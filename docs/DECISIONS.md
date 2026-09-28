@@ -164,3 +164,36 @@ their own vault or their own secret names, and the boot check in Rule 6 must sti
   prompt. Deployment is a Publish action under root `CLAUDE.md` §6 and needs explicit approval.
 - Models never read vault values (root `CLAUDE.md` §5.1). Local development uses a `.env` the
   owner fills by hand from the vault; `.env` is git-ignored.
+
+---
+
+## ADR-0003 — `/healthz` is a public route
+
+**Date:** 2026-09-28
+**Status:** Accepted (owner decision, 2026-09-28)
+
+### Context
+
+Prompt 3 fixes the public surface as the login page and, later, the webhook receiver, and
+tells the engineer to stop and ask before making anything else public. Azure Container Apps
+readiness and liveness probes and the CI smoke test call the health endpoint without a
+session and cannot complete an MFA login.
+
+### Decision
+
+`GET /healthz` is public. It returns only `{"status": "ok", "app_env": ..., "stax_env": ...}`.
+It never returns a secret, a hostname, a version string, a database status message, or any
+data from the application tables. Any method other than GET is refused by the role registry.
+It is exempt from the HTTPS redirect so in-replica probes over plain HTTP get 200.
+
+### Alternatives rejected
+
+- Authenticated health check: probes cannot authenticate.
+- Probe by TCP only: would report a process that is up but misconfigured as healthy, and the
+  CI smoke test would lose its check that staging reports `stax_env=sandbox`.
+
+### Consequences
+
+- The public set is exactly: two-factor login flow, `/static/`, `/healthz`, and from Step 8 the
+  webhook receiver at its token path. `backend/tests/test_route_registry.py` asserts this set.
+- Adding any field to the health payload needs a review against this record.

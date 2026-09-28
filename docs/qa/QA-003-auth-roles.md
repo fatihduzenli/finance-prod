@@ -41,7 +41,7 @@ Findings:         0 BLOCKER, 0 MAJOR. 3 MINOR recorded.
      test), so there is no exposure; tighten the allow-list at Step 5 for clarity.
   F2 [MINOR, deferred] sign-out-everywhere decodes every live session (O(n)). Fine at staff scale.
   F3 [MINOR, deferred] Public route `/healthz` is an addition to the prompt's "login and webhook only"
-     list, chosen for platform probes and CI smoke. Owner to confirm or refuse (one line).
+     list, chosen for platform probes and CI smoke. Owner confirmed 2026-09-28; recorded as ADR-0003. Closed.
 
 Gate 3 notes:     Deviations 1–12 in Opus's report accepted, including the admin group's model
                   permissions (needed for a non-superuser admin to manage users) and `min_role=None` for
@@ -58,5 +58,6 @@ Residual risk:    Postgres not exercised locally (CI does). Cookie Secure flag p
                   exercised end-to-end. Staging MFA enrolment end-to-end (Checkpoint 3) waits on the
                   staging deployment. Container image still unbuilt locally (Docker daemon off).
 
-Verdict:          PASS for PLAN-003 acceptance criteria 1–6. Checkpoint 3 items (staging enrolment, viewer
-                  destructive attempt on staging, admin list) are the owner's and remain open.
+Verdict:          PASS for PLAN-003 acceptance criteria 1–6. Owner read the admin:auth_user_add check on 2026-09-28 (Checkpoint 3
+                  item confirmed). Staging enrolment, the viewer destructive attempt on staging and the
+                  admin list remain open until staging exists.
