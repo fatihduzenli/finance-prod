@@ -1,0 +1,66 @@
+# Root project manifest. Commands are fixed by docs/qa/PLAN-002-scaffolding.md §3.
+# Versions are pinned exactly; uv.lock is committed.
+
+[project]
+name = "finance"
+version = "0.1.0"
+description = "Staff-only invoicing app for the Rents ledger (reads payment state from Stax Pay)."
+requires-python = ">=3.12"
+dependencies = [
+    "django==5.2.17",
+    "dj-database-url==3.1.2",
+    "gunicorn==26.2.0",
+    "psycopg[binary]==3.3.6",
+    "sentry-sdk[django]==2.70.0",
+    "whitenoise==6.12.0",
+]
+
+[dependency-groups]
+dev = [
+    "django-stubs[compatible-mypy]==6.1.1",
+    "mypy==2.3.1",
+    "pytest==9.1.1",
+    "pytest-django==4.14.0",
+    "pytest-playwright==0.9.0",
+    "ruff==0.16.9",
+]
+
+[tool.uv]
+# The Django project lives in backend/ and is used from there (manage.py, pythonpath,
+# mypy_path); there is nothing to build or install for this repository itself.
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# First-party packages live in backend/, so import sorting groups them correctly.
+src = [".", "backend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101: pytest asserts. S105/S106: obviously fake, non-secret test values (see
+# backend/tests/conftest.py). S603/S607: the secret-scan test shells out to the script
+# under test with a fixed argument list.
+"backend/tests/**" = ["S101", "S105", "S106", "S603", "S607"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+mypy_path = "backend"
+files = ["backend"]
+plugins = ["mypy_django_plugin.main"]
+
+[tool.django-stubs]
+django_settings_module = "finance.settings"
+
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["backend/tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "e2e: end-to-end browser test; needs chromium (uv run playwright install chromium)",
+]
+filterwarnings = ["error"]

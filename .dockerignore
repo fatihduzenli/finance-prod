@@ -1,0 +1,45 @@
+# Build context exclusions. Keep pyproject.toml, uv.lock and backend/.
+
+.git
+.github
+.gitignore
+docs
+infra
+scripts
+README.md
+CLAUDE.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Never ship local environment files (root CLAUDE.md 5.2)
+.env
+.env.*
+
+# Local virtualenvs must not shadow the image's /app/.venv
+.venv
+venv
+
+# Python and test artifacts
+*.pyc
+*.pyo
+__pycache__
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+test-results
+playwright-report
+
+# Generated at build time by collectstatic
+staticfiles
+
+# Local databases, editor and OS noise
+*.sqlite3
+db.sqlite3
+.idea
+.vscode
+.DS_Store

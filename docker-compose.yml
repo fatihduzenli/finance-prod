@@ -1,0 +1,38 @@
+# Local development data stores only. Never used for staging or production, which
+# run Azure Database for PostgreSQL and Azure Cache for Redis (ADR-0002).
+#
+# The credentials below are placeholders for a developer machine on localhost. They
+# are not secrets, they grant access to nothing outside this compose file, and they
+# must never be reused anywhere else.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: finance_local
+      POSTGRES_USER: finance_local_placeholder
+      POSTGRES_PASSWORD: local_placeholder_not_a_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finance_local_placeholder -d finance_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:

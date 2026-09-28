@@ -1,0 +1,158 @@
+name: CI
+
+# Every push and every pull request runs the full check suite from
+# docs/qa/PLAN-002-scaffolding.md section 3. Pushes to main additionally deploy
+# the staging environment. Deployment is a Publish action under root CLAUDE.md
+# section 6: it runs only from CI, after the test job, and only for main.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer commit on the same ref supersedes an in-flight run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, types, unit and e2e tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: finance_ci
+          POSTGRES_USER: postgres
+          # Trust auth on a throwaway CI database, deliberately, so that no
+          # password literal and no credential-bearing connection string
+          # appears anywhere in this workflow (root CLAUDE.md 5.2).
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Placeholder values only. STAX_API_KEY is a fake string that the secret
+      # scan looks for in browser-served assets; it is not a credential and
+      # reaches no Stax endpoint (no Stax call exists yet).
+      APP_ENV: local
+      STAX_ENV: sandbox
+      STAX_API_BASE_URL: https://apiprod.fattlabs.com
+      APP_BASE_URL: http://localhost:8000
+      DATABASE_URL: postgresql://postgres@localhost:5432/finance_ci
+      DJANGO_SECRET_KEY: ci-only-not-secret
+      STAX_API_KEY: FAKE-CI-KEY-XYZ123
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        run: uv sync --all-groups
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Unit tests
+        run: uv run pytest -m "not e2e" -q
+
+      - name: Install Playwright chromium
+        run: uv run playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: uv run pytest -m e2e -q
+
+      - name: Secret scan of browser-served assets
+        run: bash scripts/check-no-secrets.sh
+
+  deploy-staging:
+    name: Deploy staging
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: staging
+
+    permissions:
+      # Federated (OIDC) sign-in to Azure. No client secret is stored.
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build the image in Azure Container Registry
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          az acr build --registry "$ACR_NAME" --image "finance-web:$IMAGE_TAG" .
+
+      - name: Roll the web container app onto the new image
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          WEB_APP_NAME: ${{ vars.WEB_APP_NAME }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          az containerapp update \
+            --name "$WEB_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG"
+
+      - name: Smoke test the health endpoint
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          set -euo pipefail
+          # Whitespace is stripped before matching so the assertion holds
+          # whichever JSON separators the response uses.
+          for attempt in $(seq 1 12); do
+            body="$(curl --fail --silent --show-error --max-time 10 "$APP_BASE_URL/healthz" || true)"
+            compact="$(printf '%s' "$body" | tr -d ' \t\r\n')"
+            case "$compact" in
+              *'"stax_env":"sandbox"'*)
+                echo "healthz reports the sandbox environment"
+                exit 0
+                ;;
+            esac
+            echo "attempt $attempt: revision not serving the expected payload yet"
+            sleep 10
+          done
+          echo "healthz never reported stax_env=sandbox" >&2
+          exit 1
