@@ -18,7 +18,7 @@ pages; this app never handles card or bank data.
 
 | Path | Purpose |
 |---|---|
-| `backend/` | Django project: `finance/` (settings, env guard, banner middleware, Sentry, urls), `payments/` (reserved for the Stax adapter), `tests/` |
+| `backend/` | Django project: `finance/` (settings, env guard, banner middleware, Sentry, urls), `accounts/` (sign-in, MFA, roles, sessions), `payments/` (reserved for the Stax adapter), `tests/` |
 | `infra/` | Azure Bicep templates and the owner's deployment runbook ([`infra/README.md`](infra/README.md)) |
 | `scripts/` | Operational scripts, including the `check-no-secrets.sh` build gate |
 | `docs/` | Rules, decisions, QA plans and reports (`docs/qa/`) |
@@ -106,13 +106,75 @@ credential, or a decision.
       address from the deployment output (`infra/README.md` §9); if no, drop the
       NAT gateway and save roughly $35 per month per environment.
 - [ ] Verify on staging: `/healthz` reports `"stax_env":"sandbox"`, and
-      `/admin/login/` shows the undismissable yellow SANDBOX bar with
+      `/account/login/` shows the undismissable yellow SANDBOX bar with
       `[SANDBOX]` in the page title.
+
+## Authentication and roles
+
+Plan: [`docs/qa/PLAN-003-auth-roles.md`](docs/qa/PLAN-003-auth-roles.md). Code:
+`backend/accounts/`.
+
+- **Password plus TOTP, always.** Sign-in is `/account/login/`
+  (django-two-factor-auth on django-otp). Only authenticator-app (TOTP) devices and
+  one-time backup tokens exist; there are no SMS, phone or e-mail methods, and the
+  "remember this device" cookie is off (`TWO_FACTOR_REMEMBER_COOKIE_AGE = None`).
+  A signed-in user who has not passed the second factor can only enrol an
+  authenticator (and only while they have none) or sign out; everything else is 403.
+  Django admin requires a verified session (`AdminSiteOTPRequired`).
+- **401, not a redirect.** Any request without a session to anything but the login
+  flow, `/healthz` or `/static/` gets `401` with a page linking to the login
+  (`?next=` is a same-site path only). This includes `/admin/` and `/admin/login/`:
+  bookmark `/account/login/`.
+- **Roles** are the groups `admin`, `billing` and `viewer` (created by a migration).
+  A user's role is their highest group; the superuser flag alone grants nothing.
+  Every request other than GET/HEAD/OPTIONS is checked in
+  `accounts.middleware.RoleEnforcementMiddleware` against `accounts/registry.py`.
+  A route with no rule is refused, and `backend/tests/test_route_registry.py` fails
+  when a route is added without being classified. Method-override headers and
+  `_method` fields are ignored.
+- **Sessions** end after 30 minutes without a request and 12 hours after sign-in
+  however active. `POST /account/sign-out-everywhere/` ends every session of the
+  current user on every device (CSRF-protected; GET is refused).
+- **Local admin.** With `APP_ENV=local` and `LOCAL_ADMIN_PASSWORD` set in your
+  shell, `uv run python backend/manage.py seed_local_admin` creates or updates
+  `admin@example.com` (staff, `admin` group, not superuser) and prints its
+  `otpauth://` URI and five backup tokens. It exits with status 2 in any other
+  environment.
+
+### Route-to-role matrix
+
+"Any" means any signed-in user whose second factor is verified, whatever their
+role (enrolment routes also allow a signed-in user who has no device yet).
+
+| Route (name or pattern) | Unsafe methods allowed | Minimum role | Notes |
+|---|---|---|---|
+| `two_factor:login` | POST | public | the login wizard |
+| `healthz` | none | public | GET only; returns `status`, `app_env`, `stax_env` |
+| `/static/…` | none | public | static assets |
+| `two_factor:setup`, `two_factor:backup_tokens` | POST | any | own authenticator and backup tokens |
+| `two_factor:qr`, `two_factor:setup_complete` | none | any | GET only |
+| `logout`, `admin:logout` | POST | any | GET refused (405) |
+| `accounts:sign_out_everywhere` | POST | any | GET refused (405) |
+| `admin:password_change` | POST | viewer | own password |
+| `admin:auth_user_*`, `admin:auth_group_*` | POST | admin | user and group management, including `auth_user_password_change` |
+| `admin:otp_totp_*`, `admin:otp_static_*` | POST | admin | other users' devices |
+| `admin:accounts_usersession_*` | POST | admin | the list itself is read-only |
+| `admin:index`, `admin:app_list`, `admin:login`, `admin:jsi18n`, `admin:autocomplete`, `admin:view_on_site`, `admin:password_change_done` | none | — | GET for any verified user; Django admin still checks `is_staff` and model permissions |
+| `two_factor:profile`, `two_factor:disable` | none | — | GET only; disabling one's own second factor is refused |
+| anything else | none | **refused (403)** | an unregistered unsafe route is denied |
+
+The `admin` group also holds Django's model permissions for users, groups, OTP
+devices and sessions. `billing` and `viewer` hold none yet: they get permissions
+with the invoice and customer models (Steps 4+), and refund, void and settings
+routes will require `admin`.
 
 ## Status
 
-Prompt 2 (PLAN-002) in progress: Django skeleton, environment guard, SANDBOX
-banner, Sentry scrubbing, test runners, delivery image, CI and Azure Bicep.
-Reviewed and gated by Fable before anything is called done. No Stax API call, no
-domain model, no Celery yet. Nothing has been deployed and no GitHub remote
-exists.
+Prompt 2 (PLAN-002): Django skeleton, environment guard, SANDBOX banner, Sentry
+scrubbing, test runners, delivery image, CI and Azure Bicep.
+
+Prompt 3 (PLAN-003) implemented, awaiting Fable's QA gate: mandatory password +
+TOTP sign-in, the admin/billing/viewer roles with a fail-closed route registry,
+idle and absolute session expiry, sign out everywhere, and the local-only seeded
+admin. No Stax API call, no domain model, no Celery yet. Nothing has been
+deployed and no GitHub remote exists.

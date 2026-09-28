@@ -1,0 +1,32 @@
+{% comment %}
+Replaces django-two-factor-auth's default base, which loads Bootstrap and jQuery from a
+third-party CDN and shows a "provide a template" notice. Self-contained: no external
+asset is loaded on the login or enrolment pages. The accounts/ pages extend it too.
+The SANDBOX banner is injected by finance.middleware.SandboxBannerMiddleware.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{% endblock %} | Finance</title>
+  <style>
+    body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;background:#f6f6f6;}
+    .container{max-width:32rem;margin:3rem auto;padding:1.5rem 2rem;background:#fff;border:1px solid #ddd;border-radius:6px;}
+    h1{font-size:1.5rem;margin-top:0;}
+    label{display:block;margin:.75rem 0 .25rem;font-weight:600;}
+    input[type=text],input[type=password],input[type=number],input[type=email]{width:100%;padding:.5rem;box-sizing:border-box;font-size:1rem;}
+    .btn{display:inline-block;margin-top:1rem;padding:.5rem 1rem;border:1px solid #333;border-radius:4px;background:#fff;color:#1a1a1a;font-size:1rem;cursor:pointer;text-decoration:none;}
+    .btn-primary{background:#1a1a1a;color:#fff;}
+    .errorlist{color:#b00020;padding-left:1rem;}
+    table{border-collapse:collapse;} td,th{padding:.25rem .5rem;}
+  </style>
+  {% block extra_media %}{% endblock %}
+</head>
+<body>
+  {% block content_wrapper %}
+    <main class="container">
+      {% block content %}{% endblock %}
+    </main>
+  {% endblock %}
+</body>
+</html>

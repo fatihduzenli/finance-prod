@@ -1,0 +1,7 @@
+{% extends "two_factor/_base.html" %}
+{% block title %}Signed out everywhere{% endblock %}
+{% block content %}
+  <h1>Signed out everywhere</h1>
+  <p>Every session on every device has been ended, including this one.</p>
+  <p><a class="btn btn-primary" href="{% url 'two_factor:login' %}">Sign in again</a></p>
+{% endblock %}

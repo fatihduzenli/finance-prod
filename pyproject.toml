@@ -13,6 +13,9 @@ dependencies = [
     "psycopg[binary]==3.3.6",
     "sentry-sdk[django]==2.70.0",
     "whitenoise==6.12.0",
+    "django-otp==1.7.3",
+    "django-two-factor-auth==1.18.1",
+    "qrcode==8.2",
 ]
 
 [dependency-groups]
@@ -52,6 +55,11 @@ warn_unreachable = true
 mypy_path = "backend"
 files = ["backend"]
 plugins = ["mypy_django_plugin.main"]
+
+# django-otp, django-two-factor-auth and qrcode ship no type information.
+[[tool.mypy.overrides]]
+module = ["django_otp.*", "two_factor.*", "qrcode.*"]
+ignore_missing_imports = true
 
 [tool.django-stubs]
 django_settings_module = "finance.settings"

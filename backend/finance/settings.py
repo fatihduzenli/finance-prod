@@ -55,6 +55,15 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Mandatory TOTP second factor (docs/qa/PLAN-003-auth-roles.md §2). Only the TOTP and
+    # static (backup token) plugins are installed: no phone, SMS or e-mail methods.
+    "django_otp",
+    "django_otp.plugins.otp_totp",
+    "django_otp.plugins.otp_static",
+    # accounts precedes two_factor so its template overrides (two_factor/_base.html)
+    # win over the package defaults under APP_DIRS.
+    "accounts",
+    "two_factor",
 ]
 
 # SandboxBannerMiddleware sits high in the list so that, on the way out, it runs after
@@ -67,6 +76,14 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # Order matters: OTPMiddleware adds request.user.is_verified(); the session policy
+    # expires stale sessions before the authentication check sees them; then 401 for
+    # anonymous, 403 for unverified, and the per-route role check (PLAN-003 §4).
+    "django_otp.middleware.OTPMiddleware",
+    "accounts.middleware.SessionPolicyMiddleware",
+    "accounts.middleware.AuthRequiredMiddleware",
+    "accounts.middleware.MfaRequiredMiddleware",
+    "accounts.middleware.RoleEnforcementMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -127,6 +144,24 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SESSION_COOKIE_HTTPONLY = True
+
+# --- Authentication (docs/qa/PLAN-003-auth-roles.md) ---------------------------------
+LOGIN_URL = "two_factor:login"
+LOGIN_REDIRECT_URL = "/admin/"
+LOGOUT_REDIRECT_URL = "two_factor:login"
+# "Remember this device" would let a browser skip the second factor. Off, always.
+TWO_FACTOR_REMEMBER_COOKIE_AGE = None
+OTP_TOTP_ISSUER = "Finance (SANDBOX)" if STAX_ENV == "sandbox" else "Finance"
+
+# Sessions live in the database. Idle timeout: the cookie and the stored session expire
+# 30 minutes after the last request, because every request re-saves the session.
+# Absolute ceiling: accounts.middleware.SessionPolicyMiddleware ends any session 12 hours
+# after sign-in, however active.
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
+SESSION_COOKIE_AGE = 30 * 60
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_ABSOLUTE_MAX_AGE = 12 * 60 * 60
+SESSION_COOKIE_SAMESITE = "Strict"
 
 if APP_ENV != "local":
     # Container Apps terminates TLS in front of the app.

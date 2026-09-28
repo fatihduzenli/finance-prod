@@ -1,0 +1,11 @@
+{% extends "two_factor/_base.html" %}
+{% comment %}
+Rendered with status 401 by accounts.middleware.AuthRequiredMiddleware. No redirect.
+"next" is a same-site path or absent (accounts.views._relative_next).
+{% endcomment %}
+{% block title %}Sign in required{% endblock %}
+{% block content %}
+  <h1>Sign in required</h1>
+  <p>You need to sign in, with your password and your authenticator code, to see this page.</p>
+  <p><a class="btn btn-primary" id="sign-in-link" href="{% url 'two_factor:login' %}{% if next %}?next={{ next|urlencode:'' }}{% endif %}">Sign in</a></p>
+{% endblock %}

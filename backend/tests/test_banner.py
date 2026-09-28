@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import re
 
+import pytest
 from django.test import Client, override_settings
+
+# The two-factor login page keeps its wizard state in the database-backed session.
+pytestmark = pytest.mark.django_db
 
 BANNER_TEXT = "SANDBOX — NO REAL MONEY"
 BANNER_ID = 'id="sandbox-banner"'
@@ -13,7 +17,9 @@ _BANNER_ELEMENT_RE = re.compile(r"<div id=\"sandbox-banner\".*?</div>", re.DOTAL
 
 
 def _admin_login_html(client: Client) -> str:
-    response = client.get("/admin/login/")
+    # PLAN-003: /admin/login/ now answers 401 to an anonymous request; the login page
+    # staff actually use is the two-factor login.
+    response = client.get("/account/login/")
     assert response.status_code == 200
     assert response["Content-Type"].startswith("text/html")
     return response.content.decode()

@@ -1,0 +1,7 @@
+{% extends "two_factor/_base.html" %}
+{% comment %}Status 403 from accounts.middleware.RoleEnforcementMiddleware.{% endcomment %}
+{% block title %}Not allowed{% endblock %}
+{% block content %}
+  <h1>Not allowed</h1>
+  <p>Your role does not allow this action.</p>
+{% endblock %}
