@@ -64,6 +64,9 @@ INSTALLED_APPS = [
     # win over the package defaults under APP_DIRS.
     "accounts",
     "two_factor",
+    # Business ledger and the provider-side tables (docs/qa/PLAN-004-schema.md).
+    "ledger",
+    "payments",
     # Project package as an app so its management commands (deploy_migrate) are found.
     # It has no models. Listed last so it changes no template or static resolution.
     "finance",
