@@ -20,6 +20,7 @@ from typing import Any
 
 import pytest
 from django.conf import settings
+from django.core.exceptions import SuspiciousOperation
 from django.http import HttpRequest, HttpResponse
 from django.test import Client
 from django.urls import path
@@ -261,3 +262,63 @@ def test_secret_values_skips_unset_and_short_values() -> None:
         )
         == frozenset()
     )
+
+
+# --- PLAN-003b: a refused Host is one WARNING line --------------------------------------
+
+
+def _suspicious(request: HttpRequest) -> HttpResponse:
+    raise SuspiciousOperation("suspicious-marker for the logging test")
+
+
+urlpatterns.append(path("suspicious/", _suspicious))
+
+
+@pytest.mark.django_db
+def test_refused_host_is_one_warning_line_without_traceback(stderr_log: io.StringIO) -> None:
+    response = Client().get("/healthz", HTTP_HOST="refused.example.com")
+
+    assert response.status_code == 400
+    output = stderr_log.getvalue()
+    assert EVENT_START_RE.findall(output) == ["WARNING"], output
+    assert "Traceback" not in output
+    assert output.count("\n") == 1, output
+
+
+@pytest.mark.django_db
+def test_refused_host_line_names_the_host(stderr_log: io.StringIO) -> None:
+    Client().get("/healthz", HTTP_HOST="refused.example.com:8443")
+
+    output = stderr_log.getvalue()
+    assert output.endswith(
+        " WARNING django.security.DisallowedHost "
+        "Refused request: host not allowed: refused.example.com:8443\n"
+    ), output
+
+
+@pytest.mark.django_db
+@pytest.mark.urls(__name__)
+def test_other_security_logger_keeps_error_and_traceback(stderr_log: io.StringIO) -> None:
+    user, device = make_user("log-suspicious", Role.VIEWER)
+    assert device is not None
+    client = verified_client(user, device, Client(raise_request_exception=False))
+
+    response = client.get("/suspicious/")
+
+    assert response.status_code == 400
+    output = stderr_log.getvalue()
+    assert EVENT_START_RE.findall(output) == ["ERROR"], output
+    assert (
+        " ERROR django.security.SuspiciousOperation suspicious-marker for the logging test"
+        in output
+    )
+    assert output.count("Traceback (most recent call last):") == 1
+    assert "Refused request" not in output
+
+
+def test_refused_host_filter_is_attached_to_one_logger_only() -> None:
+    assert [
+        type(f).__name__ for f in logging.getLogger("django.security.DisallowedHost").filters
+    ] == ["RefusedHostFilter"]
+    for name in ("django", "django.request", "django.security", "django.security.csrf"):
+        assert logging.getLogger(name).filters == [], name

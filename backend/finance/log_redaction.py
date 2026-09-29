@@ -13,10 +13,36 @@ environment, and nothing here logs, prints or ``repr``-s a value (root ``CLAUDE.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable
 from urllib.parse import quote, quote_plus, unquote, urlsplit
 
 REDACTED = "[REDACTED]"
+
+#: Longest refused Host value written to the log (docs/qa/PLAN-003b §3).
+MAX_REFUSED_HOST_LENGTH = 100
+
+REFUSED_HOST_MESSAGE = "Refused request: host not allowed"
+
+#: Only this much of a ``DisallowedHost`` message is searched for the Host value. It
+#: holds the prefix and far more than ``MAX_REFUSED_HOST_LENGTH`` host characters, and
+#: it bounds the work done on an attacker-controlled message.
+MAX_MATCHED_MESSAGE_LENGTH = 512
+
+#: Django's ``DisallowedHost`` message starts with the Host value as a Python ``repr``;
+#: the quoted part, escapes included, is taken up to its closing quote. An escape and a
+#: plain character never start with the same character, so matching is linear. The
+#: group ``cut`` is the end of a message cut at ``MAX_MATCHED_MESSAGE_LENGTH``, which
+#: may fall inside an escape; it is accepted only when the message was cut.
+_DISALLOWED_HOST_RE = re.compile(
+    r"^Invalid HTTP_HOST header: "
+    r"(?P<quote>['\"])(?P<host>(?:\\.|(?!(?P=quote))[^\\])*)"
+    r"(?:(?P=quote)|(?P<cut>\\?\Z))",
+    re.DOTALL,
+)
+
+#: Every character outside this set is replaced by ``?`` in a refused Host value.
+_UNSAFE_HOST_CHAR_RE = re.compile(r"[^A-Za-z0-9.:\-\[\]_]")
 
 #: Shorter values are not redacted: an unset or trivial secret must not turn every
 #: log line into ``[REDACTED]`` noise.
@@ -91,3 +117,39 @@ class RedactingFormatter(logging.Formatter):
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__} redacting {len(self._secrets)} values>"
+
+
+class RefusedHostFilter(logging.Filter):
+    """Turn Django's refused-Host report into one WARNING line without a traceback.
+
+    Attached to the logger ``django.security.DisallowedHost`` only (PLAN-003b §3). The
+    Host header is attacker-controlled, so the rewritten message keeps nothing of the
+    original but the host itself, reduced to a safe character set and cut to
+    ``MAX_REFUSED_HOST_LENGTH`` characters. The record is always kept.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError):
+            # ``msg`` and ``args`` do not match. The record is still reported, without
+            # a host, rather than raising into Django's request handling.
+            message = ""
+        host = _refused_host(message)
+        record.msg = f"{REFUSED_HOST_MESSAGE}: {host}" if host else REFUSED_HOST_MESSAGE
+        record.args = ()
+        record.levelno = logging.WARNING
+        record.levelname = "WARNING"
+        record.exc_info = None
+        record.exc_text = None
+        record.stack_info = None
+        return True
+
+
+def _refused_host(message: str) -> str:
+    """The sanitised Host value from a ``DisallowedHost`` message, or ``""``."""
+    text = message[:MAX_MATCHED_MESSAGE_LENGTH]
+    match = _DISALLOWED_HOST_RE.match(text)
+    if match is None or (match["cut"] is not None and text == message):
+        return ""
+    return _UNSAFE_HOST_CHAR_RE.sub("?", match["host"])[:MAX_REFUSED_HOST_LENGTH]

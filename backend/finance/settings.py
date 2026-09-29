@@ -204,6 +204,9 @@ LOGGING = {
             ),
         },
     },
+    "filters": {
+        "refused_host": {"()": "finance.log_redaction.RefusedHostFilter"},
+    },
     "handlers": {
         "stderr": {
             "class": "logging.StreamHandler",
@@ -216,6 +219,13 @@ LOGGING = {
         "django": {"handlers": [], "level": "WARNING", "propagate": True},
         # runserver only (local): its request lines, redacted, instead of its own handler.
         "django.server": {"handlers": [], "level": "INFO", "propagate": True},
+        # A request for a host not in ALLOWED_HOSTS: one WARNING line, no traceback
+        # (docs/qa/PLAN-003b). Only this logger; other django.security.* are unchanged.
+        "django.security.DisallowedHost": {
+            "handlers": [],
+            "filters": ["refused_host"],
+            "propagate": True,
+        },
     },
 }
 
