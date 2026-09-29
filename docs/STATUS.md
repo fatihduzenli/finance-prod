@@ -121,8 +121,8 @@ the login page myself." The condition for starting Prompt 4 is met.
 | Item | State |
 |---|---|
 | Owner's own MFA enrolment and sign-in | Confirmed by the owner |
-| A viewer attempts a destructive action and is refused | Not yet stated by the owner; covered by automated tests |
-| Owner has reviewed the list of admin users | Not yet stated by the owner; exactly one admin exists by construction |
+| A viewer attempts a destructive action and is refused | Confirmed by the owner in writing, 2026-09-29 ("both confirmed") |
+| Owner has reviewed the list of admin users | Confirmed by the owner in writing, 2026-09-29 ("both confirmed") |
 
 - `bootstrap_admin` now refuses on staging with exit status 2, because an admin exists.
 
@@ -130,3 +130,4 @@ the login page myself." The condition for starting Prompt 4 is met.
   through an exec session writes to that session, not to the container's own output. The
   creation is therefore evidenced by the owner's statement and the user row, not by a log
   line. A durable audit record for such events belongs with the audit log in a later prompt.
+- **Checkpoint 3 on staging is complete**: all three items confirmed by the owner.
