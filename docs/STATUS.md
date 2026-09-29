@@ -88,5 +88,5 @@ the `pending` and `returned` payment states. Since the owner statements of
 2026-09-29 it must also add `charge_notes`, `charge_adjustments`,
 `insurance_premiums` and `insurance_charges`. The sign convention is confirmed.
 
-**Prompt 4 must not start until the owner confirms that defects 1 and 2 are
-fixed on staging.**
+**Owner, in writing, 2026-09-29:** "confirmed: defects 1 and 2 are fixed on staging. I opened
+the login page myself." The condition for starting Prompt 4 is met.
