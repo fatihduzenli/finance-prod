@@ -131,3 +131,10 @@ the login page myself." The condition for starting Prompt 4 is met.
   creation is therefore evidenced by the owner's statement and the user row, not by a log
   line. A durable audit record for such events belongs with the audit log in a later prompt.
 - **Checkpoint 3 on staging is complete**: all three items confirmed by the owner.
+
+## Update, 2026-09-29, Prompt 4
+
+- PLAN-004 implemented and QA verdict PASS (`docs/qa/QA-004-schema.md`), **not pushed**.
+  The verdict is conditional on the owner accepting decisions D2 to D12 in
+  `docs/qa/PLAN-004-schema.md` §3.
+- `docs/DATA_OWNERSHIP.md` is written for the owner's Checkpoint 4 review.

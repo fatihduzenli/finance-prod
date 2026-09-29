@@ -93,11 +93,12 @@ disagreeing ledgers.
 
 **How to apply.**
 - Two distinct fields on our invoice model, never merged:
-  - `stax_status` (cached copy, read-only in admin, values exactly as Stax returns
+  - `provider_status` (named `stax_status` before PLAN-004; cached copy, read-only in admin, values exactly as Stax returns
     them): `DRAFT`, `SENT`, `VIEWED`, `PAID`, `PARTIALLY APPLIED`, `ATTEMPTED`,
     `DELETED`. The docs also mention `PARTIALLY PAID` in one transition list;
     treat unknown values as opaque strings and store them as-is (TODO-VERIFY-003).
-  - `workflow_status` (ours, editable): e.g. `draft`, `ready_to_send`, `sent`,
+  - `internal_status` (named `workflow_status` before PLAN-004; ours, editable; final list
+    `draft`, `ready`, `sent`, `closed`, `void`). Earlier examples: e.g. `draft`, `ready_to_send`, `sent`,
     `follow_up`, `disputed`, `written_off`, `closed`. Define the final list in the
     first data-model prompt.
 - The only Stax calls that change money state and are allowed from this app are:
@@ -333,7 +334,7 @@ IDs over time (e.g. a re-created invoice after a Stax-side delete).
   `(entity_type, entity_id, provider, external_kind) WHERE superseded_at IS NULL`.
 - Cached Stax payloads (trimmed per Rule 1) go in a `provider_snapshots` table
   keyed by `external_refs.id`, with `fetched_at`. Domain tables hold only the
-  small denormalised fields the UI needs (`stax_status`, `balance_due_cents`,
+  small denormalised fields the UI needs (`provider_status`, `amount_paid` as exact decimals,
   `last_payment_at`), each refreshed from a snapshot, never edited by hand.
 
 ---

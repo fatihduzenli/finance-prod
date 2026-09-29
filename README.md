@@ -18,7 +18,7 @@ pages; this app never handles card or bank data.
 
 | Path | Purpose |
 |---|---|
-| `backend/` | Django project: `finance/` (settings, env guard, banner middleware, Sentry, urls), `accounts/` (sign-in, MFA, roles, sessions), `payments/` (reserved for the Stax adapter), `tests/` |
+| `backend/` | Django project: `finance/` (settings, env guard, banner middleware, Sentry, urls), `accounts/` (sign-in, MFA, roles, sessions), `ledger/` (business tables: stores, operators, leases, charges, invoices, payments; card-number guard; `seed_demo`), `payments/` (provider-side tables: `external_refs`, snapshots, deposits, webhook events, sync state; the `provider_write()` sync writer), `tests/` |
 | `infra/` | Azure Bicep templates and the owner's deployment runbook ([`infra/README.md`](infra/README.md)) |
 | `scripts/` | Operational scripts, including the `check-no-secrets.sh` build gate |
 | `docs/` | Rules, decisions, QA plans and reports (`docs/qa/`) |
@@ -48,6 +48,8 @@ All run from the repository root.
 | E2E tests | `uv run pytest -m e2e` (once: `uv run playwright install chromium`) |
 | Dev server | `uv run python backend/manage.py runserver` |
 | Apply migrations (image start) | `uv run python backend/manage.py deploy_migrate` |
+| Apply migrations (local) | `uv run python backend/manage.py migrate` |
+| Seed demo data (`APP_ENV=local` only, safe to repeat) | `uv run python backend/manage.py seed_demo` |
 | Secret scan | `scripts/check-no-secrets.sh` |
 
 ## Environments and deployment
@@ -204,7 +206,9 @@ roles with a fail-closed route registry, idle and absolute session expiry, sign 
 everywhere, and the local-only seeded admin.
 
 Staging is deployed at `https://staging.monvera.io` from `main`; production is not.
-PLAN-003a (migrations on start, error logging to stderr) passed the QA gate
-(`docs/qa/QA-003a-staging-defects.md`); until it is deployed the staging login page
-returns 500 because no migration has run there. No Stax API call, no domain model, no Celery yet. Current
+PLAN-003a to 003c (migrations on start, error logging, refused-host warnings, first admin)
+are deployed. Prompt 4 (PLAN-004): the ledger schema, 23 tables in `backend/ledger/` and
+`backend/payments/`, with the card-number guard, exact decimal money and demo data; see
+[`docs/DATA_OWNERSHIP.md`](docs/DATA_OWNERSHIP.md) and
+[`docs/qa/QA-004-schema.md`](docs/qa/QA-004-schema.md). No Stax API call and no Celery yet. Current
 state and open defects: [`docs/STATUS.md`](docs/STATUS.md).

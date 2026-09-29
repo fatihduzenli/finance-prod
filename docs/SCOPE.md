@@ -200,6 +200,14 @@ app read-mostly. D1-C is the fallback if scheduled invoices turn out not to supp
 
 ## 5. Data model (names fixed here so every later prompt uses them)
 
+> **Superseded in detail by `docs/qa/PLAN-004-schema.md` §4 and `docs/DATA_OWNERSHIP.md`
+> (2026-09-29).** The built schema differs from the table below in these points: money is
+> `numeric(12,2)` (`amount`, `amount_due`, `amount_paid`), not `*_cents`; `lease_rents` is
+> `lease_rent_history`; debit days are `debit_day` and `second_debit_day`; status columns are
+> `internal_status` and `provider_status`; rent charges have no `kind`; a
+> `collection_schedules` table holds one row per Stax schedule. Decisions D1 to D12 of the
+> plan record why.
+
 | Table | Purpose | Key fields |
 |---|---|---|
 | `stores` | One physical space | App-generated primary key. `external_label` (column A verbatim, **non-unique**: "2475" occurs twice for two different spaces, "MALL" ten times), `store_number` (integer derived from the label when numeric, non-unique), `city`, `state`, `open_date` (**nullable**; required by the app before insurance can be scheduled, not before rent), `open_date_note`, `needs_open_date` (bool), `closed_at`, `status` |
