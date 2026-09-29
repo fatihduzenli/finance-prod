@@ -53,6 +53,26 @@ Nothing in this directory contains a secret value. Secrets are referenced by
   az keyvault show --name finance-kv --query properties.enableRbacAuthorization
   ```
 
+> **Subscription and region facts (recorded 2026-09-28).**
+> - The subscription `Azure subscription 1` is **Pay-As-You-Go** with the spending limit off
+>   (verified from the CLI on 2026-09-28: quota ID `PayAsYouGo_2014-09-01`). It was a Free Trial
+>   when staging was first attempted and was upgraded the same day. **Production must never be
+>   deployed to a trial subscription**: a trial's spending limit switches every resource off when
+>   the credit is exhausted, the trial ends after 30 days, and trials are refused in several regions.
+> - **East US was rejected while the subscription was a trial**: PostgreSQL Flexible Server
+>   reported "provisioning is restricted in this region" and the Container Apps environment failed
+>   with an AKS capacity error. East US 2, South Central US, West US 2, West Europe and Canada
+>   East refused PostgreSQL as well. **Staging runs in Central US by owner decision; East US is not
+>   to be retried.** Region-bound resources created in East US were deleted on 2026-09-28. The
+>   vault, registry, identity and private DNS zone were kept; they sit in East US and are
+>   region-independent for this workload.
+> - Pass `location=centralus` on every `az deployment group create` for staging, because the
+>   template defaults `location` to the resource group's location, which is East US.
+> - The staging vault was created with purge protection **off** so the environment can be torn
+>   down and rebuilt. Deploy `main.bicep` with `createKeyVault=false` for staging so the vault is
+>   referenced, not recreated with the module default. Production's `finance-kv` is never created
+>   by the template.
+
 ## 1. Create the resource groups
 
 ```bash

@@ -45,6 +45,9 @@ param appBaseUrl string = ''
 @description('Region for every resource in this deployment.')
 param location string = resourceGroup().location
 
+@description('Region of resources that are region-independent for this workload and may already exist elsewhere: container registry, managed identity, key vault.')
+param sharedResourcesLocation string = location
+
 // ---------------------------------------------------------------------------
 // Custom hostname and DNS
 // ---------------------------------------------------------------------------
@@ -229,7 +232,7 @@ module containerAppsEnvironment 'modules/containerAppsEnvironment.bicep' = {
 module registry 'modules/registry.bicep' = {
   name: 'registry'
   params: {
-    location: location
+    location: sharedResourcesLocation
     registryName: registryName
     sku: registrySku
     tags: tags
@@ -239,7 +242,7 @@ module registry 'modules/registry.bicep' = {
 module identity 'modules/identity.bicep' = {
   name: 'identity'
   params: {
-    location: location
+    location: sharedResourcesLocation
     identityName: managedIdentityName
     registryName: registry.outputs.registryName
     tags: tags
@@ -249,7 +252,7 @@ module identity 'modules/identity.bicep' = {
 module keyVault 'modules/keyVault.bicep' = if (createKeyVault) {
   name: 'key-vault'
   params: {
-    location: location
+    location: sharedResourcesLocation
     keyVaultName: keyVaultName
     tags: tags
   }
