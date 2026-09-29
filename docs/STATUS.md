@@ -111,3 +111,22 @@ the login page myself." The condition for starting Prompt 4 is met.
   (`docs/qa/QA-003c-first-staging-admin.md`). Needs a push, then the owner runs the command
   in `infra/README.md` §12.
 
+## Update, 2026-09-29, owner confirmation
+
+- **Deployed at commit `411e412`**, which contains `bootstrap_admin`. Revision healthy.
+- **Owner, in writing:** "First staging admin created and MFA enrolled. Checkpoint 3 on
+  staging: I signed in with password + authenticator myself. Confirmed."
+- Checkpoint 3 items on staging:
+
+| Item | State |
+|---|---|
+| Owner's own MFA enrolment and sign-in | Confirmed by the owner |
+| A viewer attempts a destructive action and is refused | Not yet stated by the owner; covered by automated tests |
+| Owner has reviewed the list of admin users | Not yet stated by the owner; exactly one admin exists by construction |
+
+- `bootstrap_admin` now refuses on staging with exit status 2, because an admin exists.
+
+- **Observed:** the "First admin created" warning is not in the container log. A command run
+  through an exec session writes to that session, not to the container's own output. The
+  creation is therefore evidenced by the owner's statement and the user row, not by a log
+  line. A durable audit record for such events belongs with the audit log in a later prompt.
