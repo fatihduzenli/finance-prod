@@ -90,3 +90,14 @@ the `pending` and `returned` payment states. Since the owner statements of
 
 **Owner, in writing, 2026-09-29:** "confirmed: defects 1 and 2 are fixed on staging. I opened
 the login page myself." The condition for starting Prompt 4 is met.
+
+## Update, 2026-09-29 evening
+
+- **Stax sandbox key:** the owner states a real sandbox key was stored in the staging vault.
+  Metadata shows a second version of `stax-api-key-sandbox` created 2026-09-29 19:00 UTC.
+  The value was not read. The app picks it up with the next revision.
+- **Refused-host logging:** fixed under PLAN-003b, QA verdict PASS
+  (`docs/qa/QA-003b-refused-host-logging.md`). Not on staging until the next push.
+- **First staging admin:** proposal in `docs/qa/PLAN-003c-first-staging-admin.md`, awaiting
+  owner approval.
+

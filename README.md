@@ -117,7 +117,9 @@ gunicorn, and gunicorn is not started if that fails; on PostgreSQL an advisory l
 makes two replicas that start together migrate one at a time. Every WARNING and above,
 including each unhandled request error with its traceback, is written once to stderr
 (the container log) with the Stax key, the webhook URL token, the Django secret key and
-the database and Redis passwords replaced by `[REDACTED]`.
+the database and Redis passwords replaced by `[REDACTED]`. A request refused because
+its Host is not in `ALLOWED_HOSTS` still gets 400 and is logged as one WARNING line
+naming the host (unsafe characters replaced by `?`, at most 100), without a traceback.
 
 ## Authentication and roles
 

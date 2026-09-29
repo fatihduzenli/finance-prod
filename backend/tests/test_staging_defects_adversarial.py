@@ -264,3 +264,128 @@ def test_image_command_runs_no_destructive_management_command(repo_root: Path) -
     dockerfile = (repo_root / "Dockerfile").read_text()
     for forbidden in ("flush", "makemigrations", "sqlflush", "createsuperuser", "loaddata"):
         assert forbidden not in dockerfile, forbidden
+
+
+# --- PLAN-003b rows 5 to 7: the refused-host filter under hostile input ----------------
+
+
+def _refused(msg: str, *args: object, secrets: tuple[str, ...] = ()) -> str:
+    """One record through the filter and then the formatter, as the root handler does."""
+    from finance.log_redaction import RefusedHostFilter
+
+    try:
+        raise ValueError("traceback that must not be written")
+    except ValueError as error:
+        record = logging.LogRecord(
+            "django.security.DisallowedHost",
+            logging.ERROR,
+            __file__,
+            1,
+            msg,
+            args,
+            (type(error), error, error.__traceback__),
+        )
+    record.stack_info = "Stack (most recent call last): fake"
+    assert RefusedHostFilter().filter(record) is True
+    return RedactingFormatter("%(levelname)s %(name)s %(message)s", secrets=secrets).format(record)
+
+
+def _django_message(host: str) -> str:
+    return f"Invalid HTTP_HOST header: {host!r}. You may need to add {host!r} to ALLOWED_HOSTS."
+
+
+PREFIX = "WARNING django.security.DisallowedHost Refused request: host not allowed"
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "evil.example.com\r\nERROR forged line",
+        "a'b\"c",
+        "host with spaces",
+        "\x1b[31mred\x1b[0m.example.com",
+        "exämple.com",
+        "%s%s%s%n",
+        "{0}{host}",
+        "\\" * 5000,
+        "'" * 5000,
+        "a" * 5000,
+        "\x00\x07\x08",
+    ],
+)
+def test_hostile_host_values_give_one_safe_line(host: str) -> None:
+    line = _refused(_django_message(host))
+
+    assert line.startswith(PREFIX)
+    assert "\n" not in line
+    assert "\r" not in line
+    assert "Traceback" not in line
+    assert "Stack (most recent call last)" not in line
+    assert "ALLOWED_HOSTS" not in line
+    written_host = line[len(PREFIX) :].removeprefix(": ")
+    assert len(written_host) <= 100
+    assert re.fullmatch(r"[A-Za-z0-9.:\-\[\]_?]*", written_host), written_host
+
+
+def test_plain_host_is_written_as_it_is() -> None:
+    assert _refused(_django_message("old.example.com:8443")) == f"{PREFIX}: old.example.com:8443"
+
+
+def test_host_equal_to_a_secret_is_redacted() -> None:
+    secret = "FakeSecretHostValue0123456789"
+    line = _refused(_django_message(secret), secrets=(secret,))
+    assert secret not in line
+    assert line == f"{PREFIX}: {REDACTED}"
+
+
+@pytest.mark.parametrize(
+    ("msg", "args"),
+    [
+        ("something else entirely", ()),
+        ("", ()),
+        ("Invalid HTTP_HOST header: 'unterminated", ()),
+        ("Invalid HTTP_HOST header: %r.", ("via-args.example.com",)),
+        ("mismatched %s %s", ("only-one",)),
+        ("mismatched %d", ("not-a-number",)),
+    ],
+)
+def test_unexpected_records_never_raise_and_never_echo_the_message(
+    msg: str, args: tuple[object, ...]
+) -> None:
+    line = _refused(msg, *args)
+    if args == ("via-args.example.com",):
+        assert line == f"{PREFIX}: via-args.example.com"
+    else:
+        assert line == PREFIX
+
+
+def test_malformed_message_with_many_backslashes_is_handled_quickly() -> None:
+    """No closing quote and a long run of backslashes must not stall the worker."""
+    import time
+
+    started = time.monotonic()
+    line = _refused("Invalid HTTP_HOST header: '" + "\\" * 60)
+    assert time.monotonic() - started < 1.0
+    assert line == PREFIX
+
+
+def test_very_long_well_formed_host_keeps_its_first_hundred_characters() -> None:
+    assert _refused(_django_message("a" * 5000)) == f"{PREFIX}: {'a' * 100}"
+
+
+@pytest.mark.parametrize("length", [480, 481, 482, 483, 484, 485, 486])
+def test_message_cut_in_the_middle_of_an_escape_is_still_one_safe_line(length: int) -> None:
+    """The bounded input may end inside a ``\\\\`` pair; the line must stay safe."""
+    line = _refused(_django_message("b" * length + "\\" * 50))
+    assert line == f"{PREFIX}: {'b' * 100}"
+
+
+@pytest.mark.parametrize("size", [1_000, 100_000])
+def test_matching_time_does_not_depend_on_the_input_shape(size: int) -> None:
+    import time
+
+    for body in ("\\" * size, "'" * size, '"' * size, "\\'" * size, "a\\" * size):
+        started = time.monotonic()
+        _refused("Invalid HTTP_HOST header: '" + body)
+        _refused('Invalid HTTP_HOST header: "' + body)
+        assert time.monotonic() - started < 0.5
