@@ -1,6 +1,6 @@
 # SCOPE.md — MVP scope for the Rents ledger
 
-**Status:** DECISIONS COMPLETE, awaiting sign-off (§10). All questions are closed either by data, by owner answer, or by the owner adopting the recommended handling on 2026-09-27. Nine owner/Stax actions remain (§9, end); three of them gate go-live, none gates the next build prompt.
+**Status:** NOT ready for sign-off. Corrected 2026-09-29: questions 1, 2, 3, 5 and 6 are pending owner confirmation in writing; the import cannot be written until they are confirmed. Other questions are closed by data or by the owner adopting the recommended handling on 2026-09-27. Nine owner/Stax actions remain (§9, end); three of them gate go-live, none gates the next build prompt.
 **Date:** 2026-09-16
 **Inputs:** `docs/inputs/RENTS_AUDIT.md` (Rents tab, 534 rows × 142 columns, exported 2026-09-10) and
 `docs/inputs/STAX_ANSWERS_public_2026-09-10.md` (public-doc answers; Stax has not replied in writing).
@@ -195,9 +195,9 @@ owner signs a new scope.
 
 ## 8. Assumptions made to write this document (each is a question in §9)
 
-A1. ~~Positive month values are amounts collected; negative values are that month's rent not collected.~~ **Owner confirmed (Q1, Q2).**
+A1. Positive month values are amounts collected; negative values are that month's rent not collected. **Assumption, data-derived STRONG, pending owner confirmation (Q1, Q2).**
 A2. "M/D pending" is an ACH debit started on that date and not yet settled.
-A3. ~~Rec. Date is the day of month the debit runs.~~ **Owner confirmed (Q5).**
+A3. Rec. Date is the day of month the debit runs. **Assumption, data-derived STRONG, pending owner confirmation (Q5).**
 A4. Current RENT is the current amount; the sheet holds no rent history, so history is inferred from
     month values only where a value differs from RENT and repeats for consecutive months.
 A5. NOTES "WIRE" means the lease is wire-channel; every other lease with a Stax history is Stax-channel.
@@ -279,13 +279,13 @@ Full text: `docs/inputs/ANSWERS_evidence_2026-09-27.md`. Session numbering below
 
 ### Round 2 — owner answers
 
-**2026-09-27, owner, in session:** "yes" to the first confirmation group. Owner statements:
+**2026-09-27, owner, in session:** "yes for the first part", recorded at the time as covering Q1, Q2, Q5, Q21, Q22, Q24, Q26 and Q28. **On 2026-09-29 the owner corrected this: Q1, Q2 and Q5 are not owner-confirmed and stay pending until confirmed in writing.** The rows for Q21, Q22, Q24, Q26 and Q28 below are left as recorded and are listed for re-confirmation in the status note of 2026-09-29.
 
 | Q | Owner answer | Effect |
 |---|---|---|
-| 1 | Yes | Positive month value = amount collected. **Settled.** |
-| 2 | Yes | Negative month value = that month's rent not collected; arrears accumulate. **Settled.** |
-| 5 | Yes | Rec. Date = day of month the rent is debited. **Settled.** |
+| 1 | **Pending owner confirmation** (corrected 2026-09-29) | Data-derived STRONG: positive month value = amount collected. Not an owner statement. |
+| 2 | **Pending owner confirmation** (corrected 2026-09-29) | Data-derived STRONG: negative month value = rent not collected; arrears accumulate. Not an owner statement. |
+| 5 | **Pending owner confirmation** (corrected 2026-09-29) | Data-derived STRONG: Rec. Date = debit day. Not an owner statement. |
 | 21 | Yes | **Decision D1 = D1-B**, Stax scheduled invoice with autopay, with a store-by-store rollout and no single cutover day. **Closed.** |
 | 22 | Yes | Stax invoices are **ACH only**; card is a per-lease exception staff switch on. **Settled.** |
 | 24 | Yes | **Partial payments are rejected** on the hosted page; agreed partials become adjusted charges in the app. **Settled.** |

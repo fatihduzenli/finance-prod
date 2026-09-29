@@ -77,11 +77,11 @@ values listed above as "note only". Every dropped cell is still recorded in `imp
 Numbered to match the Prompt 1 reply and `docs/SCOPE.md` §9. Q1–Q14 are the audit's own §7
 questions, kept with their original numbers.
 
-1. ~~Positive month values = amount collected for that month?~~ **Owner: yes, Positive = collected (2026-09-27).**
-2. ~~Negative month values = that month's rent not collected (owed)?~~ **Owner: yes, Negative = not collected (2026-09-27).**
+1. Positive month values = amount collected for that month? **PENDING owner confirmation in writing (data-derived STRONG; corrected 2026-09-29).**
+2. Negative month values = that month's rent not collected (owed)? **PENDING owner confirmation in writing (data-derived STRONG; corrected 2026-09-29).**
 3. When a positive value differs from RENT: rent change, partial, catch-up or discount? Is rent history written anywhere?
 4. "9/9 pending" = a debit started on 9/9, not yet settled? Started in Stax?
-5. ~~Rec. Date = day of the month rent is debited?~~ **Owner: yes, Rec. Date = debit day (2026-09-27).**
+5. Rec. Date = day of the month rent is debited? **PENDING owner confirmation in writing (data-derived STRONG; corrected 2026-09-29).**
 6. Ins / Sign / Deposit or Access: positive = collected, negative = still owed? One-time amounts?
 7. NOTES "STAX"/"WIRE" = payment channel? Are all stores without "WIRE" debited through Stax?
 8. Is each month's ACH debit started by staff in Stax, or does Stax run it automatically today?

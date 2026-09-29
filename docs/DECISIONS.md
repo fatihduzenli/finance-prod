@@ -226,9 +226,12 @@ item, which contradicts D1.
    worklist; Prompt 10 reconciles ACH rejections; Prompt 11 must include the month grid;
    Prompt 13 imports history as local-only legacy rent charges; Prompt 16 cuts over per operator.
 3. Where the amendments file and later owner decisions differ, **the later decision wins**:
-   - Owner questions 1, 2 and 5 were answered on 2026-09-27 (positive = collected, negative =
-     not collected, Rec. Date = debit day). Only Q3 (proration) and Q6 (sign convention of the
-     one-time balance columns) remain open from that group; Q6 does not block rent collection.
+   - **Corrected 2026-09-29 by the owner:** questions 1, 2 and 5 (positive = collected,
+     negative = not collected, Rec. Date = debit day) are **not** answered by the owner. They are
+     data-derived with status STRONG in `docs/inputs/ANSWERS_ALL_25.md` and remain **pending
+     owner confirmation in writing**. The amendments file's blocking list (questions 1–3 and 6,
+     the ACH limit, operator emails, sheet version history) **stands in full** until the owner
+     confirms. The import must not be written on these assumptions as if they were settled.
    - The amendments' remarks about serverless hosts do not apply: the app runs on Azure
      Container Apps with a persistent worker and a NAT gateway with a static egress IP
      (ADR-0002). The rate limiter is global through Redis, to be provisioned at Step 10.
