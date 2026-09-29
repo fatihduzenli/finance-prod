@@ -73,14 +73,14 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import os, sys, urllib.parse, urllib.request; host = urllib.parse.urlsplit(os.environ['APP_BASE_URL']).netloc; request = urllib.request.Request('http://127.0.0.1:8000/healthz', headers={'Host': host}); sys.exit(0 if urllib.request.urlopen(request, timeout=4).status == 200 else 1)"
 
+# Start-up: apply pending migrations first (backend/finance/management/commands/
+# deploy_migrate.py; it takes a PostgreSQL advisory lock, so two replicas starting
+# together migrate once). Only if it exits 0 does the shell `exec` gunicorn, which
+# then replaces the shell as PID 1 and receives SIGTERM directly. A failed migration
+# exits non-zero, gunicorn never starts, and the revision never becomes ready.
+#
 # Access logging is deliberately left off: inbound webhook URLs carry the
 # secret path token (docs/CLAUDE.md Rule 4) and must not reach logs
 # (root CLAUDE.md 5.3). Request logging belongs in Django's logging config,
 # which redacts the path.
-CMD ["gunicorn", "finance.wsgi:application", \
-     "--chdir", "backend", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "3", \
-     "--timeout", "60", \
-     "--graceful-timeout", "30", \
-     "--error-logfile", "-"]
+CMD ["/bin/sh", "-c", "python backend/manage.py deploy_migrate && exec gunicorn finance.wsgi:application --chdir backend --bind 0.0.0.0:8000 --workers 3 --timeout 60 --graceful-timeout 30 --error-logfile -"]

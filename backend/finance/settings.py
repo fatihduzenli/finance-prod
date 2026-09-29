@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 import dj_database_url
 
-from finance import sentry
+from finance import log_redaction, sentry
 from finance.env_guard import EnvGuardError, validate
 
 # backend/
@@ -64,6 +64,9 @@ INSTALLED_APPS = [
     # win over the package defaults under APP_DIRS.
     "accounts",
     "two_factor",
+    # Project package as an app so its management commands (deploy_migrate) are found.
+    # It has no models. Listed last so it changes no template or static resolution.
+    "finance",
 ]
 
 # SandboxBannerMiddleware sits high in the list so that, on the way out, it runs after
@@ -175,5 +178,45 @@ if APP_ENV != "local":
     SECURE_HSTS_SECONDS = 31_536_000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+
+# --- Logging (docs/qa/PLAN-003a-staging-defects.md §3) ---------------------------------
+# One handler, stderr, the same in every APP_ENV. Every WARNING and above, including
+# django.request's unhandled exceptions with their traceback, is written once. The
+# formatter removes the secret values below from the finished line and traceback.
+# "django" and "django.server" lose Django's default handlers (console, mail_admins,
+# the runserver handler) and propagate to the root handler instead, so nothing is
+# written twice and nothing bypasses redaction.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "redacting": {
+            "()": "finance.log_redaction.RedactingFormatter",
+            "fmt": "%(asctime)s %(levelname)s %(name)s %(message)s",
+            # A frozenset, not a list or string: logging.config would otherwise
+            # inspect the values for ext:// and cfg:// references.
+            "secrets": log_redaction.secret_values(
+                stax_api_key=STAX_API_KEY,
+                stax_webhook_url_token=STAX_WEBHOOK_URL_TOKEN,
+                django_secret_key=SECRET_KEY,
+                database_url=_config.database_url,
+                redis_url=REDIS_URL,
+            ),
+        },
+    },
+    "handlers": {
+        "stderr": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "formatter": "redacting",
+        },
+    },
+    "root": {"handlers": ["stderr"], "level": "WARNING"},
+    "loggers": {
+        "django": {"handlers": [], "level": "WARNING", "propagate": True},
+        # runserver only (local): its request lines, redacted, instead of its own handler.
+        "django.server": {"handlers": [], "level": "INFO", "propagate": True},
+    },
+}
 
 sentry.init(dsn=_config.sentry_dsn, app_env=APP_ENV, stax_env=STAX_ENV)
