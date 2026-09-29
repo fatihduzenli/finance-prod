@@ -1,6 +1,6 @@
 # SCOPE.md — MVP scope for the Rents ledger
 
-**Status:** NOT ready for sign-off. Corrected 2026-09-29: questions 1, 2, 3, 5 and 6 are pending owner confirmation in writing; the import cannot be written until they are confirmed. Other questions are closed by data or by the owner adopting the recommended handling on 2026-09-27. Nine owner/Stax actions remain (§9, end); three of them gate go-live, none gates the next build prompt.
+**Status:** NOT ready for sign-off. Updated 2026-09-29 with the owner's written statements (§9 Round 3): questions 1, 2, 3, 5, 6, 13, 21, 22, 24, 26 and 28 are closed by the owner. Annual insurance joined the MVP (ADR-0005). Where an earlier section and Round 3 differ, **Round 3 wins**. Open owner and Stax actions are listed at the end of §9.
 **Date:** 2026-09-16
 **Inputs:** `docs/inputs/RENTS_AUDIT.md` (Rents tab, 534 rows × 142 columns, exported 2026-09-10) and
 `docs/inputs/STAX_ANSWERS_public_2026-09-10.md` (public-doc answers; Stax has not replied in writing).
@@ -29,6 +29,10 @@ collections are about $1.5M, roughly $18M a year.
   (audit §0, confirmed by the owner on 2026-09-10 for the whole sheet).
 - **The sheet's version history has not been checked yet.** Until it is, treat the sheet as
   possibly containing deleted sensitive cells. Checkpoint 1 requires that check before cutover.
+- **Bank details never enter the app (owner, 2026-09-29).** Operators give their bank details to
+  staff, and staff type them into the operator's customer record in the **Stax dashboard**. The
+  app has no field, import or note for them. The spreadsheet export that carries cell notes goes
+  only into the git-ignored `docs/inputs/private/` folder and passes the same pre-flight scan.
 - Personal data on the tab is limited to operator nicknames. No emails or phone numbers exist on
   the Rents tab; they must come from elsewhere (question Q16).
 
@@ -44,27 +48,38 @@ The founding prompt fixes the MVP at four flows. Here is what each one means for
   for 421 leases; **two per month** for the two leases marked "1 and 15" and "5 and 20"), the app
   creates one **rent charge** in our database (store, operator, period, amount due) and one
   **Stax invoice** for it. Twice-monthly leases split the monthly rent into two equal charges
-  unless the owner says otherwise (Q28).
+  (owner confirmed 2026-09-29, Q28): two charge rows per period, the grid shows the sum.
 - Leases with `collection_status = paused` (two today) get no charge and no invoice until staff
   resume them. Leases with no debit day (92 today) are treated as paused with `needs_review`.
 - The Stax invoice is the vehicle for collection. How it is collected is **Decision D1 (§4)**,
   which the owner must make. The app supports exactly one of the D1 options in the MVP.
-- Staff can also create a **one-off charge** for an existing lease (catch-up, adjustment) with a
-  free amount and a reason. This covers the "positive value ≠ rent" cases without a formula.
+- **Adjustments never edit a schedule (owner, 2026-09-29).** A shortfall carried forward, a
+  cross-store balancing debit or any other difference is collected as its **own one-off Stax
+  invoice** on the same date, linked to a `charge_adjustments` row with a mandatory note. The
+  monthly schedule keeps the rent amount. TODO-VERIFY-019 covers the sandbox proof.
+- **Short payments carry forward.** The shortfall is collected the following month and is never
+  silently forgiven. Forgiveness exists only as an explicit `discount` or `credit` adjustment
+  with a note. The next month's run shows the outstanding balance beside the new charge.
+- **Every rent charge can carry a note** (author, timestamp). The grid cell shows that a note
+  exists. This is an owner requirement, not an option.
 - Wire-channel leases get a rent charge but **no Stax invoice**; they are settled manually (Flow 2).
 
-**Out of MVP:** one-time fees (insurance, sign, deposit/access), termination invoices, late fees,
-discount rules, proration for mid-month openings or closings. See §6.
+**In the MVP since 2026-09-29: annual liability insurance** (§4a, ADR-0005).
 
-### Flow 2 — Record payments: automatically from Stax, manually for cash/check/wire
+**Out of MVP:** collection of the one-time fees (sign, deposit/access), termination invoices, late
+fees, automatic discount rules, proration for mid-month openings or closings. See §6.
+
+### Flow 2 — Record payments: automatically from Stax, manually for Zelle and wire
 
 - **Automatic:** webhooks `create_transaction` and `update_transaction_settled` (verified against
   the Stax API by re-fetch, per `docs/CLAUDE.md` Rule 4) create and update a **payment** row:
   `pending` when the ACH transaction is created, `settled` when `settled_at` is populated,
   `returned` when the transaction is voided with an ACH reason code. The nightly reconciliation
   job repairs anything webhooks missed.
-- **Manual:** staff record a wire, check or cash payment against a rent charge with amount, date
-  and a reference. For charges that have a Stax invoice, the app also calls Stax's "mark invoice
+- **Manual (owner, 2026-09-29):** a "record manual payment" action with method `zelle`, `wire` or
+  `other`, date, amount and a **mandatory note**. It mirrors today's Zelle practice: the operator
+  tells staff, staff verify the money in the bank, staff mark the month paid. A manual payment
+  below the amount due leaves a balance that carries forward. For charges that have a Stax invoice, the app also calls Stax's "mark invoice
   paid in cash or check" so Stax's invoice status stays the source of truth (TODO-VERIFY-016 on
   whether wire is an accepted method there).
 - A **returned** ACH payment leaves the charge unpaid and shows the Stax/Nacha reason code. Staff
@@ -89,7 +104,18 @@ discount rules, proration for mid-month openings or closings. See §6.
 
 ---
 
-## 4. Decision D1 — how monthly rent is collected through Stax (DECIDED: D1-B, owner, 2026-09-27)
+## 4. Decision D1 — how monthly rent is collected through Stax (DECIDED: D1-B with staff enrolment, owner, 2026-09-29)
+
+> **Owner correction, 2026-09-29. This box overrides anything below it in §4.**
+> Operators do **not** use a Stax hosted page and do not enter their own bank details. They send
+> bank details to staff; staff enter them in the operator's Stax customer record in the **Stax
+> dashboard**. In the app, **enrolment = staff link the Stax customer ID and payment-method ID**
+> to the operator. The app never collects, stores or displays bank details.
+> Consequences: enrolment does not depend on operator emails. Emails are needed only for the
+> receipt Stax sends after a payment, so Q16 drops from go-live blocker to a receipts gap.
+> Payment is always the full amount, ACH only. **No cards at all**; the per-lease card exception
+> is removed. Zelle and wire are the only other channels and are recorded manually.
+> Store-by-store rollout with no single cutover day: confirmed.
 
 The founding prompt assumed customers pay each invoice on Stax's hosted page. The audit shows the
 business today **debits operators' bank accounts by ACH** on a fixed day, without operator action.
@@ -116,7 +142,7 @@ app read-mostly. D1-C is the fallback if scheduled invoices turn out not to supp
   5 business days; `update_transaction_settled` fires either way; a rejection carries a Nacha reason
   code in `child_transactions[0].meta.achDescription`. (ACH Transactions page)
 - "Create a Bank Payment Method" exists in the API but takes raw account and routing numbers. **The
-  app will never call it** (Rule 1). Enrolment happens on Stax's hosted page only.
+  app will never call it** (Rule 1). Staff enter bank methods in the Stax dashboard (owner, 2026-09-29).
 
 **Either way, these hold:**
 - One Stax customer per **operator**. One Stax invoice per **store** per debit so the grid stays
@@ -128,9 +154,10 @@ app read-mostly. D1-C is the fallback if scheduled invoices turn out not to supp
   export; it never re-enters bank details and never matches on nickname alone. Question Q19.
 
 **Two caveats folded into D1-B (Round 1, 2026-09-16):**
-1. **Enrolment is a campaign, not a code task.** Every operator must open a Stax hosted page once
-   and save a bank method. That needs an email per operator, and the sheet holds emails for about
-   a dozen of ~174 operators (Q16). Plan a **store-by-store parallel run**: the current ACH method
+1. **Enrolment is staff work, not a code task.** *(Rewritten 2026-09-29.)* For each operator,
+   staff enter the bank method in the Stax dashboard, then link the Stax customer and
+   payment-method IDs in the app. No operator email is needed for this. Plan a **store-by-store
+   parallel run**: the current ACH method
    keeps collecting for a lease until that lease's operator has enrolled, and the app tracks
    `enrolment_status` per operator. There is no single cutover date.
 2. **Not every lease is one monthly schedule.** Two leases bill twice a month, two are paused, and
@@ -139,17 +166,53 @@ app read-mostly. D1-C is the fallback if scheduled invoices turn out not to supp
 
 ---
 
+## 4a. Annual liability insurance (owner, 2026-09-29; ADR-0005)
+
+- Insurance is an **annual** charge, collected by ACH like rent. Sign and Deposit/Access are
+  one-time: positive = paid, negative = still owed.
+- Premium per policy year lives in an admin-editable table: **2025 = 595.00, 2026 = 695.00**.
+  A missing year creates the charge with no amount, flagged `needs_premium`, and nothing is debited.
+- The **anniversary** for year Y is the store's open date moved to year Y (Feb 29 becomes Feb 28
+  in a non-leap year). Year Y is in scope when the anniversary is on or before today and before
+  the closing date, if any. No insurance is charged after a store closes.
+- **Charges are keyed to the lease.** Each policy year is owed by the operator who held the lease
+  on that year's anniversary. Unpaid years stay with the outgoing operator; the incoming operator
+  owes only years from their start date.
+- Status per lease and year: `paid` when any insurance payment for that year is settled,
+  `pending` when one is pending and none settled, otherwise `unpaid`. A voided or returned
+  payment counts as no payment.
+- The store row shows minus the sum of unpaid years in red, or plus the latest year's amount in
+  green, with the per-year breakdown on expand.
+- Under autopay, insurance is a **separate annual Stax scheduled invoice** due on the
+  anniversary, never a line on the rent invoice. The run view lists insurance debits due in the
+  next 7 days.
+- A store without an open date gets rent as usual but **no insurance schedule** until staff
+  enter the date.
+- Migration: the sheet's Ins value is an opening reference only. Years and their status come
+  from the cell note. **Every multi-year Ins value is flagged for review; its composition is
+  read from the note, never inferred from the amount.** The Payments Balance tab stays out of
+  scope; only the fact "first-year insurance was charged at setup" is used as an opening status.
+- The full algorithm and its edge cases are in `docs/inputs/OWNER_ANSWERS_ROUND2.md`. Two lines
+  of that file are superseded by the owner's later statement: the 1,130 = 595 + 535 example is
+  wrong, and charges are keyed to the lease, not the store.
+
+---
+
 ## 5. Data model (names fixed here so every later prompt uses them)
 
 | Table | Purpose | Key fields |
 |---|---|---|
-| `stores` | One physical space | App-generated primary key. `external_label` (column A verbatim, **non-unique**: "2475" occurs twice for two different spaces, "MALL" ten times), `store_number` (integer derived from the label when numeric, non-unique), `city`, `state`, `open_date`, `open_date_note`, `status` |
-| `operators` | The tenant business | `name` (nickname today), `legal_name`, `email`, `phone`, `status`, `enrolment_status` (`not_contacted`, `invited`, `enrolled`, `declined`). Linked to the Stax customer through `external_refs`. |
-| `leases` | Store × operator × terms | `store_id`, `operator_id`, `debit_days` (list of 1–2 integers 1–31; empty when unknown), `collection_status` (`active`, `paused`, `prospective`, `ended`), `review_reason` (`wire`, `dormant`, `closed`, `unknown`, NULL), `payment_channel` (`stax`, `wire`, `unknown`, `other`), `allow_card` (bool, default false), `started_on`, `ended_on`, `end_reason` |
+| `stores` | One physical space | App-generated primary key. `external_label` (column A verbatim, **non-unique**: "2475" occurs twice for two different spaces, "MALL" ten times), `store_number` (integer derived from the label when numeric, non-unique), `city`, `state`, `open_date` (**nullable**; required by the app before insurance can be scheduled, not before rent), `open_date_note`, `needs_open_date` (bool), `closed_at`, `status` |
+| `operators` | The tenant business | `name` (nickname today), `legal_name`, `email`, `phone`, `status`, `enrolment_status` (`not_enrolled`, `enrolled`; enrolled = Stax customer ID and payment-method ID linked by staff). `email` is nullable and used for receipts only. Linked to the Stax customer and payment method through `external_refs`. |
+| `leases` | Store × operator × terms | `store_id`, `operator_id`, `debit_days` (list of 1–2 integers 1–31; empty when unknown), `collection_status` (`active`, `paused`, `prospective`, `ended`), `review_reason` (`wire`, `dormant`, `closed`, `unknown`, NULL), `payment_channel` (`stax`, `wire`, `zelle`, `unknown`, `other`), `started_on`, `ended_on`, `end_reason` |
 | `lease_rents` | Rent history | `lease_id`, `amount_cents`, `effective_from`, `effective_to`, `source` (`sheet_current`, `sheet_inferred`, `staff`) |
-| `rent_charges` | One per lease per period per debit | `lease_id`, `period` (YYYY-MM), `seq` (1 or 2; 2 only for twice-monthly leases), `due_on`, `amount_cents`, `kind` (`rent`, `adjustment`, `catch_up`, `waived`), `workflow_status`, `stax_status` (cached), `local_ref`. Grid cell shows the sum over `seq`. |
-| `payments` | Money received or attempted | `rent_charge_id`, `amount_cents`, `method` (`stax_ach`, `stax_card`, `wire`, `check`, `cash`), `status` (`pending`, `settled`, `returned`, `voided`), `initiated_on`, `settled_on`, `return_code`, `reference` |
-| `store_balances` | Opening one-time balances from the sheet | `store_id`, `kind` (`insurance`, `sign`, `deposit_or_access`), `amount_cents`, `sign_convention_confirmed` (bool) |
+| `rent_charges` | One per lease per period per debit | `lease_id`, `period` (YYYY-MM), `seq` (1 or 2; 2 only for twice-monthly leases), `due_on`, `amount_due_cents`, `amount_paid_cents`, derived `balance`, `kind` (`rent`, `catch_up`, `waived`), `workflow_status` (includes `partial`), `stax_status` (cached), `local_ref`, `legacy`. Grid cell shows the sum over `seq` and a marker when a note exists. |
+| `charge_notes` | Note on one charge (required) | `rent_charge_id` or `insurance_charge_id`, `body`, `author`, `created_at`. Body passes the Rule 1 validator. Imported sheet cell notes land here. |
+| `charge_adjustments` | Credit, discount, carried shortfall or cross-store balancing | `from_charge_id` (nullable), `to_charge_id`, `amount_cents`, `reason` (`cross_store_balance`, `credit`, `discount`, `carry_forward`), `note` (mandatory), `created_by`, `created_at`. Cross-store rows require both charges to belong to the same operator. Each debit adjustment is its own one-off Stax invoice, linked through `external_refs`. |
+| `insurance_premiums` | Premium per policy year | `policy_year` (unique), `amount_cents`; admin-editable, audited |
+| `insurance_charges` | One per lease per policy year | `lease_id`, `policy_year` (unique together), `due_on` (anniversary), `amount_cents` (nullable), `needs_premium`, `needs_review`, `legacy` |
+| `payments` | Money received or attempted | `rent_charge_id` or `insurance_charge_id` or `charge_adjustment_id`, `kind` (`rent`, `insurance`, `adjustment`), `policy_year` (insurance only), `amount_cents`, `method` (`stax_ach`, `zelle`, `wire`, `other`), `note` (mandatory for manual methods), `status` (`pending`, `settled`, `returned`, `voided`), `initiated_on`, `settled_on`, `return_code`, `reference` |
+| `store_balances` | Opening balances from the sheet | `store_id`, `kind` (`insurance_opening`, `sign`, `deposit_or_access`), `amount_cents` (signed as in the sheet: positive = paid, negative = owed, owner-confirmed 2026-09-29), `needs_review`. The insurance row is a reference only; live insurance state is in `insurance_charges`. |
 | `notes` | Free text with author and date | `entity_type`, `entity_id`, `body`, `author`, `created_at`. Body passes the Rule 1 card/account-number validator. |
 | `external_refs` | Stax IDs | per `docs/CLAUDE.md` Rule 8 |
 | `provider_snapshots` | Trimmed Stax payloads with `fetched_at` | per Rule 8 |
@@ -165,20 +228,22 @@ sheet cell by cell.
 Everything below was seen in the audit or suggested along the way. None of it is built until the
 owner signs a new scope.
 
-- One-time fees: insurance ($565/$595/$695/$1,130), sign fees, deposit or access fees, and their
-  collection. MVP only stores opening balances from columns H–J.
+- Collection of one-time fees: sign fees, deposit or access fees. MVP only stores their opening
+  balances from columns I–J. (Annual insurance moved into the MVP on 2026-09-29, ADR-0005.)
 - Termination invoices and settlements.
 - Late fees, discounts, "half rent" rules, proration for partial months.
 - Automatic rent escalations or rent change schedules.
 - Reminders, dunning emails, SMS, a customer/operator portal.
 - Automatic retry of returned ACH payments.
-- Card payments as a default channel (ACH only in MVP unless the owner says otherwise, Q22).
-- Zelle and any channel other than Stax ACH, wire, check, cash.
+- Card payments of any kind. The business does not accept cards (owner, 2026-09-29, Q22).
+- Any channel other than Stax ACH, Zelle and wire. Cash and check are not used.
+- The Payments Balance tab, apart from the single opening fact named in §4a.
 - Integration of the other 15 tabs (insurance tracker, audits, IFX invoices, WM rent payable, etc.).
 - Accounting export (QuickBooks), deposit reconciliation against the bank statement.
 - Multi-user roles beyond "staff" and "admin".
 - Migrating months before March 2025 (unless Q12 says yes).
-- Cell colours from the sheet (unless Q13 says they carry meaning).
+- Cell colours from the sheet. Closed by the owner (Q13): green = positive, red = negative,
+  nothing more. The app derives the same colours from charge status.
 
 ---
 
@@ -195,13 +260,13 @@ owner signs a new scope.
 
 ## 8. Assumptions made to write this document (each is a question in §9)
 
-A1. Positive month values are amounts collected; negative values are that month's rent not collected. **Assumption, data-derived STRONG, pending owner confirmation (Q1, Q2).**
+A1. Positive month values are amounts collected; negative values are that month's rent not collected. **Confirmed by the owner in writing, 2026-09-29 (Q1, Q2).**
 A2. "M/D pending" is an ACH debit started on that date and not yet settled.
-A3. Rec. Date is the day of month the debit runs. **Assumption, data-derived STRONG, pending owner confirmation (Q5).**
+A3. Rec. Date is the day of month the debit runs. **Confirmed by the owner in writing, 2026-09-29 (Q5).**
 A4. Current RENT is the current amount; the sheet holds no rent history, so history is inferred from
     month values only where a value differs from RENT and repeats for consecutive months.
 A5. NOTES "WIRE" means the lease is wire-channel; every other lease with a Stax history is Stax-channel.
-A6. Operators are Stax customers today and already have stored bank methods in Stax.
+A6. Operators are Stax customers today and already have stored bank methods in Stax. **Supported by the owner's statement of 2026-09-29 that staff enter bank methods in the Stax dashboard; how many operators are covered is still unknown (Q8, Q19).**
 A7. ~~The debit is one Stax transaction per store per month, not one per operator.~~ **Settled by data (Q17).**
 
 ---
@@ -279,7 +344,7 @@ Full text: `docs/inputs/ANSWERS_evidence_2026-09-27.md`. Session numbering below
 
 ### Round 2 — owner answers
 
-**2026-09-27, owner, in session:** "yes for the first part", recorded at the time as covering Q1, Q2, Q5, Q21, Q22, Q24, Q26 and Q28. **On 2026-09-29 the owner corrected this: Q1, Q2 and Q5 are not owner-confirmed and stay pending until confirmed in writing.** The rows for Q21, Q22, Q24, Q26 and Q28 below are left as recorded and are listed for re-confirmation in the status note of 2026-09-29.
+**2026-09-27, owner, in session:** "yes for the first part", recorded at the time as covering Q1, Q2, Q5, Q21, Q22, Q24, Q26 and Q28. **On 2026-09-29 the owner corrected this: Q1, Q2 and Q5 are not owner-confirmed and stay pending until confirmed in writing.** The rows for Q21, Q22, Q24, Q26 and Q28 below are left as recorded and are listed for re-confirmation in the status note of 2026-09-29. **Superseded on 2026-09-29 by Round 3 below, which holds the owner's written answer for each.**
 
 | Q | Owner answer | Effect |
 |---|---|---|
@@ -320,7 +385,53 @@ Full text: `docs/inputs/ANSWERS_evidence_2026-09-27.md`. Session numbering below
 
 **Note on the customer export:** it will contain operator emails and phone numbers. Store it outside the repository or add `docs/inputs/private/` to `.gitignore` before saving it. It is personal data under root `CLAUDE.md` §5.2.
 
+### Round 3 — owner statements in writing, 2026-09-29
+
+Sources: `docs/inputs/OWNER_ANSWERS_ROUND2.md` and the owner's session message of 2026-09-29
+confirming that file and answering the follow-up points. These are **owner statements**. They
+supersede every data-derived or recommended entry above for the same question, and the Round 2
+rows recorded from "yes for the first part". Session numbering is used from here on.
+
+| Q | Owner statement | Effect |
+|---|---|---|
+| 1 | Positive month value = amount collected that month. | **Closed.** |
+| 2 | Negative month value = that month's rent not collected. It stays negative until collected, then turns positive. | **Closed.** |
+| 3 | A positive value different from RENT has three causes: short payment, discount or credit, cross-store balancing. Rent history is recorded nowhere. Notes on the rent cell are essential. | **Closed.** `lease_rents`, `charge_notes`, `charge_adjustments`. |
+| 5 | Rec. Date = day of the month the rent is debited. | **Closed.** |
+| 6 | Sign and Deposit/Access are one-time: positive = paid, negative = owed. Insurance is annual; negative = current year unpaid; paid years are tracked in cell notes. | **Closed.** Balance reports unblocked. §4a. |
+| 13 | Colours carry nothing beyond the sign: green positive, red negative. | **Closed.** |
+| 21 | D1-B confirmed, with staff enrolment through the Stax dashboard and no hosted page for operators. Store-by-store rollout, no single cutover day. | **Closed.** §4 box. |
+| 22 | ACH only. No credit cards at all. Zelle and wire are the only exceptions, recorded manually. | **Closed.** `allow_card` removed. |
+| 24 | Full amount required. Operators receive an invoice email only after payment. | **Closed.** |
+| 26 | CSV mirrors the sheet during the parallel run; normalised export afterwards. | **Closed.** |
+| 28 | 50/50, two charge rows per period, grid shows the sum. | **Closed.** |
+
+**Follow-ups, all owner statements of the same date**
+
+| Topic | Statement |
+|---|---|
+| Short payments | Arise only when the business deliberately debits less (cross-store balancing, agreed credit) or when an operator sends less by Zelle or wire. The shortfall is collected the following month. |
+| Variable amounts | Stax schedule amounts can be edited, and staff do so today. **The app does not.** It uses a separate one-off invoice per adjustment, linked to a `charge_adjustments` row with a mandatory note. Replaces TODO-VERIFY-012 with TODO-VERIFY-019. |
+| Insurance scope | Core collection scope alongside rent (ADR-0005). Payments Balance tab stays out. |
+| Open date | Nullable column, rule in the app, blocks insurance scheduling only. Stores marked TBD are entered by staff. |
+| Premiums | 2025 = 595, 2026 = 695. The 1,130 / 535 example in the file is wrong. Multi-year sums are read from the cell note and always flagged for review. |
+| Insurance after transfer | Keyed to the lease. The operator holding the lease at the anniversary owes that year. |
+| Cell notes | Hold real data and were in no export so far. Extracted from a spreadsheet export kept in the private folder, after the pre-flight scan. |
+| Manual payments | Action with method `zelle`, `wire` or `other`, date, amount, mandatory note. |
+| Operator emails | Needed only for receipts after payment. No longer a go-live blocker. The owner wrote "Q14" for this item; in session numbering it is **Q16**. |
+
+**Still open after Round 3:** Q4 for rent (which platform started a pending debit; confirmed as
+Stax for insurance), Q7, Q8, Q11, Q12, Q14, Q15, Q16 (receipts gap), Q18, Q19, Q23, Q25, Q27,
+Q29, Q30, Q32, and the extraction of cell notes.
+
+**Go-live blockers after Round 3:** Q7 (channel unknown for 453 leases), Q25 (ACH limit above
+$12,581 and any daily cap), Q27 (version history), TODO-VERIFY-019 (one-off invoice against a
+stored bank method), and the ACH debit authorisations noted in ADR-0005.
+
 ### Remaining owner and Stax actions (not questions)
+
+*Items 5 (colours) and 6 (sign convention) were closed by the owner on 2026-09-29. New on that
+date: export the sheet as a spreadsheet file with cell notes into `docs/inputs/private/`.*
 
 1. Create a Stax **sandbox** API key and store it as `stax-api-key-sandbox`, in a sandbox resource group or vault that development identities can reach and the live one cannot.
 2. Rename the existing live secret `stax-api-key-live`.

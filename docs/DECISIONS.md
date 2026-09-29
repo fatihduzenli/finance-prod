@@ -203,7 +203,7 @@ It is exempt from the HTTPS redirect so in-replica probes over plain HTTP get 20
 ## ADR-0004 — Scheduled invoices are MVP scope; prompt series amended for the Rents ledger
 
 **Date:** 2026-09-29
-**Status:** Accepted (follows from Decision D1, owner-confirmed 2026-09-27; amendments supplied by the owner in `docs/inputs/PROMPT_SERIES_AMENDMENTS.md`)
+**Status:** Accepted (follows from Decision D1, confirmed by the owner in writing on 2026-09-29; amendments supplied by the owner in `docs/inputs/PROMPT_SERIES_AMENDMENTS.md`). **Updated 2026-09-29, see "Owner statements of 2026-09-29" below.**
 
 ### Context
 
@@ -239,6 +239,39 @@ item, which contradicts D1.
      `collection_status` incl. `prospective`, `payment_channel` incl. `unknown`) are reconciled
      with the amendments' names in the Prompt 4 plan, not silently replaced.
 
+### Owner statements of 2026-09-29
+
+Sources: `docs/inputs/OWNER_ANSWERS_ROUND2.md` and the owner's session message of the same
+date. Recorded in full in `docs/SCOPE.md` §9 Round 3. They change this ADR as follows.
+
+1. **The correction in item 3 above is resolved.** Questions 1, 2, 3, 5 and 6 are now confirmed
+   by the owner in writing. So are 13, 21, 22, 24, 26 and 28. Item 3 of the amendments'
+   blocking list (questions 1–3 and 6) is closed.
+2. **D1-B stands, with a different enrolment.** Operators never see a Stax hosted page. Staff
+   enter the bank method in the Stax dashboard and link the Stax customer ID and
+   payment-method ID in the app. The amendments' "invite to autopay" step in Prompt 7a and the
+   `stax_schedule_state` value `invited` are dropped.
+3. **Operator emails are no longer a go-live blocker.** They are needed only for the receipt
+   Stax sends after a payment. Item 2 of the blocking list becomes a receipts gap. Prompt 6's
+   rule changes to: an operator without an email is valid **and** eligible for autopay.
+4. **No cards.** The per-lease card exception is removed from the model.
+5. **Adjustments use one-off invoices.** The app never edits a schedule's amount for an
+   adjustment. Each adjustment is its own Stax invoice linked to a `charge_adjustments` row
+   with a mandatory note. TODO-VERIFY-012 is replaced by TODO-VERIFY-019.
+6. **Manual payments** are `zelle`, `wire` or `other`, with a mandatory note. Cash and check are
+   not used by the business.
+7. **Prompt 4's schema grows** by `charge_notes`, `charge_adjustments`, `insurance_premiums`
+   and `insurance_charges` (ADR-0005), and `stores.open_date` is nullable with an app rule.
+
+**Blocking list after these statements:** the ACH per-transaction limit above $12,581 and any
+daily cap (Q25); the payment channel for 453 leases (Q7); the sheet version history check
+(Q27); TODO-VERIFY-019; the ACH authorisation point in ADR-0005.
+
+**Open conflict for the Prompt 5 plan.** Collecting a one-off invoice from a stored bank method
+needs either a schedule with a single occurrence or `POST /invoice/{id}/pay`. `docs/CLAUDE.md`
+Rule 2 forbids the second. TODO-VERIFY-019 must establish which call works. If only the pay
+call works, Rule 2 needs an explicit owner decision before any code uses it.
+
 ### Consequences
 
 - Prompt 4's plan must cover the amended schema and state which naming it adopts.
@@ -247,3 +280,62 @@ item, which contradicts D1.
 - Azure Cache for Redis no longer accepts new instances (observed 2026-09-28). The Redis
   choice for Step 10 (Azure Managed Redis or a Redis container app) is a separate decision to
   be recorded then. Until then `deployRedis=false`.
+
+---
+
+## ADR-0005 — Annual liability insurance is core collection scope
+
+**Date:** 2026-09-29
+**Status:** Accepted (owner statement in writing, 2026-09-29)
+
+### Context
+
+`docs/SCOPE.md` treated the sheet's Ins column as a one-time opening balance and left its
+collection to Phase 7. The owner stated on 2026-09-29 that liability insurance is an **annual**
+charge, collected by ACH in the same way as rent, for most stores as an annual automatic
+payment. Staff track paid years in cell notes because the sheet has one cell per store.
+
+### Decision
+
+1. Annual insurance is **MVP scope**, alongside rent. Sign and Deposit/Access stay one-time
+   opening balances whose collection remains in Phase 7.
+2. The model gains `insurance_premiums` (one amount per policy year, admin-editable) and
+   `insurance_charges` (one per **lease** per policy year). Known premiums: 2025 = 595.00,
+   2026 = 695.00.
+3. Charges follow the algorithm the owner approved in `docs/inputs/OWNER_ANSWERS_ROUND2.md`:
+   due on the anniversary of the store's open date, none after closure, status derived from
+   payments, a voided or returned payment counts as no payment.
+4. **Keyed to the lease, not the store.** The operator holding the lease on a year's
+   anniversary owes that year. This supersedes the file's store-keyed wording.
+5. Under autopay, insurance is a **separate annual Stax scheduled invoice**, never a line on
+   the rent invoice.
+6. `stores.open_date` is nullable. A missing date blocks insurance scheduling only.
+7. The Payments Balance tab stays out of scope. Only the fact that first-year insurance was
+   charged at setup is used, as an opening status.
+8. On import, a multi-year Ins value is never split by arithmetic. Its composition comes from
+   the cell note and the row is always flagged for review. The file's 1,130 = 595 + 535
+   example is withdrawn by the owner.
+
+### Alternatives rejected
+
+- **Insurance as a line on the monthly rent invoice.** Rejected by the owner: the two must be
+  paused, refunded and reconciled independently.
+- **One insurance balance per store**, as in the sheet. It cannot show which year is unpaid
+  and is the reason multi-year sums appear in one cell.
+
+### Consequences
+
+- Prompt 4 builds the two tables. Prompt 5's interface must create an annual schedule.
+  Prompt 7's run view lists insurance due in the next 7 days. Prompt 8's return path reopens
+  an insurance year exactly as it reopens a rent charge. Prompt 13 parses cell notes.
+- Tests must cover: open date Feb 29; open date in the future; closure one day before the
+  anniversary; missing premium; payment voided after counting as paid; two payments for one
+  year; missing open date; lease transfer between two anniversaries.
+- Open: premiums for policy years before 2025 are not stated. Imported years before 2025 carry
+  the amount from the cell note or stay flagged.
+- **Risk to raise with the business, not decided here.** Bank details now reach staff directly
+  from operators and are typed into the Stax dashboard. The hosted page therefore no longer
+  captures the operator's ACH debit authorisation. The business must hold a written
+  authorisation per operator, covering both the monthly rent debit and the annual insurance
+  debit. TODO-VERIFY-006 is rewritten to ask Stax what it requires. The app stores no bank
+  details either way (Rule 1).

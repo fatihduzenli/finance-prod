@@ -16,8 +16,9 @@ Last verified against the Stax docs: **2026-09-10**. See §10 for what was check
 - Replaces a Google Sheets workflow for a small US business: customers, invoices,
   payments, notes, and internal follow-up status.
 - Staff-only internal tool. Customers never log in here.
-- Customers pay on **Stax's hosted invoice page**, reached from an email that
-  **Stax** sends. This app never renders a payment form.
+- Operators are debited by ACH through **Stax**, from a bank method that staff
+  enter in the **Stax dashboard** (owner, 2026-09-29). Operators never enter bank
+  details anywhere in this app, and this app never renders a payment form.
 - Payment processor: **Stax Pay** (formerly Fattmerchant), Merchant API.
 - Base URL: `https://apiprod.fattlabs.com`. Sandbox and live share this URL; only
   the API key differs (confirmed in Stax docs, "Test Environments").
@@ -64,8 +65,9 @@ that could reasonably hold one.
 internal tool into a compliance liability.
 
 **How to apply.**
-- Customers pay only on Stax-hosted pages. Do not embed Stax.js, do not build a
-  "pay now" form, do not tokenize cards here. If a future prompt asks for an
+- Bank methods are entered only in the Stax dashboard, by staff. This app links
+  the resulting Stax customer ID and payment-method ID and nothing else. Do not
+  embed Stax.js, do not build a "pay now" form, do not tokenize cards here. If a future prompt asks for an
   in-app payment form, stop and escalate; it conflicts with this rule.
 - Free-text fields (notes, memos, descriptions) get a server-side validator that
   rejects strings matching a 13–19 digit run that passes the Luhn check, and
@@ -105,12 +107,17 @@ disagreeing ledgers.
   or webhook handler may trigger them.
 - Collection model is **D1-B** (`docs/SCOPE.md` §4, owner decision 2026-09-27):
   one Stax **invoice schedule** per lease debit day with autopay from a bank
-  method the operator saved on Stax's hosted page. The allowed write calls
+  method that staff entered in the Stax dashboard (owner, 2026-09-29). Annual
+  insurance is a separate yearly schedule (ADR-0005). The allowed write calls
   therefore include create, edit, pause and delete of an invoice schedule. Each is
   a deliberate staff action or a reviewed migration step, never a webhook side
-  effect. Invoices are ACH-only unless a lease's card exception is on; partial
-  payments are disabled on the hosted page.
-- "Pay an invoice" (`POST /invoice/{id}/pay`) is **not used**. The app never
+  effect. Invoices are ACH-only with no card exception. The full amount is always
+  due. **A schedule's amount is never edited for an adjustment:** each adjustment
+  is its own one-off invoice linked to a `charge_adjustments` row
+  (TODO-VERIFY-019).
+- "Pay an invoice" (`POST /invoice/{id}/pay`) is **not used**. If
+  TODO-VERIFY-019 shows a one-off invoice cannot be collected without it, that
+  is an owner decision recorded in `docs/DECISIONS.md` first, not a code change. The app never
   creates a payment method (Rule 1).
 - Cached Stax data always carries `fetched_at`. Any decision logic (overdue,
   follow-up due) uses the cache but shows the staleness.
@@ -377,8 +384,7 @@ publish actions and need explicit approval.
 - Trust a webhook body as data (Rule 4).
 - Retry a 4xx (Rule 3).
 - Run against live and sandbox from one deploy (Rule 6).
-- Send email itself for invoices. Stax sends the invoice email from its hosted
-  flow. If the business later wants custom email, that is a new decision.
+- Send email itself for invoices. Stax sends the receipt after a payment. If the business later wants custom email, that is a new decision.
 
 ---
 
@@ -412,8 +418,8 @@ publish actions and need explicit approval.
 
 Tracked in `docs/TODO-VERIFY.md`. Summary: card-not-present fee; per-transaction and
 monthly limits; whether webhooks are signed or URL-token only and whether source IPs
-are published; invoice email customisation; Nacha-compliant ACH authorisation on
-the hosted page; behaviour of the human-readable invoice reference field; whether
+are published; invoice email customisation; what ACH debit authorisation Stax requires when staff enter the bank method
+(the hosted page is not used); behaviour of the human-readable invoice reference field; whether
 our server IPs can be whitelisted for migration. Rate-limit figures were added to
 that list on 2026-09-10 because the docs and the founding prompt disagree.
 

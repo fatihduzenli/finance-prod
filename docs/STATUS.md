@@ -1,0 +1,87 @@
+# Status note — 2026-09-29
+
+Written at the end of the Azure and DNS work, before Prompt 4 starts.
+Prompts 0 to 3 are complete. Prompt 4 has not been started.
+
+## What is live
+
+| Item | State |
+|---|---|
+| Staging address | `https://staging.monvera.io` |
+| Certificate | Azure managed certificate, valid to 2027-03-29, renewed by Azure |
+| Region | Central US for the app, network and database; East US for the registry, identity and staging vault |
+| Subscription | Pay-As-You-Go, spending limit off |
+| Image | `finance-web` built from commit `02ff92b` |
+| Git | local `main` equals `origin/main` at `02ff92b`; this file is new and not committed |
+| DNS zone | `monvera.io` delegated to Azure DNS; records: root SPF `v=spf1 -all`, `staging` CNAME, `asuid.staging` TXT |
+| CI variable | `APP_BASE_URL` is `https://staging.monvera.io` |
+| Static egress IP | `20.12.221.227`, available for Stax whitelisting (TODO-VERIFY-010) |
+
+## Verified from outside on 2026-09-29
+
+| Check | Result |
+|---|---|
+| `GET /healthz` | 200, `status ok`, `app_env staging`, `stax_env sandbox` |
+| `GET /admin/` without a session | 401 |
+| Plain HTTP | 301 to HTTPS |
+| SANDBOX banner and `[SANDBOX]` title | present |
+| `GET /account/login/` | **500, see defect 1** |
+| Default Azure address | 400 by design; the app accepts only `staging.monvera.io` |
+
+## Defects found, not fixed
+
+Each needs a production-code or infrastructure change. Under the root
+`CLAUDE.md` that means an Opus assignment, a QA gate and an approved push.
+
+1. **Migrations never run on deploy.** All 27 migrations are unapplied on
+   staging, so the login page returns 500. Nobody can sign in until this is
+   fixed. The image starts gunicorn only.
+2. **No error logging to the container log.** Django has no `LOGGING`
+   configuration and no Sentry DSN is set, so a 500 leaves no trace.
+3. **The database password rotates on every infrastructure deployment.** The
+   template generates a new password each run. The app must be restarted
+   afterwards. It was restarted after the hostname deployment. This design is
+   not acceptable for production.
+4. **The local Bicep compiler crashes** on this machine. The hostname
+   deployments ran from a compiled JSON copy of the same template.
+
+## Owner actions outstanding
+
+- Overwrite the **placeholder** in the staging vault under
+  `stax-api-key-sandbox` with a real Stax sandbox key. No Stax call may be made
+  until then. The key in `finance-kv` is the live key and stays untouched.
+- ~~Confirm in writing, per question: Q1, Q2, Q3, Q5, Q6.~~ **Done 2026-09-29**,
+  together with Q13, Q21, Q22, Q24, Q26 and Q28. See `docs/SCOPE.md` §9 Round 3.
+- Export the sheet as a spreadsheet file with cell notes into
+  `docs/inputs/private/`.
+- ~~Re-confirm explicitly: Q21, Q22, Q24, Q26, Q28.~~ Done, see above. They are recorded from the
+  owner's single reply "yes for the first part" on 2026-09-27, not from a
+  per-question answer. Numbers are the session's numbering in
+  `docs/COLUMN_MAPPING.md`; `ANSWERS_ALL_25.md` numbers the same questions
+  17, 18, 20, 21 and 23.
+- Go-live blockers: payment channel for 453 leases, Stax ACH per-transaction
+  limit above $12,581 and the daily cap, sheet version history check,
+  TODO-VERIFY-019, and the ACH authorisation point in ADR-0005. Operator emails
+  are no longer a blocker; they are a receipts gap.
+- Checkpoint 3 on staging (own MFA enrolment, viewer destructive attempt, admin
+  list) is blocked by defect 1.
+
+## Follow-ups for later prompts
+
+- Redis replacement: Azure Cache for Redis is retired for new instances.
+  Decision due at Step 10. `deployRedis` is off.
+- Document the ID-based GitHub OIDC subject in `infra/README.md`.
+- Pin CI actions to commit SHAs.
+- `README.md` status section is stale: it says nothing is deployed.
+
+## Before Prompt 4
+
+The amendments file requires one change ahead of Prompt 4: scheduled invoices
+are MVP scope, not backlog. That is recorded in ADR-0004. Prompt 4 must add
+`stores`, `operators`, `leases`, `lease_rent_history` and `rent_charges`, plus
+the `pending` and `returned` payment states. Since the owner statements of
+2026-09-29 it must also add `charge_notes`, `charge_adjustments`,
+`insurance_premiums` and `insurance_charges`. The sign convention is confirmed.
+
+**Prompt 4 must not start until the owner confirms that defects 1 and 2 are
+fixed on staging.**
