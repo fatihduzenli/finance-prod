@@ -73,7 +73,7 @@ Decision: deferred. Migrations take seconds today.
 Counts: BLOCKER 0, MAJOR 0, MINOR 3 (all deferred by written decision above).
 
 **Residual risk**
-- Not yet verified on staging. Acceptance criterion 7 needs an approved push and is checked after it.
+- **Verified on staging 2026-09-29, commit `89d0066`:** pipeline green, new revision healthy, `/account/login/` 200 with the SANDBOX banner, `/admin/` 401, `deploy_migrate` success line and an ERROR with traceback present in the container log. Acceptance criterion 7 met.
 - A migration longer than about 120 seconds would be killed by the liveness probe. A startup
   probe is an `infra/` change for a later plan.
 - Production start-up behaviour is reviewed again at Step 16. Staging holds no data.

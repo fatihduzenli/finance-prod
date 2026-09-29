@@ -25,14 +25,14 @@ Prompts 0 to 3 are complete. Prompt 4 has not been started.
 | `GET /admin/` without a session | 401 |
 | Plain HTTP | 301 to HTTPS |
 | SANDBOX banner and `[SANDBOX]` title | present |
-| `GET /account/login/` | **500, see defect 1** |
+| `GET /account/login/` | 200 since commit `89d0066` (was 500, defect 1) |
 | Default Azure address | 400 by design; the app accepts only `staging.monvera.io` |
 
 ## Defects found, not fixed
 
 **Update 2026-09-29, later:** defects 1 and 2 are fixed in code under PLAN-003a, QA verdict
-PASS (`docs/qa/QA-003a-staging-defects.md`). They are **not on staging yet**; that needs an
-approved push. Defects 3 and 4 are unchanged.
+PASS (`docs/qa/QA-003a-staging-defects.md`). **Deployed to staging on 2026-09-29** at commit `89d0066` after the owner's push approval:
+login page 200, migrations applied at start, errors with traceback in the container log. Defects 3 and 4 are unchanged.
 
 Each needs a production-code or infrastructure change. Under the root
 `CLAUDE.md` that means an Opus assignment, a QA gate and an approved push.
@@ -68,7 +68,8 @@ Each needs a production-code or infrastructure change. Under the root
   TODO-VERIFY-019, and the ACH authorisation point in ADR-0005. Operator emails
   are no longer a blocker; they are a receipts gap.
 - Checkpoint 3 on staging (own MFA enrolment, viewer destructive attempt, admin
-  list) is blocked by defect 1.
+  list) is no longer blocked by defect 1, but **no user exists on staging yet**.
+  Creating the first admin is an owner-approved action still to be planned.
 
 ## Follow-ups for later prompts
 
