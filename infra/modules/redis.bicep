@@ -1,3 +1,10 @@
+// RETIRED FOR NEW INSTANCES. Azure no longer creates Azure Cache for Redis
+// (Microsoft.Cache/redis): a deployment fails with BadRequest, "Azure Cache for
+// Redis is retiring, create Azure Managed Redis instance instead" (observed
+// 2026-09-28 on staging). main.bicep deploys this module only when deployRedis
+// is true, which defaults to false. It is kept, not deleted, until Step 10
+// chooses the replacement (Azure Managed Redis, or a Redis container app).
+//
 // Azure Cache for Redis, Basic C0. Reserved for Step 10: the Celery broker, the
 // Stax token bucket and the circuit-breaker window (docs/CLAUDE.md Rule 3).
 // Nothing reads it yet, so no redis-url secret is wired into the web app here.

@@ -158,6 +158,9 @@ param postgresAdministratorPasswordSecretName string = 'postgres-admin-password'
 // Redis (reserved for Step 10)
 // ---------------------------------------------------------------------------
 
+@description('Off by default. Azure Cache for Redis (Microsoft.Cache/redis), which modules/redis.bicep deploys, no longer accepts new instances: Azure refuses creation and points to Azure Managed Redis instead. Nothing in the app reads Redis before Step 10, and the replacement (Azure Managed Redis, or a Redis container app in this environment) is decided at Step 10. Only set true against a subscription where an existing Microsoft.Cache/redis instance is being kept.')
+param deployRedis bool = false
+
 param redisName string = '${resourceNamePrefix}-redis'
 param redisSkuName string = 'Basic'
 param redisSkuFamily string = 'C'
@@ -306,7 +309,7 @@ module postgresSecrets 'modules/postgresSecrets.bicep' = {
   ]
 }
 
-module redis 'modules/redis.bicep' = {
+module redis 'modules/redis.bicep' = if (deployRedis) {
   name: 'redis'
   params: {
     location: location
@@ -409,8 +412,8 @@ module managedCertificate 'modules/managedCertificate.bicep' = if (useCustomHost
 // Rule 3 and ADR-0002). They will reuse this environment, this identity, this
 // image and these vault references, with a different command and, for beat,
 // exactly one replica and no ingress. They are deliberately not created yet:
-// nothing enqueues a task, and an idle always-on replica costs money. Redis
-// above is already provisioned for them.
+// nothing enqueues a task, and an idle always-on replica costs money. Their
+// Redis is decided at Step 10 as well: see deployRedis above.
 
 // ---------------------------------------------------------------------------
 // Outputs. Names, IDs and public addresses only; never a secret value.
@@ -453,7 +456,8 @@ output managedIdentityPrincipalId string = identity.outputs.principalId
 
 output postgresServerFqdn string = postgres.outputs.fullyQualifiedDomainName
 output postgresDatabaseName string = postgres.outputs.databaseName
-output redisHostName string = redis.outputs.hostName
+@description('Empty unless deployRedis is true.')
+output redisHostName string = deployRedis ? redis!.outputs.hostName : ''
 output keyVaultName string = keyVaultName
 output keyVaultUri string = keyVaultUri
 output logAnalyticsWorkspaceName string = monitoring.outputs.workspaceName

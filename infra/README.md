@@ -19,7 +19,7 @@ infra/
     managedCertificate.bicep       # free managed TLS certificate for the custom hostname
     postgres.bicep                 # PostgreSQL Flexible Server 16, Burstable B1ms, private access
     postgresSecrets.bicep          # writes database-url and postgres-admin-password into the vault
-    redis.bicep                    # Azure Cache for Redis Basic C0 (reserved for Step 10)
+    redis.bicep                    # Azure Cache for Redis: retired for new instances, off by default (deployRedis)
     containerAppWeb.bicep          # the web container app, secrets as Key Vault references
   parameters/
     staging.bicepparam             # resource group finance-sandbox
@@ -131,7 +131,7 @@ rm -P "$HOME/stax-sandbox-key.txt"   # GNU coreutils: shred -u
 | `sentry-dsn` | both | owner, optional | Only after this exists may you uncomment `sentryDsnSecretName` in the parameter file and redeploy. While it is unset, `SENTRY_DSN` is not passed to the app at all and Sentry stays off. |
 | `database-url` | both | **the deployment in §3** | Composed from the generated database password. Do not set it by hand; a manual value is overwritten on the next deployment. |
 | `postgres-admin-password` | both | **the deployment in §3** | The generated server administrator password, for operator use. |
-| `redis-url` | both | owner, at Step 10 | Nothing reads it yet. Build it from `redisHostName` and an access key you fetch yourself; no model may read or print that key. |
+| `redis-url` | both | owner, at Step 10 | Nothing reads it yet, and no Redis is deployed today (§10). Its source is chosen at Step 10; whatever it is, no model may read or print the access key. |
 
 Required before §3 succeeds: the Stax API key secret, the webhook URL token, and
 the Django secret key for that environment. `database-url` is created by the
@@ -198,7 +198,8 @@ az deployment group show \
 | `appBaseUrl` | GitHub variable `APP_BASE_URL` |
 | `keyVaultName`, `keyVaultUri` | where the secrets from §2 live |
 | `managedIdentityPrincipalId` | granting the app access to anything else later |
-| `postgresServerFqdn`, `postgresDatabaseName`, `redisHostName` | operations and Step 10 |
+| `postgresServerFqdn`, `postgresDatabaseName` | operations |
+| `redisHostName` | empty unless `deployRedis=true` (§10) |
 | `defaultIngressFqdn` | the CNAME target for a custom hostname (§4) |
 | `customDomainVerificationId` | the value of the `asuid.<label>` TXT record (§4) |
 | `customHostname`, `customDomainBindingType` | what the app is bound to, and whether TLS is live (§4) |
@@ -491,13 +492,19 @@ Nothing has to be re-planned for the worker and beat:
 - **Scheduled work.** Container Apps **Jobs** run on a cron schedule
   (`--trigger-type Schedule`), a separate resource type that is an alternative to
   a persistent Celery beat for the nightly reconciliation.
-- Redis Basic C0 is already provisioned for the broker, the Stax token bucket and
-  the circuit-breaker window (`docs/CLAUDE.md` Rule 3).
+- **Redis is not provisioned.** Azure Cache for Redis (`Microsoft.Cache/redis`),
+  which `modules/redis.bicep` deploys, no longer accepts new instances: on
+  2026-09-28 Azure refused it with "Azure Cache for Redis is retiring, create
+  Azure Managed Redis instance instead". The template therefore skips it
+  (`deployRedis = false`). Step 10 chooses the replacement for the broker, the
+  Stax token bucket and the circuit-breaker window (`docs/CLAUDE.md` Rule 3):
+  Azure Managed Redis, or a Redis container app in this environment. Nothing
+  reads Redis before then.
 
 ## 11. Cost note
 
 Per ADR-0002, roughly: Container Apps ~$30, PostgreSQL Burstable B1ms ~$15–25,
-Redis Basic C0 ~$16, NAT gateway ~$35, registry and vault a few dollars. Staging
+NAT gateway ~$35, registry and vault a few dollars. Staging
 is the same shape. If that is more than the sandbox is worth, the cheapest
 reductions are stopping the staging PostgreSQL server when it is idle, then
 dropping the staging NAT gateway and accepting a dynamic egress IP there.

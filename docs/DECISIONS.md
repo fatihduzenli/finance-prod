@@ -197,3 +197,50 @@ It is exempt from the HTTPS redirect so in-replica probes over plain HTTP get 20
 - The public set is exactly: two-factor login flow, `/static/`, `/healthz`, and from Step 8 the
   webhook receiver at its token path. `backend/tests/test_route_registry.py` asserts this set.
 - Adding any field to the health payload needs a review against this record.
+
+---
+
+## ADR-0004 — Scheduled invoices are MVP scope; prompt series amended for the Rents ledger
+
+**Date:** 2026-09-29
+**Status:** Accepted (follows from Decision D1, owner-confirmed 2026-09-27; amendments supplied by the owner in `docs/inputs/PROMPT_SERIES_AMENDMENTS.md`)
+
+### Context
+
+The prompt series was written for "a customer receives an invoice and pays it on a hosted
+page". The Rents audit showed the business debits about 500 operators' bank accounts by ACH
+on a fixed day each month. Decision D1 (`docs/SCOPE.md` §4) chose Stax scheduled invoices with
+autopay. Prompt 12 of the series lists "scheduled (recurring) invoices" as a Phase 7 backlog
+item, which contradicts D1.
+
+### Decision
+
+1. **Scheduled invoices via Stax's scheduled-invoice endpoints are MVP scope.** The Phase 7
+   backlog item for them is deleted. When Prompt 12 is run, its backlog list omits it.
+2. The amendments in `docs/inputs/PROMPT_SERIES_AMENDMENTS.md` are applied as each prompt comes
+   up. In summary: Prompt 4 gains `stores`, `operators`, `leases`, `lease_rent_history`,
+   `rent_charges` and payment states `pending`/`returned`; Prompt 5's provider interface gains
+   the scheduled-invoice and ACH-rejection methods; Prompt 6 treats an operator without an email
+   as valid but not eligible for autopay onboarding; Prompt 7 becomes lease setup plus the
+   monthly rent run; Prompt 8 adds the ACH return path; Prompt 9 adds wire and a returns
+   worklist; Prompt 10 reconciles ACH rejections; Prompt 11 must include the month grid;
+   Prompt 13 imports history as local-only legacy rent charges; Prompt 16 cuts over per operator.
+3. Where the amendments file and later owner decisions differ, **the later decision wins**:
+   - Owner questions 1, 2 and 5 were answered on 2026-09-27 (positive = collected, negative =
+     not collected, Rec. Date = debit day). Only Q3 (proration) and Q6 (sign convention of the
+     one-time balance columns) remain open from that group; Q6 does not block rent collection.
+   - The amendments' remarks about serverless hosts do not apply: the app runs on Azure
+     Container Apps with a persistent worker and a NAT gateway with a static egress IP
+     (ADR-0002). The rate limiter is global through Redis, to be provisioned at Step 10.
+   - Data model names fixed in `docs/SCOPE.md` §5 (`lease_rents`, `debit_days` list,
+     `collection_status` incl. `prospective`, `payment_channel` incl. `unknown`) are reconciled
+     with the amendments' names in the Prompt 4 plan, not silently replaced.
+
+### Consequences
+
+- Prompt 4's plan must cover the amended schema and state which naming it adopts.
+- `docs/CLAUDE.md` Rule 2 already lists invoice-schedule create/edit/pause/delete as allowed
+  write calls.
+- Azure Cache for Redis no longer accepts new instances (observed 2026-09-28). The Redis
+  choice for Step 10 (Azure Managed Redis or a Redis container app) is a separate decision to
+  be recorded then. Until then `deployRedis=false`.

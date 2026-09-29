@@ -61,3 +61,11 @@ param createDnsRecords = false
 // Pass 2 of the hostname setup. Leave false until the managed certificate has
 // been issued, then set it to true and redeploy to switch the binding to TLS.
 param bindManagedCertificate = false
+
+// ---------------------------------------------------------------------------
+// Redis
+// ---------------------------------------------------------------------------
+// Azure Cache for Redis no longer accepts new instances, so it is not deployed.
+// Nothing reads Redis before Step 10, which chooses the replacement (Azure
+// Managed Redis, or a Redis container app in this environment).
+param deployRedis = false
