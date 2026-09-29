@@ -30,6 +30,10 @@ Prompts 0 to 3 are complete. Prompt 4 has not been started.
 
 ## Defects found, not fixed
 
+**Update 2026-09-29, later:** defects 1 and 2 are fixed in code under PLAN-003a, QA verdict
+PASS (`docs/qa/QA-003a-staging-defects.md`). They are **not on staging yet**; that needs an
+approved push. Defects 3 and 4 are unchanged.
+
 Each needs a production-code or infrastructure change. Under the root
 `CLAUDE.md` that means an Opus assignment, a QA gate and an approved push.
 

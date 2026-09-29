@@ -47,6 +47,7 @@ All run from the repository root.
 | Unit tests | `uv run pytest -m "not e2e"` |
 | E2E tests | `uv run pytest -m e2e` (once: `uv run playwright install chromium`) |
 | Dev server | `uv run python backend/manage.py runserver` |
+| Apply migrations (image start) | `uv run python backend/manage.py deploy_migrate` |
 | Secret scan | `scripts/check-no-secrets.sh` |
 
 ## Environments and deployment
@@ -108,6 +109,15 @@ credential, or a decision.
 - [ ] Verify on staging: `/healthz` reports `"stax_env":"sandbox"`, and
       `/account/login/` shows the undismissable yellow SANDBOX bar with
       `[SANDBOX]` in the page title.
+
+## Start-up and logging
+
+The image applies pending migrations with `deploy_migrate` before it starts
+gunicorn, and gunicorn is not started if that fails; on PostgreSQL an advisory lock
+makes two replicas that start together migrate one at a time. Every WARNING and above,
+including each unhandled request error with its traceback, is written once to stderr
+(the container log) with the Stax key, the webhook URL token, the Django secret key and
+the database and Redis passwords replaced by `[REDACTED]`.
 
 ## Authentication and roles
 
@@ -173,8 +183,12 @@ routes will require `admin`.
 Prompt 2 (PLAN-002): Django skeleton, environment guard, SANDBOX banner, Sentry
 scrubbing, test runners, delivery image, CI and Azure Bicep.
 
-Prompt 3 (PLAN-003) implemented, awaiting Fable's QA gate: mandatory password +
-TOTP sign-in, the admin/billing/viewer roles with a fail-closed route registry,
-idle and absolute session expiry, sign out everywhere, and the local-only seeded
-admin. No Stax API call, no domain model, no Celery yet. Nothing has been
-deployed and no GitHub remote exists.
+Prompt 3 (PLAN-003): mandatory password + TOTP sign-in, the admin/billing/viewer
+roles with a fail-closed route registry, idle and absolute session expiry, sign out
+everywhere, and the local-only seeded admin.
+
+Staging is deployed at `https://staging.monvera.io` from `main`; production is not.
+PLAN-003a (migrations on start, error logging to stderr) passed the QA gate
+(`docs/qa/QA-003a-staging-defects.md`); until it is deployed the staging login page
+returns 500 because no migration has run there. No Stax API call, no domain model, no Celery yet. Current
+state and open defects: [`docs/STATUS.md`](docs/STATUS.md).
