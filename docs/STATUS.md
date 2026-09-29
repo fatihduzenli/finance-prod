@@ -101,3 +101,13 @@ the login page myself." The condition for starting Prompt 4 is met.
 - **First staging admin:** proposal in `docs/qa/PLAN-003c-first-staging-admin.md`, awaiting
   owner approval.
 
+## Update, 2026-09-29 night
+
+- **Deployed at commit `2d5c1e6`:** new revision healthy, health endpoint reports staging and
+  sandbox, login 200. A request to the default Azure hostname now writes one WARNING line.
+  The revision started after the new Stax sandbox key version was stored, so it holds the
+  current version. No code calls Stax yet; the key itself is first exercised in Prompt 5.
+- **First admin:** plan 003c approved by the owner, implemented, QA verdict PASS
+  (`docs/qa/QA-003c-first-staging-admin.md`). Needs a push, then the owner runs the command
+  in `infra/README.md` §12.
+

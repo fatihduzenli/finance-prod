@@ -508,3 +508,31 @@ NAT gateway ~$35, registry and vault a few dollars. Staging
 is the same shape. If that is more than the sandbox is worth, the cheapest
 reductions are stopping the staging PostgreSQL server when it is idle, then
 dropping the staging NAT gateway and accepting a dynamic egress IP there.
+
+## 12. Create the first admin user (owner only, once per environment)
+
+Plan and QA: `docs/qa/PLAN-003c-first-staging-admin.md`, `docs/qa/QA-003c-first-staging-admin.md`.
+No model runs this step: it needs the owner's Azure sign-in and the owner's password.
+
+1. Have an authenticator app ready on your phone.
+2. Run, replacing the email:
+
+   ```
+   az containerapp exec -g finance-sandbox -n finance-staging-web \
+     --command "python backend/manage.py bootstrap_admin --email <owner email>"
+   ```
+
+3. Type the password twice. Nothing is shown while you type. Use a password manager.
+4. **Immediately** open `https://staging.monvera.io/account/login/`, sign in, scan the QR
+   code and save the backup tokens. Until you do, the password alone would allow enrolment.
+5. Create every further user in the Django admin and assign the `admin`, `billing` or
+   `viewer` group.
+
+| Message | Meaning |
+|---|---|
+| exit status 2, "An admin already exists" | The step was already done. Nothing changed. |
+| "needs an interactive terminal" | The session had no terminal. Nothing was created. Re-run from a normal terminal window. |
+| "The password was rejected" | The password failed a rule named in the message. Nothing was created. |
+| "A user with this email already exists" | Nothing changed. |
+
+For production the resource group and app names change; the command is the same.

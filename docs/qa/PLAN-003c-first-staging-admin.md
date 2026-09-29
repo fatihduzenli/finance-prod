@@ -1,7 +1,7 @@
-# PLAN-003c — First admin user on staging (PROPOSAL, awaiting owner approval)
+# PLAN-003c — First admin user on staging
 
 **Date:** 2026-09-29 · **Planner / QA owner:** Fable · **Implementer:** Opus
-**Status:** proposed. Nothing in this plan has been built or run.
+**Status:** approved by the owner in writing on 2026-09-29 ("approve plan 003c").
 
 ## 1. Restated objective
 
@@ -69,8 +69,17 @@ superuser flag and no device; created user cannot reach `/admin/` before enrolme
 - **Fable or Opus creates the user.** A model would know the first admin's password.
 - **Insert the user with SQL.** Bypasses validators and the audit line.
 
-## 8. Approval needed
+## 8. Acceptance criteria
 
-1. Approve this method, or name another.
-2. After QA: a push approval for the code, as usual.
-3. The `az containerapp exec` step is yours to run. It needs your Azure sign-in.
+1. `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy` exit 0.
+2. Both pytest commands exit 0; no existing test edited, removed or skipped. The route
+   registry test stays green.
+3. Every case in §5 has a passing test.
+4. Diff touches only the files in §4. No dependency change.
+5. The password appears in no output, log line, exception message or process argument.
+
+## 9. Steps that stay with the owner
+
+1. After QA: a push approval for the code.
+2. The `az containerapp exec` step. It needs the owner's Azure sign-in and the owner's
+   password; no model runs it.

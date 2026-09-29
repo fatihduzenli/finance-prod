@@ -152,6 +152,20 @@ Plan: [`docs/qa/PLAN-003-auth-roles.md`](docs/qa/PLAN-003-auth-roles.md). Code:
   `admin@example.com` (staff, `admin` group, not superuser) and prints its
   `otpauth://` URI and five backup tokens. It exits with status 2 in any other
   environment.
+- **First admin on staging or production.** The owner (never a model) runs, once,
+  in an interactive terminal inside the deployed container:
+
+  ```
+  az containerapp exec -g finance-sandbox -n finance-staging-web \
+    --command "python backend/manage.py bootstrap_admin --email <owner email>"
+  ```
+
+  The password is typed twice at a hidden prompt; there is no password argument or
+  environment variable. The account is staff, in the `admin` group, not superuser,
+  with no authenticator. Sign in at `/account/login/` and enrol the authenticator
+  immediately: until then the account can do nothing else. The command exits with
+  status 2 once any admin exists, and in `APP_ENV=local` (use `seed_local_admin`).
+  Every later user is created by that admin in the Django admin.
 
 ### Route-to-role matrix
 
