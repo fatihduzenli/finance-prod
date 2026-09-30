@@ -73,6 +73,8 @@ they implement.
 | `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country` | App | |
 | `notes` | App | Guarded free text |
 | `enrolment_status` | App | Set by staff when the Stax customer and payment-method IDs are linked |
+| `sync_status`, `sync_failure`, `sync_attempted_at` | System | Our record of the last attempt to find or create the Stax customer; `sync_failure` is a class name only |
+| `creation_key`, `needs_review` | System / App | Duplicate-submission guard; review flag set when several Stax customers matched |
 | `archived_at` | App | |
 
 ### stores
@@ -209,6 +211,11 @@ they implement.
 | `received_at`, `event_type`, `provider_object_id`, `dedupe_hash` | Stax | As received. The event body is not trusted as data; the object is fetched again by ID |
 | `processed_at`, `outcome`, `error` | System | |
 | `job_name`, `last_success_at`, `cursor` | System | |
+
+### documents, outbound_messages (reserved, no UI)
+| Field | Owner | Note |
+|---|---|---|
+| all fields | App | Empty until Phase 7 items (a) and (b). A DocuSign envelope ID will live in `external_refs`, not here |
 
 ### audit_log, legacy_records, import_audit
 | Field | Owner | Note |

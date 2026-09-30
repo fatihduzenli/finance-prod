@@ -236,12 +236,16 @@ def _image_cmd(repo_root: Path) -> str:
 
 def test_image_starts_gunicorn_only_after_a_successful_migration(repo_root: Path) -> None:
     cmd = _image_cmd(repo_root)
-    assert "python backend/manage.py deploy_migrate && exec gunicorn " in cmd
+    # PLAN-003a: migrate first; PLAN-006: then the provider environment check; then gunicorn.
+    assert (
+        "python backend/manage.py deploy_migrate && "
+        "python backend/manage.py provider_environment_check && exec gunicorn "
+    ) in cmd
     # No operator that would continue after a failure.
     assert ";" not in cmd
     assert "||" not in cmd
     assert re.search(r"(?<!&)&(?!&)", cmd) is None
-    assert cmd.count("&&") == 1
+    assert cmd.count("&&") == 2
 
 
 def test_image_keeps_access_logging_off_and_gunicorn_arguments(repo_root: Path) -> None:
@@ -252,7 +256,7 @@ def test_image_keeps_access_logging_off_and_gunicorn_arguments(repo_root: Path) 
         "finance.wsgi:application",
         "--chdir backend",
         "--bind 0.0.0.0:8000",
-        "--workers 3",
+        "--workers 1 --worker-class gthread --threads 4",
         "--timeout 60",
         "--graceful-timeout 30",
         "--error-logfile -",

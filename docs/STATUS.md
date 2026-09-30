@@ -210,3 +210,15 @@ the login page myself." The condition for starting Prompt 4 is met.
   shown in full in the Stax dashboard, so every future ping also checks identity.
 - TODO-VERIFY-005 and 024 closed by this observation.
 
+
+## Update, 2026-09-30, Prompt 6
+
+- PLAN-006 implemented, QA verdict PASS (`docs/qa/QA-006-operators.md`), **not pushed**.
+- **Observed on the sandbox account (`GET /self`, 2026-09-30): `merchant.allow_ach = False`.**
+  The sandbox account may not be able to run ACH debits at all. Not a Prompt 6 blocker
+  (customers only), but Prompt 7's monthly run and the one-off-invoice test (TODO-VERIFY-019)
+  cannot be exercised in the sandbox until Stax enables ACH there. Owner to raise with Stax.
+- Interim: the staging web app becomes the single Stax caller (one replica, one process)
+  until Step 10; set in the template and the image.
+- Owner requests recorded: Phase 7 items (a) document upload, (b) templated outbound email,
+  (c) DocuSign API; tables `documents` and `outbound_messages` reserved.

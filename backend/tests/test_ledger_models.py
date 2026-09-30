@@ -197,6 +197,18 @@ def new_import_audit(**fields: Any) -> ledger.ImportAudit:
     return ledger.ImportAudit(**{**values, **fields})
 
 
+def new_document(**fields: Any) -> ledger.Document:
+    _default(fields, "operator", lambda: saved(new_operator()))
+    values = {"kind": "lease agreement", "source": "upload", "file_reference": "uploads/x.pdf"}
+    return ledger.Document(**{**values, **fields})
+
+
+def new_outbound_message(**fields: Any) -> ledger.OutboundMessage:
+    _default(fields, "operator", lambda: saved(new_operator()))
+    values = {"template": "termination_notice", "subject": "Notice", "delivery_status": ""}
+    return ledger.OutboundMessage(**{**values, **fields})
+
+
 LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.Operator: new_operator,
     ledger.Store: new_store,
@@ -216,6 +228,8 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.AuditLog: new_audit_log,
     ledger.LegacyRecord: new_legacy_record,
     ledger.ImportAudit: new_import_audit,
+    ledger.Document: new_document,
+    ledger.OutboundMessage: new_outbound_message,
 }
 
 
@@ -622,6 +636,8 @@ LEDGER_CASES: list[ConstraintCase] = [
     ),
     _field_unique("invoices", "invoice_number", new_invoice, "INV-2026-9001", "INV-2026-9002"),
     _field_unique("invoices", "creation_key", new_invoice, _UUID_1, _UUID_2),
+    # operators (PLAN-006 D6)
+    _field_unique("operators", "creation_key", new_operator, _UUID_1, _UUID_2),
     # invoice_line_items
     ConstraintCase(
         "invoice_line_items_position_unique",

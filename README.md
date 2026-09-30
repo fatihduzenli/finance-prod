@@ -51,6 +51,8 @@ All run from the repository root.
 | Apply migrations (local) | `uv run python backend/manage.py migrate` |
 | Seed demo data (`APP_ENV=local` only, safe to repeat) | `uv run python backend/manage.py seed_demo` |
 | Stax authentication check (one `GET /self`; needs `STAX_CALLER=worker`) | `uv run python backend/manage.py provider_ping` |
+| Boot check: key environment and merchant (one `GET /self`; runs in the image `CMD`) | `uv run python backend/manage.py provider_environment_check` |
+| Dev server without Stax (in-memory provider; `APP_ENV=local` only) | `STAX_PROVIDER=fake uv run python backend/manage.py runserver` |
 | Stax sandbox suites (off by default; need `STAX_SANDBOX_TESTS=1`) | `uv run pytest -m sandbox` |
 | Secret scan | `scripts/check-no-secrets.sh` |
 
@@ -66,9 +68,10 @@ environment guard and the yellow SANDBOX banner exist.
 | `APP_ENV` | `local` | `staging` | `production` |
 | `STAX_ENV` | `sandbox` | `sandbox` | `sandbox` for now — `live` at Step 16 |
 | Stax key | sandbox key, or empty | `stax-api-key-sandbox` | `stax-api-key-sandbox` now, `stax-api-key-live` at Step 16 |
-| `STAX_CALLER` | `none` (default); `worker` only to run `provider_ping` | `none` on web; `worker` only on the single worker (Step 10) | as staging |
+| `STAX_CALLER` | `none` (default); `worker` only to run `provider_ping` | `worker` on the web app, which runs as one replica, until Step 10 moves the calls to the worker (PLAN-006 D1) | `none` |
+| `STAX_PROVIDER` | `stax` (default), or `fake` for the in-memory provider | `stax` | `stax` |
 | `STAX_PAY_INVOICE_ENABLED` | `false` (default) | `false`; `true` only for the documented sandbox test | `false` until TODO-VERIFY-019 is decided |
-| `STAX_EXPECTED_MERCHANT_ID` | empty, or the sandbox merchant ID | sandbox merchant ID, checked by `provider_ping` | the merchant ID of the loaded key |
+| `STAX_EXPECTED_MERCHANT_ID` | empty, or the sandbox merchant ID | sandbox merchant ID (in `staging.bicepparam`), checked at every start | the merchant ID of the loaded key |
 | Config source | `.env`, filled by hand from the vault | Key Vault `finance-sandbox-kv` via managed identity | Key Vault `finance-kv` via managed identity |
 | Data | `docker-compose.yml`: PostgreSQL 16 + Redis 7 | Azure resource group `finance-sandbox` | Azure resource group `finance-prod` |
 | Banner | always on | always on | on until the live key is wired |
@@ -121,7 +124,12 @@ credential, or a decision.
 
 The image applies pending migrations with `deploy_migrate` before it starts
 gunicorn, and gunicorn is not started if that fails; on PostgreSQL an advisory lock
-makes two replicas that start together migrate one at a time. Every WARNING and above,
+makes two replicas that start together migrate one at a time. Then
+`provider_environment_check` sends one `GET /self` and refuses to start (exit 3) when
+the key's `merchant.is_sandbox` disagrees with `STAX_ENV`, (exit 1) when the merchant is
+not `STAX_EXPECTED_MERCHANT_ID`, and (exit 2) when Stax cannot be asked; a new revision
+then never becomes ready while the running one keeps serving. Locally without a key it
+is skipped. Every WARNING and above,
 including each unhandled request error with its traceback, is written once to stderr
 (the container log) with the Stax key, the webhook URL token, the Django secret key and
 the database and Redis passwords replaced by `[REDACTED]`. A request refused because
@@ -192,6 +200,10 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `admin:auth_user_*`, `admin:auth_group_*` | POST | admin | user and group management, including `auth_user_password_change` |
 | `admin:otp_totp_*`, `admin:otp_static_*` | POST | admin | other users' devices |
 | `admin:accounts_usersession_*` | POST | admin | the list itself is read-only |
+| `ledger:operators:list`, `ledger:operators:detail` | none | — | GET for any verified user with a role; no role is 403 |
+| `ledger:operators:create`, `:edit`, `:retry_sync`, `:link` | POST | billing | GET of the forms for any role |
+| `ledger:operators:archive` | POST | admin | soft delete; there is no delete route |
+| `admin:ledger_operator_*` | POST | admin | registered read-only: no add, change or delete |
 | `admin:index`, `admin:app_list`, `admin:login`, `admin:jsi18n`, `admin:autocomplete`, `admin:view_on_site`, `admin:password_change_done` | none | — | GET for any verified user; Django admin still checks `is_staff` and model permissions |
 | `two_factor:profile`, `two_factor:disable` | none | — | GET only; disabling one's own second factor is refused |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |
@@ -217,5 +229,9 @@ are deployed. Prompt 4 (PLAN-004): the ledger schema, 23 tables in `backend/ledg
 [`docs/DATA_OWNERSHIP.md`](docs/DATA_OWNERSHIP.md) and
 [`docs/qa/QA-004-schema.md`](docs/qa/QA-004-schema.md). Prompt 5 (PLAN-005): the `PaymentProvider` interface and the Stax client with its
 limiter, breaker, retries, validation and failure budget; see
-[`docs/STAX_CLIENT.md`](docs/STAX_CLIENT.md). No Celery yet. Current
+[`docs/STAX_CLIENT.md`](docs/STAX_CLIENT.md). Prompt 6 (PLAN-006): the operator screens
+at `/operators/` (list, search, detail, create, edit, archive, retry, manual link), with
+each new or edited operator linked to or created as a Stax customer, the boot-time
+environment check, and the reserved `documents` and `outbound_messages` tables; see
+[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). No Celery yet. Current
 state and open defects: [`docs/STATUS.md`](docs/STATUS.md).

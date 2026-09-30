@@ -37,4 +37,8 @@ and the code in the same change.
 | TODO-VERIFY-028 | Type and meaning of `apply_balance` on mark-paid (amount string assumed) | `mark_invoice_paid_cash_or_check` (Prompt 9) | Two-decimal amount string | sandbox | Open |
 | TODO-VERIFY-029 | Body fields of `PUT /invoice/{id}`; the spec block lists none. Merge or replace of `meta`? | `update_invoice` | Create's names; merge unknown | sandbox | Open |
 | TODO-VERIFY-030 | Deposit list and detail response keys (`batch_id` assumed; detail assumed to be a list) | Prompt 10 | As assumed | sandbox | Open |
+| TODO-VERIFY-031 | Is the `email` filter on `GET /customer` an exact match, a contains match, or case-insensitive? | Check-before-create (PLAN-006 D3) | Unknown; our code compares each returned email for exact equality after lower-casing and stripping. If Stax stores emails as typed and filters case-sensitively, a customer typed in a different case in the dashboard is not found and a duplicate is created | first operator creates in the sandbox (Checkpoint 6) | Open |
+| TODO-VERIFY-032 | Customer `created_at` key and its sortable format, used to pick the oldest of several matches | `operator_sync.oldest` | `created_at`, `YYYY-MM-DD hh:mm:ss` | sandbox | Open |
+| TODO-VERIFY-033 | Does `POST /customer` accept an empty `lastname` when `firstname` and `company` are set? | PLAN-006 D5 mapping | Yes | first sandbox create | Open |
+| TODO-VERIFY-034 | Can a payment-method ID be read or checked against its customer (`GET /customer/{id}/payment-method` per the spec index)? The interface has no such read yet | Link form (PLAN-006 D4) stores the ID unverified | Not verifiable yet | Prompt 7 adds the read if the spec confirms it | Open |
 

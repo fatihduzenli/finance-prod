@@ -238,6 +238,13 @@ owner signs a new scope.
 
 - Collection of one-time fees: sign fees, deposit or access fees. MVP only stores their opening
   balances from columns I–J. (Annual insurance moved into the MVP on 2026-09-29, ADR-0005.)
+- **Owner request 2026-09-30, in this order (tables reserved by PLAN-006, no UI yet):**
+  (a) manual document upload per operator (signed lease PDFs from DocuSign, uploaded by staff);
+  (b) templated outbound email to operators with optional attachments, which needs a
+  transactional email provider, SPF, DKIM and DMARC on `monvera.io` replacing the current
+  `v=spf1 -all`, a sending address, file storage and a send log;
+  (c) DocuSign API integration later, pending confirmation that the DocuSign plan includes API
+  access. Tables: `documents` and `outbound_messages` (`docs/qa/PLAN-006-operators.md` §4.4).
 - Termination invoices and settlements.
 - Late fees, discounts, "half rent" rules, proration for partial months.
 - Automatic rent escalations or rent change schedules.

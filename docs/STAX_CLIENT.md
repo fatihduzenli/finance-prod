@@ -72,6 +72,20 @@ the Celery worker arrives at Step 10 it runs with `STAX_CALLER=worker`, **one re
 that single-replica rule goes into the Bicep template then. Until Step 10, the only permitted
 caller is a one-off command run by the owner with the variable set for that one process (§8).
 
+## 5a. The boot-time identity check (PLAN-006)
+
+Every process start runs `provider_environment_check` after the migrations and before
+gunicorn. It sends one `GET /self` on a boot path that bypasses only the `STAX_CALLER` gate,
+then refuses to start (gunicorn never runs) when `merchant.is_sandbox` disagrees with
+`STAX_ENV` (exit 3), when `STAX_EXPECTED_MERCHANT_ID` is set and differs (exit 1), or when Stax
+cannot be reached or read (exit 2). Locally with no key it is skipped. A Stax outage therefore
+stops a **new** revision from starting; the running revision keeps serving.
+
+**Interim arrangement until Step 10.** The operator screens create and link Stax customers,
+so on staging the web process is the single caller: `STAX_CALLER=worker`, one replica
+(`webMaxReplicas = 1`) and one gunicorn process with threads. All three are set in the
+template and the image, not by hand. Step 10 moves every call to the worker and reverts them.
+
 ## 6. When the breaker opens
 
 What happens automatically:
