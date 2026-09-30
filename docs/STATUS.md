@@ -138,3 +138,6 @@ the login page myself." The condition for starting Prompt 4 is met.
   The verdict is conditional on the owner accepting decisions D2 to D12 in
   `docs/qa/PLAN-004-schema.md` §3.
 - `docs/DATA_OWNERSHIP.md` is written for the owner's Checkpoint 4 review.
+- **Owner, in writing, 2026-09-29:** "accept D2 and D12". D2 (`customers` built as
+  `operators`) and D12 (deposit and webhook tables keep their provider ID columns) are
+  accepted. D3 to D11 are open. No push approval has been given for PLAN-004.

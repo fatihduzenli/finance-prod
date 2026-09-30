@@ -29,6 +29,10 @@ perform a split or merge. The owner's amendments file already instructs the addi
 D2 to D9 are proposals. **They are built locally and presented to the owner with the Publish
 Request; nothing reaches staging before the owner has seen them.**
 
+**Owner decisions so far.** 2026-09-29, in writing: "accept D2 and D12". **D2 and D12 are
+accepted.** D3 to D11 are still proposals and await the owner's decision. D1 follows the
+owner's amendments file.
+
 | # | Decision | Reason |
 |---|---|---|
 | D1 | Add `stores`, `leases`, `lease_rent_history`, `rent_charges`, `charge_notes`, `charge_adjustments`, `insurance_premiums`, `insurance_charges`, `store_balances`, `notes`, `import_audit`, `provider_snapshots` | Amendments file; owner statements of 2026-09-29; Rule 8 |
