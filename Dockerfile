@@ -78,9 +78,16 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 # together migrate once). Only if it exits 0 does the shell `exec` gunicorn, which
 # then replaces the shell as PID 1 and receives SIGTERM directly. A failed migration
 # exits non-zero, gunicorn never starts, and the revision never becomes ready.
+# Then provider_environment_check (PLAN-006 D2) asks Stax once, GET /self, whether
+# the key's environment matches STAX_ENV and its merchant STAX_EXPECTED_MERCHANT_ID.
+# Any disagreement, and an unreachable Stax, exits non-zero: the new revision does
+# not start (the running one keeps serving). Locally without a key it is skipped.
+# gunicorn runs one worker process with threads because the Stax rate limiter and
+# breaker live in process memory: one process owns the single bucket (PLAN-006 D1)
+# until Step 10 moves the calls to the worker.
 #
 # Access logging is deliberately left off: inbound webhook URLs carry the
 # secret path token (docs/CLAUDE.md Rule 4) and must not reach logs
 # (root CLAUDE.md 5.3). Request logging belongs in Django's logging config,
 # which redacts the path.
-CMD ["/bin/sh", "-c", "python backend/manage.py deploy_migrate && exec gunicorn finance.wsgi:application --chdir backend --bind 0.0.0.0:8000 --workers 3 --timeout 60 --graceful-timeout 30 --error-logfile -"]
+CMD ["/bin/sh", "-c", "python backend/manage.py deploy_migrate && python backend/manage.py provider_environment_check && exec gunicorn finance.wsgi:application --chdir backend --bind 0.0.0.0:8000 --workers 1 --worker-class gthread --threads 4 --timeout 60 --graceful-timeout 30 --error-logfile -"]

@@ -1,0 +1,50 @@
+{% comment %}
+Layout of the staff screens (docs/qa/PLAN-006-operators.md). Self-contained: no external
+asset. Renders no setting. The SANDBOX banner and the title prefix are injected by
+finance.middleware.SandboxBannerMiddleware. The sign-in pages keep their own base,
+two_factor/_base.html.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{% endblock %} | Finance</title>
+  <style>
+    body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;background:#f6f6f6;}
+    nav{display:flex;gap:1rem;align-items:center;padding:.75rem 1.5rem;background:#1a1a1a;}
+    nav a{color:#fff;text-decoration:none;font-weight:600;}
+    nav form{margin:0 0 0 auto;}
+    nav button{background:none;border:1px solid #fff;color:#fff;border-radius:4px;padding:.25rem .75rem;cursor:pointer;}
+    main{max-width:64rem;margin:1.5rem auto;padding:1.5rem 2rem;background:#fff;border:1px solid #ddd;border-radius:6px;}
+    h1{font-size:1.5rem;margin-top:0;} h2{font-size:1.15rem;margin-top:2rem;}
+    table{border-collapse:collapse;width:100%;} th,td{padding:.4rem .5rem;border-bottom:1px solid #e5e5e5;text-align:left;vertical-align:top;}
+    label{display:block;margin:.75rem 0 .25rem;font-weight:600;}
+    input[type=text],input[type=email],input[type=search],textarea{width:100%;padding:.5rem;box-sizing:border-box;font-size:1rem;}
+    .btn{display:inline-block;padding:.45rem .9rem;border:1px solid #333;border-radius:4px;background:#fff;color:#1a1a1a;font-size:.95rem;cursor:pointer;text-decoration:none;}
+    .btn-primary{background:#1a1a1a;color:#fff;} .btn-danger{border-color:#b00020;color:#b00020;}
+    .btn:disabled{opacity:.5;cursor:default;}
+    .actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:1rem 0;} .actions form{margin:0;}
+    .messages{list-style:none;padding:0;} .messages li{padding:.6rem .8rem;margin-bottom:.5rem;border-radius:4px;background:#eef4ff;}
+    .messages .error{background:#fdecee;color:#8a0016;} .messages .warning{background:#fff6dd;} .messages .success{background:#e9f7ec;}
+    .errorlist{color:#b00020;padding-left:1rem;}
+    .muted{color:#666;} .badge{display:inline-block;padding:.1rem .45rem;border-radius:3px;background:#eee;font-size:.85rem;}
+    dl{display:grid;grid-template-columns:12rem 1fr;gap:.35rem 1rem;} dt{font-weight:600;} dd{margin:0;}
+  </style>
+</head>
+<body>
+  <nav aria-label="Main">
+    <a href="{% url 'ledger:operators:list' %}">Operators</a>
+    <a href="{% url 'admin:index' %}">Admin</a>
+    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form>
+  </nav>
+  <main>
+    {% if messages %}
+      <ul class="messages">
+        {% for message in messages %}<li class="{{ message.tags }}" role="status">{{ message }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

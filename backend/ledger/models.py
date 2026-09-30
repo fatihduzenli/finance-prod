@@ -181,6 +181,37 @@ class EnrolmentStatus(models.TextChoices):
     ENROLLED = "enrolled", "Enrolled"
 
 
+class SyncStatus(models.TextChoices):
+    """Where an operator stands with the payment provider (PLAN-006 D7)."""
+
+    NOT_APPLICABLE = "not_applicable", "Not applicable"
+    AWAITING_LINK = "awaiting_link", "Awaiting link"
+    PENDING = "pending", "Pending"
+    LINKED = "linked", "Linked"
+    FAILED = "failed", "Failed"
+
+
+class SyncFailure(models.TextChoices):
+    """The class name of the last failure, never a message (PLAN-006 D7).
+
+    A closed list, so the column cannot hold free text: the payment-provider error
+    classes (``payments.errors``), plus the one local refusal the sync can meet.
+    """
+
+    PROVIDER_ERROR = "ProviderError", "Provider error"
+    VALIDATION_FAILED = "ValidationFailed", "Refused before sending"
+    NOT_PERMITTED_HERE = "ProviderNotPermittedHere", "Not permitted from this process"
+    FEATURE_DISABLED = "FeatureDisabled", "Feature disabled"
+    CIRCUIT_OPEN = "CircuitOpen", "Calls paused after repeated failures"
+    FAILURE_BUDGET_EXHAUSTED = "FailureBudgetExhausted", "Failure budget exhausted"
+    RATE_LIMIT_WAIT_EXCEEDED = "RateLimitWaitExceeded", "Rate limit wait exceeded"
+    PROVIDER_REJECTED = "ProviderRejected", "Rejected by the provider"
+    PROVIDER_UNAVAILABLE = "ProviderUnavailable", "Provider unavailable"
+    TRANSPORT_ERROR = "TransportError", "Provider unreachable"
+    IDENTITY_MISMATCH = "IdentityMismatch", "Wrong merchant"
+    ALREADY_LINKED_ELSEWHERE = "AlreadyLinkedElsewhere", "Linked to another operator"
+
+
 class Operator(GuardedModel):
     """The business that runs a store and pays its rent ("customer" in older prompts)."""
 
@@ -197,6 +228,13 @@ class Operator(GuardedModel):
     country = models.CharField(max_length=2, default="US")
     notes = free_text()
     enrolment_status = _choice(EnrolmentStatus, default=EnrolmentStatus.NOT_ENROLLED)
+    sync_status = _choice(SyncStatus, default=SyncStatus.NOT_APPLICABLE)
+    sync_failure = _choice(SyncFailure, blank=True, default="")
+    sync_attempted_at = models.DateTimeField(null=True, blank=True)
+    #: Set once by the create form; a repeated submission finds the row (PLAN-006 D6).
+    creation_key = models.UUIDField(unique=True, null=True, blank=True, editable=False)
+    #: Set when the provider held several customers with this e-mail (PLAN-006 D3).
+    needs_review = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     archived_at = models.DateTimeField(null=True, blank=True)
@@ -215,6 +253,8 @@ class Operator(GuardedModel):
                 name="operators_email_unique",
             ),
             _valid_choice("operators", "enrolment_status", EnrolmentStatus),
+            _valid_choice("operators", "sync_status", SyncStatus),
+            _valid_choice("operators", "sync_failure", SyncFailure, blank=True),
         ]
 
     def __str__(self) -> str:
@@ -846,6 +886,55 @@ class Payment(GuardedModel):
             _valid_choice("payments", "method", PaymentMethod),
             _valid_choice("payments", "status", PaymentStatus),
         ]
+
+
+# --- Reserved: documents and outbound messages (PLAN-006 D8, no UI) -----------------
+
+
+class DocumentSource(models.TextChoices):
+    UPLOAD = "upload", "Upload"
+    DOCUSIGN = "docusign", "DocuSign"
+
+
+class Document(GuardedModel):
+    """Reserved for a later prompt: a document held for an operator. No UI, no admin.
+
+    A signing service's envelope identifier is not a column here: provider identifiers
+    live in ``payments.ExternalRef`` (docs/CLAUDE.md Rule 8).
+    """
+
+    operator = models.ForeignKey(Operator, on_delete=models.PROTECT, related_name="documents")
+    kind = free_text(blank=False)
+    source = _choice(DocumentSource)
+    file_reference = free_text(blank=False)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "documents"
+        constraints = [_valid_choice("documents", "source", DocumentSource)]
+
+
+class OutboundMessage(GuardedModel):
+    """Reserved for a later prompt: a message sent to an operator. No UI, no admin."""
+
+    operator = models.ForeignKey(
+        Operator, on_delete=models.PROTECT, related_name="outbound_messages"
+    )
+    template = free_text(blank=False)
+    subject = free_text()
+    #: Identifiers of ``documents`` rows attached to the message.
+    document_refs = guarded_json(default=list, blank=True)
+    sent_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    sent_at = models.DateTimeField(null=True, blank=True)
+    delivery_status = free_text()
+
+    class Meta:
+        db_table = "outbound_messages"
 
 
 # --- Audit and import --------------------------------------------------------------

@@ -1,0 +1,19 @@
+{% extends "finance/base.html" %}
+{% block title %}Link {{ operator.display_name }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>
+  <h1>Link payment provider IDs</h1>
+  <p>Enter the operator's bank method in the payment provider's dashboard first. Then copy the customer ID and the payment method ID here. No bank details are entered in this app.</p>
+  {% if customer_masked %}<p class="muted">Currently linked customer: {{ customer_masked }}. Enter the same customer ID to add or replace the payment method.</p>{% endif %}
+  <form method="post" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field.errors }}
+      {{ field }}
+    {% endfor %}
+    <p class="actions"><button class="btn btn-primary" type="submit">Link</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

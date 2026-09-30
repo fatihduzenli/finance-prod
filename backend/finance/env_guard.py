@@ -20,6 +20,9 @@ DEPLOYED_APP_ENVS: tuple[str, ...] = ("staging", "production")
 STAX_ENVS: tuple[str, ...] = ("sandbox", "live")
 #: Which process may call Stax (docs/qa/PLAN-005-stax-client.md D7). Unset means "none".
 STAX_CALLERS: tuple[str, ...] = ("none", "worker")
+#: Which PaymentProvider the app uses (docs/qa/PLAN-006-operators.md §4.2). Unset means
+#: "stax"; "fake" is the in-memory provider and is accepted only when APP_ENV is local.
+STAX_PROVIDERS: tuple[str, ...] = ("stax", "fake")
 #: STAX_PAY_INVOICE_ENABLED (PLAN-005 D3). Unset means "false".
 BOOLEAN_FLAGS: tuple[str, ...] = ("true", "false")
 
@@ -61,6 +64,7 @@ class Config:
     stax_pay_invoice_enabled: bool
     #: Not a credential, but identifying: shown masked only, so kept out of ``repr``.
     stax_expected_merchant_id: str = field(repr=False)
+    stax_provider: str
 
 
 def validate(env: Mapping[str, str]) -> Config:
@@ -78,6 +82,7 @@ def validate(env: Mapping[str, str]) -> Config:
     django_secret_key = env.get("DJANGO_SECRET_KEY", "")
     stax_caller = env.get("STAX_CALLER", "") or "none"
     stax_pay_invoice_enabled = env.get("STAX_PAY_INVOICE_ENABLED", "") or "false"
+    stax_provider = env.get("STAX_PROVIDER", "") or "stax"
 
     is_local = app_env == "local"
     is_deployed = app_env in DEPLOYED_APP_ENVS
@@ -146,6 +151,12 @@ def validate(env: Mapping[str, str]) -> Config:
     if stax_pay_invoice_enabled not in BOOLEAN_FLAGS:
         problems.append(f"STAX_PAY_INVOICE_ENABLED is not one of: {', '.join(BOOLEAN_FLAGS)}")
 
+    # PLAN-006 §4.2: the in-memory provider is for local development only.
+    if stax_provider not in STAX_PROVIDERS:
+        problems.append(f"STAX_PROVIDER is not one of: {', '.join(STAX_PROVIDERS)}")
+    elif stax_provider == "fake" and not is_local:
+        problems.append("STAX_PROVIDER may only be 'fake' when APP_ENV is 'local'")
+
     if problems:
         raise EnvGuardError("; ".join(problems))
 
@@ -165,4 +176,5 @@ def validate(env: Mapping[str, str]) -> Config:
         stax_caller=stax_caller,
         stax_pay_invoice_enabled=stax_pay_invoice_enabled == "true",
         stax_expected_merchant_id=env.get("STAX_EXPECTED_MERCHANT_ID", ""),
+        stax_provider=stax_provider,
     )

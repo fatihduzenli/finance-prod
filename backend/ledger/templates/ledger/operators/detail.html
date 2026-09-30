@@ -1,0 +1,80 @@
+{% extends "finance/base.html" %}
+{% block title %}{{ operator.display_name }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:operators:list' %}">&larr; Operators</a></p>
+  <h1>{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1>
+
+  <div class="actions">
+    {% if can_edit %}<a class="btn" href="{% url 'ledger:operators:edit' pk=operator.pk %}">Edit</a>{% endif %}
+    {% if can_link %}<a class="btn" href="{% url 'ledger:operators:link' pk=operator.pk %}">Link provider IDs</a>{% endif %}
+    {% if can_archive %}
+      <form method="post" action="{% url 'ledger:operators:archive' pk=operator.pk %}" onsubmit="return window.confirm('Archive this operator? It is hidden from the list but never deleted.');">
+        {% csrf_token %}<button class="btn btn-danger" type="submit">Archive</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <h2>Contact</h2>
+  <dl>
+    <dt>Legal name</dt><dd>{{ operator.legal_name|default:"—" }}</dd>
+    <dt>Company</dt><dd>{{ operator.company|default:"—" }}</dd>
+    <dt>E-mail</dt><dd>{{ operator.email|default:"—" }}</dd>
+    <dt>Phone</dt><dd>{{ operator.phone|default:"—" }}</dd>
+    <dt>Address</dt>
+    <dd>{% if operator.address_line1 %}{{ operator.address_line1 }}<br>{% endif %}{% if operator.address_line2 %}{{ operator.address_line2 }}<br>{% endif %}{{ operator.city }}{% if operator.city and operator.state %}, {% endif %}{{ operator.state }} {{ operator.postal_code }}{% if not operator.address_line1 and not operator.city %}—{% endif %}</dd>
+  </dl>
+
+  <h2>Payment provider</h2>
+  <dl>
+    <dt>Link status</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} <span class="badge">Needs review</span>{% endif %}</dd>
+    {% if failure_message %}
+      <dt>Last failure</dt>
+      <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.sync_failure }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|date:"Y-m-d H:i" }} UTC{% endif %}</span></dd>
+    {% elif operator.sync_attempted_at %}
+      <dt>Last attempt</dt><dd>{{ operator.sync_attempted_at|date:"Y-m-d H:i" }} UTC</dd>
+    {% endif %}
+    <dt>Customer ID</dt><dd>{{ customer_masked|default:"—" }}</dd>
+    <dt>Payment method ID</dt><dd>{{ payment_method_masked|default:"—" }}</dd>
+    <dt>Enrolment</dt><dd>{{ operator.get_enrolment_status_display }}</dd>
+  </dl>
+  {% if can_retry %}
+    <form method="post" action="{% url 'ledger:operators:retry_sync' pk=operator.pk %}" class="actions js-single-submit">
+      {% csrf_token %}<button class="btn btn-primary" type="submit">Retry sync</button>
+      <span class="muted">Makes one new call to the payment provider.</span>
+    </form>
+  {% endif %}
+
+  <h2>Leases</h2>
+  <table>
+    <thead><tr><th>Store</th><th>Status</th><th>Debit day</th></tr></thead>
+    <tbody>
+      {% for lease in leases %}
+        <tr><td>{{ lease.store.external_label }}</td><td>{{ lease.get_collection_status_display }}</td><td>{{ lease.debit_day|default:"—" }}</td></tr>
+      {% empty %}
+        <tr><td colspan="3" class="muted">No leases.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><strong>Outstanding balance:</strong> <span id="outstanding">${{ outstanding }}</span> <span class="muted">(sum of rent charge balances over these leases)</span></p>
+
+  <h2>Invoices</h2>
+  <table>
+    <thead><tr><th>Number</th><th>Issued</th><th>Due</th><th>Total</th><th>Status</th><th>Provider status</th></tr></thead>
+    <tbody>
+      {% for invoice in invoices %}
+        <tr><td>{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|date:"Y-m-d" }}</td><td>{{ invoice.due_date|date:"Y-m-d" }}</td><td>${{ invoice.total }}</td><td>{{ invoice.get_internal_status_display }}</td><td>{{ invoice.provider_status|default:"—" }}</td></tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">No invoices yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Notes</h2>
+  {% if operator.notes %}<p style="white-space:pre-wrap;">{{ operator.notes }}</p>{% endif %}
+  {% for note in notes %}
+    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|date:"Y-m-d" }}</span></p>
+  {% empty %}
+    {% if not operator.notes %}<p class="muted">No notes.</p>{% endif %}
+  {% endfor %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

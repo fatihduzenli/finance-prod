@@ -1,0 +1,13 @@
+{% comment %}
+Disables a form's submit button on the first submission, so a double click sends one
+request. A convenience only: the server refuses a repeat by itself (PLAN-006 D6).
+{% endcomment %}
+<script>
+  document.querySelectorAll("form.js-single-submit").forEach(function (form) {
+    form.addEventListener("submit", function (event) {
+      var button = form.querySelector("button[type=submit]");
+      if (button.disabled) { event.preventDefault(); return; }
+      button.disabled = true;
+    });
+  });
+</script>

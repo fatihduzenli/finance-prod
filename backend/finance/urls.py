@@ -1,4 +1,4 @@
-"""URL map. Django admin is the staff UI; /healthz is for the platform probe.
+"""URL map: the staff screens, Django admin, and /healthz for the platform probe.
 
 Every route must be classified in accounts.registry; backend/tests/test_route_registry.py
 fails when one is not.
@@ -33,4 +33,6 @@ urlpatterns = [
     # POST only; Django's LogoutView answers GET with 405.
     path("account/logout/", LogoutView.as_view(), name="logout"),
     path("account/", include("accounts.urls")),
+    # Staff screens: /operators/ (docs/qa/PLAN-006-operators.md §4.1).
+    path("", include("ledger.urls")),
 ]

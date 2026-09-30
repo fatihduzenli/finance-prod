@@ -44,6 +44,8 @@ STAX_CALLER = _config.stax_caller
 STAX_PAY_INVOICE_ENABLED = _config.stax_pay_invoice_enabled
 #: Merchant the key must belong to; empty means the check is not configured (Rule 6).
 STAX_EXPECTED_MERCHANT_ID = _config.stax_expected_merchant_id
+#: "stax" (default) or "fake", the in-memory provider, local only (PLAN-006 §4.2).
+STAX_PROVIDER = _config.stax_provider
 APP_BASE_URL = _config.app_base_url
 REDIS_URL = _config.redis_url
 

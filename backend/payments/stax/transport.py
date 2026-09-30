@@ -141,14 +141,19 @@ class StaxTransport:
         params: Mapping[str, str | int | bool] | None = None,
         json: Mapping[str, object] | None = None,
         idempotent: bool,
+        boot_check: bool = False,
     ) -> object:
         """Send one logical request; return the decoded JSON body (``None`` if empty).
 
         ``path`` is a template; ``{id}`` is replaced by the percent-encoded
         ``object_id``. ``idempotent=False`` marks a call that may have taken effect even
         when no response arrived: it is retried after a 429 only (D6).
+
+        ``boot_check=True`` is passed by ``provider_environment_check`` only, for its one
+        ``GET /self`` per process start (PLAN-006 D2). It skips the ``STAX_CALLER`` gate
+        and nothing else: the breaker, limiter, budget, retry policy and logging apply.
         """
-        if settings.STAX_CALLER != WORKER:
+        if not boot_check and settings.STAX_CALLER != WORKER:
             raise ProviderNotPermittedHere("This process is not permitted to call the provider")
         client = self.client
         url = path.replace(ID_PLACEHOLDER, quote(object_id, safe="")) if object_id else path

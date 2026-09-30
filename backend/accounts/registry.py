@@ -10,8 +10,8 @@ Read-only routes need no rule for GET; they are listed in ``READ_ONLY_ROUTE_NAME
 the enumeration test (backend/tests/test_route_registry.py) can prove that every route
 in the URL map has been classified. A new route that is not classified fails that test.
 
-Routes still to come (Steps 4+): refund, void and settings get ``Role.ADMIN``;
-customers, invoices, send and record-payment get ``Role.BILLING``.
+Routes still to come: refund, void and settings get ``Role.ADMIN``; invoices, send and
+record-payment get ``Role.BILLING``. Operators (PLAN-006) are classified below.
 """
 
 from __future__ import annotations
@@ -77,6 +77,12 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "accounts:sign_out_everywhere": RouteRule(min_role=None, methods=POST),
     # Changing one's own password.
     "admin:password_change": RouteRule(min_role=Role.VIEWER, methods=POST),
+    # Operators (docs/qa/PLAN-006-operators.md §4.1, D10). There is no delete route.
+    "ledger:operators:create": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:operators:edit": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:operators:retry_sync": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:operators:link": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:operators:archive": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every
@@ -88,6 +94,8 @@ ADMIN_MODEL_PREFIX_RULES: dict[str, RouteRule] = {
     "admin:accounts_usersession_": RouteRule(min_role=Role.ADMIN, methods=POST),
     "admin:otp_totp_": RouteRule(min_role=Role.ADMIN, methods=POST),
     "admin:otp_static_": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Registered read-only (PLAN-006 D9); a POST is refused below admin as well.
+    "admin:ledger_operator_": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Routes that take no unsafe method at all. GET is open to any verified user (the view
@@ -107,6 +115,9 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # Disabling one's own second factor would defeat mandatory MFA: the page may be
         # viewed, its form is refused.
         "two_factor:disable",
+        # Operator screens that only read (PLAN-006 §4.1).
+        "ledger:operators:list",
+        "ledger:operators:detail",
     }
 )
 

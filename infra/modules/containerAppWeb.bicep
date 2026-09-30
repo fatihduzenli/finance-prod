@@ -40,6 +40,16 @@ param staxEnv string
 
 param staxApiBaseUrl string
 
+@description('STAX_CALLER: none, or worker for the single process allowed to call Stax.')
+@allowed([
+  'none'
+  'worker'
+])
+param staxCaller string = 'none'
+
+@description('STAX_EXPECTED_MERCHANT_ID: the merchant the Stax key must belong to. An identifier, not a secret. Empty means not checked.')
+param staxExpectedMerchantId string = ''
+
 @description('Public base URL of this app. Drives ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS in Django.')
 param appBaseUrl string
 
@@ -149,6 +159,14 @@ var baseEnv = [
   {
     name: 'STAX_API_BASE_URL'
     value: staxApiBaseUrl
+  }
+  {
+    name: 'STAX_CALLER'
+    value: staxCaller
+  }
+  {
+    name: 'STAX_EXPECTED_MERCHANT_ID'
+    value: staxExpectedMerchantId
   }
   {
     name: 'APP_BASE_URL'

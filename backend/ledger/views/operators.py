@@ -1,0 +1,311 @@
+"""Operator screens: list, detail, create, edit, archive, retry, link (PLAN-006 §4.1).
+
+Access: every view requires a signed-in, second-factor-verified user (middleware) with a
+role; a user without one gets 403. Unsafe methods are checked a second time by
+``accounts.registry`` before the view runs (viewer: none; billing: create, edit,
+retry, link; admin: archive as well).
+
+Every operator in a URL is loaded from the database before anything else happens, and
+every change goes through :mod:`payments.operator_sync`, which writes the audit log and
+is the only code that talks to the payment provider. Templates receive masked
+identifiers only (first four and last four characters) and no setting.
+"""
+
+from __future__ import annotations
+
+import re
+import uuid
+from collections.abc import Callable
+from decimal import Decimal
+from functools import wraps
+from typing import Any
+
+from django.contrib import messages
+from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
+from django.db import IntegrityError
+from django.db.models import Q, Sum
+from django.db.models.functions import Lower
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBase
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_http_methods, require_POST, require_safe
+
+import payments
+from accounts.roles import Role, meets, role_of
+from accounts.views import forbidden
+from ledger.forms import LinkForm, OperatorCreateForm, OperatorForm
+from ledger.models import ZERO, Note, NoteEntityType, Operator, RentCharge, SyncStatus
+from payments import operator_sync
+from payments.operator_sync import Action, OperatorArchived, SyncOutcome
+from payments.provider import mask_identifier
+
+PAGE_SIZE = 25
+#: Longer search input is cut to this length before it reaches a query.
+SEARCH_MAX_LENGTH = 200
+# C0 and C1 control characters and DEL. PostgreSQL text cannot hold NUL, and none of
+# them belongs in a search term; ordinary spaces are kept.
+CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+EMAIL_TAKEN = "An operator with this e-mail address already exists."
+ALREADY_SAVED = "This operator was already saved. Nothing was changed."
+
+View = Callable[..., HttpResponseBase]
+
+
+def role_required(view: View) -> View:
+    """403 for a verified user who holds no role (docs/SCOPE.md §9)."""
+
+    @wraps(view)
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        if role_of(request.user) is None:
+            return forbidden(request)
+        return view(request, *args, **kwargs)
+
+    return wrapper
+
+
+def _actor(request: HttpRequest) -> User:
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    return user
+
+
+def _role(request: HttpRequest) -> Role | None:
+    return role_of(request.user)
+
+
+def _report(request: HttpRequest, outcome: SyncOutcome) -> None:
+    text = outcome.message
+    if not text:
+        return
+    if outcome.action in (Action.FAILED, Action.LINK_REFUSED):
+        messages.error(request, text)
+    elif outcome.needs_review or outcome.action is Action.AWAITING_LINK:
+        messages.warning(request, text)
+    else:
+        messages.success(request, text)
+
+
+def _sync(request: HttpRequest, operator: Operator, *, retry: bool = False) -> None:
+    outcome = operator_sync.sync_operator(
+        operator.pk, provider=payments.get_provider(), actor=_actor(request), retry=retry
+    )
+    _report(request, outcome)
+
+
+def _after_save(request: HttpRequest, operator: Operator) -> None:
+    """Sync a row that needs it; tell staff when it waits for a manual link."""
+    if operator.sync_status == SyncStatus.PENDING:
+        _sync(request, operator)
+    elif operator.sync_status == SyncStatus.AWAITING_LINK:
+        messages.warning(request, operator_sync.AWAITING_LINK_MESSAGE)
+
+
+def _by_creation_key(raw: str | None) -> Operator | None:
+    try:
+        key = uuid.UUID(str(raw))
+    except ValueError:
+        return None
+    return Operator.objects.filter(creation_key=key).first()
+
+
+def _load(pk: str) -> Operator:
+    """The operator named in the URL, loaded from the database; 404 otherwise."""
+    try:
+        key = uuid.UUID(pk)
+    except ValueError:
+        raise Http404 from None
+    return get_object_or_404(Operator, pk=key)
+
+
+def _refused_archived(request: HttpRequest, operator: Operator) -> HttpResponse:
+    messages.error(request, operator_sync.MESSAGES[operator_sync.ARCHIVED])
+    return redirect("ledger:operators:detail", pk=operator.pk)
+
+
+# --- Read ---------------------------------------------------------------------------
+
+
+@role_required
+@require_safe
+def operator_list(request: HttpRequest) -> HttpResponse:
+    query = CONTROL_CHARACTERS.sub("", request.GET.get("q", "")).strip()[:SEARCH_MAX_LENGTH]
+    include_archived = request.GET.get("archived") == "1"
+    operators = Operator.objects.all()
+    if not include_archived:
+        operators = operators.filter(archived_at__isnull=True)
+    if query:
+        operators = operators.filter(
+            Q(display_name__icontains=query)
+            | Q(legal_name__icontains=query)
+            | Q(company__icontains=query)
+            | Q(email__icontains=query)
+        )
+    page = Paginator(operators.order_by(Lower("display_name"), "id"), PAGE_SIZE).get_page(
+        request.GET.get("page")
+    )
+    return render(
+        request,
+        "ledger/operators/list.html",
+        {
+            "page": page,
+            "query": query,
+            "include_archived": include_archived,
+            "can_create": meets(_role(request), Role.BILLING),
+        },
+    )
+
+
+@role_required
+@require_safe
+def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
+    operator = _load(pk)
+    refs = operator_sync.current_refs(operator)
+    customer = refs.get(operator_sync.KIND_CUSTOMER, "")
+    method = refs.get(operator_sync.KIND_PAYMENT_METHOD, "")
+    outstanding: Decimal = (
+        RentCharge.objects.filter(lease__operator=operator).aggregate(total=Sum("balance"))["total"]
+        or ZERO
+    )
+    role = _role(request)
+    active = operator.archived_at is None
+    billing = meets(role, Role.BILLING)
+    return render(
+        request,
+        "ledger/operators/detail.html",
+        {
+            "operator": operator,
+            "customer_masked": mask_identifier(customer) if customer else "",
+            "payment_method_masked": mask_identifier(method) if method else "",
+            "failure_message": (
+                operator_sync.MESSAGES.get(operator.sync_failure, operator_sync.DEFAULT_MESSAGE)
+                if operator.sync_status == SyncStatus.FAILED
+                else ""
+            ),
+            "leases": operator.leases.select_related("store").order_by("store__external_label"),
+            "outstanding": outstanding.quantize(Decimal("0.01")),
+            "invoices": operator.invoices.order_by("-issue_date", "invoice_number"),
+            "notes": Note.objects.filter(
+                entity_type=NoteEntityType.OPERATOR, entity_id=operator.pk
+            ).order_by("-created_at"),
+            "can_edit": billing and active,
+            "can_retry": billing and active and operator.sync_status == SyncStatus.FAILED,
+            "can_link": billing and active,
+            "can_archive": meets(role, Role.ADMIN) and active,
+        },
+    )
+
+
+# --- Write --------------------------------------------------------------------------
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def operator_create(request: HttpRequest) -> HttpResponse:
+    if request.method == "POST":
+        existing = _by_creation_key(request.POST.get("creation_key"))
+        if existing is not None:
+            messages.info(request, ALREADY_SAVED)
+            return redirect("ledger:operators:detail", pk=existing.pk)
+        form = OperatorCreateForm(request.POST)
+        if form.is_valid():
+            try:
+                operator, created = operator_sync.create_operator(
+                    form.cleaned_data,
+                    creation_key=form.cleaned_data["creation_key"],
+                    actor=_actor(request),
+                )
+            except IntegrityError:
+                form.add_error("email", EMAIL_TAKEN)
+            else:
+                if created:
+                    messages.success(request, "Operator saved.")
+                    _after_save(request, operator)
+                else:
+                    messages.info(request, ALREADY_SAVED)
+                return redirect("ledger:operators:detail", pk=operator.pk)
+    else:
+        form = OperatorCreateForm(initial={"creation_key": uuid.uuid4()})
+    return render(request, "ledger/operators/form.html", {"form": form, "operator": None})
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def operator_edit(request: HttpRequest, pk: str) -> HttpResponse:
+    operator = _load(pk)
+    if operator.archived_at is not None:
+        return _refused_archived(request, operator)
+    if request.method == "POST":
+        form = OperatorForm(request.POST, instance=operator)
+        if form.is_valid():
+            try:
+                updated = operator_sync.update_operator(
+                    operator.pk, form.cleaned_data, actor=_actor(request)
+                )
+            except OperatorArchived:
+                return _refused_archived(request, operator)
+            except IntegrityError:
+                form.add_error("email", EMAIL_TAKEN)
+            else:
+                messages.success(request, "Operator saved.")
+                _after_save(request, updated)
+                return redirect("ledger:operators:detail", pk=operator.pk)
+    else:
+        form = OperatorForm(instance=operator)
+    return render(request, "ledger/operators/form.html", {"form": form, "operator": operator})
+
+
+@role_required
+@require_POST
+def operator_archive(request: HttpRequest, pk: str) -> HttpResponse:
+    operator = _load(pk)
+    if operator.archived_at is None:
+        operator_sync.archive_operator(operator.pk, actor=_actor(request))
+        messages.success(request, "Operator archived.")
+    return redirect("ledger:operators:list")
+
+
+@role_required
+@require_POST
+def operator_retry_sync(request: HttpRequest, pk: str) -> HttpResponse:
+    operator = _load(pk)
+    if operator.archived_at is not None:
+        return _refused_archived(request, operator)
+    _sync(request, operator, retry=True)
+    return redirect("ledger:operators:detail", pk=operator.pk)
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def operator_link(request: HttpRequest, pk: str) -> HttpResponse:
+    operator = _load(pk)
+    if operator.archived_at is not None:
+        return _refused_archived(request, operator)
+    if request.method == "POST":
+        form = LinkForm(request.POST)
+        if form.is_valid():
+            outcome = operator_sync.link_operator(
+                operator.pk,
+                customer_external_id=form.cleaned_data["customer_id"],
+                payment_method_external_id=form.cleaned_data["payment_method_id"],
+                provider=payments.get_provider(),
+                actor=_actor(request),
+            )
+            if outcome.action is Action.LINK_SET:
+                _report(request, outcome)
+                return redirect("ledger:operators:detail", pk=operator.pk)
+            form.add_error(None, outcome.message)
+    else:
+        form = LinkForm()
+    refs = operator_sync.current_refs(operator)
+    customer = refs.get(operator_sync.KIND_CUSTOMER, "")
+    return render(
+        request,
+        "ledger/operators/link.html",
+        {
+            "form": form,
+            "operator": operator,
+            "customer_masked": mask_identifier(customer) if customer else "",
+        },
+    )

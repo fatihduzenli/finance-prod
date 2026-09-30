@@ -39,6 +39,16 @@ param staxEnv string = 'sandbox'
 @description('Stax API base URL. Sandbox and live share this host; only the key differs (docs/CLAUDE.md Rule 6).')
 param staxApiBaseUrl string = 'https://apiprod.fattlabs.com'
 
+@description('STAX_CALLER of the web app: none (default) or worker. worker makes the web process the single Stax caller, which is correct only with webMaxReplicas = 1 (docs/qa/PLAN-006-operators.md D1). Step 10 moves the calls to the worker and returns the web app to none.')
+@allowed([
+  'none'
+  'worker'
+])
+param staxCaller string = 'none'
+
+@description('STAX_EXPECTED_MERCHANT_ID: the merchant the Stax key must belong to, checked at every start by provider_environment_check. An identifier, not a secret. Empty means the merchant is not checked.')
+param staxExpectedMerchantId string = ''
+
 @description('Public base URL the app is served on; drives ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS. Leave empty to use the container app\'s own ingress host name, which avoids having to know it before the first deployment. Set it once a custom domain is bound.')
 param appBaseUrl string = ''
 
@@ -369,6 +379,8 @@ module web 'modules/containerAppWeb.bicep' = {
     appEnv: appEnv
     staxEnv: staxEnv
     staxApiBaseUrl: staxApiBaseUrl
+    staxCaller: staxCaller
+    staxExpectedMerchantId: staxExpectedMerchantId
     appBaseUrl: effectiveAppBaseUrl
     staxApiKeySecretName: staxApiKeySecretName
     staxWebhookUrlTokenSecretName: staxWebhookUrlTokenSecretName
