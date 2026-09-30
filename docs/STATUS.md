@@ -185,3 +185,28 @@ the login page myself." The condition for starting Prompt 4 is met.
   create the Sentry project and alert rule, send the whitelisting questions in
   `docs/STAX_CLIENT.md` §9 to Stax.
 
+## Update, 2026-09-30, Prompt 5 on staging and the sandbox key verified
+
+- **Owner typed "push"**; `main` at `9b68d63` deployed, revision healthy, login 200.
+- **Owner instructed "run ping".** `provider_ping` on staging: `GET /self` returned 200 in one
+  attempt; provider `stax`, environment `sandbox`, merchant `ea82…58f4`, expected merchant not
+  set. No retry was needed.
+- **Written evidence that the key belongs to the sandbox account** (read-only probe of the
+  same response; the key was never printed):
+
+| Field in `GET /self` | Value |
+|---|---|
+| `merchant.company_name` | `Global Retail Group` |
+| `merchant.is_sandbox` | `True` |
+| `merchant.status` | `ACTIVE` |
+| `merchant.is_payfac` | `True` |
+| `user.is_api_key` | `True` |
+| `user.team_role` | `admin` |
+
+  The manager's statement: the sandbox account is "Global retail group" and the live company
+  account is "Global Retail Group LLP". The response names the former and carries
+  `is_sandbox = True`, so the key in the staging vault belongs to the sandbox.
+- Recommended owner action: set `STAX_EXPECTED_MERCHANT_ID` on staging to the merchant ID
+  shown in full in the Stax dashboard, so every future ping also checks identity.
+- TODO-VERIFY-005 and 024 closed by this observation.
+
