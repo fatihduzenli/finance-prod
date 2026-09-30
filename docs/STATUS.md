@@ -178,3 +178,10 @@ the login page myself." The condition for starting Prompt 4 is met.
   Prompt 5 to build on.
 - Still open before Prompt 13: where the old invoice numbers live.
 
+## Update, 2026-09-30, Prompt 5
+
+- PLAN-005 implemented, QA verdict PASS (`docs/qa/QA-005-stax-client.md`), **not pushed**.
+  No call to Stax has been made. Owner steps after the push: run `provider_ping` on staging,
+  create the Sentry project and alert rule, send the whitelisting questions in
+  `docs/STAX_CLIENT.md` §9 to Stax.
+

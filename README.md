@@ -50,6 +50,8 @@ All run from the repository root.
 | Apply migrations (image start) | `uv run python backend/manage.py deploy_migrate` |
 | Apply migrations (local) | `uv run python backend/manage.py migrate` |
 | Seed demo data (`APP_ENV=local` only, safe to repeat) | `uv run python backend/manage.py seed_demo` |
+| Stax authentication check (one `GET /self`; needs `STAX_CALLER=worker`) | `uv run python backend/manage.py provider_ping` |
+| Stax sandbox suites (off by default; need `STAX_SANDBOX_TESTS=1`) | `uv run pytest -m sandbox` |
 | Secret scan | `scripts/check-no-secrets.sh` |
 
 ## Environments and deployment
@@ -64,6 +66,9 @@ environment guard and the yellow SANDBOX banner exist.
 | `APP_ENV` | `local` | `staging` | `production` |
 | `STAX_ENV` | `sandbox` | `sandbox` | `sandbox` for now — `live` at Step 16 |
 | Stax key | sandbox key, or empty | `stax-api-key-sandbox` | `stax-api-key-sandbox` now, `stax-api-key-live` at Step 16 |
+| `STAX_CALLER` | `none` (default); `worker` only to run `provider_ping` | `none` on web; `worker` only on the single worker (Step 10) | as staging |
+| `STAX_PAY_INVOICE_ENABLED` | `false` (default) | `false`; `true` only for the documented sandbox test | `false` until TODO-VERIFY-019 is decided |
+| `STAX_EXPECTED_MERCHANT_ID` | empty, or the sandbox merchant ID | sandbox merchant ID, checked by `provider_ping` | the merchant ID of the loaded key |
 | Config source | `.env`, filled by hand from the vault | Key Vault `finance-sandbox-kv` via managed identity | Key Vault `finance-kv` via managed identity |
 | Data | `docker-compose.yml`: PostgreSQL 16 + Redis 7 | Azure resource group `finance-sandbox` | Azure resource group `finance-prod` |
 | Banner | always on | always on | on until the live key is wired |
@@ -210,5 +215,7 @@ PLAN-003a to 003c (migrations on start, error logging, refused-host warnings, fi
 are deployed. Prompt 4 (PLAN-004): the ledger schema, 23 tables in `backend/ledger/` and
 `backend/payments/`, with the card-number guard, exact decimal money and demo data; see
 [`docs/DATA_OWNERSHIP.md`](docs/DATA_OWNERSHIP.md) and
-[`docs/qa/QA-004-schema.md`](docs/qa/QA-004-schema.md). No Stax API call and no Celery yet. Current
+[`docs/qa/QA-004-schema.md`](docs/qa/QA-004-schema.md). Prompt 5 (PLAN-005): the `PaymentProvider` interface and the Stax client with its
+limiter, breaker, retries, validation and failure budget; see
+[`docs/STAX_CLIENT.md`](docs/STAX_CLIENT.md). No Celery yet. Current
 state and open defects: [`docs/STATUS.md`](docs/STATUS.md).

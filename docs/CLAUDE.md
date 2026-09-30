@@ -377,6 +377,11 @@ publish actions and need explicit approval.
 
 ---
 
+**Added by PLAN-005 (2026-09-30):** `STAX_CALLER` (`none` default, `worker` for the single
+process that may call Stax), `STAX_PAY_INVOICE_ENABLED` (`false` default; TODO-VERIFY-019),
+`STAX_EXPECTED_MERCHANT_ID` (now read by `provider_ping`), and `STAX_SANDBOX_API_KEY` (read
+only by the sandbox test suites; secret). See `docs/STAX_CLIENT.md`.
+
 ## 5. Things this app deliberately does not do
 
 - Collect or tokenize payment details (Rule 1).
