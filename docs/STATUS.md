@@ -222,3 +222,16 @@ the login page myself." The condition for starting Prompt 4 is met.
   until Step 10; set in the template and the image.
 - Owner requests recorded: Phase 7 items (a) document upload, (b) templated outbound email,
   (c) DocuSign API; tables `documents` and `outbound_messages` reserved.
+
+## Update, 2026-09-30, Prompt 6 on staging
+
+- Owner typed "push" and "deploy". `main` at `1b5093a` deployed; then the staging template
+  deployed (`staging-plan006-caller`, succeeded, no failed operations) and the revision was
+  restarted for the rotated database secret (defect 3, unchanged).
+- Revision `finance-staging-web--0000011`: `STAX_CALLER=worker`, `maxReplicas=1`,
+  `STAX_EXPECTED_MERCHANT_ID` set to the sandbox merchant. Start-up log: migrations up to
+  date, `GET /self` 200, **provider environment check: ok**, one gthread worker.
+- Health 200, login 200, `/operators/` without a session 401.
+- **Checkpoint 6 is now the owner's:** create an operator with an email, check the sandbox
+  dashboard for exactly one customer, double-click save, try a malformed email. Fable reads
+  the transport log afterwards.
