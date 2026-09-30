@@ -29,9 +29,9 @@ perform a split or merge. The owner's amendments file already instructs the addi
 D2 to D9 are proposals. **They are built locally and presented to the owner with the Publish
 Request; nothing reaches staging before the owner has seen them.**
 
-**Owner decisions so far.** 2026-09-29, in writing: "accept D2 and D12". **D2 and D12 are
-accepted.** D3 to D11 are still proposals and await the owner's decision. D1 follows the
-owner's amendments file.
+**Owner decisions.** 2026-09-29, in writing: "accept D2 and D12". 2026-09-30, in writing:
+"accept D2 TO D12". **D2 to D12 are all accepted.** D1 follows the owner's amendments file.
+The schema is no longer provisional.
 
 | # | Decision | Reason |
 |---|---|---|

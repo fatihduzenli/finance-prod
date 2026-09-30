@@ -99,7 +99,7 @@ No secret store was read by either model. No new dependency.
   must check them when rent history is edited (Prompt 7).
 - The three MINOR findings of QA-003a remain deferred.
 
-**Verdict: PASS**, conditional on the owner's acceptance of decisions D2 to D12 before the push.
+**Verdict: PASS.** The owner accepted decisions D2 to D12 in writing on 2026-09-30; the condition is met.
 
 ### Entity-relationship summary
 

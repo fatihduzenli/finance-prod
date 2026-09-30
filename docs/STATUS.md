@@ -170,3 +170,11 @@ the login page myself." The condition for starting Prompt 4 is met.
   account patterns is added to the **Prompt 14** security scope.
 - Open from this: where the old invoice numbers live (the Rents tab has none); needed before
   Prompt 13. D3 to D11 still await the owner's word.
+
+## Update, 2026-09-30, Checkpoint 4 closed
+
+- **Owner, in writing:** "guard test confirmed, accept D2 TO D12 and push". Checkpoint 4 is
+  closed. PLAN-004 decisions D2 to D12 are all accepted; the schema on staging is final for
+  Prompt 5 to build on.
+- Still open before Prompt 13: where the old invoice numbers live.
+
