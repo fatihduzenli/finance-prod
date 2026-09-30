@@ -32,7 +32,7 @@ disagreement is written to `audit_log`.** Business fields are never overwritten 
 | We hold a Stax-method payment that Stax does not know | Never deleted automatically. Flagged for staff. `audit_log` row. |
 | A payment recorded by hand (Zelle, wire, other) | Ours. Stax has no knowledge of it and cannot overrule it. |
 | Invoice total in Stax differs from ours | **Not overwritten.** The amount due is business data. Flagged for staff, `audit_log` row, and collection on that charge stops until resolved. |
-| Operator name or email differs between Stax and us | **Not overwritten.** Ours is the business record. Flagged for staff. |
+| Operator name or email differs between Stax and us | **Not overwritten.** Ours is the business record. Flagged for staff. For email the flag says: receipts go to the address stored in Stax; fix it in Stax (owner, 2026-09-30). |
 | A provider status string we have never seen | Stored exactly as received. Never mapped to a guess. |
 | A pending payment older than the configured number of days with no news | Flagged as a mismatch and alerted (Prompt 10). |
 
@@ -218,12 +218,22 @@ they implement.
 | `import_audit`, all fields except `needs_review` | Import | Which cell became which row, by which rule |
 | `import_audit.needs_review` | App | |
 
-## 6. Open points for the owner
+## 6. Owner decisions (Checkpoint 4, 2026-09-30, in writing)
 
-1. **Invoice number format.** The schema accepts `INV-` followed by a four-digit year and a
-   sequence of four or more digits. Decide whether that is the format, and whether any old
-   spreadsheet number carries forward. The Rents tab holds no invoice numbers.
-2. **Invoice total mismatch.** This document says collection on that charge stops until staff
-   resolve it. Confirm that is the behaviour you want.
-3. **Unknown Stax-method payment on our side.** This document says it is never deleted
-   automatically. Confirm.
+The owner read this document line by line and decided:
+
+1. **Invoice number format is `INV-YYYY-NNNN`, and old numbers carry forward.** The schema
+   accepts this format (four or more sequence digits, so the counter can pass 9999). The
+   Rents tab holds no invoice numbers, so the source of the old numbers is still to be
+   named by the owner before Prompt 13 (the import); until then no number is invented.
+2. **Invoice total mismatch:** collection on that charge stops until staff resolve it.
+   Confirmed.
+3. **A Stax-method payment that Stax does not know:** flagged, never deleted. Confirmed.
+
+**Card guard tested on staging by the owner:** a text card number in a note was refused.
+
+**Two notes for the record (owner, 2026-09-30):**
+- When an operator's email differs between Stax and us, **receipts still go to the address
+  stored in Stax.** The mismatch flag must tell staff to fix it in Stax. (Added to §3.)
+- Bank routing and account patterns are guarded in the application only. **A database-level
+  guard is added to the Prompt 14 security scope.**

@@ -141,3 +141,29 @@ the login page myself." The condition for starting Prompt 4 is met.
 - **Owner, in writing, 2026-09-29:** "accept D2 and D12". D2 (`customers` built as
   `operators`) and D12 (deposit and webhook tables keep their provider ID columns) are
   accepted. D3 to D11 are open. No push approval has been given for PLAN-004.
+
+## Update, 2026-09-30, Prompt 4 on staging
+
+- **Owner typed "push" on 2026-09-29.** `main` pushed to commit `5e66026`. The first deploy
+  attempt failed while pulling the Python base image (a registry 502, outside our code); the
+  failed job was re-run for the same commit and succeeded.
+- Revision `finance-staging-web--0000006` is healthy on that image. Health endpoint 200,
+  login 200, admin without a session 401. Gunicorn starts only after `deploy_migrate` exits 0,
+  so the 23 new tables and the PostgreSQL triggers are applied on staging. All tables are
+  empty; no demo data is loaded there.
+- **D3 to D11 remain proposals** awaiting the owner's word. The schema is reversible while
+  the tables are empty (`migrate ledger zero`, `migrate payments zero`).
+- Checkpoint 4 items for the owner: read `docs/DATA_OWNERSHIP.md`; decide the invoice number
+  format; confirm the two behaviours in its §6; test the card guard by hand.
+
+## Update, 2026-09-30, Checkpoint 4 complete
+
+- **Owner, in writing:** Checkpoint 4 complete. `docs/DATA_OWNERSHIP.md` read line by line.
+  Invoice number format `INV-YYYY-NNNN` with old numbers carried forward; collection stops
+  on a Stax total mismatch until staff resolve it; an unknown Stax-method payment is flagged,
+  never deleted. Card guard tested on staging: a card number in a note was refused.
+- **Owner notes for the record:** receipts go to the email stored in Stax, so an email
+  mismatch flag tells staff to fix it in Stax; a database-level guard for bank routing and
+  account patterns is added to the **Prompt 14** security scope.
+- Open from this: where the old invoice numbers live (the Rents tab has none); needed before
+  Prompt 13. D3 to D11 still await the owner's word.
