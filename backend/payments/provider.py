@@ -1,0 +1,347 @@
+"""The payment-provider interface, in this app's vocabulary (docs/CLAUDE.md Rule 8).
+
+Contract: ``docs/qa/PLAN-005-stax-client.md`` §4.1. Nothing here knows a provider's
+URLs, field names or status strings; the adapter maps these types to its own.
+
+Every input and record is a frozen dataclass. Money is :class:`~decimal.Decimal` and
+nothing else: a ``float``, an ``int`` or a string where an amount is expected raises
+:class:`~payments.errors.ValidationFailed` when the object is built, so an inexact
+amount cannot reach an adapter (D12). Every record carries ``external_id``,
+``raw_status`` (the provider's string, unmodified, Rule 2) and ``fetched_at``.
+``raw_summary`` holds scalar fields only, already trimmed per Rule 1 by the adapter.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Literal
+
+from payments.errors import ValidationFailed
+
+#: A provider object reduced to scalar fields (docs/CLAUDE.md Rule 1).
+Summary = Mapping[str, str | int | bool | None | Decimal | Mapping[str, str | None]]
+
+#: Offline payment methods (TODO-VERIFY-016 decides whether more exist).
+OfflineMethod = Literal["cash", "check"]
+
+
+def require_money(name: str, value: object) -> None:
+    """Raise :class:`ValidationFailed` unless ``value`` is a finite ``Decimal``."""
+    if not isinstance(value, Decimal) or not value.is_finite():
+        raise ValidationFailed(f"{name} must be a finite Decimal")
+
+
+def mask_identifier(value: str) -> str:
+    """First four and last four characters; anything shorter than nine is fully masked."""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}…{value[-4:]}"
+
+
+# --- Inputs -----------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class DateRange:
+    start: date
+    end: date
+
+
+@dataclass(frozen=True, slots=True)
+class LineItem:
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    details: str = ""
+
+    def __post_init__(self) -> None:
+        require_money("quantity", self.quantity)
+        require_money("unit_price", self.unit_price)
+
+    @property
+    def total(self) -> Decimal:
+        return self.quantity * self.unit_price
+
+
+@dataclass(frozen=True, slots=True)
+class Amounts:
+    """What is owed: ``total == subtotal + tax`` and the lines sum to ``subtotal``."""
+
+    total: Decimal
+    subtotal: Decimal
+    tax: Decimal
+    line_items: tuple[LineItem, ...]
+
+    def __post_init__(self) -> None:
+        require_money("total", self.total)
+        require_money("subtotal", self.subtotal)
+        require_money("tax", self.tax)
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerInput:
+    first_name: str
+    last_name: str
+    company_name: str
+    operator_email: str
+    phone: str = ""
+    cc_emails: tuple[str, ...] = ()
+    #: Our local ref, carried so a retry can find the record (Rule 5, TODO-VERIFY-004).
+    reference: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerQuery:
+    operator_email: str = ""
+    company_name: str = ""
+    reference: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceInput:
+    customer_external_id: str
+    amounts: Amounts
+    due_on: date | None = None
+    invoice_date: date | None = None
+    memo: str = ""
+    #: Our local ref (Rule 5, TODO-VERIFY-004).
+    reference: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceUpdate:
+    """Only the fields that are not ``None`` are sent."""
+
+    amounts: Amounts | None = None
+    due_on: date | None = None
+    memo: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceQuery:
+    operator_email: str = ""
+    company_name: str = ""
+    schedule_external_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class OfflinePayment:
+    method: OfflineMethod
+    amount: Decimal
+    check_number: str = ""
+    note: str = ""
+    email_receipt: bool = False
+
+    def __post_init__(self) -> None:
+        require_money("amount", self.amount)
+
+
+@dataclass(frozen=True, slots=True)
+class PayWithStoredMethod:
+    payment_method_external_id: str
+    #: A UUID string, reused unchanged on every retry of the same payment.
+    idempotency_id: str
+    email_receipt: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class TransactionQuery:
+    date_range: DateRange | None = None
+    customer_external_id: str = ""
+    payment_method_external_id: str = ""
+    page: int | None = None
+    per_page: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleInput:
+    customer_external_id: str
+    payment_method_external_id: str
+    amounts: Amounts
+    #: RRULE string beginning with ``DTSTART=``.
+    rule: str
+    email_notification: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleQuery:
+    customer_external_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleUpdate:
+    """D2: amounts and metadata are never edited, so this type has no field for them."""
+
+    active: bool | None = None
+    rule: str | None = None
+    email_notification: bool | None = None
+
+
+# --- Records ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerRecord:
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    operator_email: str = ""
+    company_name: str = ""
+    reference: str = ""
+    raw_summary: Summary = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceRecord:
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    customer_external_id: str = ""
+    total: Decimal | None = None
+    raw_summary: Summary = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class TransactionRecord:
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    total: Decimal | None = None
+    raw_summary: Summary = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class DepositRecord:
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    raw_summary: Summary = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class DepositDetail:
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    items: tuple[Summary, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleRecord:
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    customer_external_id: str = ""
+    total: Decimal | None = None
+    rule: str = ""
+    active: bool | None = None
+    raw_summary: Summary = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class AchRejection:
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    amount: Decimal | None = None
+    raw_summary: Summary = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderIdentity:
+    provider_name: str
+    environment: str
+    merchant_id: str = field(repr=False)
+    #: ``None`` when no expected merchant is configured.
+    matches_expected: bool | None
+
+
+# --- Interface --------------------------------------------------------------------
+
+
+class PaymentProvider(ABC):
+    """Every outbound payment-provider call. All methods are synchronous."""
+
+    @abstractmethod
+    def create_customer(self, customer: CustomerInput) -> CustomerRecord: ...
+
+    @abstractmethod
+    def update_customer(self, external_id: str, customer: CustomerInput) -> CustomerRecord: ...
+
+    @abstractmethod
+    def get_customer(self, external_id: str) -> CustomerRecord: ...
+
+    @abstractmethod
+    def find_customers(self, query: CustomerQuery) -> list[CustomerRecord]: ...
+
+    @abstractmethod
+    def create_invoice(self, invoice: InvoiceInput) -> InvoiceRecord: ...
+
+    @abstractmethod
+    def update_invoice(self, external_id: str, update: InvoiceUpdate) -> InvoiceRecord: ...
+
+    @abstractmethod
+    def get_invoice(self, external_id: str) -> InvoiceRecord: ...
+
+    @abstractmethod
+    def list_invoices(self, query: InvoiceQuery) -> list[InvoiceRecord]: ...
+
+    @abstractmethod
+    def delete_invoice(self, external_id: str) -> None: ...
+
+    @abstractmethod
+    def send_invoice_email(self, external_id: str, cc: list[str] | None = None) -> None: ...
+
+    @abstractmethod
+    def mark_invoice_paid_cash_or_check(
+        self, external_id: str, payment: OfflinePayment
+    ) -> InvoiceRecord: ...
+
+    @abstractmethod
+    def pay_invoice(self, external_id: str, payment: PayWithStoredMethod) -> TransactionRecord:
+        """Behind ``STAX_PAY_INVOICE_ENABLED`` (D3)."""
+
+    @abstractmethod
+    def list_transactions(self, query: TransactionQuery) -> list[TransactionRecord]: ...
+
+    @abstractmethod
+    def get_transaction(self, external_id: str) -> TransactionRecord: ...
+
+    @abstractmethod
+    def refund_transaction(self, external_id: str, amount: Decimal) -> TransactionRecord: ...
+
+    @abstractmethod
+    def void_transaction(self, external_id: str) -> TransactionRecord: ...
+
+    @abstractmethod
+    def list_deposits(self, date_range: DateRange) -> list[DepositRecord]: ...
+
+    @abstractmethod
+    def get_deposit(self, date_range: DateRange, batch_id: str) -> DepositDetail: ...
+
+    @abstractmethod
+    def create_scheduled_invoice(self, schedule: ScheduleInput) -> ScheduleRecord: ...
+
+    @abstractmethod
+    def get_scheduled_invoice(self, external_id: str) -> ScheduleRecord: ...
+
+    @abstractmethod
+    def list_scheduled_invoices(self, query: ScheduleQuery) -> list[ScheduleRecord]: ...
+
+    @abstractmethod
+    def update_scheduled_invoice(
+        self, external_id: str, update: ScheduleUpdate
+    ) -> ScheduleRecord: ...
+
+    @abstractmethod
+    def delete_scheduled_invoice(self, external_id: str) -> None: ...
+
+    @abstractmethod
+    def list_ach_rejections(self, date_range: DateRange) -> list[AchRejection]: ...
+
+    @abstractmethod
+    def ping(self) -> ProviderIdentity: ...

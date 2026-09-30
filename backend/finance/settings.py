@@ -38,6 +38,12 @@ STAX_API_BASE_URL = _config.stax_api_base_url
 STAX_API_KEY = _config.stax_api_key
 #: Server-side only. Becomes the secret path segment for inbound webhooks (Rule 4).
 STAX_WEBHOOK_URL_TOKEN = _config.stax_webhook_url_token
+#: "worker" only in the one process that owns the Stax rate-limit bucket (PLAN-005 D7).
+STAX_CALLER = _config.stax_caller
+#: Gate for the pay-an-invoice call (PLAN-005 D3). Off unless explicitly "true".
+STAX_PAY_INVOICE_ENABLED = _config.stax_pay_invoice_enabled
+#: Merchant the key must belong to; empty means the check is not configured (Rule 6).
+STAX_EXPECTED_MERCHANT_ID = _config.stax_expected_merchant_id
 APP_BASE_URL = _config.app_base_url
 REDIS_URL = _config.redis_url
 
@@ -229,6 +235,8 @@ LOGGING = {
             "filters": ["refused_host"],
             "propagate": True,
         },
+        # Payments at INFO: one redacted line per Stax request reaches stderr (PLAN-005).
+        "payments": {"handlers": [], "level": "INFO", "propagate": True},
     },
 }
 

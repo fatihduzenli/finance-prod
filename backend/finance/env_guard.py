@@ -18,6 +18,10 @@ from urllib.parse import urlsplit
 APP_ENVS: tuple[str, ...] = ("local", "staging", "production")
 DEPLOYED_APP_ENVS: tuple[str, ...] = ("staging", "production")
 STAX_ENVS: tuple[str, ...] = ("sandbox", "live")
+#: Which process may call Stax (docs/qa/PLAN-005-stax-client.md D7). Unset means "none".
+STAX_CALLERS: tuple[str, ...] = ("none", "worker")
+#: STAX_PAY_INVOICE_ENABLED (PLAN-005 D3). Unset means "false".
+BOOLEAN_FLAGS: tuple[str, ...] = ("true", "false")
 
 #: Sandbox and live share this host; only the key differs (docs/CLAUDE.md §1).
 REQUIRED_STAX_API_BASE_URL = "https://apiprod.fattlabs.com"
@@ -53,6 +57,10 @@ class Config:
     sentry_dsn: str = field(repr=False)
     django_secret_key: str = field(repr=False)
     debug: bool
+    stax_caller: str
+    stax_pay_invoice_enabled: bool
+    #: Not a credential, but identifying: shown masked only, so kept out of ``repr``.
+    stax_expected_merchant_id: str = field(repr=False)
 
 
 def validate(env: Mapping[str, str]) -> Config:
@@ -68,6 +76,8 @@ def validate(env: Mapping[str, str]) -> Config:
     database_url = env.get("DATABASE_URL", "")
     app_base_url = env.get("APP_BASE_URL", "")
     django_secret_key = env.get("DJANGO_SECRET_KEY", "")
+    stax_caller = env.get("STAX_CALLER", "") or "none"
+    stax_pay_invoice_enabled = env.get("STAX_PAY_INVOICE_ENABLED", "") or "false"
 
     is_local = app_env == "local"
     is_deployed = app_env in DEPLOYED_APP_ENVS
@@ -128,6 +138,14 @@ def validate(env: Mapping[str, str]) -> Config:
     if not django_secret_key:
         problems.append("DJANGO_SECRET_KEY is missing")
 
+    # PLAN-005 D7: only the process that owns the Stax rate-limit bucket calls Stax.
+    if stax_caller not in STAX_CALLERS:
+        problems.append(f"STAX_CALLER is not one of: {', '.join(STAX_CALLERS)}")
+
+    # PLAN-005 D3: the pay-an-invoice call is off unless explicitly enabled.
+    if stax_pay_invoice_enabled not in BOOLEAN_FLAGS:
+        problems.append(f"STAX_PAY_INVOICE_ENABLED is not one of: {', '.join(BOOLEAN_FLAGS)}")
+
     if problems:
         raise EnvGuardError("; ".join(problems))
 
@@ -144,4 +162,7 @@ def validate(env: Mapping[str, str]) -> Config:
         django_secret_key=django_secret_key,
         # Never on outside local, whatever DJANGO_DEBUG says.
         debug=is_local and env.get("DJANGO_DEBUG", "") == "1",
+        stax_caller=stax_caller,
+        stax_pay_invoice_enabled=stax_pay_invoice_enabled == "true",
+        stax_expected_merchant_id=env.get("STAX_EXPECTED_MERCHANT_ID", ""),
     )

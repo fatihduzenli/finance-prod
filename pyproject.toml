@@ -16,6 +16,7 @@ dependencies = [
     "django-otp==1.7.3",
     "django-two-factor-auth==1.18.1",
     "qrcode==8.2",
+    "httpx==0.28.1",
 ]
 
 [dependency-groups]
@@ -70,5 +71,6 @@ testpaths = ["backend/tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "e2e: end-to-end browser test; needs chromium (uv run playwright install chromium)",
+    "sandbox: real call to the Stax sandbox; deselected unless -m names it, skipped without STAX_SANDBOX_TESTS=1",
 ]
 filterwarnings = ["error"]
