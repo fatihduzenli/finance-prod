@@ -230,7 +230,17 @@ The owner read this document line by line and decided:
    Confirmed.
 3. **A Stax-method payment that Stax does not know:** flagged, never deleted. Confirmed.
 
-**Card guard tested on staging by the owner:** a text card number in a note was refused.
+**Card guard tested on staging (2026-09-30, by Fable at the owner's request; no screen for
+the new tables exists yet, so a browser test was not possible).** Both attempts to save the
+public test number into an operator note were refused and the table stayed empty:
+
+| Path | Refusal, verbatim |
+|---|---|
+| Application layer, `Operator(notes=...).save()` | `This text may not contain card or account numbers.` |
+| Direct database write, raw SQL `INSERT` bypassing the application | `This text may not contain card or account numbers.` followed by `CONTEXT:  PL/pgSQL function finance_reject_payment_data() line 27 at RAISE` |
+
+Neither message contains the number. Rows before and after: 0. Owner decision: the new
+tables join the admin panel in Prompts 6 and 7 as planned, not earlier.
 
 **Two notes for the record (owner, 2026-09-30):**
 - When an operator's email differs between Stax and us, **receipts still go to the address

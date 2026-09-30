@@ -161,7 +161,10 @@ the login page myself." The condition for starting Prompt 4 is met.
 - **Owner, in writing:** Checkpoint 4 complete. `docs/DATA_OWNERSHIP.md` read line by line.
   Invoice number format `INV-YYYY-NNNN` with old numbers carried forward; collection stops
   on a Stax total mismatch until staff resolve it; an unknown Stax-method payment is flagged,
-  never deleted. Card guard tested on staging: a card number in a note was refused.
+  never deleted. Card guard: **corrected**, no browser test was possible because the new tables are not in
+  the admin panel yet; Fable ran both attempts inside the staging container at the owner's
+  request, both refused, messages recorded in `docs/DATA_OWNERSHIP.md` §6. Admin panel
+  exposure of the new tables stays in Prompts 6 and 7.
 - **Owner notes for the record:** receipts go to the email stored in Stax, so an email
   mismatch flag tells staff to fix it in Stax; a database-level guard for bank routing and
   account patterns is added to the **Prompt 14** security scope.
