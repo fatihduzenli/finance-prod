@@ -269,3 +269,11 @@ the login page myself." The condition for starting Prompt 4 is met.
   empty optional fields are no longer sent; stored phones normalised by migration 0006, bad
   ones flagged for review.
 
+
+## Update, 2026-10-01, PLAN-006a and 006b on staging
+
+- Owner typed "push". `main` at `518dfb0` deployed; pipeline green. Revision
+  `finance-staging-web--0000012` healthy: migrations 0005 and 0006 applied at start,
+  `GET /self` ok, environment check ok, one gthread worker. Health 200, login 200.
+- Checkpoint 6 remaining: item 1, the sandbox dashboard duplicate check, when the owner has
+  dashboard access.
