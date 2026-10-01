@@ -13,12 +13,15 @@ from django import forms
 from django.core.validators import RegexValidator
 
 from ledger.models import Operator
+from payments.operator_sync import normalise_phone
 
 if TYPE_CHECKING:
     _OperatorFormBase = forms.ModelForm[Operator]
 else:  # ModelForm is only generic in the type stubs.
     _OperatorFormBase = forms.ModelForm
 
+#: Fixed and value-free (PLAN-006b §1).
+PHONE_MESSAGE = "Enter 10 to 15 digits, for example 4155550132."
 IDENTIFIER_MAX_LENGTH = 255
 #: Letters, digits, hyphen and underscore only, 1 to 255 characters.
 IDENTIFIER_VALIDATOR = RegexValidator(
@@ -29,7 +32,11 @@ IDENTIFIER_VALIDATOR = RegexValidator(
 
 
 class OperatorForm(_OperatorFormBase):
-    """Create and edit. The e-mail is lower-cased and stripped; empty means none."""
+    """Create and edit. The e-mail is lower-cased and stripped; empty means none.
+
+    The phone must pass the payment provider's rule, on create and on every edit, so an
+    operator with a bad phone cannot be saved (or re-synced) until it is fixed.
+    """
 
     email = forms.EmailField(required=False, max_length=254)
 
@@ -52,6 +59,13 @@ class OperatorForm(_OperatorFormBase):
     def clean_email(self) -> str | None:
         value = self.cleaned_data.get("email") or ""
         return value.strip().lower() or None
+
+    def clean_phone(self) -> str:
+        """The provider's phone rule; the normalised digits are stored, empty stays empty."""
+        digits = normalise_phone(str(self.cleaned_data.get("phone") or ""))
+        if digits is None:
+            raise forms.ValidationError(PHONE_MESSAGE, code="phone")
+        return digits
 
     def clean_display_name(self) -> str:
         value = str(self.cleaned_data.get("display_name") or "").strip()

@@ -743,3 +743,105 @@ def test_two_quick_retry_posts_make_one_provider_call(billing: Client, fake: Fak
     assert second.redirect_chain == [(detail(operator), 302)]
     assert call_names(fake) == ["find_customers"]
     assert "Retry available in " in second.content.decode()
+
+
+# --- PLAN-006b §3 rows 1 and 4: the phone rule in the form, the edit and the retry ------------
+
+PHONE_MESSAGE = "Enter 10 to 15 digits, for example 4155550132."
+
+
+@pytest.mark.parametrize(
+    ("phone", "stored"),
+    [
+        ("4155550132", "4155550132"),
+        ("+1 (415) 555-0132", "14155550132"),
+        ("415.555.0132", "4155550132"),
+        ("123456789012345", "123456789012345"),
+        ("", ""),
+    ],
+    ids=["digits", "formatted", "dotted", "fifteen", "empty"],
+)
+def test_the_create_form_accepts_and_stores_the_normalised_phone(
+    billing: Client, fake: FakeProvider, phone: str, stored: str
+) -> None:
+    billing.post(NEW, form_data(phone=phone))
+    operator = Operator.objects.get()
+    assert operator.phone == stored
+    [(_, (customer,))] = [call for call in fake.calls if call[0] == "create_customer"]
+    assert customer.phone == stored  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    "phone",
+    ["555-0132", "12345678901234567", "+44 20 7946 0958 ext 12", "call the office"],
+    ids=["seven", "seventeen", "extension", "letters"],
+)
+def test_the_create_form_refuses_a_bad_phone_with_the_fixed_text_and_no_call(
+    billing: Client, fake: FakeProvider, phone: str
+) -> None:
+    response = billing.post(NEW, form_data(phone=phone), follow=True)
+    page = response.content.decode()
+    assert PHONE_MESSAGE in page
+    assert response.redirect_chain[-1][0] == NEW
+    assert Operator.objects.count() == 0
+    assert fake.calls == []
+
+
+def test_a_bad_stored_phone_blocks_edit_and_retry_until_it_is_fixed(
+    billing: Client, fake: FakeProvider
+) -> None:
+    operator = new_operator()
+    Operator.objects.filter(pk=operator.pk).update(
+        phone="555-0132", sync_status=SyncStatus.FAILED, sync_failure="ProviderRejected"
+    )
+    backdate_attempt(operator)
+    edit = f"{detail(operator)}edit/"
+    retry = f"{detail(operator)}retry-sync/"
+
+    # The detail page offers the fix sentence, not the retry button.
+    page = billing.get(detail(operator)).content.decode()
+    assert "Fix the phone number first." in page
+    assert "Retry sync" not in page
+    assert "Retry available in" not in page
+
+    # An edit that keeps the bad phone is refused; a direct retry POST makes no call.
+    response = billing.post(edit, form_data(phone="555-0132", city="Elsewhere"), follow=True)
+    assert PHONE_MESSAGE in response.content.decode()
+    response = billing.post(retry, follow=True)
+    assert "Fix the phone number first." in response.content.decode()
+    operator.refresh_from_db()
+    assert (operator.phone, operator.city) == ("555-0132", "Testville")
+    assert operator.sync_status == SyncStatus.FAILED
+    assert fake.calls == []
+
+    # Fixed: saved as digits, the retry button returns, and the retry links the customer.
+    billing.post(edit, form_data(phone="(415) 555-0132"))
+    operator.refresh_from_db()
+    assert operator.phone == "4155550132"
+    page = billing.get(detail(operator)).content.decode()
+    assert "Fix the phone number first." not in page
+    assert "Retry sync" in page
+    billing.post(retry)
+    operator.refresh_from_db()
+    assert operator.sync_status == SyncStatus.LINKED
+    [(_, (customer,))] = [call for call in fake.calls if call[0] == "create_customer"]
+    assert customer.phone == "4155550132"  # type: ignore[attr-defined]
+
+
+def test_the_edit_of_a_linked_operator_with_a_bad_phone_is_refused(
+    billing: Client, fake: FakeProvider
+) -> None:
+    billing.post(NEW, form_data())
+    operator = Operator.objects.get()
+    assert operator.sync_status == SyncStatus.LINKED
+    Operator.objects.filter(pk=operator.pk).update(phone="555-0132")
+    calls = len(fake.calls)
+
+    response = billing.post(
+        f"{detail(operator)}edit/", form_data(phone="555-0132", city="Elsewhere"), follow=True
+    )
+
+    assert PHONE_MESSAGE in response.content.decode()
+    operator.refresh_from_db()
+    assert operator.city == "Testville"
+    assert len(fake.calls) == calls

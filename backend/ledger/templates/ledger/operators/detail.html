@@ -42,6 +42,8 @@
       {% csrf_token %}<button class="btn btn-primary" type="submit">Retry sync</button>
       <span class="muted">Makes one new call to the payment provider.</span>
     </form>
+  {% elif fix_phone_message %}
+    <p id="fix-phone"><strong>{{ fix_phone_message }}</strong></p>
   {% elif retry_wait_message %}
     <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
   {% endif %}

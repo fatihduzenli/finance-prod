@@ -8,6 +8,7 @@ message names the field and never the value, and the request is never sent.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import uuid
 from collections.abc import Iterable
@@ -17,7 +18,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 
 from payments.errors import ValidationFailed
-from payments.provider import Amounts, DateRange, require_money
+from payments.provider import Amounts, CustomerInput, DateRange, require_money
 
 IDEMPOTENCY_ID_MAX_LENGTH = 255
 EXTERNAL_ID_MAX_LENGTH = 255
@@ -29,6 +30,13 @@ RULE_PREFIX = "DTSTART="
 _EXTERNAL_ID = re.compile(r"[A-Za-z0-9_-]+")
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 _CENT = Decimal("0.01")
+#: create-customer: every text field we send is ``Max: 255`` (PLAN-006b §1).
+CUSTOMER_TEXT_MAX_LENGTH = 255
+#: create-customer: ``phone`` matches ``/[0-9]{10,15}/`` (PLAN-006b §1).
+PHONE_MIN_DIGITS = 10
+PHONE_MAX_DIGITS = 15
+_PHONE_DIGITS = re.compile(rf"[0-9]{{{PHONE_MIN_DIGITS},{PHONE_MAX_DIGITS}}}")
+_PHONE_SEPARATORS = re.compile(r"[ .()-]")
 
 
 def external_id(name: str, value: str) -> str:
@@ -125,3 +133,40 @@ def positive_int(name: str, value: int | None) -> int | None:
     if value is not None and (isinstance(value, bool) or value < 1):
         raise ValidationFailed(f"{name} must be a positive integer")
     return value
+
+
+def normalise_phone(value: str) -> str | None:
+    """The one phone rule (PLAN-006b §1), shared by the operator form and the adapter.
+
+    Spaces, hyphens, dots, parentheses and one leading ``+`` are removed; what remains
+    must be 10 to 15 ASCII digits and is returned. An empty (or blank) value returns
+    ``""``. Anything else returns ``None``.
+    """
+    text = value.strip()
+    if not text:
+        return ""
+    text = _PHONE_SEPARATORS.sub("", text.removeprefix("+"))
+    return text if _PHONE_DIGITS.fullmatch(text) else None
+
+
+def phone(name: str, value: str) -> str:
+    """The normalised digits, or ``""`` when empty; anything else is refused."""
+    digits = normalise_phone(value) if isinstance(value, str) else None
+    if digits is None:
+        raise ValidationFailed(f"{name} must be {PHONE_MIN_DIGITS} to {PHONE_MAX_DIGITS} digits")
+    return digits
+
+
+def _text_cap(name: str, value: str) -> None:
+    if len(value) > CUSTOMER_TEXT_MAX_LENGTH:
+        raise ValidationFailed(f"{name} must be at most {CUSTOMER_TEXT_MAX_LENGTH} characters")
+
+
+def customer(value: CustomerInput) -> CustomerInput:
+    """The 255-character caps and the phone rule; returns the input with normalised digits."""
+    _text_cap("first_name", value.first_name)
+    _text_cap("last_name", value.last_name)
+    _text_cap("company_name", value.company_name)
+    _text_cap("operator_email", value.operator_email)
+    _text_cap("reference", value.reference)
+    return dataclasses.replace(value, phone=phone("phone", value.phone))

@@ -135,14 +135,21 @@ def decode_json(content: bytes) -> object:
 
 
 def customer_body(customer: CustomerInput) -> Body:
-    """Page create-customer / update-customer-info."""
+    """Page create-customer / update-customer-info.
+
+    An optional field that is empty is left out, never sent as ``""`` (PLAN-006b §2.3).
+    """
     body: Body = {
-        "firstname": customer.first_name,
-        "lastname": customer.last_name,
-        "company": customer.company_name,
-        "email": customer.operator_email,
-        "cc_emails": list(customer.cc_emails),
+        key: value
+        for key, value in (
+            ("firstname", customer.first_name),
+            ("lastname", customer.last_name),
+            ("company", customer.company_name),
+            ("email", customer.operator_email),
+        )
+        if value
     }
+    body["cc_emails"] = list(customer.cc_emails)
     if customer.phone:
         body["phone"] = customer.phone
     if customer.reference:

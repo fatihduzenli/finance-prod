@@ -6,12 +6,15 @@ this file; nothing opens a socket.
 
 from __future__ import annotations
 
+import importlib
+import json
 import logging
 import threading
 import time
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -19,6 +22,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
+from django.db.migrations.executor import MigrationExecutor
 from django.test import override_settings
 from django.utils import timezone
 
@@ -852,3 +856,90 @@ def test_an_end_to_end_422_through_the_real_transport_stores_names_only(
     for forbidden in (marker, card, fake_stax_api_key):
         assert forbidden not in stored
         assert forbidden not in caplog.text
+
+
+# --- PLAN-006b: the phone rule before any call, and the stored phones ------------------------
+
+
+def _sent_bodies(rig: Any) -> list[dict[str, Any]]:
+    return [json.loads(request.content) for request in rig.recorder.requests if request.content]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [("", None), ("+1 555 010 0001", "15550100001"), ("4155550132", "4155550132")],
+    ids=["empty", "formatted", "digits"],
+)
+def test_the_customer_sent_carries_digits_and_no_empty_fields(
+    actor: User, stored: str, expected: str | None
+) -> None:
+    rig = make_rig(
+        sequence([httpx.Response(200, json={"data": []}), httpx.Response(200, json={"id": "c1"})])
+    )
+    operator = create(actor, phone=stored)
+    with override_settings(STAX_CALLER="worker"):
+        outcome = operator_sync.sync_operator(
+            operator.pk, provider=StaxProvider(rig.transport), actor=actor
+        )
+    assert outcome.action is Action.CREATED
+    [body] = _sent_bodies(rig)
+    assert "lastname" not in body
+    assert "" not in body.values()
+    assert body.get("phone") == expected
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("retry", [False, True], ids=["sync", "retry"])
+def test_a_stored_bad_phone_refuses_the_sync_before_any_call(
+    actor: User, fake: FakeProvider, retry: bool
+) -> None:
+    operator = create(actor)
+    status = SyncStatus.FAILED if retry else SyncStatus.PENDING
+    Operator.objects.filter(pk=operator.pk).update(phone="555-0132", sync_status=status)
+    audits = AuditLog.objects.count()
+
+    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=retry)
+
+    operator.refresh_from_db()
+    assert fake.calls == []
+    assert (outcome.action, outcome.failure) == (Action.FAILED, operator_sync.PHONE_INVALID)
+    assert outcome.message == "Fix the phone number first."
+    assert operator.sync_status == status
+    assert operator.sync_attempted_at is None
+    assert AuditLog.objects.count() == audits
+    assert operator_sync.phone_is_valid(operator) is False
+
+
+@pytest.mark.django_db
+def test_migration_0006_normalises_good_phones_and_flags_bad_ones() -> None:
+    """PLAN-006b §3 row 5, run against the migration's own historical state."""
+    migration = importlib.import_module("ledger.migrations.0006_operator_phone_rule")
+    rows = {
+        "formatted": ("+1 (415) 555-0132", "14155550132", False),
+        "digits": ("4155550132", "4155550132", False),
+        "dotted": ("415.555.0132", "4155550132", False),
+        "too short": ("555-0132", "555-0132", True),
+        "extension": ("+44 20 7946 0958 ext 12", "+44 20 7946 0958 ext 12", True),
+        "empty": ("", "", False),
+    }
+    ids = {
+        label: Operator.objects.create(display_name=label, phone=stored).pk
+        for label, (stored, _, _) in rows.items()
+    }
+    Operator.objects.filter(pk=ids["digits"]).update(needs_review=True)
+    state = MigrationExecutor(connection).loader.project_state(
+        ("ledger", "0006_operator_phone_rule")
+    )
+    editor = SimpleNamespace(connection=connection)
+
+    migration.apply_phone_rule(state.apps, editor)
+    migration.apply_phone_rule(state.apps, editor)  # a second run changes nothing
+
+    for label, (_, phone, flagged) in rows.items():
+        operator = Operator.objects.get(pk=ids[label])
+        assert operator.phone == phone, label
+        assert operator.needs_review is (flagged or label == "digits"), label
+    assert Operator.objects.count() == len(rows)
+    [operation] = migration.Migration.operations
+    assert operation.reversible

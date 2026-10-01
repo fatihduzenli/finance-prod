@@ -97,13 +97,15 @@ class StaxProvider(PaymentProvider):
 
     # --- Customers -----------------------------------------------------------------
 
-    def _validate_customer(self, customer: CustomerInput) -> None:
+    def _validate_customer(self, customer: CustomerInput) -> CustomerInput:
+        """Refuse what Stax would reject; the result carries the normalised phone."""
         validation.email("operator_email", customer.operator_email)
         validation.emails("cc_emails", customer.cc_emails)
+        return validation.customer(customer)
 
     def create_customer(self, customer: CustomerInput) -> CustomerRecord:
         """POST /customer (create-customer). Not idempotent: no retry after 5xx or timeout."""
-        self._validate_customer(customer)
+        customer = self._validate_customer(customer)
         data = self.transport.send(
             Method.POST, CUSTOMERS, json=mapping.customer_body(customer), idempotent=False
         )
@@ -112,7 +114,7 @@ class StaxProvider(PaymentProvider):
     def update_customer(self, external_id: str, customer: CustomerInput) -> CustomerRecord:
         """PUT /customer/{id} (update-customer-info)."""
         validation.external_id("external_id", external_id)
-        self._validate_customer(customer)
+        customer = self._validate_customer(customer)
         data = self.transport.send(
             Method.PUT,
             CUSTOMER,

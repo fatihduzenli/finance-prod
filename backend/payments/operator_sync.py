@@ -57,6 +57,7 @@ from payments.provider import (
     PaymentProvider,
     mask_identifier,
 )
+from payments.stax.validation import normalise_phone as normalise_phone
 
 #: ``external_refs.provider`` for this app's payment provider (as in ``seed_demo``).
 PROVIDER_KEY = "stax_pay"
@@ -88,6 +89,8 @@ OPERATOR_FIELDS: tuple[str, ...] = (
 #: Local refusals of the link form (no provider call was made).
 ALREADY_LINKED = "AlreadyLinked"
 ARCHIVED = "Archived"
+#: Local refusal of a sync: the stored phone fails the rule (PLAN-006b §2.4).
+PHONE_INVALID = "PhoneInvalid"
 
 #: Fixed sentences shown to staff, keyed by failure class name or local refusal.
 MESSAGES: dict[str, str] = {
@@ -116,6 +119,7 @@ MESSAGES: dict[str, str] = {
         "Nothing was changed."
     ),
     ARCHIVED: "This operator is archived.",
+    PHONE_INVALID: "Fix the phone number first.",
 }
 DEFAULT_MESSAGE = "The payment provider call failed. The operator is saved."
 AWAITING_LINK_MESSAGE = "No e-mail address: link the payment provider customer by hand."
@@ -261,7 +265,8 @@ def sync_operator(
     ``retry=True``), not archived, has an e-mail and has no current customer reference.
     With ``retry=True`` it refuses (``RETRY_TOO_SOON``, no call) while the last attempt
     is less than :data:`RETRY_LOCK_SECONDS` old; the check runs under the row lock, so
-    two concurrent retries cannot both pass it.
+    two concurrent retries cannot both pass it. A stored phone that fails the provider's
+    rule refuses the sync (``PHONE_INVALID``) before any call and writes nothing.
     """
     with transaction.atomic():
         operator = Operator.objects.select_for_update().get(pk=operator_id)
@@ -281,6 +286,9 @@ def sync_operator(
         wait = retry_wait_seconds(operator) if retry else 0
         if wait:
             return SyncOutcome(Action.RETRY_TOO_SOON, operator.sync_status, retry_in=wait)
+        if not phone_is_valid(operator):
+            # Nothing is written and nothing leaves: the row waits for a fixed phone.
+            return SyncOutcome(Action.FAILED, operator.sync_status, PHONE_INVALID)
 
         before = _snapshot(operator)
         operator.sync_attempted_at = timezone.now()
@@ -425,9 +433,16 @@ def customer_input(operator: Operator) -> CustomerInput:
         last_name="",
         company_name=operator.legal_name or operator.display_name,
         operator_email=operator.email or "",
-        phone=operator.phone,
+        # The normalised digits; a stored phone that fails the rule is passed as it is,
+        # so the adapter refuses it before any request.
+        phone=normalise_phone(operator.phone) or operator.phone,
         reference=str(operator.pk),
     )
+
+
+def phone_is_valid(operator: Operator) -> bool:
+    """Whether the stored phone is empty or passes the provider's phone rule."""
+    return normalise_phone(operator.phone) is not None
 
 
 def retry_wait_seconds(operator: Operator, now: datetime | None = None) -> int:

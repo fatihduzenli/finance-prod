@@ -28,6 +28,7 @@ from payments.errors import (
     ProviderNotPermittedHere,
     ProviderRejected,
     ProviderUnavailable,
+    ValidationFailed,
 )
 from payments.management.commands import provider_ping
 from payments.provider import (
@@ -267,6 +268,55 @@ def test_create_invoice_body_is_ach_only_with_exact_money() -> None:
     }
     assert record.total == D("12581.00")
     assert record.raw_status == "DRAFT"
+
+
+def test_customer_body_omits_empty_optional_fields() -> None:
+    """PLAN-006b §3 row 2: no ``phone`` key when empty, no ``lastname`` key, never ``""``."""
+    rig = make_rig(always(200, {"id": "cus-1"}))
+    StaxProvider(rig.transport).create_customer(
+        CustomerInput("Ada", "", "Example LLC", "ada@example.com", reference="r1")
+    )
+    [request] = rig.recorder.requests
+    assert _body(request) == {
+        "firstname": "Ada",
+        "company": "Example LLC",
+        "email": "ada@example.com",
+        "cc_emails": [],
+        "reference": "r1",
+    }
+
+
+@pytest.mark.parametrize("method", ["create", "update"])
+def test_customer_body_sends_the_phone_as_digits_only(method: str) -> None:
+    rig = make_rig(always(200, {"id": "cus-1"}))
+    provider = StaxProvider(rig.transport)
+    customer = CustomerInput("Ada", "", "Example LLC", "ada@example.com", phone="+1 (415) 555-0132")
+    if method == "create":
+        provider.create_customer(customer)
+    else:
+        provider.update_customer("cus-1", customer)
+    [request] = rig.recorder.requests
+    body = _body(request)
+    assert isinstance(body, dict)
+    assert body["phone"] == "14155550132"
+    assert "lastname" not in body
+
+
+@pytest.mark.parametrize("method", ["create", "update"])
+@pytest.mark.parametrize("phone", ["555-0132", "12345678901234567", "+44 20 7946 0958 ext 12"])
+def test_a_customer_with_a_bad_phone_is_refused_before_any_request(method: str, phone: str) -> None:
+    """PLAN-006b §3 row 3: ``ValidationFailed`` at the adapter, nothing reaches the transport."""
+    rig = make_rig(always(200, {"id": "cus-1"}))
+    provider = StaxProvider(rig.transport)
+    customer = CustomerInput("Ada", "", "Example LLC", "ada@example.com", phone=phone)
+    with pytest.raises(ValidationFailed) as raised:
+        if method == "create":
+            provider.create_customer(customer)
+        else:
+            provider.update_customer("cus-1", customer)
+    assert phone not in str(raised.value)
+    assert rig.recorder.requests == []
+    assert rig.budget.counts() == (0, 0)
 
 
 def test_refund_total_is_a_two_decimal_string() -> None:

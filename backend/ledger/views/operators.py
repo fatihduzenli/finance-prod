@@ -219,7 +219,8 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
     active = operator.archived_at is None
     billing = meets(role, Role.BILLING)
     failed = operator.sync_status == SyncStatus.FAILED
-    retry_in = operator_sync.retry_wait_seconds(operator) if failed else 0
+    phone_ok = operator_sync.phone_is_valid(operator)
+    retry_in = operator_sync.retry_wait_seconds(operator) if failed and phone_ok else 0
     return render(
         request,
         "ledger/operators/detail.html",
@@ -244,7 +245,12 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 entity_type=NoteEntityType.OPERATOR, entity_id=operator.pk
             ).order_by("-created_at"),
             "can_edit": billing and active,
-            "can_retry": billing and active and failed and not retry_in,
+            "can_retry": billing and active and failed and phone_ok and not retry_in,
+            "fix_phone_message": (
+                operator_sync.MESSAGES[operator_sync.PHONE_INVALID]
+                if billing and active and failed and not phone_ok
+                else ""
+            ),
             "retry_wait_message": (
                 operator_sync.retry_wait_message(retry_in)
                 if billing and active and retry_in

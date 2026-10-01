@@ -3,10 +3,12 @@ request never reaches the transport."""
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from django.test import override_settings
@@ -178,6 +180,15 @@ REJECTED_CALLS: dict[str, Call] = {
     "update customer bad id": lambda p: p.update_customer(
         "a b", CustomerInput("A", "B", "C", "a@example.com")
     ),
+    "customer bad phone": lambda p: p.create_customer(
+        CustomerInput("A", "B", "C", "a@example.com", phone="555-0132")
+    ),
+    "update customer bad phone": lambda p: p.update_customer(
+        "cus-1", CustomerInput("A", "B", "C", "a@example.com", phone="555-0132")
+    ),
+    "customer name too long": lambda p: p.create_customer(
+        CustomerInput("x" * 256, "", "C", "a@example.com")
+    ),
     "find customers bad email": lambda p: p.find_customers(CustomerQuery(operator_email="x")),
     "invoice sums": lambda p: p.create_invoice(
         InvoiceInput("cus-1", _amounts("106.00", "100.00", "5.00"))
@@ -239,3 +250,63 @@ def test_float_money_is_refused_when_the_input_is_built() -> None:
         OfflinePayment("cash", 10.0)  # type: ignore[arg-type]
     with pytest.raises(ValidationFailed):
         Amounts(1.0, D("1.00"), D("0"), ())  # type: ignore[arg-type]
+
+
+# --- PLAN-006b: the phone rule and the 255-character caps ----------------------------------
+
+GOOD_PHONES = {
+    "4155550132": "4155550132",
+    "+1 (415) 555-0132": "14155550132",
+    "415.555.0132": "4155550132",
+    "123456789012345": "123456789012345",
+    " 4155550132 ": "4155550132",
+}
+BAD_PHONES = [
+    "555-0132",
+    "12345678901234567",
+    "+44 20 7946 0958 ext 12",
+    "four one five",
+    "415555013a",
+    "++14155550132",
+    "1415+5550132",
+    "415/555/0132",
+]
+
+
+@pytest.mark.parametrize(("value", "digits"), GOOD_PHONES.items(), ids=GOOD_PHONES.keys())
+def test_phone_accepts_and_normalises(value: str, digits: str) -> None:
+    assert validation.normalise_phone(value) == digits
+    assert validation.phone("phone", value) == digits
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_an_empty_phone_is_empty(value: str) -> None:
+    assert validation.normalise_phone(value) == ""
+    assert validation.phone("phone", value) == ""
+
+
+@pytest.mark.parametrize("value", BAD_PHONES)
+def test_phone_refuses_with_a_value_free_message(value: str) -> None:
+    assert validation.normalise_phone(value) is None
+    with pytest.raises(ValidationFailed) as raised:
+        validation.phone("phone", value)
+    assert str(raised.value) == "phone must be 10 to 15 digits"
+
+
+@pytest.mark.parametrize(
+    "field", ["first_name", "last_name", "company_name", "operator_email", "reference"]
+)
+def test_customer_text_fields_are_capped_at_255(field: str) -> None:
+    base = CustomerInput("A", "B", "C", "a@example.com", reference="r")
+    longest: dict[str, Any] = {field: "x" * 255}
+    too_long: dict[str, Any] = {field: "x" * 256}
+    accepted = validation.customer(dataclasses.replace(base, **longest))
+    assert getattr(accepted, field) == "x" * 255
+    with pytest.raises(ValidationFailed) as raised:
+        validation.customer(dataclasses.replace(base, **too_long))
+    assert str(raised.value) == f"{field} must be at most 255 characters"
+
+
+def test_customer_returns_the_normalised_phone() -> None:
+    value = CustomerInput("A", "", "C", "a@example.com", phone="+1 (415) 555-0132")
+    assert validation.customer(value).phone == "14155550132"
