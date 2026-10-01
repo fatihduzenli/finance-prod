@@ -354,3 +354,10 @@ the login page myself." The condition for starting Prompt 4 is met.
   The large-debit confirmation is live; `STAX_MAX_TXN_AMOUNT` is unset (unknown) on staging.
 - Prompt 8 can be built and tested on the sandbox without ACH (customer, invoice and schedule
   webhook events); transaction, settlement and deposit events wait on Stax enabling ACH.
+
+## Update, 2026-10-01, Checkpoint 6 closed
+
+- **Owner, in writing:** "Checkpoint 6 closed: Stax sandbox dashboard shows exactly four active
+  customers, one per operator, emails matching ours. No duplicates." This completes item 1
+  (dashboard duplicate check); items 2 and 3 were confirmed on 2026-09-30, and the no-email
+  rule was confirmed in writing. Checkpoint 6 is complete.
