@@ -296,3 +296,90 @@ def test_viewer_and_billing_cannot_change_leases_or_enrol(fake: FakeProvider) ->
             response = client.post(path, {"payment_method_id": "pm-x"})
             assert response.status_code == 403, (role, path)
     assert _schedule_creates(fake) == []
+
+
+# --- PLAN-007c row 6: the large-debit confirmation ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("posted", "expect_created"),
+    [
+        ({}, False),
+        ({"confirm_large_debit": "false"}, False),
+        ({"confirm_large_debit": "0"}, False),
+        ({"confirm_large_debit": ""}, False),
+        ({"confirm_large_debit": "on"}, True),
+        ({"confirm_large_debit": "true"}, True),
+        ({"confirm_large_debit": "1"}, False),
+    ],
+)
+def test_only_an_affirmative_checkbox_confirms_a_large_debit(
+    fake: FakeProvider, posted: dict[str, str], expect_created: bool
+) -> None:
+    from django.test import override_settings
+
+    row = make_lease(rent=D("2100.00"))
+    fake.add_payment_method(CUSTOMER, method("pm-big"))
+    admin = _client(Role.ADMIN)
+    with override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=None):
+        admin.post(f"/leases/{row.pk}/enrol/", {"payment_method_id": "pm-big", **posted})
+    assert (len(_schedule_creates(fake)) == 1) is expect_created
+    from ledger.models import AuditLog
+
+    assert (
+        AuditLog.objects.filter(action="lease.autopay_large_debit_confirmed").exists()
+        is expect_created
+    )
+
+
+def test_billing_cannot_confirm_a_large_debit(fake: FakeProvider) -> None:
+    row = make_lease(rent=D("2100.00"))
+    fake.add_payment_method(CUSTOMER, method("pm-big"))
+    response = _client(Role.BILLING).post(
+        f"/leases/{row.pk}/enrol/", {"payment_method_id": "pm-big", "confirm_large_debit": "on"}
+    )
+    assert response.status_code == 403
+    assert _schedule_creates(fake) == []
+
+
+def test_amounts_exactly_at_the_thresholds_need_no_confirmation_and_are_not_blocked(
+    fake: FakeProvider,
+) -> None:
+    from django.test import override_settings
+
+    with override_settings(
+        LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("2000.00")
+    ):
+        row = make_lease(rent=D("2000.00"))
+        fake.add_payment_method(CUSTOMER, method("pm-edge"))
+        outcome = lease_service.enable_autopay(row.pk, "pm-edge", actor=None, now=NOW)
+    assert outcome.ok, outcome.text
+    assert len(_schedule_creates(fake)) == 1
+
+
+def test_a_confirmation_replayed_after_a_failed_create_does_not_create_twice(
+    fake: FakeProvider,
+) -> None:
+    from django.test import override_settings
+
+    from payments.errors import ProviderUnavailable
+
+    row = make_lease(rent=D("2100.00"))
+    fake.add_payment_method(CUSTOMER, method("pm-retry"))
+    fake.fail_next("create_scheduled_invoice", ProviderUnavailable(503))
+    with override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=None):
+        first = lease_service.enable_autopay(
+            row.pk, "pm-retry", actor=None, confirmed=True, now=NOW
+        )
+        assert not first.ok
+        second = lease_service.enable_autopay(
+            row.pk, "pm-retry", actor=None, confirmed=True, now=NOW
+        )
+        assert second.ok, second.text
+        third = lease_service.enable_autopay(
+            row.pk, "pm-retry", actor=None, confirmed=True, now=NOW
+        )
+    assert third.action == lease_service.AutopayAction.ALREADY
+    assert len(_schedule_creates(fake)) == 2  # the failed attempt and the successful one
+    live = CollectionSchedule.objects.filter(lease=row, state=ScheduleState.ACTIVE)
+    assert live.count() == 1

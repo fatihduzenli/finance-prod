@@ -46,6 +46,8 @@ on 2026-09-16.
 
 **Still needed from Stax:** your per-transaction limit (card and ACH separately, if they differ) and any monthly volume cap.
 
+**Where the answer goes (2026-10-01):** the confirmed ACH per-transaction limit is set per environment as `STAX_MAX_TXN_AMOUNT` (Bicep parameter `staxMaxTxnAmount`). Until it is set, enabling autopay above `LARGE_DEBIT_WARNING_AMOUNT` needs an explicit admin confirmation and nothing is hard-blocked. Record the figure and its source here when Stax replies.
+
 **Design impact:** Store the limit as a config value (`STAX_MAX_TXN_AMOUNT`) and warn before sending any invoice above it. Until Stax replies, **set it to $2,000 as a conservative placeholder**.
 
 **Stax written reply (verbatim):** _pending_

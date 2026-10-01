@@ -330,3 +330,20 @@ the login page myself." The condition for starting Prompt 4 is met.
   refuse anonymous requests with 401; login 200.
 - Owner's staging walk-through can start: store, lease, rent change, run page, then "Enable
   autopay" expecting the ACH refusal with field names.
+
+## Update, 2026-10-01, Prompt 7 walk-through and PLAN-007c
+
+- **Owner's staging walk-through (in writing):** store created; lease created (day 1, ACH,
+  $2,000); "Second debit day" was empty on a fresh form, the earlier "1" was a browser hint;
+  rent changed to $2,100 with history shown; run page listed the lease under day 1 with the
+  "Large debit" tag and the 2026 insurance charge with "Premium missing"; "Create today's
+  charges" twice: 1 created, then 1 already created; "Match invoices": 0 schedules; "Enable
+  autopay" refused by the large-debit hard block at $2,100; at $1,500 the page asked for a
+  bank method; **the Stax sandbox dashboard cannot add a bank account: "Could not tokenize
+  payment method: no tokenization gateway found".** Enrolment stays blocked on Stax; the
+  request to Stax now includes this and the merchant ID.
+- **PLAN-007c** (owner change request): the warning threshold no longer blocks; an admin
+  confirms explicitly and the confirmation is audited; `STAX_MAX_TXN_AMOUNT` (new, per
+  environment, empty until Stax answers Q25) is the confirmed limit above which enabling is
+  hard-blocked. QA PASS (`docs/qa/QA-007c-large-debit-confirmation.md`), **not pushed**.
+
