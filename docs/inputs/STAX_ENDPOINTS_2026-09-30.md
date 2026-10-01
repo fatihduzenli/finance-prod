@@ -32,6 +32,9 @@ Anything not in this file is unverified and must be `TODO-VERIFY` in code.
 | ping (authentication check) | `GET /self` | get-self-and-teams-info |
 | list_payment_methods (added 2026-10-01) | `GET /customer/{customerId}/payment-method`; response objects carry `id`, `method` (`bank` or `card`), `bank_type`, `bank_name`, `bank_holder_type`, `card_last_four`, `card_type`, `card_exp`, `person_name`, `nickname`, `is_default`, `customer_id`, `deleted_at`, `purged_at` | get-all-payment-methods-for-a-customer |
 | get_payment_method (added 2026-10-01) | `GET /payment-method/{id}` | get-a-payment-method-by-id |
+| list_webhooks (added 2026-10-01) | `GET /webhook` | get-all-webhooks |
+| create_webhook (added 2026-10-01) | `POST /webhook`, query `target_url`, `event` | create-new-webhook-for-all-of-my-users-merchants |
+| delete_webhook (added 2026-10-01) | `DELETE /webhook/{id}` | get-webhook-by-id (titled "Delete a Webhook") |
 
 **Confirmed on 2026-10-01 (closes earlier TODO items):**
 - `url` on `POST /invoice` and `POST /invoice/schedule/`: the spec says *"Set it to

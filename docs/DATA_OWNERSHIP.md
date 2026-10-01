@@ -35,6 +35,8 @@ disagreement is written to `audit_log`.** Business fields are never overwritten 
 | Operator name or email differs between Stax and us | **Not overwritten.** Ours is the business record. Flagged for staff. For email the flag says: receipts go to the address stored in Stax; fix it in Stax (owner, 2026-09-30). |
 | A provider status string we have never seen | Stored exactly as received. Never mapped to a guess. |
 | A pending payment older than the configured number of days with no news | Flagged as a mismatch and alerted (Prompt 10). |
+| A webhook body says an invoice is paid or a transaction settled | **Ignored.** Only the object re-fetched from Stax by ID is applied (Prompt 8). The body is stored, redacted, for the record. |
+| An ACH return arrives for a settled payment | Payment `returned`; the charge's paid amount is recomputed and it reopens; the return enters the returns queue; nothing re-debits by itself. |
 
 The detection and repair code arrives with Prompts 8 and 10. This document fixes the rule
 they implement.

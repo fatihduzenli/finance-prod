@@ -45,4 +45,20 @@ and the code in the same change.
 | TODO-VERIFY-036 | How does `FREQ=MONTHLY` behave when `DTSTART` is on day 29, 30 or 31 in a shorter month? (iCalendar skips the month; Stax's behaviour unknown) | Enrolment; no such debit day exists today | Days 29 to 31 are refused for autopay until known | sandbox | Open |
 | TODO-VERIFY-037 | For a `bank` payment method, does `card_last_four` hold the account's last four digits, and is `is_default` a boolean or 0/1? | Enrolment screen (PLAN-007 D1) | Yes; both accepted | first real method listing | Open |
 | TODO-VERIFY-038 | Key names and formats of `invoice_date_at`, `due_at` and `schedule_id` in a `GET /invoice` response | Matching (PLAN-007 D7), `payments/invoice_sync.py` | Request names; ISO 8601 | first schedule-generated invoice in the sandbox | Open |
+| TODO-VERIFY-039 | Stax's webhook delivery timeout and retry policy | Receiver design (answers in milliseconds either way) | Unknown; not relied on | Stax support | Open |
+| TODO-VERIFY-040 | `POST /webhook` response carries the registration `id` | `register_webhooks` | Yes | first registration on staging | Open |
+| TODO-VERIFY-041 | How an ACH return appears on a re-fetched transaction: `settled_at` set means settled; a child transaction with `meta.achDescription` means returned | State machine (PLAN-008 D5) | As stated, from the ACH page read 2026-09-16 | first real return (blocked on sandbox ACH) | Open |
+| TODO-VERIFY-042 | Is a webhook body the bare object or wrapped (`data`/`object`)? Decides where `id` is read | Receiver `provider_object_id` | Bare object, `id` at top level | first delivery on staging | Open |
+| TODO-VERIFY-043 | The exact event-name values in the header or body for each of the fifteen events, and whether the header is `stax-event-name` | Receiver event resolution | Header first, then body keys, then shape; source recorded | first deliveries on staging | Open |
+| TODO-VERIFY-044 | Invoice object keys `sent_at`, `viewed_at`, `paid_at` (ISO 8601) and `total_paid` | Invoice handler | As stated | first invoice event on staging | Open |
+| TODO-VERIFY-045 | Transaction `method` values: `bank` = ACH, `card` = card | Transaction handler | As stated | first transaction event (blocked on ACH) | Open |
+| TODO-VERIFY-046 | Transaction `type` values `charge`, `refund`, `void`; a refund's parent in `reference_id` | Refund path | As stated | blocked on ACH | Open |
+| TODO-VERIFY-047 | Transaction `invoice_id` and `customer_id` keys | Linking | As stated | blocked on ACH | Open |
+| TODO-VERIFY-048 | Transaction `success`, `is_voided` booleans; `created_at` | State machine | As stated | blocked on ACH | Open |
+| TODO-VERIFY-049 | `achDescription` begins with the return code (`R01` …) followed by the reason | Returns queue | As stated | blocked on ACH | Open |
+| TODO-VERIFY-050 | Webhook list objects carry `event` and `target_url` | `register_webhooks` rerun logic | As stated | first registration | Open |
+| TODO-VERIFY-051 | Schedule status strings `ACTIVE`/`PAUSED` vs the `active` flag | Schedule handler | Flag used when no status | first schedule event | Open |
+| TODO-VERIFY-052 | Deposit list keys `batched_at`, `sum`, `fees`, `net` | Deposit handler | As stated | blocked on ACH | Open |
+| TODO-VERIFY-053 | A dispute event's object ID is the disputed transaction's ID | Dispute handler | As stated | first dispute | Open |
+| TODO-VERIFY-054 | A deposit event body carries `batch_id` and no `id` | Receiver fallback | As stated | blocked on ACH | Open |
 

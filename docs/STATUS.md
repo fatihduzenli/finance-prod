@@ -361,3 +361,13 @@ the login page myself." The condition for starting Prompt 4 is met.
   customers, one per operator, emails matching ours. No duplicates." This completes item 1
   (dashboard duplicate check); items 2 and 3 were confirmed on 2026-09-30, and the no-email
   rule was confirmed in writing. Checkpoint 6 is complete.
+
+## Update, 2026-10-01, Prompt 8
+
+- PLAN-008 (webhook receiver, processor, state machine, returns queue, registration) implemented,
+  QA PASS (`docs/qa/QA-008-webhooks.md`), **not pushed**. One MAJOR (token in Sentry breadcrumbs)
+  found by Opus and fixed before the gate. `docs/RUNBOOK.md` written.
+- After the push: `register_webhooks` runs inside the staging container with the owner's word;
+  then the owner's four clicks (operator edit → `update_customer` event; dashboard invoice →
+  invoice events; replay; wrong token 404).
+
