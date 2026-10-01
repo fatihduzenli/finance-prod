@@ -347,3 +347,10 @@ the login page myself." The condition for starting Prompt 4 is met.
   environment, empty until Stax answers Q25) is the confirmed limit above which enabling is
   hard-blocked. QA PASS (`docs/qa/QA-007c-large-debit-confirmation.md`), **not pushed**.
 
+
+## Update, 2026-10-01, PLAN-007c on staging
+
+- Owner typed "push". `main` at `04a51a1` deployed; revision healthy; environment check ok.
+  The large-debit confirmation is live; `STAX_MAX_TXN_AMOUNT` is unset (unknown) on staging.
+- Prompt 8 can be built and tested on the sandbox without ACH (customer, invoice and schedule
+  webhook events); transaction, settlement and deposit events wait on Stax enabling ACH.
