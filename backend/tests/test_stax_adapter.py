@@ -95,6 +95,8 @@ ALL_METHODS: dict[str, Call] = {
     ),
     "get_customer": lambda p: p.get_customer("cus-1"),
     "find_customers": lambda p: p.find_customers(CustomerQuery(operator_email="a@example.com")),
+    "list_payment_methods": lambda p: p.list_payment_methods("cus-1"),
+    "get_payment_method": lambda p: p.get_payment_method("pm-1"),
     "create_invoice": lambda p: p.create_invoice(InvoiceInput("cus-1", _amounts())),
     "update_invoice": lambda p: p.update_invoice("inv-1", InvoiceUpdate(memo="m")),
     "get_invoice": lambda p: p.get_invoice("inv-1"),

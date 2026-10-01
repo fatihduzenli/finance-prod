@@ -10,8 +10,9 @@ Read-only routes need no rule for GET; they are listed in ``READ_ONLY_ROUTE_NAME
 the enumeration test (backend/tests/test_route_registry.py) can prove that every route
 in the URL map has been classified. A new route that is not classified fails that test.
 
-Routes still to come: refund, void and settings get ``Role.ADMIN``; invoices, send and
-record-payment get ``Role.BILLING``. Operators (PLAN-006) are classified below.
+Routes still to come: refund, void and settings get ``Role.ADMIN``; invoices and send
+get ``Role.BILLING``. Operators (PLAN-006), leases, the rent run and rent charges
+(PLAN-007) are classified below.
 """
 
 from __future__ import annotations
@@ -83,6 +84,16 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:operators:retry_sync": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:link": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:archive": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Leases and autopay (docs/qa/PLAN-007-leases-and-rent-run.md §4.1, D10): admin only.
+    "ledger:leases:create": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:leases:edit": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:leases:enrol": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:leases:pause": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:leases:resume": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Rent run and manual payments (PLAN-007 §4.1, D10): billing.
+    "ledger:run:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:run:match": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:charges:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every
@@ -118,6 +129,12 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # Operator screens that only read (PLAN-006 §4.1).
         "ledger:operators:list",
         "ledger:operators:detail",
+        # Lease screens that only read (PLAN-007 §4.1).
+        "ledger:leases:list",
+        "ledger:leases:detail",
+        # Rent run and charge screens that only read (PLAN-007 §4.1).
+        "ledger:run:today",
+        "ledger:charges:detail",
     }
 )
 

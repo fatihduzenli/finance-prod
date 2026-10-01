@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
 APP_ENVS: tuple[str, ...] = ("local", "staging", "production")
@@ -30,6 +31,11 @@ BOOLEAN_FLAGS: tuple[str, ...] = ("true", "false")
 REQUIRED_STAX_API_BASE_URL = "https://apiprod.fattlabs.com"
 
 WEBHOOK_URL_TOKEN_MIN_LENGTH = 64
+
+#: PLAN-007 §4.3: a debit above this amount shows a warning on the enrolment screen.
+#: A placeholder until Stax states the per-transaction limit (SCOPE Q25).
+DEFAULT_LARGE_DEBIT_WARNING_AMOUNT = "2000.00"
+_CENT = Decimal("0.01")
 
 _SQLITE_SCHEME_PREFIX = "sqlite"
 _WEB_URL_SCHEMES: tuple[str, ...] = ("http", "https")
@@ -65,6 +71,18 @@ class Config:
     #: Not a credential, but identifying: shown masked only, so kept out of ``repr``.
     stax_expected_merchant_id: str = field(repr=False)
     stax_provider: str
+    large_debit_warning_amount: Decimal
+
+
+def _positive_amount(value: str) -> Decimal | None:
+    """A positive, finite amount with at most two decimal places, or ``None``."""
+    try:
+        amount = Decimal(value)
+    except InvalidOperation:
+        return None
+    if not amount.is_finite() or amount <= 0 or amount != amount.quantize(_CENT):
+        return None
+    return amount
 
 
 def validate(env: Mapping[str, str]) -> Config:
@@ -83,6 +101,9 @@ def validate(env: Mapping[str, str]) -> Config:
     stax_caller = env.get("STAX_CALLER", "") or "none"
     stax_pay_invoice_enabled = env.get("STAX_PAY_INVOICE_ENABLED", "") or "false"
     stax_provider = env.get("STAX_PROVIDER", "") or "stax"
+    large_debit_warning_amount = _positive_amount(
+        env.get("LARGE_DEBIT_WARNING_AMOUNT", "") or DEFAULT_LARGE_DEBIT_WARNING_AMOUNT
+    )
 
     is_local = app_env == "local"
     is_deployed = app_env in DEPLOYED_APP_ENVS
@@ -157,7 +178,13 @@ def validate(env: Mapping[str, str]) -> Config:
     elif stax_provider == "fake" and not is_local:
         problems.append("STAX_PROVIDER may only be 'fake' when APP_ENV is 'local'")
 
-    if problems:
+    # PLAN-007 §4.3: the large-debit warning threshold.
+    if large_debit_warning_amount is None:
+        problems.append(
+            "LARGE_DEBIT_WARNING_AMOUNT must be a positive amount with at most two decimals"
+        )
+
+    if problems or large_debit_warning_amount is None:
         raise EnvGuardError("; ".join(problems))
 
     return Config(
@@ -177,4 +204,5 @@ def validate(env: Mapping[str, str]) -> Config:
         stax_pay_invoice_enabled=stax_pay_invoice_enabled == "true",
         stax_expected_merchant_id=env.get("STAX_EXPECTED_MERCHANT_ID", ""),
         stax_provider=stax_provider,
+        large_debit_warning_amount=large_debit_warning_amount,
     )

@@ -52,6 +52,7 @@ All run from the repository root.
 | Seed demo data (`APP_ENV=local` only, safe to repeat) | `uv run python backend/manage.py seed_demo` |
 | Stax authentication check (one `GET /self`; needs `STAX_CALLER=worker`) | `uv run python backend/manage.py provider_ping` |
 | Boot check: key environment and merchant (one `GET /self`; runs in the image `CMD`) | `uv run python backend/manage.py provider_environment_check` |
+| Create the annual insurance charges in scope today (idempotent; prints counts; no Stax call) | `uv run python backend/manage.py generate_insurance_charges` |
 | Dev server without Stax (in-memory provider; `APP_ENV=local` only) | `STAX_PROVIDER=fake uv run python backend/manage.py runserver` |
 | Stax sandbox suites (off by default; need `STAX_SANDBOX_TESTS=1`) | `uv run pytest -m sandbox` |
 | Secret scan | `scripts/check-no-secrets.sh` |
@@ -71,6 +72,7 @@ environment guard and the yellow SANDBOX banner exist.
 | `STAX_CALLER` | `none` (default); `worker` only to run `provider_ping` | `worker` on the web app, which runs as one replica, until Step 10 moves the calls to the worker (PLAN-006 D1) | `none` |
 | `STAX_PROVIDER` | `stax` (default), or `fake` for the in-memory provider | `stax` | `stax` |
 | `STAX_PAY_INVOICE_ENABLED` | `false` (default) | `false`; `true` only for the documented sandbox test | `false` until TODO-VERIFY-019 is decided |
+| `LARGE_DEBIT_WARNING_AMOUNT` | empty (`2000.00`) | empty (`2000.00`) | empty (`2000.00`); a placeholder until Stax states the per-transaction limit (Q25) |
 | `STAX_EXPECTED_MERCHANT_ID` | empty, or the sandbox merchant ID | sandbox merchant ID (in `staging.bicepparam`), checked at every start | the merchant ID of the loaded key |
 | Config source | `.env`, filled by hand from the vault | Key Vault `finance-sandbox-kv` via managed identity | Key Vault `finance-kv` via managed identity |
 | Data | `docker-compose.yml`: PostgreSQL 16 + Redis 7 | Azure resource group `finance-sandbox` | Azure resource group `finance-prod` |
@@ -204,6 +206,11 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:operators:create`, `:edit`, `:retry_sync`, `:link` | POST | billing | GET of the forms for any role |
 | `ledger:operators:archive` | POST | admin | soft delete; there is no delete route |
 | `admin:ledger_operator_*` | POST | admin | registered read-only: no add, change or delete |
+| `ledger:leases:list`, `ledger:leases:detail` | none | — | GET for any verified user with a role |
+| `ledger:leases:create`, `:edit`, `:enrol`, `:pause`, `:resume` | POST | admin | GET of the forms and the enrolment page (which reads Stax) is admin only too |
+| `ledger:run:today`, `ledger:charges:detail` | none | — | GET for any verified user with a role; no Stax call |
+| `ledger:run:create_charges`, `ledger:run:match` | POST | billing | always for the server's today; matching is refused while the breaker is open or the failure budget is exhausted |
+| `ledger:charges:record_payment` | POST | billing | Zelle, wire or other; GET of the form is billing only too; no Stax call |
 | `admin:index`, `admin:app_list`, `admin:login`, `admin:jsi18n`, `admin:autocomplete`, `admin:view_on_site`, `admin:password_change_done` | none | — | GET for any verified user; Django admin still checks `is_staff` and model permissions |
 | `two_factor:profile`, `two_factor:disable` | none | — | GET only; disabling one's own second factor is refused |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |

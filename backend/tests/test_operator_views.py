@@ -412,7 +412,8 @@ def test_a_user_without_a_role_is_refused_even_to_read(fake: FakeProvider) -> No
 
 
 def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
-    names = {name for name, _, _ in iter_routes() if name and name.startswith("ledger:")}
+    # PLAN-007 adds lease routes under ledger:leases:, classified in test_lease_views.py.
+    names = {name for name, _, _ in iter_routes() if name and name.startswith("ledger:operators:")}
     assert names == {
         "ledger:operators:list",
         "ledger:operators:create",

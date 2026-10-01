@@ -92,6 +92,11 @@ class CircuitBreaker:
                     raise CircuitOpen("The payment provider circuit is half-open; trial in flight")
                 self._trial_in_flight = True
 
+    def is_open(self) -> bool:
+        """Whether calls are refused now, without changing any state (for banners)."""
+        with self._lock:
+            return self.state is State.OPEN and self.clock.monotonic_ms() < self.open_until
+
     def abandon(self) -> None:
         """The call passed the gate but never reached the network; free the trial slot."""
         with self._lock:

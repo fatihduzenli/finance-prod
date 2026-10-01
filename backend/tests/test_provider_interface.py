@@ -45,6 +45,9 @@ PLANNED_METHODS = {
     "update_customer",
     "get_customer",
     "find_customers",
+    # PLAN-007 D1: read-only payment-method calls.
+    "list_payment_methods",
+    "get_payment_method",
     "create_invoice",
     "update_invoice",
     "get_invoice",

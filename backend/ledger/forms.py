@@ -1,4 +1,4 @@
-"""Operator forms (docs/qa/PLAN-006-operators.md §4.1).
+"""Operator and lease forms (docs/qa/PLAN-006-operators.md, PLAN-007-leases-and-rent-run.md).
 
 Server-side validation is what counts; the browser checks (``type=email``,
 ``required``) are a convenience. Every text field keeps the model's card-number guard,
@@ -7,18 +7,30 @@ which runs when the form validates the model instance.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from django import forms
 from django.core.validators import RegexValidator
+from django.db.models import Q
 
-from ledger.models import Operator
+from ledger.models import (
+    CollectionStatus,
+    Lease,
+    Operator,
+    PaymentChannel,
+    PaymentMethod,
+    Store,
+)
+from ledger.validators import validate_no_payment_data
 from payments.operator_sync import normalise_phone
 
 if TYPE_CHECKING:
     _OperatorFormBase = forms.ModelForm[Operator]
+    _LeaseFormBase = forms.ModelForm[Lease]
 else:  # ModelForm is only generic in the type stubs.
     _OperatorFormBase = forms.ModelForm
+    _LeaseFormBase = forms.ModelForm
 
 #: Fixed and value-free (PLAN-006b §1).
 PHONE_MESSAGE = "Enter 10 to 15 digits, for example 4155550132."
@@ -99,4 +111,128 @@ class LinkForm(forms.Form):
         label="Payment method ID",
         max_length=IDENTIFIER_MAX_LENGTH,
         validators=[IDENTIFIER_VALIDATOR],
+    )
+
+
+# --- Leases (PLAN-007 §4.1) -------------------------------------------------------------
+
+#: Largest rent the money column holds (numeric(12,2)).
+RENT_MAX = Decimal("9999999999.99")
+
+
+class LeaseForm(_LeaseFormBase):
+    """Create and edit a lease. Rent is a separate field: a change writes history (D5)."""
+
+    debit_day = forms.IntegerField(min_value=1, max_value=31, required=False)
+    second_debit_day = forms.IntegerField(
+        min_value=1,
+        max_value=31,
+        required=False,
+        help_text="Only for a lease debited twice a month.",
+    )
+    rent = forms.DecimalField(
+        label="Monthly rent",
+        min_value=Decimal("0.01"),
+        max_value=RENT_MAX,
+        max_digits=12,
+        decimal_places=2,
+    )
+    rent_effective_from = forms.DateField(
+        label="New rent takes effect on",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="Only used when the rent changes. Empty means today.",
+    )
+
+    class Meta:
+        model = Lease
+        fields = (
+            "store",
+            "operator",
+            "debit_day",
+            "second_debit_day",
+            "payment_channel",
+            "started_on",
+            "collection_status",
+        )
+        widgets = {"started_on": forms.DateInput(attrs={"type": "date"})}
+        labels = {"collection_status": "Status", "started_on": "Start date"}
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        store = self.fields["store"]
+        operator = self.fields["operator"]
+        if isinstance(store, forms.ModelChoiceField):
+            store.queryset = Store.objects.order_by("external_label", "id")
+        if isinstance(operator, forms.ModelChoiceField):
+            current = self.instance.operator_id if self.instance.pk else None
+            operator.queryset = Operator.objects.filter(
+                Q(archived_at__isnull=True) | Q(pk=current)
+            ).order_by("display_name", "id")
+        if not self.instance.pk:
+            del self.fields["rent_effective_from"]
+
+    def clean(self) -> dict[str, Any]:
+        data = super().clean() or {}
+        day = data.get("debit_day")
+        second = data.get("second_debit_day")
+        if second is not None and day is None:
+            self.add_error("second_debit_day", "Set the first debit day first.")
+        elif second is not None and second == day:
+            self.add_error("second_debit_day", "The second debit day must differ from the first.")
+        if data.get("collection_status") == CollectionStatus.ACTIVE:
+            if data.get("operator") is None:
+                self.add_error("operator", "An active lease needs an operator.")
+            if day is None:
+                self.add_error("debit_day", "An active lease needs a debit day.")
+            if data.get("payment_channel") == PaymentChannel.UNKNOWN:
+                self.add_error("payment_channel", "An active lease needs a known channel.")
+        return data
+
+
+class LeaseCreateForm(LeaseForm):
+    """Adds the one-time key rendered with the form, so a resubmission saves nothing."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput)
+
+
+class EnrolForm(forms.Form):
+    """The chosen payment method. Only its syntax is checked here; the service checks
+    that it is a bank method of the operator's customer at the provider (D2)."""
+
+    payment_method_id = forms.CharField(
+        label="Payment method",
+        max_length=IDENTIFIER_MAX_LENGTH,
+        validators=[IDENTIFIER_VALIDATOR],
+        error_messages={"required": "Choose a bank payment method."},
+    )
+
+
+# --- Manual payments (PLAN-007 D8) -------------------------------------------------------
+
+#: Longest note accepted on a manual payment.
+PAYMENT_NOTE_MAX_LENGTH = 2000
+MANUAL_METHOD_CHOICES = (
+    (PaymentMethod.ZELLE.value, PaymentMethod.ZELLE.label),
+    (PaymentMethod.WIRE.value, PaymentMethod.WIRE.label),
+    (PaymentMethod.OTHER.value, PaymentMethod.OTHER.label),
+)
+
+
+class ManualPaymentForm(forms.Form):
+    """A payment received outside the payment provider. The service re-checks every rule
+    (balance, date, note) under a row lock; the form checks shape only."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput)
+    method = forms.ChoiceField(choices=MANUAL_METHOD_CHOICES)
+    amount = forms.DecimalField(
+        min_value=Decimal("0.01"), max_value=RENT_MAX, max_digits=12, decimal_places=2
+    )
+    paid_on = forms.DateField(label="Received on", widget=forms.DateInput(attrs={"type": "date"}))
+    note = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 3}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required: what was received, and any reference staff need.",
+        error_messages={"required": "A note is required: say what was received."},
     )

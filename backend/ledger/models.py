@@ -441,6 +441,9 @@ class CollectionSchedule(GuardedModel):
     debit_day = models.SmallIntegerField(null=True, blank=True)
     amount = MoneyField()
     state = _choice(ScheduleState, default=ScheduleState.NONE)
+    #: Set when the lease changed under a provider schedule (rent, debit day, operator):
+    #: the schedule is never edited for an amount; staff pause and re-enable (PLAN-007 D5).
+    needs_review = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

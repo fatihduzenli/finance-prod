@@ -1,0 +1,911 @@
+"""Lease services (docs/qa/PLAN-007-leases-and-rent-run.md §6 rows 1, 3 and 4; D2 to D5).
+
+``payments.get_provider`` is replaced by a :class:`~payments.fake.FakeProvider`, or by
+the Stax adapter on a mock transport where the exact request body matters. Nothing
+opens a socket.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+import uuid
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from typing import Any
+
+import httpx
+import pytest
+from django.contrib.auth.models import User
+from django.db import connection
+from django.test import override_settings
+
+from accounts.roles import Role
+from ledger.models import (
+    AuditLog,
+    CollectionSchedule,
+    CollectionStatus,
+    Lease,
+    LeaseRentHistory,
+    Operator,
+    PaymentChannel,
+    ScheduleState,
+    Store,
+    StoreStatus,
+)
+from ledger.services import leases as service
+from ledger.services.leases import AutopayAction, LeaseRefused
+from payments.errors import CircuitOpen, ProviderRejected, ProviderUnavailable
+from payments.fake import FakeProvider
+from payments.models import ExternalRef
+from payments.provider import (
+    PAYMENT_METHOD_DELETED,
+    PaymentMethodRecord,
+    ScheduleInput,
+    ScheduleRecord,
+    ScheduleUpdate,
+)
+from payments.stax.adapter import DEFAULT_PAYMENT_PAGE_URL, StaxProvider
+from tests.auth_helpers import make_user
+from tests.stax_helpers import make_rig, sequence
+from tests.test_operator_sync import requires_postgresql
+
+pytestmark = pytest.mark.django_db
+
+D = Decimal
+#: 2026-10-01 15:00 UTC: the 1st's 12:00 debit time has passed.
+NOW = datetime(2026, 10, 1, 15, 0, tzinfo=UTC)
+CUSTOMER = "cus-1"
+BANK = "pm-bank-1"
+RENT = Decimal("1500.00")
+
+
+@pytest.fixture
+def fake(monkeypatch: pytest.MonkeyPatch) -> FakeProvider:
+    provider = FakeProvider()
+    monkeypatch.setattr("payments.get_provider", lambda: provider)
+    return provider
+
+
+@pytest.fixture
+def actor() -> User:
+    user, _ = make_user("admin-leases", Role.ADMIN)
+    return user
+
+
+def method(
+    external_id: str = BANK, kind: str = "bank", raw_status: str = ""
+) -> PaymentMethodRecord:
+    return PaymentMethodRecord(
+        external_id=external_id,
+        raw_status=raw_status,
+        fetched_at=NOW,
+        method=kind,
+        last_four="6789",
+        bank_type="checking",
+        nickname="Operating",
+    )
+
+
+def make_operator(
+    email: str | None = "ops@example.com", customer: str | None = CUSTOMER
+) -> Operator:
+    operator = Operator.objects.create(display_name="Northwind Stores", email=email)
+    if customer:
+        ExternalRef.objects.create(
+            entity_type="operator",
+            entity_id=operator.pk,
+            provider="stax_pay",
+            external_kind="customer",
+            external_id=customer,
+        )
+    return operator
+
+
+def lease_fields(**overrides: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "store": Store.objects.create(external_label="Store 0101", status=StoreStatus.ACTIVE),
+        "operator": None,
+        "debit_day": 15,
+        "second_debit_day": None,
+        "payment_channel": PaymentChannel.PROVIDER_ACH,
+        "started_on": date(2026, 1, 1),
+        "collection_status": CollectionStatus.ACTIVE,
+    }
+    if "operator" not in overrides:
+        values["operator"] = make_operator()
+    return {**values, **overrides}
+
+
+def make_lease(rent: Decimal = RENT, **overrides: Any) -> Lease:
+    lease, created = service.create_lease(
+        lease_fields(**overrides), rent=rent, creation_key=uuid.uuid4(), actor=None
+    )
+    assert created
+    return lease
+
+
+def edit(lease: Lease, rent: Decimal, starts: date | None = None, **changes: Any) -> Lease:
+    fields = {name: getattr(lease, name) for name in service.LEASE_FIELDS}
+    return service.update_lease(
+        lease.pk, {**fields, **changes}, rent=rent, rent_effective_from=starts, actor=None
+    )
+
+
+def enable(lease: Lease, method_id: str = BANK) -> service.AutopayOutcome:
+    return service.enable_autopay(lease.pk, method_id, actor=None, now=NOW)
+
+
+def creates(fake: FakeProvider) -> list[ScheduleInput]:
+    return [args[0] for name, args in fake.calls if name == "create_scheduled_invoice"]  # type: ignore[misc]
+
+
+def updates(fake: FakeProvider) -> list[tuple[str, ScheduleUpdate]]:
+    return [
+        (str(args[0]), args[1])  # type: ignore[misc]
+        for name, args in fake.calls
+        if name == "update_scheduled_invoice"
+    ]
+
+
+def schedule_ids(lease: Lease) -> list[str]:
+    return [service.schedule_ref(row) for row in service.live_schedules(lease)]
+
+
+def actions(lease: Lease) -> list[str]:
+    return list(
+        AuditLog.objects.filter(entity_type="lease", entity_id=str(lease.pk))
+        .order_by("id")
+        .values_list("action", flat=True)
+    )
+
+
+# --- Row 1: lease, rent history, split --------------------------------------------------------
+
+
+def test_create_writes_the_lease_its_first_rent_row_and_one_audit_row(actor: User) -> None:
+    fields = lease_fields()
+    lease, created = service.create_lease(
+        fields, rent=D("1500.00"), creation_key=uuid.uuid4(), actor=actor
+    )
+    assert created
+    [row] = LeaseRentHistory.objects.filter(lease=lease)
+    assert (row.amount, row.effective_from, row.effective_to) == (
+        D("1500.00"),
+        date(2026, 1, 1),
+        None,
+    )
+    [entry] = AuditLog.objects.filter(entity_id=str(lease.pk))
+    assert entry.action == "lease.created" and entry.actor == actor
+    assert entry.after is not None and entry.after["rent"] == "1500.00"
+
+
+def test_create_without_a_start_date_starts_the_rent_today() -> None:
+    lease, _ = service.create_lease(
+        lease_fields(started_on=None),
+        rent=D("10.00"),
+        creation_key=uuid.uuid4(),
+        actor=None,
+        today=date(2026, 10, 1),
+    )
+    assert service.current_rent(lease).effective_from == date(2026, 10, 1)  # type: ignore[union-attr]
+
+
+def test_a_replayed_creation_key_makes_one_lease() -> None:
+    fields = lease_fields()
+    key = uuid.uuid4()
+    first, created = service.create_lease(fields, rent=D("1500.00"), creation_key=key, actor=None)
+    again, created_again = service.create_lease(
+        {**fields, "debit_day": 3}, rent=D("9.99"), creation_key=key, actor=None
+    )
+    assert (created, created_again) == (True, False)
+    assert again.pk == first.pk and Lease.objects.count() == 1
+    assert LeaseRentHistory.objects.count() == 1
+    assert service.lease_for_creation_key(str(key)) == first
+    assert service.lease_for_creation_key("not-a-uuid") is None
+
+
+def test_a_rent_change_closes_the_open_row_the_day_before_and_opens_a_new_one() -> None:
+    lease = make_lease()
+    edit(lease, D("1650.00"), date(2026, 11, 1))
+    old, new = LeaseRentHistory.objects.filter(lease=lease).order_by("effective_from")
+    assert (old.amount, old.effective_from, old.effective_to) == (
+        D("1500.00"),
+        date(2026, 1, 1),
+        date(2026, 10, 31),
+    )
+    assert (new.amount, new.effective_from, new.effective_to) == (
+        D("1650.00"),
+        date(2026, 11, 1),
+        None,
+    )
+    entry = AuditLog.objects.filter(action="lease.updated").get()
+    assert (entry.before or {})["rent"] == "1500.00" and (entry.after or {})["rent"] == "1650.00"
+
+
+def test_an_unchanged_rent_writes_no_history_and_an_unchanged_lease_no_audit() -> None:
+    lease = make_lease()
+    edit(lease, D("1500.00"), date(2026, 11, 1))
+    assert LeaseRentHistory.objects.filter(lease=lease).count() == 1
+    assert actions(lease) == ["lease.created"]
+    edit(lease, D("1500.00"), debit_day=20)
+    assert actions(lease) == ["lease.created", "lease.updated"]
+
+
+@pytest.mark.parametrize("starts", [date(2026, 1, 1), date(2026, 1, 2), date(2025, 12, 1)])
+def test_a_rent_change_too_close_to_the_current_start_is_refused_and_nothing_changes(
+    starts: date,
+) -> None:
+    lease = make_lease()
+    with pytest.raises(LeaseRefused) as raised:
+        edit(lease, D("1650.00"), starts, debit_day=20)
+    assert raised.value.field == "rent_effective_from"
+    assert "2026-01-01" in str(raised.value)
+    lease.refresh_from_db()
+    assert lease.debit_day == 15
+    [row] = LeaseRentHistory.objects.filter(lease=lease)
+    assert (row.amount, row.effective_to) == (D("1500.00"), None)
+    assert actions(lease) == ["lease.created"]
+
+
+def test_the_rent_defaults_to_today_when_no_date_is_given() -> None:
+    lease = make_lease()
+    service.update_lease(
+        lease.pk,
+        {name: getattr(lease, name) for name in service.LEASE_FIELDS},
+        rent=D("1600.00"),
+        rent_effective_from=None,
+        actor=None,
+        today=date(2026, 10, 1),
+    )
+    assert service.current_rent(lease).effective_from == date(2026, 10, 1)  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(
+    ("rent", "twice", "expected"),
+    [
+        (D("1500.00"), False, (D("1500.00"),)),
+        (D("1500.00"), True, (D("750.00"), D("750.00"))),
+        (D("1000.01"), True, (D("500.01"), D("500.00"))),
+        (D("0.03"), True, (D("0.02"), D("0.01"))),
+        (D("12581.99"), True, (D("6291.00"), D("6290.99"))),
+    ],
+)
+def test_the_twice_monthly_split_gives_the_odd_cent_to_the_first_debit(
+    rent: Decimal, twice: bool, expected: tuple[Decimal, ...]
+) -> None:
+    amounts = service.debit_amounts(rent, twice_monthly=twice)
+    assert amounts == expected
+    assert sum(amounts, D(0)) == rent
+    assert all(
+        isinstance(amount, Decimal) and amount.as_tuple().exponent == -2 for amount in amounts
+    )
+
+
+def test_planned_debits_follow_the_debit_days() -> None:
+    lease = make_lease(D("1000.01"), debit_day=5, second_debit_day=20)
+    assert service.planned_debits(lease, D("1000.01")) == [
+        service.PlannedDebit(1, 5, D("500.01")),
+        service.PlannedDebit(2, 20, D("500.00")),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("day", "now", "expected"),
+    [
+        (15, datetime(2026, 10, 1, 15, 0, tzinfo=UTC), datetime(2026, 10, 15, 12, tzinfo=UTC)),
+        (1, datetime(2026, 10, 1, 11, 59, 59, tzinfo=UTC), datetime(2026, 10, 1, 12, tzinfo=UTC)),
+        (1, datetime(2026, 10, 1, 12, 0, 0, tzinfo=UTC), datetime(2026, 11, 1, 12, tzinfo=UTC)),
+        (28, datetime(2026, 12, 29, 0, 0, tzinfo=UTC), datetime(2027, 1, 28, 12, tzinfo=UTC)),
+        (31, datetime(2026, 2, 1, 0, 0, tzinfo=UTC), datetime(2026, 3, 31, 12, tzinfo=UTC)),
+    ],
+)
+def test_dtstart_is_the_next_occurrence_strictly_in_the_future(
+    day: int, now: datetime, expected: datetime
+) -> None:
+    assert service.next_debit_at(day, now) == expected
+    assert service.next_debit_at(day, now) > now
+    assert service.schedule_rule(day, now) == f"DTSTART={expected:%Y%m%dT%H%M%SZ};FREQ=MONTHLY"
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"))
+def test_the_large_debit_warning_starts_above_the_threshold() -> None:
+    assert not service.is_large_debit(D("2000.00"))
+    assert service.is_large_debit(D("2000.01"))
+
+
+# --- Row 3: enable autopay ----------------------------------------------------------------------
+
+
+def test_enable_creates_one_schedule_per_debit_day_with_the_planned_fields(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(D("1000.01"), debit_day=5, second_debit_day=20)
+    outcome = enable(lease)
+    assert outcome.action is AutopayAction.ENABLED
+    first, second = creates(fake)
+    for schedule, day, amount in ((first, 5, D("500.01")), (second, 20, D("500.00"))):
+        assert schedule.customer_external_id == CUSTOMER
+        assert schedule.payment_method_external_id == BANK
+        assert schedule.amounts.total == amount
+        assert schedule.rule == f"DTSTART=202610{day:02d}T120000Z;FREQ=MONTHLY"
+        assert schedule.email_notification is True
+        [line] = schedule.amounts.line_items
+        assert (line.description, line.quantity, line.unit_price) == (
+            "Rent, store Store 0101",
+            D(1),
+            amount,
+        )
+    rows = service.live_schedules(lease)
+    assert [(r.seq, r.debit_day, r.amount, r.state) for r in rows] == [
+        (1, 5, D("500.01"), ScheduleState.ACTIVE),
+        (2, 20, D("500.00"), ScheduleState.ACTIVE),
+    ]
+    assert len(set(schedule_ids(lease))) == 2
+    assert actions(lease).count("lease.autopay_enabled") == 2
+
+
+def test_a_monthly_lease_gets_one_schedule_for_the_whole_rent(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(D("1500.00"))
+    enable(lease)
+    [schedule] = creates(fake)
+    assert schedule.amounts.total == D("1500.00")
+
+
+def test_no_email_means_no_email_notification(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(operator=make_operator(email=None))
+    enable(lease)
+    [schedule] = creates(fake)
+    assert schedule.email_notification is False
+    assert service.NO_EMAIL in service.enrolment_notes(lease)
+
+
+def test_a_second_click_creates_nothing_and_calls_nothing(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(debit_day=5, second_debit_day=20)
+    enable(lease)
+    calls = len(fake.calls)
+    outcome = enable(lease)
+    assert outcome.action is AutopayAction.ALREADY
+    assert outcome.message == service.ALREADY_ENABLED
+    assert len(fake.calls) == calls
+    assert CollectionSchedule.objects.filter(lease=lease).count() == 2
+    assert ExternalRef.objects.filter(external_kind="schedule").count() == 2
+
+
+def test_the_schedule_create_body_is_exactly_the_planned_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = make_rig(
+        sequence(
+            [
+                httpx.Response(200, json=[{"id": BANK, "method": "bank", "customer_id": CUSTOMER}]),
+                httpx.Response(200, json={"id": "sch-1", "active": True}),
+            ]
+        )
+    )
+    monkeypatch.setattr("payments.get_provider", lambda: StaxProvider(rig.transport))
+    lease = make_lease(D("1000.01"), debit_day=5, second_debit_day=None)
+    with override_settings(STAX_CALLER="worker"):
+        outcome = enable(lease)
+    assert outcome.action is AutopayAction.ENABLED
+    listing, create = rig.recorder.requests
+    assert (listing.method, listing.url.path) == ("GET", "/customer/cus-1/payment-method")
+    assert (create.method, create.url.path) == ("POST", "/invoice/schedule/")
+    assert b'"total":1000.01' in create.content
+    assert json.loads(create.content, parse_float=Decimal) == {
+        "url": DEFAULT_PAYMENT_PAGE_URL,
+        "total": D("1000.01"),
+        "rule": "DTSTART=20261005T120000Z;FREQ=MONTHLY",
+        "customer_id": CUSTOMER,
+        "payment_method_id": BANK,
+        "email_notification": True,
+        "meta": {
+            "lineItems": [{"item": "Rent, store Store 0101", "quantity": 1, "price": D("1000.01")}]
+        },
+    }
+    assert schedule_ids(lease) == ["sch-1"]
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        (method("pm-card-1", kind="card"), service.CARD_REFUSED),
+        (method(BANK, raw_status=PAYMENT_METHOD_DELETED), service.METHOD_DELETED),
+        (method("pm-other", kind="paypal"), service.CARD_REFUSED),
+    ],
+    ids=["card", "deleted", "unknown-kind"],
+)
+def test_a_card_or_unusable_method_is_refused_even_when_posted_directly(
+    fake: FakeProvider, record: PaymentMethodRecord, message: str
+) -> None:
+    fake.add_payment_method(CUSTOMER, record)
+    lease = make_lease()
+    outcome = enable(lease, record.external_id)
+    assert (outcome.action, outcome.message) == (AutopayAction.REFUSED, message)
+    assert creates(fake) == []
+    assert CollectionSchedule.objects.count() == 0
+    entry = AuditLog.objects.filter(action="lease.autopay_refused").get()
+    assert record.external_id not in json.dumps(entry.after)
+
+
+def test_a_method_of_another_customer_is_refused(fake: FakeProvider) -> None:
+    fake.add_payment_method("cus-2", method("pm-of-cus-2"))
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    outcome = enable(lease, "pm-of-cus-2")
+    assert (outcome.action, outcome.message) == (AutopayAction.REFUSED, service.METHOD_NOT_FOUND)
+    assert creates(fake) == []
+
+
+@pytest.mark.parametrize("bad", ["", "pm 1", "../pm", "pm/1", "x" * 256])
+def test_a_malformed_method_id_is_refused_before_any_call(fake: FakeProvider, bad: str) -> None:
+    lease = make_lease()
+    outcome = enable(lease, bad)
+    assert (outcome.action, outcome.message) == (AutopayAction.REFUSED, service.CHOOSE_METHOD)
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"payment_channel": PaymentChannel.ZELLE}, service.NOT_PROVIDER_CHANNEL),
+        ({"collection_status": CollectionStatus.PAUSED}, service.NOT_ACTIVE),
+        ({"debit_day": 29}, service.DAY_NOT_SCHEDULABLE),
+        ({"debit_day": 10, "second_debit_day": 31}, service.DAY_NOT_SCHEDULABLE),
+        (
+            {"operator": None, "collection_status": CollectionStatus.PROSPECTIVE},
+            service.NO_OPERATOR,
+        ),
+    ],
+)
+def test_local_blockers_refuse_before_any_call(
+    fake: FakeProvider, overrides: dict[str, Any], message: str
+) -> None:
+    lease = make_lease(**overrides)
+    assert message in service.autopay_blockers(lease)
+    outcome = enable(lease)
+    assert outcome.action is AutopayAction.REFUSED
+    assert fake.calls == []
+
+
+def test_an_operator_without_a_stax_customer_is_a_blocker(fake: FakeProvider) -> None:
+    lease = make_lease(operator=make_operator(customer=None))
+    assert service.NO_PROVIDER_CUSTOMER in service.autopay_blockers(lease)
+    assert enable(lease).message == service.NO_PROVIDER_CUSTOMER
+    assert service.payment_method_choices(lease).error == service.NO_PROVIDER_CUSTOMER
+    assert fake.calls == []
+
+
+def test_an_archived_operator_is_a_blocker(fake: FakeProvider) -> None:
+    operator = make_operator()
+    lease = make_lease(operator=operator)
+    Operator.objects.filter(pk=operator.pk).update(archived_at=NOW)
+    lease.refresh_from_db()
+    assert enable(lease).message == service.OPERATOR_ARCHIVED
+    assert fake.calls == []
+
+
+def test_a_provider_rejection_leaves_the_lease_unchanged_and_names_the_fields(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    before = Lease.objects.filter(pk=lease.pk).values().get()
+    fake.fail_next(
+        "create_scheduled_invoice",
+        ProviderRejected(422, "CANARY-provider-text", error_fields=("payment_method_id",)),
+    )
+    outcome = enable(lease)
+    assert outcome.action is AutopayAction.FAILED
+    assert outcome.fields == ("payment_method_id",)
+    assert outcome.text == (
+        "The payment provider refused the request. Fields the provider rejected: payment_method_id."
+    )
+    assert "CANARY" not in outcome.text
+    assert Lease.objects.filter(pk=lease.pk).values().get() == before
+    [row] = CollectionSchedule.objects.filter(lease=lease)
+    assert row.state == ScheduleState.FAILED
+    assert schedule_ids(lease) == [""]
+    entry = AuditLog.objects.filter(action="lease.autopay_failed").get()
+    assert entry.after == {"seq": 1, "failure": "ProviderRejected", "fields": ["payment_method_id"]}
+
+
+def test_a_failed_method_list_creates_nothing(fake: FakeProvider) -> None:
+    lease = make_lease()
+    fake.fail_next("list_payment_methods", CircuitOpen("x"))
+    outcome = enable(lease)
+    assert (outcome.action, outcome.failure) == (AutopayAction.FAILED, "CircuitOpen")
+    assert outcome.message == service.PROVIDER_FAILED
+    assert creates(fake) == [] and CollectionSchedule.objects.count() == 0
+
+
+def test_the_second_debit_failing_keeps_the_first_and_a_retry_creates_only_the_second(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(debit_day=5, second_debit_day=20)
+
+    original = fake.create_scheduled_invoice
+    attempts: list[int] = []
+
+    def create(schedule: ScheduleInput) -> ScheduleRecord:
+        attempts.append(1)
+        if len(attempts) == 2:
+            raise ProviderRejected(422, error_fields=("rule",))
+        return original(schedule)
+
+    fake.create_scheduled_invoice = create  # type: ignore[method-assign]
+    assert enable(lease).action is AutopayAction.FAILED
+    first, second = service.live_schedules(lease)
+    assert (first.state, second.state) == (ScheduleState.ACTIVE, ScheduleState.FAILED)
+    assert service.schedule_ref(first) and not service.schedule_ref(second)
+
+    assert enable(lease).action is AutopayAction.ENABLED
+    assert len(attempts) == 3
+    assert all(service.schedule_ref(row) for row in service.live_schedules(lease))
+    assert CollectionSchedule.objects.filter(lease=lease).count() == 2
+
+
+def _provider_schedule(fake: FakeProvider, external_id: str, day: int, total: Decimal) -> None:
+    fake.schedules[external_id] = ScheduleRecord(
+        external_id=external_id,
+        raw_status="",
+        fetched_at=NOW,
+        customer_external_id=CUSTOMER,
+        total=total,
+        rule=f"DTSTART=202610{day:02d}T120000Z;FREQ=MONTHLY",
+        active=True,
+    )
+
+
+def test_a_retry_after_an_unanswered_create_adopts_the_schedule_it_made(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    fake.fail_next("create_scheduled_invoice", ProviderUnavailable(None))
+    assert enable(lease).action is AutopayAction.FAILED
+    # The unanswered request did reach the provider and made the schedule.
+    _provider_schedule(fake, "sch-made", 15, D("1500.00"))
+    _provider_schedule(fake, "sch-other-day", 16, D("1500.00"))
+    _provider_schedule(fake, "sch-other-amount", 15, D("1499.99"))
+
+    outcome = enable(lease)
+    assert outcome.action is AutopayAction.ENABLED
+    assert len(creates(fake)) == 1  # only the first, failed attempt
+    assert schedule_ids(lease) == ["sch-made"]
+    assert "lease.autopay_adopted" in actions(lease)
+
+
+def test_several_matching_provider_schedules_are_never_guessed(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    fake.fail_next("create_scheduled_invoice", ProviderUnavailable(None))
+    enable(lease)
+    _provider_schedule(fake, "sch-a", 15, D("1500.00"))
+    _provider_schedule(fake, "sch-b", 15, D("1500.00"))
+    outcome = enable(lease)
+    assert (outcome.action, outcome.message) == (AutopayAction.REFUSED, service.SEVERAL_MATCHES)
+    assert len(creates(fake)) == 1
+    [row] = service.live_schedules(lease)
+    assert (row.state, row.needs_review) == (ScheduleState.FAILED, True)
+
+
+# --- Row 4: pause and resume ---------------------------------------------------------------------
+
+
+def test_pause_sends_only_active_false(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(debit_day=5, second_debit_day=20)
+    enable(lease)
+    outcome = service.pause_autopay(lease.pk, actor=None)
+    assert outcome.action is AutopayAction.PAUSED
+    sent = updates(fake)
+    assert [update for _, update in sent] == [ScheduleUpdate(active=False)] * 2
+    assert sorted(ref for ref, _ in sent) == sorted(schedule_ids(lease))
+    assert {row.state for row in service.live_schedules(lease)} == {ScheduleState.PAUSED}
+    assert actions(lease).count("lease.autopay_paused") == 2
+
+    assert service.pause_autopay(lease.pk, actor=None).action is AutopayAction.ALREADY
+    assert len(updates(fake)) == 2
+
+
+def test_resume_sends_active_true_and_a_new_future_dtstart_only(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(debit_day=5, second_debit_day=20)
+    enable(lease)
+    service.pause_autopay(lease.pk, actor=None)
+    later = datetime(2026, 11, 10, 9, 0, tzinfo=UTC)
+    outcome = service.resume_autopay(lease.pk, actor=None, now=later)
+    assert outcome.action is AutopayAction.RESUMED
+    resumed = [update for _, update in updates(fake)][2:]
+    assert resumed == [
+        ScheduleUpdate(active=True, rule="DTSTART=20261205T120000Z;FREQ=MONTHLY"),
+        ScheduleUpdate(active=True, rule="DTSTART=20261120T120000Z;FREQ=MONTHLY"),
+    ]
+    assert {row.state for row in service.live_schedules(lease)} == {ScheduleState.ACTIVE}
+    assert service.resume_autopay(lease.pk, actor=None).action is AutopayAction.ALREADY
+
+
+def test_pause_and_resume_bodies_as_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeProvider()
+    fake.add_payment_method(CUSTOMER, method())
+    monkeypatch.setattr("payments.get_provider", lambda: fake)
+    lease = make_lease()
+    enable(lease)
+    [ref] = schedule_ids(lease)
+    rig = make_rig(lambda request: httpx.Response(200, json={"id": ref}))
+    monkeypatch.setattr("payments.get_provider", lambda: StaxProvider(rig.transport))
+    with override_settings(STAX_CALLER="worker"):
+        service.pause_autopay(lease.pk, actor=None)
+        service.resume_autopay(lease.pk, actor=None, now=NOW)
+    pause, resume = rig.recorder.requests
+    assert (pause.method, pause.url.path) == ("PUT", f"/invoice/schedule/{ref}")
+    assert json.loads(pause.content) == {"active": False}
+    assert json.loads(resume.content) == {
+        "active": True,
+        "rule": "DTSTART=20261015T120000Z;FREQ=MONTHLY",
+    }
+
+
+def test_a_pause_failure_keeps_the_schedule_active_and_names_the_fields(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    fake.fail_next("update_scheduled_invoice", ProviderRejected(422, error_fields=("active",)))
+    outcome = service.pause_autopay(lease.pk, actor=None)
+    assert (outcome.action, outcome.fields) == (AutopayAction.FAILED, ("active",))
+    [row] = service.live_schedules(lease)
+    assert row.state == ScheduleState.ACTIVE
+    assert "lease.autopay_pause_failed" in actions(lease)
+
+
+# --- D5: changes under an active schedule --------------------------------------------------------
+
+
+def test_a_rent_change_flags_the_schedule_and_it_is_never_edited_for_an_amount(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    [old_ref] = schedule_ids(lease)
+    edit(lease, D("1650.00"), date(2026, 10, 1))
+    [row] = service.live_schedules(lease)
+    assert (row.needs_review, row.amount) == (True, D("1500.00"))
+    assert service.schedule_review_message(lease, row, date(2026, 10, 1)) == (
+        service.SCHEDULE_DIFFERS
+    )
+
+    assert enable(lease).message == service.PAUSE_FIRST
+    service.pause_autopay(lease.pk, actor=None)
+    assert service.resume_autopay(lease.pk, actor=None).message == service.RESUME_REFUSED
+
+    assert enable(lease).action is AutopayAction.ENABLED
+    old, new = CollectionSchedule.objects.filter(lease=lease).order_by("created_at")
+    assert (old.state, old.amount) == (ScheduleState.ENDED, D("1500.00"))
+    assert (new.state, new.amount, new.needs_review) == (ScheduleState.ACTIVE, D("1650.00"), False)
+    assert schedule_ids(lease) != [old_ref]
+    assert [schedule.amounts.total for schedule in creates(fake)] == [D("1500.00"), D("1650.00")]
+    # Only the pause touched the old schedule, and no update carries an amount.
+    assert updates(fake) == [(old_ref, ScheduleUpdate(active=False))]
+    assert "lease.autopay_schedule_ended" in actions(lease)
+
+
+# --- QA owner's decision on future-dated rent (2026-10-01) ---------------------------------------
+
+
+def test_current_rent_is_the_row_in_effect_today_and_a_later_row_is_upcoming() -> None:
+    lease = make_lease()
+    edit(lease, D("1650.00"), date(2026, 11, 1))
+    today = date(2026, 10, 1)
+    assert service.current_rent(lease, today).amount == D("1500.00")  # type: ignore[union-attr]
+    assert service.upcoming_rent(lease, today).amount == D("1650.00")  # type: ignore[union-attr]
+    assert service.open_rent(lease).amount == D("1650.00")  # type: ignore[union-attr]
+    # The day before, the day of, and after the change.
+    assert service.rent_on(lease, date(2026, 10, 31)).amount == D("1500.00")  # type: ignore[union-attr]
+    assert service.current_rent(lease, date(2026, 11, 1)).amount == D("1650.00")  # type: ignore[union-attr]
+    assert service.upcoming_rent(lease, date(2026, 11, 1)) is None
+    assert service.rent_on(lease, date(2025, 12, 31)) is None
+
+
+def test_a_future_rent_change_flags_with_the_dated_message_and_early_re_enabling_keeps_it(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    edit(lease, D("1650.00"), date(2026, 11, 1))
+    [row] = service.live_schedules(lease)
+    expected = service.RENT_CHANGES.format(date="2026-11-01")
+    assert expected == (
+        "Rent changes on 2026-11-01; pause and re-enable autopay on or after that date."
+    )
+    assert row.needs_review
+    assert service.schedule_review_message(lease, row, date(2026, 10, 1)) == expected
+
+    # Re-enabled before the change: the first DTSTART is 2026-10-15, when 1500.00 is in
+    # effect, and the new schedule is flagged at once with the same dated message.
+    service.pause_autopay(lease.pk, actor=None)
+    assert enable(lease).action is AutopayAction.ENABLED
+    [early] = service.live_schedules(lease)
+    assert (early.amount, early.needs_review) == (D("1500.00"), True)
+    assert service.schedule_review_message(lease, early, date(2026, 10, 1)) == expected
+    assert creates(fake)[-1].rule == "DTSTART=20261015T120000Z;FREQ=MONTHLY"
+    assert enable(lease).message == service.PAUSE_FIRST
+
+    # On or after the change date: pause and enable again; the new rent, no flag.
+    service.pause_autopay(lease.pk, actor=None)
+    after = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
+    outcome = service.enable_autopay(lease.pk, BANK, actor=None, now=after)
+    assert outcome.action is AutopayAction.ENABLED
+    [late] = service.live_schedules(lease)
+    assert (late.amount, late.needs_review) == (D("1650.00"), False)
+    assert service.schedule_review_message(lease, late, date(2026, 11, 2)) == ""
+    assert [schedule.amounts.total for schedule in creates(fake)] == [
+        D("1500.00"),
+        D("1500.00"),
+        D("1650.00"),
+    ]
+
+
+def test_a_change_effective_before_the_first_dtstart_is_enrolled_at_the_new_rent(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    edit(lease, D("1650.00"), date(2026, 10, 10))  # after today, before 2026-10-15
+    assert enable(lease).action is AutopayAction.ENABLED
+    [row] = service.live_schedules(lease)
+    assert (row.amount, row.needs_review) == (D("1650.00"), False)
+
+
+def test_a_twice_monthly_lease_splits_the_rent_in_effect_on_each_first_debit(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(debit_day=5, second_debit_day=20)
+    edit(lease, D("1000.01"), date(2026, 11, 1))
+    # NOW is 2026-10-01, so the first debits are 2026-10-05 and 2026-10-20 at 1500.00.
+    assert enable(lease).action is AutopayAction.ENABLED
+    first, second = service.live_schedules(lease)
+    assert (first.amount, second.amount) == (D("750.00"), D("750.00"))
+    assert first.needs_review and second.needs_review
+
+
+def test_no_rent_in_effect_on_the_first_debit_is_refused_without_a_provider_call(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(started_on=date(2027, 1, 1))
+    outcome = enable(lease)
+    assert (outcome.action, outcome.message) == (
+        AutopayAction.REFUSED,
+        service.RENT_NOT_STARTED.format(date="2026-10-15"),
+    )
+    assert fake.calls == []
+    assert service.live_schedules(lease) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"debit_day": 16}, {"second_debit_day": 25}, "operator"],
+    ids=["day", "second-day", "operator"],
+)
+def test_a_day_or_operator_change_flags_the_schedule(fake: FakeProvider, change: Any) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    if change == "operator":
+        change = {"operator": make_operator(email="other@example.com", customer="cus-9")}
+    edit(lease, D("1500.00"), **change)
+    [row] = service.live_schedules(lease)
+    assert row.needs_review
+
+
+def test_an_unrelated_edit_does_not_flag_the_schedule(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    edit(lease, D("1500.00"), started_on=date(2026, 2, 1))
+    [row] = service.live_schedules(lease)
+    assert not row.needs_review
+
+
+def test_payment_method_choices_reads_the_list_once(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    fake.add_payment_method(CUSTOMER, method("pm-card-1", kind="card"))
+    lease = make_lease()
+    choices = service.payment_method_choices(lease)
+    assert [m.external_id for m in choices.methods] == [BANK, "pm-card-1"]
+    assert choices.has_bank and choices.error == ""
+    assert [name for name, _ in fake.calls] == ["list_payment_methods"]
+
+
+def test_payment_method_choices_reports_a_failure_by_fields_only(fake: FakeProvider) -> None:
+    fake.fail_next(
+        "list_payment_methods", ProviderRejected(404, "CANARY", error_fields=("customer",))
+    )
+    choices = service.payment_method_choices(make_lease())
+    assert (choices.methods, choices.fields) == ((), ("customer",))
+    assert choices.error == service.PROVIDER_REJECTED
+
+
+def test_the_service_module_uses_no_float() -> None:
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(service))
+    assert not any(
+        (isinstance(node, ast.Constant) and isinstance(node.value, float))
+        or (isinstance(node, ast.Name) and node.id == "float")
+        for node in ast.walk(tree)
+    )
+
+
+# --- Concurrency (PostgreSQL row locks) ----------------------------------------------------------
+
+
+def _race(*targets: Any) -> list[Any]:
+    """Run each target in its own thread, released together; their results in order."""
+    barrier = threading.Barrier(len(targets))
+    results: list[Any] = [None] * len(targets)
+
+    def run(index: int, target: Any) -> None:
+        try:
+            barrier.wait()
+            results[index] = target()
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=run, args=pair) for pair in enumerate(targets)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return results
+
+
+@requires_postgresql
+@pytest.mark.django_db(transaction=True)
+def test_two_concurrent_enable_clicks_create_one_schedule_per_debit_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SlowFake(FakeProvider):
+        def create_scheduled_invoice(self, schedule: ScheduleInput) -> ScheduleRecord:
+            threading.Event().wait(0.3)
+            return super().create_scheduled_invoice(schedule)
+
+    provider = SlowFake()
+    provider.add_payment_method(CUSTOMER, method())
+    monkeypatch.setattr("payments.get_provider", lambda: provider)
+    lease = make_lease(debit_day=5, second_debit_day=20)
+
+    outcomes = _race(lambda: enable(lease), lambda: enable(lease))
+
+    assert sorted(outcome.action for outcome in outcomes) == sorted(
+        [AutopayAction.ENABLED, AutopayAction.ALREADY]
+    )
+    assert len(creates(provider)) == 2
+    assert CollectionSchedule.objects.filter(lease=lease).count() == 2
+    assert ExternalRef.objects.filter(external_kind="schedule").count() == 2
+
+
+@requires_postgresql
+@pytest.mark.django_db(transaction=True)
+def test_two_concurrent_creates_with_one_key_make_one_lease() -> None:
+    fields = lease_fields()
+    key = uuid.uuid4()
+
+    def create() -> bool:
+        return service.create_lease(fields, rent=RENT, creation_key=key, actor=None)[1]
+
+    assert sorted(_race(create, create)) == [False, True]
+    assert Lease.objects.count() == 1
+    assert LeaseRentHistory.objects.count() == 1

@@ -1,0 +1,82 @@
+{% extends "finance/base.html" %}
+{% block title %}Rent run {{ run.day|date:"Y-m-d" }}{% endblock %}
+{% block content %}
+  <h1>Rent run {{ run.day|date:"Y-m-d" }}</h1>
+
+  {% if not health.ok %}
+    <ul class="messages" id="provider-banner">
+      {% for text in health.messages %}<li class="error" role="alert">{{ text }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+
+  <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. The payment provider's schedules generate the invoices; "Match invoices" links them to these charges. Nothing here debits anyone.</p>
+
+  {% if can_run %}
+    <div class="actions">
+      <form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">
+        {% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button>
+      </form>
+      <form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">
+        {% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok %} disabled{% endif %}>Match invoices</button>
+      </form>
+    </div>
+  {% endif %}
+
+  <h2>Due today</h2>
+  <table id="due-today">
+    <thead><tr><th>Store</th><th>Operator</th><th>Debit</th><th>Channel</th><th>Amount</th><th>This month</th><th>Last month</th></tr></thead>
+    <tbody>
+      {% for item in run.due %}
+        <tr>
+          <td><a href="{% url 'ledger:leases:detail' pk=item.lease.pk %}">{{ item.lease.store.external_label }}</a></td>
+          <td>{{ item.lease.operator.display_name|default:"—" }}</td>
+          <td>{{ item.seq }} (day {{ item.debit_day }})</td>
+          <td>{{ item.lease.get_payment_channel_display }}</td>
+          <td>${{ item.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}</td>
+          <td>{% if item.charge %}<a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{{ item.charge.get_status_display }}</a>{% if item.charge.needs_review %} <span class="badge">Needs review</span>{% endif %}{% else %}<span class="muted">Not created</span>{% endif %}</td>
+          <td>{% if item.last_month %}<a href="{% url 'ledger:charges:detail' pk=item.last_month.pk %}">{{ item.last_month.get_status_display }}</a>, balance ${{ item.last_month.balance }}{% else %}<span class="muted">No charge</span>{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7" class="muted">No debit is due today.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" id="large-debit-note">"Large debit" marks an amount above ${{ threshold }}. That amount is a placeholder until the payment provider states its per-transaction limit (Q25).</p>
+
+  <h2>Skipped today</h2>
+  <table id="skipped-today">
+    <thead><tr><th>Store</th><th>Status</th><th>Channel</th><th>Reason</th></tr></thead>
+    <tbody>
+      {% for item in run.skipped %}
+        <tr>
+          <td><a href="{% url 'ledger:leases:detail' pk=item.lease.pk %}">{{ item.lease.store.external_label }}</a></td>
+          <td>{{ item.lease.get_collection_status_display }}</td>
+          <td>{{ item.lease.get_payment_channel_display }}</td>
+          <td>{{ item.reason }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">None.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Insurance due in the next {{ insurance_days }} days</h2>
+  <table id="insurance-due">
+    <thead><tr><th>Due</th><th>Store</th><th>Policy year</th><th>Premium</th><th>Charge</th></tr></thead>
+    <tbody>
+      {% for item in insurance_due %}
+        <tr>
+          <td>{{ item.due_on|date:"Y-m-d" }}</td>
+          <td><a href="{% url 'ledger:leases:detail' pk=item.lease.pk %}">{{ item.lease.store.external_label }}</a></td>
+          <td>{{ item.policy_year }}</td>
+          <td>{% if item.amount is not None %}${{ item.amount }}{% else %}<strong>Premium missing</strong>{% endif %}</td>
+          <td>{% if item.charge %}Created{% if item.charge.needs_premium %}, needs premium{% endif %}{% else %}<span class="muted">Not yet created</span>{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted">No insurance is due in the next {{ insurance_days }} days.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">Insurance charges are created by the <code>generate_insurance_charges</code> command on or after each anniversary. Insurance autopay is a later step.</p>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

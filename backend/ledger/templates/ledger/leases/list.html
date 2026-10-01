@@ -1,0 +1,32 @@
+{% extends "finance/base.html" %}
+{% block title %}Leases{% endblock %}
+{% block content %}
+  <h1>Leases</h1>
+  {% if can_create %}<p class="actions"><a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">New lease</a></p>{% endif %}
+  <table>
+    <thead>
+      <tr><th>Store</th><th>Operator</th><th>Rent</th><th>Debit days</th><th>Channel</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {% for lease in page %}
+        <tr>
+          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">{{ lease.store.external_label }}</a>{% if lease.needs_review %} <span class="badge">Needs review</span>{% endif %}</td>
+          <td>{{ lease.operator.display_name|default:"—" }}</td>
+          <td>{% with row=lease.rent_now|first %}{% if row %}${{ row.amount }}{% else %}—{% endif %}{% endwith %}</td>
+          <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>
+          <td>{{ lease.get_payment_channel_display }}</td>
+          <td>{{ lease.get_collection_status_display }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">No leases.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if page.paginator.num_pages > 1 %}
+    <p class="actions">
+      {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} leases)</span>
+      {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+    </p>
+  {% endif %}
+{% endblock %}

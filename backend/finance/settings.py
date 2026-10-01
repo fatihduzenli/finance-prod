@@ -46,6 +46,9 @@ STAX_PAY_INVOICE_ENABLED = _config.stax_pay_invoice_enabled
 STAX_EXPECTED_MERCHANT_ID = _config.stax_expected_merchant_id
 #: "stax" (default) or "fake", the in-memory provider, local only (PLAN-006 §4.2).
 STAX_PROVIDER = _config.stax_provider
+#: A Decimal; debits above it are flagged on the enrolment screen (PLAN-007 §4.3).
+#: A placeholder until Stax states the per-transaction limit (SCOPE Q25).
+LARGE_DEBIT_WARNING_AMOUNT = _config.large_debit_warning_amount
 APP_BASE_URL = _config.app_base_url
 REDIS_URL = _config.redis_url
 

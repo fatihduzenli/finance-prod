@@ -1,0 +1,62 @@
+{% extends "finance/base.html" %}
+{% block title %}Autopay for {{ lease.store.external_label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a></p>
+  <h1>Enable autopay</h1>
+  <p>One payment provider schedule is created per debit day. It debits the chosen bank method every month, starting on the date below. Card methods are never used.</p>
+
+  {% if blockers %}
+    <p><strong>Autopay cannot be enabled yet:</strong></p>
+    <ul id="enrolment-blockers">{% for text in blockers %}<li>{{ text }}</li>{% endfor %}</ul>
+  {% else %}
+    {% if notes_info %}<ul id="enrolment-notes" class="muted">{% for text in notes_info %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}
+    <table id="debits">
+      <thead><tr><th>Debit</th><th>Day</th><th>Amount per debit</th><th>First debit (DTSTART)</th></tr></thead>
+      <tbody>
+        {% for item in debits %}
+          <tr>
+            <td>{{ item.debit.seq }}</td>
+            <td>{{ item.debit.debit_day }}</td>
+            <td>${{ item.debit.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}</td>
+            <td>{{ item.starts|date:"Y-m-d H:i" }} UTC{% if item.changes_message %}<br><strong class="schedule-review">{{ item.changes_message }}</strong>{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="muted">No rent is in effect on the first debit date.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if any_large %}
+      <p id="large-debit-warning" class="messages"><span class="warning" style="display:block;padding:.6rem .8rem;">A debit is above the large-debit warning amount. That amount is a placeholder until the payment provider states its per-transaction limit (Q25).</span></p>
+    {% endif %}
+
+    {% if choices.error %}
+      <p id="methods-error"><strong>{{ choices.error }}</strong>{% if choices.fields %} Fields the provider rejected: {{ choices.fields|join:", " }}.{% endif %}</p>
+    {% elif not choices.has_bank %}
+      <p id="no-bank-method"><strong>{{ no_bank_message }}</strong> Enter the operator's bank method in the payment provider's dashboard first.</p>
+    {% endif %}
+
+    {% if choices.methods %}
+      <form method="post" class="js-single-submit" autocomplete="off">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {{ form.payment_method_id.errors }}
+        <table id="payment-methods">
+          <thead><tr><th></th><th>Type</th><th>Account type</th><th>Last four</th><th>Nickname</th></tr></thead>
+          <tbody>
+            {% for method in choices.methods %}
+              <tr>
+                <td>{% if method.is_usable_bank %}<input type="radio" name="payment_method_id" value="{{ method.external_id }}" id="method-{{ forloop.counter }}"{% if method.external_id == linked_method %} checked{% endif %}>{% else %}<input type="radio" disabled aria-label="Not selectable">{% endif %}</td>
+                <td>{% if method.is_usable_bank %}<label for="method-{{ forloop.counter }}" style="margin:0;font-weight:normal;">Bank</label>{% elif method.raw_status %}Deleted, not selectable{% elif method.method == "card" %}Card, not allowed{% else %}Not a bank method, not allowed{% endif %}{% if method.is_default %} <span class="badge">Default</span>{% endif %}</td>
+                <td>{{ method.bank_type|default:"—" }}</td>
+                <td>{{ method.last_four|default:"—" }}</td>
+                <td>{{ method.nickname|default:"—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if choices.has_bank %}<p class="actions"><button class="btn btn-primary" type="submit" id="enable-autopay">Enable autopay</button></p>{% endif %}
+      </form>
+    {% endif %}
+  {% endif %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

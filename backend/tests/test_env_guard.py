@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
+from django.conf import settings
 
 from finance.env_guard import (
     REQUIRED_STAX_API_BASE_URL,
@@ -245,3 +248,34 @@ def test_all_problems_are_reported_together() -> None:
 
 def test_error_is_an_environment_error() -> None:
     assert issubclass(EnvGuardError, EnvironmentError)
+
+
+# --- LARGE_DEBIT_WARNING_AMOUNT (PLAN-007 §4.3) ------------------------------------------
+
+
+def test_large_debit_warning_amount_defaults_to_2000() -> None:
+    assert validate(LOCAL_ENV).large_debit_warning_amount == Decimal("2000.00")
+    assert validate(_env(LOCAL_ENV, LARGE_DEBIT_WARNING_AMOUNT="")).large_debit_warning_amount == (
+        Decimal("2000.00")
+    )
+
+
+@pytest.mark.parametrize("value", ["1500", "1500.5", "0.01", "99999.99"])
+def test_large_debit_warning_amount_accepts_a_positive_amount(value: str) -> None:
+    config = validate(_env(LOCAL_ENV, LARGE_DEBIT_WARNING_AMOUNT=value))
+    assert config.large_debit_warning_amount == Decimal(value)
+    assert isinstance(config.large_debit_warning_amount, Decimal)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "NaN", "Infinity", "10.001", FAKE_VALUE])
+def test_large_debit_warning_amount_refuses_anything_else_without_echoing_it(value: str) -> None:
+    with pytest.raises(EnvGuardError) as raised:
+        validate(_env(LOCAL_ENV, LARGE_DEBIT_WARNING_AMOUNT=value))
+    message = str(raised.value)
+    assert "LARGE_DEBIT_WARNING_AMOUNT" in message
+    assert FAKE_VALUE not in message
+
+
+def test_settings_expose_the_threshold_as_a_decimal() -> None:
+    assert isinstance(settings.LARGE_DEBIT_WARNING_AMOUNT, Decimal)
+    assert settings.LARGE_DEBIT_WARNING_AMOUNT > 0

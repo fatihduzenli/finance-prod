@@ -28,6 +28,11 @@ Summary = Mapping[str, str | int | bool | None | Decimal | Mapping[str, str | No
 #: Offline payment methods (TODO-VERIFY-016 decides whether more exist).
 OfflineMethod = Literal["cash", "check"]
 
+#: ``PaymentMethodRecord.method`` of a bank account, the only kind this app may use.
+METHOD_BANK = "bank"
+#: ``PaymentMethodRecord.raw_status`` of a method the provider marks deleted or purged.
+PAYMENT_METHOD_DELETED = "deleted"
+
 
 def require_money(name: str, value: object) -> None:
     """Raise :class:`ValidationFailed` unless ``value`` is a finite ``Decimal``."""
@@ -243,6 +248,31 @@ class ScheduleRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class PaymentMethodRecord:
+    """A stored payment method, reduced to what staff may see (PLAN-007 D1, Rule 1).
+
+    Nothing else of the provider's object is kept: no holder name, bank name, expiry,
+    account or routing data, and no summary. ``method`` is the provider's string
+    (``bank`` or ``card``); only :data:`METHOD_BANK` may ever be used. ``raw_status`` is
+    :data:`PAYMENT_METHOD_DELETED` when the provider marks the method deleted or purged,
+    and empty otherwise (the object has no status field).
+    """
+
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    method: str = ""
+    last_four: str = ""
+    bank_type: str = ""
+    nickname: str = ""
+    is_default: bool = False
+
+    @property
+    def is_usable_bank(self) -> bool:
+        return self.method == METHOD_BANK and self.raw_status != PAYMENT_METHOD_DELETED
+
+
+@dataclass(frozen=True, slots=True)
 class AchRejection:
     external_id: str
     raw_status: str
@@ -277,6 +307,13 @@ class PaymentProvider(ABC):
 
     @abstractmethod
     def find_customers(self, query: CustomerQuery) -> list[CustomerRecord]: ...
+
+    @abstractmethod
+    def list_payment_methods(self, customer_external_id: str) -> list[PaymentMethodRecord]:
+        """The customer's stored payment methods; never another customer's (PLAN-007 D1)."""
+
+    @abstractmethod
+    def get_payment_method(self, external_id: str) -> PaymentMethodRecord: ...
 
     @abstractmethod
     def create_invoice(self, invoice: InvoiceInput) -> InvoiceRecord: ...

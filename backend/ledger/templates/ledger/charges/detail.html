@@ -1,0 +1,57 @@
+{% extends "finance/base.html" %}
+{% block title %}Charge {{ lease.store.external_label }} {{ charge.period_month|date:"Y-m" }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Rent run</a></p>
+  <h1>Rent {{ charge.period_month|date:"Y-m" }}, debit {{ charge.seq }}{% if charge.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
+  {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
+
+  {% if can_record %}<p class="actions"><a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Record a payment</a></p>{% endif %}
+
+  <dl>
+    <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
+    <dt>Due</dt><dd>{{ charge.due_on|date:"Y-m-d" }}</dd>
+    <dt>Amount due</dt><dd id="amount-due">${{ charge.amount_due }}</dd>
+    <dt>Paid</dt><dd id="amount-paid">${{ charge.amount_paid }}</dd>
+    <dt>Balance</dt><dd id="balance">${{ charge.balance }}</dd>
+    <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
+  </dl>
+
+  <h2>Invoices</h2>
+  <table id="invoices">
+    <thead><tr><th>Number</th><th>Date</th><th>Total</th><th>Provider status</th></tr></thead>
+    <tbody>
+      {% for invoice in invoices %}
+        <tr><td>{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|date:"Y-m-d" }}</td><td>${{ invoice.total }}</td><td>{{ invoice.provider_status|default:"—" }}</td></tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">No invoice matched yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">Provider status is copied from the payment provider as it is.</p>
+
+  <h2>Payments</h2>
+  <table id="payments">
+    <thead><tr><th>Received</th><th>Method</th><th>Amount</th><th>Status</th><th>Note</th><th>Recorded by</th></tr></thead>
+    <tbody>
+      {% for payment in payments %}
+        <tr>
+          <td>{{ payment.settled_on|date:"Y-m-d"|default:"—" }}</td>
+          <td>{{ payment.get_method_display }}</td>
+          <td>${{ payment.amount }}</td>
+          <td>{{ payment.get_status_display }}</td>
+          <td style="white-space:pre-wrap;">{{ payment.note }}</td>
+          <td>{{ payment.recorded_by|default:"—" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">No payments.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Notes</h2>
+  {% for note in notes %}
+    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|date:"Y-m-d" }}</span></p>
+  {% empty %}
+    <p class="muted">No notes.</p>
+  {% endfor %}
+{% endblock %}

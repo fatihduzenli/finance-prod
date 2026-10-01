@@ -27,6 +27,7 @@ from payments.provider import (
     InvoiceRecord,
     InvoiceUpdate,
     OfflinePayment,
+    PaymentMethodRecord,
     PaymentProvider,
     PayWithStoredMethod,
     ProviderIdentity,
@@ -52,6 +53,8 @@ class FakeProvider(PaymentProvider):
         self.invoices: dict[str, InvoiceRecord] = {}
         self.transactions: dict[str, TransactionRecord] = {}
         self.schedules: dict[str, ScheduleRecord] = {}
+        #: Payment methods by ID, with the customer each belongs to.
+        self.payment_methods: dict[str, tuple[str, PaymentMethodRecord]] = {}
         self.deposits: list[DepositRecord] = []
         self.ach_rejections: list[AchRejection] = []
         self._failures: dict[str, ProviderError] = {}
@@ -122,6 +125,27 @@ class FakeProvider(PaymentProvider):
             and (not query.reference or record.reference == query.reference)
         ]
 
+    # --- Payment methods -----------------------------------------------------------
+
+    def add_payment_method(
+        self, customer_external_id: str, record: PaymentMethodRecord
+    ) -> PaymentMethodRecord:
+        """Test control: a method staff entered in the provider's dashboard."""
+        self.payment_methods[record.external_id] = (customer_external_id, record)
+        return record
+
+    def list_payment_methods(self, customer_external_id: str) -> list[PaymentMethodRecord]:
+        self._call("list_payment_methods", customer_external_id)
+        return [
+            record
+            for owner, record in self.payment_methods.values()
+            if owner == customer_external_id
+        ]
+
+    def get_payment_method(self, external_id: str) -> PaymentMethodRecord:
+        self._call("get_payment_method", external_id)
+        return self._get(self.payment_methods, external_id)[1]
+
     # --- Invoices ------------------------------------------------------------------
 
     def create_invoice(self, invoice: InvoiceInput) -> InvoiceRecord:
@@ -149,8 +173,14 @@ class FakeProvider(PaymentProvider):
         return self._get(self.invoices, external_id)
 
     def list_invoices(self, query: InvoiceQuery) -> list[InvoiceRecord]:
+        """Every invoice, or those whose summary names the queried schedule."""
         self._call("list_invoices", query)
-        return list(self.invoices.values())
+        return [
+            record
+            for record in self.invoices.values()
+            if not query.schedule_external_id
+            or record.raw_summary.get("schedule_id") == query.schedule_external_id
+        ]
 
     def delete_invoice(self, external_id: str) -> None:
         self._call("delete_invoice", external_id)

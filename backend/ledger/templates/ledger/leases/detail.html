@@ -1,0 +1,91 @@
+{% extends "finance/base.html" %}
+{% block title %}Lease {{ lease.store.external_label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:leases:list' %}">&larr; Leases</a></p>
+  <h1>Lease {{ lease.store.external_label }}{% if lease.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
+
+  <div class="actions">
+    {% if can_edit %}<a class="btn" href="{% url 'ledger:leases:edit' pk=lease.pk %}">Edit</a>{% endif %}
+    {% if can_enrol %}<a class="btn" href="{% url 'ledger:leases:enrol' pk=lease.pk %}">Enable autopay</a>{% endif %}
+    {% if can_pause %}
+      <form method="post" action="{% url 'ledger:leases:pause' pk=lease.pk %}" class="js-single-submit">
+        {% csrf_token %}<button class="btn" type="submit" id="pause-autopay">Pause autopay</button>
+      </form>
+    {% endif %}
+    {% if can_resume %}
+      <form method="post" action="{% url 'ledger:leases:resume' pk=lease.pk %}" class="js-single-submit">
+        {% csrf_token %}<button class="btn" type="submit" id="resume-autopay">Resume autopay</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <dl>
+    <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
+    <dt>Operator</dt><dd>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</dd>
+    <dt>Status</dt><dd>{{ lease.get_collection_status_display }}</dd>
+    <dt>Channel</dt><dd>{{ lease.get_payment_channel_display }}</dd>
+    <dt>Debit days</dt><dd>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</dd>
+    <dt>Start date</dt><dd>{{ lease.started_on|date:"Y-m-d"|default:"—" }}</dd>
+    <dt>Current rent</dt><dd id="current-rent">{% if rent %}${{ rent.amount }} from {{ rent.effective_from|date:"Y-m-d" }}{% else %}—{% endif %}</dd>
+    {% if upcoming %}<dt>Upcoming rent</dt><dd id="upcoming-rent">Rent changes to ${{ upcoming.amount }} on {{ upcoming.effective_from|date:"Y-m-d" }}</dd>{% endif %}
+  </dl>
+
+  <h2>Rent history</h2>
+  <table id="rent-history">
+    <thead><tr><th>Amount</th><th>From</th><th>To</th><th>Source</th></tr></thead>
+    <tbody>
+      {% for row in history %}
+        <tr><td>${{ row.amount }}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.get_source_display }}</td></tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">No rent recorded.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Autopay</h2>
+  {% if blockers %}
+    <p><strong>Enrolment blockers</strong></p>
+    <ul id="enrolment-blockers">{% for text in blockers %}<li>{{ text }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if notes_info %}
+    <ul id="enrolment-notes" class="muted">{% for text in notes_info %}<li>{{ text }}</li>{% endfor %}</ul>
+  {% endif %}
+  <table id="schedules">
+    <thead><tr><th>Debit</th><th>Day</th><th>Amount</th><th>State</th><th>Next debit</th><th>Provider schedule</th></tr></thead>
+    <tbody>
+      {% for item in schedules %}
+        <tr>
+          <td>{{ item.row.seq }}</td>
+          <td>{{ item.row.debit_day|default:"—" }}</td>
+          <td>${{ item.row.amount }}</td>
+          <td>{{ item.row.get_state_display }}{% if item.review_message %}<br><strong class="schedule-review">{{ item.review_message }}</strong>{% endif %}</td>
+          <td>{% if item.next_run %}{{ item.next_run|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+          <td>{{ item.schedule_masked|default:"—" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">Autopay is not set up.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">Next debit is computed here from the debit day; the provider runs the schedule.</p>
+
+  <h2>Charges</h2>
+  <table>
+    <thead><tr><th>Period</th><th>Debit</th><th>Due</th><th>Amount due</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for charge in charges %}
+        <tr><td><a href="{% url 'ledger:charges:detail' pk=charge.pk %}">{{ charge.period_month|date:"Y-m" }}</a>{% if charge.needs_review %} <span class="badge">Needs review</span>{% endif %}</td><td>{{ charge.seq }}</td><td>{{ charge.due_on|date:"Y-m-d" }}</td><td>${{ charge.amount_due }}</td><td>${{ charge.amount_paid }}</td><td>${{ charge.balance }}</td><td>{{ charge.get_status_display }}</td></tr>
+      {% empty %}
+        <tr><td colspan="7" class="muted">No charges yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Notes</h2>
+  {% for note in notes %}
+    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|date:"Y-m-d" }}</span></p>
+  {% empty %}
+    <p class="muted">No notes.</p>
+  {% endfor %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

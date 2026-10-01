@@ -26,6 +26,7 @@ from django.core.exceptions import ValidationError
 from ledger.validators import validate_no_payment_data
 from payments.errors import ProviderUnavailable
 from payments.provider import (
+    PAYMENT_METHOD_DELETED,
     AchRejection,
     Amounts,
     CustomerInput,
@@ -38,6 +39,7 @@ from payments.provider import (
     InvoiceRecord,
     InvoiceUpdate,
     OfflinePayment,
+    PaymentMethodRecord,
     PayWithStoredMethod,
     ScheduleInput,
     ScheduleQuery,
@@ -308,7 +310,13 @@ def statement_params(date_range: DateRange) -> Params:
 
 
 def schedule_body(schedule: ScheduleInput, payment_page_url: str) -> Body:
-    """Page create-a-scheduled-invoice: every amount is a number here."""
+    """Page create-a-scheduled-invoice: every amount is a number here.
+
+    Exactly the fields of PLAN-007 D3: ``url``, ``total``, ``rule``, ``customer_id``,
+    ``payment_method_id``, ``email_notification`` and ``meta.lineItems`` (``item``,
+    ``quantity``, ``price``). Nothing else of ``meta`` is sent; whether schedule
+    ``meta`` accepts ``memo``/``reference`` is TODO-VERIFY-035.
+    """
     amounts = schedule.amounts
     return {
         "url": payment_page_url,
@@ -318,8 +326,6 @@ def schedule_body(schedule: ScheduleInput, payment_page_url: str) -> Body:
         "payment_method_id": schedule.payment_method_external_id,
         "email_notification": schedule.email_notification,
         "meta": {
-            "subtotal": amounts.subtotal,
-            "tax": amounts.tax,
             "lineItems": [
                 {"item": item.description, "quantity": item.quantity, "price": item.unit_price}
                 for item in amounts.line_items
@@ -491,6 +497,62 @@ def schedule_record(data: object, fetched_at: datetime) -> ScheduleRecord:
         active=active if isinstance(active, bool) else None,
         raw_summary=summary(obj),
     )
+
+
+#: Longest bank type or nickname kept from a payment-method object.
+PAYMENT_METHOD_TEXT_MAX_LENGTH = 100
+_LAST_FOUR = re.compile(r"[0-9]{4}")
+
+
+def _safe_short_text(obj: Mapping[str, object], key: str) -> str:
+    """A string field, or ``""`` when it is not a string, holds a card or account
+    number, or is longer than :data:`PAYMENT_METHOD_TEXT_MAX_LENGTH`."""
+    value = obj.get(key)
+    if not isinstance(value, str) or len(value) > PAYMENT_METHOD_TEXT_MAX_LENGTH:
+        return ""
+    return value if _is_safe_text(value) else ""
+
+
+def payment_method_record(data: object, fetched_at: datetime) -> PaymentMethodRecord:
+    """Pages get-all-payment-methods-for-a-customer and get-a-payment-method-by-id.
+
+    Only ``id``, ``method``, ``card_last_four`` (as ``last_four``), ``bank_type``,
+    ``nickname``, ``is_default``, ``deleted_at`` and ``purged_at`` are read; every other
+    key (``bank_name``, ``bank_holder_type``, ``card_type``, ``card_exp``,
+    ``person_name`` and anything not named in the specification) is dropped here and
+    never leaves this module (PLAN-007 D1, Rule 1).
+
+    TODO-VERIFY-037: that ``card_last_four`` holds the last four digits of the account
+    for a ``bank`` method, and that ``is_default`` is a boolean or 0/1. A last four that
+    is not exactly four digits is dropped.
+    """
+    obj = as_object(data)
+    last_four = obj.get("card_last_four")
+    is_default = obj.get("is_default")
+    deleted = obj.get("deleted_at") or obj.get("purged_at")
+    return PaymentMethodRecord(
+        external_id=_required_id(obj),
+        raw_status=PAYMENT_METHOD_DELETED if deleted else "",
+        fetched_at=fetched_at,
+        method=_safe_short_text(obj, "method"),
+        last_four=(
+            last_four if isinstance(last_four, str) and _LAST_FOUR.fullmatch(last_four) else ""
+        ),
+        bank_type=_safe_short_text(obj, "bank_type"),
+        nickname=_safe_short_text(obj, "nickname"),
+        is_default=is_default is True or (type(is_default) is int and is_default == 1),
+    )
+
+
+def customer_payment_method_records(
+    data: object, customer_external_id: str, fetched_at: datetime
+) -> list[PaymentMethodRecord]:
+    """The list response, minus any object whose ``customer_id`` names another customer."""
+    return [
+        payment_method_record(item, fetched_at)
+        for item in as_list(data)
+        if _text(item, "customer_id") in ("", customer_external_id)
+    ]
 
 
 def deposit_record(data: object, fetched_at: datetime) -> DepositRecord:

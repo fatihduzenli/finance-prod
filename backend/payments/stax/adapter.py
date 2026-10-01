@@ -38,6 +38,7 @@ from payments.provider import (
     InvoiceRecord,
     InvoiceUpdate,
     OfflinePayment,
+    PaymentMethodRecord,
     PaymentProvider,
     PayWithStoredMethod,
     ProviderIdentity,
@@ -76,10 +77,15 @@ SCHEDULES = "/invoice/schedule"  # retrieve-all-scheduled-invoices
 SCHEDULE = "/invoice/schedule/{id}"  # edit-an-invoice-schedule, delete-invoice-schedule
 ACH_REJECTIONS = "/query/statement/v3/ach-rejects"  # ach-rejections
 SELF = "/self"  # get-self-and-teams-info
+#: get-all-payment-methods-for-a-customer; ``{customerId}`` is sent as the transport's
+#: ``{id}`` (see :data:`_CUSTOMER_PAYMENT_METHODS_TEMPLATE`).
+CUSTOMER_PAYMENT_METHODS = "/customer/{customerId}/payment-method"
+PAYMENT_METHOD = "/payment-method/{id}"  # get-a-payment-method-by-id
+_CUSTOMER_PAYMENT_METHODS_TEMPLATE = CUSTOMER_PAYMENT_METHODS.replace("{customerId}", "{id}")
 
-#: TODO-VERIFY-027: value of the required `url` body field of create-an-invoice and
-#: create-a-scheduled-invoice (the base of the hosted invoice page). Not in the verified
-#: tables; this value is an assumption and must be confirmed before the first create.
+#: The required `url` body field of create-an-invoice and create-a-scheduled-invoice.
+#: Confirmed 2026-10-01 from the field description of create-an-invoice ("Set it to
+#: https://app.staxpayments.com/#/bill/ ..."); TODO-VERIFY-027 closed.
 DEFAULT_PAYMENT_PAGE_URL = "https://app.staxpayments.com/#/bill/"
 
 
@@ -139,6 +145,32 @@ class StaxProvider(PaymentProvider):
         )
         fetched_at = self.now()
         return [mapping.customer_record(item, fetched_at) for item in mapping.as_list(data)]
+
+    # --- Payment methods (read only; no method is ever created here) -------------
+
+    def list_payment_methods(self, customer_external_id: str) -> list[PaymentMethodRecord]:
+        """GET /customer/{customerId}/payment-method (get-all-payment-methods-for-a-customer).
+
+        An object whose ``customer_id`` names a different customer is dropped. Only the
+        fields of :class:`PaymentMethodRecord` are kept. First page only
+        (TODO-VERIFY-021).
+        """
+        validation.external_id("customer_external_id", customer_external_id)
+        data = self.transport.send(
+            Method.GET,
+            _CUSTOMER_PAYMENT_METHODS_TEMPLATE,
+            object_id=customer_external_id,
+            idempotent=True,
+        )
+        return mapping.customer_payment_method_records(data, customer_external_id, self.now())
+
+    def get_payment_method(self, external_id: str) -> PaymentMethodRecord:
+        """GET /payment-method/{id} (get-a-payment-method-by-id)."""
+        validation.external_id("external_id", external_id)
+        data = self.transport.send(
+            Method.GET, PAYMENT_METHOD, object_id=external_id, idempotent=True
+        )
+        return mapping.payment_method_record(data, self.now())
 
     # --- Invoices ------------------------------------------------------------------
 
