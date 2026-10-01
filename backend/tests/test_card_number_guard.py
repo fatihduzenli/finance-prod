@@ -13,6 +13,7 @@ import json
 import random
 import re
 import time
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -229,6 +230,49 @@ def test_routing_number_next_to_an_account_number_is_rejected(text: str) -> None
 )
 def test_routing_pattern_needs_a_valid_checksum_and_a_nearby_account(text: str) -> None:
     assert not contains_bank_routing_pattern(text)
+
+
+# UUIDs whose digits once read as an ABA-valid routing number beside an account-like run
+# (a 9-digit run and an 8-digit run within 20 characters), before the routing rule read
+# the normalised text. They are random identifiers, not payment data.
+ROUTING_SHAPED_UUIDS = [
+    "96182028-8dcf-4e51-bf69-7a490278743e",
+    "2863717d-b96d-4bd3-9771-659885498bb2",
+    "8480340c-5e4b-4e9c-954d-703119764bff",
+]
+
+
+@pytest.mark.parametrize("identifier", ROUTING_SHAPED_UUIDS)
+def test_a_uuid_is_not_read_as_a_routing_and_account_number(identifier: str) -> None:
+    assert not contains_bank_routing_pattern(identifier)
+    validate_no_payment_data(identifier)
+    validate_no_payment_data(identifier.upper())
+    validate_json_has_no_payment_data(
+        {"lease": identifier, "year": 2026, "amount": "125.00", "kind": "insurance"}
+    )
+
+
+def test_a_routing_and_account_number_beside_a_uuid_is_still_rejected() -> None:
+    identifier = ROUTING_SHAPED_UUIDS[0]
+    text = f"lease {identifier} routing {ROUTING} account 987654321012"
+    assert contains_bank_routing_pattern(text)
+    with pytest.raises(ValidationError) as raised:
+        validate_json_has_no_payment_data({"lease": identifier, "note": text})
+    assert raised.value.messages == [PAYMENT_DATA_MESSAGE]
+    assert ROUTING not in str(raised.value)
+
+
+def test_routing_and_account_digits_split_by_an_invisible_character_are_rejected() -> None:
+    assert contains_bank_routing_pattern(f"routing {ROUTING[:4]}\u200b{ROUTING[4:]} 987654")
+
+
+def test_ten_thousand_random_uuids_are_accepted() -> None:
+    # With this seed, five of the identifiers were refused before the routing rule read
+    # the normalised text.
+    generator = random.Random(20261009)  # noqa: S311 - reproducible test data, not security
+    for _ in range(10_000):
+        identifier = str(uuid.UUID(int=generator.getrandbits(128), version=4))
+        validate_json_has_no_payment_data({"lease": identifier, "year": 2026})
 
 
 def test_json_validator_checks_the_serialised_text() -> None:

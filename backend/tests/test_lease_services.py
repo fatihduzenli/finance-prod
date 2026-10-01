@@ -35,7 +35,7 @@ from ledger.models import (
 )
 from ledger.services import leases as service
 from ledger.services.leases import AutopayAction, LeaseRefused
-from payments.errors import CircuitOpen, ProviderRejected, ProviderUnavailable
+from payments.errors import CircuitOpen, ProviderError, ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
 from payments.models import ExternalRef
 from payments.provider import (
@@ -44,6 +44,7 @@ from payments.provider import (
     ScheduleInput,
     ScheduleRecord,
     ScheduleUpdate,
+    mask_identifier,
 )
 from payments.stax.adapter import DEFAULT_PAYMENT_PAGE_URL, StaxProvider
 from tests.auth_helpers import make_user
@@ -695,7 +696,124 @@ def test_a_rent_change_flags_the_schedule_and_it_is_never_edited_for_an_amount(
     assert [schedule.amounts.total for schedule in creates(fake)] == [D("1500.00"), D("1650.00")]
     # Only the pause touched the old schedule, and no update carries an amount.
     assert updates(fake) == [(old_ref, ScheduleUpdate(active=False))]
-    assert "lease.autopay_schedule_ended" in actions(lease)
+    assert "lease.autopay_schedule_deleted" in actions(lease)
+
+
+# --- PLAN-007a: stale schedules are deleted at the provider before any create ---------------
+
+
+def _stale_paused(fake: FakeProvider, **overrides: Any) -> tuple[Lease, list[str]]:
+    """An enabled lease whose rent then changed (flagged) and which was paused."""
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(**overrides)
+    assert enable(lease).action is AutopayAction.ENABLED
+    edit(lease, D("1650.00"), date(2026, 10, 1))
+    assert service.pause_autopay(lease.pk, actor=None).action is AutopayAction.PAUSED
+    rows = service.live_schedules(lease)
+    assert all(row.needs_review and row.state == ScheduleState.PAUSED for row in rows)
+    fake.calls.clear()
+    return lease, schedule_ids(lease)
+
+
+def _provider_calls(fake: FakeProvider) -> list[str]:
+    return [
+        name
+        for name, _ in fake.calls
+        if name in ("delete_scheduled_invoice", "create_scheduled_invoice")
+    ]
+
+
+def test_re_enabling_deletes_the_stale_schedule_before_the_create(fake: FakeProvider) -> None:
+    lease, [old_ref] = _stale_paused(fake)
+    assert enable(lease).action is AutopayAction.ENABLED
+    assert _provider_calls(fake) == ["delete_scheduled_invoice", "create_scheduled_invoice"]
+    assert ("delete_scheduled_invoice", (old_ref,)) in fake.calls
+    assert old_ref not in fake.schedules
+    old, new = CollectionSchedule.objects.filter(lease=lease).order_by("created_at")
+    assert (old.state, new.state) == (ScheduleState.ENDED, ScheduleState.ACTIVE)
+    entry = AuditLog.objects.filter(action="lease.autopay_schedule_deleted").get()
+    assert entry.after == {"state": ScheduleState.ENDED, "schedule": mask_identifier(old_ref)}
+    assert old_ref not in json.dumps(entry.after)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ProviderRejected(422, error_fields=("id",)),
+        ProviderRejected(403),
+        ProviderUnavailable(503),
+        CircuitOpen("x"),
+    ],
+    ids=["422", "403", "unavailable", "circuit-open"],
+)
+def test_a_failed_delete_creates_nothing_and_ends_nothing(
+    fake: FakeProvider, error: ProviderError
+) -> None:
+    lease, refs = _stale_paused(fake)
+    before = list(CollectionSchedule.objects.filter(lease=lease).values())
+    fake.fail_next("delete_scheduled_invoice", error)
+    outcome = enable(lease)
+    assert outcome.action is AutopayAction.FAILED
+    assert outcome.failure == type(error).__name__
+    if isinstance(error, ProviderRejected):
+        assert outcome.fields == error.error_fields
+    assert _provider_calls(fake) == ["delete_scheduled_invoice"]
+    assert creates(fake) == []
+    assert list(CollectionSchedule.objects.filter(lease=lease).values()) == before
+    assert schedule_ids(lease) == refs
+    assert "lease.autopay_schedule_deleted" not in actions(lease)
+    assert "lease.autopay_delete_failed" in actions(lease)
+
+
+def test_a_404_on_delete_counts_as_gone_and_the_create_proceeds(fake: FakeProvider) -> None:
+    lease, [old_ref] = _stale_paused(fake)
+    del fake.schedules[old_ref]  # already deleted at the provider
+    assert enable(lease).action is AutopayAction.ENABLED
+    assert _provider_calls(fake) == ["delete_scheduled_invoice", "create_scheduled_invoice"]
+    old, new = CollectionSchedule.objects.filter(lease=lease).order_by("created_at")
+    assert (old.state, new.state) == (ScheduleState.ENDED, ScheduleState.ACTIVE)
+    assert "lease.autopay_schedule_deleted" in actions(lease)
+
+
+def test_two_stale_schedules_are_both_deleted_before_either_create(fake: FakeProvider) -> None:
+    lease, refs = _stale_paused(fake, debit_day=5, second_debit_day=20)
+    assert len(refs) == 2
+    assert enable(lease).action is AutopayAction.ENABLED
+    assert _provider_calls(fake) == [
+        "delete_scheduled_invoice",
+        "delete_scheduled_invoice",
+        "create_scheduled_invoice",
+        "create_scheduled_invoice",
+    ]
+    deleted = [args[0] for name, args in fake.calls if name == "delete_scheduled_invoice"]
+    assert sorted(deleted) == sorted(refs)  # type: ignore[type-var]
+    states = CollectionSchedule.objects.filter(lease=lease).values_list("state", flat=True)
+    assert sorted(states) == sorted([ScheduleState.ENDED] * 2 + [ScheduleState.ACTIVE] * 2)
+    assert actions(lease).count("lease.autopay_schedule_deleted") == 2
+
+
+def test_the_second_delete_failing_ends_nothing_and_a_retry_treats_the_first_as_gone(
+    fake: FakeProvider,
+) -> None:
+    lease, refs = _stale_paused(fake, debit_day=5, second_debit_day=20)
+    original = fake.delete_scheduled_invoice
+    attempts: list[str] = []
+
+    def delete(external_id: str) -> None:
+        attempts.append(external_id)
+        if len(attempts) == 2:
+            raise ProviderUnavailable(503)
+        original(external_id)
+
+    fake.delete_scheduled_invoice = delete  # type: ignore[method-assign]
+    assert enable(lease).action is AutopayAction.FAILED
+    assert creates(fake) == []
+    assert schedule_ids(lease) == refs
+    assert all(row.state == ScheduleState.PAUSED for row in service.live_schedules(lease))
+
+    assert enable(lease).action is AutopayAction.ENABLED  # the first now answers 404
+    assert len(creates(fake)) == 2
+    assert actions(lease).count("lease.autopay_schedule_deleted") == 2
 
 
 # --- QA owner's decision on future-dated rent (2026-10-01) ---------------------------------------

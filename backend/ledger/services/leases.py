@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 from enum import StrEnum
+from http import HTTPStatus
 from typing import Any
 
 from django.conf import settings
@@ -533,9 +534,10 @@ def enable_autopay(
     Order: identifier syntax; lease row lock; local blockers; ``external_refs`` (a
     lease whose every debit already has a schedule returns ``ALREADY`` with no provider
     call); the method list for the operator's customer (the chosen ID must be a bank
-    method in it); then one create per missing debit. A provider failure stops at that
-    debit, marks its row ``failed`` and changes nothing on the lease; schedules already
-    created stay linked.
+    method in it); a delete of every stale (flagged, paused) schedule, a 404 counting as
+    already gone, where any other failure ends nothing and creates nothing; then one
+    create per missing debit. A create failure stops at that debit, marks its row
+    ``failed`` and changes nothing on the lease; schedules already created stay linked.
     """
     if not operator_sync.IDENTIFIER.match(payment_method_external_id or ""):
         return AutopayOutcome(AutopayAction.REFUSED, CHOOSE_METHOD)
@@ -588,11 +590,31 @@ def enable_autopay(
             )
             return AutopayOutcome(AutopayAction.REFUSED, refusal)
 
+        # PLAN-007a: every stale schedule is deleted at the provider (a 404 means it is
+        # already gone) before any row is ended or any create is sent.
         for row in stale:
-            before = _schedule_snapshot(row, schedule_ref(row))
+            ref = schedule_ref(row)
+            try:
+                provider.delete_scheduled_invoice(ref)
+            except ProviderRejected as error:
+                if error.status != HTTPStatus.NOT_FOUND:
+                    return _failed(
+                        actor, lease, "lease.autopay_delete_failed", error, {"seq": row.seq}
+                    )
+            except ProviderError as error:
+                return _failed(actor, lease, "lease.autopay_delete_failed", error, {"seq": row.seq})
+        for row in stale:
+            ref = schedule_ref(row)
+            before = _schedule_snapshot(row, ref)
             row.state = ScheduleState.ENDED
             row.save(update_fields=["state", "updated_at"])
-            _audit(actor, "lease.autopay_schedule_ended", lease, before, {"state": row.state})
+            _audit(
+                actor,
+                "lease.autopay_schedule_deleted",
+                lease,
+                before,
+                {"state": row.state, "schedule": mask_identifier(ref)},
+            )
             live.pop(row.seq, None)
 
         for debit in missing:

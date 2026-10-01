@@ -2,7 +2,8 @@
 
 Contract: docs/qa/PLAN-004-schema.md §4.3 as amended by §4.6. The database repeats the
 Luhn rule, with the same normalisation, in ``finance_contains_card_number`` (migration
-``ledger.0002_postgresql_guards``); the ABA routing pattern is checked here only.
+``ledger.0002_postgresql_guards``); the ABA routing pattern, read after the same
+normalisation, is checked here only.
 
 No function here returns, logs or raises with the text it inspected: the text may be a
 real card number, and an error message or a log line is exactly where it must not end up.
@@ -87,23 +88,17 @@ def normalise_for_matching(text: str) -> str:
     return _UUID.sub(UUID_REPLACEMENT, without_invisible).replace("\r\n", "\n")
 
 
-def contains_card_number(text: str) -> bool:
-    """True when ``text`` holds a 13 to 19 digit run that passes the Luhn check.
-
-    The text is first normalised by :func:`normalise_for_matching`. A run of 20 or more
-    digits is not a card number, and no part of it is tested.
-    """
-    for match in _DIGIT_RUN.finditer(normalise_for_matching(text)):
+def _has_card_number(normalised: str) -> bool:
+    for match in _DIGIT_RUN.finditer(normalised):
         digits = _digit_values(match.group())
         if CARD_MIN_DIGITS <= len(digits) <= CARD_MAX_DIGITS and _passes_luhn(digits):
             return True
     return False
 
 
-def contains_bank_routing_pattern(text: str) -> bool:
-    """True when a 9-digit ABA-valid number lies within 20 characters of a 6+ digit run."""
-    account_runs = [match.span() for match in _ACCOUNT_RUN.finditer(text)]
-    for routing in _ROUTING_CANDIDATE.finditer(text):
+def _has_bank_routing_pattern(normalised: str) -> bool:
+    account_runs = [match.span() for match in _ACCOUNT_RUN.finditer(normalised)]
+    for routing in _ROUTING_CANDIDATE.finditer(normalised):
         if not _passes_aba_checksum(_digit_values(routing.group())):
             continue
         start, end = routing.span()
@@ -116,11 +111,33 @@ def contains_bank_routing_pattern(text: str) -> bool:
     return False
 
 
+def contains_card_number(text: str) -> bool:
+    """True when ``text`` holds a 13 to 19 digit run that passes the Luhn check.
+
+    The text is first normalised by :func:`normalise_for_matching`. A run of 20 or more
+    digits is not a card number, and no part of it is tested.
+    """
+    return _has_card_number(normalise_for_matching(text))
+
+
+def contains_bank_routing_pattern(text: str) -> bool:
+    """True when a 9-digit ABA-valid number lies within 20 characters of a 6+ digit run.
+
+    The text is first normalised by :func:`normalise_for_matching`, so the digits of a
+    UUID-shaped identifier are never read as a routing or an account number.
+    """
+    return _has_bank_routing_pattern(normalise_for_matching(text))
+
+
 def validate_no_payment_data(value: str | None) -> None:
-    """Reject free text that holds a card number or a routing and account number."""
+    """Reject free text that holds a card number or a routing and account number.
+
+    The text is normalised once, and both rules read the normalised text.
+    """
     if not value:
         return
-    if contains_card_number(value) or contains_bank_routing_pattern(value):
+    normalised = normalise_for_matching(value)
+    if _has_card_number(normalised) or _has_bank_routing_pattern(normalised):
         raise ValidationError(PAYMENT_DATA_MESSAGE, code=PAYMENT_DATA_CODE)
 
 

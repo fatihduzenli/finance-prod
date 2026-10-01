@@ -449,6 +449,32 @@ def test_the_detail_page_lists_blockers_and_information(admin: Client, fake: Fak
     assert fake.calls == []
 
 
+def test_the_enrolment_page_names_the_receipts_email_or_says_there_is_none(
+    admin: Client, fake: FakeProvider
+) -> None:
+    add_methods(fake)
+    with_email = make_lease(operator=make_operator(email="ops+rent@example.com"))
+    page = admin.get(paths(with_email)["enrol"]).content.decode()
+    assert '<li id="receipts-email">Receipts go to ops+rent@example.com</li>' in page
+    assert service.NO_EMAIL not in page
+
+    fake.add_payment_method("cus-2", method())
+    without = make_lease(operator=make_operator(email=None, customer="cus-2"))
+    page = admin.get(paths(without)["enrol"]).content.decode()
+    assert "Receipts go to" not in page
+    assert service.NO_EMAIL in page
+
+
+def test_the_receipts_email_is_escaped_on_the_enrolment_page(
+    admin: Client, fake: FakeProvider
+) -> None:
+    add_methods(fake)
+    lease = make_lease(operator=make_operator(email='"<b>x</b>"@example.com'))
+    page = admin.get(paths(lease)["enrol"]).content.decode()
+    assert "<b>x</b>" not in page
+    assert "Receipts go to &quot;&lt;b&gt;x&lt;/b&gt;&quot;@example.com" in page
+
+
 def test_no_bank_or_routing_data_reaches_any_lease_page(admin: Client, fake: FakeProvider) -> None:
     fake.add_payment_method(
         CUSTOMER,
