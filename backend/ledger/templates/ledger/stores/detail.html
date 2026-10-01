@@ -1,0 +1,36 @@
+{% extends "finance/base.html" %}
+{% block title %}Store {{ store.external_label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:stores:list' %}">&larr; Stores</a></p>
+  <h1>Store {{ store.external_label }}{% if store.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
+
+  {% if can_edit %}<div class="actions"><a class="btn" href="{% url 'ledger:stores:edit' pk=store.pk %}">Edit</a></div>{% endif %}
+
+  <dl>
+    <dt>Name</dt><dd>{{ store.external_label }}</dd>
+    <dt>Store number</dt><dd>{{ store.store_number|default_if_none:"—" }}</dd>
+    <dt>City</dt><dd>{{ store.city|default:"—" }}</dd>
+    <dt>State</dt><dd>{{ store.state|default:"—" }}</dd>
+    <dt>Open date</dt><dd>{% if store.open_date %}{{ store.open_date|date:"Y-m-d" }}{% else %}— <span class="badge">Needs open date</span>{% endif %}</dd>
+    <dt>Closed date</dt><dd>{{ store.closed_at|date:"Y-m-d"|default:"—" }}</dd>
+    <dt>Status</dt><dd>{{ store.get_status_display }}</dd>
+  </dl>
+
+  <h2>Leases</h2>
+  <table id="store-leases">
+    <thead><tr><th>Lease</th><th>Operator</th><th>Start date</th><th>Debit days</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for lease in leases %}
+        <tr>
+          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if lease.needs_review %} <span class="badge">Needs review</span>{% endif %}</td>
+          <td>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</td>
+          <td>{{ lease.started_on|date:"Y-m-d"|default:"—" }}</td>
+          <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>
+          <td>{{ lease.get_collection_status_display }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted">No leases.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

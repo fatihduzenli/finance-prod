@@ -33,6 +33,7 @@ two_factor/_base.html.
 </head>
 <body>
   <nav aria-label="Main">
+    <a href="{% url 'ledger:stores:list' %}">Stores</a>
     <a href="{% url 'ledger:operators:list' %}">Operators</a>
     <a href="{% url 'ledger:leases:list' %}">Leases</a>
     <a href="{% url 'ledger:run:today' %}">Rent run</a>

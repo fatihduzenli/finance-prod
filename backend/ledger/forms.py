@@ -1,4 +1,5 @@
-"""Operator and lease forms (docs/qa/PLAN-006-operators.md, PLAN-007-leases-and-rent-run.md).
+"""Operator, lease and store forms (docs/qa/PLAN-006-operators.md,
+PLAN-007-leases-and-rent-run.md, PLAN-007b-stores.md).
 
 Server-side validation is what counts; the browser checks (``type=email``,
 ``required``) are a convenience. Every text field keeps the model's card-number guard,
@@ -28,9 +29,11 @@ from payments.operator_sync import normalise_phone
 if TYPE_CHECKING:
     _OperatorFormBase = forms.ModelForm[Operator]
     _LeaseFormBase = forms.ModelForm[Lease]
+    _StoreFormBase = forms.ModelForm[Store]
 else:  # ModelForm is only generic in the type stubs.
     _OperatorFormBase = forms.ModelForm
     _LeaseFormBase = forms.ModelForm
+    _StoreFormBase = forms.ModelForm
 
 #: Fixed and value-free (PLAN-006b §1).
 PHONE_MESSAGE = "Enter 10 to 15 digits, for example 4155550132."
@@ -206,6 +209,51 @@ class EnrolForm(forms.Form):
         validators=[IDENTIFIER_VALIDATOR],
         error_messages={"required": "Choose a bank payment method."},
     )
+
+
+# --- Stores (PLAN-007b §1) ----------------------------------------------------------------
+
+OPEN_DATE_REQUIRED = "Enter the open date."
+CLOSED_BEFORE_OPEN = "The closed date cannot be before the open date."
+
+
+class StoreForm(_StoreFormBase):
+    """Create and edit a store. The open date is required here (ADR-0005) although the
+    model keeps it nullable for the import; ``needs_open_date`` follows the model."""
+
+    store_number = forms.IntegerField(min_value=1, max_value=2147483647, required=False)
+    open_date = forms.DateField(
+        widget=forms.DateInput(attrs={"type": "date"}),
+        error_messages={"required": OPEN_DATE_REQUIRED},
+    )
+
+    class Meta:
+        model = Store
+        fields = (
+            "store_number",
+            "external_label",
+            "city",
+            "state",
+            "open_date",
+            "closed_at",
+            "status",
+        )
+        widgets = {"closed_at": forms.DateInput(attrs={"type": "date"})}
+        labels = {"external_label": "Name", "closed_at": "Closed date"}
+
+    def clean(self) -> dict[str, Any]:
+        data = super().clean() or {}
+        opened = data.get("open_date")
+        closed = data.get("closed_at")
+        if opened is not None and closed is not None and closed < opened:
+            self.add_error("closed_at", CLOSED_BEFORE_OPEN)
+        return data
+
+
+class StoreCreateForm(StoreForm):
+    """Adds the one-time key rendered with the form, so a resubmission saves nothing."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput)
 
 
 # --- Manual payments (PLAN-007 D8) -------------------------------------------------------

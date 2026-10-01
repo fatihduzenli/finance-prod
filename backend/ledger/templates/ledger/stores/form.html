@@ -1,0 +1,19 @@
+{% extends "finance/base.html" %}
+{% block title %}{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}{% endblock %}
+{% block content %}
+  <p>{% if store %}<a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; {{ store.external_label }}</a>{% else %}<a href="{% url 'ledger:stores:list' %}">&larr; Stores</a>{% endif %}</p>
+  <h1>{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}</h1>
+  <form method="post" id="store-form" class="js-single-submit">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+    {% for field in form.visible_fields %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
+      {{ field.errors }}
+      {{ field }}
+      {% if field.help_text %}<br><span class="muted">{{ field.help_text }}</span>{% endif %}
+    {% endfor %}
+    <p class="actions"><button class="btn btn-primary" type="submit" id="save-store">Save</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

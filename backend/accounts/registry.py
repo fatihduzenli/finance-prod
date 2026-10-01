@@ -12,7 +12,7 @@ in the URL map has been classified. A new route that is not classified fails tha
 
 Routes still to come: refund, void and settings get ``Role.ADMIN``; invoices and send
 get ``Role.BILLING``. Operators (PLAN-006), leases, the rent run and rent charges
-(PLAN-007) are classified below.
+(PLAN-007) and stores (PLAN-007b) are classified below.
 """
 
 from __future__ import annotations
@@ -84,6 +84,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:operators:retry_sync": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:link": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:archive": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Stores (docs/qa/PLAN-007b-stores.md §1): admin only. There is no delete route.
+    "ledger:stores:create": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:stores:edit": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Leases and autopay (docs/qa/PLAN-007-leases-and-rent-run.md §4.1, D10): admin only.
     "ledger:leases:create": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:leases:edit": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -107,6 +110,9 @@ ADMIN_MODEL_PREFIX_RULES: dict[str, RouteRule] = {
     "admin:otp_static_": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Registered read-only (PLAN-006 D9); a POST is refused below admin as well.
     "admin:ledger_operator_": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Registered read-only as well (PLAN-007b §1).
+    "admin:ledger_store_": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "admin:ledger_lease_": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Routes that take no unsafe method at all. GET is open to any verified user (the view
@@ -129,6 +135,9 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # Operator screens that only read (PLAN-006 §4.1).
         "ledger:operators:list",
         "ledger:operators:detail",
+        # Store screens that only read (PLAN-007b §1).
+        "ledger:stores:list",
+        "ledger:stores:detail",
         # Lease screens that only read (PLAN-007 §4.1).
         "ledger:leases:list",
         "ledger:leases:detail",

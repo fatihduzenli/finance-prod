@@ -1,0 +1,36 @@
+{% extends "finance/base.html" %}
+{% block title %}Stores{% endblock %}
+{% block content %}
+  <h1>Stores</h1>
+  <form method="get" action="{% url 'ledger:stores:list' %}" class="actions" role="search">
+    <input type="search" name="q" value="{{ query }}" maxlength="200" placeholder="Name or city" aria-label="Search stores" style="max-width:24rem;">
+    <button class="btn" type="submit">Search</button>
+    {% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">New store</a>{% endif %}
+  </form>
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Store number</th><th>City</th><th>State</th><th>Open date</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {% for store in page %}
+        <tr>
+          <td><a href="{% url 'ledger:stores:detail' pk=store.pk %}">{{ store.external_label }}</a>{% if store.needs_open_date %} <span class="badge">Needs open date</span>{% endif %}{% if store.needs_review %} <span class="badge">Needs review</span>{% endif %}</td>
+          <td>{{ store.store_number|default_if_none:"—" }}</td>
+          <td>{{ store.city }}</td>
+          <td>{{ store.state }}</td>
+          <td>{{ store.open_date|date:"Y-m-d"|default:"—" }}</td>
+          <td>{{ store.get_status_display }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">No stores match.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if page.paginator.num_pages > 1 %}
+    <p class="actions">
+      {% if page.has_previous %}<a class="btn" href="?{% if query %}q={{ query|urlencode:'' }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} stores)</span>
+      {% if page.has_next %}<a class="btn" href="?{% if query %}q={{ query|urlencode:'' }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
+    </p>
+  {% endif %}
+{% endblock %}

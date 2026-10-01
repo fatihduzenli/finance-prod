@@ -206,6 +206,9 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:operators:create`, `:edit`, `:retry_sync`, `:link` | POST | billing | GET of the forms for any role |
 | `ledger:operators:archive` | POST | admin | soft delete; there is no delete route |
 | `admin:ledger_operator_*` | POST | admin | registered read-only: no add, change or delete |
+| `ledger:stores:list`, `ledger:stores:detail` | none | — | GET for any verified user with a role |
+| `ledger:stores:create`, `:edit` | POST | admin | GET of the forms is admin only too; there is no delete route |
+| `admin:ledger_store_*`, `admin:ledger_lease_*` | POST | admin | registered read-only: no add, change or delete |
 | `ledger:leases:list`, `ledger:leases:detail` | none | — | GET for any verified user with a role |
 | `ledger:leases:create`, `:edit`, `:enrol`, `:pause`, `:resume` | POST | admin | GET of the forms and the enrolment page (which reads Stax) is admin only too |
 | `ledger:run:today`, `ledger:charges:detail` | none | — | GET for any verified user with a role; no Stax call |
@@ -216,7 +219,8 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |
 
 The `admin` group also holds Django's model permissions for users, groups, OTP
-devices and sessions. `billing` and `viewer` hold none yet: they get permissions
+devices and sessions, and `view` on stores, operators and leases (read-only in the
+admin). `billing` and `viewer` hold none yet: they get permissions
 with the invoice and customer models (Steps 4+), and refund, void and settings
 routes will require `admin`.
 
