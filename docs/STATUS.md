@@ -314,3 +314,11 @@ the login page myself." The condition for starting Prompt 4 is met.
   UUIDs, so about one in 6,400 writes carrying a UUID was refused. Fixed in
   `ledger/validators.py` with regression tests; closed in QA-007.
 
+
+## Update, 2026-10-01, store page (PLAN-007b)
+
+- Owner: nothing in Prompt 7 could be exercised on staging because no store existed and no
+  store page did. PLAN-007b adds the store page (list, create, edit; open date required on the
+  form), registers Store, Operator and Lease read-only in the admin with view permission for
+  the admin group, and confirms the second debit day renders empty. QA PASS
+  (`docs/qa/QA-007b-stores.md`), **not pushed**.
