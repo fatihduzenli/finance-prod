@@ -86,6 +86,21 @@ so on staging the web process is the single caller: `STAX_CALLER=worker`, one re
 (`webMaxReplicas = 1`) and one gunicorn process with threads. All three are set in the
 template and the image, not by hand. Step 10 moves every call to the worker and reverts them.
 
+## 5b. Schedules: what the owner asked on 2026-10-01
+
+- **Re-enable after a rent change deletes the old schedule first.** A flagged schedule must be
+  paused; re-enabling then calls `DELETE /invoice/schedule/{id}` on each stale schedule and
+  creates the new one only after every delete succeeded or answered 404. Any other refusal
+  stops the re-enable with nothing created, so an operator can never hold two live schedules
+  for one debit.
+- **Receipts go to the operator's email in Stax.** `email_notification` is true whenever the
+  operator has an email. Sandbox test addresses bounce harmlessly. **Live operators need a
+  real address before enrolment**; the enrolment page shows the address staff are enrolling.
+- **`DTSTART` is 12:00:00 UTC on the debit day.** The specification does not say at what time
+  of day a schedule runs; it requires only a future `DTSTART` in UTC. The ACH page says ACH is
+  batched at 8 pm Eastern, so noon UTC (07:00 or 08:00 Eastern) leaves the whole business day
+  before the batch. Left as is until a real debit shows otherwise.
+
 ## 6. When the breaker opens
 
 What happens automatically:

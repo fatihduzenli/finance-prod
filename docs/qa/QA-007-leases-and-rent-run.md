@@ -52,13 +52,13 @@ negative, half cent, blank note, card number in the note, card, ach and cash met
 concurrent partial payments never exceed the balance; viewer and billing cannot change leases
 or enrol.
 
-**Findings:** BLOCKER 0, MAJOR 0, MINOR 1 open (the row-lock defect was fixed before the gate).
+**Findings:** BLOCKER 0, MAJOR 1 resolved (plus the row-lock defect fixed before the gate), MINOR 0.
 
 ```
-[MINOR] backend/tests — one unidentified test failed once in twelve full PostgreSQL runs.
-Failure scenario: unknown; not reproduced in eleven consecutive runs of the same suite on the same database.
-Required change: name it on recurrence (CI keeps the log) and fix or isolate it in the next plan.
-Decision: open; recorded here and in docs/STATUS.md.
+[MAJOR] backend/ledger/validators.py — the bank routing check did not strip UUIDs, unlike the card check.
+Failure scenario: test_insurance_charges.py::test_each_year_from_the_open_year_is_charged_on_its_anniversary failed intermittently: the audit row's JSON holds a lease UUID; for one UUID in about 6,400 (for example 96182028-8dcf-4e51-bf69-7a490278743e) a nine-digit run passes the ABA checksum within 20 characters of another digit run, and the write is refused with the card-number message. In production this would have refused about one in 6,400 audit rows, operator saves or notes that carry a UUID.
+Required change: normalise once (UUID tokens replaced, invisible characters removed) before both checks.
+Status: RESOLVED. Found by capturing the "flake" by name after fourteen full runs; it was a real defect, not a flaky test. Regression tests: the three reproducing UUIDs alone and in audit-style JSON; a real routing-plus-account pattern beside a UUID still refused; a 10,000-UUID sweep with a seed the old code failed on.
 ```
 Deviations accepted, the material ones: debit days 29 to 31 are refused for autopay until
 TODO-VERIFY-036 is known; a retry after an unanswered create adopts exactly one matching
@@ -82,4 +82,16 @@ threshold, labelled on screen); the human-readable number lives in `meta.referen
 - Pagination of the invoice list (TODO-VERIFY-021) is still first page only.
 - Deferred MINOR findings across earlier reports: nine, unchanged.
 
-**Verdict: PASS**, with the unidentified single failure carried as an open MINOR finding.
+**Verdict: PASS.** After the fix: PostgreSQL 1,921 passed; sqlite 1,560 passed six times in a row; e2e 3 passed.
+
+### Addendum PLAN-007a (2026-10-01, owner points 1 and 2)
+
+Re-enable now deletes each stale schedule in Stax before any create (404 counts as gone; any
+other refusal creates nothing); the enrolment page shows the operator's receipts email. Tests
+added by Opus: delete precedes create; a failed delete creates nothing (four error kinds); a
+404 is treated as gone; two stale schedules give two deletes then two creates; a partial delete
+followed by a retry; the email shown and escaped. Fable's gate after the addendum: ruff, format,
+mypy 0; PostgreSQL 1,915 passed; sqlite 1,554 passed; e2e 3 passed; secret scan clean.
+The intermittent failure recurred once on sqlite during this gate, was captured by name on
+the sixth looped run, and turned out to be the routing-check defect recorded above. Fixed.
+

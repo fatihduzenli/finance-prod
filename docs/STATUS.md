@@ -302,3 +302,15 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Checkpoint 7 on staging waits on Stax enabling ACH in the sandbox. Steps once it is on:
   link a bank method in the Stax dashboard, enable autopay on one lease in the app, confirm
   one schedule, run "Match invoices" after the first debit day.
+
+## Update, 2026-10-01, owner's three questions and the "flake" found
+
+- **Re-enable after a rent change** now deletes the old Stax schedule (DELETE, 404 = gone)
+  before any create; any other refusal creates nothing. Tested. **Enrolment page** shows the
+  operator's receipts email; live operators need a real address before enrolment
+  (`docs/STAX_CLIENT.md` §5b). **DTSTART at 12:00 UTC:** the spec is silent on run time; ACH
+  batches at 8 pm Eastern; left as is.
+- The one failure in twelve runs was **not a flake**: the routing-number check did not strip
+  UUIDs, so about one in 6,400 writes carrying a UUID was refused. Fixed in
+  `ledger/validators.py` with regression tests; closed in QA-007.
+
