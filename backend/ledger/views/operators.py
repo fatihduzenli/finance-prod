@@ -9,6 +9,11 @@ Every operator in a URL is loaded from the database before anything else happens
 every change goes through :mod:`payments.operator_sync`, which writes the audit log and
 is the only code that talks to the payment provider. Templates receive masked
 identifiers only (first four and last four characters) and no setting.
+
+Every POST ends in a redirect, whatever the outcome (PLAN-006a §3.4), so a refresh
+never resubmits. A form with errors is kept in the session under
+:data:`HELD_FORM_KEY` (its data and error messages, minus any value that holds a card
+number) and re-rendered, once, by the next GET of the same form.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from decimal import Decimal
 from functools import wraps
 from typing import Any
 
+from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
@@ -36,6 +42,7 @@ from accounts.roles import Role, meets, role_of
 from accounts.views import forbidden
 from ledger.forms import LinkForm, OperatorCreateForm, OperatorForm
 from ledger.models import ZERO, Note, NoteEntityType, Operator, RentCharge, SyncStatus
+from ledger.validators import contains_card_number
 from payments import operator_sync
 from payments.operator_sync import Action, OperatorArchived, SyncOutcome
 from payments.provider import mask_identifier
@@ -48,6 +55,9 @@ SEARCH_MAX_LENGTH = 200
 CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 EMAIL_TAKEN = "An operator with this e-mail address already exists."
 ALREADY_SAVED = "This operator was already saved. Nothing was changed."
+#: Session key of a form with errors, held for the one GET after the redirect.
+HELD_FORM_KEY = "operator_form_errors"
+NON_FIELD = "__all__"
 
 View = Callable[..., HttpResponseBase]
 
@@ -81,7 +91,7 @@ def _report(request: HttpRequest, outcome: SyncOutcome) -> None:
         return
     if outcome.action in (Action.FAILED, Action.LINK_REFUSED):
         messages.error(request, text)
-    elif outcome.needs_review or outcome.action is Action.AWAITING_LINK:
+    elif outcome.needs_review or outcome.action in (Action.AWAITING_LINK, Action.RETRY_TOO_SOON):
         messages.warning(request, text)
     else:
         messages.success(request, text)
@@ -117,6 +127,43 @@ def _load(pk: str) -> Operator:
     except ValueError:
         raise Http404 from None
     return get_object_or_404(Operator, pk=key)
+
+
+def _hold(request: HttpRequest, target: str, form: forms.BaseForm) -> None:
+    """Keep a form with errors for the next GET of ``target``.
+
+    Only the form's own fields are kept, and a value holding a card number is dropped
+    (its error message is kept), so the session never stores one.
+    """
+    data = {}
+    for name in form.fields:
+        value = form.data.get(name, "")
+        data[name] = "" if contains_card_number(str(value)) else str(value)
+    errors = {
+        field: [str(error["message"]) for error in field_errors]
+        for field, field_errors in form.errors.get_json_data().items()
+    }
+    request.session[HELD_FORM_KEY] = {"target": target, "data": data, "errors": errors}
+
+
+def _held[F: forms.BaseForm](
+    request: HttpRequest, target: str, build: Callable[[dict[str, str]], F]
+) -> F | None:
+    """The form held for ``target``, rebuilt with its errors; consumed by this call."""
+    held = request.session.pop(HELD_FORM_KEY, None)
+    if not isinstance(held, dict) or held.get("target") != target:
+        return None
+    form = build(dict(held.get("data") or {}))
+    for field, texts in dict(held.get("errors") or {}).items():
+        name = None if field == NON_FIELD else str(field)
+        if name is not None and name not in form.fields:
+            continue
+        existing = form.errors.get(field)
+        present = [str(item) for item in existing] if existing else []
+        for text in texts:
+            if text not in present:
+                form.add_error(name, str(text))
+    return form
 
 
 def _refused_archived(request: HttpRequest, operator: Operator) -> HttpResponse:
@@ -171,6 +218,8 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
     role = _role(request)
     active = operator.archived_at is None
     billing = meets(role, Role.BILLING)
+    failed = operator.sync_status == SyncStatus.FAILED
+    retry_in = operator_sync.retry_wait_seconds(operator) if failed else 0
     return render(
         request,
         "ledger/operators/detail.html",
@@ -180,7 +229,12 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "payment_method_masked": mask_identifier(method) if method else "",
             "failure_message": (
                 operator_sync.MESSAGES.get(operator.sync_failure, operator_sync.DEFAULT_MESSAGE)
-                if operator.sync_status == SyncStatus.FAILED
+                if failed
+                else ""
+            ),
+            "failure_fields": (
+                ", ".join(operator.sync_failure_fields.split(","))
+                if failed and operator.sync_failure_fields
                 else ""
             ),
             "leases": operator.leases.select_related("store").order_by("store__external_label"),
@@ -190,7 +244,12 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 entity_type=NoteEntityType.OPERATOR, entity_id=operator.pk
             ).order_by("-created_at"),
             "can_edit": billing and active,
-            "can_retry": billing and active and operator.sync_status == SyncStatus.FAILED,
+            "can_retry": billing and active and failed and not retry_in,
+            "retry_wait_message": (
+                operator_sync.retry_wait_message(retry_in)
+                if billing and active and retry_in
+                else ""
+            ),
             "can_link": billing and active,
             "can_archive": meets(role, Role.ADMIN) and active,
         },
@@ -225,8 +284,11 @@ def operator_create(request: HttpRequest) -> HttpResponse:
                 else:
                     messages.info(request, ALREADY_SAVED)
                 return redirect("ledger:operators:detail", pk=operator.pk)
-    else:
-        form = OperatorCreateForm(initial={"creation_key": uuid.uuid4()})
+        _hold(request, "create", form)
+        return redirect("ledger:operators:create")
+    form = _held(request, "create", OperatorCreateForm) or OperatorCreateForm(
+        initial={"creation_key": uuid.uuid4()}
+    )
     return render(request, "ledger/operators/form.html", {"form": form, "operator": None})
 
 
@@ -251,8 +313,11 @@ def operator_edit(request: HttpRequest, pk: str) -> HttpResponse:
                 messages.success(request, "Operator saved.")
                 _after_save(request, updated)
                 return redirect("ledger:operators:detail", pk=operator.pk)
-    else:
-        form = OperatorForm(instance=operator)
+        _hold(request, f"edit:{operator.pk}", form)
+        return redirect("ledger:operators:edit", pk=operator.pk)
+    form = _held(
+        request, f"edit:{operator.pk}", lambda data: OperatorForm(data, instance=operator)
+    ) or OperatorForm(instance=operator)
     return render(request, "ledger/operators/form.html", {"form": form, "operator": operator})
 
 
@@ -296,8 +361,9 @@ def operator_link(request: HttpRequest, pk: str) -> HttpResponse:
                 _report(request, outcome)
                 return redirect("ledger:operators:detail", pk=operator.pk)
             form.add_error(None, outcome.message)
-    else:
-        form = LinkForm()
+        _hold(request, f"link:{operator.pk}", form)
+        return redirect("ledger:operators:link", pk=operator.pk)
+    form = _held(request, f"link:{operator.pk}", LinkForm) or LinkForm()
     refs = operator_sync.current_refs(operator)
     customer = refs.get(operator_sync.KIND_CUSTOMER, "")
     return render(

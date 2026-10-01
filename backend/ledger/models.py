@@ -230,6 +230,8 @@ class Operator(GuardedModel):
     enrolment_status = _choice(EnrolmentStatus, default=EnrolmentStatus.NOT_ENROLLED)
     sync_status = _choice(SyncStatus, default=SyncStatus.NOT_APPLICABLE)
     sync_failure = _choice(SyncFailure, blank=True, default="")
+    #: Comma-separated key names of a ``ProviderRejected`` body, never values (PLAN-006a).
+    sync_failure_fields = free_text(default="")
     sync_attempted_at = models.DateTimeField(null=True, blank=True)
     #: Set once by the create form; a repeated submission finds the row (PLAN-006 D6).
     creation_key = models.UUIDField(unique=True, null=True, blank=True, editable=False)

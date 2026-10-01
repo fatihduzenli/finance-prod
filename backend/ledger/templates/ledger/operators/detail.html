@@ -29,7 +29,7 @@
     <dt>Link status</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} <span class="badge">Needs review</span>{% endif %}</dd>
     {% if failure_message %}
       <dt>Last failure</dt>
-      <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.sync_failure }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|date:"Y-m-d H:i" }} UTC{% endif %}</span></dd>
+      <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.sync_failure }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|date:"Y-m-d H:i" }} UTC{% endif %}</span>{% if failure_fields %}<br><span id="sync-failure-fields">Fields the provider rejected: {{ failure_fields }}</span>{% endif %}</dd>
     {% elif operator.sync_attempted_at %}
       <dt>Last attempt</dt><dd>{{ operator.sync_attempted_at|date:"Y-m-d H:i" }} UTC</dd>
     {% endif %}
@@ -42,6 +42,8 @@
       {% csrf_token %}<button class="btn btn-primary" type="submit">Retry sync</button>
       <span class="muted">Makes one new call to the payment provider.</span>
     </form>
+  {% elif retry_wait_message %}
+    <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
   {% endif %}
 
   <h2>Leases</h2>

@@ -18,7 +18,10 @@ Order of work, for every operator with an e-mail (D3, D6, Rule 5):
    form therefore produce one provider customer.
 3. A :class:`~payments.errors.ProviderError` marks the row ``failed`` with the error's
    class name and the time, and is not retried: :func:`sync_operator` with
-   ``retry=True`` is the manual retry.
+   ``retry=True`` is the manual retry. A :class:`~payments.errors.ProviderRejected`
+   also stores the key names the provider objected to (``sync_failure_fields``, never
+   a value). A retry is refused while the last attempt is less than
+   :data:`RETRY_LOCK_SECONDS` old; the check is made under the row lock (PLAN-006a).
 
 Operators without an e-mail make no call (D4): they wait for :func:`link_operator`,
 which reads the customer by ID to prove it exists and stores the customer and
@@ -31,10 +34,12 @@ name or a fixed sentence from :data:`MESSAGES`, never a provider message.
 
 from __future__ import annotations
 
+import math
 import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -43,7 +48,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from ledger.models import AuditLog, EnrolmentStatus, Operator, SyncFailure, SyncStatus
-from payments.errors import ProviderError
+from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef
 from payments.provider import (
     CustomerInput,
@@ -58,6 +63,9 @@ PROVIDER_KEY = "stax_pay"
 ENTITY_OPERATOR = "operator"
 KIND_CUSTOMER = "customer"
 KIND_PAYMENT_METHOD = "payment_method"
+
+#: A manual retry waits this long after the last attempt (PLAN-006a §3.3).
+RETRY_LOCK_SECONDS = 60
 
 #: Identifier syntax accepted from staff, as the adapter's own validation (PLAN-005).
 IDENTIFIER = re.compile(r"\A[A-Za-z0-9_-]{1,255}\Z")
@@ -126,6 +134,7 @@ class Action(StrEnum):
     FAILED = "failed"
     LINK_SET = "link_set"
     LINK_REFUSED = "link_refused"
+    RETRY_TOO_SOON = "retry_too_soon"
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,10 +145,14 @@ class SyncOutcome:
     #: Error class name or local refusal code; empty on success.
     failure: str = ""
     needs_review: bool = False
+    #: Seconds until a retry is allowed (``RETRY_TOO_SOON`` only).
+    retry_in: int = 0
 
     @property
     def message(self) -> str:
         """A fixed sentence for staff; never text from the provider."""
+        if self.action is Action.RETRY_TOO_SOON:
+            return retry_wait_message(self.retry_in)
         if self.action is Action.LINKED_EXISTING:
             if self.needs_review:
                 return (
@@ -210,6 +223,7 @@ def update_operator(
         elif not operator.email:
             operator.sync_status = SyncStatus.AWAITING_LINK
             operator.sync_failure = ""
+            operator.sync_failure_fields = ""
         elif operator.sync_status != SyncStatus.FAILED:
             operator.sync_status = SyncStatus.PENDING
         operator.save()
@@ -245,6 +259,9 @@ def sync_operator(
 
     Calls the provider only while the locked row is ``pending`` (or ``failed`` with
     ``retry=True``), not archived, has an e-mail and has no current customer reference.
+    With ``retry=True`` it refuses (``RETRY_TOO_SOON``, no call) while the last attempt
+    is less than :data:`RETRY_LOCK_SECONDS` old; the check runs under the row lock, so
+    two concurrent retries cannot both pass it.
     """
     with transaction.atomic():
         operator = Operator.objects.select_for_update().get(pk=operator_id)
@@ -261,6 +278,9 @@ def sync_operator(
             operator.sync_status = SyncStatus.AWAITING_LINK
             operator.save(update_fields=["sync_status", "updated_at"])
             return SyncOutcome(Action.AWAITING_LINK, operator.sync_status)
+        wait = retry_wait_seconds(operator) if retry else 0
+        if wait:
+            return SyncOutcome(Action.RETRY_TOO_SOON, operator.sync_status, retry_in=wait)
 
         before = _snapshot(operator)
         operator.sync_attempted_at = timezone.now()
@@ -278,18 +298,30 @@ def sync_operator(
             needs_review = len(matches) > 1 or len(free) != len(matches)
             if matches and not free:
                 return _fail(
-                    operator, before, actor, SyncFailure.ALREADY_LINKED_ELSEWHERE, needs_review
+                    operator,
+                    before,
+                    actor,
+                    SyncFailure.ALREADY_LINKED_ELSEWHERE,
+                    needs_review=needs_review,
                 )
             if free:
                 chosen, action = oldest(free), Action.LINKED_EXISTING
             else:
                 chosen, action = provider.create_customer(customer_input(operator)), Action.CREATED
         except ProviderError as error:
-            return _fail(operator, before, actor, failure_name(error), needs_review=False)
+            return _fail(
+                operator,
+                before,
+                actor,
+                failure_name(error),
+                needs_review=False,
+                fields=failure_fields(error),
+            )
 
         _add_ref(operator, KIND_CUSTOMER, chosen.external_id)
         operator.sync_status = SyncStatus.LINKED
         operator.sync_failure = ""
+        operator.sync_failure_fields = ""
         operator.needs_review = operator.needs_review or needs_review
         operator.save()
         after = {**_snapshot(operator), "customer": mask_identifier(chosen.external_id)}
@@ -349,6 +381,7 @@ def link_operator(
             _add_ref(operator, KIND_PAYMENT_METHOD, payment_method_external_id)
         operator.sync_status = SyncStatus.LINKED
         operator.sync_failure = ""
+        operator.sync_failure_fields = ""
         operator.enrolment_status = EnrolmentStatus.ENROLLED
         operator.save()
         after = {
@@ -397,6 +430,29 @@ def customer_input(operator: Operator) -> CustomerInput:
     )
 
 
+def retry_wait_seconds(operator: Operator, now: datetime | None = None) -> int:
+    """Whole seconds until a manual retry is allowed; 0 when it is allowed now."""
+    if operator.sync_attempted_at is None:
+        return 0
+    elapsed = ((now or timezone.now()) - operator.sync_attempted_at).total_seconds()
+    if elapsed >= RETRY_LOCK_SECONDS:
+        return 0
+    # An attempt time in the future (clock skew) never locks longer than the lock itself.
+    return min(RETRY_LOCK_SECONDS, max(1, math.ceil(RETRY_LOCK_SECONDS - elapsed)))
+
+
+def retry_wait_message(seconds: int) -> str:
+    """The sentence shown while a retry is locked."""
+    return f"Retry available in {seconds} seconds."
+
+
+def failure_fields(error: ProviderError) -> str:
+    """The rejected key names to store, comma-separated; empty for other failures."""
+    if isinstance(error, ProviderRejected):
+        return ",".join(error.error_fields)
+    return ""
+
+
 def failure_name(error: ProviderError) -> str:
     """The nearest error class name the ``sync_failure`` column accepts."""
     for klass in type(error).__mro__:
@@ -433,10 +489,13 @@ def _fail(
     before: dict[str, Any],
     actor: User | None,
     failure: str,
+    *,
     needs_review: bool,
+    fields: str = "",
 ) -> SyncOutcome:
     operator.sync_status = SyncStatus.FAILED
     operator.sync_failure = failure
+    operator.sync_failure_fields = fields
     operator.needs_review = operator.needs_review or needs_review
     operator.save()
     _audit(actor, "operator.sync_failed", operator, before, _snapshot(operator))
@@ -477,6 +536,7 @@ def _snapshot(operator: Operator) -> dict[str, Any]:
     values: dict[str, Any] = {name: getattr(operator, name) for name in OPERATOR_FIELDS}
     values["sync_status"] = operator.sync_status
     values["sync_failure"] = operator.sync_failure
+    values["sync_failure_fields"] = operator.sync_failure_fields
     values["enrolment_status"] = operator.enrolment_status
     values["needs_review"] = operator.needs_review
     values["archived_at"] = operator.archived_at.isoformat() if operator.archived_at else None

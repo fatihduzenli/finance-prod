@@ -8,19 +8,23 @@ from __future__ import annotations
 
 import threading
 import uuid
+from datetime import timedelta
 from typing import Any
 
 import pytest
 from django.contrib import admin
 from django.contrib.auth.models import User
+from django.contrib.sessions.models import Session
 from django.db import connection
 from django.test import Client
 from django.urls import NoReverseMatch, reverse
+from django.utils import timezone
 
 from accounts import registry
 from accounts.roles import Role
 from ledger.admin import OperatorAdmin
 from ledger.models import EnrolmentStatus, Operator, SyncStatus
+from ledger.views.operators import HELD_FORM_KEY
 from payments import operator_sync
 from payments.errors import CircuitOpen, ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
@@ -66,6 +70,13 @@ def form_data(**overrides: Any) -> dict[str, Any]:
 
 def detail(operator: Operator) -> str:
     return f"/operators/{operator.pk}/"
+
+
+def backdate_attempt(operator: Operator, seconds: int = operator_sync.RETRY_LOCK_SECONDS) -> None:
+    """Move the last sync attempt into the past, as if the retry lock had passed."""
+    Operator.objects.filter(pk=operator.pk).update(
+        sync_attempted_at=timezone.now() - timedelta(seconds=seconds)
+    )
 
 
 def new_operator(**overrides: Any) -> Operator:
@@ -177,7 +188,9 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
     page = response.content.decode()
     assert operator_sync.MESSAGES[name].replace("'", "&#x27;") in page
     assert name in page
-    assert "Retry sync" in page
+    # PLAN-006a §3.3: the retry button waits a minute after the attempt.
+    assert "Retry sync" not in page
+    assert "Retry available in " in page
     assert "CANARY" not in page
     assert len(fake.calls) == 1
 
@@ -185,6 +198,9 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
     billing.get(detail(operator))
     billing.post(f"{detail(operator)}edit/", form_data(phone="+1 555 010 0009"))
     assert len(fake.calls) == 1
+
+    backdate_attempt(operator)
+    assert "Retry sync" in billing.get(detail(operator)).content.decode()
 
     retried = billing.post(f"{detail(operator)}retry-sync/", follow=True)
     assert retried.status_code == 200
@@ -204,8 +220,8 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
 def test_a_malformed_email_is_refused_with_no_record_and_no_call(
     billing: Client, fake: FakeProvider, email: str
 ) -> None:
-    response = billing.post(NEW, form_data(email=email))
-    assert response.status_code == 200
+    response = billing.post(NEW, form_data(email=email), follow=True)
+    assert response.redirect_chain == [(NEW, 302)]
     assert "Enter a valid email address." in response.content.decode()
     assert Operator.objects.count() == 0
     assert fake.calls == []
@@ -218,16 +234,18 @@ def test_the_email_is_stored_lower_case_and_stripped(billing: Client, fake: Fake
 
 def test_a_duplicate_email_is_a_form_error(billing: Client, fake: FakeProvider) -> None:
     new_operator()
-    response = billing.post(NEW, form_data(email="OPS@example.com"))
-    assert response.status_code == 200
+    response = billing.post(NEW, form_data(email="OPS@example.com"), follow=True)
+    assert response.redirect_chain == [(NEW, 302)]
+    assert 'class="errorlist' in response.content.decode()
     assert Operator.objects.count() == 1
     assert fake.calls == []
 
 
 def test_a_card_number_in_a_text_field_is_refused(billing: Client, fake: FakeProvider) -> None:
-    response = billing.post(NEW, form_data(notes="card 4111 1111 1111 1111"))
-    assert response.status_code == 200
-    assert "4111" not in response.content.decode().split("<textarea")[0]
+    response = billing.post(NEW, form_data(notes="card 4111 1111 1111 1111"), follow=True)
+    assert response.redirect_chain == [(NEW, 302)]
+    assert "4111" not in response.content.decode()
+    assert "card or account numbers" in response.content.decode()
     assert Operator.objects.count() == 0
     assert fake.calls == []
 
@@ -279,9 +297,11 @@ def test_a_bad_customer_id_shows_a_clear_message_and_stores_nothing(
 ) -> None:
     operator = new_operator(email=None)
     response = billing.post(
-        f"{detail(operator)}link/", {"customer_id": "cus_missing", "payment_method_id": "pm_1"}
+        f"{detail(operator)}link/",
+        {"customer_id": "cus_missing", "payment_method_id": "pm_1"},
+        follow=True,
     )
-    assert response.status_code == 200
+    assert response.redirect_chain == [(f"{detail(operator)}link/", 302)]
     assert operator_sync.LINK_REJECTED_MESSAGE in response.content.decode()
     assert call_names(fake) == ["get_customer"]
     assert operator_sync.current_refs(operator) == {}
@@ -295,9 +315,10 @@ def test_the_link_form_refuses_anything_but_an_identifier(
 ) -> None:
     operator = new_operator(email=None)
     response = billing.post(
-        f"{detail(operator)}link/", {"customer_id": value, "payment_method_id": "pm_1"}
+        f"{detail(operator)}link/", {"customer_id": value, "payment_method_id": "pm_1"}, follow=True
     )
-    assert response.status_code == 200
+    assert response.redirect_chain == [(f"{detail(operator)}link/", 302)]
+    assert 'class="errorlist' in response.content.decode()
     assert fake.calls == []
     assert operator_sync.current_refs(operator) == {}
 
@@ -534,3 +555,191 @@ def test_the_detail_page_shows_balance_leases_and_masked_ids(
     assert "No invoices yet." in page
     assert customer not in page
     assert f"{customer[:4]}…{customer[-4:]}" in page
+
+
+# --- PLAN-006a §4 row 5: every POST redirects; errors shown once ------------------------------
+
+
+def _held_count() -> int:
+    """How many sessions hold a form for the next GET."""
+    return sum(1 for session in Session.objects.all() if HELD_FORM_KEY in session.get_decoded())
+
+
+def test_every_post_route_redirects_on_success(fake: FakeProvider) -> None:
+    client, _ = client_for(Role.ADMIN)
+    created = client.post(NEW, form_data())
+    operator = Operator.objects.get()
+    assert (created.status_code, created["Location"]) == (302, detail(operator))
+
+    paths = _paths(operator)
+    edited = client.post(paths["edit"], form_data(phone="+1 555 010 0003"))
+    assert (edited.status_code, edited["Location"]) == (302, detail(operator))
+
+    Operator.objects.filter(pk=operator.pk).update(sync_status=SyncStatus.FAILED)
+    retried = client.post(paths["retry_sync"])
+    assert (retried.status_code, retried["Location"]) == (302, detail(operator))
+
+    manual = new_operator(email=None, display_name="Manual")
+    add_provider_customer(fake, "cus_prg_0001", "")
+    linked = client.post(
+        _paths(manual)["link"], {"customer_id": "cus_prg_0001", "payment_method_id": "pm_prg"}
+    )
+    assert (linked.status_code, linked["Location"]) == (302, detail(manual))
+
+    archived = client.post(paths["archive"])
+    assert (archived.status_code, archived["Location"]) == (302, LIST)
+    assert _held_count() == 0
+
+
+def test_every_post_route_redirects_on_failure(fake: FakeProvider) -> None:
+    client, _ = client_for(Role.ADMIN)
+    operator = new_operator()
+    paths = _paths(operator)
+
+    invalid_create = client.post(NEW, form_data(display_name="  ", email="bad"))
+    assert (invalid_create.status_code, invalid_create["Location"]) == (302, NEW)
+
+    invalid_edit = client.post(paths["edit"], form_data(display_name=""))
+    assert (invalid_edit.status_code, invalid_edit["Location"]) == (302, paths["edit"])
+
+    invalid_link = client.post(paths["link"], {"customer_id": "bad id", "payment_method_id": ""})
+    assert (invalid_link.status_code, invalid_link["Location"]) == (302, paths["link"])
+
+    refused_link = client.post(paths["link"], {"customer_id": "cus_none", "payment_method_id": "p"})
+    assert (refused_link.status_code, refused_link["Location"]) == (302, paths["link"])
+
+    # A retry inside the lock is refused with a message, still a redirect.
+    Operator.objects.filter(pk=operator.pk).update(
+        sync_status=SyncStatus.FAILED, sync_attempted_at=timezone.now()
+    )
+    too_soon = client.post(paths["retry_sync"], follow=True)
+    assert too_soon.redirect_chain == [(detail(operator), 302)]
+    assert "Retry available in " in too_soon.content.decode()
+    assert fake.calls == [("get_customer", ("cus_none",))]
+
+    # Archiving twice, and anything on an archived operator, redirects too.
+    assert client.post(paths["archive"]).status_code == 302
+    for name in ("archive", "edit", "retry_sync", "link"):
+        response = client.post(paths[name], form_data())
+        assert response.status_code == 302, name
+
+
+@pytest.mark.parametrize("route", ["create", "edit", "link"])
+def test_errors_are_shown_on_the_next_get_only(
+    billing: Client, fake: FakeProvider, route: str
+) -> None:
+    operator = new_operator(email=None)
+    path = _paths(operator)[route]
+    invalid: dict[str, Any] = (
+        {"customer_id": "bad id", "payment_method_id": "pm_1"}
+        if route == "link"
+        else form_data(display_name="", legal_name="Kept Legal Name")
+    )
+
+    posted = billing.post(path, invalid)
+    assert posted.status_code == 302 and posted["Location"] == path
+
+    first = billing.get(path).content.decode()
+    assert 'class="errorlist' in first
+    if route != "link":
+        assert "This field is required." in first
+        assert 'value="Kept Legal Name"' in first
+    else:
+        assert 'value="bad id"' in first
+
+    second = billing.get(path).content.decode()
+    assert 'class="errorlist' not in second
+    assert "Kept Legal Name" not in second
+    assert _held_count() == 0
+
+
+def test_the_create_form_keeps_its_creation_key_across_the_redirect(
+    billing: Client, fake: FakeProvider
+) -> None:
+    data = form_data(display_name="")
+    billing.post(NEW, data)
+    page = billing.get(NEW).content.decode()
+    assert f'value="{data["creation_key"]}"' in page
+
+
+def test_a_held_form_is_not_shown_on_another_form(billing: Client, fake: FakeProvider) -> None:
+    first = new_operator(email=None)
+    second = new_operator(email=None, display_name="Second")
+    billing.post(_paths(first)["edit"], form_data(display_name=""))
+    other = billing.get(_paths(second)["edit"]).content.decode()
+    assert 'class="errorlist' not in other
+    # Consumed by that GET: the first form's page no longer shows it either.
+    assert 'class="errorlist' not in billing.get(_paths(first)["edit"]).content.decode()
+
+
+def test_a_card_number_is_never_held_in_the_session(billing: Client, fake: FakeProvider) -> None:
+    billing.post(NEW, form_data(notes="card 4111 1111 1111 1111", city="Kept City"))
+    stored = " ".join(str(session.get_decoded()) for session in Session.objects.all())
+    assert "4111" not in stored
+    assert "Kept City" in stored
+    page = billing.get(NEW).content.decode()
+    assert "4111" not in page
+    assert "card or account numbers" in page
+    assert 'value="Kept City"' in page
+
+
+def test_refreshing_after_a_post_issues_only_a_get(billing: Client, fake: FakeProvider) -> None:
+    response = billing.post(NEW, form_data(), follow=True)
+    final_url = response.redirect_chain[-1][0]
+    assert response.request["REQUEST_METHOD"] == "GET"
+    # A refresh repeats the last request of the chain: a GET of the detail page.
+    billing.get(final_url)
+    assert Operator.objects.count() == 1
+    assert call_names(fake).count("create_customer") == 1
+
+
+# --- PLAN-006a §4 rows 4 and 6: the lock and the rejected fields on the detail page -----------
+
+
+def test_the_detail_page_shows_the_rejected_field_names(
+    billing: Client, fake: FakeProvider
+) -> None:
+    fake.fail_next("create_customer", ProviderRejected(422, error_fields=("email", "lastname")))
+    response = billing.post(NEW, form_data(), follow=True)
+    page = response.content.decode()
+    assert "Fields the provider rejected: email, lastname" in page
+
+    operator = Operator.objects.get()
+    backdate_attempt(operator)
+    billing.post(f"{detail(operator)}retry-sync/")
+    page = billing.get(detail(operator)).content.decode()
+    assert "Fields the provider rejected" not in page
+
+
+def test_the_detail_page_hides_the_retry_button_while_locked(
+    billing: Client, fake: FakeProvider
+) -> None:
+    operator = new_operator()
+    Operator.objects.filter(pk=operator.pk).update(sync_status=SyncStatus.FAILED)
+    for seconds, button in [(1, False), (59, False), (60, True), (600, True)]:
+        backdate_attempt(operator, seconds)
+        page = billing.get(detail(operator)).content.decode()
+        assert ("Retry sync" in page) is button, seconds
+        assert ("Retry available in " in page) is (not button), seconds
+
+
+def test_a_viewer_sees_neither_the_button_nor_the_wait(fake: FakeProvider) -> None:
+    client, _ = client_for(Role.VIEWER)
+    operator = new_operator()
+    Operator.objects.filter(pk=operator.pk).update(
+        sync_status=SyncStatus.FAILED, sync_attempted_at=timezone.now()
+    )
+    page = client.get(detail(operator)).content.decode()
+    assert "Retry sync" not in page and "Retry available" not in page
+
+
+def test_two_quick_retry_posts_make_one_provider_call(billing: Client, fake: FakeProvider) -> None:
+    operator = new_operator()
+    Operator.objects.filter(pk=operator.pk).update(sync_status=SyncStatus.FAILED)
+    fake.fail_next("find_customers", ProviderUnavailable(503))
+    first = billing.post(f"{detail(operator)}retry-sync/")
+    second = billing.post(f"{detail(operator)}retry-sync/", follow=True)
+    assert first.status_code == 302
+    assert second.redirect_chain == [(detail(operator), 302)]
+    assert call_names(fake) == ["find_customers"]
+    assert "Retry available in " in second.content.decode()

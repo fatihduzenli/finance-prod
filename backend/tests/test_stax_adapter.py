@@ -380,7 +380,7 @@ def test_an_unreadable_success_raises_provider_unavailable(reply: httpx.Response
 BODY_MARKER = "BODY-MARKER-7f3a"
 LINE = re.compile(
     r"^stax method=(GET|POST|PUT|DELETE) path=(/\S*) status=(\d{3}|-) ms=\d+ object_id=(\S+)"
-    r"( failure=[A-Za-z]+)?$"
+    r"( failure=[A-Za-z]+)?( error_fields=[A-Za-z0-9_.,-]+)?$"
 )
 
 
@@ -414,7 +414,7 @@ def test_log_lines_carry_only_method_path_status_duration_and_id(
     assert lines[1].startswith("stax method=POST path=/invoice status=500 ")
     assert lines[1].endswith(" object_id=- failure=ProviderUnavailable")
     assert lines[2].startswith("stax method=POST path=/transaction/{id}/refund status=422 ")
-    assert lines[2].endswith(" object_id=txn-9 failure=ProviderRejected")
+    assert lines[2].endswith(" object_id=txn-9 failure=ProviderRejected error_fields=non-json")
     assert lines[3].startswith("stax method=POST path=/customer status=- ")
     assert lines[3].endswith(" failure=ConnectError")
     assert len(lines) == 4

@@ -6,16 +6,21 @@ this file; nothing opens a socket.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 import pytest
 from django.contrib.auth.models import User
-from django.db import connection
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, connection, transaction
+from django.test import override_settings
+from django.utils import timezone
 
 from accounts.roles import Role
 from ledger.models import AuditLog, EnrolmentStatus, Operator, SyncFailure, SyncStatus
@@ -31,7 +36,9 @@ from payments.fake import FakeProvider
 from payments.models import ExternalRef
 from payments.operator_sync import Action
 from payments.provider import CustomerQuery, CustomerRecord
+from payments.stax.adapter import StaxProvider
 from tests.auth_helpers import make_user
+from tests.stax_helpers import make_rig, sequence
 
 requires_postgresql = pytest.mark.skipif(
     connection.vendor != "postgresql",
@@ -267,7 +274,10 @@ def test_a_failed_operator_is_not_called_again_until_retry(actor: User, fake: Fa
     )
     assert len(fake.calls) == 1
 
-    # The retry: one lookup and one create, then linked.
+    # The retry, once the lock has passed: one lookup and one create, then linked.
+    Operator.objects.filter(pk=operator.pk).update(
+        sync_attempted_at=timezone.now() - timedelta(seconds=operator_sync.RETRY_LOCK_SECONDS)
+    )
     outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
     assert outcome.action is Action.CREATED
     assert call_names(fake) == ["find_customers", "find_customers", "create_customer"]
@@ -610,3 +620,235 @@ def _no_real_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
     monkeypatch.setattr("payments.get_provider", refuse)
     yield
+
+
+# --- PLAN-006a §4 row 4: the retry lock ------------------------------------------------------
+
+
+def failed_operator(actor: User, fake: FakeProvider, seconds_ago: float) -> Operator:
+    """An operator whose last attempt failed ``seconds_ago`` seconds ago."""
+    operator = create(actor)
+    fake.fail_next("find_customers", ProviderUnavailable(503))
+    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    Operator.objects.filter(pk=operator.pk).update(
+        sync_attempted_at=timezone.now() - timedelta(seconds=seconds_ago)
+    )
+    fake.calls.clear()
+    return operator
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("seconds_ago", [0, 1, 30, 59])
+def test_a_retry_within_60_seconds_is_refused_with_no_call(
+    actor: User, fake: FakeProvider, seconds_ago: int
+) -> None:
+    operator = failed_operator(actor, fake, seconds_ago)
+    audit_rows = AuditLog.objects.count()
+
+    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+
+    assert outcome.action is Action.RETRY_TOO_SOON
+    assert outcome.status == SyncStatus.FAILED
+    assert 1 <= outcome.retry_in <= 60 - seconds_ago
+    assert outcome.message == f"Retry available in {outcome.retry_in} seconds."
+    assert fake.calls == []
+    operator.refresh_from_db()
+    assert operator.sync_status == SyncStatus.FAILED
+    assert AuditLog.objects.count() == audit_rows
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("seconds_ago", [60, 61, 3600])
+def test_a_retry_at_or_after_60_seconds_is_allowed(
+    actor: User, fake: FakeProvider, seconds_ago: int
+) -> None:
+    operator = failed_operator(actor, fake, seconds_ago)
+    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+    assert outcome.action is Action.CREATED
+    assert call_names(fake) == ["find_customers", "create_customer"]
+
+
+def test_retry_wait_seconds_at_the_boundaries() -> None:
+    now = timezone.now()
+    operator = Operator(display_name="x")
+    assert operator_sync.retry_wait_seconds(operator, now) == 0
+    for elapsed, expected in [(0, 60), (0.2, 60), (59, 1), (59.9, 1), (60, 0), (61, 0)]:
+        operator.sync_attempted_at = now - timedelta(seconds=elapsed)
+        assert operator_sync.retry_wait_seconds(operator, now) == expected, elapsed
+    # An attempt time in the future (clock skew) never locks longer than the lock.
+    operator.sync_attempted_at = now + timedelta(seconds=30)
+    assert operator_sync.retry_wait_seconds(operator, now) == operator_sync.RETRY_LOCK_SECONDS
+
+
+@pytest.mark.django_db
+def test_a_plain_sync_is_not_affected_by_the_retry_lock(actor: User, fake: FakeProvider) -> None:
+    operator = create(actor)
+    Operator.objects.filter(pk=operator.pk).update(sync_attempted_at=timezone.now())
+    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    assert outcome.action is Action.CREATED
+
+
+class SlowFailingProvider(FakeProvider):
+    """Every lookup is slow and fails, so the row stays ``failed`` after each attempt."""
+
+    def find_customers(self, query: CustomerQuery) -> list[CustomerRecord]:
+        self._call("find_customers", query)
+        time.sleep(0.3)
+        raise ProviderUnavailable(503)
+
+
+@requires_postgresql
+@pytest.mark.django_db(transaction=True)
+def test_two_concurrent_retries_make_one_call(actor: User) -> None:
+    provider = SlowFailingProvider()
+    operator = create(actor)
+    Operator.objects.filter(pk=operator.pk).update(sync_status=SyncStatus.FAILED)
+    barrier = threading.Barrier(2)
+    outcomes: list[Action] = []
+
+    def retry() -> None:
+        try:
+            barrier.wait()
+            outcomes.append(
+                operator_sync.sync_operator(
+                    operator.pk, provider=provider, actor=actor, retry=True
+                ).action
+            )
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=retry) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(outcomes) == sorted([Action.FAILED, Action.RETRY_TOO_SOON])
+    assert call_names(provider) == ["find_customers"]
+
+
+# --- PLAN-006a §4 row 6: stored field names -----------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_rejected_field_names_are_stored_audited_and_cleared_on_success(
+    actor: User, fake: FakeProvider
+) -> None:
+    operator = create(actor)
+    fake.fail_next(
+        "create_customer",
+        ProviderRejected(422, "CANARY provider text", error_fields=("email", "lastname")),
+    )
+    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+
+    operator.refresh_from_db()
+    assert outcome.failure == "ProviderRejected"
+    assert operator.sync_failure_fields == "email,lastname"
+    audit = AuditLog.objects.get(action="operator.sync_failed")
+    assert audit.after is not None
+    assert audit.after["sync_failure_fields"] == "email,lastname"
+    assert "CANARY" not in str(audit.after) and "CANARY" not in outcome.message
+
+    Operator.objects.filter(pk=operator.pk).update(
+        sync_attempted_at=timezone.now() - timedelta(seconds=operator_sync.RETRY_LOCK_SECONDS)
+    )
+    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+    operator.refresh_from_db()
+    assert outcome.action is Action.CREATED
+    assert (operator.sync_failure, operator.sync_failure_fields) == ("", "")
+    created = AuditLog.objects.get(action="operator.sync_created")
+    assert created.after is not None and created.after["sync_failure_fields"] == ""
+
+
+@pytest.mark.django_db
+def test_a_failure_other_than_rejected_stores_no_field_names(
+    actor: User, fake: FakeProvider
+) -> None:
+    operator = create(actor)
+    fake.fail_next("create_customer", ProviderRejected(422, error_fields=("email",)))
+    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    Operator.objects.filter(pk=operator.pk).update(sync_attempted_at=None)
+    fake.fail_next("find_customers", ProviderUnavailable(503))
+    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+    operator.refresh_from_db()
+    assert (operator.sync_failure, operator.sync_failure_fields) == ("ProviderUnavailable", "")
+
+
+@pytest.mark.django_db
+def test_removing_the_email_or_linking_clears_the_field_names(
+    actor: User, fake: FakeProvider
+) -> None:
+    for clear in ("remove_email", "link"):
+        operator = create(actor, email=f"{clear}@example.com")
+        fake.fail_next("create_customer", ProviderRejected(422, error_fields=("email",)))
+        operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+        if clear == "remove_email":
+            operator_sync.update_operator(operator.pk, fields(email=None), actor=actor)
+        else:
+            add_provider_customer(fake, "cus_clear_0001", "")
+            operator_sync.link_operator(
+                operator.pk,
+                customer_external_id="cus_clear_0001",
+                payment_method_external_id="pm_clear",
+                provider=fake,
+                actor=actor,
+            )
+        operator.refresh_from_db()
+        assert operator.sync_failure_fields == "", clear
+
+
+@pytest.mark.django_db
+def test_the_field_names_column_is_guarded_against_card_numbers(actor: User) -> None:
+    operator = create(actor)
+    operator.sync_failure_fields = "email,4111111111111111"
+    with pytest.raises(ValidationError):
+        operator.save()
+
+
+@requires_postgresql
+@pytest.mark.django_db
+def test_the_database_trigger_guards_the_field_names_column(actor: User) -> None:
+    operator = create(actor)
+    with pytest.raises(IntegrityError), transaction.atomic():
+        Operator.objects.filter(pk=operator.pk).update(
+            sync_failure_fields="email,4111 1111 1111 1111"
+        )
+
+
+@pytest.mark.django_db
+def test_an_end_to_end_422_through_the_real_transport_stores_names_only(
+    actor: User, fake_stax_api_key: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    marker = "VALUE-MARKER-0c9a"
+    card = "4111111111111111"
+    rig = make_rig(
+        sequence(
+            [
+                httpx.Response(200, json={"data": []}),
+                httpx.Response(
+                    422,
+                    json={
+                        "email": [f"{marker} {card}"],
+                        "lastname": [f"{marker} {fake_stax_api_key}"],
+                    },
+                ),
+            ]
+        )
+    )
+    operator = create(actor)
+    with override_settings(STAX_CALLER="worker"), caplog.at_level(logging.DEBUG):
+        outcome = operator_sync.sync_operator(
+            operator.pk, provider=StaxProvider(rig.transport), actor=actor
+        )
+
+    operator.refresh_from_db()
+    assert outcome.failure == "ProviderRejected"
+    assert operator.sync_failure_fields == "email,lastname"
+    assert "error_fields=email,lastname" in caplog.text
+    audit = AuditLog.objects.get(action="operator.sync_failed")
+    stored = " ".join(
+        [str(audit.before), str(audit.after), operator.sync_failure_fields, outcome.message]
+    )
+    for forbidden in (marker, card, fake_stax_api_key):
+        assert forbidden not in stored
+        assert forbidden not in caplog.text

@@ -38,11 +38,22 @@ class RateLimitWaitExceeded(ProviderError):  # noqa: N818 (names fixed by PLAN-0
 
 
 class ProviderRejected(ProviderError):  # noqa: N818 (names fixed by PLAN-005 §4.1)
-    """The provider answered with a 4xx other than 429. Never retried."""
+    """The provider answered with a 4xx other than 429. Never retried.
 
-    def __init__(self, status: int, message: str = "The provider rejected the request") -> None:
+    ``error_fields`` holds the key names of the error body, reduced to a safe alphabet
+    by the transport (PLAN-006a §3.1); never a value. It is not part of the message.
+    """
+
+    def __init__(
+        self,
+        status: int,
+        message: str = "The provider rejected the request",
+        *,
+        error_fields: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(f"{message} (status {status})")
         self.status = status
+        self.error_fields = error_fields
 
 
 class ProviderUnavailable(ProviderError):  # noqa: N818 (names fixed by PLAN-005 §4.1)

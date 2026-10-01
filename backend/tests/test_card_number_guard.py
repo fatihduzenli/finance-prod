@@ -284,6 +284,7 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         for module in (
             "ledger.migrations.0002_postgresql_guards",
             "ledger.migrations.0004_reserved_tables",
+            "ledger.migrations.0005_operator_sync_failure_fields",
             "payments.migrations.0002_postgresql_guards",
         )
         for table, columns in importlib.import_module(module).GUARDED_COLUMNS.items()
