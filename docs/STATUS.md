@@ -253,3 +253,19 @@ the login page myself." The condition for starting Prompt 4 is met.
   operator POST, created ID in the create log line.
 - Owner will edit the failed operator's email to a non-reserved domain and retry once.
 
+## Update, 2026-10-01, cause of the 422 found by the owner
+
+- **Owner, in writing:** the failed operator is now linked. Cause: an **incomplete phone
+  number**. A non-reserved email alone still gave 422; adding the company name alone still
+  gave 422; completing the phone number succeeded first time. The `example.com` hypothesis was
+  wrong; the six failures that opened the breaker at 20:34 UTC most likely had the same cause.
+  Three more failed requests were spent on the retries. Checkpoint 6 items 2 and 3 confirmed;
+  item 1 (dashboard) is for 2026-10-01.
+- The specification (`/reference/create-customer.md`, read 2026-10-01) states the phone rule
+  `/[0-9]{10,15}/`, 255-character caps on names and email, and the error shape
+  `{"<field>": ["<message>"]}`.
+- **PLAN-006b** implemented, QA PASS (`docs/qa/QA-006b-customer-field-rules.md`), **not pushed**:
+  the phone rule and the caps are enforced in the form and again before any request leaves;
+  empty optional fields are no longer sent; stored phones normalised by migration 0006, bad
+  ones flagged for review.
+

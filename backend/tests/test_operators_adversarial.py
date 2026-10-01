@@ -17,6 +17,7 @@ from payments import operator_sync
 from payments.errors import ProviderError
 from payments.fake import FakeProvider
 from payments.models import ExternalRef
+from payments.provider import CustomerInput
 from payments.stax import mapping
 from tests.auth_helpers import make_user, verified_client
 from tests.stax_helpers import make_rig
@@ -329,3 +330,48 @@ def test_outstanding_balance_is_exact_money(billing: Client, fake: FakeProvider)
         )
     response = billing.get(f"/operators/{operator.pk}/")
     assert "0.31" in response.content.decode()
+
+
+# --- PLAN-006b row 6: the phone rule under hostile input ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "phone",
+    [
+        "".join(chr(0xFF10 + int(d)) for d in "4155550132"),  # full-width digits
+        "".join(chr(0x0660 + int(d)) for d in "4155550132"),  # Arabic-Indic digits
+        "415+555+0132",
+        "++14155550132",
+        "4111111111111111",  # Luhn-valid 16-digit run: too long for a phone
+        "4111 1111 1111 1111",
+        "0" * 9,
+        "1" * 16,
+        "415-555-0132 ext 44",
+        "tel:4155550132",
+        "4155550132​",
+    ],
+)
+def test_hostile_phones_are_refused_without_a_call_and_without_the_card_message(
+    billing: Client, fake: FakeProvider, phone: str
+) -> None:
+    response = billing.post("/operators/new/", form_data(phone=phone), follow=True)
+    body = response.content.decode(errors="replace")
+    assert Operator.objects.count() == 0
+    assert call_names(fake) == []
+    assert "Enter 10 to 15 digits" in body
+    assert "card or account numbers" not in body
+    assert "4111111111111111" not in body
+
+
+@pytest.mark.parametrize("phone", ["0000000000", "+1 (415) 555-0132", "415.555.0132", "9" * 15])
+def test_accepted_phones_reach_the_provider_as_digits_only(
+    billing: Client, fake: FakeProvider, phone: str
+) -> None:
+    billing.post("/operators/new/", form_data(phone=phone, email="digits@example.com"))
+    operator = Operator.objects.get()
+    assert operator.phone.isdigit() and 10 <= len(operator.phone) <= 15
+    created = [args for name, args in fake.calls if name == "create_customer"]
+    assert len(created) == 1
+    sent = created[0][0]
+    assert isinstance(sent, CustomerInput)
+    assert sent.phone == operator.phone
