@@ -17,6 +17,7 @@ from django.test import Client, override_settings
 from accounts import registry
 from accounts.roles import Role
 from ledger.models import (
+    AuditLog,
     CollectionSchedule,
     CollectionStatus,
     Lease,
@@ -325,7 +326,7 @@ def test_the_large_debit_warning(
     with override_settings(LARGE_DEBIT_WARNING_AMOUNT=D(threshold)):
         page = admin.get(paths(lease)["enrol"]).content.decode()
     assert ('id="large-debit-warning"' in page) is shown
-    assert ("placeholder" in page) is shown
+    assert ('id="confirm-large-debit"' in page) is shown
 
 
 def test_enable_through_the_screen_then_a_second_click_creates_nothing(
@@ -385,6 +386,148 @@ def test_a_provider_rejection_on_enrol_shows_the_field_names(
     page = admin.get(route["enrol"]).content.decode()
     assert "Fields the provider rejected: payment_method_id, rule." in page
     assert "CANARY" not in page
+
+
+# --- PLAN-007c: large-debit confirmation and the confirmed provider limit ------------------------
+
+CONFIRM_2100 = (
+    "I confirm this debit of $2,100.00 exceeds the warning threshold of $2,000.00 "
+    "and may be enabled."
+)
+LIMIT_5000 = "Exceeds the confirmed provider limit of $5,000.00. Autopay cannot be enabled."
+
+
+def _creates(fake: FakeProvider) -> int:
+    return [name for name, _ in fake.calls].count("create_scheduled_invoice")
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=None)
+def test_the_enrolment_page_asks_for_the_large_debit_confirmation(
+    admin: Client, fake: FakeProvider
+) -> None:
+    add_methods(fake)
+    page = admin.get(paths(make_lease(D("2100.00")))["enrol"]).content.decode()
+    assert 'id="large-debit-warning"' in page and "$2,000.00" in page
+    assert 'type="checkbox" name="confirm_large_debit"' in page
+    assert CONFIRM_2100 in page
+    assert 'id="enable-autopay"' in page
+    assert 'id="provider-limit"' not in page
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=None)
+def test_the_enrolment_page_below_the_warning_has_no_checkbox(
+    admin: Client, fake: FakeProvider
+) -> None:
+    add_methods(fake)
+    page = admin.get(paths(make_lease(D("2000.00")))["enrol"]).content.decode()
+    assert 'name="confirm_large_debit"' not in page
+    assert 'id="enable-autopay"' in page
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=None)
+def test_a_large_debit_posted_without_the_checkbox_is_refused_with_the_sentence(
+    admin: Client, fake: FakeProvider
+) -> None:
+    add_methods(fake)
+    lease = make_lease(D("2100.00"))
+    route = paths(lease)
+    response = admin.post(route["enrol"], {"payment_method_id": BANK})
+    assert (response.status_code, response["Location"]) == (302, route["enrol"])
+    assert _creates(fake) == 0 and fake.calls == []
+    assert CONFIRM_2100 in admin.get(route["enrol"]).content.decode()
+    assert CollectionSchedule.objects.count() == 0
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=None)
+def test_a_large_debit_posted_with_the_checkbox_is_enabled_and_audited(
+    admin: Client, fake: FakeProvider
+) -> None:
+    add_methods(fake)
+    lease = make_lease(D("2100.00"))
+    route = paths(lease)
+    response = admin.post(
+        route["enrol"], {"payment_method_id": BANK, "confirm_large_debit": "true"}
+    )
+    assert (response.status_code, response["Location"]) == (302, route["detail"])
+    assert _creates(fake) == 1
+    entry = AuditLog.objects.get(action="lease.autopay_large_debit_confirmed")
+    assert entry.actor is not None
+    assert entry.after == {
+        "amount": "2100.00",
+        "threshold": "2000.00",
+        "confirmed_by": entry.actor.pk,
+    }
+
+
+@pytest.mark.parametrize(
+    ("posted", "confirmed"),
+    [
+        ({"confirm_large_debit": "on"}, True),
+        ({"confirm_large_debit": "true"}, True),
+        ({"confirm_large_debit": "1"}, False),
+        ({"confirm_large_debit": "yes"}, False),
+        ({"confirm_large_debit": "0"}, False),
+        ({"confirm_large_debit": "off"}, False),
+        ({"confirm_large_debit": "false"}, False),
+        ({"confirm_large_debit": "no"}, False),
+        ({"confirm_large_debit": "ON"}, False),
+        ({"confirm_large_debit": "True"}, False),
+        ({"confirm_large_debit": " on"}, False),
+        ({"confirm_large_debit": ""}, False),
+        ({}, False),
+    ],
+)
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=None)
+def test_only_the_exact_checkbox_value_confirms_a_large_debit(
+    admin: Client, fake: FakeProvider, posted: dict[str, str], confirmed: bool
+) -> None:
+    add_methods(fake)
+    lease = make_lease(D("2100.00"))
+    route = paths(lease)
+    response = admin.post(route["enrol"], {"payment_method_id": BANK, **posted})
+    expected = route["detail"] if confirmed else route["enrol"]
+    assert (response.status_code, response["Location"]) == (302, expected)
+    assert _creates(fake) == (1 if confirmed else 0)
+    assert CollectionSchedule.objects.exists() is confirmed
+    assert (
+        AuditLog.objects.filter(action="lease.autopay_large_debit_confirmed").exists() is confirmed
+    )
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("5000.00"))
+def test_above_the_confirmed_limit_the_page_offers_no_way_and_a_post_is_refused(
+    admin: Client, fake: FakeProvider
+) -> None:
+    add_methods(fake)
+    lease = make_lease(D("5000.01"))
+    route = paths(lease)
+    page = admin.get(route["enrol"]).content.decode()
+    assert LIMIT_5000 in page
+    assert 'name="confirm_large_debit"' not in page
+    assert 'id="enable-autopay"' not in page
+    response = admin.post(
+        route["enrol"], {"payment_method_id": BANK, "confirm_large_debit": "true"}
+    )
+    assert (response.status_code, response["Location"]) == (302, route["enrol"])
+    assert _creates(fake) == 0
+    assert LIMIT_5000 in admin.get(route["enrol"]).content.decode()
+    assert CollectionSchedule.objects.count() == 0
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("5000.00"))
+def test_between_the_warning_and_the_limit_the_screen_confirmation_works(
+    admin: Client, fake: FakeProvider
+) -> None:
+    add_methods(fake)
+    lease = make_lease(D("5000.00"))
+    route = paths(lease)
+    page = admin.get(route["enrol"]).content.decode()
+    assert 'name="confirm_large_debit"' in page and 'id="provider-limit"' not in page
+    response = admin.post(
+        route["enrol"], {"payment_method_id": BANK, "confirm_large_debit": "true"}
+    )
+    assert (response.status_code, response["Location"]) == (302, route["detail"])
+    assert _creates(fake) == 1
 
 
 # --- Row 4 through the screens -------------------------------------------------------------------

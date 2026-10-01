@@ -199,6 +199,15 @@ class LeaseCreateForm(LeaseForm):
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
 
 
+class _ExactCheckboxInput(forms.CheckboxInput):
+    """A checkbox that is ticked only by the exact value a rendered checkbox posts ("on")
+    or the literal "true". Django's CheckboxInput treats any other non-empty string,
+    such as "0" or "off", as ticked."""
+
+    def value_from_datadict(self, data: Any, files: Any, name: str) -> bool:
+        return data.get(name) in ("on", "true")
+
+
 class EnrolForm(forms.Form):
     """The chosen payment method. Only its syntax is checked here; the service checks
     that it is a bank method of the operator's customer at the provider (D2)."""
@@ -209,6 +218,9 @@ class EnrolForm(forms.Form):
         validators=[IDENTIFIER_VALIDATOR],
         error_messages={"required": "Choose a bank payment method."},
     )
+    #: PLAN-007c: the admin's confirmation of a debit above the warning threshold. The
+    #: service decides whether it is needed and refuses without it.
+    confirm_large_debit = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
 
 
 # --- Stores (PLAN-007b §1) ----------------------------------------------------------------

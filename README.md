@@ -73,6 +73,7 @@ environment guard and the yellow SANDBOX banner exist.
 | `STAX_PROVIDER` | `stax` (default), or `fake` for the in-memory provider | `stax` | `stax` |
 | `STAX_PAY_INVOICE_ENABLED` | `false` (default) | `false`; `true` only for the documented sandbox test | `false` until TODO-VERIFY-019 is decided |
 | `LARGE_DEBIT_WARNING_AMOUNT` | empty (`2000.00`) | empty (`2000.00`) | empty (`2000.00`); a placeholder until Stax states the per-transaction limit (Q25) |
+| `STAX_MAX_TXN_AMOUNT` | empty (unknown, no hard block) | empty until Stax answers Q25 (`staxMaxTxnAmount`) | the ACH per-transaction limit Stax confirmed; a debit above it cannot be enrolled (PLAN-007c) |
 | `STAX_EXPECTED_MERCHANT_ID` | empty, or the sandbox merchant ID | sandbox merchant ID (in `staging.bicepparam`), checked at every start | the merchant ID of the loaded key |
 | Config source | `.env`, filled by hand from the vault | Key Vault `finance-sandbox-kv` via managed identity | Key Vault `finance-kv` via managed identity |
 | Data | `docker-compose.yml`: PostgreSQL 16 + Redis 7 | Azure resource group `finance-sandbox` | Azure resource group `finance-prod` |

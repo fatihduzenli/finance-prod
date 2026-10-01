@@ -1027,3 +1027,179 @@ def test_two_concurrent_creates_with_one_key_make_one_lease() -> None:
     assert sorted(_race(create, create)) == [False, True]
     assert Lease.objects.count() == 1
     assert LeaseRentHistory.objects.count() == 1
+
+
+# --- PLAN-007c: large-debit confirmation and the confirmed provider limit -----------------------
+
+LARGE_SETTINGS = {"LARGE_DEBIT_WARNING_AMOUNT": D("2000.00"), "PROVIDER_MAX_TXN_AMOUNT": None}
+CONFIRM_2100 = (
+    "I confirm this debit of $2,100.00 exceeds the warning threshold of $2,000.00 "
+    "and may be enabled."
+)
+
+
+def enable_confirmed(
+    lease: Lease, *, confirmed: bool, actor: User | None = None
+) -> service.AutopayOutcome:
+    return service.enable_autopay(lease.pk, BANK, actor=actor, confirmed=confirmed, now=NOW)
+
+
+def _audit_before_create(fake: FakeProvider) -> list[list[str]]:
+    """Wrap ``create_scheduled_invoice``; record the audit actions present at each call."""
+    original = fake.create_scheduled_invoice
+    seen: list[list[str]] = []
+
+    def create(schedule: ScheduleInput) -> ScheduleRecord:
+        seen.append(list(AuditLog.objects.order_by("id").values_list("action", flat=True)))
+        return original(schedule)
+
+    fake.create_scheduled_invoice = create  # type: ignore[method-assign]
+    return seen
+
+
+@override_settings(**LARGE_SETTINGS)
+def test_a_debit_below_the_warning_needs_no_confirmation(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(D("2000.00"))
+    outcome = enable_confirmed(lease, confirmed=False)
+    assert outcome.action is AutopayAction.ENABLED
+    assert len(creates(fake)) == 1
+    assert "lease.autopay_large_debit_confirmed" not in actions(lease)
+
+
+@override_settings(**LARGE_SETTINGS)
+def test_a_large_debit_without_confirmation_is_refused_with_no_call(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(D("2100.00"))
+    outcome = enable_confirmed(lease, confirmed=False)
+    assert outcome.action is AutopayAction.REFUSED
+    assert outcome.text == CONFIRM_2100
+    assert fake.calls == []
+    assert CollectionSchedule.objects.filter(lease=lease).count() == 0
+    assert "lease.autopay_large_debit_confirmed" not in actions(lease)
+
+
+@override_settings(**LARGE_SETTINGS)
+def test_a_confirmed_large_debit_is_audited_before_the_create(
+    fake: FakeProvider, actor: User
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(D("2100.00"))
+    seen = _audit_before_create(fake)
+    outcome = enable_confirmed(lease, confirmed=True, actor=actor)
+    assert outcome.action is AutopayAction.ENABLED
+    assert [schedule.amounts.total for schedule in creates(fake)] == [D("2100.00")]
+    [at_create] = seen
+    assert at_create[-1] == "lease.autopay_large_debit_confirmed"
+    entry = AuditLog.objects.get(action="lease.autopay_large_debit_confirmed")
+    assert entry.actor == actor
+    assert entry.entity_id == str(lease.pk)
+    assert entry.after == {"amount": "2100.00", "threshold": "2000.00", "confirmed_by": actor.pk}
+    assert actions(lease)[-2:] == ["lease.autopay_large_debit_confirmed", "lease.autopay_enabled"]
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("5000.00"))
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_a_debit_above_the_confirmed_limit_is_refused_even_when_confirmed(
+    fake: FakeProvider, confirmed: bool
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(D("5000.01"))
+    outcome = enable_confirmed(lease, confirmed=confirmed)
+    assert outcome.action is AutopayAction.REFUSED
+    assert outcome.text == (
+        "Exceeds the confirmed provider limit of $5,000.00. Autopay cannot be enabled."
+    )
+    assert fake.calls == []
+    assert "lease.autopay_large_debit_confirmed" not in actions(lease)
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("5000.00"))
+def test_between_the_warning_and_the_limit_the_confirmation_path_works(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(D("4999.99"))
+    refused = enable_confirmed(lease, confirmed=False)
+    assert refused.action is AutopayAction.REFUSED
+    assert refused.text == (
+        "I confirm this debit of $4,999.99 exceeds the warning threshold of $2,000.00 "
+        "and may be enabled."
+    )
+    assert fake.calls == []
+    assert enable_confirmed(lease, confirmed=True).action is AutopayAction.ENABLED
+    assert len(creates(fake)) == 1
+
+
+@override_settings(**LARGE_SETTINGS)
+def test_an_empty_limit_never_hard_blocks(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(D("9999999.99"))
+    assert enable_confirmed(lease, confirmed=True).action is AutopayAction.ENABLED
+    assert service.provider_limit_refusal([D("9999999.99")]) == ""
+    assert not service.exceeds_provider_limit(D("9999999.99"))
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("3000.00"))
+def test_twice_monthly_compares_the_per_debit_amount(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    # 3800.00 is above the limit as a whole; each half (1900.00) is below the warning.
+    lease = make_lease(D("3800.00"), debit_day=5, second_debit_day=20)
+    outcome = enable_confirmed(lease, confirmed=False)
+    assert outcome.action is AutopayAction.ENABLED
+    assert [s.amounts.total for s in creates(fake)] == [D("1900.00"), D("1900.00")]
+    assert "lease.autopay_large_debit_confirmed" not in actions(lease)
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("3000.00"))
+def test_twice_monthly_halves_above_the_warning_need_confirmation_for_the_larger_half(
+    fake: FakeProvider, actor: User
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    # 4200.01 splits into 2100.01 and 2100.00; both above the warning, below the limit.
+    lease = make_lease(D("4200.01"), debit_day=5, second_debit_day=20)
+    refused = enable_confirmed(lease, confirmed=False)
+    assert refused.text == (
+        "I confirm this debit of $2,100.01 exceeds the warning threshold of $2,000.00 "
+        "and may be enabled."
+    )
+    assert fake.calls == []
+    assert enable_confirmed(lease, confirmed=True, actor=actor).action is AutopayAction.ENABLED
+    entry = AuditLog.objects.get(action="lease.autopay_large_debit_confirmed")
+    assert entry.after == {"amount": "2100.01", "threshold": "2000.00", "confirmed_by": actor.pk}
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("3000.00"))
+def test_twice_monthly_with_a_half_above_the_limit_is_refused(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(D("6000.02"), debit_day=5, second_debit_day=20)
+    outcome = enable_confirmed(lease, confirmed=True)
+    assert outcome.text == (
+        "Exceeds the confirmed provider limit of $3,000.00. Autopay cannot be enabled."
+    )
+    assert fake.calls == []
+
+
+@override_settings(**LARGE_SETTINGS)
+def test_a_confirmation_with_a_refused_method_writes_no_confirmation_row(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method(kind="card"))
+    lease = make_lease(D("2100.00"))
+    outcome = enable_confirmed(lease, confirmed=True)
+    assert outcome.message == service.CARD_REFUSED
+    assert creates(fake) == []
+    assert "lease.autopay_large_debit_confirmed" not in actions(lease)
+
+
+@pytest.mark.parametrize(
+    ("amount", "text"),
+    [
+        (D("0.01"), "$0.01"),
+        (D("2000.00"), "$2,000.00"),
+        (D("1234567.89"), "$1,234,567.89"),
+        (D("5"), "$5.00"),
+    ],
+)
+def test_amounts_in_messages_are_formatted_with_separators(amount: Decimal, text: str) -> None:
+    assert service.format_amount(amount) == text

@@ -32,7 +32,7 @@
           <td>{{ item.lease.operator.display_name|default:"—" }}</td>
           <td>{{ item.seq }} (day {{ item.debit_day }})</td>
           <td>{{ item.lease.get_payment_channel_display }}</td>
-          <td>${{ item.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}</td>
+          <td>${{ item.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}{% if item.over_limit %} <strong class="over-limit">exceeds confirmed limit</strong>{% endif %}</td>
           <td>{% if item.charge %}<a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{{ item.charge.get_status_display }}</a>{% if item.charge.needs_review %} <span class="badge">Needs review</span>{% endif %}{% else %}<span class="muted">Not created</span>{% endif %}</td>
           <td>{% if item.last_month %}<a href="{% url 'ledger:charges:detail' pk=item.last_month.pk %}">{{ item.last_month.get_status_display }}</a>, balance ${{ item.last_month.balance }}{% else %}<span class="muted">No charge</span>{% endif %}</td>
         </tr>

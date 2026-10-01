@@ -18,6 +18,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import Prefetch, Q
@@ -225,7 +226,10 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
         form = EnrolForm(request.POST)
         if form.is_valid():
             outcome = service.enable_autopay(
-                lease.pk, form.cleaned_data["payment_method_id"], actor=_actor(request)
+                lease.pk,
+                form.cleaned_data["payment_method_id"],
+                actor=_actor(request),
+                confirmed=form.cleaned_data["confirm_large_debit"],
             )
             _report(request, outcome)
             if outcome.ok:
@@ -235,7 +239,8 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
         return redirect("ledger:leases:enrol", pk=lease.pk)
     form = _held(request, target, EnrolForm) or EnrolForm()
     blockers = service.autopay_blockers(lease)
-    now = timezone.now()
+    plan = service.debit_plan(lease, timezone.now())
+    amounts = [debit.amount for debit in plan]
     debits = [
         {
             "debit": debit,
@@ -247,7 +252,7 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
                 else ""
             ),
         }
-        for debit in service.debit_plan(lease, now)
+        for debit in plan
     ]
     # The provider is read only when nothing local blocks enrolment.
     choices = service.payment_method_choices(lease) if not blockers else service.MethodChoices()
@@ -261,6 +266,9 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
             "notes_info": service.enrolment_notes(lease),
             "debits": debits,
             "any_large": any(item["large"] for item in debits),
+            "threshold": service.format_amount(settings.LARGE_DEBIT_WARNING_AMOUNT),
+            "limit_refusal": service.provider_limit_refusal(amounts),
+            "confirmation": service.large_debit_confirmation(amounts),
             "choices": choices,
             "linked_method": service.linked_payment_method(lease.operator),
             "no_bank_message": service.NO_BANK_METHOD,

@@ -50,6 +50,9 @@ param staxCaller string = 'none'
 @description('STAX_EXPECTED_MERCHANT_ID: the merchant the Stax key must belong to. An identifier, not a secret. Empty means not checked.')
 param staxExpectedMerchantId string = ''
 
+@description('STAX_MAX_TXN_AMOUNT: the ACH per-transaction limit confirmed by Stax (PLAN-007c). Not a secret. Empty means unknown: no hard block.')
+param staxMaxTxnAmount string = ''
+
 @description('Public base URL of this app. Drives ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS in Django.')
 param appBaseUrl string
 
@@ -167,6 +170,10 @@ var baseEnv = [
   {
     name: 'STAX_EXPECTED_MERCHANT_ID'
     value: staxExpectedMerchantId
+  }
+  {
+    name: 'STAX_MAX_TXN_AMOUNT'
+    value: staxMaxTxnAmount
   }
   {
     name: 'APP_BASE_URL'

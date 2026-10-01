@@ -25,8 +25,10 @@
         {% endfor %}
       </tbody>
     </table>
-    {% if any_large %}
-      <p id="large-debit-warning" class="messages"><span class="warning" style="display:block;padding:.6rem .8rem;">A debit is above the large-debit warning amount. That amount is a placeholder until the payment provider states its per-transaction limit (Q25).</span></p>
+    {% if limit_refusal %}
+      <p id="provider-limit"><strong>{{ limit_refusal }}</strong></p>
+    {% elif any_large %}
+      <p id="large-debit-warning" class="messages"><span class="warning" style="display:block;padding:.6rem .8rem;">A debit is above the large-debit warning threshold of {{ threshold }}. Enabling autopay needs the confirmation below.</span></p>
     {% endif %}
 
     {% if choices.error %}
@@ -54,7 +56,10 @@
             {% endfor %}
           </tbody>
         </table>
-        {% if choices.has_bank %}<p class="actions"><button class="btn btn-primary" type="submit" id="enable-autopay">Enable autopay</button></p>{% endif %}
+        {% if choices.has_bank and confirmation and not limit_refusal %}
+          <p id="large-debit-confirmation"><label style="font-weight:normal;"><input type="checkbox" name="confirm_large_debit" value="true" id="confirm-large-debit"> {{ confirmation }}</label></p>
+        {% endif %}
+        {% if choices.has_bank and not limit_refusal %}<p class="actions"><button class="btn btn-primary" type="submit" id="enable-autopay">Enable autopay</button></p>{% endif %}
       </form>
     {% endif %}
   {% endif %}

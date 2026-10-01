@@ -67,6 +67,7 @@ from ledger.services import numbering
 from ledger.services.leases import (
     PROVIDER_KEY,
     debit_amounts,
+    exceeds_provider_limit,
     is_large_debit,
     rent_on,
     schedule_ref,
@@ -148,6 +149,8 @@ class DueDebit:
     amount: Decimal
     #: Above ``LARGE_DEBIT_WARNING_AMOUNT`` (a placeholder until the provider answers Q25).
     large: bool
+    #: Above ``PROVIDER_MAX_TXN_AMOUNT`` when set (PLAN-007c); the charge is created anyway.
+    over_limit: bool
     #: This period's charge, when already created.
     charge: RentCharge | None
     #: The same debit's charge of the previous month, if any.
@@ -261,6 +264,7 @@ def leases_due(day: date) -> RunDay:
                     debit_day=debit_day,
                     amount=amount,
                     large=is_large_debit(amount),
+                    over_limit=exceeds_provider_limit(amount),
                     charge=charges.get((period, seq)),
                     last_month=charges.get((previous, seq)),
                 )

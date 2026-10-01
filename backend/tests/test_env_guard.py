@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from django.conf import settings
@@ -279,3 +281,62 @@ def test_large_debit_warning_amount_refuses_anything_else_without_echoing_it(val
 def test_settings_expose_the_threshold_as_a_decimal() -> None:
     assert isinstance(settings.LARGE_DEBIT_WARNING_AMOUNT, Decimal)
     assert settings.LARGE_DEBIT_WARNING_AMOUNT > 0
+
+
+# --- STAX_MAX_TXN_AMOUNT (PLAN-007c §1) ---------------------------------------------------
+
+
+def test_stax_max_txn_amount_is_unknown_when_unset_or_empty() -> None:
+    assert validate(LOCAL_ENV).stax_max_txn_amount is None
+    assert validate(_env(LOCAL_ENV, STAX_MAX_TXN_AMOUNT="")).stax_max_txn_amount is None
+
+
+@pytest.mark.parametrize("value", ["5000.00", "5000", "2500.5", "0.01", "99999.99"])
+def test_stax_max_txn_amount_accepts_a_positive_amount(value: str) -> None:
+    config = validate(_env(LOCAL_ENV, STAX_MAX_TXN_AMOUNT=value))
+    assert config.stax_max_txn_amount == Decimal(value)
+    assert isinstance(config.stax_max_txn_amount, Decimal)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "0",
+        "0.00",
+        "-1",
+        "-5000.00",
+        "abc",
+        "five thousand",
+        "NaN",
+        "Infinity",
+        "10.001",
+        FAKE_VALUE,
+    ],
+)
+def test_stax_max_txn_amount_refuses_anything_else_without_echoing_it(value: str) -> None:
+    with pytest.raises(EnvGuardError) as raised:
+        validate(_env(LOCAL_ENV, STAX_MAX_TXN_AMOUNT=value))
+    message = str(raised.value)
+    assert message == "STAX_MAX_TXN_AMOUNT must be a positive amount with at most two decimals"
+    assert FAKE_VALUE not in message
+
+
+def test_settings_expose_the_confirmed_limit_as_a_decimal_or_none() -> None:
+    limit = settings.PROVIDER_MAX_TXN_AMOUNT
+    assert limit is None or (isinstance(limit, Decimal) and limit > 0)
+
+
+def test_stax_max_txn_amount_is_wired_through_bicep_and_left_empty_in_staging(
+    repo_root: Path,
+) -> None:
+    main = (repo_root / "infra/main.bicep").read_text()
+    assert "param staxMaxTxnAmount string = ''" in main
+    assert "    staxMaxTxnAmount: staxMaxTxnAmount\n" in main
+    web = (repo_root / "infra/modules/containerAppWeb.bicep").read_text()
+    assert "param staxMaxTxnAmount string = ''" in web
+    assert "name: 'STAX_MAX_TXN_AMOUNT'\n    value: staxMaxTxnAmount\n" in web
+    params = (repo_root / "infra/parameters/staging.bicepparam").read_text()
+    assert not re.search(r"^param staxMaxTxnAmount\b", params, re.MULTILINE)
+    assert "Q25" in params
+    example = (repo_root / ".env.example").read_text()
+    assert re.search(r"^STAX_MAX_TXN_AMOUNT=$", example, re.MULTILINE)

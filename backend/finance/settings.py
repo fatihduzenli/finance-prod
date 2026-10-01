@@ -49,6 +49,11 @@ STAX_PROVIDER = _config.stax_provider
 #: A Decimal; debits above it are flagged on the enrolment screen (PLAN-007 §4.3).
 #: A placeholder until Stax states the per-transaction limit (SCOPE Q25).
 LARGE_DEBIT_WARNING_AMOUNT = _config.large_debit_warning_amount
+#: STAX_MAX_TXN_AMOUNT: a Decimal, or None when unknown: the ACH per-transaction limit
+#: confirmed by Stax (PLAN-007c §1, SCOPE Q25). A debit above it cannot be enrolled in
+#: autopay. Named for the provider in general because the ledger may not name Stax
+#: (tests/test_stax_isolation.py).
+PROVIDER_MAX_TXN_AMOUNT = _config.stax_max_txn_amount
 APP_BASE_URL = _config.app_base_url
 REDIS_URL = _config.redis_url
 

@@ -31,6 +31,10 @@ param webMaxReplicas = 1
 // The sandbox merchant read from GET /self on 2026-09-30. An identifier, not a secret.
 // provider_environment_check refuses to start the app when the key belongs to another.
 param staxExpectedMerchantId = 'ea824f2b-90b3-4c49-8f69-ba06943458f4'
+
+// staxMaxTxnAmount (STAX_MAX_TXN_AMOUNT, PLAN-007c) is set here only once Stax answers
+// SCOPE Q25 with the confirmed ACH per-transaction limit. Until then it stays empty and
+// no debit is hard-blocked.
 param staxWebhookUrlTokenSecretName = 'stax-webhook-url-token-staging'
 
 // Uncomment once the sentry-dsn secret exists in the vault. While it is empty,

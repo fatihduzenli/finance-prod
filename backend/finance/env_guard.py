@@ -35,6 +35,8 @@ WEBHOOK_URL_TOKEN_MIN_LENGTH = 64
 #: PLAN-007 §4.3: a debit above this amount shows a warning on the enrolment screen.
 #: A placeholder until Stax states the per-transaction limit (SCOPE Q25).
 DEFAULT_LARGE_DEBIT_WARNING_AMOUNT = "2000.00"
+#: PLAN-007c §1: STAX_MAX_TXN_AMOUNT is the ACH per-transaction limit confirmed by Stax
+#: (SCOPE Q25). Empty means unknown: no hard block.
 _CENT = Decimal("0.01")
 
 _SQLITE_SCHEME_PREFIX = "sqlite"
@@ -72,6 +74,8 @@ class Config:
     stax_expected_merchant_id: str = field(repr=False)
     stax_provider: str
     large_debit_warning_amount: Decimal
+    #: ``None`` when the confirmed provider limit is unknown (PLAN-007c §1).
+    stax_max_txn_amount: Decimal | None
 
 
 def _positive_amount(value: str) -> Decimal | None:
@@ -104,6 +108,8 @@ def validate(env: Mapping[str, str]) -> Config:
     large_debit_warning_amount = _positive_amount(
         env.get("LARGE_DEBIT_WARNING_AMOUNT", "") or DEFAULT_LARGE_DEBIT_WARNING_AMOUNT
     )
+    raw_max_txn_amount = env.get("STAX_MAX_TXN_AMOUNT", "")
+    stax_max_txn_amount = _positive_amount(raw_max_txn_amount) if raw_max_txn_amount else None
 
     is_local = app_env == "local"
     is_deployed = app_env in DEPLOYED_APP_ENVS
@@ -184,6 +190,10 @@ def validate(env: Mapping[str, str]) -> Config:
             "LARGE_DEBIT_WARNING_AMOUNT must be a positive amount with at most two decimals"
         )
 
+    # PLAN-007c §1: the confirmed provider limit, optional.
+    if raw_max_txn_amount and stax_max_txn_amount is None:
+        problems.append("STAX_MAX_TXN_AMOUNT must be a positive amount with at most two decimals")
+
     if problems or large_debit_warning_amount is None:
         raise EnvGuardError("; ".join(problems))
 
@@ -205,4 +215,5 @@ def validate(env: Mapping[str, str]) -> Config:
         stax_expected_merchant_id=env.get("STAX_EXPECTED_MERCHANT_ID", ""),
         stax_provider=stax_provider,
         large_debit_warning_amount=large_debit_warning_amount,
+        stax_max_txn_amount=stax_max_txn_amount,
     )

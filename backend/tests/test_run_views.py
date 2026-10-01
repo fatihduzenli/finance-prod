@@ -253,6 +253,30 @@ def test_the_large_debit_warning_starts_above_the_threshold(
     assert "placeholder until the payment provider states its per-transaction limit" in page
 
 
+@pytest.mark.parametrize(
+    ("rent", "large", "over"),
+    [("2000.00", False, False), ("3000.00", True, False), ("3000.01", True, True)],
+)
+def test_the_run_page_tags_large_debits_and_those_above_the_confirmed_limit(
+    billing: Client, rent: str, large: bool, over: bool
+) -> None:
+    lease(rent=D(rent))
+    with override_settings(
+        LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("3000.00")
+    ):
+        page = billing.get(RUN).content.decode()
+    assert ('<strong class="large-debit">Large debit</strong>' in page) is large
+    assert ('<strong class="over-limit">exceeds confirmed limit</strong>' in page) is over
+
+
+def test_the_run_page_never_tags_over_limit_while_the_limit_is_unknown(billing: Client) -> None:
+    lease(rent=D("999999.99"))
+    with override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=None):
+        page = billing.get(RUN).content.decode()
+    assert 'class="large-debit"' in page
+    assert "exceeds confirmed limit" not in page
+
+
 # --- Row 7 through the screens ------------------------------------------------------------------
 
 

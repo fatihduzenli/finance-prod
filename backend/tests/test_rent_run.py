@@ -521,6 +521,25 @@ def test_the_large_debit_flag_starts_above_the_threshold() -> None:
     assert flags == [(D("1500.00"), False), (D("1500.01"), True)]
 
 
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("1500.00"), PROVIDER_MAX_TXN_AMOUNT=D("3000.00"))
+def test_the_over_limit_flag_starts_above_the_confirmed_limit_and_charges_are_created() -> None:
+    lease(rent=D("3000.00"))
+    lease(rent=D("3000.01"))
+    flags = sorted(
+        (item.amount, item.large, item.over_limit) for item in rent_run.leases_due(DAY).due
+    )
+    assert flags == [(D("3000.00"), True, False), (D("3000.01"), True, True)]
+    report = rent_run.create_charges(DAY, actor=None)
+    assert len(report.created) == 2
+
+
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("1500.00"), PROVIDER_MAX_TXN_AMOUNT=None)
+def test_no_over_limit_flag_while_the_limit_is_unknown() -> None:
+    lease(rent=D("999999.99"))
+    [item] = rent_run.leases_due(DAY).due
+    assert (item.large, item.over_limit) == (True, False)
+
+
 # --- Row 7: manual payments ---------------------------------------------------------------------
 
 

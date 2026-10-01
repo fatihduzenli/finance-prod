@@ -49,6 +49,9 @@ param staxCaller string = 'none'
 @description('STAX_EXPECTED_MERCHANT_ID: the merchant the Stax key must belong to, checked at every start by provider_environment_check. An identifier, not a secret. Empty means the merchant is not checked.')
 param staxExpectedMerchantId string = ''
 
+@description('STAX_MAX_TXN_AMOUNT: the ACH per-transaction limit confirmed by Stax for this environment, a positive amount with at most two decimals (PLAN-007c). A debit above it cannot be enrolled in autopay. Not a secret. Empty means unknown: no hard block.')
+param staxMaxTxnAmount string = ''
+
 @description('Public base URL the app is served on; drives ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS. Leave empty to use the container app\'s own ingress host name, which avoids having to know it before the first deployment. Set it once a custom domain is bound.')
 param appBaseUrl string = ''
 
@@ -381,6 +384,7 @@ module web 'modules/containerAppWeb.bicep' = {
     staxApiBaseUrl: staxApiBaseUrl
     staxCaller: staxCaller
     staxExpectedMerchantId: staxExpectedMerchantId
+    staxMaxTxnAmount: staxMaxTxnAmount
     appBaseUrl: effectiveAppBaseUrl
     staxApiKeySecretName: staxApiKeySecretName
     staxWebhookUrlTokenSecretName: staxWebhookUrlTokenSecretName

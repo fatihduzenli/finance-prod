@@ -24,6 +24,10 @@ Rules kept here:
 - **Bank only.** The chosen payment method must be in the provider's list for the
   operator's customer, be a ``bank`` method and not be deleted; a card is refused even
   when its ID is posted directly (D2).
+- **Large debits** (PLAN-007c §1), compared per debit: above ``PROVIDER_MAX_TXN_AMOUNT``
+  (when set) enrolment is refused whatever is confirmed; else above
+  ``LARGE_DEBIT_WARNING_AMOUNT`` it needs ``confirmed=True``, recorded in a
+  ``lease.autopay_large_debit_confirmed`` audit row before any provider write.
 - **Never an amount on an update** (D4): pause sends ``active=False``; resume sends
   ``active=True`` and a rule with a new future ``DTSTART``. A schedule that no longer
   matches the lease is flagged ``needs_review`` and cannot be resumed; staff pause it
@@ -39,7 +43,7 @@ from __future__ import annotations
 import calendar
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
@@ -141,6 +145,12 @@ SEVERAL_MATCHES = (
 )
 PROVIDER_REJECTED = "The payment provider refused the request."
 PROVIDER_FAILED = "The payment provider could not be reached or did not answer. Try again later."
+#: PLAN-007c §1. Amounts are formatted by :func:`format_amount`.
+LIMIT_EXCEEDED = "Exceeds the confirmed provider limit of {limit}. Autopay cannot be enabled."
+CONFIRM_LARGE_DEBIT = (
+    "I confirm this debit of {amount} exceeds the warning threshold of {threshold} "
+    "and may be enabled."
+)
 RENT_DATE_TOO_EARLY = (
     "The new rent must take effect at least two days after the current rent started ({start})."
 )
@@ -249,6 +259,42 @@ def is_large_debit(amount: Decimal) -> bool:
     """Above the configured warning threshold (PLAN-007 §4.3); the amount itself is allowed."""
     threshold: Decimal = settings.LARGE_DEBIT_WARNING_AMOUNT
     return amount > threshold
+
+
+def exceeds_provider_limit(amount: Decimal) -> bool:
+    """Above ``PROVIDER_MAX_TXN_AMOUNT``; never when the limit is unknown (PLAN-007c §1)."""
+    limit: Decimal | None = settings.PROVIDER_MAX_TXN_AMOUNT
+    return limit is not None and amount > limit
+
+
+def format_amount(amount: Decimal) -> str:
+    """``$1,234.56``."""
+    return f"${amount:,.2f}"
+
+
+def provider_limit_refusal(amounts: Iterable[Decimal]) -> str:
+    """:data:`LIMIT_EXCEEDED` when any debit is above the confirmed limit, else ``""``."""
+    limit: Decimal | None = settings.PROVIDER_MAX_TXN_AMOUNT
+    if limit is None or not any(exceeds_provider_limit(amount) for amount in amounts):
+        return ""
+    return LIMIT_EXCEEDED.format(limit=format_amount(limit))
+
+
+def largest_large_debit(amounts: Iterable[Decimal]) -> Decimal | None:
+    """The largest debit above the warning threshold, or ``None``."""
+    return max((amount for amount in amounts if is_large_debit(amount)), default=None)
+
+
+def large_debit_confirmation(amounts: Iterable[Decimal]) -> str:
+    """:data:`CONFIRM_LARGE_DEBIT` for the largest debit above the warning threshold,
+    or ``""`` when none is above it."""
+    largest = largest_large_debit(amounts)
+    if largest is None:
+        return ""
+    return CONFIRM_LARGE_DEBIT.format(
+        amount=format_amount(largest),
+        threshold=format_amount(settings.LARGE_DEBIT_WARNING_AMOUNT),
+    )
 
 
 # --- Reads ----------------------------------------------------------------------------
@@ -527,17 +573,22 @@ def enable_autopay(
     payment_method_external_id: str,
     *,
     actor: User | None,
+    confirmed: bool = False,
     now: datetime | None = None,
 ) -> AutopayOutcome:
     """Create one provider schedule per debit day that has none (D3, D2).
 
     Order: identifier syntax; lease row lock; local blockers; ``external_refs`` (a
     lease whose every debit already has a schedule returns ``ALREADY`` with no provider
-    call); the method list for the operator's customer (the chosen ID must be a bank
-    method in it); a delete of every stale (flagged, paused) schedule, a 404 counting as
-    already gone, where any other failure ends nothing and creates nothing; then one
-    create per missing debit. A create failure stops at that debit, marks its row
-    ``failed`` and changes nothing on the lease; schedules already created stay linked.
+    call); the per-debit amounts of the debits to create (PLAN-007c: above the confirmed
+    provider limit is refused; above the warning threshold is refused unless
+    ``confirmed`` is ``True``; both with no provider call); the method list for the
+    operator's customer (the chosen ID must be a bank method in it); a delete of every
+    stale (flagged, paused) schedule, a 404 counting as already gone, where any other
+    failure ends nothing and creates nothing; then one create per missing debit. A
+    create failure stops at that debit, marks its row ``failed`` and changes nothing on
+    the lease; schedules already created stay linked.
+    A confirmed large debit is audited after the method check, before any provider write.
     """
     if not operator_sync.IDENTIFIER.match(payment_method_external_id or ""):
         return AutopayOutcome(AutopayAction.REFUSED, CHOOSE_METHOD)
@@ -571,6 +622,13 @@ def enable_autopay(
         ]
         if not missing and not stale:
             return AutopayOutcome(AutopayAction.ALREADY, ALREADY_ENABLED)
+        amounts = [debit.amount for debit in missing]
+        limit_refusal = provider_limit_refusal(amounts)
+        if limit_refusal:
+            return AutopayOutcome(AutopayAction.REFUSED, limit_refusal)
+        large = largest_large_debit(amounts)
+        if large is not None and confirmed is not True:
+            return AutopayOutcome(AutopayAction.REFUSED, large_debit_confirmation(amounts))
 
         provider = payments.get_provider()
         customer = customer_ref(operator)
@@ -589,6 +647,18 @@ def enable_autopay(
                 {"payment_method": mask_identifier(payment_method_external_id), "reason": refusal},
             )
             return AutopayOutcome(AutopayAction.REFUSED, refusal)
+        if large is not None:
+            _audit(
+                actor,
+                "lease.autopay_large_debit_confirmed",
+                lease,
+                None,
+                {
+                    "amount": str(large),
+                    "threshold": str(settings.LARGE_DEBIT_WARNING_AMOUNT),
+                    "confirmed_by": actor.pk if actor is not None else None,
+                },
+            )
 
         # PLAN-007a: every stale schedule is deleted at the provider (a 404 means it is
         # already gone) before any row is ended or any create is sent.
