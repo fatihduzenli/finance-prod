@@ -30,6 +30,20 @@ Anything not in this file is unverified and must be `TODO-VERIFY` in code.
 | delete_scheduled_invoice | `DELETE /invoice/schedule/{id}` | delete-invoice-schedule |
 | list_ach_rejections | `GET /query/statement/v3/ach-rejects`, query `startDate`*, `endDate`* | ach-rejections |
 | ping (authentication check) | `GET /self` | get-self-and-teams-info |
+| list_payment_methods (added 2026-10-01) | `GET /customer/{customerId}/payment-method`; response objects carry `id`, `method` (`bank` or `card`), `bank_type`, `bank_name`, `bank_holder_type`, `card_last_four`, `card_type`, `card_exp`, `person_name`, `nickname`, `is_default`, `customer_id`, `deleted_at`, `purged_at` | get-all-payment-methods-for-a-customer |
+| get_payment_method (added 2026-10-01) | `GET /payment-method/{id}` | get-a-payment-method-by-id |
+
+**Confirmed on 2026-10-01 (closes earlier TODO items):**
+- `url` on `POST /invoice` and `POST /invoice/schedule/`: the spec says *"Set it to
+  `https://app.staxpayments.com/#/bill/` to enable a clickable button in the invoice email"*
+  (create-an-invoice, field description). TODO-VERIFY-027 closed.
+- Invoice `meta` carries `memo` (customer-facing, hosted page), `reference` (internal or
+  customer reference) and `internalMemo` (merchant-only). Our human-readable number goes in
+  `meta.reference`; our local ref in `meta.internalMemo`. TODO-VERIFY-004 and 017 narrowed.
+- Schedule `rule`: iCalendar RRULE, `DTSTART` must be in the future in `YYYYMMDDTHHMMSSZ`;
+  pause = `active=false` (clears `next_run_at`); resume = `active=true` **with a new future
+  `DTSTART` in `rule`**. Schedule statuses: `NOT STARTED`, `PENDING`, `WAITING`, `PAUSED`.
+- `GET /invoice?schedule_id=<id>` lists the invoices a schedule generated.
 
 **Not found in the specification (TODO-VERIFY):**
 - A `GET /invoice/schedule/{id}` for one schedule. Only the list exists. `get_scheduled_invoice`

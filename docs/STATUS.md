@@ -277,3 +277,18 @@ the login page myself." The condition for starting Prompt 4 is met.
   `GET /self` ok, environment check ok, one gthread worker. Health 200, login 200.
 - Checkpoint 6 remaining: item 1, the sandbox dashboard duplicate check, when the owner has
   dashboard access.
+
+## Update, 2026-10-01, Prompt 7
+
+- PLAN-007 (7a lease setup and autopay enrolment, 7b monthly rent run, insurance charge
+  generation) implemented, QA PASS (`docs/qa/QA-007-leases-and-rent-run.md`), **not pushed**.
+- Spec facts settled on 2026-10-01: hosted-page `url` value; `meta.memo` / `meta.reference` /
+  `meta.internalMemo` on invoices; payment-method list fields; schedule pause and resume.
+  New open items TODO-VERIFY-035 to 038.
+- One test failed once in twelve full runs and was not identified; carried as an open MINOR.
+- **Sandbox ACH is still reported disabled.** The first real enrolment on staging is expected
+  to stop at the schedule create with field names until Stax enables ACH. What to ask Stax:
+  enable ACH (bank payment methods and ACH scheduled invoices) on sandbox merchant
+  `ea824f2b-90b3-4c49-8f69-ba06943458f4` ("Global Retail Group"), and confirm the ACH
+  per-transaction limit on the live account exceeds $12,581 (Q25).
+
