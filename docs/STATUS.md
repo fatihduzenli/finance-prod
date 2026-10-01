@@ -292,3 +292,13 @@ the login page myself." The condition for starting Prompt 4 is met.
   `ea824f2b-90b3-4c49-8f69-ba06943458f4` ("Global Retail Group"), and confirm the ACH
   per-transaction limit on the live account exceeds $12,581 (Q25).
 
+
+## Update, 2026-10-01, Prompt 7 on staging
+
+- Owner typed "push". `main` at `f96887a` deployed; pipeline green (the unidentified flake
+  did not recur in CI). Revision `finance-staging-web--0000013` healthy: migration 0007
+  applied, environment check ok, one gthread worker. Health 200, login 200, `/leases/` and
+  `/run/` refuse anonymous requests with 401.
+- Checkpoint 7 on staging waits on Stax enabling ACH in the sandbox. Steps once it is on:
+  link a bank method in the Stax dashboard, enable autopay on one lease in the app, confirm
+  one schedule, run "Match invoices" after the first debit day.
