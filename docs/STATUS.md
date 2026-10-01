@@ -322,3 +322,11 @@ the login page myself." The condition for starting Prompt 4 is met.
   form), registers Store, Operator and Lease read-only in the admin with view permission for
   the admin group, and confirms the second debit day renders empty. QA PASS
   (`docs/qa/QA-007b-stores.md`), **not pushed**.
+
+## Update, 2026-10-01, store page on staging
+
+- Owner typed "push". `main` at `a9e40d4` deployed; revision `finance-staging-web--0000015`
+  healthy; migration 0008 applied; environment check ok. `/stores/`, `/leases/`, `/run/`
+  refuse anonymous requests with 401; login 200.
+- Owner's staging walk-through can start: store, lease, rent change, run page, then "Enable
+  autopay" expecting the ACH refusal with field names.
