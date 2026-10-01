@@ -25,6 +25,7 @@ from ledger.services import insurance, rent_run
 from ledger.services.rent_run import MatchAction
 from ledger.views.operators import _actor, _role, role_required
 from payments.health import provider_health
+from payments.models import WebhookEvent, WebhookOutcome
 
 #: Most report lines shown after a run; the rest are counted.
 MAX_LINES = 20
@@ -44,6 +45,7 @@ def run_today(request: HttpRequest) -> HttpResponse:
             "health": provider_health(),
             "threshold": settings.LARGE_DEBIT_WARNING_AMOUNT,
             "can_run": meets(_role(request), Role.BILLING),
+            "dead_letters": WebhookEvent.objects.filter(outcome=WebhookOutcome.DEAD_LETTER).count(),
         },
     )
 

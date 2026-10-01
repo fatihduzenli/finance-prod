@@ -1,5 +1,5 @@
 """Ledger routes (PLAN-006-operators.md §4.1, PLAN-007-leases-and-rent-run.md §4.1,
-PLAN-007b-stores.md §1).
+PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8).
 
 Namespace ``ledger``.
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from django.urls import include, path
 
-from ledger.views import charges, leases, operators, run, stores
+from ledger.views import charges, leases, operators, returns, run, stores, webhooks
 
 app_name = "ledger"
 
@@ -74,10 +74,29 @@ charge_patterns = (
     "charges",
 )
 
+webhook_patterns = (
+    [
+        path("", webhooks.webhook_list, name="list"),
+        path("<str:pk>/", webhooks.webhook_detail, name="detail"),
+        path("<str:pk>/replay/", webhooks.webhook_replay, name="replay"),
+    ],
+    "webhooks",
+)
+
+return_patterns = (
+    [
+        path("", returns.return_list, name="list"),
+        path("<str:pk>/resolve/", returns.return_resolve, name="resolve"),
+    ],
+    "returns",
+)
+
 urlpatterns = [
     path("operators/", include(operator_patterns)),
     path("stores/", include(store_patterns)),
     path("leases/", include(lease_patterns)),
     path("run/", include(run_patterns)),
     path("charges/", include(charge_patterns)),
+    path("webhooks/", include(webhook_patterns)),
+    path("returns/", include(return_patterns)),
 ]

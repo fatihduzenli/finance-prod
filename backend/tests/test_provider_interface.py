@@ -68,6 +68,9 @@ PLANNED_METHODS = {
     "update_scheduled_invoice",
     "delete_scheduled_invoice",
     "list_ach_rejections",
+    "list_webhooks",
+    "create_webhook",
+    "delete_webhook",
     "ping",
 }
 

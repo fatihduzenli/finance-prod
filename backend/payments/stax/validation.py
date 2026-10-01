@@ -13,6 +13,7 @@ import re
 import uuid
 from collections.abc import Iterable
 from decimal import Decimal
+from urllib.parse import urlsplit
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
@@ -46,6 +47,32 @@ def external_id(name: str, value: str) -> str:
         or not _EXTERNAL_ID.fullmatch(value)
     ):
         raise ValidationFailed(f"{name} must be a non-empty identifier without whitespace")
+    return value
+
+
+#: Longest webhook target URL sent.
+WEBHOOK_URL_MAX_LENGTH = 2048
+
+
+def webhook_target_url(value: str) -> str:
+    """An absolute ``https`` URL with a host, no credentials, query, fragment or
+    whitespace (PLAN-008 D9). The message never includes the value: it holds the token."""
+    try:
+        parts = urlsplit(value) if isinstance(value, str) else None
+    except ValueError:
+        parts = None
+    if (
+        parts is None
+        or len(value) > WEBHOOK_URL_MAX_LENGTH
+        or parts.scheme != "https"
+        or not parts.hostname
+        or parts.username is not None
+        or parts.query
+        or parts.fragment
+        or any(character.isspace() for character in value)
+        or _CONTROL_CHARACTERS.search(value)
+    ):
+        raise ValidationFailed("target_url must be an absolute https URL")
     return value
 
 

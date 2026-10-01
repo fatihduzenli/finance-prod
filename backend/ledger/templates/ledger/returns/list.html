@@ -1,0 +1,43 @@
+{% extends "finance/base.html" %}
+{% block title %}Returned payments{% endblock %}
+{% block content %}
+  <h1>Returned payments</h1>
+  <p class="muted">ACH debits the payment provider reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing here debits again.</p>
+  <table id="returns">
+    <thead>
+      <tr><th>Operator</th><th>Store</th><th>Amount</th><th>Code</th><th>Reason</th><th>Returned at</th>{% if can_resolve %}<th>Resolve</th>{% endif %}</tr>
+    </thead>
+    <tbody>
+      {% for item in rows %}
+        <tr id="return-{{ item.payment.pk }}">
+          <td>{% if item.operator %}<a href="{% url 'ledger:operators:detail' pk=item.operator.pk %}">{{ item.operator.display_name }}</a>{% else %}<span class="muted">Unknown</span>{% endif %}</td>
+          <td>{% if item.store %}{{ item.store.external_label }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>${{ item.amount }}{% if item.payment.rent_charge_id %} <a href="{% url 'ledger:charges:detail' pk=item.payment.rent_charge_id %}">charge</a>{% endif %}</td>
+          <td>{{ item.code|default:"—" }}</td>
+          <td>{{ item.reason|default:"—" }}</td>
+          <td>{{ item.returned_at|date:"Y-m-d H:i"|default:"—" }}</td>
+          {% if can_resolve %}
+            <td>
+              <form method="post" action="{% url 'ledger:returns:resolve' pk=item.payment.pk %}" class="js-single-submit">
+                {% csrf_token %}
+                <label for="note-{{ item.payment.pk }}">Note *</label>
+                <textarea name="note" id="note-{{ item.payment.pk }}" rows="2" maxlength="2000" required></textarea>
+                <button class="btn" type="submit">Resolve</button>
+              </form>
+            </td>
+          {% endif %}
+        </tr>
+      {% empty %}
+        <tr><td colspan="{% if can_resolve %}7{% else %}6{% endif %}" class="muted">No unresolved returns.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if page.paginator.num_pages > 1 %}
+    <p class="actions">
+      {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} returns)</span>
+      {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+    </p>
+  {% endif %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

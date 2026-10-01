@@ -15,7 +15,7 @@ import itertools
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -674,6 +674,21 @@ LEDGER_CASES: list[ConstraintCase] = [
         "payments_manual_method_has_note",
         lambda: new_payment(method="zelle", note="Zelle received on 2026-09-05."),
         lambda: new_payment(method="wire", note="   "),
+    ),
+    ConstraintCase(
+        "payments_resolved_return_has_note",
+        lambda: new_payment(
+            method="ach",
+            status="returned",
+            resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
+            resolution_note="Operator paid by wire.",
+        ),
+        lambda: new_payment(
+            method="ach",
+            status="settled",
+            resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
+            resolution_note="Not a return.",
+        ),
     ),
     # legacy_records
     ConstraintCase(

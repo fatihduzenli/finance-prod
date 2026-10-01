@@ -48,6 +48,7 @@ from payments.provider import (
     ScheduleUpdate,
     TransactionQuery,
     TransactionRecord,
+    WebhookRecord,
 )
 from payments.stax import mapping, validation
 from payments.stax.transport import Method, StaxTransport
@@ -81,6 +82,8 @@ SELF = "/self"  # get-self-and-teams-info
 #: ``{id}`` (see :data:`_CUSTOMER_PAYMENT_METHODS_TEMPLATE`).
 CUSTOMER_PAYMENT_METHODS = "/customer/{customerId}/payment-method"
 PAYMENT_METHOD = "/payment-method/{id}"  # get-a-payment-method-by-id
+WEBHOOKS = "/webhook"  # get-all-webhooks, create-new-webhook-for-all-of-my-users-merchants
+WEBHOOK = "/webhook/{id}"  # get-webhook-by-id (titled "Delete a Webhook")
 _CUSTOMER_PAYMENT_METHODS_TEMPLATE = CUSTOMER_PAYMENT_METHODS.replace("{customerId}", "{id}")
 
 #: The required `url` body field of create-an-invoice and create-a-scheduled-invoice.
@@ -421,6 +424,32 @@ class StaxProvider(PaymentProvider):
         """DELETE /invoice/schedule/{id} (delete-invoice-schedule)."""
         validation.external_id("external_id", external_id)
         self.transport.send(Method.DELETE, SCHEDULE, object_id=external_id, idempotent=True)
+
+    # --- Webhook registrations (PLAN-008 D9; the registration commands only) ---------
+
+    def list_webhooks(self) -> list[WebhookRecord]:
+        """GET /webhook (get-all-webhooks). First page only (TODO-VERIFY-021)."""
+        data = self.transport.send(Method.GET, WEBHOOKS, idempotent=True)
+        fetched_at = self.now()
+        return [mapping.webhook_record(item, fetched_at) for item in mapping.as_list(data)]
+
+    def create_webhook(self, target_url: str, event: str) -> WebhookRecord:
+        """POST /webhook (create-new-webhook-for-all-of-my-users-merchants), query
+        ``target_url`` and ``event``. Not idempotent: a repeat could register twice."""
+        validation.webhook_target_url(target_url)
+        validation.external_id("event", event)
+        data = self.transport.send(
+            Method.POST,
+            WEBHOOKS,
+            params=mapping.webhook_params(target_url, event),
+            idempotent=False,
+        )
+        return mapping.webhook_record(data, self.now())
+
+    def delete_webhook(self, external_id: str) -> None:
+        """DELETE /webhook/{id} (get-webhook-by-id, titled "Delete a Webhook")."""
+        validation.external_id("external_id", external_id)
+        self.transport.send(Method.DELETE, WEBHOOK, object_id=external_id, idempotent=True)
 
     # --- Identity ------------------------------------------------------------------
 

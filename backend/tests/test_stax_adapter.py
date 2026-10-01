@@ -125,6 +125,11 @@ ALL_METHODS: dict[str, Call] = {
     ),
     "delete_scheduled_invoice": lambda p: p.delete_scheduled_invoice("sch-1"),
     "list_ach_rejections": lambda p: p.list_ach_rejections(RANGE),
+    "list_webhooks": lambda p: p.list_webhooks(),
+    "create_webhook": lambda p: p.create_webhook(
+        "https://staging.example.com/api/webhooks/stax/" + "t" * 32 + "/", "update_invoice"
+    ),
+    "delete_webhook": lambda p: p.delete_webhook("wh-1"),
     "ping": lambda p: p.ping(),
 }
 

@@ -37,6 +37,7 @@ from payments.provider import (
     ScheduleUpdate,
     TransactionQuery,
     TransactionRecord,
+    WebhookRecord,
     require_money,
 )
 
@@ -57,6 +58,7 @@ class FakeProvider(PaymentProvider):
         self.payment_methods: dict[str, tuple[str, PaymentMethodRecord]] = {}
         self.deposits: list[DepositRecord] = []
         self.ach_rejections: list[AchRejection] = []
+        self.webhooks: dict[str, WebhookRecord] = {}
         self._failures: dict[str, ProviderError] = {}
         self._counter = 0
 
@@ -308,6 +310,29 @@ class FakeProvider(PaymentProvider):
         self._call("delete_scheduled_invoice", external_id)
         self._get(self.schedules, external_id)
         del self.schedules[external_id]
+
+    # --- Webhook registrations -----------------------------------------------------
+
+    def list_webhooks(self) -> list[WebhookRecord]:
+        self._call("list_webhooks")
+        return list(self.webhooks.values())
+
+    def create_webhook(self, target_url: str, event: str) -> WebhookRecord:
+        now = self._call("create_webhook", target_url, event)
+        record = WebhookRecord(
+            external_id=self._next_id("webhook"),
+            raw_status="",
+            fetched_at=now,
+            event=event,
+            target_url=target_url,
+        )
+        self.webhooks[record.external_id] = record
+        return record
+
+    def delete_webhook(self, external_id: str) -> None:
+        self._call("delete_webhook", external_id)
+        self._get(self.webhooks, external_id)
+        del self.webhooks[external_id]
 
     # --- Identity ------------------------------------------------------------------
 

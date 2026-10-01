@@ -65,6 +65,8 @@ from ledger.models import (
 )
 from ledger.services import numbering
 from ledger.services.leases import (
+    ENTITY_SCHEDULE,
+    KIND_SCHEDULE,
     PROVIDER_KEY,
     debit_amounts,
     exceeds_provider_limit,
@@ -110,6 +112,7 @@ MATCH_CHARGE_INVOICED = (
     "The charge is flagged for review."
 )
 MATCH_NO_OPERATOR = "The lease has no operator; not linked."
+MATCH_OTHER_OPERATOR = "The invoice names another operator's customer; not linked."
 MATCH_LINKED = "Linked to the charge for {period} debit {seq} as {number}."
 MATCH_MISMATCH = (
     "Linked to the charge for {period} debit {seq} as {number}. The invoice total at the payment "
@@ -351,6 +354,42 @@ def match_schedule_invoices(*, actor: User | None) -> MatchReport:
     return report
 
 
+def match_invoice(
+    record: InvoiceRecord, operator_id: uuid.UUID, *, actor: User | None
+) -> MatchLine | None:
+    """Link one provider invoice by the matching rules above, when the schedule it names
+    is an active rent schedule of ours; ``None`` when it names none (PLAN-008 D4).
+
+    ``operator_id`` is the operator whose customer the invoice names: an invoice is never
+    linked to a schedule of another operator's lease. The caller has already fetched the
+    invoice; nothing here calls the provider.
+    """
+    ref = invoice_sync.schedule_id(record)
+    if not ref:
+        return None
+    schedule_ids = ExternalRef.objects.filter(
+        entity_type=ENTITY_SCHEDULE,
+        provider=PROVIDER_KEY,
+        external_kind=KIND_SCHEDULE,
+        external_id=ref,
+        superseded_at__isnull=True,
+    ).values("entity_id")
+    row = (
+        CollectionSchedule.objects.filter(
+            pk__in=schedule_ids, kind=ScheduleKind.RENT, state=ScheduleState.ACTIVE
+        )
+        .select_related("lease", "lease__operator")
+        .first()
+    )
+    if row is None:
+        return None
+    if row.lease.operator_id != operator_id:
+        return MatchLine(
+            MatchAction.REPORTED, mask_identifier(record.external_id), MATCH_OTHER_OPERATOR
+        )
+    return _match_one(row, ref, record, actor)
+
+
 def _match_one(
     row: CollectionSchedule, ref: str, record: InvoiceRecord, actor: User | None
 ) -> MatchLine:
@@ -559,6 +598,47 @@ def _payment_for_key(charge: RentCharge, creation_key: uuid.UUID) -> bool:
         entity_id=str(charge.pk),
         after__creation_key=str(creation_key),
     ).exists()
+
+
+def recompute_charge(charge: RentCharge) -> None:
+    """Recompute a charge's paid amount and status from its payments (PLAN-008 D5, D12).
+
+    Paid in full: ``paid``; partly: ``partial``; nothing settled but a payment pending:
+    ``pending``; nothing settled after a payment was returned or reopened: ``unpaid``;
+    otherwise the status stays (``due``). A waived charge is left as it is. The caller
+    holds the row lock and writes the audit row.
+    """
+    if charge.status == RentChargeStatus.WAIVED:
+        return
+    paid = _settled(charge)
+    payments = Payment.objects.filter(rent_charge=charge, is_refund=False)
+    if paid >= charge.amount_due and paid > 0:
+        status = RentChargeStatus.PAID
+    elif paid > 0:
+        status = RentChargeStatus.PARTIAL
+    elif payments.filter(status=PaymentStatus.PENDING).exists():
+        status = RentChargeStatus.PENDING
+    elif (
+        charge.status
+        in (
+            RentChargeStatus.PENDING,
+            RentChargeStatus.PAID,
+            RentChargeStatus.PARTIAL,
+        )
+        or payments.filter(status=PaymentStatus.RETURNED).exists()
+    ):
+        status = RentChargeStatus.UNPAID
+    else:
+        status = RentChargeStatus(charge.status)
+    if (charge.amount_paid, charge.status) != (paid, status):
+        charge.amount_paid = paid
+        charge.status = status
+        charge.save(update_fields=["amount_paid", "status", "updated_at"])
+
+
+def charge_state(charge: RentCharge) -> dict[str, Any]:
+    """The audited fields of a charge."""
+    return _charge(charge)
 
 
 def _settled(charge: RentCharge) -> Decimal:

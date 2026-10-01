@@ -53,6 +53,9 @@ All run from the repository root.
 | Stax authentication check (one `GET /self`; needs `STAX_CALLER=worker`) | `uv run python backend/manage.py provider_ping` |
 | Boot check: key environment and merchant (one `GET /self`; runs in the image `CMD`) | `uv run python backend/manage.py provider_environment_check` |
 | Create the annual insurance charges in scope today (idempotent; prints counts; no Stax call) | `uv run python backend/manage.py generate_insurance_charges` |
+| Process stored webhook events not yet processed (catch-up after a restart; retries failed events; prints counts) | `uv run python backend/manage.py process_webhooks [--limit 100]` |
+| Register the app's webhooks with Stax (creates only missing ones; stores the IDs; prints event names and masked IDs, never the URL; refused when `APP_ENV=local`) | `uv run python backend/manage.py register_webhooks` |
+| Delete the app's webhook registrations at Stax by stored ID (refused when `APP_ENV=local`) | `uv run python backend/manage.py unregister_webhooks` |
 | Dev server without Stax (in-memory provider; `APP_ENV=local` only) | `STAX_PROVIDER=fake uv run python backend/manage.py runserver` |
 | Stax sandbox suites (off by default; need `STAX_SANDBOX_TESTS=1`) | `uv run pytest -m sandbox` |
 | Secret scan | `scripts/check-no-secrets.sh` |
@@ -194,6 +197,7 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 |---|---|---|---|
 | `two_factor:login` | POST | public | the login wizard |
 | `healthz` | none | public | GET only; returns `status`, `app_env`, `stax_env` |
+| `webhooks:receive` (`/api/webhooks/stax/<token>/`) | POST | public | CSRF-exempt; the URL token is the secret; anything else gets an empty 404 and writes nothing |
 | `/static/…` | none | public | static assets |
 | `two_factor:setup`, `two_factor:backup_tokens` | POST | any | own authenticator and backup tokens |
 | `two_factor:qr`, `two_factor:setup_complete` | none | any | GET only |
@@ -215,6 +219,11 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:run:today`, `ledger:charges:detail` | none | — | GET for any verified user with a role; no Stax call |
 | `ledger:run:create_charges`, `ledger:run:match` | POST | billing | always for the server's today; matching is refused while the breaker is open or the failure budget is exhausted |
 | `ledger:charges:record_payment` | POST | billing | Zelle, wire or other; GET of the form is billing only too; no Stax call |
+| `ledger:webhooks:list`, `ledger:webhooks:detail` | none | — | GET for any verified user with a role; provider IDs masked; the stored body is the redacted copy |
+| `ledger:webhooks:replay` | POST | billing | re-runs the handler; handlers are idempotent |
+| `ledger:returns:list` | none | — | GET for any verified user with a role: returned ACH payments not yet resolved |
+| `ledger:returns:resolve` | POST | billing | a note is required; records who and why; changes no charge; there is no re-debit route |
+| `admin:payments_webhookevent_*` | POST | admin | registered read-only: no add, change or delete |
 | `admin:index`, `admin:app_list`, `admin:login`, `admin:jsi18n`, `admin:autocomplete`, `admin:view_on_site`, `admin:password_change_done` | none | — | GET for any verified user; Django admin still checks `is_staff` and model permissions |
 | `two_factor:profile`, `two_factor:disable` | none | — | GET only; disabling one's own second factor is refused |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |

@@ -37,6 +37,8 @@ two_factor/_base.html.
     <a href="{% url 'ledger:operators:list' %}">Operators</a>
     <a href="{% url 'ledger:leases:list' %}">Leases</a>
     <a href="{% url 'ledger:run:today' %}">Rent run</a>
+    <a href="{% url 'ledger:returns:list' %}">Returns</a>
+    <a href="{% url 'ledger:webhooks:list' %}">Webhooks</a>
     <a href="{% url 'admin:index' %}">Admin</a>
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form>
   </nav>

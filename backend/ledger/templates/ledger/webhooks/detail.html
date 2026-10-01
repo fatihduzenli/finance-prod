@@ -1,0 +1,42 @@
+{% extends "finance/base.html" %}
+{% block title %}Webhook event {{ event.event_type }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:webhooks:list' %}">&larr; Webhook events</a></p>
+  <h1>Webhook event: {{ event.event_type }}</h1>
+
+  {% if can_replay %}
+    <div class="actions">
+      <form method="post" action="{% url 'ledger:webhooks:replay' pk=event.pk %}" class="js-single-submit">
+        {% csrf_token %}<button class="btn btn-primary" type="submit" id="replay">Replay</button>
+      </form>
+      <span class="muted">Runs the handler for this event again. Handlers re-read the object from the payment provider; a replay of a processed event changes nothing.</span>
+    </div>
+  {% endif %}
+
+  <dl id="webhook-event">
+    <dt>Received</dt><dd>{{ event.received_at|date:"Y-m-d H:i:s" }} UTC</dd>
+    <dt>Type</dt><dd>{{ event.event_type }}</dd>
+    <dt>Name from</dt><dd>{{ event.get_event_source_display }}</dd>
+    <dt>Object ID</dt><dd>{{ object_id_masked|default:"—" }}</dd>
+    <dt>Outcome</dt><dd id="outcome">{{ event.outcome|default:"—" }}</dd>
+    <dt>Processed</dt><dd>{% if event.processed_at %}{{ event.processed_at|date:"Y-m-d H:i:s" }} UTC{% else %}<span class="muted">Not processed</span>{% endif %}</dd>
+    <dt>Failed attempts</dt><dd id="attempts">{{ event.attempts }}</dd>
+    <dt>Last attempt</dt><dd>{% if event.last_attempt_at %}{{ event.last_attempt_at|date:"Y-m-d H:i:s" }} UTC{% else %}—{% endif %}</dd>
+    <dt>Last error</dt><dd id="error">{{ event.error|default:"—" }}</dd>
+    <dt>Duplicate deliveries</dt><dd id="duplicates">{{ event.duplicate_count }}</dd>
+  </dl>
+
+  <h2>Payload (redacted)</h2>
+  {% if payload_rows %}
+    <table id="payload">
+      <thead><tr><th>Field</th><th>Value</th></tr></thead>
+      <tbody>
+        {% for path, value in payload_rows %}<tr><td><code>{{ path|default:"(value)" }}</code></td><td>{{ value }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    {% if payload_rows_hidden %}<p class="muted">{{ payload_rows_hidden }} more fields not shown.</p>{% endif %}
+  {% else %}
+    <p class="muted" id="no-payload">No payload stored: the body was not JSON, or nothing of it could be kept without card or account data.</p>
+  {% endif %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

@@ -8,6 +8,7 @@ identifiers (PLAN-004 decision D12).
 
 from __future__ import annotations
 
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import F, Q
 
@@ -96,19 +97,60 @@ class Deposit(GuardedModel):
         ]
 
 
+class WebhookEventSource(models.TextChoices):
+    """Where the receiver found the event name (docs/qa/PLAN-008-webhooks.md D3)."""
+
+    HEADER = "header", "Header"
+    BODY = "body", "Body"
+    SHAPE = "shape", "Object shape"
+    UNKNOWN = "unknown", "Unknown"
+
+
+class WebhookOutcome(models.TextChoices):
+    """Values of ``WebhookEvent.outcome`` (PLAN-008 D3).
+
+    Not attached to the column: an ignored event is stored as ``"ignored: <reason>"``.
+    A duplicate delivery creates no row; it increments ``duplicate_count``.
+    """
+
+    RECEIVED = "received", "Received"
+    PROCESSED = "processed", "Processed"
+    IGNORED = "ignored", "Ignored"
+    FAILED = "failed", "Failed"
+    DEAD_LETTER = "dead_letter", "Dead letter"
+
+
 class WebhookEvent(GuardedModel):
     received_at = models.DateTimeField(auto_now_add=True)
     event_type = guarded_char(100)
+    event_source = models.CharField(
+        max_length=16, choices=WebhookEventSource.choices, default=WebhookEventSource.UNKNOWN
+    )
     #: An identifier, not free text: outside the card-number guard (PLAN-004 §4.6 point 1).
     provider_object_id = models.CharField(max_length=EXTERNAL_ID_MAX_LENGTH)
     #: An identifier, not free text: outside the card-number guard (PLAN-004 §4.6 point 1).
     dedupe_hash = models.CharField(max_length=64, unique=True)
+    #: The body as received, redacted per Rule 1 (``payments.redaction.redact``); null
+    #: when the body was not a JSON value or still matched the guard after redaction.
+    #: ``Decimal`` numbers are stored as strings, never as binary floating point.
+    payload = guarded_json(null=True, blank=True, encoder=DjangoJSONEncoder)
     processed_at = models.DateTimeField(null=True, blank=True)
     outcome = guarded_char(32, blank=True)
     error = free_text()
+    #: Failed processing attempts; the third moves the event to dead letter.
+    attempts = models.PositiveSmallIntegerField(default=0)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    #: Byte-identical redeliveries received after the first (PLAN-008 D7).
+    duplicate_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "webhook_events"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(event_source__in=WebhookEventSource.values),
+                name="webhook_events_event_source_valid",
+            ),
+        ]
 
 
 class SyncState(GuardedModel):

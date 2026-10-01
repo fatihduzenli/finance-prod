@@ -865,6 +865,13 @@ class Payment(GuardedModel):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     raw_summary = guarded_json(default=dict, blank=True)
+    #: Returns queue (PLAN-008 D6): set together, with a note, when staff resolve a
+    #: returned payment. Nothing here re-debits.
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    resolution_note = free_text()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -886,6 +893,11 @@ class Payment(GuardedModel):
             models.CheckConstraint(
                 condition=~Q(method__in=["zelle", "wire", "other"]) | Q(note__regex=_NOT_BLANK),
                 name="payments_manual_method_has_note",
+            ),
+            models.CheckConstraint(
+                condition=Q(resolved_at__isnull=True)
+                | (Q(status="returned") & Q(resolution_note__regex=_NOT_BLANK)),
+                name="payments_resolved_return_has_note",
             ),
             _valid_choice("payments", "kind", PaymentKind),
             _valid_choice("payments", "method", PaymentMethod),

@@ -208,15 +208,49 @@ class InvoiceRecord:
     customer_external_id: str = ""
     total: Decimal | None = None
     raw_summary: Summary = field(default_factory=dict)
+    #: When the provider sent, the operator viewed and the provider marked paid the
+    #: invoice, and the amount it reports paid; ``None`` when unknown (PLAN-008 D4).
+    sent_at: datetime | None = None
+    viewed_at: datetime | None = None
+    paid_at: datetime | None = None
+    amount_paid: Decimal | None = None
+
+
+#: ``TransactionRecord.kind`` of a refund (PLAN-008 D5).
+TRANSACTION_REFUND = "refund"
+#: ``TransactionRecord.kind`` of a void.
+TRANSACTION_VOID = "void"
 
 
 @dataclass(frozen=True, slots=True)
 class TransactionRecord:
+    """A provider transaction (PLAN-008 D4, D5).
+
+    ``method`` is the provider's string (:data:`METHOD_BANK` for ACH). ``kind`` is the
+    provider's transaction type (``charge``, :data:`TRANSACTION_REFUND`, ...). A refund
+    names the transaction it refunds in ``parent_external_id``. ``settled_at`` is set
+    once the provider reports the transaction settled; ``returned`` is true when the
+    provider reports an ACH return, whose code and reason (already trimmed per Rule 1)
+    are in ``return_code`` and ``return_reason``.
+    """
+
     external_id: str
     raw_status: str
     fetched_at: datetime
     total: Decimal | None = None
     raw_summary: Summary = field(default_factory=dict)
+    method: str = ""
+    kind: str = ""
+    invoice_external_id: str = ""
+    customer_external_id: str = ""
+    parent_external_id: str = ""
+    success: bool | None = None
+    is_voided: bool = False
+    created_at: datetime | None = None
+    settled_at: datetime | None = None
+    returned: bool = False
+    return_code: str = ""
+    return_reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +313,18 @@ class AchRejection:
     fetched_at: datetime
     amount: Decimal | None = None
     raw_summary: Summary = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class WebhookRecord:
+    """A webhook registration (PLAN-008 D9). ``target_url`` carries the URL token and is
+    kept out of ``repr``; callers never print it."""
+
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    event: str = ""
+    target_url: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,6 +425,16 @@ class PaymentProvider(ABC):
 
     @abstractmethod
     def list_ach_rejections(self, date_range: DateRange) -> list[AchRejection]: ...
+
+    @abstractmethod
+    def list_webhooks(self) -> list[WebhookRecord]:
+        """The registered webhooks (PLAN-008 D9); used only by the registration commands."""
+
+    @abstractmethod
+    def create_webhook(self, target_url: str, event: str) -> WebhookRecord: ...
+
+    @abstractmethod
+    def delete_webhook(self, external_id: str) -> None: ...
 
     @abstractmethod
     def ping(self) -> ProviderIdentity: ...

@@ -1,4 +1,5 @@
-"""URL map: the staff screens, Django admin, and /healthz for the platform probe.
+"""URL map: the staff screens, Django admin, /healthz for the platform probe, and the
+public webhook receiver under /api/webhooks/ (docs/qa/PLAN-008-webhooks.md D2).
 
 Every route must be classified in accounts.registry; backend/tests/test_route_registry.py
 fails when one is not.
@@ -28,6 +29,8 @@ def healthz(request: HttpRequest) -> JsonResponse:
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("healthz", healthz, name="healthz"),
+    # Public, CSRF-exempt, token in the path; answers 404 to anything but a valid POST.
+    path("api/webhooks/", include("payments.webhooks.urls")),
     # Login, enrolment, QR code, backup tokens, profile: all under /account/.
     path("", include(two_factor_urlpatterns)),
     # POST only; Django's LogoutView answers GET with 405.

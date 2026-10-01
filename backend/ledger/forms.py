@@ -296,3 +296,15 @@ class ManualPaymentForm(forms.Form):
         help_text="Required: what was received, and any reference staff need.",
         error_messages={"required": "A note is required: say what was received."},
     )
+
+
+class ResolveReturnForm(forms.Form):
+    """Resolve a returned payment (PLAN-008 D6): a note, nothing else."""
+
+    note = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required: how the return was resolved.",
+        error_messages={"required": "A note is required: say how the return was resolved."},
+    )

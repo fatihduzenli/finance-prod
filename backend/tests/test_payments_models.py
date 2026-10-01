@@ -140,6 +140,11 @@ PAYMENTS_CASES: list[ConstraintCase] = [
         column="dedupe_hash",
     ),
     ConstraintCase(
+        "webhook_events_event_source_valid",
+        lambda: new_webhook_event(event_source="shape"),
+        lambda: new_webhook_event(event_source="query_string"),
+    ),
+    ConstraintCase(
         "sync_state.job_name",
         unique_pair(new_sync_state, {}, {"job_name": "webhook_refetch"}),
         unique_pair(new_sync_state, {}, {}),

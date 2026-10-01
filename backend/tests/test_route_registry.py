@@ -75,9 +75,10 @@ def test_read_only_routes_have_no_unsafe_rule() -> None:
         assert registry.rule_for(name) is None, name
 
 
-def test_public_set_is_exactly_login_healthz_and_static() -> None:
-    assert registry.PUBLIC_ROUTE_NAMES == {"two_factor:login", "healthz"}
-    assert registry.PUBLIC_UNSAFE_ROUTE_NAMES == {"two_factor:login"}
+def test_public_set_is_exactly_login_healthz_webhook_receiver_and_static() -> None:
+    # The webhook receiver is public and takes POST (PLAN-008 D2); it checks its token.
+    assert registry.PUBLIC_ROUTE_NAMES == {"two_factor:login", "healthz", "webhooks:receive"}
+    assert registry.PUBLIC_UNSAFE_ROUTE_NAMES == {"two_factor:login", "webhooks:receive"}
     assert registry.PUBLIC_PATH_PREFIXES == (f"/{settings.STATIC_URL.lstrip('/')}",)
 
 

@@ -17,13 +17,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator, Mapping
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from django.core.exceptions import ValidationError
-
-from ledger.validators import validate_no_payment_data
 from payments.errors import ProviderUnavailable
 from payments.provider import (
     PAYMENT_METHOD_DELETED,
@@ -48,24 +45,13 @@ from payments.provider import (
     Summary,
     TransactionQuery,
     TransactionRecord,
+    WebhookRecord,
 )
+from payments.redaction import SENSITIVE_KEY as _SENSITIVE_KEY
+from payments.redaction import is_safe_text as _is_safe_text
+from payments.redaction import payment_method_subset
 
 _CENT = Decimal("0.01")
-
-#: docs/CLAUDE.md Rule 1: of a payment-method object, keep at most these keys.
-PAYMENT_METHOD_KEYS: tuple[str, ...] = (
-    "id",
-    "method",
-    "card_type",
-    "card_last_four",
-    "card_exp",
-    "nickname",
-)
-#: Keys whose values never enter a summary, whatever they hold.
-_SENSITIVE_KEY = re.compile(
-    r"(account|routing|bank_|cvv|cvc|card_number|cardnumber|token|secret|password)",
-    re.IGNORECASE,
-)
 
 Params = dict[str, str | int | bool]
 Body = dict[str, Any]
@@ -301,6 +287,11 @@ def refund_body(amount: Decimal) -> Body:
     return {"total": money_string(amount)}
 
 
+def webhook_params(target_url: str, event: str) -> Params:
+    """Page create-new-webhook-for-all-of-my-users-merchants (query parameters)."""
+    return {"target_url": target_url, "event": event}
+
+
 def statement_params(date_range: DateRange) -> Params:
     """Pages get-list-of-deposits, get-detail-of-specific-deposit, ach-rejections."""
     return {"startDate": iso_date(date_range.start), "endDate": iso_date(date_range.end)}
@@ -407,33 +398,45 @@ def _money(obj: Mapping[str, object], key: str) -> Decimal | None:
     return amount
 
 
-def _is_safe_text(value: str) -> bool:
+def _datetime(obj: Mapping[str, object], key: str) -> datetime | None:
+    """An ISO 8601 date and time (a space may separate them); naive values are UTC.
+
+    ``None`` when the key is missing, empty or unparseable: a date is never guessed.
+    """
+    value = obj.get(key)
+    if not isinstance(value, str) or not value.strip():
+        return None
     try:
-        validate_no_payment_data(value)
-    except ValidationError:
-        return False
-    return True
+        moment = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+def _flag(obj: Mapping[str, object], key: str) -> bool | None:
+    """A boolean, or 0/1; ``None`` when absent or anything else."""
+    value = obj.get(key)
+    if isinstance(value, bool):
+        return value
+    if type(value) is int and value in (0, 1):
+        return bool(value)
+    return None
 
 
 def summary(obj: Mapping[str, object]) -> Summary:
     """Scalar fields only, trimmed per docs/CLAUDE.md Rule 1.
 
     Nested objects are dropped except ``payment_method``, of which only
-    :data:`PAYMENT_METHOD_KEYS` survive. Keys that name account, routing or card data
-    are dropped, and so is any string that holds a card or account number.
+    :data:`payments.redaction.PAYMENT_METHOD_KEYS` survive. Keys that name account,
+    routing or card data are dropped, and so is any string that holds a card or account
+    number.
     """
     trimmed: dict[str, Any] = {}
     for key, value in obj.items():
         if _SENSITIVE_KEY.search(key):
             continue
         if key == "payment_method" and isinstance(value, Mapping):
-            trimmed[key] = {
-                name: str(value[name])
-                for name in PAYMENT_METHOD_KEYS
-                if isinstance(value.get(name), str | int)
-                and not isinstance(value.get(name), bool)
-                and _is_safe_text(str(value[name]))
-            }
+            trimmed[key] = payment_method_subset(value)
         elif isinstance(value, str):
             if _is_safe_text(value):
                 trimmed[key] = value
@@ -461,6 +464,14 @@ def customer_record(data: object, fetched_at: datetime) -> CustomerRecord:
     )
 
 
+#: TODO-VERIFY-044: the keys of an invoice's sent, viewed and paid times and of the
+#: amount paid in a ``GET /invoice/{id}`` response. These names are assumed.
+INVOICE_SENT_AT_KEY = "sent_at"
+INVOICE_VIEWED_AT_KEY = "viewed_at"
+INVOICE_PAID_AT_KEY = "paid_at"
+INVOICE_AMOUNT_PAID_KEY = "total_paid"
+
+
 def invoice_record(data: object, fetched_at: datetime) -> InvoiceRecord:
     obj = as_object(data)
     return InvoiceRecord(
@@ -470,17 +481,83 @@ def invoice_record(data: object, fetched_at: datetime) -> InvoiceRecord:
         customer_external_id=_text(obj, "customer_id"),
         total=_money(obj, "total"),
         raw_summary=summary(obj),
+        sent_at=_datetime(obj, INVOICE_SENT_AT_KEY),
+        viewed_at=_datetime(obj, INVOICE_VIEWED_AT_KEY),
+        paid_at=_datetime(obj, INVOICE_PAID_AT_KEY),
+        amount_paid=_money(obj, INVOICE_AMOUNT_PAID_KEY),
     )
+
+
+# Keys of a transaction object (``GET /transaction/{id}``), none in the verified tables:
+#: TODO-VERIFY-045: ``method`` (``bank`` for ACH, ``card``).
+TRANSACTION_METHOD_KEY = "method"
+#: TODO-VERIFY-046: ``type`` (``charge``, ``refund``, ``void``) and ``reference_id``, the
+#: transaction a refund refunds.
+TRANSACTION_TYPE_KEY = "type"
+TRANSACTION_PARENT_KEY = "reference_id"
+#: TODO-VERIFY-047: ``invoice_id`` and ``customer_id``.
+TRANSACTION_INVOICE_KEY = "invoice_id"
+TRANSACTION_CUSTOMER_KEY = "customer_id"
+#: TODO-VERIFY-048: ``success`` and ``is_voided`` (booleans or 0/1), ``created_at``.
+TRANSACTION_SUCCESS_KEY = "success"
+TRANSACTION_VOIDED_KEY = "is_voided"
+TRANSACTION_CREATED_AT_KEY = "created_at"
+#: TODO-VERIFY-041: ``settled_at`` set means settled; a child transaction carrying
+#: ``meta.achDescription`` means the ACH debit was returned.
+TRANSACTION_SETTLED_AT_KEY = "settled_at"
+TRANSACTION_CHILDREN_KEY = "child_transactions"
+ACH_DESCRIPTION_KEY = "achDescription"
+#: TODO-VERIFY-049: an ACH description is assumed to start with the NACHA return code
+#: (``R01`` ... ``R99``), followed by the reason text.
+_RETURN_CODE = re.compile(r"\A\s*(R[0-9]{2})\b[\s:.-]*(.*)\Z", re.DOTALL)
+#: Longest return reason kept.
+RETURN_REASON_MAX_LENGTH = 200
+
+
+def _ach_description(obj: Mapping[str, object]) -> str | None:
+    """The first child transaction's ``meta.achDescription``, or ``None``."""
+    children = obj.get(TRANSACTION_CHILDREN_KEY)
+    if not isinstance(children, list):
+        return None
+    for child in children:
+        meta = child.get("meta") if isinstance(child, Mapping) else None
+        description = meta.get(ACH_DESCRIPTION_KEY) if isinstance(meta, Mapping) else None
+        if isinstance(description, str) and description.strip():
+            return description
+    return None
+
+
+def ach_return(description: str) -> tuple[str, str]:
+    """``(code, reason)`` of an ACH description; text holding payment data is dropped."""
+    text = " ".join(description.split())
+    match = _RETURN_CODE.match(text)
+    code, reason = (match.group(1), match.group(2).strip()) if match else ("", text)
+    reason = reason[:RETURN_REASON_MAX_LENGTH]
+    return code, reason if _is_safe_text(reason) else ""
 
 
 def transaction_record(data: object, fetched_at: datetime) -> TransactionRecord:
     obj = as_object(data)
+    description = _ach_description(obj)
+    code, reason = ach_return(description) if description is not None else ("", "")
     return TransactionRecord(
         external_id=_required_id(obj),
         raw_status=_text(obj, "status"),
         fetched_at=fetched_at,
         total=_money(obj, "total"),
         raw_summary=summary(obj),
+        method=_safe_short_text(obj, TRANSACTION_METHOD_KEY),
+        kind=_safe_short_text(obj, TRANSACTION_TYPE_KEY),
+        invoice_external_id=_text(obj, TRANSACTION_INVOICE_KEY),
+        customer_external_id=_text(obj, TRANSACTION_CUSTOMER_KEY),
+        parent_external_id=_text(obj, TRANSACTION_PARENT_KEY),
+        success=_flag(obj, TRANSACTION_SUCCESS_KEY),
+        is_voided=_flag(obj, TRANSACTION_VOIDED_KEY) is True,
+        created_at=_datetime(obj, TRANSACTION_CREATED_AT_KEY),
+        settled_at=_datetime(obj, TRANSACTION_SETTLED_AT_KEY),
+        returned=description is not None,
+        return_code=code,
+        return_reason=reason,
     )
 
 
@@ -576,6 +653,22 @@ def ach_rejection(data: object, fetched_at: datetime) -> AchRejection:
         fetched_at=fetched_at,
         amount=_money(obj, "ach_reject_transaction_amount"),
         raw_summary=summary(obj),
+    )
+
+
+def webhook_record(data: object, fetched_at: datetime) -> WebhookRecord:
+    """Pages get-all-webhooks and create-new-webhook-for-all-of-my-users-merchants.
+
+    TODO-VERIFY-040: the response carries the registration's ``id``. TODO-VERIFY-050:
+    it names the event in ``event`` and the URL in ``target_url``.
+    """
+    obj = as_object(data)
+    return WebhookRecord(
+        external_id=_required_id(obj),
+        raw_status="",
+        fetched_at=fetched_at,
+        event=_safe_short_text(obj, "event"),
+        target_url=_text(obj, "target_url"),
     )
 
 

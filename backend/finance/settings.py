@@ -250,4 +250,10 @@ LOGGING = {
     },
 }
 
-sentry.init(dsn=_config.sentry_dsn, app_env=APP_ENV, stax_env=STAX_ENV)
+sentry.init(
+    dsn=_config.sentry_dsn,
+    app_env=APP_ENV,
+    stax_env=STAX_ENV,
+    stax_api_key=STAX_API_KEY,
+    stax_webhook_url_token=STAX_WEBHOOK_URL_TOKEN,
+)

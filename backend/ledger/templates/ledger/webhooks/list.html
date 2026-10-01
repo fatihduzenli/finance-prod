@@ -1,0 +1,45 @@
+{% extends "finance/base.html" %}
+{% block title %}Webhook events{% endblock %}
+{% block content %}
+  <h1>Webhook events</h1>
+  <form method="get" action="{% url 'ledger:webhooks:list' %}" class="actions" role="search">
+    <label for="outcome" style="margin:0;">Outcome</label>
+    <select name="outcome" id="outcome">
+      <option value="">Any</option>
+      {% for value, label in outcomes %}<option value="{{ value }}"{% if value == outcome %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <label for="type" style="margin:0;">Type</label>
+    <select name="type" id="type">
+      <option value="">Any</option>
+      {% for name in event_types %}<option value="{{ name }}"{% if name == event_type %} selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select>
+    <button class="btn" type="submit">Filter</button>
+  </form>
+  <table id="webhook-events">
+    <thead>
+      <tr><th>Received</th><th>Type</th><th>Name from</th><th>Object</th><th>Outcome</th><th>Failed attempts</th><th>Duplicates</th></tr>
+    </thead>
+    <tbody>
+      {% for event, object_id in rows %}
+        <tr>
+          <td><a href="{% url 'ledger:webhooks:detail' pk=event.pk %}">{{ event.received_at|date:"Y-m-d H:i:s" }}</a></td>
+          <td>{{ event.event_type }}</td>
+          <td>{{ event.get_event_source_display }}</td>
+          <td>{{ object_id|default:"—" }}</td>
+          <td>{{ event.outcome|default:"—" }}</td>
+          <td>{{ event.attempts }}</td>
+          <td>{{ event.duplicate_count }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7" class="muted">No webhook events match.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if page.paginator.num_pages > 1 %}
+    <p class="actions">
+      {% if page.has_previous %}<a class="btn" href="?{% if outcome %}outcome={{ outcome|urlencode:'' }}&amp;{% endif %}{% if event_type %}type={{ event_type|urlencode:'' }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} events)</span>
+      {% if page.has_next %}<a class="btn" href="?{% if outcome %}outcome={{ outcome|urlencode:'' }}&amp;{% endif %}{% if event_type %}type={{ event_type|urlencode:'' }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
+    </p>
+  {% endif %}
+{% endblock %}

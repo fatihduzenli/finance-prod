@@ -12,7 +12,8 @@ in the URL map has been classified. A new route that is not classified fails tha
 
 Routes still to come: refund, void and settings get ``Role.ADMIN``; invoices and send
 get ``Role.BILLING``. Operators (PLAN-006), leases, the rent run and rent charges
-(PLAN-007) and stores (PLAN-007b) are classified below.
+(PLAN-007), stores (PLAN-007b), webhook events and the returns queue (PLAN-008) are
+classified below.
 """
 
 from __future__ import annotations
@@ -40,11 +41,13 @@ class RouteRule:
     methods: frozenset[str]
 
 
-#: Reachable without a session. Exactly the login flow and the health probe (§3).
-PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset({"two_factor:login", "healthz"})
+#: Reachable without a session. Exactly the login flow, the health probe (§3) and the
+#: webhook receiver, which checks its URL token itself (PLAN-008 D2).
+PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset({"two_factor:login", "healthz", "webhooks:receive"})
 
-#: Public routes that also accept an unsafe method: the login form posts to itself.
-PUBLIC_UNSAFE_ROUTE_NAMES: frozenset[str] = frozenset({"two_factor:login"})
+#: Public routes that also accept an unsafe method: the login form posts to itself, and
+#: the payment provider posts events to the receiver (CSRF-exempt; 404 without the token).
+PUBLIC_UNSAFE_ROUTE_NAMES: frozenset[str] = frozenset({"two_factor:login", "webhooks:receive"})
 
 
 def _static_prefix() -> str:
@@ -97,6 +100,10 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:run:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:run:match": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:charges:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Webhook events (docs/qa/PLAN-008-webhooks.md D8): replay needs billing.
+    "ledger:webhooks:replay": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Returns queue (PLAN-008 D6): resolving needs billing; nothing re-debits.
+    "ledger:returns:resolve": RouteRule(min_role=Role.BILLING, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every
@@ -113,6 +120,8 @@ ADMIN_MODEL_PREFIX_RULES: dict[str, RouteRule] = {
     # Registered read-only as well (PLAN-007b §1).
     "admin:ledger_store_": RouteRule(min_role=Role.ADMIN, methods=POST),
     "admin:ledger_lease_": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Registered read-only (PLAN-008 D8).
+    "admin:payments_webhookevent_": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Routes that take no unsafe method at all. GET is open to any verified user (the view
@@ -144,6 +153,10 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # Rent run and charge screens that only read (PLAN-007 §4.1).
         "ledger:run:today",
         "ledger:charges:detail",
+        # Webhook event screens that only read (PLAN-008 D8).
+        "ledger:webhooks:list",
+        "ledger:webhooks:detail",
+        "ledger:returns:list",
     }
 )
 

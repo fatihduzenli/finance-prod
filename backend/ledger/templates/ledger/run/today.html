@@ -9,6 +9,12 @@
     </ul>
   {% endif %}
 
+  {% if dead_letters %}
+    <ul class="messages" id="webhook-banner">
+      <li class="error" role="alert"><a href="{% url 'ledger:webhooks:list' %}?outcome=dead_letter">{{ dead_letters }} webhook event{{ dead_letters|pluralize:" is,s are" }} dead-lettered</a></li>
+    </ul>
+  {% endif %}
+
   <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. The payment provider's schedules generate the invoices; "Match invoices" links them to these charges. Nothing here debits anyone.</p>
 
   {% if can_run %}
