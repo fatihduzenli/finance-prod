@@ -235,3 +235,21 @@ the login page myself." The condition for starting Prompt 4 is met.
 - **Checkpoint 6 is now the owner's:** create an operator with an email, check the sandbox
   dashboard for exactly one customer, double-click save, try a malformed email. Fable reads
   the transport log afterwards.
+
+## Update, 2026-10-01, Checkpoint 6 and PLAN-006a
+
+- **Checkpoint 6, owner in writing:** test 2 (double click: one record, linked) and test 3
+  (malformed email refused, no record) passed. Fable confirmed from the transport log that no
+  request left for the malformed email, and by a read-only API lookup that each of the three
+  created operators has exactly one Stax customer, with matching IDs. Test 1's first attempt
+  returned 422 from `POST /customer` (email at the reserved `example.com` domain; hypothesis,
+  body not logged); five further attempts within a minute opened the breaker at 20:34:01 UTC,
+  which closed itself at 20:39:01. Dashboard duplicate check deferred by the owner to
+  2026-10-01 (no sandbox dashboard access yet).
+- **No-email rule, owner in writing:** "confirm. Allowed, complete record, not enrolled until
+  staff link the IDs."
+- **PLAN-006a** (owner's option A) implemented, QA PASS (`docs/qa/QA-006a-sync-diagnostics.md`),
+  **not pushed**: 4xx field names in the log, 60-second retry lock, post-redirect-get on every
+  operator POST, created ID in the create log line.
+- Owner will edit the failed operator's email to a non-reserved domain and retry once.
+

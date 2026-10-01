@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections.abc import Iterator
@@ -284,3 +285,69 @@ def test_date_range_of_more_than_a_year_never_leaves_the_process() -> None:
         StaxProvider(rig.transport).list_deposits(DateRange(date(2026, 2, 1), date(2026, 1, 1)))
     assert rig.recorder.requests == []
     assert isinstance(rig, Rig) and isinstance(rig.recorder, Recorder)
+
+
+# --- PLAN-006a row 7: error field names under hostile bodies -------------------------------------
+
+
+def _fields_from(body: bytes, caplog: pytest.LogCaptureFixture) -> str:
+    caplog.set_level(logging.INFO)
+    rig = make_rig(
+        lambda request: httpx.Response(
+            422, content=body, headers={"content-type": "application/json"}
+        )
+    )
+    with pytest.raises(ProviderRejected):
+        rig.transport.send(Method.POST, "/customer", json={"a": "b"}, idempotent=False)
+    lines = [
+        record.getMessage() for record in caplog.records if "error_fields=" in record.getMessage()
+    ]
+    assert len(lines) == 1, lines
+    return lines[0].split("error_fields=", 1)[1]
+
+
+def test_five_megabyte_error_body_is_handled_and_logged_as_non_json(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    body = b'{"email": ["' + b"x" * (5 * 1024 * 1024) + b'"]}'
+    started = time.monotonic()
+    fields = _fields_from(body, caplog)
+    assert time.monotonic() - started < 5.0
+    assert fields == "non-json"
+    assert "xxxx" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_absent"),
+    [
+        (b'{"4111111111111111": ["x"]}', "4111111111111111"),
+        (b'{"__KEY__": ["x"]}', "__KEY__"),
+        (b'{"routing 021000021 acct 123456789012": ["x"]}', "021000021"),
+        (b'{"": ["x"], "   ": ["y"]}', "email"),
+        (b'{"\\u0000\\n\\t": ["x"]}', "\x00"),
+        (b'{"em\\u00e4il \\ud83d\\ude42": ["x"]}', "ä"),
+        (b'{"a": {"b": {"c": {"d": {"e": "4111111111111111"}}}}}', "4111111111111111"),
+        (b'{"errors": {"card_number": ["4111111111111111"], "cvv": ["123"]}}', "4111111111111111"),
+    ],
+)
+def test_hostile_key_names_and_values_never_reach_the_log(
+    body: bytes, expected_absent: str, caplog: pytest.LogCaptureFixture, fake_stax_api_key: str
+) -> None:
+    body = body.replace(b"__KEY__", fake_stax_api_key.encode())
+    expected_absent = expected_absent.replace("__KEY__", fake_stax_api_key)
+    fields = _fields_from(body, caplog)
+    assert expected_absent not in caplog.text
+    assert re.fullmatch(r"[A-Za-z0-9_.,-]+", fields), fields
+
+
+def test_a_two_thousand_level_deep_body_does_not_crash(caplog: pytest.LogCaptureFixture) -> None:
+    body = b"[" * 2000 + b"]" * 2000
+    assert _fields_from(body, caplog) in {"non-json", "list"}
+
+
+def test_numeric_and_boolean_json_bodies(caplog: pytest.LogCaptureFixture) -> None:
+    for body in (b"42", b"true", b"null", b'"a string with 4111111111111111"'):
+        caplog.clear()
+        fields = _fields_from(body, caplog)
+        assert fields in {"scalar", "non-json"}
+        assert "4111111111111111" not in caplog.text

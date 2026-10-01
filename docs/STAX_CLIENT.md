@@ -117,7 +117,9 @@ One INFO line per request on the logger `payments.stax.transport`:
 stax method=GET path=/invoice/{id} status=200 ms=123 object_id=<stax id>
 ```
 
-and `failure=<ClassName>` on failure. Never a body, header, token, email or amount. The
+and `failure=<ClassName>` on failure. Since PLAN-006a a 4xx line also carries
+`error_fields=<names>`: the **key names** of Stax's error body, reduced to a safe alphabet,
+never a value or message; a successful create logs the new object's `id` as `object_id`. Never a body, header, token, email or amount. The
 redacting formatter (`finance.log_redaction`) still runs over every line as a second layer.
 
 ## 8. Checking authentication (the only call this step makes)
