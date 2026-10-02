@@ -442,3 +442,15 @@ the login page myself." The condition for starting Prompt 4 is met.
 
 - Owner typed "push". `main` at `ab8d075` deployed; the live revision runs that image tag,
   healthy; environment check ok. Click 1 of Checkpoint 8 can be repeated.
+
+## Update, 2026-10-02, PLAN-008a (owner findings from the clicks)
+
+- `send_invoice` events were `ignored: no object id`: the body is an email envelope with the
+  invoice under `mergeVars.invoice`. The receiver now reads nested IDs and records the source;
+  the handler re-fetches and derives `sent_at` from the event time (the invoice object has no
+  timestamp keys). A dashboard invoice can now be linked to a charge: automatically on
+  `create_invoice` when exactly one open charge of the operator matches total and period,
+  otherwise by hand from the charge page ("Link invoice", billing or admin, confirmation and
+  note when the total differs). QA PASS (`docs/qa/QA-008a-send-invoice-and-manual-link.md`),
+  **not pushed**. TODO-VERIFY-015 and 042 (invoices) closed from the stored bodies.
+

@@ -172,7 +172,7 @@ they implement.
 | `internal_status` | App | Our workflow |
 | **`provider_status`** | **Stax** | Sync layer only. Stored exactly as Stax returns it |
 | **`amount_paid`** | **Stax** | Overwritten from Stax on disagreement |
-| **`sent_at`, `viewed_at`, `paid_at`** | **Stax** | Overwritten from Stax on disagreement |
+| **`sent_at`, `viewed_at`, `paid_at`** | **Stax, derived** | The invoice object carries no such timestamps (observed 2026-10-02). Each is set once, from the time our receiver got the first webhook whose re-fetch showed the status (sent, viewed, paid). A timestamp Stax ever reports would win. |
 | `allow_card` | App | Always false. The business accepts no cards |
 | `allow_ach` | App | |
 | `legacy` | Import | |

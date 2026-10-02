@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from django.db import connections
 from django.test import Client
 
 from accounts.roles import Role
@@ -18,7 +19,7 @@ from payments.fake import FakeProvider
 from payments.models import ExternalRef
 from payments.provider import ScheduleInput, ScheduleUpdate
 from tests.auth_helpers import make_user, verified_client
-from tests.test_lease_services import CUSTOMER, _race, edit, make_lease, method
+from tests.test_lease_services import CUSTOMER, _race, edit, make_lease, make_operator, method
 from tests.test_operator_sync import requires_postgresql
 from tests.test_rent_run import DAY, NOW, PERIOD, RENT, charge_of, enrolled, invoice, lease
 
@@ -383,3 +384,69 @@ def test_a_confirmation_replayed_after_a_failed_create_does_not_create_twice(
     assert len(_schedule_creates(fake)) == 2  # the failed attempt and the successful one
     live = CollectionSchedule.objects.filter(lease=row, state=ScheduleState.ACTIVE)
     assert live.count() == 1
+
+
+# --- PLAN-008a row 5: manual invoice linking under hostile input ------------------------------
+
+
+def test_an_invoice_of_another_operator_cannot_be_linked_by_id(fake: FakeProvider) -> None:
+    from ledger.models import Invoice
+    from tests.test_run_views import a_charge, link_data, link_path, local_invoice
+
+    charge = a_charge()
+    other = make_operator(email="other@example.com", customer="cus-other")
+    foreign = local_invoice(other, provider_id="foreign-invoice-0001")
+    _client(Role.BILLING).post(link_path(charge), link_data(foreign))
+    foreign.refresh_from_db()
+    assert foreign.rent_charge_id is None
+    assert Invoice.objects.filter(rent_charge=charge).count() == 0
+
+
+def test_a_link_note_with_a_card_number_and_tampered_confirmations_link_nothing(
+    fake: FakeProvider,
+) -> None:
+    from tests.test_run_views import a_charge, link_data, link_path, local_invoice
+
+    charge = a_charge()
+    operator = charge.lease.operator
+    invoice = local_invoice(operator, total="1400.00", provider_id="dash-0002")  # differs
+    billing = _client(Role.BILLING)
+    for extra in (
+        {"note": f"card {CARD}", "confirm_total_differs": "true"},
+        {"note": "ok", "confirm_total_differs": "1"},
+        {"note": "ok", "confirm_total_differs": "0"},
+        {"note": "ok"},
+        {"confirm_total_differs": "true"},
+    ):
+        data = link_data(invoice, **extra)
+        if "confirm_total_differs" in extra:
+            data["confirm"] = extra["confirm_total_differs"]
+        billing.post(link_path(charge), data)
+        invoice.refresh_from_db()
+        assert invoice.rent_charge_id is None, extra
+
+
+@requires_postgresql
+@pytest.mark.django_db(transaction=True)
+def test_two_charges_racing_for_one_invoice_leave_it_on_exactly_one(fake: FakeProvider) -> None:
+    from ledger.models import Invoice
+    from tests.test_run_views import a_charge_of, local_invoice
+
+    operator = make_operator(email="race@example.com", customer="cus-race")
+    first = a_charge_of(operator)
+    second = a_charge_of(operator)
+    invoice = local_invoice(operator, provider_id="dash-race")
+
+    def link(charge_id: Any) -> Any:
+        try:
+            return rent_run.link_invoice(charge_id, invoice.pk, confirm=False, note="", actor=None)
+        except Exception as error:  # noqa: BLE001 - a refusal is fine, a crash is not
+            return error
+        finally:
+            connections.close_all()
+
+    results = _race(lambda: link(first.pk), lambda: link(second.pk))
+    assert not any(isinstance(r, Exception) and not isinstance(r, ValueError) for r in results)
+    invoice.refresh_from_db()
+    assert invoice.rent_charge_id in {first.pk, second.pk}
+    assert Invoice.objects.filter(rent_charge__in=[first.pk, second.pk]).count() == 1
