@@ -459,3 +459,9 @@ the login page myself." The condition for starting Prompt 4 is met.
   `update_customer` row on the Webhooks page with the event name from the header, and the
   email still present in Stax after the update (the update carried the email; TODO-VERIFY-056,
   about omitting it, stays open).
+
+## Update, 2026-10-02, PLAN-008a on staging
+
+- Owner typed "push". `main` at `8fc2521` deployed; the live revision runs that image tag,
+  healthy, 100 % traffic; migrations `payments.0004` and `ledger.0011` applied; environment
+  check ok.
