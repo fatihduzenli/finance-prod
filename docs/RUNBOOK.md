@@ -83,3 +83,23 @@ prompt.
 charge is paid) or `returned` (the charge is reopened, the return goes to the queue);
 `voided`; a refund is a new payment row marked as a refund and linked to its parent. A charge is
 never paid on creation.
+
+## 7. Manual payments and the Stax side
+
+Record a wire, Zelle or other payment on the charge page with a mandatory note. If the charge has
+a Stax invoice and the payment covers the whole balance, the app re-fetches the invoice, marks it
+paid in Stax as **cash** with the memo "Paid by <method> on <date>. <note>" (the only offline
+method Stax offers that fits; the real method stays in our ledger), and re-fetches again. If Stax
+already showed it paid, nothing is sent and the charge is flagged for review. If the Stax call
+fails, the payment stands, the charge shows the failure, and "Retry marking" appears after a
+minute. Partial payments are local only for now and flagged.
+
+## 8. Refunds and voids (admin only)
+
+From a payment's page: Refund (full or partial, up to the remaining refundable amount) or Void
+(whole payment). Each has a confirmation page naming operator, store, invoice, amounts, and a
+checkbox that must be ticked. The call goes to Stax, the transaction and invoice are re-fetched,
+a refund becomes a new payment row linked to its parent, a void marks the original payment voided,
+the charge is recomputed, and the audit log names the admin. Billing and viewer users cannot open
+these pages. Refunds of manual payments are not possible here; they were never Stax transactions.
+

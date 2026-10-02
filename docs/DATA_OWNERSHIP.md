@@ -36,6 +36,7 @@ disagreement is written to `audit_log`.** Business fields are never overwritten 
 | A provider status string we have never seen | Stored exactly as received. Never mapped to a guess. |
 | A pending payment older than the configured number of days with no news | Flagged as a mismatch and alerted (Prompt 10). |
 | A webhook body says an invoice is paid or a transaction settled | **Ignored.** Only the object re-fetched from Stax by ID is applied (Prompt 8). The body is stored, redacted, for the record. |
+| A wire, Zelle or other payment is recorded against a charge that has a Stax invoice | Our ledger keeps the real method. **Stax is told the invoice was paid "in cash"**, with the memo "Paid by <method> on <date>. <note>", because Stax offers no wire or Zelle method and this is what staff did by hand in the dashboard (owner Q19, 2026-10-02). Before marking, the invoice is re-fetched; if Stax already shows it paid, nothing is sent and the mismatch is recorded. A **partial** payment is not sent to Stax until the unit of `apply_balance` is verified (TODO-VERIFY-028); the charge is flagged. |
 | An ACH return arrives for a settled payment | Payment `returned`; the charge's paid amount is recomputed and it reopens; the return enters the returns queue; nothing re-debits by itself. |
 
 The detection and repair code arrives with Prompts 8 and 10. This document fixes the rule

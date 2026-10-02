@@ -398,3 +398,12 @@ the login page myself." The condition for starting Prompt 4 is met.
 - **Owner, in writing (2026-10-02):** the test event's alert email arrived; the Sentry event has
   no Request section, only tags, runtime and `sys.argv`, and no token or key anywhere.
   **Sentry is proven on staging.** Breaker and dead-letter alerts now page the owner.
+
+## Update, 2026-10-02, Prompt 9
+
+- PLAN-009 (payments ledger, Stax marking of manual payments, carried balance, refunds and voids)
+  implemented, QA PASS (`docs/qa/QA-009-payments-ledger.md`), **not pushed**.
+- Owner decision needed: a **void** marks the original payment voided rather than adding a row
+  (amendment 4 said new rows for refunds and voids; a void is not a new transaction at Stax).
+- TODO-VERIFY-016 closed; 028 (`apply_balance` unit) keeps partial payments local-only.
+
