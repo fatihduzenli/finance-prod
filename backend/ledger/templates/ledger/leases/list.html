@@ -3,6 +3,14 @@
 {% block content %}
   <h1>Leases</h1>
   {% if can_create %}<p class="actions"><a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">New lease</a></p>{% endif %}
+  <form method="get" action="{% url 'ledger:leases:list' %}" class="actions" role="search" id="lease-filters">
+    <label for="operator" style="margin:0;">Operator</label>
+    <select name="operator" id="operator">
+      <option value="">Any</option>
+      {% for item in operators %}<option value="{{ item.pk }}"{% if item.pk == operator %} selected{% endif %}>{{ item.display_name }}</option>{% endfor %}
+    </select>
+    <button class="btn" type="submit">Filter</button>
+  </form>
   <table>
     <thead>
       <tr><th>Store</th><th>Operator</th><th>Rent</th><th>Debit days</th><th>Channel</th><th>Status</th></tr>
@@ -10,7 +18,7 @@
     <tbody>
       {% for lease in page %}
         <tr>
-          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">{{ lease.store.external_label }}</a>{% if lease.needs_review %} <span class="badge">Needs review</span>{% endif %}</td>
+          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">{{ lease.store.external_label }}</a>{% if lease.needs_review %} <span class="badge">Needs review</span>{% endif %}{% if lease.has_charge_note %} <span class="badge note-indicator" title="A charge of this lease has a note">Note</span>{% endif %}</td>
           <td>{{ lease.operator.display_name|default:"—" }}</td>
           <td>{% with row=lease.rent_now|first %}{% if row %}${{ row.amount }}{% else %}—{% endif %}{% endwith %}</td>
           <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>
@@ -24,9 +32,9 @@
   </table>
   {% if page.paginator.num_pages > 1 %}
     <p class="actions">
-      {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      {% if page.has_previous %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
       <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} leases)</span>
-      {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+      {% if page.has_next %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
     </p>
   {% endif %}
 {% endblock %}

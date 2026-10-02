@@ -1,0 +1,87 @@
+{% extends "finance/base.html" %}
+{% block title %}Payments{% endblock %}
+{% block content %}
+  <h1>Payments</h1>
+  <form method="get" action="{% url 'ledger:payments:list' %}" id="payment-filters" role="search">
+    <div class="actions">
+      <label for="date_by" style="margin:0;">Date</label>
+      <select name="date_by" id="date_by">
+        {% for value, label in date_by_choices %}<option value="{{ value }}"{% if value == selected.date_by %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <label for="date_from" style="margin:0;">From</label>
+      <input type="date" name="date_from" id="date_from" value="{{ selected.date_from|date:'Y-m-d' }}">
+      <label for="date_to" style="margin:0;">To</label>
+      <input type="date" name="date_to" id="date_to" value="{{ selected.date_to|date:'Y-m-d' }}">
+    </div>
+    <div class="actions">
+      <label for="method" style="margin:0;">Method</label>
+      <select name="method" id="method">
+        <option value="">Any</option>
+        {% for value, label in method_choices %}<option value="{{ value }}"{% if value == selected.method %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <label for="status" style="margin:0;">Status</label>
+      <select name="status" id="status">
+        <option value="">Any</option>
+        {% for value, label in status_choices %}<option value="{{ value }}"{% if value == selected.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <label for="operator" style="margin:0;">Operator</label>
+      <select name="operator" id="operator">
+        <option value="">Any</option>
+        {% for operator in operators %}<option value="{{ operator.pk }}"{% if operator.pk == selected.operator %} selected{% endif %}>{{ operator.display_name }}</option>{% endfor %}
+      </select>
+      <label for="store" style="margin:0;">Store</label>
+      <select name="store" id="store">
+        <option value="">Any</option>
+        {% for store in stores %}<option value="{{ store.pk }}"{% if store.pk == selected.store %} selected{% endif %}>{{ store.external_label }}</option>{% endfor %}
+      </select>
+      <button class="btn" type="submit">Filter</button>
+      <a class="btn" id="export-csv" href="{% url 'ledger:payments:export' %}{% if query %}?{{ query }}{% endif %}">Export CSV</a>
+    </div>
+  </form>
+
+  <h2>Totals of the {{ totals.count }} payment{{ totals.count|pluralize }} shown</h2>
+  <table id="payment-totals">
+    <thead><tr><th>Settled (collected)</th><th>Pending (not collected yet)</th><th>Returned</th><th>Refunded</th></tr></thead>
+    <tbody>
+      <tr>
+        <td id="total-settled">${{ totals.settled }}</td>
+        <td id="total-pending">${{ totals.pending }}</td>
+        <td id="total-returned">${{ totals.returned }}</td>
+        <td id="total-refunded">${{ totals.refunded }}</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="muted">Pending payments are never counted as collected. Refunds are shown as their own rows.</p>
+
+  <table id="payments">
+    <thead>
+      <tr><th>Paid on</th><th>Initiated</th><th>Operator</th><th>Store</th><th>Charge</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Transaction</th><th>Note</th></tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          <td><a href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.payment.settled_on|date:"Y-m-d"|default:"—" }}</a></td>
+          <td>{{ row.payment.initiated_on|date:"Y-m-d"|default:"—" }}</td>
+          <td>{{ row.operator.display_name|default:"—" }}</td>
+          <td>{{ row.store.external_label|default:"—" }}</td>
+          <td>{% if row.payment.rent_charge %}<a href="{% url 'ledger:charges:detail' pk=row.payment.rent_charge.pk %}">Rent {{ row.payment.rent_charge.period_month|date:"Y-m" }}, debit {{ row.payment.rent_charge.seq }}</a>{% elif row.payment.insurance_charge %}Insurance {{ row.payment.policy_year }}{% else %}—{% endif %}</td>
+          <td>{{ row.payment.get_method_display }}</td>
+          <td>{% if row.payment.is_refund %}&minus;{% endif %}${{ row.payment.amount }}</td>
+          <td>{% if row.payment.is_refund %}<span class="badge">Refund</span> {% endif %}{{ row.payment.get_status_display }}</td>
+          <td>{{ row.payment.reference|default:"—" }}</td>
+          <td>{{ row.transaction|default:"—" }}</td>
+          <td>{% if row.has_note %}<span class="badge note-indicator" title="The charge has a note">Note</span>{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="11" class="muted">No payments match.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if page.paginator.num_pages > 1 %}
+    <p class="actions">
+      {% if page.has_previous %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} payments)</span>
+      {% if page.has_next %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
+    </p>
+  {% endif %}
+{% endblock %}

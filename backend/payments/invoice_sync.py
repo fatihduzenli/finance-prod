@@ -26,6 +26,14 @@ from payments.sync_writer import provider_write
 INVOICE_DATE_KEY = "invoice_date_at"
 DUE_DATE_KEY = "due_at"
 SCHEDULE_KEY = "schedule_id"
+#: TODO-VERIFY-055: the status string of an invoice the provider shows paid in full.
+#: ``PAID`` is assumed (PLAN-009 D1); compared stripped and upper-cased.
+PROVIDER_PAID = "PAID"
+
+
+def shows_paid(record: InvoiceRecord) -> bool:
+    """Whether the provider's invoice is already paid (PLAN-009 D1 pre-check)."""
+    return record.raw_status.strip().upper() == PROVIDER_PAID
 
 
 def record_provider_status(invoice_id: UUID, raw_status: str) -> None:

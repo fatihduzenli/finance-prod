@@ -1,0 +1,22 @@
+{% extends "finance/base.html" %}
+{% block title %}Void a payment{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">&larr; Payment</a></p>
+  <h1>Void a payment</h1>
+  {% include "ledger/payments/summary.html" %}
+  {% if facts.void_refusal %}
+    <p id="void-refusal"><strong>{{ facts.void_refusal }}</strong></p>
+  {% else %}
+    <p id="void-sentence"><strong>{{ sentence }}</strong></p>
+    <form method="post" class="js-single-submit" autocomplete="off" id="void-form">
+      {% csrf_token %}
+      {{ form.creation_key }}
+      {% if form.non_field_errors %}<p class="errorlist">{{ form.non_field_errors|join:" " }}</p>{% endif %}
+      <p id="void-confirmation"><label style="font-weight:normal;"><input type="checkbox" name="confirm" value="true" id="confirm-void"> {{ confirmation }}</label>
+        {% for error in form.confirm.errors %}<br><strong class="field-error">{{ error }}</strong>{% endfor %}
+      </p>
+      <p class="actions"><button class="btn btn-primary" type="submit" id="confirm-void-button">Void at the payment provider</button></p>
+    </form>
+  {% endif %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

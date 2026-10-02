@@ -21,9 +21,23 @@ Rules kept here:
   linked is skipped; one whose date or schedule cannot be read is reported, never
   guessed. Matching is refused, with no provider call, while the breaker is open or the
   failure budget is exhausted.
-- **Manual payments** (D8): Zelle, wire or other, recorded here only (no provider
-  call); amount above zero and at most the balance; date not in the future; a note.
-  ``amount_paid`` is recomputed from settled payments and the status follows.
+- **Manual payments** (D8): Zelle, wire or other; amount above zero and at most the
+  balance; date not in the future; a note; an optional reference. The payment is
+  written first, in its own transaction, and ``amount_paid`` is recomputed from settled
+  payments with the status following.
+- **Marking the provider invoice** (PLAN-009 D1 to D3): when the charge has a provider
+  invoice and the payment covers the charge's whole amount (nothing was paid before),
+  the invoice is re-fetched under the charge's row lock; one the provider already shows
+  paid is not marked again (``payment.provider_already_paid``, charge flagged);
+  otherwise it is marked paid as cash with the memo of :mod:`payments.offline_marking`,
+  re-fetched, and its state copied through :mod:`payments.invoice_sync`. A provider
+  failure keeps the payment and flags the charge with the failure class and field
+  names; :func:`retry_provider_mark` is the manual retry, refused for
+  ``RETRY_LOCK_SECONDS`` after the last attempt. A partial payment, or one that differs
+  from the invoice total, makes no provider call and flags the charge.
+- **Carried balance** (PLAN-009 D5): the open balances of a lease's earlier charges are
+  shown with each due debit and on the charge page; a new charge's amount never
+  includes them.
 
 Every change writes ``audit_log``; provider identifiers in it are masked. Money is
 ``Decimal`` throughout.
@@ -32,9 +46,10 @@ Every change writes ``audit_log``; provider identifiers in it are masked. Money 
 from __future__ import annotations
 
 import calendar
+import math
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
@@ -74,7 +89,7 @@ from ledger.services.leases import (
     rent_on,
     schedule_ref,
 )
-from payments import invoice_sync, operator_sync
+from payments import invoice_sync, offline_marking, operator_sync
 from payments.errors import ProviderError
 from payments.health import provider_health
 from payments.models import ExternalRef
@@ -82,6 +97,7 @@ from payments.provider import InvoiceQuery, InvoiceRecord, mask_identifier
 
 ENTITY_CHARGE = "rent_charge"
 ENTITY_INVOICE = "invoice"
+ENTITY_PAYMENT = "payment"
 KIND_INVOICE = "invoice"
 CENT = Decimal("0.01")
 #: Largest amount ``numeric(12,2)`` holds.
@@ -139,6 +155,29 @@ PAY_NOTE_PAYMENT_DATA = "This text may not contain card or account numbers."
 PAY_WAIVED = "This charge is waived. Nothing was recorded."
 PAY_NOTHING_DUE = "Nothing is due on this charge. Nothing was recorded."
 PAY_ALREADY = "This payment was already recorded. Nothing was changed."
+PAY_RECORDED = "Payment recorded."
+
+#: Audit actions of the provider marking (PLAN-009 D1 to D3).
+MARKED_ACTION = "rent_charge.provider_marked"
+MARK_FAILED_ACTION = "rent_charge.provider_mark_failed"
+NOT_UPDATED_ACTION = "rent_charge.provider_not_updated"
+ALREADY_PAID_ACTION = "payment.provider_already_paid"
+_CHARGE_MARK_ACTIONS = (MARKED_ACTION, MARK_FAILED_ACTION, NOT_UPDATED_ACTION)
+#: Other reasons a charge is flagged; clearing a marking flag keeps the charge flagged
+#: when one of them was ever recorded.
+_OTHER_FLAG_ACTIONS = (
+    "rent_charge.second_invoice",
+    "rent_charge.total_mismatch",
+    "rent_charge.disputed",
+)
+#: Where a marking attempt stopped.
+STAGE_CHECK = "check"
+STAGE_MARK = "mark"
+STAGE_REREAD = "reread"
+
+MARK_DONE = "The invoice at the payment provider is marked paid."
+MARK_RETRY_HINT = " The payment is recorded; retry from the charge page."
+MARK_NOTHING_TO_RETRY = "Nothing to retry on this charge."
 
 
 # --- Results --------------------------------------------------------------------------
@@ -158,6 +197,8 @@ class DueDebit:
     charge: RentCharge | None
     #: The same debit's charge of the previous month, if any.
     last_month: RentCharge | None
+    #: Open balances of the lease's earlier charges (PLAN-009 D5); not part of ``amount``.
+    carried_balance: Decimal = ZERO
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +223,30 @@ class ChargeRunReport:
     created: tuple[RentCharge, ...]
     already: tuple[RentCharge, ...]
     skipped: tuple[SkippedLease, ...]
+
+
+class MarkAction(StrEnum):
+    """What happened at the payment provider after a manual payment (PLAN-009 D1 to D3)."""
+
+    NO_INVOICE = "no_invoice"
+    NOT_UPDATED = "not_updated"
+    MARKED = "marked"
+    ALREADY_PAID = "already_paid"
+    FAILED = "failed"
+    RETRY_TOO_SOON = "retry_too_soon"
+    NOTHING_TO_RETRY = "nothing_to_retry"
+
+
+@dataclass(frozen=True, slots=True)
+class MarkResult:
+    action: MarkAction
+    #: A fixed sentence for staff that never names the provider; empty for ``NO_INVOICE``.
+    message: str = ""
+    retry_in: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.action in (MarkAction.NO_INVOICE, MarkAction.MARKED)
 
 
 class MatchAction(StrEnum):
@@ -219,6 +284,8 @@ class PaymentOutcome:
     payment: Payment | None = None
     #: True when the form's key had already recorded a payment (a resubmission).
     replayed: bool = False
+    #: What happened at the payment provider afterwards; ``None`` when nothing was saved.
+    provider: MarkResult | None = None
 
 
 # --- Who is due -----------------------------------------------------------------------
@@ -270,9 +337,27 @@ def leases_due(day: date) -> RunDay:
                     over_limit=exceeds_provider_limit(amount),
                     charge=charges.get((period, seq)),
                     last_month=charges.get((previous, seq)),
+                    carried_balance=_carried(lease.pk, period, seq),
                 )
             )
     return RunDay(day, tuple(due), tuple(skipped))
+
+
+def carried_balance(charge: RentCharge) -> Decimal:
+    """The open balances of the lease's charges before this one (PLAN-009 D5)."""
+    return _carried(charge.lease_id, charge.period_month, charge.seq)
+
+
+def _carried(lease_id: uuid.UUID, period: date, seq: int) -> Decimal:
+    """Sum of the balances above zero of the lease's charges before ``(period, seq)``; a
+    waived charge is not owed and is left out."""
+    total = (
+        RentCharge.objects.filter(lease_id=lease_id, balance__gt=0)
+        .filter(Q(period_month__lt=period) | Q(period_month=period, seq__lt=seq))
+        .exclude(status=RentChargeStatus.WAIVED)
+        .aggregate(total=Sum("balance"))["total"]
+    )
+    return Decimal(total or ZERO).quantize(CENT)
 
 
 def _skip_reason(lease: Lease, day: date) -> str:
@@ -489,9 +574,12 @@ def charge_review_message(charge: RentCharge) -> str:
     """Why a flagged charge needs review, or ``""`` when it is not flagged."""
     if not charge.needs_review:
         return ""
+    parts = []
     if charge.invoices.exclude(total=charge.amount_due).exists():
-        return TOTAL_MISMATCH
-    return SECOND_INVOICE
+        parts.append(TOTAL_MISMATCH)
+    if charge.review_message:
+        parts.append(f"{offline_marking.shown(charge.review_message)}.")
+    return " ".join(parts) or SECOND_INVOICE
 
 
 def _invoice_linked(external_id: str) -> bool:
@@ -520,13 +608,17 @@ def record_manual_payment(
     actor: User | None,
     creation_key: uuid.UUID | None = None,
     today: date | None = None,
+    reference: str = "",
 ) -> PaymentOutcome:
-    """Record a Zelle, wire or other payment against a rent charge (D8). No provider call.
+    """Record a Zelle, wire or other payment against a rent charge (D8), then update the
+    provider invoice as the module docstring says (PLAN-009 D1 to D3).
 
     ``creation_key`` is the one-time key of the form; it is kept in the audit row and
-    looked up under the charge's row lock, so a resubmitted form records nothing.
+    looked up under the charge's row lock, so a resubmitted form records nothing and
+    calls nothing.
     """
     text = (note or "").strip()
+    reference = (reference or "").strip()
     if method not in MANUAL_METHODS:
         return PaymentOutcome(False, PAY_METHOD, "method")
     if not isinstance(amount, Decimal) or not amount.is_finite() or amount <= 0:
@@ -548,6 +640,7 @@ def record_manual_payment(
             return PaymentOutcome(False, PAY_NOTHING_DUE)
         if amount > balance:
             return PaymentOutcome(False, PAY_OVER_BALANCE, "amount")
+        whole = balance == charge.amount_due and amount == balance
         before = _charge(charge)
         payment = Payment(
             rent_charge=charge,
@@ -557,6 +650,7 @@ def record_manual_payment(
             status=PaymentStatus.SETTLED,
             initiated_on=paid_on,
             settled_on=paid_on,
+            reference=reference,
             note=text,
             recorded_by=actor,
         )
@@ -588,7 +682,248 @@ def record_manual_payment(
                 "creation_key": str(creation_key) if creation_key is not None else None,
             },
         )
-    return PaymentOutcome(True, "Payment recorded.", payment=payment)
+        linked = _provider_invoice(charge)
+        if linked is not None and not (whole and linked[0].total == amount):
+            reason = offline_marking.PARTIAL_AMOUNT if not whole else offline_marking.TOTAL_DIFFERS
+            result = _not_updated(charge, payment, linked, reason, actor)
+            return PaymentOutcome(True, PAY_RECORDED, payment=payment, provider=result)
+    if linked is None:
+        return PaymentOutcome(
+            True, PAY_RECORDED, payment=payment, provider=MarkResult(MarkAction.NO_INVOICE)
+        )
+    result = _mark(charge.pk, payment.pk, actor=actor, retry=False)
+    return PaymentOutcome(True, PAY_RECORDED, payment=payment, provider=result)
+
+
+def retry_provider_mark(charge_id: uuid.UUID, *, actor: User | None) -> MarkResult:
+    """Retry the last failed marking of the charge's provider invoice (PLAN-009 D2)."""
+    return _mark(charge_id, None, actor=actor, retry=True)
+
+
+def provider_retry_wait(charge: RentCharge, now: datetime | None = None) -> int | None:
+    """``None`` when the charge has no failed marking to retry; otherwise the whole
+    seconds until a retry is allowed (0: now)."""
+    last = _last_mark_event(charge)
+    if last is None or last.action != MARK_FAILED_ACTION:
+        return None
+    return _retry_wait(last, now)
+
+
+def _retry_wait(event: AuditLog, now: datetime | None = None) -> int:
+    elapsed = ((now or timezone.now()) - event.at).total_seconds()
+    lock = operator_sync.RETRY_LOCK_SECONDS
+    if elapsed >= lock:
+        return 0
+    return min(lock, max(1, math.ceil(lock - elapsed)))
+
+
+def _last_mark_event(charge: RentCharge) -> AuditLog | None:
+    return (
+        AuditLog.objects.filter(
+            Q(
+                entity_type=ENTITY_CHARGE,
+                entity_id=str(charge.pk),
+                action__in=_CHARGE_MARK_ACTIONS,
+            )
+            | Q(action=ALREADY_PAID_ACTION, after__rent_charge=str(charge.pk))
+        )
+        .order_by("-id")
+        .first()
+    )
+
+
+def _provider_invoice(charge: RentCharge) -> tuple[Invoice, str] | None:
+    """The charge's first invoice with a current provider reference, and that reference."""
+    for invoice in charge.invoices.order_by("issue_date", "invoice_number"):
+        ref = (
+            ExternalRef.objects.filter(
+                entity_type=ENTITY_INVOICE,
+                entity_id=invoice.pk,
+                provider=PROVIDER_KEY,
+                external_kind=KIND_INVOICE,
+                superseded_at__isnull=True,
+            )
+            .values_list("external_id", flat=True)
+            .first()
+        )
+        if ref:
+            return invoice, ref
+    return None
+
+
+def _mark_context(payment: Payment, linked: tuple[Invoice, str]) -> dict[str, Any]:
+    invoice, ref = linked
+    return {
+        "payment": str(payment.pk),
+        "invoice_number": invoice.invoice_number,
+        "provider_invoice": mask_identifier(ref),
+    }
+
+
+def _flag_review(charge: RentCharge, text: str) -> None:
+    charge.needs_review = True
+    charge.review_message = text
+    charge.save(update_fields=["needs_review", "review_message", "updated_at"])
+
+
+def _clear_review(charge: RentCharge) -> None:
+    """Clear a marking flag; the charge stays flagged for any other recorded reason."""
+    if not charge.review_message:
+        return
+    charge.review_message = ""
+    charge.needs_review = (
+        charge.invoices.exclude(total=charge.amount_due).exists()
+        or AuditLog.objects.filter(
+            entity_type=ENTITY_CHARGE, entity_id=str(charge.pk), action__in=_OTHER_FLAG_ACTIONS
+        ).exists()
+    )
+    charge.save(update_fields=["needs_review", "review_message", "updated_at"])
+
+
+def _not_updated(
+    charge: RentCharge,
+    payment: Payment,
+    linked: tuple[Invoice, str],
+    reason: str,
+    actor: User | None,
+) -> MarkResult:
+    """No provider call (D3): flag the charge; an earlier, different flag text is kept."""
+    before = {**_charge(charge), "review_message": charge.review_message}
+    if not charge.review_message:
+        _flag_review(charge, reason)
+    elif not charge.needs_review:
+        charge.needs_review = True
+        charge.save(update_fields=["needs_review", "updated_at"])
+    _audit(
+        actor,
+        NOT_UPDATED_ACTION,
+        ENTITY_CHARGE,
+        charge.pk,
+        before,
+        {
+            **_charge(charge),
+            "review_message": charge.review_message,
+            **_mark_context(payment, linked),
+            "reason": reason,
+        },
+    )
+    return MarkResult(MarkAction.NOT_UPDATED, offline_marking.shown(reason))
+
+
+def _mark(
+    charge_id: uuid.UUID, payment_id: uuid.UUID | None, *, actor: User | None, retry: bool
+) -> MarkResult:
+    """Re-fetch, mark and re-fetch the charge's provider invoice under its row lock (D1).
+
+    With ``retry``, the payment is the one named by the last failed attempt, and the call
+    is refused while that attempt is less than ``RETRY_LOCK_SECONDS`` old. When the last
+    attempt marked the invoice but could not re-read it, an invoice now shown paid
+    confirms that mark and is not treated as paid elsewhere.
+    """
+    with transaction.atomic():
+        charge = RentCharge.objects.select_for_update().get(pk=charge_id)
+        previous_stage = ""
+        if retry:
+            last = _last_mark_event(charge)
+            if last is None or last.action != MARK_FAILED_ACTION or not last.after:
+                return MarkResult(MarkAction.NOTHING_TO_RETRY, MARK_NOTHING_TO_RETRY)
+            wait = _retry_wait(last)
+            if wait:
+                return MarkResult(
+                    MarkAction.RETRY_TOO_SOON, operator_sync.retry_wait_message(wait), wait
+                )
+            payment_id = uuid.UUID(str(last.after["payment"]))
+            previous_stage = str(last.after.get("stage", ""))
+        linked = _provider_invoice(charge)
+        if linked is None or payment_id is None:
+            return MarkResult(MarkAction.NOTHING_TO_RETRY if retry else MarkAction.NO_INVOICE)
+        invoice, ref = linked
+        payment = Payment.objects.get(pk=payment_id, rent_charge=charge)
+        context = _mark_context(payment, linked)
+        before = {**_charge(charge), "review_message": charge.review_message}
+        provider = payments.get_provider()
+        stage = STAGE_CHECK
+        try:
+            record = provider.get_invoice(ref)
+            if invoice_sync.shows_paid(record) and previous_stage != STAGE_REREAD:
+                changes = invoice_sync.record_provider_state(invoice.pk, record)
+                _flag_review(charge, offline_marking.ALREADY_PAID)
+                _audit(
+                    actor,
+                    ALREADY_PAID_ACTION,
+                    ENTITY_PAYMENT,
+                    payment.pk,
+                    before,
+                    {
+                        **_charge(charge),
+                        "review_message": charge.review_message,
+                        "rent_charge": str(charge.pk),
+                        **context,
+                        "provider_changes": changes,
+                    },
+                )
+                return MarkResult(
+                    MarkAction.ALREADY_PAID, offline_marking.shown(offline_marking.ALREADY_PAID)
+                )
+            if not invoice_sync.shows_paid(record):
+                stage = STAGE_MARK
+                provider.mark_invoice_paid_cash_or_check(
+                    ref,
+                    offline_marking.offline_payment(
+                        method=payment.method,
+                        amount=payment.amount,
+                        paid_on=payment.settled_on or payment.initiated_on or timezone.localdate(),
+                        note=payment.note,
+                        reference=payment.reference,
+                    ),
+                )
+                stage = STAGE_REREAD
+                record = provider.get_invoice(ref)
+        except ProviderError as error:
+            failure = operator_sync.failure_name(error)
+            fields = operator_sync.failure_fields(error)
+            template = (
+                offline_marking.REREAD_FAILED
+                if stage == STAGE_REREAD
+                else offline_marking.MARK_FAILED
+            )
+            text = offline_marking.failure_text(template, failure, fields)
+            _flag_review(charge, text)
+            _audit(
+                actor,
+                MARK_FAILED_ACTION,
+                ENTITY_CHARGE,
+                charge.pk,
+                before,
+                {
+                    **_charge(charge),
+                    "review_message": charge.review_message,
+                    **context,
+                    "stage": stage,
+                    "failure": failure,
+                    "fields": fields,
+                },
+            )
+            return MarkResult(
+                MarkAction.FAILED, offline_marking.shown(text) + "." + MARK_RETRY_HINT
+            )
+        changes = invoice_sync.record_provider_state(invoice.pk, record)
+        _clear_review(charge)
+        _audit(
+            actor,
+            MARKED_ACTION,
+            ENTITY_CHARGE,
+            charge.pk,
+            before,
+            {
+                **_charge(charge),
+                "review_message": charge.review_message,
+                **context,
+                "confirmed_earlier_mark": stage == STAGE_CHECK,
+                "provider_changes": changes,
+            },
+        )
+        return MarkResult(MarkAction.MARKED, MARK_DONE)
 
 
 def _payment_for_key(charge: RentCharge, creation_key: uuid.UUID) -> bool:

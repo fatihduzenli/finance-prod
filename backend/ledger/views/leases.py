@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Prefetch, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
+from django.db.models.functions import Lower
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -31,10 +33,12 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import EnrolForm, LeaseCreateForm, LeaseForm
 from ledger.models import (
+    ChargeNote,
     Lease,
     LeaseRentHistory,
     Note,
     NoteEntityType,
+    Operator,
     ScheduleState,
 )
 from ledger.services import leases as service
@@ -70,25 +74,46 @@ def _initial(lease: Lease) -> dict[str, Any]:
 # --- Read ---------------------------------------------------------------------------
 
 
+def _operator_filter(raw: str | None) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(raw or "")
+    except ValueError:
+        return None
+
+
 @role_required
 @require_safe
 def lease_list(request: HttpRequest) -> HttpResponse:
+    """Every lease, optionally of one operator (PLAN-009 D9); a lease whose charges carry
+    a charge note is marked."""
     today = timezone.localdate()
     in_effect = (
         LeaseRentHistory.objects.filter(effective_from__lte=today)
         .filter(Q(effective_to__isnull=True) | Q(effective_to__gte=today))
         .order_by("-effective_from")
     )
+    operator = _operator_filter(request.GET.get("operator"))
     leases = (
         Lease.objects.select_related("store", "operator")
         .prefetch_related(Prefetch("rent_history", queryset=in_effect, to_attr="rent_now"))
+        .annotate(
+            has_charge_note=Exists(ChargeNote.objects.filter(rent_charge__lease=OuterRef("pk")))
+        )
         .order_by("store__external_label", "id")
     )
+    if operator is not None:
+        leases = leases.filter(operator_id=operator)
     page = Paginator(leases, PAGE_SIZE).get_page(request.GET.get("page"))
     return render(
         request,
         "ledger/leases/list.html",
-        {"page": page, "can_create": meets(_role(request), Role.ADMIN)},
+        {
+            "page": page,
+            "can_create": meets(_role(request), Role.ADMIN),
+            "operators": Operator.objects.order_by(Lower("display_name"), "id"),
+            "operator": operator,
+            "query": urlencode({"operator": str(operator)}) if operator else "",
+        },
     )
 
 

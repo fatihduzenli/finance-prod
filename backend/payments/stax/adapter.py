@@ -54,7 +54,8 @@ from payments.stax import mapping, validation
 from payments.stax.transport import Method, StaxTransport
 
 PROVIDER_NAME = "stax"
-#: TODO-VERIFY-016: the accepted values of {method} on mark-paid; these two are assumed.
+#: The values of {method} on mark-paid that this app may send. The page (read 2026-10-02,
+#: PLAN-009) lists ``cash``, ``check`` and ``giftcard``; gift cards are never used here.
 OFFLINE_METHODS: tuple[str, ...] = ("cash", "check")
 NOT_FOUND = 404
 
@@ -247,7 +248,7 @@ class StaxProvider(PaymentProvider):
         the payment twice.
         """
         validation.external_id("external_id", external_id)
-        validation.positive_amount("amount", payment.amount)
+        validation.offline_payment(payment)
         if payment.method not in OFFLINE_METHODS:
             raise ValidationFailed("method must be one of the offline payment methods")
         data = self.transport.send(

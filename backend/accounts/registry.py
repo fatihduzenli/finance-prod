@@ -10,10 +10,11 @@ Read-only routes need no rule for GET; they are listed in ``READ_ONLY_ROUTE_NAME
 the enumeration test (backend/tests/test_route_registry.py) can prove that every route
 in the URL map has been classified. A new route that is not classified fails that test.
 
-Routes still to come: refund, void and settings get ``Role.ADMIN``; invoices and send
-get ``Role.BILLING``. Operators (PLAN-006), leases, the rent run and rent charges
-(PLAN-007), stores (PLAN-007b), webhook events and the returns queue (PLAN-008) are
-classified below.
+Routes still to come: settings get ``Role.ADMIN``; invoices and send get
+``Role.BILLING``. Operators (PLAN-006), leases, the rent run and rent charges
+(PLAN-007), stores (PLAN-007b), webhook events and the returns queue (PLAN-008), and the
+payments ledger, its export, the payment page, the marking retry, refund and void
+(PLAN-009) are classified below.
 """
 
 from __future__ import annotations
@@ -100,10 +101,16 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:run:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:run:match": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:charges:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Retry marking the provider invoice paid (PLAN-009 D2): billing.
+    "ledger:charges:retry_mark": RouteRule(min_role=Role.BILLING, methods=POST),
     # Webhook events (docs/qa/PLAN-008-webhooks.md D8): replay needs billing.
     "ledger:webhooks:replay": RouteRule(min_role=Role.BILLING, methods=POST),
     # Returns queue (PLAN-008 D6): resolving needs billing; nothing re-debits.
     "ledger:returns:resolve": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Refund and void of an ACH payment (PLAN-009 D6, D7): admin. The views refuse the
+    # GET of the confirmation pages below admin too.
+    "ledger:payments:refund": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:payments:void": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every
@@ -157,6 +164,11 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:webhooks:list",
         "ledger:webhooks:detail",
         "ledger:returns:list",
+        # The payments ledger and its CSV export: any verified role (PLAN-009 D4).
+        "ledger:payments:list",
+        "ledger:payments:export",
+        # The payment page: any verified role (PLAN-009 D8).
+        "ledger:payments:detail",
     }
 )
 

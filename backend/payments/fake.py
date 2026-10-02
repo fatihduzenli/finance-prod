@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from payments.errors import FeatureDisabled, ProviderError, ProviderRejected
 from payments.provider import (
+    TRANSACTION_REFUND,
     AchRejection,
     CustomerInput,
     CustomerQuery,
@@ -197,8 +198,10 @@ class FakeProvider(PaymentProvider):
         self, external_id: str, payment: OfflinePayment
     ) -> InvoiceRecord:
         now = self._call("mark_invoice_paid_cash_or_check", external_id, payment)
+        current = self._get(self.invoices, external_id)
+        # The status the services read as paid (payments.invoice_sync.PROVIDER_PAID).
         record = replace(
-            self._get(self.invoices, external_id), raw_status="FAKE-PAID", fetched_at=now
+            current, raw_status="PAID", fetched_at=now, paid_at=now, amount_paid=current.total
         )
         self.invoices[external_id] = record
         return record
@@ -230,12 +233,21 @@ class FakeProvider(PaymentProvider):
     def refund_transaction(self, external_id: str, amount: Decimal) -> TransactionRecord:
         require_money("amount", amount)
         now = self._call("refund_transaction", external_id, amount)
-        self._get(self.transactions, external_id)
+        original = self._get(self.transactions, external_id)
+        # A new transaction of type refund naming its parent, not settled yet (as the
+        # webhook handlers read one, PLAN-008 D5).
         record = TransactionRecord(
             external_id=self._next_id("transaction"),
             raw_status="FAKE-REFUNDED",
             fetched_at=now,
             total=amount,
+            method=original.method,
+            kind=TRANSACTION_REFUND,
+            invoice_external_id=original.invoice_external_id,
+            customer_external_id=original.customer_external_id,
+            parent_external_id=external_id,
+            success=True,
+            created_at=now,
         )
         self.transactions[record.external_id] = record
         return record
@@ -243,7 +255,10 @@ class FakeProvider(PaymentProvider):
     def void_transaction(self, external_id: str) -> TransactionRecord:
         now = self._call("void_transaction", external_id)
         record = replace(
-            self._get(self.transactions, external_id), raw_status="FAKE-VOIDED", fetched_at=now
+            self._get(self.transactions, external_id),
+            raw_status="FAKE-VOIDED",
+            fetched_at=now,
+            is_voided=True,
         )
         self.transactions[external_id] = record
         return record

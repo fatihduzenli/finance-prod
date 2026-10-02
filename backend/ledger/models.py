@@ -494,6 +494,9 @@ class RentCharge(GuardedModel):
     status = _choice(RentChargeStatus)
     legacy = models.BooleanField(default=False)
     needs_review = models.BooleanField(default=False)
+    #: Why the payment provider's invoice was not updated after a manual payment
+    #: (PLAN-009 D2, D3): a fixed text written by the rent run, or empty.
+    review_message = free_text(default="")
     local_ref = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

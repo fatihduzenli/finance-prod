@@ -19,7 +19,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 
 from payments.errors import ValidationFailed
-from payments.provider import Amounts, CustomerInput, DateRange, require_money
+from payments.provider import Amounts, CustomerInput, DateRange, OfflinePayment, require_money
 
 IDEMPOTENCY_ID_MAX_LENGTH = 255
 EXTERNAL_ID_MAX_LENGTH = 255
@@ -38,6 +38,11 @@ PHONE_MIN_DIGITS = 10
 PHONE_MAX_DIGITS = 15
 _PHONE_DIGITS = re.compile(rf"[0-9]{{{PHONE_MIN_DIGITS},{PHONE_MAX_DIGITS}}}")
 _PHONE_SEPARATORS = re.compile(r"[ .()-]")
+#: mark-an-invoice-paid-in-cash-or-check: ``check_number`` max 25, ``payment_note`` max 255
+#: (PLAN-009 header). A check number is further limited to letters, digits and hyphens.
+CHECK_NUMBER_MAX_LENGTH = 25
+PAYMENT_NOTE_MAX_LENGTH = 255
+_CHECK_NUMBER = re.compile(rf"[A-Za-z0-9-]{{1,{CHECK_NUMBER_MAX_LENGTH}}}")
 
 
 def external_id(name: str, value: str) -> str:
@@ -197,3 +202,17 @@ def customer(value: CustomerInput) -> CustomerInput:
     _text_cap("operator_email", value.operator_email)
     _text_cap("reference", value.reference)
     return dataclasses.replace(value, phone=phone("phone", value.phone))
+
+
+def offline_payment(value: OfflinePayment) -> OfflinePayment:
+    """The amount (checked locally, never sent), the check number and the note caps."""
+    positive_amount("amount", value.amount)
+    if value.check_number and not _CHECK_NUMBER.fullmatch(value.check_number):
+        raise ValidationFailed(
+            f"check_number must be 1 to {CHECK_NUMBER_MAX_LENGTH} letters, digits or hyphens"
+        )
+    if len(value.note) > PAYMENT_NOTE_MAX_LENGTH or _CONTROL_CHARACTERS.search(value.note):
+        raise ValidationFailed(
+            f"payment_note must be at most {PAYMENT_NOTE_MAX_LENGTH} characters on one line"
+        )
+    return value

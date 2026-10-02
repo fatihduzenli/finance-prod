@@ -25,7 +25,8 @@ from payments.errors import ValidationFailed
 #: A provider object reduced to scalar fields (docs/CLAUDE.md Rule 1).
 Summary = Mapping[str, str | int | bool | None | Decimal | Mapping[str, str | None]]
 
-#: Offline payment methods (TODO-VERIFY-016 decides whether more exist).
+#: Offline payment methods this app may use. The provider also offers a gift-card method,
+#: which is never used (PLAN-009 header).
 OfflineMethod = Literal["cash", "check"]
 
 #: ``PaymentMethodRecord.method`` of a bank account, the only kind this app may use.
@@ -135,6 +136,9 @@ class InvoiceQuery:
 
 @dataclass(frozen=True, slots=True)
 class OfflinePayment:
+    """Marks a whole invoice paid outside the provider (PLAN-009 D1). ``amount`` is checked
+    locally and never sent: a partial amount cannot be expressed yet (TODO-VERIFY-028)."""
+
     method: OfflineMethod
     amount: Decimal
     check_number: str = ""

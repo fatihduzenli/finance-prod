@@ -1,0 +1,87 @@
+{% extends "finance/base.html" %}
+{% block title %}Payment{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:payments:list' %}">&larr; Payments</a>{% if charge %} · <a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Charge</a>{% endif %}</p>
+  <h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of ${{ payment.amount }}</h1>
+  {% if can_refund or can_void %}
+    <p class="actions">
+      {% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}
+      {% if can_void %}<a class="btn" href="{% url 'ledger:payments:void' pk=payment.pk %}" id="void-payment">Void</a>{% endif %}
+    </p>
+  {% endif %}
+
+  {% include "ledger/payments/summary.html" %}
+  <dl>
+    <dt>Initiated</dt><dd>{{ payment.initiated_on|date:"Y-m-d"|default:"—" }}</dd>
+    <dt>Paid on</dt><dd>{{ payment.settled_on|date:"Y-m-d"|default:"—" }}</dd>
+    {% if payment.return_code %}<dt>Return</dt><dd>{{ payment.return_code }} {{ payment.return_reason }}</dd>{% endif %}
+    <dt>Reference</dt><dd>{{ payment.reference|default:"—" }}</dd>
+    <dt>Note</dt><dd style="white-space:pre-wrap;">{{ payment.note|default:"—" }}</dd>
+    <dt>Recorded by</dt><dd>{{ payment.recorded_by|default:"—" }}</dd>
+  </dl>
+
+  {% if payment.parent_payment %}
+    <h2>Refunds payment</h2>
+    <p id="parent-payment"><a href="{% url 'ledger:payments:detail' pk=payment.parent_payment.pk %}">{{ payment.parent_payment.get_method_display }} payment of ${{ payment.parent_payment.amount }}</a>, {{ payment.parent_payment.get_status_display }}{% if parent_transaction %}, transaction {{ parent_transaction }}{% endif %}</p>
+  {% endif %}
+
+  {% if not payment.is_refund %}
+    <h2>Refunds</h2>
+    <table id="refunds">
+      <thead><tr><th>Initiated</th><th>Paid on</th><th>Amount</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for refund in refunds %}
+          <tr>
+            <td><a href="{% url 'ledger:payments:detail' pk=refund.pk %}">{{ refund.initiated_on|date:"Y-m-d"|default:"—" }}</a></td>
+            <td>{{ refund.settled_on|date:"Y-m-d"|default:"—" }}</td>
+            <td>&minus;${{ refund.amount }}</td>
+            <td>{{ refund.get_status_display }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="muted">No refunds.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  <h2>Invoice</h2>
+  {% if invoice %}
+    <dl id="payment-invoice">
+      <dt>Number</dt><dd>{{ invoice.invoice_number }}</dd>
+      <dt>Total</dt><dd>${{ invoice.total }}</dd>
+      <dt>Provider status</dt><dd id="invoice-provider-status">{{ invoice.provider_status|default:"—" }}</dd>
+      <dt>Provider amount paid</dt><dd>{% if invoice.amount_paid is not None %}${{ invoice.amount_paid }}{% else %}—{% endif %}</dd>
+    </dl>
+    <p class="muted">Provider status is copied from the payment provider as it is.</p>
+  {% else %}
+    <p class="muted">No invoice.</p>
+  {% endif %}
+
+  <h2>Charge</h2>
+  {% if charge %}
+    <dl id="payment-charge">
+      <dt>Charge</dt><dd><a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Rent {{ charge.period_month|date:"Y-m" }}, debit {{ charge.seq }}</a></dd>
+      <dt>Amount due</dt><dd id="charge-due">${{ charge.amount_due }}</dd>
+      <dt>Paid</dt><dd id="charge-paid">${{ charge.amount_paid }}</dd>
+      <dt>Balance</dt><dd id="charge-balance">${{ charge.balance }}</dd>
+      <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
+    </dl>
+    {% if charge_review %}<p><strong>{{ charge_review }}</strong></p>{% endif %}
+  {% elif payment.insurance_charge %}
+    <p>Insurance {{ payment.policy_year }}: ${{ payment.insurance_charge.amount }}</p>
+  {% else %}
+    <p class="muted">No charge linked.</p>
+  {% endif %}
+
+  <h2>Audit</h2>
+  <table id="payment-audit">
+    <thead><tr><th>When</th><th>Action</th><th>By</th></tr></thead>
+    <tbody>
+      {% for entry in audit_rows %}
+        <tr><td>{{ entry.at|date:"Y-m-d H:i" }}</td><td>{{ entry.action }}</td><td>{{ entry.actor|default:"payment provider or system" }}</td></tr>
+      {% empty %}
+        <tr><td colspan="3" class="muted">No audit rows.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

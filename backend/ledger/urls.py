@@ -1,5 +1,5 @@
 """Ledger routes (PLAN-006-operators.md §4.1, PLAN-007-leases-and-rent-run.md §4.1,
-PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8).
+PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4, D6 to D8).
 
 Namespace ``ledger``.
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from django.urls import include, path
 
-from ledger.views import charges, leases, operators, returns, run, stores, webhooks
+from ledger.views import charges, leases, operators, payments, returns, run, stores, webhooks
 
 app_name = "ledger"
 
@@ -70,8 +70,20 @@ charge_patterns = (
     [
         path("<str:pk>/", charges.charge_detail, name="detail"),
         path("<str:pk>/payments/new/", charges.charge_record_payment, name="record_payment"),
+        path("<str:pk>/retry-mark/", charges.charge_retry_mark, name="retry_mark"),
     ],
     "charges",
+)
+
+payment_patterns = (
+    [
+        path("", payments.payment_list, name="list"),
+        path("export.csv", payments.payment_export, name="export"),
+        path("<str:pk>/", payments.payment_detail, name="detail"),
+        path("<str:pk>/refund/", payments.payment_refund, name="refund"),
+        path("<str:pk>/void/", payments.payment_void, name="void"),
+    ],
+    "payments",
 )
 
 webhook_patterns = (
@@ -97,6 +109,7 @@ urlpatterns = [
     path("leases/", include(lease_patterns)),
     path("run/", include(run_patterns)),
     path("charges/", include(charge_patterns)),
+    path("payments/", include(payment_patterns)),
     path("webhooks/", include(webhook_patterns)),
     path("returns/", include(return_patterns)),
 ]

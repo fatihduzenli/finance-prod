@@ -15,7 +15,10 @@ States, from the re-fetched transaction only:
   ``partial``) and flagged for review, and the payment enters the returns queue;
 - the transaction voided: ``voided``;
 - a refund (a transaction of type refund naming its parent) is a payment of its own,
-  ``is_refund``, linked to the parent's payment, charge and invoice.
+  ``is_refund``, linked to the parent's payment, charge and invoice. A refund an admin
+  made here (PLAN-009 D6, :func:`record_refund`) whose provider ID was not known at the
+  time is recorded without one; the first event of a refund of that parent and amount
+  gives that row its ID instead of making a second row.
 
 ``returned`` and ``voided`` are final. Every write is keyed on provider IDs and every
 recomputation is pure, so a repeated or replayed event changes nothing.
@@ -23,10 +26,12 @@ recomputation is pure, so a repeated or replayed event changes nothing.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 import payments
@@ -40,7 +45,7 @@ from ledger.models import (
     RentCharge,
 )
 from ledger.services import rent_run
-from payments.models import WebhookOutcome
+from payments.models import ExternalRef, WebhookOutcome
 from payments.provider import (
     METHOD_BANK,
     TRANSACTION_REFUND,
@@ -119,6 +124,8 @@ def apply(record: TransactionRecord, *, settle: bool, parent_lookup: bool = True
         if operator is None or operator.pk != invoice.operator_id:
             return OTHER_OPERATOR
     payment = local_payment(record.external_id)
+    if payment is None and parent is not None:
+        payment = _unlinked_refund(parent, record)
     if payment is None:
         if record.success is False and not record.returned:
             return UNSUCCESSFUL
@@ -142,6 +149,88 @@ def _parent(record: TransactionRecord, lookup: bool) -> Payment | None:
             apply(parent_record, settle=False, parent_lookup=False)
             parent = local_payment(record.parent_external_id)
     return parent
+
+
+def _unlinked_refund(parent: Payment, record: TransactionRecord) -> Payment | None:
+    """A refund row of ``parent`` with this amount and no provider ID yet, given the ID.
+
+    Such a row is written by :func:`record_refund` when the provider's answer to the
+    refund did not name the new transaction; the oldest one is taken.
+    """
+    if record.total is None:
+        return None
+    payment = (
+        Payment.objects.select_for_update()
+        .filter(parent_payment=parent, is_refund=True, amount=record.total)
+        .exclude(status=PaymentStatus.VOIDED)
+        .exclude(
+            Exists(
+                ExternalRef.objects.filter(
+                    entity_type=ENTITY_PAYMENT,
+                    entity_id=OuterRef("pk"),
+                    external_kind=KIND_TRANSACTION,
+                    superseded_at__isnull=True,
+                )
+            )
+        )
+        .order_by("created_at", "pk")
+        .first()
+    )
+    if payment is None:
+        return None
+    add_ref(ENTITY_PAYMENT, payment.pk, KIND_TRANSACTION, record.external_id)
+    audit(
+        "payment.provider_id_recorded",
+        ENTITY_PAYMENT,
+        payment.pk,
+        None,
+        {**_state(payment), "provider_transaction": mask_identifier(record.external_id)},
+    )
+    return payment
+
+
+def record_refund(parent: Payment, amount: Decimal, record: TransactionRecord | None) -> Payment:
+    """The refund row of a refund an admin made of ``parent`` (PLAN-009 D6).
+
+    ``record`` is the re-fetched refund transaction when the provider named it: the row
+    is made from it as an event would make it (or is the row an event already made),
+    then moved to the state it shows. Without it, the row is made from the request,
+    ``pending`` and with no provider ID; the refund's first event gives it its ID
+    (:func:`_unlinked_refund`). The caller holds the row locks.
+    """
+    if record is not None:
+        payment = local_payment(record.external_id)
+        if payment is None:
+            total = record.total
+            usable = total is not None and total > 0 and usable_total(total)
+            payment = _create(record, total if usable and total else amount, None, parent)
+        _transition(payment, record, settle=True)
+        return payment
+    payment = Payment.objects.create(
+        invoice=parent.invoice,
+        method=PaymentMethod.ACH,
+        amount=amount,
+        status=PaymentStatus.PENDING,
+        is_refund=True,
+        parent_payment=parent,
+        initiated_on=timezone.localdate(),
+        kind=parent.kind,
+        policy_year=parent.policy_year,
+        rent_charge_id=parent.rent_charge_id,
+        insurance_charge_id=parent.insurance_charge_id,
+        charge_adjustment_id=parent.charge_adjustment_id,
+    )
+    audit("payment.created_from_request", ENTITY_PAYMENT, payment.pk, None, _state(payment))
+    _refresh_charge(payment, returned=False)
+    return payment
+
+
+def record_void(payment: Payment, record: TransactionRecord) -> None:
+    """The void an admin made of ``payment`` (PLAN-009 D6): the provider accepted it, so
+    the payment is ``voided`` even when ``record`` (the re-fetch, or the provider's
+    answer when the re-fetch failed) does not show it yet. No new row: a void is not a
+    new transaction. The caller holds the row locks."""
+    _transition(payment, replace(record, is_voided=True), settle=False)
 
 
 def _kind(invoice: Invoice | None) -> dict[str, Any]:

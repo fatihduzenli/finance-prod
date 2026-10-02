@@ -234,13 +234,13 @@ def invoice_params(query: InvoiceQuery) -> Params:
 
 
 def offline_payment_params(payment: OfflinePayment) -> Params:
-    """Page mark-an-invoice-paid-in-cash-or-check (query parameters)."""
-    # TODO-VERIFY-028: type and meaning of `apply_balance` (amount to apply is assumed,
-    # as a two-decimal string).
-    params: Params = {
-        "apply_balance": money_string(payment.amount),
-        "email_receipt": payment.email_receipt,
-    }
+    """Page mark-an-invoice-paid-in-cash-or-check (query parameters; there is no body).
+
+    ``apply_balance`` is never sent (PLAN-009 §2, TODO-VERIFY-028): the page types it as
+    an integer "for a partial payment" without a unit, so only whole invoices are marked
+    and the amount is checked locally only.
+    """
+    params: Params = {"email_receipt": payment.email_receipt}
     if payment.check_number:
         params["check_number"] = payment.check_number
     if payment.note:

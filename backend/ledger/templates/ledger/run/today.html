@@ -30,7 +30,7 @@
 
   <h2>Due today</h2>
   <table id="due-today">
-    <thead><tr><th>Store</th><th>Operator</th><th>Debit</th><th>Channel</th><th>Amount</th><th>This month</th><th>Last month</th></tr></thead>
+    <thead><tr><th>Store</th><th>Operator</th><th>Debit</th><th>Channel</th><th>Amount</th><th>Carried balance</th><th>This month</th><th>Last month</th></tr></thead>
     <tbody>
       {% for item in run.due %}
         <tr>
@@ -39,14 +39,16 @@
           <td>{{ item.seq }} (day {{ item.debit_day }})</td>
           <td>{{ item.lease.get_payment_channel_display }}</td>
           <td>${{ item.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}{% if item.over_limit %} <strong class="over-limit">exceeds confirmed limit</strong>{% endif %}</td>
+          <td class="carried-balance">{% if item.carried_balance %}${{ item.carried_balance }}{% else %}<span class="muted">$0.00</span>{% endif %}</td>
           <td>{% if item.charge %}<a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{{ item.charge.get_status_display }}</a>{% if item.charge.needs_review %} <span class="badge">Needs review</span>{% endif %}{% else %}<span class="muted">Not created</span>{% endif %}</td>
           <td>{% if item.last_month %}<a href="{% url 'ledger:charges:detail' pk=item.last_month.pk %}">{{ item.last_month.get_status_display }}</a>, balance ${{ item.last_month.balance }}{% else %}<span class="muted">No charge</span>{% endif %}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="7" class="muted">No debit is due today.</td></tr>
+        <tr><td colspan="8" class="muted">No debit is due today.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  <p class="muted" id="carried-balance-note">"Carried balance" is what earlier charges of the lease still owe. It is not added to today's amount.</p>
   <p class="muted" id="large-debit-note">"Large debit" marks an amount above ${{ threshold }}. That amount is a placeholder until the payment provider states its per-transaction limit (Q25).</p>
 
   <h2>Skipped today</h2>

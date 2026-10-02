@@ -41,7 +41,12 @@ TODAY = date(2026, 10, 15)
 RUN = "/run/"
 CREATE = "/run/create-charges/"
 MATCH = "/run/match/"
-POST_ROUTES = ("ledger:run:create_charges", "ledger:run:match", "ledger:charges:record_payment")
+POST_ROUTES = (
+    "ledger:run:create_charges",
+    "ledger:run:match",
+    "ledger:charges:record_payment",
+    "ledger:charges:retry_mark",
+)
 READ_ROUTES = ("ledger:run:today", "ledger:charges:detail")
 
 

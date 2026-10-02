@@ -218,12 +218,17 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:leases:create`, `:edit`, `:enrol`, `:pause`, `:resume` | POST | admin | GET of the forms and the enrolment page (which reads Stax) is admin only too |
 | `ledger:run:today`, `ledger:charges:detail` | none | — | GET for any verified user with a role; no Stax call |
 | `ledger:run:create_charges`, `ledger:run:match` | POST | billing | always for the server's today; matching is refused while the breaker is open or the failure budget is exhausted |
-| `ledger:charges:record_payment` | POST | billing | Zelle, wire or other; GET of the form is billing only too; no Stax call |
+| `ledger:charges:record_payment` | POST | billing | Zelle, wire or other; GET of the form is billing only too; a full payment on a charge with a Stax invoice marks that invoice paid (as cash, with a memo) after re-fetching it; a partial payment makes no Stax call |
 | `ledger:webhooks:list`, `ledger:webhooks:detail` | none | — | GET for any verified user with a role; provider IDs masked; the stored body is the redacted copy |
 | `ledger:webhooks:replay` | POST | billing | re-runs the handler; handlers are idempotent |
 | `ledger:returns:list` | none | — | GET for any verified user with a role: returned ACH payments not yet resolved |
 | `ledger:returns:resolve` | POST | billing | a note is required; records who and why; changes no charge; there is no re-debit route |
 | `admin:payments_webhookevent_*` | POST | admin | registered read-only: no add, change or delete |
+| `ledger:payments:list`, `ledger:payments:export` | none | — | GET for any verified user with a role: the payments ledger with filters and totals, and its CSV export (same filter); provider IDs masked |
+| `ledger:payments:detail` | none | — | GET for any verified user with a role: the payment, its parent and refunds, invoice, charge and audit rows; refund and void buttons only for admin |
+| `ledger:charges:retry_mark` | POST | billing | retries marking the Stax invoice paid after a failure; refused for 60 seconds after the last attempt |
+| `ledger:payments:refund` | POST | admin | GET of the confirmation page is admin only too; settled ACH payments only, up to the remaining refundable amount; exact-value confirmation; calls Stax, re-fetches, audits |
+| `ledger:payments:void` | POST | admin | GET of the confirmation page is admin only too; pending or settled ACH payments without refunds, whole amount; the payment becomes `voided` (no new row) |
 | `admin:index`, `admin:app_list`, `admin:login`, `admin:jsi18n`, `admin:autocomplete`, `admin:view_on_site`, `admin:password_change_done` | none | — | GET for any verified user; Django admin still checks `is_staff` and model permissions |
 | `two_factor:profile`, `two_factor:disable` | none | — | GET only; disabling one's own second factor is refused |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |
@@ -231,8 +236,8 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 The `admin` group also holds Django's model permissions for users, groups, OTP
 devices and sessions, and `view` on stores, operators and leases (read-only in the
 admin). `billing` and `viewer` hold none yet: they get permissions
-with the invoice and customer models (Steps 4+), and refund, void and settings
-routes will require `admin`.
+with the invoice and customer models (Steps 4+), and settings routes will require
+`admin`.
 
 ## Status
 

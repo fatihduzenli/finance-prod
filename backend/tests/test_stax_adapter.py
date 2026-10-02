@@ -342,7 +342,6 @@ def test_mark_paid_uses_the_method_path_and_query() -> None:
     [request] = rig.recorder.requests
     assert (request.method, request.url.path) == ("POST", "/invoice/inv-1/pay/check")
     assert dict(request.url.params) == {
-        "apply_balance": "10.00",
         "email_receipt": "false",
         "check_number": "1001",
         "payment_note": "lobby",

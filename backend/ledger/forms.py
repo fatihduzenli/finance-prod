@@ -272,6 +272,7 @@ class StoreCreateForm(StoreForm):
 
 #: Longest note accepted on a manual payment.
 PAYMENT_NOTE_MAX_LENGTH = 2000
+PAYMENT_REFERENCE_MAX_LENGTH = 100
 MANUAL_METHOD_CHOICES = (
     (PaymentMethod.ZELLE.value, PaymentMethod.ZELLE.label),
     (PaymentMethod.WIRE.value, PaymentMethod.WIRE.label),
@@ -289,6 +290,15 @@ class ManualPaymentForm(forms.Form):
         min_value=Decimal("0.01"), max_value=RENT_MAX, max_digits=12, decimal_places=2
     )
     paid_on = forms.DateField(label="Received on", widget=forms.DateInput(attrs={"type": "date"}))
+    reference = forms.CharField(
+        required=False,
+        max_length=PAYMENT_REFERENCE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text=(
+            "Optional: the bank or Zelle reference. Letters, digits and hyphens of it (up to "
+            "25) are sent with the invoice when it is marked paid."
+        ),
+    )
     note = forms.CharField(
         widget=forms.Textarea(attrs={"rows": 3}),
         max_length=PAYMENT_NOTE_MAX_LENGTH,
@@ -308,3 +318,30 @@ class ResolveReturnForm(forms.Form):
         help_text="Required: how the return was resolved.",
         error_messages={"required": "A note is required: say how the return was resolved."},
     )
+
+
+# --- Refunds and voids (PLAN-009 D6, D7) ---------------------------------------------------
+
+
+class RefundForm(forms.Form):
+    """An admin's refund of an ACH payment. The service re-checks every rule (status,
+    refundable amount, confirmation) under the payment's row lock; the form checks
+    shape only."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput)
+    amount = forms.DecimalField(
+        label="Refund amount",
+        min_value=Decimal("0.01"),
+        max_value=RENT_MAX,
+        max_digits=12,
+        decimal_places=2,
+    )
+    #: The exact-value confirmation checkbox of PLAN-007c; the service refuses without it.
+    confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
+
+
+class VoidForm(forms.Form):
+    """An admin's void of a whole ACH payment; the service re-checks every rule."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput)
+    confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)

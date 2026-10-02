@@ -3,7 +3,7 @@
 {% block content %}
   <p><a href="{% url 'ledger:charges:detail' pk=charge.pk %}">&larr; Rent {{ charge.period_month|date:"Y-m" }}, {{ charge.lease.store.external_label }}</a></p>
   <h1>Record a payment</h1>
-  <p>Balance due: <strong id="balance">${{ charge.balance }}</strong>. A payment received by Zelle, wire or another way outside the payment provider. Nothing is sent to the payment provider. The amount may not be more than the balance.</p>
+  <p>Balance due: <strong id="balance">${{ charge.balance }}</strong>. A payment received by Zelle, wire or another way outside the payment provider. The amount may not be more than the balance. When the charge has an invoice at the payment provider and this payment covers the whole charge, that invoice is then marked paid there; a partial payment is recorded here only.</p>
   <form method="post" id="payment-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
