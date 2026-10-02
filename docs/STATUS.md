@@ -380,3 +380,10 @@ the login page myself." The condition for starting Prompt 4 is met.
   path with no token → 404. The log shows the refusal lines with `[token]` in place of the
   path segment and no token value. Nothing stored (no row can exist before registration).
 - Waiting for the owner's "register" before `register_webhooks` runs in the container.
+
+## Update, 2026-10-02, webhooks registered on staging
+
+- Owner typed "register". `register_webhooks` ran inside revision `finance-staging-web--0000017`:
+  `GET /webhook` then fifteen `POST /webhook`, all 200, paced by the limiter. Registrations: 15,
+  created: 15; IDs stored in `external_refs` (`webhook_registration`). Event list as in
+  `docs/RUNBOOK.md` §2. The owner's four click paths are next.
