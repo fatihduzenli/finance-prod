@@ -846,3 +846,99 @@ def test_the_edit_of_a_linked_operator_with_a_bad_phone_is_refused(
     operator.refresh_from_db()
     assert operator.city == "Testville"
     assert len(fake.calls) == calls
+
+
+# --- PLAN-006c: the edit of a linked operator updates the provider customer ------------------
+
+
+def linked_through_the_form(billing: Client, fake: FakeProvider) -> Operator:
+    billing.post(NEW, form_data())
+    operator = Operator.objects.get()
+    assert operator.sync_status == SyncStatus.LINKED
+    fake.calls.clear()
+    return operator
+
+
+def test_006c_a_phone_edit_updates_the_customer_and_the_page_says_when(
+    billing: Client, fake: FakeProvider
+) -> None:
+    operator = linked_through_the_form(billing, fake)
+    page = billing.get(detail(operator)).content.decode()
+    assert "Provider customer updated" not in page
+
+    response = billing.post(
+        f"{detail(operator)}edit/", form_data(phone="(415) 555-0132"), follow=True
+    )
+
+    page = response.content.decode()
+    assert response.redirect_chain[-1][0] == detail(operator)
+    assert call_names(fake) == ["update_customer"]
+    [(_, (_, sent))] = fake.calls
+    assert sent.phone == "4155550132"  # type: ignore[attr-defined]
+    assert "Updated the customer at the payment provider." in page
+    assert 'id="provider-updated"' in page and "Provider customer updated " in page
+    operator.refresh_from_db()
+    assert operator.sync_status == SyncStatus.LINKED
+
+
+def test_006c_a_rejected_update_shows_the_failure_and_the_retry_updates(
+    billing: Client, fake: FakeProvider
+) -> None:
+    operator = linked_through_the_form(billing, fake)
+    fake.fail_next(
+        "update_customer", ProviderRejected(422, "CANARY-provider-text", error_fields=("phone",))
+    )
+
+    response = billing.post(
+        f"{detail(operator)}edit/", form_data(phone="(415) 555-0132"), follow=True
+    )
+
+    page = response.content.decode()
+    assert (
+        "Saved here. The payment provider did not accept the update: ProviderRejected "
+        "(fields phone). Retry when ready."
+    ) in page
+    assert 'id="sync-failure"' in page and "Fields the provider rejected: phone" in page
+    assert "Retry available in " in page and "Retry sync" not in page
+    assert "Provider customer updated" not in page
+    assert "CANARY" not in page
+    operator.refresh_from_db()
+    assert (operator.phone, operator.sync_status) == ("4155550132", SyncStatus.FAILED)
+
+    backdate_attempt(operator)
+    assert "Retry sync" in billing.get(detail(operator)).content.decode()
+    retried = billing.post(f"{detail(operator)}retry-sync/", follow=True)
+
+    page = retried.content.decode()
+    assert call_names(fake) == ["update_customer", "update_customer"]
+    assert "Updated the customer at the payment provider." in page
+    assert "Provider customer updated " in page and "Retry sync" not in page
+    operator.refresh_from_db()
+    assert operator.sync_status == SyncStatus.LINKED
+
+
+def test_006c_a_notes_edit_makes_no_call_and_keeps_the_status(
+    billing: Client, fake: FakeProvider
+) -> None:
+    operator = linked_through_the_form(billing, fake)
+
+    response = billing.post(f"{detail(operator)}edit/", form_data(notes="Pays early"), follow=True)
+
+    assert fake.calls == []
+    assert "Updated the customer" not in response.content.decode()
+    operator.refresh_from_db()
+    assert (operator.notes, operator.sync_status) == ("Pays early", SyncStatus.LINKED)
+
+
+def test_006c_removing_the_email_of_a_linked_operator_updates_and_stays_linked(
+    billing: Client, fake: FakeProvider
+) -> None:
+    operator = linked_through_the_form(billing, fake)
+
+    response = billing.post(f"{detail(operator)}edit/", form_data(email=""), follow=True)
+
+    [(_, (_, sent))] = fake.calls
+    assert sent.operator_email == ""  # type: ignore[attr-defined]
+    assert "Updated the customer at the payment provider." in response.content.decode()
+    operator.refresh_from_db()
+    assert (operator.email, operator.sync_status) == (None, SyncStatus.LINKED)

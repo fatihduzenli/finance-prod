@@ -1,4 +1,5 @@
-"""The operator sync service (docs/qa/PLAN-006-operators.md §6 rows 1, 2, 3, 5 and 8).
+"""The operator sync service (docs/qa/PLAN-006-operators.md §6 rows 1, 2, 3, 5 and 8;
+PLAN-006c §2 rows 1 to 6).
 
 Every provider here is a :class:`~payments.fake.FakeProvider` or a subclass defined in
 this file; nothing opens a socket.
@@ -39,7 +40,7 @@ from payments.errors import (
 from payments.fake import FakeProvider
 from payments.models import ExternalRef
 from payments.operator_sync import Action
-from payments.provider import CustomerQuery, CustomerRecord
+from payments.provider import CustomerQuery, CustomerRecord, mask_identifier
 from payments.stax.adapter import StaxProvider
 from tests.auth_helpers import make_user
 from tests.stax_helpers import make_rig, sequence
@@ -943,3 +944,397 @@ def test_migration_0006_normalises_good_phones_and_flags_bad_ones() -> None:
     assert Operator.objects.count() == len(rows)
     [operation] = migration.Migration.operations
     assert operation.reversible
+
+
+# --- PLAN-006c: an edit of a linked operator updates the provider customer ------------------
+
+
+def linked(actor: User, fake: FakeProvider, **overrides: Any) -> Operator:
+    """An operator created and linked through the service; the fake's call log cleared."""
+    operator = create(actor, **overrides)
+    assert operator_sync.sync_operator(operator.pk, provider=fake, actor=actor).action is (
+        Action.CREATED
+    )
+    operator.refresh_from_db()
+    assert operator.sync_status == SyncStatus.LINKED
+    fake.calls.clear()
+    return operator
+
+
+def edit(
+    actor: User, fake: FakeProvider, operator: Operator, **changes: Any
+) -> operator_sync.SyncOutcome:
+    """What the edit view does: save the fields, then sync the saved row."""
+    operator_sync.update_operator(operator.pk, fields(**changes), actor=actor)
+    return operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+
+
+def update_calls(fake: FakeProvider) -> list[tuple[str, Any]]:
+    """``(customer_external_id, CustomerInput)`` of each ``update_customer`` call."""
+    return [(str(args[0]), args[1]) for name, args in fake.calls if name == "update_customer"]
+
+
+def audit_text(row: AuditLog) -> str:
+    return f"{row.before} {row.after}"
+
+
+@pytest.mark.django_db
+def test_006c_row1_a_phone_edit_updates_the_customer_with_the_digits(
+    actor: User, fake: FakeProvider
+) -> None:
+    operator = linked(actor, fake)
+    [ref] = customer_refs(operator)
+
+    outcome = edit(actor, fake, operator, phone="+1 (555) 010-0002")
+
+    operator.refresh_from_db()
+    assert outcome.action is Action.UPDATED
+    assert outcome.message == "Updated the customer at the payment provider."
+    assert call_names(fake) == ["update_customer"]
+    [(customer_id, sent)] = update_calls(fake)
+    assert customer_id == ref.external_id
+    assert sent == operator_sync.customer_input(operator)
+    assert sent.phone == "15550100002"
+    assert (sent.first_name, sent.company_name, sent.operator_email) == (
+        "Northwind Stores",
+        "Northwind Stores LLC",
+        EMAIL,
+    )
+    assert (operator.sync_status, operator.sync_failure) == (SyncStatus.LINKED, "")
+    assert operator.sync_attempted_at is not None
+    audit = AuditLog.objects.get(action="operator.sync_updated")
+    assert audit.actor_id == actor.pk
+    assert audit.after is not None
+    assert audit.after["fields"] == ["phone"]
+    assert audit.after["email"] == "…@example.com"
+    assert audit.after["customer"] == mask_identifier(ref.external_id)
+    assert audit.after["sync_status"] == SyncStatus.LINKED
+    assert EMAIL not in audit_text(audit)
+    assert "0100002" not in audit_text(audit)
+    assert len(customer_refs(operator)) == 1
+
+
+@pytest.mark.django_db
+def test_006c_row1_a_name_edit_names_the_field_and_sends_the_d5_mapping(
+    actor: User, fake: FakeProvider
+) -> None:
+    operator = linked(actor, fake, legal_name="")
+
+    assert edit(actor, fake, operator, display_name="Southwind", legal_name="").action is (
+        Action.UPDATED
+    )
+
+    [(_, sent)] = update_calls(fake)
+    assert (sent.first_name, sent.company_name) == ("Southwind", "Southwind")
+    audit = AuditLog.objects.get(action="operator.sync_updated")
+    assert audit.after is not None and audit.after["fields"] == ["display_name"]
+
+
+@pytest.mark.django_db
+def test_006c_row2_a_rejected_update_keeps_the_edit_and_the_retry_updates_once(
+    actor: User, fake: FakeProvider
+) -> None:
+    operator = linked(actor, fake)
+    fake.fail_next(
+        "update_customer",
+        ProviderRejected(422, "CANARY provider text", error_fields=("phone", "email")),
+    )
+
+    outcome = edit(actor, fake, operator, phone="4155550132")
+
+    operator.refresh_from_db()
+    assert outcome.action is Action.UPDATE_FAILED
+    assert outcome.message == (
+        "Saved here. The payment provider did not accept the update: ProviderRejected "
+        "(fields phone, email). Retry when ready."
+    )
+    assert operator.phone == "4155550132"
+    assert (operator.sync_status, operator.sync_failure, operator.sync_failure_fields) == (
+        SyncStatus.FAILED,
+        "ProviderRejected",
+        "phone,email",
+    )
+    assert operator.sync_attempted_at is not None
+    failed = AuditLog.objects.get(action="operator.sync_failed")
+    assert failed.after is not None
+    assert failed.after["fields"] == ["phone"]
+    assert failed.after["sync_failure_fields"] == "phone,email"
+    for forbidden in ("CANARY", EMAIL, "4155550132"):
+        assert forbidden not in audit_text(failed)
+        assert forbidden not in outcome.message
+    assert len(customer_refs(operator)) == 1
+
+    # A plain sync and an early retry make no call.
+    assert operator_sync.sync_operator(operator.pk, provider=fake, actor=actor).action is (
+        Action.NO_CALL
+    )
+    early = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+    assert early.action is Action.RETRY_TOO_SOON
+    assert call_names(fake) == ["update_customer"]
+
+    Operator.objects.filter(pk=operator.pk).update(
+        sync_attempted_at=timezone.now() - timedelta(seconds=operator_sync.RETRY_LOCK_SECONDS)
+    )
+    retried = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+
+    operator.refresh_from_db()
+    assert retried.action is Action.UPDATED
+    assert call_names(fake) == ["update_customer", "update_customer"]
+    assert update_calls(fake)[1][1].phone == "4155550132"
+    assert (operator.sync_status, operator.sync_failure, operator.sync_failure_fields) == (
+        SyncStatus.LINKED,
+        "",
+        "",
+    )
+    updated = AuditLog.objects.get(action="operator.sync_updated")
+    assert updated.after is not None and updated.after["fields"] == ["phone"]
+    assert len(customer_refs(operator)) == 1
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("error", "name"),
+    [
+        (ProviderUnavailable(503), "ProviderUnavailable"),
+        (TransportError(), "TransportError"),
+        (CircuitOpen("open"), "CircuitOpen"),
+    ],
+    ids=["unavailable", "transport", "circuit-open"],
+)
+def test_006c_row2_other_failures_name_the_class_and_no_fields(
+    actor: User, fake: FakeProvider, error: ProviderError, name: str
+) -> None:
+    operator = linked(actor, fake)
+    fake.fail_next("update_customer", error)
+
+    outcome = edit(actor, fake, operator, phone="4155550132")
+
+    operator.refresh_from_db()
+    assert outcome.message == (
+        f"Saved here. The payment provider did not accept the update: {name}. Retry when ready."
+    )
+    assert (operator.phone, operator.sync_status, operator.sync_failure) == (
+        "4155550132",
+        SyncStatus.FAILED,
+        name,
+    )
+    assert operator.sync_failure_fields == ""
+
+
+@pytest.mark.django_db
+def test_006c_row2_an_edit_of_a_failed_linked_operator_updates_again(
+    actor: User, fake: FakeProvider
+) -> None:
+    operator = linked(actor, fake)
+    fake.fail_next("update_customer", ProviderRejected(422, error_fields=("phone",)))
+    edit(actor, fake, operator, phone="4155550132")
+
+    # The fix of the rejected field is sent with the save, as an edit of a linked row is.
+    outcome = edit(actor, fake, operator, phone="4155550133")
+
+    operator.refresh_from_db()
+    assert outcome.action is Action.UPDATED
+    assert call_names(fake) == ["update_customer", "update_customer"]
+    assert operator.sync_status == SyncStatus.LINKED
+    audit = AuditLog.objects.get(action="operator.sync_updated")
+    assert audit.after is not None and audit.after["fields"] == ["phone"]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"notes": "Pays early"},
+        {"address_line1": "2 Demo Avenue", "city": "Elsewhere", "postal_code": "75002"},
+        {"company": "Northwind Holdings"},
+        {"phone": "15550100001"},  # the same digits as "+1 555 010 0001"
+        {"email": " OPS@Example.com "},
+    ],
+    ids=["notes", "address", "company", "same-phone-digits", "same-email"],
+)
+def test_006c_row3_an_edit_outside_the_payload_makes_no_call(
+    actor: User, fake: FakeProvider, changes: dict[str, Any]
+) -> None:
+    operator = linked(actor, fake)
+
+    outcome = edit(actor, fake, operator, **changes)
+
+    operator.refresh_from_db()
+    assert outcome.action is Action.NO_CALL
+    assert fake.calls == []
+    assert operator.sync_status == SyncStatus.LINKED
+    assert not AuditLog.objects.filter(action="operator.sync_updated").exists()
+
+
+@pytest.mark.django_db
+def test_006c_row3_a_non_payload_edit_keeps_a_failed_status(
+    actor: User, fake: FakeProvider
+) -> None:
+    operator = linked(actor, fake)
+    fake.fail_next("update_customer", ProviderUnavailable(503))
+    edit(actor, fake, operator, phone="4155550132")
+    fake.calls.clear()
+
+    outcome = edit(actor, fake, operator, phone="4155550132", notes="Called them")
+
+    operator.refresh_from_db()
+    assert outcome.action is Action.NO_CALL
+    assert fake.calls == []
+    assert (operator.sync_status, operator.sync_failure) == (
+        SyncStatus.FAILED,
+        "ProviderUnavailable",
+    )
+
+
+@pytest.mark.django_db
+def test_006c_row4_removing_the_email_updates_without_it_and_stays_linked(
+    actor: User, fake: FakeProvider
+) -> None:
+    operator = linked(actor, fake)
+    [ref] = customer_refs(operator)
+
+    outcome = edit(actor, fake, operator, email=None)
+
+    operator.refresh_from_db()
+    assert outcome.action is Action.UPDATED
+    [(customer_id, sent)] = update_calls(fake)
+    assert (customer_id, sent.operator_email) == (ref.external_id, "")
+    assert operator.email is None
+    assert operator.sync_status == SyncStatus.LINKED
+    audit = AuditLog.objects.get(action="operator.sync_updated")
+    assert audit.after is not None
+    assert (audit.after["fields"], audit.after["email"]) == (["email"], "")
+    assert EMAIL not in audit_text(audit)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("changes", "expected_phone", "expected_email"),
+    [
+        ({"phone": "+1 (555) 010-0002"}, "15550100002", EMAIL),
+        ({"email": None}, "15550100001", None),
+    ],
+    ids=["row1-phone", "row4-email-removed"],
+)
+def test_006c_an_edit_reaches_the_real_adapter_as_a_put_with_the_mapped_body(
+    actor: User,
+    fake: FakeProvider,
+    changes: dict[str, Any],
+    expected_phone: str,
+    expected_email: str | None,
+) -> None:
+    """Rules 1 and 4 through the real StaxProvider and a mock transport, not the fake."""
+    operator = linked(actor, fake)
+    [ref] = customer_refs(operator)
+    rig = make_rig(lambda request: httpx.Response(200, json={"id": ref.external_id}))
+
+    operator_sync.update_operator(operator.pk, fields(**changes), actor=actor)
+    with override_settings(STAX_CALLER="worker"):
+        outcome = operator_sync.sync_operator(
+            operator.pk, provider=StaxProvider(rig.transport), actor=actor
+        )
+
+    operator.refresh_from_db()
+    assert outcome.action is Action.UPDATED
+    assert operator.sync_status == SyncStatus.LINKED
+    [request] = rig.recorder.requests
+    assert (request.method, request.url.path) == ("PUT", f"/customer/{ref.external_id}")
+    [body] = _sent_bodies(rig)
+    assert body["phone"] == expected_phone
+    assert body.get("email") == expected_email
+    assert ("email" in body) is (expected_email is not None)
+    assert body["firstname"] == "Northwind Stores"
+    assert "" not in body.values()
+
+
+@pytest.mark.django_db
+def test_006c_row5_an_unlinked_operator_is_never_updated(actor: User, fake: FakeProvider) -> None:
+    awaiting = create(actor, email=None)
+    assert edit(actor, fake, awaiting, email=None, phone="4155550132").action is (Action.NO_CALL)
+
+    failed = create(actor, email="failed@example.com")
+    fake.fail_next("find_customers", ProviderUnavailable(503))
+    operator_sync.sync_operator(failed.pk, provider=fake, actor=actor)
+    assert edit(actor, fake, failed, email="failed@example.com", phone="4155550132").action is (
+        Action.NO_CALL
+    )
+
+    pending = create(actor, email="pending@example.com")
+    assert edit(actor, fake, pending, email="pending@example.com", phone="4155550132").action is (
+        Action.CREATED
+    )
+
+    assert "update_customer" not in call_names(fake)
+    assert call_names(fake) == ["find_customers", "find_customers", "create_customer"]
+    awaiting.refresh_from_db()
+    assert awaiting.sync_status == SyncStatus.AWAITING_LINK
+
+
+@pytest.mark.django_db
+def test_006c_row6_two_edits_in_turn_send_two_updates_and_end_on_the_last(
+    actor: User, fake: FakeProvider
+) -> None:
+    operator = linked(actor, fake)
+    edit(actor, fake, operator, phone="4155550132")
+    edit(actor, fake, operator, phone="4155550133")
+
+    operator.refresh_from_db()
+    assert [sent.phone for _, sent in update_calls(fake)] == ["4155550132", "4155550133"]
+    assert operator.sync_status == SyncStatus.LINKED
+    assert [
+        row.after["fields"] if row.after else None
+        for row in AuditLog.objects.filter(action="operator.sync_updated").order_by("id")
+    ] == [["phone"], ["phone"]]
+
+
+class SlowUpdateProvider(FakeProvider):
+    """Holds each customer update long enough for a second edit to arrive meanwhile."""
+
+    def update_customer(self, external_id: str, customer: Any) -> CustomerRecord:
+        time.sleep(0.3)
+        return super().update_customer(external_id, customer)
+
+
+@requires_postgresql
+@pytest.mark.django_db(transaction=True)
+def test_006c_row6_two_concurrent_edits_never_crash_and_stax_ends_on_the_saved_row(
+    actor: User,
+) -> None:
+    provider = SlowUpdateProvider()
+    operator = linked(actor, provider)
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+    outcomes: list[Action] = []
+
+    def submit(phone: str) -> None:
+        try:
+            barrier.wait()
+            operator_sync.update_operator(operator.pk, fields(phone=phone), actor=actor)
+            outcomes.append(
+                operator_sync.sync_operator(operator.pk, provider=provider, actor=actor).action
+            )
+        except BaseException as error:  # reported below, not swallowed
+            errors.append(error)
+        finally:
+            connection.close()
+
+    threads = [
+        threading.Thread(target=submit, args=(phone,)) for phone in ("4155550132", "4155550133")
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    operator.refresh_from_db()
+    sent = update_calls(provider)
+    assert 1 <= len(sent) <= 2
+    assert sorted(outcomes, key=str) in (
+        sorted([Action.UPDATED, Action.UPDATED], key=str),
+        sorted([Action.UPDATED, Action.NO_CALL], key=str),
+    )
+    # The last update sent carries what is saved here.
+    assert sent[-1][1].phone == operator.phone
+    assert operator.sync_status == SyncStatus.LINKED
+    assert len(customer_refs(operator)) == 1

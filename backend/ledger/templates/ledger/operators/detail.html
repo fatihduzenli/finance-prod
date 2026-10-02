@@ -30,6 +30,8 @@
     {% if failure_message %}
       <dt>Last failure</dt>
       <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.sync_failure }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|date:"Y-m-d H:i" }} UTC{% endif %}</span>{% if failure_fields %}<br><span id="sync-failure-fields">Fields the provider rejected: {{ failure_fields }}</span>{% endif %}</dd>
+    {% elif provider_updated_at %}
+      <dt>Last update</dt><dd id="provider-updated">Provider customer updated {{ provider_updated_at|date:"Y-m-d H:i" }} UTC</dd>
     {% elif operator.sync_attempted_at %}
       <dt>Last attempt</dt><dd>{{ operator.sync_attempted_at|date:"Y-m-d H:i" }} UTC</dd>
     {% endif %}

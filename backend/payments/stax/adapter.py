@@ -108,8 +108,13 @@ class StaxProvider(PaymentProvider):
     # --- Customers -----------------------------------------------------------------
 
     def _validate_customer(self, customer: CustomerInput) -> CustomerInput:
-        """Refuse what Stax would reject; the result carries the normalised phone."""
-        validation.email("operator_email", customer.operator_email)
+        """Refuse what Stax would reject; the result carries the normalised phone.
+
+        An empty e-mail is allowed and left out of the body: the spec needs one of
+        firstname, lastname, email or company, and ``firstname`` is always sent.
+        """
+        if customer.operator_email:
+            validation.email("operator_email", customer.operator_email)
         validation.emails("cc_emails", customer.cc_emails)
         return validation.customer(customer)
 

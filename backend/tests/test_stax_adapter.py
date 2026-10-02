@@ -326,6 +326,49 @@ def test_a_customer_with_a_bad_phone_is_refused_before_any_request(method: str, 
     assert rig.budget.counts() == (0, 0)
 
 
+@pytest.mark.parametrize(
+    ("method", "verb", "path"),
+    [("create", "POST", "/customer"), ("update", "PUT", "/customer/cus-1")],
+)
+def test_a_customer_without_an_email_is_sent_without_an_email_key(
+    method: str, verb: str, path: str
+) -> None:
+    """PLAN-006c rule 4: an empty e-mail is allowed and left out of the body."""
+    rig = make_rig(always(200, {"id": "cus-1"}))
+    provider = StaxProvider(rig.transport)
+    customer = CustomerInput("Ada", "", "Example LLC", "", reference="r1")
+    if method == "create":
+        provider.create_customer(customer)
+    else:
+        provider.update_customer("cus-1", customer)
+    [request] = rig.recorder.requests
+    assert (request.method, request.url.path) == (verb, path)
+    assert _body(request) == {
+        "firstname": "Ada",
+        "company": "Example LLC",
+        "cc_emails": [],
+        "reference": "r1",
+    }
+
+
+@pytest.mark.parametrize("method", ["create", "update"])
+@pytest.mark.parametrize("value", ["nope", "ada@", " ", "a b@example.com"])
+def test_a_customer_with_a_malformed_email_is_refused_before_any_request(
+    method: str, value: str
+) -> None:
+    rig = make_rig(always(200, {"id": "cus-1"}))
+    provider = StaxProvider(rig.transport)
+    customer = CustomerInput("Ada", "", "Example LLC", value)
+    with pytest.raises(ValidationFailed) as raised:
+        if method == "create":
+            provider.create_customer(customer)
+        else:
+            provider.update_customer("cus-1", customer)
+    assert str(raised.value) == "operator_email must be a valid e-mail address"
+    assert rig.recorder.requests == []
+    assert rig.budget.counts() == (0, 0)
+
+
 def test_refund_total_is_a_two_decimal_string() -> None:
     rig = make_rig(always(200, {"id": "txn-2"}))
     StaxProvider(rig.transport).refund_transaction("txn-1", D("12.5"))

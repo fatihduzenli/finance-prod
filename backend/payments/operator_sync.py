@@ -27,6 +27,13 @@ Operators without an e-mail make no call (D4): they wait for :func:`link_operato
 which reads the customer by ID to prove it exists and stores the customer and
 payment-method IDs.
 
+An edit of an operator that already has a customer reference (PLAN-006c) and changes
+what :func:`customer_input` builds marks the row ``pending`` (the local save commits
+first and stands); :func:`sync_operator` then sends that same payload with
+``update_customer`` under the row lock. The retry of a ``failed`` row with a customer
+reference updates too; it never looks up or creates. An edit that leaves the payload
+as it was makes no call and keeps the status.
+
 Every change writes one ``audit_log`` row. Nothing from a provider response is stored
 except the customer ID; the trimmed summary is not persisted. Failure text is a class
 name or a fixed sentence from :data:`MESSAGES`, never a provider message.
@@ -34,10 +41,11 @@ name or a fixed sentence from :data:`MESSAGES`, never a provider message.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -84,6 +92,17 @@ OPERATOR_FIELDS: tuple[str, ...] = (
     "state",
     "postal_code",
     "notes",
+)
+
+#: The operator fields :func:`customer_input` reads, named in the update audit row.
+PAYLOAD_FIELDS: tuple[str, ...] = ("display_name", "legal_name", "email", "phone")
+
+#: Audit actions after which the provider holds the operator's current details.
+PUSHED_ACTIONS: tuple[str, ...] = (
+    "operator.sync_created",
+    "operator.sync_linked",
+    "operator.sync_updated",
+    "operator.link_set",
 )
 
 #: Local refusals of the link form (no provider call was made).
@@ -135,7 +154,9 @@ class Action(StrEnum):
     AWAITING_LINK = "awaiting_link"
     LINKED_EXISTING = "linked_existing"
     CREATED = "created"
+    UPDATED = "updated"
     FAILED = "failed"
+    UPDATE_FAILED = "update_failed"
     LINK_SET = "link_set"
     LINK_REFUSED = "link_refused"
     RETRY_TOO_SOON = "retry_too_soon"
@@ -151,6 +172,8 @@ class SyncOutcome:
     needs_review: bool = False
     #: Seconds until a retry is allowed (``RETRY_TOO_SOON`` only).
     retry_in: int = 0
+    #: Comma-separated key names the provider rejected (``UPDATE_FAILED`` only).
+    fields: str = ""
 
     @property
     def message(self) -> str:
@@ -166,6 +189,14 @@ class SyncOutcome:
             return "Linked to the existing payment provider customer with this e-mail."
         if self.action is Action.CREATED:
             return "Created the customer at the payment provider."
+        if self.action is Action.UPDATED:
+            return "Updated the customer at the payment provider."
+        if self.action is Action.UPDATE_FAILED:
+            named = f" (fields {', '.join(self.fields.split(','))})" if self.fields else ""
+            return (
+                "Saved here. The payment provider did not accept the update: "
+                f"{self.failure}{named}. Retry when ready."
+            )
         if self.action is Action.AWAITING_LINK:
             return AWAITING_LINK_MESSAGE
         if self.action is Action.LINK_SET:
@@ -214,16 +245,21 @@ def update_operator(
 ) -> Operator:
     """Apply staff edits under a row lock; mark the row for a sync when it needs one.
 
-    A ``failed`` row stays failed (only the retry button calls again), unless its
-    e-mail was removed, which makes it wait for a manual link.
+    Without a customer reference, a ``failed`` row stays failed (only the retry button
+    calls again), unless its e-mail was removed, which makes it wait for a manual link.
+    With one, a change of the customer payload marks the row ``pending`` so that
+    :func:`sync_operator` updates the provider's customer (PLAN-006c); any other edit
+    keeps the status.
     """
     with transaction.atomic():
         operator = _locked(operator_id)
         before = _snapshot(operator)
+        payload = _payload(operator)
         for name, value in _editable(fields).items():
             setattr(operator, name, value)
         if _current_ref(operator, KIND_CUSTOMER) is not None:
-            operator.sync_status = SyncStatus.LINKED
+            if _payload(operator) != payload:
+                operator.sync_status = SyncStatus.PENDING
         elif not operator.email:
             operator.sync_status = SyncStatus.AWAITING_LINK
             operator.sync_failure = ""
@@ -259,10 +295,12 @@ def sync_operator(
     actor: User | None,
     retry: bool = False,
 ) -> SyncOutcome:
-    """Link or create the operator's provider customer, at most one call path per row.
+    """Link, create or update the operator's provider customer, one call path per row.
 
     Calls the provider only while the locked row is ``pending`` (or ``failed`` with
-    ``retry=True``), not archived, has an e-mail and has no current customer reference.
+    ``retry=True``) and not archived. A row with a current customer reference gets one
+    ``update_customer`` call with :func:`customer_input` (PLAN-006c), with or without an
+    e-mail; a row without one needs an e-mail and is looked up, then linked or created.
     With ``retry=True`` it refuses (``RETRY_TOO_SOON``, no call) while the last attempt
     is less than :data:`RETRY_LOCK_SECONDS` old; the check runs under the row lock, so
     two concurrent retries cannot both pass it. A stored phone that fails the provider's
@@ -273,22 +311,21 @@ def sync_operator(
         status = operator.sync_status
         if retry and status == SyncStatus.FAILED:
             status = SyncStatus.PENDING
-        if (
-            operator.archived_at is not None
-            or status != SyncStatus.PENDING
-            or _current_ref(operator, KIND_CUSTOMER) is not None
-        ):
+        if operator.archived_at is not None or status != SyncStatus.PENDING:
             return SyncOutcome(Action.NO_CALL, operator.sync_status)
+        customer = _current_ref(operator, KIND_CUSTOMER)
+        if customer is not None:
+            refused = _refused_before_call(operator, retry=retry)
+            if refused is not None:
+                return refused
+            return _update_customer(operator, customer.external_id, provider=provider, actor=actor)
         if not operator.email:
             operator.sync_status = SyncStatus.AWAITING_LINK
             operator.save(update_fields=["sync_status", "updated_at"])
             return SyncOutcome(Action.AWAITING_LINK, operator.sync_status)
-        wait = retry_wait_seconds(operator) if retry else 0
-        if wait:
-            return SyncOutcome(Action.RETRY_TOO_SOON, operator.sync_status, retry_in=wait)
-        if not phone_is_valid(operator):
-            # Nothing is written and nothing leaves: the row waits for a fixed phone.
-            return SyncOutcome(Action.FAILED, operator.sync_status, PHONE_INVALID)
+        refused = _refused_before_call(operator, retry=retry)
+        if refused is not None:
+            return refused
 
         before = _snapshot(operator)
         operator.sync_attempted_at = timezone.now()
@@ -340,6 +377,76 @@ def sync_operator(
         )
         _audit(actor, audit_action, operator, before, after)
         return SyncOutcome(action, operator.sync_status, needs_review=needs_review)
+
+
+def _refused_before_call(operator: Operator, *, retry: bool) -> SyncOutcome | None:
+    """The retry lock and the phone rule, checked under the row lock; nothing is written."""
+    wait = retry_wait_seconds(operator) if retry else 0
+    if wait:
+        return SyncOutcome(Action.RETRY_TOO_SOON, operator.sync_status, retry_in=wait)
+    if not phone_is_valid(operator):
+        # Nothing leaves: the row waits for a fixed phone.
+        return SyncOutcome(Action.FAILED, operator.sync_status, PHONE_INVALID)
+    return None
+
+
+def _update_customer(
+    operator: Operator, external_id: str, *, provider: PaymentProvider, actor: User | None
+) -> SyncOutcome:
+    """Send the locked row's payload to its provider customer; audit either outcome.
+
+    The audit rows name the changed fields and mask the e-mail and customer ID; they
+    never carry a field value.
+    """
+    before = _push_summary(operator)
+    changed = _changed_since_push(operator)
+    operator.sync_attempted_at = timezone.now()
+    try:
+        # TODO-VERIFY-056: whether omitting `email` on PUT /customer/{id} (an operator
+        # whose e-mail was removed) clears the e-mail at Stax or leaves it unchanged.
+        # Until known, receipts may still go to the old address; the mismatch flag set
+        # from the `update_customer` webhook surfaces it.
+        provider.update_customer(external_id, customer_input(operator))
+    except ProviderError as error:
+        failed = _fail(
+            operator,
+            before,
+            actor,
+            failure_name(error),
+            needs_review=False,
+            fields=failure_fields(error),
+            summary=lambda row: _push_summary(row, changed, external_id),
+        )
+        return dataclasses.replace(
+            failed, action=Action.UPDATE_FAILED, fields=operator.sync_failure_fields
+        )
+    operator.sync_status = SyncStatus.LINKED
+    operator.sync_failure = ""
+    operator.sync_failure_fields = ""
+    operator.save()
+    _audit(
+        actor,
+        "operator.sync_updated",
+        operator,
+        before,
+        _push_summary(operator, changed, external_id),
+    )
+    return SyncOutcome(Action.UPDATED, operator.sync_status)
+
+
+def provider_updated_at(operator: Operator) -> datetime | None:
+    """When the provider's customer was last updated, if that is the latest push."""
+    latest = (
+        AuditLog.objects.filter(
+            entity_type=ENTITY_OPERATOR, entity_id=str(operator.pk), action__in=PUSHED_ACTIONS
+        )
+        .order_by("-id")
+        .values_list("action", "at")
+        .first()
+    )
+    if latest is None or latest[0] != "operator.sync_updated":
+        return None
+    return latest[1]
 
 
 def link_operator(
@@ -440,6 +547,13 @@ def customer_input(operator: Operator) -> CustomerInput:
     )
 
 
+def mask_email(value: str | None) -> str:
+    """Only the domain of an e-mail address; empty when there is none."""
+    if not value or "@" not in value:
+        return ""
+    return f"…@{value.rsplit('@', 1)[1]}"
+
+
 def phone_is_valid(operator: Operator) -> bool:
     """Whether the stored phone is empty or passes the provider's phone rule."""
     return normalise_phone(operator.phone) is not None
@@ -507,13 +621,15 @@ def _fail(
     *,
     needs_review: bool,
     fields: str = "",
+    summary: Callable[[Operator], dict[str, Any]] | None = None,
 ) -> SyncOutcome:
     operator.sync_status = SyncStatus.FAILED
     operator.sync_failure = failure
     operator.sync_failure_fields = fields
     operator.needs_review = operator.needs_review or needs_review
     operator.save()
-    _audit(actor, "operator.sync_failed", operator, before, _snapshot(operator))
+    after = (summary or _snapshot)(operator)
+    _audit(actor, "operator.sync_failed", operator, before, after)
     return SyncOutcome(Action.FAILED, operator.sync_status, failure, needs_review)
 
 
@@ -545,6 +661,49 @@ def _add_ref(operator: Operator, kind: str, external_id: str) -> None:
         external_kind=kind,
         external_id=external_id,
     )
+
+
+def _payload(operator: Operator) -> CustomerInput:
+    """What :func:`customer_input` builds, with the e-mail as ``Operator.save`` stores it."""
+    return dataclasses.replace(
+        customer_input(operator), operator_email=normalise_email(operator.email or "")
+    )
+
+
+def _changed_since_push(operator: Operator) -> list[str]:
+    """The payload fields edited since the provider last received this operator.
+
+    Read from the ``operator.updated`` audit rows written after the latest push, so a
+    retry names the same fields as the attempt it repeats.
+    """
+    rows = AuditLog.objects.filter(entity_type=ENTITY_OPERATOR, entity_id=str(operator.pk))
+    last_push = (
+        rows.filter(action__in=PUSHED_ACTIONS).order_by("-id").values_list("id", flat=True).first()
+    )
+    edits = rows.filter(action="operator.updated")
+    if last_push is not None:
+        edits = edits.filter(id__gt=last_push)
+    changed: set[str] = set()
+    for edit_before, edit_after in edits.values_list("before", "after"):
+        old, new = edit_before or {}, edit_after or {}
+        changed.update(name for name in PAYLOAD_FIELDS if old.get(name) != new.get(name))
+    return [name for name in PAYLOAD_FIELDS if name in changed]
+
+
+def _push_summary(
+    operator: Operator, changed: Sequence[str] | None = None, external_id: str = ""
+) -> dict[str, Any]:
+    """The audit view of an update: status, field names and masked identifiers only."""
+    values: dict[str, Any] = {
+        "sync_status": operator.sync_status,
+        "sync_failure": operator.sync_failure,
+        "sync_failure_fields": operator.sync_failure_fields,
+    }
+    if changed is not None:
+        values["fields"] = list(changed)
+        values["email"] = mask_email(operator.email)
+        values["customer"] = mask_identifier(external_id)
+    return values
 
 
 def _snapshot(operator: Operator) -> dict[str, Any]:

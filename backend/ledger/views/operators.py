@@ -89,7 +89,7 @@ def _report(request: HttpRequest, outcome: SyncOutcome) -> None:
     text = outcome.message
     if not text:
         return
-    if outcome.action in (Action.FAILED, Action.LINK_REFUSED):
+    if outcome.action in (Action.FAILED, Action.UPDATE_FAILED, Action.LINK_REFUSED):
         messages.error(request, text)
     elif outcome.needs_review or outcome.action in (Action.AWAITING_LINK, Action.RETRY_TOO_SOON):
         messages.warning(request, text)
@@ -244,6 +244,11 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "notes": Note.objects.filter(
                 entity_type=NoteEntityType.OPERATOR, entity_id=operator.pk
             ).order_by("-created_at"),
+            "provider_updated_at": (
+                operator_sync.provider_updated_at(operator)
+                if operator.sync_status == SyncStatus.LINKED
+                else None
+            ),
             "can_edit": billing and active,
             "can_retry": billing and active and failed and phone_ok and not retry_in,
             "fix_phone_message": (
