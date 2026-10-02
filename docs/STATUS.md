@@ -465,3 +465,15 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Owner typed "push". `main` at `8fc2521` deployed; the live revision runs that image tag,
   healthy, 100 % traffic; migrations `payments.0004` and `ledger.0011` applied; environment
   check ok.
+
+## Update, 2026-10-02, owner clicks on 0000023 and PLAN-009a
+
+- **Owner, in writing:** Link invoice worked without confirmation. The replayed `send_invoice`
+  still read "ignored: no object id". The wire payment was recorded locally but the Stax mark
+  failed: `ProviderRejected (fields: email_receipt)`. The owner then marked that invoice paid by
+  hand in the Stax dashboard and will run the memo test on a fresh charge.
+- **PLAN-009a:** booleans in query strings are now `0`/`1` (Stax rejected `false`); a replay
+  re-reads the object ID from the stored body. QA PASS (`docs/qa/QA-009a-query-booleans-and-replay.md`),
+  **not pushed**. After the deploy: Retry on the first charge should find the invoice already
+  paid in Stax and send nothing (mismatch recorded); the memo test runs on a fresh charge.
+
