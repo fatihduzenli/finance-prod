@@ -37,9 +37,9 @@ param staxExpectedMerchantId = 'ea824f2b-90b3-4c49-8f69-ba06943458f4'
 // no debit is hard-blocked.
 param staxWebhookUrlTokenSecretName = 'stax-webhook-url-token-staging'
 
-// Uncomment once the sentry-dsn secret exists in the vault. While it is empty,
-// SENTRY_DSN is not set on the app at all and Sentry stays off.
-// param sentryDsnSecretName = 'sentry-dsn'
+// The sentry-dsn secret exists in the vault since 2026-10-02 (owner); SENTRY_DSN is read
+// from it through the managed identity. Alerts: level fatal emails the owner.
+param sentryDsnSecretName = 'sentry-dsn'
 
 // appBaseUrl is derived: it becomes https://<customHostname> when a custom
 // hostname is set, and the default ingress host name otherwise. Override it
