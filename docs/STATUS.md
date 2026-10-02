@@ -407,3 +407,5 @@ the login page myself." The condition for starting Prompt 4 is met.
   (amendment 4 said new rows for refunds and voids; a void is not a new transaction at Stax).
 - TODO-VERIFY-016 closed; 028 (`apply_balance` unit) keeps partial payments local-only.
 
+- **Owner, in writing (2026-10-02): "voids as built."** A void marks the original payment voided;
+  refunds are new rows linked to their parent. Amendment 4 is read that way from here on.
