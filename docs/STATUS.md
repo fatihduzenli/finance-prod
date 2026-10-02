@@ -395,3 +395,6 @@ the login page myself." The condition for starting Prompt 4 is met.
   deployment `staging-sentry-dsn` succeeded; the live revision `finance-staging-web--0000019`
   has `SENTRY_DSN` as a vault reference. The breaker and dead-letter alerts now reach Sentry.
 - A one-off test event (level fatal) from inside the container awaits the owner's word.
+- **Owner, in writing (2026-10-02):** the test event's alert email arrived; the Sentry event has
+  no Request section, only tags, runtime and `sys.argv`, and no token or key anywhere.
+  **Sentry is proven on staging.** Breaker and dead-letter alerts now page the owner.
