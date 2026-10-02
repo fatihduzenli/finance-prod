@@ -454,3 +454,8 @@ the login page myself." The condition for starting Prompt 4 is met.
   note when the total differs). QA PASS (`docs/qa/QA-008a-send-invoice-and-manual-link.md`),
   **not pushed**. TODO-VERIFY-015 and 042 (invoices) closed from the stored bodies.
 
+- **Owner, in writing (2026-10-02): Checkpoint 8 click 1 passed** on revision 0000022: phone
+  edit saved, "Provider customer updated" shown, new phone in the Stax dashboard, an
+  `update_customer` row on the Webhooks page with the event name from the header, and the
+  email still present in Stax after the update (the update carried the email; TODO-VERIFY-056,
+  about omitting it, stays open).
