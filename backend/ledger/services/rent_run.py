@@ -35,6 +35,15 @@ Rules kept here:
   names; :func:`retry_provider_mark` is the manual retry, refused for
   ``RETRY_LOCK_SECONDS`` after the last attempt. A partial payment, or one that differs
   from the invoice total, makes no provider call and flags the charge.
+- **Linking an invoice to a charge** (PLAN-008a §2 rules 3, 4): an invoice the
+  provider did not generate from a schedule is linked automatically only when exactly
+  one open charge of its operator (due, unpaid or partial, balance above zero, no
+  invoice yet) has an amount due equal to its total and a period that is the month of
+  its date; otherwise staff link it from the charge page. Both set the invoice's
+  ``rent_charge`` under row locks on the charge, then the invoice; a charge has at most
+  one invoice (a unique partial index on ``invoices.rent_charge``). A manual link whose
+  total differs from the balance needs the confirmation and a note, and flags the
+  charge.
 - **Carried balance** (PLAN-009 D5): the open balances of a lease's earlier charges are
   shown with each due debit and on the charge page; a new charge's amount never
   includes them.
@@ -57,7 +66,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum
+from django.db.models import Q, QuerySet, Sum
 from django.utils import timezone
 
 import payments
@@ -89,6 +98,7 @@ from ledger.services.leases import (
     rent_on,
     schedule_ref,
 )
+from ledger.validators import validate_no_payment_data
 from payments import invoice_sync, offline_marking, operator_sync
 from payments.errors import ProviderError
 from payments.health import provider_health
@@ -165,7 +175,9 @@ ALREADY_PAID_ACTION = "payment.provider_already_paid"
 _CHARGE_MARK_ACTIONS = (MARKED_ACTION, MARK_FAILED_ACTION, NOT_UPDATED_ACTION)
 #: Other reasons a charge is flagged; clearing a marking flag keeps the charge flagged
 #: when one of them was ever recorded.
+LINKED_TOTAL_DIFFERS_ACTION = "rent_charge.linked_total_differs"
 _OTHER_FLAG_ACTIONS = (
+    LINKED_TOTAL_DIFFERS_ACTION,
     "rent_charge.second_invoice",
     "rent_charge.total_mismatch",
     "rent_charge.disputed",
@@ -178,6 +190,29 @@ STAGE_REREAD = "reread"
 MARK_DONE = "The invoice at the payment provider is marked paid."
 MARK_RETRY_HINT = " The payment is recorded; retry from the charge page."
 MARK_NOTHING_TO_RETRY = "Nothing to retry on this charge."
+
+#: Charge statuses an invoice may be linked to automatically (PLAN-008a §2 rule 3).
+AUTO_LINK_STATUSES: tuple[str, ...] = (
+    RentChargeStatus.DUE,
+    RentChargeStatus.UNPAID,
+    RentChargeStatus.PARTIAL,
+)
+LINKED_TOTAL_DIFFERS = "Linked invoice total differs from the balance."
+LINK_CHOOSE = "Choose an unlinked invoice of this charge's operator. Nothing was linked."
+LINK_CHARGE_HAS_INVOICE = "This charge already has an invoice. Nothing was linked."
+LINK_CONFIRM = (
+    "The invoice total differs from the balance: tick the confirmation to link it anyway. "
+    "Nothing was linked."
+)
+LINK_NOTE_REQUIRED = (
+    "A note is required when the total differs from the balance: say why. Nothing was linked."
+)
+LINK_SAME = "This invoice is already linked to this charge. Nothing was changed."
+LINK_DONE = "Invoice {number} linked to this charge."
+LINK_DONE_DIFFERS = (
+    "Invoice {number} linked to this charge. Its total differs from the balance; the charge "
+    "is flagged for review."
+)
 
 
 # --- Results --------------------------------------------------------------------------
@@ -274,6 +309,22 @@ class MatchReport:
 
     def count(self, action: MatchAction) -> int:
         return sum(1 for line in self.lines if line.action is action)
+
+
+@dataclass(frozen=True, slots=True)
+class LinkOutcome:
+    ok: bool
+    #: A fixed sentence for staff that never names the provider.
+    message: str
+    field: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UnlinkedInvoice:
+    """One row of the manual link list: the provider ID is shown masked only."""
+
+    invoice: Invoice
+    provider_invoice: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -577,6 +628,10 @@ def charge_review_message(charge: RentCharge) -> str:
     parts = []
     if charge.invoices.exclude(total=charge.amount_due).exists():
         parts.append(TOTAL_MISMATCH)
+    if AuditLog.objects.filter(
+        entity_type=ENTITY_CHARGE, entity_id=str(charge.pk), action=LINKED_TOTAL_DIFFERS_ACTION
+    ).exists():
+        parts.append(LINKED_TOTAL_DIFFERS)
     if charge.review_message:
         parts.append(f"{offline_marking.shown(charge.review_message)}.")
     return " ".join(parts) or SECOND_INVOICE
@@ -593,6 +648,199 @@ def _flag(charge: RentCharge, actor: User | None, action: str, context: dict[str
     charge.needs_review = True
     charge.save(update_fields=["needs_review", "updated_at"])
     _audit(actor, action, ENTITY_CHARGE, charge.pk, before, {**_charge(charge), **context})
+
+
+# --- Linking an invoice to a charge (PLAN-008a §2 rules 3, 4) ---------------------------
+
+
+def _unlinked(queryset: QuerySet[Invoice]) -> QuerySet[Invoice]:
+    return queryset.filter(
+        rent_charge__isnull=True, insurance_charge__isnull=True, charge_adjustment__isnull=True
+    )
+
+
+def _provider_ref(invoice_id: uuid.UUID) -> str:
+    return (
+        ExternalRef.objects.filter(
+            entity_type=ENTITY_INVOICE,
+            entity_id=invoice_id,
+            provider=PROVIDER_KEY,
+            external_kind=KIND_INVOICE,
+            superseded_at__isnull=True,
+        )
+        .values_list("external_id", flat=True)
+        .first()
+        or ""
+    )
+
+
+def _operator_of(charge: RentCharge) -> uuid.UUID | None:
+    return Lease.objects.only("operator_id").get(pk=charge.lease_id).operator_id
+
+
+def unlinked_invoices(charge: RentCharge) -> list[UnlinkedInvoice]:
+    """The local invoices of the charge's operator that have no charge, newest first."""
+    operator_id = _operator_of(charge)
+    if operator_id is None:
+        return []
+    rows = _unlinked(Invoice.objects.filter(operator_id=operator_id)).order_by(
+        "-issue_date", "-invoice_number"
+    )
+    return [UnlinkedInvoice(row, mask_identifier(_provider_ref(row.pk))) for row in rows]
+
+
+def _auto_candidates(operator_id: uuid.UUID, total: Decimal, issued: date) -> QuerySet[RentCharge]:
+    return RentCharge.objects.filter(
+        lease__operator_id=operator_id,
+        status__in=AUTO_LINK_STATUSES,
+        balance__gt=0,
+        amount_due=total,
+        period_month=issued.replace(day=1),
+        invoices__isnull=True,
+    )
+
+
+def _attach(charge: RentCharge, invoice: Invoice) -> None:
+    """Set the invoice's charge. The caller holds the locks on both rows; a charge that
+    already has an invoice is refused by the unique index with an IntegrityError."""
+    Invoice.objects.filter(pk=invoice.pk, rent_charge__isnull=True).update(
+        rent_charge=charge, updated_at=timezone.now()
+    )
+
+
+def auto_link_invoice(
+    invoice_id: uuid.UUID, total: Decimal | None, issued: date | None
+) -> tuple[bool, int]:
+    """Link an unlinked invoice to the one open charge it fits (PLAN-008a §2 rule 3).
+
+    ``total`` and ``issued`` are the re-fetched invoice's total and date; the caller has
+    checked that the invoice names no schedule. Returns whether the invoice is now
+    linked and the number of candidate charges found; nothing is written unless there
+    is exactly one.
+    """
+    invoice = Invoice.objects.filter(pk=invoice_id).first()
+    if invoice is None:
+        return False, 0
+    if invoice.rent_charge_id is not None:
+        return True, 1
+    if total is None or issued is None:
+        return False, 0
+    candidates = _auto_candidates(invoice.operator_id, total, issued)
+    found = list(candidates.values_list("pk", flat=True)[:2])
+    if len(found) != 1:
+        return False, candidates.count() if found else 0
+    try:
+        with transaction.atomic():
+            charge = RentCharge.objects.select_for_update().filter(pk=found[0]).first()
+            locked = _unlinked(Invoice.objects.select_for_update().filter(pk=invoice_id)).first()
+            if (
+                charge is None
+                or locked is None
+                or not candidates.filter(pk=charge.pk).exists()
+                or charge.invoices.exists()
+            ):
+                return _linked(invoice_id), 1
+            _attach(charge, locked)
+            _audit(
+                None,
+                "invoice.auto_linked",
+                ENTITY_INVOICE,
+                locked.pk,
+                {"rent_charge": None},
+                {
+                    "invoice_number": locked.invoice_number,
+                    "rent_charge": str(charge.pk),
+                    "period": f"{charge.period_month:%Y-%m}",
+                    "seq": charge.seq,
+                    "total": str(total),
+                    "provider_invoice": mask_identifier(_provider_ref(locked.pk)),
+                },
+            )
+    except IntegrityError:
+        # Another invoice was linked to that charge first; ours rolled back.
+        return False, 1
+    return True, 1
+
+
+def _linked(invoice_id: uuid.UUID) -> bool:
+    return Invoice.objects.filter(pk=invoice_id, rent_charge__isnull=False).exists()
+
+
+def link_invoice(
+    charge_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    *,
+    confirm: bool,
+    note: str,
+    actor: User | None,
+) -> LinkOutcome:
+    """Staff link an unlinked invoice of the charge's operator to the charge (rule 4).
+
+    Every rule is checked under the row locks, charge first, then invoice. A total that
+    differs from the charge's balance needs ``confirm`` and a note, and flags the charge.
+    """
+    text = (note or "").strip()
+    if text:
+        try:
+            validate_no_payment_data(text)
+        except ValidationError:
+            return LinkOutcome(False, PAY_NOTE_PAYMENT_DATA, "note")
+    try:
+        with transaction.atomic():
+            charge = RentCharge.objects.select_for_update().get(pk=charge_id)
+            operator_id = _operator_of(charge)
+            invoice = (
+                Invoice.objects.select_for_update()
+                .filter(pk=invoice_id, operator_id=operator_id)
+                .first()
+                if operator_id is not None
+                else None
+            )
+            if invoice is None:
+                return LinkOutcome(False, LINK_CHOOSE, "invoice")
+            if invoice.rent_charge_id == charge.pk:
+                return LinkOutcome(True, LINK_SAME)
+            if (
+                invoice.rent_charge_id is not None
+                or invoice.insurance_charge_id is not None
+                or invoice.charge_adjustment_id is not None
+            ):
+                return LinkOutcome(False, LINK_CHOOSE, "invoice")
+            if charge.invoices.exists():
+                return LinkOutcome(False, LINK_CHARGE_HAS_INVOICE)
+            differs = invoice.total != charge.balance
+            if differs and not confirm:
+                return LinkOutcome(False, LINK_CONFIRM, "confirm")
+            if differs and not text:
+                return LinkOutcome(False, LINK_NOTE_REQUIRED, "note")
+            _attach(charge, invoice)
+            context = {
+                "invoice_number": invoice.invoice_number,
+                "invoice_total": str(invoice.total),
+                "charge_balance": str(charge.balance),
+            }
+            _audit(
+                actor,
+                "invoice.linked",
+                ENTITY_INVOICE,
+                invoice.pk,
+                {"rent_charge": None},
+                {
+                    **context,
+                    "rent_charge": str(charge.pk),
+                    "amount_due": str(charge.amount_due),
+                    "provider_invoice": mask_identifier(_provider_ref(invoice.pk)),
+                    "total_differs": differs,
+                    "note": text,
+                },
+            )
+            if differs:
+                _flag(charge, actor, LINKED_TOTAL_DIFFERS_ACTION, context)
+            template = LINK_DONE_DIFFERS if differs else LINK_DONE
+    except IntegrityError:
+        # Another link to this charge committed first; ours rolled back.
+        return LinkOutcome(False, LINK_CHARGE_HAS_INVOICE)
+    return LinkOutcome(True, template.format(number=invoice.invoice_number))
 
 
 # --- Manual payments ------------------------------------------------------------------

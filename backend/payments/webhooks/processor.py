@@ -20,7 +20,7 @@ from django.utils import timezone
 
 from payments import alerts
 from payments.models import WebhookEvent, WebhookOutcome
-from payments.webhooks.events import UNKNOWN_EVENT, ignored
+from payments.webhooks.events import UNKNOWN_EVENT, handling, ignored
 from payments.webhooks.handlers import HANDLERS
 
 #: Failed attempts after which an event is dead-lettered.
@@ -65,7 +65,7 @@ def process_event(event_id: uuid.UUID, *, replay: bool = False) -> str | None:
         now = timezone.now()
         event.last_attempt_at = now
         try:
-            with transaction.atomic():
+            with transaction.atomic(), handling(event.received_at):
                 if handler is None:
                     outcome = ignored(UNKNOWN_EVENT)
                 else:

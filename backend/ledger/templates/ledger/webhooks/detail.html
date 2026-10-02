@@ -18,6 +18,7 @@
     <dt>Type</dt><dd>{{ event.event_type }}</dd>
     <dt>Name from</dt><dd>{{ event.get_event_source_display }}</dd>
     <dt>Object ID</dt><dd>{{ object_id_masked|default:"—" }}</dd>
+    <dt>Object ID from</dt><dd id="object-id-source">{% if event.object_id_source %}<code>{{ event.object_id_source }}</code>{% else %}—{% endif %}</dd>
     <dt>Outcome</dt><dd id="outcome">{{ event.outcome|default:"—" }}</dd>
     <dt>Processed</dt><dd>{% if event.processed_at %}{{ event.processed_at|date:"Y-m-d H:i:s" }} UTC{% else %}<span class="muted">Not processed</span>{% endif %}</dd>
     <dt>Failed attempts</dt><dd id="attempts">{{ event.attempts }}</dd>

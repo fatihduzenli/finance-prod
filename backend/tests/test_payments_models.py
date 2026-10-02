@@ -145,6 +145,11 @@ PAYMENTS_CASES: list[ConstraintCase] = [
         lambda: new_webhook_event(event_source="query_string"),
     ),
     ConstraintCase(
+        "webhook_events_object_id_source_valid",
+        lambda: new_webhook_event(object_id_source="mergeVars.invoice.id"),
+        lambda: new_webhook_event(object_id_source="body.anything"),
+    ),
+    ConstraintCase(
         "sync_state.job_name",
         unique_pair(new_sync_state, {}, {"job_name": "webhook_refetch"}),
         unique_pair(new_sync_state, {}, {}),

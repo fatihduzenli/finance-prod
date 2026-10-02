@@ -17,7 +17,7 @@ import json
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -43,6 +43,8 @@ from ledger.models import (
     RentChargeStatus,
     ScheduleKind,
     ScheduleState,
+    Store,
+    StoreStatus,
 )
 from ledger.services import rent_run, returns
 from payments.errors import ProviderRejected, ProviderUnavailable, ValidationFailed
@@ -57,6 +59,7 @@ from payments.provider import (
 )
 from payments.stax import mapping, validation
 from payments.stax.adapter import StaxProvider
+from payments.webhooks import events as webhook_events
 from payments.webhooks import handlers, processor, receiver, registration
 from payments.webhooks.events import EVENT_NAMES, ignored
 from payments.webhooks.handlers import transaction as transaction_handler
@@ -657,7 +660,8 @@ def test_an_unknown_invoice_of_a_known_customer_is_created_unlinked(fake: FakePr
         total=D("75.00"),
         raw_summary={"invoice_date_at": "2026-10-20", "due_at": "2026-10-30"},
     )
-    assert deliver("create_invoice", id="inv-new") == "processed"
+    # PLAN-008a §2 rule 3: no open charge fits, so it stays unlinked with the count.
+    assert deliver("create_invoice", id="inv-new") == "processed: unlinked (0 candidates)"
     invoice = Invoice.objects.get()
     assert (invoice.operator_id, invoice.rent_charge_id) == (operator.pk, None)
     assert (invoice.issue_date, invoice.due_date) == (date(2026, 10, 20), date(2026, 10, 30))
@@ -709,6 +713,344 @@ def test_a_schedule_invoice_naming_another_operators_customer_is_not_linked(
     fake.invoices[record.external_id] = replace(record, customer_external_id=OTHER_CUSTOMER)
     assert deliver("create_invoice", id=record.external_id) == ignored("not matched")
     assert not Invoice.objects.exists()
+
+
+# --- PLAN-008a row 2: send_invoice, and the sent, viewed and paid times -------------------
+
+
+def _last_event() -> WebhookEvent:
+    return WebhookEvent.objects.order_by("-received_at", "-pk").first()  # type: ignore[return-value]
+
+
+def envelope(invoice_id: str = INVOICE, **invoice: Any) -> dict[str, Any]:
+    """A ``send_invoice`` body: an email envelope with the invoice under mergeVars."""
+    return {
+        "toEmail": "ops@example.com",
+        "toName": "Operator",
+        "mergeVars": {"user": {"name": "Staff"}, "invoice": {"id": invoice_id, **invoice}},
+    }
+
+
+def test_send_invoice_refetches_and_sets_sent_at_from_the_event_time(fake: FakeProvider) -> None:
+    world = make_world(fake)
+    provider_invoice(fake, status="SENT")
+    assert deliver("send_invoice", envelope()) == "processed"
+    event = _last_event()
+    assert event.provider_object_id == INVOICE
+    assert event.object_id_source == "mergeVars.invoice.id"
+    assert fetches(fake, "get_invoice") == [INVOICE]
+    world.invoice.refresh_from_db()
+    assert world.invoice.provider_status == "SENT"
+    assert world.invoice.sent_at == event.received_at
+    assert (world.invoice.viewed_at, world.invoice.paid_at) == (None, None)
+    audit = AuditLog.objects.get(action="invoice.provider_state_changed")
+    assert audit.after is not None and audit.after["sent_at"] == event.received_at.isoformat()
+
+
+def test_a_second_send_event_does_not_move_sent_at(fake: FakeProvider) -> None:
+    world = make_world(fake)
+    provider_invoice(fake, status="SENT")
+    deliver("send_invoice", envelope())
+    first = _last_event().received_at
+    WebhookEvent.objects.update(received_at=first - timedelta(hours=1))  # earlier than any next
+    world.invoice.refresh_from_db()
+    sent = world.invoice.sent_at
+    assert sent == first
+    assert deliver("send_invoice", envelope()) == "processed"
+    world.invoice.refresh_from_db()
+    assert world.invoice.sent_at == sent
+    replay_all()
+    world.invoice.refresh_from_db()
+    assert world.invoice.sent_at == sent
+
+
+@pytest.mark.parametrize("status", ["VIEWED", "PAID", " sent "])
+def test_send_invoice_sets_sent_at_when_the_refetch_shows_it_sent_viewed_or_paid(
+    fake: FakeProvider, status: str
+) -> None:
+    world = make_world(fake)
+    provider_invoice(fake, status=status)
+    deliver("send_invoice", envelope())
+    world.invoice.refresh_from_db()
+    assert world.invoice.sent_at == _last_event().received_at
+
+
+@pytest.mark.parametrize("status", ["DRAFT", "", "VOIDED"])
+def test_send_invoice_leaves_sent_at_empty_when_the_refetch_does_not_show_it_sent(
+    fake: FakeProvider, status: str
+) -> None:
+    world = make_world(fake)
+    provider_invoice(fake, status=status)
+    assert deliver("send_invoice", envelope()) == "processed"
+    world.invoice.refresh_from_db()
+    assert world.invoice.sent_at is None
+
+
+def test_the_send_body_status_is_never_read(fake: FakeProvider) -> None:
+    world = make_world(fake)
+    provider_invoice(fake, status="DRAFT")
+    body = envelope(status="SENT", sent_at="2026-10-01 00:00:00", total="1.00")
+    body["status"] = "PAID"
+    deliver("send_invoice", body)
+    world.invoice.refresh_from_db()
+    assert world.invoice.provider_status == "DRAFT"
+    assert (world.invoice.sent_at, world.invoice.paid_at) == (None, None)
+
+
+def test_a_time_the_provider_reports_is_kept_and_not_derived(fake: FakeProvider) -> None:
+    world = make_world(fake)
+    sent = datetime(2026, 10, 2, 8, 0, tzinfo=UTC)
+    provider_invoice(fake, status="SENT", sent_at=sent)
+    deliver("send_invoice", envelope())
+    world.invoice.refresh_from_db()
+    assert world.invoice.sent_at == sent
+
+
+def test_send_invoice_without_an_object_id_makes_no_call(fake: FakeProvider) -> None:
+    make_world(fake)
+    body = envelope()
+    body["mergeVars"]["invoice"]["id"] = "../etc"
+    assert deliver("send_invoice", body) == ignored("no object id")
+    assert fetches(fake, "get_invoice") == []
+
+
+def test_viewed_at_comes_from_the_first_update_whose_refetch_shows_viewed(
+    fake: FakeProvider,
+) -> None:
+    world = make_world(fake)
+    provider_invoice(fake, status="SENT")
+    deliver("update_invoice", id=INVOICE)
+    world.invoice.refresh_from_db()
+    assert world.invoice.viewed_at is None and world.invoice.sent_at is None
+    provider_invoice(fake, status="VIEWED")
+    deliver("update_invoice", id=INVOICE)
+    viewed = _last_event().received_at
+    WebhookEvent.objects.update(received_at=viewed - timedelta(hours=1))
+    deliver("update_invoice", id=INVOICE)
+    world.invoice.refresh_from_db()
+    assert world.invoice.viewed_at == viewed
+    assert world.invoice.sent_at is None  # only a send event sets the sent time
+
+
+def test_paid_at_comes_from_the_first_refetch_showing_paid(fake: FakeProvider) -> None:
+    world = make_world(fake)
+    provider_invoice(fake, status="PAID")
+    deliver("update_invoice", id=INVOICE)
+    paid = _last_event().received_at
+    WebhookEvent.objects.update(received_at=paid - timedelta(hours=1))
+    deliver("send_invoice", envelope())
+    world.invoice.refresh_from_db()
+    assert world.invoice.paid_at == paid
+    assert world.invoice.viewed_at is None
+
+
+def test_the_receipt_time_is_known_only_while_an_event_is_processed(
+    fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[object] = []
+
+    def spy(event_type: str, provider_object_id: str) -> str:
+        seen.append(webhook_events.received_at())
+        return "processed"
+
+    monkeypatch.setitem(handlers.HANDLERS, "send_invoice", spy)
+    deliver("send_invoice", envelope())
+    assert seen == [_last_event().received_at]
+    assert webhook_events.received_at() is None
+
+
+# --- PLAN-008a row 3: auto-link on create_invoice ------------------------------------------
+
+DASHBOARD = "inv-dash-0001"
+
+
+def open_charge(
+    operator: Operator,
+    label: str = "Store 0101",
+    *,
+    amount: Decimal = RENT,
+    period: date = PERIOD,
+    status: str = RentChargeStatus.DUE,
+) -> RentCharge:
+    store = Store.objects.create(external_label=label, status=StoreStatus.ACTIVE)
+    lease = make_lease(operator=operator, store=store)
+    return RentCharge.objects.create(
+        lease=lease,
+        period_month=period,
+        seq=1,
+        due_on=period.replace(day=15),
+        amount_due=amount,
+        status=status,
+    )
+
+
+def dashboard_invoice(
+    fake: FakeProvider,
+    *,
+    total: Decimal = RENT,
+    issued: str = "2026-10-15",
+    customer: str = CUSTOMER,
+    **summary: Any,
+) -> InvoiceRecord:
+    return provider_invoice(
+        fake,
+        DASHBOARD,
+        status="DRAFT",
+        total=total,
+        customer=customer,
+        raw_summary={"invoice_date_at": issued, "schedule_id": None, **summary},
+    )
+
+
+def test_exactly_one_matching_open_charge_is_linked_and_audited(fake: FakeProvider) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    charge = open_charge(operator)
+    dashboard_invoice(fake)
+    assert deliver("create_invoice", id=DASHBOARD) == "processed"
+    invoice = Invoice.objects.get()
+    assert invoice.rent_charge_id == charge.pk
+    audit = AuditLog.objects.get(action="invoice.auto_linked")
+    assert audit.actor is None and audit.entity_id == str(invoice.pk)
+    assert audit.after is not None
+    assert audit.after["rent_charge"] == str(charge.pk)
+    assert audit.after["total"] == "1500.00" and audit.after["period"] == "2026-10"
+    assert audit.after["provider_invoice"] == "inv-…0001"
+    assert DASHBOARD not in json.dumps(audit.after)
+    charge.refresh_from_db()
+    assert not charge.needs_review and charge.amount_due == RENT
+
+
+@pytest.mark.parametrize("status", [RentChargeStatus.UNPAID, RentChargeStatus.PARTIAL])
+def test_an_unpaid_or_partial_charge_is_a_candidate(fake: FakeProvider, status: str) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    charge = open_charge(operator, status=status)
+    dashboard_invoice(fake)
+    assert deliver("create_invoice", id=DASHBOARD) == "processed"
+    assert Invoice.objects.get().rent_charge_id == charge.pk
+
+
+def test_zero_candidates_leaves_it_unlinked_with_the_count(fake: FakeProvider) -> None:
+    make_operator(email="ops@example.com", customer=CUSTOMER)
+    dashboard_invoice(fake)
+    assert deliver("create_invoice", id=DASHBOARD) == "processed: unlinked (0 candidates)"
+    assert Invoice.objects.get().rent_charge_id is None
+    assert not AuditLog.objects.filter(action="invoice.auto_linked").exists()
+
+
+def test_two_candidates_leave_it_unlinked_with_the_count(fake: FakeProvider) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    first = open_charge(operator, "Store 0101")
+    second = open_charge(operator, "Store 0202")
+    dashboard_invoice(fake)
+    assert deliver("create_invoice", id=DASHBOARD) == "processed: unlinked (2 candidates)"
+    assert Invoice.objects.get().rent_charge_id is None
+    assert not first.invoices.exists() and not second.invoices.exists()
+
+
+@pytest.mark.parametrize(
+    ("total", "issued"),
+    [
+        (D("1499.99"), "2026-10-15"),  # total differs from the amount due
+        (D("1500.01"), "2026-10-15"),
+        (RENT, "2026-11-01"),  # the next month
+        (RENT, "2026-09-30"),  # the month before
+    ],
+)
+def test_a_total_or_period_mismatch_is_not_linked(
+    fake: FakeProvider, total: Decimal, issued: str
+) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    open_charge(operator)
+    dashboard_invoice(fake, total=total, issued=issued)
+    assert deliver("create_invoice", id=DASHBOARD) == "processed: unlinked (0 candidates)"
+    assert Invoice.objects.get().rent_charge_id is None
+
+
+@pytest.mark.parametrize(
+    "status", [RentChargeStatus.PAID, RentChargeStatus.WAIVED, RentChargeStatus.PENDING]
+)
+def test_a_charge_that_is_not_open_is_not_a_candidate(fake: FakeProvider, status: str) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    open_charge(operator, status=status)
+    dashboard_invoice(fake)
+    assert deliver("create_invoice", id=DASHBOARD) == "processed: unlinked (0 candidates)"
+
+
+def test_a_charge_with_an_invoice_or_no_balance_is_not_a_candidate(fake: FakeProvider) -> None:
+    world = make_world(fake)  # its charge already has an invoice
+    paid = open_charge(world.operator, "Store 0202")
+    RentCharge.objects.filter(pk=paid.pk).update(amount_paid=RENT)  # balance 0, still "due"
+    dashboard_invoice(fake)
+    assert deliver("create_invoice", id=DASHBOARD) == "processed: unlinked (0 candidates)"
+    assert Invoice.objects.get(pk__in=_dashboard_invoice_ids()).rent_charge_id is None
+
+
+def test_another_operators_charge_is_not_a_candidate(fake: FakeProvider) -> None:
+    make_operator(email="ops@example.com", customer=CUSTOMER)
+    other = make_operator(email="other@example.com", customer=OTHER_CUSTOMER)
+    open_charge(other)
+    dashboard_invoice(fake)
+    assert deliver("create_invoice", id=DASHBOARD) == "processed: unlinked (0 candidates)"
+
+
+def test_an_invoice_naming_a_schedule_is_never_auto_linked(fake: FakeProvider) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    open_charge(operator)
+    # The schedule is not one of ours: the rent run's matching does not place it, and
+    # the auto-link leaves it alone even though one charge fits.
+    dashboard_invoice(fake, schedule_id="sched-unknown")
+    assert deliver("create_invoice", id=DASHBOARD) == "processed"
+    assert Invoice.objects.get().rent_charge_id is None
+    assert not AuditLog.objects.filter(action="invoice.auto_linked").exists()
+    assert deliver("update_invoice", id=DASHBOARD) == "processed"
+    assert Invoice.objects.get().rent_charge_id is None
+
+
+def test_update_invoice_links_an_unlinked_invoice_once_a_charge_fits(fake: FakeProvider) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    dashboard_invoice(fake)
+    assert deliver("create_invoice", id=DASHBOARD) == "processed: unlinked (0 candidates)"
+    charge = open_charge(operator)
+    assert deliver("update_invoice", id=DASHBOARD) == "processed"
+    assert Invoice.objects.get().rent_charge_id == charge.pk
+
+
+def test_send_invoice_does_not_auto_link(fake: FakeProvider) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    open_charge(operator)
+    dashboard_invoice(fake)
+    assert deliver("send_invoice", envelope(DASHBOARD)) == "processed"
+    assert Invoice.objects.get().rent_charge_id is None
+
+
+def test_a_replayed_auto_link_changes_nothing(fake: FakeProvider) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    open_charge(operator)
+    dashboard_invoice(fake)
+    deliver("create_invoice", id=DASHBOARD)
+    before = state()
+    replay_all()
+    deliver("create_invoice", id=DASHBOARD)
+    assert state() == before
+    assert AuditLog.objects.filter(action="invoice.auto_linked").count() == 1
+
+
+def test_a_linked_invoice_is_not_moved_to_another_fitting_charge(fake: FakeProvider) -> None:
+    operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    first = open_charge(operator, "Store 0101")
+    dashboard_invoice(fake)
+    deliver("create_invoice", id=DASHBOARD)
+    open_charge(operator, "Store 0202")  # now two would fit
+    assert deliver("update_invoice", id=DASHBOARD) == "processed"
+    assert Invoice.objects.get().rent_charge_id == first.pk
+
+
+def _dashboard_invoice_ids() -> list[uuid.UUID]:
+    return list(
+        ExternalRef.objects.filter(external_kind="invoice", external_id=DASHBOARD).values_list(
+            "entity_id", flat=True
+        )
+    )
 
 
 def _customer(lease: Lease) -> str:

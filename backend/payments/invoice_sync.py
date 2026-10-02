@@ -4,7 +4,10 @@
 provider_write`, which is private to this package; the rent run in ``ledger`` reaches
 it through :func:`record_provider_status`, the webhook handlers through
 :func:`record_provider_state`, which also copies the sent, viewed and paid times and
-the amount paid. Reading an invoice's date from a provider record is also kept here, so
+the amount paid. The provider's invoice object carries no sent, viewed or paid time
+(PLAN-008a §1): a time it lacks is derived from the re-fetched status and the time a
+webhook event was received (§2 rule 2), never from the event's body. Reading an
+invoice's date from a provider record is also kept here, so
 ``ledger`` never handles provider field names.
 """
 
@@ -29,11 +32,21 @@ SCHEDULE_KEY = "schedule_id"
 #: TODO-VERIFY-055: the status string of an invoice the provider shows paid in full.
 #: ``PAID`` is assumed (PLAN-009 D1); compared stripped and upper-cased.
 PROVIDER_PAID = "PAID"
+PROVIDER_SENT = "SENT"
+PROVIDER_VIEWED = "VIEWED"
+#: Statuses that show the invoice was sent (PLAN-008a §2 rule 2).
+_SHOWS_SENT = frozenset({PROVIDER_SENT, PROVIDER_VIEWED, PROVIDER_PAID})
+SEND_EVENT = "send_invoice"
+UPDATE_EVENT = "update_invoice"
+
+
+def _status(record: InvoiceRecord) -> str:
+    return record.raw_status.strip().upper()
 
 
 def shows_paid(record: InvoiceRecord) -> bool:
     """Whether the provider's invoice is already paid (PLAN-009 D1 pre-check)."""
-    return record.raw_status.strip().upper() == PROVIDER_PAID
+    return _status(record) == PROVIDER_PAID
 
 
 def record_provider_status(invoice_id: UUID, raw_status: str) -> None:
@@ -76,8 +89,35 @@ def _shown(value: object) -> object:
     return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
-def record_provider_state(invoice_id: UUID, record: InvoiceRecord) -> dict[str, Any]:
+def _derived_times(record: InvoiceRecord, event_type: str, event_at: datetime) -> dict[str, Any]:
+    """The times a webhook event lets us derive (PLAN-008a §2 rule 2): ``sent_at`` from a
+    send event whose re-fetch shows the invoice sent, viewed or paid; ``viewed_at`` from
+    an update event whose re-fetch shows it viewed; ``paid_at`` from any re-fetch that
+    shows it paid."""
+    status = _status(record)
+    derived: dict[str, Any] = {}
+    if event_type == SEND_EVENT and status in _SHOWS_SENT:
+        derived["sent_at"] = event_at
+    if event_type == UPDATE_EVENT and status == PROVIDER_VIEWED:
+        derived["viewed_at"] = event_at
+    if status == PROVIDER_PAID:
+        derived["paid_at"] = event_at
+    return derived
+
+
+def record_provider_state(
+    invoice_id: UUID,
+    record: InvoiceRecord,
+    *,
+    event_type: str = "",
+    event_at: datetime | None = None,
+) -> dict[str, Any]:
     """Copy the provider's status, times and amount paid onto the local invoice.
+
+    With ``event_at`` (the time a webhook event of ``event_type`` was received), a sent,
+    viewed or paid time the provider does not report is derived as
+    :func:`_derived_times` says, and only while ours is still empty: the first such
+    event sets it and a later one never moves it.
 
     Returns ``{field: [before, after]}`` for each field that changed (empty when none
     did), as text for the audit row; nothing is written when nothing changed.
@@ -86,6 +126,10 @@ def record_provider_state(invoice_id: UUID, record: InvoiceRecord) -> dict[str, 
     changed: dict[str, Any] = {}
     with provider_write():
         invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
+        if event_at is not None:
+            for name, moment in _derived_times(record, event_type, event_at).items():
+                if name not in values and getattr(invoice, name) is None:
+                    values[name] = moment
         for name, value in values.items():
             current = getattr(invoice, name)
             if current != value:

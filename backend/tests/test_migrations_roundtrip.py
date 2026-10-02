@@ -86,6 +86,7 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0001_initial",
                 "[ ] 0002_postgresql_guards",
                 "[ ] 0003_webhook_event_processing",
+                "[ ] 0004_webhook_object_id_source",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):

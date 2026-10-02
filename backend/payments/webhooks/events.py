@@ -3,6 +3,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime
+
 from payments.models import WebhookOutcome
 
 #: The events the app registers (D10), from the Merchant Webhooks page of the spec.
@@ -36,3 +41,24 @@ UNKNOWN_EVENT = "unknown event"
 def ignored(reason: str) -> str:
     """The stored outcome of an event that was processed and deliberately not applied."""
     return f"{WebhookOutcome.IGNORED.value}: {reason}"
+
+
+#: When the event being processed was received (PLAN-008a §2 rule 2). Set by the
+#: processor around the handler call; a handler still receives only the event type and
+#: the object ID, and never the body. ``None`` outside the processor.
+_RECEIVED_AT: ContextVar[datetime | None] = ContextVar("webhook_received_at", default=None)
+
+
+@contextmanager
+def handling(received_at: datetime) -> Iterator[None]:
+    """Make ``received_at`` the current event's receipt time for the block."""
+    token = _RECEIVED_AT.set(received_at)
+    try:
+        yield
+    finally:
+        _RECEIVED_AT.reset(token)
+
+
+def received_at() -> datetime | None:
+    """The receipt time of the event being processed, or ``None``."""
+    return _RECEIVED_AT.get()

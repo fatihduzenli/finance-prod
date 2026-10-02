@@ -71,6 +71,7 @@ charge_patterns = (
         path("<str:pk>/", charges.charge_detail, name="detail"),
         path("<str:pk>/payments/new/", charges.charge_record_payment, name="record_payment"),
         path("<str:pk>/retry-mark/", charges.charge_retry_mark, name="retry_mark"),
+        path("<str:pk>/link-invoice/", charges.charge_link_invoice, name="link_invoice"),
     ],
     "charges",
 )

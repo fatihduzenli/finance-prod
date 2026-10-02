@@ -308,6 +308,24 @@ class ManualPaymentForm(forms.Form):
     )
 
 
+class LinkInvoiceForm(forms.Form):
+    """Link one of the operator's unlinked invoices to a rent charge (PLAN-008a §2 rule
+    4). The invoice is named by its local key; the service checks under row locks that it
+    belongs to the charge's operator and is unlinked, and requires the confirmation and
+    the note when its total differs from the balance."""
+
+    invoice = forms.UUIDField(error_messages={"required": "Choose an invoice."})
+    #: The exact-value confirmation checkbox of PLAN-007c.
+    confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
+    note = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required when the total differs from the balance: say why.",
+    )
+
+
 class ResolveReturnForm(forms.Form):
     """Resolve a returned payment (PLAN-008 D6): a note, nothing else."""
 

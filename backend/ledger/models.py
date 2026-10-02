@@ -767,6 +767,12 @@ class Invoice(GuardedModel):
                 condition=Q(invoice_number__regex=r"^INV-[0-9]{4}-[0-9]{4,}$"),
                 name="invoices_number_format",
             ),
+            # One invoice per rent charge (PLAN-008a §2 rules 3, 4).
+            models.UniqueConstraint(
+                fields=["rent_charge"],
+                condition=Q(rent_charge__isnull=False),
+                name="invoices_one_per_rent_charge",
+            ),
             models.CheckConstraint(
                 condition=Q(rent_charge__isnull=True, insurance_charge__isnull=True)
                 | Q(rent_charge__isnull=True, charge_adjustment__isnull=True)

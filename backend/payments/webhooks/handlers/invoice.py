@@ -6,13 +6,23 @@ to its rent charge by the rent run's matching when it names an active rent sched
 of that operator (an invoice the matching cannot place yet is left for the rent run),
 and unlinked otherwise. The provider's status, sent, viewed and paid times and amount
 paid are then copied through :func:`payments.invoice_sync.record_provider_state`, the
-only writer of those columns. A provider total that differs from ours flags the
-charge; the amount due is never changed.
+only writer of those columns; a time the provider does not report is derived there from
+the re-fetched status and the time the event was received (PLAN-008a §2 rule 2). A
+provider total that differs from ours flags the charge; the amount due is never changed.
+
+The time the event was received is read from :func:`payments.webhooks.events.
+received_at`, which the processor sets; the handler never sees the event row or body.
+
+On ``create_invoice`` and ``update_invoice``, an invoice that names no schedule and has
+no charge is linked to the one open charge it fits, if exactly one does
+(:func:`ledger.services.rent_run.auto_link_invoice`, PLAN-008a §2 rule 3); otherwise the
+outcome records the number of candidates.
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
@@ -25,6 +35,7 @@ from payments import invoice_sync
 from payments.models import WebhookOutcome
 from payments.operator_sync import ENTITY_OPERATOR, KIND_CUSTOMER
 from payments.provider import InvoiceRecord, mask_identifier
+from payments.webhooks import events
 from payments.webhooks.events import ignored
 from payments.webhooks.handlers.common import (
     ENTITY_CHARGE,
@@ -43,17 +54,31 @@ UNKNOWN_CUSTOMER = ignored("unknown customer")
 NOT_MATCHED = ignored("not matched")
 NO_DATE = ignored("no invoice date")
 NO_TOTAL = ignored("no usable total")
+#: Events after which an unlinked invoice is linked automatically when it fits.
+AUTO_LINK_EVENTS: frozenset[str] = frozenset({"create_invoice", "update_invoice"})
+
+
+def unlinked(candidates: int) -> str:
+    """The outcome of an invoice left unlinked (PLAN-008a §2 rule 3)."""
+    return f"{WebhookOutcome.PROCESSED.value}: unlinked ({candidates} candidates)"
 
 
 def handle(event_type: str, provider_object_id: str) -> str:
     if not provider_object_id:
         return NO_OBJECT_ID
-    outcome, _ = sync_invoice(provider_object_id)
+    outcome, _ = sync_invoice(
+        provider_object_id, event_type=event_type, received_at=events.received_at()
+    )
     return outcome
 
 
-def sync_invoice(external_id: str) -> tuple[str, Invoice | None]:
-    """Re-fetch one invoice and mirror it; the outcome and the local invoice, if any."""
+def sync_invoice(
+    external_id: str, *, event_type: str = "", received_at: datetime | None = None
+) -> tuple[str, Invoice | None]:
+    """Re-fetch one invoice and mirror it; the outcome and the local invoice, if any.
+
+    ``event_type`` and ``received_at`` are those of the webhook event being handled.
+    """
     record = fetch(payments.get_provider().get_invoice, external_id)
     if record is None:
         return NOT_AT_PROVIDER, None
@@ -62,7 +87,20 @@ def sync_invoice(external_id: str) -> tuple[str, Invoice | None]:
         outcome, invoice = _create(record)
         if invoice is None:
             return outcome, None
-    _apply(invoice, record)
+    _apply(invoice, record, event_type, received_at)
+    if (
+        event_type in AUTO_LINK_EVENTS
+        and invoice.rent_charge_id is None
+        and invoice.insurance_charge_id is None
+        and invoice.charge_adjustment_id is None
+        and not invoice_sync.schedule_id(record)
+    ):
+        total = record.total if usable_total(record.total) else None
+        linked, candidates = rent_run.auto_link_invoice(
+            invoice.pk, total, invoice_sync.invoice_date(record)
+        )
+        if not linked:
+            return unlinked(candidates), invoice
     return WebhookOutcome.PROCESSED, invoice
 
 
@@ -144,8 +182,12 @@ def _create(record: InvoiceRecord) -> tuple[str, Invoice | None]:
     return WebhookOutcome.PROCESSED, invoice
 
 
-def _apply(invoice: Invoice, record: InvoiceRecord) -> None:
-    changed = invoice_sync.record_provider_state(invoice.pk, record)
+def _apply(
+    invoice: Invoice, record: InvoiceRecord, event_type: str, received_at: datetime | None
+) -> None:
+    changed = invoice_sync.record_provider_state(
+        invoice.pk, record, event_type=event_type, event_at=received_at
+    )
     if changed:
         audit(
             "invoice.provider_state_changed",

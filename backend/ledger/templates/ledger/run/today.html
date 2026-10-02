@@ -16,6 +16,7 @@
   {% endif %}
 
   <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. The payment provider's schedules generate the invoices; "Match invoices" links them to these charges. Nothing here debits anyone.</p>
+  <p class="muted" id="match-scope">"Match invoices" reads the invoices of the provider's schedules only. An invoice made on the payment provider's dashboard is not matched here: link it from its charge's page with "Link invoice".</p>
 
   {% if can_run %}
     <div class="actions">

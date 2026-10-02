@@ -33,7 +33,12 @@ from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
 from django.views.decorators.csrf import csrf_exempt
 
 from ledger.validators import validate_json_has_no_payment_data
-from payments.models import WebhookEvent, WebhookEventSource, WebhookOutcome
+from payments.models import (
+    WebhookEvent,
+    WebhookEventSource,
+    WebhookObjectIdSource,
+    WebhookOutcome,
+)
 from payments.redaction import DROPPED, is_safe_text, redact
 from payments.webhooks import queue
 from payments.webhooks.events import EVENT_NAMES, UNKNOWN_TYPE
@@ -168,23 +173,58 @@ def resolve_event_type(header: str | None, body: object) -> tuple[str, WebhookEv
     return UNKNOWN_TYPE, WebhookEventSource.UNKNOWN
 
 
-#: Keys read for the object's ID, in this order. A deposit is identified by its batch
-#: (TODO-VERIFY-030, TODO-VERIFY-054: a deposit event's body carries ``batch_id`` and
-#: no ``id``).
-OBJECT_ID_KEYS: tuple[str, ...] = ("id", "batch_id")
+#: Paths read for the object's ID, in this order (PLAN-008a §2 rule 1). The first path
+#: that holds a value decides: a ``send_invoice`` body is an email envelope with the
+#: invoice under ``mergeVars.invoice`` and no top-level ``id``; a deposit is identified
+#: by its batch (TODO-VERIFY-030, TODO-VERIFY-054: ``batch_id`` and no ``id``).
+OBJECT_ID_PATHS: tuple[tuple[WebhookObjectIdSource, tuple[str, ...]], ...] = (
+    (WebhookObjectIdSource.ID, ("id",)),
+    (WebhookObjectIdSource.MERGE_VARS_INVOICE_ID, ("mergeVars", "invoice", "id")),
+    (WebhookObjectIdSource.INVOICE_ID, ("invoice", "id")),
+    (WebhookObjectIdSource.TRANSACTION_ID, ("transaction", "id")),
+    (WebhookObjectIdSource.DATA_ID, ("data", "id")),
+    (WebhookObjectIdSource.BATCH_ID, ("batch_id",)),
+)
 
 
-def object_id(body: object) -> str:
-    """The body's ``id`` (or, without one, ``batch_id``) when it is a plain identifier,
-    else ``""``."""
+def _at(body: Mapping[str, object], path: tuple[str, ...]) -> object:
+    value: object = body
+    for key in path:
+        if not isinstance(value, Mapping):
+            return None
+        value = value.get(key)
+    return value
+
+
+def object_id_and_source(body: object) -> tuple[str, WebhookObjectIdSource]:
+    """The object ID and the path it was read from, or ``("", NONE)``.
+
+    The first path holding a value decides; only a plain identifier is accepted, so a
+    value of another shape at that path yields no ID (it is not looked for further).
+    """
     if not isinstance(body, Mapping):
-        return ""
-    value = next((body[key] for key in OBJECT_ID_KEYS if body.get(key) is not None), None)
+        return "", WebhookObjectIdSource.NONE
+    found = next(
+        (
+            (source, value)
+            for source, path in OBJECT_ID_PATHS
+            if (value := _at(body, path)) is not None
+        ),
+        None,
+    )
+    if found is None:
+        return "", WebhookObjectIdSource.NONE
+    source, value = found
     if isinstance(value, int) and not isinstance(value, bool):
         value = str(value)
     if isinstance(value, str) and _OBJECT_ID.fullmatch(value) and is_safe_text(value):
-        return value
-    return ""
+        return value, source
+    return "", WebhookObjectIdSource.NONE
+
+
+def object_id(body: object) -> str:
+    """The body's object ID when it is a plain identifier, else ``""``."""
+    return object_id_and_source(body)[0]
 
 
 def _depth_within(value: object, limit: int) -> bool:
@@ -224,12 +264,14 @@ def store_event(raw: bytes, header: str | None) -> uuid.UUID | None:
     body = parse_body(raw)
     event_type, source = resolve_event_type(header, body)
     digest = dedupe_hash(event_type, raw)
+    provider_object_id, object_id_source = object_id_and_source(body)
     try:
         with transaction.atomic():
             event = WebhookEvent.objects.create(
                 event_type=event_type,
                 event_source=source,
-                provider_object_id=object_id(body),
+                provider_object_id=provider_object_id,
+                object_id_source=object_id_source,
                 dedupe_hash=digest,
                 payload=stored_payload(body),
                 outcome=WebhookOutcome.RECEIVED,

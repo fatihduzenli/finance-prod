@@ -106,6 +106,19 @@ class WebhookEventSource(models.TextChoices):
     UNKNOWN = "unknown", "Unknown"
 
 
+class WebhookObjectIdSource(models.TextChoices):
+    """Where the receiver found the object ID (docs/qa/PLAN-008a §2 rule 1); empty when
+    no plain identifier was found."""
+
+    NONE = "", "None"
+    ID = "id", "id"
+    MERGE_VARS_INVOICE_ID = "mergeVars.invoice.id", "mergeVars.invoice.id"
+    INVOICE_ID = "invoice.id", "invoice.id"
+    TRANSACTION_ID = "transaction.id", "transaction.id"
+    DATA_ID = "data.id", "data.id"
+    BATCH_ID = "batch_id", "batch_id"
+
+
 class WebhookOutcome(models.TextChoices):
     """Values of ``WebhookEvent.outcome`` (PLAN-008 D3).
 
@@ -128,6 +141,13 @@ class WebhookEvent(GuardedModel):
     )
     #: An identifier, not free text: outside the card-number guard (PLAN-004 §4.6 point 1).
     provider_object_id = models.CharField(max_length=EXTERNAL_ID_MAX_LENGTH)
+    #: The body path the object ID was read from (PLAN-008a §2 rule 1).
+    object_id_source = models.CharField(
+        max_length=32,
+        choices=WebhookObjectIdSource.choices,
+        default=WebhookObjectIdSource.NONE,
+        blank=True,
+    )
     #: An identifier, not free text: outside the card-number guard (PLAN-004 §4.6 point 1).
     dedupe_hash = models.CharField(max_length=64, unique=True)
     #: The body as received, redacted per Rule 1 (``payments.redaction.redact``); null
@@ -135,7 +155,8 @@ class WebhookEvent(GuardedModel):
     #: ``Decimal`` numbers are stored as strings, never as binary floating point.
     payload = guarded_json(null=True, blank=True, encoder=DjangoJSONEncoder)
     processed_at = models.DateTimeField(null=True, blank=True)
-    outcome = guarded_char(32, blank=True)
+    #: ``processed: unlinked (n candidates)`` (PLAN-008a §2 rule 3) needs more than 32.
+    outcome = guarded_char(64, blank=True)
     error = free_text()
     #: Failed processing attempts; the third moves the event to dead letter.
     attempts = models.PositiveSmallIntegerField(default=0)
@@ -149,6 +170,10 @@ class WebhookEvent(GuardedModel):
             models.CheckConstraint(
                 condition=Q(event_source__in=WebhookEventSource.values),
                 name="webhook_events_event_source_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(object_id_source__in=WebhookObjectIdSource.values),
+                name="webhook_events_object_id_source_valid",
             ),
         ]
 

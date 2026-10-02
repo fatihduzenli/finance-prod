@@ -5,7 +5,12 @@
   <h1>Rent {{ charge.period_month|date:"Y-m" }}, debit {{ charge.seq }}{% if charge.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
 
-  {% if can_record %}<p class="actions"><a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Record a payment</a></p>{% endif %}
+  {% if can_record or can_link_invoice %}
+    <p class="actions">
+      {% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Record a payment</a>{% endif %}
+      {% if can_link_invoice %}<a class="btn" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Link invoice</a>{% endif %}
+    </p>
+  {% endif %}
   {% if can_retry_mark %}
     <form method="post" action="{% url 'ledger:charges:retry_mark' pk=charge.pk %}" class="actions js-single-submit">
       {% csrf_token %}<button class="btn btn-primary" type="submit" id="retry-mark">Retry marking the invoice paid</button>
@@ -31,7 +36,7 @@
       {% for invoice in invoices %}
         <tr><td>{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|date:"Y-m-d" }}</td><td>${{ invoice.total }}</td><td>{{ invoice.provider_status|default:"—" }}</td></tr>
       {% empty %}
-        <tr><td colspan="4" class="muted">No invoice matched yet.</td></tr>
+        <tr><td colspan="4" class="muted">No invoice linked yet.{% if can_link_invoice %} An invoice made on the payment provider's dashboard can be linked with "Link invoice".{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>

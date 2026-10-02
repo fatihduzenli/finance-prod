@@ -1,9 +1,10 @@
-"""Rent charge screens: detail, manual payment and the marking retry (PLAN-007 §4.1, D8;
-PLAN-009 D1 to D3, D5).
+"""Rent charge screens: detail, manual payment, the marking retry and linking an invoice
+(PLAN-007 §4.1, D8; PLAN-009 D1 to D3, D5; PLAN-008a §2 rule 4).
 
 The detail page is read by any role and shows the carried balance of earlier charges.
-Recording a payment (GET of the form and POST) and retrying the marking of the provider
-invoice need ``billing``; the registry checks the POST first. The service re-checks
+Recording a payment (GET of the form and POST), retrying the marking of the provider
+invoice and linking an invoice (GET of the list and POST) need ``billing``; the
+registry checks the POST first. The service re-checks
 every rule under a row lock, makes the provider calls and writes the audit rows. Every
 POST ends in a redirect; a form with errors is held in the session for the next GET.
 """
@@ -19,7 +20,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
-from ledger.forms import ManualPaymentForm
+from ledger.forms import LinkInvoiceForm, ManualPaymentForm
 from ledger.models import ChargeNote, RentCharge, RentChargeStatus
 from ledger.services import rent_run
 from ledger.services.rent_run import MarkAction, MarkResult
@@ -68,6 +69,7 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             and charge.status != RentChargeStatus.WAIVED
             and charge.balance > 0,
             "can_retry_mark": retry_wait == 0,
+            "can_link_invoice": billing and not charge.invoices.exists(),
             "retry_wait_message": (
                 operator_sync.retry_wait_message(retry_wait) if retry_wait else ""
             ),
@@ -121,3 +123,40 @@ def charge_retry_mark(request: HttpRequest, pk: str) -> HttpResponse:
     charge = _load(pk)
     _report(request, rent_run.retry_provider_mark(charge.pk, actor=_actor(request)))
     return redirect("ledger:charges:detail", pk=charge.pk)
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def charge_link_invoice(request: HttpRequest, pk: str) -> HttpResponse:
+    if not meets(_role(request), Role.BILLING):
+        return forbidden(request)
+    charge = _load(pk)
+    target = f"charge-link-invoice:{charge.pk}"
+    if request.method == "POST":
+        form = LinkInvoiceForm(request.POST)
+        if form.is_valid():
+            data = form.cleaned_data
+            outcome = rent_run.link_invoice(
+                charge.pk,
+                data["invoice"],
+                confirm=data["confirm"],
+                note=data["note"],
+                actor=_actor(request),
+            )
+            if outcome.ok:
+                messages.success(request, outcome.message)
+                return redirect("ledger:charges:detail", pk=charge.pk)
+            form.add_error(outcome.field, outcome.message)
+        _hold(request, target, form)
+        return redirect("ledger:charges:link_invoice", pk=charge.pk)
+    form = _held(request, target, LinkInvoiceForm) or LinkInvoiceForm()
+    return render(
+        request,
+        "ledger/charges/link_invoice.html",
+        {
+            "form": form,
+            "charge": charge,
+            "has_invoice": charge.invoices.exists(),
+            "rows": rent_run.unlinked_invoices(charge),
+        },
+    )

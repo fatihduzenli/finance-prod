@@ -101,6 +101,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:run:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:run:match": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:charges:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Linking an unlinked invoice to a rent charge (PLAN-008a §2 rule 4): admin or
+    # billing. The view refuses the GET of the form below billing too.
+    "ledger:charges:link_invoice": RouteRule(min_role=Role.BILLING, methods=POST),
     # Retry marking the provider invoice paid (PLAN-009 D2): billing.
     "ledger:charges:retry_mark": RouteRule(min_role=Role.BILLING, methods=POST),
     # Webhook events (docs/qa/PLAN-008-webhooks.md D8): replay needs billing.

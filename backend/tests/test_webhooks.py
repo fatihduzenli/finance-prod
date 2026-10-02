@@ -318,6 +318,96 @@ def test_only_a_plain_identifier_becomes_the_object_id(value: object, expected: 
     assert stored({"id": value}).provider_object_id == expected
 
 
+# --- PLAN-008a row 1: the object ID of an envelope, and where it was found ----------------
+
+SEND_INVOICE_ENVELOPE = {
+    "toEmail": "ops@example.com",
+    "toName": "Operator",
+    "ccEmails": [],
+    "bccEmails": [],
+    "mergeVars": {
+        "user": {"name": "Staff"},
+        "invoice": {"id": "inv-send-0001", "url": "https://example.com/i", "meta": {}},
+    },
+}
+
+
+@pytest.mark.django_db
+def test_a_send_invoice_envelope_takes_its_object_id_from_merge_vars_invoice_id() -> None:
+    event = stored(SEND_INVOICE_ENVELOPE, "send_invoice")
+    assert event.event_type == "send_invoice"
+    assert event.provider_object_id == "inv-send-0001"
+    assert event.object_id_source == "mergeVars.invoice.id"
+
+
+@pytest.mark.django_db
+def test_a_send_invoice_envelope_delivered_over_http_records_the_source(client: Client) -> None:
+    assert deliver(client, SEND_INVOICE_ENVELOPE, event="send_invoice").status_code == 200
+    event = WebhookEvent.objects.get()
+    assert (event.provider_object_id, event.object_id_source) == (
+        "inv-send-0001",
+        "mergeVars.invoice.id",
+    )
+
+
+@pytest.mark.django_db
+def test_a_top_level_id_wins_over_a_nested_one() -> None:
+    body = {**SEND_INVOICE_ENVELOPE, "id": "inv-top-0001"}
+    event = stored(body, "send_invoice")
+    assert (event.provider_object_id, event.object_id_source) == ("inv-top-0001", "id")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("body", "expected", "source"),
+    [
+        ({"mergeVars": {"invoice": {"id": 42}}}, "42", "mergeVars.invoice.id"),
+        ({"invoice": {"id": "inv-a"}}, "inv-a", "invoice.id"),
+        ({"transaction": {"id": "txn-a"}}, "txn-a", "transaction.id"),
+        ({"data": {"id": "obj-a"}}, "obj-a", "data.id"),
+        ({"batch_id": "batch-a"}, "batch-a", "batch_id"),
+        # The order of the paths: mergeVars before invoice before transaction ...
+        (
+            {"invoice": {"id": "inv-b"}, "mergeVars": {"invoice": {"id": "inv-m"}}},
+            "inv-m",
+            "mergeVars.invoice.id",
+        ),
+        ({"transaction": {"id": "txn-b"}, "invoice": {"id": "inv-c"}}, "inv-c", "invoice.id"),
+        ({"data": {"id": "d"}, "batch_id": "b-1"}, "d", "data.id"),
+        # Nothing usable anywhere.
+        ({"mergeVars": {"invoice": "inv-not-an-object"}}, "", ""),
+        ({"mergeVars": None}, "", ""),
+        ({"toEmail": "ops@example.com"}, "", ""),
+    ],
+)
+def test_the_object_id_paths_are_read_in_order(body: object, expected: str, source: str) -> None:
+    event = stored(body, "send_invoice")
+    assert (event.provider_object_id, event.object_id_source) == (expected, source)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "value", ["../../etc/passwd", "a/b", "a b", CARD, True, {"nested": 1}, ["x"], "x" * 256]
+)
+def test_a_nested_value_that_is_not_a_plain_identifier_is_rejected(value: object) -> None:
+    body = {"mergeVars": {"invoice": {"id": value}}, "invoice": {"id": "inv-fallback"}}
+    event = stored(body, "send_invoice")
+    # The first path holding a value decides; a bad value is not replaced by a later one.
+    assert (event.provider_object_id, event.object_id_source) == ("", "")
+
+
+@pytest.mark.django_db
+def test_the_detail_page_shows_where_the_object_id_was_found() -> None:
+    event = stored(SEND_INVOICE_ENVELOPE, "send_invoice")
+    viewer, _ = client_for(Role.VIEWER)
+    page = viewer.get(f"/webhooks/{event.pk}/").content.decode()
+    assert '<dd id="object-id-source"><code>mergeVars.invoice.id</code></dd>' in page
+    assert "inv-send-0001" not in page
+    missing = stored({"toEmail": "ops@example.com", "n": 1}, "send_invoice")
+    page = viewer.get(f"/webhooks/{missing.pk}/").content.decode()
+    assert '<dd id="object-id-source">—</dd>' in page
+
+
 @pytest.mark.django_db
 def test_the_stored_payload_is_redacted_at_every_depth() -> None:
     body = {

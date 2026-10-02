@@ -598,6 +598,16 @@ LEDGER_CASES: list[ConstraintCase] = [
         ),
     ),
     ConstraintCase(
+        # Partial: any number of invoices without a rent charge; one per charge.
+        "invoices_one_per_rent_charge",
+        unique_pair(new_invoice, {}, {}),
+        lambda: unique_pair(
+            new_invoice,
+            {"rent_charge": saved(new_rent_charge())},
+            {"rent_charge": lambda row: row.rent_charge},
+        )(),
+    ),
+    ConstraintCase(
         "invoices_total_is_subtotal_plus_tax",
         lambda: new_invoice(subtotal=D("0.10"), tax=D("0.20"), total=D("0.30")),
         lambda: new_invoice(subtotal=D("0.10"), tax=D("0.20"), total=D("0.31")),
