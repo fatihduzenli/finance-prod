@@ -417,3 +417,11 @@ the login page myself." The condition for starting Prompt 4 is met.
   `finance-staging-web--0000021` on the new image: healthy, 100 % traffic, migration 0010 applied,
   environment check ok. The CI job is marked failed although the deployment took effect; no
   re-run was needed. Health 200, login 200, `/payments/` without a session 401.
+
+## Carried into the next plan (owner request, 2026-10-02)
+
+- **CI verification step after `az containerapp update`:** poll until the active revision's
+  image tag equals the commit SHA and its health is Healthy and Running; pass the job on that
+  evidence even when the update command itself returned a transient Azure error; fail the job
+  when the revision is not live within the wait. Not urgent; goes into the next plan that
+  touches `.github/workflows/ci.yml`.
