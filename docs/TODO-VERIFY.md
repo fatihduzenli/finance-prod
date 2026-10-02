@@ -61,8 +61,8 @@ and the code in the same change.
 | TODO-VERIFY-052 | Deposit list keys `batched_at`, `sum`, `fees`, `net` | Deposit handler | As stated | blocked on ACH | Open |
 | TODO-VERIFY-053 | A dispute event's object ID is the disputed transaction's ID | Dispute handler | As stated | first dispute | Open |
 | TODO-VERIFY-054 | A deposit event body carries `batch_id` and no `id` | Receiver fallback | As stated | blocked on ACH | Open |
-| TODO-VERIFY-055 | An invoice the provider shows paid in full has status string `PAID` (compared stripped and upper-cased) | Check-before-write on marking; `payments/invoice_sync.py` | Yes | first marked invoice on staging | Open |
+| TODO-VERIFY-055 | The paid status string | Check-before-write on marking | — | **Closed 2026-10-02 on staging:** `PAID`; the retry path found the hand-marked invoice paid and sent nothing. | Closed |
 | TODO-VERIFY-056 | Does omitting `email` on `PUT /customer/{id}` clear the customer's email at Stax or leave it unchanged? | Operator edits that remove an email (PLAN-006c rule 4) | Unknown; the `update_customer` webhook's mismatch flag surfaces a difference | first such edit on staging | Open |
 | TODO-VERIFY-057 | Does an invoice `total` arrive as an integer (dollars) or a decimal string on other invoices? Observed once as an integer `1500` | Invoice mapping | Both accepted and read as dollars | more invoices on staging | Open |
-| TODO-VERIFY-058 | Boolean query parameters: Stax rejected `email_receipt=false` (422 naming the field) on 2026-10-02; `0`/`1` are now sent. Does Stax accept `true`/`false` at all? | Every boolean query parameter | `0`/`1` | next marking on staging | Open |
+| TODO-VERIFY-058 | Boolean query parameters | Every boolean query parameter | — | **Closed 2026-10-02 on staging:** `email_receipt=0` accepted (a fresh invoice was marked paid with the memo); `false` had been rejected. | Closed |
 

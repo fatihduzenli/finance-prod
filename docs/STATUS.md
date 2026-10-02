@@ -484,3 +484,18 @@ the login page myself." The condition for starting Prompt 4 is met.
   image tag, healthy; environment check ok. Owner's next clicks: Retry on the hand-marked charge
   (expect "already paid" with no call), the memo test on a fresh charge, replay of the old
   `send_invoice` event.
+
+## Update, 2026-10-02, Checkpoints 8 and 9 closed except the ACH-blocked items
+
+- **Owner, in writing:** on revision 0000024 (1) Retry on the hand-marked charge: "Provider
+  invoice already showed paid before marking: not marked again. Check for a double payment."
+  Nothing sent. (2) Fresh charge for operator halid: the dashboard invoice auto-linked,
+  `create_invoice` and `send_invoice` processed, wire payment recorded, Stax shows the invoice
+  paid with memo "Paid by wire on 10/02/2026. test wire two"; the resulting `create_transaction`
+  event was ignored as not ACH (a cash-marked payment), which is right. (3) Replay of the old
+  `send_invoice` event: processed, object ID from `mergeVars.invoice.id`.
+- TODO-VERIFY-058 answered in practice: `email_receipt=0` accepted. TODO-VERIFY-055 answered:
+  the paid status string is `PAID`.
+- **Checkpoints 8 and 9 closed** except the items blocked on Stax ACH: transaction, settlement,
+  return, refund, void and deposit events; refunds and voids of real debits; the
+  "pay half, refund the half, pay in full" matrix row.
