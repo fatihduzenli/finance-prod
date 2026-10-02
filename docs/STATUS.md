@@ -387,3 +387,11 @@ the login page myself." The condition for starting Prompt 4 is met.
   `GET /webhook` then fifteen `POST /webhook`, all 200, paced by the limiter. Registrations: 15,
   created: 15; IDs stored in `external_refs` (`webhook_registration`). Event list as in
   `docs/RUNBOOK.md` §2. The owner's four click paths are next.
+
+## Update, 2026-10-02, Sentry wired on staging
+
+- Owner created the Sentry project `finance-staging` (alert: level fatal emails the owner) and
+  stored `sentry-dsn` in `finance-sandbox-kv`. Owner typed "push" and "deploy". Template
+  deployment `staging-sentry-dsn` succeeded; the live revision `finance-staging-web--0000019`
+  has `SENTRY_DSN` as a vault reference. The breaker and dead-letter alerts now reach Sentry.
+- A one-off test event (level fatal) from inside the container awaits the owner's word.
