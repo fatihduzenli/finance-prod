@@ -437,3 +437,8 @@ the login page myself." The condition for starting Prompt 4 is met.
   One MAJOR (email validated as required in the adapter) found and fixed. QA PASS
   (`docs/qa/QA-006c-operator-update-sync.md`), **not pushed**.
 
+
+## Update, 2026-10-02, PLAN-006c on staging
+
+- Owner typed "push". `main` at `ab8d075` deployed; the live revision runs that image tag,
+  healthy; environment check ok. Click 1 of Checkpoint 8 can be repeated.
