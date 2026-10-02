@@ -371,3 +371,12 @@ the login page myself." The condition for starting Prompt 4 is met.
   then the owner's four clicks (operator edit → `update_customer` event; dashboard invoice →
   invoice events; replay; wrong token 404).
 
+
+## Update, 2026-10-02, Prompt 8 on staging
+
+- Owner typed "push". `main` at `46fcf80` deployed; revision `finance-staging-web--0000017`
+  healthy; migrations `payments.0003` and `ledger.0009` applied; environment check ok.
+- Receiver probed from outside: POST with a wrong token → 404, empty body; GET → 404; the
+  path with no token → 404. The log shows the refusal lines with `[token]` in place of the
+  path segment and no token value. Nothing stored (no row can exist before registration).
+- Waiting for the owner's "register" before `register_webhooks` runs in the container.
