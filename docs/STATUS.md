@@ -409,3 +409,11 @@ the login page myself." The condition for starting Prompt 4 is met.
 
 - **Owner, in writing (2026-10-02): "voids as built."** A void marks the original payment voided;
   refunds are new rows linked to their parent. Amendment 4 is read that way from here on.
+
+## Update, 2026-10-02, Prompt 9 on staging
+
+- Owner typed "push". `main` at `0725f8f`. The pipeline's deploy step reported an Azure
+  InternalServerError from `az containerapp update`, yet Azure created and activated revision
+  `finance-staging-web--0000021` on the new image: healthy, 100 % traffic, migration 0010 applied,
+  environment check ok. The CI job is marked failed although the deployment took effect; no
+  re-run was needed. Health 200, login 200, `/payments/` without a session 401.
