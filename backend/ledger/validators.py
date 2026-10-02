@@ -88,6 +88,13 @@ def normalise_for_matching(text: str) -> str:
     return _UUID.sub(UUID_REPLACEMENT, without_invisible).replace("\r\n", "\n")
 
 
+def visible_text(text: str) -> str:
+    """The text without :data:`INVISIBLE_CHARACTERS` and without leading or trailing
+    Unicode whitespace (no-break space included): what a required note is judged by,
+    and what is stored."""
+    return text.translate(_REMOVE_INVISIBLE).strip()
+
+
 def _has_card_number(normalised: str) -> bool:
     for match in _DIGIT_RUN.finditer(normalised):
         digits = _digit_values(match.group())

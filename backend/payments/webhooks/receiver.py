@@ -8,9 +8,9 @@ as ``/api/webhooks/stax/[token]/``. The response is returned, never raised, and 
 as logged, so Django does not log the real path (which would hold the attempted token).
 
 An accepted delivery is stored (redacted, with its deduplication hash) and answered
-with 200 at once; its ID is queued after the commit. Nothing here calls the provider,
-and nothing here imports the adapter package. A byte-identical redelivery stores
-nothing new: the first row's ``duplicate_count`` goes up and its outcome stays.
+with 200 at once; the ``worker`` process takes it from the table (PLAN-010 D2). Nothing
+here calls the provider, and nothing here imports the adapter package. A byte-identical
+redelivery stores nothing new: the first row's ``duplicate_count`` goes up and its outcome stays.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ import re
 import uuid
 from collections.abc import Mapping
 from decimal import Decimal
-from functools import partial
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -40,7 +39,6 @@ from payments.models import (
     WebhookOutcome,
 )
 from payments.redaction import DROPPED, is_safe_text, redact
-from payments.webhooks import queue
 from payments.webhooks.events import EVENT_NAMES, UNKNOWN_TYPE
 
 #: Largest body accepted, in bytes (D2).
@@ -110,9 +108,7 @@ def receive(request: HttpRequest, rest: str) -> HttpResponse:
     body = _read_body(request)
     if body is None:
         return _not_found(request, "body too large")
-    event_id = store_event(body, request.headers.get(EVENT_HEADER))
-    if event_id is not None:
-        transaction.on_commit(partial(queue.enqueue, event_id))
+    store_event(body, request.headers.get(EVENT_HEADER))
     return HttpResponse(status=200)
 
 

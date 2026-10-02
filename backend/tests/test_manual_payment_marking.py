@@ -41,11 +41,13 @@ from payments.stax.adapter import StaxProvider
 from payments.stax.breaker import CircuitBreaker, reset_breaker
 from payments.stax.budget import FailureBudget, reset_budget
 from payments.stax.state import MemoryStateStore
+from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.stax_helpers import always, make_rig
 from tests.test_operator_views import client_for
 from tests.test_rent_run import RENT, charge_of, enrolled, invoice, lease
 
-pytestmark = pytest.mark.django_db
+# PLAN-010 D3: views queue provider work; the worker is run after every request here.
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("worker_between_requests")]
 
 D = Decimal
 DAY = date(2026, 10, 15)

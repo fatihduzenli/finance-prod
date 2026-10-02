@@ -1,0 +1,100 @@
+{% extends "finance/base.html" %}
+{% block title %}Reconciliation{% endblock %}
+{% block content %}
+  <h1>Reconciliation</h1>
+  <p class="muted">Each night the reconciliation re-reads open invoices, recent transactions, deposits and ACH rejections from the payment provider, and flags pending payments that are too old. Times are shown in {{ timezone }}. Identifiers are masked.</p>
+
+  {% if can_run %}
+    <div class="actions">
+      <form method="post" action="{% url 'ledger:reconciliation:run' %}" class="js-single-submit">
+        {% csrf_token %}<button class="btn btn-primary" type="submit" id="run-now"{% if job_refresh %} disabled{% endif %}>Run now</button>
+      </form>
+      <span class="muted">Runs the same reconciliation as the nightly job, now. Only one runs at a time.</span>
+    </div>
+  {% endif %}
+  {% include "ledger/_job_status.html" %}
+
+  <h2>Last run</h2>
+  {% if last %}
+    <dl id="last-run">
+      <dt>Started</dt><dd id="last-started">{{ last.started_local }}</dd>
+      <dt>How</dt><dd>{{ last.run.get_trigger_display }}</dd>
+      <dt>Status</dt><dd id="last-status">{{ last.run.get_status_display }}</dd>
+      <dt>Step reached</dt><dd>{{ last.run.get_step_reached_display|default:"—" }}</dd>
+      <dt>Duration</dt><dd id="last-duration">{% if last.run.duration_ms is not None %}{{ last.run.duration_ms }} ms{% else %}—{% endif %}</dd>
+      <dt>Provider requests</dt><dd id="last-requests">{{ last.run.requests }}</dd>
+      <dt>Error</dt><dd id="last-error">{{ last.run.error|default:"—" }}</dd>
+    </dl>
+    <table id="last-counts">
+      <thead><tr><th>Step</th><th>Counts</th></tr></thead>
+      <tbody>
+        {% for step in last.steps %}
+          <tr><td>{{ step.letter }}. {{ step.label }}</td><td>{% for name, number in step.counts %}{{ name }}: {{ number }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="muted">nothing</span>{% endfor %}</td></tr>
+        {% empty %}
+          <tr><td colspan="2" class="muted">No step completed.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted" id="no-run">No reconciliation has run yet.</p>
+  {% endif %}
+
+  <h2>Mismatches</h2>
+  <p class="muted">{{ open_count }} unresolved. Unresolved first, newest first.</p>
+  <table id="mismatches">
+    <thead>
+      <tr><th>Found</th><th>Kind</th><th>Record</th><th>Detail</th><th>Resolved</th><th>Resolve</th></tr>
+    </thead>
+    <tbody>
+      {% for item in rows %}
+        <tr id="mismatch-{{ item.mismatch.pk }}">
+          <td>{{ item.found_local }}</td>
+          <td>{{ item.mismatch.get_kind_display }}</td>
+          <td>{{ item.mismatch.entity_type }} {{ item.entity_masked }}</td>
+          <td>{{ item.mismatch.detail }}</td>
+          <td>{% if item.mismatch.resolved_at %}{{ item.mismatch.resolved_at|date:"Y-m-d H:i" }} UTC{% if item.mismatch.resolved_by %} by {{ item.mismatch.resolved_by.get_username }}{% endif %}: {{ item.mismatch.resolution_note }}{% else %}<span class="muted">Open</span>{% endif %}</td>
+          <td>
+            {% if not item.mismatch.resolved_at %}
+              <form method="post" action="{% url 'ledger:reconciliation:resolve' pk=item.mismatch.pk %}" class="js-single-submit">
+                {% csrf_token %}
+                <label for="note-{{ item.mismatch.pk }}">Note *</label>
+                <textarea name="note" id="note-{{ item.mismatch.pk }}" rows="2" maxlength="2000" required></textarea>
+                <button class="btn" type="submit">Resolve with note</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">No mismatches.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if page.paginator.num_pages > 1 %}
+    <p class="actions">
+      {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} mismatches)</span>
+      {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+    </p>
+  {% endif %}
+
+  <h2>Recent runs</h2>
+  <table id="recent-runs">
+    <thead><tr><th>Started</th><th>How</th><th>Status</th><th>Step</th><th>Requests</th><th>Duration</th><th>Note</th></tr></thead>
+    <tbody>
+      {% for item in recent %}
+        <tr>
+          <td>{{ item.started_local }}</td>
+          <td>{{ item.run.get_trigger_display }}</td>
+          <td>{{ item.run.get_status_display }}</td>
+          <td>{{ item.run.step_reached|default:"—" }}</td>
+          <td>{{ item.run.requests }}</td>
+          <td>{% if item.run.duration_ms is not None %}{{ item.run.duration_ms }} ms{% else %}—{% endif %}</td>
+          <td>{{ item.run.error|default:"" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7" class="muted">No runs yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

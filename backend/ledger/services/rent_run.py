@@ -335,8 +335,12 @@ class PaymentOutcome:
     payment: Payment | None = None
     #: True when the form's key had already recorded a payment (a resubmission).
     replayed: bool = False
-    #: What happened at the payment provider afterwards; ``None`` when nothing was saved.
+    #: What happened at the payment provider afterwards; ``None`` when nothing was saved
+    #: or when the marking was left to the caller (``mark_due``).
     provider: MarkResult | None = None
+    #: True when the provider invoice is still to be marked (``defer_mark=True``): the
+    #: caller runs :func:`mark_provider_invoice` for ``payment`` (PLAN-010 D3).
+    mark_due: bool = False
 
 
 # --- Who is due -----------------------------------------------------------------------
@@ -857,13 +861,16 @@ def record_manual_payment(
     creation_key: uuid.UUID | None = None,
     today: date | None = None,
     reference: str = "",
+    defer_mark: bool = False,
 ) -> PaymentOutcome:
     """Record a Zelle, wire or other payment against a rent charge (D8), then update the
     provider invoice as the module docstring says (PLAN-009 D1 to D3).
 
     ``creation_key`` is the one-time key of the form; it is kept in the audit row and
     looked up under the charge's row lock, so a resubmitted form records nothing and
-    calls nothing.
+    calls nothing. With ``defer_mark`` (the web, PLAN-010 D3) no provider call is made:
+    a payment whose invoice is to be marked returns ``mark_due=True`` and the worker
+    marks it with :func:`mark_provider_invoice`.
     """
     text = (note or "").strip()
     reference = (reference or "").strip()
@@ -939,8 +946,17 @@ def record_manual_payment(
         return PaymentOutcome(
             True, PAY_RECORDED, payment=payment, provider=MarkResult(MarkAction.NO_INVOICE)
         )
-    result = _mark(charge.pk, payment.pk, actor=actor, retry=False)
+    if defer_mark:
+        return PaymentOutcome(True, PAY_RECORDED, payment=payment, mark_due=True)
+    result = mark_provider_invoice(charge.pk, payment.pk, actor=actor)
     return PaymentOutcome(True, PAY_RECORDED, payment=payment, provider=result)
+
+
+def mark_provider_invoice(
+    charge_id: uuid.UUID, payment_id: uuid.UUID, *, actor: User | None
+) -> MarkResult:
+    """Mark the charge's provider invoice paid for this manual payment (PLAN-009 D1)."""
+    return _mark(charge_id, payment_id, actor=actor, retry=False)
 
 
 def retry_provider_mark(charge_id: uuid.UUID, *, actor: User | None) -> MarkResult:

@@ -1,7 +1,9 @@
 """Provider-side tables and the provider_status write rule (PLAN-004 §6 rows 3 and 8).
 
-Row 3 for ``external_refs``, ``provider_snapshots``, ``deposits``, ``webhook_events`` and
-``sync_state``, with the constraint-case machinery of ``test_ledger_models``.
+Row 3 for ``external_refs``, ``provider_snapshots``, ``deposits``, ``webhook_events``,
+``sync_state``, ``jobs`` (PLAN-010 D1), ``reconciliation_runs`` and
+``reconciliation_mismatches`` (PLAN-010 D10), with the constraint-case machinery of
+``test_ledger_models``.
 
 Row 8: ``invoices.provider_status`` is written only inside
 ``payments.sync_writer.provider_write()``; on PostgreSQL a trigger rejects every other
@@ -91,12 +93,39 @@ def new_sync_state(**fields: Any) -> provider.SyncState:
     return provider.SyncState(**{"job_name": "nightly_reconciliation", **fields})
 
 
+def new_job(**fields: Any) -> provider.Job:
+    values = {
+        "kind": provider.JobKind.OPERATOR_SYNC,
+        "entity_type": provider.JobEntity.OPERATOR,
+        "entity_id": uuid.uuid4(),
+    }
+    return provider.Job(**{**values, **fields})
+
+
+def new_reconciliation_run(**fields: Any) -> provider.ReconciliationRun:
+    values = {"trigger": provider.ReconciliationTrigger.MANUAL, "started_at": FETCHED_AT}
+    return provider.ReconciliationRun(**{**values, **fields})
+
+
+def new_reconciliation_mismatch(**fields: Any) -> provider.ReconciliationMismatch:
+    _default(fields, "run", lambda: saved(new_reconciliation_run()))
+    values = {
+        "kind": provider.MismatchKind.PENDING_TOO_OLD,
+        "entity_type": "payment",
+        "entity_id": uuid.uuid4(),
+    }
+    return provider.ReconciliationMismatch(**{**values, **fields})
+
+
 PAYMENTS_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     provider.ExternalRef: new_external_ref,
     provider.ProviderSnapshot: new_snapshot,
     provider.Deposit: new_deposit,
     provider.WebhookEvent: new_webhook_event,
     provider.SyncState: new_sync_state,
+    provider.Job: new_job,
+    provider.ReconciliationRun: new_reconciliation_run,
+    provider.ReconciliationMismatch: new_reconciliation_mismatch,
 }
 
 
@@ -154,6 +183,66 @@ PAYMENTS_CASES: list[ConstraintCase] = [
         unique_pair(new_sync_state, {}, {"job_name": "webhook_refetch"}),
         unique_pair(new_sync_state, {}, {}),
         column="job_name",
+    ),
+    ConstraintCase(
+        "jobs_kind_valid",
+        lambda: new_job(kind="payment_void", entity_type="payment"),
+        lambda: new_job(kind="webhook_event"),
+    ),
+    ConstraintCase(
+        "jobs_entity_type_valid",
+        lambda: new_job(entity_type="rent_charge"),
+        lambda: new_job(entity_type="store"),
+    ),
+    ConstraintCase(
+        "jobs_status_valid",
+        lambda: new_job(status="dead"),
+        lambda: new_job(status="retrying"),
+    ),
+    ConstraintCase(
+        "jobs.replay_key",
+        unique_pair(
+            new_job,
+            {"replay_key": uuid.UUID(int=1)},
+            {"replay_key": uuid.UUID(int=2)},
+        ),
+        unique_pair(new_job, {"replay_key": uuid.UUID(int=1)}, {"replay_key": uuid.UUID(int=1)}),
+        column="replay_key",
+    ),
+    # PLAN-010 D10.
+    ConstraintCase(
+        "reconciliation_runs_trigger_valid",
+        lambda: new_reconciliation_run(trigger="scheduled"),
+        lambda: new_reconciliation_run(trigger="cron"),
+    ),
+    ConstraintCase(
+        "reconciliation_runs_status_valid",
+        lambda: new_reconciliation_run(status="skipped"),
+        lambda: new_reconciliation_run(status="paused"),
+    ),
+    ConstraintCase(
+        "reconciliation_runs_step_reached_valid",
+        lambda: new_reconciliation_run(step_reached="c"),
+        lambda: new_reconciliation_run(step_reached="g"),
+    ),
+    ConstraintCase(
+        "reconciliation_mismatches_kind_valid",
+        lambda: new_reconciliation_mismatch(kind="deposit_unmatched"),
+        lambda: new_reconciliation_mismatch(kind="amount_differs"),
+    ),
+    ConstraintCase(
+        "reconciliation_mismatches_resolved_has_note",
+        lambda: new_reconciliation_mismatch(resolved_at=FETCHED_AT, resolution_note="Checked."),
+        lambda: new_reconciliation_mismatch(resolved_at=FETCHED_AT, resolution_note="  "),
+    ),
+    ConstraintCase(
+        "reconciliation_mismatches_one_open",
+        unique_pair(
+            new_reconciliation_mismatch,
+            {},
+            {"entity_id": _same_entity, "resolved_at": FETCHED_AT, "resolution_note": "Done."},
+        ),
+        unique_pair(new_reconciliation_mismatch, {}, {"entity_id": _same_entity}),
     ),
 ]
 

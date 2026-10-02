@@ -339,3 +339,72 @@ payment. Staff track paid years in cell notes because the sheet has one cell per
   authorisation per operator, covering both the monthly rent debit and the annual insurance
   debit. TODO-VERIFY-006 is rewritten to ask Stax what it requires. The app stores no bank
   details either way (Rule 1).
+
+## ADR-0006 — The database is the queue; no Celery, no Redis
+
+**Date:** 2026-10-02
+**Status:** Accepted (owner amendment to Prompt 10, in writing, 2026-10-02)
+
+### Context
+
+ADR-0001 and ADR-0002 named Celery with Redis for background work and scheduling. By
+Prompt 10 the only background work is: the Stax calls the web screens used to make
+(operator sync, autopay enable/pause/resume, mark-paid, refund, void, and three reads),
+the stored-webhook re-fetches, and one nightly reconciliation. Every one of these already
+goes through a service function with row locks, creation keys and external-reference
+checks, so running it twice changes nothing. The owner's amendment: *no Celery and no
+Redis; use the database as the queue; the nightly reconciliation runs as an Azure
+Container Apps scheduled Job with a lock; fall back to a Redis container app only if the
+database queue proves insufficient, and never Azure Managed Redis.*
+
+### Decision
+
+1. **Table `jobs` is the queue** (`docs/qa/PLAN-010-worker-and-reconciliation.md` D1).
+   A web view writes its local change, inserts one row, and redirects. The row holds a
+   closed `kind`, the entity, identifiers and amounts as text, a one-time `replay_key`
+   from the form, and the outcome sentence. Nothing in it is provider text.
+2. **One `worker` process claims and runs jobs** with `SELECT … FOR UPDATE SKIP LOCKED`,
+   one at a time, then stored webhook events never attempted. It is the only process
+   with `STAX_CALLER=worker`, so the limiter, the breaker and the failure budget have
+   one owner (docs/CLAUDE.md Rule 3). It runs as the container app
+   `finance-<env>-worker`, one replica, no ingress. The web app runs with
+   `STAX_CALLER=none` and scales.
+3. **Jobs never retry by themselves.** A failed job stays on the page as "Failed: …"
+   with the same single manual retry the screens had, which creates a new job. A job
+   whose worker died mid-run is queued again once, then marked `dead`.
+4. **The nightly reconciliation is a Container Apps scheduled Job that only queues.**
+   Cron is UTC-only, so it fires at 06:00 and 07:00 UTC; `reconcile --scheduled` applies
+   the local-time gate (02:00 America/New_York, once per local date) and queues one
+   `reconcile_run` job; the worker runs it under a PostgreSQL advisory lock. The job
+   container has `STAX_CALLER=none` and never calls Stax. *(First draft ran the
+   reconciliation in the job container; rejected in QA because it made a second Stax
+   caller with its own limiter.)*
+5. **No Redis.** `docker-compose.yml` keeps Redis only until the next housekeeping
+   change removes it; nothing reads `REDIS_URL`. If the database queue ever proves
+   insufficient (it will not for one worker and a few hundred jobs a day), the fallback
+   is a Redis **container app** inside the environment, never Azure Managed Redis.
+
+### Alternatives rejected
+
+- **Celery + Redis** (ADR-0001): a broker, a beat process and a result store for a
+  workload of a few hundred idempotent calls a day; two more things to deploy, secure
+  and monitor, and the owner declined the cost.
+- **Running the reconciliation inside the scheduled Job container:** a second process
+  with its own in-memory limiter could send up to twice the design rate against Stax's
+  per-IP limit.
+- **A thread inside the web process** (PLAN-008's webhook thread): dies with the
+  replica, cannot be the single caller once the web app scales, and was removed.
+
+### Consequences
+
+- docs/CLAUDE.md §2 still names Celery + Redis; it is superseded by this ADR for the
+  queue and the schedule. Rule 3's "token bucket in Redis" reads as "in the worker
+  process, persisted through `sync_state`".
+- A staff action now shows "Queued" for up to a few seconds; the page refreshes itself
+  every five seconds while a job waits. The screens' outcome sentences are unchanged.
+- The owner's done-when for Prompt 10 is met through the worker: an operator edit reaches
+  Stax within a minute; the scheduled Job's firing at 02:00 New York is visible as a
+  `reconciliation_runs` row with trigger `scheduled`.
+- Known gap: the daily summary email (Prompt 10 item 3) waits for the Phase 7 email
+  provider; until then the reconciliation page is the daily report and Sentry's fatal
+  alert is the notification.

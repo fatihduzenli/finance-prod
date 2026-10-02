@@ -82,9 +82,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 # the key's environment matches STAX_ENV and its merchant STAX_EXPECTED_MERCHANT_ID.
 # Any disagreement, and an unreachable Stax, exits non-zero: the new revision does
 # not start (the running one keeps serving). Locally without a key it is skipped.
-# gunicorn runs one worker process with threads because the Stax rate limiter and
-# breaker live in process memory: one process owns the single bucket (PLAN-006 D1)
-# until Step 10 moves the calls to the worker.
+# gunicorn runs one worker process with threads. The web makes no Stax call: it runs
+# with STAX_CALLER=none, and the worker container app (PLAN-010 D4) is the single
+# process that calls Stax and owns the rate limiter and breaker.
 #
 # Access logging is deliberately left off: inbound webhook URLs carry the
 # secret path token (docs/CLAUDE.md Rule 4) and must not reach logs

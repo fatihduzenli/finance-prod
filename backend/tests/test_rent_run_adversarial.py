@@ -19,6 +19,7 @@ from payments.fake import FakeProvider
 from payments.models import ExternalRef
 from payments.provider import ScheduleInput, ScheduleUpdate
 from tests.auth_helpers import make_user, verified_client
+from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.test_lease_services import CUSTOMER, _race, edit, make_lease, make_operator, method
 from tests.test_operator_sync import requires_postgresql
 from tests.test_rent_run import DAY, NOW, PERIOD, RENT, charge_of, enrolled, invoice, lease
@@ -40,6 +41,12 @@ def _client(role: Role) -> Client:
     user, device = make_user(f"adv7-{role.value}-{uuid.uuid4().hex[:6]}", role)
     assert device is not None
     return verified_client(user, device)
+
+
+@pytest.fixture(autouse=True)
+def _worker_runs_between_requests(request: pytest.FixtureRequest) -> None:
+    """PLAN-010: views queue provider work; these cases check the outcome after the worker ran."""
+    request.getfixturevalue("worker_between_requests")
 
 
 def _schedule_creates(fake: FakeProvider) -> list[ScheduleInput]:

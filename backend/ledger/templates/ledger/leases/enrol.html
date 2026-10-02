@@ -31,8 +31,18 @@
       <p id="large-debit-warning" class="messages"><span class="warning" style="display:block;padding:.6rem .8rem;">A debit is above the large-debit warning threshold of {{ threshold }}. Enabling autopay needs the confirmation below.</span></p>
     {% endif %}
 
+    {% include "ledger/_job_status.html" %}
     {% if choices.error %}
       <p id="methods-error"><strong>{{ choices.error }}</strong>{% if choices.fields %} Fields the provider rejected: {{ choices.fields|join:", " }}.{% endif %}</p>
+    {% else %}
+      <div class="actions">
+        {% if choices.fetched_at %}<span id="methods-as-of" class="muted">Methods as of {{ choices.fetched_at|date:"Y-m-d H:i" }} UTC</span>{% else %}<span id="methods-not-read"><strong>{{ methods_not_read }}</strong></span>{% endif %}
+        <form method="post" class="js-single-submit">
+          {% csrf_token %}<button class="btn" type="submit" name="refresh_methods" value="1" id="refresh-methods"{% if job_refresh %} disabled{% endif %}>Refresh methods</button>
+        </form>
+      </div>
+    {% endif %}
+    {% if choices.error or not choices.fetched_at %}
     {% elif not choices.has_bank %}
       <p id="no-bank-method"><strong>{{ no_bank_message }}</strong> Enter the operator's bank method in the payment provider's dashboard first.</p>
     {% endif %}

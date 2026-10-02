@@ -8,6 +8,7 @@ two_factor/_base.html.
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% if job_refresh %}<meta http-equiv="refresh" content="5">{% endif %}
   <title>{% block title %}{% endblock %} | Finance</title>
   <style>
     body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;background:#f6f6f6;}
@@ -40,6 +41,7 @@ two_factor/_base.html.
     <a href="{% url 'ledger:payments:list' %}">Payments</a>
     <a href="{% url 'ledger:returns:list' %}">Returns</a>
     <a href="{% url 'ledger:webhooks:list' %}">Webhooks</a>
+    <a href="{% url 'ledger:reconciliation:page' %}">Reconciliation</a>
     <a href="{% url 'admin:index' %}">Admin</a>
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form>
   </nav>

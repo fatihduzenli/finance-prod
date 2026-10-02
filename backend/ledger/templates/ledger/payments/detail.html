@@ -10,6 +10,7 @@
     </p>
   {% endif %}
 
+  {% include "ledger/_job_status.html" %}
   {% include "ledger/payments/summary.html" %}
   <dl>
     <dt>Initiated</dt><dd>{{ payment.initiated_on|date:"Y-m-d"|default:"—" }}</dd>

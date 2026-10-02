@@ -25,6 +25,7 @@
   </dl>
 
   <h2>Payment provider</h2>
+  {% include "ledger/_job_status.html" %}
   <dl>
     <dt>Link status</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} <span class="badge">Needs review</span>{% endif %}</dd>
     {% if failure_message %}

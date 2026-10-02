@@ -5,7 +5,9 @@ The detail page is read by any role and shows the carried balance of earlier cha
 Recording a payment (GET of the form and POST), retrying the marking of the provider
 invoice and linking an invoice (GET of the list and POST) need ``billing``; the
 registry checks the POST first. The service re-checks
-every rule under a row lock, makes the provider calls and writes the audit rows. Every
+every rule under a row lock and writes the audit rows. No view calls the provider: a
+recorded payment whose invoice is to be marked, and the retry, are queued as jobs
+(:mod:`ledger.views.jobs`, PLAN-010 D3); the detail page shows the latest one. Every
 POST ends in a redirect; a form with errors is held in the session for the next GET.
 """
 
@@ -24,9 +26,11 @@ from ledger.forms import LinkInvoiceForm, ManualPaymentForm
 from ledger.models import ChargeNote, RentCharge, RentChargeStatus
 from ledger.services import rent_run
 from ledger.services.rent_run import MarkAction, MarkResult
+from ledger.views.jobs import already_submitted, busy, job_context, submit
 from ledger.views.operators import _actor, _held, _hold, _role, role_required
 from ledger.views.run import _billing_only
 from payments import operator_sync
+from payments.models import JobKind
 
 
 def _load(pk: str) -> RentCharge:
@@ -54,10 +58,12 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
     charge = _load(pk)
     billing = meets(_role(request), Role.BILLING)
     retry_wait = rent_run.provider_retry_wait(charge) if billing else None
+    jobs = job_context(charge)
     return render(
         request,
         "ledger/charges/detail.html",
         {
+            **jobs,
             "charge": charge,
             "lease": charge.lease,
             "invoices": charge.invoices.order_by("issue_date", "invoice_number"),
@@ -68,7 +74,7 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_record": billing
             and charge.status != RentChargeStatus.WAIVED
             and charge.balance > 0,
-            "can_retry_mark": retry_wait == 0,
+            "can_retry_mark": retry_wait == 0 and not jobs["job_refresh"],
             "can_link_invoice": billing and not charge.invoices.exists(),
             "retry_wait_message": (
                 operator_sync.retry_wait_message(retry_wait) if retry_wait else ""
@@ -88,6 +94,9 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
         form = ManualPaymentForm(request.POST)
         if form.is_valid():
             data = form.cleaned_data
+            if already_submitted(data["creation_key"]):
+                messages.info(request, rent_run.PAY_ALREADY)
+                return redirect("ledger:charges:detail", pk=charge.pk)
             outcome = rent_run.record_manual_payment(
                 charge.pk,
                 method=data["method"],
@@ -97,7 +106,16 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
                 actor=_actor(request),
                 creation_key=data["creation_key"],
                 reference=data["reference"],
+                defer_mark=True,
             )
+            if outcome.ok and outcome.mark_due and outcome.payment is not None:
+                submit(
+                    request,
+                    JobKind.PAYMENT_MARK,
+                    charge,
+                    {"payment": outcome.payment.pk},
+                    replay_key=data["creation_key"],
+                )
             if outcome.ok:
                 if outcome.replayed:
                     messages.info(request, outcome.message)
@@ -121,7 +139,8 @@ def charge_retry_mark(request: HttpRequest, pk: str) -> HttpResponse:
     if refused is not None:
         return refused
     charge = _load(pk)
-    _report(request, rent_run.retry_provider_mark(charge.pk, actor=_actor(request)))
+    if not busy(request, charge):
+        submit(request, JobKind.PAYMENT_RETRY_MARK, charge)
     return redirect("ledger:charges:detail", pk=charge.pk)
 
 

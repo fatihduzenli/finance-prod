@@ -9,9 +9,13 @@ filter and streams its rows. Provider identifiers appear masked only.
 
 Refund and void need ``admin``: the registry refuses a POST below admin, and these
 views refuse the GET of the confirmation page as well, so a billing user or a viewer
-never sees it. :mod:`ledger.services.refunds` enforces every rule, makes the provider
-calls and writes the audit rows. Every POST ends in a redirect; a form with errors is
-held in the session for the next GET.
+never sees it. :mod:`ledger.services.refunds` enforces every rule and writes the audit
+rows. No view calls the provider: a confirmed refund or void is queued as a job
+(:mod:`ledger.views.jobs`, PLAN-010 D3) keyed by the form's one-time key, and the
+payment page shows the latest one. What can be refused from local data (no
+confirmation, nothing refundable, an amount above the refundable one) is refused here
+before anything is queued; the service checks it again under the row lock. Every POST
+ends in a redirect; a form with errors is held in the session for the next GET.
 """
 
 from __future__ import annotations
@@ -34,7 +38,9 @@ from ledger.models import AuditLog, Operator, Payment, PaymentMethod, Store
 from ledger.services import payments_ledger as ledger
 from ledger.services import refunds
 from ledger.services.rent_run import charge_review_message
-from ledger.views.operators import PAGE_SIZE, _actor, _held, _hold, _role, role_required
+from ledger.views.jobs import already_submitted, job_context, submit
+from ledger.views.operators import PAGE_SIZE, _held, _hold, _role, role_required
+from payments.models import JobKind
 from payments.provider import mask_identifier
 from payments.webhooks.handlers.common import ENTITY_PAYMENT
 
@@ -124,6 +130,7 @@ def payment_detail(request: HttpRequest, pk: str) -> HttpResponse:
         "ledger/payments/detail.html",
         {
             **_summary(payment, facts),
+            **job_context(payment),
             "refunds": payment.refunds.order_by("created_at", "id"),
             "charge_review": (
                 charge_review_message(payment.rent_charge) if payment.rent_charge else ""
@@ -150,15 +157,6 @@ def _admin_only(request: HttpRequest) -> HttpResponse | None:
     return None
 
 
-def _report(request: HttpRequest, outcome: refunds.Outcome) -> None:
-    if outcome.replayed:
-        messages.info(request, outcome.message)
-    elif outcome.incomplete:
-        messages.warning(request, outcome.message)
-    else:
-        messages.success(request, outcome.message)
-
-
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def payment_refund(request: HttpRequest, pk: str) -> HttpResponse:
@@ -171,22 +169,30 @@ def payment_refund(request: HttpRequest, pk: str) -> HttpResponse:
         form = RefundForm(request.POST)
         if form.is_valid():
             data = form.cleaned_data
-            outcome = refunds.refund_payment(
-                payment.pk,
-                amount=data["amount"],
-                confirmed=data["confirm"],
-                actor=_actor(request),
-                creation_key=data["creation_key"],
-            )
-            if outcome.ok:
-                _report(request, outcome)
+            if already_submitted(data["creation_key"]):
+                messages.info(request, refunds.ALREADY_SUBMITTED)
                 return redirect("ledger:payments:detail", pk=payment.pk)
-            if not outcome.field:
-                # The rule or the provider refused: the key may be spent, so the page
-                # starts again with a new one.
-                messages.error(request, outcome.message)
+            facts = refunds.payment_facts(payment)
+            if facts.refund_refusal:
+                messages.error(request, facts.refund_refusal)
                 return redirect("ledger:payments:refund", pk=payment.pk)
-            form.add_error(outcome.field, outcome.message)
+            if data["confirm"] is not True:
+                form.add_error("confirm", refunds.CONFIRM_REQUIRED)
+            elif data["amount"] > facts.refundable:
+                form.add_error("amount", refunds.AMOUNT_OVER.format(refundable=facts.refundable))
+            else:
+                submit(
+                    request,
+                    JobKind.PAYMENT_REFUND,
+                    payment,
+                    {
+                        "amount": data["amount"],
+                        "confirmed": True,
+                        "creation_key": data["creation_key"],
+                    },
+                    replay_key=data["creation_key"],
+                )
+                return redirect("ledger:payments:detail", pk=payment.pk)
         _hold(request, target, form)
         return redirect("ledger:payments:refund", pk=payment.pk)
     facts = refunds.payment_facts(payment)
@@ -217,19 +223,24 @@ def payment_void(request: HttpRequest, pk: str) -> HttpResponse:
         form = VoidForm(request.POST)
         if form.is_valid():
             data = form.cleaned_data
-            outcome = refunds.void_payment(
-                payment.pk,
-                confirmed=data["confirm"],
-                actor=_actor(request),
-                creation_key=data["creation_key"],
-            )
-            if outcome.ok:
-                _report(request, outcome)
+            if already_submitted(data["creation_key"]):
+                messages.info(request, refunds.ALREADY_SUBMITTED)
                 return redirect("ledger:payments:detail", pk=payment.pk)
-            if not outcome.field:
-                messages.error(request, outcome.message)
+            refusal = refunds.payment_facts(payment).void_refusal
+            if refusal:
+                messages.error(request, refusal)
                 return redirect("ledger:payments:void", pk=payment.pk)
-            form.add_error(outcome.field, outcome.message)
+            if data["confirm"] is not True:
+                form.add_error("confirm", refunds.CONFIRM_REQUIRED)
+            else:
+                submit(
+                    request,
+                    JobKind.PAYMENT_VOID,
+                    payment,
+                    {"confirmed": True, "creation_key": data["creation_key"]},
+                    replay_key=data["creation_key"],
+                )
+                return redirect("ledger:payments:detail", pk=payment.pk)
         _hold(request, target, form)
         return redirect("ledger:payments:void", pk=payment.pk)
     form = _held(request, target, VoidForm) or VoidForm(initial={"creation_key": uuid.uuid4()})

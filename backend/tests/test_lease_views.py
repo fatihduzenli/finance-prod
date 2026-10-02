@@ -34,10 +34,12 @@ from payments.fake import FakeProvider
 from payments.models import ExternalRef
 from payments.provider import PaymentMethodRecord
 from tests.auth_helpers import iter_routes, make_user, verified_client
+from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.test_lease_services import NOW, make_lease, make_operator, method
 from tests.test_operator_views import client_for
 
-pytestmark = pytest.mark.django_db
+# PLAN-010 D3: views queue provider work; the worker is run after every request here.
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("worker_between_requests")]
 
 D = Decimal
 LIST = "/leases/"
@@ -122,6 +124,15 @@ def edit_data(lease: Lease, **overrides: Any) -> dict[str, Any]:
 def add_methods(fake: FakeProvider) -> None:
     fake.add_payment_method(CUSTOMER, method())
     fake.add_payment_method(CUSTOMER, method(CARD_ID, kind="card"))
+
+
+def read_methods(lease: Lease, fake: FakeProvider) -> Lease:
+    """What the worker's ``operator_methods_refresh`` job does: the snapshot the
+    enrolment page reads (PLAN-010 Batch A follow-up). The read is not counted."""
+    assert lease.operator is not None
+    assert service.refresh_payment_methods(lease.operator.pk).ok
+    fake.calls.clear()
+    return lease
 
 
 # --- Row 10: roles, CSRF, registry ---------------------------------------------------------------
@@ -274,15 +285,16 @@ def test_the_enrolment_page_lists_bank_methods_and_shows_cards_as_not_allowed(
         ),
     )
     fake.add_payment_method(CUSTOMER, method(CARD_ID, kind="card"))
-    lease = make_lease(D("1000.01"), debit_day=5, second_debit_day=20)
+    lease = read_methods(make_lease(D("1000.01"), debit_day=5, second_debit_day=20), fake)
     page = admin.get(paths(lease)["enrol"]).content.decode()
+    assert 'id="methods-as-of"' in page and "Methods as of 2026-10-01 15:00 UTC" in page
     assert f'name="payment_method_id" value="{BANK}"' in page
     assert f'value="{CARD_ID}"' not in page
     assert "Card, not allowed" in page
     assert "6789" in page and "checking" in page and "Operating" in page
     assert "$500.01" in page and "$500.00" in page
     assert "UTC" in page and "Enable autopay" in page
-    assert [name for name, _ in fake.calls] == ["list_payment_methods"]
+    assert fake.calls == []
 
 
 def test_the_enrolment_page_with_a_blocker_makes_no_provider_call(
@@ -299,7 +311,7 @@ def test_the_enrolment_page_says_no_bank_method_when_only_cards_exist(
     admin: Client, fake: FakeProvider
 ) -> None:
     fake.add_payment_method(CUSTOMER, method(CARD_ID, kind="card"))
-    page = admin.get(paths(make_lease())["enrol"]).content.decode()
+    page = admin.get(paths(read_methods(make_lease(), fake))["enrol"]).content.decode()
     assert service.NO_BANK_METHOD in page
     assert 'id="enable-autopay"' not in page
 
@@ -310,9 +322,14 @@ def test_the_enrolment_page_shows_a_list_failure_by_field_names_only(
     fake.fail_next(
         "list_payment_methods", ProviderRejected(422, "CANARY", error_fields=("customer_id",))
     )
-    page = admin.get(paths(make_lease())["enrol"]).content.decode()
+    route = paths(make_lease())["enrol"]
+    # The worker runs the queued read after the POST (``worker_between_requests``).
+    admin.post(route, {"refresh_methods": "1"})
+    page = admin.get(route).content.decode()
     assert service.PROVIDER_REJECTED in page and "customer_id" in page
+    assert "ProviderRejected" in page and 'id="job-state">Failed: ' in page
     assert "CANARY" not in page
+    assert 'id="methods-not-read"' in page
 
 
 @pytest.mark.parametrize(
@@ -322,7 +339,7 @@ def test_the_large_debit_warning(
     admin: Client, fake: FakeProvider, threshold: str, shown: bool
 ) -> None:
     add_methods(fake)
-    lease = make_lease(D("1500.00"))
+    lease = read_methods(make_lease(D("1500.00")), fake)
     with override_settings(LARGE_DEBIT_WARNING_AMOUNT=D(threshold)):
         page = admin.get(paths(lease)["enrol"]).content.decode()
     assert ('id="large-debit-warning"' in page) is shown
@@ -355,15 +372,16 @@ def test_a_card_id_posted_directly_is_refused_with_a_redirect(
     lease = make_lease()
     route = paths(lease)
     response = admin.post(route["enrol"], {"payment_method_id": CARD_ID})
-    assert (response.status_code, response["Location"]) == (302, route["enrol"])
-    assert service.CARD_REFUSED in admin.get(route["enrol"]).content.decode()
+    # PLAN-010 D3: enrolment is a job; its refusal is shown on the lease page.
+    assert (response.status_code, response["Location"]) == (302, route["detail"])
+    assert service.CARD_REFUSED in admin.get(route["detail"]).content.decode()
     assert "create_scheduled_invoice" not in [name for name, _ in fake.calls]
     assert CollectionSchedule.objects.count() == 0
 
 
 def test_a_malformed_method_id_is_held_with_its_error(admin: Client, fake: FakeProvider) -> None:
     add_methods(fake)
-    lease = make_lease()
+    lease = read_methods(make_lease(), fake)
     route = paths(lease)
     response = admin.post(route["enrol"], {"payment_method_id": "../x"})
     assert (response.status_code, response["Location"]) == (302, route["enrol"])
@@ -382,8 +400,8 @@ def test_a_provider_rejection_on_enrol_shows_the_field_names(
     )
     route = paths(lease)
     response = admin.post(route["enrol"], {"payment_method_id": BANK})
-    assert (response.status_code, response["Location"]) == (302, route["enrol"])
-    page = admin.get(route["enrol"]).content.decode()
+    assert (response.status_code, response["Location"]) == (302, route["detail"])
+    page = admin.get(route["detail"]).content.decode()
     assert "Fields the provider rejected: payment_method_id, rule." in page
     assert "CANARY" not in page
 
@@ -406,7 +424,7 @@ def test_the_enrolment_page_asks_for_the_large_debit_confirmation(
     admin: Client, fake: FakeProvider
 ) -> None:
     add_methods(fake)
-    page = admin.get(paths(make_lease(D("2100.00")))["enrol"]).content.decode()
+    page = admin.get(paths(read_methods(make_lease(D("2100.00")), fake))["enrol"]).content.decode()
     assert 'id="large-debit-warning"' in page and "$2,000.00" in page
     assert 'type="checkbox" name="confirm_large_debit"' in page
     assert CONFIRM_2100 in page
@@ -419,7 +437,7 @@ def test_the_enrolment_page_below_the_warning_has_no_checkbox(
     admin: Client, fake: FakeProvider
 ) -> None:
     add_methods(fake)
-    page = admin.get(paths(make_lease(D("2000.00")))["enrol"]).content.decode()
+    page = admin.get(paths(read_methods(make_lease(D("2000.00")), fake))["enrol"]).content.decode()
     assert 'name="confirm_large_debit"' not in page
     assert 'id="enable-autopay"' in page
 
@@ -432,9 +450,9 @@ def test_a_large_debit_posted_without_the_checkbox_is_refused_with_the_sentence(
     lease = make_lease(D("2100.00"))
     route = paths(lease)
     response = admin.post(route["enrol"], {"payment_method_id": BANK})
-    assert (response.status_code, response["Location"]) == (302, route["enrol"])
+    assert (response.status_code, response["Location"]) == (302, route["detail"])
     assert _creates(fake) == 0 and fake.calls == []
-    assert CONFIRM_2100 in admin.get(route["enrol"]).content.decode()
+    assert CONFIRM_2100 in admin.get(route["detail"]).content.decode()
     assert CollectionSchedule.objects.count() == 0
 
 
@@ -485,8 +503,7 @@ def test_only_the_exact_checkbox_value_confirms_a_large_debit(
     lease = make_lease(D("2100.00"))
     route = paths(lease)
     response = admin.post(route["enrol"], {"payment_method_id": BANK, **posted})
-    expected = route["detail"] if confirmed else route["enrol"]
-    assert (response.status_code, response["Location"]) == (302, expected)
+    assert (response.status_code, response["Location"]) == (302, route["detail"])
     assert _creates(fake) == (1 if confirmed else 0)
     assert CollectionSchedule.objects.exists() is confirmed
     assert (
@@ -508,9 +525,9 @@ def test_above_the_confirmed_limit_the_page_offers_no_way_and_a_post_is_refused(
     response = admin.post(
         route["enrol"], {"payment_method_id": BANK, "confirm_large_debit": "true"}
     )
-    assert (response.status_code, response["Location"]) == (302, route["enrol"])
+    assert (response.status_code, response["Location"]) == (302, route["detail"])
     assert _creates(fake) == 0
-    assert LIMIT_5000 in admin.get(route["enrol"]).content.decode()
+    assert LIMIT_5000 in admin.get(route["detail"]).content.decode()
     assert CollectionSchedule.objects.count() == 0
 
 
@@ -519,7 +536,7 @@ def test_between_the_warning_and_the_limit_the_screen_confirmation_works(
     admin: Client, fake: FakeProvider
 ) -> None:
     add_methods(fake)
-    lease = make_lease(D("5000.00"))
+    lease = read_methods(make_lease(D("5000.00")), fake)
     route = paths(lease)
     page = admin.get(route["enrol"]).content.decode()
     assert 'name="confirm_large_debit"' in page and 'id="provider-limit"' not in page

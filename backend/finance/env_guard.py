@@ -11,10 +11,13 @@ read from the environment is ever echoed (root ``CLAUDE.md`` §5.2).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import time
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 APP_ENVS: tuple[str, ...] = ("local", "staging", "production")
 DEPLOYED_APP_ENVS: tuple[str, ...] = ("staging", "production")
@@ -38,6 +41,22 @@ DEFAULT_LARGE_DEBIT_WARNING_AMOUNT = "2000.00"
 #: PLAN-007c §1: STAX_MAX_TXN_AMOUNT is the ACH per-transaction limit confirmed by Stax
 #: (SCOPE Q25). Empty means unknown: no hard block.
 _CENT = Decimal("0.01")
+
+#: PLAN-010 D12: the reconciliation's thresholds. Name -> (default, smallest, largest).
+#: Each is a whole number; anything else aborts the boot. The day windows stay under a
+#: year because the provider's date-range queries span at most one.
+RECONCILE_INTEGERS: dict[str, tuple[int, int, int]] = {
+    "PENDING_PAYMENT_MAX_BUSINESS_DAYS": (5, 1, 60),
+    "RECONCILE_LOOKBACK_DAYS": (35, 1, 364),
+    "RECONCILE_OVERLAP_HOURS": (48, 0, 720),
+    "RECONCILE_DEPOSIT_DAYS": (14, 1, 364),
+}
+DEFAULT_RECONCILE_LOCAL_TIME = "02:00"
+DEFAULT_RECONCILE_TIMEZONE = "America/New_York"
+_WHOLE_NUMBER = re.compile(r"[0-9]{1,6}")
+_LOCAL_TIME = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
+#: An IANA zone name such as America/New_York: no path, no dots at the start.
+_ZONE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*")
 
 _SQLITE_SCHEME_PREFIX = "sqlite"
 _WEB_URL_SCHEMES: tuple[str, ...] = ("http", "https")
@@ -76,6 +95,13 @@ class Config:
     large_debit_warning_amount: Decimal
     #: ``None`` when the confirmed provider limit is unknown (PLAN-007c §1).
     stax_max_txn_amount: Decimal | None
+    #: PLAN-010 D12.
+    pending_payment_max_business_days: int
+    reconcile_lookback_days: int
+    reconcile_overlap_hours: int
+    reconcile_deposit_days: int
+    reconcile_local_time: time
+    reconcile_timezone: str
 
 
 def _positive_amount(value: str) -> Decimal | None:
@@ -87,6 +113,28 @@ def _positive_amount(value: str) -> Decimal | None:
     if not amount.is_finite() or amount <= 0 or amount != amount.quantize(_CENT):
         return None
     return amount
+
+
+def _whole_number(value: str, smallest: int, largest: int) -> int | None:
+    if not _WHOLE_NUMBER.fullmatch(value):
+        return None
+    number = int(value)
+    return number if smallest <= number <= largest else None
+
+
+def _local_time(value: str) -> time | None:
+    match = _LOCAL_TIME.fullmatch(value)
+    return time(int(match.group(1)), int(match.group(2))) if match else None
+
+
+def _zone(value: str) -> str | None:
+    if not _ZONE_NAME.fullmatch(value):
+        return None
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    return value
 
 
 def validate(env: Mapping[str, str]) -> Config:
@@ -194,7 +242,29 @@ def validate(env: Mapping[str, str]) -> Config:
     if raw_max_txn_amount and stax_max_txn_amount is None:
         problems.append("STAX_MAX_TXN_AMOUNT must be a positive amount with at most two decimals")
 
-    if problems or large_debit_warning_amount is None:
+    # PLAN-010 D12: the reconciliation's thresholds, schedule and time zone.
+    reconcile: dict[str, int] = {}
+    for name, (default, smallest, largest) in RECONCILE_INTEGERS.items():
+        number = _whole_number(env.get(name, "") or str(default), smallest, largest)
+        if number is None:
+            problems.append(f"{name} must be a whole number from {smallest} to {largest}")
+        else:
+            reconcile[name] = number
+    reconcile_local_time = _local_time(
+        env.get("RECONCILE_LOCAL_TIME", "") or DEFAULT_RECONCILE_LOCAL_TIME
+    )
+    if reconcile_local_time is None:
+        problems.append("RECONCILE_LOCAL_TIME must be a time of day as HH:MM")
+    reconcile_timezone = _zone(env.get("RECONCILE_TIMEZONE", "") or DEFAULT_RECONCILE_TIMEZONE)
+    if reconcile_timezone is None:
+        problems.append("RECONCILE_TIMEZONE must be a known IANA time zone name")
+
+    if (
+        problems
+        or large_debit_warning_amount is None
+        or reconcile_local_time is None
+        or reconcile_timezone is None
+    ):
         raise EnvGuardError("; ".join(problems))
 
     return Config(
@@ -216,4 +286,10 @@ def validate(env: Mapping[str, str]) -> Config:
         stax_provider=stax_provider,
         large_debit_warning_amount=large_debit_warning_amount,
         stax_max_txn_amount=stax_max_txn_amount,
+        pending_payment_max_business_days=reconcile["PENDING_PAYMENT_MAX_BUSINESS_DAYS"],
+        reconcile_lookback_days=reconcile["RECONCILE_LOOKBACK_DAYS"],
+        reconcile_overlap_hours=reconcile["RECONCILE_OVERLAP_HOURS"],
+        reconcile_deposit_days=reconcile["RECONCILE_DEPOSIT_DAYS"],
+        reconcile_local_time=reconcile_local_time,
+        reconcile_timezone=reconcile_timezone,
     )

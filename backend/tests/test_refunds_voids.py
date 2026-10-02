@@ -33,6 +33,7 @@ from payments.errors import ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
 from payments.models import ExternalRef
 from payments.provider import TransactionRecord
+from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.test_lease_services import _race
 from tests.test_operator_sync import requires_postgresql
 from tests.test_operator_views import client_for
@@ -51,7 +52,8 @@ from tests.test_webhook_handlers import (
     settle,
 )
 
-pytestmark = pytest.mark.django_db
+# PLAN-010 D3: views queue provider work; the worker is run after every request here.
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("worker_between_requests")]
 
 D = Decimal
 SECOND_TXN = "txn-0002"
@@ -718,7 +720,10 @@ def test_the_page_shows_the_failure_class_and_fields(fake: FakeProvider) -> None
     )
     html = response.content.decode()
     assert "ProviderRejected" in html and "fields: total" in html
-    assert 'id="refund-form"' in html  # a fresh form to try again
+    # PLAN-010 D3: the outcome is shown on the payment page, with the refund button
+    # leading to a fresh form to try again.
+    assert response.redirect_chain == [(f"/payments/{payment.pk}/", 302)]
+    assert 'id="refund-payment"' in html
 
 
 def test_a_failed_refetch_keeps_the_refund_and_says_so(settling: FakeProvider) -> None:

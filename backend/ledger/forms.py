@@ -23,7 +23,7 @@ from ledger.models import (
     PaymentMethod,
     Store,
 )
-from ledger.validators import validate_no_payment_data
+from ledger.validators import validate_no_payment_data, visible_text
 from payments.operator_sync import normalise_phone
 
 if TYPE_CHECKING:
@@ -336,6 +336,25 @@ class ResolveReturnForm(forms.Form):
         help_text="Required: how the return was resolved.",
         error_messages={"required": "A note is required: say how the return was resolved."},
     )
+
+
+class ResolveMismatchForm(forms.Form):
+    """Resolve a reconciliation mismatch (PLAN-010 D10): a note, nothing else."""
+
+    note = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required: how the mismatch was resolved.",
+        error_messages={"required": "A note is required: say how the mismatch was resolved."},
+    )
+
+    def clean_note(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a note.
+        note = visible_text(self.cleaned_data["note"])
+        if not note:
+            raise forms.ValidationError(self.fields["note"].error_messages["required"])
+        return note
 
 
 # --- Refunds and voids (PLAN-009 D6, D7) ---------------------------------------------------

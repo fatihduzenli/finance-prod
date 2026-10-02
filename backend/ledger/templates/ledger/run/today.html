@@ -24,9 +24,13 @@
         {% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button>
       </form>
       <form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">
-        {% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok %} disabled{% endif %}>Match invoices</button>
+        {% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Match invoices</button>
       </form>
     </div>
+  {% endif %}
+  {% include "ledger/_job_status.html" %}
+  {% if match_lines %}
+    <ul id="match-report">{% for line in match_lines %}<li>{{ line }}</li>{% endfor %}</ul>
   {% endif %}
 
   <h2>Due today</h2>

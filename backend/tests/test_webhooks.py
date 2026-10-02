@@ -1,5 +1,8 @@
-"""Webhook receiver, storage, queue, processor framework and screens
+"""Webhook receiver, storage, worker, processor framework and screens
 (docs/qa/PLAN-008-webhooks.md Batch A; §6 rows 1 (dedupe), 2, 6 (storage), 7 and 9).
+
+PLAN-010 D2: the in-process queue and its thread are gone; the receiver only stores,
+and the ``worker`` command takes each stored event from the table.
 
 Every handler is replaced by :data:`PLACEHOLDER` (no call, no write) unless a test
 installs its own in ``payments.webhooks.handlers.HANDLERS``; the real handlers are
@@ -13,7 +16,6 @@ import ast
 import hmac
 import json
 import logging
-import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -30,6 +32,7 @@ from accounts import registry
 from accounts.roles import Role
 from payments import alerts
 from payments.errors import ProviderRejected, ProviderUnavailable
+from payments.management.commands import worker
 from payments.models import (
     WebhookEvent,
     WebhookEventSource,
@@ -38,11 +41,11 @@ from payments.models import (
 )
 from payments.redaction import redact
 from payments.stax.adapter import StaxProvider
-from payments.webhooks import handlers, processor, queue, receiver
+from payments.webhooks import handlers, processor, receiver
 from payments.webhooks.events import EVENT_NAMES, SHAPE_TYPES, UNKNOWN_EVENT, ignored
 from tests.auth_helpers import iter_routes
+from tests.job_helpers import run_queued_jobs
 from tests.stax_helpers import Rig, always, make_rig
-from tests.test_operator_sync import requires_postgresql
 from tests.test_operator_views import client_for
 
 TOKEN = "t" * 64
@@ -208,8 +211,8 @@ def test_a_valid_delivery_needs_no_session_or_csrf_token(
     event = WebhookEvent.objects.get()
     assert event.outcome == WebhookOutcome.RECEIVED
     assert event.processed_at is None
-    # The event is queued only after its row is committed.
-    assert len(callbacks) == 1
+    # PLAN-010 D2: nothing is handed to an in-process queue; the worker reads the table.
+    assert callbacks == []
 
 
 # --- Row 1 (dedupe): byte-identical redeliveries ------------------------------------------
@@ -659,9 +662,9 @@ def test_the_worker_does_not_retry_a_failed_event(monkeypatch: pytest.MonkeyPatc
 
     install(monkeypatch, "update_invoice", handler)
     event = stored(INVOICE_BODY)
-    queue.process_one(event.pk)
+    assert worker.tick() is True
+    assert worker.tick() is False  # the failed event waits for a replay or the command
     assert calls == ["inv-0001"]
-    assert queue._pending.empty()
     event.refresh_from_db()
     assert (event.outcome, event.attempts) == (WebhookOutcome.FAILED, 1)
 
@@ -673,10 +676,11 @@ def test_the_worker_survives_an_error_outside_the_handler(
     def broken(event_id: uuid.UUID, *, replay: bool = False) -> str:
         raise RuntimeError(f"secret detail {CARD}")
 
-    monkeypatch.setattr(processor, "process_event", broken)
-    with caplog.at_level(logging.ERROR):
-        queue.process_one(uuid.uuid4())
-    assert "RuntimeError" in caplog.text
+    stored(INVOICE_BODY)
+    monkeypatch.setattr(worker, "process_event", broken)
+    with caplog.at_level(logging.INFO):
+        assert worker.tick() is True
+    assert "outcome=RuntimeError" in caplog.text
     assert CARD not in caplog.text
 
 
@@ -768,15 +772,6 @@ def test_the_receiver_makes_no_provider_call_and_no_outbound_request(
     assert WebhookEvent.objects.count() == 1
 
 
-def _wait_until_processed(count: int, timeout_s: float = 30.0) -> None:
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        if WebhookEvent.objects.filter(processed_at__isnull=False).count() >= count:
-            return
-        time.sleep(0.05)
-    raise AssertionError("the worker thread did not process every event in time")
-
-
 @pytest.fixture
 def stax_rig(monkeypatch: pytest.MonkeyPatch, settings: Any) -> Rig:
     """The real adapter on a mock transport and a fake clock, as ``get_provider()``.
@@ -816,22 +811,20 @@ def test_a_burst_of_50_events_processed_by_the_command_departs_at_most_2_per_sec
     assert WebhookEvent.objects.filter(outcome=WebhookOutcome.PROCESSED).count() == 50
 
 
-# The worker thread writes while the test reads; sqlite's shared in-memory test database
-# locks whole tables, so the threaded case runs on PostgreSQL only.
-@requires_postgresql
-@pytest.mark.django_db(transaction=True)
-def test_a_burst_of_50_deliveries_leaves_the_worker_thread_at_most_2_per_second(
+@pytest.mark.django_db
+def test_a_burst_of_50_deliveries_leaves_the_worker_at_most_2_per_second(
     stax_rig: Rig,
 ) -> None:
     client = Client()
     for number in range(50):
         response = deliver(client, {"id": f"inv-{number:04d}"}, event="update_invoice")
         assert response.status_code == 200
-    _wait_until_processed(50)
+    assert stax_rig.recorder.arrivals == []  # the receiver called nothing
+    for _ in range(50):
+        call_command("worker", "--once")
     assert len(stax_rig.recorder.arrivals) == 50
     assert _at_most_two_per_second(stax_rig.recorder.arrivals)
-    assert queue._worker is not None and queue._worker.name == queue.THREAD_NAME
-    assert queue._worker.daemon and queue._worker.is_alive()
+    assert WebhookEvent.objects.filter(outcome=WebhookOutcome.PROCESSED).count() == 50
 
 
 # --- Screens: list, detail, replay, banner, admin ------------------------------------------
@@ -946,7 +939,14 @@ def test_billing_replays_a_dead_letter_and_it_is_processed(
     assert 'id="replay"' in billing.get(f"/webhooks/{event.pk}/").content.decode()
     response = billing.post(f"/webhooks/{event.pk}/replay/", follow=True)
     assert response.redirect_chain[-1][0] == f"/webhooks/{event.pk}/"
-    assert f"Outcome: {PLACEHOLDER}." in response.content.decode()
+    # PLAN-010 Batch A follow-up: the replay is a job the worker runs.
+    page = response.content.decode()
+    assert 'id="job-state">Queued<' in page and 'http-equiv="refresh"' in page
+    event.refresh_from_db()
+    assert event.outcome == WebhookOutcome.DEAD_LETTER
+    run_queued_jobs()
+    page = billing.get(f"/webhooks/{event.pk}/").content.decode()
+    assert f'id="job-state">Done: Replayed. Outcome: {PLACEHOLDER}.<' in page
     event.refresh_from_db()
     assert event.outcome == PLACEHOLDER
     assert event.processed_at is not None and event.error == ""
@@ -968,6 +968,8 @@ def test_a_replay_of_a_processed_event_runs_the_handler_again(
     processor.process_event(event.pk)  # not a replay: skipped
     billing, _ = client_for(Role.BILLING)
     billing.post(f"/webhooks/{event.pk}/replay/")
+    assert calls == ["inv-0001"]
+    run_queued_jobs()
     assert calls == ["inv-0001", "inv-0001"]
 
 
@@ -976,8 +978,13 @@ def test_a_failed_replay_reports_the_failure(monkeypatch: pytest.MonkeyPatch) ->
     install(monkeypatch, "update_invoice", failing(ProviderUnavailable(503)))
     event = stored(INVOICE_BODY)
     billing, _ = client_for(Role.BILLING)
-    response = billing.post(f"/webhooks/{event.pk}/replay/", follow=True)
-    assert "The handler failed again; outcome: failed." in response.content.decode()
+    billing.post(f"/webhooks/{event.pk}/replay/")
+    run_queued_jobs()
+    page = billing.get(f"/webhooks/{event.pk}/").content.decode()
+    assert (
+        'id="job-state">Failed: Replayed. The handler failed again; outcome: failed. '
+        "(ProviderUnavailable)<"
+    ) in page
 
 
 @pytest.mark.django_db

@@ -1,5 +1,6 @@
 """Ledger routes (PLAN-006-operators.md §4.1, PLAN-007-leases-and-rent-run.md §4.1,
-PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4, D6 to D8).
+PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
+D6 to D8, PLAN-010-worker-and-reconciliation.md D10).
 
 Namespace ``ledger``.
 
@@ -17,7 +18,17 @@ from __future__ import annotations
 
 from django.urls import include, path
 
-from ledger.views import charges, leases, operators, payments, returns, run, stores, webhooks
+from ledger.views import (
+    charges,
+    leases,
+    operators,
+    payments,
+    reconciliation,
+    returns,
+    run,
+    stores,
+    webhooks,
+)
 
 app_name = "ledger"
 
@@ -104,6 +115,19 @@ return_patterns = (
     "returns",
 )
 
+reconciliation_patterns = (
+    [
+        path("", reconciliation.reconciliation_page, name="page"),
+        path("run/", reconciliation.reconciliation_run, name="run"),
+        path(
+            "mismatches/<str:pk>/resolve/",
+            reconciliation.reconciliation_resolve,
+            name="resolve",
+        ),
+    ],
+    "reconciliation",
+)
+
 urlpatterns = [
     path("operators/", include(operator_patterns)),
     path("stores/", include(store_patterns)),
@@ -113,4 +137,5 @@ urlpatterns = [
     path("payments/", include(payment_patterns)),
     path("webhooks/", include(webhook_patterns)),
     path("returns/", include(return_patterns)),
+    path("reconciliation/", include(reconciliation_patterns)),
 ]

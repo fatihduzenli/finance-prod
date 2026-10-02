@@ -7,11 +7,12 @@
   {% if can_replay %}
     <div class="actions">
       <form method="post" action="{% url 'ledger:webhooks:replay' pk=event.pk %}" class="js-single-submit">
-        {% csrf_token %}<button class="btn btn-primary" type="submit" id="replay">Replay</button>
+        {% csrf_token %}<button class="btn btn-primary" type="submit" id="replay"{% if job_refresh %} disabled{% endif %}>Replay</button>
       </form>
       <span class="muted">Runs the handler for this event again. Handlers re-read the object from the payment provider; a replay of a processed event changes nothing.</span>
     </div>
   {% endif %}
+  {% include "ledger/_job_status.html" %}
 
   <dl id="webhook-event">
     <dt>Received</dt><dd>{{ event.received_at|date:"Y-m-d H:i:s" }} UTC</dd>

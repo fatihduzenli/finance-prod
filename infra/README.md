@@ -195,6 +195,8 @@ az deployment group show \
 | `natEgressPublicIpAddress` | the static egress IP to give Stax (§9) |
 | `registryName` | GitHub variable `ACR_NAME` |
 | `webAppName` | GitHub variable `WEB_APP_NAME` |
+| `workerAppName` | GitHub variable `WORKER_APP_NAME` (CI defaults to `finance-staging-worker`) |
+| `reconcileJobName` | GitHub variable `RECONCILE_JOB_NAME` (CI defaults to `finance-staging-reconcile`) |
 | `appBaseUrl` | GitHub variable `APP_BASE_URL` |
 | `keyVaultName`, `keyVaultUri` | where the secrets from §2 live |
 | `managedIdentityPrincipalId` | granting the app access to anything else later |
@@ -399,6 +401,8 @@ secrets, just names the workflow interpolates:
 |---|---|
 | `ACR_NAME` | deployment output `registryName` |
 | `WEB_APP_NAME` | deployment output `webAppName` |
+| `WORKER_APP_NAME` | deployment output `workerAppName`; optional, CI defaults to `finance-staging-worker` |
+| `RECONCILE_JOB_NAME` | deployment output `reconcileJobName`; optional, CI defaults to `finance-staging-reconcile` |
 | `RESOURCE_GROUP` | `finance-sandbox` |
 | `APP_BASE_URL` | deployment output `appBaseUrl`, no trailing slash. With a custom hostname, set this only after pass 2 in §4; until then use `defaultIngressFqdn`. |
 

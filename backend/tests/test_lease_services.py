@@ -17,8 +17,10 @@ from typing import Any
 import httpx
 import pytest
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import connection
 from django.test import override_settings
+from django.utils import timezone
 
 from accounts.roles import Role
 from ledger.models import (
@@ -37,7 +39,7 @@ from ledger.services import leases as service
 from ledger.services.leases import AutopayAction, LeaseRefused
 from payments.errors import CircuitOpen, ProviderError, ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
-from payments.models import ExternalRef
+from payments.models import ExternalRef, ProviderSnapshot
 from payments.provider import (
     PAYMENT_METHOD_DELETED,
     PaymentMethodRecord,
@@ -936,23 +938,138 @@ def test_an_unrelated_edit_does_not_flag_the_schedule(fake: FakeProvider) -> Non
     assert not row.needs_review
 
 
-def test_payment_method_choices_reads_the_list_once(fake: FakeProvider) -> None:
+# --- Payment methods from the snapshot (PLAN-010 Batch A follow-up) -----------------------------
+
+
+def _method_snapshots() -> list[ProviderSnapshot]:
+    return [row for row in ProviderSnapshot.objects.all() if isinstance(row.payload, list)]
+
+
+def test_payment_method_choices_without_a_snapshot_says_so_and_calls_nothing(
+    fake: FakeProvider,
+) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    choices = service.payment_method_choices(make_lease())
+    assert (choices.methods, choices.error, choices.fetched_at) == ((), "", None)
+    assert fake.calls == []
+
+
+def test_payment_method_choices_without_a_customer_names_the_blocker(fake: FakeProvider) -> None:
+    choices = service.payment_method_choices(make_lease(operator=make_operator(customer=None)))
+    assert choices.error == service.NO_PROVIDER_CUSTOMER
+    assert fake.calls == []
+
+
+def test_a_refresh_reads_the_list_once_and_the_page_reads_only_the_snapshot(
+    fake: FakeProvider,
+) -> None:
     fake.add_payment_method(CUSTOMER, method())
     fake.add_payment_method(CUSTOMER, method("pm-card-1", kind="card"))
     lease = make_lease()
-    choices = service.payment_method_choices(lease)
-    assert [m.external_id for m in choices.methods] == [BANK, "pm-card-1"]
-    assert choices.has_bank and choices.error == ""
+    assert lease.operator is not None
+    outcome = service.refresh_payment_methods(lease.operator.pk)
+    assert (outcome.ok, outcome.message) == (True, service.METHODS_READ.format(count=2))
     assert [name for name, _ in fake.calls] == ["list_payment_methods"]
 
+    fake.calls.clear()
+    choices = service.payment_method_choices(lease)
+    assert fake.calls == []
+    assert [m.external_id for m in choices.methods] == [BANK, "pm-card-1"]
+    assert choices.has_bank and choices.error == "" and choices.fetched_at == NOW
+    [snapshot] = _method_snapshots()
+    assert snapshot.external_ref.external_id == CUSTOMER
+    assert all(set(item) == set(service.METHOD_SNAPSHOT_FIELDS) for item in snapshot.payload)
 
-def test_payment_method_choices_reports_a_failure_by_fields_only(fake: FakeProvider) -> None:
+
+def test_a_second_refresh_replaces_the_list_and_keeps_the_customer_snapshot(
+    fake: FakeProvider,
+) -> None:
+    lease = make_lease()
+    assert lease.operator is not None
+    ref = ExternalRef.objects.get(external_id=CUSTOMER)
+    customer = ProviderSnapshot.objects.create(
+        external_ref=ref, payload={"id": CUSTOMER}, fetched_at=NOW
+    )
+    fake.add_payment_method(CUSTOMER, method())
+    service.refresh_payment_methods(lease.operator.pk)
+    fake.add_payment_method(CUSTOMER, method("pm-bank-2"))
+    service.refresh_payment_methods(lease.operator.pk)
+    [snapshot] = _method_snapshots()
+    assert [item["external_id"] for item in snapshot.payload] == [BANK, "pm-bank-2"]
+    assert ProviderSnapshot.objects.filter(pk=customer.pk).exists()
+    # The newer customer snapshot under the same reference is not read as a list.
+    ProviderSnapshot.objects.filter(pk=customer.pk).update(fetched_at=timezone.now())
+    choices = service.payment_method_choices(lease)
+    assert [m.external_id for m in choices.methods] == [BANK, "pm-bank-2"]
+
+
+def test_a_failed_refresh_keeps_the_previous_list_and_names_fields_only(
+    fake: FakeProvider,
+) -> None:
+    lease = make_lease()
+    assert lease.operator is not None
+    fake.add_payment_method(CUSTOMER, method())
+    service.refresh_payment_methods(lease.operator.pk)
     fake.fail_next(
         "list_payment_methods", ProviderRejected(404, "CANARY", error_fields=("customer",))
     )
-    choices = service.payment_method_choices(make_lease())
-    assert (choices.methods, choices.fields) == ((), ("customer",))
-    assert choices.error == service.PROVIDER_REJECTED
+    outcome = service.refresh_payment_methods(lease.operator.pk)
+    assert (outcome.ok, outcome.fields, outcome.failure) == (
+        False,
+        ("customer",),
+        "ProviderRejected",
+    )
+    assert outcome.message == service.PROVIDER_REJECTED and "CANARY" not in outcome.message
+    [snapshot] = _method_snapshots()
+    assert [item["external_id"] for item in snapshot.payload] == [BANK]
+
+
+def test_a_refresh_without_a_customer_calls_nothing_and_writes_nothing(
+    fake: FakeProvider,
+) -> None:
+    operator = make_operator(customer=None)
+    outcome = service.refresh_payment_methods(operator.pk)
+    assert (outcome.ok, outcome.message) == (False, service.NO_PROVIDER_CUSTOMER)
+    assert service.refresh_payment_methods(uuid.uuid4()).ok is False
+    assert fake.calls == [] and not ProviderSnapshot.objects.exists()
+
+
+def test_a_method_holding_a_card_number_is_not_stored_and_the_old_list_stays(
+    fake: FakeProvider,
+) -> None:
+    lease = make_lease()
+    assert lease.operator is not None
+    fake.add_payment_method(CUSTOMER, method())
+    service.refresh_payment_methods(lease.operator.pk)
+    dirty = PaymentMethodRecord(
+        external_id="pm-dirty", raw_status="", fetched_at=NOW, nickname="4111111111111111"
+    )
+    fake.add_payment_method(CUSTOMER, dirty)
+    with pytest.raises(ValidationError):
+        service.refresh_payment_methods(lease.operator.pk)
+    [snapshot] = _method_snapshots()
+    assert [item["external_id"] for item in snapshot.payload] == [BANK]
+    assert "4111111111111111" not in str(ProviderSnapshot.objects.values_list("payload"))
+
+
+def test_malformed_snapshot_items_are_skipped_and_unknown_keys_dropped(
+    fake: FakeProvider,
+) -> None:
+    lease = make_lease()
+    ref = ExternalRef.objects.get(external_id=CUSTOMER)
+    ProviderSnapshot.objects.create(
+        external_ref=ref,
+        payload=[
+            "text",
+            {"method": "bank"},
+            {"external_id": 7},
+            {"external_id": BANK, "method": "bank", "is_default": "yes", "routing": "x"},
+        ],
+        fetched_at=NOW,
+    )
+    [only] = service.payment_method_choices(lease).methods
+    assert (only.external_id, only.method, only.is_default) == (BANK, "bank", False)
+    assert not hasattr(only, "routing")
 
 
 def test_the_service_module_uses_no_float() -> None:

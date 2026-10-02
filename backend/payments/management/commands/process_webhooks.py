@@ -1,11 +1,11 @@
 """``process_webhooks``: process stored webhook events that are not processed yet.
 
-docs/qa/PLAN-008-webhooks.md D1. Catches up after a restart (the in-process queue lives
-in memory) and retries failed events, oldest first, at most ``--limit`` per run. A
-dead-lettered event is skipped; staff replay it from its page. Each event is processed
-in its own transaction by ``payments.webhooks.processor.process_event``, which locks the
-row, so this command and a web process's worker thread never process one event twice
-at the same time. It prints counts only.
+docs/qa/PLAN-008-webhooks.md D1. The manual catch-up: retries failed events (the
+``worker`` takes only events never attempted, PLAN-010 D2), oldest first, at most
+``--limit`` per run. A dead-lettered event is skipped; staff replay it from its page.
+Each event is processed in its own transaction by
+``payments.webhooks.processor.process_event``, which locks the row, so this command and
+the worker never process one event twice at the same time. It prints counts only.
 """
 
 from __future__ import annotations

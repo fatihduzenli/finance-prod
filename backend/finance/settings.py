@@ -54,6 +54,19 @@ LARGE_DEBIT_WARNING_AMOUNT = _config.large_debit_warning_amount
 #: autopay. Named for the provider in general because the ledger may not name Stax
 #: (tests/test_stax_isolation.py).
 PROVIDER_MAX_TXN_AMOUNT = _config.stax_max_txn_amount
+# --- Reconciliation (docs/qa/PLAN-010-worker-and-reconciliation.md D5, D7, D12) -------
+#: A pending payment older than this many US business days is flagged.
+PENDING_PAYMENT_MAX_BUSINESS_DAYS = _config.pending_payment_max_business_days
+#: The first run's transaction window, in days.
+RECONCILE_LOOKBACK_DAYS = _config.reconcile_lookback_days
+#: Each run re-reads transactions from this many hours before the last successful run.
+RECONCILE_OVERLAP_HOURS = _config.reconcile_overlap_hours
+#: The deposit window, in days.
+RECONCILE_DEPOSIT_DAYS = _config.reconcile_deposit_days
+#: A ``datetime.time``: the scheduled run starts at this local time ...
+RECONCILE_LOCAL_TIME = _config.reconcile_local_time
+#: ... in this IANA time zone.
+RECONCILE_TIMEZONE = _config.reconcile_timezone
 APP_BASE_URL = _config.app_base_url
 REDIS_URL = _config.redis_url
 

@@ -114,6 +114,10 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # GET of the confirmation pages below admin too.
     "ledger:payments:refund": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:payments:void": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Reconciliation (PLAN-010 D10): "Run now" needs admin; resolving a mismatch needs
+    # billing. The view refuses the page's GET below billing too.
+    "ledger:reconciliation:run": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:reconciliation:resolve": RouteRule(min_role=Role.BILLING, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every
@@ -172,6 +176,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:payments:export",
         # The payment page: any verified role (PLAN-009 D8).
         "ledger:payments:detail",
+        # The reconciliation page; the view itself requires billing (PLAN-010 D10).
+        "ledger:reconciliation:page",
     }
 )
 

@@ -3,14 +3,18 @@
 Access: every view requires a signed-in, second-factor-verified user with a role
 (middleware plus :func:`~ledger.views.operators.role_required`). Unsafe methods are
 checked again by ``accounts.registry``: every lease POST needs ``admin`` (D10). The
-enrolment page also reads the operator's payment methods from the provider, so its GET
-is limited to ``admin`` here too, and a viewer never causes a provider call.
+enrolment page shows the operator's payment methods, so its GET is limited to ``admin``
+here too.
 
-No view calls the provider: every change and every provider read goes through
-:mod:`ledger.services.leases`, which writes the audit log. Templates receive masked
-identifiers only, except the payment-method IDs that are the values of the enrolment
-choices. Every POST ends in a redirect, whatever the outcome; a form with errors is
-held in the session for the next GET, as on the operator screens.
+No view calls the provider: every change goes through :mod:`ledger.services.leases`,
+which writes the audit log. Enable, pause and resume are queued as jobs
+(:mod:`ledger.views.jobs`, PLAN-010 D3) that run the service in the worker; the detail
+page shows the latest one. The enrolment page lists the methods from the latest
+snapshot ("Methods as of ..."); its "Refresh methods" button (a POST to the same URL
+with ``refresh_methods``) queues the read, and the page shows that job's state.
+Templates receive masked identifiers only, except the payment-method IDs that are the
+values of the enrolment choices. Every POST ends in a redirect, whatever the outcome; a
+form with errors is held in the session for the next GET, as on the operator screens.
 """
 
 from __future__ import annotations
@@ -42,11 +46,17 @@ from ledger.models import (
     ScheduleState,
 )
 from ledger.services import leases as service
-from ledger.services.leases import AutopayOutcome, LeaseRefused
+from ledger.services.leases import LeaseRefused
+from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import PAGE_SIZE, _actor, _held, _hold, _role, role_required
+from payments import jobs
+from payments.models import JobKind
 from payments.provider import mask_identifier
 
 ALREADY_SAVED = "This lease was already saved. Nothing was changed."
+REFRESH_QUEUED = "Reading the operator's payment methods."
+#: The job kinds the enrolment page shows.
+REFRESH_KINDS = (JobKind.OPERATOR_METHODS_REFRESH,)
 
 
 def _load(pk: str) -> Lease:
@@ -56,13 +66,6 @@ def _load(pk: str) -> Lease:
     except ValueError:
         raise Http404 from None
     return get_object_or_404(Lease.objects.select_related("store", "operator"), pk=key)
-
-
-def _report(request: HttpRequest, outcome: AutopayOutcome) -> None:
-    if outcome.ok:
-        messages.success(request, outcome.text)
-    else:
-        messages.error(request, outcome.text)
 
 
 def _initial(lease: Lease) -> dict[str, Any]:
@@ -147,6 +150,7 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/leases/detail.html",
         {
+            **job_context(lease),
             "lease": lease,
             "rent": service.current_rent(lease, today),
             "upcoming": service.upcoming_rent(lease, today),
@@ -247,19 +251,24 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
         return refused
     lease = _load(pk)
     target = f"lease-enrol:{lease.pk}"
+    if request.method == "POST" and "refresh_methods" in request.POST:
+        _refresh_methods(request, lease)
+        return redirect("ledger:leases:enrol", pk=lease.pk)
     if request.method == "POST":
         form = EnrolForm(request.POST)
         if form.is_valid():
-            outcome = service.enable_autopay(
-                lease.pk,
-                form.cleaned_data["payment_method_id"],
-                actor=_actor(request),
-                confirmed=form.cleaned_data["confirm_large_debit"],
-            )
-            _report(request, outcome)
-            if outcome.ok:
+            if busy(request, lease):
                 return redirect("ledger:leases:detail", pk=lease.pk)
-            return redirect("ledger:leases:enrol", pk=lease.pk)
+            submit(
+                request,
+                JobKind.AUTOPAY_ENABLE,
+                lease,
+                {
+                    "payment_method_id": form.cleaned_data["payment_method_id"],
+                    "confirmed": form.cleaned_data["confirm_large_debit"] is True,
+                },
+            )
+            return redirect("ledger:leases:detail", pk=lease.pk)
         _hold(request, target, form)
         return redirect("ledger:leases:enrol", pk=lease.pk)
     form = _held(request, target, EnrolForm) or EnrolForm()
@@ -279,12 +288,12 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
         }
         for debit in plan
     ]
-    # The provider is read only when nothing local blocks enrolment.
     choices = service.payment_method_choices(lease) if not blockers else service.MethodChoices()
     return render(
         request,
         "ledger/leases/enrol.html",
         {
+            **(job_context(lease.operator, REFRESH_KINDS) if lease.operator else {}),
             "lease": lease,
             "form": form,
             "blockers": blockers,
@@ -297,15 +306,30 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
             "choices": choices,
             "linked_method": service.linked_payment_method(lease.operator),
             "no_bank_message": service.NO_BANK_METHOD,
+            "methods_not_read": service.METHODS_NOT_READ,
         },
     )
+
+
+def _refresh_methods(request: HttpRequest, lease: Lease) -> None:
+    """Queue a read of the operator's payment methods; refused, with a message, when
+    the operator has no customer reference or a read is already waiting."""
+    operator = lease.operator
+    if operator is None or not service.customer_ref(operator):
+        messages.error(request, service.NO_PROVIDER_CUSTOMER)
+        return
+    if busy(request, operator, REFRESH_KINDS):
+        return
+    jobs.refresh_methods(operator, request.user)
+    messages.info(request, REFRESH_QUEUED)
 
 
 @role_required
 @require_POST
 def lease_pause(request: HttpRequest, pk: str) -> HttpResponse:
     lease = _load(pk)
-    _report(request, service.pause_autopay(lease.pk, actor=_actor(request)))
+    if not busy(request, lease):
+        submit(request, JobKind.AUTOPAY_PAUSE, lease)
     return redirect("ledger:leases:detail", pk=lease.pk)
 
 
@@ -313,5 +337,6 @@ def lease_pause(request: HttpRequest, pk: str) -> HttpResponse:
 @require_POST
 def lease_resume(request: HttpRequest, pk: str) -> HttpResponse:
     lease = _load(pk)
-    _report(request, service.resume_autopay(lease.pk, actor=_actor(request)))
+    if not busy(request, lease):
+        submit(request, JobKind.AUTOPAY_RESUME, lease)
     return redirect("ledger:leases:detail", pk=lease.pk)

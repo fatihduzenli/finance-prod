@@ -43,6 +43,7 @@
   </table>
 
   <h2>Autopay</h2>
+  {% include "ledger/_job_status.html" %}
   {% if blockers %}
     <p><strong>Enrolment blockers</strong></p>
     <ul id="enrolment-blockers">{% for text in blockers %}<li>{{ text }}</li>{% endfor %}</ul>

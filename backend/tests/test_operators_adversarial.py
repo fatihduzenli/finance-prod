@@ -21,6 +21,7 @@ from payments.models import ExternalRef
 from payments.provider import CustomerInput
 from payments.stax import mapping
 from tests.auth_helpers import make_user, verified_client
+from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.stax_helpers import make_rig
 from tests.test_operator_sync import (
     add_provider_customer,
@@ -52,6 +53,12 @@ def _client(role: Role) -> Client:
 @pytest.fixture
 def billing() -> Client:
     return _client(Role.BILLING)
+
+
+@pytest.fixture(autouse=True)
+def _worker_runs_between_requests(request: pytest.FixtureRequest) -> None:
+    """PLAN-010: views queue provider work; these cases check the outcome after the worker ran."""
+    request.getfixturevalue("worker_between_requests")
 
 
 # --- 11: forms and search --------------------------------------------------------------------

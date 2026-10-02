@@ -37,6 +37,7 @@ from payments.stax.breaker import CircuitBreaker, Outcome, reset_breaker
 from payments.stax.budget import FailureBudget, reset_budget
 from payments.stax.state import MemoryStateStore
 from tests.auth_helpers import iter_routes, make_user, verified_client
+from tests.job_helpers import run_queued_jobs
 from tests.test_operator_views import client_for
 from tests.test_rent_run import enrolled, invoice, lease
 
@@ -216,10 +217,18 @@ def test_match_links_and_reports_through_the_page(billing: Client, fake: FakePro
     _, [ref] = enrolled(fake)
     rent_run.create_charges(TODAY, actor=None)
     invoice(fake, ref, total=D("1499.00"))
+    fake.calls.clear()
     response = billing.post(MATCH)
     assert (response.status_code, response["Location"]) == (302, RUN)
+    # PLAN-010 Batch A follow-up: matching is a job; the page shows it queued, then the
+    # report once the worker ran it.
+    page = billing.get(RUN).content.decode()
+    assert 'id="job-state">Queued<' in page and "Linked with a total mismatch" not in page
+    assert fake.calls == []
+    run_queued_jobs()
     page = billing.get(RUN).content.decode()
     assert "Linked with a total mismatch: 1." in page
+    assert 'id="match-report"' in page and "differs from the amount due" in page
     assert "Needs review" in page
     charge = RentCharge.objects.get()
     detail = billing.get(charge_paths(charge)[0]).content.decode()
@@ -338,7 +347,9 @@ def test_an_invalid_payment_is_held_shown_once_and_saves_nothing(
     assert (response.status_code, response["Location"]) == (302, record)
     page = billing.get(record).content.decode()
     assert text in page
-    assert "4111" not in page
+    # The rejected value never comes back, in any spacing. ("4111" alone could appear
+    # inside a CSRF token or a UUID, so the check is on the number itself.)
+    assert "4111 1111 1111 1111" not in page and "4111111111111111" not in page
     assert text not in billing.get(record).content.decode()
     assert not Payment.objects.exists()
 

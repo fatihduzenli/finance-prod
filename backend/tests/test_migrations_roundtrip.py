@@ -41,6 +41,7 @@ GUARD_TRIGGERS = {
         for module in (
             "ledger.migrations.0002_postgresql_guards",
             "payments.migrations.0002_postgresql_guards",
+            "payments.migrations.0005_jobs",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -87,6 +88,9 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0002_postgresql_guards",
                 "[ ] 0003_webhook_event_processing",
                 "[ ] 0004_webhook_object_id_source",
+                "[ ] 0005_jobs",
+                "[ ] 0006_job_kinds_reads",
+                "[ ] 0007_reconciliation",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):

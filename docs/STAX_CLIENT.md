@@ -65,12 +65,19 @@ spread as the run decides.
 | Setting | Value | Meaning |
 |---|---|---|
 | `STAX_CALLER=none` | default; the web app | every provider call raises `ProviderNotPermittedHere` before any network activity |
-| `STAX_CALLER=worker` | the single worker process (Step 10) | the only process allowed to call Stax |
+| `STAX_CALLER=worker` | the `worker` container app, one replica (PLAN-010 D4) | the only process allowed to call Stax |
 
-The web app on Azure Container Apps may run up to two replicas. Neither may call Stax. When
-the Celery worker arrives at Step 10 it runs with `STAX_CALLER=worker`, **one replica**, and
-that single-replica rule goes into the Bicep template then. Until Step 10, the only permitted
-caller is a one-off command run by the owner with the variable set for that one process (§8).
+The web app on Azure Container Apps runs up to two replicas with `STAX_CALLER=none`: its
+views queue rows in the `jobs` table and never call the provider (a static scan and a
+runtime test over every enqueueing view enforce it, `backend/tests/test_jobs.py`). The
+`worker` command (`finance-<env>-worker`, one replica, no ingress, `STAX_CALLER=worker`)
+runs the jobs and the stored webhook events one at a time, so the limiter, breaker and
+failure budget live in exactly one process. The nightly reconciliation runs **inside the
+worker** too: the Container Apps scheduled Job only queues it (ADR-0006). Between a
+revision swap's start and the old replica's exit (grace period 60 s) two worker
+processes can exist for a moment; the old one finishes its current item and takes no new
+one. The only other permitted caller is a one-off command run by the owner inside the
+worker container (§8, `docs/RUNBOOK.md` §10.2).
 
 ## 5a. The boot-time identity check (PLAN-006)
 

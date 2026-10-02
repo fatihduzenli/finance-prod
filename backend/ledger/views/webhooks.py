@@ -3,7 +3,8 @@
 Any role may read; replay needs ``billing`` (``accounts.registry`` and again here).
 Provider object IDs are masked to their first and last four characters, in the list,
 on the detail page and inside the payload table. The payload shown is the redacted
-copy the receiver stored; nothing here reads the provider.
+copy the receiver stored; nothing here reads the provider. A replay is queued as a
+``webhook_replay`` job for the worker (PLAN-010 D3); the detail page shows its state.
 """
 
 from __future__ import annotations
@@ -12,7 +13,6 @@ import re
 import uuid
 from collections.abc import Mapping
 
-from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
@@ -20,11 +20,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST, require_safe
 
 from accounts.roles import Role, meets
+from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import PAGE_SIZE, _role, role_required
 from ledger.views.run import _billing_only
-from payments.models import WebhookEvent, WebhookOutcome
+from payments.models import JobKind, WebhookEvent, WebhookOutcome
 from payments.provider import mask_identifier
-from payments.webhooks.processor import process_event
 
 #: Most payload rows rendered; the rest are counted.
 MAX_PAYLOAD_ROWS = 500
@@ -118,6 +118,7 @@ def webhook_detail(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/webhooks/detail.html",
         {
+            **job_context(event),
             "event": event,
             "object_id_masked": mask_identifier(event.provider_object_id),
             "payload_rows": rows[:MAX_PAYLOAD_ROWS],
@@ -134,9 +135,6 @@ def webhook_replay(request: HttpRequest, pk: str) -> HttpResponse:
     if refused is not None:
         return refused
     event = _load(pk)
-    outcome = process_event(event.pk, replay=True)
-    if outcome in (WebhookOutcome.FAILED, WebhookOutcome.DEAD_LETTER):
-        messages.error(request, f"Replayed. The handler failed again; outcome: {outcome}.")
-    else:
-        messages.success(request, f"Replayed. Outcome: {outcome}.")
+    if not busy(request, event):
+        submit(request, JobKind.WEBHOOK_REPLAY, event)
     return redirect("ledger:webhooks:detail", pk=event.pk)

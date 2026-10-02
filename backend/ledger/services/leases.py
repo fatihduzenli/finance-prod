@@ -21,6 +21,11 @@ Rules kept here:
   is never created again, so a second click creates nothing. A schedule whose last
   create failed is first looked for in the provider's list, in case the failed request
   took effect, and adopted when exactly one unlinked schedule matches.
+- **Methods from the snapshot** (PLAN-010 Batch A follow-up): the enrolment page reads
+  the operator's payment methods from the latest ``provider_snapshots`` row of its
+  customer reference, written by :func:`refresh_payment_methods` in the worker; the
+  page never calls the provider. :func:`enable_autopay` still reads the list from the
+  provider before it creates anything.
 - **Bank only.** The chosen payment method must be in the provider's list for the
   operator's customer, be a ``bank`` method and not be deleted; a card is refused even
   when its ID is posted directly (D2).
@@ -72,7 +77,7 @@ from ledger.models import (
 )
 from payments import operator_sync
 from payments.errors import ProviderError, ProviderRejected
-from payments.models import ExternalRef
+from payments.models import ExternalRef, ProviderSnapshot
 from payments.provider import (
     Amounts,
     LineItem,
@@ -121,6 +126,8 @@ DAY_NOT_SCHEDULABLE = (
 NO_RENT = "The lease has no rent."
 NO_PROVIDER_CUSTOMER = "Operator has no payment provider customer."
 NO_BANK_METHOD = "No bank method linked."
+METHODS_NOT_READ = "The operator's payment methods have not been read yet."
+METHODS_READ = "Payment methods read: {count}."
 NO_EMAIL = "No email: operator will not receive receipts."
 SCHEDULE_DIFFERS = "Schedule amount differs from rent; pause and re-enable autopay."
 RENT_CHANGES = "Rent changes on {date}; pause and re-enable autopay on or after that date."
@@ -210,10 +217,24 @@ class MethodChoices:
     #: A fixed sentence when the list could not be read; empty otherwise.
     error: str = ""
     fields: tuple[str, ...] = ()
+    #: When the snapshot shown was read; ``None`` when no snapshot exists.
+    fetched_at: datetime | None = None
 
     @property
     def has_bank(self) -> bool:
         return any(method.is_usable_bank for method in self.methods)
+
+
+@dataclass(frozen=True, slots=True)
+class MethodsRefresh:
+    """The outcome of :func:`refresh_payment_methods`."""
+
+    ok: bool
+    message: str
+    #: Key names a ``ProviderRejected`` body named; never a value.
+    fields: tuple[str, ...] = ()
+    #: Error class name of a provider failure, empty otherwise.
+    failure: str = ""
 
 
 class LeaseRefused(Exception):  # noqa: N818 (reads as an outcome, like the provider errors)
@@ -467,16 +488,102 @@ def enrolment_notes(lease: Lease) -> list[str]:
     return notes
 
 
+#: The fields of a payment-method record kept in its snapshot (Rule 1: nothing else).
+METHOD_SNAPSHOT_FIELDS: tuple[str, ...] = (
+    "external_id",
+    "raw_status",
+    "method",
+    "last_four",
+    "bank_type",
+    "nickname",
+    "is_default",
+)
+
+
+def _customer_ref_row(operator: Operator | None) -> ExternalRef | None:
+    if operator is None:
+        return None
+    return ExternalRef.objects.filter(
+        entity_type=operator_sync.ENTITY_OPERATOR,
+        entity_id=operator.pk,
+        provider=PROVIDER_KEY,
+        external_kind=operator_sync.KIND_CUSTOMER,
+        superseded_at__isnull=True,
+    ).first()
+
+
+def _method_snapshots(ref: ExternalRef) -> list[ProviderSnapshot]:
+    """The method-list snapshots of a customer reference, newest first. The customer
+    webhook keeps the customer object (a JSON object) under the same reference; a method
+    list is a JSON array."""
+    return [
+        snapshot
+        for snapshot in ref.snapshots.order_by("-fetched_at", "-id")
+        if isinstance(snapshot.payload, list)
+    ]
+
+
+def _method_payload(method: PaymentMethodRecord) -> dict[str, str | bool]:
+    return {name: getattr(method, name) for name in METHOD_SNAPSHOT_FIELDS}
+
+
+def _method_from_payload(item: object, fetched_at: datetime) -> PaymentMethodRecord | None:
+    if not isinstance(item, dict) or not isinstance(item.get("external_id"), str):
+        return None
+    values: dict[str, Any] = {}
+    for name in METHOD_SNAPSHOT_FIELDS:
+        value = item.get(name)
+        wanted = bool if name == "is_default" else str
+        if isinstance(value, wanted):
+            values[name] = value
+    values.setdefault("raw_status", "")
+    return PaymentMethodRecord(fetched_at=fetched_at, **values)
+
+
 def payment_method_choices(lease: Lease) -> MethodChoices:
-    """The operator's methods at the provider (one list call), or why there are none."""
-    customer = customer_ref(lease.operator)
-    if not customer:
+    """The operator's methods from the latest snapshot (no provider call), or why there
+    are none. ``fetched_at`` is ``None`` when the methods were never read."""
+    ref = _customer_ref_row(lease.operator)
+    if ref is None:
         return MethodChoices(error=NO_PROVIDER_CUSTOMER)
+    snapshots = _method_snapshots(ref)
+    if not snapshots:
+        return MethodChoices()
+    latest = snapshots[0]
+    methods = (_method_from_payload(item, latest.fetched_at) for item in latest.payload)
+    return MethodChoices(
+        methods=tuple(method for method in methods if method is not None),
+        fetched_at=latest.fetched_at,
+    )
+
+
+def refresh_payment_methods(operator_id: uuid.UUID) -> MethodsRefresh:
+    """Read the operator's payment methods from the provider (one list call) and keep
+    them as the one method-list snapshot of its customer reference (worker only).
+
+    Nothing is written before the call; a failure keeps the previous snapshot. The new
+    snapshot replaces the previous ones in one transaction.
+    """
+    operator = Operator.objects.filter(pk=operator_id).first()
+    ref = _customer_ref_row(operator)
+    if ref is None:
+        return MethodsRefresh(False, NO_PROVIDER_CUSTOMER)
     try:
-        methods = payments.get_provider().list_payment_methods(customer)
+        methods = payments.get_provider().list_payment_methods(ref.external_id)
     except ProviderError as error:
-        return MethodChoices(error=_failure_message(error), fields=_fields(error))
-    return MethodChoices(methods=tuple(methods))
+        return MethodsRefresh(
+            False, _failure_message(error), _fields(error), operator_sync.failure_name(error)
+        )
+    fetched_at = max((method.fetched_at for method in methods), default=timezone.now())
+    with transaction.atomic():
+        old = [snapshot.pk for snapshot in _method_snapshots(ref)]
+        ProviderSnapshot.objects.create(
+            external_ref=ref,
+            payload=[_method_payload(method) for method in methods],
+            fetched_at=fetched_at,
+        )
+        ProviderSnapshot.objects.filter(pk__in=old).delete()
+    return MethodsRefresh(True, METHODS_READ.format(count=len(methods)))
 
 
 # --- Lease writes ---------------------------------------------------------------------

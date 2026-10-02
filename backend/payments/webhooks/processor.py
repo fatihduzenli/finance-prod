@@ -5,7 +5,8 @@ and records the outcome. A handler failure is recorded as the exception's class 
 and, when the exception carries them, the names of the fields involved; never a message
 or a value. The third failed attempt moves the event to dead letter and alerts once.
 Nothing here retries: a failed event waits for a replay or the next
-``process_webhooks`` run.
+``process_webhooks`` run. The ``worker`` command calls :func:`process_event` for each
+stored event not yet attempted (PLAN-010 D2).
 
 An event stored without an object ID (before PLAN-008a read nested IDs) has the ID read
 again from its stored, redacted payload before its handler runs (PLAN-009a); an ID
@@ -26,6 +27,7 @@ from payments import alerts
 from payments.models import WebhookEvent, WebhookOutcome
 from payments.webhooks.events import UNKNOWN_EVENT, handling, ignored
 from payments.webhooks.handlers import HANDLERS
+from payments.webhooks.receiver import object_id_and_source
 
 #: Failed attempts after which an event is dead-lettered.
 MAX_ATTEMPTS = 3
@@ -53,9 +55,6 @@ def _recover_object_id(event: WebhookEvent) -> bool:
     """Read the object ID from the stored payload when the row has none; True if found."""
     if event.provider_object_id or event.payload is None:
         return False
-    # Imported here: the receiver imports the queue, which imports this module.
-    from payments.webhooks.receiver import object_id_and_source
-
     provider_object_id, source = object_id_and_source(event.payload)
     if not provider_object_id:
         return False

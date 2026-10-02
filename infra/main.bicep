@@ -39,7 +39,7 @@ param staxEnv string = 'sandbox'
 @description('Stax API base URL. Sandbox and live share this host; only the key differs (docs/CLAUDE.md Rule 6).')
 param staxApiBaseUrl string = 'https://apiprod.fattlabs.com'
 
-@description('STAX_CALLER of the web app: none (default) or worker. worker makes the web process the single Stax caller, which is correct only with webMaxReplicas = 1 (docs/qa/PLAN-006-operators.md D1). Step 10 moves the calls to the worker and returns the web app to none.')
+@description('STAX_CALLER of the web app: none (default) or worker. From Step 10 the worker container app is the single Stax caller (STAX_CALLER=worker, set in its module) and the web app runs with none (docs/qa/PLAN-010-worker-and-reconciliation.md D4). worker here is correct only with webMaxReplicas = 1 and no worker app.')
 @allowed([
   'none'
   'worker'
@@ -192,6 +192,23 @@ param webMinReplicas int = 1
 param webMaxReplicas int = 2
 param webCpuCores string = '0.5'
 param webMemory string = '1Gi'
+
+// ---------------------------------------------------------------------------
+// Worker container app (Step 10)
+// ---------------------------------------------------------------------------
+
+@description('The worker container app: the single Stax caller, one replica, no ingress, the web image (PLAN-010 D4). Set as the GitHub repository variable WORKER_APP_NAME.')
+param workerAppName string = '${resourceNamePrefix}-worker'
+
+param workerCpuCores string = '0.5'
+param workerMemory string = '1Gi'
+
+// ---------------------------------------------------------------------------
+// Scheduled reconciliation job (Step 10)
+// ---------------------------------------------------------------------------
+
+@description('The nightly reconciliation: a scheduled Container Apps job on the web image, cron 06:00 and 07:00 UTC, running at 02:00 New York (PLAN-010 D5). Set as the GitHub repository variable RECONCILE_JOB_NAME.')
+param reconcileJobName string = '${resourceNamePrefix}-reconcile'
 
 @description('Vault secret name for the Stax API key of this environment.')
 param staxApiKeySecretName string
@@ -424,12 +441,76 @@ module managedCertificate 'modules/managedCertificate.bicep' = if (useCustomHost
   ]
 }
 
-// The Celery worker and beat container apps belong here (Step 10, docs/CLAUDE.md
-// Rule 3 and ADR-0002). They will reuse this environment, this identity, this
-// image and these vault references, with a different command and, for beat,
-// exactly one replica and no ingress. They are deliberately not created yet:
-// nothing enqueues a task, and an idle always-on replica costs money. Their
-// Redis is decided at Step 10 as well: see deployRedis above.
+// The worker (PLAN-010 D2, D4): same environment, identity, image and vault
+// references as the web app; STAX_CALLER=worker, one replica, no ingress. It drains
+// the jobs table and the stored webhook events. No Celery and no Redis.
+module worker 'modules/containerAppWorker.bicep' = {
+  name: 'container-app-worker'
+  params: {
+    location: location
+    appName: workerAppName
+    environmentId: containerAppsEnvironment.outputs.environmentId
+    image: webImage
+    identityResourceId: identity.outputs.identityId
+    registryLoginServer: registry.outputs.loginServer
+    keyVaultUri: keyVaultUri
+    appEnv: appEnv
+    staxEnv: staxEnv
+    staxApiBaseUrl: staxApiBaseUrl
+    staxExpectedMerchantId: staxExpectedMerchantId
+    staxMaxTxnAmount: staxMaxTxnAmount
+    appBaseUrl: effectiveAppBaseUrl
+    staxApiKeySecretName: staxApiKeySecretName
+    staxWebhookUrlTokenSecretName: staxWebhookUrlTokenSecretName
+    databaseUrlSecretName: databaseUrlSecretName
+    djangoSecretKeySecretName: djangoSecretKeySecretName
+    sentryDsnSecretName: sentryDsnSecretName
+    cpuCores: workerCpuCores
+    memory: workerMemory
+    tags: tags
+  }
+  dependsOn: [
+    keyVaultAccess
+    postgresSecrets
+    // The web app's start applies the migrations the worker needs.
+    web
+  ]
+}
+
+// The nightly reconciliation (PLAN-010 D5 to D9): same environment, identity, image,
+// vault references and environment as the worker, but STAX_CALLER=none: the job only
+// queues the run and the worker runs it. The thresholds of D12 keep their defaults;
+// none is set here.
+module reconcileJob 'modules/containerAppJobReconcile.bicep' = {
+  name: 'container-app-job-reconcile'
+  params: {
+    location: location
+    jobName: reconcileJobName
+    environmentId: containerAppsEnvironment.outputs.environmentId
+    image: webImage
+    identityResourceId: identity.outputs.identityId
+    registryLoginServer: registry.outputs.loginServer
+    keyVaultUri: keyVaultUri
+    appEnv: appEnv
+    staxEnv: staxEnv
+    staxApiBaseUrl: staxApiBaseUrl
+    staxExpectedMerchantId: staxExpectedMerchantId
+    staxMaxTxnAmount: staxMaxTxnAmount
+    appBaseUrl: effectiveAppBaseUrl
+    staxApiKeySecretName: staxApiKeySecretName
+    staxWebhookUrlTokenSecretName: staxWebhookUrlTokenSecretName
+    databaseUrlSecretName: databaseUrlSecretName
+    djangoSecretKeySecretName: djangoSecretKeySecretName
+    sentryDsnSecretName: sentryDsnSecretName
+    tags: tags
+  }
+  dependsOn: [
+    keyVaultAccess
+    postgresSecrets
+    // The web app's start applies the migrations the job needs.
+    web
+  ]
+}
 
 // ---------------------------------------------------------------------------
 // Outputs. Names, IDs and public addresses only; never a secret value.
@@ -445,6 +526,12 @@ output registryLoginServer string = registry.outputs.loginServer
 
 @description('Set as the GitHub repository variable WEB_APP_NAME.')
 output webAppName string = web.outputs.appName
+
+@description('Set as the GitHub repository variable WORKER_APP_NAME.')
+output workerAppName string = worker.outputs.appName
+
+@description('Set as the GitHub repository variable RECONCILE_JOB_NAME.')
+output reconcileJobName string = reconcileJob.outputs.jobName
 
 @description('Ingress host name of the web app.')
 output webAppFqdn string = web.outputs.fqdn

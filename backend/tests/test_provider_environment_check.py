@@ -218,10 +218,12 @@ def test_the_image_runs_the_check_after_migrations_and_before_gunicorn(repo_root
     assert " --workers 1 --worker-class gthread --threads 4 " in cmd
 
 
-def test_staging_makes_the_single_web_replica_the_caller(repo_root: Path) -> None:
+def test_staging_makes_the_worker_app_the_single_caller(repo_root: Path) -> None:
+    # PLAN-010 D4: the web app is back to none and the default two replicas; the worker
+    # app (containerAppWorker.bicep, tested in test_jobs.py) is the caller.
     params = (repo_root / "infra/parameters/staging.bicepparam").read_text()
-    assert re.search(r"^param staxCaller = 'worker'$", params, re.MULTILINE)
-    assert re.search(r"^param webMaxReplicas = 1$", params, re.MULTILINE)
+    assert re.search(r"^param staxCaller = 'none'$", params, re.MULTILINE)
+    assert not re.search(r"^param webMaxReplicas", params, re.MULTILINE)
     assert re.search(r"^param staxExpectedMerchantId = '[0-9a-f-]{36}'$", params, re.MULTILINE)
     main = (repo_root / "infra/main.bicep").read_text()
     assert "param staxCaller string = 'none'" in main

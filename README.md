@@ -24,14 +24,15 @@ pages; this app never handles card or bank data.
 | `docs/` | Rules, decisions, QA plans and reports (`docs/qa/`) |
 | `Dockerfile`, `.dockerignore` | Delivery image: uv build stage, non-root gunicorn runtime |
 | `.github/workflows/ci.yml` | Lint, types, unit and e2e tests on every push; staging deploy from `main` |
-| `docker-compose.yml` | Local PostgreSQL and Redis |
+| `docker-compose.yml` | Local PostgreSQL (and a Redis service nothing reads; ADR-0006) |
 | `.env.example` | Every environment variable the app reads, with empty values |
 
 ## Stack
 
-Python 3.12, Django 5.2 LTS, PostgreSQL 16, Celery + Redis (from Step 10),
+Python 3.12, Django 5.2 LTS, PostgreSQL 16, a database job queue with one worker
+process (no Celery, no Redis; ADR-0006),
 `uv` for dependency management, ruff, mypy in strict mode, pytest and
-Playwright. Hosted on Azure Container Apps. See ADR-0001 and ADR-0002 in
+Playwright. Hosted on Azure Container Apps. See ADR-0001, ADR-0002 and ADR-0006 in
 [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
 ## Commands
@@ -53,7 +54,11 @@ All run from the repository root.
 | Stax authentication check (one `GET /self`; needs `STAX_CALLER=worker`) | `uv run python backend/manage.py provider_ping` |
 | Boot check: key environment and merchant (one `GET /self`; runs in the image `CMD`) | `uv run python backend/manage.py provider_environment_check` |
 | Create the annual insurance charges in scope today (idempotent; prints counts; no Stax call) | `uv run python backend/manage.py generate_insurance_charges` |
-| Process stored webhook events not yet processed (catch-up after a restart; retries failed events; prints counts) | `uv run python backend/manage.py process_webhooks [--limit 100]` |
+| Worker: runs queued Stax jobs and stored webhook events, one at a time (the single Stax caller; refuses to start unless `STAX_CALLER=worker`; SIGTERM finishes the current item; `--once` runs one tick) | `STAX_CALLER=worker uv run python backend/manage.py worker [--once]` |
+| Process stored webhook events not yet processed (manual catch-up; retries failed events, which the worker does not; prints counts) | `uv run python backend/manage.py process_webhooks [--limit 100]` |
+| Queue the nightly reconciliation when it is due (the scheduled Container Apps job runs this; no Stax call; `STAX_CALLER` may be `none`) | `uv run python backend/manage.py reconcile --scheduled` |
+| Run a reconciliation at once inside the worker (prints counts; exit 1 on failure) | `STAX_CALLER=worker uv run python backend/manage.py reconcile` |
+| Test fixture: age a pending payment so the next reconciliation flags it (refused in production) | `uv run python backend/manage.py age_pending_payment --payment <id> --days 10` |
 | Register the app's webhooks with Stax (creates only missing ones; stores the IDs; prints event names and masked IDs, never the URL; refused when `APP_ENV=local`) | `uv run python backend/manage.py register_webhooks` |
 | Delete the app's webhook registrations at Stax by stored ID (refused when `APP_ENV=local`) | `uv run python backend/manage.py unregister_webhooks` |
 | Dev server without Stax (in-memory provider; `APP_ENV=local` only) | `STAX_PROVIDER=fake uv run python backend/manage.py runserver` |
@@ -72,7 +77,7 @@ environment guard and the yellow SANDBOX banner exist.
 | `APP_ENV` | `local` | `staging` | `production` |
 | `STAX_ENV` | `sandbox` | `sandbox` | `sandbox` for now — `live` at Step 16 |
 | Stax key | sandbox key, or empty | `stax-api-key-sandbox` | `stax-api-key-sandbox` now, `stax-api-key-live` at Step 16 |
-| `STAX_CALLER` | `none` (default); `worker` only to run `provider_ping` | `worker` on the web app, which runs as one replica, until Step 10 moves the calls to the worker (PLAN-006 D1) | `none` |
+| `STAX_CALLER` | `none` (default) on the dev server; `worker` for the `worker` command and `provider_ping` | web app `none` (up to 2 replicas); worker app `worker` (one replica, PLAN-010 D4) | web app `none`; worker app `worker` |
 | `STAX_PROVIDER` | `stax` (default), or `fake` for the in-memory provider | `stax` | `stax` |
 | `STAX_PAY_INVOICE_ENABLED` | `false` (default) | `false`; `true` only for the documented sandbox test | `false` until TODO-VERIFY-019 is decided |
 | `LARGE_DEBIT_WARNING_AMOUNT` | empty (`2000.00`) | empty (`2000.00`) | empty (`2000.00`); a placeholder until Stax states the per-transaction limit (Q25) |
@@ -116,8 +121,10 @@ credential, or a decision.
 - [ ] Create the GitHub repository and remote, then the OIDC app registration and
       federated credential, and the `staging` GitHub environment
       (`infra/README.md` §5).
-- [ ] Set the GitHub variables `ACR_NAME`, `WEB_APP_NAME`, `RESOURCE_GROUP`,
-      `APP_BASE_URL` and the secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+- [ ] Set the GitHub variables `ACR_NAME`, `WEB_APP_NAME`, `WORKER_APP_NAME`
+      (default `finance-staging-worker`), `RECONCILE_JOB_NAME` (default
+      `finance-staging-reconcile`), `RESOURCE_GROUP`, `APP_BASE_URL` and the
+      secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
       `AZURE_SUBSCRIPTION_ID` (`infra/README.md` §6).
 - [ ] Decide on IP whitelisting with Stax. If yes, send them the NAT gateway
       address from the deployment output (`infra/README.md` §9); if no, drop the
@@ -259,5 +266,7 @@ limiter, breaker, retries, validation and failure budget; see
 at `/operators/` (list, search, detail, create, edit, archive, retry, manual link), with
 each new or edited operator linked to or created as a Stax customer, the boot-time
 environment check, and the reserved `documents` and `outbound_messages` tables; see
-[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). No Celery yet. Current
-state and open defects: [`docs/STATUS.md`](docs/STATUS.md).
+[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). Prompt 10 (PLAN-010): the `jobs` table, the `worker` container app as the single Stax
+caller, the nightly reconciliation (scheduled job queues, worker runs) and
+`/reconciliation/`; see [`docs/qa/PLAN-010-worker-and-reconciliation.md`](docs/qa/PLAN-010-worker-and-reconciliation.md)
+and ADR-0006. Current state and open defects: [`docs/STATUS.md`](docs/STATUS.md).

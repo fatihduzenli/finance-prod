@@ -6,11 +6,15 @@ when the payment provider may not be called (breaker open, failure budget exhaus
 It reads only: no provider call and no write.
 
 ``run:create_charges`` and ``run:match`` need ``billing`` (D10; checked by
-``accounts.registry`` and again here). Both always act on the server's today, never a
-date from the request, and end in a redirect with the outcome as messages.
+``accounts.registry`` and again here). Both end in a redirect. Creating charges acts on
+the server's today, never a date from the request, with the outcome as messages.
+"Match invoices" reads the provider, so it is queued as a ``run_match`` job for the
+worker (PLAN-010 D3); the page shows the latest one and its report lines.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from django.conf import settings
 from django.contrib import messages
@@ -22,13 +26,28 @@ from django.views.decorators.http import require_POST, require_safe
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.services import insurance, rent_run
-from ledger.services.rent_run import MatchAction
+from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import _actor, _role, role_required
+from payments import jobs
 from payments.health import provider_health
-from payments.models import WebhookEvent, WebhookOutcome
+from payments.models import JobKind, JobStatus, WebhookEvent, WebhookOutcome
 
 #: Most report lines shown after a run; the rest are counted.
 MAX_LINES = 20
+MATCH_QUEUED = "Matching queued. The report appears below when it is done."
+
+
+def _match_context() -> dict[str, Any]:
+    """The latest "Match invoices" job: its state, and its stored report lines once it
+    finished (the first line goes with the state)."""
+    context = job_context(jobs.RENT_RUN)
+    job = context["job"]
+    finished = job is not None and job.status in (JobStatus.DONE, JobStatus.FAILED)
+    lines = context["job_text"].splitlines() if finished else []
+    if lines:
+        context["job_text"] = lines[0]
+    context["match_lines"] = lines[1:]
+    return context
 
 
 @role_required
@@ -39,6 +58,7 @@ def run_today(request: HttpRequest) -> HttpResponse:
         request,
         "ledger/run/today.html",
         {
+            **_match_context(),
             "run": rent_run.leases_due(today),
             "insurance_due": insurance.insurance_due_soon(today),
             "insurance_days": insurance.DUE_SOON_DAYS,
@@ -79,25 +99,11 @@ def run_match(request: HttpRequest) -> HttpResponse:
     refused = _billing_only(request)
     if refused is not None:
         return refused
-    report = rent_run.match_schedule_invoices(actor=_actor(request))
-    for text in report.refused:
-        messages.error(request, text)
-    if report.refused:
+    health = provider_health()
+    if not health.ok:
+        for text in health.messages:
+            messages.error(request, text)
         return redirect("ledger:run:today")
-    messages.success(
-        request,
-        f"Schedules read: {report.schedules}. Linked: {report.count(MatchAction.LINKED)}. "
-        f"Linked with a total mismatch: {report.count(MatchAction.MISMATCH)}. "
-        f"Already linked: {report.count(MatchAction.ALREADY)}. "
-        f"Not linked: {report.count(MatchAction.REPORTED)}.",
-    )
-    shown = [line for line in report.lines if line.action is not MatchAction.ALREADY]
-    for line in shown[:MAX_LINES]:
-        text = f"Invoice {line.invoice}: {line.message}"
-        if line.action is MatchAction.LINKED:
-            messages.info(request, text)
-        else:
-            messages.warning(request, text)
-    if report.failure:
-        messages.error(request, report.failure)
+    if not busy(request, jobs.RENT_RUN) and submit(request, JobKind.RUN_MATCH, jobs.RENT_RUN):
+        messages.info(request, MATCH_QUEUED)
     return redirect("ledger:run:today")

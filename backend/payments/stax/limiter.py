@@ -66,6 +66,15 @@ class RateLimiter:
         self.clock = clock
         self.buckets = (TokenBucket(PER_SECOND, SECOND_MS), TokenBucket(PER_MINUTE, MINUTE_MS))
         self._lock = threading.Lock()
+        #: Requests released since this limiter was made; the reconciliation report
+        #: records the difference over a run (PLAN-010 D7).
+        self.departures = 0
+
+    def _take(self, now: int) -> int:
+        for bucket in self.buckets:
+            bucket.take(now)
+        self.departures += 1
+        return now
 
     def acquire(self, max_wait_ms: int = DEFAULT_MAX_WAIT_MS) -> int:
         """Block until both buckets release a token; return the monotonic departure time.
@@ -84,9 +93,7 @@ class RateLimiter:
                 now = self.clock.monotonic_ms()
                 wait = max(bucket.wait_ms(now) for bucket in self.buckets)
                 if wait <= 0:
-                    for bucket in self.buckets:
-                        bucket.take(now)
-                    return now
+                    return self._take(now)
                 if now + wait > deadline:
                     raise RateLimitWaitExceeded(
                         "No request slot became free within the allowed wait"
@@ -94,9 +101,7 @@ class RateLimiter:
                 self.clock.sleep_ms(wait)
                 now = self.clock.monotonic_ms()
                 if max(bucket.wait_ms(now) for bucket in self.buckets) <= 0:
-                    for bucket in self.buckets:
-                        bucket.take(now)
-                    return now
+                    return self._take(now)
             finally:
                 self._lock.release()
 

@@ -499,3 +499,25 @@ the login page myself." The condition for starting Prompt 4 is met.
 - **Checkpoints 8 and 9 closed** except the items blocked on Stax ACH: transaction, settlement,
   return, refund, void and deposit events; refunds and voids of real debits; the
   "pay half, refund the half, pay in full" matrix row.
+
+## Update, 2026-10-02, PLAN-010 (worker, database queue, reconciliation) — QA PASS, not pushed
+
+- **Built:** the `jobs` table and `worker` command (the single Stax caller, container app
+  `finance-staging-worker`, one replica, `STAX_CALLER=worker`); every screen action that
+  reached Stax now queues a job and shows its state; the web app returns to `STAX_CALLER=none`
+  and two replicas; the nightly reconciliation (`reconciliation_runs`, `reconciliation_mismatches`,
+  `/reconciliation/` with Run now and Resolve); the scheduled Container Apps Job
+  `finance-staging-reconcile` (cron 06:00/07:00 UTC, local gate 02:00 New York) **queues** the run
+  for the worker; `age_pending_payment` fixture command; six D12 settings; CI updates the worker
+  and the job image and verifies all three are live on the commit. ADR-0006: no Celery, no Redis.
+- QA report `docs/qa/QA-010-worker-and-reconciliation.md`: PASS; 2,769 tests on PostgreSQL;
+  one MAJOR (job as second caller) resolved by amending D5; one MINOR deferred in writing
+  (invisible-character notes on the older mandatory notes).
+- **Rollout order (two owner words):** first "push" (CI builds the image, rolls the web app,
+  applies migrations 0005–0007; the worker and job updates fail harmlessly because the apps do
+  not exist yet, so that one CI run ends red at the verification step), then "deploy" (Bicep with
+  `webImage` = the new image: creates the worker app and the scheduled job, sets the web app to
+  `none` / 2 replicas). Between the two, staff actions queue and wait; nothing is lost.
+- Owner's done-when after the deploy: an operator edit reaches Stax within a minute; Run now
+  shows counts; `age_pending_payment` + Run now sends the Sentry fatal email; the scheduled
+  run row appears the next morning (two overnight runs for Checkpoint 10).

@@ -6,9 +6,11 @@ role; a user without one gets 403. Unsafe methods are checked a second time by
 retry, link; admin: archive as well).
 
 Every operator in a URL is loaded from the database before anything else happens, and
-every change goes through :mod:`payments.operator_sync`, which writes the audit log and
-is the only code that talks to the payment provider. Templates receive masked
-identifiers only (first four and last four characters) and no setting.
+every change goes through :mod:`payments.operator_sync`, which writes the audit log.
+No view calls the payment provider: the sync, the retry and the link are queued as jobs
+(:mod:`ledger.views.jobs`, PLAN-010 D3) after the local write, and the detail page shows
+the latest one. Templates receive masked identifiers only (first four and last four
+characters) and no setting.
 
 Every POST ends in a redirect, whatever the outcome (PLAN-006a §3.4), so a refresh
 never resubmits. A form with errors is kept in the session under
@@ -37,14 +39,15 @@ from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBase
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
-import payments
 from accounts.roles import Role, meets, role_of
 from accounts.views import forbidden
 from ledger.forms import LinkForm, OperatorCreateForm, OperatorForm
 from ledger.models import ZERO, Note, NoteEntityType, Operator, RentCharge, SyncStatus
 from ledger.validators import contains_card_number
+from ledger.views.jobs import busy, job_context, submit
 from payments import operator_sync
-from payments.operator_sync import Action, OperatorArchived, SyncOutcome
+from payments.models import JobKind
+from payments.operator_sync import OperatorArchived
 from payments.provider import mask_identifier
 
 PAGE_SIZE = 25
@@ -85,29 +88,12 @@ def _role(request: HttpRequest) -> Role | None:
     return role_of(request.user)
 
 
-def _report(request: HttpRequest, outcome: SyncOutcome) -> None:
-    text = outcome.message
-    if not text:
-        return
-    if outcome.action in (Action.FAILED, Action.UPDATE_FAILED, Action.LINK_REFUSED):
-        messages.error(request, text)
-    elif outcome.needs_review or outcome.action in (Action.AWAITING_LINK, Action.RETRY_TOO_SOON):
-        messages.warning(request, text)
-    else:
-        messages.success(request, text)
-
-
-def _sync(request: HttpRequest, operator: Operator, *, retry: bool = False) -> None:
-    outcome = operator_sync.sync_operator(
-        operator.pk, provider=payments.get_provider(), actor=_actor(request), retry=retry
-    )
-    _report(request, outcome)
-
-
-def _after_save(request: HttpRequest, operator: Operator) -> None:
-    """Sync a row that needs it; tell staff when it waits for a manual link."""
+def _after_save(
+    request: HttpRequest, operator: Operator, replay_key: uuid.UUID | None = None
+) -> None:
+    """Queue the sync of a row that needs it; tell staff when it waits for a manual link."""
     if operator.sync_status == SyncStatus.PENDING:
-        _sync(request, operator)
+        submit(request, JobKind.OPERATOR_SYNC, operator, replay_key=replay_key)
     elif operator.sync_status == SyncStatus.AWAITING_LINK:
         messages.warning(request, operator_sync.AWAITING_LINK_MESSAGE)
 
@@ -221,10 +207,12 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
     failed = operator.sync_status == SyncStatus.FAILED
     phone_ok = operator_sync.phone_is_valid(operator)
     retry_in = operator_sync.retry_wait_seconds(operator) if failed and phone_ok else 0
+    jobs = job_context(operator)
     return render(
         request,
         "ledger/operators/detail.html",
         {
+            **jobs,
             "operator": operator,
             "customer_masked": mask_identifier(customer) if customer else "",
             "payment_method_masked": mask_identifier(method) if method else "",
@@ -250,7 +238,12 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 else None
             ),
             "can_edit": billing and active,
-            "can_retry": billing and active and failed and phone_ok and not retry_in,
+            "can_retry": billing
+            and active
+            and failed
+            and phone_ok
+            and not retry_in
+            and not jobs["job_refresh"],
             "fix_phone_message": (
                 operator_sync.MESSAGES[operator_sync.PHONE_INVALID]
                 if billing and active and failed and not phone_ok
@@ -291,7 +284,7 @@ def operator_create(request: HttpRequest) -> HttpResponse:
             else:
                 if created:
                     messages.success(request, "Operator saved.")
-                    _after_save(request, operator)
+                    _after_save(request, operator, form.cleaned_data["creation_key"])
                 else:
                     messages.info(request, ALREADY_SAVED)
                 return redirect("ledger:operators:detail", pk=operator.pk)
@@ -348,7 +341,8 @@ def operator_retry_sync(request: HttpRequest, pk: str) -> HttpResponse:
     operator = _load(pk)
     if operator.archived_at is not None:
         return _refused_archived(request, operator)
-    _sync(request, operator, retry=True)
+    if not busy(request, operator):
+        submit(request, JobKind.OPERATOR_RETRY, operator)
     return redirect("ledger:operators:detail", pk=operator.pk)
 
 
@@ -361,17 +355,16 @@ def operator_link(request: HttpRequest, pk: str) -> HttpResponse:
     if request.method == "POST":
         form = LinkForm(request.POST)
         if form.is_valid():
-            outcome = operator_sync.link_operator(
-                operator.pk,
-                customer_external_id=form.cleaned_data["customer_id"],
-                payment_method_external_id=form.cleaned_data["payment_method_id"],
-                provider=payments.get_provider(),
-                actor=_actor(request),
+            submit(
+                request,
+                JobKind.OPERATOR_LINK,
+                operator,
+                {
+                    "customer_id": form.cleaned_data["customer_id"],
+                    "payment_method_id": form.cleaned_data["payment_method_id"],
+                },
             )
-            if outcome.action is Action.LINK_SET:
-                _report(request, outcome)
-                return redirect("ledger:operators:detail", pk=operator.pk)
-            form.add_error(None, outcome.message)
+            return redirect("ledger:operators:detail", pk=operator.pk)
         _hold(request, f"link:{operator.pk}", form)
         return redirect("ledger:operators:link", pk=operator.pk)
     form = _held(request, f"link:{operator.pk}", LinkForm) or LinkForm()

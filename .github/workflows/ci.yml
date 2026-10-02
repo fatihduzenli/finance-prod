@@ -122,6 +122,9 @@ jobs:
           set -euo pipefail
           az acr build --registry "$ACR_NAME" --image "finance-web:$IMAGE_TAG" .
 
+      # Each update tolerates an error (owner request of 2026-10-02, PLAN-010 D13): the
+      # command can report a transient failure for a revision that does go live. The
+      # verification step below decides from the revisions themselves.
       - name: Roll the web container app onto the new image
         env:
           ACR_NAME: ${{ vars.ACR_NAME }}
@@ -133,7 +136,87 @@ jobs:
           az containerapp update \
             --name "$WEB_APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
-            --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG"
+            --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG" \
+            || echo "update returned an error; verifying the revision instead"
+
+      - name: Roll the worker container app onto the new image
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          WORKER_APP_NAME: ${{ vars.WORKER_APP_NAME || 'finance-staging-worker' }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          az containerapp update \
+            --name "$WORKER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG" \
+            || echo "update returned an error; verifying the revision instead"
+
+      # The scheduled reconciliation job (PLAN-010 D5, D13) runs the same image; the next
+      # firing after this update uses it. Same tolerance as the two updates above.
+      - name: Roll the reconcile job onto the new image
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          RECONCILE_JOB_NAME: ${{ vars.RECONCILE_JOB_NAME || 'finance-staging-reconcile' }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          az containerapp job update \
+            --name "$RECONCILE_JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG" \
+            || echo "update returned an error; verifying the revision instead"
+
+      # Read-only az queries. Passes only when, for both apps, an active revision runs
+      # the image tagged with this commit and reports Healthy and Running (a running
+      # state that starts with Running, so RunningAtMaxScale of the one-replica worker
+      # counts), and the reconcile job's template names the image tagged with this
+      # commit (a job has no revisions); polls for up to 10 minutes, then fails.
+      - name: Verify the web and worker revisions are live on this commit
+        env:
+          WEB_APP_NAME: ${{ vars.WEB_APP_NAME }}
+          WORKER_APP_NAME: ${{ vars.WORKER_APP_NAME || 'finance-staging-worker' }}
+          RECONCILE_JOB_NAME: ${{ vars.RECONCILE_JOB_NAME || 'finance-staging-reconcile' }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          live() {
+            az containerapp revision list \
+              --name "$1" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "[?properties.active && ends_with(properties.template.containers[0].image, ':$IMAGE_TAG') && properties.healthState == 'Healthy' && starts_with(properties.runningState, 'Running')] | length(@)" \
+              --output tsv 2>/dev/null || echo 0
+          }
+          job_on_commit() {
+            image="$(az containerapp job show \
+              --name "$RECONCILE_JOB_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "properties.template.containers[0].image" \
+              --output tsv 2>/dev/null || true)"
+            case "$image" in
+              *":$IMAGE_TAG") echo 1 ;;
+              *) echo 0 ;;
+            esac
+          }
+          deadline=$(( $(date +%s) + 600 ))
+          while :; do
+            web="$(live "$WEB_APP_NAME")"
+            worker="$(live "$WORKER_APP_NAME")"
+            job="$(job_on_commit)"
+            echo "live revisions on $IMAGE_TAG: web=${web:-0} worker=${worker:-0} reconcile job=${job}"
+            if [ "${web:-0}" -ge 1 ] && [ "${worker:-0}" -ge 1 ] && [ "$job" -eq 1 ]; then
+              echo "web and worker run this commit, Healthy and Running; the reconcile job uses it"
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "a revision on this commit is not live after 10 minutes, or the reconcile job does not use it" >&2
+              exit 1
+            fi
+            sleep 15
+          done
 
       - name: Smoke test the health endpoint
         env:

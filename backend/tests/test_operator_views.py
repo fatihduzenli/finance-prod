@@ -30,6 +30,7 @@ from payments.errors import CircuitOpen, ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
 from payments.provider import CustomerQuery, CustomerRecord
 from tests.auth_helpers import iter_routes, make_user, verified_client
+from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.test_operator_sync import (
     add_provider_customer,
     call_names,
@@ -38,7 +39,8 @@ from tests.test_operator_sync import (
     requires_postgresql,
 )
 
-pytestmark = pytest.mark.django_db
+# PLAN-010 D3: views queue provider work; the worker is run after every request here.
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("worker_between_requests")]
 
 LIST = "/operators/"
 NEW = "/operators/new/"
@@ -204,7 +206,13 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
 
     retried = billing.post(f"{detail(operator)}retry-sync/", follow=True)
     assert retried.status_code == 200
-    assert call_names(fake) == ["find_customers", "find_customers", "create_customer"]
+    # A successful sync queues a read of the operator's payment methods (PLAN-010 follow-up).
+    assert call_names(fake) == [
+        "find_customers",
+        "find_customers",
+        "create_customer",
+        "list_payment_methods",
+    ]
     operator.refresh_from_db()
     assert operator.sync_status == SyncStatus.LINKED
     assert "Retry sync" not in retried.content.decode()
@@ -279,7 +287,10 @@ def test_the_link_form_stores_both_ids_after_one_read(billing: Client, fake: Fak
     )
 
     assert response.status_code == 200
-    assert fake.calls == [("get_customer", ("cus_manual_0001",))]
+    assert fake.calls == [
+        ("get_customer", ("cus_manual_0001",)),
+        ("list_payment_methods", ("cus_manual_0001",)),
+    ]
     assert operator_sync.current_refs(operator) == {
         "customer": "cus_manual_0001",
         "payment_method": "pm_bank-0001",
@@ -301,7 +312,8 @@ def test_a_bad_customer_id_shows_a_clear_message_and_stores_nothing(
         {"customer_id": "cus_missing", "payment_method_id": "pm_1"},
         follow=True,
     )
-    assert response.redirect_chain == [(f"{detail(operator)}link/", 302)]
+    # PLAN-010 D3: the link is a job; its outcome is shown on the detail page.
+    assert response.redirect_chain == [(detail(operator), 302)]
     assert operator_sync.LINK_REJECTED_MESSAGE in response.content.decode()
     assert call_names(fake) == ["get_customer"]
     assert operator_sync.current_refs(operator) == {}
@@ -606,8 +618,9 @@ def test_every_post_route_redirects_on_failure(fake: FakeProvider) -> None:
     invalid_link = client.post(paths["link"], {"customer_id": "bad id", "payment_method_id": ""})
     assert (invalid_link.status_code, invalid_link["Location"]) == (302, paths["link"])
 
+    # PLAN-010 D3: a valid link form is queued; the refusal shows on the detail page.
     refused_link = client.post(paths["link"], {"customer_id": "cus_none", "payment_method_id": "p"})
-    assert (refused_link.status_code, refused_link["Location"]) == (302, paths["link"])
+    assert (refused_link.status_code, refused_link["Location"]) == (302, detail(operator))
 
     # A retry inside the lock is refused with a message, still a redirect.
     Operator.objects.filter(pk=operator.pk).update(
@@ -820,7 +833,8 @@ def test_a_bad_stored_phone_blocks_edit_and_retry_until_it_is_fixed(
     operator.refresh_from_db()
     assert operator.phone == "4155550132"
     page = billing.get(detail(operator)).content.decode()
-    assert "Fix the phone number first." not in page
+    # The last request's outcome still names the phone (PLAN-010 D3); the prompt is gone.
+    assert 'id="fix-phone"' not in page
     assert "Retry sync" in page
     billing.post(retry)
     operator.refresh_from_db()
@@ -872,8 +886,8 @@ def test_006c_a_phone_edit_updates_the_customer_and_the_page_says_when(
 
     page = response.content.decode()
     assert response.redirect_chain[-1][0] == detail(operator)
-    assert call_names(fake) == ["update_customer"]
-    [(_, (_, sent))] = fake.calls
+    assert call_names(fake) == ["update_customer", "list_payment_methods"]
+    [(_, (_, sent)), _] = fake.calls
     assert sent.phone == "4155550132"  # type: ignore[attr-defined]
     assert "Updated the customer at the payment provider." in page
     assert 'id="provider-updated"' in page and "Provider customer updated " in page
@@ -910,7 +924,7 @@ def test_006c_a_rejected_update_shows_the_failure_and_the_retry_updates(
     retried = billing.post(f"{detail(operator)}retry-sync/", follow=True)
 
     page = retried.content.decode()
-    assert call_names(fake) == ["update_customer", "update_customer"]
+    assert call_names(fake) == ["update_customer", "update_customer", "list_payment_methods"]
     assert "Updated the customer at the payment provider." in page
     assert "Provider customer updated " in page and "Retry sync" not in page
     operator.refresh_from_db()
@@ -937,7 +951,8 @@ def test_006c_removing_the_email_of_a_linked_operator_updates_and_stays_linked(
 
     response = billing.post(f"{detail(operator)}edit/", form_data(email=""), follow=True)
 
-    [(_, (_, sent))] = fake.calls
+    assert call_names(fake) == ["update_customer", "list_payment_methods"]
+    [(_, (_, sent)), _] = fake.calls
     assert sent.operator_email == ""  # type: ignore[attr-defined]
     assert "Updated the customer at the payment provider." in response.content.decode()
     operator.refresh_from_db()

@@ -20,13 +20,11 @@ param keyVaultName = 'finance-sandbox-kv'
 
 param staxApiKeySecretName = 'stax-api-key-sandbox'
 
-// Until Step 10 the web process is the single Stax caller (docs/qa/PLAN-006-operators.md
-// D1): the operators screens create and link Stax customers. Stax's rate limit is per
-// source IP and the limiter is per process, so the web app must then run as ONE
-// replica. Step 10 moves every Stax call to the worker, sets staxCaller back to 'none'
-// and removes webMaxReplicas = 1. Do not raise the replica count before then.
-param staxCaller = 'worker'
-param webMaxReplicas = 1
+// From Step 10 the worker container app (finance-staging-worker, one replica,
+// STAX_CALLER=worker) is the single Stax caller (docs/qa/PLAN-010-worker-and-
+// reconciliation.md D4): the web app only queues jobs and refuses provider calls, so it
+// runs with 'none' and scales to the default webMaxReplicas (2).
+param staxCaller = 'none'
 
 // The sandbox merchant read from GET /self on 2026-09-30. An identifier, not a secret.
 // provider_environment_check refuses to start the app when the key belongs to another.
