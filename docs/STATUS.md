@@ -477,3 +477,10 @@ the login page myself." The condition for starting Prompt 4 is met.
   **not pushed**. After the deploy: Retry on the first charge should find the invoice already
   paid in Stax and send nothing (mismatch recorded); the memo test runs on a fresh charge.
 
+
+## Update, 2026-10-02, PLAN-009a on staging
+
+- Owner typed "push". `main` at `938608b` deployed; the live revision runs that
+  image tag, healthy; environment check ok. Owner's next clicks: Retry on the hand-marked charge
+  (expect "already paid" with no call), the memo test on a fresh charge, replay of the old
+  `send_invoice` event.
