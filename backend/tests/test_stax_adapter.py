@@ -48,7 +48,7 @@ from payments.provider import (
     ScheduleUpdate,
     TransactionQuery,
 )
-from payments.stax import adapter
+from payments.stax import adapter, mapping
 from payments.stax.adapter import StaxProvider
 from payments.stax.transport import Method
 from tests.stax_helpers import Rig, always, make_rig, sequence
@@ -184,7 +184,7 @@ def test_pay_invoice_flag_on_sends_the_verified_request() -> None:
     assert dict(request.url.params) == {
         "payment_method_id": "pm-1",
         "idempotency_id": idempotency_id,
-        "email_receipt": "false",
+        "email_receipt": "0",
     }
     assert str(uuid.UUID(request.url.params["idempotency_id"])) == idempotency_id
     assert request.content == b""
@@ -385,10 +385,72 @@ def test_mark_paid_uses_the_method_path_and_query() -> None:
     [request] = rig.recorder.requests
     assert (request.method, request.url.path) == ("POST", "/invoice/inv-1/pay/check")
     assert dict(request.url.params) == {
-        "email_receipt": "false",
+        "email_receipt": "0",
         "check_number": "1001",
         "payment_note": "lobby",
     }
+
+
+# --- PLAN-009a: booleans in a query string are "1"/"0" -------------------------------------
+
+#: The 422 body Stax returned on staging 2026-10-02 for ``email_receipt=false``.
+EMAIL_RECEIPT_REJECTION = {"email_receipt": ["The email receipt field must be true or false."]}
+
+
+@pytest.mark.parametrize(("value", "expected"), [(True, "1"), (False, "0")])
+def test_query_bool_is_one_or_zero(value: bool, expected: str) -> None:
+    assert mapping.query_bool(value) == expected
+
+
+@pytest.mark.parametrize(("value", "expected"), [(True, "1"), (False, "0")])
+def test_offline_and_pay_params_carry_email_receipt_as_one_or_zero(
+    value: bool, expected: str
+) -> None:
+    offline = mapping.offline_payment_params(
+        OfflinePayment("cash", D("10.00"), email_receipt=value)
+    )
+    pay = mapping.pay_params(PayWithStoredMethod("pm-1", str(uuid.uuid4()), email_receipt=value))
+    for params in (offline, pay):
+        assert params["email_receipt"] == expected
+        assert type(params["email_receipt"]) is str
+        assert not any(isinstance(v, bool) for v in params.values())
+
+
+def _stax_like_receipt_check(request: httpx.Request) -> httpx.Response:
+    """Answers as Stax did: 422 unless ``email_receipt`` is ``1`` or ``0``."""
+    if request.url.params.get("email_receipt") not in {"0", "1"}:
+        return httpx.Response(422, json=EMAIL_RECEIPT_REJECTION)
+    return httpx.Response(200, json={"id": "inv-1", "status": "PAID"})
+
+
+def test_mark_paid_sends_email_receipt_zero_on_the_wire() -> None:
+    rig = make_rig(_stax_like_receipt_check)
+    StaxProvider(rig.transport).mark_invoice_paid_cash_or_check(
+        "inv-1", OfflinePayment("cash", D("10.00"))
+    )
+    [request] = rig.recorder.requests
+    assert request.url.path == "/invoice/inv-1/pay/cash"
+    assert request.url.query == b"email_receipt=0"
+
+
+def test_pay_invoice_sends_email_receipt_zero_on_the_wire() -> None:
+    rig = make_rig(_stax_like_receipt_check)
+    with override_settings(STAX_PAY_INVOICE_ENABLED=True):
+        StaxProvider(rig.transport).pay_invoice(
+            "inv-1", PayWithStoredMethod("pm-1", str(uuid.uuid4()))
+        )
+    [request] = rig.recorder.requests
+    assert b"email_receipt=0" in request.url.query.split(b"&")
+
+
+def test_the_staging_email_receipt_rejection_is_a_provider_rejected_naming_the_field() -> None:
+    rig = make_rig(always(422, EMAIL_RECEIPT_REJECTION))
+    with pytest.raises(ProviderRejected) as caught:
+        StaxProvider(rig.transport).mark_invoice_paid_cash_or_check(
+            "inv-1", OfflinePayment("cash", D("10.00"))
+        )
+    assert caught.value.error_fields == ("email_receipt",)
+    assert len(rig.recorder.requests) == 1
 
 
 def test_send_email_body_is_cc_emails() -> None:

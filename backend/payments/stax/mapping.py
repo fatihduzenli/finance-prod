@@ -53,10 +53,22 @@ from payments.redaction import payment_method_subset
 
 _CENT = Decimal("0.01")
 
-Params = dict[str, str | int | bool]
+#: Query parameters carry no ``bool``: httpx would send it as ``true``/``false``, which
+#: Stax rejects (PLAN-009a). Every boolean goes through :func:`query_bool`.
+Params = dict[str, str | int]
 Body = dict[str, Any]
 
 # --- Encoding -----------------------------------------------------------------------
+
+
+def query_bool(value: bool) -> str:
+    """A boolean query parameter as Stax accepts it: ``"1"`` or ``"0"`` (PLAN-009a).
+
+    Observed on staging 2026-10-02: ``POST /invoice/{id}/pay/cash?email_receipt=false``
+    was rejected with 422 naming ``email_receipt``. TODO-VERIFY-058: whether Stax also
+    accepts ``true``/``false`` in some form; it rejected ``false``, so ``1``/``0`` only.
+    """
+    return "1" if value else "0"
 
 
 def money_string(value: Decimal) -> str:
@@ -240,7 +252,7 @@ def offline_payment_params(payment: OfflinePayment) -> Params:
     an integer "for a partial payment" without a unit, so only whole invoices are marked
     and the amount is checked locally only.
     """
-    params: Params = {"email_receipt": payment.email_receipt}
+    params: Params = {"email_receipt": query_bool(payment.email_receipt)}
     if payment.check_number:
         params["check_number"] = payment.check_number
     if payment.note:
@@ -253,7 +265,7 @@ def pay_params(payment: PayWithStoredMethod) -> Params:
     return {
         "payment_method_id": payment.payment_method_external_id,
         "idempotency_id": payment.idempotency_id,
-        "email_receipt": payment.email_receipt,
+        "email_receipt": query_bool(payment.email_receipt),
     }
 
 

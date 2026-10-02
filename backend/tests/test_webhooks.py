@@ -30,7 +30,12 @@ from accounts import registry
 from accounts.roles import Role
 from payments import alerts
 from payments.errors import ProviderRejected, ProviderUnavailable
-from payments.models import WebhookEvent, WebhookEventSource, WebhookOutcome
+from payments.models import (
+    WebhookEvent,
+    WebhookEventSource,
+    WebhookObjectIdSource,
+    WebhookOutcome,
+)
 from payments.redaction import redact
 from payments.stax.adapter import StaxProvider
 from payments.webhooks import handlers, processor, queue, receiver
@@ -394,6 +399,117 @@ def test_a_nested_value_that_is_not_a_plain_identifier_is_rejected(value: object
     event = stored(body, "send_invoice")
     # The first path holding a value decides; a bad value is not replaced by a later one.
     assert (event.provider_object_id, event.object_id_source) == ("", "")
+
+
+# --- PLAN-009a: an event stored without an object ID gets it from its stored payload -------
+
+
+def _seen_ids(monkeypatch: pytest.MonkeyPatch, event_type: str) -> list[str]:
+    """Install a handler that records the object ID it is given."""
+    seen: list[str] = []
+
+    def handler(event_type: str, provider_object_id: str) -> str:
+        seen.append(provider_object_id)
+        if not provider_object_id:
+            return ignored("no object id")
+        return WebhookOutcome.PROCESSED.value
+
+    install(monkeypatch, event_type, handler)
+    return seen
+
+
+def _as_stored_before_plan_008a(event: WebhookEvent, outcome: str) -> WebhookEvent:
+    WebhookEvent.objects.filter(pk=event.pk).update(
+        provider_object_id="",
+        object_id_source=WebhookObjectIdSource.NONE,
+        outcome=outcome,
+        processed_at=timezone.now() if outcome != WebhookOutcome.RECEIVED else None,
+    )
+    event.refresh_from_db()
+    return event
+
+
+@pytest.mark.django_db
+def test_a_replay_reads_the_object_id_from_the_stored_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _seen_ids(monkeypatch, "send_invoice")
+    event = _as_stored_before_plan_008a(
+        stored(SEND_INVOICE_ENVELOPE, "send_invoice"), ignored("no object id")
+    )
+    assert event.payload["mergeVars"]["invoice"]["id"] == "inv-send-0001"
+
+    assert processor.process_event(event.pk, replay=True) == WebhookOutcome.PROCESSED
+    event.refresh_from_db()
+    assert seen == ["inv-send-0001"]
+    assert event.provider_object_id == "inv-send-0001"
+    assert event.object_id_source == "mergeVars.invoice.id"
+    assert event.outcome == WebhookOutcome.PROCESSED
+
+
+@pytest.mark.django_db
+def test_process_webhooks_reads_the_object_id_of_an_unprocessed_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _seen_ids(monkeypatch, "send_invoice")
+    event = _as_stored_before_plan_008a(
+        stored(SEND_INVOICE_ENVELOPE, "send_invoice"), WebhookOutcome.RECEIVED
+    )
+    call_command("process_webhooks")
+    event.refresh_from_db()
+    assert seen == ["inv-send-0001"]
+    assert (event.provider_object_id, event.object_id_source) == (
+        "inv-send-0001",
+        "mergeVars.invoice.id",
+    )
+    assert event.outcome == WebhookOutcome.PROCESSED
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "body",
+    [{"toEmail": "ops@example.com", "mergeVars": {"user": {"name": "Staff"}}}, b"not json"],
+    ids=["no-id-in-payload", "no-payload"],
+)
+def test_a_replay_of_an_event_whose_payload_holds_no_id_stays_ignored(
+    monkeypatch: pytest.MonkeyPatch, body: object
+) -> None:
+    seen = _seen_ids(monkeypatch, "send_invoice")
+    event = stored(body, "send_invoice")
+    assert event.provider_object_id == ""
+    assert processor.process_event(event.pk, replay=True) == ignored("no object id")
+    event.refresh_from_db()
+    assert seen == [""]
+    assert (event.provider_object_id, event.object_id_source) == ("", "")
+
+
+@pytest.mark.django_db
+def test_a_replay_never_changes_an_object_id_already_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _seen_ids(monkeypatch, "send_invoice")
+    event = stored(SEND_INVOICE_ENVELOPE, "send_invoice")
+    WebhookEvent.objects.filter(pk=event.pk).update(
+        provider_object_id="inv-kept", object_id_source=WebhookObjectIdSource.INVOICE_ID
+    )
+    assert processor.process_event(event.pk, replay=True) == WebhookOutcome.PROCESSED
+    event.refresh_from_db()
+    assert seen == ["inv-kept"]
+    assert (event.provider_object_id, event.object_id_source) == ("inv-kept", "invoice.id")
+
+
+@pytest.mark.django_db
+def test_an_object_id_recovered_on_a_failed_attempt_is_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(monkeypatch, "send_invoice", failing(ProviderUnavailable(503)))
+    event = _as_stored_before_plan_008a(
+        stored(SEND_INVOICE_ENVELOPE, "send_invoice"), ignored("no object id")
+    )
+    assert processor.process_event(event.pk, replay=True) == WebhookOutcome.FAILED
+    event.refresh_from_db()
+    assert event.provider_object_id == "inv-send-0001"
+    assert event.object_id_source == "mergeVars.invoice.id"
 
 
 @pytest.mark.django_db

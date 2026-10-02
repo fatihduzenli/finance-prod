@@ -530,7 +530,7 @@ def test_the_mark_paid_request_has_no_apply_balance_and_no_body() -> None:
     [request] = rig.recorder.requests
     assert (request.method, request.url.path) == ("POST", "/invoice/inv-1/pay/cash")
     assert dict(request.url.params) == {
-        "email_receipt": "false",
+        "email_receipt": "0",
         "check_number": "Z-1",
         "payment_note": "Paid by Zelle on 10/15/2026. ok",
     }

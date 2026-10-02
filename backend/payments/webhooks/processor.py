@@ -6,6 +6,10 @@ and, when the exception carries them, the names of the fields involved; never a 
 or a value. The third failed attempt moves the event to dead letter and alerts once.
 Nothing here retries: a failed event waits for a replay or the next
 ``process_webhooks`` run.
+
+An event stored without an object ID (before PLAN-008a read nested IDs) has the ID read
+again from its stored, redacted payload before its handler runs (PLAN-009a); an ID
+already set is never changed.
 """
 
 from __future__ import annotations
@@ -45,6 +49,21 @@ def describe_error(error: BaseException) -> str:
     return f"{name} (fields: {', '.join(safe)})" if safe else name
 
 
+def _recover_object_id(event: WebhookEvent) -> bool:
+    """Read the object ID from the stored payload when the row has none; True if found."""
+    if event.provider_object_id or event.payload is None:
+        return False
+    # Imported here: the receiver imports the queue, which imports this module.
+    from payments.webhooks.receiver import object_id_and_source
+
+    provider_object_id, source = object_id_and_source(event.payload)
+    if not provider_object_id:
+        return False
+    event.provider_object_id = provider_object_id
+    event.object_id_source = source
+    return True
+
+
 def process_event(event_id: uuid.UUID, *, replay: bool = False) -> str | None:
     """Run the handler for one event; return the outcome stored, or None if no such row.
 
@@ -61,6 +80,9 @@ def process_event(event_id: uuid.UUID, *, replay: bool = False) -> str | None:
             event.processed_at is not None or event.outcome == WebhookOutcome.DEAD_LETTER
         ):
             return event.outcome
+        update_fields = ["last_attempt_at", "attempts", "error", "processed_at", "outcome"]
+        if _recover_object_id(event):
+            update_fields += ["provider_object_id", "object_id_source"]
         handler = HANDLERS.get(event.event_type)
         now = timezone.now()
         event.last_attempt_at = now
@@ -86,9 +108,7 @@ def process_event(event_id: uuid.UUID, *, replay: bool = False) -> str | None:
             event.processed_at = now
             event.outcome = outcome
             event.error = ""
-        event.save(
-            update_fields=["last_attempt_at", "attempts", "error", "processed_at", "outcome"]
-        )
+        event.save(update_fields=update_fields)
         if newly_dead:
             event_pk, event_type, attempts = str(event.pk), event.event_type, event.attempts
             transaction.on_commit(
