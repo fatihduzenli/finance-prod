@@ -62,4 +62,5 @@ and the code in the same change.
 | TODO-VERIFY-053 | A dispute event's object ID is the disputed transaction's ID | Dispute handler | As stated | first dispute | Open |
 | TODO-VERIFY-054 | A deposit event body carries `batch_id` and no `id` | Receiver fallback | As stated | blocked on ACH | Open |
 | TODO-VERIFY-055 | An invoice the provider shows paid in full has status string `PAID` (compared stripped and upper-cased) | Check-before-write on marking; `payments/invoice_sync.py` | Yes | first marked invoice on staging | Open |
+| TODO-VERIFY-056 | Does omitting `email` on `PUT /customer/{id}` clear the customer's email at Stax or leave it unchanged? | Operator edits that remove an email (PLAN-006c rule 4) | Unknown; the `update_customer` webhook's mismatch flag surfaces a difference | first such edit on staging | Open |
 

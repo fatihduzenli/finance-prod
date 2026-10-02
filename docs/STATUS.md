@@ -425,3 +425,15 @@ the login page myself." The condition for starting Prompt 4 is met.
   evidence even when the update command itself returned a transient Azure error; fail the job
   when the revision is not live within the wait. Not urgent; goes into the next plan that
   touches `.github/workflows/ci.yml`.
+
+## Update, 2026-10-02, Checkpoint 8 click 1 and PLAN-006c
+
+- **Owner, in writing:** editing operator fatih's phone did not reach Stax; the Webhooks page
+  stayed empty. Fable's checks: (a) the edit path made no provider call (a Prompt 6 deviation
+  Fable had accepted in QA-006, wrongly); (b) no Stax call in the transport log at 16:54 UTC;
+  (c) the operator showed `linked`, no failure, phone changed locally only.
+- **PLAN-006c** fixes it: an edit of a linked operator updates the Stax customer through the
+  same field rules as create, shows the outcome, and offers the single manual retry on failure.
+  One MAJOR (email validated as required in the adapter) found and fixed. QA PASS
+  (`docs/qa/QA-006c-operator-update-sync.md`), **not pushed**.
+

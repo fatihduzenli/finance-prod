@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import uuid
 from decimal import Decimal
+from typing import Any
 
 import httpx
 import pytest
@@ -375,3 +376,102 @@ def test_accepted_phones_reach_the_provider_as_digits_only(
     sent = created[0][0]
     assert isinstance(sent, CustomerInput)
     assert sent.phone == operator.phone
+
+
+# --- PLAN-006c row 7: edits of a linked operator ------------------------------------------------
+
+
+def _linked_operator(fake: FakeProvider, **fields: Any) -> Operator:
+    values = {"email": "linked@example.com", "phone": "4155550132", **fields}
+    operator, _ = operator_sync.create_operator(
+        fields_for_adversarial(**values), creation_key=uuid.uuid4(), actor=None
+    )
+    operator_sync.sync_operator(operator.pk, provider=fake, actor=None)
+    fake.calls.clear()
+    operator.refresh_from_db()
+    assert operator.sync_status == SyncStatus.LINKED
+    return operator
+
+
+def fields_for_adversarial(**overrides: Any) -> dict[str, Any]:
+    return fields(**overrides)
+
+
+def test_a_rejected_update_whose_body_names_the_token_leaves_no_trace_of_it(
+    fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    from payments.errors import ProviderRejected
+
+    operator = _linked_operator(fake)
+    fake.fail_next("update_customer", ProviderRejected(422, "token FAKE-CI-KEY-XYZ123 leaked"))
+    caplog.set_level(logging.INFO)
+    billing = _client(Role.BILLING)
+    billing.post(f"/operators/{operator.pk}/edit/", form_data(**fields(phone="4155550199")))
+    operator.refresh_from_db()
+    assert operator.sync_status == SyncStatus.FAILED
+    assert operator.phone == "4155550199"  # the local change stands
+    page = billing.get(f"/operators/{operator.pk}/").content.decode()
+    for text in (page, caplog.text, operator.sync_failure, operator.sync_failure_fields):
+        assert "FAKE-CI-KEY-XYZ123" not in text
+        assert "leaked" not in text
+    from ledger.models import AuditLog
+
+    for row in AuditLog.objects.filter(entity_type="operator"):
+        assert "leaked" not in str(row.after) and "FAKE-CI-KEY-XYZ123" not in str(row.after)
+
+
+def test_a_bad_phone_on_edit_is_refused_by_the_form_before_any_call(fake: FakeProvider) -> None:
+    operator = _linked_operator(fake)
+    billing = _client(Role.BILLING)
+    billing.post(f"/operators/{operator.pk}/edit/", form_data(**fields(phone="555-0132")))
+    operator.refresh_from_db()
+    assert operator.phone == "4155550132"
+    assert call_names(fake) == []
+    assert operator.sync_status == SyncStatus.LINKED
+
+
+def test_an_edit_of_an_archived_linked_operator_calls_nothing(fake: FakeProvider) -> None:
+    operator = _linked_operator(fake)
+    operator_sync.archive_operator(operator.pk, actor=None)
+    fake.calls.clear()
+    _client(Role.BILLING).post(
+        f"/operators/{operator.pk}/edit/", form_data(**fields(phone="4155550199"))
+    )
+    operator.refresh_from_db()
+    assert operator.phone == "4155550132"
+    assert call_names(fake) == []
+
+
+def test_update_audit_rows_never_carry_the_full_email(fake: FakeProvider) -> None:
+    from ledger.models import AuditLog
+
+    operator = _linked_operator(fake, email="private.person@example.com")
+    _client(Role.BILLING).post(
+        f"/operators/{operator.pk}/edit/", form_data(**fields(email="other.person@example.com"))
+    )
+    rows = AuditLog.objects.filter(
+        entity_type="operator", action__in=["operator.sync_updated", "operator.sync_failed"]
+    )
+    assert rows.exists()
+    for row in rows:
+        text = str(row.after) + str(row.before)
+        assert "private.person@" not in text and "other.person@" not in text
+
+
+def test_an_update_after_retries_exhausted_keeps_the_local_change_and_fails_once(
+    fake: FakeProvider,
+) -> None:
+    from payments.errors import ProviderUnavailable
+
+    operator = _linked_operator(fake)
+    fake.fail_next("update_customer", ProviderUnavailable(503))
+    _client(Role.BILLING).post(
+        f"/operators/{operator.pk}/edit/", form_data(**fields(phone="4155550177"))
+    )
+    operator.refresh_from_db()
+    assert operator.phone == "4155550177"
+    assert operator.sync_status == SyncStatus.FAILED
+    assert call_names(fake).count("update_customer") == 1
+    assert "create_customer" not in call_names(fake)
