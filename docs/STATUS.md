@@ -521,3 +521,19 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Owner's done-when after the deploy: an operator edit reaches Stax within a minute; Run now
   shows counts; `age_pending_payment` + Run now sends the Sentry fatal email; the scheduled
   run row appears the next morning (two overnight runs for Checkpoint 10).
+
+## Update, 2026-10-03, PLAN-010 on staging
+
+- Owner typed "push": `main` at `3030829`; the web revision `finance-staging-web--0000026`
+  went live on that image with migrations 0005–0007 applied; that CI run ended red at the new
+  verification step because the worker app did not exist yet (expected, documented above).
+- Owner typed "deploy": template deployment `staging-plan-010` succeeded (3 min 12 s, no failed
+  operations). Now live: web `finance-staging-web--0000027` (`STAX_CALLER=none`, max 2
+  replicas, healthz 200); worker `finance-staging-worker` (one replica, `STAX_CALLER=worker`,
+  grace 60 s, environment check ok, "Worker started" 01:22 UTC, image tag `3030829`);
+  scheduled job `finance-staging-reconcile` (cron `0 6,7 * * *`, `STAX_CALLER=none`,
+  `reconcile --scheduled`, timeout 300, no retries). No job had queued between the two steps.
+- Next: the owner's done-when clicks (operator edit through the worker; Run now;
+  `age_pending_payment` then Run now for the Sentry email); the first scheduled run is expected
+  at 06:00 UTC on 2026-10-03 (02:00 New York); Checkpoint 10 wants two overnight runs. The CI
+  verification goes green on the next push, when all three resources exist.
