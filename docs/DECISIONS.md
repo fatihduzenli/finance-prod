@@ -412,7 +412,7 @@ database queue proves insufficient, and never Azure Managed Redis.*
 ## ADR-0007 — Setup fees are charges with a cost side; a deposit is a liability; year-one insurance stays an insurance charge
 
 **Date:** 2026-10-05
-**Status:** Accepted (owner's Prompt 10b text of 2026-10-04; the first-year-insurance choice is Fable's and awaits the owner's confirmation)
+**Status:** Accepted (owner's Prompt 10b text of 2026-10-04; owner confirmed in writing on 2026-10-05: "first_year_insurance stays inactive, as built")
 
 ### Context
 

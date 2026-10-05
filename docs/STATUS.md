@@ -561,3 +561,8 @@ the login page myself." The condition for starting Prompt 4 is met.
   web start; no infra change). Then the owner's six done-when clicks (RUNBOOK §11; the two-row
   import runs inside the web container against `backend/tests/fixtures/store_costs/two_rows.xlsx`,
   after stores 1796 and 437 exist with those numbers).
+
+## Update, 2026-10-05, PLAN-010b pushed
+
+- **Owner, in writing:** "first_year_insurance stays inactive, as built." ADR-0007 §3 confirmed.
+- Owner typed "push".
