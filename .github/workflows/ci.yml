@@ -78,8 +78,12 @@ jobs:
       - name: Type check
         run: uv run mypy
 
+      # A test that runs longer than five minutes dumps every thread's stack and the
+      # step ends after fifteen, so a hang names its test instead of using the whole
+      # job timeout (CI run of 2026-10-05, QA-010b addendum).
       - name: Unit tests
-        run: uv run pytest -m "not e2e" -q
+        timeout-minutes: 15
+        run: uv run pytest -m "not e2e" -q -o faulthandler_timeout=300
 
       - name: Install Playwright chromium
         run: uv run playwright install --with-deps chromium

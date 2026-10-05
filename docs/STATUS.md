@@ -566,3 +566,11 @@ the login page myself." The condition for starting Prompt 4 is met.
 
 - **Owner, in writing:** "first_year_insurance stays inactive, as built." ADR-0007 §3 confirmed.
 - Owner typed "push".
+- The CI run on `bd34846` hung in the unit tests and was cancelled at the 30-minute limit;
+  **nothing was deployed**; staging still runs `3030829`. Cause, reproduced in a one-CPU Linux
+  container: PostgreSQL planned the P&L performance test's query from statistics that said the
+  tables were empty (autovacuum had analysed them earlier in the session; the test's rows were
+  uncommitted), giving nested sequential scans. Fix in the test helper (`ANALYZE` after loading);
+  20 clean rounds where it hung one in three; full gate re-run green. The CI unit-test step now
+  dumps stacks after five minutes and stops after fifteen. One MINOR deferred: no statement
+  timeout on the report's queries (QA-010b addendum). **Needs a new "push".**

@@ -923,6 +923,33 @@ def busy_stores(count: int, months: int = 1, start: date = JULY) -> None:
         )
         for lease in leases
     )
+    _refresh_planner_statistics()
+
+
+def _refresh_planner_statistics() -> None:
+    """ANALYZE the tables just loaded (PostgreSQL only).
+
+    The rows above sit in the test's open transaction. If autovacuum analysed these tables
+    earlier in the session while they were empty, the planner believes they still are and
+    joins 6,000 payments to 6,000 charges by nested sequential scans: the report query
+    then runs for many minutes (CI run of 2026-10-05). A live database keeps its
+    statistics current, so the test does the same before it measures anything.
+    """
+    if connection.vendor != "postgresql":
+        return
+    tables = (
+        Operator,
+        Store,
+        Lease,
+        StoreCost,
+        RentCharge,
+        Payment,
+        SetupCharge,
+        InsuranceCharge,
+    )
+    with connection.cursor() as cursor:
+        for model in tables:
+            cursor.execute(f"ANALYZE {connection.ops.quote_name(model._meta.db_table)}")
 
 
 def queries_for(selected: pnl.PnlQuery) -> int:

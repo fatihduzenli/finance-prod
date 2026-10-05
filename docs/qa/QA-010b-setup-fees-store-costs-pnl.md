@@ -67,3 +67,47 @@ the whole deposit (a partial refund records the remainder as withheld).
 
 **Verdict: PASS** (pending the staging done-when: checklist on lease creation; landlord rent and
 margin; wire payment on a sign fee; two-row import; P&L row and CSV; deposit refund at lease end).
+
+---
+
+### Addendum, 2026-10-05: the first CI run after the push hung in the unit tests
+
+**What happened.** CI run 37342732918 on commit `bd34846` was cancelled by the 30-minute job
+timeout in the unit-test step; nothing was deployed. The same suite had passed twice locally on
+PostgreSQL 16 and once in a Linux container.
+
+**Diagnosis (reproduced, not guessed).** Looping the affected files in a one-CPU Linux container
+reproduced the hang about one round in three. The stack dump showed the main thread waiting on
+PostgreSQL inside `ledger/services/pnl.py::_payments`, called by
+`test_500_stores_by_12_months_in_under_two_seconds`. `pg_stat_activity` showed the query
+**active with no wait event** (executing, not locked), and `pg_class.reltuples` was 0 for
+`payments`, `rent_charges` and `leases`: autovacuum had analysed those tables earlier in the
+session while they were empty, and the test's 6,000 rows per table sat uncommitted in its
+transaction. The planner therefore joined them by nested sequential scans. Whether autovacuum
+runs at that moment is a matter of timing, hence the intermittence.
+
+**Fix (test only).** `busy_stores` in `backend/tests/test_pnl.py` now runs `ANALYZE` on the
+tables it loads before anything is measured, as a live database's statistics would be current.
+Verified by the same loop that reproduced the hang (see the table below). CI hardening
+(verification configuration): the unit-test step now passes `-o faulthandler_timeout=300` and has
+its own 15-minute limit, so any future hang names its test.
+
+**Finding.** [MINOR, deferred by written decision] `ledger/services/pnl.py` — the report's
+queries run without a statement timeout. Failure scenario: planner statistics badly out of date
+on a live database (for example right after a bulk import and before autovacuum's analyze) could
+make `/reports/pnl/` run for minutes while holding a web thread. Required change, for the next
+hardening plan: a `statement_timeout` around the report's queries with a value-free "try again"
+message, and an `ANALYZE` of the affected tables at the end of the bulk importers. Not a
+correctness defect; the figures are unaffected.
+
+**Verdict unchanged: PASS**, on the re-run gate below.
+
+| Command (re-run after the addendum's changes) | Database | Exit | Result |
+|---|---|---|---|
+| `uv run ruff check .`, `ruff format --check .`, `uv run mypy` | n/a | 0 | clean, 291 files; 230 source files |
+| `makemigrations --check --dry-run` | both | 0 | no changes |
+| `uv run pytest -m "not e2e" -q -o faulthandler_timeout=300` | PostgreSQL 16 | 0 | 3,234 passed, 1 skipped |
+| same | sqlite | 0 | 2,785 passed, 450 skipped |
+| `uv run pytest -m e2e -q` | PostgreSQL 16 | 0 | 3 passed |
+| `bash scripts/check-no-secrets.sh` | n/a | 0 | clean |
+| Reproduction loop: the four affected files, Linux container, one CPU, 20 rounds | PostgreSQL 16 | 0 | 20 clean rounds (before the fix: a hang about one round in three) |
