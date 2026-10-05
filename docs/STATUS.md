@@ -670,3 +670,12 @@ the login page myself." The condition for starting Prompt 4 is met.
   `document.downloaded` with `result=ok`. Four live `documents` rows: 2 on the lease, 2 on the
   store. The managed identity reached the private container on the first upload. Nothing was
   written by the queries.
+
+## Update, 2026-10-05, Prompt 10c closed on staging
+
+- **Owner, in writing:** all 10c clicks passed: PDF lease uploaded, previewed and downloaded; a
+  floor-plan image on a store likewise; a viewer sees lists and downloads but has no upload box;
+  the fake bank PDF was refused twice (the owner's test file, no false positive); the 30 MB file
+  was refused; store cost Correct and Close work. Audit rows confirmed by the two read-only
+  queries; the audit page goes into 10d. The document kinds on the store were the owner's
+  dropdown choices and stay. **Prompt 10c closed.**
