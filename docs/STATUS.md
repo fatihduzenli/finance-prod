@@ -657,3 +657,16 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Not yet proven: a real upload through the managed identity (the owner's first click; a new
   role assignment can take a few minutes to take effect).
 - Next: the owner's 10c done-when clicks (RUNBOOK §12).
+
+## Update, 2026-10-05, 10c document clicks: evidence from the audit log
+
+- No audit-log screen exists yet (gap in the 10c plan; the owner sets it as Prompt 10d:
+  admin-only, read-only `/audit/` with filters by action, user, record and date range, CSV
+  export, and an Activity list in each Documents section).
+- On the owner's instruction Fable ran a read-only query in the staging web container, twice.
+  Rows under the owner's user: two `document.upload_refused` (reason `payment_data`; **owner
+  confirmed both were the fake bank PDF, no false positive**), four `document.uploaded` (three
+  PDFs/PNGs on a lease and a store, one PNG on a store), two `document.previewed` and two
+  `document.downloaded` with `result=ok`. Four live `documents` rows: 2 on the lease, 2 on the
+  store. The managed identity reached the private container on the first upload. Nothing was
+  written by the queries.
