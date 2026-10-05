@@ -537,3 +537,12 @@ the login page myself." The condition for starting Prompt 4 is met.
   `age_pending_payment` then Run now for the Sentry email); the first scheduled run is expected
   at 06:00 UTC on 2026-10-03 (02:00 New York); Checkpoint 10 wants two overnight runs. The CI
   verification goes green on the next push, when all three resources exist.
+
+## Update, 2026-10-04, Checkpoint 10 closed except the Sentry fixture proof
+
+- **Owner, in writing:** operator edit through the worker: Queued then Done within a minute, the
+  new phone visible in the Stax dashboard. Run now: Done, step f, 5 requests. Scheduled runs: one
+  row per night on 2026-10-03 and 2026-10-04 at 02:00 EDT, both Done; the 07:00 UTC firing made
+  no second row. The `age_pending_payment` + Sentry proof waits for a pending ACH payment (Stax
+  ACH still blocked). **Checkpoint 10 closed** except that item.
+- Next: Prompt 10b (setup fees, store costs, deposits, P&L), owner-requested, application only.
