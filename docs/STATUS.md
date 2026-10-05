@@ -604,3 +604,19 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Done-when item 4 of Prompt 10b is met (import creates the costs; a second run changes
   nothing). The owner checks the two store pages for the landlord rents. Items 1–3, 5 and 6 are
   the owner's clicks.
+
+## Update, 2026-10-05, Prompt 10b closed on staging
+
+- **Owner, in writing:** stores 1796 and 437 show the imported values. All 10b clicks passed: the
+  checklist created the sign fee and the deposit; landlord rent set and the margin shown; the wire
+  payment on the sign fee shows paid; the P&L for October alone shows landlord rent 1,500.00 and
+  billed margin −1,000.00 as expected, and a July–October range shows "unknown" because no cost
+  row covers July–September; End lease, deposit payment, then Resolve deposit → refunded produced
+  a `refund_deposit` row and the P&L did not move. **Prompt 10b closed.**
+- **Owner finding:** store cost rows cannot be edited or corrected. Wanted: correct the current
+  row's amount or dates by a superseding row (history kept, no in-place overwrite of a past
+  period) and close a row with a "to" date; admin only, audited. In the 10c plan, not a separate
+  push.
+- Next: Prompt 10c (document uploads on stores and leases), with the store-cost correction, the
+  binding carry-over (statement timeout on reports, ANALYZE after imports) and the deferred
+  invisible-note MINOR.
