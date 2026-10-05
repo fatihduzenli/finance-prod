@@ -634,3 +634,12 @@ the login page myself." The condition for starting Prompt 4 is met.
   then "deploy" (Bicep: storage account, container, role assignment, web env). What-if run:
   only those changes.
 - Owner's test files are made locally, not committed: see RUNBOOK §12 and the session message.
+
+## Update, 2026-10-05, PLAN-010c pushed; storage deployment pending
+
+- Owner typed "push". `main` at `3ddc75e`; CI run 37375480391 green (unit tests 4 min 52 s,
+  deploy, verification). Web revision `finance-staging-web--0000029` Healthy and Running on that
+  image; `deploy_migrate` succeeded (ledger 0015–0016); environment check ok; `/healthz` 200.
+- The web app carries no document settings yet, so the Documents sections read "Document
+  storage is not configured" until the infrastructure deployment (Publish Request 2, "deploy").
+  Store-cost Correct and Close, the report timeout and the note rule are live now.
