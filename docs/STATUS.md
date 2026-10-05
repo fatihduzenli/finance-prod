@@ -574,3 +574,9 @@ the login page myself." The condition for starting Prompt 4 is met.
   20 clean rounds where it hung one in three; full gate re-run green. The CI unit-test step now
   dumps stacks after five minutes and stops after fifteen. One MINOR deferred: no statement
   timeout on the report's queries (QA-010b addendum). **Needs a new "push".**
+- **Owner, in writing (2026-10-05):** "The statement-timeout and post-import ANALYZE item must
+  land before Prompt 13, since the migration is exactly the bulk import that would trigger it.
+  Put it in the 10c or 11 plan, whichever comes first." **Binding carry-over** for the next
+  plan: `statement_timeout` around the P&L queries with a value-free message, and `ANALYZE` of
+  the affected tables at the end of every bulk importer (`import_store_costs` and the Step 13
+  import). Owner typed "push" for `8959df1`.
