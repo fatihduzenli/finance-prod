@@ -851,6 +851,13 @@ class StoreCost(GuardedModel):
     none, and a store has at most one. Rows never overlap: a new row closes the open one
     the day before it starts (:mod:`ledger.services.store_costs`). No row on a day means
     the cost is unknown, never zero. ``other_monthly_cost`` null means no other cost.
+
+    **Corrections** (PLAN-010c D10): a row is never edited to say something else; an
+    admin's correction writes a new row and marks this one superseded
+    (``superseded_at``, ``superseded_by``, and ``change_note`` saying why). A superseded
+    row counts for nothing and stays for the history. *Live* rows are the ones with
+    ``superseded_at`` null; the open-row and same-start rules hold among live rows only.
+    ``change_note`` also records why an admin closed a row.
     """
 
     store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="costs")
@@ -862,6 +869,14 @@ class StoreCost(GuardedModel):
     effective_to = models.DateField(null=True, blank=True)
     source = _choice(StoreCostSource)
     notes = free_text()
+    #: When an admin's correction replaced this row (D10); null on a live row.
+    superseded_at = models.DateTimeField(null=True, blank=True)
+    #: The row that replaced this one.
+    superseded_by = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    #: Why the row was corrected or closed, or why it is a correction (D10).
+    change_note = free_text()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -877,13 +892,29 @@ class StoreCost(GuardedModel):
                 condition=Q(effective_to__isnull=True) | Q(effective_to__gte=F("effective_from")),
                 name="store_costs_effective_order",
             ),
+            # Among live rows: one row per start date, and one open row per store.
             models.UniqueConstraint(
-                fields=["store", "effective_from"], name="store_costs_store_from_unique"
+                fields=["store", "effective_from"],
+                condition=Q(superseded_at__isnull=True),
+                name="store_costs_store_from_unique",
             ),
             models.UniqueConstraint(
                 fields=["store"],
-                condition=Q(effective_to__isnull=True),
+                condition=Q(effective_to__isnull=True, superseded_at__isnull=True),
                 name="store_costs_one_open_row",
+            ),
+            # A superseded row names its replacement and says why; a live row does neither.
+            models.CheckConstraint(
+                condition=Q(superseded_at__isnull=True, superseded_by__isnull=True)
+                | Q(
+                    superseded_at__isnull=False,
+                    superseded_by__isnull=False,
+                    change_note__regex=_NOT_BLANK,
+                ),
+                name="store_costs_superseded_complete",
+            ),
+            models.CheckConstraint(
+                condition=~Q(superseded_by=F("id")), name="store_costs_not_superseded_by_itself"
             ),
             _valid_choice("store_costs", "source", StoreCostSource),
         ]
@@ -1207,33 +1238,122 @@ class DepositResolution(GuardedModel):
         ]
 
 
-# --- Reserved: documents and outbound messages (PLAN-006 D8, no UI) -----------------
+# --- Documents (PLAN-010c D4) and a reserved table (PLAN-006 D8, no UI) -------------
 
 
 class DocumentSource(models.TextChoices):
     UPLOAD = "upload", "Upload"
+    #: Reserved; unused (PLAN-010c §2).
     DOCUSIGN = "docusign", "DocuSign"
 
 
-class Document(GuardedModel):
-    """Reserved for a later prompt: a document held for an operator. No UI, no admin.
+class DocumentKind(models.TextChoices):
+    LEASE_AGREEMENT = "lease_agreement", "Lease agreement"
+    AMENDMENT = "amendment", "Amendment"
+    FLOOR_PLAN = "floor_plan", "Floor plan"
+    PHOTO = "photo", "Photo"
+    NOTICE = "notice", "Notice"
+    OTHER = "other", "Other"
 
-    A signing service's envelope identifier is not a column here: provider identifiers
-    live in ``payments.ExternalRef`` (docs/CLAUDE.md Rule 8).
+
+class DocumentContentType(models.TextChoices):
+    """The stored type, decided from the file's content, never from the browser
+    (PLAN-010c D5)."""
+
+    PDF = "application/pdf", "PDF"
+    DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Word"
+    JPEG = "image/jpeg", "JPEG image"
+    PNG = "image/png", "PNG image"
+    HEIC = "image/heic", "HEIC image"
+
+
+#: Longest stored filename (PLAN-010c D5).
+DOCUMENT_FILENAME_MAX_LENGTH = 150
+
+
+#: Lower-case hexadecimal SHA-256: exactly 64 characters, nothing around them.
+SHA256_HEX = r"\A[0-9a-f]{64}\Z"
+
+
+class Document(GuardedModel):
+    """A file kept with a store or a lease (PLAN-010c D4).
+
+    The bytes live in Blob Storage at ``blob_path`` (``documents/<store|lease>/<owner
+    uuid>/<document uuid>``, never the filename), never in the database or on the
+    container's disk. Rows are never deleted: an admin's delete sets ``deleted_at``,
+    ``deleted_by`` and ``delete_note``, and the blob stays. Written only by
+    :mod:`ledger.services.documents`.
     """
 
-    operator = models.ForeignKey(Operator, on_delete=models.PROTECT, related_name="documents")
-    kind = free_text(blank=False)
-    source = _choice(DocumentSource)
-    file_reference = free_text(blank=False)
+    store = models.ForeignKey(
+        Store, on_delete=models.PROTECT, null=True, blank=True, related_name="documents"
+    )
+    lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="documents"
+    )
+    kind = _choice(DocumentKind)
+    source = _choice(DocumentSource, default=DocumentSource.UPLOAD)
+    #: Sanitised (base name, no control or path characters), and guarded.
+    original_filename = guarded_char(DOCUMENT_FILENAME_MAX_LENGTH)
+    content_type = models.CharField(max_length=100, choices=DocumentContentType.choices)
+    size_bytes = models.BigIntegerField()
+    #: Built from UUIDs only, never the filename. Guarded all the same: the guard reads
+    #: a UUID as one letter, so a real path always passes.
+    blob_path = guarded_char(200, unique=True)
+    #: Lower-case hexadecimal SHA-256 of the bytes. An identifier, not free text, and
+    #: so outside the guard (PLAN-004 §4.6 point 1, like ``webhook_events.dedupe_hash``):
+    #: random hexadecimal holds a Luhn-valid run of 13 digits often enough to matter.
+    sha256 = models.CharField(max_length=64)
+    note = free_text()
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
-    created_at = models.DateTimeField(auto_now_add=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    delete_note = free_text()
 
     class Meta:
         db_table = "documents"
-        constraints = [_valid_choice("documents", "source", DocumentSource)]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(store__isnull=False, lease__isnull=True)
+                | Q(store__isnull=True, lease__isnull=False),
+                name="documents_exactly_one_owner",
+            ),
+            _valid_choice("documents", "kind", DocumentKind),
+            _valid_choice("documents", "source", DocumentSource),
+            _valid_choice("documents", "content_type", DocumentContentType),
+            _positive("documents", "size_bytes"),
+            _not_blank("documents", "original_filename"),
+            # A SHA-256 digest's shape. ``\A`` and ``\Z`` (not ``^`` and ``$``): on sqlite
+            # the check runs Python's ``re.search``, where ``$`` also matches before a
+            # final line break; both engines read ``\A`` and ``\Z`` as the string's ends.
+            models.CheckConstraint(
+                condition=Q(sha256__regex=SHA256_HEX), name="documents_sha256_hex"
+            ),
+            # A deleted row says why.
+            models.CheckConstraint(
+                condition=Q(deleted_at__isnull=True) | Q(delete_note__regex=_NOT_BLANK),
+                name="documents_deleted_has_note",
+            ),
+            # The same file once per record among live rows (D4).
+            models.UniqueConstraint(
+                fields=["store", "sha256"],
+                condition=Q(deleted_at__isnull=True, store__isnull=False),
+                name="documents_store_sha256_live_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["lease", "sha256"],
+                condition=Q(deleted_at__isnull=True, lease__isnull=False),
+                name="documents_lease_sha256_live_unique",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.original_filename
 
 
 class OutboundMessage(GuardedModel):

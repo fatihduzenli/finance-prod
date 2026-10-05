@@ -323,24 +323,26 @@ GUARDED_IDS = [f"{model._meta.db_table}.{field.column}" for model, field in GUAR
 
 
 def test_guarded_columns_match_the_database_triggers() -> None:
-    expected = {
-        f"{table}.{column}"
-        for module in (
-            "ledger.migrations.0002_postgresql_guards",
-            "ledger.migrations.0004_reserved_tables",
-            "ledger.migrations.0005_operator_sync_failure_fields",
-            "ledger.migrations.0009_payment_returns_resolution",
-            "ledger.migrations.0010_rent_charge_review_message",
-            "ledger.migrations.0012_setup_charges",
-            "ledger.migrations.0014_store_costs_deposit_resolutions",
-            "payments.migrations.0002_postgresql_guards",
-            "payments.migrations.0003_webhook_event_processing",
-            "payments.migrations.0005_jobs",
-            "payments.migrations.0007_reconciliation",
-        )
-        for table, columns in importlib.import_module(module).GUARDED_COLUMNS.items()
-        for column in columns
-    }
+    # A later migration's entry for a table replaces the earlier one: it drops the old
+    # trigger and creates the new one (ledger 0015 reshaped ``documents``, PLAN-010c D4).
+    triggers: dict[str, tuple[str, ...]] = {}
+    for module in (
+        "ledger.migrations.0002_postgresql_guards",
+        "ledger.migrations.0004_reserved_tables",
+        "ledger.migrations.0005_operator_sync_failure_fields",
+        "ledger.migrations.0009_payment_returns_resolution",
+        "ledger.migrations.0010_rent_charge_review_message",
+        "ledger.migrations.0012_setup_charges",
+        "ledger.migrations.0014_store_costs_deposit_resolutions",
+        "ledger.migrations.0015_documents_reshape",
+        "ledger.migrations.0016_store_cost_corrections",
+        "payments.migrations.0002_postgresql_guards",
+        "payments.migrations.0003_webhook_event_processing",
+        "payments.migrations.0005_jobs",
+        "payments.migrations.0007_reconciliation",
+    ):
+        triggers.update(importlib.import_module(module).GUARDED_COLUMNS)
+    expected = {f"{table}.{column}" for table, columns in triggers.items() for column in columns}
     assert set(GUARDED_IDS) == expected
 
 
@@ -352,6 +354,8 @@ IDENTIFIER_COLUMNS = {
     "webhook_events.dedupe_hash",
     "audit_log.entity_id",
     "import_audit.target_id",
+    # A SHA-256 in hexadecimal (PLAN-010c D4), like webhook_events.dedupe_hash.
+    "documents.sha256",
 }
 
 
@@ -400,6 +404,10 @@ def test_guard_covers_every_open_text_column_except_the_named_identifiers() -> N
     } <= set(GUARDED_IDS)
 
 
+#: An identifier with a shape of its own holds the Luhn-valid run inside that shape:
+#: ``documents.sha256`` must be 64 lower-case hexadecimal characters (its CHECK).
+IDENTIFIER_VALUES = {"documents.sha256": "4111111111111111" + "abcdef" * 8}
+
 IDENTIFIER_FIELDS = [
     (model, field)
     for label in ("ledger", "payments")
@@ -419,7 +427,9 @@ def test_identifier_columns_accept_a_luhn_valid_number(
     model: type[models.Model], field: models.Field[Any, Any]
 ) -> None:
     # Not free text: a provider identifier is never refused, by save() or by a trigger.
-    instance = saved(FACTORIES[model](**{field.attname: "4111111111111111"}))
+    column = f"{model._meta.db_table}.{field.column}"
+    value = IDENTIFIER_VALUES.get(column, "4111111111111111")
+    instance = saved(FACTORIES[model](**{field.attname: value}))
     assert model._default_manager.filter(pk=instance.pk).exists()
 
 

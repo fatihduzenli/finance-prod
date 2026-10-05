@@ -105,7 +105,7 @@ from ledger.services.leases import (
     rent_on,
     schedule_ref,
 )
-from ledger.validators import validate_no_payment_data
+from ledger.validators import validate_no_payment_data, visible_text
 from payments import invoice_sync, offline_marking, operator_sync
 from payments.errors import ProviderError
 from payments.health import provider_health
@@ -860,9 +860,10 @@ def link_charge_invoice(
     """Link an unlinked invoice of the charge's operator to a charge of ``kind``.
 
     Every rule is checked under the row locks, charge first, then invoice. A total that
-    differs from the charge's balance needs ``confirm`` and a note, and flags the charge.
+    differs from the charge's balance needs ``confirm`` and a note (judged and stored as
+    :func:`~ledger.validators.visible_text`), and flags the charge.
     """
-    text = (note or "").strip()
+    text = visible_text(note or "")
     if text:
         try:
             validate_no_payment_data(text)
@@ -947,7 +948,7 @@ def record_manual_payment(
     a payment whose invoice is to be marked returns ``mark_due=True`` and the worker
     marks it with :func:`mark_provider_invoice`.
     """
-    text = (note or "").strip()
+    text = visible_text(note or "")
     reference = (reference or "").strip()
     refusal = payment_refusal(method, amount, paid_on, text, today)
     if refusal is not None:
@@ -1025,7 +1026,8 @@ def payment_refusal(
 ) -> PaymentOutcome | None:
     """The first rule a manual payment breaks before any row is read (D8), or ``None``.
 
-    ``text`` is the note, already stripped.
+    ``text`` is the note as :func:`~ledger.validators.visible_text` leaves it: without
+    invisible characters or surrounding whitespace (PLAN-010c D12).
     """
     if method not in MANUAL_METHODS:
         return PaymentOutcome(False, PAY_METHOD, "method")

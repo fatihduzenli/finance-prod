@@ -1,10 +1,11 @@
 {% extends "finance/base.html" %}
+{% load static %}
 {% block title %}{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}{% endblock %}
 {% block content %}
   <p>{% if lease %}<a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; {{ lease.store.external_label }}</a>{% else %}<a href="{% url 'ledger:leases:list' %}">&larr; Leases</a>{% endif %}</p>
   <h1>{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}</h1>
   {% if lease %}<p class="muted">A rent change is never overwritten: the current rent ends the day before the new one takes effect, and the history keeps both. A lease with autopay keeps its schedules; any schedule that no longer matches is flagged for review.</p>{% endif %}
-  <form method="post" id="lease-form" class="js-single-submit">
+  <form method="post" id="lease-form" class="js-single-submit"{% if not lease %} enctype="multipart/form-data"{% endif %}>
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
@@ -33,8 +34,9 @@
           {% endfor %}
         </tbody>
       </table>
+      {% include "ledger/documents/_create_upload.html" %}
     {% endif %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-lease">Save</button></p>
   </form>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

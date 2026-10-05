@@ -505,6 +505,31 @@ Nothing has to be re-planned for the worker and beat:
   Azure Managed Redis, or a Redis container app in this environment. Nothing
   reads Redis before then.
 
+## 10a. Document storage (PLAN-010c D1)
+
+`modules/storage.bicep` creates one StorageV2 account (`Standard_LRS`) for the
+documents attached to stores and leases, with one private container (`documents`).
+
+- **No key exists to leak.** Shared key access is disabled, so account keys, connection
+  strings and SAS tokens do not work against it, and the template never lists, outputs
+  or passes one. Blob public access is off, HTTPS only, TLS 1.2 minimum.
+- **Access is by role.** The environment's user-assigned managed identity holds
+  **Storage Blob Data Contributor** on the `documents` container only (not the account).
+  The web app reaches it with that identity; the worker and the reconciliation job get
+  no storage settings. A new role assignment can take a few minutes to take effect.
+- **Network.** The blob endpoint is public but accepts Entra tokens only. Restricting it
+  to the Container Apps subnet (service endpoint or private endpoint) is a recorded
+  hardening option, not built.
+- **Retention.** Blob versioning is on; deleted blobs and deleted containers are kept
+  for 30 days. The app never hard-deletes a blob. LRS keeps three copies in one data
+  centre; losing the account is not recoverable (GRS is the option, at a cost).
+- **Web app settings.** `DOCUMENTS_STORAGE_ACCOUNT_URL` (the blob endpoint, as Azure
+  returns it, with a trailing slash), `DOCUMENTS_CONTAINER` and `AZURE_CLIENT_ID` (the
+  identity's client ID). All are plain values, not secrets.
+- **Outputs.** `documentsStorageAccountName`, `documentsContainerName`. The account
+  name defaults to `st<prefix without hyphens><uniqueString(resource group)>` cut to 24
+  characters; override `documentsStorageAccountName` if it is taken.
+
 ## 11. Cost note
 
 Per ADR-0002, roughly: Container Apps ~$30, PostgreSQL Burstable B1ms ~$15–25,

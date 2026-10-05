@@ -34,6 +34,9 @@ ALLOWED: dict[str, str] = {
     "ledger/models.py": "payment_channel value (PLAN-005 §6 row 12)",
     "ledger/migrations/0001_initial.py": "payment_channel value (PLAN-005 §6 row 12)",
     "ledger/management/commands/seed_demo.py": "demo ExternalRef provider name (PLAN-004)",
+    "ledger/templates/ledger/documents/_notice.html": (
+        "the upload notice says bank forms stay in Stax (PLAN-010c D6, verbatim)"
+    ),
 }
 #: In these files the only permitted mention is the quoted payment_channel value.
 CHANNEL_VALUE_ONLY = {"ledger/models.py", "ledger/migrations/0001_initial.py"}

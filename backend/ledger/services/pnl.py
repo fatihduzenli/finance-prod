@@ -29,9 +29,9 @@ with no end date, is never active. The columns:
   ``insurance`` payments by ``settled_on`` month minus their settled refunds, plus the
   withheld part of resolved deposits by ``resolved_on`` month (``withheld_deposits``,
   shown apart as well);
-- **landlord rent** and **other costs**: the store cost row in effect on the month's
-  first day; none is "unknown" (``None``), never zero. An empty other cost on a row in
-  effect is zero;
+- **landlord rent** and **other costs**: the live store cost row in effect on the
+  month's first day (a superseded row, PLAN-010c D10, counts for nothing); none is
+  "unknown" (``None``), never zero. An empty other cost on a row in effect is zero;
 - **fee costs**: the ``cost`` of the month's non-refundable setup charges by
   ``due_date`` (waived ones included: the item was bought all the same), plus the
   premium ``cost`` of the policy year of each insurance charge billed that month; any
@@ -543,10 +543,11 @@ def _lease_spans(start: date, end: date) -> dict[uuid.UUID, list[_LeaseSpan]]:
 
 
 def _cost_rows(start: date, end: date) -> dict[uuid.UUID, list[_CostRow]]:
-    """The store cost rows that may matter in the range, by store (1 query)."""
+    """The live store cost rows that may matter in the range, by store (1 query). A
+    superseded row (PLAN-010c D10) counts for nothing."""
     rows_by_store: dict[uuid.UUID, list[_CostRow]] = defaultdict(list)
     for store, rent, other, lease_end, effective_from, effective_to in (
-        StoreCost.objects.filter(effective_from__lte=end)
+        StoreCost.objects.filter(superseded_at__isnull=True, effective_from__lte=end)
         .filter(
             Q(effective_to__isnull=True)
             | Q(effective_to__gte=start)
@@ -811,7 +812,13 @@ def csv_records(query: PnlQuery) -> Iterator[list[str]]:
 
 def csv_lines(query: PnlQuery) -> Iterator[str]:
     """The report as CSV, one line at a time (header first)."""
+    return csv_lines_of(csv_records(query))
+
+
+def csv_lines_of(records: Iterable[list[str]]) -> Iterator[str]:
+    """The header, then ``records``, as CSV lines. The export computes its records
+    first (inside the report's statement timeout, PLAN-010c D11) and streams these."""
     writer = csv.writer(CsvLine())
     yield writer.writerow(CSV_HEADER)
-    for record in csv_records(query):
+    for record in records:
         yield writer.writerow(record)

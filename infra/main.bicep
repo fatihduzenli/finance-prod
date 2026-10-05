@@ -194,6 +194,18 @@ param webCpuCores string = '0.5'
 param webMemory string = '1Gi'
 
 // ---------------------------------------------------------------------------
+// Document storage (PLAN-010c D1)
+// ---------------------------------------------------------------------------
+
+@description('Storage account for documents: 3-24 lowercase letters and digits, globally unique. The default is cut to 24 characters, so it keeps only part of the unique suffix.')
+@minLength(3)
+@maxLength(24)
+param documentsStorageAccountName string = take(toLower('st${replace(resourceNamePrefix, '-', '')}${uniqueString(resourceGroup().id)}'), 24)
+
+@description('Private blob container that holds the documents.')
+param documentsContainerName string = 'documents'
+
+// ---------------------------------------------------------------------------
 // Worker container app (Step 10)
 // ---------------------------------------------------------------------------
 
@@ -351,6 +363,20 @@ module redis 'modules/redis.bicep' = if (deployRedis) {
   }
 }
 
+// Document storage (PLAN-010c D1): the account, its private container and the
+// identity's Storage Blob Data Contributor role on that container. Only the web
+// app uses it; the worker and the reconciliation job never touch documents.
+module storage 'modules/storage.bicep' = {
+  name: 'storage'
+  params: {
+    location: location
+    accountName: documentsStorageAccountName
+    containerName: documentsContainerName
+    principalId: identity.outputs.principalId
+    tags: tags
+  }
+}
+
 // The default ingress host name is only knowable after the environment exists,
 // so it is resolved here rather than asked for as a parameter. It is also the
 // CNAME target for a custom hostname, which is why it is derived rather than
@@ -408,6 +434,11 @@ module web 'modules/containerAppWeb.bicep' = {
     databaseUrlSecretName: databaseUrlSecretName
     djangoSecretKeySecretName: djangoSecretKeySecretName
     sentryDsnSecretName: sentryDsnSecretName
+    // Reading the storage module's outputs makes the web app depend on the whole
+    // module, so the role assignment exists before the revision that uses it.
+    documentsStorageAccountUrl: storage.outputs.blobEndpoint
+    documentsContainer: storage.outputs.containerName
+    azureClientId: identity.outputs.clientId
     minReplicas: webMinReplicas
     maxReplicas: webMaxReplicas
     cpuCores: webCpuCores
@@ -564,3 +595,8 @@ output redisHostName string = deployRedis ? redis!.outputs.hostName : ''
 output keyVaultName string = keyVaultName
 output keyVaultUri string = keyVaultUri
 output logAnalyticsWorkspaceName string = monitoring.outputs.workspaceName
+
+@description('Document storage account (PLAN-010c D1). Shared key access is off: there is no key to read.')
+output documentsStorageAccountName string = storage.outputs.accountName
+
+output documentsContainerName string = storage.outputs.containerName

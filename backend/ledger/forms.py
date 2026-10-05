@@ -20,6 +20,7 @@ from ledger.models import (
     NAME_MAX_LENGTH,
     CollectionStatus,
     DepositResolutionKind,
+    DocumentKind,
     FeeType,
     Lease,
     Operator,
@@ -467,6 +468,14 @@ class ManualPaymentForm(forms.Form):
         error_messages={"required": "A note is required: say what was received."},
     )
 
+    def clean_note(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a note
+        # (PLAN-010c D12).
+        note = visible_text(self.cleaned_data["note"])
+        if not note:
+            raise forms.ValidationError(self.fields["note"].error_messages["required"])
+        return note
+
 
 class LinkInvoiceForm(forms.Form):
     """Link one of the operator's unlinked invoices to a rent charge (PLAN-008a §2 rule
@@ -485,6 +494,11 @@ class LinkInvoiceForm(forms.Form):
         help_text="Required when the total differs from the balance: say why.",
     )
 
+    def clean_note(self) -> str:
+        # Stored without invisible characters; the service decides whether a note is
+        # required and judges it by the same visible text (PLAN-010c D12).
+        return visible_text(self.cleaned_data["note"])
+
 
 class ResolveReturnForm(forms.Form):
     """Resolve a returned payment (PLAN-008 D6): a note, nothing else."""
@@ -496,6 +510,14 @@ class ResolveReturnForm(forms.Form):
         help_text="Required: how the return was resolved.",
         error_messages={"required": "A note is required: say how the return was resolved."},
     )
+
+    def clean_note(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a note
+        # (PLAN-010c D12).
+        note = visible_text(self.cleaned_data["note"])
+        if not note:
+            raise forms.ValidationError(self.fields["note"].error_messages["required"])
+        return note
 
 
 class WaiveForm(forms.Form):
@@ -601,6 +623,75 @@ class StoreCostForm(forms.Form):
         ].help_text = "The first day this amount applies. The current row ends the day before."
 
 
+CHANGE_NOTE_MAX_LENGTH = 2000
+
+
+def _change_note_field(required_message: str, help_text: str) -> forms.CharField:
+    return forms.CharField(
+        label="Why",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=CHANGE_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text=help_text,
+        error_messages={"required": required_message},
+    )
+
+
+class StoreCostCorrectForm(StoreCostForm):
+    """Correct one cost row (admin, PLAN-010c D10): the corrected values and dates, and
+    why. The service writes a new row and supersedes the old one under the store's row
+    lock, and refuses an overlap with another live row."""
+
+    effective_to = forms.DateField(
+        label="Effective to",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="The last day this amount applies. Empty means it still applies.",
+    )
+    change_note = _change_note_field(
+        "A note is required: say why the row is changed.",
+        "Required: why the row is corrected. Kept with the history.",
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["effective_from"].help_text = "The first day this amount applies."
+
+    def clean_change_note(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a note.
+        note = visible_text(self.cleaned_data["change_note"])
+        if not note:
+            raise forms.ValidationError(self.fields["change_note"].error_messages["required"])
+        return note
+
+    def clean(self) -> dict[str, Any]:
+        data = super().clean() or {}
+        start = data.get("effective_from")
+        end = data.get("effective_to")
+        if start is not None and end is not None and end < start:
+            self.add_error("effective_to", "The end date cannot be before the start date.")
+        return data
+
+
+class StoreCostCloseForm(forms.Form):
+    """Close the open cost row on a date (admin, PLAN-010c D10)."""
+
+    effective_to = forms.DateField(
+        label="Last day",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="The last day the current landlord rent applies.",
+    )
+    change_note = _change_note_field(
+        "A note is required: say why the row is closed.", "Required: why the row is closed."
+    )
+
+    def clean_change_note(self) -> str:
+        note = visible_text(self.cleaned_data["change_note"])
+        if not note:
+            raise forms.ValidationError(self.fields["change_note"].error_messages["required"])
+        return note
+
+
 # --- Deposit resolution (PLAN-010b D7) -------------------------------------------------------
 
 RESOLUTION_METHOD_CHOICES = (("", "—"), *MANUAL_METHOD_CHOICES)
@@ -674,3 +765,54 @@ class EndLeaseForm(forms.Form):
         if not reason:
             raise forms.ValidationError(END_REASON_REQUIRED)
         return reason
+
+
+# --- Documents (PLAN-010c D7) --------------------------------------------------------------
+
+DOCUMENT_NOTE_MAX_LENGTH = 2000
+DOCUMENT_FILE_REQUIRED = "Choose a file to upload."
+
+
+class DocumentUploadForm(forms.Form):
+    """One file, its kind and an optional note. Shape only: the service decides the
+    type from the content, checks the size, the kind and the note, and runs the
+    payment-data guard (D5, D6), so that every refusal is audited in one place.
+
+    Rendered with the prefix ``document`` on the store and lease create forms, where the
+    file is optional and uploaded after the record is saved.
+    """
+
+    file = forms.FileField(
+        label="File",
+        error_messages={"required": DOCUMENT_FILE_REQUIRED},
+        # An empty file reaches the service, which refuses it and audits the refusal.
+        allow_empty_file=True,
+        # The type is decided from the content; this only narrows the file picker.
+        widget=forms.FileInput(
+            attrs={"accept": ".pdf,.docx,.jpg,.jpeg,.png,.heic", "class": "js-document-file"}
+        ),
+    )
+    #: A select of the kinds; any other value reaches the service, which refuses it.
+    kind = forms.CharField(label="Kind", widget=forms.Select(choices=DocumentKind.choices))
+    note = forms.CharField(
+        required=False,
+        strip=False,
+        widget=forms.Textarea(attrs={"rows": 2, "maxlength": DOCUMENT_NOTE_MAX_LENGTH}),
+    )
+
+
+class DocumentDeleteForm(forms.Form):
+    """Delete a document (admin): a note, nothing else."""
+
+    note = forms.CharField(
+        max_length=DOCUMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": "A note is required: say why the document is deleted."},
+    )
+
+    def clean_note(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a note.
+        note = visible_text(self.cleaned_data["note"])
+        if not note:
+            raise forms.ValidationError(self.fields["note"].error_messages["required"])
+        return note

@@ -455,3 +455,60 @@ could be shown.
 - New dependency `openpyxl==3.1.5` (MIT), used by the importer only.
 - Known limitation: the payments-ledger "Deposits held" total is over the filtered set, not a
   balance at a date; the P&L footer is the balance at the end of its range.
+
+## ADR-0008 — Documents live in private Blob Storage; files are checked for bank data; images are covered by policy
+
+**Date:** 2026-10-05
+**Status:** Accepted (owner's Prompt 10c text of 2026-10-05)
+
+### Context
+
+Staff keep lease agreements, amendments, floor plans, photos and notices in shared drives and
+inboxes. The app reserved a `documents` table in Prompt 6. A document store is also the easiest
+way for bank details to enter a system that must never hold them (docs/CLAUDE.md Rule 1): a
+scanned ACH authorisation or a voided cheque is exactly what an operator sends with a lease.
+
+### Decision
+
+1. **Where files live.** One private Azure Blob Storage container per environment, in the
+   environment's resource group. Anonymous access is off, shared-key access is off (no account
+   key exists to leak), and the app reaches it with its managed identity. A file is never written
+   to the container filesystem or to the database; the database holds the row (owner, kind, name,
+   type, size, blob path, sha256, who and when).
+2. **How files leave.** Only through the app, streamed to an authenticated user whose role may
+   read. No public URL and no shared-access link is ever produced. Preview is limited to PDF, PNG
+   and JPEG and is served sandboxed.
+3. **What may be uploaded.** pdf, docx, jpg/jpeg, png, heic, up to 25 MB, the type decided from
+   the content and required to agree with the extension.
+4. **Bank-data guard on files.** Text is extracted from every PDF and DOCX at upload and run
+   through the same card, routing and account detectors as every text field. A hit refuses the
+   file with the same sentence and stores nothing. A PDF that cannot be read (encrypted, corrupt)
+   is refused because it cannot be checked.
+5. **The stated limit: images.** A photo, a scan or a PDF made of page images cannot be checked.
+   The rule for those is policy, shown on every upload box: **no bank forms, ACH authorisations,
+   voided cheques or card details; those stay in Stax or DocuSign.** An admin deletes a file that
+   breaks the rule. OCR is not used: it would read bank details into this app's memory and logs,
+   and a missed digit gives false comfort.
+6. **Deletion is soft.** An admin delete sets `deleted_at`; the blob stays. The platform keeps
+   deleted and overwritten blobs for 30 days (soft delete and versioning). The database's
+   point-in-time restore window is 7 days, so a restored database always finds its blobs.
+7. **Audit.** Every upload, refused upload (reason code only), preview, download and delete
+   writes an audit row.
+
+### Alternatives rejected
+
+- **Files in PostgreSQL** (bytea): backups and restores carry every file; the owner asked for
+  the opposite.
+- **Short-lived SAS links for download:** a link can be forwarded for as long as it lives, needs
+  a user-delegation key, and puts a storage URL in a browser. Streaming needs neither.
+- **Account-key or connection-string access:** a secret to store, rotate and leak.
+- **OCR of images:** see point 5.
+
+### Consequences
+
+- docs/CLAUDE.md Rule 1 gains the file policy. `docs/DATA_OWNERSHIP.md` gains the table.
+- Known gaps, recorded for the owner: no virus scanning (Microsoft Defender for Storage is the
+  option); the storage endpoint is public with Entra-only auth (a subnet restriction is the
+  hardening option); the account is locally redundant (GRS is the option for a regional loss).
+- A removed file that broke Rule 1 remains in blob soft delete for 30 days; purging it sooner
+  is a manual owner action in the portal, recorded when it happens.

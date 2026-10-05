@@ -51,12 +51,29 @@ RECONCILE_INTEGERS: dict[str, tuple[int, int, int]] = {
     "RECONCILE_OVERLAP_HOURS": (48, 0, 720),
     "RECONCILE_DEPOSIT_DAYS": (14, 1, 364),
 }
+#: PLAN-010c D11: the PostgreSQL statement timeout of the P&L page and export, in
+#: milliseconds (default, smallest, largest).
+REPORT_STATEMENT_TIMEOUT_MS = (15_000, 1_000, 120_000)
 DEFAULT_RECONCILE_LOCAL_TIME = "02:00"
 DEFAULT_RECONCILE_TIMEZONE = "America/New_York"
 _WHOLE_NUMBER = re.compile(r"[0-9]{1,6}")
 _LOCAL_TIME = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 #: An IANA zone name such as America/New_York: no path, no dots at the start.
 _ZONE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*")
+
+#: PLAN-010c D1, D2: the document storage account's blob endpoint, the container and the
+#: managed identity's client ID. Empty URL: the documents feature is off outside local.
+#: The endpoint is exactly ``https://<account>.blob.core.windows.net`` (a trailing slash,
+#: as Azure reports the endpoint, is accepted); an account name is 3 to 24 lower-case
+#: letters and digits.
+_BLOB_ACCOUNT_URL = re.compile(r"https://[a-z0-9]{3,24}\.blob\.core\.windows\.net/?")
+DEFAULT_DOCUMENTS_CONTAINER = "documents"
+#: An Azure container name: 3 to 63 lower-case letters, digits and single hyphens,
+#: starting and ending with a letter or digit.
+_CONTAINER_NAME = re.compile(r"(?!.*--)[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
+_CLIENT_ID = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
 
 _SQLITE_SCHEME_PREFIX = "sqlite"
 _WEB_URL_SCHEMES: tuple[str, ...] = ("http", "https")
@@ -102,6 +119,12 @@ class Config:
     reconcile_deposit_days: int
     reconcile_local_time: time
     reconcile_timezone: str
+    #: PLAN-010c D2. Identifiers, not credentials: no key or token is ever configured.
+    documents_storage_account_url: str = ""
+    documents_container: str = DEFAULT_DOCUMENTS_CONTAINER
+    azure_client_id: str = ""
+    #: PLAN-010c D11.
+    report_statement_timeout_ms: int = REPORT_STATEMENT_TIMEOUT_MS[0]
 
 
 def _positive_amount(value: str) -> Decimal | None:
@@ -259,11 +282,45 @@ def validate(env: Mapping[str, str]) -> Config:
     if reconcile_timezone is None:
         problems.append("RECONCILE_TIMEZONE must be a known IANA time zone name")
 
+    # PLAN-010c D11: the report's statement timeout.
+    timeout_default, timeout_smallest, timeout_largest = REPORT_STATEMENT_TIMEOUT_MS
+    report_statement_timeout_ms = _whole_number(
+        env.get("REPORT_STATEMENT_TIMEOUT_MS", "") or str(timeout_default),
+        timeout_smallest,
+        timeout_largest,
+    )
+    if report_statement_timeout_ms is None:
+        problems.append(
+            f"REPORT_STATEMENT_TIMEOUT_MS must be a whole number from {timeout_smallest} "
+            f"to {timeout_largest}"
+        )
+
+    # PLAN-010c D2: document storage. Empty URL means the feature is off (outside local).
+    documents_storage_account_url = env.get("DOCUMENTS_STORAGE_ACCOUNT_URL", "")
+    documents_container = env.get("DOCUMENTS_CONTAINER", "") or DEFAULT_DOCUMENTS_CONTAINER
+    azure_client_id = env.get("AZURE_CLIENT_ID", "")
+    if documents_storage_account_url and not _BLOB_ACCOUNT_URL.fullmatch(
+        documents_storage_account_url
+    ):
+        problems.append(
+            "DOCUMENTS_STORAGE_ACCOUNT_URL must be https://<account>.blob.core.windows.net "
+            "when it is set"
+        )
+    if not _CONTAINER_NAME.fullmatch(documents_container):
+        problems.append(
+            "DOCUMENTS_CONTAINER must be 3 to 63 lower-case letters, digits and single hyphens"
+        )
+    if azure_client_id and not _CLIENT_ID.fullmatch(azure_client_id):
+        problems.append("AZURE_CLIENT_ID must be a client ID in UUID form")
+    elif documents_storage_account_url and not azure_client_id:
+        problems.append("AZURE_CLIENT_ID is required when DOCUMENTS_STORAGE_ACCOUNT_URL is set")
+
     if (
         problems
         or large_debit_warning_amount is None
         or reconcile_local_time is None
         or reconcile_timezone is None
+        or report_statement_timeout_ms is None
     ):
         raise EnvGuardError("; ".join(problems))
 
@@ -292,4 +349,8 @@ def validate(env: Mapping[str, str]) -> Config:
         reconcile_deposit_days=reconcile["RECONCILE_DEPOSIT_DAYS"],
         reconcile_local_time=reconcile_local_time,
         reconcile_timezone=reconcile_timezone,
+        documents_storage_account_url=documents_storage_account_url,
+        documents_container=documents_container,
+        azure_client_id=azure_client_id,
+        report_statement_timeout_ms=report_statement_timeout_ms,
     )

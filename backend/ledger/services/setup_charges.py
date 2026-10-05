@@ -413,7 +413,7 @@ def record_payment(
     caller queues :func:`mark_provider_invoice` for the worker. ``creation_key`` is kept
     in the audit row and looked up under the charge's row lock.
     """
-    text = (note or "").strip()
+    text = visible_text(note or "")
     reference = (reference or "").strip()
     refused = rent_run.payment_refusal(method, amount, paid_on, text, today)
     if refused is not None:

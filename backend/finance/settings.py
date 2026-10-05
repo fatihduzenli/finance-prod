@@ -106,6 +106,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    # Refuses an oversized body before CsrfViewMiddleware reads it (PLAN-010c D3).
+    "finance.uploads.RequestSizeLimitMiddleware",
     "finance.middleware.SandboxBannerMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -175,6 +177,34 @@ STORAGES = {
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# --- Uploads and document storage (docs/qa/PLAN-010c-documents-and-cost-corrections.md) --
+#: The largest document accepted: 25 MB (D5).
+DOCUMENT_MAX_BYTES = 25 * 1024 * 1024
+#: Room for the multipart boundaries, the other form fields and the filename.
+UPLOAD_FORM_OVERHEAD_BYTES = 1024 * 1024
+#: The largest body of a request to a route that takes a document
+#: (finance.uploads.LARGE_UPLOAD_ROUTE_NAMES); finance.uploads refuses anything larger (D3).
+UPLOAD_MAX_REQUEST_BYTES = DOCUMENT_MAX_BYTES + UPLOAD_FORM_OVERHEAD_BYTES
+#: The largest body of every other request, the login form included: Django's own
+#: default of 2.5 MiB.
+REQUEST_MAX_BYTES = 2_621_440
+#: Files are held in memory only, never in a temporary file (D3). The handler caps each
+#: request at its route's limit (finance.uploads.request_limit).
+FILE_UPLOAD_HANDLERS = ["finance.uploads.CappedMemoryFileUploadHandler"]
+FILE_UPLOAD_MAX_MEMORY_SIZE = UPLOAD_MAX_REQUEST_BYTES
+#: A body read whole, and the non-file fields of a form, never exceed the small limit.
+DATA_UPLOAD_MAX_MEMORY_SIZE = REQUEST_MAX_BYTES
+#: One file per submit (D7).
+DATA_UPLOAD_MAX_NUMBER_FILES = 1
+#: The storage account's blob endpoint; empty means the documents feature is off outside
+#: local (D2). Not a secret: access is by managed identity, with no key anywhere.
+DOCUMENTS_STORAGE_ACCOUNT_URL = _config.documents_storage_account_url
+DOCUMENTS_CONTAINER = _config.documents_container
+#: The user-assigned managed identity's client ID: an identifier, not a secret (D1).
+AZURE_CLIENT_ID = _config.azure_client_id
+#: PostgreSQL statement timeout of the P&L page and export, in milliseconds (D11).
+REPORT_STATEMENT_TIMEOUT_MS = _config.report_statement_timeout_ms
 
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -260,6 +290,10 @@ LOGGING = {
         },
         # Payments at INFO: one redacted line per Stax request reaches stderr (PLAN-005).
         "payments": {"handlers": [], "level": "INFO", "propagate": True},
+        # The PDF reader's own warnings about a malformed file are dropped: a document's
+        # text must never reach a log line (PLAN-010c D6). The service logs a refusal's
+        # class name instead.
+        "pypdf": {"handlers": [], "level": "CRITICAL", "propagate": True},
     },
 }
 

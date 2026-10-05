@@ -52,6 +52,8 @@ IDENTIFIER_COLUMNS = {
     ("webhook_events", "dedupe_hash"),
     ("audit_log", "entity_id"),
     ("import_audit", "target_id"),
+    # A file's SHA-256 as 64 hex characters (PLAN-010c D4); a CHECK holds it to that shape.
+    ("documents", "sha256"),
 }
 
 

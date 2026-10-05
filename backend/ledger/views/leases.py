@@ -39,6 +39,7 @@ from accounts.views import forbidden
 from ledger.forms import EndLeaseForm, EnrolForm, LeaseCreateForm, LeaseForm
 from ledger.models import (
     ChargeNote,
+    DocumentKind,
     Lease,
     LeaseRentHistory,
     Note,
@@ -50,6 +51,7 @@ from ledger.services import deposits, setup_charges
 from ledger.services import leases as service
 from ledger.services.leases import LeaseRefused
 from ledger.services.setup_charges import SetupRefused
+from ledger.views import documents
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import PAGE_SIZE, _actor, _held, _hold, _role, role_required
 from payments import jobs
@@ -179,6 +181,7 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_enrol": admin,
             "can_pause": admin and ScheduleState.ACTIVE in linked_states,
             "can_resume": admin and ScheduleState.PAUSED in linked_states,
+            **documents.section_context(request, lease),
         },
     )
 
@@ -218,6 +221,7 @@ def lease_create(request: HttpRequest) -> HttpResponse:
             else:
                 if created:
                     messages.success(request, _saved_message(len(charges)))
+                    documents.upload_after_create(request, lease, "lease")
                 else:
                     messages.info(request, ALREADY_SAVED)
                 return redirect("ledger:leases:detail", pk=lease.pk)
@@ -226,7 +230,15 @@ def lease_create(request: HttpRequest) -> HttpResponse:
     form = _held(request, "lease-create", LeaseCreateForm) or LeaseCreateForm(
         initial={"creation_key": uuid.uuid4()}
     )
-    return render(request, "ledger/leases/form.html", {"form": form, "lease": None})
+    return render(
+        request,
+        "ledger/leases/form.html",
+        {
+            "form": form,
+            "lease": None,
+            "document_form": documents.create_form(DocumentKind.LEASE_AGREEMENT),
+        },
+    )
 
 
 def _saved_message(charges: int) -> str:

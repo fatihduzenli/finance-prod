@@ -56,6 +56,15 @@ param staxMaxTxnAmount string = ''
 @description('Public base URL of this app. Drives ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS in Django.')
 param appBaseUrl string
 
+@description('DOCUMENTS_STORAGE_ACCOUNT_URL: blob endpoint of the document storage account (PLAN-010c D1). A plain URL, not a secret.')
+param documentsStorageAccountUrl string
+
+@description('DOCUMENTS_CONTAINER: name of the private blob container for documents. Not a secret.')
+param documentsContainer string
+
+@description('AZURE_CLIENT_ID: client ID of the user-assigned managed identity the app authenticates to Blob Storage with. An identifier, not a secret.')
+param azureClientId string
+
 @description('Vault secret name for the Stax API key, e.g. stax-api-key-sandbox.')
 param staxApiKeySecretName string
 
@@ -178,6 +187,18 @@ var baseEnv = [
   {
     name: 'APP_BASE_URL'
     value: appBaseUrl
+  }
+  {
+    name: 'DOCUMENTS_STORAGE_ACCOUNT_URL'
+    value: documentsStorageAccountUrl
+  }
+  {
+    name: 'DOCUMENTS_CONTAINER'
+    value: documentsContainer
+  }
+  {
+    name: 'AZURE_CLIENT_ID'
+    value: azureClientId
   }
   {
     name: 'STAX_API_KEY'

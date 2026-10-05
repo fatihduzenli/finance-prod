@@ -141,6 +141,28 @@ def new_store_cost(**fields: Any) -> ledger.StoreCost:
     return ledger.StoreCost(**{**values, **fields})
 
 
+def _superseded_store_cost(**fields: Any) -> ledger.StoreCost:
+    """An unsaved superseded row, its replacement saved (PLAN-010c D10)."""
+    replacement = saved(new_store_cost(effective_from=date(2026, 1, 1)))
+    return new_store_cost(
+        store=replacement.store,
+        effective_from=date(2026, 1, 1),
+        superseded_at=datetime(2026, 10, 5, tzinfo=UTC),
+        superseded_by=replacement,
+        **fields,
+    )
+
+
+def _self_superseded_store_cost() -> ledger.StoreCost:
+    row_id = uuid.uuid4()
+    return new_store_cost(
+        id=row_id,
+        superseded_at=datetime(2026, 10, 5, tzinfo=UTC),
+        superseded_by_id=row_id,
+        change_note="Wrong amount.",
+    )
+
+
 def new_deposit_resolution(**fields: Any) -> ledger.DepositResolution:
     _default(fields, "setup_charge", lambda: saved(new_setup_charge()))
     values = {
@@ -228,9 +250,25 @@ def new_import_audit(**fields: Any) -> ledger.ImportAudit:
 
 
 def new_document(**fields: Any) -> ledger.Document:
-    _default(fields, "operator", lambda: saved(new_operator()))
-    values = {"kind": "lease agreement", "source": "upload", "file_reference": "uploads/x.pdf"}
+    if "lease" not in fields:
+        _default(fields, "store", lambda: saved(new_store()))
+    document_id = uuid.uuid4()
+    values = {
+        "id": document_id,
+        "kind": "lease_agreement",
+        "source": "upload",
+        "original_filename": "lease.pdf",
+        "content_type": "application/pdf",
+        "size_bytes": 1024,
+        "blob_path": f"documents/store/{uuid.uuid4()}/{document_id}",
+        "sha256": uuid.uuid4().hex * 2,
+    }
     return ledger.Document(**{**values, **fields})
+
+
+def new_lease_document(**fields: Any) -> ledger.Document:
+    _default(fields, "lease", lambda: saved(new_lease()))
+    return new_document(store=None, **fields)
 
 
 def new_outbound_message(**fields: Any) -> ledger.OutboundMessage:
@@ -374,6 +412,10 @@ def declared_constraints(app_label: str) -> set[str]:
 
 def _same_lease(row: Any) -> Any:
     return row.lease
+
+
+def _same_store(row: Any) -> Any:
+    return row.store
 
 
 def _field_unique(
@@ -661,6 +703,17 @@ LEDGER_CASES: list[ConstraintCase] = [
             {"store": lambda row: row.store, "effective_from": date(2026, 1, 1)},
         ),
     ),
+    # store_costs corrections (PLAN-010c D10)
+    ConstraintCase(
+        "store_costs_superseded_complete",
+        lambda: _superseded_store_cost(change_note="Wrong amount."),
+        lambda: _superseded_store_cost(change_note=" "),
+    ),
+    ConstraintCase(
+        "store_costs_not_superseded_by_itself",
+        lambda: _superseded_store_cost(change_note="Wrong amount."),
+        _self_superseded_store_cost,
+    ),
     # deposit_resolutions (PLAN-010b D7)
     ConstraintCase(
         "deposit_resolutions_amount_positive",
@@ -906,6 +959,48 @@ LEDGER_CASES: list[ConstraintCase] = [
             resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
             resolution_note="Not a return.",
         ),
+    ),
+    # documents (PLAN-010c D4)
+    ConstraintCase(
+        "documents_exactly_one_owner",
+        lambda: new_document(store=None, lease=saved(new_lease())),
+        lambda: new_document(store=saved(new_store()), lease=saved(new_lease())),
+    ),
+    ConstraintCase(
+        "documents_size_bytes_positive",
+        lambda: new_document(size_bytes=1),
+        lambda: new_document(size_bytes=0),
+    ),
+    ConstraintCase(
+        "documents_original_filename_not_blank",
+        new_document,
+        lambda: new_document(original_filename="  "),
+    ),
+    ConstraintCase(
+        "documents_deleted_has_note",
+        lambda: new_document(
+            deleted_at=datetime(2026, 10, 5, tzinfo=UTC), delete_note="Uploaded twice."
+        ),
+        lambda: new_document(deleted_at=datetime(2026, 10, 5, tzinfo=UTC), delete_note=" "),
+    ),
+    ConstraintCase(
+        "documents_store_sha256_live_unique",
+        # The same file on another store: allowed.
+        unique_pair(new_document, {"sha256": "a" * 64}, {"sha256": "a" * 64}),
+        unique_pair(new_document, {"sha256": "a" * 64}, {"sha256": "a" * 64, "store": _same_store}),
+    ),
+    ConstraintCase(
+        "documents_lease_sha256_live_unique",
+        unique_pair(new_lease_document, {"sha256": "b" * 64}, {"sha256": "b" * 64}),
+        unique_pair(
+            new_lease_document, {"sha256": "b" * 64}, {"sha256": "b" * 64, "lease": _same_lease}
+        ),
+    ),
+    _field_unique("documents", "blob_path", new_document, "documents/a", "documents/b"),
+    ConstraintCase(
+        "documents_sha256_hex",
+        lambda: new_document(sha256="0123456789abcdef" * 4),
+        lambda: new_document(sha256="0123456789ABCDEF" * 4),
     ),
     # legacy_records
     ConstraintCase(

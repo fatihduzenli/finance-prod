@@ -267,7 +267,10 @@ limiter, breaker, retries, validation and failure budget; see
 at `/operators/` (list, search, detail, create, edit, archive, retry, manual link), with
 each new or edited operator linked to or created as a Stax customer, the boot-time
 environment check, and the reserved `documents` and `outbound_messages` tables; see
-[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). Prompt 10b (PLAN-010b): setup fees, store costs, deposits and the P&L report at
+[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). Prompt 10c (PLAN-010c): documents on stores and leases in private Blob Storage with the
+bank-data check on files (ADR-0008), store-cost corrections, the report timeout; see
+[`docs/qa/PLAN-010c-documents-and-cost-corrections.md`](docs/qa/PLAN-010c-documents-and-cost-corrections.md).
+Prompt 10b (PLAN-010b): setup fees, store costs, deposits and the P&L report at
 `/reports/pnl/`; see [`docs/qa/PLAN-010b-setup-fees-store-costs-pnl.md`](docs/qa/PLAN-010b-setup-fees-store-costs-pnl.md).
 Prompt 10 (PLAN-010): the `jobs` table, the `worker` container app as the single Stax
 caller, the nightly reconciliation (scheduled job queues, worker runs) and

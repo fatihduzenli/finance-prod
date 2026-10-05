@@ -22,6 +22,9 @@
     <ul class="messages" id="pnl-messages">{% for text in query.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}
 
+  {% if too_slow %}
+    <p class="warning" id="pnl-too-slow" role="status">{{ too_slow }}</p>
+  {% else %}
   <p class="muted">{{ query.from_month|date:"Y-m" }} to {{ query.to_month|date:"Y-m" }}, by {{ group_label|lower }}; {{ row_count }} store, operator and month row{{ row_count|pluralize }}{% if cost_only_count %}, {{ cost_only_count }} cost-only{% endif %}. Amounts in US dollars. Billed: rent charges by rent month (waived ones left out), setup fees by due date and insurance by due date. Collected: settled payments by settled date, less their settled refunds, plus withheld deposits by resolution date. Landlord rent and other costs are the store's cost row in effect on the first of the month, counted once per store and month. A margin is "unknown" when a cost is not known. A cost-only row is a month in which the store is held and no lease is active.</p>
 
   <table id="pnl">
@@ -58,4 +61,5 @@
   </table>
 
   <p id="deposits-held"><strong>Deposits held</strong> at {{ query.end|date:"Y-m-d" }}: <span id="deposits-held-amount">{{ deposits_held }}</span>. <span class="muted">Deposits are money held for operators, not revenue: they are in no figure above except the part withheld at the end of a lease.</span></p>
+  {% endif %}
 {% endblock %}

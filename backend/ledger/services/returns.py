@@ -22,6 +22,7 @@ from django.utils import timezone
 
 from ledger.models import AuditLog, Operator, Payment, PaymentStatus, Store
 from ledger.services.payments_ledger import charge_lease
+from ledger.validators import visible_text
 
 ENTITY_PAYMENT = "payment"
 
@@ -86,8 +87,11 @@ def row(payment: Payment) -> ReturnRow:
 def resolve_return(
     payment_id: uuid.UUID, *, note: str, actor: User | None, now: datetime | None = None
 ) -> ResolveOutcome:
-    """Mark one returned payment resolved, with a note. Nothing else changes."""
-    text = (note or "").strip()
+    """Mark one returned payment resolved, with a note. Nothing else changes.
+
+    The note is judged and stored as :func:`~ledger.validators.visible_text`: invisible
+    characters and whitespace alone are no note (PLAN-010c D12)."""
+    text = visible_text(note or "")
     if not text:
         return ResolveOutcome(False, RESOLVE_NOTE_REQUIRED)
     with transaction.atomic():

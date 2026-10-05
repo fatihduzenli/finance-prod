@@ -18,6 +18,9 @@ dependencies = [
     "qrcode==8.2",
     "httpx==0.28.1",
     "openpyxl==3.1.5",
+    "azure-storage-blob==12.31.0",
+    "azure-identity==1.26.0",
+    "pypdf==6.19.0",
 ]
 
 [dependency-groups]

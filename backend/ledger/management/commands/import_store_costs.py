@@ -6,6 +6,10 @@ template's header and sets each filled row's landlord rent through
 "row N: reason" (a reason never repeats a cell's value). Exits 1 when the file is
 refused as a whole or any row was refused; the other rows are applied. ``--dry-run``
 reads and checks everything and writes nothing. Makes no payment-provider call.
+
+After a real run that created or updated a row, the planner statistics of
+``store_costs`` are refreshed (:func:`ledger.services.maintenance.analyze`, PostgreSQL
+only; PLAN-010c D11); not after a dry run, and not when nothing changed.
 """
 
 from __future__ import annotations
@@ -14,7 +18,8 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from ledger.services import store_costs
+from ledger.models import StoreCost
+from ledger.services import maintenance, store_costs
 
 
 class Command(BaseCommand):
@@ -35,6 +40,8 @@ class Command(BaseCommand):
         except store_costs.FileRefused as refused:
             raise CommandError(refused.message, returncode=1) from None
         report = store_costs.import_rows(parsed, dry_run=dry_run, actor=None)
+        if not dry_run and report.created + report.updated > 0:
+            maintenance.analyze(StoreCost)
         prefix = "dry run, nothing written: " if dry_run else ""
         self.stdout.write(prefix + report.counts())
         for number, reason in report.refusals:

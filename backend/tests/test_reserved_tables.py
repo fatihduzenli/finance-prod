@@ -1,8 +1,10 @@
-"""The two reserved tables (docs/qa/PLAN-006-operators.md §6 row 10, D8, §4.4).
+"""The reserved table (docs/qa/PLAN-006-operators.md §6 row 10, D8, §4.4).
 
-``documents`` and ``outbound_messages`` exist, start empty, are covered by the
-card-number guard (application validator everywhere, trigger on PostgreSQL), and have
-no URL and no admin page.
+``outbound_messages`` exists, starts empty, is covered by the card-number guard
+(application validator everywhere, trigger on PostgreSQL), and has no URL and no admin
+page. ``documents`` was reserved with it until PLAN-010c D4 reshaped it for uploads; its
+columns, guards and routes are tested in ``test_documents.py``. The 0004 migration's
+guard list is history and stays as written.
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ from tests.auth_helpers import iter_routes
 
 CARD = "4111 1111 1111 1111"
 TABLES = ("documents", "outbound_messages")
+#: Reserved tables still without a writer.
+RESERVED = ("outbound_messages",)
 GUARDS = importlib.import_module("ledger.migrations.0004_reserved_tables").GUARDED_COLUMNS
 
 requires_postgresql = pytest.mark.skipif(
@@ -34,11 +38,6 @@ def operator() -> Operator:
     row = Operator(display_name="Reserved Test Operator")
     row.save()
     return row
-
-
-def document(**fields: Any) -> Document:
-    values = {"kind": "lease", "source": "upload", "file_reference": "files/lease.pdf"}
-    return Document(operator=operator(), **{**values, **fields})
 
 
 def message(**fields: Any) -> OutboundMessage:
@@ -54,18 +53,9 @@ def test_the_tables_exist_and_are_empty() -> None:
 
 
 def test_columns_are_as_listed() -> None:
-    def columns(model: type[Document] | type[OutboundMessage]) -> set[str]:
+    def columns(model: type[OutboundMessage]) -> set[str]:
         return {str(field.column) for field in model._meta.concrete_fields}
 
-    assert columns(Document) == {
-        "id",
-        "operator_id",
-        "kind",
-        "source",
-        "file_reference",
-        "uploaded_by_id",
-        "created_at",
-    }
     assert columns(OutboundMessage) == {
         "id",
         "operator_id",
@@ -90,8 +80,6 @@ def test_every_text_and_json_column_has_a_trigger() -> None:
 @pytest.mark.parametrize(
     ("factory", "field", "value"),
     [
-        (document, "kind", CARD),
-        (document, "file_reference", f"scan-{CARD}.pdf"),
         (message, "template", CARD),
         (message, "subject", f"card {CARD}"),
         (message, "delivery_status", CARD),
@@ -107,25 +95,23 @@ def test_save_refuses_a_card_number(factory: Any, field: str, value: Any) -> Non
 
 @pytest.mark.django_db
 def test_a_valid_row_saves() -> None:
-    document().save()
     message(document_refs=["00000000-0000-0000-0000-000000000000"]).save()
-    assert Document.objects.count() == OutboundMessage.objects.count() == 1
-
-
-@pytest.mark.django_db
-def test_the_source_is_a_closed_list() -> None:
-    with pytest.raises(IntegrityError), transaction.atomic():
-        Document.objects.bulk_create([document(source="email")])
+    assert OutboundMessage.objects.count() == 1
 
 
 @requires_postgresql
 @pytest.mark.django_db
 @pytest.mark.parametrize(
     ("table", "column"),
-    [(table, column) for table, columns in GUARDS.items() for column in columns],
+    [
+        (table, column)
+        for table, columns in GUARDS.items()
+        if table in RESERVED
+        for column in columns
+    ],
 )
 def test_the_database_trigger_refuses_a_card_number(table: str, column: str) -> None:
-    row: Document | OutboundMessage = document() if table == "documents" else message()
+    row = message()
     row.save()
     is_json = column == "document_refs"
     value = json.dumps([CARD]) if is_json else CARD
@@ -140,9 +126,9 @@ def test_the_database_trigger_refuses_a_card_number(table: str, column: str) -> 
 
 
 def test_no_url_and_no_admin() -> None:
+    # Documents have routes since PLAN-010c, but still no admin page.
     assert Document not in admin.site._registry
     assert OutboundMessage not in admin.site._registry
     for name, raw, _ in iter_routes():
         text = f"{name or ''} {raw}".lower()
-        assert "document" not in text, text
         assert "outbound" not in text and "message" not in text, text

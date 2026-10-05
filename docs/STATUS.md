@@ -620,3 +620,17 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Next: Prompt 10c (document uploads on stores and leases), with the store-cost correction, the
   binding carry-over (statement timeout on reports, ANALYZE after imports) and the deferred
   invisible-note MINOR.
+
+## Update, 2026-10-05, PLAN-010c (documents, cost corrections, report timeout) — QA PASS, not pushed
+
+- Built: document uploads on stores and leases into a private Blob Storage container by managed
+  identity (no keys, no public access, streamed through the app), with the bank-data check on PDF
+  and DOCX text including form fields, annotations and properties; store-cost **Correct** and
+  **Close** (admin, history kept); the P&L statement timeout and post-import ANALYZE (the owner's
+  deadline before Prompt 13 is met); invisible-character notes. QA report
+  `docs/qa/QA-010c-documents-and-cost-corrections.md`: PASS, 3,704 tests on PostgreSQL; three
+  MAJOR findings resolved (two found by the QA adversarial tests).
+- Rollout: "push" (the app boots with the feature off: "Document storage is not configured"),
+  then "deploy" (Bicep: storage account, container, role assignment, web env). What-if run:
+  only those changes.
+- Owner's test files are made locally, not committed: see RUNBOOK §12 and the session message.

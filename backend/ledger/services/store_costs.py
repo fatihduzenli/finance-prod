@@ -24,6 +24,16 @@ Rules kept here, not in the views or the command:
   writes nothing, and the other rows are applied. Every cell of every row goes through
   the card-number guard. ``dry_run`` reads the open cost rows and writes nothing.
 
+- **Corrections** (PLAN-010c D10, admin, a note required): :func:`correct_cost` writes
+  a new row with the corrected values and dates and marks the old one superseded, in
+  one transaction under the store's row lock; :func:`close_cost` ends the open row on a
+  date. Only *live* rows (``superseded_at`` null) count anywhere: the open row, the
+  overlap rule, :func:`current_cost`, :func:`margin`, the importer's comparison and the
+  P&L. :func:`history` lists every row, live ones first. A result that would overlap
+  another live row, or end before it starts, is refused with a sentence. Months after a
+  closed row have no cost row and read "unknown"; a row with landlord rent 0.00 is a
+  known zero.
+
 Every write is audited: ``audit_log`` (entity ``store_cost``) for every change, plus one
 ``import_audit`` row (``target_table="store_costs"``) per row the importer applied.
 Money is ``Decimal`` throughout. ``openpyxl`` is imported here only, and only when an
@@ -47,9 +57,12 @@ from pathlib import Path
 from typing import Any
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import QuerySet
+from django.utils import timezone
 
+from accounts.roles import Role, meets, role_of
 from ledger.models import (
     NAME_MAX_LENGTH,
     AuditLog,
@@ -75,6 +88,10 @@ TOO_LARGE = "The amount is too large."
 DESCRIPTION_TOO_LONG = f"The description may have at most {NAME_MAX_LENGTH} characters."
 EARLIER_THAN_OPEN = (
     "The effective date is before {start}, when the current landlord rent started. "
+    "Nothing was saved."
+)
+AFTER_CLOSED = (
+    "The effective date must be after {end}, when the last landlord rent row ends. "
     "Nothing was saved."
 )
 SAVED_NEW = "Landlord rent saved from {start}."
@@ -131,15 +148,27 @@ class CostValues:
 # --- Reads ----------------------------------------------------------------------------
 
 
+def live_costs(store: Store) -> QuerySet[StoreCost]:
+    """The store's cost rows that count: none superseded (D10)."""
+    return StoreCost.objects.filter(store=store, superseded_at__isnull=True)
+
+
 def open_cost(store: Store) -> StoreCost | None:
-    """The store's latest cost row, the one with no end (one at most, by constraint)."""
-    return StoreCost.objects.filter(store=store, effective_to__isnull=True).first()
+    """The store's live row with no end (one at most, by constraint)."""
+    return live_costs(store).filter(effective_to__isnull=True).first()
+
+
+def latest_cost(store: Store) -> StoreCost | None:
+    """The store's live row that starts last: the open row when there is one (live rows
+    never overlap), else the row that ends last."""
+    return live_costs(store).order_by("-effective_from").first()
 
 
 def current_cost(store: Store, on: date) -> StoreCost | None:
-    """The cost row in effect on ``on``, or ``None``: the cost is unknown that day."""
+    """The live cost row in effect on ``on``, or ``None``: the cost is unknown that day."""
     return (
-        StoreCost.objects.filter(store=store, effective_from__lte=on)
+        live_costs(store)
+        .filter(effective_from__lte=on)
         .exclude(effective_to__lt=on)
         .order_by("-effective_from")
         .first()
@@ -147,7 +176,46 @@ def current_cost(store: Store, on: date) -> StoreCost | None:
 
 
 def history(store: Store) -> list[StoreCost]:
-    return list(StoreCost.objects.filter(store=store).order_by("-effective_from"))
+    """Every cost row of the store: the live ones first, then the superseded ones, each
+    part latest first."""
+    rows = StoreCost.objects.filter(store=store).order_by("-effective_from", "-created_at")
+    return sorted(rows, key=lambda row: row.superseded_at is not None)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryEntry:
+    """One row of the store page's cost history, with who superseded or closed it."""
+
+    row: StoreCost
+    #: The username of the admin whose correction superseded the row, or "".
+    superseded_by_user: str = ""
+    #: The username of the admin who closed the row, or "".
+    closed_by_user: str = ""
+
+
+def history_entries(store: Store) -> list[HistoryEntry]:
+    """:func:`history` with the admin of each correction and close, read from the audit
+    log (2 queries)."""
+    rows = history(store)
+    actors: dict[tuple[str, str], str] = {}
+    for action, entity_id, username in (
+        AuditLog.objects.filter(
+            entity_type=ENTITY_STORE_COST,
+            action__in=(ACTION_AUDIT_SUPERSEDED, ACTION_AUDIT_CLOSED_BY_ADMIN),
+            entity_id__in=[str(row.pk) for row in rows],
+        )
+        .order_by("at")
+        .values_list("action", "entity_id", "actor__username")
+    ):
+        actors[(action, entity_id)] = username or ""
+    return [
+        HistoryEntry(
+            row=row,
+            superseded_by_user=actors.get((ACTION_AUDIT_SUPERSEDED, str(row.pk)), ""),
+            closed_by_user=actors.get((ACTION_AUDIT_CLOSED_BY_ADMIN, str(row.pk)), ""),
+        )
+        for row in rows
+    ]
 
 
 def active_lease(store: Store, on: date) -> Lease | None:
@@ -221,11 +289,25 @@ def values_refusal(values: CostValues) -> CostOutcome | None:
     )
 
 
-def decide(open_row: StoreCost | None, values: CostValues, effective_from: date) -> CostOutcome:
-    """What :func:`set_cost` would do against ``open_row``; reads and writes nothing.
+def decide(latest: StoreCost | None, values: CostValues, effective_from: date) -> CostOutcome:
+    """What :func:`set_cost` would do against the store's latest live row
+    (:func:`latest_cost`); reads and writes nothing.
 
-    The result carries no row; the dry run of the importer reports it as it is.
+    With no open row (none at all, or the latest was closed) a new open row is created,
+    and it must start after the latest row ends, so live rows never overlap. With an open
+    row: unchanged, updated in place, refused, or a new row that closes it. The result
+    carries no row; the dry run of the importer reports it as it is.
     """
+    if latest is not None and latest.effective_to is not None:
+        if effective_from <= latest.effective_to:
+            return CostOutcome(
+                False,
+                ACTION_REFUSED,
+                AFTER_CLOSED.format(end=latest.effective_to.isoformat()),
+                "effective_from",
+            )
+        return CostOutcome(True, ACTION_CREATED, SAVED_NEW.format(start=effective_from))
+    open_row = latest
     if open_row is None:
         return CostOutcome(True, ACTION_CREATED, SAVED_NEW.format(start=effective_from))
     if values.same_as(open_row):
@@ -268,10 +350,11 @@ def set_cost(
     try:
         with transaction.atomic():
             locked = Store.objects.select_for_update().get(pk=store.pk)
-            open_row = open_cost(locked)
-            outcome = decide(open_row, values, effective_from)
+            latest = latest_cost(locked)
+            outcome = decide(latest, values, effective_from)
             if not outcome.ok or outcome.action == ACTION_UNCHANGED:
                 return outcome
+            open_row = latest if latest is not None and latest.effective_to is None else None
             before = _state(open_row) if open_row is not None else None
             closed: StoreCost | None = None
             if outcome.action == ACTION_UPDATED and open_row is not None:
@@ -325,6 +408,9 @@ def _state(row: StoreCost) -> dict[str, Any]:
         "effective_to": row.effective_to.isoformat() if row.effective_to else None,
         "source": row.source,
         "notes": row.notes,
+        "superseded_at": row.superseded_at.isoformat() if row.superseded_at else None,
+        "superseded_by": str(row.superseded_by_id) if row.superseded_by_id else None,
+        "change_note": row.change_note,
     }
 
 
@@ -343,6 +429,169 @@ def _audit(
         before=before,
         after=after,
     )
+
+
+# --- Corrections and closing (PLAN-010c D10) ------------------------------------------
+
+CHANGE_NOTE_MAX_LENGTH = 2000
+CHANGE_NOTE_REQUIRED = "A note is required: say why the row is changed."
+CLOSE_NOTE_REQUIRED = "A note is required: say why the row is closed."
+CHANGE_NOTE_TOO_LONG = f"The note may have at most {CHANGE_NOTE_MAX_LENGTH} characters."
+END_BEFORE_START = "The end date cannot be before the start date. Nothing was saved."
+ROW_NOT_FOUND = "This cost row is not one of this store's. Nothing was saved."
+ALREADY_SUPERSEDED = "This cost row was already corrected. Nothing was saved."
+OVERLAPS = (
+    "The corrected dates overlap the row from {start} to {end}. "
+    "Correct or close that row first. Nothing was saved."
+)
+NO_OPEN_ROW = "The store has no open landlord rent row to close. Nothing was saved."
+CLOSE_BEFORE_START = (
+    "The end date is before {start}, when this landlord rent started. Nothing was saved."
+)
+CORRECTED = "Cost row corrected; the old row is kept in the history, struck through."
+CLOSED = "Landlord rent closed on {end}. Later months have no cost row and read unknown."
+
+ACTION_AUDIT_SUPERSEDED = "store_cost.superseded"
+ACTION_AUDIT_CORRECTION = "store_cost.correction_created"
+ACTION_AUDIT_CLOSED_BY_ADMIN = "store_cost.closed_by_admin"
+
+
+def _require_admin(actor: User | None) -> None:
+    if actor is None or not meets(role_of(actor), Role.ADMIN):
+        raise PermissionDenied
+
+
+def _note_refusal(note: str, required: str) -> CostOutcome | None:
+    if not note:
+        return CostOutcome(False, ACTION_REFUSED, required, "change_note")
+    if len(note) > CHANGE_NOTE_MAX_LENGTH:
+        return CostOutcome(False, ACTION_REFUSED, CHANGE_NOTE_TOO_LONG, "change_note")
+    return _text_refusal(note, "change_note")
+
+
+def _overlapping(
+    store: Store, start: date, end: date | None, exclude: StoreCost
+) -> StoreCost | None:
+    """A live row of ``store`` other than ``exclude`` in effect on any day from
+    ``start`` to ``end`` (open when ``None``), or ``None``."""
+    rows = live_costs(store).exclude(pk=exclude.pk).exclude(effective_to__lt=start)
+    if end is not None:
+        rows = rows.filter(effective_from__lte=end)
+    return rows.order_by("effective_from").first()
+
+
+def correct_cost(
+    store: Store,
+    row: StoreCost,
+    values: CostValues,
+    effective_from: date,
+    effective_to: date | None,
+    note: str,
+    actor: User | None,
+) -> CostOutcome:
+    """Correct one live cost row of ``store`` (admin, D10): a new row with ``values``
+    and the dates, and the old row superseded by it with ``note``, in one transaction
+    under the store's row lock. Refused, with nothing written, when the note is empty,
+    the values break a rule, the end precedes the start, the row is not a live row of
+    the store, or the new dates overlap another live row."""
+    _require_admin(actor)
+    text = visible_text(note or "")
+    values = CostValues(
+        landlord_rent=values.landlord_rent,
+        other_monthly_cost=values.other_monthly_cost,
+        other_cost_description=visible_text(values.other_cost_description or ""),
+        landlord_lease_end=values.landlord_lease_end,
+        notes=visible_text(values.notes or ""),
+    )
+    refused = _note_refusal(text, CHANGE_NOTE_REQUIRED) or values_refusal(values)
+    if refused is not None:
+        return refused
+    if effective_to is not None and effective_to < effective_from:
+        return CostOutcome(False, ACTION_REFUSED, END_BEFORE_START, "effective_to")
+    try:
+        with transaction.atomic():
+            locked = Store.objects.select_for_update().get(pk=store.pk)
+            old = StoreCost.objects.filter(store=locked, pk=row.pk).first()
+            if old is None:
+                return CostOutcome(False, ACTION_REFUSED, ROW_NOT_FOUND)
+            if old.superseded_at is not None:
+                return CostOutcome(False, ACTION_REFUSED, ALREADY_SUPERSEDED)
+            if (
+                values.same_as(old)
+                and old.effective_from == effective_from
+                and old.effective_to == effective_to
+            ):
+                return CostOutcome(True, ACTION_UNCHANGED, UNCHANGED)
+            other = _overlapping(locked, effective_from, effective_to, exclude=old)
+            if other is not None:
+                return CostOutcome(
+                    False,
+                    ACTION_REFUSED,
+                    OVERLAPS.format(
+                        start=other.effective_from.isoformat(),
+                        end=other.effective_to.isoformat() if other.effective_to else "open",
+                    ),
+                    "effective_from",
+                )
+            before = _state(old)
+            new = StoreCost(
+                store=locked,
+                effective_from=effective_from,
+                effective_to=effective_to,
+                change_note=text,
+            )
+            _assign(new, values, StoreCostSource.STAFF)
+            # The old row leaves the live set first, so the new one may take its start
+            # date or be the open row; it names the new row, inserted next in the same
+            # transaction (the foreign key is checked at commit).
+            old.superseded_at = timezone.now()
+            old.superseded_by_id = new.pk
+            old.change_note = text
+            old.save(update_fields=["superseded_at", "superseded_by", "change_note", "updated_at"])
+            new.save(force_insert=True)
+            _audit(actor, ACTION_AUDIT_SUPERSEDED, old, before, _state(old))
+            _audit(actor, ACTION_AUDIT_CORRECTION, new, None, _state(new))
+            return CostOutcome(True, ACTION_CREATED, CORRECTED, cost=new)
+    except ValidationError:
+        return CostOutcome(False, ACTION_REFUSED, PAYMENT_DATA_MESSAGE)
+    except IntegrityError:
+        # Not reachable under the store lock; kept so a constraint never becomes a 500.
+        return CostOutcome(
+            False, ACTION_REFUSED, "The cost row could not be corrected. Nothing was saved."
+        )
+
+
+def close_cost(store: Store, effective_to: date, note: str, actor: User | None) -> CostOutcome:
+    """End the store's open cost row on ``effective_to`` (admin, D10), with ``note``.
+    Later days have no cost row: the cost is unknown there, never zero."""
+    _require_admin(actor)
+    text = visible_text(note or "")
+    refused = _note_refusal(text, CLOSE_NOTE_REQUIRED)
+    if refused is not None:
+        return refused
+    try:
+        with transaction.atomic():
+            locked = Store.objects.select_for_update().get(pk=store.pk)
+            row = open_cost(locked)
+            if row is None:
+                return CostOutcome(False, ACTION_REFUSED, NO_OPEN_ROW)
+            if effective_to < row.effective_from:
+                return CostOutcome(
+                    False,
+                    ACTION_REFUSED,
+                    CLOSE_BEFORE_START.format(start=row.effective_from.isoformat()),
+                    "effective_to",
+                )
+            before = _state(row)
+            row.effective_to = effective_to
+            row.change_note = text
+            row.save(update_fields=["effective_to", "change_note", "updated_at"])
+            _audit(actor, ACTION_AUDIT_CLOSED_BY_ADMIN, row, before, _state(row))
+            return CostOutcome(
+                True, ACTION_UPDATED, CLOSED.format(end=effective_to.isoformat()), cost=row
+            )
+    except ValidationError:
+        return CostOutcome(False, ACTION_REFUSED, PAYMENT_DATA_MESSAGE)
 
 
 # --- Import: reading the file (D10) ---------------------------------------------------
@@ -786,7 +1035,7 @@ def _apply(
     if effective_from is None:
         return CostOutcome(False, ACTION_REFUSED, ROW_NO_OPEN_DATE.format(number=number))
     if dry_run:
-        return decide(open_cost(store), values, effective_from)
+        return decide(latest_cost(store), values, effective_from)
     with transaction.atomic():
         outcome = set_cost(
             store,

@@ -1,0 +1,65 @@
+{% comment %}
+Documents of a store or a lease (docs/qa/PLAN-010c D7), included by both detail pages.
+Context from ledger.views.documents.section_context. The upload is a plain multipart form
+post; ledger/document_drop.js only moves a dropped file into the file input.
+{% endcomment %}
+<section id="documents">
+  <h2>Documents</h2>
+  {% if not documents_feature_on %}
+    <p class="muted" id="documents-off">Document storage is not configured.</p>
+  {% elif documents_can_upload %}
+    <form method="post" enctype="multipart/form-data" action="{{ documents_upload_url }}" id="document-upload" class="js-single-submit">
+      {% csrf_token %}
+      {% include "ledger/documents/_notice.html" %}
+      <div class="js-document-drop" style="border:1px dashed #999;border-radius:4px;padding:.25rem .75rem .75rem;">
+        <label for="{{ documents_form.file.id_for_label }}">File (PDF, Word .docx, JPEG, PNG or HEIC; at most 25 MB)</label>
+        {{ documents_form.file }}
+        <p class="muted js-document-drop-hint" hidden>Or drop one file here.</p>
+      </div>
+      <label for="{{ documents_form.kind.id_for_label }}">Kind</label>
+      {{ documents_form.kind }}
+      <label for="{{ documents_form.note.id_for_label }}">Note</label>
+      {{ documents_form.note }}
+      <p class="actions"><button class="btn btn-primary" type="submit" id="upload-document">Upload</button></p>
+    </form>
+  {% endif %}
+
+  {% if documents_preview %}
+    <div id="document-preview">
+      <p>Preview of {{ documents_preview.original_filename }} · <a href="{{ documents_owner_url }}#documents">Close preview</a></p>
+      <iframe src="{% url 'ledger:documents:preview' pk=documents_preview.pk %}" title="Preview of {{ documents_preview.original_filename }}" style="width:100%;height:40rem;border:1px solid #ddd;"></iframe>
+    </div>
+  {% endif %}
+
+  <table id="documents-list">
+    <thead><tr><th>Kind</th><th>File</th><th>Size</th><th>Uploaded by</th><th>Date</th><th>Note</th><th></th></tr></thead>
+    <tbody>
+      {% for item in documents %}{% with document=item.row %}
+        <tr id="document-{{ document.pk }}"{% if document.deleted_at %} class="document-deleted"{% endif %}>
+          <td>{{ document.get_kind_display }}</td>
+          <td>{% if document.deleted_at %}<s>{{ document.original_filename }}</s>{% else %}{{ document.original_filename }}{% endif %}</td>
+          <td>{{ document.size_bytes|filesizeformat }}</td>
+          <td>{{ document.uploaded_by.get_username|default:"—" }}</td>
+          <td>{{ document.uploaded_at|date:"Y-m-d" }}</td>
+          <td style="white-space:pre-wrap;">{{ document.note }}{% if document.deleted_at %}{% if document.note %}<br>{% endif %}<span class="badge">Deleted</span> {{ document.deleted_at|date:"Y-m-d" }} by {{ document.deleted_by.get_username|default:"—" }}: {{ document.delete_note }}{% endif %}</td>
+          <td>
+            <div class="actions" style="margin:0;">
+              {% if item.can_preview and not document.deleted_at %}<a class="btn document-preview" href="{{ documents_owner_url }}?preview={{ document.pk }}#documents">Preview</a>{% endif %}
+              <a class="btn document-download" href="{% url 'ledger:documents:download' pk=document.pk %}">Download</a>
+              {% if documents_can_delete and not document.deleted_at %}
+                <form method="post" action="{% url 'ledger:documents:delete' pk=document.pk %}" class="js-single-submit document-delete">
+                  {% csrf_token %}
+                  <label for="delete-note-{{ document.pk }}" style="margin:0;font-weight:normal;">Why delete?</label>
+                  <input type="text" name="note" id="delete-note-{{ document.pk }}" maxlength="2000" required>
+                  <button class="btn btn-danger" type="submit">Delete</button>
+                </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+      {% endwith %}{% empty %}
+        <tr><td colspan="7" class="muted">No documents.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

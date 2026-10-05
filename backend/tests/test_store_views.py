@@ -328,12 +328,15 @@ def test_the_detail_shows_the_leases_of_the_store(admin: Client) -> None:
 
 def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     names = {name for name, _, _ in iter_routes() if name and name.startswith("ledger:stores:")}
-    # PLAN-010b D8, D12: setting the landlord rent needs billing.
+    # PLAN-010b D8, D12: setting the landlord rent needs billing. PLAN-010c D10:
+    # correcting a cost row and closing the open one need admin.
+    corrections = ("correct_cost", "close_cost")
     assert names == {
-        f"ledger:stores:{short}" for short in ("list", "detail", "set_cost", *POST_ROUTES)
+        f"ledger:stores:{short}"
+        for short in ("list", "detail", "set_cost", *POST_ROUTES, *corrections)
     }
     assert {"ledger:stores:list", "ledger:stores:detail"} <= registry.READ_ONLY_ROUTE_NAMES
-    for short in POST_ROUTES:
+    for short in (*POST_ROUTES, *corrections):
         rule = registry.rule_for(f"ledger:stores:{short}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
     rule = registry.rule_for("ledger:stores:set_cost")

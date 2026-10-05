@@ -1,13 +1,14 @@
 """Ledger routes (PLAN-006-operators.md §4.1, PLAN-007-leases-and-rent-run.md §4.1,
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
-D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11).
+D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11, PLAN-010c
+D7, D10).
 
 Namespace ``ledger``.
 
 Every unsafe route here has a rule in ``accounts.registry``; the read-only ones are
 listed there too, so ``backend/tests/test_route_registry.py`` sees them classified.
-There is no delete route: archiving is the only way to retire an operator, and a store
-is closed through its status.
+There is no delete route for a record: archiving is the only way to retire an operator,
+and a store is closed through its status. A document's delete is soft (PLAN-010c D7).
 
 ``pk`` is matched as text, as the admin matches its object IDs, so every operator path
 resolves to its route and the role registry decides on an unsafe request before the
@@ -21,6 +22,7 @@ from django.urls import include, path
 from ledger.views import (
     charges,
     deposits,
+    documents,
     leases,
     operators,
     payments,
@@ -55,6 +57,8 @@ store_patterns = (
         path("<str:pk>/", stores.store_detail, name="detail"),
         path("<str:pk>/edit/", stores.store_edit, name="edit"),
         path("<str:pk>/cost/", stores.store_set_cost, name="set_cost"),
+        path("<str:pk>/cost/close/", stores.store_close_cost, name="close_cost"),
+        path("<str:pk>/costs/<str:row>/correct/", stores.store_correct_cost, name="correct_cost"),
     ],
     "stores",
 )
@@ -163,6 +167,17 @@ report_patterns = (
     "reports",
 )
 
+document_patterns = (
+    [
+        path("stores/<str:pk>/upload/", documents.upload_store, name="upload_store"),
+        path("leases/<str:pk>/upload/", documents.upload_lease, name="upload_lease"),
+        path("<str:pk>/download/", documents.download, name="download"),
+        path("<str:pk>/preview/", documents.preview, name="preview"),
+        path("<str:pk>/delete/", documents.delete, name="delete"),
+    ],
+    "documents",
+)
+
 urlpatterns = [
     path("operators/", include(operator_patterns)),
     path("stores/", include(store_patterns)),
@@ -175,4 +190,5 @@ urlpatterns = [
     path("returns/", include(return_patterns)),
     path("reconciliation/", include(reconciliation_patterns)),
     path("reports/", include(report_patterns)),
+    path("documents/", include(document_patterns)),
 ]

@@ -490,8 +490,12 @@ def test_no_delete_route_exists() -> None:
     for name in ("delete", "remove", "destroy"):
         with pytest.raises(NoReverseMatch):
             reverse(f"ledger:operators:{name}", kwargs={"pk": uuid.uuid4()})
+    # The one exception is a document's soft delete (PLAN-010c D7): it hides a file and
+    # never removes a row.
     assert not any(
-        "delete" in raw for name, raw, _ in iter_routes() if (name or "").startswith("ledger:")
+        "delete" in raw
+        for name, raw, _ in iter_routes()
+        if (name or "").startswith("ledger:") and name != "ledger:documents:delete"
     )
 
 

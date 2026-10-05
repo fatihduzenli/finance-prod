@@ -14,7 +14,7 @@ Routes still to come: settings get ``Role.ADMIN``; invoices and send get
 ``Role.BILLING``. Operators (PLAN-006), leases, the rent run and rent charges
 (PLAN-007), stores (PLAN-007b), webhook events and the returns queue (PLAN-008), and the
 payments ledger, its export, the payment page, the marking retry, refund and void
-(PLAN-009) are classified below.
+(PLAN-009), and documents and store-cost corrections (PLAN-010c) are classified below.
 """
 
 from __future__ import annotations
@@ -136,6 +136,14 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # Setting a store's landlord rent (PLAN-010b D8, D12): billing. The view refuses the
     # form's GET below billing too.
     "ledger:stores:set_cost": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Correcting a store cost row and closing the open one (PLAN-010c D10): admin. The
+    # correction view refuses its form's GET below admin too.
+    "ledger:stores:correct_cost": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:stores:close_cost": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Documents (PLAN-010c D7): uploading needs billing; the soft delete needs admin.
+    "ledger:documents:upload_store": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:documents:upload_lease": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:documents:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every
@@ -205,6 +213,10 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # D11, D12).
         "ledger:reports:pnl",
         "ledger:reports:pnl_export",
+        # Document download and preview, streamed through the app: any verified role
+        # (PLAN-010c D7).
+        "ledger:documents:download",
+        "ledger:documents:preview",
     }
 )
 

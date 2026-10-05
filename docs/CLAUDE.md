@@ -79,6 +79,14 @@ internal tool into a compliance liability.
   `card_exp` (month/year), and `nickname`. Drop everything else before persisting.
 - Test fixtures use Stax's published sandbox test cards only, and only inside
   documented sandbox test flows. Never in a unit test that runs against our DB.
+- **Uploaded files (ADR-0008, PLAN-010c).** Documents on stores and leases live in a
+  private blob container and are subject to this rule like every text field: the text of
+  each PDF and DOCX is extracted at upload and run through the same detectors; a hit
+  refuses the file and stores nothing; a PDF that cannot be read is refused. Images and
+  scanned PDFs cannot be checked, so the rule for them is policy, shown on every upload
+  box: **no bank forms, ACH authorisations, voided cheques or card details; those stay in
+  Stax or DocuSign.** Do not add OCR to "close" this gap; it would bring the data in.
+  A file found to break the rule is deleted by an admin and the deletion is recorded.
 
 ### Rule 2 — Stax is the source of truth for payment state
 

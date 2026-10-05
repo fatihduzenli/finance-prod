@@ -1,10 +1,12 @@
 """Store screens: list, detail, create, edit (docs/qa/PLAN-007b-stores.md §1), and the
-landlord rent ("Set landlord rent", docs/qa/PLAN-010b D8).
+landlord rent ("Set landlord rent", docs/qa/PLAN-010b D8), and the corrections of the
+cost rows ("Correct" and "Close", docs/qa/PLAN-010c D10).
 
 Access: every view requires a signed-in, second-factor-verified user with a role
 (middleware plus :func:`~ledger.views.operators.role_required`). The list and the detail
 are open to any role; create and edit, GET and POST, need ``admin``; setting the
-landlord rent, GET and POST, needs ``billing``. Every POST is checked again by
+landlord rent, GET and POST, needs ``billing``; correcting a cost row (GET and POST) and
+closing the open one (POST) need ``admin``. Every POST is checked again by
 ``accounts.registry``. There is no delete route.
 
 Every change goes through :mod:`ledger.services.stores` or
@@ -25,15 +27,23 @@ from django.db.models import Q
 from django.db.models.functions import Lower
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_http_methods, require_safe
+from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
-from ledger.forms import StoreCostForm, StoreCreateForm, StoreForm
-from ledger.models import Store, StoreCostSource
+from ledger.forms import (
+    StoreCostCloseForm,
+    StoreCostCorrectForm,
+    StoreCostForm,
+    StoreCreateForm,
+    StoreForm,
+)
+from ledger.models import DocumentKind, Store, StoreCost, StoreCostSource
 from ledger.services import store_costs
 from ledger.services import stores as service
+from ledger.views import documents
 from ledger.views.leases import _admin_only
 from ledger.views.operators import (
     CONTROL_CHARACTERS,
@@ -94,7 +104,11 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "cost": store_costs.current_cost(store, today),
             "operator_rent": store_costs.operator_rent(store, today),
             "margin": store_costs.margin(store, today),
-            "cost_history": store_costs.history(store),
+            "cost_history": store_costs.history_entries(store),
+            "can_correct_cost": meets(_role(request), Role.ADMIN),
+            "open_cost": store_costs.open_cost(store),
+            "close_form": StoreCostCloseForm(),
+            **documents.section_context(request, store),
         },
     )
 
@@ -122,6 +136,7 @@ def store_create(request: HttpRequest) -> HttpResponse:
             )
             if created:
                 messages.success(request, "Store saved.")
+                documents.upload_after_create(request, store, "store")
             else:
                 messages.info(request, ALREADY_SAVED)
             return redirect("ledger:stores:detail", pk=store.pk)
@@ -130,7 +145,11 @@ def store_create(request: HttpRequest) -> HttpResponse:
     form = _held(request, "store-create", StoreCreateForm) or StoreCreateForm(
         initial={"creation_key": uuid.uuid4()}
     )
-    return render(request, "ledger/stores/form.html", {"form": form, "store": None})
+    return render(
+        request,
+        "ledger/stores/form.html",
+        {"form": form, "store": None, "document_form": documents.create_form(DocumentKind.OTHER)},
+    )
 
 
 @role_required
@@ -201,3 +220,96 @@ def store_set_cost(request: HttpRequest, pk: str) -> HttpResponse:
     return render(
         request, "ledger/stores/cost_form.html", {"form": form, "store": store, "current": current}
     )
+
+
+COSTS_ANCHOR = "#store-costs"
+
+
+def _cost_row(store: Store, row: str) -> StoreCost:
+    """A cost row of ``store`` named in the URL; 404 otherwise."""
+    try:
+        key = uuid.UUID(row)
+    except ValueError:
+        raise Http404 from None
+    return get_object_or_404(StoreCost, pk=key, store=store)
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def store_correct_cost(request: HttpRequest, pk: str, row: str) -> HttpResponse:
+    """``ledger:stores:correct_cost``: correct one live cost row (admin, D10)."""
+    refused = _admin_only(request)
+    if refused is not None:
+        return refused
+    store = _load(pk)
+    cost = _cost_row(store, row)
+    target = f"store-correct-cost:{cost.pk}"
+    if request.method == "POST":
+        form = StoreCostCorrectForm(request.POST)
+        if form.is_valid():
+            data = form.cleaned_data
+            outcome = store_costs.correct_cost(
+                store,
+                cost,
+                store_costs.CostValues(
+                    landlord_rent=data["landlord_rent"],
+                    other_monthly_cost=data.get("other_monthly_cost"),
+                    other_cost_description=data.get("other_cost_description") or "",
+                    landlord_lease_end=data.get("landlord_lease_end"),
+                    notes=data.get("notes") or "",
+                ),
+                data["effective_from"],
+                data.get("effective_to"),
+                data["change_note"],
+                _actor(request),
+            )
+            if outcome.ok:
+                if outcome.action == store_costs.ACTION_UNCHANGED:
+                    messages.info(request, outcome.message)
+                else:
+                    messages.success(request, outcome.message)
+                return redirect(
+                    reverse("ledger:stores:detail", kwargs={"pk": store.pk}) + COSTS_ANCHOR
+                )
+            form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
+        _hold(request, target, form)
+        return redirect("ledger:stores:correct_cost", pk=store.pk, row=cost.pk)
+    form = _held(request, target, StoreCostCorrectForm) or StoreCostCorrectForm(
+        initial={
+            "landlord_rent": cost.landlord_rent,
+            "effective_from": cost.effective_from,
+            "effective_to": cost.effective_to,
+            "other_monthly_cost": cost.other_monthly_cost,
+            "other_cost_description": cost.other_cost_description,
+            "landlord_lease_end": cost.landlord_lease_end,
+            "notes": cost.notes,
+        }
+    )
+    return render(
+        request, "ledger/stores/cost_correct.html", {"form": form, "store": store, "cost": cost}
+    )
+
+
+@role_required
+@require_POST
+def store_close_cost(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:stores:close_cost``: end the open cost row on a date (admin, D10)."""
+    refused = _admin_only(request)
+    if refused is not None:
+        return refused
+    store = _load(pk)
+    destination = reverse("ledger:stores:detail", kwargs={"pk": store.pk}) + COSTS_ANCHOR
+    form = StoreCostCloseForm(request.POST)
+    if not form.is_valid():
+        for errors in form.errors.values():
+            for error in errors:
+                messages.error(request, str(error))
+        return redirect(destination)
+    outcome = store_costs.close_cost(
+        store, form.cleaned_data["effective_to"], form.cleaned_data["change_note"], _actor(request)
+    )
+    if outcome.ok:
+        messages.success(request, outcome.message)
+    else:
+        messages.error(request, outcome.message)
+    return redirect(destination)

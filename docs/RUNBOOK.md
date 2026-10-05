@@ -243,3 +243,75 @@ margin on a billed and on a collected basis. "unknown" means an input is missing
 row, a null fee cost or premium cost); the row says which. A highlighted row is a month in which
 the store costs money with no operator. **Export CSV** gives the same figures; an unknown amount
 is an empty cell with a `*_known` column beside it.
+
+### 11.1 Correcting or closing a store cost row (admin, PLAN-010c)
+
+On the store page each live cost row has **Correct** and, for the open row, **Close**.
+*Correct* opens the row's values; change the amount, the other cost, the dates or the landlord
+lease end, give a note, and save: a new row replaces the old one, which stays in the history
+struck through with who, when and why. Nothing is overwritten. A correction that would overlap
+another live row is refused. *Close* sets an end date on the open row with a note. Months after a
+closed row read **unknown** in the margin and the P&L; to state "no cost from here", add a row
+with landlord rent 0.00, which is a known zero. After a close, a new row or an import must start
+after the closed row's end.
+
+The P&L now stops a query that runs longer than `REPORT_STATEMENT_TIMEOUT_MS` (15 seconds by
+default) and says "The report took too long. Try a shorter range, or try again in a minute."
+`import_store_costs` refreshes the planner statistics of `store_costs` after a run that changed
+anything; the Step 13 import must call the same helper for every table it loads.
+
+## 12. Documents on stores and leases (PLAN-010c, ADR-0008)
+
+**What it is.** The Documents section on a store or lease page holds lease agreements,
+amendments, floor plans, photos, notices and other files. Billing and admin upload (button or
+drag and drop, one file at a time, with a kind and an optional note); every role can list,
+preview (PDF, PNG, JPEG) and download; an admin deletes with a note. A file can also be attached
+while creating a store or lease; it is saved after the record, and a refused file never undoes
+the record.
+
+**Rules.** pdf, docx, jpg/jpeg, png, heic; at most 25 MB; the type is read from the content and
+must agree with the extension. The same file twice on one record is refused.
+
+**No bank data, ever.** At upload the app reads the text of every PDF and DOCX, including form
+field values, annotations, document properties, headers, footers, footnotes, comments and alt
+text, and refuses the file with the usual sentence if it finds a card number or a routing and
+account pair. Nothing is stored. A PDF that cannot be read (password-protected, damaged) is
+refused, and so is a document with an embedded file, because neither can be checked. **Images and
+scanned PDFs cannot be checked.** The rule for those is on every upload box: *Do not upload bank
+forms, ACH authorisations, voided cheques or card details. Those stay in Stax or DocuSign.* If
+one is uploaded by mistake, an admin deletes it at once (see "Purging" below).
+
+**Where files live.** In the private container `documents` of the environment's storage
+account (staging: the account named in the deployment output `documentsStorageAccountName`).
+No public access, no account keys; the web app reads and writes with its managed identity. A file
+never touches the container's disk or the database. Downloads and previews are streamed through
+the app to a signed-in user; there is no link to share.
+
+**Audit.** `document.uploaded`, `document.upload_refused` (reason code only),
+`document.previewed`, `document.downloaded`, `document.deleted` in the audit log, with who and
+which document.
+
+**Retention and restore.**
+- The database is restored by Azure Database for PostgreSQL point-in-time restore, 7 days.
+- A delete in the app is soft: the row keeps `deleted_at`, the blob stays. Admins still see the row.
+- The storage account keeps deleted and overwritten blobs for 30 days (soft delete, versioning)
+  and a deleted container for 30 days. A database restored to any point in its 7-day window
+  therefore finds every blob its rows name.
+- To bring back a blob deleted in the portal within 30 days (owner, signed in):
+  ```bash
+  az storage blob undelete --account-name <account> --container-name documents \
+    --name "<blob path from the documents row>" --auth-mode login
+  ```
+- The account is locally redundant (three copies in one region). Loss of the region loses the
+  files; geo-redundant storage is the option, at about twice the storage price.
+
+**Purging a file that broke the rule.** Delete it in the app (admin, with a note). The blob
+then still exists for staff with storage access and in soft delete for 30 days. To remove it
+for good, the owner deletes the blob and its versions in the portal and records the date in the
+status log. A model does not do this.
+
+**If uploads fail with "Document storage is not available".** Check, in order: the web app has
+`DOCUMENTS_STORAGE_ACCOUNT_URL`, `DOCUMENTS_CONTAINER` and `AZURE_CLIENT_ID`; the identity has
+the role *Storage Blob Data Contributor* on the container (a new assignment takes a few minutes
+to take effect); the account still has shared-key access off and the container exists. "Document
+storage is not configured" means the first variable is empty: the feature is off.

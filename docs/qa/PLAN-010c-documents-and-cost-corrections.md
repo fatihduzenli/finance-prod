@@ -143,3 +143,18 @@ lease and a floor-plan image on a store appear in their lists, preview and downl
 viewer sees but cannot upload, the PDF with a fake routing-and-account pair is refused, a 30 MB
 file is refused, and the audit log shows the owner's upload and download; a store cost row can be
 corrected and closed by an admin with history kept.
+
+## 9. Amendments during QA (2026-10-05)
+
+- **D6 widened.** The guard text of a PDF also includes every form field's name, value, default
+  and options, every annotation's contents, the document information dictionary and XMP; of a
+  DOCX, the text of every element of every XML part, document properties, alt text, tag and
+  alias values and relationship targets. Pieces other than page or paragraph text are separated
+  by four line breaks so that neighbouring properties do not merge into one digit run. A PDF or
+  DOCX that carries an embedded file is refused (`embedded_object`).
+- **D7 preview headers.** A PDF preview carries `default-src 'none'; frame-ancestors 'self'`
+  without `sandbox` (the browser's PDF viewer does not run in a sandboxed frame); PNG and JPEG
+  previews and every download keep `sandbox`.
+- **D3 request limit.** The 26 MiB request limit applies only to the two upload routes and the
+  store and lease create forms; every other route keeps 2.5 MiB.
+- **D10 addition.** After a closed cost row, a new row or an import must start after its end.

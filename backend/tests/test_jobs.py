@@ -1375,8 +1375,15 @@ def test_the_worker_app_is_one_replica_without_ingress_running_the_worker() -> N
     web = (REPO / "infra/modules/containerAppWeb.bicep").read_text()
     for secret in re.findall(r"name: '([a-z-]+)'\n    keyVaultUrl", web):
         assert f"name: '{secret}'\n    keyVaultUrl" in module
-    for name in re.findall(r"name: '([A-Z_]+)'\n", web):
+    # The document store is the web app's alone (PLAN-010c D1): the worker and the job
+    # never touch a file, so they carry none of its settings.
+    web_only = {"DOCUMENTS_STORAGE_ACCOUNT_URL", "DOCUMENTS_CONTAINER", "AZURE_CLIENT_ID"}
+    names = set(re.findall(r"name: '([A-Z_]+)'\n", web))
+    assert web_only <= names
+    for name in names - web_only:
         assert f"name: '{name}'\n" in module
+    for name in web_only:
+        assert name not in module
 
 
 def test_main_wires_the_worker_with_the_web_image_and_staging_runs_the_web_as_none() -> None:

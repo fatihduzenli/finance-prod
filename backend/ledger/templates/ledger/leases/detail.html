@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load static %}
 {% block title %}Lease {{ lease.store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:leases:list' %}">&larr; Leases</a></p>
@@ -105,5 +106,7 @@
   {% empty %}
     <p class="muted">No notes.</p>
   {% endfor %}
+
+  {% include "ledger/documents/_section.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

@@ -196,7 +196,8 @@ Superseded by `setup_charges` with `legacy=true` (PLAN-010b D13); removed in Ste
 | Field | Owner | Note |
 |---|---|---|
 | `id`, `created_at`, `updated_at` | System | |
-| `store_id`, `landlord_rent`, `other_monthly_cost`, `other_cost_description`, `landlord_lease_end`, `effective_from`, `effective_to`, `notes` | App / Import | Date-effective, one open row per store, no overlap. No row = cost unknown, never 0. `source` says `staff` or `import` |
+| `store_id`, `landlord_rent`, `other_monthly_cost`, `other_cost_description`, `landlord_lease_end`, `effective_from`, `effective_to`, `notes` | App / Import | Date-effective, one open row per store, no overlap among live rows. No row = cost unknown, never 0. `source` says `staff` or `import` |
+| `superseded_at`, `superseded_by_id`, `change_note` | App | A correction (admin) writes a new row and marks the old one superseded; a superseded row counts for nothing and stays as history |
 
 ### invoices
 | Field | Owner | Note |
@@ -252,7 +253,21 @@ Superseded by `setup_charges` with `legacy=true` (PLAN-010b D13); removed in Ste
 | `processed_at`, `outcome`, `error` | System | |
 | `job_name`, `last_success_at`, `cursor` | System | |
 
-### documents, outbound_messages (reserved, no UI)
+### documents
+| Field | Owner | Note |
+|---|---|---|
+| `id`, `uploaded_at` | System | |
+| `store_id` / `lease_id` | App | Exactly one. The record the file belongs to |
+| `kind`, `note` | App | `note` is guarded free text |
+| `original_filename`, `content_type`, `size_bytes`, `sha256` | System | Name sanitised; type read from the content; the digest is an identifier, held to 64 hex characters |
+| `blob_path` | System | Where the bytes live in the private blob container; never a filename; the file itself is **never** in the database |
+| `source` | System | `upload`; `docusign` reserved |
+| `uploaded_by_id`, `deleted_at`, `deleted_by_id`, `delete_note` | System / App | Soft delete by an admin with a note; the blob stays |
+
+Files are subject to Rule 1 (ADR-0008): PDF and DOCX text is checked at upload; images and
+scans are covered by the stated policy, not by a check.
+
+### outbound_messages (reserved, no UI)
 | Field | Owner | Note |
 |---|---|---|
 | all fields | App | Empty until Phase 7 items (a) and (b). A DocuSign envelope ID will live in `external_refs`, not here |
