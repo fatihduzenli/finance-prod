@@ -643,3 +643,17 @@ the login page myself." The condition for starting Prompt 4 is met.
 - The web app carries no document settings yet, so the Documents sections read "Document
   storage is not configured" until the infrastructure deployment (Publish Request 2, "deploy").
   Store-cost Correct and Close, the report timeout and the note rule are live now.
+
+## Update, 2026-10-05, PLAN-010c storage deployed to staging
+
+- Owner typed "deploy". Template deployment `staging-plan-010c` succeeded (3 min 6 s, no failed
+  operations). Verified by metadata only: storage account `stfinancestagingavyxps6f`
+  (Standard_LRS, public blob access off, **shared-key access off**, TLS 1.2, HTTPS only);
+  versioning on; blob and container soft delete 30 days; container `documents` with no public
+  access; one role assignment on the container, Storage Blob Data Contributor to the app's
+  identity. Web revision `finance-staging-web--0000030` Healthy and Running with
+  `DOCUMENTS_STORAGE_ACCOUNT_URL`, `DOCUMENTS_CONTAINER` and `AZURE_CLIENT_ID`; `/healthz` 200;
+  the worker is untouched and running.
+- Not yet proven: a real upload through the managed identity (the owner's first click; a new
+  role assignment can take a few minutes to take effect).
+- Next: the owner's 10c done-when clicks (RUNBOOK §12).
