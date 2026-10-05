@@ -592,3 +592,15 @@ the login page myself." The condition for starting Prompt 4 is met.
   the next Azure read is needed; no model does it.
 - Next: the owner's six done-when clicks (RUNBOOK §11). Binding carry-over for plan 10c or 11:
   statement timeout on the P&L queries and ANALYZE after bulk imports, before Prompt 13.
+
+## Update, 2026-10-05, store-cost import proven on staging
+
+- **Owner, in writing:** signed in to Azure with MFA; stores 1796 and 437 exist; "Run the three
+  imports now and report the counts." Run by Fable inside `finance-staging-web--0000028` against
+  `backend/tests/fixtures/store_costs/two_rows.xlsx`:
+  - dry run: read 2, not filled 0, unchanged 0, created 2, updated 0, refused 0 (nothing written)
+  - real run 1: read 2, not filled 0, unchanged 0, created 2, updated 0, refused 0
+  - real run 2: read 2, not filled 0, unchanged 2, created 0, updated 0, refused 0
+- Done-when item 4 of Prompt 10b is met (import creates the costs; a second run changes
+  nothing). The owner checks the two store pages for the landlord rents. Items 1–3, 5 and 6 are
+  the owner's clicks.
