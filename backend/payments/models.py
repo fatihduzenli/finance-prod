@@ -207,6 +207,13 @@ class JobKind(models.TextChoices):
     WEBHOOK_REPLAY = "webhook_replay", "Replay webhook event"
     #: PLAN-010 Batch B: "Run now" on the reconciliation page.
     RECONCILE_RUN = "reconcile_run", "Run reconciliation"
+    #: PLAN-010b D6: a manual payment on a setup charge whose invoice is to be marked paid.
+    SETUP_PAYMENT_MARK = "setup_payment_mark", "Mark the provider invoice of a setup charge paid"
+    #: PLAN-010b Batch B: "Retry marking" on a setup charge's page.
+    SETUP_PAYMENT_RETRY_MARK = (
+        "setup_payment_retry_mark",
+        "Retry marking the provider invoice of a setup charge",
+    )
 
 
 class JobEntity(models.TextChoices):
@@ -221,6 +228,7 @@ class JobEntity(models.TextChoices):
     WEBHOOK_EVENT = "webhook_event", "Webhook event"
     #: Not a row: the reconciliation, one fixed entity ID (``payments.jobs.RECONCILIATION``).
     RECONCILIATION = "reconciliation", "Reconciliation"
+    SETUP_CHARGE = "setup_charge", "Setup charge"
 
 
 class JobStatus(models.TextChoices):

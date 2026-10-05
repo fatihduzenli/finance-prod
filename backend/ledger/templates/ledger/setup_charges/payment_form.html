@@ -1,0 +1,20 @@
+{% extends "finance/base.html" %}
+{% block title %}Record a payment{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:setup_charges:detail' pk=charge.pk %}">&larr; {{ charge.fee_type.name }}, {{ charge.lease.store.external_label }}</a></p>
+  <h1>Record a payment</h1>
+  <p>Balance due: <strong id="balance">${{ charge.balance }}</strong>. A payment received by Zelle, wire or another way outside the payment provider. The amount may not be more than the balance. When the charge has an invoice at the payment provider and this payment covers the whole price, that invoice is then marked paid there; a partial payment is recorded here only.</p>
+  <form method="post" id="payment-form" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+    {% for field in form.visible_fields %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
+      {{ field.errors }}
+      {{ field }}
+      {% if field.help_text %}<br><span class="muted">{{ field.help_text }}</span>{% endif %}
+    {% endfor %}
+    <p class="actions"><button class="btn btn-primary" type="submit" id="save-payment">Record payment</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

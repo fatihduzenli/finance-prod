@@ -70,6 +70,8 @@ ENTITY_OF_KIND: dict[str, str] = {
     JobKind.RUN_MATCH: JobEntity.RENT_RUN,
     JobKind.WEBHOOK_REPLAY: JobEntity.WEBHOOK_EVENT,
     JobKind.RECONCILE_RUN: JobEntity.RECONCILIATION,
+    JobKind.SETUP_PAYMENT_MARK: JobEntity.SETUP_CHARGE,
+    JobKind.SETUP_PAYMENT_RETRY_MARK: JobEntity.SETUP_CHARGE,
 }
 
 #: ``app_label.ModelName`` of each entity type.
@@ -77,6 +79,7 @@ _ENTITY_OF_MODEL: dict[str, str] = {
     "ledger.Operator": JobEntity.OPERATOR,
     "ledger.Lease": JobEntity.LEASE,
     "ledger.RentCharge": JobEntity.RENT_CHARGE,
+    "ledger.SetupCharge": JobEntity.SETUP_CHARGE,
     "ledger.Payment": JobEntity.PAYMENT,
     "payments.WebhookEvent": JobEntity.WEBHOOK_EVENT,
 }
@@ -125,8 +128,8 @@ def entity_type_of(entity: Entity) -> str:
         return _ENTITY_OF_MODEL[label]
     except KeyError:
         raise ValueError(
-            "Jobs act on operators, leases, rent charges, payments, webhook events, "
-            "the rent run and the reconciliation only"
+            "Jobs act on operators, leases, rent charges, setup charges, payments, "
+            "webhook events, the rent run and the reconciliation only"
         ) from None
 
 

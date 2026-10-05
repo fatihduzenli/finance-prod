@@ -48,6 +48,11 @@ Rules kept here:
   shown with each due debit and on the charge page; a new charge's amount never
   includes them.
 
+The manual payment checks, the provider marking and the invoice link are shared with
+setup charges (PLAN-010b D6) through :class:`ChargeKind`: :data:`RENT` here, ``SETUP``
+in :mod:`ledger.services.setup_charges`. Audit actions are ``<entity>.<reason>``, so a
+rent charge's are unchanged.
+
 Every change writes ``audit_log``; provider identifiers in it are masked. Money is
 ``Decimal`` throughout.
 """
@@ -57,6 +62,7 @@ from __future__ import annotations
 import calendar
 import math
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -86,6 +92,7 @@ from ledger.models import (
     RentChargeStatus,
     ScheduleKind,
     ScheduleState,
+    SetupCharge,
 )
 from ledger.services import numbering
 from ledger.services.leases import (
@@ -172,16 +179,10 @@ MARKED_ACTION = "rent_charge.provider_marked"
 MARK_FAILED_ACTION = "rent_charge.provider_mark_failed"
 NOT_UPDATED_ACTION = "rent_charge.provider_not_updated"
 ALREADY_PAID_ACTION = "payment.provider_already_paid"
-_CHARGE_MARK_ACTIONS = (MARKED_ACTION, MARK_FAILED_ACTION, NOT_UPDATED_ACTION)
 #: Other reasons a charge is flagged; clearing a marking flag keeps the charge flagged
-#: when one of them was ever recorded.
+#: when one of them was ever recorded. Each is ``<charge entity>.<reason>``.
 LINKED_TOTAL_DIFFERS_ACTION = "rent_charge.linked_total_differs"
-_OTHER_FLAG_ACTIONS = (
-    LINKED_TOTAL_DIFFERS_ACTION,
-    "rent_charge.second_invoice",
-    "rent_charge.total_mismatch",
-    "rent_charge.disputed",
-)
+_OTHER_FLAG_REASONS = ("linked_total_differs", "second_invoice", "total_mismatch", "disputed")
 #: Where a marking attempt stopped.
 STAGE_CHECK = "check"
 STAGE_MARK = "mark"
@@ -213,6 +214,47 @@ LINK_DONE_DIFFERS = (
     "Invoice {number} linked to this charge. Its total differs from the balance; the charge "
     "is flagged for review."
 )
+
+
+# --- Kinds of charge ------------------------------------------------------------------
+
+#: A charge the manual payment, marking and link rules below apply to.
+ChargeRow = RentCharge | SetupCharge
+
+
+@dataclass(frozen=True, slots=True)
+class ChargeKind:
+    """What the shared rules need to know of one kind of charge: rent charges here
+    (:data:`RENT`), setup charges in :mod:`ledger.services.setup_charges` (PLAN-010b D6).
+    """
+
+    model: type[RentCharge] | type[SetupCharge]
+    #: The audit entity type, which is also the charge's column on invoices and payments.
+    entity: str
+    #: The charge's amount column.
+    amount_field: str
+    #: The audited fields of a charge.
+    state: Callable[[Any], dict[str, Any]]
+
+    def action(self, reason: str) -> str:
+        return f"{self.entity}.{reason}"
+
+    def amount(self, charge: ChargeRow) -> Decimal:
+        return Decimal(getattr(charge, self.amount_field))
+
+    def lock(self, charge_id: uuid.UUID) -> ChargeRow:
+        return self.model._default_manager.select_for_update().get(pk=charge_id)
+
+    @property
+    def mark_actions(self) -> tuple[str, ...]:
+        return tuple(self.action(reason) for reason in _MARK_REASONS)
+
+    @property
+    def other_flag_actions(self) -> tuple[str, ...]:
+        return tuple(self.action(reason) for reason in _OTHER_FLAG_REASONS)
+
+
+_MARK_REASONS = ("provider_marked", "provider_mark_failed", "provider_not_updated")
 
 
 # --- Results --------------------------------------------------------------------------
@@ -647,11 +689,18 @@ def _invoice_linked(external_id: str) -> bool:
     ).exists()
 
 
-def _flag(charge: RentCharge, actor: User | None, action: str, context: dict[str, Any]) -> None:
-    before = _charge(charge)
+def _flag(
+    charge: ChargeRow,
+    actor: User | None,
+    action: str,
+    context: dict[str, Any],
+    kind: ChargeKind | None = None,
+) -> None:
+    kind = kind or RENT
+    before = kind.state(charge)
     charge.needs_review = True
     charge.save(update_fields=["needs_review", "updated_at"])
-    _audit(actor, action, ENTITY_CHARGE, charge.pk, before, {**_charge(charge), **context})
+    _audit(actor, action, kind.entity, charge.pk, before, {**kind.state(charge), **context})
 
 
 # --- Linking an invoice to a charge (PLAN-008a §2 rules 3, 4) ---------------------------
@@ -659,7 +708,23 @@ def _flag(charge: RentCharge, actor: User | None, action: str, context: dict[str
 
 def _unlinked(queryset: QuerySet[Invoice]) -> QuerySet[Invoice]:
     return queryset.filter(
-        rent_charge__isnull=True, insurance_charge__isnull=True, charge_adjustment__isnull=True
+        rent_charge__isnull=True,
+        insurance_charge__isnull=True,
+        charge_adjustment__isnull=True,
+        setup_charge__isnull=True,
+    )
+
+
+def is_linked(invoice: Invoice) -> bool:
+    """Whether the invoice belongs to a charge of any kind (or an adjustment)."""
+    return any(
+        value is not None
+        for value in (
+            invoice.rent_charge_id,
+            invoice.insurance_charge_id,
+            invoice.charge_adjustment_id,
+            invoice.setup_charge_id,
+        )
     )
 
 
@@ -678,11 +743,11 @@ def _provider_ref(invoice_id: uuid.UUID) -> str:
     )
 
 
-def _operator_of(charge: RentCharge) -> uuid.UUID | None:
+def _operator_of(charge: ChargeRow) -> uuid.UUID | None:
     return Lease.objects.only("operator_id").get(pk=charge.lease_id).operator_id
 
 
-def unlinked_invoices(charge: RentCharge) -> list[UnlinkedInvoice]:
+def unlinked_invoices(charge: ChargeRow) -> list[UnlinkedInvoice]:
     """The local invoices of the charge's operator that have no charge, newest first."""
     operator_id = _operator_of(charge)
     if operator_id is None:
@@ -704,11 +769,12 @@ def _auto_candidates(operator_id: uuid.UUID, total: Decimal, issued: date) -> Qu
     )
 
 
-def _attach(charge: RentCharge, invoice: Invoice) -> None:
+def _attach(charge: ChargeRow, invoice: Invoice, kind: ChargeKind | None = None) -> None:
     """Set the invoice's charge. The caller holds the locks on both rows; a charge that
     already has an invoice is refused by the unique index with an IntegrityError."""
-    Invoice.objects.filter(pk=invoice.pk, rent_charge__isnull=True).update(
-        rent_charge=charge, updated_at=timezone.now()
+    kind = kind or RENT
+    Invoice.objects.filter(pk=invoice.pk, **{f"{kind.entity}__isnull": True}).update(
+        **{kind.entity: charge, "updated_at": timezone.now()}
     )
 
 
@@ -778,7 +844,20 @@ def link_invoice(
     note: str,
     actor: User | None,
 ) -> LinkOutcome:
-    """Staff link an unlinked invoice of the charge's operator to the charge (rule 4).
+    """Staff link an unlinked invoice of the charge's operator to the charge (rule 4)."""
+    return link_charge_invoice(RENT, charge_id, invoice_id, confirm=confirm, note=note, actor=actor)
+
+
+def link_charge_invoice(
+    kind: ChargeKind,
+    charge_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    *,
+    confirm: bool,
+    note: str,
+    actor: User | None,
+) -> LinkOutcome:
+    """Link an unlinked invoice of the charge's operator to a charge of ``kind``.
 
     Every rule is checked under the row locks, charge first, then invoice. A total that
     differs from the charge's balance needs ``confirm`` and a note, and flags the charge.
@@ -791,7 +870,7 @@ def link_invoice(
             return LinkOutcome(False, PAY_NOTE_PAYMENT_DATA, "note")
     try:
         with transaction.atomic():
-            charge = RentCharge.objects.select_for_update().get(pk=charge_id)
+            charge = kind.lock(charge_id)
             operator_id = _operator_of(charge)
             invoice = (
                 Invoice.objects.select_for_update()
@@ -802,13 +881,9 @@ def link_invoice(
             )
             if invoice is None:
                 return LinkOutcome(False, LINK_CHOOSE, "invoice")
-            if invoice.rent_charge_id == charge.pk:
+            if getattr(invoice, f"{kind.entity}_id") == charge.pk:
                 return LinkOutcome(True, LINK_SAME)
-            if (
-                invoice.rent_charge_id is not None
-                or invoice.insurance_charge_id is not None
-                or invoice.charge_adjustment_id is not None
-            ):
+            if is_linked(invoice):
                 return LinkOutcome(False, LINK_CHOOSE, "invoice")
             if charge.invoices.exists():
                 return LinkOutcome(False, LINK_CHARGE_HAS_INVOICE)
@@ -817,7 +892,7 @@ def link_invoice(
                 return LinkOutcome(False, LINK_CONFIRM, "confirm")
             if differs and not text:
                 return LinkOutcome(False, LINK_NOTE_REQUIRED, "note")
-            _attach(charge, invoice)
+            _attach(charge, invoice, kind)
             context = {
                 "invoice_number": invoice.invoice_number,
                 "invoice_total": str(invoice.total),
@@ -828,18 +903,18 @@ def link_invoice(
                 "invoice.linked",
                 ENTITY_INVOICE,
                 invoice.pk,
-                {"rent_charge": None},
+                {kind.entity: None},
                 {
                     **context,
-                    "rent_charge": str(charge.pk),
-                    "amount_due": str(charge.amount_due),
+                    kind.entity: str(charge.pk),
+                    kind.amount_field: str(kind.amount(charge)),
                     "provider_invoice": mask_identifier(_provider_ref(invoice.pk)),
                     "total_differs": differs,
                     "note": text,
                 },
             )
             if differs:
-                _flag(charge, actor, LINKED_TOTAL_DIFFERS_ACTION, context)
+                _flag(charge, actor, kind.action("linked_total_differs"), context, kind)
             template = LINK_DONE_DIFFERS if differs else LINK_DONE
     except IntegrityError:
         # Another link to this charge committed first; ours rolled back.
@@ -874,16 +949,9 @@ def record_manual_payment(
     """
     text = (note or "").strip()
     reference = (reference or "").strip()
-    if method not in MANUAL_METHODS:
-        return PaymentOutcome(False, PAY_METHOD, "method")
-    if not isinstance(amount, Decimal) or not amount.is_finite() or amount <= 0:
-        return PaymentOutcome(False, PAY_NOT_POSITIVE, "amount")
-    if amount != amount.quantize(CENT):
-        return PaymentOutcome(False, PAY_NOT_CENTS, "amount")
-    if paid_on > (today or timezone.localdate()):
-        return PaymentOutcome(False, PAY_FUTURE, "paid_on")
-    if not text:
-        return PaymentOutcome(False, PAY_NOTE_REQUIRED, "note")
+    refusal = payment_refusal(method, amount, paid_on, text, today)
+    if refusal is not None:
+        return refusal
     with transaction.atomic():
         charge = RentCharge.objects.select_for_update().get(pk=charge_id)
         if creation_key is not None and _payment_for_key(charge, creation_key):
@@ -937,10 +1005,10 @@ def record_manual_payment(
                 "creation_key": str(creation_key) if creation_key is not None else None,
             },
         )
-        linked = _provider_invoice(charge)
+        linked = provider_invoice(charge)
         if linked is not None and not (whole and linked[0].total == amount):
             reason = offline_marking.PARTIAL_AMOUNT if not whole else offline_marking.TOTAL_DIFFERS
-            result = _not_updated(charge, payment, linked, reason, actor)
+            result = not_updated(RENT, charge, payment, linked, reason, actor)
             return PaymentOutcome(True, PAY_RECORDED, payment=payment, provider=result)
     if linked is None:
         return PaymentOutcome(
@@ -952,23 +1020,62 @@ def record_manual_payment(
     return PaymentOutcome(True, PAY_RECORDED, payment=payment, provider=result)
 
 
+def payment_refusal(
+    method: str, amount: Decimal, paid_on: date, text: str, today: date | None
+) -> PaymentOutcome | None:
+    """The first rule a manual payment breaks before any row is read (D8), or ``None``.
+
+    ``text`` is the note, already stripped.
+    """
+    if method not in MANUAL_METHODS:
+        return PaymentOutcome(False, PAY_METHOD, "method")
+    if not isinstance(amount, Decimal) or not amount.is_finite() or amount <= 0:
+        return PaymentOutcome(False, PAY_NOT_POSITIVE, "amount")
+    if amount != amount.quantize(CENT):
+        return PaymentOutcome(False, PAY_NOT_CENTS, "amount")
+    if paid_on > (today or timezone.localdate()):
+        return PaymentOutcome(False, PAY_FUTURE, "paid_on")
+    if not text:
+        return PaymentOutcome(False, PAY_NOTE_REQUIRED, "note")
+    return None
+
+
 def mark_provider_invoice(
     charge_id: uuid.UUID, payment_id: uuid.UUID, *, actor: User | None
 ) -> MarkResult:
     """Mark the charge's provider invoice paid for this manual payment (PLAN-009 D1)."""
-    return _mark(charge_id, payment_id, actor=actor, retry=False)
+    return mark_charge_invoice(RENT, charge_id, payment_id, actor=actor)
+
+
+def mark_charge_invoice(
+    kind: ChargeKind, charge_id: uuid.UUID, payment_id: uuid.UUID, *, actor: User | None
+) -> MarkResult:
+    """Mark the provider invoice of a charge of ``kind`` paid for this manual payment."""
+    return _mark(kind, charge_id, payment_id, actor=actor, retry=False)
 
 
 def retry_provider_mark(charge_id: uuid.UUID, *, actor: User | None) -> MarkResult:
     """Retry the last failed marking of the charge's provider invoice (PLAN-009 D2)."""
-    return _mark(charge_id, None, actor=actor, retry=True)
+    return retry_charge_mark(RENT, charge_id, actor=actor)
+
+
+def retry_charge_mark(kind: ChargeKind, charge_id: uuid.UUID, *, actor: User | None) -> MarkResult:
+    """Retry the last failed marking of the provider invoice of a charge of ``kind``."""
+    return _mark(kind, charge_id, None, actor=actor, retry=True)
 
 
 def provider_retry_wait(charge: RentCharge, now: datetime | None = None) -> int | None:
     """``None`` when the charge has no failed marking to retry; otherwise the whole
     seconds until a retry is allowed (0: now)."""
-    last = _last_mark_event(charge)
-    if last is None or last.action != MARK_FAILED_ACTION:
+    return charge_retry_wait(RENT, charge, now)
+
+
+def charge_retry_wait(
+    kind: ChargeKind, charge: ChargeRow, now: datetime | None = None
+) -> int | None:
+    """:func:`provider_retry_wait` for a charge of ``kind``."""
+    last = _last_mark_event(charge, kind)
+    if last is None or last.action != kind.action("provider_mark_failed"):
         return None
     return _retry_wait(last, now)
 
@@ -981,22 +1088,22 @@ def _retry_wait(event: AuditLog, now: datetime | None = None) -> int:
     return min(lock, max(1, math.ceil(lock - elapsed)))
 
 
-def _last_mark_event(charge: RentCharge) -> AuditLog | None:
+def _last_mark_event(charge: ChargeRow, kind: ChargeKind) -> AuditLog | None:
     return (
         AuditLog.objects.filter(
             Q(
-                entity_type=ENTITY_CHARGE,
+                entity_type=kind.entity,
                 entity_id=str(charge.pk),
-                action__in=_CHARGE_MARK_ACTIONS,
+                action__in=kind.mark_actions,
             )
-            | Q(action=ALREADY_PAID_ACTION, after__rent_charge=str(charge.pk))
+            | Q(action=ALREADY_PAID_ACTION, **{f"after__{kind.entity}": str(charge.pk)})
         )
         .order_by("-id")
         .first()
     )
 
 
-def _provider_invoice(charge: RentCharge) -> tuple[Invoice, str] | None:
+def provider_invoice(charge: ChargeRow) -> tuple[Invoice, str] | None:
     """The charge's first invoice with a current provider reference, and that reference."""
     for invoice in charge.invoices.order_by("issue_date", "invoice_number"):
         ref = (
@@ -1024,35 +1131,38 @@ def _mark_context(payment: Payment, linked: tuple[Invoice, str]) -> dict[str, An
     }
 
 
-def _flag_review(charge: RentCharge, text: str) -> None:
+def _flag_review(charge: ChargeRow, text: str) -> None:
     charge.needs_review = True
     charge.review_message = text
     charge.save(update_fields=["needs_review", "review_message", "updated_at"])
 
 
-def _clear_review(charge: RentCharge) -> None:
+def _clear_review(charge: ChargeRow, kind: ChargeKind) -> None:
     """Clear a marking flag; the charge stays flagged for any other recorded reason."""
     if not charge.review_message:
         return
     charge.review_message = ""
     charge.needs_review = (
-        charge.invoices.exclude(total=charge.amount_due).exists()
+        charge.invoices.exclude(total=kind.amount(charge)).exists()
         or AuditLog.objects.filter(
-            entity_type=ENTITY_CHARGE, entity_id=str(charge.pk), action__in=_OTHER_FLAG_ACTIONS
+            entity_type=kind.entity,
+            entity_id=str(charge.pk),
+            action__in=kind.other_flag_actions,
         ).exists()
     )
     charge.save(update_fields=["needs_review", "review_message", "updated_at"])
 
 
-def _not_updated(
-    charge: RentCharge,
+def not_updated(
+    kind: ChargeKind,
+    charge: ChargeRow,
     payment: Payment,
     linked: tuple[Invoice, str],
     reason: str,
     actor: User | None,
 ) -> MarkResult:
     """No provider call (D3): flag the charge; an earlier, different flag text is kept."""
-    before = {**_charge(charge), "review_message": charge.review_message}
+    before = {**kind.state(charge), "review_message": charge.review_message}
     if not charge.review_message:
         _flag_review(charge, reason)
     elif not charge.needs_review:
@@ -1060,12 +1170,12 @@ def _not_updated(
         charge.save(update_fields=["needs_review", "updated_at"])
     _audit(
         actor,
-        NOT_UPDATED_ACTION,
-        ENTITY_CHARGE,
+        kind.action("provider_not_updated"),
+        kind.entity,
         charge.pk,
         before,
         {
-            **_charge(charge),
+            **kind.state(charge),
             "review_message": charge.review_message,
             **_mark_context(payment, linked),
             "reason": reason,
@@ -1075,7 +1185,12 @@ def _not_updated(
 
 
 def _mark(
-    charge_id: uuid.UUID, payment_id: uuid.UUID | None, *, actor: User | None, retry: bool
+    kind: ChargeKind,
+    charge_id: uuid.UUID,
+    payment_id: uuid.UUID | None,
+    *,
+    actor: User | None,
+    retry: bool,
 ) -> MarkResult:
     """Re-fetch, mark and re-fetch the charge's provider invoice under its row lock (D1).
 
@@ -1085,11 +1200,11 @@ def _mark(
     confirms that mark and is not treated as paid elsewhere.
     """
     with transaction.atomic():
-        charge = RentCharge.objects.select_for_update().get(pk=charge_id)
+        charge = kind.lock(charge_id)
         previous_stage = ""
         if retry:
-            last = _last_mark_event(charge)
-            if last is None or last.action != MARK_FAILED_ACTION or not last.after:
+            last = _last_mark_event(charge, kind)
+            if last is None or last.action != kind.action("provider_mark_failed") or not last.after:
                 return MarkResult(MarkAction.NOTHING_TO_RETRY, MARK_NOTHING_TO_RETRY)
             wait = _retry_wait(last)
             if wait:
@@ -1098,13 +1213,13 @@ def _mark(
                 )
             payment_id = uuid.UUID(str(last.after["payment"]))
             previous_stage = str(last.after.get("stage", ""))
-        linked = _provider_invoice(charge)
+        linked = provider_invoice(charge)
         if linked is None or payment_id is None:
             return MarkResult(MarkAction.NOTHING_TO_RETRY if retry else MarkAction.NO_INVOICE)
         invoice, ref = linked
-        payment = Payment.objects.get(pk=payment_id, rent_charge=charge)
+        payment = Payment.objects.get(pk=payment_id, **{kind.entity: charge})
         context = _mark_context(payment, linked)
-        before = {**_charge(charge), "review_message": charge.review_message}
+        before = {**kind.state(charge), "review_message": charge.review_message}
         provider = payments.get_provider()
         stage = STAGE_CHECK
         try:
@@ -1119,9 +1234,9 @@ def _mark(
                     payment.pk,
                     before,
                     {
-                        **_charge(charge),
+                        **kind.state(charge),
                         "review_message": charge.review_message,
-                        "rent_charge": str(charge.pk),
+                        kind.entity: str(charge.pk),
                         **context,
                         "provider_changes": changes,
                     },
@@ -1155,12 +1270,12 @@ def _mark(
             _flag_review(charge, text)
             _audit(
                 actor,
-                MARK_FAILED_ACTION,
-                ENTITY_CHARGE,
+                kind.action("provider_mark_failed"),
+                kind.entity,
                 charge.pk,
                 before,
                 {
-                    **_charge(charge),
+                    **kind.state(charge),
                     "review_message": charge.review_message,
                     **context,
                     "stage": stage,
@@ -1172,15 +1287,15 @@ def _mark(
                 MarkAction.FAILED, offline_marking.shown(text) + "." + MARK_RETRY_HINT
             )
         changes = invoice_sync.record_provider_state(invoice.pk, record)
-        _clear_review(charge)
+        _clear_review(charge, kind)
         _audit(
             actor,
-            MARKED_ACTION,
-            ENTITY_CHARGE,
+            kind.action("provider_marked"),
+            kind.entity,
             charge.pk,
             before,
             {
-                **_charge(charge),
+                **kind.state(charge),
                 "review_message": charge.review_message,
                 **context,
                 "confirmed_earlier_mark": stage == STAGE_CHECK,
@@ -1280,3 +1395,7 @@ def _audit(
         before=before,
         after=after,
     )
+
+
+#: Rent charges, for the shared rules above.
+RENT = ChargeKind(RentCharge, ENTITY_CHARGE, "amount_due", _charge)

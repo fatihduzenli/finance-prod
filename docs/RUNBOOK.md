@@ -186,3 +186,60 @@ Inside the **worker** container only (`STAX_CALLER=worker` there):
 `python backend/manage.py reconcile` runs at once under the same lock and prints the
 counts; exit code 1 means the run failed and the row says at which step. From any other
 container the command refuses.
+
+## 11. Setup fees, deposits, store costs and the P&L (PLAN-010b)
+
+**Setup charges.** When an admin creates a lease, the form ends with a checklist of the active
+fee types (access fee, security deposit, front sign fee, architecture fee, business purchase
+fee, phone service; first-year insurance is inactive, ADR-0007). Tick the items the operator
+owes, type cost and price, and save once: the lease and its charges are created together. Billing
+can add a charge later from the lease page. Each charge has its own page: **Record payment**
+(wire, Zelle, other, with a note; a full payment marks the linked Stax invoice paid through the
+worker, as rent does), **Link invoice** (an unlinked one-off invoice of the operator, created by
+staff in the Stax dashboard), **Edit** (price locked once a payment exists), **Waive** (admin,
+note required). Fee types and premium costs are edited in the Django admin by an admin.
+
+**Deposits.** A security deposit is held, not earned. When a lease ends (**End lease** on the
+lease page, admin: end date and reason; autopay must be paused first), the lease page offers
+**Resolve deposit** on each paid deposit: *refunded* (amount, date, method, note; a partial
+amount records the rest as withheld), *withheld* (the whole amount becomes revenue that month),
+or *transferred* to another lease of the same operator. The refund appears in the payments
+ledger as kind `refund_deposit` and in no revenue figure.
+
+**Store costs.** On a store's page, **Set landlord rent** (billing) records the landlord rent,
+an optional other monthly cost with its description, and the landlord lease end, effective from a
+date; the page then shows the margin against the operator rent of the active lease. A store with
+no cost row shows "unknown", never 0. To load many stores at once, fill the owner's template
+(`docs/templates/Store_Costs_Template.xlsx` or `.csv`; only the yellow columns; numbers only;
+dates MM/DD/YYYY; an empty effective date means the store's open date; an empty rent means "not
+filled") and run, from a shell in the web container:
+
+```bash
+python backend/manage.py import_store_costs /path/to/file.xlsx --dry-run
+python backend/manage.py import_store_costs /path/to/file.xlsx
+```
+
+The dry run prints what would happen and writes nothing. The real run prints read / not filled /
+unchanged / created / updated / refused, and each refused row as "row N: reason"; it exits 1 when
+any row was refused and the other rows are still applied. Running the same file twice changes
+nothing. A later effective date closes the previous row the day before. Example files with two
+rows: `docs/templates/examples/store_costs_two_rows.{csv,xlsx}` (stores 1796 and 437). The
+image does not carry `docs/`, so inside the container use the identical copy that ships with the
+tests:
+
+```bash
+az containerapp exec -g finance-sandbox -n finance-staging-web --command bash
+python backend/manage.py import_store_costs backend/tests/fixtures/store_costs/two_rows.xlsx --dry-run
+python backend/manage.py import_store_costs backend/tests/fixtures/store_costs/two_rows.xlsx
+```
+
+(Stores 1796 and 437 must exist with those store numbers first, or both rows are refused as
+"unknown store".)
+
+**Profit and loss.** `/reports/pnl/` (every role can read it) shows, by store, operator or
+month over a range of up to 36 months: rent billed and collected, fees billed and collected
+(setup fees plus insurance, never deposits), landlord rent, other costs, fee costs, and the gross
+margin on a billed and on a collected basis. "unknown" means an input is missing (no store cost
+row, a null fee cost or premium cost); the row says which. A highlighted row is a month in which
+the store costs money with no operator. **Export CSV** gives the same figures; an unknown amount
+is an empty cell with a `*_known` column beside it.

@@ -331,6 +331,8 @@ def test_guarded_columns_match_the_database_triggers() -> None:
             "ledger.migrations.0005_operator_sync_failure_fields",
             "ledger.migrations.0009_payment_returns_resolution",
             "ledger.migrations.0010_rent_charge_review_message",
+            "ledger.migrations.0012_setup_charges",
+            "ledger.migrations.0014_store_costs_deposit_resolutions",
             "payments.migrations.0002_postgresql_guards",
             "payments.migrations.0003_webhook_event_processing",
             "payments.migrations.0005_jobs",

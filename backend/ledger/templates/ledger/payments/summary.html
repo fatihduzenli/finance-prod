@@ -2,7 +2,7 @@
   <dt>Operator</dt><dd id="summary-operator">{{ row.operator.display_name|default:"—" }}</dd>
   <dt>Store</dt><dd id="summary-store">{{ row.store.external_label|default:"—" }}</dd>
   <dt>Invoice number</dt><dd id="summary-invoice">{{ invoice.invoice_number|default:"—" }}</dd>
-  <dt>Charge</dt><dd id="summary-charge">{% if charge %}<a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Rent {{ charge.period_month|date:"Y-m" }}, debit {{ charge.seq }}</a>{% elif payment.insurance_charge %}Insurance {{ payment.policy_year }}{% else %}—{% endif %}</dd>
+  <dt>Charge</dt><dd id="summary-charge">{% include "ledger/payments/_charge.html" %}</dd>
   <dt>Method</dt><dd>{{ payment.get_method_display }}</dd>
   <dt>Status</dt><dd id="summary-status">{% if payment.is_refund %}<span class="badge">Refund</span> {% endif %}{{ payment.get_status_display }}</dd>
   <dt>Transaction</dt><dd id="summary-transaction">{{ row.transaction|default:"—" }}</dd>

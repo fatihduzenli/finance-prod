@@ -1,0 +1,20 @@
+{% extends "finance/base.html" %}
+{% block title %}Set landlord rent {{ store.external_label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
+  <h1>Set landlord rent</h1>
+  {% if current %}<p id="current-cost">Current row: ${{ current.landlord_rent }} a month from {{ current.effective_from|date:"Y-m-d" }}.</p>{% else %}<p id="current-cost" class="muted">No landlord rent is recorded for this store yet: its cost is unknown.</p>{% endif %}
+  <p class="muted">The same effective date as the current row corrects it in place. A later date closes the current row the day before and starts a new one, so the history is kept. An earlier date is refused.</p>
+  <form method="post" id="store-cost-form" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form.visible_fields %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
+      {{ field.errors }}
+      {{ field }}
+      {% if field.help_text %}<br><span class="muted">{{ field.help_text }}</span>{% endif %}
+    {% endfor %}
+    <p class="actions"><button class="btn btn-primary" type="submit" id="save-store-cost">Save</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

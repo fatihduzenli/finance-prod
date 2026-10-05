@@ -37,6 +37,8 @@ Rules kept here:
   ``active=True`` and a rule with a new future ``DTSTART``. A schedule that no longer
   matches the lease is flagged ``needs_review`` and cannot be resumed; staff pause it
   and enable autopay again, which ends the old row and creates a new schedule.
+- **Ending a lease** (PLAN-010b Batch C): :func:`end_lease` sets the end date, the
+  reason and the ``ended`` status; it is refused while autopay is on (pause it first).
 
 Every change writes one ``audit_log`` row; provider identifiers in it are masked.
 Messages are fixed sentences; a provider rejection adds only the field names the
@@ -58,6 +60,7 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
@@ -75,6 +78,7 @@ from ledger.models import (
     ScheduleState,
     Store,
 )
+from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 from payments import operator_sync
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef, ProviderSnapshot
@@ -160,6 +164,15 @@ CONFIRM_LARGE_DEBIT = (
 )
 RENT_DATE_TOO_EARLY = (
     "The new rent must take effect at least two days after the current rent started ({start})."
+)
+#: Ending a lease (PLAN-010b Batch C).
+ALREADY_ENDED = "This lease has already ended. Nothing was changed."
+END_DATE_REQUIRED = "Enter the date the lease ended."
+END_BEFORE_START = "The end date cannot be before the lease started ({start})."
+END_IN_FUTURE = "The end date cannot be in the future."
+END_REASON_REQUIRED = "A reason is required: say why the lease ended."
+END_AUTOPAY_ON = (
+    "Autopay is on for this lease. Pause autopay first, then end the lease. Nothing was changed."
 )
 
 
@@ -670,6 +683,67 @@ def update_lease(
         if after != before:
             _audit(actor, "lease.updated", lease, before, after)
     return lease
+
+
+def end_lease(
+    lease_id: uuid.UUID,
+    ended_on: date | None,
+    end_reason: str,
+    *,
+    actor: User | None,
+    today: date | None = None,
+) -> Lease:
+    """Set the lease's end date and reason and its status to ``ended`` (PLAN-010b Batch C).
+
+    Refused, with one sentence and nothing written, when the lease has already ended,
+    the date is missing, before the start date or in the future, the reason is empty
+    or holds a card or account number, or a rent schedule is active at the payment
+    provider (autopay must be paused first; nothing here calls the provider). Checked
+    under the lease's row lock and audited as ``lease.ended``.
+    """
+    reason = visible_text(end_reason or "")
+    with transaction.atomic():
+        lease = _locked(lease_id)
+        if lease.ended_on is not None:
+            raise LeaseRefused(None, ALREADY_ENDED)
+        if ended_on is None:
+            raise LeaseRefused("ended_on", END_DATE_REQUIRED)
+        if ended_on > (today or timezone.localdate()):
+            raise LeaseRefused("ended_on", END_IN_FUTURE)
+        if lease.started_on is not None and ended_on < lease.started_on:
+            raise LeaseRefused(
+                "ended_on", END_BEFORE_START.format(start=lease.started_on.isoformat())
+            )
+        if not reason:
+            raise LeaseRefused("end_reason", END_REASON_REQUIRED)
+        try:
+            validate_no_payment_data(reason)
+        except ValidationError:
+            raise LeaseRefused("end_reason", PAYMENT_DATA_MESSAGE) from None
+        if autopay_on(lease):
+            raise LeaseRefused(None, END_AUTOPAY_ON)
+        before = {**_snapshot(lease), **_end_snapshot(lease)}
+        lease.ended_on = ended_on
+        lease.end_reason = reason
+        lease.collection_status = CollectionStatus.ENDED
+        lease.save(update_fields=["ended_on", "end_reason", "collection_status", "updated_at"])
+        _audit(actor, "lease.ended", lease, before, {**_snapshot(lease), **_end_snapshot(lease)})
+    return lease
+
+
+def autopay_on(lease: Lease) -> bool:
+    """Whether a rent schedule of the lease is active at the payment provider: the
+    state the lease page offers "Pause autopay" for (local data only)."""
+    return any(
+        row.state == ScheduleState.ACTIVE and schedule_ref(row) for row in live_schedules(lease)
+    )
+
+
+def _end_snapshot(lease: Lease) -> dict[str, Any]:
+    return {
+        "ended_on": lease.ended_on.isoformat() if lease.ended_on else None,
+        "end_reason": lease.end_reason,
+    }
 
 
 # --- Autopay --------------------------------------------------------------------------

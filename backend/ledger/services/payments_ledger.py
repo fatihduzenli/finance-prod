@@ -6,13 +6,27 @@ query string and an unusable value is ignored, never an error:
 - ``date_by`` ``paid`` (the settled date, the default) or ``initiated``, with
   ``date_from`` and ``date_to`` (ISO dates, both inclusive);
 - ``method``: a payment method;
-- ``operator`` and ``store``: IDs, matched through the payment's charge (rent or
-  insurance) or, for the operator, its invoice;
+- ``operator`` and ``store``: IDs, matched through the payment's charge (rent,
+  insurance or setup) or, for the operator, its invoice;
 - ``status``: ``pending``, ``settled``, ``returned`` or ``voided`` (payments that are not
   refunds), or ``refunded`` (the refund rows).
 
 The totals of the filtered set keep ``settled`` (collected), ``pending``, ``returned``
-and ``refunded`` apart: a pending payment is never counted as collected.
+and ``refunded`` apart: a pending payment is never counted as collected. Deposits are
+not revenue (PLAN-010b D7): payments on a setup charge of a refundable fee type, their
+refunds and deposit refunds (``refund_deposit``) are left out of those four and shown
+on their own line, ``deposits_held``. What a resolution releases is no longer held
+(:func:`deposits_released`, the rule the P&L footer uses too): a deposit transferred to
+another lease of the operator is paid in again on that lease, so the transfer is
+subtracted from the deposit it moved (held once, not twice); and a withheld amount
+(a whole withheld deposit, or the remainder kept from a partial refund or transfer)
+became revenue the day it was withheld, so it is not held either.
+
+The ledger's ``deposits_held`` is the total of the filtered set, not a balance at a
+date: a date range keeps the deposit payments in that range, and subtracts every
+release of those deposits whatever its date (a release after ``date_to`` included), so
+it can differ from the P&L footer, which counts up to the end of its range. (A known
+limitation, deferred.)
 
 The CSV export (:func:`csv_lines`) has one header row and one row per payment; the
 ``csv`` module quotes commas, quotes and line breaks, so a note never splits a row.
@@ -36,8 +50,12 @@ from django.db.models.functions import Coalesce
 from ledger.models import (
     ZERO,
     ChargeNote,
+    DepositResolution,
+    DepositResolutionKind,
+    Lease,
     Operator,
     Payment,
+    PaymentKind,
     PaymentMethod,
     PaymentStatus,
     Store,
@@ -118,6 +136,9 @@ class Totals:
     returned: Decimal
     refunded: Decimal
     count: int
+    #: Settled deposit payments minus their settled refunds, the deposit refunds and
+    #: what their resolutions released (transferred or withheld).
+    deposits_held: Decimal = ZERO
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +189,9 @@ def ledger_payments(selected: PaymentFilter) -> QuerySet[Payment]:
         "rent_charge__lease__operator",
         "insurance_charge__lease__store",
         "insurance_charge__lease__operator",
+        "setup_charge__fee_type",
+        "setup_charge__lease__store",
+        "setup_charge__lease__operator",
         "recorded_by",
     ).annotate(
         on=Coalesce("settled_on", "initiated_on"),
@@ -185,12 +209,14 @@ def ledger_payments(selected: PaymentFilter) -> QuerySet[Payment]:
         rows = rows.filter(
             Q(rent_charge__lease__operator_id=selected.operator)
             | Q(insurance_charge__lease__operator_id=selected.operator)
+            | Q(setup_charge__lease__operator_id=selected.operator)
             | Q(invoice__operator_id=selected.operator)
         )
     if selected.store is not None:
         rows = rows.filter(
             Q(rent_charge__lease__store_id=selected.store)
             | Q(insurance_charge__lease__store_id=selected.store)
+            | Q(setup_charge__lease__store_id=selected.store)
         )
     if selected.status == STATUS_REFUNDED:
         rows = rows.filter(is_refund=True)
@@ -200,29 +226,67 @@ def ledger_payments(selected: PaymentFilter) -> QuerySet[Payment]:
 
 
 def totals(rows: QuerySet[Payment]) -> Totals:
-    """Settled (collected), pending, returned and refunded totals, kept apart.
+    """Settled (collected), pending, returned and refunded totals, kept apart, and the
+    deposits held.
 
     A refund counts unless it was voided; the other three count payments that are not
-    refunds, by status.
+    refunds, by status. None of the four counts a deposit row (PLAN-010b D7). The
+    deposits held subtract what the resolutions of the deposits paid in the set
+    released (:func:`deposits_released`), whatever the resolution's date.
     """
-    payment = Q(is_refund=False)
+    deposit = Q(setup_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
+    payment = Q(is_refund=False) & ~deposit
+    settled = Q(status=PaymentStatus.SETTLED)
+    held_in = deposit & Q(kind=PaymentKind.SETUP, is_refund=False) & settled
+    held_out = deposit & (Q(kind=PaymentKind.REFUND_DEPOSIT) | Q(is_refund=True)) & settled
     sums = rows.order_by().aggregate(
-        settled=Sum("amount", filter=payment & Q(status=PaymentStatus.SETTLED)),
+        settled=Sum("amount", filter=payment & settled),
         pending=Sum("amount", filter=payment & Q(status=PaymentStatus.PENDING)),
         returned=Sum("amount", filter=payment & Q(status=PaymentStatus.RETURNED)),
-        refunded=Sum("amount", filter=Q(is_refund=True) & ~Q(status=PaymentStatus.VOIDED)),
+        refunded=Sum(
+            "amount", filter=Q(is_refund=True) & ~deposit & ~Q(status=PaymentStatus.VOIDED)
+        ),
+        held_in=Sum("amount", filter=held_in),
+        held_out=Sum("amount", filter=held_out),
     )
 
     def money(name: str) -> Decimal:
         return Decimal(sums[name] or ZERO).quantize(CENT)
 
+    released = deposits_released(
+        DepositResolution.objects.filter(
+            setup_charge__in=rows.filter(held_in).order_by().values("setup_charge_id")
+        )
+    )
     return Totals(
         settled=money("settled"),
         pending=money("pending"),
         returned=money("returned"),
         refunded=money("refunded"),
         count=rows.count(),
+        deposits_held=money("held_in") - money("held_out") - released,
     )
+
+
+def deposits_released(resolutions: QuerySet[DepositResolution]) -> Decimal:
+    """What ``resolutions`` released from the deposits held, other than by a payment.
+
+    Two parts, and whatever counts deposits held subtracts both (the payments ledger
+    and the P&L footer both use this):
+
+    - a transfer's ``amount``: the deposit is paid in again on the receiving lease (a
+      ``setup`` payment), so it is counted there, once;
+    - every ``withheld_amount``: the whole deposit when withheld, the remainder kept
+      from a partial refund or transfer. Withheld money is revenue from the day it is
+      withheld (PLAN-010b D7), not a deposit held.
+
+    A refund's ``amount`` is not here: it leaves as a ``refund_deposit`` payment.
+    """
+    sums = resolutions.aggregate(
+        transferred=Sum("amount", filter=Q(kind=DepositResolutionKind.TRANSFERRED)),
+        withheld=Sum("withheld_amount"),
+    )
+    return (Decimal(sums["transferred"] or ZERO) + Decimal(sums["withheld"] or ZERO)).quantize(CENT)
 
 
 def _transactions(payment_ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, str]:
@@ -243,13 +307,7 @@ def rows_for(payments: Iterable[Payment]) -> list[LedgerRow]:
     refs = _transactions(item.pk for item in items)
     result = []
     for item in items:
-        lease = (
-            item.rent_charge.lease
-            if item.rent_charge is not None
-            else item.insurance_charge.lease
-            if item.insurance_charge is not None
-            else None
-        )
+        lease = charge_lease(item)
         operator = lease.operator if lease is not None else None
         if operator is None and item.invoice is not None:
             operator = item.invoice.operator
@@ -266,7 +324,15 @@ def rows_for(payments: Iterable[Payment]) -> list[LedgerRow]:
     return result
 
 
-def _text(value: str) -> str:
+def charge_lease(payment: Payment) -> Lease | None:
+    """The lease of the payment's rent, insurance or setup charge, if any."""
+    for charge in (payment.rent_charge, payment.insurance_charge, payment.setup_charge):
+        if charge is not None:
+            return charge.lease
+    return None
+
+
+def csv_text(value: str) -> str:
     """A text cell; one a spreadsheet would read as a formula starts with an apostrophe."""
     return f"'{value}" if value.startswith(_FORMULA_START) else value
 
@@ -275,7 +341,7 @@ def _iso(value: date | None) -> str:
     return value.isoformat() if value is not None else ""
 
 
-def _money(value: Decimal) -> str:
+def csv_money(value: Decimal) -> str:
     return format(Decimal(value).quantize(CENT), "f")
 
 
@@ -286,8 +352,8 @@ def csv_record(row: LedgerRow) -> list[str]:
         str(payment.pk),
         _iso(payment.settled_on),
         _iso(payment.initiated_on),
-        _text(row.operator.display_name if row.operator is not None else ""),
-        _text(row.store.external_label if row.store is not None else ""),
+        csv_text(row.operator.display_name if row.operator is not None else ""),
+        csv_text(row.store.external_label if row.store is not None else ""),
         payment.kind,
         f"{charge.period_month:%Y-%m}" if charge is not None else "",
         str(charge.seq) if charge is not None else "",
@@ -296,17 +362,17 @@ def csv_record(row: LedgerRow) -> list[str]:
         payment.status,
         "yes" if payment.is_refund else "no",
         str(payment.parent_payment_id) if payment.parent_payment_id else "",
-        _money(payment.amount),
-        _text(payment.reference),
-        _text(payment.note),
+        csv_money(payment.amount),
+        csv_text(payment.reference),
+        csv_text(payment.note),
         "yes" if row.has_note else "no",
         row.transaction,
-        _text(payment.return_code),
-        _text(payment.recorded_by.get_username() if payment.recorded_by is not None else ""),
+        csv_text(payment.return_code),
+        csv_text(payment.recorded_by.get_username() if payment.recorded_by is not None else ""),
     ]
 
 
-class _Line:
+class CsvLine:
     """A file-like object whose ``write`` returns the line, for a streamed ``csv.writer``."""
 
     def write(self, value: str) -> str:
@@ -315,7 +381,7 @@ class _Line:
 
 def csv_lines(selected: PaymentFilter) -> Iterator[str]:
     """The export of :func:`ledger_payments`, one CSV line at a time."""
-    writer = csv.writer(_Line())
+    writer = csv.writer(CsvLine())
     yield writer.writerow(CSV_HEADER)
     chunk: list[Payment] = []
     for payment in ledger_payments(selected).iterator(chunk_size=EXPORT_CHUNK):

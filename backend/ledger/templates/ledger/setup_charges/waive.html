@@ -1,0 +1,17 @@
+{% extends "finance/base.html" %}
+{% block title %}Waive {{ charge.fee_type.name }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:setup_charges:detail' pk=charge.pk %}">&larr; {{ charge.fee_type.name }}, {{ charge.lease.store.external_label }}</a></p>
+  <h1>Waive {{ charge.fee_type.name }}</h1>
+  <p>Price ${{ charge.price }}, balance ${{ charge.balance }}. A waived charge is no longer owed and cannot be edited or paid here. A charge with a settled payment cannot be waived. Nothing is sent to the payment provider: an invoice linked to this charge stays open there until staff close it.</p>
+  <form method="post" id="waive-form" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <label for="{{ form.note.id_for_label }}">Note *</label>
+    {{ form.note.errors }}
+    {{ form.note }}
+    <br><span class="muted">{{ form.note.help_text }}</span>
+    <p class="actions"><button class="btn btn-primary" type="submit" id="waive-submit">Waive</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

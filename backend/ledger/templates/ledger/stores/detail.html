@@ -4,7 +4,7 @@
   <p><a href="{% url 'ledger:stores:list' %}">&larr; Stores</a></p>
   <h1>Store {{ store.external_label }}{% if store.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
 
-  {% if can_edit %}<div class="actions"><a class="btn" href="{% url 'ledger:stores:edit' pk=store.pk %}">Edit</a></div>{% endif %}
+  {% if can_edit or can_set_cost %}<div class="actions">{% if can_edit %}<a class="btn" href="{% url 'ledger:stores:edit' pk=store.pk %}">Edit</a>{% endif %}{% if can_set_cost %} <a class="btn" href="{% url 'ledger:stores:set_cost' pk=store.pk %}" id="set-landlord-rent">Set landlord rent</a>{% endif %}</div>{% endif %}
 
   <dl>
     <dt>Name</dt><dd>{{ store.external_label }}</dd>
@@ -15,6 +15,26 @@
     <dt>Closed date</dt><dd>{{ store.closed_at|date:"Y-m-d"|default:"—" }}</dd>
     <dt>Status</dt><dd>{{ store.get_status_display }}</dd>
   </dl>
+
+  <h2>Costs and margin</h2>
+  <dl id="store-costs">
+    <dt>Landlord rent</dt><dd id="landlord-rent">{% if cost %}${{ cost.landlord_rent }} a month from {{ cost.effective_from|date:"Y-m-d" }}{% else %}unknown{% endif %}</dd>
+    <dt>Landlord lease end</dt><dd id="landlord-lease-end">{% if cost %}{{ cost.landlord_lease_end|date:"Y-m-d"|default:"—" }}{% else %}unknown{% endif %}</dd>
+    <dt>Other monthly cost</dt><dd id="other-cost">{% if cost %}{% if cost.other_monthly_cost is not None %}${{ cost.other_monthly_cost }}{% if cost.other_cost_description %} ({{ cost.other_cost_description }}){% endif %}{% else %}none{% endif %}{% else %}unknown{% endif %}</dd>
+    <dt>Operator rent</dt><dd id="operator-rent">{% if operator_rent is not None %}${{ operator_rent }} a month{% else %}unknown{% endif %}</dd>
+    <dt>Margin</dt><dd id="store-margin">{% if margin is not None %}${{ margin }} a month{% else %}unknown{% endif %}</dd>
+  </dl>
+  <p class="muted">Margin is the operator rent of the lease active today less the landlord rent and the other monthly cost in effect today; it is unknown when any of them is.</p>
+  {% if cost_history %}
+    <table id="cost-history">
+      <thead><tr><th>Landlord rent</th><th>Other cost</th><th>From</th><th>To</th><th>Lease end</th><th>Source</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for row in cost_history %}
+          <tr><td>${{ row.landlord_rent }}</td><td>{% if row.other_monthly_cost is not None %}${{ row.other_monthly_cost }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.landlord_lease_end|date:"Y-m-d"|default:"—" }}</td><td>{{ row.get_source_display }}</td><td style="white-space:pre-wrap;">{{ row.notes }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
 
   <h2>Leases</h2>
   <table id="store-leases">

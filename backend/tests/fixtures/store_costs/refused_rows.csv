@@ -1,0 +1,19 @@
+store_no,location,state,operator (ref only),operator rent (ref only),walmart_monthly_rent,walmart_rent_effective_from,walmart_lease_end,other_monthly_cost,other_cost_description,notes
+1796,,,,,2500.00,01/01/2026,,,,applied
+999999,,,,,2500.00,01/01/2026,,,,unknown store
+437,,,,,3000.00,01/01/2026,,,,first of a duplicate
+0437,,,,,3100.00,02/01/2026,,,,second of a duplicate
+2101,,,,,"2,500",01/01/2026,,,,comma
+2102,,,,,$2500,01/01/2026,,,,dollar
+2103,,,,,-1,01/01/2026,,,,negative
+2104,,,,,2500.555,01/01/2026,,,,three decimals
+2105,,,,,2500.00,13/01/2026,,,,month 13
+2106,,,,,2500.00,02/30/2026,,,,february 30
+2107,,,,,2500.00,,,,,no open date
+2108,,,,,2500.00,01/01/2026,,,,earlier than the open row
+2109,,,,,2500.00,01/01/2026,,,,card 4111 1111 1111 1111
+abc,,,,,2500.00,01/01/2026,,,,store_no not a number
+2110,,,,,2500.00,01/01/2026,,-5,rent share,negative other cost
+2111,,,,,2500.00,01/01/2026,12/31/30,,,two-digit year
+2112,,,4111111111111111,,2500.00,01/01/2026,,,,card in a reference column
+2113,,,,,,01/01/2026,,,,not filled

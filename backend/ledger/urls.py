@@ -1,6 +1,6 @@
 """Ledger routes (PLAN-006-operators.md §4.1, PLAN-007-leases-and-rent-run.md §4.1,
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
-D6 to D8, PLAN-010-worker-and-reconciliation.md D10).
+D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11).
 
 Namespace ``ledger``.
 
@@ -20,12 +20,15 @@ from django.urls import include, path
 
 from ledger.views import (
     charges,
+    deposits,
     leases,
     operators,
     payments,
     reconciliation,
+    reports,
     returns,
     run,
+    setup_charges,
     stores,
     webhooks,
 )
@@ -51,6 +54,7 @@ store_patterns = (
         path("new/", stores.store_create, name="create"),
         path("<str:pk>/", stores.store_detail, name="detail"),
         path("<str:pk>/edit/", stores.store_edit, name="edit"),
+        path("<str:pk>/cost/", stores.store_set_cost, name="set_cost"),
     ],
     "stores",
 )
@@ -61,9 +65,20 @@ lease_patterns = (
         path("new/", leases.lease_create, name="create"),
         path("<str:pk>/", leases.lease_detail, name="detail"),
         path("<str:pk>/edit/", leases.lease_edit, name="edit"),
+        path("<str:pk>/end/", leases.lease_end, name="end"),
         path("<str:pk>/enrol/", leases.lease_enrol, name="enrol"),
         path("<str:pk>/pause/", leases.lease_pause, name="pause"),
         path("<str:pk>/resume/", leases.lease_resume, name="resume"),
+        path(
+            "<str:pk>/setup-charges/new/",
+            setup_charges.lease_add_setup_charge,
+            name="add_setup_charge",
+        ),
+        path(
+            "<str:pk>/deposits/<str:charge>/resolve/",
+            deposits.resolve_deposit,
+            name="resolve_deposit",
+        ),
     ],
     "leases",
 )
@@ -85,6 +100,18 @@ charge_patterns = (
         path("<str:pk>/link-invoice/", charges.charge_link_invoice, name="link_invoice"),
     ],
     "charges",
+)
+
+setup_charge_patterns = (
+    [
+        path("<str:pk>/", setup_charges.setup_charge_detail, name="detail"),
+        path("<str:pk>/payments/new/", setup_charges.setup_charge_payment, name="payment"),
+        path("<str:pk>/retry-mark/", setup_charges.setup_charge_retry_mark, name="retry_mark"),
+        path("<str:pk>/link-invoice/", setup_charges.setup_charge_link, name="link"),
+        path("<str:pk>/edit/", setup_charges.setup_charge_edit, name="edit"),
+        path("<str:pk>/waive/", setup_charges.setup_charge_waive, name="waive"),
+    ],
+    "setup_charges",
 )
 
 payment_patterns = (
@@ -128,14 +155,24 @@ reconciliation_patterns = (
     "reconciliation",
 )
 
+report_patterns = (
+    [
+        path("pnl/", reports.pnl_report, name="pnl"),
+        path("pnl/export.csv", reports.pnl_export, name="pnl_export"),
+    ],
+    "reports",
+)
+
 urlpatterns = [
     path("operators/", include(operator_patterns)),
     path("stores/", include(store_patterns)),
     path("leases/", include(lease_patterns)),
     path("run/", include(run_patterns)),
     path("charges/", include(charge_patterns)),
+    path("setup-charges/", include(setup_charge_patterns)),
     path("payments/", include(payment_patterns)),
     path("webhooks/", include(webhook_patterns)),
     path("returns/", include(return_patterns)),
     path("reconciliation/", include(reconciliation_patterns)),
+    path("reports/", include(report_patterns)),
 ]

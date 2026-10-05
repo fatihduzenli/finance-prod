@@ -41,17 +41,18 @@
 
   <h2>Totals of the {{ totals.count }} payment{{ totals.count|pluralize }} shown</h2>
   <table id="payment-totals">
-    <thead><tr><th>Settled (collected)</th><th>Pending (not collected yet)</th><th>Returned</th><th>Refunded</th></tr></thead>
+    <thead><tr><th>Settled (collected)</th><th>Pending (not collected yet)</th><th>Returned</th><th>Refunded</th><th>Deposits held</th></tr></thead>
     <tbody>
       <tr>
         <td id="total-settled">${{ totals.settled }}</td>
         <td id="total-pending">${{ totals.pending }}</td>
         <td id="total-returned">${{ totals.returned }}</td>
         <td id="total-refunded">${{ totals.refunded }}</td>
+        <td id="total-deposits-held">${{ totals.deposits_held }}</td>
       </tr>
     </tbody>
   </table>
-  <p class="muted">Pending payments are never counted as collected. Refunds are shown as their own rows.</p>
+  <p class="muted">Pending payments are never counted as collected. Refunds are shown as their own rows. Deposits are money held for the operator, not revenue: they are left out of the other totals, and "Deposits held" is the settled deposit payments shown minus their refunds and the deposit refunds shown.</p>
 
   <table id="payments">
     <thead>
@@ -64,7 +65,7 @@
           <td>{{ row.payment.initiated_on|date:"Y-m-d"|default:"—" }}</td>
           <td>{{ row.operator.display_name|default:"—" }}</td>
           <td>{{ row.store.external_label|default:"—" }}</td>
-          <td>{% if row.payment.rent_charge %}<a href="{% url 'ledger:charges:detail' pk=row.payment.rent_charge.pk %}">Rent {{ row.payment.rent_charge.period_month|date:"Y-m" }}, debit {{ row.payment.rent_charge.seq }}</a>{% elif row.payment.insurance_charge %}Insurance {{ row.payment.policy_year }}{% else %}—{% endif %}</td>
+          <td>{% include "ledger/payments/_charge.html" with payment=row.payment %}</td>
           <td>{{ row.payment.get_method_display }}</td>
           <td>{% if row.payment.is_refund %}&minus;{% endif %}${{ row.payment.amount }}</td>
           <td>{% if row.payment.is_refund %}<span class="badge">Refund</span> {% endif %}{{ row.payment.get_status_display }}</td>

@@ -123,6 +123,36 @@ def new_insurance_charge(**fields: Any) -> ledger.InsuranceCharge:
     return ledger.InsuranceCharge(**{**values, **fields})
 
 
+def new_fee_type(**fields: Any) -> ledger.FeeType:
+    values = {"code": f"test_fee_{next(_numbers)}", "name": "Test fee", "sort_order": 900}
+    return ledger.FeeType(**{**values, **fields})
+
+
+def new_setup_charge(**fields: Any) -> ledger.SetupCharge:
+    _default(fields, "lease", lambda: saved(new_lease()))
+    _default(fields, "fee_type", lambda: saved(new_fee_type()))
+    values = {"price": D("1000.00"), "due_date": date(2026, 10, 1), "status": "owed"}
+    return ledger.SetupCharge(**{**values, **fields})
+
+
+def new_store_cost(**fields: Any) -> ledger.StoreCost:
+    _default(fields, "store", lambda: saved(new_store()))
+    values = {"landlord_rent": D("2500.00"), "effective_from": date(2026, 1, 1), "source": "staff"}
+    return ledger.StoreCost(**{**values, **fields})
+
+
+def new_deposit_resolution(**fields: Any) -> ledger.DepositResolution:
+    _default(fields, "setup_charge", lambda: saved(new_setup_charge()))
+    values = {
+        "kind": "refunded",
+        "method": "wire",
+        "amount": D("1000.00"),
+        "resolved_on": date(2026, 10, 1),
+        "note": "Paid back by wire.",
+    }
+    return ledger.DepositResolution(**{**values, **fields})
+
+
 def new_charge_note(**fields: Any) -> ledger.ChargeNote:
     if "insurance_charge" not in fields:
         _default(fields, "rent_charge", lambda: saved(new_rent_charge()))
@@ -218,6 +248,10 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.RentCharge: new_rent_charge,
     ledger.InsurancePremium: new_premium,
     ledger.InsuranceCharge: new_insurance_charge,
+    ledger.FeeType: new_fee_type,
+    ledger.SetupCharge: new_setup_charge,
+    ledger.StoreCost: new_store_cost,
+    ledger.DepositResolution: new_deposit_resolution,
     ledger.ChargeNote: new_charge_note,
     ledger.ChargeAdjustment: new_adjustment,
     ledger.StoreBalance: new_store_balance,
@@ -522,6 +556,143 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_premium(amount=D("0.00")),
     ),
     _field_unique("insurance_premiums", "policy_year", new_premium, 2025, 2026),
+    ConstraintCase(
+        "insurance_premiums_cost_not_negative",
+        lambda: new_premium(cost=D("0.00")),
+        lambda: new_premium(cost=D("-0.01")),
+    ),
+    # fee_types (PLAN-010b D1)
+    ConstraintCase("fee_types_name_not_blank", new_fee_type, lambda: new_fee_type(name=" ")),
+    ConstraintCase(
+        "fee_types_default_cost_not_negative",
+        lambda: new_fee_type(default_cost=D("0.00")),
+        lambda: new_fee_type(default_cost=D("-0.01")),
+    ),
+    ConstraintCase(
+        "fee_types_default_price_positive",
+        lambda: new_fee_type(default_price=D("0.01")),
+        lambda: new_fee_type(default_price=D("0.00")),
+    ),
+    _field_unique("fee_types", "code", new_fee_type, "test_code_a", "test_code_b"),
+    # setup_charges (PLAN-010b D3)
+    ConstraintCase(
+        "setup_charges_price_positive",
+        lambda: new_setup_charge(price=D("0.01")),
+        lambda: new_setup_charge(price=D("0.00")),
+    ),
+    ConstraintCase(
+        "setup_charges_cost_not_negative",
+        lambda: new_setup_charge(cost=D("0.00")),
+        lambda: new_setup_charge(cost=D("-0.01")),
+    ),
+    ConstraintCase(
+        "setup_charges_amount_paid_not_negative",
+        lambda: new_setup_charge(amount_paid=D("0.00")),
+        lambda: new_setup_charge(amount_paid=D("-0.01")),
+    ),
+    ConstraintCase(
+        "setup_charges_waived_has_note",
+        lambda: new_setup_charge(
+            status="waived",
+            waived_at=datetime(2026, 10, 1, tzinfo=UTC),
+            waive_note="Owner waived the sign fee.",
+        ),
+        lambda: new_setup_charge(
+            status="waived", waived_at=datetime(2026, 10, 1, tzinfo=UTC), waive_note=" "
+        ),
+    ),
+    ConstraintCase(
+        # Partial: a legacy balance may sit beside a real charge of the same fee type.
+        "setup_charges_lease_fee_type_unique",
+        unique_pair(
+            new_setup_charge,
+            {},
+            {"lease": _same_lease, "fee_type": lambda row: row.fee_type, "legacy": True},
+        ),
+        unique_pair(
+            new_setup_charge, {}, {"lease": _same_lease, "fee_type": lambda row: row.fee_type}
+        ),
+    ),
+    # store_costs (PLAN-010b D8)
+    ConstraintCase(
+        "store_costs_landlord_rent_not_negative",
+        lambda: new_store_cost(landlord_rent=D("0.00")),
+        lambda: new_store_cost(landlord_rent=D("-0.01")),
+    ),
+    ConstraintCase(
+        "store_costs_other_monthly_cost_not_negative",
+        lambda: new_store_cost(other_monthly_cost=D("0.00")),
+        lambda: new_store_cost(other_monthly_cost=D("-0.01")),
+    ),
+    ConstraintCase(
+        # A one-day row is allowed (effective_to is inclusive); a row ending before it
+        # starts is not.
+        "store_costs_effective_order",
+        lambda: new_store_cost(effective_from=date(2025, 1, 1), effective_to=date(2025, 1, 1)),
+        lambda: new_store_cost(effective_from=date(2025, 1, 2), effective_to=date(2025, 1, 1)),
+    ),
+    ConstraintCase(
+        "store_costs_store_from_unique",
+        unique_pair(
+            new_store_cost,
+            {"effective_from": date(2025, 1, 1), "effective_to": date(2025, 12, 31)},
+            {"store": lambda row: row.store, "effective_from": date(2026, 1, 1)},
+        ),
+        unique_pair(
+            new_store_cost,
+            {"effective_from": date(2025, 1, 1), "effective_to": date(2025, 12, 31)},
+            {
+                "store": lambda row: row.store,
+                "effective_from": date(2025, 1, 1),
+                "effective_to": date(2025, 6, 1),
+            },
+        ),
+    ),
+    ConstraintCase(
+        "store_costs_one_open_row",
+        unique_pair(
+            new_store_cost,
+            {"effective_from": date(2025, 1, 1), "effective_to": date(2025, 12, 31)},
+            {"store": lambda row: row.store, "effective_from": date(2026, 1, 1)},
+        ),
+        unique_pair(
+            new_store_cost,
+            {"effective_from": date(2025, 1, 1)},
+            {"store": lambda row: row.store, "effective_from": date(2026, 1, 1)},
+        ),
+    ),
+    # deposit_resolutions (PLAN-010b D7)
+    ConstraintCase(
+        "deposit_resolutions_amount_positive",
+        lambda: new_deposit_resolution(amount=D("0.01")),
+        lambda: new_deposit_resolution(amount=D("0.00")),
+    ),
+    ConstraintCase(
+        "deposit_resolutions_withheld_amount_not_negative",
+        lambda: new_deposit_resolution(withheld_amount=D("0.00")),
+        lambda: new_deposit_resolution(withheld_amount=D("-0.01")),
+    ),
+    ConstraintCase(
+        "deposit_resolutions_note_not_blank",
+        new_deposit_resolution,
+        lambda: new_deposit_resolution(note=" \n "),
+    ),
+    ConstraintCase(
+        "deposit_resolutions_method_iff_refunded",
+        lambda: new_deposit_resolution(kind="refunded", method="zelle"),
+        lambda: new_deposit_resolution(kind="refunded", method=""),
+    ),
+    ConstraintCase(
+        "deposit_resolutions_to_lease_iff_transferred",
+        lambda: new_deposit_resolution(kind="transferred", method="", to_lease=saved(new_lease())),
+        lambda: new_deposit_resolution(kind="transferred", method="", to_lease=None),
+    ),
+    ConstraintCase(
+        "deposit_resolutions.setup_charge_id",
+        unique_pair(new_deposit_resolution, {}, {}),
+        unique_pair(new_deposit_resolution, {}, {"setup_charge": lambda row: row.setup_charge}),
+        column="setup_charge_id",
+    ),
     # insurance_charges
     ConstraintCase(
         "insurance_charges_lease_year_unique",
@@ -608,6 +779,16 @@ LEDGER_CASES: list[ConstraintCase] = [
         )(),
     ),
     ConstraintCase(
+        # Partial: any number of invoices without a setup charge; one per charge.
+        "invoices_one_per_setup_charge",
+        unique_pair(new_invoice, {}, {}),
+        lambda: unique_pair(
+            new_invoice,
+            {"setup_charge": saved(new_setup_charge())},
+            {"setup_charge": lambda row: row.setup_charge},
+        )(),
+    ),
+    ConstraintCase(
         "invoices_total_is_subtotal_plus_tax",
         lambda: new_invoice(subtotal=D("0.10"), tax=D("0.20"), total=D("0.30")),
         lambda: new_invoice(subtotal=D("0.10"), tax=D("0.20"), total=D("0.31")),
@@ -686,6 +867,32 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_payment(method="wire", note="   "),
     ),
     ConstraintCase(
+        "payments_setup_kind_iff_setup_charge",
+        lambda: new_payment(kind="setup", setup_charge=saved(new_setup_charge())),
+        lambda: new_payment(kind="setup", setup_charge=None),
+    ),
+    ConstraintCase(
+        "payments_setup_charge_only_target",
+        lambda: new_payment(kind="setup", setup_charge=saved(new_setup_charge())),
+        lambda: new_payment(
+            kind="setup",
+            setup_charge=saved(new_setup_charge()),
+            rent_charge=saved(new_rent_charge()),
+        ),
+    ),
+    ConstraintCase(
+        "payments_refund_deposit_manual",
+        lambda: new_payment(
+            kind="refund_deposit",
+            method="wire",
+            note="Deposit returned by wire.",
+            setup_charge=saved(new_setup_charge()),
+        ),
+        lambda: new_payment(
+            kind="refund_deposit", method="ach", setup_charge=saved(new_setup_charge())
+        ),
+    ),
+    ConstraintCase(
         "payments_resolved_return_has_note",
         lambda: new_payment(
             method="ach",
@@ -757,6 +964,55 @@ EXTRA_REJECTIONS: list[ConstraintCase] = [
         lambda: new_invoice(
             insurance_charge=saved(new_insurance_charge()),
             charge_adjustment=saved(new_adjustment()),
+        ),
+    ),
+    ConstraintCase(
+        "invoices_at_most_one_source",
+        new_invoice,
+        lambda: new_invoice(
+            setup_charge=saved(new_setup_charge()), rent_charge=saved(new_rent_charge())
+        ),
+    ),
+    ConstraintCase(
+        "setup_charges_waived_has_note",
+        new_setup_charge,
+        lambda: new_setup_charge(status="owed", waived_at=datetime(2026, 10, 1, tzinfo=UTC)),
+    ),
+    ConstraintCase(
+        "setup_charges_waived_has_note",
+        new_setup_charge,
+        lambda: new_setup_charge(status="waived", waive_note="No date."),
+    ),
+    ConstraintCase(
+        "payments_setup_kind_iff_setup_charge",
+        new_payment,
+        lambda: new_payment(kind="rent", setup_charge=saved(new_setup_charge())),
+    ),
+    ConstraintCase(
+        "deposit_resolutions_method_iff_refunded",
+        lambda: new_deposit_resolution(kind="withheld", method=""),
+        lambda: new_deposit_resolution(kind="withheld", method="wire"),
+    ),
+    ConstraintCase(
+        "deposit_resolutions_method_iff_refunded",
+        new_deposit_resolution,
+        lambda: new_deposit_resolution(kind="refunded", method="ach"),
+    ),
+    ConstraintCase(
+        "deposit_resolutions_to_lease_iff_transferred",
+        new_deposit_resolution,
+        lambda: new_deposit_resolution(to_lease=saved(new_lease())),
+    ),
+    ConstraintCase(
+        "payments_refund_deposit_manual",
+        new_payment,
+        lambda: new_payment(
+            kind="refund_deposit",
+            method="other",
+            note="Paid back.",
+            setup_charge=saved(new_setup_charge()),
+            is_refund=True,
+            parent_payment=saved(new_payment()),
         ),
     ),
 ]

@@ -1,0 +1,363 @@
+"""Deposit resolution at the end of a lease (docs/qa/PLAN-010b-setup-fees-store-costs-pnl.md
+D7, D12).
+
+A deposit is a setup charge whose fee type is refundable: money held, never revenue.
+Once its lease has ended, an admin resolves it once (:func:`resolve_deposit`, one
+``deposit_resolutions`` row per deposit):
+
+- ``refunded``: the amount is paid back by Zelle, wire or other; a ``refund_deposit``
+  payment (money out, never a provider refund) is written with the mandatory note.
+- ``withheld``: the business keeps the whole paid deposit; nothing is written to
+  payments. To keep only part of it, the admin picks ``refunded`` or ``transferred`` with
+  the amount given back, and the rest is recorded as withheld on the same row.
+- ``transferred``: the amount moves to another lease of the same operator that has not
+  ended: a ``security_deposit`` setup charge is created there with ``price=amount`` and
+  no cost, paid by a ``setup`` payment of method ``other`` with the note "Deposit
+  transferred from <store label> lease", so its balance derives from payments like
+  every other charge.
+
+``withheld_amount`` is the part of the paid deposit the business keeps: paid less the
+amount for a refund or a transfer, the amount itself when withheld. "Paid" is the
+deposit's settled ``setup`` payments less their settled refunds. Every rule is checked
+before anything is written, under the deposit's row lock (and the target lease's for a
+transfer); a refusal is one sentence and writes nothing. Every resolution is audited
+(entity ``setup_charge``). No call reaches the payment provider.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+from typing import Any
+
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+
+from ledger.models import (
+    MANUAL_PAYMENT_METHODS,
+    AuditLog,
+    DepositResolution,
+    DepositResolutionKind,
+    FeeType,
+    Lease,
+    Payment,
+    PaymentKind,
+    PaymentMethod,
+    PaymentStatus,
+    SetupCharge,
+    SetupChargeStatus,
+)
+from ledger.services import setup_charges
+from ledger.services.rent_run import CENT, MONEY_MAX
+from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
+
+DEPOSIT_FEE_CODE = "security_deposit"
+TRANSFER_NOTE = "Deposit transferred from {store} lease"
+
+# --- Fixed sentences ------------------------------------------------------------------
+
+KIND_INVALID = "Choose refunded, withheld or transferred."
+AMOUNT_NOT_POSITIVE = "The amount must be more than zero."
+NOT_CENTS = "The amount must have at most two decimals."
+TOO_LARGE = "The amount is too large."
+NOTE_REQUIRED = "A note is required: say what happened to the deposit."
+DATE_FUTURE = "The date cannot be in the future."
+METHOD_REQUIRED = "Choose Zelle, wire or other: how the deposit was paid back."
+METHOD_NOT_REFUND = "A method is given for a refund only. Nothing was saved."
+TARGET_REQUIRED = "Choose the lease the deposit moves to."
+TARGET_NOT_TRANSFER = "A lease to move the deposit to is given for a transfer only."
+NOT_REFUNDABLE = (
+    "Only a deposit can be resolved: this fee type is not refundable. Nothing was saved."
+)
+LEASE_NOT_ENDED = "The lease has not ended: set its end date first. Nothing was saved."
+ALREADY_RESOLVED = "This deposit is already resolved. Nothing was saved."
+ABOVE_PAID = "The amount is more than was paid on the deposit (${paid}). Nothing was saved."
+WITHHELD_PART = (
+    "To keep part of the deposit, choose refunded or transferred with the amount given back; "
+    "the rest is recorded as withheld. Nothing was saved."
+)
+TARGET_OTHER_OPERATOR = "A deposit moves only to a lease of the same operator. Nothing was saved."
+TARGET_ENDED = "A deposit cannot move to a lease that has ended. Nothing was saved."
+TARGET_HAS_DEPOSIT = "That lease already has a security deposit charge. Nothing was saved."
+NO_DEPOSIT_TYPE = "The security deposit fee type is missing. Nothing was saved."
+DONE = {
+    DepositResolutionKind.REFUNDED: "Deposit refunded.",
+    DepositResolutionKind.WITHHELD: "Deposit withheld.",
+    DepositResolutionKind.TRANSFERRED: "Deposit transferred.",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class Outcome:
+    ok: bool
+    message: str
+    #: The form field a refusal belongs to (``None``: the whole form).
+    field: str | None = None
+    resolution: DepositResolution | None = None
+
+
+def _refused(message: str, field: str | None = None) -> Outcome:
+    return Outcome(False, message, field)
+
+
+# --- Reads ----------------------------------------------------------------------------
+
+
+def is_deposit(charge: SetupCharge) -> bool:
+    return bool(charge.fee_type.refundable)
+
+
+def can_resolve(charge: SetupCharge) -> bool:
+    """Whether the lease page offers "Resolve deposit" for this charge."""
+    return (
+        is_deposit(charge)
+        and charge.lease.ended_on is not None
+        and not DepositResolution.objects.filter(setup_charge=charge).exists()
+    )
+
+
+def target_leases(charge: SetupCharge) -> list[Lease]:
+    """Leases a deposit may move to: the same operator's other leases not ended."""
+    if charge.lease.operator_id is None:
+        return []
+    return list(
+        Lease.objects.filter(operator_id=charge.lease.operator_id, ended_on__isnull=True)
+        .exclude(pk=charge.lease_id)
+        .select_related("store")
+        .order_by("store__external_label", "started_on", "id")
+    )
+
+
+# --- The resolution -------------------------------------------------------------------
+
+
+def _shape_refusal(
+    kind: str,
+    amount: Decimal,
+    resolved_on: date,
+    method: str,
+    note: str,
+    to_lease: Lease | None,
+    today: date,
+) -> Outcome | None:
+    """The first rule broken before any row is read, or ``None``. ``note`` is visible."""
+    if kind not in DepositResolutionKind.values:
+        return _refused(KIND_INVALID, "kind")
+    if not isinstance(amount, Decimal) or not amount.is_finite() or amount <= 0:
+        return _refused(AMOUNT_NOT_POSITIVE, "amount")
+    if amount != amount.quantize(CENT):
+        return _refused(NOT_CENTS, "amount")
+    if amount > MONEY_MAX:
+        return _refused(TOO_LARGE, "amount")
+    if resolved_on > today:
+        return _refused(DATE_FUTURE, "resolved_on")
+    if not note:
+        return _refused(NOTE_REQUIRED, "note")
+    try:
+        validate_no_payment_data(note)
+    except ValidationError:
+        return _refused(PAYMENT_DATA_MESSAGE, "note")
+    refund = kind == DepositResolutionKind.REFUNDED
+    if refund and method not in MANUAL_PAYMENT_METHODS:
+        return _refused(METHOD_REQUIRED, "method")
+    if not refund and method:
+        return _refused(METHOD_NOT_REFUND, "method")
+    transfer = kind == DepositResolutionKind.TRANSFERRED
+    if transfer and to_lease is None:
+        return _refused(TARGET_REQUIRED, "to_lease")
+    if not transfer and to_lease is not None:
+        return _refused(TARGET_NOT_TRANSFER, "to_lease")
+    return None
+
+
+def resolve_deposit(
+    setup_charge: SetupCharge,
+    kind: str,
+    amount: Decimal,
+    resolved_on: date,
+    method: str,
+    note: str,
+    to_lease: Lease | None,
+    actor: User | None,
+    *,
+    today: date | None = None,
+) -> Outcome:
+    """Resolve a deposit once its lease has ended (D7); see the module for the rules."""
+    text = visible_text(note or "")
+    method = (method or "").strip()
+    refused = _shape_refusal(
+        kind, amount, resolved_on, method, text, to_lease, today or timezone.localdate()
+    )
+    if refused is not None:
+        return refused
+    try:
+        with transaction.atomic():
+            charge = (
+                SetupCharge.objects.select_for_update(of=("self",))
+                .select_related("fee_type", "lease", "lease__store")
+                .get(pk=setup_charge.pk)
+            )
+            refused = _charge_refusal(charge, kind, amount)
+            if refused is not None:
+                return refused
+            paid = setup_charges.settled(charge)
+            target: Lease | None = None
+            if to_lease is not None:
+                target = Lease.objects.select_for_update().get(pk=to_lease.pk)
+                refused = _target_refusal(charge, target)
+                if refused is not None:
+                    return refused
+            resolution = DepositResolution.objects.create(
+                setup_charge=charge,
+                kind=kind,
+                amount=amount,
+                withheld_amount=amount if kind == DepositResolutionKind.WITHHELD else paid - amount,
+                resolved_on=resolved_on,
+                method=method,
+                note=text,
+                to_lease=target,
+                created_by=actor,
+            )
+            effects = _write_effects(resolution, charge, target, actor)
+            AuditLog.objects.create(
+                actor=actor,
+                action=f"setup_charge.deposit_{kind}",
+                entity_type=setup_charges.ENTITY_SETUP_CHARGE,
+                entity_id=str(charge.pk),
+                before={"paid": str(paid)},
+                after={**_state(resolution), **effects},
+            )
+    except IntegrityError:
+        # A concurrent resolution of the same deposit committed first.
+        return _refused(ALREADY_RESOLVED)
+    except ValidationError:
+        # The card-number guard on save; the transaction is rolled back.
+        return _refused(PAYMENT_DATA_MESSAGE, "note")
+    return Outcome(True, DONE[DepositResolutionKind(kind)], resolution=resolution)
+
+
+def _charge_refusal(charge: SetupCharge, kind: str, amount: Decimal) -> Outcome | None:
+    if not charge.fee_type.refundable:
+        return _refused(NOT_REFUNDABLE)
+    if charge.lease.ended_on is None:
+        return _refused(LEASE_NOT_ENDED)
+    if DepositResolution.objects.filter(setup_charge=charge).exists():
+        return _refused(ALREADY_RESOLVED)
+    paid = setup_charges.settled(charge)
+    if amount > paid:
+        return _refused(ABOVE_PAID.format(paid=paid), "amount")
+    if kind == DepositResolutionKind.WITHHELD and amount != paid:
+        return _refused(WITHHELD_PART, "amount")
+    return None
+
+
+def _target_refusal(charge: SetupCharge, target: Lease) -> Outcome | None:
+    if charge.lease.operator_id is None or target.operator_id != charge.lease.operator_id:
+        return _refused(TARGET_OTHER_OPERATOR, "to_lease")
+    if target.ended_on is not None:
+        return _refused(TARGET_ENDED, "to_lease")
+    deposit_type = FeeType.objects.filter(code=DEPOSIT_FEE_CODE).first()
+    if deposit_type is None:
+        return _refused(NO_DEPOSIT_TYPE)
+    if SetupCharge.objects.filter(lease=target, fee_type=deposit_type, legacy=False).exists():
+        return _refused(TARGET_HAS_DEPOSIT, "to_lease")
+    return None
+
+
+def _write_effects(
+    resolution: DepositResolution,
+    charge: SetupCharge,
+    target: Lease | None,
+    actor: User | None,
+) -> dict[str, Any]:
+    """The payments a resolution writes; the identifiers go in the audit row."""
+    if resolution.kind == DepositResolutionKind.REFUNDED:
+        payment = _payment(
+            charge,
+            PaymentKind.REFUND_DEPOSIT,
+            resolution.method,
+            resolution.amount,
+            resolution.resolved_on,
+            resolution.note,
+            actor,
+        )
+        return {"payment": str(payment.pk)}
+    if resolution.kind == DepositResolutionKind.TRANSFERRED and target is not None:
+        received = SetupCharge.objects.create(
+            lease=target,
+            fee_type=FeeType.objects.get(code=DEPOSIT_FEE_CODE),
+            cost=None,
+            price=resolution.amount,
+            due_date=resolution.resolved_on,
+            status=SetupChargeStatus.OWED,
+        )
+        payment = _payment(
+            received,
+            PaymentKind.SETUP,
+            PaymentMethod.OTHER,
+            resolution.amount,
+            resolution.resolved_on,
+            TRANSFER_NOTE.format(store=charge.lease.store.external_label),
+            actor,
+        )
+        setup_charges.recompute(received)
+        AuditLog.objects.create(
+            actor=actor,
+            action=setup_charges.CREATED_ACTION,
+            entity_type=setup_charges.ENTITY_SETUP_CHARGE,
+            entity_id=str(received.pk),
+            before=None,
+            after={
+                **setup_charges.charge_state(received),
+                "transferred_from": str(charge.pk),
+                "payment": str(payment.pk),
+            },
+        )
+        return {"target_charge": str(received.pk), "payment": str(payment.pk)}
+    return {}
+
+
+def _payment(
+    charge: SetupCharge,
+    kind: str,
+    method: str,
+    amount: Decimal,
+    on: date,
+    note: str,
+    actor: User | None,
+) -> Payment:
+    payment = Payment(
+        setup_charge=charge,
+        kind=kind,
+        method=method,
+        amount=amount,
+        status=PaymentStatus.SETTLED,
+        initiated_on=on,
+        settled_on=on,
+        note=note,
+        recorded_by=actor,
+    )
+    payment.save()
+    return payment
+
+
+def _state(resolution: DepositResolution) -> dict[str, Any]:
+    """The audited fields of a resolution."""
+    return {
+        "resolution": str(resolution.pk),
+        "kind": resolution.kind,
+        "amount": str(resolution.amount),
+        "withheld_amount": str(resolution.withheld_amount),
+        "resolved_on": resolution.resolved_on.isoformat(),
+        "method": resolution.method,
+        "to_lease": str(resolution.to_lease_id) if resolution.to_lease_id else None,
+        "note": resolution.note,
+    }
+
+
+def lease_label(lease: Lease) -> str:
+    started = lease.started_on.isoformat() if lease.started_on else "no start date"
+    return f"Lease {lease.store.external_label} from {started}"

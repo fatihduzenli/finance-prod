@@ -8,12 +8,32 @@
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
-    {% for field in form.visible_fields %}
+    {% for field in form.lease_fields %}
       <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
       {{ field.errors }}
       {{ field }}
       {% if field.help_text %}<br><span class="muted">{{ field.help_text }}</span>{% endif %}
     {% endfor %}
+    {% if not lease %}
+      <h2>Setup checklist</h2>
+      <p class="muted">Tick each one-time item the operator is charged. Saving creates the lease and the ticked setup charges together. The cost is what the item costs the business (empty: unknown); the price is what the operator pays. An empty due date is the lease's start date. More items can be added from the lease page later.</p>
+      <table id="setup-checklist">
+        <thead><tr><th>Charge</th><th>Cost</th><th>Price</th><th>Vendor</th><th>Due date</th></tr></thead>
+        <tbody>
+          {% for row in form.setup_rows %}
+            <tr id="setup-{{ row.fee_type.code }}">
+              <td><label for="{{ row.tick.id_for_label }}">{{ row.tick }} {{ row.fee_type.name }}</label>{% if row.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{{ row.tick.errors }}</td>
+              <td>{{ row.cost.errors }}{{ row.cost }}</td>
+              <td>{{ row.price.errors }}{{ row.price }}</td>
+              <td>{{ row.vendor.errors }}{{ row.vendor }}</td>
+              <td>{{ row.due_date.errors }}{{ row.due_date }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="muted">No active fee type.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-lease">Save</button></p>
   </form>
 {% endblock %}

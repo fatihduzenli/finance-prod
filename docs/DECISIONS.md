@@ -408,3 +408,50 @@ database queue proves insufficient, and never Azure Managed Redis.*
 - Known gap: the daily summary email (Prompt 10 item 3) waits for the Phase 7 email
   provider; until then the reconciliation page is the daily report and Sentry's fatal
   alert is the notification.
+
+## ADR-0007 — Setup fees are charges with a cost side; a deposit is a liability; year-one insurance stays an insurance charge
+
+**Date:** 2026-10-05
+**Status:** Accepted (owner's Prompt 10b text of 2026-10-04; the first-year-insurance choice is Fable's and awaits the owner's confirmation)
+
+### Context
+
+The business charges each operator one-time setup items at a markup over its own cost, and pays
+the landlord a monthly rent the sheet never recorded. The sheet's Ins / Sign / "Deposit or
+Access" columns are operator-side balances only. Nothing in the app held a cost, so no margin
+could be shown.
+
+### Decision
+
+1. **`fee_types` catalogue, `setup_charges` per lease.** A setup charge has a `price` (what the
+   operator owes, collected through the existing payments ledger and, for ACH, a one-off Stax
+   invoice linked with the existing link action) and a `cost` (ours; null means unknown). Status
+   is derived from settled payments exactly as rent charges are. Nothing new is created on the
+   Stax side.
+2. **A security deposit is a liability, not revenue.** Refundable fee types are excluded from
+   every revenue figure and shown as "Deposits held". At lease end a deposit is resolved once:
+   refunded (a `refund_deposit` payment, money out, manual method, never a Stax refund),
+   withheld (revenue in the month of resolution) or transferred (a paid deposit on the
+   operator's other lease).
+3. **Year-one insurance stays an `insurance_charges` row** (ADR-0005) and its cost is
+   `insurance_premiums.cost` (300.00 for 2025 and 2026). The `first_year_insurance` fee type is
+   seeded **inactive** so a lease is never billed twice for the same year. The owner can activate
+   it in the admin if the business prefers the setup line; the insurance algorithm would then
+   need a rule to skip year one, which is a new decision.
+4. **`store_costs` is date-effective** (landlord rent, other monthly cost, landlord lease end),
+   one open row per store, no overlap. A store without a row has an **unknown** cost, never 0.
+   The owner's `Store_Costs_Template` is imported by `import_store_costs`, idempotently.
+5. **The P&L** (`/reports/pnl/`) shows billed and collected bases side by side, marks unknown
+   inputs instead of treating them as zero, highlights months a store costs money with no
+   operator, and never counts deposits, voided or returned payments, or waived charges.
+
+### Consequences
+
+- `payments` and `invoices` gain a fourth target (`setup_charge`); `PaymentKind` gains `setup`
+  and `refund_deposit`. The webhook transaction handler, the reconciliation, refunds, voids,
+  returns and the ledger all know the new target.
+- Step 13 imports the sheet's three balance columns as `setup_charges` with `legacy=true` and
+  `cost` unknown, then removes `store_balances`.
+- New dependency `openpyxl==3.1.5` (MIT), used by the importer only.
+- Known limitation: the payments-ledger "Deposits held" total is over the filtered set, not a
+  balance at a date; the P&L footer is the balance at the end of its range.

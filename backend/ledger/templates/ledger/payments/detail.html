@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% block title %}Payment{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:payments:list' %}">&larr; Payments</a>{% if charge %} · <a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Charge</a>{% endif %}</p>
+  <p><a href="{% url 'ledger:payments:list' %}">&larr; Payments</a>{% if charge %} · <a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Charge</a>{% elif setup_charge %} · <a href="{% url 'ledger:setup_charges:detail' pk=setup_charge.pk %}">Setup charge</a>{% endif %}</p>
   <h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of ${{ payment.amount }}</h1>
   {% if can_refund or can_void %}
     <p class="actions">
@@ -66,6 +66,15 @@
       <dt>Paid</dt><dd id="charge-paid">${{ charge.amount_paid }}</dd>
       <dt>Balance</dt><dd id="charge-balance">${{ charge.balance }}</dd>
       <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
+    </dl>
+    {% if charge_review %}<p><strong>{{ charge_review }}</strong></p>{% endif %}
+  {% elif setup_charge %}
+    <dl id="payment-setup-charge">
+      <dt>Charge</dt><dd><a href="{% url 'ledger:setup_charges:detail' pk=setup_charge.pk %}">{{ setup_charge.fee_type.name }}</a> <span class="muted">({{ payment.get_kind_display }})</span>{% if setup_charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}</dd>
+      <dt>Price</dt><dd id="charge-due">${{ setup_charge.price }}</dd>
+      <dt>Paid</dt><dd id="charge-paid">${{ setup_charge.amount_paid }}</dd>
+      <dt>Balance</dt><dd id="charge-balance">${{ setup_charge.balance }}</dd>
+      <dt>Status</dt><dd id="charge-status">{{ setup_charge.get_status_display }}</dd>
     </dl>
     {% if charge_review %}<p><strong>{{ charge_review }}</strong></p>{% endif %}
   {% elif payment.insurance_charge %}

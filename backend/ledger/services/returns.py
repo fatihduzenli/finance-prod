@@ -21,6 +21,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from ledger.models import AuditLog, Operator, Payment, PaymentStatus, Store
+from ledger.services.payments_ledger import charge_lease
 
 ENTITY_PAYMENT = "payment"
 
@@ -58,6 +59,8 @@ def open_returns() -> QuerySet[Payment]:
             "rent_charge__lease__operator",
             "insurance_charge__lease__store",
             "insurance_charge__lease__operator",
+            "setup_charge__lease__store",
+            "setup_charge__lease__operator",
         )
         .order_by("returned_at", "created_at", "id")
     )
@@ -65,13 +68,7 @@ def open_returns() -> QuerySet[Payment]:
 
 def row(payment: Payment) -> ReturnRow:
     """What the queue shows of one returned payment."""
-    lease = (
-        payment.rent_charge.lease
-        if payment.rent_charge is not None
-        else payment.insurance_charge.lease
-        if payment.insurance_charge is not None
-        else None
-    )
+    lease = charge_lease(payment)
     operator = payment.invoice.operator if payment.invoice is not None else None
     if operator is None and lease is not None:
         operator = lease.operator

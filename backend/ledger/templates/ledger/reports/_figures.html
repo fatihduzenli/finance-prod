@@ -1,0 +1,9 @@
+{% comment %}The money cells of a P&L row, group or total ("item"). An unknown amount reads "unknown".{% endcomment %}<td class="money">{{ item.rent_billed }}</td>
+<td class="money">{{ item.rent_collected }}</td>
+<td class="money">{{ item.fees_billed }}</td>
+<td class="money">{{ item.fees_collected }}{% if item.withheld_deposits %}<br><span class="muted">incl. {{ item.withheld_deposits }} withheld deposit</span>{% endif %}</td>
+<td class="money">{% if item.landlord_rent is None %}<span class="unknown">unknown</span>{% else %}{{ item.landlord_rent }}{% endif %}</td>
+<td class="money">{% if item.other_costs is None %}<span class="unknown">unknown</span>{% else %}{{ item.other_costs }}{% endif %}</td>
+<td class="money">{% if item.fee_costs is None %}<span class="unknown">unknown</span>{% else %}{{ item.fee_costs }}{% endif %}</td>
+<td class="money margin-billed">{% if item.margin_billed is None %}<span class="unknown">unknown</span>{% else %}{{ item.margin_billed }}{% endif %}</td>
+<td class="money margin-collected">{% if item.margin_collected is None %}<span class="unknown">unknown</span>{% else %}{{ item.margin_collected }}{% endif %}</td>

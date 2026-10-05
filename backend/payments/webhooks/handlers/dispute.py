@@ -8,7 +8,7 @@ re-fetched to confirm it exists; the charge of our payment for it is flagged for
 from __future__ import annotations
 
 import payments
-from ledger.models import AuditLog, InsuranceCharge, RentCharge
+from ledger.models import AuditLog, InsuranceCharge, RentCharge, SetupCharge
 from payments.models import WebhookOutcome
 from payments.provider import mask_identifier
 from payments.webhooks.events import ignored
@@ -16,6 +16,7 @@ from payments.webhooks.handlers.common import (
     ENTITY_CHARGE,
     ENTITY_INSURANCE_CHARGE,
     ENTITY_PAYMENT,
+    ENTITY_SETUP_CHARGE,
     NO_OBJECT_ID,
     NOT_AT_PROVIDER,
     audit,
@@ -44,13 +45,16 @@ def handle(event_type: str, provider_object_id: str) -> str:
     )
     if recorded.exists():
         return WebhookOutcome.PROCESSED  # a repeat of the same event writes nothing
-    charge: RentCharge | InsuranceCharge | None = None
+    charge: RentCharge | InsuranceCharge | SetupCharge | None = None
     if payment.rent_charge_id is not None:
         charge = RentCharge.objects.select_for_update().get(pk=payment.rent_charge_id)
         entity = ENTITY_CHARGE
     elif payment.insurance_charge_id is not None:
         charge = InsuranceCharge.objects.select_for_update().get(pk=payment.insurance_charge_id)
         entity = ENTITY_INSURANCE_CHARGE
+    elif payment.setup_charge_id is not None:
+        charge = SetupCharge.objects.select_for_update().get(pk=payment.setup_charge_id)
+        entity = ENTITY_SETUP_CHARGE
     if charge is None:
         audit("payment.disputed", ENTITY_PAYMENT, payment.pk, None, context)
         return WebhookOutcome.PROCESSED

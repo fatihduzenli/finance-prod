@@ -1,0 +1,84 @@
+{% extends "finance/base.html" %}
+{% block title %}{{ charge.fee_type.name }} {{ lease.store.external_label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a></p>
+  <h1>{{ charge.fee_type.name }}{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">Legacy</span>{% endif %}{% if charge.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
+  {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
+
+  {% if can_record or can_link_invoice or can_edit or can_waive %}
+    <p class="actions">
+      {% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:setup_charges:payment' pk=charge.pk %}" id="record-payment">Record a payment</a>{% endif %}
+      {% if can_link_invoice %}<a class="btn" href="{% url 'ledger:setup_charges:link' pk=charge.pk %}" id="link-invoice">Link invoice</a>{% endif %}
+      {% if can_edit %}<a class="btn" href="{% url 'ledger:setup_charges:edit' pk=charge.pk %}" id="edit-charge">Edit</a>{% endif %}
+      {% if can_waive %}<a class="btn" href="{% url 'ledger:setup_charges:waive' pk=charge.pk %}" id="waive-charge">Waive</a>{% endif %}
+    </p>
+  {% endif %}
+  {% include "ledger/_job_status.html" %}
+  {% if can_retry_mark %}
+    <form method="post" action="{% url 'ledger:setup_charges:retry_mark' pk=charge.pk %}" class="actions js-single-submit">
+      {% csrf_token %}<button class="btn btn-primary" type="submit" id="retry-mark">Retry marking the invoice paid</button>
+    </form>
+  {% elif retry_wait_message %}
+    <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
+  {% endif %}
+
+  <dl>
+    <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
+    <dt>Operator</dt><dd>{{ lease.operator.display_name|default:"—" }}</dd>
+    <dt>Due</dt><dd id="due-date">{{ charge.due_date|date:"Y-m-d" }}</dd>
+    <dt>Vendor</dt><dd id="vendor">{{ charge.vendor|default:"—" }}</dd>
+    <dt>Cost</dt><dd id="cost">{% if charge.cost is not None %}${{ charge.cost }}{% else %}unknown{% endif %}</dd>
+    <dt>Price</dt><dd id="price">${{ charge.price }}</dd>
+    <dt>Paid</dt><dd id="amount-paid">${{ charge.amount_paid }}</dd>
+    <dt>Balance</dt><dd id="balance">${{ charge.balance }}</dd>
+    <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
+    {% if charge.waived_at %}<dt>Waived</dt><dd id="waived">{{ charge.waived_at|date:"Y-m-d" }} by {{ charge.waived_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.waive_note }}</span></dd>{% endif %}
+  </dl>
+
+  {% if resolution %}
+    <h2>Deposit resolution</h2>
+    <dl id="deposit-resolution">
+      <dt>Resolved</dt><dd id="resolution-kind">{{ resolution.get_kind_display }} on {{ resolution.resolved_on|date:"Y-m-d" }}{% if resolution.created_by %} by {{ resolution.created_by }}{% endif %}</dd>
+      <dt>Amount</dt><dd id="resolution-amount">${{ resolution.amount }}</dd>
+      {% if resolution.method %}<dt>Method</dt><dd id="resolution-method">{{ resolution.get_method_display }}</dd>{% endif %}
+      {% if resolution.to_lease %}<dt>Transferred to</dt><dd id="resolution-to-lease"><a href="{% url 'ledger:leases:detail' pk=resolution.to_lease.pk %}">Lease {{ resolution.to_lease.store.external_label }}</a></dd>{% endif %}
+      <dt>Withheld</dt><dd id="resolution-withheld">${{ resolution.withheld_amount }}</dd>
+      <dt>Note</dt><dd id="resolution-note" style="white-space:pre-wrap;">{{ resolution.note }}</dd>
+    </dl>
+  {% endif %}
+
+  <h2>Invoices</h2>
+  <table id="invoices">
+    <thead><tr><th>Number</th><th>Date</th><th>Total</th><th>Provider status</th></tr></thead>
+    <tbody>
+      {% for invoice in invoices %}
+        <tr><td>{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|date:"Y-m-d" }}</td><td>${{ invoice.total }}</td><td>{{ invoice.provider_status|default:"—" }}</td></tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">No invoice linked.{% if can_link_invoice %} A one-off invoice made on the payment provider's dashboard can be linked with "Link invoice".{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">Provider status is copied from the payment provider as it is.</p>
+
+  <h2>Payments</h2>
+  <table id="payments">
+    <thead><tr><th>Received</th><th>Kind</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Note</th><th>Recorded by</th></tr></thead>
+    <tbody>
+      {% for payment in payments %}
+        <tr>
+          <td><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">{{ payment.settled_on|date:"Y-m-d"|default:"—" }}</a></td>
+          <td>{{ payment.get_kind_display }}</td>
+          <td>{{ payment.get_method_display }}</td>
+          <td>{% if payment.is_refund or payment.kind == "refund_deposit" %}&minus;{% endif %}${{ payment.amount }}</td>
+          <td>{% if payment.is_refund %}<span class="badge">Refund</span> {% endif %}{{ payment.get_status_display }}</td>
+          <td>{{ payment.reference|default:"—" }}</td>
+          <td style="white-space:pre-wrap;">{{ payment.note }}</td>
+          <td>{{ payment.recorded_by|default:"—" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8" class="muted">No payments.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

@@ -59,6 +59,7 @@ All run from the repository root.
 | Queue the nightly reconciliation when it is due (the scheduled Container Apps job runs this; no Stax call; `STAX_CALLER` may be `none`) | `uv run python backend/manage.py reconcile --scheduled` |
 | Run a reconciliation at once inside the worker (prints counts; exit 1 on failure) | `STAX_CALLER=worker uv run python backend/manage.py reconcile` |
 | Test fixture: age a pending payment so the next reconciliation flags it (refused in production) | `uv run python backend/manage.py age_pending_payment --payment <id> --days 10` |
+| Import landlord rents and other store costs from the owner's template (`.csv` or `.xlsx`, sheet "Store costs"); idempotent; `--dry-run` writes nothing; exit 1 when any row was refused | `uv run python backend/manage.py import_store_costs <file> [--dry-run]` |
 | Register the app's webhooks with Stax (creates only missing ones; stores the IDs; prints event names and masked IDs, never the URL; refused when `APP_ENV=local`) | `uv run python backend/manage.py register_webhooks` |
 | Delete the app's webhook registrations at Stax by stored ID (refused when `APP_ENV=local`) | `uv run python backend/manage.py unregister_webhooks` |
 | Dev server without Stax (in-memory provider; `APP_ENV=local` only) | `STAX_PROVIDER=fake uv run python backend/manage.py runserver` |
@@ -266,7 +267,9 @@ limiter, breaker, retries, validation and failure budget; see
 at `/operators/` (list, search, detail, create, edit, archive, retry, manual link), with
 each new or edited operator linked to or created as a Stax customer, the boot-time
 environment check, and the reserved `documents` and `outbound_messages` tables; see
-[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). Prompt 10 (PLAN-010): the `jobs` table, the `worker` container app as the single Stax
+[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). Prompt 10b (PLAN-010b): setup fees, store costs, deposits and the P&L report at
+`/reports/pnl/`; see [`docs/qa/PLAN-010b-setup-fees-store-costs-pnl.md`](docs/qa/PLAN-010b-setup-fees-store-costs-pnl.md).
+Prompt 10 (PLAN-010): the `jobs` table, the `worker` container app as the single Stax
 caller, the nightly reconciliation (scheduled job queues, worker runs) and
 `/reconciliation/`; see [`docs/qa/PLAN-010-worker-and-reconciliation.md`](docs/qa/PLAN-010-worker-and-reconciliation.md)
 and ADR-0006. Current state and open defects: [`docs/STATUS.md`](docs/STATUS.md).

@@ -11,11 +11,14 @@ Rules kept here, not in the views:
   reference and has no refund that is not voided. The whole amount; the payment
   itself becomes ``voided`` (no new row, as the webhook handlers model a void).
 - Manual payments (wire, Zelle, other) were never provider transactions and have no
-  refund or void here.
+  refund or void here. A deposit refund (``refund_deposit``, PLAN-010b D4) is money
+  paid back by hand and is never refunded or voided.
+- A payment on a setup charge (kind ``setup``) made by ACH follows the rent rules; its
+  charge is locked and recomputed as a rent charge is.
 - The admin's confirmation (the exact-value checkbox) is required; without it nothing
   is sent.
 
-Both run under the row locks of the payment and its rent charge, held during the
+Both run under the row locks of the payment and its rent or setup charge, held during the
 provider call, so two admins confirming at once make one refund: the second sees the
 first refund's row and the smaller refundable amount. A form's ``creation_key`` is kept
 in the audit row; a resubmitted confirmation finds it and calls nothing.
@@ -52,11 +55,13 @@ from ledger.models import (
     ZERO,
     AuditLog,
     Payment,
+    PaymentKind,
     PaymentMethod,
     PaymentStatus,
     RentCharge,
+    SetupCharge,
 )
-from ledger.services import rent_run
+from ledger.services import rent_run, setup_charges
 from payments import invoice_sync, operator_sync
 from payments.errors import ProviderError, ProviderUnavailable
 from payments.provider import TRANSACTION_REFUND, TransactionRecord, mask_identifier
@@ -87,6 +92,7 @@ NOT_ACH = (
     "A wire, Zelle or other payment was never a provider transaction."
 )
 IS_REFUND = "A refund cannot itself be refunded or voided."
+IS_DEPOSIT_REFUND = "A deposit refund was paid back by hand; it cannot be refunded or voided."
 NO_REFERENCE = "The payment has no payment provider transaction on record."
 REFUND_NOT_SETTLED = "Only a settled payment can be refunded."
 NOTHING_REFUNDABLE = "Nothing is left to refund on this payment."
@@ -173,6 +179,8 @@ def refunded_amount(payment: Payment) -> Decimal:
 
 
 def _common_refusal(payment: Payment, reference: str) -> str:
+    if payment.kind == PaymentKind.REFUND_DEPOSIT:
+        return IS_DEPOSIT_REFUND
     if payment.is_refund:
         return IS_REFUND
     if payment.method != PaymentMethod.ACH:
@@ -254,7 +262,7 @@ def refund_payment(
             **_payment_state(payment),
             "refunded": str(facts.refunded),
             "refundable": str(facts.refundable),
-            "charge": rent_run.charge_state(charge) if charge is not None else None,
+            "charge": _charge_state(charge),
         }
         context = {
             "amount": str(amount),
@@ -283,8 +291,7 @@ def refund_payment(
         refund = transaction_handler.record_refund(payment, amount, record)
         invoice_changes, invoice_failure = _refresh_invoice(payment)
         refetch_failure = refetch_failure or invoice_failure
-        if charge is not None:
-            rent_run.recompute_charge(charge)
+        _recompute(charge)
         refund.refresh_from_db()
         after = {
             **_payment_state(payment),
@@ -294,7 +301,7 @@ def refund_payment(
             "provider_refund": mask_identifier(refund_id) if refund_id else None,
             "refunded": str(refunded_amount(payment)),
             "refundable": str(payment_facts(payment).refundable),
-            "charge": rent_run.charge_state(charge) if charge is not None else None,
+            "charge": _charge_state(charge),
             "invoice_changes": invoice_changes,
             "refetch_failure": refetch_failure or None,
         }
@@ -339,7 +346,7 @@ def void_payment(
         reference = facts.reference
         before = {
             **_payment_state(payment),
-            "charge": rent_run.charge_state(charge) if charge is not None else None,
+            "charge": _charge_state(charge),
         }
         context = {
             "amount": str(payment.amount),
@@ -362,14 +369,13 @@ def void_payment(
         transaction_handler.record_void(payment, record)
         invoice_changes, invoice_failure = _refresh_invoice(payment)
         refetch_failure = refetch_failure or invoice_failure
-        if charge is not None:
-            rent_run.recompute_charge(charge)
+        _recompute(charge)
         payment.refresh_from_db()
         after = {
             **_payment_state(payment),
             **context,
             "provider_shows_voided": record.is_voided,
-            "charge": rent_run.charge_state(charge) if charge is not None else None,
+            "charge": _charge_state(charge),
             "invoice_changes": invoice_changes,
             "refetch_failure": refetch_failure or None,
         }
@@ -383,10 +389,27 @@ def void_payment(
 # --- Helpers ---------------------------------------------------------------------------
 
 
-def _lock_charge(payment: Payment) -> RentCharge | None:
-    if payment.rent_charge_id is None:
-        return None
-    return RentCharge.objects.select_for_update().get(pk=payment.rent_charge_id)
+def _lock_charge(payment: Payment) -> RentCharge | SetupCharge | None:
+    if payment.rent_charge_id is not None:
+        return RentCharge.objects.select_for_update().get(pk=payment.rent_charge_id)
+    if payment.setup_charge_id is not None:
+        return SetupCharge.objects.select_for_update().get(pk=payment.setup_charge_id)
+    return None
+
+
+def _recompute(charge: RentCharge | SetupCharge | None) -> None:
+    if isinstance(charge, RentCharge):
+        rent_run.recompute_charge(charge)
+    elif isinstance(charge, SetupCharge):
+        setup_charges.recompute(charge)
+
+
+def _charge_state(charge: RentCharge | SetupCharge | None) -> dict[str, Any] | None:
+    if isinstance(charge, RentCharge):
+        return rent_run.charge_state(charge)
+    if isinstance(charge, SetupCharge):
+        return setup_charges.charge_state(charge)
+    return None
 
 
 def _key_used(payment: Payment, actions: tuple[str, ...], creation_key: uuid.UUID) -> bool:
@@ -446,6 +469,7 @@ def _payment_state(payment: Payment) -> dict[str, Any]:
         "amount": str(payment.amount),
         "is_refund": payment.is_refund,
         "rent_charge": str(payment.rent_charge_id) if payment.rent_charge_id else None,
+        "setup_charge": str(payment.setup_charge_id) if payment.setup_charge_id else None,
         "invoice": str(payment.invoice_id) if payment.invoice_id else None,
     }
 

@@ -546,3 +546,18 @@ the login page myself." The condition for starting Prompt 4 is met.
   no second row. The `age_pending_payment` + Sentry proof waits for a pending ACH payment (Stax
   ACH still blocked). **Checkpoint 10 closed** except that item.
 - Next: Prompt 10b (setup fees, store costs, deposits, P&L), owner-requested, application only.
+
+## Update, 2026-10-05, PLAN-010b (setup fees, store costs, deposits, P&L) — QA PASS, not pushed
+
+- Built in three batches plus two rework cycles: fee catalogue and per-lease setup charges with
+  the lease-creation checklist and their own pages; deposits as liabilities with refund/withhold/
+  transfer at lease end (plus the new **End lease** action); date-effective store costs with the
+  template importer (`import_store_costs`, `.csv`/`.xlsx`, idempotent, dry run); premium cost;
+  `/reports/pnl/` with CSV. QA report `docs/qa/QA-010b-setup-fees-store-costs-pnl.md`: PASS,
+  3,232 tests on PostgreSQL; new dependency `openpyxl==3.1.5`.
+- **Owner to confirm (ADR-0007 §3):** `first_year_insurance` is seeded inactive because year one
+  is already billed by the lease's first insurance charge; activate it only with a rule change.
+- Rollout: one "push" (CI deploys; migrations ledger 0012–0014 and payments 0008–0009 apply at
+  web start; no infra change). Then the owner's six done-when clicks (RUNBOOK §11; the two-row
+  import runs inside the web container against `backend/tests/fixtures/store_costs/two_rows.xlsx`,
+  after stores 1796 and 437 exist with those numbers).

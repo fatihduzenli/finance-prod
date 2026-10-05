@@ -97,6 +97,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:leases:enrol": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:leases:pause": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:leases:resume": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Ending a lease (PLAN-010b Batch C): admin. The view refuses the form's GET below
+    # admin too.
+    "ledger:leases:end": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Rent run and manual payments (PLAN-007 §4.1, D10): billing.
     "ledger:run:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:run:match": RouteRule(min_role=Role.BILLING, methods=POST),
@@ -118,6 +121,21 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # billing. The view refuses the page's GET below billing too.
     "ledger:reconciliation:run": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:reconciliation:resolve": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Setup charges (PLAN-010b D12): adding, editing, recording a payment, retrying the
+    # marking and linking an invoice need billing; waiving needs admin. The views refuse
+    # the forms' GET below the same role.
+    "ledger:leases:add_setup_charge": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:setup_charges:payment": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:setup_charges:retry_mark": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:setup_charges:link": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:setup_charges:edit": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:setup_charges:waive": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Deposit resolution at lease end (PLAN-010b D7, D12): admin. The view refuses the
+    # form's GET below admin too.
+    "ledger:leases:resolve_deposit": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Setting a store's landlord rent (PLAN-010b D8, D12): billing. The view refuses the
+    # form's GET below billing too.
+    "ledger:stores:set_cost": RouteRule(min_role=Role.BILLING, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every
@@ -136,6 +154,9 @@ ADMIN_MODEL_PREFIX_RULES: dict[str, RouteRule] = {
     "admin:ledger_lease_": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Registered read-only (PLAN-008 D8).
     "admin:payments_webhookevent_": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # The fee catalogue and the insurance premiums, edited in the admin (PLAN-010b D12).
+    "admin:ledger_feetype_": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "admin:ledger_insurancepremium_": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Routes that take no unsafe method at all. GET is open to any verified user (the view
@@ -178,6 +199,12 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:payments:detail",
         # The reconciliation page; the view itself requires billing (PLAN-010 D10).
         "ledger:reconciliation:page",
+        # The setup charge page: any verified role (PLAN-010b D6).
+        "ledger:setup_charges:detail",
+        # The profit and loss report and its CSV export: any verified role (PLAN-010b
+        # D11, D12).
+        "ledger:reports:pnl",
+        "ledger:reports:pnl_export",
     }
 )
 

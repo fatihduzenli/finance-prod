@@ -38,6 +38,8 @@ disagreement is written to `audit_log`.** Business fields are never overwritten 
 | The nightly reconciliation finds a transaction at Stax with no local payment | Row created through the webhook handler's own path; `payment_restored` mismatch; `audit_log` row. An orphaned `external_refs` row left by a deleted payment is removed first (audited). |
 | A deposit row names a transaction we hold no settled payment for, or a settled ACH payment of the last 14 days (at least 3 days old) is in no deposit | `deposit_unmatched` / `settled_payment_undeposited` mismatch for staff; nothing is written to the payment. Field names unverified until live data (TODO-VERIFY-030, 060). |
 | Stax's ACH rejection list names a payment no return webhook reached us for | The existing return path is applied from the re-fetched transaction (`returned`, charge reopened, returns queue); `return_missed_by_webhook` mismatch. A rejection naming no local payment is counted only (TODO-VERIFY-061). |
+| A deposit (refundable fee type) is paid | Held as a liability: excluded from every revenue figure (P&L, ledger totals); shown as "Deposits held". Resolved once at lease end: refunded (money out), withheld (revenue that month) or transferred (a paid deposit on the operator's other lease). |
+| A store has no `store_costs` row | Landlord rent and margin are **unknown**, never 0, on the store page and in the P&L; the row is flagged. |
 | A mismatch is resolved by staff | Note required (guarded, invisible characters do not count); `resolved_at`, `resolved_by`, `audit_log` row. The underlying data is not changed by resolving. |
 | A webhook body says an invoice is paid or a transaction settled | **Ignored.** Only the object re-fetched from Stax by ID is applied (Prompt 8). The body is stored, redacted, for the record. |
 | A wire, Zelle or other payment is recorded against a charge that has a Stax invoice | Our ledger keeps the real method. **Stax is told the invoice was paid "in cash"**, with the memo "Paid by <method> on <date>. <note>", because Stax offers no wire or Zelle method and this is what staff did by hand in the dashboard (owner Q19, 2026-10-02). Before marking, the invoice is re-fetched; if Stax already shows it paid, nothing is sent and the mismatch is recorded. A **partial** payment is not sent to Stax until the unit of `apply_balance` is verified (TODO-VERIFY-028); the charge is flagged. |
@@ -132,6 +134,7 @@ they implement.
 |---|---|---|
 | `id`, `updated_at` | System | |
 | `policy_year`, `amount` | App | Admin only |
+| `cost` | App | Admin only; our cost of the policy year (PLAN-010b D9); null = unknown, never 0 |
 
 ### insurance_charges
 | Field | Owner | Note |
@@ -165,6 +168,36 @@ they implement.
 | `store_id`, `kind`, `amount` | Import | Opening values from the sheet, sign as in the sheet |
 | `needs_review` | App | |
 
+Superseded by `setup_charges` with `legacy=true` (PLAN-010b D13); removed in Step 13.
+
+### fee_types
+| Field | Owner | Note |
+|---|---|---|
+| `id`, `created_at`, `updated_at` | System | |
+| `code`, `name`, `default_cost`, `default_price`, `refundable`, `active`, `sort_order` | App | Admin only. `refundable` marks a deposit (a liability). `first_year_insurance` is seeded inactive (ADR-0007) |
+
+### setup_charges
+| Field | Owner | Note |
+|---|---|---|
+| `id`, `created_at`, `updated_at` | System | |
+| `lease_id`, `fee_type_id`, `price`, `cost`, `vendor`, `due_date`, `note` | App | `price` is what the operator owes; `cost` is ours, null = unknown. Price locked once a payment exists |
+| `amount_paid`, `balance`, `status` | Derived | From settled payments, as `rent_charges`; `waived` set by the waive action |
+| `waived_at`, `waived_by_id`, `waive_note` | App | Admin; note mandatory |
+| `review_message`, `needs_review` | App / Stax | The provider marking's refusal text, class names only |
+| `legacy` | Import | Step 13 opening balances (D13) |
+
+### deposit_resolutions
+| Field | Owner | Note |
+|---|---|---|
+| `id`, `created_at` | System | |
+| `setup_charge_id`, `kind`, `amount`, `withheld_amount`, `resolved_on`, `method`, `note`, `to_lease_id`, `created_by_id` | App | Admin; once per deposit. `refunded` writes a `refund_deposit` payment; `transferred` creates a paid deposit on the target lease; `withheld` becomes revenue in its month |
+
+### store_costs
+| Field | Owner | Note |
+|---|---|---|
+| `id`, `created_at`, `updated_at` | System | |
+| `store_id`, `landlord_rent`, `other_monthly_cost`, `other_cost_description`, `landlord_lease_end`, `effective_from`, `effective_to`, `notes` | App / Import | Date-effective, one open row per store, no overlap. No row = cost unknown, never 0. `source` says `staff` or `import` |
+
 ### invoices
 | Field | Owner | Note |
 |---|---|---|
@@ -190,7 +223,7 @@ they implement.
 | Field | Owner | Note |
 |---|---|---|
 | `id`, `created_at`, `updated_at` | System | |
-| charge and invoice references, `kind`, `policy_year` | App | Linking a payment to a charge is our decision |
+| charge and invoice references (`rent_charge`, `insurance_charge`, `charge_adjustment`, `setup_charge`), `kind`, `policy_year` | App | Linking a payment to a charge is our decision. Kinds `setup` and `refund_deposit` belong to a setup charge; `refund_deposit` is money out, manual only, never refundable or voidable |
 | `method` | Stax for `ach`; App for `zelle`, `wire`, `other` | |
 | **`amount`, `status`** | **Stax** for method `ach`; **App** for manual methods | Overwritten from Stax on disagreement, for `ach` only |
 | **`initiated_on`, `settled_on`, `returned_at`, `return_code`, `return_reason`, `provider_created_at`** | **Stax** for method `ach` | |

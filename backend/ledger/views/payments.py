@@ -36,7 +36,7 @@ from accounts.views import forbidden
 from ledger.forms import RefundForm, VoidForm
 from ledger.models import AuditLog, Operator, Payment, PaymentMethod, Store
 from ledger.services import payments_ledger as ledger
-from ledger.services import refunds
+from ledger.services import refunds, setup_charges
 from ledger.services.rent_run import charge_review_message
 from ledger.views.jobs import already_submitted, job_context, submit
 from ledger.views.operators import PAGE_SIZE, _held, _hold, _role, role_required
@@ -100,6 +100,8 @@ def _load(pk: str) -> Payment:
             "rent_charge__lease",
             "rent_charge__lease__store",
             "insurance_charge",
+            "setup_charge",
+            "setup_charge__fee_type",
             "parent_payment",
             "recorded_by",
         ),
@@ -116,6 +118,7 @@ def _summary(payment: Payment, facts: refunds.PaymentFacts) -> dict[str, object]
         "facts": facts,
         "invoice": payment.invoice,
         "charge": payment.rent_charge,
+        "setup_charge": payment.setup_charge,
     }
 
 
@@ -132,9 +135,7 @@ def payment_detail(request: HttpRequest, pk: str) -> HttpResponse:
             **_summary(payment, facts),
             **job_context(payment),
             "refunds": payment.refunds.order_by("created_at", "id"),
-            "charge_review": (
-                charge_review_message(payment.rent_charge) if payment.rent_charge else ""
-            ),
+            "charge_review": _charge_review(payment),
             "audit_rows": AuditLog.objects.filter(
                 entity_type=ENTITY_PAYMENT, entity_id=str(payment.pk)
             )
@@ -149,6 +150,14 @@ def payment_detail(request: HttpRequest, pk: str) -> HttpResponse:
             ),
         },
     )
+
+
+def _charge_review(payment: Payment) -> str:
+    if payment.rent_charge is not None:
+        return charge_review_message(payment.rent_charge)
+    if payment.setup_charge is not None:
+        return setup_charges.review_message(payment.setup_charge)
+    return ""
 
 
 def _admin_only(request: HttpRequest) -> HttpResponse | None:

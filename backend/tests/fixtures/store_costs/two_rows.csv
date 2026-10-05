@@ -1,0 +1,3 @@
+store_no,location,state,operator (ref only),operator rent (ref only),walmart_monthly_rent,walmart_rent_effective_from,walmart_lease_end,other_monthly_cost,other_cost_description,notes
+1796,"AMHERST, NH",NH,,,2500.00,01/01/2026,12/31/2030,,,
+437,"SEALY, TEXAS",TX,,,3000.00,01/01/2026,,50.00,dumpster,

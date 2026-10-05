@@ -42,6 +42,8 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0002_postgresql_guards",
             "payments.migrations.0002_postgresql_guards",
             "payments.migrations.0005_jobs",
+            "ledger.migrations.0012_setup_charges",
+            "ledger.migrations.0014_store_costs_deposit_resolutions",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -91,6 +93,8 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0005_jobs",
                 "[ ] 0006_job_kinds_reads",
                 "[ ] 0007_reconciliation",
+                "[ ] 0008_setup_payment_mark",
+                "[ ] 0009_setup_payment_retry_mark",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):

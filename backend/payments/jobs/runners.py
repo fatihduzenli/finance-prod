@@ -19,7 +19,7 @@ from decimal import Decimal
 
 import payments
 from ledger.models import Operator
-from ledger.services import leases, refunds, rent_run
+from ledger.services import leases, refunds, rent_run, setup_charges
 from ledger.services.leases import AutopayOutcome, MethodsRefresh
 from ledger.services.rent_run import MarkAction, MarkResult, MatchAction, MatchReport
 from payments import jobs, operator_sync, reconciliation
@@ -153,8 +153,22 @@ def payment_mark_job(job: Job) -> Result:
     )
 
 
+def setup_payment_mark_job(job: Job) -> Result:
+    """PLAN-010b D6: the setup charge's invoice, marked by the rent rules."""
+    return _mark(
+        setup_charges.mark_provider_invoice(
+            job.entity_id, uuid.UUID(str(job.params["payment"])), actor=job.requested_by
+        )
+    )
+
+
 def payment_retry_mark_job(job: Job) -> Result:
     return _mark(rent_run.retry_provider_mark(job.entity_id, actor=job.requested_by))
+
+
+def setup_payment_retry_mark_job(job: Job) -> Result:
+    """PLAN-010b Batch B: the manual retry of a setup charge's failed marking."""
+    return _mark(setup_charges.retry_provider_mark(job.entity_id, actor=job.requested_by))
 
 
 def _creation_key(job: Job) -> uuid.UUID | None:
@@ -277,4 +291,6 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.RUN_MATCH: run_match_job,
     JobKind.WEBHOOK_REPLAY: webhook_replay_job,
     JobKind.RECONCILE_RUN: reconcile_run_job,
+    JobKind.SETUP_PAYMENT_MARK: setup_payment_mark_job,
+    JobKind.SETUP_PAYMENT_RETRY_MARK: setup_payment_retry_mark_job,
 }

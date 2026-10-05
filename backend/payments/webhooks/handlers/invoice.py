@@ -41,6 +41,7 @@ from payments.webhooks.handlers.common import (
     ENTITY_CHARGE,
     ENTITY_INSURANCE_CHARGE,
     ENTITY_INVOICE,
+    ENTITY_SETUP_CHARGE,
     KIND_INVOICE,
     NO_OBJECT_ID,
     NOT_AT_PROVIDER,
@@ -93,6 +94,7 @@ def sync_invoice(
         and invoice.rent_charge_id is None
         and invoice.insurance_charge_id is None
         and invoice.charge_adjustment_id is None
+        and invoice.setup_charge_id is None
         and not invoice_sync.schedule_id(record)
     ):
         total = record.total if usable_total(record.total) else None
@@ -109,7 +111,9 @@ def local_invoice(external_id: str) -> Invoice | None:
     if ref is None or ref.entity_type != ENTITY_INVOICE:
         return None
     return (
-        Invoice.objects.select_related("operator", "rent_charge", "insurance_charge")
+        Invoice.objects.select_related(
+            "operator", "rent_charge", "insurance_charge", "setup_charge"
+        )
         .filter(pk=ref.entity_id)
         .first()
     )
@@ -204,6 +208,7 @@ def _apply(
     for charge, entity in (
         (invoice.rent_charge, ENTITY_CHARGE),
         (invoice.insurance_charge, ENTITY_INSURANCE_CHARGE),
+        (invoice.setup_charge, ENTITY_SETUP_CHARGE),
     ):
         if charge is not None and not charge.needs_review:
             charge.needs_review = True

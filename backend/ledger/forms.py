@@ -8,6 +8,7 @@ which runs when the form validates the model instance.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -16,13 +17,19 @@ from django.core.validators import RegexValidator
 from django.db.models import Q
 
 from ledger.models import (
+    NAME_MAX_LENGTH,
     CollectionStatus,
+    DepositResolutionKind,
+    FeeType,
     Lease,
     Operator,
     PaymentChannel,
     PaymentMethod,
     Store,
 )
+from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
+from ledger.services.leases import END_DATE_REQUIRED, END_REASON_REQUIRED
+from ledger.services.setup_charges import ChargeInput
 from ledger.validators import validate_no_payment_data, visible_text
 from payments.operator_sync import normalise_phone
 
@@ -175,6 +182,10 @@ class LeaseForm(_LeaseFormBase):
         if not self.instance.pk:
             del self.fields["rent_effective_from"]
 
+    def lease_fields(self) -> list[forms.BoundField]:
+        """The visible fields of the lease itself (the create form adds a checklist)."""
+        return [field for field in self.visible_fields() if not field.name.startswith(SETUP)]
+
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
         day = data.get("debit_day")
@@ -194,9 +205,158 @@ class LeaseForm(_LeaseFormBase):
 
 
 class LeaseCreateForm(LeaseForm):
-    """Adds the one-time key rendered with the form, so a resubmission saves nothing."""
+    """Adds the one-time key rendered with the form, so a resubmission saves nothing,
+    and the setup checklist (PLAN-010b D5): per active fee type a tick, cost, price,
+    vendor and due date, the amounts defaulting from the catalogue. A ticked row needs a
+    price; an empty due date is the lease's start date."""
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fee_types = list(
+            FeeType.objects.filter(active=True).order_by("sort_order", "name", "id")
+        )
+        for fee_type in self.fee_types:
+            name = _setup_name(fee_type)
+            self.fields[f"{name}_tick"] = forms.BooleanField(
+                required=False, widget=_ExactCheckboxInput, label=fee_type.name
+            )
+            self.fields[f"{name}_cost"] = _money_field(
+                "Cost", minimum=Decimal("0.00"), initial=fee_type.default_cost
+            )
+            self.fields[f"{name}_price"] = _money_field(
+                "Price", minimum=Decimal("0.01"), initial=fee_type.default_price
+            )
+            self.fields[f"{name}_vendor"] = _vendor_field()
+            self.fields[f"{name}_due_date"] = forms.DateField(
+                label="Due date", required=False, widget=forms.DateInput(attrs={"type": "date"})
+            )
+
+    def setup_rows(self) -> list[dict[str, Any]]:
+        """The checklist, one row of bound fields per active fee type."""
+        return [
+            {
+                "fee_type": fee_type,
+                **{
+                    part: self[f"{_setup_name(fee_type)}_{part}"]
+                    for part in ("tick", "cost", "price", "vendor", "due_date")
+                },
+            }
+            for fee_type in self.fee_types
+        ]
+
+    def clean(self) -> dict[str, Any]:
+        data = super().clean()
+        started = data.get("started_on")
+        for fee_type in self.fee_types:
+            name = _setup_name(fee_type)
+            if data.get(f"{name}_tick") is not True:
+                continue
+            if data.get(f"{name}_price") is None and f"{name}_price" not in self.errors:
+                self.add_error(f"{name}_price", SETUP_PRICE_REQUIRED)
+            if data.get(f"{name}_due_date") is None and started is None:
+                self.add_error(f"{name}_due_date", SETUP_DUE_REQUIRED)
+        return data
+
+    def setup_items(self) -> list[ChargeInput]:
+        """The ticked rows of a valid form, in catalogue order."""
+        data = self.cleaned_data
+        started: date | None = data.get("started_on")
+        items = []
+        for fee_type in self.fee_types:
+            name = _setup_name(fee_type)
+            if data.get(f"{name}_tick") is not True:
+                continue
+            due = data.get(f"{name}_due_date") or started
+            if due is None:  # refused by clean()
+                continue
+            items.append(
+                ChargeInput(
+                    fee_type=fee_type,
+                    price=data[f"{name}_price"],
+                    cost=data.get(f"{name}_cost"),
+                    vendor=data.get(f"{name}_vendor") or "",
+                    due_date=due,
+                )
+            )
+        return items
+
+
+# --- Setup charges (PLAN-010b D5, D6) ------------------------------------------------------
+
+#: The name prefix of every checklist field of the lease create form.
+SETUP = "setup_"
+SETUP_PRICE_REQUIRED = "Enter the price of a ticked item."
+SETUP_DUE_REQUIRED = "Enter a due date, or a start date for the lease."
+COST_HELP = "Empty means the cost is unknown."
+
+
+def _setup_name(fee_type: FeeType) -> str:
+    return f"{SETUP}{fee_type.code}"
+
+
+def _money_field(
+    label: str, *, minimum: Decimal, initial: Decimal | None = None, required: bool = False
+) -> forms.DecimalField:
+    return forms.DecimalField(
+        label=label,
+        required=required,
+        min_value=minimum,
+        max_value=RENT_MAX,
+        max_digits=12,
+        decimal_places=2,
+        initial=initial,
+    )
+
+
+def _vendor_field() -> forms.CharField:
+    return forms.CharField(
+        label="Vendor",
+        required=False,
+        max_length=NAME_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+    )
+
+
+class SetupChargeEditForm(forms.Form):
+    """Cost, price, vendor and due date of a setup charge (D6). The service locks the price
+    once a payment exists and re-checks every rule under the row lock."""
+
+    cost = _money_field("Cost", minimum=Decimal("0.00"))
+    price = _money_field("Price", minimum=Decimal("0.01"), required=True)
+    vendor = _vendor_field()
+    due_date = forms.DateField(label="Due date", widget=forms.DateInput(attrs={"type": "date"}))
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["cost"].help_text = COST_HELP
+
+
+class SetupChargeAddForm(SetupChargeEditForm):
+    """One setup charge added from the lease page (D5): an active fee type, then the edit
+    fields."""
+
+    fee_type = forms.ModelChoiceField(
+        queryset=FeeType.objects.none(), error_messages={"required": "Choose a fee type."}
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        field = self.fields["fee_type"]
+        if isinstance(field, forms.ModelChoiceField):
+            field.queryset = FeeType.objects.filter(active=True).order_by("sort_order", "name")
+        self.order_fields(["fee_type", "cost", "price", "vendor", "due_date"])
+
+    def item(self) -> ChargeInput:
+        data = self.cleaned_data
+        return ChargeInput(
+            fee_type=data["fee_type"],
+            price=data["price"],
+            cost=data.get("cost"),
+            vendor=data.get("vendor") or "",
+            due_date=data["due_date"],
+        )
 
 
 class _ExactCheckboxInput(forms.CheckboxInput):
@@ -338,6 +498,25 @@ class ResolveReturnForm(forms.Form):
     )
 
 
+class WaiveForm(forms.Form):
+    """Waive a setup charge (PLAN-010b D6, admin): a note, nothing else."""
+
+    note = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required: why the charge is waived.",
+        error_messages={"required": "A note is required: say why the charge is waived."},
+    )
+
+    def clean_note(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a note.
+        note = visible_text(self.cleaned_data["note"])
+        if not note:
+            raise forms.ValidationError(self.fields["note"].error_messages["required"])
+        return note
+
+
 class ResolveMismatchForm(forms.Form):
     """Resolve a reconciliation mismatch (PLAN-010 D10): a note, nothing else."""
 
@@ -382,3 +561,116 @@ class VoidForm(forms.Form):
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
     confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
+
+
+# --- Store costs (PLAN-010b D8) ------------------------------------------------------------
+
+
+class StoreCostForm(forms.Form):
+    """The store page's "Set landlord rent" (billing). The service decides, under the
+    store's row lock, whether this updates the open row, starts a new one or is refused."""
+
+    landlord_rent = _money_field("Landlord rent (monthly)", minimum=Decimal("0.00"), required=True)
+    effective_from = forms.DateField(
+        label="Effective from", widget=forms.DateInput(attrs={"type": "date"})
+    )
+    other_monthly_cost = _money_field("Other monthly cost", minimum=Decimal("0.00"))
+    other_cost_description = forms.CharField(
+        label="Other cost description",
+        required=False,
+        max_length=NAME_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+    )
+    landlord_lease_end = forms.DateField(
+        label="Landlord lease end",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["other_monthly_cost"].help_text = "Empty means no other monthly cost."
+        self.fields[
+            "effective_from"
+        ].help_text = "The first day this amount applies. The current row ends the day before."
+
+
+# --- Deposit resolution (PLAN-010b D7) -------------------------------------------------------
+
+RESOLUTION_METHOD_CHOICES = (("", "—"), *MANUAL_METHOD_CHOICES)
+
+
+class DepositResolutionForm(forms.Form):
+    """Resolve a deposit at the end of its lease (admin). The service re-checks every
+    rule under the charge's row lock; the form checks shape only."""
+
+    kind = forms.ChoiceField(choices=DepositResolutionKind.choices, label="Resolution")
+    amount = forms.DecimalField(
+        min_value=Decimal("0.01"), max_value=RENT_MAX, max_digits=12, decimal_places=2
+    )
+    resolved_on = forms.DateField(label="Date", widget=forms.DateInput(attrs={"type": "date"}))
+    method = forms.ChoiceField(
+        choices=RESOLUTION_METHOD_CHOICES,
+        required=False,
+        help_text="Refunded only: how the money was paid back.",
+    )
+    to_lease = forms.UUIDField(
+        required=False,
+        label="Transfer to lease",
+        widget=forms.Select(),
+        help_text="Transferred only: another lease of the same operator that has not ended.",
+    )
+    note = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 3}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required: what happened to the deposit, and why any part was kept.",
+        error_messages={"required": DEPOSIT_NOTE_REQUIRED},
+    )
+
+    def __init__(
+        self, *args: Any, targets: list[tuple[str, str]] | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        widget = self.fields["to_lease"].widget
+        if isinstance(widget, forms.Select):
+            widget.choices = [("", "—"), *(targets or [])]
+
+    def clean_note(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a note.
+        note = visible_text(self.cleaned_data["note"])
+        if not note:
+            raise forms.ValidationError(DEPOSIT_NOTE_REQUIRED)
+        return note
+
+
+class EndLeaseForm(forms.Form):
+    """End a lease (admin, PLAN-010b Batch C). The service re-checks every rule under
+    the lease's row lock; the form checks shape only."""
+
+    ended_on = forms.DateField(
+        label="End date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="The last day of the lease: not before it started, not in the future.",
+        error_messages={"required": END_DATE_REQUIRED},
+    )
+    end_reason = forms.CharField(
+        label="Reason",
+        widget=forms.Textarea(attrs={"rows": 3}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": END_REASON_REQUIRED},
+    )
+
+    def clean_end_reason(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a reason.
+        reason = visible_text(self.cleaned_data["end_reason"])
+        if not reason:
+            raise forms.ValidationError(END_REASON_REQUIRED)
+        return reason

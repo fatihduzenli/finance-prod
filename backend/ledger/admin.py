@@ -7,16 +7,26 @@ lists them: no add, change or delete permission, so nothing can be hard-deleted 
 The ``admin`` group holds ``view_*`` on the three models (ledger migration 0008), so an
 admin-group user who is not a superuser can open them. The reserved tables (documents,
 outbound messages) are deliberately not registered.
+
+The fee catalogue and the insurance premiums are edited here, by an admin only
+(docs/qa/PLAN-010b D1, D9, D12): add and change, never delete (a fee type no longer
+offered is made inactive; a premium is kept for the years it priced). The ``admin``
+group holds view, add and change on both (ledger migration 0013); the registry refuses
+any POST to them below admin. Every save writes an ``audit_log`` row with the fields
+before and after.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from django import forms
 from django.contrib import admin
+from django.contrib.auth.models import User
+from django.db import models
 from django.http import HttpRequest
 
-from ledger.models import Lease, Operator, Store
+from ledger.models import AuditLog, FeeType, InsurancePremium, Lease, Operator, Store
 
 if TYPE_CHECKING:
     _ModelAdminBase = admin.ModelAdmin[Any]
@@ -86,3 +96,71 @@ class LeaseAdmin(ReadOnlyAdmin):
     search_fields = ("store__external_label", "operator__display_name")
     ordering = ("store__external_label",)
     list_select_related = ("store", "operator")
+
+
+def _fields(row: models.Model, names: tuple[str, ...]) -> dict[str, Any]:
+    values = {}
+    for name in names:
+        value = getattr(row, name)
+        values[name] = value if isinstance(value, bool | int | str) or value is None else str(value)
+    return values
+
+
+class AuditedAdmin(_ModelAdminBase):
+    """Add and change only; every save is written to ``audit_log``."""
+
+    audited_fields: tuple[str, ...] = ()
+    entity_type = ""
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+    def save_model(
+        self, request: HttpRequest, obj: Any, form: forms.ModelForm[Any], change: bool
+    ) -> None:
+        before = None
+        if change:
+            stored = type(obj)._default_manager.filter(pk=obj.pk).first()
+            before = _fields(stored, self.audited_fields) if stored is not None else None
+        super().save_model(request, obj, form, change)
+        AuditLog.objects.create(
+            actor=request.user if isinstance(request.user, User) else None,
+            action=f"{self.entity_type}.{'changed' if change else 'created'}_in_admin",
+            entity_type=self.entity_type,
+            entity_id=str(obj.pk),
+            before=before,
+            after=_fields(obj, self.audited_fields),
+        )
+
+
+@admin.register(FeeType)
+class FeeTypeAdmin(AuditedAdmin):
+    list_display = (
+        "name",
+        "code",
+        "default_cost",
+        "default_price",
+        "refundable",
+        "active",
+        "sort_order",
+    )
+    list_filter = ("active", "refundable")
+    ordering = ("sort_order", "name")
+    audited_fields = (
+        "code",
+        "name",
+        "default_cost",
+        "default_price",
+        "refundable",
+        "active",
+        "sort_order",
+    )
+    entity_type = "fee_type"
+
+
+@admin.register(InsurancePremium)
+class InsurancePremiumAdmin(AuditedAdmin):
+    list_display = ("policy_year", "amount", "cost")
+    ordering = ("-policy_year",)
+    audited_fields = ("policy_year", "amount", "cost")
+    entity_type = "insurance_premium"

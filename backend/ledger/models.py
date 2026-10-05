@@ -166,6 +166,14 @@ def _not_negative(table: str, field: str) -> models.CheckConstraint:
     )
 
 
+def _at_most_one_set(*fields: str) -> Q:
+    """At most one of ``fields`` is not null: every choice of all but one is null."""
+    condition = Q()
+    for kept in fields:
+        condition |= Q(**{f"{field}__isnull": True for field in fields if field != kept})
+    return condition
+
+
 def _day_of_month(table: str, field: str) -> models.CheckConstraint:
     return models.CheckConstraint(
         condition=Q(**{f"{field}__isnull": True}) | Q(**{f"{field}__gte": 1, f"{field}__lte": 31}),
@@ -520,6 +528,9 @@ class RentCharge(GuardedModel):
 class InsurancePremium(GuardedModel):
     policy_year = models.IntegerField(unique=True)
     amount = MoneyField()
+    #: What the policy costs the business; null when unknown (PLAN-010b D9). ``amount``
+    #: is the price the operator pays.
+    cost = MoneyField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -530,6 +541,10 @@ class InsurancePremium(GuardedModel):
                 name="insurance_premiums_policy_year_range",
             ),
             _positive("insurance_premiums", "amount"),
+            models.CheckConstraint(
+                condition=Q(cost__isnull=True) | Q(cost__gte=0),
+                name="insurance_premiums_cost_not_negative",
+            ),
         ]
 
 
@@ -708,6 +723,172 @@ class Note(GuardedModel):
         ]
 
 
+# --- Setup fees (PLAN-010b D1 to D3) -------------------------------------------------
+
+
+class FeeType(GuardedModel):
+    """One kind of one-time setup item charged to an operator (PLAN-010b D1).
+
+    Edited by an admin in the Django admin. ``refundable`` marks a deposit: money held,
+    never revenue. A null default amount means no amount is standard.
+    """
+
+    code = models.SlugField(max_length=64, unique=True, validators=[validate_no_payment_data])
+    name = guarded_char(NAME_MAX_LENGTH)
+    default_cost = MoneyField(null=True, blank=True)
+    default_price = MoneyField(null=True, blank=True)
+    refundable = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "fee_types"
+        ordering = ("sort_order", "name")
+        constraints = [
+            _not_blank("fee_types", "name"),
+            models.CheckConstraint(
+                condition=Q(default_cost__isnull=True) | Q(default_cost__gte=0),
+                name="fee_types_default_cost_not_negative",
+            ),
+            models.CheckConstraint(
+                condition=Q(default_price__isnull=True) | Q(default_price__gt=0),
+                name="fee_types_default_price_positive",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class SetupChargeStatus(models.TextChoices):
+    """Derived from settled payments; ``waived`` is set only by the waive action (D3)."""
+
+    OWED = "owed", "Owed"
+    PARTIAL = "partial", "Partially paid"
+    PAID = "paid", "Paid"
+    WAIVED = "waived", "Waived"
+
+
+class SetupCharge(GuardedModel):
+    """A one-time setup item charged on one lease (PLAN-010b D3).
+
+    ``amount_paid`` is recomputed from settled payments (minus settled refunds) like a
+    rent charge's; ``balance`` is computed by the database. ``cost`` null means the cost
+    is unknown. A legacy row (the sheet import) may sit beside a real charge of the same
+    fee type; otherwise a lease has at most one charge per fee type.
+    """
+
+    lease = models.ForeignKey(Lease, on_delete=models.PROTECT, related_name="setup_charges")
+    fee_type = models.ForeignKey(FeeType, on_delete=models.PROTECT, related_name="setup_charges")
+    cost = MoneyField(null=True, blank=True)
+    price = MoneyField()
+    vendor = guarded_char(NAME_MAX_LENGTH, blank=True)
+    due_date = models.DateField()
+    amount_paid = MoneyField(default=ZERO)
+    balance = models.GeneratedField(
+        expression=F("price") - F("amount_paid"),
+        output_field=models.DecimalField(
+            max_digits=MONEY_MAX_DIGITS, decimal_places=MONEY_DECIMAL_PLACES
+        ),
+        db_persist=True,
+    )
+    status = _choice(SetupChargeStatus, default=SetupChargeStatus.OWED)
+    waived_at = models.DateTimeField(null=True, blank=True)
+    waived_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    waive_note = free_text()
+    note = free_text()
+    #: Why the payment provider's invoice was not updated after a manual payment, as on
+    #: rent charges (PLAN-009 D2, D3): a fixed text, or empty.
+    review_message = free_text(default="")
+    legacy = models.BooleanField(default=False)
+    needs_review = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "setup_charges"
+        constraints = [
+            _positive("setup_charges", "price"),
+            models.CheckConstraint(
+                condition=Q(cost__isnull=True) | Q(cost__gte=0),
+                name="setup_charges_cost_not_negative",
+            ),
+            _not_negative("setup_charges", "amount_paid"),
+            models.CheckConstraint(
+                condition=Q(status="waived", waived_at__isnull=False, waive_note__regex=_NOT_BLANK)
+                | (~Q(status="waived") & Q(waived_at__isnull=True)),
+                name="setup_charges_waived_has_note",
+            ),
+            models.UniqueConstraint(
+                fields=["lease", "fee_type"],
+                condition=Q(legacy=False),
+                name="setup_charges_lease_fee_type_unique",
+            ),
+            _valid_choice("setup_charges", "status", SetupChargeStatus),
+        ]
+
+    def __str__(self) -> str:
+        return f"Setup charge {self.pk}"
+
+
+# --- Store costs (PLAN-010b D8) ------------------------------------------------------
+
+
+class StoreCostSource(models.TextChoices):
+    IMPORT = "import", "Import"
+    STAFF = "staff", "Staff"
+
+
+class StoreCost(GuardedModel):
+    """What the business pays the landlord for a store, date-effective like
+    ``lease_rent_history`` (PLAN-010b D8).
+
+    ``effective_to`` is the last day a row is in effect (inclusive); the open row has
+    none, and a store has at most one. Rows never overlap: a new row closes the open one
+    the day before it starts (:mod:`ledger.services.store_costs`). No row on a day means
+    the cost is unknown, never zero. ``other_monthly_cost`` null means no other cost.
+    """
+
+    store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="costs")
+    landlord_rent = MoneyField()
+    other_monthly_cost = MoneyField(null=True, blank=True)
+    other_cost_description = guarded_char(NAME_MAX_LENGTH, blank=True)
+    landlord_lease_end = models.DateField(null=True, blank=True)
+    effective_from = models.DateField()
+    effective_to = models.DateField(null=True, blank=True)
+    source = _choice(StoreCostSource)
+    notes = free_text()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "store_costs"
+        constraints = [
+            _not_negative("store_costs", "landlord_rent"),
+            models.CheckConstraint(
+                condition=Q(other_monthly_cost__isnull=True) | Q(other_monthly_cost__gte=0),
+                name="store_costs_other_monthly_cost_not_negative",
+            ),
+            models.CheckConstraint(
+                condition=Q(effective_to__isnull=True) | Q(effective_to__gte=F("effective_from")),
+                name="store_costs_effective_order",
+            ),
+            models.UniqueConstraint(
+                fields=["store", "effective_from"], name="store_costs_store_from_unique"
+            ),
+            models.UniqueConstraint(
+                fields=["store"],
+                condition=Q(effective_to__isnull=True),
+                name="store_costs_one_open_row",
+            ),
+            _valid_choice("store_costs", "source", StoreCostSource),
+        ]
+
+
 # --- Invoices and payments ---------------------------------------------------------
 
 PROVIDER_STATUS_NOTE = (
@@ -734,6 +915,9 @@ class Invoice(GuardedModel):
     )
     charge_adjustment = models.ForeignKey(
         ChargeAdjustment, on_delete=models.PROTECT, null=True, blank=True, related_name="invoices"
+    )
+    setup_charge = models.ForeignKey(
+        SetupCharge, on_delete=models.PROTECT, null=True, blank=True, related_name="invoices"
     )
     issue_date = models.DateField()
     due_date = models.DateField()
@@ -773,10 +957,16 @@ class Invoice(GuardedModel):
                 condition=Q(rent_charge__isnull=False),
                 name="invoices_one_per_rent_charge",
             ),
+            # One invoice per setup charge (PLAN-010b D6, the rent rule).
+            models.UniqueConstraint(
+                fields=["setup_charge"],
+                condition=Q(setup_charge__isnull=False),
+                name="invoices_one_per_setup_charge",
+            ),
             models.CheckConstraint(
-                condition=Q(rent_charge__isnull=True, insurance_charge__isnull=True)
-                | Q(rent_charge__isnull=True, charge_adjustment__isnull=True)
-                | Q(insurance_charge__isnull=True, charge_adjustment__isnull=True),
+                condition=_at_most_one_set(
+                    "rent_charge", "insurance_charge", "charge_adjustment", "setup_charge"
+                ),
                 name="invoices_at_most_one_source",
             ),
             models.CheckConstraint(
@@ -824,6 +1014,16 @@ class PaymentKind(models.TextChoices):
     RENT = "rent", "Rent"
     INSURANCE = "insurance", "Insurance"
     ADJUSTMENT = "adjustment", "Adjustment"
+    #: A payment on a setup charge (PLAN-010b D4).
+    SETUP = "setup", "Setup fee"
+    #: Money paid back to the operator from a deposit; never a provider refund (D4, D7).
+    REFUND_DEPOSIT = "refund_deposit", "Deposit refund"
+
+
+#: The payment kinds that belong to a setup charge.
+SETUP_PAYMENT_KINDS: list[str] = [PaymentKind.SETUP.value, PaymentKind.REFUND_DEPOSIT.value]
+#: Methods recorded by hand, not through the payment provider.
+MANUAL_PAYMENT_METHODS: list[str] = ["zelle", "wire", "other"]
 
 
 class PaymentMethod(models.TextChoices):
@@ -852,6 +1052,9 @@ class Payment(GuardedModel):
     )
     charge_adjustment = models.ForeignKey(
         ChargeAdjustment, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
+    )
+    setup_charge = models.ForeignKey(
+        SetupCharge, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
     )
     kind = _choice(PaymentKind)
     policy_year = models.IntegerField(null=True, blank=True)
@@ -903,6 +1106,29 @@ class Payment(GuardedModel):
                 condition=~Q(method__in=["zelle", "wire", "other"]) | Q(note__regex=_NOT_BLANK),
                 name="payments_manual_method_has_note",
             ),
+            # PLAN-010b D4: a setup charge is paid only by kind setup (or paid back by
+            # refund_deposit), and those kinds always name it and nothing else.
+            models.CheckConstraint(
+                condition=Q(kind__in=SETUP_PAYMENT_KINDS, setup_charge__isnull=False)
+                | (~Q(kind__in=SETUP_PAYMENT_KINDS) & Q(setup_charge__isnull=True)),
+                name="payments_setup_kind_iff_setup_charge",
+            ),
+            models.CheckConstraint(
+                condition=Q(setup_charge__isnull=True)
+                | Q(rent_charge__isnull=True, insurance_charge__isnull=True)
+                & Q(charge_adjustment__isnull=True),
+                name="payments_setup_charge_only_target",
+            ),
+            # Money out by hand: never a refund row, never of a provider transaction.
+            models.CheckConstraint(
+                condition=~Q(kind="refund_deposit")
+                | Q(
+                    is_refund=False,
+                    parent_payment__isnull=True,
+                    method__in=MANUAL_PAYMENT_METHODS,
+                ),
+                name="payments_refund_deposit_manual",
+            ),
             models.CheckConstraint(
                 condition=Q(resolved_at__isnull=True)
                 | (Q(status="returned") & Q(resolution_note__regex=_NOT_BLANK)),
@@ -911,6 +1137,73 @@ class Payment(GuardedModel):
             _valid_choice("payments", "kind", PaymentKind),
             _valid_choice("payments", "method", PaymentMethod),
             _valid_choice("payments", "status", PaymentStatus),
+        ]
+
+
+# --- Deposit resolution (PLAN-010b D7) ---------------------------------------------
+
+
+class DepositResolutionKind(models.TextChoices):
+    """What happened to a deposit at the end of its lease (PLAN-010b D7)."""
+
+    REFUNDED = "refunded", "Refunded"
+    WITHHELD = "withheld", "Withheld"
+    TRANSFERRED = "transferred", "Transferred"
+
+
+class DepositResolution(GuardedModel):
+    """How a deposit (a setup charge of a refundable fee type) was resolved once its
+    lease ended (PLAN-010b D7). One per deposit.
+
+    ``amount`` is what was refunded, transferred or withheld. ``withheld_amount`` is the
+    part of the paid deposit the business keeps: the paid amount less ``amount`` for a
+    refund or a transfer, ``amount`` itself when withheld. ``method`` is set for a refund
+    only, ``to_lease`` for a transfer only.
+    """
+
+    setup_charge = models.OneToOneField(
+        SetupCharge, on_delete=models.PROTECT, related_name="deposit_resolution"
+    )
+    kind = _choice(DepositResolutionKind)
+    amount = MoneyField()
+    withheld_amount = MoneyField(default=ZERO)
+    resolved_on = models.DateField()
+    method = _choice(PaymentMethod, blank=True, default="")
+    note = free_text(blank=False)
+    to_lease = models.ForeignKey(
+        Lease,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="deposits_received",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "deposit_resolutions"
+        constraints = [
+            _positive("deposit_resolutions", "amount"),
+            _not_negative("deposit_resolutions", "withheld_amount"),
+            _not_blank("deposit_resolutions", "note"),
+            # A refund names how it was paid back, never through the provider; the other
+            # kinds name no method. (Each rule reads only valid kinds, so an unknown kind
+            # or method fails its own CHECK.)
+            models.CheckConstraint(
+                condition=(~Q(kind="refunded") | ~Q(method__in=["", PaymentMethod.ACH.value]))
+                & (~Q(kind__in=["withheld", "transferred"]) | Q(method="")),
+                name="deposit_resolutions_method_iff_refunded",
+            ),
+            models.CheckConstraint(
+                condition=(~Q(kind="transferred") | Q(to_lease__isnull=False))
+                & (~Q(kind__in=["refunded", "withheld"]) | Q(to_lease__isnull=True)),
+                name="deposit_resolutions_to_lease_iff_transferred",
+            ),
+            _valid_choice("deposit_resolutions", "kind", DepositResolutionKind),
+            _valid_choice("deposit_resolutions", "method", PaymentMethod, blank=True),
         ]
 
 

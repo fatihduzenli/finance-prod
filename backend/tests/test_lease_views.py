@@ -140,11 +140,23 @@ def read_methods(lease: Lease, fake: FakeProvider) -> Lease:
 
 def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     names = {name for name, _, _ in iter_routes() if name and name.startswith("ledger:leases:")}
-    assert names == {f"ledger:leases:{short}" for short in ("list", "detail", *POST_ROUTES)}
+    # PLAN-010b D5, D7, D12: adding one setup charge from the lease page needs billing;
+    # resolving a deposit needs admin, as the lease routes do. Batch C: ending a lease
+    # needs admin.
+    assert names == {
+        f"ledger:leases:{short}"
+        for short in ("list", "detail", "add_setup_charge", "resolve_deposit", "end", *POST_ROUTES)
+    }
     assert {"ledger:leases:list", "ledger:leases:detail"} <= registry.READ_ONLY_ROUTE_NAMES
     for short in POST_ROUTES:
         rule = registry.rule_for(f"ledger:leases:{short}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
+    rule = registry.rule_for("ledger:leases:add_setup_charge")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    rule = registry.rule_for("ledger:leases:resolve_deposit")
+    assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
+    rule = registry.rule_for("ledger:leases:end")
+    assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
 
 
 @pytest.mark.parametrize("role", [Role.VIEWER, Role.BILLING])

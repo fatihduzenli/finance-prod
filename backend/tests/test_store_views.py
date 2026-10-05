@@ -328,11 +328,16 @@ def test_the_detail_shows_the_leases_of_the_store(admin: Client) -> None:
 
 def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     names = {name for name, _, _ in iter_routes() if name and name.startswith("ledger:stores:")}
-    assert names == {f"ledger:stores:{short}" for short in ("list", "detail", *POST_ROUTES)}
+    # PLAN-010b D8, D12: setting the landlord rent needs billing.
+    assert names == {
+        f"ledger:stores:{short}" for short in ("list", "detail", "set_cost", *POST_ROUTES)
+    }
     assert {"ledger:stores:list", "ledger:stores:detail"} <= registry.READ_ONLY_ROUTE_NAMES
     for short in POST_ROUTES:
         rule = registry.rule_for(f"ledger:stores:{short}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
+    rule = registry.rule_for("ledger:stores:set_cost")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
 
 
 @pytest.mark.parametrize("role", [Role.VIEWER, Role.BILLING])
@@ -395,6 +400,10 @@ def test_the_nav_links_to_the_store_list(admin: Client) -> None:
 # --- Row 4: the admin lists stores, operators and leases read-only --------------------------------
 
 
+#: Models whose permissions ledger migration 0013 gives the admin group (PLAN-010b D12).
+PLAN_010B_ADMIN_MODELS = ("feetype", "insurancepremium")
+
+
 def _grant_view_permissions() -> None:
     """Run the data migration against its own historical state (transactional tests
     elsewhere flush the rows a migration made)."""
@@ -426,6 +435,7 @@ def test_the_migration_gives_only_the_admin_group_the_three_view_permissions() -
     ledger = set(
         Group.objects.get(name="admin")
         .permissions.filter(content_type__app_label="ledger")
+        .exclude(content_type__model__in=PLAN_010B_ADMIN_MODELS)
         .values_list("codename", flat=True)
     )
     assert ledger == {"view_store", "view_operator", "view_lease"}
@@ -447,7 +457,11 @@ def test_the_migration_reverse_removes_exactly_the_three_permissions() -> None:
     )
     migration.revoke_view_permissions(state.apps, None)
     assert group.permissions.count() == before - 3
-    assert not group.permissions.filter(content_type__app_label="ledger").exists()
+    assert (
+        not group.permissions.filter(content_type__app_label="ledger")
+        .exclude(content_type__model__in=PLAN_010B_ADMIN_MODELS)
+        .exists()
+    )
 
 
 def test_an_admin_group_user_who_is_not_a_superuser_opens_the_three_lists() -> None:
