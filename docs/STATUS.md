@@ -580,3 +580,15 @@ the login page myself." The condition for starting Prompt 4 is met.
   plan: `statement_timeout` around the P&L queries with a value-free message, and `ANALYZE` of
   the affected tables at the end of every bulk importer (`import_store_costs` and the Step 13
   import). Owner typed "push" for `8959df1`.
+
+## Update, 2026-10-05, PLAN-010b on staging
+
+- `main` at `faef3b9`. CI run 37356571164 green: unit tests in 4 min 42 s (no hang), deploy, and
+  the verification step ("web and worker run this commit, Healthy and Running; the reconcile job
+  uses it"). `/healthz` 200. Migrations ledger 0012–0014 and payments 0008–0009 applied at web
+  start (the revision is healthy; the start command fails otherwise).
+- Fable's local Azure CLI session expired after the push, so the start logs were not read from
+  this machine; the CI verification is the evidence. The owner signs in again (`az login`) when
+  the next Azure read is needed; no model does it.
+- Next: the owner's six done-when clicks (RUNBOOK §11). Binding carry-over for plan 10c or 11:
+  statement timeout on the P&L queries and ANALYZE after bulk imports, before Prompt 13.
