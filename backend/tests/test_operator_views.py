@@ -434,6 +434,8 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:archive",
         "ledger:operators:retry_sync",
         "ledger:operators:link",
+        # PLAN-010d D2: creating a one-off charge from the operator page.
+        "ledger:operators:new_charge",
     }
     assert {"ledger:operators:list", "ledger:operators:detail"} <= registry.READ_ONLY_ROUTE_NAMES
     expected = {
@@ -441,6 +443,7 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "edit": Role.BILLING,
         "retry_sync": Role.BILLING,
         "link": Role.BILLING,
+        "new_charge": Role.BILLING,
         "archive": Role.ADMIN,
     }
     for short, role in expected.items():

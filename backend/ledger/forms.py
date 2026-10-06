@@ -18,11 +18,13 @@ from django.db.models import Q
 
 from ledger.models import (
     NAME_MAX_LENGTH,
+    CollectionMethod,
     CollectionStatus,
     DepositResolutionKind,
     DocumentKind,
     FeeType,
     Lease,
+    OneOffCategory,
     Operator,
     PaymentChannel,
     PaymentMethod,
@@ -30,7 +32,12 @@ from ledger.models import (
 )
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import END_DATE_REQUIRED, END_REASON_REQUIRED
-from ledger.services.setup_charges import ChargeInput
+from ledger.services.one_off_charges import (
+    AMOUNT_MAX,
+    FORM_CATEGORIES,
+    FORM_COLLECTIONS,
+    ChargeInput,
+)
 from ledger.validators import validate_no_payment_data, visible_text
 from payments.operator_sync import normalise_phone
 
@@ -520,8 +527,137 @@ class ResolveReturnForm(forms.Form):
         return note
 
 
+# --- One-off charges (PLAN-010d D2, D6) ----------------------------------------------------
+
+#: The longest description the form accepts; the service refuses above 120 characters with
+#: its own sentence, so a long paste is answered, not truncated.
+DESCRIPTION_INPUT_MAX_LENGTH = 1000
+ONE_OFF_NOTE_HELP = "Required, internal: why the charge is made. Not sent to the operator."
+
+
+class OneOffChargeForm(forms.Form):
+    """Create one one-off charge (D2) from the operator page (the lease is chosen among
+    the operator's leases, or left blank) or the lease page (the lease is fixed). The
+    form checks shape; the service re-checks every rule under a row lock. ``Charge now``
+    is offered to admins only."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput)
+    lease = forms.ChoiceField(required=False, label="Lease")
+    category = forms.ChoiceField(choices=(), error_messages={"required": "Choose a category."})
+    description = forms.CharField(
+        max_length=DESCRIPTION_INPUT_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="The invoice's line, at most 120 characters.",
+        error_messages={"required": "A description is required: it is the invoice's line."},
+    )
+    amount = forms.DecimalField(
+        min_value=Decimal("0.01"), max_value=AMOUNT_MAX, max_digits=12, decimal_places=2
+    )
+    due_date = forms.DateField(label="Due date", widget=forms.DateInput(attrs={"type": "date"}))
+    collection = forms.ChoiceField(
+        choices=(), label="Collect by", error_messages={"required": "Choose how it is collected."}
+    )
+    note = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text=ONE_OFF_NOTE_HELP,
+        error_messages={"required": "An internal note is required: say why the charge is made."},
+    )
+    #: PLAN-007c: the confirmation of a debit above the warning threshold. The service
+    #: decides whether it is needed and refuses without it.
+    confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
+
+    def __init__(
+        self,
+        *args: Any,
+        operator: Operator,
+        lease: Lease | None = None,
+        admin: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.operator = operator
+        self.fixed_lease = lease
+        self.leases = {
+            str(row.pk): row
+            for row in operator.leases.select_related("store").order_by(
+                "store__external_label", "started_on", "id"
+            )
+        }
+        lease_field = self.fields["lease"]
+        if lease is not None:
+            del self.fields["lease"]
+        elif isinstance(lease_field, forms.ChoiceField):
+            lease_field.choices = [("", "No lease (the operator)")] + [
+                (key, f"{row.store.external_label} from {row.started_on or 'no start date'}")
+                for key, row in self.leases.items()
+            ]
+        category = self.fields["category"]
+        if isinstance(category, forms.ChoiceField):
+            category.choices = [(value, OneOffCategory(value).label) for value in FORM_CATEGORIES]
+        offered = [
+            value for value in FORM_COLLECTIONS if admin or value != CollectionMethod.CHARGE_NOW
+        ]
+        collection = self.fields["collection"]
+        if isinstance(collection, forms.ChoiceField):
+            collection.choices = [(value, CollectionMethod(value).label) for value in offered]
+
+    def clean_description(self) -> str:
+        text = visible_text(self.cleaned_data["description"])
+        if not text:
+            raise forms.ValidationError(self.fields["description"].error_messages["required"])
+        return text
+
+    def clean_note(self) -> str:
+        # Invisible format characters and Unicode whitespace alone are not a note.
+        note = visible_text(self.cleaned_data["note"])
+        if not note:
+            raise forms.ValidationError(self.fields["note"].error_messages["required"])
+        return note
+
+    def chosen_lease(self) -> Lease | None:
+        if self.fixed_lease is not None:
+            return self.fixed_lease
+        return self.leases.get(self.cleaned_data.get("lease") or "")
+
+    def item(self) -> ChargeInput:
+        data = self.cleaned_data
+        return ChargeInput(
+            fee_type=None,
+            price=data["amount"],
+            cost=None,
+            vendor="",
+            due_date=data["due_date"],
+            note=data["note"],
+            category=data["category"],
+            collection=data["collection"],
+            description=data["description"],
+            confirmed=data.get("confirm") is True,
+            creation_key=data["creation_key"],
+        )
+
+
+class CancelChargeForm(forms.Form):
+    """Cancel an unpaid one-off charge (D6, billing): a note, nothing else."""
+
+    note = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required: why the charge is cancelled.",
+        error_messages={"required": "A note is required: say why the charge is cancelled."},
+    )
+
+    def clean_note(self) -> str:
+        note = visible_text(self.cleaned_data["note"])
+        if not note:
+            raise forms.ValidationError(self.fields["note"].error_messages["required"])
+        return note
+
+
 class WaiveForm(forms.Form):
-    """Waive a setup charge (PLAN-010b D6, admin): a note, nothing else."""
+    """Waive a one-off charge (PLAN-010b D6, admin): a note, nothing else."""
 
     note = forms.CharField(
         widget=forms.Textarea(attrs={"rows": 2}),
@@ -556,6 +692,13 @@ class ResolveMismatchForm(forms.Form):
         if not note:
             raise forms.ValidationError(self.fields["note"].error_messages["required"])
         return note
+
+
+class ChargeNowForm(forms.Form):
+    """An admin's confirmation of "Charge now" (PLAN-010d D4). ``confirm`` is the
+    large-debit box; the service re-checks every rule under the charge's row lock."""
+
+    confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
 
 
 # --- Refunds and voids (PLAN-009 D6, D7) ---------------------------------------------------

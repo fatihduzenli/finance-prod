@@ -1,0 +1,34 @@
+{% extends "finance/base.html" %}
+{% block title %}Charge now {{ charge.label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
+  <h1>Charge now</h1>
+  <dl id="charge-now-details">
+    <dt>Operator</dt><dd id="charge-now-operator">{{ details.operator.display_name|default:"—" }}</dd>
+    <dt>Store</dt><dd id="charge-now-store">{{ details.store_label|default:"Operator-level" }}</dd>
+    <dt>Amount</dt><dd id="charge-now-amount">${{ details.amount }}</dd>
+    <dt>Invoice</dt><dd id="charge-now-invoice">{{ details.invoice_number|default:"—" }}</dd>
+    <dt>Bank method</dt><dd id="charge-now-method">{% if details.last_four %}ending {{ details.last_four }}{% if details.nickname %} ({{ details.nickname }}){% endif %}{% else %}—{% endif %}</dd>
+  </dl>
+  <p class="muted">The bank method is read from the operator's stored list of payment methods, not from the payment provider.</p>
+  {% if details.refusal %}
+    <p id="charge-now-refusal"><strong>{{ details.refusal }}</strong></p>
+  {% elif busy %}
+    <p id="charge-now-busy"><strong>{{ busy_text }}</strong></p>
+  {% elif wait_text %}
+    <p id="charge-now-wait"><strong>{{ wait_text }}</strong></p>
+  {% else %}
+    <p id="charge-now-one-attempt"><strong>{{ one_attempt }}</strong></p>
+    <form method="post" class="js-single-submit" autocomplete="off" id="charge-now-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<p class="errorlist">{{ form.non_field_errors|join:" " }}</p>{% endif %}
+      {% if details.large_debit %}
+        <p id="charge-now-large-debit"><label style="font-weight:normal;"><input type="checkbox" name="confirm" value="true" id="confirm-large-debit"> {{ details.large_debit }}</label>
+          {% for error in form.confirm.errors %}<br><strong class="field-error">{{ error }}</strong>{% endfor %}
+        </p>
+      {% endif %}
+      <p class="actions"><button class="btn btn-primary" type="submit" id="charge-now-submit">Charge ${{ details.amount }} now</button></p>
+    </form>
+  {% endif %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

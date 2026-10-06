@@ -36,18 +36,18 @@ from ledger.models import (
     InsurancePremium,
     Invoice,
     Lease,
+    OneOffCharge,
+    OneOffChargeStatus,
     Payment,
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
-    SetupCharge,
-    SetupChargeStatus,
 )
+from ledger.services import one_off_charges as service
 from ledger.services import payments_ledger, refunds, rent_run, returns
-from ledger.services import setup_charges as service
-from ledger.services.setup_charges import ChargeInput, SetupRefused
+from ledger.services.one_off_charges import ChargeInput, SetupRefused
 from payments import jobs, offline_marking
 from payments.errors import ProviderUnavailable
 from payments.fake import FakeProvider
@@ -133,13 +133,13 @@ def item(fee_type: FeeType | None = None, price: str = "1000.00", **fields: Any)
     return ChargeInput(**values)
 
 
-def a_charge(price: str = "1000.00", fee_type: FeeType | None = None, **lease: Any) -> SetupCharge:
+def a_charge(price: str = "1000.00", fee_type: FeeType | None = None, **lease: Any) -> OneOffCharge:
     outcome = service.add_charge(a_lease(**lease).pk, item(fee_type, price), actor=None)
     assert outcome.ok and outcome.charge is not None, outcome.message
     return outcome.charge
 
 
-def pay(charge: SetupCharge, amount: str, **overrides: Any) -> rent_run.PaymentOutcome:
+def pay(charge: OneOffCharge, amount: str, **overrides: Any) -> rent_run.PaymentOutcome:
     values: dict[str, Any] = {
         "method": PaymentMethod.WIRE,
         "amount": D(amount),
@@ -152,8 +152,14 @@ def pay(charge: SetupCharge, amount: str, **overrides: Any) -> rent_run.PaymentO
     return service.record_payment(charge.pk, **values)
 
 
-def fresh(charge: SetupCharge) -> SetupCharge:
-    return SetupCharge.objects.get(pk=charge.pk)
+def lease_of(charge: OneOffCharge) -> Lease:
+    """The lease of a setup charge, which always has one (PLAN-010d D1 made it nullable)."""
+    assert charge.lease is not None
+    return charge.lease
+
+
+def fresh(charge: OneOffCharge) -> OneOffCharge:
+    return OneOffCharge.objects.get(pk=charge.pk)
 
 
 def unlinked_invoice(
@@ -193,10 +199,10 @@ def provider_invoice(fake: FakeProvider, total: str = "1000.00", status: str = "
     )
 
 
-def invoiced(fake: FakeProvider, price: str = "1000.00") -> SetupCharge:
+def invoiced(fake: FakeProvider, price: str = "1000.00") -> OneOffCharge:
     """A sign fee charge linked to the provider invoice ``INVOICE_REF``."""
     charge = a_charge(price, customer=CUSTOMER)
-    invoice = unlinked_invoice(charge.lease.operator_id, price, ref=INVOICE_REF)
+    invoice = unlinked_invoice(lease_of(charge).operator_id, price, ref=INVOICE_REF)
     provider_invoice(fake, price)
     outcome = service.link_invoice(charge.pk, invoice.pk, confirm=False, note="", actor=None)
     assert outcome.ok, outcome.message
@@ -305,7 +311,7 @@ def test_the_admin_group_gets_view_add_and_change_on_the_two_admin_models() -> N
 
 def checklist(
     items: list[ChargeInput], key: uuid.UUID | None = None
-) -> tuple[Lease, bool, list[SetupCharge]]:
+) -> tuple[Lease, bool, list[OneOffCharge]]:
     return service.create_lease_with_checklist(
         lease_fields(
             operator=make_operator(email=f"{uuid.uuid4().hex[:8]}@example.com", customer=None)
@@ -326,7 +332,11 @@ def test_the_checklist_creates_exactly_the_ticked_charges_with_the_typed_amounts
         ]
     )
     assert created and len(charges) == 2
-    rows = {row.fee_type.code: row for row in SetupCharge.objects.filter(lease=lease)}
+    rows = {
+        row.fee_type.code: row
+        for row in OneOffCharge.objects.filter(lease=lease)
+        if row.fee_type is not None
+    }
     assert set(rows) == {"sign_fee", "access_fee"}
     assert (rows["sign_fee"].price, rows["sign_fee"].cost, rows["sign_fee"].vendor) == (
         D("1000.00"),
@@ -339,7 +349,7 @@ def test_the_checklist_creates_exactly_the_ticked_charges_with_the_typed_amounts
         None,
         date(2026, 1, 31),
     )
-    assert all(row.status == SetupChargeStatus.OWED for row in rows.values())
+    assert all(row.status == OneOffChargeStatus.OWED for row in rows.values())
     assert all(row.balance == row.price for row in rows.values())
     assert actions(rows["sign_fee"].pk) == [service.CREATED_ACTION]
 
@@ -347,7 +357,7 @@ def test_the_checklist_creates_exactly_the_ticked_charges_with_the_typed_amounts
 def test_an_empty_checklist_creates_the_lease_only() -> None:
     lease, created, charges = checklist([])
     assert created and charges == []
-    assert not SetupCharge.objects.filter(lease=lease).exists()
+    assert not OneOffCharge.objects.filter(lease=lease).exists()
 
 
 def test_a_resubmitted_checklist_makes_one_lease_and_one_set_of_charges() -> None:
@@ -355,7 +365,7 @@ def test_a_resubmitted_checklist_makes_one_lease_and_one_set_of_charges() -> Non
     first, created, charges = checklist([item()], key)
     again, created_again, more = checklist([item()], key)
     assert (again.pk, created, created_again, len(charges), more) == (first.pk, True, False, 1, [])
-    assert SetupCharge.objects.filter(lease=first).count() == 1
+    assert OneOffCharge.objects.filter(lease=first).count() == 1
 
 
 @pytest.mark.parametrize(
@@ -376,7 +386,7 @@ def test_a_refused_row_saves_nothing_not_even_the_lease(
     assert raised.value.message == message
     assert CARD not in str(raised.value)
     assert Lease.objects.count() == leases_before
-    assert not SetupCharge.objects.exists()
+    assert not OneOffCharge.objects.exists()
 
 
 def test_an_inactive_fee_type_is_refused() -> None:
@@ -388,12 +398,16 @@ def test_an_inactive_fee_type_is_refused() -> None:
 
 def test_one_charge_per_fee_type_per_lease_but_a_legacy_row_may_sit_beside_it() -> None:
     charge = a_charge()
-    again = service.add_charge(charge.lease_id, item(), actor=None)
+    again = service.add_charge(lease_of(charge).pk, item(), actor=None)
     assert (again.ok, again.message) == (False, service.ALREADY_ON_LEASE.format(name="Sign fee"))
-    SetupCharge.objects.create(
-        lease=charge.lease, fee_type=charge.fee_type, price=D("50.00"), due_date=DAY, legacy=True
+    OneOffCharge.objects.create(
+        lease=lease_of(charge),
+        fee_type=charge.fee_type,
+        price=D("50.00"),
+        due_date=DAY,
+        legacy=True,
     )
-    assert SetupCharge.objects.filter(lease=charge.lease).count() == 2
+    assert OneOffCharge.objects.filter(lease=lease_of(charge)).count() == 2
 
 
 # --- Manual payments (D6) --------------------------------------------------------------------
@@ -405,18 +419,18 @@ def test_a_wire_covering_the_price_pays_the_charge_and_a_partial_leaves_it_parti
     assert pay(part, "400.00").ok
     whole, part = fresh(whole), fresh(part)
     assert (whole.status, whole.amount_paid, whole.balance) == (
-        SetupChargeStatus.PAID,
+        OneOffChargeStatus.PAID,
         D("1000.00"),
         D("0.00"),
     )
     assert (part.status, part.amount_paid, part.balance) == (
-        SetupChargeStatus.PARTIAL,
+        OneOffChargeStatus.PARTIAL,
         D("400.00"),
         D("600.00"),
     )
-    payment = Payment.objects.get(setup_charge=whole)
+    payment = Payment.objects.get(one_off_charge=whole)
     assert (payment.kind, payment.method, payment.status) == (
-        PaymentKind.SETUP,
+        PaymentKind.ONE_OFF,
         PaymentMethod.WIRE,
         PaymentStatus.SETTLED,
     )
@@ -426,7 +440,7 @@ def test_a_wire_covering_the_price_pays_the_charge_and_a_partial_leaves_it_parti
 def test_a_price_of_one_cent_is_paid_by_one_cent() -> None:
     charge = a_charge("0.01")
     assert pay(charge, "0.01").ok
-    assert fresh(charge).status == SetupChargeStatus.PAID
+    assert fresh(charge).status == OneOffChargeStatus.PAID
 
 
 @pytest.mark.parametrize(
@@ -448,7 +462,7 @@ def test_a_refused_payment_records_nothing(
     outcome = pay(charge, amount, **overrides)
     assert (outcome.ok, outcome.message) == (False, message)
     assert not Payment.objects.exists()
-    assert fresh(charge).status == SetupChargeStatus.OWED
+    assert fresh(charge).status == OneOffChargeStatus.OWED
 
 
 def test_a_paid_or_waived_charge_takes_no_payment() -> None:
@@ -486,7 +500,7 @@ def test_two_concurrent_record_payment_clicks_make_one_payment() -> None:
     )
     assert sorted(result.replayed for result in results) == [False, True]
     assert Payment.objects.count() == 1
-    assert fresh(charge).status == SetupChargeStatus.PAID
+    assert fresh(charge).status == OneOffChargeStatus.PAID
 
 
 @requires_postgresql
@@ -496,7 +510,7 @@ def test_two_concurrent_checklist_submissions_make_one_lease_and_one_set() -> No
     fields = lease_fields(operator=make_operator(email="race@example.com", customer=None))
     key = uuid.uuid4()
 
-    def submit() -> tuple[Lease, bool, list[SetupCharge]]:
+    def submit() -> tuple[Lease, bool, list[OneOffCharge]]:
         return service.create_lease_with_checklist(
             fields,
             rent=D("3500.00"),
@@ -508,13 +522,13 @@ def test_two_concurrent_checklist_submissions_make_one_lease_and_one_set() -> No
     results = _race(submit, submit)
     assert sorted(created for _, created, _ in results) == [False, True]
     assert Lease.objects.count() == 1
-    assert SetupCharge.objects.count() == 2
+    assert OneOffCharge.objects.count() == 2
 
 
 # --- Edit and waive (D6) ---------------------------------------------------------------------
 
 
-def edit(charge: SetupCharge, **changes: Any) -> service.Outcome:
+def edit(charge: OneOffCharge, **changes: Any) -> service.Outcome:
     values: dict[str, Any] = {
         "cost": charge.cost,
         "price": charge.price,
@@ -540,7 +554,7 @@ def test_edit_changes_cost_price_vendor_and_due_date_and_is_audited() -> None:
         date(2026, 11, 1),
         D("1200.00"),
     )
-    entry = AuditLog.objects.get(action="setup_charge.edited")
+    entry = AuditLog.objects.get(action="one_off_charge.edited")
     assert entry.before is not None and entry.after is not None
     assert (entry.before["price"], entry.after["price"]) == ("1000.00", "1200.00")
     assert edit(charge).message == service.UNCHANGED
@@ -571,7 +585,7 @@ def test_waive_needs_a_visible_note() -> None:
         assert (outcome.ok, outcome.message) == (False, service.WAIVE_NOTE_REQUIRED)
     card = service.waive(charge.pk, note=f"See {CARD}", actor=None)
     assert (card.ok, card.message) == (False, service.TEXT_PAYMENT_DATA)
-    assert fresh(charge).status == SetupChargeStatus.OWED
+    assert fresh(charge).status == OneOffChargeStatus.OWED
 
 
 def test_waive_with_a_note_marks_the_charge_waived_and_audits_it() -> None:
@@ -581,13 +595,13 @@ def test_waive_with_a_note_marks_the_charge_waived_and_audits_it() -> None:
     assert (outcome.ok, outcome.message) == (True, service.WAIVED)
     charge = fresh(charge)
     assert (charge.status, charge.waive_note, charge.waived_by) == (
-        SetupChargeStatus.WAIVED,
+        OneOffChargeStatus.WAIVED,
         "Owner waived the sign.",
         user,
     )
     assert charge.waived_at is not None
     assert service.waive(charge.pk, note="Again.", actor=None).message == service.WAIVE_ALREADY
-    assert "setup_charge.waived" in actions(charge.pk)
+    assert "one_off_charge.waived" in actions(charge.pk)
 
 
 def test_waive_is_refused_once_a_payment_settled() -> None:
@@ -595,7 +609,7 @@ def test_waive_is_refused_once_a_payment_settled() -> None:
     pay(charge, "1.00")
     outcome = service.waive(charge.pk, note="Too late.", actor=None)
     assert (outcome.ok, outcome.message) == (False, service.WAIVE_SETTLED)
-    assert fresh(charge).status == SetupChargeStatus.PARTIAL
+    assert fresh(charge).status == OneOffChargeStatus.PARTIAL
 
 
 # --- Linking an invoice: the rent rules (D6) ------------------------------------------------
@@ -603,7 +617,7 @@ def test_waive_is_refused_once_a_payment_settled() -> None:
 
 def test_an_unlinked_invoice_of_the_operator_is_linked() -> None:
     charge = a_charge()
-    invoice = unlinked_invoice(charge.lease.operator_id)
+    invoice = unlinked_invoice(lease_of(charge).operator_id)
     assert [row.invoice for row in rent_run.unlinked_invoices(charge)] == [invoice]
     outcome = service.link_invoice(charge.pk, invoice.pk, confirm=False, note="", actor=None)
     assert (outcome.ok, outcome.message) == (
@@ -611,9 +625,9 @@ def test_an_unlinked_invoice_of_the_operator_is_linked() -> None:
         rent_run.LINK_DONE.format(number="INV-2026-0101"),
     )
     invoice.refresh_from_db()
-    assert (invoice.setup_charge_id, invoice.rent_charge_id) == (charge.pk, None)
+    assert (invoice.one_off_charge_id, invoice.rent_charge_id) == (charge.pk, None)
     entry = AuditLog.objects.get(action="invoice.linked")
-    assert entry.after is not None and entry.after["setup_charge"] == str(charge.pk)
+    assert entry.after is not None and entry.after["one_off_charge"] == str(charge.pk)
     again = service.link_invoice(charge.pk, invoice.pk, confirm=False, note="", actor=None)
     assert (again.ok, again.message) == (True, rent_run.LINK_SAME)
 
@@ -622,20 +636,20 @@ def test_another_operators_invoice_or_one_linked_elsewhere_is_refused() -> None:
     charge = a_charge()
     stranger = unlinked_invoice(make_operator(email="other@example.com", customer=None).pk)
     rent_charge = RentCharge.objects.create(
-        lease=charge.lease,
+        lease=lease_of(charge),
         period_month=date(2026, 10, 1),
         due_on=DAY,
         amount_due=D("1000.00"),
         status=RentChargeStatus.DUE,
     )
-    taken = unlinked_invoice(charge.lease.operator_id, number="INV-2026-0102")
+    taken = unlinked_invoice(lease_of(charge).operator_id, number="INV-2026-0102")
     Invoice.objects.filter(pk=taken.pk).update(rent_charge=rent_charge)
     for invoice in (stranger, taken):
         outcome = service.link_invoice(charge.pk, invoice.pk, confirm=True, note="x", actor=None)
         assert (outcome.ok, outcome.message) == (False, rent_run.LINK_CHOOSE)
-    assert not Invoice.objects.filter(setup_charge=charge).exists()
+    assert not Invoice.objects.filter(one_off_charge=charge).exists()
     # The rent charge's link page never offers an invoice of a setup charge either.
-    linked = unlinked_invoice(charge.lease.operator_id, number="INV-2026-0103")
+    linked = unlinked_invoice(lease_of(charge).operator_id, number="INV-2026-0103")
     service.link_invoice(charge.pk, linked.pk, confirm=False, note="", actor=None)
     assert linked.pk not in [row.invoice.pk for row in rent_run.unlinked_invoices(rent_charge)]
     refused = rent_run.link_invoice(rent_charge.pk, linked.pk, confirm=True, note="x", actor=None)
@@ -644,7 +658,7 @@ def test_another_operators_invoice_or_one_linked_elsewhere_is_refused() -> None:
 
 def test_a_second_invoice_is_refused_and_a_differing_total_needs_confirmation_and_note() -> None:
     charge = a_charge()
-    differs = unlinked_invoice(charge.lease.operator_id, total="900.00")
+    differs = unlinked_invoice(lease_of(charge).operator_id, total="900.00")
     no_confirm = service.link_invoice(charge.pk, differs.pk, confirm=False, note="", actor=None)
     assert (no_confirm.ok, no_confirm.message) == (False, rent_run.LINK_CONFIRM)
     no_note = service.link_invoice(charge.pk, differs.pk, confirm=True, note=" ", actor=None)
@@ -656,7 +670,7 @@ def test_a_second_invoice_is_refused_and_a_differing_total_needs_confirmation_an
     charge = fresh(charge)
     assert charge.needs_review
     assert rent_run.LINKED_TOTAL_DIFFERS in service.review_message(charge)
-    second = unlinked_invoice(charge.lease.operator_id, number="INV-2026-0104")
+    second = unlinked_invoice(lease_of(charge).operator_id, number="INV-2026-0104")
     refused = service.link_invoice(charge.pk, second.pk, confirm=True, note="x", actor=None)
     assert (refused.ok, refused.message) == (False, rent_run.LINK_CHARGE_HAS_INVOICE)
 
@@ -665,14 +679,14 @@ def test_an_invoice_event_never_auto_links_an_invoice_of_a_setup_charge(fake: Fa
     charge = invoiced(fake)
     # A rent charge of the same operator, amount and month the invoice would fit.
     RentCharge.objects.create(
-        lease=charge.lease,
+        lease=lease_of(charge),
         period_month=date(2026, 10, 1),
         due_on=DAY,
         amount_due=D("1000.00"),
         status=RentChargeStatus.DUE,
     )
     deliver("update_invoice", id=INVOICE_REF)
-    invoice = Invoice.objects.get(setup_charge=charge)
+    invoice = Invoice.objects.get(one_off_charge=charge)
     assert invoice.rent_charge_id is None
 
 
@@ -687,8 +701,8 @@ def test_a_full_payment_queues_the_mark_and_the_worker_marks_the_invoice_paid(
     assert (outcome.ok, outcome.mark_due, outcome.provider) == (True, True, None)
     assert outcome.payment is not None
     assert fake.calls == []  # the service never calls the provider
-    job = jobs.enqueue(JobKind.SETUP_PAYMENT_MARK, charge, {"payment": outcome.payment.pk}, None)
-    assert (job.entity_type, job.entity_id) == ("setup_charge", charge.pk)
+    job = jobs.enqueue(JobKind.ONE_OFF_PAYMENT_MARK, charge, {"payment": outcome.payment.pk}, None)
+    assert (job.entity_type, job.entity_id) == ("one_off_charge", charge.pk)
     [done] = run_queued_jobs()
     assert (done.status, done.result) == (JobStatus.DONE, rent_run.MARK_DONE)
     assert [name for name, _ in fake.calls] == [
@@ -696,10 +710,10 @@ def test_a_full_payment_queues_the_mark_and_the_worker_marks_the_invoice_paid(
         "mark_invoice_paid_cash_or_check",
         "get_invoice",
     ]
-    invoice = Invoice.objects.get(setup_charge=charge)
+    invoice = Invoice.objects.get(one_off_charge=charge)
     assert invoice.provider_status == "PAID"
-    assert "setup_charge.provider_marked" in actions(charge.pk)
-    marked = AuditLog.objects.get(action="setup_charge.provider_marked")
+    assert "one_off_charge.provider_marked" in actions(charge.pk)
+    marked = AuditLog.objects.get(action="one_off_charge.provider_marked")
     assert marked.after is not None and INVOICE_REF not in str(marked.after)
 
 
@@ -710,11 +724,11 @@ def test_a_failed_mark_keeps_the_payment_and_flags_the_charge(
     outcome = pay(charge, "1000.00")
     assert outcome.payment is not None
     fake.fail_next("mark_invoice_paid_cash_or_check", ProviderUnavailable(503))
-    jobs.enqueue(JobKind.SETUP_PAYMENT_MARK, charge, {"payment": outcome.payment.pk}, None)
+    jobs.enqueue(JobKind.ONE_OFF_PAYMENT_MARK, charge, {"payment": outcome.payment.pk}, None)
     [done] = run_queued_jobs()
     assert done.status == JobStatus.FAILED
     charge = fresh(charge)
-    assert (charge.status, charge.needs_review) == (SetupChargeStatus.PAID, True)
+    assert (charge.status, charge.needs_review) == (OneOffChargeStatus.PAID, True)
     assert "Provider invoice not marked paid: ProviderUnavailable" in service.review_message(charge)
 
 
@@ -723,13 +737,13 @@ def later(monkeypatch: pytest.MonkeyPatch, seconds: int) -> None:
     monkeypatch.setattr("django.utils.timezone.now", lambda: moment)
 
 
-def failed_mark(fake: FakeProvider) -> SetupCharge:
+def failed_mark(fake: FakeProvider) -> OneOffCharge:
     """An invoiced charge paid in full whose marking failed in the worker."""
     charge = invoiced(fake)
     outcome = pay(charge, "1000.00")
     assert outcome.payment is not None
     fake.fail_next("mark_invoice_paid_cash_or_check", ProviderUnavailable(503))
-    jobs.enqueue(JobKind.SETUP_PAYMENT_MARK, charge, {"payment": outcome.payment.pk}, None)
+    jobs.enqueue(JobKind.ONE_OFF_PAYMENT_MARK, charge, {"payment": outcome.payment.pk}, None)
     [done] = run_queued_jobs()
     assert done.status == JobStatus.FAILED
     fake.calls.clear()
@@ -748,7 +762,7 @@ def test_a_failed_mark_is_retried_after_a_minute_and_clears_the_flag(
     assert service.retry_provider_mark(charge.pk, actor=None).retry_in == 1
     later(monkeypatch, 60)
     assert service.retry_wait(fresh(charge)) == 0
-    jobs.enqueue(JobKind.SETUP_PAYMENT_RETRY_MARK, charge, None, None)
+    jobs.enqueue(JobKind.ONE_OFF_PAYMENT_RETRY_MARK, charge, None, None)
     [done] = run_queued_jobs()
     assert (done.status, done.result) == (JobStatus.DONE, rent_run.MARK_DONE)
     assert [name for name, _ in fake.calls] == [
@@ -758,7 +772,7 @@ def test_a_failed_mark_is_retried_after_a_minute_and_clears_the_flag(
     ]
     charge = fresh(charge)
     assert (charge.needs_review, charge.review_message) == (False, "")
-    assert Invoice.objects.get(setup_charge=charge).provider_status == "PAID"
+    assert Invoice.objects.get(one_off_charge=charge).provider_status == "PAID"
     assert service.retry_wait(charge) is None
     nothing = service.retry_provider_mark(charge.pk, actor=None)
     assert nothing.action is rent_run.MarkAction.NOTHING_TO_RETRY
@@ -776,10 +790,10 @@ def test_nothing_to_retry_without_a_failed_mark() -> None:
 def test_the_retry_kind_acts_on_setup_charges_only() -> None:
     charge = a_charge()
     with pytest.raises(ValueError, match="does not act on this entity"):
-        jobs.enqueue(JobKind.SETUP_PAYMENT_RETRY_MARK, charge.lease, None, None)
+        jobs.enqueue(JobKind.ONE_OFF_PAYMENT_RETRY_MARK, lease_of(charge), None, None)
     with pytest.raises(ValueError, match="does not act on this entity"):
         jobs.enqueue(JobKind.PAYMENT_RETRY_MARK, charge, None, None)
-    assert jobs.ENTITY_OF_KIND[JobKind.SETUP_PAYMENT_RETRY_MARK] == "setup_charge"
+    assert jobs.ENTITY_OF_KIND[JobKind.ONE_OFF_PAYMENT_RETRY_MARK] == "one_off_charge"
 
 
 def test_the_page_shows_the_wait_then_the_button_and_queues_one_retry(
@@ -788,27 +802,27 @@ def test_the_page_shows_the_wait_then_the_button_and_queues_one_retry(
     charge = failed_mark(fake)
     client, _ = client_for(Role.BILLING)
     paths = routes(charge)
-    page = client.get(paths["ledger:setup_charges:detail"]).content.decode()
+    page = client.get(paths["ledger:one_off_charges:detail"]).content.decode()
     assert 'id="retry-mark"' not in page
     assert '<p id="retry-wait" class="muted">Retry available in 60 seconds.</p>' in page
     later(monkeypatch, 61)
-    page = client.get(paths["ledger:setup_charges:detail"]).content.decode()
+    page = client.get(paths["ledger:one_off_charges:detail"]).content.decode()
     assert 'id="retry-mark"' in page
-    response = client.post(paths["ledger:setup_charges:retry_mark"])
-    assert response["Location"] == paths["ledger:setup_charges:detail"]
-    retry = Job.objects.filter(kind=JobKind.SETUP_PAYMENT_RETRY_MARK)
+    response = client.post(paths["ledger:one_off_charges:retry_mark"])
+    assert response["Location"] == paths["ledger:one_off_charges:detail"]
+    retry = Job.objects.filter(kind=JobKind.ONE_OFF_PAYMENT_RETRY_MARK)
     assert [(job.entity_id, job.status) for job in retry] == [(charge.pk, JobStatus.QUEUED)]
     # While that job waits, the button is gone and a second click queues nothing.
-    page = client.get(paths["ledger:setup_charges:detail"]).content.decode()
+    page = client.get(paths["ledger:one_off_charges:detail"]).content.decode()
     assert 'id="retry-mark"' not in page
-    client.post(paths["ledger:setup_charges:retry_mark"])
+    client.post(paths["ledger:one_off_charges:retry_mark"])
     assert retry.count() == 1
     assert fake.calls == []  # the page never calls the provider
     viewer, _ = client_for(Role.VIEWER)
     assert (
-        'id="retry-mark"' not in viewer.get(paths["ledger:setup_charges:detail"]).content.decode()
+        'id="retry-mark"' not in viewer.get(paths["ledger:one_off_charges:detail"]).content.decode()
     )
-    assert viewer.post(paths["ledger:setup_charges:retry_mark"]).status_code == 403
+    assert viewer.post(paths["ledger:one_off_charges:retry_mark"]).status_code == 403
     assert retry.count() == 1
 
 
@@ -823,7 +837,7 @@ def test_a_partial_payment_on_an_invoiced_charge_makes_no_call_and_flags_it(
     charge = fresh(charge)
     assert charge.review_message == offline_marking.PARTIAL_AMOUNT
     assert "Provider invoice not updated: partial amount" in service.review_message(charge)
-    assert "setup_charge.provider_not_updated" in actions(charge.pk)
+    assert "one_off_charge.provider_not_updated" in actions(charge.pk)
 
 
 def test_a_payment_without_an_invoice_queues_nothing() -> None:
@@ -835,10 +849,12 @@ def test_a_payment_without_an_invoice_queues_nothing() -> None:
 def test_the_setup_mark_kind_acts_on_setup_charges_only() -> None:
     charge = a_charge()
     with pytest.raises(ValueError, match="does not act on this entity"):
-        jobs.enqueue(JobKind.SETUP_PAYMENT_MARK, charge.lease, {"payment": uuid.uuid4()}, None)
+        jobs.enqueue(
+            JobKind.ONE_OFF_PAYMENT_MARK, lease_of(charge), {"payment": uuid.uuid4()}, None
+        )
     with pytest.raises(ValueError, match="does not act on this entity"):
         jobs.enqueue(JobKind.PAYMENT_MARK, charge, {"payment": uuid.uuid4()}, None)
-    assert jobs.ENTITY_OF_KIND[JobKind.SETUP_PAYMENT_MARK] == "setup_charge"
+    assert jobs.ENTITY_OF_KIND[JobKind.ONE_OFF_PAYMENT_MARK] == "one_off_charge"
 
 
 # --- Payment provider transactions for a setup invoice (consumers) -----------------------------
@@ -848,19 +864,19 @@ def test_a_transaction_for_a_setup_invoice_lands_on_the_setup_charge(fake: FakeP
     charge = invoiced(fake)
     provider_txn(fake)
     assert deliver("create_transaction", id=TXN) == "processed"
-    payment = Payment.objects.get(setup_charge=charge)
+    payment = Payment.objects.get(one_off_charge=charge)
     assert (payment.kind, payment.method, payment.status, payment.rent_charge_id) == (
-        PaymentKind.SETUP,
+        PaymentKind.ONE_OFF,
         PaymentMethod.ACH,
         PaymentStatus.PENDING,
         None,
     )
-    assert fresh(charge).status == SetupChargeStatus.OWED  # pending pays nothing
+    assert fresh(charge).status == OneOffChargeStatus.OWED  # pending pays nothing
     fake.transactions[TXN] = replace(fake.transactions[TXN], settled_at=SETTLED_AT)
     deliver("update_transaction_settled", id=TXN)
     charge = fresh(charge)
-    assert (charge.status, charge.amount_paid) == (SetupChargeStatus.PAID, D("1000.00"))
-    assert "setup_charge.payment_applied" in actions(charge.pk)
+    assert (charge.status, charge.amount_paid) == (OneOffChargeStatus.PAID, D("1000.00"))
+    assert "one_off_charge.payment_applied" in actions(charge.pk)
 
 
 def test_an_ach_return_reopens_the_setup_charge_and_enters_the_returns_queue(
@@ -869,26 +885,26 @@ def test_an_ach_return_reopens_the_setup_charge_and_enters_the_returns_queue(
     charge = invoiced(fake)
     provider_txn(fake, settled_at=SETTLED_AT)
     deliver("update_transaction_settled", id=TXN)
-    assert fresh(charge).status == SetupChargeStatus.PAID
+    assert fresh(charge).status == OneOffChargeStatus.PAID
     fake.transactions[TXN] = replace(
         fake.transactions[TXN], returned=True, return_code="R01", return_reason="NSF"
     )
     deliver("update_transaction", id=TXN)
     charge = fresh(charge)
     assert (charge.status, charge.amount_paid, charge.needs_review) == (
-        SetupChargeStatus.OWED,
+        OneOffChargeStatus.OWED,
         D("0.00"),
         True,
     )
-    payment = Payment.objects.get(setup_charge=charge)
+    payment = Payment.objects.get(one_off_charge=charge)
     [queued] = list(returns.open_returns())
     assert queued == payment
     row = returns.row(payment)
-    assert (row.store, row.operator) == (charge.lease.store, charge.lease.operator)
+    assert (row.store, row.operator) == (lease_of(charge).store, lease_of(charge).operator)
     assert service.RETURNED in service.review_message(charge)
-    assert "setup_charge.ach_returned" in actions(charge.pk)
+    assert "one_off_charge.ach_returned" in actions(charge.pk)
     page = client_for(Role.VIEWER)[0].get("/returns/").content.decode()
-    assert f"/setup-charges/{charge.pk}/" in page
+    assert f"/one-off-charges/{charge.pk}/" in page
 
 
 def test_a_dispute_flags_the_setup_charge(fake: FakeProvider) -> None:
@@ -907,26 +923,26 @@ def test_a_differing_provider_total_flags_the_setup_charge(fake: FakeProvider) -
     deliver("update_invoice", id=INVOICE_REF)
     charge = fresh(charge)
     assert charge.needs_review and charge.price == D("1000.00")
-    assert "setup_charge.total_mismatch" in actions(charge.pk)
+    assert "one_off_charge.total_mismatch" in actions(charge.pk)
 
 
 def test_an_ach_setup_payment_is_refunded_by_the_rent_rules(fake: FakeProvider) -> None:
     charge = invoiced(fake)
     provider_txn(fake, settled_at=SETTLED_AT)
     deliver("update_transaction_settled", id=TXN)
-    payment = Payment.objects.get(setup_charge=charge)
+    payment = Payment.objects.get(one_off_charge=charge)
     facts = refunds.payment_facts(payment)
     assert facts.can_refund and facts.refundable == D("1000.00")
     outcome = refunds.refund_payment(payment.pk, amount=D("200.00"), confirmed=True, actor=None)
     assert outcome.ok, outcome.message
-    refund = Payment.objects.get(setup_charge=charge, is_refund=True)
+    refund = Payment.objects.get(one_off_charge=charge, is_refund=True)
     assert (refund.kind, refund.parent_payment_id, refund.amount) == (
-        PaymentKind.SETUP,
+        PaymentKind.ONE_OFF,
         payment.pk,
         D("200.00"),
     )
     if refund.status == PaymentStatus.SETTLED:
-        assert fresh(charge).status == SetupChargeStatus.PARTIAL
+        assert fresh(charge).status == OneOffChargeStatus.PARTIAL
     entry = AuditLog.objects.get(action=refunds.REFUNDED_ACTION)
     assert entry.after is not None and entry.after["charge"]["fee_type"] == "sign_fee"
 
@@ -935,7 +951,7 @@ def test_a_deposit_refund_is_never_refundable_or_voidable() -> None:
     charge = a_charge("2500.00", deposit_type())
     pay(charge, "2500.00")
     paid_back = Payment.objects.create(
-        setup_charge=charge,
+        one_off_charge=charge,
         kind=PaymentKind.REFUND_DEPOSIT,
         method=PaymentMethod.WIRE,
         amount=D("2500.00"),
@@ -951,7 +967,7 @@ def test_a_deposit_refund_is_never_refundable_or_voidable() -> None:
     refused = refunds.refund_payment(paid_back.pk, amount=D("1.00"), confirmed=True, actor=None)
     assert (refused.ok, refused.message) == (False, refunds.IS_DEPOSIT_REFUND)
     # Paying the deposit back does not reopen the charge.
-    assert fresh(charge).status == SetupChargeStatus.PAID
+    assert fresh(charge).status == OneOffChargeStatus.PAID
     service.recompute(fresh(charge))
     assert fresh(charge).amount_paid == D("2500.00")
 
@@ -965,7 +981,7 @@ def test_the_ledger_totals_leave_deposits_out_and_show_them_held() -> None:
     pay(sign, "1000.00")
     pay(deposit, "2500.00")
     Payment.objects.create(
-        setup_charge=deposit,
+        one_off_charge=deposit,
         kind=PaymentKind.REFUND_DEPOSIT,
         method=PaymentMethod.ZELLE,
         amount=D("2000.00"),
@@ -988,15 +1004,15 @@ def test_the_ledger_filters_and_shows_a_setup_payment_by_its_lease() -> None:
     charge = a_charge()
     pay(charge, "1000.00")
     selected = payments_ledger.PaymentFilter(
-        operator=charge.lease.operator_id, store=charge.lease.store_id
+        operator=lease_of(charge).operator_id, store=lease_of(charge).store_id
     )
     [row] = payments_ledger.rows_for(payments_ledger.ledger_payments(selected))
-    assert (row.operator, row.store) == (charge.lease.operator, charge.lease.store)
+    assert (row.operator, row.store) == (lease_of(charge).operator, lease_of(charge).store)
     [record] = [
         payments_ledger.csv_record(item)
         for item in payments_ledger.rows_for(payments_ledger.ledger_payments(selected))
     ]
-    assert record[payments_ledger.CSV_HEADER.index("charge_kind")] == "setup"
+    assert record[payments_ledger.CSV_HEADER.index("charge_kind")] == "one_off"
 
 
 def test_the_ledger_and_payment_pages_name_the_kind_and_the_setup_charge() -> None:
@@ -1005,7 +1021,7 @@ def test_the_ledger_and_payment_pages_name_the_kind_and_the_setup_charge() -> No
     payment = Payment.objects.get()
     client, _ = client_for(Role.VIEWER)
     listing = client.get("/payments/").content.decode()
-    assert f"/setup-charges/{charge.pk}/" in listing
+    assert f"/one-off-charges/{charge.pk}/" in listing
     assert "Setup fee: Sign fee" in listing
     assert 'id="total-deposits-held"' in listing
     detail = client.get(f"/payments/{payment.pk}/").content.decode()
@@ -1016,34 +1032,52 @@ def test_the_ledger_and_payment_pages_name_the_kind_and_the_setup_charge() -> No
 
 WRITE_ROUTES = {
     "ledger:leases:add_setup_charge": Role.BILLING,
-    "ledger:setup_charges:payment": Role.BILLING,
-    "ledger:setup_charges:retry_mark": Role.BILLING,
-    "ledger:setup_charges:link": Role.BILLING,
-    "ledger:setup_charges:edit": Role.BILLING,
-    "ledger:setup_charges:waive": Role.ADMIN,
+    "ledger:one_off_charges:payment": Role.BILLING,
+    "ledger:one_off_charges:retry_mark": Role.BILLING,
+    "ledger:one_off_charges:link": Role.BILLING,
+    "ledger:one_off_charges:edit": Role.BILLING,
+    "ledger:one_off_charges:waive": Role.ADMIN,
+    # PLAN-010d D2, D6, D9: creating a one-off charge, cancelling it and the provider retry.
+    "ledger:operators:new_charge": Role.BILLING,
+    "ledger:leases:new_charge": Role.BILLING,
+    "ledger:one_off_charges:cancel": Role.BILLING,
+    "ledger:one_off_charges:retry": Role.BILLING,
+    # PLAN-010d D4, D9: Charge now, admin.
+    "ledger:one_off_charges:charge_now": Role.ADMIN,
 }
 
-POST_ONLY_ROUTES = {"ledger:setup_charges:retry_mark"}
+POST_ONLY_ROUTES = {"ledger:one_off_charges:retry_mark", "ledger:one_off_charges:retry"}
 
 
-def routes(charge: SetupCharge) -> dict[str, str]:
-    base = f"/setup-charges/{charge.pk}/"
+def routes(charge: OneOffCharge) -> dict[str, str]:
+    base = f"/one-off-charges/{charge.pk}/"
     return {
-        "ledger:setup_charges:detail": base,
-        "ledger:setup_charges:payment": f"{base}payments/new/",
-        "ledger:setup_charges:retry_mark": f"{base}retry-mark/",
-        "ledger:setup_charges:link": f"{base}link-invoice/",
-        "ledger:setup_charges:edit": f"{base}edit/",
-        "ledger:setup_charges:waive": f"{base}waive/",
+        "ledger:one_off_charges:detail": base,
+        "ledger:one_off_charges:payment": f"{base}payments/new/",
+        "ledger:one_off_charges:retry_mark": f"{base}retry-mark/",
+        "ledger:one_off_charges:link": f"{base}link-invoice/",
+        "ledger:one_off_charges:edit": f"{base}edit/",
+        "ledger:one_off_charges:waive": f"{base}waive/",
         "ledger:leases:add_setup_charge": f"/leases/{charge.lease_id}/setup-charges/new/",
+        "ledger:operators:new_charge": f"/operators/{lease_of(charge).operator_id}/charges/new/",
+        "ledger:leases:new_charge": f"/leases/{charge.lease_id}/charges/new/",
+        "ledger:one_off_charges:cancel": f"{base}cancel/",
+        "ledger:one_off_charges:retry": f"{base}retry/",
+        "ledger:one_off_charges:charge_now": f"{base}charge-now/",
     }
 
 
 def test_every_setup_route_is_classified_with_its_role() -> None:
     ledger = [name for name, _, _ in iter_routes() if name and name.startswith("ledger:")]
-    names = {name for name in ledger if "setup" in name}
-    assert names == {"ledger:setup_charges:detail", *WRITE_ROUTES}
-    assert "ledger:setup_charges:detail" in registry.READ_ONLY_ROUTE_NAMES
+    names = {
+        name
+        for name in ledger
+        if "setup" in name
+        or name.startswith("ledger:one_off_charges:")
+        or name.endswith(":new_charge")
+    }
+    assert names == {"ledger:one_off_charges:detail", *WRITE_ROUTES}
+    assert "ledger:one_off_charges:detail" in registry.READ_ONLY_ROUTE_NAMES
     for name, role in WRITE_ROUTES.items():
         rule = registry.rule_for(name)
         assert rule is not None and rule.min_role is role and rule.methods == {"POST"}, name
@@ -1056,7 +1090,7 @@ def test_a_viewer_reads_the_page_and_every_write_route_refuses_it() -> None:
     charge = a_charge()
     client, _ = client_for(Role.VIEWER)
     paths = routes(charge)
-    page = client.get(paths["ledger:setup_charges:detail"]).content.decode()
+    page = client.get(paths["ledger:one_off_charges:detail"]).content.decode()
     assert (
         "Sign fee" in page and 'id="record-payment"' not in page and 'id="waive-charge"' not in page
     )
@@ -1066,32 +1100,33 @@ def test_a_viewer_reads_the_page_and_every_write_route_refuses_it() -> None:
         assert client.get(paths[name]).status_code == expected, name
         assert client.post(paths[name], {"note": "x", "price": "1.00"}).status_code == 403, name
     assert not Payment.objects.exists() and not Job.objects.exists()
-    assert fresh(charge).status == SetupChargeStatus.OWED
+    assert fresh(charge).status == OneOffChargeStatus.OWED
 
 
 def test_billing_cannot_waive() -> None:
     charge = a_charge()
     client, _ = client_for(Role.BILLING)
     paths = routes(charge)
-    assert (
-        'id="waive-charge"' not in client.get(paths["ledger:setup_charges:detail"]).content.decode()
-    )
-    assert client.get(paths["ledger:setup_charges:waive"]).status_code == 403
-    assert client.post(paths["ledger:setup_charges:waive"], {"note": "x"}).status_code == 403
-    assert fresh(charge).status == SetupChargeStatus.OWED
+    detail = client.get(paths["ledger:one_off_charges:detail"]).content.decode()
+    assert 'id="waive-charge"' not in detail
+    assert client.get(paths["ledger:one_off_charges:waive"]).status_code == 403
+    assert client.post(paths["ledger:one_off_charges:waive"], {"note": "x"}).status_code == 403
+    assert fresh(charge).status == OneOffChargeStatus.OWED
 
 
 def test_an_admin_waives_through_the_page_and_an_empty_note_is_held_as_an_error() -> None:
     charge = a_charge()
     client, _ = client_for(Role.ADMIN)
     paths = routes(charge)
-    assert 'id="waive-charge"' in client.get(paths["ledger:setup_charges:detail"]).content.decode()
-    refused = client.post(paths["ledger:setup_charges:waive"], {"note": "​"})
-    assert refused["Location"] == paths["ledger:setup_charges:waive"]
-    assert "A note is required" in client.get(paths["ledger:setup_charges:waive"]).content.decode()
-    done = client.post(paths["ledger:setup_charges:waive"], {"note": "Owner decision."})
-    assert done["Location"] == paths["ledger:setup_charges:detail"]
-    assert fresh(charge).status == SetupChargeStatus.WAIVED
+    detail = client.get(paths["ledger:one_off_charges:detail"]).content.decode()
+    assert 'id="waive-charge"' in detail
+    refused = client.post(paths["ledger:one_off_charges:waive"], {"note": "​"})
+    assert refused["Location"] == paths["ledger:one_off_charges:waive"]
+    waive_page = client.get(paths["ledger:one_off_charges:waive"]).content.decode()
+    assert "A note is required" in waive_page
+    done = client.post(paths["ledger:one_off_charges:waive"], {"note": "Owner decision."})
+    assert done["Location"] == paths["ledger:one_off_charges:detail"]
+    assert fresh(charge).status == OneOffChargeStatus.WAIVED
 
 
 @pytest.mark.usefixtures("pinned_today")
@@ -1107,11 +1142,11 @@ def test_billing_records_a_wire_through_the_page_and_a_resubmission_records_noth
         "reference": "W-1",
         "note": NOTE,
     }
-    response = client.post(paths["ledger:setup_charges:payment"], data)
-    assert response["Location"] == paths["ledger:setup_charges:detail"]
-    client.post(paths["ledger:setup_charges:payment"], data)
+    response = client.post(paths["ledger:one_off_charges:payment"], data)
+    assert response["Location"] == paths["ledger:one_off_charges:detail"]
+    client.post(paths["ledger:one_off_charges:payment"], data)
     assert Payment.objects.count() == 1
-    page = client.get(paths["ledger:setup_charges:detail"]).content.decode()
+    page = client.get(paths["ledger:one_off_charges:detail"]).content.decode()
     assert "Paid" in page and "W-1" in page
     assert not Job.objects.exists()  # no invoice, nothing to mark
 
@@ -1122,7 +1157,7 @@ def test_the_page_queues_the_setup_mark_job_for_an_invoiced_charge(fake: FakePro
     client, _ = client_for(Role.BILLING)
     key = str(uuid.uuid4())
     client.post(
-        routes(charge)["ledger:setup_charges:payment"],
+        routes(charge)["ledger:one_off_charges:payment"],
         {
             "creation_key": key,
             "method": "zelle",
@@ -1134,12 +1169,12 @@ def test_the_page_queues_the_setup_mark_job_for_an_invoiced_charge(fake: FakePro
     )
     [job] = Job.objects.all()
     assert (job.kind, job.entity_id, str(job.replay_key)) == (
-        JobKind.SETUP_PAYMENT_MARK,
+        JobKind.ONE_OFF_PAYMENT_MARK,
         charge.pk,
         key,
     )
     assert fake.calls == []
-    page = client.get(routes(charge)["ledger:setup_charges:detail"]).content.decode()
+    page = client.get(routes(charge)["ledger:one_off_charges:detail"]).content.decode()
     assert 'id="job-status"' in page
 
 
@@ -1147,12 +1182,12 @@ def test_billing_links_edits_and_adds_through_the_pages() -> None:
     charge = a_charge()
     client, _ = client_for(Role.BILLING)
     paths = routes(charge)
-    invoice = unlinked_invoice(charge.lease.operator_id)
-    assert "INV-2026-0101" in client.get(paths["ledger:setup_charges:link"]).content.decode()
-    client.post(paths["ledger:setup_charges:link"], {"invoice": str(invoice.pk), "note": ""})
-    assert Invoice.objects.get(pk=invoice.pk).setup_charge_id == charge.pk
+    invoice = unlinked_invoice(lease_of(charge).operator_id)
+    assert "INV-2026-0101" in client.get(paths["ledger:one_off_charges:link"]).content.decode()
+    client.post(paths["ledger:one_off_charges:link"], {"invoice": str(invoice.pk), "note": ""})
+    assert Invoice.objects.get(pk=invoice.pk).one_off_charge_id == charge.pk
     client.post(
-        paths["ledger:setup_charges:edit"],
+        paths["ledger:one_off_charges:edit"],
         {"cost": "", "price": "1100.00", "vendor": "V", "due_date": "2026-11-01"},
     )
     assert (fresh(charge).price, fresh(charge).cost) == (D("1100.00"), None)
@@ -1167,8 +1202,8 @@ def test_billing_links_edits_and_adds_through_the_pages() -> None:
             "due_date": "2026-10-01",
         },
     )
-    new = SetupCharge.objects.get(lease=charge.lease, fee_type=access)
-    assert added["Location"] == f"/setup-charges/{new.pk}/"
+    new = OneOffCharge.objects.get(lease=lease_of(charge), fee_type=access)
+    assert added["Location"] == f"/one-off-charges/{new.pk}/"
     duplicate = client.post(
         paths["ledger:leases:add_setup_charge"],
         {
@@ -1184,7 +1219,7 @@ def test_billing_links_edits_and_adds_through_the_pages() -> None:
     assert "already has a charge for Access fee" in page
     lease_page = client.get(f"/leases/{charge.lease_id}/").content.decode()
     assert 'id="setup-charges"' in lease_page and 'id="add-setup-charge"' in lease_page
-    assert f"/setup-charges/{new.pk}/" in lease_page
+    assert f"/one-off-charges/{new.pk}/" in lease_page
 
 
 def test_the_vendor_with_a_card_number_is_refused_on_the_add_form_and_never_held() -> None:
@@ -1204,7 +1239,7 @@ def test_the_vendor_with_a_card_number_is_refused_on_the_add_form_and_never_held
     assert "may not contain card or account numbers" in page
     # The whole number, not a fragment: a random identifier on the page may hold "4111".
     assert CARD not in page and CARD.replace(" ", "") not in page
-    assert SetupCharge.objects.count() == 1
+    assert OneOffCharge.objects.count() == 1
 
 
 # --- The lease checklist screen (D5) ----------------------------------------------------------
@@ -1241,7 +1276,7 @@ def test_the_checklist_post_creates_the_lease_and_the_ticked_charges_once() -> N
     response = client.post("/leases/new/", data)
     lease = Lease.objects.get()
     assert response["Location"] == f"/leases/{lease.pk}/"
-    [charge] = SetupCharge.objects.all()
+    [charge] = OneOffCharge.objects.all()
     assert (charge.fee_type, charge.price, charge.cost, charge.due_date) == (
         sign,
         D("1000.00"),
@@ -1249,8 +1284,8 @@ def test_the_checklist_post_creates_the_lease_and_the_ticked_charges_once() -> N
         date(2026, 1, 1),  # the lease's start date
     )
     client.post("/leases/new/", data)
-    assert (Lease.objects.count(), SetupCharge.objects.count()) == (1, 1)
-    assert not SetupCharge.objects.filter(fee_type=access).exists()
+    assert (Lease.objects.count(), OneOffCharge.objects.count()) == (1, 1)
+    assert not OneOffCharge.objects.filter(fee_type=access).exists()
 
 
 def test_a_ticked_row_without_a_price_or_with_a_card_number_saves_nothing() -> None:
@@ -1267,7 +1302,7 @@ def test_a_ticked_row_without_a_price_or_with_a_card_number_saves_nothing() -> N
     assert "may not contain card or account numbers" in page
     # The whole number, not a fragment: a random identifier on the page may hold "4111".
     assert CARD not in page and CARD.replace(" ", "") not in page
-    assert (Lease.objects.count(), SetupCharge.objects.count()) == (0, 0)
+    assert (Lease.objects.count(), OneOffCharge.objects.count()) == (0, 0)
 
 
 def test_the_lease_edit_page_has_no_checklist() -> None:

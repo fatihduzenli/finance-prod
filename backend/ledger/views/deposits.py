@@ -20,25 +20,25 @@ from django.views.decorators.http import require_http_methods
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import DepositResolutionForm
-from ledger.models import Lease, SetupCharge
+from ledger.models import Lease, OneOffCharge
 from ledger.services import deposits as service
-from ledger.services import setup_charges
+from ledger.services import one_off_charges
 from ledger.views.operators import _actor, _held, _hold, _role, role_required
 
 
-def _load(pk: str, charge_pk: str) -> SetupCharge:
+def _load(pk: str, charge_pk: str) -> OneOffCharge:
     try:
         lease_id, charge_id = uuid.UUID(pk), uuid.UUID(charge_pk)
     except ValueError:
         raise Http404 from None
     return get_object_or_404(
-        SetupCharge.objects.select_related("lease", "lease__store", "lease__operator", "fee_type"),
+        OneOffCharge.objects.select_related("lease", "lease__store", "lease__operator", "fee_type"),
         pk=charge_id,
         lease_id=lease_id,
     )
 
 
-def _targets(charge: SetupCharge) -> list[tuple[str, str]]:
+def _targets(charge: OneOffCharge) -> list[tuple[str, str]]:
     return [(str(lease.pk), service.lease_label(lease)) for lease in service.target_leases(charge)]
 
 
@@ -49,6 +49,8 @@ def resolve_deposit(request: HttpRequest, pk: str, charge: str) -> HttpResponse:
         return forbidden(request)
     deposit = _load(pk, charge)
     lease = deposit.lease
+    if lease is None:  # loaded by its lease; kept for the type checker
+        raise Http404
     target = f"resolve-deposit:{deposit.pk}"
     targets = _targets(deposit)
     if request.method == "POST":
@@ -73,7 +75,7 @@ def resolve_deposit(request: HttpRequest, pk: str, charge: str) -> HttpResponse:
                 )
                 if outcome.ok:
                     messages.success(request, outcome.message)
-                    return redirect("ledger:setup_charges:detail", pk=deposit.pk)
+                    return redirect("ledger:one_off_charges:detail", pk=deposit.pk)
                 field = outcome.field if outcome.field in form.fields else None
                 form.add_error(field, outcome.message)
         _hold(request, target, form)
@@ -82,7 +84,7 @@ def resolve_deposit(request: HttpRequest, pk: str, charge: str) -> HttpResponse:
         request, target, lambda data: DepositResolutionForm(data, targets=targets)
     ) or DepositResolutionForm(
         targets=targets,
-        initial={"amount": setup_charges.settled(deposit), "resolved_on": timezone.localdate()},
+        initial={"amount": one_off_charges.settled(deposit), "resolved_on": timezone.localdate()},
     )
     return render(
         request,
@@ -91,7 +93,7 @@ def resolve_deposit(request: HttpRequest, pk: str, charge: str) -> HttpResponse:
             "form": form,
             "charge": deposit,
             "lease": lease,
-            "paid": setup_charges.settled(deposit),
+            "paid": one_off_charges.settled(deposit),
             "can_resolve": service.can_resolve(deposit),
         },
     )

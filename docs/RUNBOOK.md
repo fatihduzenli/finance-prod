@@ -315,3 +315,41 @@ status log. A model does not do this.
 the role *Storage Blob Data Contributor* on the container (a new assignment takes a few minutes
 to take effect); the account still has shared-key access off and the container exists. "Document
 storage is not configured" means the first variable is empty: the feature is off.
+
+## 13. One-off charges, Charge now, cancel, and the audit page (PLAN-010d, ADR-0009)
+
+**Create a one-off charge** from an operator page (lease blank or chosen) or a lease page
+(billing): category (arrears, adjustment, damage, other, or a setup fee type), amount, due date,
+the description that becomes the invoice line, a mandatory internal note, and how to collect it:
+
+| Collection | What happens |
+|---|---|
+| Send by email | The worker creates the Stax invoice (our `INV-YYYY-NNNN` number as its reference, the description as the line) and sends it through Stax. The page shows the invoice linked and `SENT`. |
+| Leave unsent (manual) | The worker creates the Stax invoice and sends nothing; record the wire, Zelle or other payment on the charge page as usual, and Stax is marked paid with the memo. |
+| Autopay on the due date | The worker creates a Stax scheduled invoice with one occurrence on the due date from the operator's linked bank method; Stax generates and debits the invoice that day. Needs a linked bank method; large amounts need the confirmation box. |
+| Charge now (admin) | The invoice is created, then an admin confirms the debit on a separate page. See below. |
+
+The charge page shows the Stax status, the payments, the latest provider request (Queued, Done,
+Failed with the reason), the same single Retry as elsewhere, and Cancel. A failure of the
+invoice creation is never retried automatically; Retry makes one new attempt, which first looks
+for an invoice Stax may already hold with our reference.
+
+**Charge now** (admin; `STAX_PAY_INVOICE_ENABLED` must be on, which it is not on staging until
+Stax enables ACH): the confirmation page repeats operator, store, amount, our invoice number and
+the last four of the linked bank method, asks for the large-debit box above the threshold, and
+says that one attempt is made. On confirm the worker re-reads the invoice, refuses one already
+paid, and sends **one** pay request with the charge's stored idempotency ID. Success shows a
+pending ACH payment that settles by webhook; a failure shows the class and field names, leaves
+the charge open, and the button returns after a minute. A later attempt reuses the same ID, so
+Stax cannot charge twice.
+
+**Cancel** (billing, note required): allowed only while nothing has been paid or is pending. The
+worker deletes the Stax invoice (or the unfired schedule) and, once Stax confirms, the charge
+reads **Voided** and the local invoice `void`. Stax shows the invoice as **DELETED**; it has no
+"voided" state for invoices. A charge with a payment is handled through refunds instead.
+
+**Audit page** `/audit/` (admin only): filters by action (exact, or a prefix with `*` such as
+`document.*`), user, record type and ID, and a date range in New York days (default the last 7
+days, at most 366); 100 rows a page; **Export CSV** of the filtered rows (at most 50,000). Each
+Documents section shows an **Activity** list of the last 10 document events for that record,
+including refused uploads, with a link to the audit page for admins.

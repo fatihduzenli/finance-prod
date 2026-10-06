@@ -19,10 +19,10 @@ from decimal import Decimal
 
 import payments
 from ledger.models import Operator
-from ledger.services import leases, refunds, rent_run, setup_charges
+from ledger.services import leases, one_off_charges, refunds, rent_run
 from ledger.services.leases import AutopayOutcome, MethodsRefresh
 from ledger.services.rent_run import MarkAction, MarkResult, MatchAction, MatchReport
-from payments import jobs, operator_sync, reconciliation
+from payments import jobs, one_off_invoices, operator_sync, reconciliation
 from payments.models import (
     Job,
     JobKind,
@@ -153,10 +153,10 @@ def payment_mark_job(job: Job) -> Result:
     )
 
 
-def setup_payment_mark_job(job: Job) -> Result:
-    """PLAN-010b D6: the setup charge's invoice, marked by the rent rules."""
+def one_off_payment_mark_job(job: Job) -> Result:
+    """PLAN-010b D6: the one-off charge's invoice, marked by the rent rules."""
     return _mark(
-        setup_charges.mark_provider_invoice(
+        one_off_charges.mark_provider_invoice(
             job.entity_id, uuid.UUID(str(job.params["payment"])), actor=job.requested_by
         )
     )
@@ -166,9 +166,41 @@ def payment_retry_mark_job(job: Job) -> Result:
     return _mark(rent_run.retry_provider_mark(job.entity_id, actor=job.requested_by))
 
 
-def setup_payment_retry_mark_job(job: Job) -> Result:
-    """PLAN-010b Batch B: the manual retry of a setup charge's failed marking."""
-    return _mark(setup_charges.retry_provider_mark(job.entity_id, actor=job.requested_by))
+def one_off_payment_retry_mark_job(job: Job) -> Result:
+    """PLAN-010b Batch B: the manual retry of a one-off charge's failed marking."""
+    return _mark(one_off_charges.retry_provider_mark(job.entity_id, actor=job.requested_by))
+
+
+def invoice_create_job(job: Job) -> Result:
+    """PLAN-010d D3: the one-off charge's provider invoice (and its e-mail)."""
+    return one_off_invoices.create_provider_invoice(job.entity_id, job.requested_by)
+
+
+def invoice_send_job(job: Job) -> Result:
+    """PLAN-010d D3: the e-mail of the one-off charge's provider invoice, alone."""
+    return one_off_invoices.send(job.entity_id, job.requested_by)
+
+
+def invoice_delete_job(job: Job) -> Result:
+    """PLAN-010d D6: the cancel of an invoiced one-off charge."""
+    return one_off_invoices.delete(job.entity_id, job.requested_by)
+
+
+def schedule_create_job(job: Job) -> Result:
+    """PLAN-010d D2: the one-occurrence schedule of an ``autopay_due`` charge."""
+    return one_off_invoices.schedule(job.entity_id, job.requested_by)
+
+
+def schedule_delete_job(job: Job) -> Result:
+    """PLAN-010d D6: the cancel of an ``autopay_due`` charge whose schedule has not fired."""
+    return one_off_invoices.delete_schedule(job.entity_id, job.requested_by)
+
+
+def invoice_pay_job(job: Job) -> Result:
+    """PLAN-010d D4: "Charge now", one pay-an-invoice attempt."""
+    return one_off_invoices.pay(
+        job.entity_id, job.requested_by, confirmed=job.params.get("confirmed") is True
+    )
 
 
 def _creation_key(job: Job) -> uuid.UUID | None:
@@ -291,6 +323,12 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.RUN_MATCH: run_match_job,
     JobKind.WEBHOOK_REPLAY: webhook_replay_job,
     JobKind.RECONCILE_RUN: reconcile_run_job,
-    JobKind.SETUP_PAYMENT_MARK: setup_payment_mark_job,
-    JobKind.SETUP_PAYMENT_RETRY_MARK: setup_payment_retry_mark_job,
+    JobKind.ONE_OFF_PAYMENT_MARK: one_off_payment_mark_job,
+    JobKind.ONE_OFF_PAYMENT_RETRY_MARK: one_off_payment_retry_mark_job,
+    JobKind.INVOICE_CREATE: invoice_create_job,
+    JobKind.INVOICE_SEND: invoice_send_job,
+    JobKind.INVOICE_DELETE: invoice_delete_job,
+    JobKind.SCHEDULE_CREATE: schedule_create_job,
+    JobKind.SCHEDULE_DELETE: schedule_delete_job,
+    JobKind.INVOICE_PAY: invoice_pay_job,
 }

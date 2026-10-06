@@ -13,27 +13,35 @@ an error. A month is a calendar month; "today" is the date in the project's
 ``TIME_ZONE`` (every date read here is a date column, so no instant is converted).
 
 **One row per (store, operator, month)** (:func:`rows`), the operator being the lease's
-(``None`` when the lease has none, and for a cost-only row). A row exists when a lease
+(``None`` when the lease has none, and for a cost-only row); a one-off charge's is the
+operator it bills, and a one-off charge without a lease is on a row without a store
+(:data:`NO_STORE`), which never carries store costs. A row exists when a lease
 of that operator on that store is active on any day of the month, or any figure below
 is not zero, or the month is cost-only. A lease is active from ``started_on`` (or
 always, when empty) to ``ended_on`` (or open); a prospective lease, and an ended lease
 with no end date, is never active. The columns:
 
 - **rent billed**: rent charges by ``period_month``, except waived ones (the only rent
-  charge status that is not a bill; there is no voided or cancelled status);
-- **rent collected**: settled ``rent`` payments by ``settled_on`` month, minus the
-  settled refunds of them by their own ``settled_on`` month;
-- **fees billed**: setup charges of a non-refundable fee type, not waived, by
-  ``due_date`` month, plus insurance charges with an amount, by ``due_on`` month;
-- **fees collected**: settled ``setup`` (non-refundable fee types only) and
-  ``insurance`` payments by ``settled_on`` month minus their settled refunds, plus the
-  withheld part of resolved deposits by ``resolved_on`` month (``withheld_deposits``,
-  shown apart as well);
+  charge status that is not a bill; there is no voided or cancelled status), plus
+  one-off charges of category ``arrears`` (rent owed, PLAN-010d D7), neither waived nor
+  voided, by ``due_date`` month;
+- **rent collected**: settled ``rent`` payments, and settled ``one_off`` payments on
+  ``arrears`` charges, by ``settled_on`` month, minus the settled refunds of them by
+  their own ``settled_on`` month;
+- **fees billed**: one-off charges of every other category (``setup`` of a
+  non-refundable fee type, ``adjustment``, ``damage``, ``other``), neither waived nor
+  voided, by ``due_date`` month, plus insurance charges with an amount, by ``due_on``
+  month;
+- **fees collected**: settled ``one_off`` payments on those charges and ``insurance``
+  payments by ``settled_on`` month minus their settled refunds, plus the withheld part
+  of resolved deposits by ``resolved_on`` month (``withheld_deposits``, shown apart as
+  well);
 - **landlord rent** and **other costs**: the live store cost row in effect on the
   month's first day (a superseded row, PLAN-010c D10, counts for nothing); none is
   "unknown" (``None``), never zero. An empty other cost on a row in effect is zero;
 - **fee costs**: the ``cost`` of the month's non-refundable setup charges by
-  ``due_date`` (waived ones included: the item was bought all the same), plus the
+  ``due_date`` (waived ones included: the item was bought all the same; the other
+  categories have no cost), plus the
   premium ``cost`` of the policy year of each insurance charge billed that month; any
   missing cost (a null cost, a policy year with no premium or a null premium cost)
   makes the whole figure unknown;
@@ -80,7 +88,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.db.models import Count, F, Q, Sum
-from django.db.models.functions import TruncMonth
+from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
 
 from ledger.models import (
@@ -90,14 +98,15 @@ from ledger.models import (
     InsuranceCharge,
     InsurancePremium,
     Lease,
+    OneOffCategory,
+    OneOffCharge,
+    OneOffChargeStatus,
     Operator,
     Payment,
     PaymentKind,
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
-    SetupCharge,
-    SetupChargeStatus,
     Store,
     StoreCost,
 )
@@ -119,6 +128,8 @@ GROUP_CHOICES: tuple[tuple[str, str], ...] = (
     (GROUP_MONTH, "Month"),
 )
 NO_OPERATOR = "No operator"
+#: The store label of a row of one-off charges that have no lease.
+NO_STORE = "No store"
 
 #: The figures that can be unknown, as named on the page and in the CSV.
 LANDLORD_RENT = "landlord rent"
@@ -349,7 +360,7 @@ class _Acc:
     carries: bool = False
 
 
-type _Key = tuple[uuid.UUID, uuid.UUID | None, date]
+type _Key = tuple[uuid.UUID | None, uuid.UUID | None, date]
 
 
 @dataclass(slots=True)
@@ -398,11 +409,21 @@ def _money_or_zero(value: object) -> Decimal:
     return Decimal(str(value)) if value is not None else ZERO
 
 
-def _payments(kind: str, charge: str, start: date, end: date, **extra: Any) -> Iterator[Any]:
+def _payments(
+    kind: str,
+    charge: str,
+    start: date,
+    end: date,
+    *filters: Q,
+    operator: Any = None,
+    **extra: Any,
+) -> Iterator[Any]:
     """Settled payments of one kind on one charge type, and their settled refunds, summed
-    by the charge's store and operator and the ``settled_on`` month."""
+    by the charge's store and operator (``operator``, else the lease's) and the
+    ``settled_on`` month."""
     return iter(
         Payment.objects.filter(
+            *filters,
             kind=kind,
             status=PaymentStatus.SETTLED,
             settled_on__gte=start,
@@ -412,7 +433,7 @@ def _payments(kind: str, charge: str, start: date, end: date, **extra: Any) -> I
         )
         .values(
             store=F(f"{charge}__lease__store"),
-            operator=F(f"{charge}__lease__operator"),
+            operator=operator if operator is not None else F(f"{charge}__lease__operator"),
             month=TruncMonth("settled_on"),
         )
         .annotate(
@@ -435,7 +456,7 @@ def _key(item: Mapping[str, Any]) -> _Key:
 
 
 def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> None:
-    """Rent and fees billed and collected, withheld deposits and fee costs (6 queries)."""
+    """Rent and fees billed and collected, withheld deposits and fee costs (7 queries)."""
     rent_charges = (
         RentCharge.objects.filter(period_month__gte=start, period_month__lte=end)
         .exclude(status=RentChargeStatus.WAIVED)
@@ -446,13 +467,31 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
     for rent in rent_charges:
         acc[_key(rent)].rent_billed += _money_or_zero(rent["total"])
 
-    for paid in _payments(PaymentKind.RENT, "rent_charge", start, end):
-        net = _money_or_zero(paid["paid"]) - _money_or_zero(paid["refunded"])
-        acc[_key(paid)].rent_collected += net
+    one_off_operator = Coalesce("one_off_charge__operator", "one_off_charge__lease__operator")
+    not_deposit = Q(one_off_charge__fee_type__isnull=True) | Q(
+        one_off_charge__fee_type__refundable=False
+    )
+    arrears = Q(one_off_charge__category=OneOffCategory.ARREARS)
+    rent_payments = (
+        _payments(PaymentKind.RENT, "rent_charge", start, end),
+        _payments(
+            PaymentKind.ONE_OFF, "one_off_charge", start, end, arrears, operator=one_off_operator
+        ),
+    )
+    for source in rent_payments:
+        for paid in source:
+            net = _money_or_zero(paid["paid"]) - _money_or_zero(paid["refunded"])
+            acc[_key(paid)].rent_collected += net
     fee_payments = (
         _payments(PaymentKind.INSURANCE, "insurance_charge", start, end),
         _payments(
-            PaymentKind.SETUP, "setup_charge", start, end, setup_charge__fee_type__refundable=False
+            PaymentKind.ONE_OFF,
+            "one_off_charge",
+            start,
+            end,
+            not_deposit,
+            ~arrears,
+            operator=one_off_operator,
         ),
     )
     for source in fee_payments:
@@ -460,22 +499,32 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
             net = _money_or_zero(paid["paid"]) - _money_or_zero(paid["refunded"])
             acc[_key(paid)].fees_collected += net
 
-    setup = (
-        SetupCharge.objects.filter(
-            due_date__gte=start, due_date__lte=end, fee_type__refundable=False
-        )
+    setup = OneOffCategory.SETUP
+    one_off = (
+        OneOffCharge.objects.filter(due_date__gte=start, due_date__lte=end)
+        .filter(Q(fee_type__isnull=True) | Q(fee_type__refundable=False))
         .values(
-            store=F("lease__store"), operator=F("lease__operator"), month=TruncMonth("due_date")
+            "category",
+            store=F("lease__store"),
+            # Not ``operator``: the model has a field of that name.
+            billed_operator=Coalesce("operator", "lease__operator"),
+            month=TruncMonth("due_date"),
         )
         .annotate(
-            billed=Sum("price", filter=~Q(status=SetupChargeStatus.WAIVED)),
-            cost_total=Sum("cost"),
-            missing=Count("pk", filter=Q(cost__isnull=True)),
+            billed=Sum(
+                "price",
+                filter=~Q(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED]),
+            ),
+            cost_total=Sum("cost", filter=Q(category=setup)),
+            missing=Count("pk", filter=Q(category=setup, cost__isnull=True)),
         )
         .order_by()
     )
-    for charge in setup:
-        row = acc[_key(charge)]
+    for charge in one_off:
+        row = acc[(charge["store"], charge["billed_operator"], _month(charge["month"]))]
+        if charge["category"] == OneOffCategory.ARREARS:
+            row.rent_billed += _money_or_zero(charge["billed"])
+            continue
         row.fees_billed += _money_or_zero(charge["billed"])
         row.fee_costs += _money_or_zero(charge["cost_total"])
         row.fee_costs_unknown |= bool(charge["missing"])
@@ -488,7 +537,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         )
         .values(
             store=F("setup_charge__lease__store"),
-            operator=F("setup_charge__lease__operator"),
+            operator=Coalesce("setup_charge__operator", "setup_charge__lease__operator"),
             month=TruncMonth("resolved_on"),
         )
         .annotate(total=Sum("withheld_amount"))
@@ -591,9 +640,10 @@ def _place_store_costs(
     each store's costs of a month on one row (see the module docstring)."""
     with_figures: dict[tuple[uuid.UUID, date], list[_Key]] = defaultdict(list)
     for k in acc:
-        with_figures[(k[0], k[2])].append(k)
+        if k[0] is not None:
+            with_figures[(k[0], k[2])].append(k)
     placed: dict[_Key, _StoreCosts] = {}
-    for store in set(spans) | set(costs) | {k[0] for k in acc}:
+    for store in set(spans) | set(costs) | {k[0] for k in acc if k[0] is not None}:
         store_spans = spans.get(store, [])
         cost_rows = costs.get(store, [])
         for month in months:
@@ -630,7 +680,7 @@ def _place_store_costs(
 
 def rows(query: PnlQuery) -> list[PnlRow]:
     """One row per (store, operator, month) of the range, sorted by store, month and
-    operator (see the module docstring for every column). Twelve queries, whatever the
+    operator (see the module docstring for every column). Thirteen queries, whatever the
     number of rows."""
     start, end = query.from_month, query.end
     acc: dict[_Key, _Acc] = defaultdict(_Acc)
@@ -655,7 +705,7 @@ def rows(query: PnlQuery) -> list[PnlRow]:
                 other_costs=store_costs.other_costs,
                 fee_costs=None if item.fee_costs_unknown else item.fee_costs,
                 store_id=k[0],
-                store=labels.get(k[0], ""),
+                store=labels.get(k[0], "") if k[0] is not None else NO_STORE,
                 operator_id=k[1],
                 operator=names.get(k[1], NO_OPERATOR) if k[1] is not None else NO_OPERATOR,
                 month=k[2],
@@ -718,10 +768,10 @@ def deposits_held(query: PnlQuery) -> Decimal:
     settled refunds) less the deposits refunded, withheld or transferred by then. Not
     revenue; shown under the report only."""
     end = query.end
-    deposit = Q(setup_charge__fee_type__refundable=True, status=PaymentStatus.SETTLED)
+    deposit = Q(one_off_charge__fee_type__refundable=True, status=PaymentStatus.SETTLED)
     sums = Payment.objects.filter(deposit, settled_on__lte=end).aggregate(
-        paid=Sum("amount", filter=Q(kind=PaymentKind.SETUP, is_refund=False)),
-        refunded=Sum("amount", filter=Q(kind=PaymentKind.SETUP, is_refund=True)),
+        paid=Sum("amount", filter=Q(kind=PaymentKind.ONE_OFF, is_refund=False)),
+        refunded=Sum("amount", filter=Q(kind=PaymentKind.ONE_OFF, is_refund=True)),
         paid_back=Sum("amount", filter=Q(kind=PaymentKind.REFUND_DEPOSIT)),
     )
     return (

@@ -679,3 +679,20 @@ the login page myself." The condition for starting Prompt 4 is met.
   was refused; store cost Correct and Close work. Audit rows confirmed by the two read-only
   queries; the audit page goes into 10d. The document kinds on the store were the owner's
   dropdown choices and stay. **Prompt 10c closed.**
+
+## Update, 2026-10-05, PLAN-010d (one-off charges, Charge now, audit page) — QA PASS, not pushed
+
+- Built: `one_off_charges` as the single creation path (setup, arrears, adjustment, damage,
+  other) with the Stax invoice created by the worker (our number as the reference, the
+  description as the line; email, manual, autopay on the due date by a one-occurrence schedule,
+  Charge now); cancel deletes the Stax invoice (Stax shows `DELETED`); Charge now behind
+  `STAX_PAY_INVOICE_ENABLED` (off on staging until ACH), one request, admin confirmation; the
+  audit page `/audit/` with filters and CSV; Activity lists in the Documents sections. ADR-0009;
+  Rule 2 amended. QA report `docs/qa/QA-010d-one-off-charges-and-audit-page.md`: PASS, 3,934 tests
+  on PostgreSQL.
+- Rollout: one "push" (migrations ledger 0017–0019 and payments 0010–0011 at web start; the data
+  migration renames existing setup rows and audit entries). No infrastructure change.
+- Owner's done-when: the $3,000 arrears charge for halid by email; the dashboard shows our
+  reference; a wire payment marks it paid with the memo; a second charge cancelled shows
+  **DELETED** in Stax (there is no "voided" for an invoice); `/audit/` filtered by
+  `document.uploaded` shows the owner's uploads and a billing user gets 403.

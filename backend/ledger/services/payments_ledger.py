@@ -7,7 +7,7 @@ query string and an unusable value is ignored, never an error:
   ``date_from`` and ``date_to`` (ISO dates, both inclusive);
 - ``method``: a payment method;
 - ``operator`` and ``store``: IDs, matched through the payment's charge (rent,
-  insurance or setup) or, for the operator, its invoice;
+  insurance or one-off) or, for the operator, its invoice;
 - ``status``: ``pending``, ``settled``, ``returned`` or ``voided`` (payments that are not
   refunds), or ``refunded`` (the refund rows).
 
@@ -189,9 +189,10 @@ def ledger_payments(selected: PaymentFilter) -> QuerySet[Payment]:
         "rent_charge__lease__operator",
         "insurance_charge__lease__store",
         "insurance_charge__lease__operator",
-        "setup_charge__fee_type",
-        "setup_charge__lease__store",
-        "setup_charge__lease__operator",
+        "one_off_charge__fee_type",
+        "one_off_charge__lease__store",
+        "one_off_charge__lease__operator",
+        "one_off_charge__operator",
         "recorded_by",
     ).annotate(
         on=Coalesce("settled_on", "initiated_on"),
@@ -209,14 +210,15 @@ def ledger_payments(selected: PaymentFilter) -> QuerySet[Payment]:
         rows = rows.filter(
             Q(rent_charge__lease__operator_id=selected.operator)
             | Q(insurance_charge__lease__operator_id=selected.operator)
-            | Q(setup_charge__lease__operator_id=selected.operator)
+            | Q(one_off_charge__operator_id=selected.operator)
+            | Q(one_off_charge__lease__operator_id=selected.operator)
             | Q(invoice__operator_id=selected.operator)
         )
     if selected.store is not None:
         rows = rows.filter(
             Q(rent_charge__lease__store_id=selected.store)
             | Q(insurance_charge__lease__store_id=selected.store)
-            | Q(setup_charge__lease__store_id=selected.store)
+            | Q(one_off_charge__lease__store_id=selected.store)
         )
     if selected.status == STATUS_REFUNDED:
         rows = rows.filter(is_refund=True)
@@ -234,10 +236,10 @@ def totals(rows: QuerySet[Payment]) -> Totals:
     deposits held subtract what the resolutions of the deposits paid in the set
     released (:func:`deposits_released`), whatever the resolution's date.
     """
-    deposit = Q(setup_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
+    deposit = Q(one_off_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
     payment = Q(is_refund=False) & ~deposit
     settled = Q(status=PaymentStatus.SETTLED)
-    held_in = deposit & Q(kind=PaymentKind.SETUP, is_refund=False) & settled
+    held_in = deposit & Q(kind=PaymentKind.ONE_OFF, is_refund=False) & settled
     held_out = deposit & (Q(kind=PaymentKind.REFUND_DEPOSIT) | Q(is_refund=True)) & settled
     sums = rows.order_by().aggregate(
         settled=Sum("amount", filter=payment & settled),
@@ -255,7 +257,7 @@ def totals(rows: QuerySet[Payment]) -> Totals:
 
     released = deposits_released(
         DepositResolution.objects.filter(
-            setup_charge__in=rows.filter(held_in).order_by().values("setup_charge_id")
+            setup_charge__in=rows.filter(held_in).order_by().values("one_off_charge_id")
         )
     )
     return Totals(
@@ -275,7 +277,7 @@ def deposits_released(resolutions: QuerySet[DepositResolution]) -> Decimal:
     and the P&L footer both use this):
 
     - a transfer's ``amount``: the deposit is paid in again on the receiving lease (a
-      ``setup`` payment), so it is counted there, once;
+      ``one_off`` payment), so it is counted there, once;
     - every ``withheld_amount``: the whole deposit when withheld, the remainder kept
       from a partial refund or transfer. Withheld money is revenue from the day it is
       withheld (PLAN-010b D7), not a deposit held.
@@ -311,6 +313,8 @@ def rows_for(payments: Iterable[Payment]) -> list[LedgerRow]:
         operator = lease.operator if lease is not None else None
         if operator is None and item.invoice is not None:
             operator = item.invoice.operator
+        if operator is None and item.one_off_charge is not None:
+            operator = item.one_off_charge.operator
         ref = refs.get(item.pk, "")
         result.append(
             LedgerRow(
@@ -325,8 +329,8 @@ def rows_for(payments: Iterable[Payment]) -> list[LedgerRow]:
 
 
 def charge_lease(payment: Payment) -> Lease | None:
-    """The lease of the payment's rent, insurance or setup charge, if any."""
-    for charge in (payment.rent_charge, payment.insurance_charge, payment.setup_charge):
+    """The lease of the payment's rent, insurance or one-off charge, if any."""
+    for charge in (payment.rent_charge, payment.insurance_charge, payment.one_off_charge):
         if charge is not None:
             return charge.lease
     return None

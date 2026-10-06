@@ -42,11 +42,18 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0002_postgresql_guards",
             "payments.migrations.0002_postgresql_guards",
             "payments.migrations.0005_jobs",
-            "ledger.migrations.0012_setup_charges",
             "ledger.migrations.0014_store_costs_deposit_resolutions",
+            "ledger.migrations.0017_one_off_charges",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
+}
+#: The trigger ledger 0017 replaced (``setup_charges`` became ``one_off_charges``,
+#: PLAN-010d D1): gone after the round trip, back only below 0017.
+RENAMED_TRIGGERS = {
+    f"{table}_payment_data_guard"
+    for table in importlib.import_module("ledger.migrations.0012_setup_charges").GUARDED_COLUMNS
+    if table == "setup_charges"
 }
 GUARD_FUNCTIONS = {
     "finance_contains_card_number",
@@ -95,6 +102,8 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0007_reconciliation",
                 "[ ] 0008_setup_payment_mark",
                 "[ ] 0009_setup_payment_retry_mark",
+                "[ ] 0010_one_off_jobs",
+                "[ ] 0011_invoice_pay_job",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):
@@ -169,12 +178,14 @@ def test_round_trip_on_a_fresh_postgresql_database(
     triggers, functions = _guard_objects(scratch_postgresql_url)
     assert GUARD_TRIGGERS <= triggers
     assert GUARD_FUNCTIONS <= functions
+    assert not RENAMED_TRIGGERS & triggers
 
     for label in ("payments", "ledger"):
         result = _manage(repo_root, scratch_postgresql_url, "migrate", label, "zero", "--noinput")
         assert result.returncode == 0, result.stderr
     triggers, functions = _guard_objects(scratch_postgresql_url)
     assert not GUARD_TRIGGERS & triggers
+    assert not RENAMED_TRIGGERS & triggers
     assert not GUARD_FUNCTIONS & functions
 
     result = _manage(repo_root, scratch_postgresql_url, "migrate", "--noinput")

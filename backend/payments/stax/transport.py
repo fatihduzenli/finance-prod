@@ -92,6 +92,15 @@ class Method(StrEnum):
     DELETE = "DELETE"
 
 
+class RetryPolicy(StrEnum):
+    """Which failed attempts :meth:`StaxTransport.send` repeats."""
+
+    #: D6: a 429 always; a 5xx or a network error only for an idempotent call.
+    STANDARD = "standard"
+    #: PLAN-010d D4: exactly one HTTP request, whatever the outcome (pay-an-invoice).
+    NONE = "none"
+
+
 @dataclass(frozen=True, slots=True)
 class _Attempt:
     outcome: Outcome
@@ -189,6 +198,7 @@ class StaxTransport:
         json: Mapping[str, object] | None = None,
         idempotent: bool,
         boot_check: bool = False,
+        retry: RetryPolicy = RetryPolicy.STANDARD,
     ) -> object:
         """Send one logical request; return the decoded JSON body (``None`` if empty).
 
@@ -199,6 +209,10 @@ class StaxTransport:
         ``boot_check=True`` is passed by ``provider_environment_check`` only, for its one
         ``GET /self`` per process start (PLAN-006 D2). It skips the ``STAX_CALLER`` gate
         and nothing else: the breaker, limiter, budget, retry policy and logging apply.
+
+        ``retry=RetryPolicy.NONE`` sends exactly one request: no 429, 5xx or network
+        error is repeated (the caller check, breaker, limiter, budget and logging still
+        apply).
         """
         if not boot_check and settings.STAX_CALLER != WORKER:
             raise ProviderNotPermittedHere("This process is not permitted to call the provider")
@@ -206,7 +220,8 @@ class StaxTransport:
         url = path.replace(ID_PLACEHOLDER, quote(object_id, safe="")) if object_id else path
         content = mapping.encode_json(json) if json is not None else None
 
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        attempts = 1 if retry is RetryPolicy.NONE else MAX_ATTEMPTS
+        for attempt in range(1, attempts + 1):
             result = self._attempt(client, method, url, path, object_id, params, content)
             if result.outcome is Outcome.SUCCESS:
                 if result.unreadable:
@@ -219,7 +234,7 @@ class StaxTransport:
             retryable = result.outcome is Outcome.THROTTLED or (
                 idempotent and result.outcome in (Outcome.SERVER_ERROR, Outcome.NETWORK_ERROR)
             )
-            if not retryable or attempt == MAX_ATTEMPTS:
+            if not retryable or attempt == attempts:
                 if result.outcome is Outcome.NETWORK_ERROR:
                     raise TransportError()
                 raise ProviderUnavailable(result.status)

@@ -13,6 +13,12 @@ provider total that differs from ours flags the charge; the amount due is never 
 The time the event was received is read from :func:`payments.webhooks.events.
 received_at`, which the processor sets; the handler never sees the event row or body.
 
+An invoice we hold no row for that belongs to a one-off charge (its reference is the
+number of one of our one-off invoices, or one of our one-off charges' schedules
+generated it) is placed by :func:`payments.one_off_invoices.link_from_provider` first
+(PLAN-010d D5) and never reaches the rent rules; one naming another operator's invoice
+is not linked. A one-off invoice the re-fetch shows sent becomes ``sent``.
+
 On ``create_invoice`` and ``update_invoice``, an invoice that names no schedule and has
 no charge is linked to the one open charge it fits, if exactly one does
 (:func:`ledger.services.rent_run.auto_link_invoice`, PLAN-008a §2 rule 3); otherwise the
@@ -31,7 +37,7 @@ import payments
 from ledger.models import ZERO, Invoice, Operator
 from ledger.services import numbering, rent_run
 from ledger.services.rent_run import MatchAction
-from payments import invoice_sync
+from payments import invoice_sync, one_off_invoices
 from payments.models import WebhookOutcome
 from payments.operator_sync import ENTITY_OPERATOR, KIND_CUSTOMER
 from payments.provider import InvoiceRecord, mask_identifier
@@ -41,7 +47,7 @@ from payments.webhooks.handlers.common import (
     ENTITY_CHARGE,
     ENTITY_INSURANCE_CHARGE,
     ENTITY_INVOICE,
-    ENTITY_SETUP_CHARGE,
+    ENTITY_ONE_OFF_CHARGE,
     KIND_INVOICE,
     NO_OBJECT_ID,
     NOT_AT_PROVIDER,
@@ -94,7 +100,7 @@ def sync_invoice(
         and invoice.rent_charge_id is None
         and invoice.insurance_charge_id is None
         and invoice.charge_adjustment_id is None
-        and invoice.setup_charge_id is None
+        and invoice.one_off_charge_id is None
         and not invoice_sync.schedule_id(record)
     ):
         total = record.total if usable_total(record.total) else None
@@ -112,7 +118,7 @@ def local_invoice(external_id: str) -> Invoice | None:
         return None
     return (
         Invoice.objects.select_related(
-            "operator", "rent_charge", "insurance_charge", "setup_charge"
+            "operator", "rent_charge", "insurance_charge", "one_off_charge"
         )
         .filter(pk=ref.entity_id)
         .first()
@@ -139,6 +145,9 @@ def _create(record: InvoiceRecord) -> tuple[str, Invoice | None]:
     operator = customer_operator(record.customer_external_id)
     if operator is None:
         return UNKNOWN_CUSTOMER, None
+    placed = one_off_invoices.link_from_provider(record, operator)
+    if placed is not None:
+        return placed
     line = rent_run.match_invoice(record, operator.pk, actor=None)
     if line is not None:
         if line.action is MatchAction.REPORTED:
@@ -192,6 +201,7 @@ def _apply(
     changed = invoice_sync.record_provider_state(
         invoice.pk, record, event_type=event_type, event_at=received_at
     )
+    one_off_invoices.note_sent(invoice, record)
     if changed:
         audit(
             "invoice.provider_state_changed",
@@ -208,7 +218,7 @@ def _apply(
     for charge, entity in (
         (invoice.rent_charge, ENTITY_CHARGE),
         (invoice.insurance_charge, ENTITY_INSURANCE_CHARGE),
-        (invoice.setup_charge, ENTITY_SETUP_CHARGE),
+        (invoice.one_off_charge, ENTITY_ONE_OFF_CHARGE),
     ):
         if charge is not None and not charge.needs_review:
             charge.needs_review = True

@@ -60,8 +60,9 @@ def open_returns() -> QuerySet[Payment]:
             "rent_charge__lease__operator",
             "insurance_charge__lease__store",
             "insurance_charge__lease__operator",
-            "setup_charge__lease__store",
-            "setup_charge__lease__operator",
+            "one_off_charge__lease__store",
+            "one_off_charge__lease__operator",
+            "one_off_charge__operator",
         )
         .order_by("returned_at", "created_at", "id")
     )
@@ -73,6 +74,8 @@ def row(payment: Payment) -> ReturnRow:
     operator = payment.invoice.operator if payment.invoice is not None else None
     if operator is None and lease is not None:
         operator = lease.operator
+    if operator is None and payment.one_off_charge is not None:
+        operator = payment.one_off_charge.operator
     return ReturnRow(
         payment=payment,
         operator=operator,

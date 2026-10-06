@@ -51,7 +51,7 @@ from payments.provider import (
     WebhookRecord,
 )
 from payments.stax import mapping, validation
-from payments.stax.transport import Method, StaxTransport
+from payments.stax.transport import Method, RetryPolicy, StaxTransport
 
 PROVIDER_NAME = "stax"
 #: The values of {method} on mark-paid that this app may send. The page (read 2026-10-02,
@@ -268,9 +268,11 @@ class StaxProvider(PaymentProvider):
     def pay_invoice(self, external_id: str, payment: PayWithStoredMethod) -> TransactionRecord:
         """POST /invoice/{id}/pay (pay-an-invoice), behind STAX_PAY_INVOICE_ENABLED (D3).
 
-        docs/CLAUDE.md Rule 2 forbids this call until TODO-VERIFY-019 is decided; the flag
-        is off by default. The request carries ``idempotency_id``, so Stax deduplicates a
-        repeat and a retry after a timeout or a 5xx is safe with the same identifier.
+        "Charge now" (PLAN-010d D4, ADR-0009): exactly one HTTP request, with no retry
+        after a network error, a 429 or a 5xx (:attr:`RetryPolicy.NONE`); the limiter,
+        breaker and failure budget still apply. The request carries ``idempotency_id``
+        (the charge's stored ``charge_now_key``), so a later attempt after an unanswered
+        one reuses it and Stax deduplicates it. The flag is off by default.
         """
         if not settings.STAX_PAY_INVOICE_ENABLED:
             raise FeatureDisabled("Paying an invoice from a stored method is disabled")
@@ -284,6 +286,7 @@ class StaxProvider(PaymentProvider):
             object_id=external_id,
             params=mapping.pay_params(payment),
             idempotent=True,
+            retry=RetryPolicy.NONE,
         )
         return mapping.transaction_record(data, self.now())
 

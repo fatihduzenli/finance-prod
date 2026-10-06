@@ -209,6 +209,7 @@ def test_a_user_without_a_role_is_refused() -> None:
 def test_an_admin_ends_a_lease_from_the_page_and_resolve_deposit_appears() -> None:
     deposit = held_deposit(ended=False)
     lease = deposit.lease
+    assert lease is not None
     client, user = client_for(Role.ADMIN)
     detail_path = f"/leases/{lease.pk}/"
     resolve = f"/leases/{lease.pk}/deposits/{deposit.pk}/resolve/"

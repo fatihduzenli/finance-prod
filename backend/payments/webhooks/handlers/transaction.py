@@ -20,9 +20,9 @@ States, from the re-fetched transaction only:
   time is recorded without one; the first event of a refund of that parent and amount
   gives that row its ID instead of making a second row.
 
-A transaction for an invoice linked to a setup charge is a payment of kind ``setup`` on
-that charge (PLAN-010b D6); it pays, reopens and flags that charge as a rent payment
-does its rent charge.
+A transaction for an invoice linked to a one-off charge is a payment of kind ``one_off``
+on that charge (PLAN-010b D6, PLAN-010d D7); it pays, reopens and flags that charge as a
+rent payment does its rent charge.
 
 ``returned`` and ``voided`` are final. Every write is keyed on provider IDs and every
 recomputation is pure, so a repeated or replayed event changes nothing.
@@ -42,14 +42,14 @@ import payments
 from ledger.models import (
     InsuranceCharge,
     Invoice,
+    OneOffCharge,
     Payment,
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
     RentCharge,
-    SetupCharge,
 )
-from ledger.services import rent_run, setup_charges
+from ledger.services import one_off_charges, rent_run
 from payments.models import ExternalRef, WebhookOutcome
 from payments.provider import (
     METHOD_BANK,
@@ -63,8 +63,8 @@ from payments.webhooks.handlers.common import (
     ENTITY_CHARGE,
     ENTITY_INSURANCE_CHARGE,
     ENTITY_INVOICE,
+    ENTITY_ONE_OFF_CHARGE,
     ENTITY_PAYMENT,
-    ENTITY_SETUP_CHARGE,
     KIND_INVOICE,
     KIND_TRANSACTION,
     NO_OBJECT_ID,
@@ -225,7 +225,7 @@ def record_refund(parent: Payment, amount: Decimal, record: TransactionRecord | 
         rent_charge_id=parent.rent_charge_id,
         insurance_charge_id=parent.insurance_charge_id,
         charge_adjustment_id=parent.charge_adjustment_id,
-        setup_charge_id=parent.setup_charge_id,
+        one_off_charge_id=parent.one_off_charge_id,
     )
     audit("payment.created_from_request", ENTITY_PAYMENT, payment.pk, None, _state(payment))
     _refresh_charge(payment, returned=False)
@@ -256,11 +256,11 @@ def _kind(invoice: Invoice | None) -> dict[str, Any]:
             "policy_year": None,
             "charge_adjustment_id": invoice.charge_adjustment_id,
         }
-    if invoice.setup_charge_id is not None:
+    if invoice.one_off_charge_id is not None:
         return {
-            "kind": PaymentKind.SETUP,
+            "kind": PaymentKind.ONE_OFF,
             "policy_year": None,
-            "setup_charge_id": invoice.setup_charge_id,
+            "one_off_charge_id": invoice.one_off_charge_id,
         }
     return {"kind": PaymentKind.RENT, "policy_year": None, "rent_charge": invoice.rent_charge}
 
@@ -279,7 +279,7 @@ def _create(
             "rent_charge_id": parent.rent_charge_id,
             "insurance_charge_id": parent.insurance_charge_id,
             "charge_adjustment_id": parent.charge_adjustment_id,
-            "setup_charge_id": parent.setup_charge_id,
+            "one_off_charge_id": parent.one_off_charge_id,
         }
         invoice = invoice or parent.invoice
     else:
@@ -363,7 +363,7 @@ def _transition(payment: Payment, record: TransactionRecord, *, settle: bool) ->
 
 
 def _refresh_charge(payment: Payment, *, returned: bool) -> None:
-    """Recompute the rent or setup charge, and on a return flag the charge for review."""
+    """Recompute the rent or one-off charge, and on a return flag the charge for review."""
     context = {"payment": str(payment.pk), "payment_status": payment.status}
     if returned:
         context |= {"return_code": payment.return_code, "return_reason": payment.return_reason}
@@ -379,21 +379,21 @@ def _refresh_charge(payment: Payment, *, returned: bool) -> None:
             audit("rent_charge.ach_returned", ENTITY_CHARGE, charge.pk, before, after | context)
         elif after != before:
             audit("rent_charge.payment_applied", ENTITY_CHARGE, charge.pk, before, after | context)
-    elif payment.setup_charge_id is not None:
-        setup = SetupCharge.objects.select_for_update().get(pk=payment.setup_charge_id)
-        before = setup_charges.charge_state(setup)
-        setup_charges.recompute(setup)
-        if returned and not setup.needs_review:
-            setup.needs_review = True
-            setup.save(update_fields=["needs_review", "updated_at"])
-        after = setup_charges.charge_state(setup)
+    elif payment.one_off_charge_id is not None:
+        one_off = OneOffCharge.objects.select_for_update().get(pk=payment.one_off_charge_id)
+        before = one_off_charges.charge_state(one_off)
+        one_off_charges.recompute(one_off)
+        if returned and not one_off.needs_review:
+            one_off.needs_review = True
+            one_off.save(update_fields=["needs_review", "updated_at"])
+        after = one_off_charges.charge_state(one_off)
         if returned:
-            action = "setup_charge.ach_returned"
+            action = "one_off_charge.ach_returned"
         elif after != before:
-            action = "setup_charge.payment_applied"
+            action = "one_off_charge.payment_applied"
         else:
             return
-        audit(action, ENTITY_SETUP_CHARGE, setup.pk, before, after | context)
+        audit(action, ENTITY_ONE_OFF_CHARGE, one_off.pk, before, after | context)
     elif payment.insurance_charge_id is not None and returned:
         insurance = InsuranceCharge.objects.select_for_update().get(pk=payment.insurance_charge_id)
         flagged = insurance.needs_review
@@ -421,7 +421,7 @@ def _state(payment: Payment) -> dict[str, Any]:
         "insurance_charge": (
             str(payment.insurance_charge_id) if payment.insurance_charge_id else None
         ),
-        "setup_charge": str(payment.setup_charge_id) if payment.setup_charge_id else None,
+        "one_off_charge": str(payment.one_off_charge_id) if payment.one_off_charge_id else None,
         "settled_on": payment.settled_on.isoformat() if payment.settled_on else None,
         "return_code": payment.return_code,
     }

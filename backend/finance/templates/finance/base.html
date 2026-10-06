@@ -3,7 +3,7 @@ Layout of the staff screens (docs/qa/PLAN-006-operators.md). Self-contained: no 
 asset. Renders no setting. The SANDBOX banner and the title prefix are injected by
 finance.middleware.SandboxBannerMiddleware. The sign-in pages keep their own base,
 two_factor/_base.html.
-{% endcomment %}<!DOCTYPE html>
+{% endcomment %}{% load roles %}<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -43,6 +43,7 @@ two_factor/_base.html.
     <a href="{% url 'ledger:returns:list' %}">Returns</a>
     <a href="{% url 'ledger:webhooks:list' %}">Webhooks</a>
     <a href="{% url 'ledger:reconciliation:page' %}">Reconciliation</a>
+    {% if request.user|is_admin %}<a href="{% url 'ledger:audit:page' %}" id="nav-audit">Audit</a>{% endif %}
     <a href="{% url 'admin:index' %}">Admin</a>
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form>
   </nav>

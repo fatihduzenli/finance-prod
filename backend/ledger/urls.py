@@ -1,7 +1,7 @@
 """Ledger routes (PLAN-006-operators.md §4.1, PLAN-007-leases-and-rent-run.md §4.1,
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
 D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11, PLAN-010c
-D7, D10).
+D7, D10, PLAN-010d D1, D2, D4, D6, D8).
 
 Namespace ``ledger``.
 
@@ -20,17 +20,18 @@ from __future__ import annotations
 from django.urls import include, path
 
 from ledger.views import (
+    audit,
     charges,
     deposits,
     documents,
     leases,
+    one_off_charges,
     operators,
     payments,
     reconciliation,
     reports,
     returns,
     run,
-    setup_charges,
     stores,
     webhooks,
 )
@@ -46,6 +47,7 @@ operator_patterns = (
         path("<str:pk>/archive/", operators.operator_archive, name="archive"),
         path("<str:pk>/retry-sync/", operators.operator_retry_sync, name="retry_sync"),
         path("<str:pk>/link/", operators.operator_link, name="link"),
+        path("<str:pk>/charges/new/", one_off_charges.operator_new_charge, name="new_charge"),
     ],
     "operators",
 )
@@ -75,9 +77,10 @@ lease_patterns = (
         path("<str:pk>/resume/", leases.lease_resume, name="resume"),
         path(
             "<str:pk>/setup-charges/new/",
-            setup_charges.lease_add_setup_charge,
+            one_off_charges.lease_add_setup_charge,
             name="add_setup_charge",
         ),
+        path("<str:pk>/charges/new/", one_off_charges.lease_new_charge, name="new_charge"),
         path(
             "<str:pk>/deposits/<str:charge>/resolve/",
             deposits.resolve_deposit,
@@ -106,16 +109,19 @@ charge_patterns = (
     "charges",
 )
 
-setup_charge_patterns = (
+one_off_charge_patterns = (
     [
-        path("<str:pk>/", setup_charges.setup_charge_detail, name="detail"),
-        path("<str:pk>/payments/new/", setup_charges.setup_charge_payment, name="payment"),
-        path("<str:pk>/retry-mark/", setup_charges.setup_charge_retry_mark, name="retry_mark"),
-        path("<str:pk>/link-invoice/", setup_charges.setup_charge_link, name="link"),
-        path("<str:pk>/edit/", setup_charges.setup_charge_edit, name="edit"),
-        path("<str:pk>/waive/", setup_charges.setup_charge_waive, name="waive"),
+        path("<str:pk>/", one_off_charges.charge_detail, name="detail"),
+        path("<str:pk>/payments/new/", one_off_charges.charge_payment, name="payment"),
+        path("<str:pk>/retry-mark/", one_off_charges.charge_retry_mark, name="retry_mark"),
+        path("<str:pk>/link-invoice/", one_off_charges.charge_link, name="link"),
+        path("<str:pk>/edit/", one_off_charges.charge_edit, name="edit"),
+        path("<str:pk>/waive/", one_off_charges.charge_waive, name="waive"),
+        path("<str:pk>/cancel/", one_off_charges.charge_cancel, name="cancel"),
+        path("<str:pk>/retry/", one_off_charges.charge_retry, name="retry"),
+        path("<str:pk>/charge-now/", one_off_charges.charge_now, name="charge_now"),
     ],
-    "setup_charges",
+    "one_off_charges",
 )
 
 payment_patterns = (
@@ -178,17 +184,26 @@ document_patterns = (
     "documents",
 )
 
+audit_patterns = (
+    [
+        path("", audit.audit_page, name="page"),
+        path("export.csv", audit.audit_export, name="export"),
+    ],
+    "audit",
+)
+
 urlpatterns = [
     path("operators/", include(operator_patterns)),
     path("stores/", include(store_patterns)),
     path("leases/", include(lease_patterns)),
     path("run/", include(run_patterns)),
     path("charges/", include(charge_patterns)),
-    path("setup-charges/", include(setup_charge_patterns)),
+    path("one-off-charges/", include(one_off_charge_patterns)),
     path("payments/", include(payment_patterns)),
     path("webhooks/", include(webhook_patterns)),
     path("returns/", include(return_patterns)),
     path("reconciliation/", include(reconciliation_patterns)),
     path("reports/", include(report_patterns)),
     path("documents/", include(document_patterns)),
+    path("audit/", include(audit_patterns)),
 ]

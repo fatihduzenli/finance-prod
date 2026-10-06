@@ -723,7 +723,7 @@ class Note(GuardedModel):
         ]
 
 
-# --- Setup fees (PLAN-010b D1 to D3) -------------------------------------------------
+# --- Setup fees and one-off charges (PLAN-010b D1 to D3, PLAN-010d D1) ---------------
 
 
 class FeeType(GuardedModel):
@@ -762,26 +762,80 @@ class FeeType(GuardedModel):
         return self.name
 
 
-class SetupChargeStatus(models.TextChoices):
-    """Derived from settled payments; ``waived`` is set only by the waive action (D3)."""
+class OneOffChargeStatus(models.TextChoices):
+    """Derived from settled payments; ``waived`` is set only by the waive action
+    (PLAN-010b D3), ``voided`` only once the provider confirmed the cancel (PLAN-010d D6)."""
 
     OWED = "owed", "Owed"
     PARTIAL = "partial", "Partially paid"
     PAID = "paid", "Paid"
     WAIVED = "waived", "Waived"
+    VOIDED = "voided", "Voided"
 
 
-class SetupCharge(GuardedModel):
-    """A one-time setup item charged on one lease (PLAN-010b D3).
+class OneOffCategory(models.TextChoices):
+    """What a one-off charge is for (PLAN-010d D1); a closed list."""
 
-    ``amount_paid`` is recomputed from settled payments (minus settled refunds) like a
-    rent charge's; ``balance`` is computed by the database. ``cost`` null means the cost
-    is unknown. A legacy row (the sheet import) may sit beside a real charge of the same
-    fee type; otherwise a lease has at most one charge per fee type.
+    SETUP = "setup", "Setup"
+    ARREARS = "arrears", "Arrears"
+    ADJUSTMENT = "adjustment", "Adjustment"
+    DAMAGE = "damage", "Damage"
+    OTHER = "other", "Other"
+
+
+class CollectionMethod(models.TextChoices):
+    """How a one-off charge is collected (PLAN-010d D1, D2); a closed list. ``none`` is
+    the setup charges' flow of PLAN-010b (no invoice is made by the app)."""
+
+    NONE = "none", "None"
+    AUTOPAY_DUE = "autopay_due", "Autopay on the due date"
+    EMAIL = "email", "Send by email"
+    MANUAL = "manual", "Manual payment"
+    CHARGE_NOW = "charge_now", "Charge now"
+
+
+#: Longest description of a one-off charge: the invoice's line item (PLAN-010d D1).
+DESCRIPTION_MAX_LENGTH = 120
+#: Why a save that changes a stored ``charge_now_key`` is refused (PLAN-010d D4).
+CHARGE_NOW_KEY_FIXED = "The Charge now identifier of a one-off charge cannot change once set."
+#: The categories other than ``setup``: each CHECK below reads only valid categories, so
+#: an unknown one fails its own CHECK (``one_off_charges_category_valid``) alone.
+NON_SETUP_CATEGORIES: list[str] = [
+    OneOffCategory.ARREARS.value,
+    OneOffCategory.ADJUSTMENT.value,
+    OneOffCategory.DAMAGE.value,
+    OneOffCategory.OTHER.value,
+]
+
+
+class OneOffCharge(GuardedModel):
+    """A one-time amount charged to an operator, on a lease or on the operator alone
+    (PLAN-010b D3 as setup charges; PLAN-010d D1 for every category).
+
+    ``operator`` is the operator billed: always set, copied from the lease when there is
+    one, except on a setup charge of a lease that has no operator yet, where the lease's
+    operator (when it gets one) is the charge's (:attr:`operator_id_billed`). ``fee_type`` is
+    set exactly for category ``setup``; ``description`` is the invoice's line item and is
+    required for every other category. ``amount_paid`` is recomputed from settled
+    payments (minus settled refunds) like a rent charge's; ``balance`` is computed by
+    the database. ``cost`` null means the cost is unknown. A legacy row (the sheet
+    import) may sit beside a real charge of the same fee type; otherwise a lease has at
+    most one charge per fee type. ``voided`` is written only after the provider
+    confirmed the delete of the charge's invoice or schedule (D6).
     """
 
-    lease = models.ForeignKey(Lease, on_delete=models.PROTECT, related_name="setup_charges")
-    fee_type = models.ForeignKey(FeeType, on_delete=models.PROTECT, related_name="setup_charges")
+    operator = models.ForeignKey(
+        Operator, on_delete=models.PROTECT, null=True, blank=True, related_name="one_off_charges"
+    )
+    lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="one_off_charges"
+    )
+    fee_type = models.ForeignKey(
+        FeeType, on_delete=models.PROTECT, null=True, blank=True, related_name="one_off_charges"
+    )
+    category = _choice(OneOffCategory, default=OneOffCategory.SETUP)
+    description = guarded_char(DESCRIPTION_MAX_LENGTH, blank=True)
+    collection = _choice(CollectionMethod, default=CollectionMethod.NONE)
     cost = MoneyField(null=True, blank=True)
     price = MoneyField()
     vendor = guarded_char(NAME_MAX_LENGTH, blank=True)
@@ -794,7 +848,7 @@ class SetupCharge(GuardedModel):
         ),
         db_persist=True,
     )
-    status = _choice(SetupChargeStatus, default=SetupChargeStatus.OWED)
+    status = _choice(OneOffChargeStatus, default=OneOffChargeStatus.OWED)
     waived_at = models.DateTimeField(null=True, blank=True)
     waived_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
@@ -806,33 +860,96 @@ class SetupCharge(GuardedModel):
     review_message = free_text(default="")
     legacy = models.BooleanField(default=False)
     needs_review = models.BooleanField(default=False)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    void_note = free_text()
+    #: The idempotency identifier of the single "Charge now" attempt (D4), set once.
+    charge_now_key = models.UUIDField(null=True, blank=True, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "setup_charges"
+        db_table = "one_off_charges"
         constraints = [
-            _positive("setup_charges", "price"),
+            _positive("one_off_charges", "price"),
             models.CheckConstraint(
                 condition=Q(cost__isnull=True) | Q(cost__gte=0),
-                name="setup_charges_cost_not_negative",
+                name="one_off_charges_cost_not_negative",
             ),
-            _not_negative("setup_charges", "amount_paid"),
+            _not_negative("one_off_charges", "amount_paid"),
             models.CheckConstraint(
                 condition=Q(status="waived", waived_at__isnull=False, waive_note__regex=_NOT_BLANK)
                 | (~Q(status="waived") & Q(waived_at__isnull=True)),
-                name="setup_charges_waived_has_note",
+                name="one_off_charges_waived_has_note",
+            ),
+            models.CheckConstraint(
+                condition=Q(status="voided", voided_at__isnull=False, void_note__regex=_NOT_BLANK)
+                | (~Q(status="voided") & Q(voided_at__isnull=True)),
+                name="one_off_charges_voided_has_note",
+            ),
+            models.CheckConstraint(
+                condition=(~Q(category="setup") | Q(fee_type__isnull=False))
+                & (~Q(category__in=NON_SETUP_CATEGORIES) | Q(fee_type__isnull=True)),
+                name="one_off_charges_fee_type_iff_setup",
+            ),
+            models.CheckConstraint(
+                condition=~Q(category__in=NON_SETUP_CATEGORIES) | Q(description__regex=_NOT_BLANK),
+                name="one_off_charges_description_required",
+            ),
+            models.CheckConstraint(
+                condition=~Q(collection="none", category__in=NON_SETUP_CATEGORIES),
+                name="one_off_charges_collection_none_only_setup",
+            ),
+            models.CheckConstraint(
+                condition=Q(operator__isnull=False)
+                | (Q(lease__isnull=False) & ~Q(category__in=NON_SETUP_CATEGORIES)),
+                name="one_off_charges_has_operator",
             ),
             models.UniqueConstraint(
                 fields=["lease", "fee_type"],
                 condition=Q(legacy=False),
-                name="setup_charges_lease_fee_type_unique",
+                name="one_off_charges_lease_fee_type_unique",
             ),
-            _valid_choice("setup_charges", "status", SetupChargeStatus),
+            _valid_choice("one_off_charges", "status", OneOffChargeStatus),
+            _valid_choice("one_off_charges", "category", OneOffCategory),
+            _valid_choice("one_off_charges", "collection", CollectionMethod),
         ]
 
     def __str__(self) -> str:
-        return f"Setup charge {self.pk}"
+        return f"One-off charge {self.pk}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Refuse a change of ``charge_now_key`` once it is stored (PLAN-010d D4): the
+        single "Charge now" attempt and every later one carry the same identifier."""
+        update_fields = kwargs.get("update_fields")
+        writes_key = update_fields is None or "charge_now_key" in update_fields
+        if writes_key and not self._state.adding:
+            stored = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("charge_now_key", flat=True)
+                .first()
+            )
+            if stored is not None and stored != self.charge_now_key:
+                raise ValidationError(CHARGE_NOW_KEY_FIXED, code="charge_now_key_fixed")
+        super().save(*args, **kwargs)
+
+    @property
+    def operator_id_billed(self) -> Any:
+        """The operator billed: the charge's own, else (a setup charge of a lease that
+        had no operator when it was made) the lease's."""
+        if self.operator_id is not None:
+            return self.operator_id
+        return self.lease.operator_id if self.lease is not None else None
+
+    @property
+    def label(self) -> str:
+        """What staff call the charge: its description, else its fee type's name."""
+        if self.description:
+            return self.description
+        return self.fee_type.name if self.fee_type is not None else ""
 
 
 # --- Store costs (PLAN-010b D8) ------------------------------------------------------
@@ -947,8 +1064,8 @@ class Invoice(GuardedModel):
     charge_adjustment = models.ForeignKey(
         ChargeAdjustment, on_delete=models.PROTECT, null=True, blank=True, related_name="invoices"
     )
-    setup_charge = models.ForeignKey(
-        SetupCharge, on_delete=models.PROTECT, null=True, blank=True, related_name="invoices"
+    one_off_charge = models.ForeignKey(
+        OneOffCharge, on_delete=models.PROTECT, null=True, blank=True, related_name="invoices"
     )
     issue_date = models.DateField()
     due_date = models.DateField()
@@ -988,15 +1105,15 @@ class Invoice(GuardedModel):
                 condition=Q(rent_charge__isnull=False),
                 name="invoices_one_per_rent_charge",
             ),
-            # One invoice per setup charge (PLAN-010b D6, the rent rule).
+            # One invoice per one-off charge (PLAN-010b D6, the rent rule).
             models.UniqueConstraint(
-                fields=["setup_charge"],
-                condition=Q(setup_charge__isnull=False),
-                name="invoices_one_per_setup_charge",
+                fields=["one_off_charge"],
+                condition=Q(one_off_charge__isnull=False),
+                name="invoices_one_per_one_off_charge",
             ),
             models.CheckConstraint(
                 condition=_at_most_one_set(
-                    "rent_charge", "insurance_charge", "charge_adjustment", "setup_charge"
+                    "rent_charge", "insurance_charge", "charge_adjustment", "one_off_charge"
                 ),
                 name="invoices_at_most_one_source",
             ),
@@ -1045,14 +1162,14 @@ class PaymentKind(models.TextChoices):
     RENT = "rent", "Rent"
     INSURANCE = "insurance", "Insurance"
     ADJUSTMENT = "adjustment", "Adjustment"
-    #: A payment on a setup charge (PLAN-010b D4).
-    SETUP = "setup", "Setup fee"
+    #: A payment on a one-off charge (PLAN-010b D4 as ``setup``; PLAN-010d D1).
+    ONE_OFF = "one_off", "One-off charge"
     #: Money paid back to the operator from a deposit; never a provider refund (D4, D7).
     REFUND_DEPOSIT = "refund_deposit", "Deposit refund"
 
 
-#: The payment kinds that belong to a setup charge.
-SETUP_PAYMENT_KINDS: list[str] = [PaymentKind.SETUP.value, PaymentKind.REFUND_DEPOSIT.value]
+#: The payment kinds that belong to a one-off charge.
+ONE_OFF_PAYMENT_KINDS: list[str] = [PaymentKind.ONE_OFF.value, PaymentKind.REFUND_DEPOSIT.value]
 #: Methods recorded by hand, not through the payment provider.
 MANUAL_PAYMENT_METHODS: list[str] = ["zelle", "wire", "other"]
 
@@ -1084,8 +1201,8 @@ class Payment(GuardedModel):
     charge_adjustment = models.ForeignKey(
         ChargeAdjustment, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
     )
-    setup_charge = models.ForeignKey(
-        SetupCharge, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
+    one_off_charge = models.ForeignKey(
+        OneOffCharge, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
     )
     kind = _choice(PaymentKind)
     policy_year = models.IntegerField(null=True, blank=True)
@@ -1137,18 +1254,18 @@ class Payment(GuardedModel):
                 condition=~Q(method__in=["zelle", "wire", "other"]) | Q(note__regex=_NOT_BLANK),
                 name="payments_manual_method_has_note",
             ),
-            # PLAN-010b D4: a setup charge is paid only by kind setup (or paid back by
-            # refund_deposit), and those kinds always name it and nothing else.
+            # PLAN-010b D4: a one-off charge is paid only by kind one_off (or paid back
+            # by refund_deposit), and those kinds always name it and nothing else.
             models.CheckConstraint(
-                condition=Q(kind__in=SETUP_PAYMENT_KINDS, setup_charge__isnull=False)
-                | (~Q(kind__in=SETUP_PAYMENT_KINDS) & Q(setup_charge__isnull=True)),
-                name="payments_setup_kind_iff_setup_charge",
+                condition=Q(kind__in=ONE_OFF_PAYMENT_KINDS, one_off_charge__isnull=False)
+                | (~Q(kind__in=ONE_OFF_PAYMENT_KINDS) & Q(one_off_charge__isnull=True)),
+                name="payments_one_off_kind_iff_one_off_charge",
             ),
             models.CheckConstraint(
-                condition=Q(setup_charge__isnull=True)
+                condition=Q(one_off_charge__isnull=True)
                 | Q(rent_charge__isnull=True, insurance_charge__isnull=True)
                 & Q(charge_adjustment__isnull=True),
-                name="payments_setup_charge_only_target",
+                name="payments_one_off_charge_only_target",
             ),
             # Money out by hand: never a refund row, never of a provider transaction.
             models.CheckConstraint(
@@ -1184,7 +1301,8 @@ class DepositResolutionKind(models.TextChoices):
 
 class DepositResolution(GuardedModel):
     """How a deposit (a setup charge of a refundable fee type) was resolved once its
-    lease ended (PLAN-010b D7). One per deposit.
+    lease ended (PLAN-010b D7). One per deposit. ``setup_charge`` names a one-off charge
+    of category ``setup`` (PLAN-010d D1 kept this column's name).
 
     ``amount`` is what was refunded, transferred or withheld. ``withheld_amount`` is the
     part of the paid deposit the business keeps: the paid amount less ``amount`` for a
@@ -1193,7 +1311,7 @@ class DepositResolution(GuardedModel):
     """
 
     setup_charge = models.OneToOneField(
-        SetupCharge, on_delete=models.PROTECT, related_name="deposit_resolution"
+        OneOffCharge, on_delete=models.PROTECT, related_name="deposit_resolution"
     )
     kind = _choice(DepositResolutionKind)
     amount = MoneyField()
@@ -1396,6 +1514,11 @@ class AuditLog(PaymentDataGuardedModel):
 
     class Meta:
         db_table = "audit_log"
+        # The audit log page filters on a time range and on the entity (PLAN-010d D8).
+        indexes = [
+            models.Index(fields=["at"], name="audit_log_at_idx"),
+            models.Index(fields=["entity_type", "entity_id", "at"], name="audit_log_entity_idx"),
+        ]
 
 
 class LegacyRecord(GuardedModel):

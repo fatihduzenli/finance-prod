@@ -64,6 +64,19 @@
   </table>
   <p><strong>Outstanding balance:</strong> <span id="outstanding">${{ outstanding }}</span> <span class="muted">(sum of rent charge balances over these leases)</span></p>
 
+  <h2>One-off charges</h2>
+  {% if can_new_charge %}<p class="actions"><a class="btn" href="{% url 'ledger:operators:new_charge' pk=operator.pk %}" id="new-one-off-charge">Create one-off charge</a></p>{% endif %}
+  <table id="one-off-charges">
+    <thead><tr><th>Charge</th><th>Lease</th><th>Due</th><th>Amount</th><th>Balance</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for charge in one_off_charges %}
+        <tr><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a> <span class="muted">({{ charge.get_category_display }})</span>{% if charge.needs_review %} <span class="badge">Needs review</span>{% endif %}</td><td>{{ charge.lease.store.external_label|default:"—" }}</td><td>{{ charge.due_date|date:"Y-m-d" }}</td><td>${{ charge.price }}</td><td>${{ charge.balance }}</td><td>{{ charge.get_status_display }}</td></tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">No one-off charges.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
   <h2>Invoices</h2>
   <table>
     <thead><tr><th>Number</th><th>Issued</th><th>Due</th><th>Total</th><th>Status</th><th>Provider status</th></tr></thead>

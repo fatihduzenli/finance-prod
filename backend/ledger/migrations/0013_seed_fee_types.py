@@ -102,7 +102,9 @@ def seed(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
 
 def unseed(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     apps.get_model("ledger", "FeeType").objects.filter(
-        code__in=[row[0] for row in FEE_TYPES], setup_charges__isnull=True
+        # The historical model's related name (``one_off_charges`` since 0017).
+        code__in=[row[0] for row in FEE_TYPES],
+        setup_charges__isnull=True,  # type: ignore[misc]
     ).delete()
     apps.get_model("ledger", "InsurancePremium").objects.filter(
         policy_year__in=PREMIUM_COST_YEARS, cost=PREMIUM_COST

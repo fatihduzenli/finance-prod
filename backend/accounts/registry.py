@@ -14,7 +14,8 @@ Routes still to come: settings get ``Role.ADMIN``; invoices and send get
 ``Role.BILLING``. Operators (PLAN-006), leases, the rent run and rent charges
 (PLAN-007), stores (PLAN-007b), webhook events and the returns queue (PLAN-008), and the
 payments ledger, its export, the payment page, the marking retry, refund and void
-(PLAN-009), and documents and store-cost corrections (PLAN-010c) are classified below.
+(PLAN-009), documents and store-cost corrections (PLAN-010c), and one-off charges, Charge
+now and the audit log page (PLAN-010d) are classified below.
 """
 
 from __future__ import annotations
@@ -121,15 +122,24 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # billing. The view refuses the page's GET below billing too.
     "ledger:reconciliation:run": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:reconciliation:resolve": RouteRule(min_role=Role.BILLING, methods=POST),
-    # Setup charges (PLAN-010b D12): adding, editing, recording a payment, retrying the
-    # marking and linking an invoice need billing; waiving needs admin. The views refuse
-    # the forms' GET below the same role.
+    # One-off charges (PLAN-010b D12 as setup charges; PLAN-010d D9): adding a setup
+    # charge, creating a one-off charge (Charge now: admin, checked by the service too),
+    # editing, recording a payment, retrying the marking or the provider request, linking
+    # an invoice and cancelling need billing; waiving needs admin. The views refuse the
+    # forms' GET below the same role.
     "ledger:leases:add_setup_charge": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:setup_charges:payment": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:setup_charges:retry_mark": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:setup_charges:link": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:setup_charges:edit": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:setup_charges:waive": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:leases:new_charge": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:operators:new_charge": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:payment": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:retry_mark": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:retry": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:link": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:edit": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:cancel": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:waive": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Charge now (PLAN-010d D4, D9): admin. The view refuses the confirmation page's GET
+    # below admin too.
+    "ledger:one_off_charges:charge_now": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Deposit resolution at lease end (PLAN-010b D7, D12): admin. The view refuses the
     # form's GET below admin too.
     "ledger:leases:resolve_deposit": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -207,8 +217,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:payments:detail",
         # The reconciliation page; the view itself requires billing (PLAN-010 D10).
         "ledger:reconciliation:page",
-        # The setup charge page: any verified role (PLAN-010b D6).
-        "ledger:setup_charges:detail",
+        # The one-off charge page: any verified role (PLAN-010b D6).
+        "ledger:one_off_charges:detail",
         # The profit and loss report and its CSV export: any verified role (PLAN-010b
         # D11, D12).
         "ledger:reports:pnl",
@@ -217,6 +227,10 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # (PLAN-010c D7).
         "ledger:documents:download",
         "ledger:documents:preview",
+        # The audit log page and its CSV export; the views themselves require admin
+        # (PLAN-010d D8, D9).
+        "ledger:audit:page",
+        "ledger:audit:export",
     }
 )
 

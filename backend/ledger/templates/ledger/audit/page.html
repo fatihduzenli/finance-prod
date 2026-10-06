@@ -1,0 +1,56 @@
+{% extends "finance/base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+  <h1>Audit log</h1>
+  <form method="get" action="{% url 'ledger:audit:page' %}" id="audit-filters" role="search">
+    <div class="actions">
+      <label for="audit-action" style="margin:0;">Action</label>
+      <input type="text" name="action" id="audit-action" value="{{ query.action }}" maxlength="200" style="width:14rem;" placeholder="document.*">
+      <label for="audit-user" style="margin:0;">User</label>
+      <input type="text" name="user" id="audit-user" value="{{ query.user }}" maxlength="200" style="width:10rem;">
+      <label for="audit-entity-type" style="margin:0;">Entity type</label>
+      <input type="text" name="entity_type" id="audit-entity-type" value="{{ query.entity_type }}" maxlength="200" style="width:10rem;">
+      <label for="audit-entity-id" style="margin:0;">Entity id</label>
+      <input type="text" name="entity_id" id="audit-entity-id" value="{{ query.entity_id }}" maxlength="200" style="width:14rem;">
+      <label for="audit-from" style="margin:0;">From</label>
+      <input type="date" name="from" id="audit-from" value="{{ query.date_from|date:'Y-m-d' }}">
+      <label for="audit-to" style="margin:0;">To</label>
+      <input type="date" name="to" id="audit-to" value="{{ query.date_to|date:'Y-m-d' }}">
+      {% if query.documents_of %}<input type="hidden" name="documents_of" value="{{ query.documents_of.0 }}:{{ query.documents_of.1 }}">{% endif %}
+      <button class="btn" type="submit">Show</button>
+      <a class="btn" id="audit-export" href="{% url 'ledger:audit:export' %}?{{ export_query }}">Export CSV</a>
+    </div>
+  </form>
+  <p class="muted">Newest first, {{ page_size }} rows a page. Dates are New York calendar days, at most {{ max_days }} days. An action or entity id ending in * matches every value that starts with the text before it. Identifiers are masked; amounts are shown as they were recorded.{% if query.documents_of %} Showing the document activity of one {{ query.documents_of.0 }}.{% endif %}</p>
+  {% if messages_shown %}
+    <ul class="messages" id="audit-messages">{% for text in messages_shown %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if too_slow %}
+    <p class="warning" id="audit-too-slow" role="status">{{ too_slow }}</p>
+  {% else %}
+  <table id="audit-rows">
+    <thead><tr><th>Time (UTC)</th><th>Time (New York)</th><th>Action</th><th>User</th><th>Entity</th><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+      {% for row, link in rows %}
+        <tr class="audit-row" id="audit-{{ row.id }}">
+          <td class="audit-utc">{{ row.at_utc }}</td>
+          <td class="audit-new-york">{{ row.at_new_york }}</td>
+          <td class="audit-action">{{ row.action }}</td>
+          <td class="audit-user">{{ row.user|default:"—" }}</td>
+          <td class="audit-entity">{{ row.entity_type }} {% if link %}<a href="{{ link }}">{{ row.entity_id }}</a>{% else %}{{ row.entity_id }}{% endif %}</td>
+          <td class="audit-before">{% for key, value in row.before %}<div>{% if key %}<strong>{{ key }}</strong>: {% endif %}<span style="white-space:pre-wrap;">{{ value }}</span></div>{% empty %}—{% endfor %}</td>
+          <td class="audit-after">{% for key, value in row.after %}<div>{% if key %}<strong>{{ key }}</strong>: {% endif %}<span style="white-space:pre-wrap;">{{ value }}</span></div>{% empty %}—{% endfor %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7" class="muted">No audit rows match.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="actions">
+    {% if previous_query %}<a class="btn" id="audit-previous" href="?{{ previous_query }}">Newer</a>{% endif %}
+    <span class="muted">Page {{ query.page }}</span>
+    {% if next_query %}<a class="btn" id="audit-next" href="?{{ next_query }}">Older</a>{% endif %}
+  </p>
+  {% endif %}
+{% endblock %}

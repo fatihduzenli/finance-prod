@@ -31,8 +31,17 @@ ACCOUNT_MIN_DIGITS = 6
 ROUTING_ACCOUNT_MAX_GAP = 20
 
 #: Removed before matching (PLAN-004 §4.6 point 3): zero-width space, non-joiner and
-#: joiner, word joiner and the byte order mark.
-INVISIBLE_CHARACTERS = "\u200b\u200c\u200d\u2060\ufeff"
+#: joiner, word joiner and the byte order mark; and the bidirectional marks and controls
+#: (PLAN-010d Batch A finding): left-to-right and right-to-left marks (U+200E, U+200F),
+#: the embeddings, overrides and pop (U+202A to U+202E) and the isolates (U+2066 to
+#: U+2069). The database function ``finance_contains_card_number`` removes the same
+#: characters (migration ``ledger.0018``).
+INVISIBLE_CHARACTERS = (
+    "\u200b\u200c\u200d\u2060\ufeff"
+    "\u200e\u200f"
+    "\u202a\u202b\u202c\u202d\u202e"
+    "\u2066\u2067\u2068\u2069"
+)
 _REMOVE_INVISIBLE = str.maketrans("", "", INVISIBLE_CHARACTERS)
 
 # A UUID-shaped token (8-4-4-4-12 hexadecimal groups, either case) bounded by characters

@@ -243,24 +243,31 @@ def test_refund_amount_is_sent_as_a_two_decimal_string() -> None:
 # --- 19: idempotency under retry --------------------------------------------------------------
 
 
-def test_network_error_retry_on_pay_invoice_reuses_the_same_idempotency_id() -> None:
+def test_pay_invoice_makes_exactly_one_request_and_a_later_attempt_reuses_the_key() -> None:
+    """PLAN-010d D4: Charge now is one request, never an automatic retry; the stored
+    idempotency ID is what makes a later, deliberate attempt safe at the provider."""
+    from payments.errors import ProviderUnavailable
+
+    key = "0f0a8f7e-1a2b-4c3d-8e9f-0123456789ab"
+    payment = PayWithStoredMethod(payment_method_external_id="pm-1", idempotency_id=key)
+    for failure in (httpx.ConnectError("boom"), httpx.ReadTimeout("boom")):
+        rig = make_rig(sequence([failure]))
+        with pytest.raises(ProviderUnavailable):
+            StaxProvider(rig.transport).pay_invoice("inv-1", payment)
+        assert len(rig.recorder.requests) == 1
+        assert rig.clock.sleeps == []
+    for status in (429, 500, 502, 503):
+        rig = make_rig(always(status))
+        with pytest.raises(ProviderError):
+            StaxProvider(rig.transport).pay_invoice("inv-1", payment)
+        assert len(rig.recorder.requests) == 1, status
+        assert rig.clock.sleeps == []
+    # The deliberate later attempt carries the very same key.
     rig = make_rig(
-        sequence(
-            [
-                httpx.ConnectError("boom"),
-                httpx.ReadTimeout("boom"),
-                httpx.Response(200, json={"id": "txn-1", "status": "PENDING", "total": "1.00"}),
-            ]
-        )
-    )
-    payment = PayWithStoredMethod(
-        payment_method_external_id="pm-1", idempotency_id="0f0a8f7e-1a2b-4c3d-8e9f-0123456789ab"
+        sequence([httpx.Response(200, json={"id": "txn-1", "status": "PENDING", "total": "1.00"})])
     )
     StaxProvider(rig.transport).pay_invoice("inv-1", payment)
-    ids = {request.url.params.get("idempotency_id") for request in rig.recorder.requests}
-    assert ids == {"0f0a8f7e-1a2b-4c3d-8e9f-0123456789ab"}
-    assert len(rig.recorder.requests) == 3
-    assert rig.clock.sleeps == [1_000, 4_000]
+    assert [r.url.params.get("idempotency_id") for r in rig.recorder.requests] == [key]
 
 
 def test_pay_invoice_is_also_refused_on_every_4xx_without_retry() -> None:

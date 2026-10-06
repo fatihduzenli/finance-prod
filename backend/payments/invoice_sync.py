@@ -34,6 +34,9 @@ SCHEDULE_KEY = "schedule_id"
 PROVIDER_PAID = "PAID"
 PROVIDER_SENT = "SENT"
 PROVIDER_VIEWED = "VIEWED"
+#: The status of an invoice the provider deleted (docs/CLAUDE.md Rule 2 lists it; there
+#: is no "void" for an invoice, PLAN-010d D6).
+PROVIDER_DELETED = "DELETED"
 #: Statuses that show the invoice was sent (PLAN-008a §2 rule 2).
 _SHOWS_SENT = frozenset({PROVIDER_SENT, PROVIDER_VIEWED, PROVIDER_PAID})
 SEND_EVENT = "send_invoice"
@@ -47,6 +50,17 @@ def _status(record: InvoiceRecord) -> str:
 def shows_paid(record: InvoiceRecord) -> bool:
     """Whether the provider's invoice is already paid (PLAN-009 D1 pre-check)."""
     return _status(record) == PROVIDER_PAID
+
+
+def shows_deleted(record: InvoiceRecord) -> bool:
+    """Whether the provider shows the invoice deleted (PLAN-010d D6)."""
+    return _status(record) == PROVIDER_DELETED
+
+
+def shows_sent(record: InvoiceRecord) -> bool:
+    """Whether the provider shows the invoice sent: a send time, or a status that comes
+    only after sending (PLAN-010d D3)."""
+    return record.sent_at is not None or _status(record) in _SHOWS_SENT
 
 
 def record_provider_status(invoice_id: UUID, raw_status: str) -> None:
@@ -172,6 +186,9 @@ def due_date(record: InvoiceRecord) -> date | None:
 
 
 def schedule_id(record: InvoiceRecord) -> str:
-    """The schedule the provider says generated the invoice, or ``""``."""
+    """The schedule the provider says generated the invoice, or ``""``: the record's
+    own field, else the summary's (a record built without the field)."""
+    if record.schedule_id:
+        return record.schedule_id
     value = record.raw_summary.get(SCHEDULE_KEY)
     return str(value) if isinstance(value, str | int) and not isinstance(value, bool) else ""

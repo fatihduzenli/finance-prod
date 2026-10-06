@@ -24,6 +24,7 @@ from django.db import IntegrityError, connection, models, transaction
 
 from ledger import models as ledger_models
 from ledger.validators import (
+    INVISIBLE_CHARACTERS,
     PAYMENT_DATA_MESSAGE,
     contains_bank_routing_pattern,
     contains_card_number,
@@ -336,12 +337,16 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0014_store_costs_deposit_resolutions",
         "ledger.migrations.0015_documents_reshape",
         "ledger.migrations.0016_store_cost_corrections",
+        "ledger.migrations.0017_one_off_charges",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",
         "payments.migrations.0007_reconciliation",
     ):
         triggers.update(importlib.import_module(module).GUARDED_COLUMNS)
+    # ledger 0017 renamed ``setup_charges`` to ``one_off_charges`` and replaced its trigger
+    # (PLAN-010d D1): the old table's entry names a table that no longer exists.
+    del triggers["setup_charges"]
     expected = {f"{table}.{column}" for table, columns in triggers.items() for column in columns}
     assert set(GUARDED_IDS) == expected
 
@@ -661,3 +666,44 @@ def test_database_function_agrees_with_the_validator_on_the_amended_alphabet() -
         if a != d
     ]
     assert disagreements == []
+
+
+# --- Bidirectional marks (PLAN-010d Batch A finding, ledger 0018) --------------------------
+
+BIDI_MARKS = [
+    chr(code) for code in (0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A))
+]
+
+
+def test_the_bidi_marks_are_invisible_to_the_guard() -> None:
+    assert len(BIDI_MARKS) == 11
+    for mark in BIDI_MARKS:
+        assert mark in INVISIBLE_CHARACTERS
+        assert contains_card_number(mark.join(["4111", "1111", "1111", "1111"])), repr(mark)
+        with pytest.raises(ValidationError):
+            validate_no_payment_data(f"ref {mark}4111 1111{mark} 1111 1111")
+
+
+@requires_postgresql
+@pytest.mark.django_db
+def test_the_database_function_reads_through_the_bidi_marks_as_the_validator() -> None:
+    samples = [mark.join(["4111", "1111", "1111", "1111"]) for mark in BIDI_MARKS]
+    samples += [mark.join("4111111111111112") for mark in BIDI_MARKS]  # Luhn fails
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT finance_contains_card_number(t) FROM unnest(%s::text[]) WITH ORDINALITY "
+            "AS x(t, n) ORDER BY n",
+            [samples],
+        )
+        database = [row[0] for row in cursor.fetchall()]
+    assert database == [contains_card_number(text) for text in samples]
+    assert database == [True] * 11 + [False] * 11
+
+
+@requires_postgresql
+@pytest.mark.django_db
+def test_the_trigger_refuses_a_card_number_split_by_bidi_marks() -> None:
+    operator = saved(LEDGER_FACTORIES[ledger_models.Operator]())
+    text = "‮".join(["4111", "1111", "1111", "1111"])
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ledger_models.Operator.objects.filter(pk=operator.pk).update(notes=text)

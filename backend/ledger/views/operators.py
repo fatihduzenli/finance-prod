@@ -43,6 +43,7 @@ from accounts.roles import Role, meets, role_of
 from accounts.views import forbidden
 from ledger.forms import LinkForm, OperatorCreateForm, OperatorForm
 from ledger.models import ZERO, Note, NoteEntityType, Operator, RentCharge, SyncStatus
+from ledger.services import one_off_charges
 from ledger.validators import contains_card_number
 from ledger.views.jobs import busy, job_context, submit
 from payments import operator_sync
@@ -255,6 +256,8 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 else ""
             ),
             "can_link": billing and active,
+            "can_new_charge": billing and active,
+            "one_off_charges": one_off_charges.operator_charges(operator),
             "can_archive": meets(role, Role.ADMIN) and active,
         },
     )

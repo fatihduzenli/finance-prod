@@ -317,10 +317,19 @@ def schedule_body(schedule: ScheduleInput, payment_page_url: str) -> Body:
 
     Exactly the fields of PLAN-007 D3: ``url``, ``total``, ``rule``, ``customer_id``,
     ``payment_method_id``, ``email_notification`` and ``meta.lineItems`` (``item``,
-    ``quantity``, ``price``). Nothing else of ``meta`` is sent; whether schedule
-    ``meta`` accepts ``memo``/``reference`` is TODO-VERIFY-035.
+    ``quantity``, ``price``), plus ``meta.reference`` when the schedule carries one
+    (PLAN-010d D2). TODO-VERIFY-035: the create-a-scheduled-invoice block does not list
+    ``meta.reference``; whether it is accepted and returned is unverified.
     """
     amounts = schedule.amounts
+    meta: Body = {
+        "lineItems": [
+            {"item": item.description, "quantity": item.quantity, "price": item.unit_price}
+            for item in amounts.line_items
+        ],
+    }
+    if schedule.reference:
+        meta["reference"] = schedule.reference
     return {
         "url": payment_page_url,
         "total": amounts.total,
@@ -328,12 +337,7 @@ def schedule_body(schedule: ScheduleInput, payment_page_url: str) -> Body:
         "customer_id": schedule.customer_external_id,
         "payment_method_id": schedule.payment_method_external_id,
         "email_notification": schedule.email_notification,
-        "meta": {
-            "lineItems": [
-                {"item": item.description, "quantity": item.quantity, "price": item.unit_price}
-                for item in amounts.line_items
-            ],
-        },
+        "meta": meta,
     }
 
 
@@ -482,6 +486,23 @@ INVOICE_SENT_AT_KEY = "sent_at"
 INVOICE_VIEWED_AT_KEY = "viewed_at"
 INVOICE_PAID_AT_KEY = "paid_at"
 INVOICE_AMOUNT_PAID_KEY = "total_paid"
+#: TODO-VERIFY-004: ``meta.reference`` as sent on create-an-invoice is assumed to come
+#: back on ``GET /invoice`` under ``meta``. TODO-VERIFY-038: ``schedule_id`` at the top.
+INVOICE_META_KEY = "meta"
+INVOICE_REFERENCE_KEY = "reference"
+INVOICE_SCHEDULE_KEY = "schedule_id"
+#: Longest reference read; a longer one, or one holding payment data, reads as none.
+REFERENCE_MAX_LENGTH = 64
+
+
+def _reference(obj: Mapping[str, object]) -> str:
+    """``meta.reference`` as a short safe string, else ``""``. Read here only; the
+    summary keeps no nested object (Rule 1)."""
+    meta = obj.get(INVOICE_META_KEY)
+    value = meta.get(INVOICE_REFERENCE_KEY) if isinstance(meta, Mapping) else None
+    if not isinstance(value, str) or len(value) > REFERENCE_MAX_LENGTH:
+        return ""
+    return value.strip() if _is_safe_text(value) else ""
 
 
 def invoice_record(data: object, fetched_at: datetime) -> InvoiceRecord:
@@ -497,6 +518,8 @@ def invoice_record(data: object, fetched_at: datetime) -> InvoiceRecord:
         viewed_at=_datetime(obj, INVOICE_VIEWED_AT_KEY),
         paid_at=_datetime(obj, INVOICE_PAID_AT_KEY),
         amount_paid=_money(obj, INVOICE_AMOUNT_PAID_KEY),
+        reference=_reference(obj),
+        schedule_id=_text(obj, INVOICE_SCHEDULE_KEY),
     )
 
 

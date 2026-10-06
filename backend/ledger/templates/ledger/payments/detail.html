@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% block title %}Payment{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:payments:list' %}">&larr; Payments</a>{% if charge %} · <a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Charge</a>{% elif setup_charge %} · <a href="{% url 'ledger:setup_charges:detail' pk=setup_charge.pk %}">Setup charge</a>{% endif %}</p>
+  <p><a href="{% url 'ledger:payments:list' %}">&larr; Payments</a>{% if charge %} · <a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Charge</a>{% elif one_off_charge %} · <a href="{% url 'ledger:one_off_charges:detail' pk=one_off_charge.pk %}">One-off charge</a>{% endif %}</p>
   <h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of ${{ payment.amount }}</h1>
   {% if can_refund or can_void %}
     <p class="actions">
@@ -68,13 +68,13 @@
       <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
     </dl>
     {% if charge_review %}<p><strong>{{ charge_review }}</strong></p>{% endif %}
-  {% elif setup_charge %}
+  {% elif one_off_charge %}
     <dl id="payment-setup-charge">
-      <dt>Charge</dt><dd><a href="{% url 'ledger:setup_charges:detail' pk=setup_charge.pk %}">{{ setup_charge.fee_type.name }}</a> <span class="muted">({{ payment.get_kind_display }})</span>{% if setup_charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}</dd>
-      <dt>Price</dt><dd id="charge-due">${{ setup_charge.price }}</dd>
-      <dt>Paid</dt><dd id="charge-paid">${{ setup_charge.amount_paid }}</dd>
-      <dt>Balance</dt><dd id="charge-balance">${{ setup_charge.balance }}</dd>
-      <dt>Status</dt><dd id="charge-status">{{ setup_charge.get_status_display }}</dd>
+      <dt>Charge</dt><dd><a href="{% url 'ledger:one_off_charges:detail' pk=one_off_charge.pk %}">{{ one_off_charge.label }}</a> <span class="muted">({{ payment.get_kind_display }})</span>{% if one_off_charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}</dd>
+      <dt>Price</dt><dd id="charge-due">${{ one_off_charge.price }}</dd>
+      <dt>Paid</dt><dd id="charge-paid">${{ one_off_charge.amount_paid }}</dd>
+      <dt>Balance</dt><dd id="charge-balance">${{ one_off_charge.balance }}</dd>
+      <dt>Status</dt><dd id="charge-status">{{ one_off_charge.get_status_display }}</dd>
     </dl>
     {% if charge_review %}<p><strong>{{ charge_review }}</strong></p>{% endif %}
   {% elif payment.insurance_charge %}

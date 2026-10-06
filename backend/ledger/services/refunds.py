@@ -13,12 +13,12 @@ Rules kept here, not in the views:
 - Manual payments (wire, Zelle, other) were never provider transactions and have no
   refund or void here. A deposit refund (``refund_deposit``, PLAN-010b D4) is money
   paid back by hand and is never refunded or voided.
-- A payment on a setup charge (kind ``setup``) made by ACH follows the rent rules; its
+- A payment on a one-off charge (kind ``one_off``) made by ACH follows the rent rules; its
   charge is locked and recomputed as a rent charge is.
 - The admin's confirmation (the exact-value checkbox) is required; without it nothing
   is sent.
 
-Both run under the row locks of the payment and its rent or setup charge, held during the
+Both run under the row locks of the payment and its rent or one-off charge, held during the
 provider call, so two admins confirming at once make one refund: the second sees the
 first refund's row and the smaller refundable amount. A form's ``creation_key`` is kept
 in the audit row; a resubmitted confirmation finds it and calls nothing.
@@ -54,14 +54,14 @@ import payments
 from ledger.models import (
     ZERO,
     AuditLog,
+    OneOffCharge,
     Payment,
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
     RentCharge,
-    SetupCharge,
 )
-from ledger.services import rent_run, setup_charges
+from ledger.services import one_off_charges, rent_run
 from payments import invoice_sync, operator_sync
 from payments.errors import ProviderError, ProviderUnavailable
 from payments.provider import TRANSACTION_REFUND, TransactionRecord, mask_identifier
@@ -389,26 +389,26 @@ def void_payment(
 # --- Helpers ---------------------------------------------------------------------------
 
 
-def _lock_charge(payment: Payment) -> RentCharge | SetupCharge | None:
+def _lock_charge(payment: Payment) -> RentCharge | OneOffCharge | None:
     if payment.rent_charge_id is not None:
         return RentCharge.objects.select_for_update().get(pk=payment.rent_charge_id)
-    if payment.setup_charge_id is not None:
-        return SetupCharge.objects.select_for_update().get(pk=payment.setup_charge_id)
+    if payment.one_off_charge_id is not None:
+        return OneOffCharge.objects.select_for_update().get(pk=payment.one_off_charge_id)
     return None
 
 
-def _recompute(charge: RentCharge | SetupCharge | None) -> None:
+def _recompute(charge: RentCharge | OneOffCharge | None) -> None:
     if isinstance(charge, RentCharge):
         rent_run.recompute_charge(charge)
-    elif isinstance(charge, SetupCharge):
-        setup_charges.recompute(charge)
+    elif isinstance(charge, OneOffCharge):
+        one_off_charges.recompute(charge)
 
 
-def _charge_state(charge: RentCharge | SetupCharge | None) -> dict[str, Any] | None:
+def _charge_state(charge: RentCharge | OneOffCharge | None) -> dict[str, Any] | None:
     if isinstance(charge, RentCharge):
         return rent_run.charge_state(charge)
-    if isinstance(charge, SetupCharge):
-        return setup_charges.charge_state(charge)
+    if isinstance(charge, OneOffCharge):
+        return one_off_charges.charge_state(charge)
     return None
 
 
@@ -469,7 +469,7 @@ def _payment_state(payment: Payment) -> dict[str, Any]:
         "amount": str(payment.amount),
         "is_refund": payment.is_refund,
         "rent_charge": str(payment.rent_charge_id) if payment.rent_charge_id else None,
-        "setup_charge": str(payment.setup_charge_id) if payment.setup_charge_id else None,
+        "one_off_charge": str(payment.one_off_charge_id) if payment.one_off_charge_id else None,
         "invoice": str(payment.invoice_id) if payment.invoice_id else None,
     }
 

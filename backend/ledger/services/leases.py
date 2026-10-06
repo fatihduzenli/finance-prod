@@ -556,7 +556,12 @@ def _method_from_payload(item: object, fetched_at: datetime) -> PaymentMethodRec
 def payment_method_choices(lease: Lease) -> MethodChoices:
     """The operator's methods from the latest snapshot (no provider call), or why there
     are none. ``fetched_at`` is ``None`` when the methods were never read."""
-    ref = _customer_ref_row(lease.operator)
+    return operator_method_choices(lease.operator)
+
+
+def operator_method_choices(operator: Operator | None) -> MethodChoices:
+    """:func:`payment_method_choices` for an operator (no provider call)."""
+    ref = _customer_ref_row(operator)
     if ref is None:
         return MethodChoices(error=NO_PROVIDER_CUSTOMER)
     snapshots = _method_snapshots(ref)
@@ -567,6 +572,22 @@ def payment_method_choices(lease: Lease) -> MethodChoices:
     return MethodChoices(
         methods=tuple(method for method in methods if method is not None),
         fetched_at=latest.fetched_at,
+    )
+
+
+def linked_method_record(operator: Operator | None) -> PaymentMethodRecord | None:
+    """The operator's linked payment method as the latest stored snapshot shows it, or
+    ``None`` when nothing is linked or the snapshot does not list it (no provider call)."""
+    linked = linked_payment_method(operator)
+    if not linked:
+        return None
+    return next(
+        (
+            method
+            for method in operator_method_choices(operator).methods
+            if method.external_id == linked
+        ),
+        None,
     )
 
 

@@ -1,5 +1,6 @@
 """Documents on the store and lease pages (docs/qa/PLAN-010c-documents-and-cost-corrections.md
-D3, D7).
+D3, D7), with their Activity list (docs/qa/PLAN-010d D8: the last ``document.*`` audit
+rows of the record, and for admins a link to the audit log page filtered on them).
 
 Access, as everywhere: a signed-in, second-factor-verified user with a role
 (middleware plus :func:`~ledger.views.operators.role_required`). Upload needs
@@ -26,6 +27,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.http import (
@@ -45,6 +47,7 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import DocumentDeleteForm, DocumentUploadForm
 from ledger.models import Document, DocumentKind, Lease, Store
+from ledger.services import audit
 from ledger.services import documents as service
 from ledger.views.operators import _actor, _role, role_required
 
@@ -111,6 +114,12 @@ def section_context(request: HttpRequest, owner: service.Owner) -> dict[str, Any
         "documents_form": DocumentUploadForm(initial={"kind": default_kind}),
         "documents_preview": preview,
         "documents_owner_url": _owner_url(owner).removesuffix(ANCHOR),
+        "documents_activity": audit.activity_for(owner),
+        "documents_activity_url": (
+            f"{reverse('ledger:audit:page')}?{urlencode(audit.activity_query(owner))}"
+            if is_admin
+            else ""
+        ),
     }
 
 

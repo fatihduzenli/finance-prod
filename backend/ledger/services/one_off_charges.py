@@ -1,0 +1,1344 @@
+"""One-off charges: every amount charged once (docs/qa/PLAN-010b D3 to D6 as setup
+charges; docs/qa/PLAN-010d D1, D2, D6 for every category).
+
+Rules kept here, not in the views:
+
+- **Creation** (:func:`create_charge`, the single path). Category ``setup`` (PLAN-010b):
+  from the lease form's checklist (:func:`create_lease_with_checklist`: the lease and
+  every ticked charge in one transaction, under the lease form's creation key, so a
+  resubmitted form makes one lease and one set of charges), or one at a time from the
+  lease page (:func:`add_charge`); collection ``none``; the fee type must be active; a
+  lease has at most one non-legacy charge per fee type (a unique index). The other
+  categories (``arrears``, ``adjustment``, ``damage``, ``other``; PLAN-010d D2) from the
+  operator or lease page: a description (the invoice's line item, at most
+  :data:`~ledger.models.DESCRIPTION_MAX_LENGTH` characters) and an internal note are
+  required, the amount is above zero and at most :data:`AMOUNT_MAX`, and the
+  collection decides what follows in the same transaction: for ``email``, ``manual``
+  and ``charge_now`` a local invoice (numbered by :mod:`ledger.services.numbering`,
+  ``draft``) and the job ``invoice_create``; for ``autopay_due`` no invoice and the job
+  ``schedule_create`` (the provider generates the invoice on the due date). Refused,
+  with nothing written: an operator without a provider customer (for anything but
+  ``manual``; a ``manual`` charge then gets its local invoice and no job), ``autopay_due``
+  or ``charge_now`` without a linked bank method, above the confirmed provider limit, or
+  above the large-debit threshold without the confirmation; ``autopay_due`` due in the
+  past or on a lease that ended; ``charge_now`` by anyone but an admin.
+- **Status** is never set by hand. :func:`recompute` derives it from the settled
+  ``one_off`` payments minus their settled refunds: ``paid``, ``partial`` or ``owed``. A
+  deposit refund (``refund_deposit``) is money paid back at the lease's end and does
+  not reopen the charge. ``waived`` is set only by :func:`waive`, ``voided`` only by
+  :func:`mark_voided` once the provider confirmed the cancel.
+- **Edit** (:func:`edit_charge`): cost, price, vendor and due date; the price is locked
+  once any payment exists on the charge, and a waived or voided charge is not edited.
+- **Waive** (:func:`waive`, admin): a note is mandatory; refused once any payment on the
+  charge is settled. Nothing is sent to the payment provider.
+- **Cancel** (:func:`cancel_charge`, billing; PLAN-010d D6): a note is mandatory;
+  refused once anything is paid or a payment is pending. It queues the delete of the
+  provider invoice (``invoice_delete``) or, for an ``autopay_due`` charge whose
+  schedule has not generated its invoice, of the schedule (``schedule_delete``); the
+  charge is voided by the worker only after the provider confirmed.
+- **Charge now** (:func:`charge_now_request`, :func:`charge_now_confirm`, admin;
+  PLAN-010d D4): the confirmation page's details come from local data only (the bank
+  method's last four and nickname from the stored methods snapshot); the confirm sets
+  the charge's ``charge_now_key`` once and queues the ``invoice_pay`` job, which
+  :func:`payments.one_off_invoices.pay` runs in the worker: one attempt. Refused, with
+  nothing queued: the pay-an-invoice flag off (:func:`payments.pay_invoice_enabled`),
+  anyone but an admin, a
+  charge not collected by Charge now, waived, voided or with nothing owed, its invoice
+  not at the provider yet or with a total that differs from the price, a payment
+  pending, settled or returned on it, no linked bank method or one the stored snapshot
+  does not show as a usable bank account, above the confirmed provider limit, above the
+  large-debit threshold without the confirmation, a provider request already waiting,
+  or less than a minute after a failed attempt.
+- **Manual payments** (:func:`record_payment`): the rent rules (method, amount, date,
+  note and the form's creation key; :func:`ledger.services.rent_run.payment_refusal`),
+  kind ``one_off``. The provider invoice, when one is linked and the payment covers the
+  whole price, is never marked here: the outcome says ``mark_due`` and the caller
+  queues the ``one_off_payment_mark`` job, which runs :func:`mark_provider_invoice` in
+  the worker with the rent rules of :func:`ledger.services.rent_run.mark_charge_invoice`.
+  A partial payment, or one that differs from the invoice total, flags the charge and
+  makes no call. A failed marking is retried by hand (:func:`retry_provider_mark`, the
+  ``one_off_payment_retry_mark`` job), refused for ``RETRY_LOCK_SECONDS`` after the last
+  attempt, as on rent charges.
+- **Linking an invoice** (:func:`link_invoice`): the rent rules of
+  :func:`ledger.services.rent_run.link_charge_invoice`, with the same sentences.
+
+Every write is audited (entity ``one_off_charge``); provider identifiers are masked.
+Money is ``Decimal`` throughout.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any
+
+from django.conf import settings
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.db.models import Sum
+from django.utils import timezone
+
+import payments
+from accounts.roles import Role, meets, role_of
+from ledger.models import (
+    DESCRIPTION_MAX_LENGTH,
+    ZERO,
+    AuditLog,
+    CollectionMethod,
+    CollectionStatus,
+    FeeType,
+    Invoice,
+    InvoiceStatus,
+    Lease,
+    OneOffCategory,
+    OneOffCharge,
+    OneOffChargeStatus,
+    Operator,
+    Payment,
+    PaymentKind,
+    PaymentStatus,
+)
+from ledger.services import leases, numbering, rent_run
+from ledger.services.rent_run import (
+    CENT,
+    MONEY_MAX,
+    PAY_ALREADY,
+    PAY_NOTE_PAYMENT_DATA,
+    PAY_NOTHING_DUE,
+    PAY_OVER_BALANCE,
+    PAY_RECORDED,
+    PAY_WAIVED,
+    LinkOutcome,
+    MarkAction,
+    MarkResult,
+    PaymentOutcome,
+)
+from ledger.validators import validate_no_payment_data, visible_text
+from payments import jobs, offline_marking
+from payments.models import ExternalRef, Job, JobKind, JobStatus
+
+ENTITY_ONE_OFF_CHARGE = "one_off_charge"
+#: The ``external_refs.external_kind`` of an ``autopay_due`` charge's provider schedule.
+KIND_SCHEDULE = "schedule"
+#: Largest amount of a one-off charge created from the form (PLAN-010d D2).
+AMOUNT_MAX = Decimal("999999.99")
+
+#: The categories the one-off form offers; ``setup`` comes from the lease checklist.
+FORM_CATEGORIES: tuple[str, ...] = (
+    OneOffCategory.ARREARS,
+    OneOffCategory.ADJUSTMENT,
+    OneOffCategory.DAMAGE,
+    OneOffCategory.OTHER,
+)
+#: The collections of the one-off form; ``none`` is the setup flow.
+FORM_COLLECTIONS: tuple[str, ...] = (
+    CollectionMethod.AUTOPAY_DUE,
+    CollectionMethod.EMAIL,
+    CollectionMethod.MANUAL,
+    CollectionMethod.CHARGE_NOW,
+)
+#: Collections that get a local invoice at creation (D2).
+INVOICED_COLLECTIONS: tuple[str, ...] = (
+    CollectionMethod.EMAIL,
+    CollectionMethod.MANUAL,
+    CollectionMethod.CHARGE_NOW,
+)
+#: Collections that debit the operator's linked bank method (D2, D4).
+DEBIT_COLLECTIONS: tuple[str, ...] = (CollectionMethod.AUTOPAY_DUE, CollectionMethod.CHARGE_NOW)
+
+# --- Fixed sentences ------------------------------------------------------------------
+
+PRICE_NOT_POSITIVE = "The price must be more than zero."
+AMOUNT_NOT_POSITIVE = "The amount must be more than zero."
+COST_NEGATIVE = "The cost cannot be negative."
+NOT_CENTS = "Amounts must have at most two decimals."
+TOO_LARGE = "The amount is too large."
+AMOUNT_TOO_LARGE = "The amount can be at most $999,999.99."
+FEE_TYPE_INACTIVE = "This fee type is not active. Nothing was saved."
+ALREADY_ON_LEASE = "This lease already has a charge for {name}. Nothing was saved."
+TEXT_PAYMENT_DATA = PAY_NOTE_PAYMENT_DATA
+ADDED = "{name} charge added."
+SAVED = "Charge saved."
+UNCHANGED = "Nothing was changed."
+EDIT_WAIVED = "A waived charge cannot be edited. Nothing was saved."
+EDIT_VOIDED = "A voided charge cannot be edited. Nothing was saved."
+EDIT_ONE_OFF = (
+    "Only a setup charge is edited here: its invoice is at the payment provider. Cancel the "
+    "charge and create a new one. Nothing was saved."
+)
+PRICE_LOCKED = "The price cannot change once a payment is recorded. Nothing was saved."
+WAIVE_NOTE_REQUIRED = "A note is required: say why the charge is waived."
+WAIVE_SETTLED = "A charge with a settled payment cannot be waived. Nothing was changed."
+WAIVE_ALREADY = "This charge is already waived. Nothing was changed."
+WAIVE_VOIDED = "This charge is voided. Nothing was changed."
+WAIVED = "Charge waived."
+RETURNED = "An ACH payment on this charge was returned."
+DISPUTED = "A payment on this charge is disputed."
+TOTAL_MISMATCH = (
+    "The invoice total at the payment provider differs from the price. The price was not changed."
+)
+SEVERAL_PROVIDER_INVOICES = (
+    "Several invoices at the payment provider could be this charge's. Nothing was created; "
+    "review them on the payment provider's dashboard."
+)
+OTHER_OPERATOR_REFERENCE = (
+    "An invoice at the payment provider names this charge's invoice number but another "
+    "operator's customer. It was not linked."
+)
+SECOND_PROVIDER_INVOICE = (
+    "More than one invoice at the payment provider names this charge. Only the first is "
+    "linked; review the others at the payment provider."
+)
+
+# One-off creation (PLAN-010d D2).
+CHOOSE_CATEGORY = "Choose a category."
+CHOOSE_COLLECTION = "Choose how the charge is collected."
+DESCRIPTION_REQUIRED = "A description is required: it is the invoice's line."
+DESCRIPTION_TOO_LONG = "The description can be at most 120 characters."
+NOTE_REQUIRED = "An internal note is required: say why the charge is made."
+DUE_REQUIRED = "Enter a due date."
+DUE_IN_PAST = "Autopay on the due date needs a due date that is today or later."
+LEASE_ENDED = "This lease has ended: autopay on the due date is not possible. Choose another way."
+LEASE_OTHER_OPERATOR = "Choose one of this operator's leases. Nothing was saved."
+NO_OPERATOR = "Choose an operator. Nothing was saved."
+LEASE_NO_OPERATOR = "This lease has no operator: a one-off charge needs one."
+OPERATOR_ARCHIVED = "The operator is archived. Nothing was saved."
+NO_PROVIDER_CUSTOMER = (
+    "The operator has no payment provider customer: only a manual payment is possible."
+)
+NO_BANK_METHOD = "The operator has no linked bank method: this collection is not possible."
+CHARGE_NOW_ADMIN = "Only an admin can choose Charge now."
+CREATED = "Charge created as {number}."
+CREATED_NO_INVOICE = "Charge created. The payment provider schedules the invoice for {date}."
+ALREADY_CREATED = "This charge was already created. Nothing was changed."
+CREATED_MANUAL_LOCAL = (
+    "Charge created as {number}. The operator has no payment provider customer, so no "
+    "invoice is made there; record the payment when it arrives."
+)
+
+# Cancel (PLAN-010d D6).
+VOID_NOTE_REQUIRED = "A note is required: say why the charge is cancelled."
+CANCEL_VOIDED = "This charge is already voided. Nothing was changed."
+CANCEL_SETUP = "A setup charge is waived, not cancelled. Nothing was changed."
+CANCEL_WAIVED = "This charge is waived. Nothing was changed."
+CANCEL_PAID = (
+    "Money was received on this charge: it follows the refund path and cannot be cancelled. "
+    "Nothing was changed."
+)
+PAY_VOIDED = "This charge is voided. Nothing was recorded."
+CANCEL_PENDING = "A payment on this charge is pending. Nothing was changed."
+CANCEL_BUSY = (
+    "A request to the payment provider is already waiting for this charge. Nothing was changed."
+)
+CANCEL_REQUESTED = (
+    "Cancel requested. The charge is voided once the payment provider confirms the delete."
+)
+VOIDED = "Charge voided."
+
+# Charge now (PLAN-010d D4).
+CHARGE_NOW_DISABLED = "Charge now is not enabled in this environment."
+CHARGE_NOW_NOT_ELIGIBLE = "This charge is not collected by Charge now. Nothing was charged."
+CHARGE_NOW_CLOSED = "This charge is waived or voided. Nothing was charged."
+CHARGE_NOW_NOTHING_DUE = "Nothing is owed on this charge. Nothing was charged."
+CHARGE_NOW_HAS_PAYMENT = "A payment on this charge is pending or settled. Nothing was charged."
+CHARGE_NOW_RETURNED = (
+    "A payment on this charge was returned: Charge now does not debit again. Nothing was charged."
+)
+CHARGE_NOW_NOT_LINKED = (
+    "The charge's invoice is not at the payment provider yet. Charge now is possible once it "
+    "is linked."
+)
+CHARGE_NOW_TOTAL_DIFFERS = (
+    "The invoice total differs from the price. Nothing was charged; review the invoice."
+)
+CHARGE_NOW_NO_METHOD = "The operator has no linked bank method. Nothing was charged."
+CHARGE_NOW_METHOD_NOT_STORED = (
+    "The stored list of the operator's payment methods does not show the linked bank method "
+    "as a usable bank account. Refresh the payment methods on the operator's page first. "
+    "Nothing was charged."
+)
+CHARGE_NOW_BUSY = (
+    "A request to the payment provider is already waiting for this charge. Nothing was charged."
+)
+CHARGE_NOW_WAIT = "The last attempt failed. Charge now is possible again in {seconds} seconds."
+CHARGE_NOW_ONE_ATTEMPT = "One attempt. If it fails you will see why and can try again later."
+CHARGE_NOW_REQUESTED = "Charge requested: one attempt is made. This page shows the outcome."
+
+CREATED_ACTION = "one_off_charge.created"
+PAYMENT_ACTION = "one_off_charge.payment_recorded"
+LARGE_DEBIT_ACTION = "one_off_charge.large_debit_confirmed"
+CANCEL_ACTION = "one_off_charge.cancel_requested"
+VOIDED_ACTION = "one_off_charge.voided"
+CHARGE_NOW_REQUESTED_ACTION = "one_off_charge.charge_now_requested"
+CHARGED_ACTION = "one_off_charge.charged"
+CHARGE_FAILED_ACTION = "one_off_charge.charge_failed"
+#: Audit actions that flag a charge for a provider-side reason (D3, D5).
+SEVERAL_ACTION = "one_off_charge.provider_invoice_ambiguous"
+OTHER_OPERATOR_ACTION = "one_off_charge.reference_other_operator"
+SECOND_INVOICE_ACTION = "one_off_charge.second_invoice"
+
+
+# --- Values and outcomes --------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ChargeInput:
+    """One one-off charge as staff entered it (a checklist row, the add form or the
+    one-off form). ``fee_type`` is set for category ``setup`` only; ``description`` is
+    required for the others. ``confirmed`` is the large-debit confirmation (D2)."""
+
+    fee_type: FeeType | None
+    price: Decimal
+    cost: Decimal | None
+    vendor: str
+    due_date: date
+    note: str = ""
+    category: str = OneOffCategory.SETUP
+    collection: str = CollectionMethod.NONE
+    description: str = ""
+    confirmed: bool = False
+    #: The form's one-time key: a resubmitted form returns the charge the first made.
+    creation_key: uuid.UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Outcome:
+    ok: bool
+    message: str
+    #: The form field a refusal belongs to (``None``: the whole form).
+    field: str | None = None
+    charge: OneOffCharge | None = None
+    job: Job | None = None
+
+
+class SetupRefused(Exception):  # noqa: N818 (reads as an outcome, like LeaseRefused)
+    """A checklist row broke a rule; the whole save is rolled back."""
+
+    def __init__(self, field: str | None, message: str, fee_type: FeeType | None = None) -> None:
+        super().__init__(message)
+        self.field = field
+        self.message = message
+        self.fee_type = fee_type
+
+
+# --- Reads ----------------------------------------------------------------------------
+
+
+def checklist_types() -> list[FeeType]:
+    """The active fee types, in catalogue order: one checklist row each (D5)."""
+    return list(FeeType.objects.filter(active=True).order_by("sort_order", "name", "id"))
+
+
+def charges_of(lease: Lease) -> list[OneOffCharge]:
+    return list(
+        OneOffCharge.objects.filter(lease=lease)
+        .select_related("fee_type", "lease", "deposit_resolution")
+        .order_by("fee_type__sort_order", "fee_type__name", "due_date", "created_at", "id")
+    )
+
+
+def operator_charges(operator: Operator) -> list[OneOffCharge]:
+    """Every one-off charge billed to the operator, newest due first."""
+    return list(
+        OneOffCharge.objects.filter(operator=operator)
+        .select_related("fee_type", "lease__store")
+        .order_by("-due_date", "-created_at", "id")
+    )
+
+
+def has_payment(charge: OneOffCharge) -> bool:
+    return Payment.objects.filter(one_off_charge=charge).exists()
+
+
+def has_settled_payment(charge: OneOffCharge) -> bool:
+    return Payment.objects.filter(
+        one_off_charge=charge,
+        kind=PaymentKind.ONE_OFF,
+        is_refund=False,
+        status=PaymentStatus.SETTLED,
+    ).exists()
+
+
+def has_pending_payment(charge: OneOffCharge) -> bool:
+    return Payment.objects.filter(one_off_charge=charge, status=PaymentStatus.PENDING).exists()
+
+
+def provider_schedule(charge: OneOffCharge) -> str:
+    """The provider schedule ID of an ``autopay_due`` charge, or ``""`` (unmasked)."""
+    return (
+        ExternalRef.objects.filter(
+            entity_type=ENTITY_ONE_OFF_CHARGE,
+            entity_id=charge.pk,
+            provider=leases.PROVIDER_KEY,
+            external_kind=KIND_SCHEDULE,
+            superseded_at__isnull=True,
+        )
+        .values_list("external_id", flat=True)
+        .first()
+        or ""
+    )
+
+
+def _flagged_by(charge: OneOffCharge, action: str) -> bool:
+    return AuditLog.objects.filter(
+        entity_type=ENTITY_ONE_OFF_CHARGE, entity_id=str(charge.pk), action=action
+    ).exists()
+
+
+def review_message(charge: OneOffCharge) -> str:
+    """Why a flagged charge needs review, or ``""`` when it is not flagged."""
+    if not charge.needs_review:
+        return ""
+    parts = []
+    if charge.invoices.exclude(total=charge.price).exists():
+        parts.append(TOTAL_MISMATCH)
+    if _flagged_by(charge, ONE_OFF.action("linked_total_differs")):
+        parts.append(rent_run.LINKED_TOTAL_DIFFERS)
+    if charge.review_message:
+        parts.append(f"{offline_marking.shown(charge.review_message)}.")
+    if charge.payments.filter(status=PaymentStatus.RETURNED).exists():
+        parts.append(RETURNED)
+    if _flagged_by(charge, ONE_OFF.action("disputed")):
+        parts.append(DISPUTED)
+    for action, text in (
+        (SEVERAL_ACTION, SEVERAL_PROVIDER_INVOICES),
+        (OTHER_OPERATOR_ACTION, OTHER_OPERATOR_REFERENCE),
+        (SECOND_INVOICE_ACTION, SECOND_PROVIDER_INVOICE),
+    ):
+        if _flagged_by(charge, action):
+            parts.append(text)
+    return " ".join(parts)
+
+
+# --- Validation -----------------------------------------------------------------------
+
+
+def _money_refusal(value: Decimal | None, *, field: str, positive: bool) -> Outcome | None:
+    if value is None:
+        return Outcome(False, PRICE_NOT_POSITIVE, field) if positive else None
+    if not isinstance(value, Decimal) or not value.is_finite():
+        return Outcome(False, PRICE_NOT_POSITIVE if positive else COST_NEGATIVE, field)
+    if positive and value <= 0:
+        return Outcome(False, PRICE_NOT_POSITIVE, field)
+    if not positive and value < 0:
+        return Outcome(False, COST_NEGATIVE, field)
+    if value != value.quantize(CENT):
+        return Outcome(False, NOT_CENTS, field)
+    if value > MONEY_MAX:
+        return Outcome(False, TOO_LARGE, field)
+    return None
+
+
+def _text_refusal(text: str, field: str) -> Outcome | None:
+    try:
+        validate_no_payment_data(text)
+    except ValidationError:
+        return Outcome(False, TEXT_PAYMENT_DATA, field)
+    return None
+
+
+def refusal(item: ChargeInput) -> Outcome | None:
+    """The first rule a setup ``item`` breaks before anything is written, or ``None``."""
+    return (
+        _money_refusal(item.price, field="price", positive=True)
+        or _money_refusal(item.cost, field="cost", positive=False)
+        or _text_refusal(item.vendor, "vendor")
+        or _text_refusal(item.note, "note")
+    )
+
+
+def _amount_refusal(value: Decimal) -> Outcome | None:
+    if not isinstance(value, Decimal) or not value.is_finite() or value <= 0:
+        return Outcome(False, AMOUNT_NOT_POSITIVE, "price")
+    if value != value.quantize(CENT):
+        return Outcome(False, NOT_CENTS, "price")
+    if value > AMOUNT_MAX:
+        return Outcome(False, AMOUNT_TOO_LARGE, "price")
+    return None
+
+
+def _lease_ended(lease: Lease, today: date) -> bool:
+    return lease.collection_status == CollectionStatus.ENDED or (
+        lease.ended_on is not None and lease.ended_on <= today
+    )
+
+
+def one_off_refusal(
+    operator: Operator | None,
+    lease: Lease | None,
+    item: ChargeInput,
+    actor: User | None,
+    *,
+    today: date | None = None,
+) -> Outcome | None:
+    """The first rule a one-off ``item`` (any category but ``setup``) breaks before
+    anything is written, or ``None`` (D2). Reads local data only."""
+    day = today or timezone.localdate()
+    if operator is None:
+        return Outcome(False, NO_OPERATOR, "operator")
+    if operator.archived_at is not None:
+        return Outcome(False, OPERATOR_ARCHIVED)
+    if lease is not None and lease.operator_id != operator.pk:
+        return Outcome(False, LEASE_OTHER_OPERATOR, "lease")
+    if item.category not in FORM_CATEGORIES:
+        return Outcome(False, CHOOSE_CATEGORY, "category")
+    if item.collection not in FORM_COLLECTIONS:
+        return Outcome(False, CHOOSE_COLLECTION, "collection")
+    description = visible_text(item.description or "")
+    if not description:
+        return Outcome(False, DESCRIPTION_REQUIRED, "description")
+    if len(description) > DESCRIPTION_MAX_LENGTH:
+        return Outcome(False, DESCRIPTION_TOO_LONG, "description")
+    note = visible_text(item.note or "")
+    if not note:
+        return Outcome(False, NOTE_REQUIRED, "note")
+    refused = (
+        _text_refusal(description, "description")
+        or _text_refusal(note, "note")
+        or _amount_refusal(item.price)
+    )
+    if refused is not None:
+        return refused
+    if item.collection == CollectionMethod.CHARGE_NOW and not (
+        actor is not None and meets(role_of(actor), Role.ADMIN)
+    ):
+        return Outcome(False, CHARGE_NOW_ADMIN, "collection")
+    if item.collection == CollectionMethod.AUTOPAY_DUE:
+        if item.due_date < day:
+            return Outcome(False, DUE_IN_PAST, "due_date")
+        if lease is not None and _lease_ended(lease, day):
+            return Outcome(False, LEASE_ENDED, "collection")
+    if item.collection != CollectionMethod.MANUAL and not leases.customer_ref(operator):
+        return Outcome(False, NO_PROVIDER_CUSTOMER, "collection")
+    if item.collection in DEBIT_COLLECTIONS:
+        if not leases.linked_payment_method(operator):
+            return Outcome(False, NO_BANK_METHOD, "collection")
+        limit = leases.provider_limit_refusal([item.price])
+        if limit:
+            return Outcome(False, limit, "price")
+        if leases.is_large_debit(item.price) and item.confirmed is not True:
+            return Outcome(False, leases.large_debit_confirmation([item.price]), "confirm")
+    return None
+
+
+# --- Creation (PLAN-010b D5, PLAN-010d D2) ------------------------------------------
+
+
+def create_lease_with_checklist(
+    fields: Mapping[str, Any],
+    *,
+    rent: Decimal,
+    creation_key: uuid.UUID,
+    items: Sequence[ChargeInput],
+    actor: User | None,
+) -> tuple[Lease, bool, list[OneOffCharge]]:
+    """Save a new lease and the ticked setup charges in one transaction (D5).
+
+    A resubmitted form (same ``creation_key``) returns the lease the first one made and
+    creates nothing. A refused row raises :class:`SetupRefused` and nothing is saved,
+    the lease included.
+    """
+    with transaction.atomic():
+        lease, created = leases.create_lease(
+            fields, rent=rent, creation_key=creation_key, actor=actor
+        )
+        if not created:
+            return lease, False, []
+        charges = create_from_checklist(lease, items, actor=actor)
+    return lease, True, charges
+
+
+def create_from_checklist(
+    lease: Lease, items: Sequence[ChargeInput], *, actor: User | None
+) -> list[OneOffCharge]:
+    """Create one setup charge per item, all or none (D5); raises :class:`SetupRefused`."""
+    made: list[OneOffCharge] = []
+    with transaction.atomic():
+        for item in items:
+            outcome = create_charge(lease.operator, lease, item, actor)
+            if not outcome.ok or outcome.charge is None:
+                raise SetupRefused(outcome.field, outcome.message, item.fee_type)
+            made.append(outcome.charge)
+    return made
+
+
+def add_charge(lease_id: uuid.UUID, item: ChargeInput, *, actor: User | None) -> Outcome:
+    """Add one setup charge to a lease (the lease page's form, billing)."""
+    name = item.fee_type.name if item.fee_type is not None else ""
+    try:
+        with transaction.atomic():
+            lease = Lease.objects.select_for_update().get(pk=lease_id)
+            outcome = create_charge(lease.operator, lease, item, actor)
+            if not outcome.ok:
+                transaction.set_rollback(True)
+            return outcome
+    except IntegrityError:
+        # A concurrent add of the same fee type committed first.
+        return Outcome(False, ALREADY_ON_LEASE.format(name=name), "fee_type")
+
+
+def create_charge(
+    operator: Operator | None,
+    lease: Lease | None,
+    item: ChargeInput,
+    actor: User | None,
+    *,
+    today: date | None = None,
+) -> Outcome:
+    """Create one one-off charge (the single creation path, PLAN-010d D1, D2).
+
+    Category ``setup`` follows PLAN-010b (``lease`` required, collection ``none``, no
+    invoice, no job); ``operator`` must then be the lease's. Every other category is
+    checked by :func:`one_off_refusal` and written with its invoice and its job in one
+    transaction.
+    """
+    if item.category == OneOffCategory.SETUP:
+        if lease is None or operator != lease.operator:
+            return Outcome(False, LEASE_OTHER_OPERATOR, "lease")
+        return _create_setup(lease, item, actor)
+    refused = one_off_refusal(operator, lease, item, actor, today=today)
+    if refused is not None or operator is None:
+        return refused or Outcome(False, NO_OPERATOR, "operator")
+    return _create_one_off(operator, lease, item, actor, today or timezone.localdate())
+
+
+def _create_setup(lease: Lease, item: ChargeInput, actor: User | None) -> Outcome:
+    refused = refusal(item)
+    if refused is not None:
+        return refused
+    if item.collection != CollectionMethod.NONE or item.fee_type is None:
+        return Outcome(False, FEE_TYPE_INACTIVE, "fee_type")
+    fee_type = FeeType.objects.filter(pk=item.fee_type.pk, active=True).first()
+    if fee_type is None:
+        return Outcome(False, FEE_TYPE_INACTIVE, "fee_type")
+    taken = OneOffCharge.objects.filter(lease=lease, fee_type=fee_type, legacy=False)
+    if taken.exists():
+        return Outcome(False, ALREADY_ON_LEASE.format(name=fee_type.name), "fee_type")
+    charge = OneOffCharge(
+        operator_id=lease.operator_id,
+        lease=lease,
+        fee_type=fee_type,
+        category=OneOffCategory.SETUP,
+        collection=CollectionMethod.NONE,
+        description=fee_type.name[:DESCRIPTION_MAX_LENGTH],
+        cost=item.cost,
+        price=item.price,
+        vendor=item.vendor.strip(),
+        due_date=item.due_date,
+        note=item.note.strip(),
+        status=OneOffChargeStatus.OWED,
+    )
+    try:
+        with transaction.atomic():
+            charge.save()
+    except ValidationError:
+        return Outcome(False, TEXT_PAYMENT_DATA, "vendor")
+    except IntegrityError:
+        return Outcome(False, ALREADY_ON_LEASE.format(name=fee_type.name), "fee_type")
+    _audit(actor, CREATED_ACTION, charge, None, charge_state(charge))
+    return Outcome(True, ADDED.format(name=fee_type.name), charge=charge)
+
+
+def _create_one_off(
+    operator: Operator, lease: Lease | None, item: ChargeInput, actor: User | None, today: date
+) -> Outcome:
+    collection = CollectionMethod(item.collection)
+    has_customer = bool(leases.customer_ref(operator))
+    with transaction.atomic():
+        locked = Operator.objects.select_for_update().get(pk=operator.pk)
+        if locked.archived_at is not None:
+            return Outcome(False, OPERATOR_ARCHIVED)
+        earlier = _charge_for_key(item.creation_key)
+        if earlier is not None:
+            return Outcome(True, ALREADY_CREATED, charge=earlier)
+        charge = OneOffCharge(
+            operator=locked,
+            lease=lease,
+            category=item.category,
+            collection=collection,
+            description=visible_text(item.description),
+            price=item.price,
+            due_date=item.due_date,
+            note=visible_text(item.note),
+            status=OneOffChargeStatus.OWED,
+        )
+        try:
+            with transaction.atomic():
+                charge.save()
+        except ValidationError:
+            return Outcome(False, TEXT_PAYMENT_DATA, "description")
+        invoice = None
+        if collection in INVOICED_COLLECTIONS:
+            invoice = Invoice.objects.create(
+                invoice_number=numbering.next_invoice_number(today.year),
+                operator=locked,
+                one_off_charge=charge,
+                issue_date=today,
+                due_date=max(item.due_date, today),
+                memo=charge.description,
+                subtotal=item.price,
+                tax=ZERO,
+                total=item.price,
+                internal_status=InvoiceStatus.DRAFT,
+                allow_card=False,
+                allow_ach=True,
+                legacy=False,
+            )
+        _audit(
+            actor,
+            CREATED_ACTION,
+            charge,
+            None,
+            {
+                **charge_state(charge),
+                "invoice_number": invoice.invoice_number if invoice is not None else None,
+                "note": charge.note,
+                "creation_key": str(item.creation_key) if item.creation_key else None,
+            },
+        )
+        if collection in DEBIT_COLLECTIONS and leases.is_large_debit(item.price):
+            _audit(
+                actor,
+                LARGE_DEBIT_ACTION,
+                charge,
+                None,
+                {
+                    "amount": str(item.price),
+                    "threshold": str(settings.LARGE_DEBIT_WARNING_AMOUNT),
+                    "confirmed_by": actor.pk if actor is not None else None,
+                },
+            )
+        job = None
+        if collection == CollectionMethod.AUTOPAY_DUE:
+            job = jobs.enqueue(JobKind.SCHEDULE_CREATE, charge, None, actor)
+            message = CREATED_NO_INVOICE.format(date=item.due_date.isoformat())
+        elif invoice is not None and (has_customer or collection != CollectionMethod.MANUAL):
+            job = jobs.enqueue(JobKind.INVOICE_CREATE, charge, None, actor)
+            message = CREATED.format(number=invoice.invoice_number)
+        else:
+            number = invoice.invoice_number if invoice is not None else ""
+            message = CREATED_MANUAL_LOCAL.format(number=number)
+    return Outcome(True, message, charge=charge, job=job)
+
+
+def _charge_for_key(creation_key: uuid.UUID | None) -> OneOffCharge | None:
+    """The charge a form with this one-time key already created, if any. Read under the
+    operator's row lock, which every one-off creation of that operator takes."""
+    if creation_key is None:
+        return None
+    row = AuditLog.objects.filter(
+        action=CREATED_ACTION,
+        entity_type=ENTITY_ONE_OFF_CHARGE,
+        after__creation_key=str(creation_key),
+    ).first()
+    return OneOffCharge.objects.filter(pk=row.entity_id).first() if row is not None else None
+
+
+# --- Edit and waive (D6) --------------------------------------------------------------
+
+
+def edit_charge(
+    charge_id: uuid.UUID,
+    *,
+    cost: Decimal | None,
+    price: Decimal,
+    vendor: str,
+    due_date: date,
+    actor: User | None,
+) -> Outcome:
+    """Change cost, price, vendor or due date; the price is locked once a payment exists."""
+    vendor = (vendor or "").strip()
+    refused = (
+        _money_refusal(price, field="price", positive=True)
+        or _money_refusal(cost, field="cost", positive=False)
+        or _text_refusal(vendor, "vendor")
+    )
+    if refused is not None:
+        return refused
+    with transaction.atomic():
+        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        if charge.status == OneOffChargeStatus.WAIVED:
+            return Outcome(False, EDIT_WAIVED)
+        if charge.status == OneOffChargeStatus.VOIDED:
+            return Outcome(False, EDIT_VOIDED)
+        if charge.category != OneOffCategory.SETUP:
+            return Outcome(False, EDIT_ONE_OFF)
+        if (charge.cost, charge.price, charge.vendor, charge.due_date) == (
+            cost,
+            price,
+            vendor,
+            due_date,
+        ):
+            return Outcome(True, UNCHANGED, charge=charge)
+        if price != charge.price and has_payment(charge):
+            return Outcome(False, PRICE_LOCKED, "price")
+        before = charge_state(charge)
+        charge.cost = cost
+        charge.price = price
+        charge.vendor = vendor
+        charge.due_date = due_date
+        # No payment exists when the price changes, so the status stays what it is.
+        charge.save(update_fields=["cost", "price", "vendor", "due_date", "updated_at"])
+        _audit(actor, "one_off_charge.edited", charge, before, charge_state(charge))
+    return Outcome(True, SAVED, charge=charge)
+
+
+def waive(
+    charge_id: uuid.UUID, *, note: str, actor: User | None, now: datetime | None = None
+) -> Outcome:
+    """Waive a one-off charge (admin): a note is mandatory; refused once a payment settled."""
+    text = visible_text(note or "")
+    if not text:
+        return Outcome(False, WAIVE_NOTE_REQUIRED, "note")
+    refused = _text_refusal(text, "note")
+    if refused is not None:
+        return refused
+    with transaction.atomic():
+        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        if charge.status == OneOffChargeStatus.WAIVED:
+            return Outcome(False, WAIVE_ALREADY)
+        if charge.status == OneOffChargeStatus.VOIDED:
+            return Outcome(False, WAIVE_VOIDED)
+        if has_settled_payment(charge):
+            return Outcome(False, WAIVE_SETTLED)
+        before = charge_state(charge)
+        charge.status = OneOffChargeStatus.WAIVED
+        charge.waived_at = now or timezone.now()
+        charge.waived_by = actor
+        charge.waive_note = text
+        charge.save(update_fields=["status", "waived_at", "waived_by", "waive_note", "updated_at"])
+        _audit(
+            actor, "one_off_charge.waived", charge, before, {**charge_state(charge), "note": text}
+        )
+    return Outcome(True, WAIVED, charge=charge)
+
+
+# --- Cancel (PLAN-010d D6) ------------------------------------------------------------
+
+
+def cancel_refusal(charge: OneOffCharge) -> str:
+    """Why the charge cannot be cancelled now, or ``""``. Local data only."""
+    if charge.status == OneOffChargeStatus.VOIDED:
+        return CANCEL_VOIDED
+    if charge.collection == CollectionMethod.NONE:
+        return CANCEL_SETUP
+    if charge.status == OneOffChargeStatus.WAIVED:
+        return CANCEL_WAIVED
+    if charge.amount_paid > 0 or has_settled_payment(charge):
+        return CANCEL_PAID
+    if has_pending_payment(charge):
+        return CANCEL_PENDING
+    return ""
+
+
+def cancel_job_kind(charge: OneOffCharge) -> str:
+    """``schedule_delete`` for an ``autopay_due`` charge whose schedule has not
+    generated its invoice yet; ``invoice_delete`` otherwise."""
+    if (
+        charge.collection == CollectionMethod.AUTOPAY_DUE
+        and not charge.invoices.exists()
+        and provider_schedule(charge)
+    ):
+        return JobKind.SCHEDULE_DELETE
+    return JobKind.INVOICE_DELETE
+
+
+def cancel_charge(charge_id: uuid.UUID, *, note: str, actor: User | None) -> Outcome:
+    """Request the cancel of an unpaid one-off charge (billing; D6).
+
+    The note is required and stored with the request; the delete is queued for the
+    worker, which voids the charge only after the provider confirmed. Refused, with
+    nothing queued, when anything is paid, a payment is pending, the charge is already
+    voided or waived, it is a setup charge, or a provider request is already waiting.
+    """
+    text = visible_text(note or "")
+    if not text:
+        return Outcome(False, VOID_NOTE_REQUIRED, "note")
+    refused = _text_refusal(text, "note")
+    if refused is not None:
+        return refused
+    with transaction.atomic():
+        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        reason = cancel_refusal(charge)
+        if reason:
+            return Outcome(False, reason)
+        if jobs.is_active(jobs.latest_for(charge)):
+            return Outcome(False, CANCEL_BUSY)
+        kind = cancel_job_kind(charge)
+        _audit(
+            actor,
+            CANCEL_ACTION,
+            charge,
+            charge_state(charge),
+            {**charge_state(charge), "note": text, "job_kind": kind},
+        )
+        job = jobs.enqueue(kind, charge, None, actor)
+    return Outcome(True, CANCEL_REQUESTED, charge=charge, job=job)
+
+
+# --- Charge now (PLAN-010d D4) --------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ChargeNowDetails:
+    """What the Charge now confirmation page shows, from local data only.
+
+    ``refusal`` is the sentence of the first rule the charge breaks now (``""``: it may
+    be charged); ``large_debit`` the confirmation sentence when the amount is above the
+    warning threshold; ``wait_seconds`` the seconds left before a failed attempt may be
+    repeated (0: now)."""
+
+    refusal: str
+    operator: Operator | None
+    store_label: str
+    amount: Decimal
+    invoice_number: str
+    last_four: str
+    nickname: str
+    large_debit: str
+    wait_seconds: int
+
+
+def charge_now_enabled() -> bool:
+    """The pay-an-invoice flag (:func:`payments.pay_invoice_enabled`): off, nothing is
+    queued and the provider is never reached (D4)."""
+    return payments.pay_invoice_enabled()
+
+
+def _charge_operator(charge: OneOffCharge) -> Operator | None:
+    if charge.operator is not None:
+        return charge.operator
+    return charge.lease.operator if charge.lease is not None else None
+
+
+def _last_charge_now_event(charge: OneOffCharge) -> AuditLog | None:
+    return (
+        AuditLog.objects.filter(
+            entity_type=ENTITY_ONE_OFF_CHARGE,
+            entity_id=str(charge.pk),
+            action__in=(CHARGE_NOW_REQUESTED_ACTION, CHARGED_ACTION, CHARGE_FAILED_ACTION),
+        )
+        .order_by("-id")
+        .first()
+    )
+
+
+def charge_now_wait(charge: OneOffCharge, now: datetime | None = None) -> int:
+    """Seconds until Charge now may be repeated after a failed attempt (0: now). The
+    lock is the manual retry's (``RETRY_LOCK_SECONDS``, one minute)."""
+    last = _last_charge_now_event(charge)
+    if last is None or last.action != CHARGE_FAILED_ACTION:
+        return 0
+    return rent_run.retry_wait_after(last, now)
+
+
+def charge_now_refusal(charge: OneOffCharge) -> str:
+    """The first rule that stops Charge now on this charge, or ``""``. Local data only;
+    the role, the large-debit box, a waiting job and the one-minute lock are checked by
+    :func:`charge_now_confirm`, and the invoice's state at the provider by the worker."""
+    if not charge_now_enabled():
+        return CHARGE_NOW_DISABLED
+    if charge.collection != CollectionMethod.CHARGE_NOW or charge.category not in FORM_CATEGORIES:
+        return CHARGE_NOW_NOT_ELIGIBLE
+    if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
+        return CHARGE_NOW_CLOSED
+    paid = charge.payments.filter(is_refund=False)
+    if paid.filter(status__in=(PaymentStatus.PENDING, PaymentStatus.SETTLED)).exists():
+        return CHARGE_NOW_HAS_PAYMENT
+    if paid.filter(status=PaymentStatus.RETURNED).exists():
+        return CHARGE_NOW_RETURNED
+    if charge.price - charge.amount_paid <= 0:
+        return CHARGE_NOW_NOTHING_DUE
+    linked = rent_run.provider_invoice(charge)
+    if linked is None:
+        return CHARGE_NOW_NOT_LINKED
+    if linked[0].total != charge.price:
+        return CHARGE_NOW_TOTAL_DIFFERS
+    operator = _charge_operator(charge)
+    if not leases.linked_payment_method(operator):
+        return CHARGE_NOW_NO_METHOD
+    method = leases.linked_method_record(operator)
+    if method is None or not method.is_usable_bank:
+        return CHARGE_NOW_METHOD_NOT_STORED
+    return leases.provider_limit_refusal([charge.price])
+
+
+def charge_now_request(charge: OneOffCharge, actor: User | None) -> ChargeNowDetails:
+    """The confirmation page of Charge now (admin; D4). Never calls the provider."""
+    operator = _charge_operator(charge)
+    refusal = (
+        CHARGE_NOW_ADMIN
+        if actor is None or not meets(role_of(actor), Role.ADMIN)
+        else charge_now_refusal(charge)
+    )
+    linked = rent_run.provider_invoice(charge)
+    method = leases.linked_method_record(operator)
+    return ChargeNowDetails(
+        refusal=refusal,
+        operator=operator,
+        store_label=charge.lease.store.external_label if charge.lease is not None else "",
+        amount=charge.price,
+        invoice_number=linked[0].invoice_number if linked is not None else "",
+        last_four=method.last_four if method is not None else "",
+        nickname=method.nickname if method is not None else "",
+        large_debit=leases.large_debit_confirmation([charge.price]),
+        wait_seconds=charge_now_wait(charge),
+    )
+
+
+def charge_now_confirm(charge_id: uuid.UUID, *, actor: User | None, confirmed: bool) -> Outcome:
+    """Queue the single Charge now attempt (admin; D4): the charge's ``charge_now_key``
+    is set if it has none (it never changes after), the request is audited and the
+    ``invoice_pay`` job queued, under the charge's row lock, so two confirms queue one
+    job."""
+    if actor is None or not meets(role_of(actor), Role.ADMIN):
+        return Outcome(False, CHARGE_NOW_ADMIN)
+    with transaction.atomic():
+        charge = (
+            OneOffCharge.objects.select_for_update(of=("self",))
+            .select_related("operator", "lease")
+            .get(pk=charge_id)
+        )
+        refusal = charge_now_refusal(charge)
+        if refusal:
+            return Outcome(False, refusal)
+        if jobs.is_active(jobs.latest_for(charge)):
+            return Outcome(False, CHARGE_NOW_BUSY)
+        wait = charge_now_wait(charge)
+        if wait:
+            return Outcome(False, CHARGE_NOW_WAIT.format(seconds=wait))
+        large = leases.is_large_debit(charge.price)
+        if large and confirmed is not True:
+            return Outcome(False, leases.large_debit_confirmation([charge.price]), "confirm")
+        if charge.charge_now_key is None:
+            charge.charge_now_key = uuid.uuid4()
+            charge.save(update_fields=["charge_now_key", "updated_at"])
+        linked = rent_run.provider_invoice(charge)
+        _audit(
+            actor,
+            CHARGE_NOW_REQUESTED_ACTION,
+            charge,
+            None,
+            {
+                "amount": str(charge.price),
+                "invoice_number": linked[0].invoice_number if linked is not None else None,
+                "large_debit_confirmed": large,
+            },
+        )
+        job = jobs.enqueue(JobKind.INVOICE_PAY, charge, {"confirmed": confirmed is True}, actor)
+    return Outcome(True, CHARGE_NOW_REQUESTED, charge=charge, job=job)
+
+
+def record_charge_now(
+    charge_id: uuid.UUID, actor: User | None, action: str, context: Mapping[str, Any]
+) -> None:
+    """Audit the outcome of the worker's attempt (``charged`` or ``charge_failed``)."""
+    charge = OneOffCharge.objects.get(pk=charge_id)
+    _audit(actor, action, charge, None, dict(context))
+
+
+#: The provider requests of a one-off charge that the page's single retry repeats (D3).
+PROVIDER_JOB_KINDS: frozenset[str] = frozenset(
+    {
+        JobKind.INVOICE_CREATE,
+        JobKind.INVOICE_SEND,
+        JobKind.INVOICE_DELETE,
+        JobKind.SCHEDULE_CREATE,
+        JobKind.SCHEDULE_DELETE,
+    }
+)
+
+
+def retry_kind(charge: OneOffCharge) -> str | None:
+    """The job kind the manual retry queues, or ``None`` when there is nothing to retry:
+    the charge's latest job is a failed provider request. A failed create whose invoice
+    is at the provider but not sent retries the e-mail alone; a failed cancel retries
+    the cancel only while the charge may still be cancelled."""
+    job = jobs.latest_for(charge)
+    if (
+        job is None
+        or job.kind not in PROVIDER_JOB_KINDS
+        or job.status not in (JobStatus.FAILED, JobStatus.DEAD)
+        or charge.status == OneOffChargeStatus.VOIDED
+    ):
+        return None
+    if job.kind in (JobKind.INVOICE_DELETE, JobKind.SCHEDULE_DELETE):
+        return None if cancel_refusal(charge) else cancel_job_kind(charge)
+    if job.kind == JobKind.INVOICE_CREATE and charge.collection == CollectionMethod.EMAIL:
+        linked = rent_run.provider_invoice(charge)
+        if linked is not None and linked[0].internal_status != InvoiceStatus.SENT:
+            return JobKind.INVOICE_SEND
+    return str(job.kind)
+
+
+def cancel_note(charge: OneOffCharge) -> str:
+    """The note of the latest cancel request of the charge, or ``""``."""
+    row = (
+        AuditLog.objects.filter(
+            entity_type=ENTITY_ONE_OFF_CHARGE, entity_id=str(charge.pk), action=CANCEL_ACTION
+        )
+        .order_by("-id")
+        .first()
+    )
+    after = row.after if row is not None else None
+    return str(after.get("note", "")) if isinstance(after, dict) else ""
+
+
+def mark_voided(
+    charge_id: uuid.UUID,
+    *,
+    actor: User | None,
+    context: Mapping[str, Any],
+    now: datetime | None = None,
+) -> Outcome:
+    """Void the charge and its invoice once the provider confirmed the delete (D6; the
+    worker only). The note is the cancel request's. Refused when a payment arrived."""
+    with transaction.atomic():
+        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        if charge.status == OneOffChargeStatus.VOIDED:
+            return Outcome(True, VOIDED, charge=charge)
+        reason = cancel_refusal(charge)
+        if reason:
+            return Outcome(False, reason)
+        note = cancel_note(charge) or VOID_NOTE_REQUIRED
+        before = charge_state(charge)
+        charge.status = OneOffChargeStatus.VOIDED
+        charge.voided_at = now or timezone.now()
+        charge.voided_by = actor
+        charge.void_note = note
+        charge.save(update_fields=["status", "voided_at", "voided_by", "void_note", "updated_at"])
+        charge.invoices.exclude(internal_status=InvoiceStatus.VOID).update(
+            internal_status=InvoiceStatus.VOID, updated_at=timezone.now()
+        )
+        _audit(
+            actor,
+            VOIDED_ACTION,
+            charge,
+            before,
+            {**charge_state(charge), "note": note, **context},
+        )
+    return Outcome(True, VOIDED, charge=charge)
+
+
+def flag(charge_id: uuid.UUID, action: str, context: Mapping[str, Any]) -> None:
+    """Flag the charge for review for a provider-side reason (D3, D5); audited once."""
+    with transaction.atomic():
+        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        before = charge_state(charge)
+        if not charge.needs_review:
+            charge.needs_review = True
+            charge.save(update_fields=["needs_review", "updated_at"])
+        _audit(None, action, charge, before, {**charge_state(charge), **context})
+
+
+# --- Payments (D6) --------------------------------------------------------------------
+
+
+def record_payment(
+    charge_id: uuid.UUID,
+    *,
+    method: str,
+    amount: Decimal,
+    paid_on: date,
+    note: str,
+    actor: User | None,
+    creation_key: uuid.UUID | None = None,
+    today: date | None = None,
+    reference: str = "",
+) -> PaymentOutcome:
+    """Record a Zelle, wire or other payment against a one-off charge (kind ``one_off``).
+
+    Never calls the provider: when the charge has a provider invoice and the payment
+    covers the whole price at its total, the outcome has ``mark_due=True`` and the
+    caller queues :func:`mark_provider_invoice` for the worker. ``creation_key`` is kept
+    in the audit row and looked up under the charge's row lock.
+    """
+    text = visible_text(note or "")
+    reference = (reference or "").strip()
+    refused = rent_run.payment_refusal(method, amount, paid_on, text, today)
+    if refused is not None:
+        return refused
+    with transaction.atomic():
+        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        if creation_key is not None and _payment_for_key(charge, creation_key):
+            return PaymentOutcome(True, PAY_ALREADY, replayed=True)
+        if charge.status == OneOffChargeStatus.WAIVED:
+            return PaymentOutcome(False, PAY_WAIVED)
+        if charge.status == OneOffChargeStatus.VOIDED:
+            return PaymentOutcome(False, PAY_VOIDED)
+        balance = charge.price - settled(charge)
+        if balance <= 0:
+            return PaymentOutcome(False, PAY_NOTHING_DUE)
+        if amount > balance:
+            return PaymentOutcome(False, PAY_OVER_BALANCE, "amount")
+        whole = balance == charge.price and amount == balance
+        before = charge_state(charge)
+        payment = Payment(
+            one_off_charge=charge,
+            kind=PaymentKind.ONE_OFF,
+            method=method,
+            amount=amount,
+            status=PaymentStatus.SETTLED,
+            initiated_on=paid_on,
+            settled_on=paid_on,
+            reference=reference,
+            note=text,
+            recorded_by=actor,
+        )
+        try:
+            payment.save()
+        except ValidationError:
+            # The card-number guard: the transaction is rolled back with nothing saved.
+            transaction.set_rollback(True)
+            return PaymentOutcome(False, PAY_NOTE_PAYMENT_DATA, "note")
+        recompute(charge)
+        _audit(
+            actor,
+            PAYMENT_ACTION,
+            charge,
+            before,
+            {
+                **charge_state(charge),
+                "payment": str(payment.pk),
+                "method": method,
+                "amount": str(amount),
+                "paid_on": paid_on.isoformat(),
+                "creation_key": str(creation_key) if creation_key is not None else None,
+            },
+        )
+        linked = rent_run.provider_invoice(charge)
+        if linked is None:
+            return PaymentOutcome(
+                True, PAY_RECORDED, payment=payment, provider=MarkResult(MarkAction.NO_INVOICE)
+            )
+        if not (whole and linked[0].total == amount):
+            reason = offline_marking.PARTIAL_AMOUNT if not whole else offline_marking.TOTAL_DIFFERS
+            result = rent_run.not_updated(ONE_OFF, charge, payment, linked, reason, actor)
+            return PaymentOutcome(True, PAY_RECORDED, payment=payment, provider=result)
+    return PaymentOutcome(True, PAY_RECORDED, payment=payment, mark_due=True)
+
+
+def mark_provider_invoice(
+    charge_id: uuid.UUID, payment_id: uuid.UUID, *, actor: User | None
+) -> MarkResult:
+    """Mark the one-off charge's provider invoice paid for this manual payment (the worker's
+    ``one_off_payment_mark`` job)."""
+    return rent_run.mark_charge_invoice(ONE_OFF, charge_id, payment_id, actor=actor)
+
+
+def retry_provider_mark(charge_id: uuid.UUID, *, actor: User | None) -> MarkResult:
+    """Retry the last failed marking of the one-off charge's provider invoice (the worker's
+    ``one_off_payment_retry_mark`` job), refused for ``RETRY_LOCK_SECONDS`` after it."""
+    return rent_run.retry_charge_mark(ONE_OFF, charge_id, actor=actor)
+
+
+def retry_wait(charge: OneOffCharge, now: datetime | None = None) -> int | None:
+    """``None`` when the charge has no failed marking to retry; otherwise the whole
+    seconds until the retry is allowed (0: now)."""
+    return rent_run.charge_retry_wait(ONE_OFF, charge, now)
+
+
+def link_invoice(
+    charge_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    *,
+    confirm: bool,
+    note: str,
+    actor: User | None,
+) -> LinkOutcome:
+    """Link an unlinked invoice of the lease's operator to the one-off charge (the rent
+    rules and sentences)."""
+    return rent_run.link_charge_invoice(
+        ONE_OFF, charge_id, invoice_id, confirm=confirm, note=note, actor=actor
+    )
+
+
+def _payment_for_key(charge: OneOffCharge, creation_key: uuid.UUID) -> bool:
+    return AuditLog.objects.filter(
+        action=PAYMENT_ACTION,
+        entity_type=ENTITY_ONE_OFF_CHARGE,
+        entity_id=str(charge.pk),
+        after__creation_key=str(creation_key),
+    ).exists()
+
+
+# --- Recomputation --------------------------------------------------------------------
+
+
+def settled(charge: OneOffCharge) -> Decimal:
+    """Settled ``one_off`` payments minus their settled refunds, to the cent. A deposit
+    refund (``refund_deposit``) is not counted."""
+    rows = Payment.objects.filter(
+        one_off_charge=charge, kind=PaymentKind.ONE_OFF, status=PaymentStatus.SETTLED
+    )
+    paid = rows.filter(is_refund=False).aggregate(total=Sum("amount"))["total"] or ZERO
+    refunded = rows.filter(is_refund=True).aggregate(total=Sum("amount"))["total"] or ZERO
+    return (Decimal(paid) - Decimal(refunded)).quantize(CENT)
+
+
+def recompute(charge: OneOffCharge) -> None:
+    """Recompute the paid amount and the status from the payments (D3).
+
+    Paid in full: ``paid``; partly: ``partial``; nothing: ``owed``. A waived charge is
+    left as it is. The caller holds the row lock and writes the audit row.
+    """
+    if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
+        return
+    paid = settled(charge)
+    if paid >= charge.price and paid > 0:
+        status = OneOffChargeStatus.PAID
+    elif paid > 0:
+        status = OneOffChargeStatus.PARTIAL
+    else:
+        status = OneOffChargeStatus.OWED
+    if (charge.amount_paid, charge.status) != (paid, status):
+        charge.amount_paid = paid
+        charge.status = status
+        charge.save(update_fields=["amount_paid", "status", "updated_at"])
+
+
+# --- Helpers --------------------------------------------------------------------------
+
+
+def charge_state(charge: OneOffCharge) -> dict[str, Any]:
+    """The audited fields of a one-off charge."""
+    return {
+        "operator": str(charge.operator_id) if charge.operator_id else None,
+        "lease": str(charge.lease_id) if charge.lease_id else None,
+        "category": charge.category,
+        "collection": charge.collection,
+        "description": charge.description,
+        "fee_type": charge.fee_type.code if charge.fee_type is not None else None,
+        "cost": str(charge.cost) if charge.cost is not None else None,
+        "price": str(charge.price),
+        "vendor": charge.vendor,
+        "due_date": charge.due_date.isoformat(),
+        "amount_paid": str(charge.amount_paid),
+        "status": charge.status,
+        "needs_review": charge.needs_review,
+    }
+
+
+def _audit(
+    actor: User | None,
+    action: str,
+    charge: OneOffCharge,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+) -> None:
+    AuditLog.objects.create(
+        actor=actor,
+        action=action,
+        entity_type=ENTITY_ONE_OFF_CHARGE,
+        entity_id=str(charge.pk),
+        before=before,
+        after=after,
+    )
+
+
+#: One-off charges, for the shared payment, marking and link rules of the rent run.
+ONE_OFF = rent_run.ChargeKind(OneOffCharge, ENTITY_ONE_OFF_CHARGE, "price", charge_state)

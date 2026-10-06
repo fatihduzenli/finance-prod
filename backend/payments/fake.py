@@ -43,6 +43,10 @@ from payments.provider import (
 )
 
 NOT_FOUND = 404
+#: The status the services read as deleted (``payments.invoice_sync.PROVIDER_DELETED``).
+DELETED = "DELETED"
+#: The status the services read as sent (``payments.invoice_sync.PROVIDER_SENT``).
+SENT = "SENT"
 
 
 class FakeProvider(PaymentProvider):
@@ -61,6 +65,8 @@ class FakeProvider(PaymentProvider):
         self.ach_rejections: list[AchRejection] = []
         self.webhooks: dict[str, WebhookRecord] = {}
         self._failures: dict[str, ProviderError] = {}
+        #: Transactions made by ``pay_invoice``, by idempotency identifier.
+        self._paid_by_key: dict[str, str] = {}
         self._counter = 0
 
     # --- Test controls -------------------------------------------------------------
@@ -153,12 +159,22 @@ class FakeProvider(PaymentProvider):
 
     def create_invoice(self, invoice: InvoiceInput) -> InvoiceRecord:
         now = self._call("create_invoice", invoice)
+        dates = {
+            key: value.isoformat()
+            for key, value in (
+                ("invoice_date_at", invoice.invoice_date),
+                ("due_at", invoice.due_on),
+            )
+            if value is not None
+        }
         record = InvoiceRecord(
             external_id=self._next_id("invoice"),
             raw_status="FAKE-OPEN",
             fetched_at=now,
             customer_external_id=invoice.customer_external_id,
             total=invoice.amounts.total,
+            raw_summary=dates,
+            reference=invoice.reference,
         )
         self.invoices[record.external_id] = record
         return record
@@ -176,23 +192,35 @@ class FakeProvider(PaymentProvider):
         return self._get(self.invoices, external_id)
 
     def list_invoices(self, query: InvoiceQuery) -> list[InvoiceRecord]:
-        """Every invoice, or those whose summary names the queried schedule."""
+        """Every invoice, or those of the customers with the queried e-mail, or those
+        that name the queried schedule."""
         self._call("list_invoices", query)
+        customers = {
+            record.external_id
+            for record in self.customers.values()
+            if record.operator_email == query.operator_email
+        }
         return [
             record
             for record in self.invoices.values()
-            if not query.schedule_external_id
-            or record.raw_summary.get("schedule_id") == query.schedule_external_id
+            if (
+                not query.schedule_external_id
+                or query.schedule_external_id
+                in (record.schedule_id, record.raw_summary.get("schedule_id"))
+            )
+            and (not query.operator_email or record.customer_external_id in customers)
         ]
 
     def delete_invoice(self, external_id: str) -> None:
-        self._call("delete_invoice", external_id)
-        self._get(self.invoices, external_id)
-        del self.invoices[external_id]
+        """The invoice stays readable with the deleted status, as the provider keeps it."""
+        now = self._call("delete_invoice", external_id)
+        record = self._get(self.invoices, external_id)
+        self.invoices[external_id] = replace(record, raw_status=DELETED, fetched_at=now)
 
     def send_invoice_email(self, external_id: str, cc: list[str] | None = None) -> None:
-        self._call("send_invoice_email", external_id, tuple(cc or ()))
-        self._get(self.invoices, external_id)
+        now = self._call("send_invoice_email", external_id, tuple(cc or ()))
+        record = self._get(self.invoices, external_id)
+        self.invoices[external_id] = replace(record, raw_status=SENT, sent_at=now, fetched_at=now)
 
     def mark_invoice_paid_cash_or_check(
         self, external_id: str, payment: OfflinePayment
@@ -211,13 +239,26 @@ class FakeProvider(PaymentProvider):
             raise FeatureDisabled("Paying an invoice from a stored method is disabled")
         now = self._call("pay_invoice", external_id, payment)
         invoice = self._get(self.invoices, external_id)
+        # A repeat with the same idempotency identifier answers the first transaction, as
+        # the provider deduplicates it.
+        earlier = self._paid_by_key.get(payment.idempotency_id)
+        if earlier is not None:
+            return self.transactions[earlier]
+        method = self.payment_methods.get(payment.payment_method_external_id)
         record = TransactionRecord(
             external_id=self._next_id("transaction"),
             raw_status="FAKE-PENDING",
             fetched_at=now,
             total=invoice.total,
+            method=method[1].method if method is not None else "",
+            kind="charge",
+            invoice_external_id=external_id,
+            customer_external_id=invoice.customer_external_id,
+            success=True,
+            created_at=now,
         )
         self.transactions[record.external_id] = record
+        self._paid_by_key[payment.idempotency_id] = record.external_id
         return record
 
     # --- Transactions --------------------------------------------------------------

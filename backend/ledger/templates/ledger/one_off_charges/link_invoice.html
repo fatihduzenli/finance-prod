@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% block title %}Link an invoice{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:setup_charges:detail' pk=charge.pk %}">&larr; {{ charge.fee_type.name }}, {{ charge.lease.store.external_label }}</a></p>
+  <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
   <h1>Link an invoice</h1>
   <p>Price: <strong id="price">${{ charge.price }}</strong>. Balance: <strong id="balance">${{ charge.balance }}</strong>.</p>
   <p class="muted">The invoices of this lease's operator that are not linked to any charge, such as a one-off invoice created on the payment provider's dashboard. A charge has at most one invoice, and a link cannot be undone here. When the invoice total differs from the balance, tick the confirmation and say why in the note; the charge is then flagged for review.</p>

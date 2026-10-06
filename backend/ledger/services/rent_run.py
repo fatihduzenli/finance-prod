@@ -49,9 +49,9 @@ Rules kept here:
   includes them.
 
 The manual payment checks, the provider marking and the invoice link are shared with
-setup charges (PLAN-010b D6) through :class:`ChargeKind`: :data:`RENT` here, ``SETUP``
-in :mod:`ledger.services.setup_charges`. Audit actions are ``<entity>.<reason>``, so a
-rent charge's are unchanged.
+one-off charges (PLAN-010b D6, PLAN-010d D1) through :class:`ChargeKind`: :data:`RENT`
+here, ``ONE_OFF`` in :mod:`ledger.services.one_off_charges`. Audit actions are
+``<entity>.<reason>``, so a rent charge's are unchanged.
 
 Every change writes ``audit_log``; provider identifiers in it are masked. Money is
 ``Decimal`` throughout.
@@ -83,6 +83,7 @@ from ledger.models import (
     CollectionStatus,
     Invoice,
     Lease,
+    OneOffCharge,
     Payment,
     PaymentChannel,
     PaymentKind,
@@ -92,7 +93,6 @@ from ledger.models import (
     RentChargeStatus,
     ScheduleKind,
     ScheduleState,
-    SetupCharge,
 )
 from ledger.services import numbering
 from ledger.services.leases import (
@@ -219,16 +219,17 @@ LINK_DONE_DIFFERS = (
 # --- Kinds of charge ------------------------------------------------------------------
 
 #: A charge the manual payment, marking and link rules below apply to.
-ChargeRow = RentCharge | SetupCharge
+ChargeRow = RentCharge | OneOffCharge
 
 
 @dataclass(frozen=True, slots=True)
 class ChargeKind:
     """What the shared rules need to know of one kind of charge: rent charges here
-    (:data:`RENT`), setup charges in :mod:`ledger.services.setup_charges` (PLAN-010b D6).
+    (:data:`RENT`), one-off charges in :mod:`ledger.services.one_off_charges` (PLAN-010b
+    D6, PLAN-010d D1).
     """
 
-    model: type[RentCharge] | type[SetupCharge]
+    model: type[RentCharge] | type[OneOffCharge]
     #: The audit entity type, which is also the charge's column on invoices and payments.
     entity: str
     #: The charge's amount column.
@@ -711,7 +712,7 @@ def _unlinked(queryset: QuerySet[Invoice]) -> QuerySet[Invoice]:
         rent_charge__isnull=True,
         insurance_charge__isnull=True,
         charge_adjustment__isnull=True,
-        setup_charge__isnull=True,
+        one_off_charge__isnull=True,
     )
 
 
@@ -723,7 +724,7 @@ def is_linked(invoice: Invoice) -> bool:
             invoice.rent_charge_id,
             invoice.insurance_charge_id,
             invoice.charge_adjustment_id,
-            invoice.setup_charge_id,
+            invoice.one_off_charge_id,
         )
     )
 
@@ -744,7 +745,14 @@ def _provider_ref(invoice_id: uuid.UUID) -> str:
 
 
 def _operator_of(charge: ChargeRow) -> uuid.UUID | None:
-    return Lease.objects.only("operator_id").get(pk=charge.lease_id).operator_id
+    """The operator billed: a one-off charge's own (or, without one, its lease's), a rent
+    charge's lease's."""
+    lease_id = charge.lease_id
+    if isinstance(charge, OneOffCharge) and charge.operator_id is not None:
+        return charge.operator_id
+    if lease_id is None:
+        return None
+    return Lease.objects.only("operator_id").get(pk=lease_id).operator_id
 
 
 def unlinked_invoices(charge: ChargeRow) -> list[UnlinkedInvoice]:
@@ -1079,10 +1087,11 @@ def charge_retry_wait(
     last = _last_mark_event(charge, kind)
     if last is None or last.action != kind.action("provider_mark_failed"):
         return None
-    return _retry_wait(last, now)
+    return retry_wait_after(last, now)
 
 
-def _retry_wait(event: AuditLog, now: datetime | None = None) -> int:
+def retry_wait_after(event: AuditLog, now: datetime | None = None) -> int:
+    """Whole seconds until a retry after the failure ``event`` is allowed (0: now)."""
     elapsed = ((now or timezone.now()) - event.at).total_seconds()
     lock = operator_sync.RETRY_LOCK_SECONDS
     if elapsed >= lock:
@@ -1208,7 +1217,7 @@ def _mark(
             last = _last_mark_event(charge, kind)
             if last is None or last.action != kind.action("provider_mark_failed") or not last.after:
                 return MarkResult(MarkAction.NOTHING_TO_RETRY, MARK_NOTHING_TO_RETRY)
-            wait = _retry_wait(last)
+            wait = retry_wait_after(last)
             if wait:
                 return MarkResult(
                     MarkAction.RETRY_TOO_SOON, operator_sync.retry_wait_message(wait), wait

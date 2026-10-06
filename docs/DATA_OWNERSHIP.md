@@ -168,7 +168,7 @@ they implement.
 | `store_id`, `kind`, `amount` | Import | Opening values from the sheet, sign as in the sheet |
 | `needs_review` | App | |
 
-Superseded by `setup_charges` with `legacy=true` (PLAN-010b D13); removed in Step 13.
+Superseded by `one_off_charges` with `legacy=true` (PLAN-010b D13, PLAN-010d D1); removed in Step 13.
 
 ### fee_types
 | Field | Owner | Note |
@@ -176,15 +176,19 @@ Superseded by `setup_charges` with `legacy=true` (PLAN-010b D13); removed in Ste
 | `id`, `created_at`, `updated_at` | System | |
 | `code`, `name`, `default_cost`, `default_price`, `refundable`, `active`, `sort_order` | App | Admin only. `refundable` marks a deposit (a liability). `first_year_insurance` is seeded inactive (ADR-0007) |
 
-### setup_charges
+### one_off_charges (was `setup_charges`; PLAN-010d D1)
 | Field | Owner | Note |
 |---|---|---|
 | `id`, `created_at`, `updated_at` | System | |
-| `lease_id`, `fee_type_id`, `price`, `cost`, `vendor`, `due_date`, `note` | App | `price` is what the operator owes; `cost` is ours, null = unknown. Price locked once a payment exists |
-| `amount_paid`, `balance`, `status` | Derived | From settled payments, as `rent_charges`; `waived` set by the waive action |
+| `operator_id`, `lease_id` | App | The operator always (except a legacy setup row on a lease without one); the lease when one applies |
+| `category`, `collection`, `description` | App | `setup`, `arrears`, `adjustment`, `damage`, `other`; how it is collected; the invoice line (guarded) |
+| `fee_type_id`, `price`, `cost`, `vendor`, `due_date`, `note` | App | `fee_type` for `setup` only. `price` is what the operator owes; `cost` is ours, null = unknown. Price locked once a payment exists |
+| `amount_paid`, `balance`, `status` | Derived | From settled payments, as `rent_charges`; `waived` and `voided` set by their actions |
 | `waived_at`, `waived_by_id`, `waive_note` | App | Admin; note mandatory |
-| `review_message`, `needs_review` | App / Stax | The provider marking's refusal text, class names only |
-| `legacy` | Import | Step 13 opening balances (D13) |
+| `voided_at`, `voided_by_id`, `void_note` | App | Billing, after the provider confirmed the invoice is deleted; note mandatory |
+| `charge_now_key` | System | The idempotency ID of the single "Charge now" attempt; set once, never changed |
+| `review_message`, `needs_review` | App / Stax | Provider refusal text (class names only), reference conflicts |
+| `legacy` | Import | Step 13 opening balances |
 
 ### deposit_resolutions
 | Field | Owner | Note |
@@ -224,7 +228,7 @@ Superseded by `setup_charges` with `legacy=true` (PLAN-010b D13); removed in Ste
 | Field | Owner | Note |
 |---|---|---|
 | `id`, `created_at`, `updated_at` | System | |
-| charge and invoice references (`rent_charge`, `insurance_charge`, `charge_adjustment`, `setup_charge`), `kind`, `policy_year` | App | Linking a payment to a charge is our decision. Kinds `setup` and `refund_deposit` belong to a setup charge; `refund_deposit` is money out, manual only, never refundable or voidable |
+| charge and invoice references (`rent_charge`, `insurance_charge`, `charge_adjustment`, `one_off_charge`), `kind`, `policy_year` | App | Linking a payment to a charge is our decision. Kinds `one_off` and `refund_deposit` belong to a one-off charge; `refund_deposit` is money out, manual only, never refundable or voidable |
 | `method` | Stax for `ach`; App for `zelle`, `wire`, `other` | |
 | **`amount`, `status`** | **Stax** for method `ach`; **App** for manual methods | Overwritten from Stax on disagreement, for `ach` only |
 | **`initiated_on`, `settled_on`, `returned_at`, `return_code`, `return_reason`, `provider_created_at`** | **Stax** for method `ach` | |

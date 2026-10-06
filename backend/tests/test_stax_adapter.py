@@ -28,6 +28,7 @@ from payments.errors import (
     ProviderNotPermittedHere,
     ProviderRejected,
     ProviderUnavailable,
+    TransportError,
     ValidationFailed,
 )
 from payments.management.commands import provider_ping
@@ -193,14 +194,64 @@ def test_pay_invoice_flag_on_sends_the_verified_request() -> None:
     assert record.total == D("12581.0")
 
 
-def test_pay_invoice_retry_reuses_the_same_idempotency_id() -> None:
+def test_pay_invoice_is_never_retried_and_a_later_attempt_reuses_the_idempotency_id() -> None:
+    """PLAN-010d D4: one request per attempt, whatever the failure; the next attempt (a
+    new call by the caller) carries the same identifier."""
     rig = make_rig(sequence([httpx.ConnectError("refused"), httpx.Response(200, json={"id": "t"})]))
     idempotency_id = str(uuid.uuid4())
+    payment = PayWithStoredMethod("pm-1", idempotency_id)
     with override_settings(STAX_PAY_INVOICE_ENABLED=True):
+        with pytest.raises(TransportError):
+            StaxProvider(rig.transport).pay_invoice("inv-1", payment)
+        assert len(rig.recorder.requests) == 1
+        assert rig.clock.sleeps == []
+        StaxProvider(rig.transport).pay_invoice("inv-1", payment)
+    assert [r.url.params["idempotency_id"] for r in rig.recorder.requests] == [idempotency_id] * 2
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        httpx.Response(503),
+        httpx.Response(500),
+        httpx.Response(429),
+        httpx.ReadTimeout("slow"),
+        httpx.ConnectError("refused"),
+    ],
+    ids=["503", "500", "429", "timeout", "connect"],
+)
+def test_pay_invoice_sends_exactly_one_request_on_any_retryable_failure(
+    reply: httpx.Response | Exception,
+) -> None:
+    rig = make_rig(sequence([reply]))
+    idempotency_id = str(uuid.uuid4())
+    with override_settings(STAX_PAY_INVOICE_ENABLED=True), pytest.raises(ProviderUnavailable):
         StaxProvider(rig.transport).pay_invoice(
             "inv-1", PayWithStoredMethod("pm-1", idempotency_id)
         )
-    assert [r.url.params["idempotency_id"] for r in rig.recorder.requests] == [idempotency_id] * 2
+    [request] = rig.recorder.requests
+    assert request.url.params["idempotency_id"] == idempotency_id
+    assert rig.clock.sleeps == []
+    # The failure still counts against the breaker and the failure budget.
+    assert rig.budget.counts()[0] == 1
+
+
+def test_pay_invoice_sends_email_receipt_one_when_asked() -> None:
+    rig = make_rig(always(200, {"id": "txn-1"}))
+    with override_settings(STAX_PAY_INVOICE_ENABLED=True):
+        StaxProvider(rig.transport).pay_invoice(
+            "inv-1", PayWithStoredMethod("pm-1", str(uuid.uuid4()), email_receipt=True)
+        )
+    [request] = rig.recorder.requests
+    assert request.url.params["email_receipt"] == "1"
+    assert "apply_balance" not in request.url.params
+
+
+def test_the_other_calls_keep_their_retries() -> None:
+    rig = make_rig(sequence([httpx.Response(503), httpx.Response(200, json={"id": "inv-1"})]))
+    StaxProvider(rig.transport).get_invoice("inv-1")
+    assert len(rig.recorder.requests) == 2
+    assert rig.clock.sleeps == [1_000]
 
 
 # --- Row 9: schedule updates cannot carry total or meta -------------------------------------

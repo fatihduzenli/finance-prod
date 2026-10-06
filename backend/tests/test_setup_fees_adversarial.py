@@ -22,9 +22,9 @@ from ledger.models import (
     AuditLog,
     DepositResolution,
     DepositResolutionKind,
+    OneOffCharge,
     Payment,
     PaymentKind,
-    SetupCharge,
     StoreCost,
 )
 from ledger.services import payments_ledger, pnl
@@ -44,17 +44,18 @@ CARD_SPACED = "4111 1111 1111 1111"
 # --- role sweep over every new write route ----------------------------------------------------
 
 
-def _write_routes(charge: SetupCharge) -> list[str]:
+def _write_routes(charge: OneOffCharge) -> list[str]:
     lease = charge.lease
+    assert lease is not None
     return [
         f"/leases/{lease.pk}/setup-charges/new/",
         f"/leases/{lease.pk}/deposits/{charge.pk}/resolve/",
         f"/leases/{lease.pk}/end/",
-        f"/setup-charges/{charge.pk}/payments/new/",
-        f"/setup-charges/{charge.pk}/retry-mark/",
-        f"/setup-charges/{charge.pk}/link-invoice/",
-        f"/setup-charges/{charge.pk}/edit/",
-        f"/setup-charges/{charge.pk}/waive/",
+        f"/one-off-charges/{charge.pk}/payments/new/",
+        f"/one-off-charges/{charge.pk}/retry-mark/",
+        f"/one-off-charges/{charge.pk}/link-invoice/",
+        f"/one-off-charges/{charge.pk}/edit/",
+        f"/one-off-charges/{charge.pk}/waive/",
         f"/stores/{lease.store.pk}/cost/",
     ]
 
@@ -66,7 +67,7 @@ def test_a_viewer_or_a_user_without_a_role_is_refused_on_every_new_write_route(
     charge = a_charge()
     client, _ = client_for(role)
     before = (
-        SetupCharge.objects.count(),
+        OneOffCharge.objects.count(),
         Payment.objects.count(),
         StoreCost.objects.count(),
         AuditLog.objects.count(),
@@ -75,7 +76,7 @@ def test_a_viewer_or_a_user_without_a_role_is_refused_on_every_new_write_route(
         for response in (client.post(path, {"note": "x", "amount": "1"}), client.get(path)):
             assert response.status_code in (403, 405), (path, response.status_code)
     assert before == (
-        SetupCharge.objects.count(),
+        OneOffCharge.objects.count(),
         Payment.objects.count(),
         StoreCost.objects.count(),
         AuditLog.objects.count(),
@@ -86,8 +87,9 @@ def test_billing_cannot_waive_end_a_lease_or_resolve_a_deposit() -> None:
     charge = a_charge()
     billing, _ = client_for(Role.BILLING)
     lease = charge.lease
+    assert lease is not None
     for path in (
-        f"/setup-charges/{charge.pk}/waive/",
+        f"/one-off-charges/{charge.pk}/waive/",
         f"/leases/{lease.pk}/end/",
         f"/leases/{lease.pk}/deposits/{charge.pk}/resolve/",
     ):
@@ -109,9 +111,9 @@ def test_the_pnl_routes_accept_only_safe_methods_from_every_role() -> None:
 def test_unknown_or_malformed_setup_charge_ids_are_404_not_500(key: str) -> None:
     admin, _ = client_for(Role.ADMIN)
     for path in (
-        f"/setup-charges/{key}/",
-        f"/setup-charges/{key}/edit/",
-        f"/setup-charges/{key}/waive/",
+        f"/one-off-charges/{key}/",
+        f"/one-off-charges/{key}/edit/",
+        f"/one-off-charges/{key}/waive/",
     ):
         response = admin.get(path) if path.endswith(f"{key}/") else admin.post(path, {"note": "x"})
         assert response.status_code == 404, path
@@ -146,7 +148,7 @@ def test_the_checklist_ignores_unknown_fee_codes_and_refuses_impossible_prices()
     base = lease_form()  # one store and one operator for every post below
     # An unknown code posts nothing: the lease is created with no charge.
     admin.post("/leases/new/", {**base, "setup_bogus_tick": "on", "setup_bogus_price": "1.00"})
-    assert (Lease.objects.count(), SetupCharge.objects.count()) == (1, 0)
+    assert (Lease.objects.count(), OneOffCharge.objects.count()) == (1, 0)
     Lease.objects.all().delete()
     # Impossible prices: nothing is saved, not even the lease.
     prices = ("1000000000000.00", "NaN", "-5", "0.001", "Infinity", "1e300", "0x10", "1,000")
@@ -159,7 +161,7 @@ def test_the_checklist_ignores_unknown_fee_codes_and_refuses_impossible_prices()
         }
         response = admin.post("/leases/new/", data)
         assert response.status_code in (200, 302), price
-        assert (Lease.objects.count(), SetupCharge.objects.count()) == (0, 0), price
+        assert (Lease.objects.count(), OneOffCharge.objects.count()) == (0, 0), price
     # Other spellings of an exact amount (scientific notation, other digit scripts) are
     # numbers like any other and are stored as the exact amount they name.
     for spelling, exact in (("1e3", D("1000.00")), ("\u0967\u0966\u0966", D("100.00"))):
@@ -172,8 +174,8 @@ def test_the_checklist_ignores_unknown_fee_codes_and_refuses_impossible_prices()
                 f"setup_{sign.code}_price": spelling,
             },
         )
-        assert list(SetupCharge.objects.values_list("price", flat=True)) == [exact], spelling
-        SetupCharge.objects.all().delete()
+        assert list(OneOffCharge.objects.values_list("price", flat=True)) == [exact], spelling
+        OneOffCharge.objects.all().delete()
         Lease.objects.all().delete()
 
 
@@ -181,7 +183,7 @@ def test_a_vendor_or_note_with_a_card_number_never_reaches_a_row_or_a_page() -> 
     charge = a_charge()
     billing, _ = client_for(Role.BILLING)
     billing.post(
-        f"/setup-charges/{charge.pk}/edit/",
+        f"/one-off-charges/{charge.pk}/edit/",
         {
             "cost": "500.00",
             "price": "1000.00",
@@ -190,7 +192,7 @@ def test_a_vendor_or_note_with_a_card_number_never_reaches_a_row_or_a_page() -> 
         },
     )
     billing.post(
-        f"/setup-charges/{charge.pk}/payments/new/",
+        f"/one-off-charges/{charge.pk}/payments/new/",
         {
             "method": "wire",
             "amount": "1000.00",
@@ -199,10 +201,10 @@ def test_a_vendor_or_note_with_a_card_number_never_reaches_a_row_or_a_page() -> 
             "creation_key": str(uuid.uuid4()),
         },
     )
-    page = billing.get(f"/setup-charges/{charge.pk}/").content.decode()
+    page = billing.get(f"/one-off-charges/{charge.pk}/").content.decode()
     assert CARD not in page and CARD_SPACED not in page
-    assert CARD not in str(SetupCharge.objects.values_list("vendor", "note"))
-    assert not Payment.objects.filter(setup_charge=charge).exists()
+    assert CARD not in str(OneOffCharge.objects.values_list("vendor", "note"))
+    assert not Payment.objects.filter(one_off_charge=charge).exists()
 
 
 # --- the importer under hostile files -------------------------------------------------------
@@ -315,10 +317,11 @@ def test_a_refund_above_what_was_paid_is_refused_and_a_second_refund_too() -> No
 
 def test_the_pnl_counts_no_deposit_no_voided_payment_and_no_waived_charge() -> None:
     from ledger.models import PaymentStatus
-    from ledger.services import setup_charges as setup_service
+    from ledger.services import one_off_charges as setup_service
 
     deposit = held_deposit(ended=False)  # paid deposit of 2,500 on its lease
     lease = deposit.lease
+    assert lease is not None
     sign = setup_service.add_charge(lease.pk, item(fee(), "1000.00"), actor=None).charge
     assert sign is not None
     paid = pay(sign, "1000.00")

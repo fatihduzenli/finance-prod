@@ -23,18 +23,27 @@ from ledger.models import (
     DepositResolution,
     DepositResolutionKind,
     Lease,
+    OneOffCharge,
+    OneOffChargeStatus,
     Payment,
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
-    SetupCharge,
-    SetupChargeStatus,
 )
 from ledger.services import deposits as service
 from ledger.services import leases, payments_ledger, pnl, refunds
 from tests.test_lease_services import _race, make_operator
 from tests.test_operator_views import client_for
-from tests.test_setup_charges import DAY, a_charge, a_lease, deposit_type, fee, fresh, pay
+from tests.test_setup_charges import (
+    DAY,
+    a_charge,
+    a_lease,
+    deposit_type,
+    fee,
+    fresh,
+    lease_of,
+    pay,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -58,17 +67,17 @@ def end(lease: Lease, on: date = ENDED) -> Lease:
     return leases.end_lease(lease.pk, on, "Operator moved out.", actor=None, today=DAY)
 
 
-def held_deposit(paid: str = "2500.00", price: str = "2500.00", ended: bool = True) -> SetupCharge:
+def held_deposit(paid: str = "2500.00", price: str = "2500.00", ended: bool = True) -> OneOffCharge:
     charge = a_charge(price, deposit_type())
     if D(paid):
         outcome = pay(charge, paid)
         assert outcome.ok, outcome.message
     if ended:
-        end(charge.lease)
+        end(lease_of(charge))
     return fresh(charge)
 
 
-def resolve(charge: SetupCharge, kind: str, amount: str, **overrides: Any) -> service.Outcome:
+def resolve(charge: OneOffCharge, kind: str, amount: str, **overrides: Any) -> service.Outcome:
     values: dict[str, Any] = {
         "resolved_on": ON,
         "method": PaymentMethod.WIRE if kind == DepositResolutionKind.REFUNDED else "",
@@ -81,16 +90,16 @@ def resolve(charge: SetupCharge, kind: str, amount: str, **overrides: Any) -> se
     return service.resolve_deposit(charge, kind, D(amount), **values)
 
 
-def sibling(charge: SetupCharge, **overrides: Any) -> Lease:
+def sibling(charge: OneOffCharge, **overrides: Any) -> Lease:
     """Another lease of the deposit's operator, not ended."""
-    return a_lease(operator=charge.lease.operator, **overrides)
+    return a_lease(operator=lease_of(charge).operator, **overrides)
 
 
-def nothing_written(charge: SetupCharge, payments: int = 1) -> None:
+def nothing_written(charge: OneOffCharge, payments: int = 1) -> None:
     assert not DepositResolution.objects.exists()
-    assert Payment.objects.filter(setup_charge__lease=charge.lease).count() == payments
-    assert not AuditLog.objects.filter(action__startswith="setup_charge.deposit_").exists()
-    assert SetupCharge.objects.count() == 1
+    assert Payment.objects.filter(one_off_charge__lease=lease_of(charge)).count() == payments
+    assert not AuditLog.objects.filter(action__startswith="one_off_charge.deposit_").exists()
+    assert OneOffCharge.objects.count() == 1
 
 
 # --- Refunded, withheld, transferred (D7) --------------------------------------------------
@@ -107,7 +116,7 @@ def test_a_full_refund_writes_a_deposit_refund_payment_and_keeps_nothing() -> No
         D("0.00"),
     )
     [paid_back] = Payment.objects.filter(kind=PaymentKind.REFUND_DEPOSIT)
-    assert (paid_back.setup_charge_id, paid_back.method, paid_back.amount) == (
+    assert (paid_back.one_off_charge_id, paid_back.method, paid_back.amount) == (
         charge.pk,
         PaymentMethod.WIRE,
         D("2500.00"),
@@ -119,8 +128,8 @@ def test_a_full_refund_writes_a_deposit_refund_payment_and_keeps_nothing() -> No
     )
     assert (paid_back.is_refund, paid_back.parent_payment_id) == (False, None)
     # Paying the deposit back does not reopen the charge.
-    assert fresh(charge).status == SetupChargeStatus.PAID
-    entry = AuditLog.objects.get(action="setup_charge.deposit_refunded")
+    assert fresh(charge).status == OneOffChargeStatus.PAID
+    entry = AuditLog.objects.get(action="one_off_charge.deposit_refunded")
     assert entry.entity_id == str(charge.pk)
     assert entry.after is not None and entry.after["payment"] == str(paid_back.pk)
 
@@ -171,7 +180,7 @@ def test_the_ledger_page_shows_the_refund_with_its_charge() -> None:
     resolve(charge, DepositResolutionKind.REFUNDED, "2500.00")
     client, _ = client_for(Role.VIEWER)
     listing = client.get("/payments/?kind=refund_deposit").content.decode()
-    assert f"/setup-charges/{charge.pk}/" in listing
+    assert f"/one-off-charges/{charge.pk}/" in listing
 
 
 def test_withheld_keeps_the_whole_deposit_and_writes_no_payment() -> None:
@@ -185,7 +194,7 @@ def test_withheld_keeps_the_whole_deposit_and_writes_no_payment() -> None:
         None,
     )
     assert Payment.objects.count() == 1  # the deposit's own payment only
-    assert AuditLog.objects.filter(action="setup_charge.deposit_withheld").count() == 1
+    assert AuditLog.objects.filter(action="one_off_charge.deposit_withheld").count() == 1
 
 
 def test_withholding_part_of_a_deposit_is_refused_with_the_way_to_do_it() -> None:
@@ -200,26 +209,26 @@ def test_a_transfer_creates_a_paid_deposit_on_the_operators_other_lease() -> Non
     target = sibling(charge)
     outcome = resolve(charge, DepositResolutionKind.TRANSFERRED, "2000.00", to_lease=target)
     assert (outcome.ok, outcome.message) == (True, "Deposit transferred.")
-    received = SetupCharge.objects.get(lease=target)
-    assert received.fee_type.code == "security_deposit"
+    received = OneOffCharge.objects.get(lease=target)
+    assert received.fee_type is not None and received.fee_type.code == "security_deposit"
     assert (received.price, received.cost, received.amount_paid, received.status) == (
         D("2000.00"),
         None,
         D("2000.00"),
-        SetupChargeStatus.PAID,
+        OneOffChargeStatus.PAID,
     )
-    [moved] = Payment.objects.filter(setup_charge=received)
+    [moved] = Payment.objects.filter(one_off_charge=received)
     assert (moved.kind, moved.method, moved.amount, moved.status) == (
-        PaymentKind.SETUP,
+        PaymentKind.ONE_OFF,
         PaymentMethod.OTHER,
         D("2000.00"),
         PaymentStatus.SETTLED,
     )
-    assert moved.note == f"Deposit transferred from {charge.lease.store.external_label} lease"
+    assert moved.note == f"Deposit transferred from {lease_of(charge).store.external_label} lease"
     resolution = DepositResolution.objects.get()
     assert (resolution.to_lease_id, resolution.withheld_amount) == (target.pk, D("500.00"))
     assert not Payment.objects.filter(kind=PaymentKind.REFUND_DEPOSIT).exists()
-    created = AuditLog.objects.get(action="setup_charge.created", entity_id=str(received.pk))
+    created = AuditLog.objects.get(action="one_off_charge.created", entity_id=str(received.pk))
     assert created.after is not None and created.after["transferred_from"] == str(charge.pk)
 
 
@@ -228,7 +237,7 @@ def test_a_transfer_then_a_partial_refund_on_the_target_holds_the_rest_once() ->
     target = sibling(charge)
     assert resolve(charge, DepositResolutionKind.TRANSFERRED, "2500.00", to_lease=target).ok
     end(target, ON)
-    received = SetupCharge.objects.get(lease=target)
+    received = OneOffCharge.objects.get(lease=target)
     assert resolve(received, DepositResolutionKind.REFUNDED, "1000.00").ok
 
     def held(**selected: Any) -> Decimal:
@@ -239,7 +248,7 @@ def test_a_transfer_then_a_partial_refund_on_the_target_holds_the_rest_once() ->
     # rest withheld (revenue, not held): nothing is held, never 5,000 less the refund.
     assert held() == D("0.00")
     # The transfer leaves the first lease's store and lands on the target's.
-    assert held(store=charge.lease.store_id) == D("0.00")
+    assert held(store=lease_of(charge).store_id) == D("0.00")
     assert held(store=target.store_id) == D("0.00")
     # The P&L footer applies the same rule: the ledger and the footer agree.
     assert pnl.deposits_held(pnl.parse_query({"from": "2026-01", "to": "2026-12"})) == held()
@@ -258,7 +267,7 @@ def test_a_transfer_works_even_when_the_deposit_type_is_inactive() -> None:
 def test_a_non_refundable_charge_is_refused() -> None:
     charge = a_charge("1000.00", fee("sign_fee"))
     pay(charge, "1000.00")
-    end(charge.lease)
+    end(lease_of(charge))
     outcome = resolve(charge, DepositResolutionKind.REFUNDED, "1000.00")
     assert (outcome.ok, outcome.message) == (False, service.NOT_REFUNDABLE)
     nothing_written(charge)
@@ -288,7 +297,7 @@ def test_an_amount_above_what_was_paid_is_refused(paid: str, amount: str) -> Non
 
 def test_a_returned_payment_does_not_count_as_paid() -> None:
     charge = held_deposit()
-    Payment.objects.filter(setup_charge=charge).update(status=PaymentStatus.RETURNED)
+    Payment.objects.filter(one_off_charge=charge).update(status=PaymentStatus.RETURNED)
     outcome = resolve(charge, DepositResolutionKind.REFUNDED, "2500.00")
     assert outcome.message == service.ABOVE_PAID.format(paid="0.00")
 
@@ -357,7 +366,7 @@ def test_a_transfer_to_another_operators_lease_is_refused() -> None:
 def test_a_transfer_to_an_ended_lease_or_to_its_own_lease_is_refused() -> None:
     charge = held_deposit()
     ended = end(sibling(charge))
-    for target in (ended, charge.lease):
+    for target in (ended, lease_of(charge)):
         outcome = resolve(charge, DepositResolutionKind.TRANSFERRED, "100.00", to_lease=target)
         assert (outcome.ok, outcome.message) == (False, service.TARGET_ENDED)
     nothing_written(charge)
@@ -366,12 +375,12 @@ def test_a_transfer_to_an_ended_lease_or_to_its_own_lease_is_refused() -> None:
 def test_a_transfer_to_a_lease_with_a_deposit_already_is_refused() -> None:
     charge = held_deposit()
     target = sibling(charge)
-    a_charge_on = SetupCharge.objects.create(
+    a_charge_on = OneOffCharge.objects.create(
         lease=target, fee_type=deposit_type(), price=D("100.00"), due_date=DAY
     )
     outcome = resolve(charge, DepositResolutionKind.TRANSFERRED, "100.00", to_lease=target)
     assert (outcome.ok, outcome.message) == (False, service.TARGET_HAS_DEPOSIT)
-    assert SetupCharge.objects.filter(lease=target).get() == a_charge_on
+    assert OneOffCharge.objects.filter(lease=target).get() == a_charge_on
     assert not DepositResolution.objects.exists()
 
 
@@ -400,7 +409,7 @@ def test_two_concurrent_resolutions_make_one() -> None:
 # --- Screens and roles (D7, D12) ---------------------------------------------------------
 
 
-def resolve_path(charge: SetupCharge) -> str:
+def resolve_path(charge: OneOffCharge) -> str:
     return f"/leases/{charge.lease_id}/deposits/{charge.pk}/resolve/"
 
 
@@ -434,12 +443,12 @@ def test_billing_and_viewer_cannot_resolve_a_deposit(role: Role) -> None:
 
 def test_the_lease_page_offers_the_action_only_once_ended_and_for_deposits() -> None:
     charge = held_deposit(ended=False)
-    sign = a_charge("1000.00", fee("sign_fee"), operator=charge.lease.operator)
-    SetupCharge.objects.filter(pk=sign.pk).update(lease=charge.lease)
+    sign = a_charge("1000.00", fee("sign_fee"), operator=lease_of(charge).operator)
+    OneOffCharge.objects.filter(pk=sign.pk).update(lease=lease_of(charge))
     client, _ = client_for(Role.ADMIN)
     lease_page = f"/leases/{charge.lease_id}/"
     assert resolve_path(charge) not in client.get(lease_page).content.decode()
-    end(charge.lease)
+    end(lease_of(charge))
     shown = client.get(lease_page).content.decode()
     assert resolve_path(charge) in shown
     assert f"/deposits/{sign.pk}/resolve/" not in shown
@@ -453,10 +462,10 @@ def test_an_admin_resolves_through_the_page_and_the_deposit_page_shows_it() -> N
     response = client.post(
         resolve_path(charge), form(amount="2000.00", note="Kept 500 for repairs.")
     )
-    assert response["Location"] == f"/setup-charges/{charge.pk}/"
+    assert response["Location"] == f"/one-off-charges/{charge.pk}/"
     resolution = DepositResolution.objects.get()
     assert (resolution.created_by, resolution.withheld_amount) == (user, D("500.00"))
-    detail = client.get(f"/setup-charges/{charge.pk}/").content.decode()
+    detail = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
     assert 'id="deposit-resolution"' in detail and "Refunded on 2026-10-01" in detail
     assert '<dd id="resolution-withheld">$500.00</dd>' in detail
     assert "Kept 500 for repairs." in detail
@@ -472,7 +481,7 @@ def test_an_admin_transfers_to_a_lease_chosen_from_the_operators_open_leases() -
     page = client.get(resolve_path(charge)).content.decode()
     assert f'value="{target.pk}"' in page and f'value="{stranger.pk}"' not in page
     client.post(resolve_path(charge), form(kind="transferred", method="", to_lease=str(target.pk)))
-    assert SetupCharge.objects.get(lease=target).status == SetupChargeStatus.PAID
+    assert OneOffCharge.objects.get(lease=target).status == OneOffChargeStatus.PAID
     # A posted lease that is not offered is still refused by the service.
     other = held_deposit()
     client.post(resolve_path(other), form(kind="transferred", method="", to_lease=str(stranger.pk)))

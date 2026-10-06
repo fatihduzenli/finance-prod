@@ -12,16 +12,16 @@ Once its lease has ended, an admin resolves it once (:func:`resolve_deposit`, on
   the amount given back, and the rest is recorded as withheld on the same row.
 - ``transferred``: the amount moves to another lease of the same operator that has not
   ended: a ``security_deposit`` setup charge is created there with ``price=amount`` and
-  no cost, paid by a ``setup`` payment of method ``other`` with the note "Deposit
+  no cost, paid by a ``one_off`` payment of method ``other`` with the note "Deposit
   transferred from <store label> lease", so its balance derives from payments like
   every other charge.
 
 ``withheld_amount`` is the part of the paid deposit the business keeps: paid less the
 amount for a refund or a transfer, the amount itself when withheld. "Paid" is the
-deposit's settled ``setup`` payments less their settled refunds. Every rule is checked
+deposit's settled ``one_off`` payments less their settled refunds. Every rule is checked
 before anything is written, under the deposit's row lock (and the target lease's for a
 transfer); a refusal is one sentence and writes nothing. Every resolution is audited
-(entity ``setup_charge``). No call reaches the payment provider.
+(entity ``one_off_charge``). No call reaches the payment provider.
 """
 
 from __future__ import annotations
@@ -39,18 +39,20 @@ from django.utils import timezone
 from ledger.models import (
     MANUAL_PAYMENT_METHODS,
     AuditLog,
+    CollectionMethod,
     DepositResolution,
     DepositResolutionKind,
     FeeType,
     Lease,
+    OneOffCategory,
+    OneOffCharge,
+    OneOffChargeStatus,
     Payment,
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
-    SetupCharge,
-    SetupChargeStatus,
 )
-from ledger.services import setup_charges
+from ledger.services import one_off_charges
 from ledger.services.rent_run import CENT, MONEY_MAX
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 
@@ -106,26 +108,28 @@ def _refused(message: str, field: str | None = None) -> Outcome:
 # --- Reads ----------------------------------------------------------------------------
 
 
-def is_deposit(charge: SetupCharge) -> bool:
-    return bool(charge.fee_type.refundable)
+def is_deposit(charge: OneOffCharge) -> bool:
+    return charge.fee_type is not None and charge.fee_type.refundable
 
 
-def can_resolve(charge: SetupCharge) -> bool:
+def can_resolve(charge: OneOffCharge) -> bool:
     """Whether the lease page offers "Resolve deposit" for this charge."""
     return (
         is_deposit(charge)
+        and charge.lease is not None
         and charge.lease.ended_on is not None
         and not DepositResolution.objects.filter(setup_charge=charge).exists()
     )
 
 
-def target_leases(charge: SetupCharge) -> list[Lease]:
+def target_leases(charge: OneOffCharge) -> list[Lease]:
     """Leases a deposit may move to: the same operator's other leases not ended."""
-    if charge.lease.operator_id is None:
+    lease = charge.lease
+    if lease is None or lease.operator_id is None:
         return []
     return list(
-        Lease.objects.filter(operator_id=charge.lease.operator_id, ended_on__isnull=True)
-        .exclude(pk=charge.lease_id)
+        Lease.objects.filter(operator_id=lease.operator_id, ended_on__isnull=True)
+        .exclude(pk=lease.pk)
         .select_related("store")
         .order_by("store__external_label", "started_on", "id")
     )
@@ -174,7 +178,7 @@ def _shape_refusal(
 
 
 def resolve_deposit(
-    setup_charge: SetupCharge,
+    setup_charge: OneOffCharge,
     kind: str,
     amount: Decimal,
     resolved_on: date,
@@ -196,14 +200,14 @@ def resolve_deposit(
     try:
         with transaction.atomic():
             charge = (
-                SetupCharge.objects.select_for_update(of=("self",))
+                OneOffCharge.objects.select_for_update(of=("self",))
                 .select_related("fee_type", "lease", "lease__store")
                 .get(pk=setup_charge.pk)
             )
             refused = _charge_refusal(charge, kind, amount)
             if refused is not None:
                 return refused
-            paid = setup_charges.settled(charge)
+            paid = one_off_charges.settled(charge)
             target: Lease | None = None
             if to_lease is not None:
                 target = Lease.objects.select_for_update().get(pk=to_lease.pk)
@@ -224,8 +228,8 @@ def resolve_deposit(
             effects = _write_effects(resolution, charge, target, actor)
             AuditLog.objects.create(
                 actor=actor,
-                action=f"setup_charge.deposit_{kind}",
-                entity_type=setup_charges.ENTITY_SETUP_CHARGE,
+                action=f"one_off_charge.deposit_{kind}",
+                entity_type=one_off_charges.ENTITY_ONE_OFF_CHARGE,
                 entity_id=str(charge.pk),
                 before={"paid": str(paid)},
                 after={**_state(resolution), **effects},
@@ -239,14 +243,14 @@ def resolve_deposit(
     return Outcome(True, DONE[DepositResolutionKind(kind)], resolution=resolution)
 
 
-def _charge_refusal(charge: SetupCharge, kind: str, amount: Decimal) -> Outcome | None:
-    if not charge.fee_type.refundable:
+def _charge_refusal(charge: OneOffCharge, kind: str, amount: Decimal) -> Outcome | None:
+    if not is_deposit(charge) or charge.lease is None:
         return _refused(NOT_REFUNDABLE)
     if charge.lease.ended_on is None:
         return _refused(LEASE_NOT_ENDED)
     if DepositResolution.objects.filter(setup_charge=charge).exists():
         return _refused(ALREADY_RESOLVED)
-    paid = setup_charges.settled(charge)
+    paid = one_off_charges.settled(charge)
     if amount > paid:
         return _refused(ABOVE_PAID.format(paid=paid), "amount")
     if kind == DepositResolutionKind.WITHHELD and amount != paid:
@@ -254,22 +258,23 @@ def _charge_refusal(charge: SetupCharge, kind: str, amount: Decimal) -> Outcome 
     return None
 
 
-def _target_refusal(charge: SetupCharge, target: Lease) -> Outcome | None:
-    if charge.lease.operator_id is None or target.operator_id != charge.lease.operator_id:
+def _target_refusal(charge: OneOffCharge, target: Lease) -> Outcome | None:
+    operator_id = charge.lease.operator_id if charge.lease is not None else None
+    if operator_id is None or target.operator_id != operator_id:
         return _refused(TARGET_OTHER_OPERATOR, "to_lease")
     if target.ended_on is not None:
         return _refused(TARGET_ENDED, "to_lease")
     deposit_type = FeeType.objects.filter(code=DEPOSIT_FEE_CODE).first()
     if deposit_type is None:
         return _refused(NO_DEPOSIT_TYPE)
-    if SetupCharge.objects.filter(lease=target, fee_type=deposit_type, legacy=False).exists():
+    if OneOffCharge.objects.filter(lease=target, fee_type=deposit_type, legacy=False).exists():
         return _refused(TARGET_HAS_DEPOSIT, "to_lease")
     return None
 
 
 def _write_effects(
     resolution: DepositResolution,
-    charge: SetupCharge,
+    charge: OneOffCharge,
     target: Lease | None,
     actor: User | None,
 ) -> dict[str, Any]:
@@ -286,32 +291,39 @@ def _write_effects(
         )
         return {"payment": str(payment.pk)}
     if resolution.kind == DepositResolutionKind.TRANSFERRED and target is not None:
-        received = SetupCharge.objects.create(
+        deposit_type = FeeType.objects.get(code=DEPOSIT_FEE_CODE)
+        received = OneOffCharge.objects.create(
+            operator_id=target.operator_id,
             lease=target,
-            fee_type=FeeType.objects.get(code=DEPOSIT_FEE_CODE),
+            fee_type=deposit_type,
+            category=OneOffCategory.SETUP,
+            collection=CollectionMethod.NONE,
+            description=deposit_type.name[:120],
             cost=None,
             price=resolution.amount,
             due_date=resolution.resolved_on,
-            status=SetupChargeStatus.OWED,
+            status=OneOffChargeStatus.OWED,
         )
         payment = _payment(
             received,
-            PaymentKind.SETUP,
+            PaymentKind.ONE_OFF,
             PaymentMethod.OTHER,
             resolution.amount,
             resolution.resolved_on,
-            TRANSFER_NOTE.format(store=charge.lease.store.external_label),
+            TRANSFER_NOTE.format(
+                store=charge.lease.store.external_label if charge.lease is not None else ""
+            ),
             actor,
         )
-        setup_charges.recompute(received)
+        one_off_charges.recompute(received)
         AuditLog.objects.create(
             actor=actor,
-            action=setup_charges.CREATED_ACTION,
-            entity_type=setup_charges.ENTITY_SETUP_CHARGE,
+            action=one_off_charges.CREATED_ACTION,
+            entity_type=one_off_charges.ENTITY_ONE_OFF_CHARGE,
             entity_id=str(received.pk),
             before=None,
             after={
-                **setup_charges.charge_state(received),
+                **one_off_charges.charge_state(received),
                 "transferred_from": str(charge.pk),
                 "payment": str(payment.pk),
             },
@@ -321,7 +333,7 @@ def _write_effects(
 
 
 def _payment(
-    charge: SetupCharge,
+    charge: OneOffCharge,
     kind: str,
     method: str,
     amount: Decimal,
@@ -330,7 +342,7 @@ def _payment(
     actor: User | None,
 ) -> Payment:
     payment = Payment(
-        setup_charge=charge,
+        one_off_charge=charge,
         kind=kind,
         method=method,
         amount=amount,

@@ -35,8 +35,8 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import RefundForm, VoidForm
 from ledger.models import AuditLog, Operator, Payment, PaymentMethod, Store
+from ledger.services import one_off_charges, refunds
 from ledger.services import payments_ledger as ledger
-from ledger.services import refunds, setup_charges
 from ledger.services.rent_run import charge_review_message
 from ledger.views.jobs import already_submitted, job_context, submit
 from ledger.views.operators import PAGE_SIZE, _held, _hold, _role, role_required
@@ -100,8 +100,9 @@ def _load(pk: str) -> Payment:
             "rent_charge__lease",
             "rent_charge__lease__store",
             "insurance_charge",
-            "setup_charge",
-            "setup_charge__fee_type",
+            "one_off_charge",
+            "one_off_charge__fee_type",
+            "one_off_charge__operator",
             "parent_payment",
             "recorded_by",
         ),
@@ -118,7 +119,7 @@ def _summary(payment: Payment, facts: refunds.PaymentFacts) -> dict[str, object]
         "facts": facts,
         "invoice": payment.invoice,
         "charge": payment.rent_charge,
-        "setup_charge": payment.setup_charge,
+        "one_off_charge": payment.one_off_charge,
     }
 
 
@@ -155,8 +156,8 @@ def payment_detail(request: HttpRequest, pk: str) -> HttpResponse:
 def _charge_review(payment: Payment) -> str:
     if payment.rent_charge is not None:
         return charge_review_message(payment.rent_charge)
-    if payment.setup_charge is not None:
-        return setup_charges.review_message(payment.setup_charge)
+    if payment.one_off_charge is not None:
+        return one_off_charges.review_message(payment.one_off_charge)
     return ""
 
 

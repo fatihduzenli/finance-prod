@@ -145,13 +145,24 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     # needs admin.
     assert names == {
         f"ledger:leases:{short}"
-        for short in ("list", "detail", "add_setup_charge", "resolve_deposit", "end", *POST_ROUTES)
+        for short in (
+            "list",
+            "detail",
+            "add_setup_charge",
+            "new_charge",
+            "resolve_deposit",
+            "end",
+            *POST_ROUTES,
+        )
     }
     assert {"ledger:leases:list", "ledger:leases:detail"} <= registry.READ_ONLY_ROUTE_NAMES
     for short in POST_ROUTES:
         rule = registry.rule_for(f"ledger:leases:{short}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
     rule = registry.rule_for("ledger:leases:add_setup_charge")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-010d D9: creating a one-off charge from the lease page needs billing.
+    rule = registry.rule_for("ledger:leases:new_charge")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     rule = registry.rule_for("ledger:leases:resolve_deposit")
     assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}

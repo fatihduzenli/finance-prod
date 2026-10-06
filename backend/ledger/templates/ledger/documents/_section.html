@@ -62,4 +62,23 @@ post; ledger/document_drop.js only moves a dropped file into the file input.
       {% endfor %}
     </tbody>
   </table>
+
+  <h3 id="documents-activity-title">Activity</h3>
+  <table id="documents-activity">
+    <thead><tr><th>Time (New York)</th><th>Action</th><th>User</th><th>Kind</th><th>Outcome</th></tr></thead>
+    <tbody>
+      {% for entry in documents_activity %}
+        <tr class="document-activity">
+          <td>{{ entry.at_new_york }}</td>
+          <td class="activity-action">{{ entry.action }}</td>
+          <td>{{ entry.user|default:"—" }}</td>
+          <td>{{ entry.kind|default:"—" }}</td>
+          <td class="activity-outcome">{{ entry.outcome|default:"—" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted">No document activity yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if documents_activity_url %}<p><a href="{{ documents_activity_url }}" id="documents-activity-link">All document activity in the audit log</a></p>{% endif %}
 </section>

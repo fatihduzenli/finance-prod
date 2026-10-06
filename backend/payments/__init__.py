@@ -38,6 +38,15 @@ def get_provider() -> PaymentProvider:
         return provider
 
 
+def pay_invoice_enabled() -> bool:
+    """Whether paying an invoice from a stored method ("Charge now", PLAN-010d D4) is
+    enabled here (``STAX_PAY_INVOICE_ENABLED``). Off, nothing queues the call and the
+    adapter refuses it."""
+    from django.conf import settings
+
+    return bool(settings.STAX_PAY_INVOICE_ENABLED)
+
+
 def _build(kind: str) -> PaymentProvider:
     if kind == FAKE:
         from payments.fake import FakeProvider

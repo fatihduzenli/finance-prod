@@ -47,10 +47,10 @@ from ledger.models import (
     Operator,
     ScheduleState,
 )
-from ledger.services import deposits, setup_charges
+from ledger.services import deposits, one_off_charges
 from ledger.services import leases as service
 from ledger.services.leases import LeaseRefused
-from ledger.services.setup_charges import SetupRefused
+from ledger.services.one_off_charges import SetupRefused
 from ledger.views import documents
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import PAGE_SIZE, _actor, _held, _hold, _role, role_required
@@ -170,9 +170,10 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
                     "resolution": getattr(charge, "deposit_resolution", None),
                     "can_resolve": admin and deposits.can_resolve(charge),
                 }
-                for charge in setup_charges.charges_of(lease)
+                for charge in one_off_charges.charges_of(lease)
             ],
             "can_add_setup_charge": meets(_role(request), Role.BILLING),
+            "can_new_charge": meets(_role(request), Role.BILLING) and lease.operator_id is not None,
             "notes": Note.objects.filter(
                 entity_type=NoteEntityType.LEASE, entity_id=lease.pk
             ).order_by("-created_at"),
@@ -209,7 +210,7 @@ def lease_create(request: HttpRequest) -> HttpResponse:
         form = LeaseCreateForm(request.POST)
         if form.is_valid():
             try:
-                lease, created, charges = setup_charges.create_lease_with_checklist(
+                lease, created, charges = one_off_charges.create_lease_with_checklist(
                     form.cleaned_data,
                     rent=form.cleaned_data["rent"],
                     creation_key=form.cleaned_data["creation_key"],

@@ -124,10 +124,16 @@ disagreeing ledgers.
   due. **A schedule's amount is never edited for an adjustment:** each adjustment
   is its own one-off invoice linked to a `charge_adjustments` row
   (TODO-VERIFY-019).
-- "Pay an invoice" (`POST /invoice/{id}/pay`) is **not used**. If
-  TODO-VERIFY-019 shows a one-off invoice cannot be collected without it, that
-  is an owner decision recorded in `docs/DECISIONS.md` first, not a code change. The app never
-  creates a payment method (Rule 1).
+- "Pay an invoice" (`POST /invoice/{id}/pay`) is used for **one action only**: an
+  admin's "Charge now" on a one-off charge (ADR-0009, owner decision 2026-10-05),
+  behind `STAX_PAY_INVOICE_ENABLED`, with a confirmation page, the large-debit
+  confirmation, a stored idempotency ID and **one request with no automatic retry**.
+  No job, webhook handler or schedule may call it. The app never creates a payment
+  method (Rule 1).
+- One-off charges (arrears, adjustments, damage, other, setup fees) are created in the
+  app and their Stax invoice is created by the worker, local-first, with our invoice
+  number as `meta.reference` (ADR-0009). Cancelling an unpaid one deletes the Stax
+  invoice; Stax shows `DELETED`.
 - Cached Stax data always carries `fetched_at`. Any decision logic (overdue,
   follow-up due) uses the cache but shows the staleness.
 

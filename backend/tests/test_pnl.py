@@ -32,6 +32,8 @@ from ledger.models import (
     InsuranceCharge,
     InsurancePremium,
     Lease,
+    OneOffCharge,
+    OneOffChargeStatus,
     Operator,
     Payment,
     PaymentChannel,
@@ -40,8 +42,6 @@ from ledger.models import (
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
-    SetupCharge,
-    SetupChargeStatus,
     Store,
     StoreCost,
     StoreCostSource,
@@ -107,7 +107,7 @@ def rent(lease: Lease, month: date, amount: str = "3500.00", **fields: Any) -> R
 
 
 def paid(
-    charge: RentCharge | SetupCharge | InsuranceCharge, amount: str, on: date, **fields: Any
+    charge: RentCharge | OneOffCharge | InsuranceCharge, amount: str, on: date, **fields: Any
 ) -> Payment:
     values: dict[str, Any] = {
         "method": PaymentMethod.ACH,
@@ -118,8 +118,8 @@ def paid(
     }
     if isinstance(charge, RentCharge):
         values.update(rent_charge=charge, kind=PaymentKind.RENT)
-    elif isinstance(charge, SetupCharge):
-        values.update(setup_charge=charge, kind=PaymentKind.SETUP)
+    elif isinstance(charge, OneOffCharge):
+        values.update(one_off_charge=charge, kind=PaymentKind.ONE_OFF)
     else:
         values.update(
             insurance_charge=charge, kind=PaymentKind.INSURANCE, policy_year=charge.policy_year
@@ -140,7 +140,7 @@ def refund_of(payment: Payment, amount: str, on: date, **fields: Any) -> Payment
         "policy_year": payment.policy_year,
         "rent_charge": payment.rent_charge,
         "insurance_charge": payment.insurance_charge,
-        "setup_charge": payment.setup_charge,
+        "one_off_charge": payment.one_off_charge,
     }
     values.update(fields)
     return Payment.objects.create(**values)
@@ -153,8 +153,8 @@ def a_setup(
     cost: str | None = "500.00",
     due: date = date(2026, 7, 10),
     **fields: Any,
-) -> SetupCharge:
-    return SetupCharge.objects.create(
+) -> OneOffCharge:
+    return OneOffCharge.objects.create(
         lease=lease,
         fee_type=fee_type or fee("sign_fee"),
         price=D(price),
@@ -208,7 +208,7 @@ def month_rows(month: date, start: date = JULY, end: date | None = None) -> list
     return [row for row in pnl.rows(query(start, end)) if row.month == month]
 
 
-def known_store() -> tuple[Store, Lease, RentCharge, SetupCharge]:
+def known_store() -> tuple[Store, Lease, RentCharge, OneOffCharge]:
     """The plan's example: rent 3,500, landlord 2,500, sign fee price 1,000 cost 500
     due in July."""
     store = a_store()
@@ -427,7 +427,7 @@ def test_a_withheld_deposit_counts_in_the_month_it_was_resolved() -> None:
         note="Kept 500 for repairs.",
     )
     Payment.objects.create(
-        setup_charge=deposit,
+        one_off_charge=deposit,
         kind=PaymentKind.REFUND_DEPOSIT,
         method=PaymentMethod.WIRE,
         amount=D("2000.00"),
@@ -498,7 +498,7 @@ def test_waived_charges_are_not_billed_but_a_waived_items_cost_still_counts() ->
     rent(lease, JULY, status=RentChargeStatus.WAIVED)
     a_setup(
         lease,
-        status=SetupChargeStatus.WAIVED,
+        status=OneOffChargeStatus.WAIVED,
         waived_at=JULY_NOON,
         waive_note="Waived as a welcome gesture.",
     )
@@ -900,16 +900,16 @@ def busy_stores(count: int, months: int = 1, start: date = JULY) -> None:
         )
         for charge in charges
     )
-    setups = SetupCharge.objects.bulk_create(
-        SetupCharge(
+    setups = OneOffCharge.objects.bulk_create(
+        OneOffCharge(
             lease=lease, fee_type=sign, price=D("1000.00"), cost=D("500.00"), due_date=start
         )
         for lease in leases
     )
     Payment.objects.bulk_create(
         Payment(
-            setup_charge=setup,
-            kind=PaymentKind.SETUP,
+            one_off_charge=setup,
+            kind=PaymentKind.ONE_OFF,
             method=PaymentMethod.ACH,
             amount=D("1000.00"),
             status=PaymentStatus.SETTLED,
@@ -944,7 +944,7 @@ def _refresh_planner_statistics() -> None:
         StoreCost,
         RentCharge,
         Payment,
-        SetupCharge,
+        OneOffCharge,
         InsuranceCharge,
     )
     with connection.cursor() as cursor:
@@ -964,7 +964,8 @@ def test_the_number_of_queries_does_not_depend_on_the_number_of_rows() -> None:
     few = queries_for(query(JULY, AUGUST))
     busy_more(20)
     many = queries_for(query(JULY, AUGUST))
-    assert empty == few == many == 12
+    # PLAN-010d D7 added one: the settled payments of arrears charges (rent collected).
+    assert empty == few == many == 13
 
 
 def busy_more(count: int) -> None:
@@ -1001,5 +1002,5 @@ def test_500_stores_by_12_months_in_under_two_seconds() -> None:
         found = pnl.rows(selected)
     elapsed = time.perf_counter() - started
     assert len(found) == 500 * 12
-    assert len(captured) == 12
+    assert len(captured) == 13  # PLAN-010d D7: arrears payments count as rent collected
     assert elapsed < 2.0, f"rows() took {elapsed:.2f}s"

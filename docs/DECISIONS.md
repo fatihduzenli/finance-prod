@@ -512,3 +512,63 @@ scanned ACH authorisation or a voided cheque is exactly what an operator sends w
   hardening option); the account is locally redundant (GRS is the option for a regional loss).
 - A removed file that broke Rule 1 remains in blob soft delete for 30 days; purging it sooner
   is a manual owner action in the portal, recorded when it happens.
+
+## ADR-0009 — One creation path for every non-rent charge; "Charge now" uses pay-an-invoice; cancel deletes the Stax invoice
+
+**Date:** 2026-10-05
+**Status:** Accepted (owner's Prompt 10d text of 2026-10-05)
+
+### Context
+
+Every amount that is not monthly rent (old arrears, adjustments, damage, later NSF fees and
+installments) could only be created in the Stax dashboard and linked. Rule 2 said "pay an
+invoice" (`POST /invoice/{id}/pay`) is not used, pending TODO-VERIFY-019. The owner now wants
+these charges created from the app, collected the way staff choose, and, for "Charge now", paid
+immediately from the operator's linked bank method.
+
+### Decision
+
+1. **One table, one path.** `setup_charges` becomes `one_off_charges` with a `category`
+   (`setup`, `arrears`, `adjustment`, `damage`, `other`) and a `collection`
+   (`none`, `autopay_due`, `email`, `manual`, `charge_now`). Setup charges, and later NSF fees
+   (11b) and installments (12b), are created through `create_charge`. Payment kind `setup`
+   becomes `one_off`. `charge_adjustments` stays for cross-store balance moves until Step 13.
+2. **The app creates the Stax one-off invoice** through the worker, local-first (our
+   `INV-YYYY-NNNN` row exists before the call and travels as `meta.reference`; the description is
+   the single line item; ACH only; check-before-create on every retry; a 4xx is never retried).
+   `email` sends it through Stax; `manual` leaves it for a hand-recorded payment; `autopay_due`
+   creates a Stax scheduled invoice with **one occurrence** on the due date from the linked bank
+   method (TODO-VERIFY-019's working assumption) and Stax generates the invoice that day.
+3. **"Charge now" uses `POST /invoice/{id}/pay`** with the linked bank method and a stored
+   idempotency ID. Rule 2's prohibition is lifted for exactly this call under these conditions:
+   admin only; a confirmation page naming operator, store, amount, invoice number and the bank
+   method's last four; the large-debit confirmation above the threshold; **one request, never an
+   automatic retry** (a dedicated no-retry policy in the adapter); the same idempotency ID on
+   every later deliberate attempt; a re-fetch first so a paid invoice is never charged; behind
+   `STAX_PAY_INVOICE_ENABLED`, which stays off on staging until Stax enables ACH. The result is a
+   pending ACH payment that settles through webhooks and the reconciliation like any other.
+4. **Cancel of an unpaid charge deletes the Stax invoice** (`DELETE /invoice/{id}`; Stax has no
+   "void" for an invoice and shows `DELETED`) or the unfired schedule; the local charge becomes
+   `voided` with a note only after the provider confirmed. A charge with any payment follows the
+   refund path instead.
+5. **P&L:** `arrears` counts as rent billed and collected; the other categories as fees;
+   refundable fee types stay deposits.
+
+### Alternatives rejected
+
+- **A separate table per kind of charge:** three more copies of payments, invoices, marking and
+  reporting logic; the owner asked for one path.
+- **Our worker debiting on the due date** for `autopay_due`: the app would become the scheduler
+  of money movement; Stax's schedule already is.
+- **Retrying a failed "Charge now" automatically:** a retry on an unknown outcome is the one
+  thing an idempotency ID cannot fully protect against at a processor with a 10-failures-a-minute
+  limit; the owner chose one attempt and a visible failure.
+
+### Consequences
+
+- docs/CLAUDE.md Rule 2 is amended (the "not used" sentence on pay-an-invoice becomes the
+  conditions above). `STAX_PAY_INVOICE_ENABLED` remains the switch.
+- TODO-VERIFY-019 stays open until the sandbox has ACH: whether `meta.reference` returns on GET,
+  whether a one-occurrence schedule behaves, whether a deleted invoice reads `DELETED` or 404.
+- The audit log page `/audit/` (admin) exists from this step; the Documents sections show an
+  Activity list.

@@ -174,6 +174,9 @@ class ScheduleInput:
     #: RRULE string beginning with ``DTSTART=``.
     rule: str
     email_notification: bool = False
+    #: A reference the schedule's owner carries (PLAN-010d D2, TODO-VERIFY-035); empty:
+    #: none is sent.
+    reference: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +221,10 @@ class InvoiceRecord:
     viewed_at: datetime | None = None
     paid_at: datetime | None = None
     amount_paid: Decimal | None = None
+    #: The reference the invoice was created with (our invoice number, PLAN-010d D5;
+    #: TODO-VERIFY-004), and the schedule that generated it; ``""`` when none or unknown.
+    reference: str = ""
+    schedule_id: str = ""
 
 
 #: ``TransactionRecord.kind`` of a refund (PLAN-008 D5).

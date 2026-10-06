@@ -86,16 +86,16 @@
     </tbody>
   </table>
 
-  <h2>Setup charges</h2>
-  {% if can_add_setup_charge %}<p class="actions"><a class="btn" href="{% url 'ledger:leases:add_setup_charge' pk=lease.pk %}" id="add-setup-charge">Add setup charge</a></p>{% endif %}
+  <h2>Setup and one-off charges</h2>
+  {% if can_add_setup_charge or can_new_charge %}<p class="actions">{% if can_add_setup_charge %}<a class="btn" href="{% url 'ledger:leases:add_setup_charge' pk=lease.pk %}" id="add-setup-charge">Add setup charge</a>{% endif %}{% if can_new_charge %} <a class="btn" href="{% url 'ledger:leases:new_charge' pk=lease.pk %}" id="new-one-off-charge">Create one-off charge</a>{% endif %}</p>{% endif %}
   <table id="setup-charges">
     <thead><tr><th>Charge</th><th>Due</th><th>Cost</th><th>Price</th><th>Paid</th><th>Balance</th><th>Status</th><th>Deposit</th></tr></thead>
     <tbody>
       {% for row in setup_rows %}{% with charge=row.charge %}
-        <tr><td><a href="{% url 'ledger:setup_charges:detail' pk=charge.pk %}">{{ charge.fee_type.name }}</a>{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">Legacy</span>{% endif %}{% if charge.needs_review %} <span class="badge">Needs review</span>{% endif %}</td><td>{{ charge.due_date|date:"Y-m-d" }}</td><td>{% if charge.cost is not None %}${{ charge.cost }}{% else %}unknown{% endif %}</td><td>${{ charge.price }}</td><td>${{ charge.amount_paid }}</td><td>${{ charge.balance }}</td><td>{{ charge.get_status_display }}</td>
+        <tr><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a>{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">Legacy</span>{% endif %}{% if charge.needs_review %} <span class="badge">Needs review</span>{% endif %}</td><td>{{ charge.due_date|date:"Y-m-d" }}</td><td>{% if charge.cost is not None %}${{ charge.cost }}{% else %}unknown{% endif %}</td><td>${{ charge.price }}</td><td>${{ charge.amount_paid }}</td><td>${{ charge.balance }}</td><td>{{ charge.get_status_display }}</td>
           <td>{% if row.resolution %}<span class="deposit-resolved">{{ row.resolution.get_kind_display }} ${{ row.resolution.amount }}</span>{% elif row.can_resolve %}<a class="btn resolve-deposit" href="{% url 'ledger:leases:resolve_deposit' pk=lease.pk charge=charge.pk %}">Resolve deposit</a>{% elif charge.fee_type.refundable %}<span class="muted">Held</span>{% else %}—{% endif %}</td></tr>
       {% endwith %}{% empty %}
-        <tr><td colspan="8" class="muted">No setup charges.</td></tr>
+        <tr><td colspan="8" class="muted">No setup or one-off charges.</td></tr>
       {% endfor %}
     </tbody>
   </table>

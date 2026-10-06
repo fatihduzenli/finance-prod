@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
-{% block title %}{% if charge %}Edit {{ charge.fee_type.name }}{% else %}Add setup charge{% endif %}{% endblock %}
+{% block title %}{% if charge %}Edit {{ charge.label }}{% else %}Add setup charge{% endif %}{% endblock %}
 {% block content %}
-  <p>{% if charge %}<a href="{% url 'ledger:setup_charges:detail' pk=charge.pk %}">&larr; {{ charge.fee_type.name }}, {{ lease.store.external_label }}</a>{% else %}<a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a>{% endif %}</p>
-  <h1>{% if charge %}Edit {{ charge.fee_type.name }}{% else %}Add setup charge{% endif %}</h1>
+  <p>{% if charge %}<a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if lease %}, {{ lease.store.external_label }}{% endif %}</a>{% else %}<a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a>{% endif %}</p>
+  <h1>{% if charge %}Edit {{ charge.label }}{% else %}Add setup charge{% endif %}</h1>
   {% if price_locked %}<p id="price-locked" class="muted">A payment is recorded on this charge, so its price cannot change.</p>{% endif %}
   {% if not charge %}<p class="muted">The cost is what the item costs the business (empty: unknown); the price is what the operator pays. A lease has at most one charge of each fee type.</p>{% endif %}
   <form method="post" id="setup-charge-form" class="js-single-submit" autocomplete="off">

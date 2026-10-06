@@ -207,13 +207,27 @@ class JobKind(models.TextChoices):
     WEBHOOK_REPLAY = "webhook_replay", "Replay webhook event"
     #: PLAN-010 Batch B: "Run now" on the reconciliation page.
     RECONCILE_RUN = "reconcile_run", "Run reconciliation"
-    #: PLAN-010b D6: a manual payment on a setup charge whose invoice is to be marked paid.
-    SETUP_PAYMENT_MARK = "setup_payment_mark", "Mark the provider invoice of a setup charge paid"
-    #: PLAN-010b Batch B: "Retry marking" on a setup charge's page.
-    SETUP_PAYMENT_RETRY_MARK = (
-        "setup_payment_retry_mark",
-        "Retry marking the provider invoice of a setup charge",
+    #: PLAN-010b D6 (``setup_payment_mark`` before PLAN-010d D1): a manual payment on a
+    #: one-off charge whose invoice is to be marked paid.
+    ONE_OFF_PAYMENT_MARK = (
+        "one_off_payment_mark",
+        "Mark the provider invoice of a one-off charge paid",
     )
+    #: PLAN-010b Batch B: "Retry marking" on a one-off charge's page.
+    ONE_OFF_PAYMENT_RETRY_MARK = (
+        "one_off_payment_retry_mark",
+        "Retry marking the provider invoice of a one-off charge",
+    )
+    #: PLAN-010d D3, D6: the provider invoice of a one-off charge: create (with the
+    #: e-mail when the charge says so), the e-mail alone, delete.
+    INVOICE_CREATE = "invoice_create", "Create the provider invoice"
+    INVOICE_SEND = "invoice_send", "Send the provider invoice by email"
+    INVOICE_DELETE = "invoice_delete", "Delete the provider invoice"
+    #: PLAN-010d D2, D6: the one-occurrence provider schedule of an ``autopay_due`` charge.
+    SCHEDULE_CREATE = "schedule_create", "Create the provider schedule"
+    SCHEDULE_DELETE = "schedule_delete", "Delete the provider schedule"
+    #: PLAN-010d D4: "Charge now", the single pay-an-invoice attempt of a one-off charge.
+    INVOICE_PAY = "invoice_pay", "Charge the provider invoice now"
 
 
 class JobEntity(models.TextChoices):
@@ -228,7 +242,7 @@ class JobEntity(models.TextChoices):
     WEBHOOK_EVENT = "webhook_event", "Webhook event"
     #: Not a row: the reconciliation, one fixed entity ID (``payments.jobs.RECONCILIATION``).
     RECONCILIATION = "reconciliation", "Reconciliation"
-    SETUP_CHARGE = "setup_charge", "Setup charge"
+    ONE_OFF_CHARGE = "one_off_charge", "One-off charge"
 
 
 class JobStatus(models.TextChoices):
