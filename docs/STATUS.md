@@ -736,3 +736,16 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Owner typed "push". `main` at `6f153de`; CI run 37414601899 green (web first, then worker and
   job; all three on the commit). Web and worker healthy; `/healthz` 200. The owner now presses
   the single Retry on `INV-2026-0003`.
+
+## Update, 2026-10-06, Prompt 10d closed on staging; waive finding
+
+- **Owner, in writing:** 10d clicks 1–4 passed: the retry created `INV-2026-0003`, SENT, visible in
+  the Stax dashboard with our reference and description; wire payment recorded and Stax shows it
+  paid with the memo; Cancel on a third charge: Voided here, DELETED in Stax. Audit page: filter
+  and CSV work; `viewer1` gets 403 on the URL. **Prompt 10d closed** (Charge now and autopay on
+  the due date proven by unit tests until Stax enables ACH).
+- **Owner finding (misclick):** Waive on a charge with a live Stax invoice marks the charge
+  Waived while the invoice stays open at Stax, which could still collect it. Wanted: Waive must
+  delete the provider invoice through the worker (Cancel's path) before marking waived, or refuse
+  until cancelled; audit both; make Waive and Cancel explicit on the page; and give the already
+  waived `INV-2026-0004` a way to have its Stax invoice deleted. In the Prompt 11 plan.
