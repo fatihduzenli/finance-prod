@@ -808,6 +808,6 @@ the login page myself." The condition for starting Prompt 4 is met.
   not required yet). Then Fable runs `tz_audit` on staging (read-only) and shows the list;
   `tz_apply` only on the owner's word. Mail is enabled in a later deployment once the owner has
   done plan §9 and stored the key.
-- An untracked folder `static:brand/` (Monvera logos and icons, added 2026-10-06 17:35 local)
-  appeared in the working tree; it is not part of this plan and was **left out of the commit**
-  pending the owner's instruction.
+- **Owner, in writing:** the brand folder is theirs (misnamed by Finder); the six Monvera brand
+  files now sit in `static/brand/`, **uncommitted by instruction**, for Prompt 12c. Every commit
+  until then excludes `static/brand/`.
