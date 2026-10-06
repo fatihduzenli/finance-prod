@@ -780,3 +780,15 @@ the login page myself." The condition for starting Prompt 4 is met.
   `Cache-Control: private, no-store`.
 - Next: the owner's laptop and phone clicks (RUNBOOK §14), including "Delete provider invoice"
   on `INV-2026-0004`.
+
+## Update, 2026-10-06, Prompt 11 closed on staging
+
+- **Owner, in writing:** all Prompt 11 clicks passed on the laptop and the phone: dashboard, grid
+  with filters and CSV, arrears and today's run match the run page, aging total equals
+  outstanding, report CSV, Delete provider invoice on `INV-2026-0004` shows DELETED in Stax,
+  home-screen install, MFA sign-in, grid scroll and camera upload on the phone. **Prompt 11
+  closed.** Usability note for 11b: the grid's months beyond the viewport need a visible
+  horizontal scrollbar, a fixed store column, and columns sized so 12 months fit on a laptop.
+- **Owner decision (item 7 of 11b):** the project time zone becomes America/New_York (storage
+  stays UTC); nothing migrates silently: the rows whose date would change are listed first. Must
+  land before Prompt 13.
