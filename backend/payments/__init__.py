@@ -16,6 +16,9 @@ if TYPE_CHECKING:
     from payments.provider import PaymentProvider
 
 FAKE = "fake"
+#: The payment provider's name as staff know it, for the few sentences that must name it
+#: (PLAN-011 D0). The ledger may not name the provider itself (tests/test_stax_isolation.py).
+PROVIDER_LABEL = "Stax"
 
 _lock = threading.Lock()
 _providers: dict[str, PaymentProvider] = {}

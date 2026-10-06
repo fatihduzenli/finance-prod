@@ -914,6 +914,8 @@ class EndLeaseForm(forms.Form):
 
 DOCUMENT_NOTE_MAX_LENGTH = 2000
 DOCUMENT_FILE_REQUIRED = "Choose a file to upload."
+DOCUMENT_FILE_ACCEPT = "image/*,.pdf,.docx,.heic"
+DOCUMENT_PHOTO_ACCEPT = "image/*"
 
 
 class DocumentUploadForm(forms.Form):
@@ -927,12 +929,26 @@ class DocumentUploadForm(forms.Form):
 
     file = forms.FileField(
         label="File",
-        error_messages={"required": DOCUMENT_FILE_REQUIRED},
+        # Required with the photo below: one of the two (clean).
+        required=False,
         # An empty file reaches the service, which refuses it and audits the refusal.
         allow_empty_file=True,
-        # The type is decided from the content; this only narrows the file picker.
+        # The type is decided from the content; this only narrows the file picker
+        # (images include a phone's photo library; PLAN-011 D9).
+        widget=forms.FileInput(attrs={"accept": DOCUMENT_FILE_ACCEPT, "class": "js-document-file"}),
+    )
+    #: "Take photo" (PLAN-011 D9): the phone opens its rear camera. Images only; one file
+    #: per submit still (DATA_UPLOAD_MAX_NUMBER_FILES), so the page clears the other input.
+    photo = forms.FileField(
+        label="Take photo",
+        required=False,
+        allow_empty_file=True,
         widget=forms.FileInput(
-            attrs={"accept": ".pdf,.docx,.jpg,.jpeg,.png,.heic", "class": "js-document-file"}
+            attrs={
+                "accept": DOCUMENT_PHOTO_ACCEPT,
+                "capture": "environment",
+                "class": "js-document-photo",
+            }
         ),
     )
     #: A select of the kinds; any other value reaches the service, which refuses it.
@@ -942,6 +958,16 @@ class DocumentUploadForm(forms.Form):
         strip=False,
         widget=forms.Textarea(attrs={"rows": 2, "maxlength": DOCUMENT_NOTE_MAX_LENGTH}),
     )
+
+    def clean(self) -> dict[str, Any]:
+        """The file comes from either input; the photo becomes ``file``."""
+        cleaned = super().clean() or {}
+        photo = cleaned.get("photo")
+        if cleaned.get("file") is None and photo is not None:
+            cleaned["file"] = photo
+        if cleaned.get("file") is None and "file" not in self.errors:
+            self.add_error("file", DOCUMENT_FILE_REQUIRED)
+        return cleaned
 
 
 class DocumentDeleteForm(forms.Form):

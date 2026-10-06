@@ -267,7 +267,11 @@ limiter, breaker, retries, validation and failure budget; see
 at `/operators/` (list, search, detail, create, edit, archive, retry, manual link), with
 each new or edited operator linked to or created as a Stax customer, the boot-time
 environment check, and the reserved `documents` and `outbound_messages` tables; see
-[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). Prompt 10d (PLAN-010d): one-off charges and their Stax invoices from the app (arrears,
+[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). Prompt 11 (PLAN-011): the dashboard at `/`, the month grid, arrears, the reports menu (aging,
+revenue, payments by method, deposits, statement, P&L), CSV on every list, phone layout and
+home-screen install (static-only service worker), camera capture; see
+[`docs/qa/PLAN-011-dashboard-reports-mobile.md`](docs/qa/PLAN-011-dashboard-reports-mobile.md).
+Prompt 10d (PLAN-010d): one-off charges and their Stax invoices from the app (arrears,
 adjustments, damage, setup fees; email, manual, autopay or Charge now), cancel, and the
 admin audit page at `/audit/` (ADR-0009); see
 [`docs/qa/PLAN-010d-one-off-charges-and-audit-page.md`](docs/qa/PLAN-010d-one-off-charges-and-audit-page.md).

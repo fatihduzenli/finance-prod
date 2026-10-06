@@ -137,6 +137,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:one_off_charges:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:cancel": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:waive": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Deleting the live provider invoice of a waived charge (PLAN-011 D0, D10): admin.
+    "ledger:one_off_charges:delete_invoice": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Charge now (PLAN-010d D4, D9): admin. The view refuses the confirmation page's GET
     # below admin too.
     "ledger:one_off_charges:charge_now": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -231,6 +233,43 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # (PLAN-010d D8, D9).
         "ledger:audit:page",
         "ledger:audit:export",
+        # The home page (dashboard), the month grid and the arrears list, with their CSV
+        # exports: any verified role (PLAN-011 D1 to D3, D10).
+        "ledger:home",
+        "ledger:grid:page",
+        "ledger:grid:export",
+        "ledger:arrears:page",
+        "ledger:arrears:export",
+        # The reports menu, the A/R aging, revenue by month, payments by method, deposits
+        # versus transactions and the customer statement, with their CSV exports: any
+        # verified role (PLAN-011 D4, D10).
+        "ledger:reports:index",
+        "ledger:reports:aging",
+        "ledger:reports:aging_export",
+        "ledger:reports:revenue",
+        "ledger:reports:revenue_export",
+        "ledger:reports:payments_by_method",
+        "ledger:reports:payments_by_method_export",
+        "ledger:reports:deposits",
+        "ledger:reports:deposits_export",
+        "ledger:operators:statement",
+        "ledger:operators:statement_export",
+        # The CSV export of every list (PLAN-011 D5, D10): any verified role, except the
+        # reconciliation mismatches, whose view requires billing like its page.
+        "ledger:operators:export",
+        "ledger:stores:export",
+        "ledger:leases:export",
+        "ledger:run:export",
+        "ledger:charges:export",
+        "ledger:one_off_charges:export",
+        "ledger:returns:export",
+        "ledger:webhooks:export",
+        "ledger:reconciliation:export",
+        "ledger:documents:export_store",
+        "ledger:documents:export_lease",
+        # The web app manifest and the service worker (PLAN-011 D9): any verified role.
+        "finance:manifest",
+        "finance:service_worker",
     }
 )
 

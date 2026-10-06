@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% load static %}
 {% block title %}Store {{ store.external_label }}{% endblock %}
 {% block content %}
@@ -39,6 +40,7 @@
     </form>
   {% endif %}
   {% if cost_history %}
+    {% responsive_table %}
     <table id="cost-history">
       <thead><tr><th>Landlord rent</th><th>Other cost</th><th>From</th><th>To</th><th>Lease end</th><th>Source</th><th>Notes</th><th></th></tr></thead>
       <tbody>
@@ -57,9 +59,11 @@
         {% endwith %}{% endfor %}
       </tbody>
     </table>
+    {% endresponsive_table %}
   {% endif %}
 
   <h2>Leases</h2>
+  {% responsive_table %}
   <table id="store-leases">
     <thead><tr><th>Lease</th><th>Operator</th><th>Start date</th><th>Debit days</th><th>Status</th></tr></thead>
     <tbody>
@@ -76,6 +80,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 
   {% include "ledger/documents/_section.html" %}
 {% endblock %}

@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}{{ charge.label }}{% if lease %} {{ lease.store.external_label }}{% endif %}{% endblock %}
 {% block content %}
   <p>{% if lease %}<a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a>{% elif operator %}<a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a>{% endif %}</p>
@@ -13,6 +14,19 @@
     {% elif charge_now_wait %}
       <p id="charge-now-wait" class="muted">{{ charge_now_wait }}</p>
     {% endif %}
+  {% endif %}
+  {% if can_waive or can_cancel %}
+    <ul id="close-actions" class="muted">
+      {% if can_cancel %}<li id="cancel-meaning"><strong>Cancel</strong> {{ cancel_meaning }}.</li>{% endif %}
+      {% if can_waive %}<li id="waive-meaning"><strong>Waive</strong> {{ waive_meaning }}.</li>{% endif %}
+    </ul>
+    {% if can_waive and waive_refusal %}<p id="waive-refusal"><strong>{{ waive_refusal }}</strong></p>{% endif %}
+  {% endif %}
+  {% if can_delete_invoice %}
+    <form method="post" action="{% url 'ledger:one_off_charges:delete_invoice' pk=charge.pk %}" class="actions js-single-submit">
+      {% csrf_token %}<button class="btn btn-danger" type="submit" id="delete-invoice">Delete provider invoice</button>
+      <span class="muted">{{ delete_invoice_hint }}</span>
+    </form>
   {% endif %}
   {% if can_record or can_link_invoice or can_edit or can_waive or can_cancel %}
     <p class="actions">
@@ -70,6 +84,7 @@
   {% endif %}
 
   <h2>Invoices</h2>
+  {% responsive_table %}
   <table id="invoices">
     <thead><tr><th>Number</th><th>Date</th><th>Due</th><th>Total</th><th>Status</th><th>Provider status</th></tr></thead>
     <tbody>
@@ -80,9 +95,11 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   <p class="muted">Provider status is copied from the payment provider as it is.</p>
 
   <h2>Payments</h2>
+  {% responsive_table %}
   <table id="payments">
     <thead><tr><th>Received</th><th>Kind</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Note</th><th>Recorded by</th></tr></thead>
     <tbody>
@@ -102,5 +119,6 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

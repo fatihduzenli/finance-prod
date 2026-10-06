@@ -3,7 +3,8 @@
 {% block content %}
   <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
   <h1>Waive {{ charge.label }}</h1>
-  <p>Price ${{ charge.price }}, balance ${{ charge.balance }}. A waived charge is no longer owed and cannot be edited or paid here. A charge with a settled payment cannot be waived. Nothing is sent to the payment provider: an invoice linked to this charge stays open there until staff close it.</p>
+  <p>Price ${{ charge.price }}, balance ${{ charge.balance }}. <strong>Waive</strong> {{ waive_meaning }}. A waived charge is no longer owed and cannot be edited or paid here. A charge with a settled payment cannot be waived. Nothing is sent to the payment provider.</p>
+  {% if refusal %}<p id="waive-refusal"><strong>{{ refusal }}</strong></p>{% endif %}
   <form method="post" id="waive-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}

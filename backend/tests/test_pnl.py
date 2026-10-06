@@ -760,23 +760,28 @@ def test_the_csv_equals_the_page_figures_for_every_grouping_and_the_breakdown() 
                 else:
                     expected.append((group, item))
             expected.append(("total", context["total"]))
-            assert [record["level"] for record in records] == [level for level, _ in expected]
+            assert [record["Level"] for record in records] == [level for level, _ in expected]
             for record, (_, item) in zip(records, expected, strict=True):
-                for name in ("rent_billed", "rent_collected", "fees_billed", "fees_collected"):
-                    assert record[name] == f"{getattr(item, name):.2f}"
-                for name in (
-                    "landlord_rent",
-                    "other_costs",
-                    "fee_costs",
-                    "margin_billed",
-                    "margin_collected",
+                for name, column in (
+                    ("rent_billed", "Rent billed (USD)"),
+                    ("rent_collected", "Rent collected (USD)"),
+                    ("fees_billed", "Fees billed (USD)"),
+                    ("fees_collected", "Fees collected (USD)"),
+                ):
+                    assert record[column] == f"{getattr(item, name):.2f}"
+                for name, column, known in (
+                    ("landlord_rent", "Landlord rent (USD)", "Landlord rent known"),
+                    ("other_costs", "Other costs (USD)", "Other costs known"),
+                    ("fee_costs", "Fee costs (USD)", "Fee costs known"),
+                    ("margin_billed", "Margin billed (USD)", "Margin billed known"),
+                    ("margin_collected", "Margin collected (USD)", "Margin collected known"),
                 ):
                     value = getattr(item, name)
                     if value is None:
-                        assert (record[name], record[f"{name}_known"]) == ("", "no")
+                        assert (record[column], record[known]) == ("", "no")
                     else:
-                        assert (record[name], record[f"{name}_known"]) == (f"{value:.2f}", "yes")
-                assert record["unknown_inputs"] == "; ".join(item.unknown)
+                        assert (record[column], record[known]) == (f"{value:.2f}", "yes")
+                assert record["Unknown inputs"] == "; ".join(item.unknown)
 
 
 def test_the_csv_header_documents_unknown_and_the_cells_are_formula_safe() -> None:
@@ -786,13 +791,13 @@ def test_the_csv_header_documents_unknown_and_the_cells_are_formula_safe() -> No
     records = csv_rows(get(EXPORT, {"from": "2026-07", "to": "2026-07", "detail": "1"}))
     assert list(records[0]) == list(pnl.CSV_HEADER)
     detail = records[0]
-    assert detail["store"] == '\'=HYPERLINK("http://example.com")'
-    assert detail["operator"] == "'+Plus Operator"
-    assert (detail["landlord_rent"], detail["landlord_rent_known"]) == ("", "no")
-    assert (detail["margin_billed"], detail["margin_billed_known"]) == ("", "no")
-    assert detail["unknown_inputs"] == "landlord rent; other costs"
-    assert detail["cost_only_months"] == "0"
-    assert records[-1]["level"] == "total"
+    assert detail["Store"] == '\'=HYPERLINK("http://example.com")'
+    assert detail["Operator"] == "'+Plus Operator"
+    assert (detail["Landlord rent (USD)"], detail["Landlord rent known"]) == ("", "no")
+    assert (detail["Margin billed (USD)"], detail["Margin billed known"]) == ("", "no")
+    assert detail["Unknown inputs"] == "landlord rent; other costs"
+    assert detail["Cost-only months"] == "0"
+    assert records[-1]["Level"] == "total"
 
 
 def test_the_export_is_a_streamed_csv_attachment() -> None:
@@ -802,7 +807,7 @@ def test_the_export_is_a_streamed_csv_attachment() -> None:
     assert response["Content-Disposition"].startswith(
         'attachment; filename="pnl-2026-07-to-2026-08-'
     )
-    assert response["Cache-Control"] == "no-store"
+    assert set(response["Cache-Control"].split(", ")) == {"no-store", "private"}
 
 
 def test_the_nav_links_to_the_report_next_to_payments() -> None:

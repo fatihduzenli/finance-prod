@@ -149,6 +149,7 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
         for short in (
             "list",
             "detail",
+            "export",
             "add_setup_charge",
             "new_charge",
             "resolve_deposit",
@@ -156,7 +157,11 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             *POST_ROUTES,
         )
     }
-    assert {"ledger:leases:list", "ledger:leases:detail"} <= registry.READ_ONLY_ROUTE_NAMES
+    assert {
+        "ledger:leases:list",
+        "ledger:leases:detail",
+        "ledger:leases:export",
+    } <= registry.READ_ONLY_ROUTE_NAMES
     for short in POST_ROUTES:
         rule = registry.rule_for(f"ledger:leases:{short}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}

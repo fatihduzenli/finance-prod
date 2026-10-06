@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Autopay for {{ lease.store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a></p>
@@ -10,6 +11,7 @@
     <ul id="enrolment-blockers">{% for text in blockers %}<li>{{ text }}</li>{% endfor %}</ul>
   {% else %}
     {% if notes_info or lease.operator.email %}<ul id="enrolment-notes" class="muted">{% if lease.operator.email %}<li id="receipts-email">Receipts go to {{ lease.operator.email }}</li>{% endif %}{% for text in notes_info %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}
+    {% responsive_table %}
     <table id="debits">
       <thead><tr><th>Debit</th><th>Day</th><th>Amount per debit</th><th>First debit (DTSTART)</th></tr></thead>
       <tbody>
@@ -25,6 +27,7 @@
         {% endfor %}
       </tbody>
     </table>
+    {% endresponsive_table %}
     {% if limit_refusal %}
       <p id="provider-limit"><strong>{{ limit_refusal }}</strong></p>
     {% elif any_large %}
@@ -52,6 +55,7 @@
         {% csrf_token %}
         {{ form.non_field_errors }}
         {{ form.payment_method_id.errors }}
+        {% responsive_table %}
         <table id="payment-methods">
           <thead><tr><th></th><th>Type</th><th>Account type</th><th>Last four</th><th>Nickname</th></tr></thead>
           <tbody>
@@ -66,6 +70,7 @@
             {% endfor %}
           </tbody>
         </table>
+        {% endresponsive_table %}
         {% if choices.has_bank and confirmation and not limit_refusal %}
           <p id="large-debit-confirmation"><label style="font-weight:normal;"><input type="checkbox" name="confirm_large_debit" value="true" id="confirm-large-debit"> {{ confirmation }}</label></p>
         {% endif %}

@@ -749,3 +749,24 @@ the login page myself." The condition for starting Prompt 4 is met.
   delete the provider invoice through the worker (Cancel's path) before marking waived, or refuse
   until cancelled; audit both; make Waive and Cancel explicit on the page; and give the already
   waived `INV-2026-0004` a way to have its Stax invoice deleted. In the Prompt 11 plan.
+
+## Note, 2026-10-06: TIME_ZONE and settlement dates (owner decision wanted, not urgent)
+
+- `TIME_ZONE = "UTC"`: a payment settled at 23:59 New York time is recorded with the next day's
+  `settled_on`, so month-boundary figures (paid this month, revenue by month) follow UTC days.
+  Changing the project time zone to America/New_York moves ledger dates and needs its own plan;
+  deferred by written decision until the owner says which calendar the books keep.
+
+## Update, 2026-10-06, PLAN-011 (dashboard, grid, arrears, reports, exports, mobile) — QA PASS, not pushed
+
+- Built as one plan in three batches: Waive refusal and the "Delete provider invoice" remedy (for
+  `INV-2026-0004`); the dashboard as home; the month grid with the sheet's CSV order; arrears;
+  the reports menu (aging equal to the dashboard's outstanding by construction, revenue, payments
+  by method, deposits vs transactions, printable statement, P&L); CSV on every list with
+  accountant-readable headers; five indexes; the August 2026 fixture (392 / $1,470,001.57 / 47 /
+  13) reproduced; phone layout, manifest, static-only service worker (executed under Node in QA),
+  camera capture, MFA on a 390 px viewport in Playwright. QA report
+  `docs/qa/QA-011-dashboard-reports-mobile.md`: PASS, 4,246 tests on PostgreSQL.
+- Rollout: one "push" (migration ledger 0022, indexes only). No infrastructure change.
+- Deferred by written decision: `TIME_ZONE` and settlement dates (note above); the Google Sheet
+  push stays unbuilt (amendment 7).

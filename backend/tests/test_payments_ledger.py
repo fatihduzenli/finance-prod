@@ -217,10 +217,10 @@ def test_unusable_filter_values_are_ignored(book: dict[str, Any], params: dict[s
 def test_every_role_reads_the_ledger_and_the_totals(book: dict[str, Any], role: Role) -> None:
     client, _ = client_for(role)
     page = client.get(LIST).content.decode()
-    assert '<td id="total-settled">$1900.00</td>' in page
-    assert '<td id="total-pending">$700.00</td>' in page
-    assert '<td id="total-returned">$300.00</td>' in page
-    assert '<td id="total-refunded">$200.00</td>' in page
+    assert '<td id="total-settled" data-label="Settled (collected)">$1900.00</td>' in page
+    assert '<td id="total-pending" data-label="Pending (not collected yet)">$700.00</td>' in page
+    assert '<td id="total-returned" data-label="Returned">$300.00</td>' in page
+    assert '<td id="total-refunded" data-label="Refunded">$200.00</td>' in page
     assert "txn-…5678" in page and TRANSACTION not in page
 
 
@@ -294,26 +294,26 @@ def test_the_export_streams_one_row_per_payment_with_plain_values(book: dict[str
     rows = parse(response)
     assert len(rows) == 6
     assert list(rows[0]) == list(ledger.CSV_HEADER)
-    by_id = {row["payment_id"]: row for row in rows}
+    by_id = {row["Payment ID"]: row for row in rows}
     settled = by_id[str(book["settled"].pk)]
-    assert (settled["amount"], settled["paid_on"], settled["initiated_on"]) == (
+    assert (settled["Amount (USD)"], settled["Paid date"], settled["Initiated date"]) == (
         "1500.00",
         "2026-10-17",
         "2026-10-15",
     )
-    assert settled["provider_transaction"] == "txn-…5678"
-    assert (settled["status"], settled["is_refund"], settled["charge_period"]) == (
+    assert settled["Provider transaction (masked)"] == "txn-…5678"
+    assert (settled["Status"], settled["Refund"], settled["Rent month"]) == (
         "settled",
         "no",
         "2026-10",
     )
     refund = by_id[str(book["refund"].pk)]
-    assert (refund["is_refund"], refund["refunds_payment_id"]) == ("yes", str(book["settled"].pk))
+    assert (refund["Refund"], refund["Refund of payment ID"]) == ("yes", str(book["settled"].pk))
     wire = by_id[str(book["wire"].pk)]
-    assert wire["note"] == TRICKY_NOTE
-    assert wire["reference"] == "'=SUM(A1)"
+    assert wire["Note"] == TRICKY_NOTE
+    assert wire["Reference"] == "'=SUM(A1)"
     pending = by_id[str(book["pending"].pk)]
-    assert (pending["paid_on"], pending["status"]) == ("", "pending")
+    assert (pending["Paid date"], pending["Status"]) == ("", "pending")
 
 
 def test_the_export_never_holds_an_unmasked_provider_id(book: dict[str, Any]) -> None:
@@ -325,10 +325,10 @@ def test_the_export_never_holds_an_unmasked_provider_id(book: dict[str, Any]) ->
 def test_the_export_applies_the_same_filter_as_the_page(book: dict[str, Any]) -> None:
     client, _ = client_for(Role.BILLING)
     rows = parse(client.get(EXPORT, {"status": "refunded"}))
-    assert [row["payment_id"] for row in rows] == [str(book["refund"].pk)]
+    assert [row["Payment ID"] for row in rows] == [str(book["refund"].pk)]
     operator = operator_of(book["second"])
     by_operator = parse(client.get(EXPORT, {"operator": str(operator.pk), "method": "ach"}))
-    assert {row["payment_id"] for row in by_operator} == {
+    assert {row["Payment ID"] for row in by_operator} == {
         str(book[name].pk) for name in ("pending", "returned", "voided")
     }
 

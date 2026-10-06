@@ -1,10 +1,15 @@
-"""The profit and loss report and its CSV export (docs/qa/PLAN-010b D11, D12).
+"""The reports menu, the profit and loss report, the A/R aging, revenue by month,
+payments by method, deposits versus transactions and the customer statement, each with
+its CSV export (docs/qa/PLAN-010b D11, D12; PLAN-011 D4, D5, D10).
 
-Read only and open to every role: ``accounts.registry`` lists both routes as read-only,
-so any unsafe method is refused (403), and the views take GET and HEAD only (405
-otherwise). The query string is read by :func:`ledger.services.pnl.parse_query`, which
-never fails: an unusable range is replaced and the page says so. The export applies
-the same query.
+Read only and open to every role: ``accounts.registry`` lists every route here as
+read-only, so any unsafe method is refused (403), and the views take GET and HEAD only
+(405 otherwise). The P&L's query string is read by
+:func:`ledger.services.pnl.parse_query`, the other reports' range by
+:func:`ledger.services.reports.parse_range` (the same bounds); neither fails: an
+unusable range is replaced and the page says so. Each export applies its page's query.
+The aging has no range: it is the open balances as of today, so that its grand total
+is the dashboard's total outstanding.
 
 **Statement timeout** (PLAN-010c D11): on PostgreSQL every query of the page and of the
 export runs inside one transaction with ``SET LOCAL statement_timeout`` set to
@@ -18,19 +23,27 @@ run the same code without the timeout.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+import uuid
+from collections.abc import Callable, Iterator
 from decimal import Decimal
+from typing import Any
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.db import OperationalError, connection, transaction
-from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
-from django.shortcuts import render
+from django.http import (
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBase,
+)
+from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_safe
 
-from ledger.services import pnl
-from ledger.views.operators import role_required
+from ledger.models import Operator
+from ledger.services import pnl, receivables, reports
+from ledger.views.operators import csv_response, role_required
 
 logger = logging.getLogger(__name__)
 
@@ -136,12 +149,213 @@ def pnl_export(request: HttpRequest) -> HttpResponseBase:
         records = bounded(lambda: list(pnl.csv_records(query)))
     except ReportTooSlow:
         return _too_slow(request, query)
-    response = StreamingHttpResponse(
-        pnl.csv_lines_of(records), content_type="text/csv; charset=utf-8"
+    return csv_response(
+        pnl.csv_lines_of(records),
+        f"pnl-{query.from_month:%Y-%m}-to-{query.to_month:%Y-%m}-{_stamp()}.csv",
     )
-    response["Content-Disposition"] = (
-        f'attachment; filename="pnl-{query.from_month:%Y-%m}-to-{query.to_month:%Y-%m}'
-        f'-{timezone.localdate():%Y-%m-%d}.csv"'
+
+
+def _stamp() -> str:
+    return f"{timezone.localdate():%Y-%m-%d}"
+
+
+def _span(selected: reports.ReportRange) -> str:
+    return f"{selected.from_month:%Y-%m}-to-{selected.to_month:%Y-%m}"
+
+
+# --- The menu (D4) ----------------------------------------------------------------------
+
+
+@role_required
+@require_safe
+def report_index(request: HttpRequest) -> HttpResponse:
+    """``ledger:reports:index``: every report, the P&L included."""
+    return render(request, "ledger/reports/index.html")
+
+
+# --- A/R aging --------------------------------------------------------------------------
+
+
+def _aging_page(request: HttpRequest, report: receivables.AgingReport | None) -> HttpResponse:
+    return render(
+        request,
+        "ledger/reports/aging.html",
+        {
+            "report": report,
+            "too_slow": TOO_SLOW if report is None else "",
+            "buckets": receivables.AGING_BUCKETS,
+            "today": timezone.localdate(),
+        },
     )
-    response["Cache-Control"] = "no-store"
-    return response
+
+
+@role_required
+@require_safe
+def aging_report(request: HttpRequest) -> HttpResponse:
+    today = timezone.localdate()
+    try:
+        report = bounded(lambda: receivables.aging(today))
+    except ReportTooSlow:
+        report = None
+    return _aging_page(request, report)
+
+
+@role_required
+@require_safe
+def aging_export(request: HttpRequest) -> HttpResponseBase:
+    today = timezone.localdate()
+    try:
+        report = bounded(lambda: receivables.aging(today))
+    except ReportTooSlow:
+        return _aging_page(request, None)
+    return csv_response(receivables.aging_csv_lines(report), f"aging-{today:%Y-%m-%d}.csv")
+
+
+# --- Ranged reports: revenue, payments by method, deposits ------------------------------
+
+
+def _ranged_page(
+    request: HttpRequest,
+    template: str,
+    selected: reports.ReportRange,
+    report: object | None,
+    **extra: Any,
+) -> HttpResponse:
+    return render(
+        request,
+        template,
+        {
+            "selected": selected,
+            "report": report,
+            "too_slow": TOO_SLOW if report is None else "",
+            "export_query": urlencode(selected.as_query()),
+            **extra,
+        },
+    )
+
+
+def _ranged[T](
+    request: HttpRequest,
+    template: str,
+    compute: Callable[[reports.ReportRange], T],
+    **extra: Any,
+) -> HttpResponse:
+    selected = reports.parse_range(request.GET)
+    try:
+        report: T | None = bounded(lambda: compute(selected))
+    except ReportTooSlow:
+        report = None
+    return _ranged_page(request, template, selected, report, **extra)
+
+
+def _ranged_export[T](
+    request: HttpRequest,
+    template: str,
+    compute: Callable[[reports.ReportRange], T],
+    lines: Callable[[T], Iterator[str]],
+    name: str,
+    **extra: Any,
+) -> HttpResponseBase:
+    selected = reports.parse_range(request.GET)
+    try:
+        report = bounded(lambda: compute(selected))
+    except ReportTooSlow:
+        return _ranged_page(request, template, selected, None, **extra)
+    return csv_response(lines(report), f"{name}-{_span(selected)}-{_stamp()}.csv")
+
+
+REVENUE = "ledger/reports/revenue.html"
+BY_METHOD = "ledger/reports/payments_by_method.html"
+DEPOSITS = "ledger/reports/deposits.html"
+
+
+@role_required
+@require_safe
+def revenue_report(request: HttpRequest) -> HttpResponse:
+    return _ranged(request, REVENUE, reports.revenue_by_month)
+
+
+@role_required
+@require_safe
+def revenue_export(request: HttpRequest) -> HttpResponseBase:
+    return _ranged_export(
+        request, REVENUE, reports.revenue_by_month, reports.revenue_csv_lines, "revenue"
+    )
+
+
+@role_required
+@require_safe
+def payments_by_method_report(request: HttpRequest) -> HttpResponse:
+    return _ranged(request, BY_METHOD, reports.payments_by_method, cards_note=reports.CARDS_NOTE)
+
+
+@role_required
+@require_safe
+def payments_by_method_export(request: HttpRequest) -> HttpResponseBase:
+    return _ranged_export(
+        request,
+        BY_METHOD,
+        reports.payments_by_method,
+        reports.payments_by_method_csv_lines,
+        "payments-by-method",
+        cards_note=reports.CARDS_NOTE,
+    )
+
+
+@role_required
+@require_safe
+def deposits_report(request: HttpRequest) -> HttpResponse:
+    return _ranged(request, DEPOSITS, reports.deposits_vs_transactions)
+
+
+@role_required
+@require_safe
+def deposits_export(request: HttpRequest) -> HttpResponseBase:
+    return _ranged_export(
+        request,
+        DEPOSITS,
+        reports.deposits_vs_transactions,
+        reports.deposits_csv_lines,
+        "deposits",
+    )
+
+
+# --- The customer statement -------------------------------------------------------------
+
+STATEMENT = "ledger/reports/statement.html"
+
+
+def _operator(pk: str) -> Operator:
+    """The operator named in the URL, archived or not; 404 otherwise."""
+    try:
+        key = uuid.UUID(pk)
+    except ValueError:
+        raise Http404 from None
+    return get_object_or_404(Operator, pk=key)
+
+
+def _statement(operator: Operator) -> Callable[[reports.ReportRange], reports.Statement]:
+    today = timezone.localdate()
+    return lambda selected: reports.statement(operator, selected, today)
+
+
+@role_required
+@require_safe
+def statement_page(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:operators:statement``: printable, every store of the operator."""
+    operator = _operator(pk)
+    return _ranged(request, STATEMENT, _statement(operator), operator=operator)
+
+
+@role_required
+@require_safe
+def statement_export(request: HttpRequest, pk: str) -> HttpResponseBase:
+    operator = _operator(pk)
+    return _ranged_export(
+        request,
+        STATEMENT,
+        _statement(operator),
+        reports.statement_csv_lines,
+        f"statement-{operator.pk}",
+        operator=operator,
+    )

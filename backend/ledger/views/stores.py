@@ -15,17 +15,20 @@ landlord rent in effect today, the operator rent of the lease active today and t
 margin, or "unknown" when any of them is unknown (never zero).
 Every POST ends in a redirect, whatever the outcome; a form with errors is held in the
 session for the next GET, as on the operator and lease screens.
+
+The list exports as CSV (``stores:export``, PLAN-011 D5): the same search, every page.
 """
 
 from __future__ import annotations
 
 import uuid
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from django.db.models.functions import Lower
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -41,19 +44,21 @@ from ledger.forms import (
     StoreForm,
 )
 from ledger.models import DocumentKind, Store, StoreCost, StoreCostSource
-from ledger.services import store_costs
+from ledger.services import csv_export, store_costs
 from ledger.services import stores as service
+from ledger.services.csv_export import CsvWriter
 from ledger.views import documents
 from ledger.views.leases import _admin_only
 from ledger.views.operators import (
-    CONTROL_CHARACTERS,
     PAGE_SIZE,
-    SEARCH_MAX_LENGTH,
     _actor,
     _held,
     _hold,
     _role,
+    csv_response,
+    export_name,
     role_required,
+    search_text,
 )
 
 ALREADY_SAVED = "This store was already saved. Nothing was changed."
@@ -71,21 +76,65 @@ def _load(pk: str) -> Store:
 # --- Read ---------------------------------------------------------------------------
 
 
-@role_required
-@require_safe
-def store_list(request: HttpRequest) -> HttpResponse:
-    query = CONTROL_CHARACTERS.sub("", request.GET.get("q", "")).strip()[:SEARCH_MAX_LENGTH]
+def _listed(request: HttpRequest) -> tuple[QuerySet[Store], str]:
+    """The stores the list shows for the request's search, in its order."""
+    query = search_text(request)
     stores = Store.objects.all()
     if query:
         stores = stores.filter(Q(external_label__icontains=query) | Q(city__icontains=query))
-    page = Paginator(stores.order_by(Lower("external_label"), "id"), PAGE_SIZE).get_page(
-        request.GET.get("page")
-    )
+    return stores.order_by(Lower("external_label"), "id"), query
+
+
+@role_required
+@require_safe
+def store_list(request: HttpRequest) -> HttpResponse:
+    stores, query = _listed(request)
+    page = Paginator(stores, PAGE_SIZE).get_page(request.GET.get("page"))
     return render(
         request,
         "ledger/stores/list.html",
-        {"page": page, "query": query, "can_create": meets(_role(request), Role.ADMIN)},
+        {
+            "page": page,
+            "query": query,
+            "can_create": meets(_role(request), Role.ADMIN),
+            "export_query": urlencode({"q": query}) if query else "",
+        },
     )
+
+
+EXPORT_HEADER = (
+    "Store",
+    "Store number",
+    "City",
+    "State",
+    "Open date",
+    "Needs open date",
+    "Status",
+    "Closed on",
+    "Needs review",
+)
+
+
+@role_required
+@require_safe
+def store_export(request: HttpRequest) -> StreamingHttpResponse:
+    """``ledger:stores:export`` (PLAN-011 D5): the list's rows, every page."""
+    stores, _ = _listed(request)
+    records = (
+        [
+            store.external_label,
+            store.store_number,
+            store.city,
+            store.state,
+            store.open_date,
+            store.needs_open_date,
+            store.get_status_display(),
+            store.closed_at,
+            store.needs_review,
+        ]
+        for store in stores[: csv_export.CSV_MAX_ROWS + 1].iterator()
+    )
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("stores"))
 
 
 @role_required

@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Webhook event {{ event.event_type }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:webhooks:list' %}">&larr; Webhook events</a></p>
@@ -30,12 +31,14 @@
 
   <h2>Payload (redacted)</h2>
   {% if payload_rows %}
+    {% responsive_table %}
     <table id="payload">
       <thead><tr><th>Field</th><th>Value</th></tr></thead>
       <tbody>
         {% for path, value in payload_rows %}<tr><td><code>{{ path|default:"(value)" }}</code></td><td>{{ value }}</td></tr>{% endfor %}
       </tbody>
     </table>
+    {% endresponsive_table %}
     {% if payload_rows_hidden %}<p class="muted">{{ payload_rows_hidden }} more fields not shown.</p>{% endif %}
   {% else %}
     <p class="muted" id="no-payload">No payload stored: the body was not JSON, or nothing of it could be kept without card or account data.</p>

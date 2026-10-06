@@ -182,7 +182,10 @@ def invoice_send_job(job: Job) -> Result:
 
 
 def invoice_delete_job(job: Job) -> Result:
-    """PLAN-010d D6: the cancel of an invoiced one-off charge."""
+    """PLAN-010d D6: the cancel of an invoiced one-off charge; with the waived flag
+    (PLAN-011 D0), the delete of a waived charge's live invoice."""
+    if job.params.get(one_off_charges.WAIVED_INVOICE_PARAM) is True:
+        return one_off_invoices.delete_waived(job.entity_id, job.requested_by)
     return one_off_invoices.delete(job.entity_id, job.requested_by)
 
 

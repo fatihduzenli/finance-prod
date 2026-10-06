@@ -72,7 +72,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q, QuerySet, Sum
+from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Sum
 from django.utils import timezone
 
 import payments
@@ -83,6 +83,7 @@ from ledger.models import (
     CollectionStatus,
     Invoice,
     Lease,
+    LeaseRentHistory,
     OneOffCharge,
     Payment,
     PaymentChannel,
@@ -394,10 +395,15 @@ def falls_on(debit_day: int, year: int, month: int) -> int:
     return min(debit_day, calendar.monthrange(year, month)[1])
 
 
+def _debit_days(day: date) -> list[int]:
+    """The debit days that fall on ``day`` (29 to 31 move to the month's last day)."""
+    last = calendar.monthrange(day.year, day.month)[1]
+    return [day.day] if day.day < last else list(range(day.day, 32))
+
+
 def leases_due(day: date) -> RunDay:
     """The debits due on ``day`` and the leases due that day that are skipped."""
-    last = calendar.monthrange(day.year, day.month)[1]
-    days = [day.day] if day.day < last else list(range(day.day, 32))
+    days = _debit_days(day)
     leases = (
         Lease.objects.select_related("store", "operator")
         .filter(Q(debit_day__in=days) | Q(second_debit_day__in=days))
@@ -439,6 +445,54 @@ def leases_due(day: date) -> RunDay:
                 )
             )
     return RunDay(day, tuple(due), tuple(skipped))
+
+
+@dataclass(frozen=True, slots=True)
+class DueCounts:
+    """How many debits :func:`leases_due` lists as due on a day, and how many of them
+    have a charge that is pending."""
+
+    due: int
+    pending: int
+
+
+def due_counts(day: date) -> DueCounts:
+    """The counts of :func:`leases_due` from two grouped queries, without per-lease work
+    (PLAN-011 D1, D6), for the home page; the run page keeps :func:`leases_due`.
+
+    The same definitions: a lease is due when a debit day falls on ``day``, its collection
+    is active, its channel is known, it has started and a rent row is in effect on ``day``
+    (:func:`_skip_reason`, :func:`ledger.services.leases.rent_on`). Debit 1 is
+    ``debit_day`` and debit 2 is ``second_debit_day`` (which needs a first one, by
+    constraint). A due debit is pending when this month's charge for it is pending.
+    """
+    days = _debit_days(day)
+    rent_in_effect = Exists(
+        LeaseRentHistory.objects.filter(lease=OuterRef("pk"), effective_from__lte=day).exclude(
+            effective_to__lt=day
+        )
+    )
+    eligible = (
+        Lease.objects.filter(collection_status=CollectionStatus.ACTIVE)
+        .exclude(payment_channel=PaymentChannel.UNKNOWN)
+        .filter(Q(started_on__isnull=True) | Q(started_on__lte=day))
+        .filter(rent_in_effect)
+        .filter(Q(debit_day__in=days) | Q(second_debit_day__in=days))
+    )
+    counts = eligible.aggregate(
+        first=Count("id", filter=Q(debit_day__in=days)),
+        second=Count("id", filter=Q(second_debit_day__in=days)),
+    )
+    pending = (
+        RentCharge.objects.filter(
+            lease__in=eligible.values("id"),
+            period_month=day.replace(day=1),
+            status=RentChargeStatus.PENDING,
+        )
+        .filter(Q(seq=1, lease__debit_day__in=days) | Q(seq=2, lease__second_debit_day__in=days))
+        .count()
+    )
+    return DueCounts(due=counts["first"] + counts["second"], pending=pending)
 
 
 def carried_balance(charge: RentCharge) -> Decimal:

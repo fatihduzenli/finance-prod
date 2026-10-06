@@ -39,7 +39,7 @@ def _sign_in(page: Page, live_server: LiveServer, username: str) -> None:
     token_field.wait_for(state="visible")
     token_field.fill(current_code(device))
     page.get_by_role("button", name="Next").click()
-    page.wait_for_url(f"{live_server.url}/admin/")
+    page.wait_for_url(f"{live_server.url}/")  # the dashboard (PLAN-011 D1)
 
 
 def test_upload_by_input_and_by_drop_then_preview(

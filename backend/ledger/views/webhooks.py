@@ -5,6 +5,9 @@ Provider object IDs are masked to their first and last four characters, in the l
 on the detail page and inside the payload table. The payload shown is the redacted
 copy the receiver stored; nothing here reads the provider. A replay is queued as a
 ``webhook_replay`` job for the worker (PLAN-010 D3); the detail page shows its state.
+
+The list exports as CSV (``webhooks:export``, PLAN-011 D5): the same filters, identifiers
+masked.
 """
 
 from __future__ import annotations
@@ -12,16 +15,19 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Mapping
+from urllib.parse import urlencode
 
 from django.core.paginator import Paginator
-from django.db.models import Q
-from django.http import Http404, HttpRequest, HttpResponse
+from django.db.models import Q, QuerySet
+from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST, require_safe
 
 from accounts.roles import Role, meets
+from ledger.services import csv_export
+from ledger.services.csv_export import CsvWriter
 from ledger.views.jobs import busy, job_context, submit
-from ledger.views.operators import PAGE_SIZE, _role, role_required
+from ledger.views.operators import PAGE_SIZE, _role, csv_response, export_name, role_required
 from ledger.views.run import _billing_only
 from payments.models import JobKind, WebhookEvent, WebhookOutcome
 from payments.provider import mask_identifier
@@ -77,9 +83,8 @@ def _outcome_filter(outcome: str) -> Q:
     return Q(outcome=outcome) | Q(outcome__startswith=f"{outcome}:")
 
 
-@role_required
-@require_safe
-def webhook_list(request: HttpRequest) -> HttpResponse:
+def _listed(request: HttpRequest) -> tuple[QuerySet[WebhookEvent], str, str]:
+    """The events the list shows for the request's filters, newest first."""
     outcome = request.GET.get("outcome", "")
     if outcome not in WebhookOutcome.values:
         outcome = ""
@@ -91,6 +96,13 @@ def webhook_list(request: HttpRequest) -> HttpResponse:
         events = events.filter(_outcome_filter(outcome))
     if event_type:
         events = events.filter(event_type=event_type)
+    return events, outcome, event_type
+
+
+@role_required
+@require_safe
+def webhook_list(request: HttpRequest) -> HttpResponse:
+    events, outcome, event_type = _listed(request)
     page = Paginator(events, PAGE_SIZE).get_page(request.GET.get("page"))
     rows = [(event, mask_identifier(event.provider_object_id)) for event in page]
     return render(
@@ -101,12 +113,50 @@ def webhook_list(request: HttpRequest) -> HttpResponse:
             "rows": rows,
             "outcome": outcome,
             "event_type": event_type,
+            "export_query": urlencode(
+                {
+                    name: value
+                    for name, value in (("outcome", outcome), ("type", event_type))
+                    if value
+                }
+            ),
             "outcomes": WebhookOutcome.choices,
             "event_types": WebhookEvent.objects.order_by("event_type")
             .values_list("event_type", flat=True)
             .distinct(),
         },
     )
+
+
+EXPORT_HEADER = (
+    "Received at",
+    "Event type",
+    "Name from",
+    "Provider object (masked)",
+    "Outcome",
+    "Failed attempts",
+    "Duplicates",
+)
+
+
+@role_required
+@require_safe
+def webhook_export(request: HttpRequest) -> StreamingHttpResponse:
+    """``ledger:webhooks:export`` (PLAN-011 D5): the list's rows, identifiers masked."""
+    events, _, _ = _listed(request)
+    records = (
+        [
+            event.received_at,
+            event.event_type,
+            event.get_event_source_display(),
+            mask_identifier(event.provider_object_id),
+            event.outcome,
+            event.attempts,
+            event.duplicate_count,
+        ]
+        for event in events[: csv_export.CSV_MAX_ROWS + 1].iterator(chunk_size=2_000)
+    )
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("webhooks"))
 
 
 @role_required

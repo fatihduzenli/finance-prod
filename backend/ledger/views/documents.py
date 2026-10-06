@@ -20,7 +20,8 @@ itself, never in an ``<img>`` tag of the page. Downloads are ``attachment`` with
 ``sandbox``.
 
 Every POST ends in a redirect to the owner's page, whatever the outcome; the outcome is
-a message there.
+a message there. The section's rows (not the files) export as CSV for every role, deleted
+rows for admins only, as on the page (PLAN-011 D5).
 """
 
 from __future__ import annotations
@@ -47,9 +48,10 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import DocumentDeleteForm, DocumentUploadForm
 from ledger.models import Document, DocumentKind, Lease, Store
-from ledger.services import audit
+from ledger.services import audit, csv_export
 from ledger.services import documents as service
-from ledger.views.operators import _actor, _role, role_required
+from ledger.services.csv_export import CsvWriter
+from ledger.views.operators import _actor, _role, csv_response, export_name, role_required
 
 SERVICE_UNAVAILABLE = 503
 ANCHOR = "#documents"
@@ -115,6 +117,10 @@ def section_context(request: HttpRequest, owner: service.Owner) -> dict[str, Any
         "documents_preview": preview,
         "documents_owner_url": _owner_url(owner).removesuffix(ANCHOR),
         "documents_activity": audit.activity_for(owner),
+        "documents_export_url": reverse(
+            f"ledger:documents:{'export_store' if isinstance(owner, Store) else 'export_lease'}",
+            kwargs={"pk": owner.pk},
+        ),
         "documents_activity_url": (
             f"{reverse('ledger:audit:page')}?{urlencode(audit.activity_query(owner))}"
             if is_admin
@@ -156,6 +162,56 @@ def upload_after_create(request: HttpRequest, owner: service.Owner, noun: str) -
         messages.error(
             request, f"The {noun} was created, but the file was not uploaded: {outcome.message}"
         )
+
+
+# --- Export (PLAN-011 D5) -------------------------------------------------------------------
+
+EXPORT_HEADER = (
+    "Kind",
+    "File name",
+    "File type",
+    "Size (bytes)",
+    "Uploaded at",
+    "Uploaded by",
+    "Note",
+    "Deleted at",
+)
+
+
+def _export(request: HttpRequest, owner: service.Owner, name: str) -> StreamingHttpResponse:
+    """The rows of the owner's Documents section: deleted ones for an admin only, as on
+    the page. File contents never leave through this route."""
+    rows = service.documents_of(owner, include_deleted=meets(_role(request), Role.ADMIN))
+    records = (
+        [
+            document.get_kind_display(),
+            document.original_filename,
+            document.content_type,
+            document.size_bytes,
+            document.uploaded_at,
+            document.uploaded_by.get_username() if document.uploaded_by is not None else "",
+            document.note,
+            document.deleted_at,
+        ]
+        for document in rows[: csv_export.CSV_MAX_ROWS + 1].iterator(chunk_size=2_000)
+    )
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name(name))
+
+
+@role_required
+@require_safe
+def export_store(request: HttpRequest, pk: str) -> StreamingHttpResponse:
+    """``ledger:documents:export_store`` (any role)."""
+    store = get_object_or_404(Store, pk=_parse(pk))
+    return _export(request, store, "store-documents")
+
+
+@role_required
+@require_safe
+def export_lease(request: HttpRequest, pk: str) -> StreamingHttpResponse:
+    """``ledger:documents:export_lease`` (any role)."""
+    lease = get_object_or_404(Lease, pk=_parse(pk))
+    return _export(request, lease, "lease-documents")
 
 
 # --- Write --------------------------------------------------------------------------------

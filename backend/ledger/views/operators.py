@@ -16,16 +16,21 @@ Every POST ends in a redirect, whatever the outcome (PLAN-006a §3.4), so a refr
 never resubmits. A form with errors is kept in the session under
 :data:`HELD_FORM_KEY` (its data and error messages, minus any value that holds a card
 number) and re-rendered, once, by the next GET of the same form.
+
+The list exports as CSV (``operators:export``, PLAN-011 D5): the same search, every page,
+through :class:`ledger.services.csv_export.CsvWriter`; :func:`csv_response` streams every
+export of the app. The customer statement lives in :mod:`ledger.views.reports`.
 """
 
 from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from decimal import Decimal
 from functools import wraps
 from typing import Any
+from urllib.parse import urlencode
 
 from django import forms
 from django.contrib import messages
@@ -33,17 +38,25 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import IntegrityError
-from django.db.models import Q, Sum
+from django.db.models import Q, QuerySet, Sum
 from django.db.models.functions import Lower
-from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBase
+from django.http import (
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBase,
+    StreamingHttpResponse,
+)
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from accounts.roles import Role, meets, role_of
 from accounts.views import forbidden
 from ledger.forms import LinkForm, OperatorCreateForm, OperatorForm
 from ledger.models import ZERO, Note, NoteEntityType, Operator, RentCharge, SyncStatus
-from ledger.services import one_off_charges
+from ledger.services import csv_export, one_off_charges
+from ledger.services.csv_export import CsvWriter
 from ledger.validators import contains_card_number
 from ledger.views.jobs import busy, job_context, submit
 from payments import operator_sync
@@ -76,6 +89,27 @@ def role_required(view: View) -> View:
         return view(request, *args, **kwargs)
 
     return wrapper
+
+
+def csv_response(lines: Iterator[str], filename: str) -> StreamingHttpResponse:
+    """A streamed CSV attachment that no cache keeps (PLAN-011 D5)."""
+    response = StreamingHttpResponse(lines, content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+def uuid_param(request: HttpRequest, name: str) -> uuid.UUID | None:
+    """A UUID from the query string, or ``None`` when it is missing or unreadable."""
+    try:
+        return uuid.UUID(request.GET.get(name, "") or "")
+    except ValueError:
+        return None
+
+
+def export_name(name: str) -> str:
+    """The file name of a list's export: ``<name>-<today>.csv``."""
+    return f"{name}-{timezone.localdate():%Y-%m-%d}.csv"
 
 
 def _actor(request: HttpRequest) -> User:
@@ -161,10 +195,14 @@ def _refused_archived(request: HttpRequest, operator: Operator) -> HttpResponse:
 # --- Read ---------------------------------------------------------------------------
 
 
-@role_required
-@require_safe
-def operator_list(request: HttpRequest) -> HttpResponse:
-    query = CONTROL_CHARACTERS.sub("", request.GET.get("q", "")).strip()[:SEARCH_MAX_LENGTH]
+def search_text(request: HttpRequest) -> str:
+    """The ``q`` search of a list, without control characters and cut to length."""
+    return CONTROL_CHARACTERS.sub("", request.GET.get("q", "")).strip()[:SEARCH_MAX_LENGTH]
+
+
+def _listed(request: HttpRequest) -> tuple[QuerySet[Operator], str, bool]:
+    """The operators the list shows for the request's search, in its order."""
+    query = search_text(request)
     include_archived = request.GET.get("archived") == "1"
     operators = Operator.objects.all()
     if not include_archived:
@@ -176,9 +214,15 @@ def operator_list(request: HttpRequest) -> HttpResponse:
             | Q(company__icontains=query)
             | Q(email__icontains=query)
         )
-    page = Paginator(operators.order_by(Lower("display_name"), "id"), PAGE_SIZE).get_page(
-        request.GET.get("page")
-    )
+    return operators.order_by(Lower("display_name"), "id"), query, include_archived
+
+
+@role_required
+@require_safe
+def operator_list(request: HttpRequest) -> HttpResponse:
+    operators, query, include_archived = _listed(request)
+    page = Paginator(operators, PAGE_SIZE).get_page(request.GET.get("page"))
+    export = {"q": query, "archived": "1" if include_archived else ""}
     return render(
         request,
         "ledger/operators/list.html",
@@ -187,8 +231,48 @@ def operator_list(request: HttpRequest) -> HttpResponse:
             "query": query,
             "include_archived": include_archived,
             "can_create": meets(_role(request), Role.BILLING),
+            "export_query": urlencode({k: v for k, v in export.items() if v}),
         },
     )
+
+
+EXPORT_HEADER = (
+    "Operator",
+    "Legal name",
+    "Company",
+    "Email",
+    "Phone",
+    "City",
+    "State",
+    "Provider link",
+    "Enrolment",
+    "Needs review",
+    "Archived on",
+)
+
+
+@role_required
+@require_safe
+def operator_export(request: HttpRequest) -> StreamingHttpResponse:
+    """``ledger:operators:export`` (PLAN-011 D5): the list's rows, every page."""
+    operators, _, _ = _listed(request)
+    records = (
+        [
+            operator.display_name,
+            operator.legal_name,
+            operator.company,
+            operator.email or "",
+            operator.phone,
+            operator.city,
+            operator.state,
+            operator.get_sync_status_display(),
+            operator.get_enrolment_status_display(),
+            operator.needs_review,
+            operator.archived_at,
+        ]
+        for operator in operators[: csv_export.CSV_MAX_ROWS + 1].iterator()
+    )
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("operators"))
 
 
 @role_required

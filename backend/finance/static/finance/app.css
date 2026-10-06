@@ -1,0 +1,94 @@
+/* Staff screens (docs/qa/PLAN-011-dashboard-reports-mobile.md D9).
+   Breakpoints: under 720px a phone (tables as cards, one form column), under 1024px a
+   tablet (the menu folds behind a "Menu" toggle). Touch targets are at least 44px high
+   under 1024px and on any coarse pointer. No external asset. */
+
+:root { --ink: #1a1a1a; --line: #e5e5e5; --paper: #fff; --page: #f6f6f6; --muted: #666; --tap: 44px; }
+body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: var(--ink); background: var(--page); -webkit-text-size-adjust: 100%; }
+
+/* --- Navigation ------------------------------------------------------------------- */
+body > nav { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: center; padding: .5rem 1.5rem; background: var(--ink); }
+body > nav a { color: #fff; text-decoration: none; font-weight: 600; }
+body > nav form { margin: 0; }
+body > nav button { background: none; border: 1px solid #fff; color: #fff; border-radius: 4px; padding: .25rem .75rem; cursor: pointer; font: inherit; }
+.nav-links { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: center; flex: 1 1 auto; }
+.nav-links form { margin-left: auto; }
+/* The "Menu" toggle: a checkbox and its label; no script. Hidden on wide screens. */
+.nav-toggle { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.nav-toggle-label { display: none; color: #fff; font-weight: 600; cursor: pointer; border: 1px solid #fff; border-radius: 4px; padding: 0 .9rem; line-height: calc(var(--tap) - 2px); min-height: var(--tap); box-sizing: border-box; user-select: none; }
+.nav-toggle:focus-visible + .nav-toggle-label { outline: 2px solid #ffd400; outline-offset: 2px; }
+
+/* --- Page --------------------------------------------------------------------------- */
+main { max-width: 64rem; margin: 1.5rem auto; padding: 1.5rem 2rem; background: var(--paper); border: 1px solid #ddd; border-radius: 6px; }
+main.wide { max-width: none; margin: 1.5rem 1rem; }
+h1 { font-size: 1.5rem; margin-top: 0; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: .4rem .5rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+label { display: block; margin: .75rem 0 .25rem; font-weight: 600; }
+input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], select, textarea { padding: .5rem; box-sizing: border-box; font-size: 1rem; max-width: 100%; }
+input[type=text], input[type=email], input[type=search], textarea { width: 100%; }
+.btn { display: inline-block; padding: .45rem .9rem; border: 1px solid #333; border-radius: 4px; background: #fff; color: var(--ink); font-size: .95rem; cursor: pointer; text-decoration: none; box-sizing: border-box; }
+.btn-primary { background: var(--ink); color: #fff; } .btn-danger { border-color: #b00020; color: #b00020; }
+.btn:disabled { opacity: .5; cursor: default; }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: 1rem 0; } .actions form { margin: 0; }
+.messages { list-style: none; padding: 0; } .messages li { padding: .6rem .8rem; margin-bottom: .5rem; border-radius: 4px; background: #eef4ff; }
+.messages .error { background: #fdecee; color: #8a0016; } .messages .warning { background: #fff6dd; } .messages .success { background: #e9f7ec; }
+.errorlist { color: #b00020; padding-left: 1rem; }
+.muted { color: var(--muted); } .badge { display: inline-block; padding: .1rem .45rem; border-radius: 3px; background: #eee; font-size: .85rem; }
+dl { display: grid; grid-template-columns: 12rem 1fr; gap: .35rem 1rem; } dt { font-weight: 600; } dd { margin: 0; }
+img, iframe { max-width: 100%; }
+
+/* Tables that scroll sideways (the grid, the audit page, the reports): first column sticky. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.table-scroll > table { width: auto; min-width: 100%; border-collapse: separate; border-spacing: 0; }
+.table-scroll > table th:first-child, .table-scroll > table td:first-child { position: sticky; left: 0; background: var(--paper); z-index: 1; }
+
+/* --- Tablet and phone: menu toggle, touch targets ---------------------------------------- */
+@media (max-width: 1023.98px) {
+  body > nav { padding: .5rem 1rem; }
+  .nav-toggle-label { display: inline-block; }
+  .nav-links { display: none; flex-basis: 100%; padding: .25rem 0 .5rem; }
+  .nav-toggle:checked ~ .nav-links { display: flex; }
+  .nav-links a, .nav-links button { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 .5rem; box-sizing: border-box; }
+  .nav-links form { margin-left: 0; }
+}
+@media (max-width: 1023.98px), (pointer: coarse) {
+  .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=file] { min-height: var(--tap); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; }
+  input[type=checkbox], input[type=radio] { min-width: 24px; min-height: 24px; }
+  td a, li a, .pagination a { display: inline-flex; align-items: center; min-height: var(--tap); }
+  table.grid td a { min-height: var(--tap); display: flex; align-items: center; justify-content: flex-end; }
+}
+
+/* --- Phone ------------------------------------------------------------------------------ */
+@media (max-width: 719.98px) {
+  main, main.wide { margin: 0; padding: 1rem; border: 0; border-radius: 0; max-width: none; }
+  h1 { font-size: 1.3rem; }
+  dl { grid-template-columns: 1fr; gap: .1rem; } dd { margin-bottom: .6rem; }
+  /* One form column: labels above full-width fields, inline widths overridden. */
+  form .actions { flex-direction: column; align-items: stretch; }
+  form .actions label { margin: .5rem 0 0; }
+  form input:not([type=checkbox]):not([type=radio]):not([type=hidden]), form select, form textarea { width: 100% !important; }
+  form .btn, form button { width: 100%; }
+  body > nav form button { width: auto; }
+  /* Tables become cards: one bordered block per row, a "label: value" line per cell. */
+  .table-cards > table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .table-cards > table, .table-cards > table tbody, .table-cards > table tfoot, .table-cards > table tr, .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { display: block; width: 100%; box-sizing: border-box; }
+  .table-cards > table tr { border: 1px solid #ddd; border-radius: 6px; margin: 0 0 .75rem; padding: .25rem .75rem; background: var(--paper); }
+  .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { border: 0; padding: .35rem 0; }
+  /* The label sits in a left column; the cell's own content (a link and its badges) keeps flowing inline. */
+  .table-cards > table td[data-label] { position: relative; padding-left: calc(40% + .75rem); min-height: 1.4em; }
+  .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 600; color: #444; overflow-wrap: anywhere; }
+  .table-cards > table td:empty { display: none; }
+  .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
+  table.grid th.store-col { min-width: 8rem !important; max-width: 9rem; white-space: normal !important; }
+}
+
+/* --- Print ---------------------------------------------------------------------------------- */
+@media print {
+  /* The sandbox banner is left as it is: it prints too (docs/CLAUDE.md Rule 6). */
+  body > nav, .nav-toggle, .nav-toggle-label { display: none !important; }
+  body { background: #fff; }
+  main, main.wide { margin: 0; padding: 0; border: 0; max-width: none; }
+  .table-scroll { overflow: visible; }
+}

@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Link an invoice{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
@@ -14,6 +15,7 @@
   {% else %}
     <form method="post" id="link-form" class="js-single-submit" autocomplete="off">
       {% csrf_token %}
+      {% responsive_table %}
       <table id="unlinked-invoices">
         <thead><tr><th></th><th>Number</th><th>Provider date</th><th>Total</th><th>Provider status</th><th>Provider ID</th></tr></thead>
         <tbody>
@@ -29,6 +31,7 @@
           {% endfor %}
         </tbody>
       </table>
+      {% endresponsive_table %}
       <p>
         {{ form.confirm.errors }}
         <label for="{{ form.confirm.id_for_label }}">{{ form.confirm }} I confirm linking an invoice whose total differs from the balance.</label>

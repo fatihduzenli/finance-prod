@@ -58,6 +58,7 @@ they implement.
 | Append-only audit | PostgreSQL trigger on `audit_log` | Refuses every UPDATE and DELETE. |
 | Identifier isolation | `external_refs` | The only place a Stax ID of a business record is stored. No business table has a provider ID column. |
 | Exact money | `numeric(12,2)` everywhere, `Decimal` in code | Inexact binary numbers are refused by the field itself. |
+| Report indexes | `rent_charges (status, due_on)`, `payments (settled_on, status)`, `invoices (provider_status)`, `one_off_charges (operator_id, status)`, `insurance_charges (lease_id, due_on)` (migration 0022) | Read paths of the dashboard, arrears, aging and "failed attempts"; no ownership change. |
 
 **Limits you should know.**
 - The triggers exist on PostgreSQL, which is what staging, production and CI use. A local

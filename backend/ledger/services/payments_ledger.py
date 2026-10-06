@@ -28,16 +28,14 @@ release of those deposits whatever its date (a release after ``date_to`` include
 it can differ from the P&L footer, which counts up to the end of its range. (A known
 limitation, deferred.)
 
-The CSV export (:func:`csv_lines`) has one header row and one row per payment; the
-``csv`` module quotes commas, quotes and line breaks, so a note never splits a row.
-Amounts are plain decimals with two places, dates ISO 8601. The provider's
-transaction ID is masked exactly as on screen. A text cell that a spreadsheet would
-read as a formula is prefixed with an apostrophe.
+The CSV export (:func:`csv_lines`) has one header row and one row per payment, written
+by :class:`ledger.services.csv_export.CsvWriter` (plain-English headers, amounts as plain
+decimals with two places, dates ISO 8601, formula-safe text, at most
+``CSV_MAX_ROWS`` rows). The provider's transaction ID is masked exactly as on screen.
 """
 
 from __future__ import annotations
 
-import csv
 import uuid
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
@@ -60,6 +58,7 @@ from ledger.models import (
     PaymentStatus,
     Store,
 )
+from ledger.services.csv_export import CsvWriter
 from payments.models import ExternalRef
 from payments.operator_sync import PROVIDER_KEY
 from payments.provider import mask_identifier
@@ -80,29 +79,27 @@ STATUS_CHOICES: tuple[tuple[str, str], ...] = (
 #: Rows read from the database at a time by the export.
 EXPORT_CHUNK = 500
 CSV_HEADER: tuple[str, ...] = (
-    "payment_id",
-    "paid_on",
-    "initiated_on",
-    "operator",
-    "store",
-    "charge_kind",
-    "charge_period",
-    "charge_debit",
-    "policy_year",
-    "method",
-    "status",
-    "is_refund",
-    "refunds_payment_id",
-    "amount",
-    "reference",
-    "note",
-    "charge_has_note",
-    "provider_transaction",
-    "return_code",
-    "recorded_by",
+    "Payment ID",
+    "Paid date",
+    "Initiated date",
+    "Operator",
+    "Store",
+    "Charge kind",
+    "Rent month",
+    "Debit of the month",
+    "Policy year",
+    "Method",
+    "Status",
+    "Refund",
+    "Refund of payment ID",
+    "Amount (USD)",
+    "Reference",
+    "Note",
+    "Charge has a note",
+    "Provider transaction (masked)",
+    "Return code",
+    "Recorded by",
 )
-#: First characters that make a spreadsheet read a cell as a formula.
-_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,61 +333,43 @@ def charge_lease(payment: Payment) -> Lease | None:
     return None
 
 
-def csv_text(value: str) -> str:
-    """A text cell; one a spreadsheet would read as a formula starts with an apostrophe."""
-    return f"'{value}" if value.startswith(_FORMULA_START) else value
-
-
-def _iso(value: date | None) -> str:
-    return value.isoformat() if value is not None else ""
-
-
-def csv_money(value: Decimal) -> str:
-    return format(Decimal(value).quantize(CENT), "f")
-
-
-def csv_record(row: LedgerRow) -> list[str]:
+def csv_record(row: LedgerRow) -> list[object]:
     payment = row.payment
     charge = payment.rent_charge
     return [
-        str(payment.pk),
-        _iso(payment.settled_on),
-        _iso(payment.initiated_on),
-        csv_text(row.operator.display_name if row.operator is not None else ""),
-        csv_text(row.store.external_label if row.store is not None else ""),
+        payment.pk,
+        payment.settled_on,
+        payment.initiated_on,
+        row.operator.display_name if row.operator is not None else "",
+        row.store.external_label if row.store is not None else "",
         payment.kind,
         f"{charge.period_month:%Y-%m}" if charge is not None else "",
-        str(charge.seq) if charge is not None else "",
-        str(payment.policy_year) if payment.policy_year is not None else "",
+        charge.seq if charge is not None else None,
+        payment.policy_year,
         payment.method,
         payment.status,
-        "yes" if payment.is_refund else "no",
-        str(payment.parent_payment_id) if payment.parent_payment_id else "",
-        csv_money(payment.amount),
-        csv_text(payment.reference),
-        csv_text(payment.note),
-        "yes" if row.has_note else "no",
+        payment.is_refund,
+        payment.parent_payment_id,
+        payment.amount,
+        payment.reference,
+        payment.note,
+        row.has_note,
         row.transaction,
-        csv_text(payment.return_code),
-        csv_text(payment.recorded_by.get_username() if payment.recorded_by is not None else ""),
+        payment.return_code,
+        payment.recorded_by.get_username() if payment.recorded_by is not None else "",
     ]
 
 
-class CsvLine:
-    """A file-like object whose ``write`` returns the line, for a streamed ``csv.writer``."""
-
-    def write(self, value: str) -> str:
-        return value
-
-
-def csv_lines(selected: PaymentFilter) -> Iterator[str]:
-    """The export of :func:`ledger_payments`, one CSV line at a time."""
-    writer = csv.writer(CsvLine())
-    yield writer.writerow(CSV_HEADER)
+def _records(selected: PaymentFilter) -> Iterator[list[object]]:
     chunk: list[Payment] = []
     for payment in ledger_payments(selected).iterator(chunk_size=EXPORT_CHUNK):
         chunk.append(payment)
         if len(chunk) == EXPORT_CHUNK:
-            yield from (writer.writerow(csv_record(row)) for row in rows_for(chunk))
+            yield from (csv_record(row) for row in rows_for(chunk))
             chunk = []
-    yield from (writer.writerow(csv_record(row)) for row in rows_for(chunk))
+    yield from (csv_record(row) for row in rows_for(chunk))
+
+
+def csv_lines(selected: PaymentFilter) -> Iterator[str]:
+    """The export of :func:`ledger_payments`, one CSV line at a time."""
+    return CsvWriter(CSV_HEADER).lines(_records(selected))

@@ -3,6 +3,8 @@
 Any role may read the queue; resolving needs ``billing`` (``accounts.registry`` and again
 here) and a note. Resolving records who and why; it changes no charge and calls no
 provider. There is no re-debit action anywhere.
+
+The queue exports as CSV (``returns:export``, PLAN-011 D5), any role.
 """
 
 from __future__ import annotations
@@ -11,15 +13,23 @@ import uuid
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST, require_safe
 
 from accounts.roles import Role, meets
 from ledger.forms import ResolveReturnForm
 from ledger.models import Payment
-from ledger.services import returns
-from ledger.views.operators import PAGE_SIZE, _actor, _role, role_required
+from ledger.services import csv_export, returns
+from ledger.services.csv_export import CsvWriter
+from ledger.views.operators import (
+    PAGE_SIZE,
+    _actor,
+    _role,
+    csv_response,
+    export_name,
+    role_required,
+)
 from ledger.views.run import _billing_only
 
 
@@ -36,6 +46,43 @@ def return_list(request: HttpRequest) -> HttpResponse:
             "can_resolve": meets(_role(request), Role.BILLING),
         },
     )
+
+
+EXPORT_HEADER = (
+    "Operator",
+    "Store",
+    "Charge kind",
+    "Amount (USD)",
+    "Return code",
+    "Return reason",
+    "Returned at",
+    "Payment ID",
+)
+
+
+@role_required
+@require_safe
+def return_export(request: HttpRequest) -> StreamingHttpResponse:
+    """``ledger:returns:export`` (PLAN-011 D5): the unresolved returns, as the queue."""
+    records = (
+        [
+            item.operator.display_name if item.operator is not None else "",
+            item.store.external_label if item.store is not None else "",
+            item.payment.kind,
+            item.amount,
+            item.code,
+            item.reason,
+            item.returned_at,
+            item.payment.pk,
+        ]
+        for item in (
+            returns.row(payment)
+            for payment in returns.open_returns()[: csv_export.CSV_MAX_ROWS + 1].iterator(
+                chunk_size=2_000
+            )
+        )
+    )
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("returns"))
 
 
 @role_required

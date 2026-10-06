@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Payments{% endblock %}
 {% block content %}
   <h1>Payments</h1>
@@ -40,6 +41,7 @@
   </form>
 
   <h2>Totals of the {{ totals.count }} payment{{ totals.count|pluralize }} shown</h2>
+  {% responsive_table %}
   <table id="payment-totals">
     <thead><tr><th>Settled (collected)</th><th>Pending (not collected yet)</th><th>Returned</th><th>Refunded</th><th>Deposits held</th></tr></thead>
     <tbody>
@@ -52,8 +54,10 @@
       </tr>
     </tbody>
   </table>
+  {% endresponsive_table %}
   <p class="muted">Pending payments are never counted as collected. Refunds are shown as their own rows. Deposits are money held for the operator, not revenue: they are left out of the other totals, and "Deposits held" is the settled deposit payments shown minus their refunds and the deposit refunds shown.</p>
 
+  {% responsive_table %}
   <table id="payments">
     <thead>
       <tr><th>Paid on</th><th>Initiated</th><th>Operator</th><th>Store</th><th>Charge</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Transaction</th><th>Note</th></tr>
@@ -78,6 +82,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   {% if page.paginator.num_pages > 1 %}
     <p class="actions">
       {% if page.has_previous %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

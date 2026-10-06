@@ -55,7 +55,13 @@ POST_ROUTES = (
     "ledger:charges:retry_mark",
     "ledger:charges:link_invoice",
 )
-READ_ROUTES = ("ledger:run:today", "ledger:charges:detail")
+READ_ROUTES = (
+    "ledger:run:today",
+    "ledger:charges:detail",
+    # PLAN-011 D5: the CSV exports of the run and of rent charges.
+    "ledger:run:export",
+    "ledger:charges:export",
+)
 
 
 @pytest.fixture(autouse=True)

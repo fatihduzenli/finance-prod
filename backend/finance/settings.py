@@ -106,6 +106,10 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    # Cache-Control: private, no-store on every non-static response (PLAN-011 D9). Just
+    # inside whitenoise, which answers static files itself, so it sees every other
+    # response, the 401 and 403 pages included.
+    "finance.middleware.PrivateNoStoreMiddleware",
     # Refuses an oversized body before CsrfViewMiddleware reads it (PLAN-010c D3).
     "finance.uploads.RequestSizeLimitMiddleware",
     "finance.middleware.SandboxBannerMiddleware",
@@ -195,7 +199,9 @@ FILE_UPLOAD_HANDLERS = ["finance.uploads.CappedMemoryFileUploadHandler"]
 FILE_UPLOAD_MAX_MEMORY_SIZE = UPLOAD_MAX_REQUEST_BYTES
 #: A body read whole, and the non-file fields of a form, never exceed the small limit.
 DATA_UPLOAD_MAX_MEMORY_SIZE = REQUEST_MAX_BYTES
-#: One file per submit (D7).
+#: One file per submit (D7). The upload forms' two file inputs (PLAN-011 D9) fit: the
+#: part a browser sends for the input left empty has no file name, and Django counts
+#: only parts with one.
 DATA_UPLOAD_MAX_NUMBER_FILES = 1
 #: The storage account's blob endpoint; empty means the documents feature is off outside
 #: local (D2). Not a secret: access is by managed identity, with no key anywhere.
@@ -212,7 +218,8 @@ SESSION_COOKIE_HTTPONLY = True
 
 # --- Authentication (docs/qa/PLAN-003-auth-roles.md) ---------------------------------
 LOGIN_URL = "two_factor:login"
-LOGIN_REDIRECT_URL = "/admin/"
+# The dashboard (docs/qa/PLAN-011-dashboard-reports-mobile.md D1).
+LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "two_factor:login"
 # "Remember this device" would let a browser skip the second factor. Off, always.
 TWO_FACTOR_REMEMBER_COOKIE_AGE = None

@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Operators{% endblock %}
 {% block content %}
   <h1>Operators</h1>
@@ -7,7 +8,9 @@
     <label style="margin:0;font-weight:normal;"><input type="checkbox" name="archived" value="1"{% if include_archived %} checked{% endif %}> Include archived</label>
     <button class="btn" type="submit">Search</button>
     {% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:operators:create' %}">New operator</a>{% endif %}
+    <a class="btn" id="export-csv" href="{% url 'ledger:operators:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Export CSV</a>
   </form>
+  {% responsive_table %}
   <table>
     <thead>
       <tr><th>Display name</th><th>Legal name</th><th>E-mail</th><th>Provider link</th><th>Enrolment</th></tr>
@@ -26,6 +29,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   {% if page.paginator.num_pages > 1 %}
     <p class="actions">
       {% if page.has_previous %}<a class="btn" href="?{% if query %}q={{ query|urlencode:'' }}&amp;{% endif %}{% if include_archived %}archived=1&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

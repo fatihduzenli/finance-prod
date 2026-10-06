@@ -1360,8 +1360,9 @@ def test_only_a_returned_payment_can_be_resolved(fake: FakeProvider) -> None:
 def test_the_returns_routes_are_classified_and_none_re_debits() -> None:
     routes = iter_routes()
     names = {name for name, _, _ in routes if name and "returns" in name}
-    assert names == {"ledger:returns:list", "ledger:returns:resolve"}
-    assert "ledger:returns:list" in registry.READ_ONLY_ROUTE_NAMES
+    # PLAN-011 D5: the queue's CSV export reads only.
+    assert names == {"ledger:returns:list", "ledger:returns:resolve", "ledger:returns:export"}
+    assert {"ledger:returns:list", "ledger:returns:export"} <= registry.READ_ONLY_ROUTE_NAMES
     rule = registry.rule_for("ledger:returns:resolve")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     for name, raw, _ in routes:

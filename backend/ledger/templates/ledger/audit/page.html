@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Audit log{% endblock %}
 {% block content %}
   <h1>Audit log</h1>
@@ -29,6 +30,7 @@
   {% if too_slow %}
     <p class="warning" id="audit-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
+  {% responsive_table "scroll" %}
   <table id="audit-rows">
     <thead><tr><th>Time (UTC)</th><th>Time (New York)</th><th>Action</th><th>User</th><th>Entity</th><th>Before</th><th>After</th></tr></thead>
     <tbody>
@@ -47,6 +49,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   <p class="actions">
     {% if previous_query %}<a class="btn" id="audit-previous" href="?{{ previous_query }}">Newer</a>{% endif %}
     <span class="muted">Page {{ query.page }}</span>

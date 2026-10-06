@@ -40,7 +40,7 @@ def test_double_click_on_save_creates_one_operator_and_one_customer(
     token_field.wait_for(state="visible")
     token_field.fill(current_code(device))
     page.get_by_role("button", name="Next").click()
-    page.wait_for_url(f"{live_server.url}/admin/")
+    page.wait_for_url(f"{live_server.url}/")  # the dashboard (PLAN-011 D1)
 
     page.goto(f"{live_server.url}/operators/new/")
     page.fill("#id_display_name", "Double Click Stores")

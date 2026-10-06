@@ -16,20 +16,23 @@ with ``refresh_methods``) queues the read, and the page shows that job's state.
 Templates receive masked identifiers only, except the payment-method IDs that are the
 values of the enrolment choices. Every POST ends in a redirect, whatever the outcome; a
 form with errors is held in the session for the next GET, as on the operator screens.
+
+The list exports as CSV (``leases:export``, PLAN-011 D5): the same filter, every page.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Exists, OuterRef, Prefetch, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q, QuerySet
 from django.db.models.functions import Lower
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
@@ -47,13 +50,23 @@ from ledger.models import (
     Operator,
     ScheduleState,
 )
-from ledger.services import deposits, one_off_charges
+from ledger.services import csv_export, deposits, one_off_charges
 from ledger.services import leases as service
+from ledger.services.csv_export import CsvWriter
 from ledger.services.leases import LeaseRefused
 from ledger.services.one_off_charges import SetupRefused
 from ledger.views import documents
 from ledger.views.jobs import busy, job_context, submit
-from ledger.views.operators import PAGE_SIZE, _actor, _held, _hold, _role, role_required
+from ledger.views.operators import (
+    PAGE_SIZE,
+    _actor,
+    _held,
+    _hold,
+    _role,
+    csv_response,
+    export_name,
+    role_required,
+)
 from payments import jobs
 from payments.models import JobKind
 from payments.provider import mask_identifier
@@ -89,11 +102,8 @@ def _operator_filter(raw: str | None) -> uuid.UUID | None:
         return None
 
 
-@role_required
-@require_safe
-def lease_list(request: HttpRequest) -> HttpResponse:
-    """Every lease, optionally of one operator (PLAN-009 D9); a lease whose charges carry
-    a charge note is marked."""
+def _listed(request: HttpRequest) -> tuple[QuerySet[Lease], uuid.UUID | None]:
+    """The leases the list shows, with the rent in effect today and the note flag."""
     today = timezone.localdate()
     in_effect = (
         LeaseRentHistory.objects.filter(effective_from__lte=today)
@@ -111,6 +121,15 @@ def lease_list(request: HttpRequest) -> HttpResponse:
     )
     if operator is not None:
         leases = leases.filter(operator_id=operator)
+    return leases, operator
+
+
+@role_required
+@require_safe
+def lease_list(request: HttpRequest) -> HttpResponse:
+    """Every lease, optionally of one operator (PLAN-009 D9); a lease whose charges carry
+    a charge note is marked."""
+    leases, operator = _listed(request)
     page = Paginator(leases, PAGE_SIZE).get_page(request.GET.get("page"))
     return render(
         request,
@@ -123,6 +142,49 @@ def lease_list(request: HttpRequest) -> HttpResponse:
             "query": urlencode({"operator": str(operator)}) if operator else "",
         },
     )
+
+
+EXPORT_HEADER = (
+    "Store",
+    "Store number",
+    "Operator",
+    "Rent now (USD)",
+    "Debit day",
+    "Second debit day",
+    "Channel",
+    "Status",
+    "Started on",
+    "Ended on",
+    "Charges have a note",
+    "Needs review",
+)
+
+
+@role_required
+@require_safe
+def lease_export(request: HttpRequest) -> StreamingHttpResponse:
+    """``ledger:leases:export`` (PLAN-011 D5): the list's rows, every page."""
+    leases, _ = _listed(request)
+
+    def records() -> Iterator[list[object]]:
+        for lease in leases[: csv_export.CSV_MAX_ROWS + 1].iterator(chunk_size=500):
+            rent = lease.rent_now[0].amount if lease.rent_now else None  # type: ignore[attr-defined]
+            yield [
+                lease.store.external_label,
+                lease.store.store_number,
+                lease.operator.display_name if lease.operator is not None else "",
+                rent,
+                lease.debit_day,
+                lease.second_debit_day,
+                lease.get_payment_channel_display(),
+                lease.get_collection_status_display(),
+                lease.started_on,
+                lease.ended_on,
+                bool(lease.has_charge_note),  # type: ignore[attr-defined]
+                lease.needs_review,
+            ]
+
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records()), export_name("leases"))
 
 
 @role_required

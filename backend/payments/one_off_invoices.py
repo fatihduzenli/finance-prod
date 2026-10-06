@@ -22,6 +22,11 @@ class and the field names it rejected (never provider text).
   invoice is re-fetched (a paid one is never deleted), deleted (a 404 counts as already
   deleted) and re-fetched again; only an invoice the provider shows ``DELETED`` or no
   longer has lets :func:`ledger.services.one_off_charges.mark_voided` void the charge.
+- :func:`delete_waived` (``invoice_delete`` with ``params.waived``; PLAN-011 D0): the
+  remedy for a charge waived while its invoice was live. The same re-fetch, delete and
+  re-fetch as :func:`delete`; once the provider shows the invoice ``DELETED`` (or no
+  longer has it) :func:`ledger.services.one_off_charges.mark_waived_invoice_deleted`
+  marks the local invoice void. The charge stays ``waived``.
 - :func:`schedule` (``schedule_create``): the one-occurrence schedule of an
   ``autopay_due`` charge on its due date with the operator's linked bank method, its
   reference ``OOC-<first 8 of the charge id>``; :func:`delete_schedule`
@@ -131,6 +136,10 @@ DELETE_NOT_CONFIRMED = (
     "The payment provider did not confirm the delete. The charge stays open; retry later."
 )
 DELETE_FAILED = "The payment provider did not delete the invoice"
+WAIVED_DELETE_NOT_CONFIRMED = (
+    "The payment provider did not confirm the delete. The invoice may still be live; retry "
+    "from the charge page."
+)
 SCHEDULED = "Autopay scheduled for {date}."
 ALREADY_SCHEDULED = "Autopay is already scheduled for this charge."
 SCHEDULE_ADOPTED = "The schedule was found at the payment provider and linked; none was created."
@@ -534,6 +543,50 @@ def delete(charge_id: uuid.UUID, actor: User | None) -> Result:
             "provider_status": record.raw_status if record is not None else "not found",
         },
     )
+
+
+def delete_waived(charge_id: uuid.UUID, actor: User | None) -> Result:
+    """The ``invoice_delete`` job of the waived-charge remedy (PLAN-011 D0); see the
+    module docstring. A charge with no live invoice any more is done, with nothing sent."""
+    charge = _charge(charge_id)
+    if charge is None:
+        return False, NO_CHARGE
+    if charge.status != OneOffChargeStatus.WAIVED:
+        return False, one_off_charges.DELETE_INVOICE_NOT_WAIVED
+    linked = one_off_charges.live_provider_invoice(charge)
+    if linked is None:
+        return True, one_off_charges.DELETE_INVOICE_NONE
+    invoice, ref = linked
+    provider = payments.get_provider()
+    try:
+        record = _fetch(provider.get_invoice, ref)
+        if record is not None and invoice_sync.shows_paid(record):
+            return False, DELETE_PAID
+        if record is not None and not invoice_sync.shows_deleted(record):
+            try:
+                provider.delete_invoice(ref)
+            except ProviderRejected as error:
+                if error.status != NOT_FOUND:
+                    raise
+            record = _fetch(provider.get_invoice, ref)
+    except ProviderError as error:
+        return _failed(
+            charge, actor, "one_off_charge.waived_invoice_delete_failed", error, DELETE_FAILED
+        )
+    if record is not None and not invoice_sync.shows_deleted(record):
+        return False, WAIVED_DELETE_NOT_CONFIRMED
+    if record is not None:
+        invoice_sync.record_provider_state(invoice.pk, record)
+    outcome = one_off_charges.mark_waived_invoice_deleted(
+        charge.pk,
+        actor=actor,
+        context={
+            "invoice_number": invoice.invoice_number,
+            "provider_invoice": mask_identifier(ref),
+            "provider_status": record.raw_status if record is not None else "not found",
+        },
+    )
+    return outcome.ok, outcome.message
 
 
 # --- Schedules (D2, D6) ---------------------------------------------------------------

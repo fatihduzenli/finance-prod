@@ -6,10 +6,12 @@ page (docs/qa/PLAN-010d D2, D6, D9).
 The detail page is read by any role. Recording a payment, retrying the marking of the
 provider invoice or a failed provider request, linking an invoice, editing, cancelling,
 adding a setup charge and creating a one-off charge (GET of the forms and POST) need
-``billing``; waiving needs ``admin``; the "Charge now" collection is offered to admins
-only and refused by the service for anyone else, and so is the Charge now confirmation
-page and its POST (D4), which queues the single ``invoice_pay`` attempt and reads the
-bank method from the stored methods snapshot, never from the provider. The registry
+``billing``; waiving needs ``admin``, and so does deleting the live provider invoice of a
+waived charge (PLAN-011 D0; POST only, queued as ``invoice_delete`` with the waived
+flag); the "Charge now" collection is offered to admins only and refused by the service
+for anyone else, and so is the Charge now confirmation page and its POST (D4), which
+queues the single ``invoice_pay`` attempt and reads the bank method from the stored
+methods snapshot, never from the provider. The registry
 checks the POST first; these views refuse the GET of the forms below the same role.
 :mod:`ledger.services.one_off_charges` re-checks every rule under a row lock and writes
 the audit rows. No view calls the provider: the service queues the provider work
@@ -18,6 +20,9 @@ recorded payment whose invoice is to be marked is queued as a ``one_off_payment_
 job keyed by the form's one-time key, the marking retry as a
 ``one_off_payment_retry_mark`` job, and the detail page shows the latest job. Every POST
 ends in a redirect; a form with errors is held in the session for the next GET.
+
+``one_off_charges:export`` (PLAN-011 D5) is one-off charges as CSV, of one lease or
+operator, any role.
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ import uuid
 
 from django import forms
 from django.contrib import messages
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
@@ -52,11 +57,21 @@ from ledger.models import (
     OneOffChargeStatus,
     Operator,
 )
+from ledger.services import csv_export, rent_run
 from ledger.services import one_off_charges as service
-from ledger.services import rent_run
+from ledger.services.csv_export import CsvWriter
 from ledger.views.charges import _report
 from ledger.views.jobs import already_submitted, busy, job_context, submit
-from ledger.views.operators import _actor, _held, _hold, _role, role_required
+from ledger.views.operators import (
+    _actor,
+    _held,
+    _hold,
+    _role,
+    csv_response,
+    export_name,
+    role_required,
+    uuid_param,
+)
 from payments import operator_sync
 from payments.jobs import is_active, latest_for
 from payments.models import JobKind
@@ -95,6 +110,61 @@ def _operator(charge: OneOffCharge) -> Operator | None:
     return charge.lease.operator if charge.lease is not None else None
 
 
+EXPORT_HEADER = (
+    "Operator",
+    "Store",
+    "Description",
+    "Category",
+    "Collection",
+    "Due date",
+    "Price (USD)",
+    "Cost (USD)",
+    "Paid (USD)",
+    "Balance (USD)",
+    "Status",
+    "Deposit",
+    "Needs review",
+)
+
+
+@role_required
+@require_safe
+def charge_export(request: HttpRequest) -> StreamingHttpResponse:
+    """``ledger:one_off_charges:export`` (PLAN-011 D5): one-off charges, of one lease
+    (``lease``) or billed to one operator (``operator``, as the operator page lists them)
+    when given, newest due first; an unreadable filter is ignored."""
+    charges = OneOffCharge.objects.select_related(
+        "operator", "lease__store", "lease__operator", "fee_type"
+    )
+    lease = uuid_param(request, "lease")
+    if lease is not None:
+        charges = charges.filter(lease_id=lease)
+    operator = uuid_param(request, "operator")
+    if operator is not None:
+        charges = charges.filter(operator_id=operator)
+    records = (
+        [
+            billed.display_name if (billed := _operator(charge)) is not None else "",
+            charge.lease.store.external_label if charge.lease is not None else "",
+            charge.label,
+            charge.get_category_display(),
+            charge.get_collection_display(),
+            charge.due_date,
+            charge.price,
+            charge.cost,
+            charge.amount_paid,
+            charge.balance,
+            charge.get_status_display(),
+            charge.fee_type is not None and charge.fee_type.refundable,
+            charge.needs_review,
+        ]
+        for charge in charges.order_by("-due_date", "-created_at", "id")[
+            : csv_export.CSV_MAX_ROWS + 1
+        ].iterator(chunk_size=2_000)
+    )
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("one-off-charges"))
+
+
 @role_required
 @require_safe
 def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
@@ -125,6 +195,17 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_link_invoice": billing and not closed and not invoices,
             "can_edit": billing and not closed and setup,
             "can_waive": admin and not closed and not service.has_settled_payment(charge),
+            "waive_refusal": (
+                service.WAIVE_LIVE_INVOICE
+                if not closed and service.live_provider_invoice(charge) is not None
+                else ""
+            ),
+            "cancel_meaning": service.CANCEL_MEANING,
+            "waive_meaning": service.WAIVE_MEANING,
+            "delete_invoice_hint": service.DELETE_INVOICE_HINT,
+            "can_delete_invoice": admin
+            and not jobs["job_refresh"]
+            and not service.delete_invoice_refusal(charge),
             "can_cancel": billing
             and not service.cancel_refusal(charge)
             and not jobs["job_refresh"],
@@ -389,7 +470,35 @@ def charge_waive(request: HttpRequest, pk: str) -> HttpResponse:
         _hold(request, target, form)
         return redirect("ledger:one_off_charges:waive", pk=charge.pk)
     form = _held(request, target, WaiveForm) or WaiveForm()
-    return render(request, "ledger/one_off_charges/waive.html", {"form": form, "charge": charge})
+    return render(
+        request,
+        "ledger/one_off_charges/waive.html",
+        {
+            "form": form,
+            "charge": charge,
+            "waive_meaning": service.WAIVE_MEANING,
+            "refusal": (
+                service.WAIVE_LIVE_INVOICE if service.live_provider_invoice(charge) else ""
+            ),
+        },
+    )
+
+
+@role_required
+@require_POST
+def charge_delete_invoice(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:one_off_charges:delete_invoice`` (admin; PLAN-011 D0): queue the delete of
+    a waived charge's live provider invoice. The charge stays waived."""
+    refused = _refuse_below(request, Role.ADMIN)
+    if refused is not None:
+        return refused
+    charge = _load(pk)
+    outcome = service.delete_waived_invoice(charge.pk, actor=_actor(request))
+    if outcome.ok:
+        messages.success(request, outcome.message)
+    else:
+        messages.error(request, outcome.message)
+    return redirect("ledger:one_off_charges:detail", pk=charge.pk)
 
 
 @role_required

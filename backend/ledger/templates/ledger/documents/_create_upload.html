@@ -10,6 +10,8 @@ undoes the record.
   <div class="js-document-drop" style="border:1px dashed #999;border-radius:4px;padding:.25rem .75rem .75rem;">
     <label for="{{ document_form.file.id_for_label }}">File (PDF, Word .docx, JPEG, PNG or HEIC; at most 25 MB)</label>
     {{ document_form.file }}
+    <label for="{{ document_form.photo.id_for_label }}">Take photo</label>
+    {{ document_form.photo }}
     <p class="muted js-document-drop-hint" hidden>Or drop one file here.</p>
   </div>
   <label for="{{ document_form.kind.id_for_label }}">Kind</label>

@@ -48,7 +48,7 @@ def test_password_and_totp_reach_admin(client: Client) -> None:
     password_step(client, "vera")
     response = token_step(client, current_code(device))
     assert response.status_code == 302
-    assert redirect_target(response) == "/admin/"
+    assert redirect_target(response) == "/"
     index = client.get("/admin/")
     assert index.status_code == 200
     assert BANNER_ID in index.content.decode()
@@ -60,7 +60,7 @@ def test_login_redirect_rejects_absolute_next(client: Client) -> None:
     password_step(client, "nina")
     response = token_step(client, current_code(device), next_path="https://evil.example.com/x")
     assert response.status_code == 302
-    assert response["Location"] == "/admin/"
+    assert response["Location"] == "/"
 
 
 def test_login_redirect_rejects_protocol_relative_next(client: Client) -> None:
@@ -68,7 +68,7 @@ def test_login_redirect_rejects_protocol_relative_next(client: Client) -> None:
     assert device is not None
     password_step(client, "nora")
     response = token_step(client, current_code(device), next_path="//evil.example.com/x")
-    assert response["Location"] == "/admin/"
+    assert response["Location"] == "/"
 
 
 def test_session_without_otp_cannot_use_admin() -> None:

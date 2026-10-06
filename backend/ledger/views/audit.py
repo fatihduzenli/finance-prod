@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
-from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
@@ -23,7 +23,7 @@ from django.views.decorators.http import require_safe
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.services import audit
-from ledger.views.operators import _role, role_required
+from ledger.views.operators import _role, csv_response, role_required
 from ledger.views.reports import TOO_SLOW, ReportTooSlow, bounded
 
 #: The record page of each linked entity type (``ledger.services.audit.LINKED_TYPES``
@@ -94,12 +94,8 @@ def audit_export(request: HttpRequest) -> HttpResponseBase:
         records = bounded(lambda: list(audit.csv_records(query)))
     except ReportTooSlow:
         return _page(request, query, None)
-    response = StreamingHttpResponse(
-        audit.csv_lines_of(records), content_type="text/csv; charset=utf-8"
+    return csv_response(
+        audit.csv_lines_of(records),
+        f"audit-{query.date_from:%Y-%m-%d}-to-{query.date_to:%Y-%m-%d}"
+        f"-{timezone.localdate():%Y-%m-%d}.csv",
     )
-    response["Content-Disposition"] = (
-        f'attachment; filename="audit-{query.date_from:%Y-%m-%d}-to-{query.date_to:%Y-%m-%d}'
-        f'-{timezone.localdate():%Y-%m-%d}.csv"'
-    )
-    response["Cache-Control"] = "no-store"
-    return response

@@ -169,7 +169,7 @@ def test_a_refund_is_money_out_and_never_revenue_in_the_payments_ledger() -> Non
     )
     [refund_row] = [row for row in rows if row.payment.kind == PaymentKind.REFUND_DEPOSIT]
     record = payments_ledger.csv_record(refund_row)
-    assert record[payments_ledger.CSV_HEADER.index("charge_kind")] == "refund_deposit"
+    assert record[payments_ledger.CSV_HEADER.index("Charge kind")] == "refund_deposit"
     paid_back = Payment.objects.get(kind=PaymentKind.REFUND_DEPOSIT)
     facts = refunds.payment_facts(paid_back)
     assert facts.refund_refusal == refunds.IS_DEPOSIT_REFUND

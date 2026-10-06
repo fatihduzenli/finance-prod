@@ -437,8 +437,18 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:link",
         # PLAN-010d D2: creating a one-off charge from the operator page.
         "ledger:operators:new_charge",
+        # PLAN-011 D4, D5: the list's CSV export and the customer statement.
+        "ledger:operators:export",
+        "ledger:operators:statement",
+        "ledger:operators:statement_export",
     }
-    assert {"ledger:operators:list", "ledger:operators:detail"} <= registry.READ_ONLY_ROUTE_NAMES
+    assert {
+        "ledger:operators:list",
+        "ledger:operators:detail",
+        "ledger:operators:export",
+        "ledger:operators:statement",
+        "ledger:operators:statement_export",
+    } <= registry.READ_ONLY_ROUTE_NAMES
     expected = {
         "create": Role.BILLING,
         "edit": Role.BILLING,
@@ -494,12 +504,14 @@ def test_no_delete_route_exists() -> None:
     for name in ("delete", "remove", "destroy"):
         with pytest.raises(NoReverseMatch):
             reverse(f"ledger:operators:{name}", kwargs={"pk": uuid.uuid4()})
-    # The one exception is a document's soft delete (PLAN-010c D7): it hides a file and
-    # never removes a row.
+    # The exceptions remove no row: a document's soft delete (PLAN-010c D7) hides a file,
+    # and a waived charge's "Delete provider invoice" (PLAN-011 D0) deletes the invoice at
+    # the provider and marks the local invoice void.
+    allowed = {"ledger:documents:delete", "ledger:one_off_charges:delete_invoice"}
     assert not any(
         "delete" in raw
         for name, raw, _ in iter_routes()
-        if (name or "").startswith("ledger:") and name != "ledger:documents:delete"
+        if (name or "").startswith("ledger:") and name not in allowed
     )
 
 

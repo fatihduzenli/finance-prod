@@ -1,4 +1,4 @@
-"""Response middleware that makes a sandbox deployment impossible to miss.
+"""Response middleware: the sandbox banner, and no shared or stored copy of a page.
 
 docs/CLAUDE.md Rule 6: when ``STAX_ENV=sandbox`` every rendered page, Django admin
 included, carries a fixed yellow bar that cannot be dismissed, and the page title is
@@ -15,6 +15,7 @@ from functools import cache
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
 from django.template.loader import render_to_string
+from django.utils.cache import patch_cache_control
 
 BANNER_TEMPLATE = "finance/banner.html"
 SANDBOX_STAX_ENV = "sandbox"
@@ -63,4 +64,27 @@ class SandboxBannerMiddleware:
         response.content = content
         if response.has_header("Content-Length"):
             response["Content-Length"] = str(len(response.content))
+        return response
+
+
+class PrivateNoStoreMiddleware:
+    """``Cache-Control: private, no-store`` on every response that is not a static file
+    (docs/qa/PLAN-011-dashboard-reports-mobile.md D9, §7).
+
+    Pages, exports, documents and errors carry financial data: no browser, proxy or
+    service worker may keep a copy. Directives a view already set are kept (for example
+    ``no-cache``, ``must-revalidate``, ``max-age=0``); ``private`` and ``no-store`` are
+    added and a ``public`` is removed. Static files under ``STATIC_URL`` keep the caching
+    whitenoise gives them.
+    """
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponseBase]) -> None:
+        self.get_response = get_response
+        prefix = settings.STATIC_URL or "static/"
+        self.static_prefix = prefix if prefix.startswith("/") else f"/{prefix}"
+
+    def __call__(self, request: HttpRequest) -> HttpResponseBase:
+        response = self.get_response(request)
+        if not request.path_info.startswith(self.static_prefix):
+            patch_cache_control(response, private=True, no_store=True)
         return response

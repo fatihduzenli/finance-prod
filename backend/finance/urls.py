@@ -14,6 +14,8 @@ from django.http import HttpRequest, JsonResponse
 from django.urls import include, path
 from two_factor.urls import urlpatterns as two_factor_urlpatterns
 
+from finance import pwa
+
 
 def healthz(request: HttpRequest) -> JsonResponse:
     """Liveness probe. Unauthenticated by design, so it carries no secret."""
@@ -29,6 +31,20 @@ def healthz(request: HttpRequest) -> JsonResponse:
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("healthz", healthz, name="healthz"),
+    # Install to the home screen (PLAN-011 D9): the manifest and the service worker, at
+    # the root so the worker's scope is the whole site.
+    path(
+        "",
+        include(
+            (
+                [
+                    path("manifest.webmanifest", pwa.manifest, name="manifest"),
+                    path("sw.js", pwa.service_worker, name="service_worker"),
+                ],
+                "finance",
+            )
+        ),
+    ),
     # Public, CSRF-exempt, token in the path; answers 404 to anything but a valid POST.
     path("api/webhooks/", include("payments.webhooks.urls")),
     # Login, enrolment, QR code, backup tokens, profile: all under /account/.

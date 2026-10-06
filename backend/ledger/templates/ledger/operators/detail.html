@@ -1,10 +1,12 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}{{ operator.display_name }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:operators:list' %}">&larr; Operators</a></p>
   <h1>{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1>
 
   <div class="actions">
+    <a class="btn" id="statement" href="{% url 'ledger:operators:statement' pk=operator.pk %}">Statement</a>
     {% if can_edit %}<a class="btn" href="{% url 'ledger:operators:edit' pk=operator.pk %}">Edit</a>{% endif %}
     {% if can_link %}<a class="btn" href="{% url 'ledger:operators:link' pk=operator.pk %}">Link provider IDs</a>{% endif %}
     {% if can_archive %}
@@ -52,6 +54,7 @@
   {% endif %}
 
   <h2>Leases</h2>
+  {% responsive_table %}
   <table>
     <thead><tr><th>Store</th><th>Status</th><th>Debit day</th></tr></thead>
     <tbody>
@@ -62,10 +65,13 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   <p><strong>Outstanding balance:</strong> <span id="outstanding">${{ outstanding }}</span> <span class="muted">(sum of rent charge balances over these leases)</span></p>
 
   <h2>One-off charges</h2>
+  <p class="actions"><a class="btn" id="export-one-off-charges" href="{% url 'ledger:one_off_charges:export' %}?operator={{ operator.pk }}">Export CSV</a></p>
   {% if can_new_charge %}<p class="actions"><a class="btn" href="{% url 'ledger:operators:new_charge' pk=operator.pk %}" id="new-one-off-charge">Create one-off charge</a></p>{% endif %}
+  {% responsive_table %}
   <table id="one-off-charges">
     <thead><tr><th>Charge</th><th>Lease</th><th>Due</th><th>Amount</th><th>Balance</th><th>Status</th></tr></thead>
     <tbody>
@@ -76,8 +82,10 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 
   <h2>Invoices</h2>
+  {% responsive_table %}
   <table>
     <thead><tr><th>Number</th><th>Issued</th><th>Due</th><th>Total</th><th>Status</th><th>Provider status</th></tr></thead>
     <tbody>
@@ -88,6 +96,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 
   <h2>Notes</h2>
   {% if operator.notes %}<p style="white-space:pre-wrap;">{{ operator.notes }}</p>{% endif %}

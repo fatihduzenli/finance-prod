@@ -1,0 +1,75 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Deposits versus transactions{% endblock %}
+{% block head %}<style>tr.unmatched{background:#fdecee;}</style>{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
+  <h1>Deposits versus transactions</h1>
+  {% url 'ledger:reports:deposits' as action %}{% url 'ledger:reports:deposits_export' as export %}
+  {% include "ledger/reports/_range.html" with action=action export=export %}
+  {% if too_slow %}
+    <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
+  {% else %}
+  <p class="muted">Bank deposits the payment provider reported, by deposit date, against the ACH payments and refunds settled in the same months (security deposits paid by ACH included: they reach the bank like rent). The difference is gross deposits less net settled ACH; a payment settled at the end of a month may be deposited in the next. Amounts in US dollars.</p>
+
+  <h2>Unmatched items</h2>
+  <p class="muted">Open findings of the nightly reconciliation's deposit step, whatever their date. Resolve them on the <a href="{% url 'ledger:reconciliation:page' %}" id="reconciliation-link">reconciliation page</a>.</p>
+  {% responsive_table "scroll" %}
+  <table id="unmatched">
+    <thead><tr><th>Found</th><th>Finding</th><th>Record</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for item in report.unmatched %}
+        <tr class="unmatched" data-kind="{{ item.kind }}">
+          <td>{{ item.found_on|date:"Y-m-d" }}</td>
+          <td><a href="{% url 'ledger:reconciliation:page' %}">{{ item.kind_label }}</a></td>
+          <td>{% if item.payment_id %}<a href="{% url 'ledger:payments:detail' pk=item.payment_id %}">payment {{ item.record }}</a>{% else %}{{ item.record }}{% endif %}</td>
+          <td>{{ item.detail }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">No open finding.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+
+  <h2>By month</h2>
+  {% responsive_table "scroll" %}
+  <table id="deposit-months">
+    <thead><tr><th>Month</th><th>Deposits</th><th>Gross</th><th>Fees</th><th>Net</th><th>Settled ACH payments</th><th>Settled ACH refunds</th><th>Difference</th></tr></thead>
+    <tbody>
+      {% for item in report.months %}
+        <tr class="deposit-month" data-month="{{ item.month|date:'Y-m' }}">
+          <th scope="row">{{ item.month|date:"Y-m" }}</th><td>{{ item.count }}</td>
+          <td class="money">{{ item.gross }}</td><td class="money">{{ item.fees }}</td><td class="money">{{ item.net }}</td>
+          <td class="money">{{ item.ach_paid }} <span class="muted">({{ item.ach_count }})</span></td><td class="money">{{ item.ach_refunded }}</td>
+          <td class="money difference">{{ item.difference }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      {% with item=report.total %}
+      <tr id="deposits-total">
+        <th scope="row">Total</th><td>{{ item.count }}</td>
+        <td class="money">{{ item.gross }}</td><td class="money">{{ item.fees }}</td><td class="money">{{ item.net }}</td>
+        <td class="money">{{ item.ach_paid }}</td><td class="money">{{ item.ach_refunded }}</td><td class="money">{{ item.difference }}</td>
+      </tr>
+      {% endwith %}
+    </tfoot>
+  </table>
+  {% endresponsive_table %}
+
+  <h2>Deposits received</h2>
+  {% responsive_table "scroll" %}
+  <table id="deposits">
+    <thead><tr><th>Date</th><th>Deposit</th><th>Status</th><th>Gross</th><th>Fees</th><th>Net</th></tr></thead>
+    <tbody>
+      {% for line in report.deposits %}
+        <tr class="deposit"><td>{{ line.deposit_date|date:"Y-m-d" }}</td><td>{{ line.reference }}</td><td>{{ line.status }}</td><td class="money">{{ line.gross }}</td><td class="money">{{ line.fees }}</td><td class="money">{{ line.net }}</td></tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">No deposit in these months.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  {% endif %}
+{% endblock %}

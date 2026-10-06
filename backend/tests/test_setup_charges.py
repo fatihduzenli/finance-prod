@@ -1012,7 +1012,7 @@ def test_the_ledger_filters_and_shows_a_setup_payment_by_its_lease() -> None:
         payments_ledger.csv_record(item)
         for item in payments_ledger.rows_for(payments_ledger.ledger_payments(selected))
     ]
-    assert record[payments_ledger.CSV_HEADER.index("charge_kind")] == "one_off"
+    assert record[payments_ledger.CSV_HEADER.index("Charge kind")] == "one_off"
 
 
 def test_the_ledger_and_payment_pages_name_the_kind_and_the_setup_charge() -> None:
@@ -1044,9 +1044,15 @@ WRITE_ROUTES = {
     "ledger:one_off_charges:retry": Role.BILLING,
     # PLAN-010d D4, D9: Charge now, admin.
     "ledger:one_off_charges:charge_now": Role.ADMIN,
+    # PLAN-011 D0, D10: deleting a waived charge's live provider invoice, admin.
+    "ledger:one_off_charges:delete_invoice": Role.ADMIN,
 }
 
-POST_ONLY_ROUTES = {"ledger:one_off_charges:retry_mark", "ledger:one_off_charges:retry"}
+POST_ONLY_ROUTES = {
+    "ledger:one_off_charges:retry_mark",
+    "ledger:one_off_charges:retry",
+    "ledger:one_off_charges:delete_invoice",
+}
 
 
 def routes(charge: OneOffCharge) -> dict[str, str]:
@@ -1064,6 +1070,7 @@ def routes(charge: OneOffCharge) -> dict[str, str]:
         "ledger:one_off_charges:cancel": f"{base}cancel/",
         "ledger:one_off_charges:retry": f"{base}retry/",
         "ledger:one_off_charges:charge_now": f"{base}charge-now/",
+        "ledger:one_off_charges:delete_invoice": f"{base}delete-invoice/",
     }
 
 
@@ -1076,8 +1083,9 @@ def test_every_setup_route_is_classified_with_its_role() -> None:
         or name.startswith("ledger:one_off_charges:")
         or name.endswith(":new_charge")
     }
-    assert names == {"ledger:one_off_charges:detail", *WRITE_ROUTES}
-    assert "ledger:one_off_charges:detail" in registry.READ_ONLY_ROUTE_NAMES
+    read_only = {"ledger:one_off_charges:detail", "ledger:one_off_charges:export"}
+    assert names == {*read_only, *WRITE_ROUTES}
+    assert read_only <= registry.READ_ONLY_ROUTE_NAMES
     for name, role in WRITE_ROUTES.items():
         rule = registry.rule_for(name)
         assert rule is not None and rule.min_role is role and rule.methods == {"POST"}, name

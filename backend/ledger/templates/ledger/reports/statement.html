@@ -1,0 +1,68 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Statement: {{ operator.display_name }}{% endblock %}
+{% block head %}<style>
+  @media print {
+    nav, .no-print, form#report-filters, #report-messages { display: none !important; }
+    body { background: #fff; }
+    main { max-width: none; margin: 0; padding: 0; border: 0; }
+    a { color: inherit; text-decoration: none; }
+    table { page-break-inside: auto; } tr { page-break-inside: avoid; }
+  }
+</style>{% endblock %}
+{% block content %}
+  <p class="no-print"><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>
+  <h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1>
+  {% if operator.legal_name or operator.company %}<p>{{ operator.legal_name }}{% if operator.legal_name and operator.company %} · {% endif %}{{ operator.company }}</p>{% endif %}
+  {% url 'ledger:operators:statement' pk=operator.pk as action %}{% url 'ledger:operators:statement_export' pk=operator.pk as export %}
+  <div class="no-print">{% include "ledger/reports/_range.html" with action=action export=export %}</div>
+  <p class="actions no-print"><button class="btn" type="button" onclick="window.print()">Print</button></p>
+  {% if too_slow %}
+    <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
+  {% else %}
+  <p class="muted">As of {{ report.today|date:"Y-m-d" }}; payment history {{ selected.from_month|date:"Y-m" }} to {{ selected.to_month|date:"Y-m" }}. Every store of this operator. Amounts in US dollars.</p>
+
+  <h2>Open charges</h2>
+  {% responsive_table "scroll" %}
+  <table id="open-charges">
+    <thead><tr><th>Store</th><th>Charge</th><th>Due date</th><th>Status</th><th>Balance</th></tr></thead>
+    <tbody>
+      {% for item in report.open_charges %}
+        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|date:"Y-m-d" }}</td><td>{{ item.status|default:"—" }}</td><td class="money">{{ item.balance }}</td></tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted">Nothing is owed.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><th scope="row" colspan="4">Open balance</th><th class="money" id="open-total">{{ report.open_total }}</th></tr>
+      <tr><th scope="row" colspan="4">of which overdue</th><th class="money" id="overdue-total">{{ report.overdue_total }}</th></tr>
+    </tfoot>
+  </table>
+  {% endresponsive_table %}
+
+  <h2>Payment history</h2>
+  {% responsive_table "scroll" %}
+  <table id="payment-history">
+    <thead><tr><th>Date</th><th>Store</th><th>Charge</th><th>Kind</th><th>Method</th><th>Status</th><th>Amount</th></tr></thead>
+    <tbody>
+      {% for line in report.history %}
+        <tr class="history-line"><td>{{ line.on|date:"Y-m-d"|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_method_display }}</td><td>{{ line.payment.get_status_display }}</td><td class="money">{{ line.payment.amount }}</td></tr>
+      {% empty %}
+        <tr><td colspan="7" class="muted">No payment in these months.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  {% responsive_table "scroll" %}
+  <table id="statement-totals">
+    <tbody>
+      <tr><th scope="row">Paid in the range</th><td class="money" id="paid-total">{{ report.paid }}</td></tr>
+      <tr><th scope="row">Refunded in the range</th><td class="money" id="refunded-total">{{ report.refunded }}</td></tr>
+      <tr><th scope="row">Deposits held from the range</th><td class="money" id="deposits-held">{{ report.deposits_held }}</td></tr>
+      <tr><th scope="row">Pending in the range</th><td class="money" id="pending-total">{{ report.pending }}</td></tr>
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  <p class="muted">Deposits are money held for the operator, not a payment of a charge. A pending payment is not yet collected.</p>
+  {% endif %}
+{% endblock %}

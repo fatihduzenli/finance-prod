@@ -7,6 +7,9 @@ runs the same locked reconciliation as the scheduled job. Nothing here reads the
 provider. Every identifier is shown masked; times of a run are shown in the
 reconciliation's time zone. The run list leaves out the ``skipped`` rows of scheduled
 firings that were not due (one a day, see :mod:`payments.reconciliation.schedule`).
+
+The mismatches export as CSV (``reconciliation:export``, PLAN-011 D5) for ``billing`` and
+above, like the page.
 """
 
 from __future__ import annotations
@@ -17,16 +20,25 @@ from typing import Any
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import F
-from django.http import Http404, HttpRequest, HttpResponse
+from django.db.models import F, QuerySet
+from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST, require_safe
 
 from accounts.roles import Role, meets
 from ledger.forms import ResolveMismatchForm
+from ledger.services import csv_export
+from ledger.services.csv_export import CsvWriter
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.leases import _admin_only
-from ledger.views.operators import PAGE_SIZE, _actor, _role, role_required
+from ledger.views.operators import (
+    PAGE_SIZE,
+    _actor,
+    _role,
+    csv_response,
+    export_name,
+    role_required,
+)
 from ledger.views.run import _billing_only
 from payments import jobs
 from payments.models import (
@@ -67,6 +79,13 @@ def _run_row(run: ReconciliationRun) -> dict[str, Any]:
     }
 
 
+def _mismatches() -> QuerySet[ReconciliationMismatch]:
+    """Every mismatch, open ones first, newest first."""
+    return ReconciliationMismatch.objects.select_related("run", "resolved_by").order_by(
+        F("resolved_at").asc(nulls_first=True), "-created_at", "-id"
+    )
+
+
 @role_required
 @require_safe
 def reconciliation_page(request: HttpRequest) -> HttpResponse:
@@ -83,10 +102,7 @@ def reconciliation_page(request: HttpRequest) -> HttpResponse:
         status=ReconciliationStatus.SKIPPED,
         error__startswith=schedule.NOT_DUE,
     ).order_by("-started_at", "-id")[:RECENT_RUNS]
-    found = ReconciliationMismatch.objects.select_related("run", "resolved_by").order_by(
-        F("resolved_at").asc(nulls_first=True), "-created_at", "-id"
-    )
-    page = Paginator(found, PAGE_SIZE).get_page(request.GET.get("page"))
+    page = Paginator(_mismatches(), PAGE_SIZE).get_page(request.GET.get("page"))
     return render(
         request,
         "ledger/reconciliation/page.html",
@@ -108,6 +124,42 @@ def reconciliation_page(request: HttpRequest) -> HttpResponse:
             "can_run": meets(_role(request), Role.ADMIN),
         },
     )
+
+
+EXPORT_HEADER = (
+    "Found at",
+    "Mismatch",
+    "Record type",
+    "Record (masked)",
+    "Detail",
+    "Resolved at",
+    "Resolved by",
+    "Resolution note",
+)
+
+
+@role_required
+@require_safe
+def reconciliation_export(request: HttpRequest) -> HttpResponse | StreamingHttpResponse:
+    """``ledger:reconciliation:export`` (PLAN-011 D5): every mismatch, as the page lists
+    them; ``billing`` and above, like the page."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    records = (
+        [
+            mismatch.created_at,
+            mismatch.get_kind_display(),
+            mismatch.entity_type,
+            mask_identifier(str(mismatch.entity_id)),
+            mismatch.detail,
+            mismatch.resolved_at,
+            mismatch.resolved_by.get_username() if mismatch.resolved_by is not None else "",
+            mismatch.resolution_note,
+        ]
+        for mismatch in _mismatches()[: csv_export.CSV_MAX_ROWS + 1].iterator(chunk_size=2_000)
+    )
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("reconciliation"))
 
 
 @role_required

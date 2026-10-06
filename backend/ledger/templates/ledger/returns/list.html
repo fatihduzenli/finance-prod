@@ -1,8 +1,11 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Returned payments{% endblock %}
 {% block content %}
   <h1>Returned payments</h1>
   <p class="muted">ACH debits the payment provider reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing here debits again.</p>
+  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Export CSV</a></p>
+  {% responsive_table %}
   <table id="returns">
     <thead>
       <tr><th>Operator</th><th>Store</th><th>Amount</th><th>Code</th><th>Reason</th><th>Returned at</th>{% if can_resolve %}<th>Resolve</th>{% endif %}</tr>
@@ -32,6 +35,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   {% if page.paginator.num_pages > 1 %}
     <p class="actions">
       {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}

@@ -129,7 +129,7 @@ def test_export_round_trips_notes_with_commas_quotes_and_newlines() -> None:
     text = _streamed(response)
     rows = list(csv.DictReader(io.StringIO(text)))
     assert len(rows) == 2
-    notes = [row["note"] for row in rows]
+    notes = [row["Note"] for row in rows]
     assert tricky in notes
     assert any(note.startswith("'=") for note in notes)  # formula injection neutralised
     assert all(CARD not in value for row in rows for value in row.values())

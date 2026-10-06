@@ -452,7 +452,14 @@ def test_a_pending_or_settled_payment_on_the_charge_refuses(
 
 def test_a_waived_charge_is_refused(fake: FakeProvider, enabled: None) -> None:
     charge = ready(fake)
-    service.waive(charge.pk, note="Goodwill.", actor=None)
+    # PLAN-011 D0: Waive is refused while the invoice is live; a charge waived before
+    # that rule (as INV-2026-0004 was) is still refused by Charge now.
+    assert service.waive(charge.pk, note="Goodwill.", actor=None).message == (
+        service.WAIVE_LIVE_INVOICE
+    )
+    OneOffCharge.objects.filter(pk=charge.pk).update(
+        status=OneOffChargeStatus.WAIVED, waived_at=timezone.now(), waive_note="Goodwill."
+    )
     assert confirm(charge).message == service.CHARGE_NOW_CLOSED
 
 

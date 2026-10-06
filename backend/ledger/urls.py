@@ -1,7 +1,7 @@
 """Ledger routes (PLAN-006-operators.md §4.1, PLAN-007-leases-and-rent-run.md §4.1,
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
 D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11, PLAN-010c
-D7, D10, PLAN-010d D1, D2, D4, D6, D8).
+D7, D10, PLAN-010d D1, D2, D4, D6, D8, PLAN-011 D0 to D5).
 
 Namespace ``ledger``.
 
@@ -22,6 +22,7 @@ from django.urls import include, path
 from ledger.views import (
     audit,
     charges,
+    dashboard,
     deposits,
     documents,
     leases,
@@ -41,6 +42,7 @@ app_name = "ledger"
 operator_patterns = (
     [
         path("", operators.operator_list, name="list"),
+        path("export.csv", operators.operator_export, name="export"),
         path("new/", operators.operator_create, name="create"),
         path("<str:pk>/", operators.operator_detail, name="detail"),
         path("<str:pk>/edit/", operators.operator_edit, name="edit"),
@@ -48,6 +50,8 @@ operator_patterns = (
         path("<str:pk>/retry-sync/", operators.operator_retry_sync, name="retry_sync"),
         path("<str:pk>/link/", operators.operator_link, name="link"),
         path("<str:pk>/charges/new/", one_off_charges.operator_new_charge, name="new_charge"),
+        path("<str:pk>/statement/", reports.statement_page, name="statement"),
+        path("<str:pk>/statement/export.csv", reports.statement_export, name="statement_export"),
     ],
     "operators",
 )
@@ -55,6 +59,7 @@ operator_patterns = (
 store_patterns = (
     [
         path("", stores.store_list, name="list"),
+        path("export.csv", stores.store_export, name="export"),
         path("new/", stores.store_create, name="create"),
         path("<str:pk>/", stores.store_detail, name="detail"),
         path("<str:pk>/edit/", stores.store_edit, name="edit"),
@@ -68,6 +73,7 @@ store_patterns = (
 lease_patterns = (
     [
         path("", leases.lease_list, name="list"),
+        path("export.csv", leases.lease_export, name="export"),
         path("new/", leases.lease_create, name="create"),
         path("<str:pk>/", leases.lease_detail, name="detail"),
         path("<str:pk>/edit/", leases.lease_edit, name="edit"),
@@ -93,6 +99,7 @@ lease_patterns = (
 run_patterns = (
     [
         path("", run.run_today, name="today"),
+        path("export.csv", run.run_export, name="export"),
         path("create-charges/", run.run_create_charges, name="create_charges"),
         path("match/", run.run_match, name="match"),
     ],
@@ -101,6 +108,7 @@ run_patterns = (
 
 charge_patterns = (
     [
+        path("export.csv", charges.charge_export, name="export"),
         path("<str:pk>/", charges.charge_detail, name="detail"),
         path("<str:pk>/payments/new/", charges.charge_record_payment, name="record_payment"),
         path("<str:pk>/retry-mark/", charges.charge_retry_mark, name="retry_mark"),
@@ -111,6 +119,7 @@ charge_patterns = (
 
 one_off_charge_patterns = (
     [
+        path("export.csv", one_off_charges.charge_export, name="export"),
         path("<str:pk>/", one_off_charges.charge_detail, name="detail"),
         path("<str:pk>/payments/new/", one_off_charges.charge_payment, name="payment"),
         path("<str:pk>/retry-mark/", one_off_charges.charge_retry_mark, name="retry_mark"),
@@ -118,6 +127,11 @@ one_off_charge_patterns = (
         path("<str:pk>/edit/", one_off_charges.charge_edit, name="edit"),
         path("<str:pk>/waive/", one_off_charges.charge_waive, name="waive"),
         path("<str:pk>/cancel/", one_off_charges.charge_cancel, name="cancel"),
+        path(
+            "<str:pk>/delete-invoice/",
+            one_off_charges.charge_delete_invoice,
+            name="delete_invoice",
+        ),
         path("<str:pk>/retry/", one_off_charges.charge_retry, name="retry"),
         path("<str:pk>/charge-now/", one_off_charges.charge_now, name="charge_now"),
     ],
@@ -138,6 +152,7 @@ payment_patterns = (
 webhook_patterns = (
     [
         path("", webhooks.webhook_list, name="list"),
+        path("export.csv", webhooks.webhook_export, name="export"),
         path("<str:pk>/", webhooks.webhook_detail, name="detail"),
         path("<str:pk>/replay/", webhooks.webhook_replay, name="replay"),
     ],
@@ -147,6 +162,7 @@ webhook_patterns = (
 return_patterns = (
     [
         path("", returns.return_list, name="list"),
+        path("export.csv", returns.return_export, name="export"),
         path("<str:pk>/resolve/", returns.return_resolve, name="resolve"),
     ],
     "returns",
@@ -155,6 +171,7 @@ return_patterns = (
 reconciliation_patterns = (
     [
         path("", reconciliation.reconciliation_page, name="page"),
+        path("export.csv", reconciliation.reconciliation_export, name="export"),
         path("run/", reconciliation.reconciliation_run, name="run"),
         path(
             "mismatches/<str:pk>/resolve/",
@@ -167,8 +184,21 @@ reconciliation_patterns = (
 
 report_patterns = (
     [
+        path("", reports.report_index, name="index"),
         path("pnl/", reports.pnl_report, name="pnl"),
         path("pnl/export.csv", reports.pnl_export, name="pnl_export"),
+        path("aging/", reports.aging_report, name="aging"),
+        path("aging/export.csv", reports.aging_export, name="aging_export"),
+        path("revenue/", reports.revenue_report, name="revenue"),
+        path("revenue/export.csv", reports.revenue_export, name="revenue_export"),
+        path("payments-by-method/", reports.payments_by_method_report, name="payments_by_method"),
+        path(
+            "payments-by-method/export.csv",
+            reports.payments_by_method_export,
+            name="payments_by_method_export",
+        ),
+        path("deposits/", reports.deposits_report, name="deposits"),
+        path("deposits/export.csv", reports.deposits_export, name="deposits_export"),
     ],
     "reports",
 )
@@ -177,6 +207,8 @@ document_patterns = (
     [
         path("stores/<str:pk>/upload/", documents.upload_store, name="upload_store"),
         path("leases/<str:pk>/upload/", documents.upload_lease, name="upload_lease"),
+        path("stores/<str:pk>/export.csv", documents.export_store, name="export_store"),
+        path("leases/<str:pk>/export.csv", documents.export_lease, name="export_lease"),
         path("<str:pk>/download/", documents.download, name="download"),
         path("<str:pk>/preview/", documents.preview, name="preview"),
         path("<str:pk>/delete/", documents.delete, name="delete"),
@@ -192,7 +224,26 @@ audit_patterns = (
     "audit",
 )
 
+grid_patterns = (
+    [
+        path("", dashboard.grid_page, name="page"),
+        path("export.csv", dashboard.grid_export, name="export"),
+    ],
+    "grid",
+)
+
+arrears_patterns = (
+    [
+        path("", dashboard.arrears_page, name="page"),
+        path("export.csv", dashboard.arrears_export, name="export"),
+    ],
+    "arrears",
+)
+
 urlpatterns = [
+    path("", dashboard.home, name="home"),
+    path("grid/", include(grid_patterns)),
+    path("arrears/", include(arrears_patterns)),
     path("operators/", include(operator_patterns)),
     path("stores/", include(store_patterns)),
     path("leases/", include(lease_patterns)),

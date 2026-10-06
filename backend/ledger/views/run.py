@@ -10,6 +10,8 @@ It reads only: no provider call and no write.
 the server's today, never a date from the request, with the outcome as messages.
 "Match invoices" reads the provider, so it is queued as a ``run_match`` job for the
 worker (PLAN-010 D3); the page shows the latest one and its report lines.
+
+``run:export`` (PLAN-011 D5) is the debits due today as CSV, any role.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib import messages
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_safe
@@ -26,8 +28,9 @@ from django.views.decorators.http import require_POST, require_safe
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.services import insurance, rent_run
+from ledger.services.csv_export import CsvWriter
 from ledger.views.jobs import busy, job_context, submit
-from ledger.views.operators import _actor, _role, role_required
+from ledger.views.operators import _actor, _role, csv_response, export_name, role_required
 from payments import jobs
 from payments.health import provider_health
 from payments.models import JobKind, JobStatus, WebhookEvent, WebhookOutcome
@@ -68,6 +71,46 @@ def run_today(request: HttpRequest) -> HttpResponse:
             "dead_letters": WebhookEvent.objects.filter(outcome=WebhookOutcome.DEAD_LETTER).count(),
         },
     )
+
+
+EXPORT_HEADER = (
+    "Store",
+    "Store number",
+    "Operator",
+    "Debit of the month",
+    "Debit day",
+    "Channel",
+    "Amount (USD)",
+    "Carried balance (USD)",
+    "Status",
+    "Last month status",
+    "Last month balance (USD)",
+)
+NOT_CREATED = "Not created"
+
+
+@role_required
+@require_safe
+def run_export(request: HttpRequest) -> StreamingHttpResponse:
+    """``ledger:run:export`` (PLAN-011 D5): the debits due today, as the page lists them."""
+    run = rent_run.leases_due(timezone.localdate())
+    records = (
+        [
+            item.lease.store.external_label,
+            item.lease.store.store_number,
+            item.lease.operator.display_name if item.lease.operator is not None else "",
+            item.seq,
+            item.debit_day,
+            item.lease.get_payment_channel_display(),
+            item.amount,
+            item.carried_balance,
+            item.charge.get_status_display() if item.charge is not None else NOT_CREATED,
+            item.last_month.get_status_display() if item.last_month is not None else "",
+            item.last_month.balance if item.last_month is not None else None,
+        ]
+        for item in run.due
+    )
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("rent-run"))
 
 
 def _billing_only(request: HttpRequest) -> HttpResponse | None:

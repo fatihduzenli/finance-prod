@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Leases{% endblock %}
 {% block content %}
   <h1>Leases</h1>
@@ -10,7 +11,9 @@
       {% for item in operators %}<option value="{{ item.pk }}"{% if item.pk == operator %} selected{% endif %}>{{ item.display_name }}</option>{% endfor %}
     </select>
     <button class="btn" type="submit">Filter</button>
+    <a class="btn" id="export-csv" href="{% url 'ledger:leases:export' %}{% if query %}?{{ query }}{% endif %}">Export CSV</a>
   </form>
+  {% responsive_table %}
   <table>
     <thead>
       <tr><th>Store</th><th>Operator</th><th>Rent</th><th>Debit days</th><th>Channel</th><th>Status</th></tr>
@@ -30,6 +33,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   {% if page.paginator.num_pages > 1 %}
     <p class="actions">
       {% if page.has_previous %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

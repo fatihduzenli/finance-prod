@@ -1,0 +1,78 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Arrears{% endblock %}
+{% block content %}
+  <h1>Arrears</h1>
+  <form method="get" action="{% url 'ledger:arrears:page' %}" id="arrears-filters" role="search">
+    <div class="actions">
+      <label for="operator" style="margin:0;">Operator</label>
+      <select name="operator" id="operator">
+        <option value="">All</option>
+        {% for operator in operators %}<option value="{{ operator.pk }}"{% if operator.pk == selected.operator %} selected{% endif %}>{{ operator.display_name }}</option>{% endfor %}
+      </select>
+      <label for="state" style="margin:0;">State</label>
+      <input type="text" name="state" id="state" value="{{ selected.state }}" maxlength="50" style="width:5rem;">
+      <label for="bucket" style="margin:0;">Months behind</label>
+      <select name="bucket" id="bucket">
+        <option value="">All</option>
+        {% for value, label in buckets %}<option value="{{ value }}"{% if value == selected.bucket %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <input type="hidden" name="sort" value="{{ selected.sort }}">
+      <input type="hidden" name="dir" value="{% if selected.descending %}desc{% else %}asc{% endif %}">
+      <button class="btn" type="submit">Show</button>
+      <a class="btn" id="export-csv" href="{% url 'ledger:arrears:export' %}?{{ export_query }}">Export CSV</a>
+    </div>
+  </form>
+  {% if selected.messages %}
+    <ul class="messages" id="arrears-messages">{% for text in selected.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if too_slow %}
+    <p class="warning" id="arrears-too-slow" role="status">{{ too_slow }}</p>
+  {% else %}
+  <p class="muted">Operators behind today: a rent charge unpaid or partly paid, or an insurance or one-off balance, due before today. Months behind counts the rent months unpaid or partly paid. Total owed is every open balance of the operator, overdue or not (rent, insurance and one-off charges not waived or voided, deposits left out). Amounts in US dollars.</p>
+  {% responsive_table %}
+  <table id="bucket-totals">
+    <thead><tr><th>Months behind</th><th>Operators</th><th>Total owed</th></tr></thead>
+    <tbody>
+      {% for bucket, label, count, owed in report.bucket_totals %}
+        <tr class="bucket-total" data-bucket="{{ bucket }}"><td>{{ label }}</td><td class="bucket-count">{{ count }}</td><td class="bucket-owed">${{ owed|floatformat:"2g" }}</td></tr>
+      {% endfor %}
+      <tr id="overall-total"><th>All</th><th id="arrears-count">{{ report.count }}</th><th id="arrears-owed">${{ report.total_owed|floatformat:"2g" }}</th></tr>
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+
+  <h2>Operators</h2>
+  {% responsive_table %}
+  <table id="arrears">
+    <thead>
+      <tr>
+        <th><a href="?{{ sort_links.operator }}">Operator</a></th>
+        <th><a href="?{{ sort_links.months }}">Months behind</a></th>
+        <th><a href="?{{ sort_links.owed }}">Total owed</a></th>
+        <th>Overdue</th>
+        <th><a href="?{{ sort_links.last_payment }}">Last payment</a></th>
+        <th>Channel</th>
+        <th>Stores</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in report.rows %}
+        <tr class="arrears-row" data-bucket="{{ row.bucket }}">
+          <td>{% if row.operator_id %}<a href="{% url 'ledger:operators:detail' pk=row.operator_id %}">{{ row.operator_name }}</a>{% else %}No operator{% endif %}</td>
+          <td class="months-behind">{{ row.months_behind }}</td>
+          <td class="total-owed">${{ row.total_owed|floatformat:"2g" }}</td>
+          <td>${{ row.overdue|floatformat:"2g" }}</td>
+          <td>{{ row.last_payment|date:"Y-m-d"|default:"—" }}</td>
+          <td>{{ row.channel_labels|join:", "|default:"—" }}</td>
+          <td>{{ row.store_labels|join:", "|default:"—" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7" class="muted">No operator is behind.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  {% endif %}
+{% endblock %}

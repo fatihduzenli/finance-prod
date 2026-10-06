@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Reconciliation{% endblock %}
 {% block content %}
   <h1>Reconciliation</h1>
@@ -25,6 +26,7 @@
       <dt>Provider requests</dt><dd id="last-requests">{{ last.run.requests }}</dd>
       <dt>Error</dt><dd id="last-error">{{ last.run.error|default:"—" }}</dd>
     </dl>
+    {% responsive_table %}
     <table id="last-counts">
       <thead><tr><th>Step</th><th>Counts</th></tr></thead>
       <tbody>
@@ -35,12 +37,15 @@
         {% endfor %}
       </tbody>
     </table>
+    {% endresponsive_table %}
   {% else %}
     <p class="muted" id="no-run">No reconciliation has run yet.</p>
   {% endif %}
 
   <h2>Mismatches</h2>
+  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:reconciliation:export' %}">Export CSV</a></p>
   <p class="muted">{{ open_count }} unresolved. Unresolved first, newest first.</p>
+  {% responsive_table %}
   <table id="mismatches">
     <thead>
       <tr><th>Found</th><th>Kind</th><th>Record</th><th>Detail</th><th>Resolved</th><th>Resolve</th></tr>
@@ -69,6 +74,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   {% if page.paginator.num_pages > 1 %}
     <p class="actions">
       {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
@@ -78,6 +84,7 @@
   {% endif %}
 
   <h2>Recent runs</h2>
+  {% responsive_table %}
   <table id="recent-runs">
     <thead><tr><th>Started</th><th>How</th><th>Status</th><th>Step</th><th>Requests</th><th>Duration</th><th>Note</th></tr></thead>
     <tbody>
@@ -96,5 +103,6 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

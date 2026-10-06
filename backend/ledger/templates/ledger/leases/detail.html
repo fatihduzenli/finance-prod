@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% load static %}
 {% block title %}Lease {{ lease.store.external_label }}{% endblock %}
 {% block content %}
@@ -35,6 +36,7 @@
   </dl>
 
   <h2>Rent history</h2>
+  {% responsive_table %}
   <table id="rent-history">
     <thead><tr><th>Amount</th><th>From</th><th>To</th><th>Source</th></tr></thead>
     <tbody>
@@ -45,6 +47,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 
   <h2>Autopay</h2>
   {% include "ledger/_job_status.html" %}
@@ -55,6 +58,7 @@
   {% if notes_info %}
     <ul id="enrolment-notes" class="muted">{% for text in notes_info %}<li>{{ text }}</li>{% endfor %}</ul>
   {% endif %}
+  {% responsive_table %}
   <table id="schedules">
     <thead><tr><th>Debit</th><th>Day</th><th>Amount</th><th>State</th><th>Next debit</th><th>Provider schedule</th></tr></thead>
     <tbody>
@@ -72,9 +76,12 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   <p class="muted">Next debit is computed here from the debit day; the provider runs the schedule.</p>
 
   <h2>Charges</h2>
+  <p class="actions"><a class="btn" id="export-charges" href="{% url 'ledger:charges:export' %}?lease={{ lease.pk }}">Export CSV</a></p>
+  {% responsive_table %}
   <table>
     <thead><tr><th>Period</th><th>Debit</th><th>Due</th><th>Amount due</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
     <tbody>
@@ -85,9 +92,12 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 
   <h2>Setup and one-off charges</h2>
+  <p class="actions"><a class="btn" id="export-one-off-charges" href="{% url 'ledger:one_off_charges:export' %}?lease={{ lease.pk }}">Export CSV</a></p>
   {% if can_add_setup_charge or can_new_charge %}<p class="actions">{% if can_add_setup_charge %}<a class="btn" href="{% url 'ledger:leases:add_setup_charge' pk=lease.pk %}" id="add-setup-charge">Add setup charge</a>{% endif %}{% if can_new_charge %} <a class="btn" href="{% url 'ledger:leases:new_charge' pk=lease.pk %}" id="new-one-off-charge">Create one-off charge</a>{% endif %}</p>{% endif %}
+  {% responsive_table %}
   <table id="setup-charges">
     <thead><tr><th>Charge</th><th>Due</th><th>Cost</th><th>Price</th><th>Paid</th><th>Balance</th><th>Status</th><th>Deposit</th></tr></thead>
     <tbody>
@@ -99,6 +109,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 
   <h2>Notes</h2>
   {% for note in notes %}

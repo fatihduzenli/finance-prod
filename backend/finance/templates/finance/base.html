@@ -1,44 +1,37 @@
 {% comment %}
 Layout of the staff screens (docs/qa/PLAN-006-operators.md). Self-contained: no external
-asset. Renders no setting. The SANDBOX banner and the title prefix are injected by
-finance.middleware.SandboxBannerMiddleware. The sign-in pages keep their own base,
+asset; the style sheet, the manifest and the service worker are the app's own
+(docs/qa/PLAN-011-dashboard-reports-mobile.md D9). Renders no setting. Under 1024 px the
+links fold behind "Menu", a checkbox and its label: no script. The SANDBOX banner and the
+title prefix are injected by finance.middleware.SandboxBannerMiddleware. The sign-in pages keep their own base,
 two_factor/_base.html.
-{% endcomment %}{% load roles %}<!DOCTYPE html>
+{% endcomment %}{% load roles static %}<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   {% if job_refresh %}<meta http-equiv="refresh" content="5">{% endif %}
   <title>{% block title %}{% endblock %} | Finance</title>
-  <style>
-    body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;background:#f6f6f6;}
-    nav{display:flex;gap:1rem;align-items:center;padding:.75rem 1.5rem;background:#1a1a1a;}
-    nav a{color:#fff;text-decoration:none;font-weight:600;}
-    nav form{margin:0 0 0 auto;}
-    nav button{background:none;border:1px solid #fff;color:#fff;border-radius:4px;padding:.25rem .75rem;cursor:pointer;}
-    main{max-width:64rem;margin:1.5rem auto;padding:1.5rem 2rem;background:#fff;border:1px solid #ddd;border-radius:6px;}
-    h1{font-size:1.5rem;margin-top:0;} h2{font-size:1.15rem;margin-top:2rem;}
-    table{border-collapse:collapse;width:100%;} th,td{padding:.4rem .5rem;border-bottom:1px solid #e5e5e5;text-align:left;vertical-align:top;}
-    label{display:block;margin:.75rem 0 .25rem;font-weight:600;}
-    input[type=text],input[type=email],input[type=search],textarea{width:100%;padding:.5rem;box-sizing:border-box;font-size:1rem;}
-    .btn{display:inline-block;padding:.45rem .9rem;border:1px solid #333;border-radius:4px;background:#fff;color:#1a1a1a;font-size:.95rem;cursor:pointer;text-decoration:none;}
-    .btn-primary{background:#1a1a1a;color:#fff;} .btn-danger{border-color:#b00020;color:#b00020;}
-    .btn:disabled{opacity:.5;cursor:default;}
-    .actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:1rem 0;} .actions form{margin:0;}
-    .messages{list-style:none;padding:0;} .messages li{padding:.6rem .8rem;margin-bottom:.5rem;border-radius:4px;background:#eef4ff;}
-    .messages .error{background:#fdecee;color:#8a0016;} .messages .warning{background:#fff6dd;} .messages .success{background:#e9f7ec;}
-    .errorlist{color:#b00020;padding-left:1rem;}
-    .muted{color:#666;} .badge{display:inline-block;padding:.1rem .45rem;border-radius:3px;background:#eee;font-size:.85rem;}
-    dl{display:grid;grid-template-columns:12rem 1fr;gap:.35rem 1rem;} dt{font-weight:600;} dd{margin:0;}
-  </style>
+  <meta name="theme-color" content="#1a1a1a">
+  <link rel="stylesheet" href="{% static 'finance/app.css' %}">
+  <link rel="manifest" href="{% url 'finance:manifest' %}" crossorigin="use-credentials">
+  <link rel="apple-touch-icon" href="{% static 'finance/icons/icon-192.png' %}">
+  {% block head %}{% endblock %}
 </head>
 <body>
   <nav aria-label="Main">
+    <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-controls="nav-links">
+    <label for="nav-toggle" class="nav-toggle-label" id="nav-menu">Menu</label>
+    <div class="nav-links" id="nav-links">
+    <a href="{% url 'ledger:grid:page' %}" id="nav-grid">Grid</a>
+    <a href="{% url 'ledger:home' %}" id="nav-home">Dashboard</a>
+    <a href="{% url 'ledger:arrears:page' %}" id="nav-arrears">Arrears</a>
     <a href="{% url 'ledger:stores:list' %}">Stores</a>
     <a href="{% url 'ledger:operators:list' %}">Operators</a>
     <a href="{% url 'ledger:leases:list' %}">Leases</a>
     <a href="{% url 'ledger:run:today' %}">Rent run</a>
     <a href="{% url 'ledger:payments:list' %}">Payments</a>
+    <a href="{% url 'ledger:reports:index' %}" id="nav-reports">Reports</a>
     <a href="{% url 'ledger:reports:pnl' %}">Profit and loss</a>
     <a href="{% url 'ledger:returns:list' %}">Returns</a>
     <a href="{% url 'ledger:webhooks:list' %}">Webhooks</a>
@@ -46,8 +39,9 @@ two_factor/_base.html.
     {% if request.user|is_admin %}<a href="{% url 'ledger:audit:page' %}" id="nav-audit">Audit</a>{% endif %}
     <a href="{% url 'admin:index' %}">Admin</a>
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form>
+    </div>
   </nav>
-  <main>
+  <main class="{% block main_class %}{% endblock %}">
     {% if messages %}
       <ul class="messages">
         {% for message in messages %}<li class="{{ message.tags }}" role="status">{{ message }}</li>{% endfor %}
@@ -56,5 +50,15 @@ two_factor/_base.html.
     {% block content %}{% endblock %}
   </main>
   {% block scripts %}{% endblock %}
+  <script>
+    // Static files only; see finance/pwa.py. A failed registration leaves the page as is.
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("{% url 'finance:service_worker' %}", {scope: "/"}).catch(function (error) {
+          console.warn("Service worker not registered:", error.name);
+        });
+      });
+    }
+  </script>
 </body>
 </html>

@@ -14,18 +14,17 @@ and ``page``.
 A filter longer than :data:`FILTER_MAX_LENGTH` characters is dropped.
 
 Rows are newest first, :data:`PAGE_SIZE` per page, read with one query (no count). The
-CSV holds at most :data:`CSV_MAX_ROWS` rows; its text cells are formula-safe
-(:func:`ledger.services.payments_ledger.csv_text`) and ``before``/``after`` are compact
-JSON. On the page and in the file the entity id is masked, and every value of
-``before``/``after`` that looks like an identifier (:func:`looks_like_identifier`) is
-masked by :func:`payments.provider.mask_identifier`; money stays the text it was
-stored as. The caller runs :func:`rows` and :func:`csv_records` under the report
-statement timeout (``ledger.views.reports.bounded``).
+CSV holds at most :data:`CSV_MAX_ROWS` rows; it is written by
+:class:`ledger.services.csv_export.CsvWriter` (formula-safe text) and
+``before``/``after`` are compact JSON. On the page and in the file the entity id is
+masked, and every value of ``before``/``after`` that looks like an identifier
+(:func:`looks_like_identifier`) is masked by :func:`payments.provider.mask_identifier`;
+money stays the text it was stored as. The caller runs :func:`rows` and
+:func:`csv_records` under the report statement timeout (``ledger.views.reports.bounded``).
 """
 
 from __future__ import annotations
 
-import csv
 import json
 import re
 import uuid
@@ -40,7 +39,8 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from ledger.models import AuditLog, Document, Lease, Store
-from ledger.services.payments_ledger import CsvLine, csv_text
+from ledger.services import csv_export
+from ledger.services.csv_export import CsvWriter
 from payments.provider import mask_identifier
 
 NEW_YORK = ZoneInfo("America/New_York")
@@ -53,7 +53,7 @@ MAX_DAYS = 366
 #: stay far from ``date.min`` and ``date.max``.
 MIN_YEAR = 2000
 MAX_YEAR = 2100
-CSV_MAX_ROWS = 50_000
+CSV_MAX_ROWS = csv_export.CSV_MAX_ROWS
 FILTER_MAX_LENGTH = 200
 ACTIVITY_SIZE = 10
 DOCUMENT_ACTIONS = "document."
@@ -68,15 +68,15 @@ LINKED_TYPES: frozenset[str] = frozenset(
 )
 
 CSV_HEADER: tuple[str, ...] = (
-    "id",
-    "at_utc",
-    "at_new_york",
-    "action",
-    "user",
-    "entity_type",
-    "entity_id",
-    "before_json",
-    "after_json",
+    "Audit entry",
+    "Time (UTC)",
+    "Time (New York)",
+    "Action",
+    "User",
+    "Record type",
+    "Record (masked)",
+    "Before (JSON)",
+    "After (JSON)",
 )
 
 # --- Sentences ------------------------------------------------------------------------
@@ -88,8 +88,6 @@ TOO_LONG = "A filter longer than {limit} characters was ignored: {name}."
 UNKNOWN_USER = "No user has that username; no rows match."
 BAD_OWNER = "The documents filter could not be read and was ignored."
 PAGE_CAPPED = "Pages after {limit} are not shown; narrow the filters."
-CSV_TRUNCATED = "truncated"
-CSV_TRUNCATED_TEXT = "Only the first {limit} rows are exported; narrow the filters."
 
 _ISO_DATE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 #: An identifier-shaped value: letters, digits, ``_`` and ``-`` only, 9 to 64 of them,
@@ -409,42 +407,34 @@ def pairs(value: Any) -> list[tuple[str, str]]:
 # --- CSV ------------------------------------------------------------------------------
 
 
-def _csv_record(row: AuditLog) -> list[str]:
+def _csv_record(row: AuditLog) -> list[object]:
     return [
-        str(row.id),
-        row.at.astimezone(UTC).isoformat(),
-        row.at.astimezone(NEW_YORK).isoformat(),
-        csv_text(row.action),
-        csv_text(row.actor.get_username() if row.actor is not None else ""),
-        csv_text(row.entity_type),
-        csv_text(mask_identifier(row.entity_id)),
-        csv_text(compact_json(row.before)),
-        csv_text(compact_json(row.after)),
+        row.id,
+        row.at.astimezone(UTC),
+        row.at.astimezone(NEW_YORK),
+        row.action,
+        row.actor.get_username() if row.actor is not None else "",
+        row.entity_type,
+        mask_identifier(row.entity_id),
+        compact_json(row.before),
+        compact_json(row.after),
     ]
 
 
-def csv_records(query: AuditQuery) -> Iterator[list[str]]:
-    """The rows of ``query`` (every page) as CSV records, at most :data:`CSV_MAX_ROWS`,
-    then a ``truncated`` record when there were more."""
+def csv_records(query: AuditQuery) -> Iterator[list[object]]:
+    """The rows of ``query`` (every page) as CSV records, at most one more than
+    :data:`CSV_MAX_ROWS`: the writer turns that one into its ``truncated`` row."""
     found = _filtered(query)
     if found is None:
         return
-    count = 0
     for row in found[: CSV_MAX_ROWS + 1].iterator(chunk_size=2_000):
-        if count == CSV_MAX_ROWS:
-            yield [CSV_TRUNCATED, CSV_TRUNCATED_TEXT.format(limit=CSV_MAX_ROWS)]
-            return
-        count += 1
         yield _csv_record(row)
 
 
-def csv_lines_of(records: Iterable[list[str]]) -> Iterator[str]:
+def csv_lines_of(records: Iterable[list[object]]) -> Iterator[str]:
     """The header, then ``records``, as CSV lines (the export reads its records first,
     inside the statement timeout, and streams these)."""
-    writer = csv.writer(CsvLine())
-    yield writer.writerow(CSV_HEADER)
-    for record in records:
-        yield writer.writerow(record)
+    return CsvWriter(CSV_HEADER, limit=CSV_MAX_ROWS).lines(records)
 
 
 # --- Activity of a Documents section --------------------------------------------------

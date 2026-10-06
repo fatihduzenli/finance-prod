@@ -353,3 +353,44 @@ reads **Voided** and the local invoice `void`. Stax shows the invoice as **DELET
 days, at most 366); 100 rows a page; **Export CSV** of the filtered rows (at most 50,000). Each
 Documents section shows an **Activity** list of the last 10 document events for that record,
 including refused uploads, with a link to the audit page for admins.
+
+## 14. Dashboard, month grid, arrears, reports, exports and the phone (PLAN-011)
+
+**Home (`/`).** Signing in lands on the dashboard: total outstanding, overdue with a count, paid
+this month, invoices created but not sent, **failed payment attempts** (invoices Stax marks
+`ATTEMPTED`: operators who tried to pay and could not; call them first), today's run (due,
+pending, returned, with links), the last reconciliation, and, while any exist, charges waived
+with a live Stax invoice (see §13.1). Every figure links to the list behind it.
+
+**Grid (`/grid/`)** is the Rents tab: stores down, months across; green paid, red unpaid, amber
+pending, orange partial, grey waived, "due" before the debit, "not due" before the lease, a dot
+where the charge has a note; click a cell to open the charge. Filters: operator, state, channel,
+status. Export CSV gives the sheet's column order so the parallel run can be diffed.
+
+**Arrears (`/arrears/`)**: one line per operator across stores, months behind (1, 2, 3+), total
+owed including insurance and one-off charges, last payment, channels, stores; CSV.
+
+**Reports (`/reports/`)**: A/R aging (a snapshot as of today; its grand total always equals the
+dashboard's outstanding), revenue by month (billed and collected by the month the money settled;
+deposits excluded), payments by method (ACH, Zelle, wire, other; no cards exist here), deposits
+versus transactions (unmatched items highlighted, from the nightly reconciliation), the P&L, and
+a printable **customer statement** per operator across all stores (open charges and payment
+history; print from the browser; CSV). Every list page has Export CSV of the filtered rows with
+headers written for an accountant (`Amount due (USD)`, `Due date`, …). Exports stop at 50,000
+rows and say so in a final row.
+
+**On a phone.** Every page fits a phone; tables turn into cards, the grid and the reports scroll
+sideways with the first column fixed. To install: open the site in Safari (iPhone) or Chrome
+(Android) while signed in, use "Add to Home Screen" / "Install app". The installed app caches
+only static files (styles, icons, scripts); every page and every figure is fetched live, and
+nothing works offline by design. Documents can be taken with the camera from the upload box.
+Sign-in with the authenticator code works the same on the phone.
+
+### 13.1 Waive, Cancel, and a live Stax invoice
+
+**Cancel** removes the Stax invoice (it reads DELETED there) and closes the charge: nothing is
+owed. **Waive** closes a charge that has no Stax invoice without collecting it. Waiving a charge
+whose invoice is live at Stax is refused: cancel first. A charge already waived with a live
+invoice (there was one from the night of 2026-10-05) shows on the dashboard until an admin
+presses **Delete provider invoice** on its page, which removes the invoice through the worker
+and records it in the audit log.

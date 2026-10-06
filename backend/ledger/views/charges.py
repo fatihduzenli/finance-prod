@@ -9,6 +9,8 @@ every rule under a row lock and writes the audit rows. No view calls the provide
 recorded payment whose invoice is to be marked, and the retry, are queued as jobs
 (:mod:`ledger.views.jobs`, PLAN-010 D3); the detail page shows the latest one. Every
 POST ends in a redirect; a form with errors is held in the session for the next GET.
+
+``charges:export`` (PLAN-011 D5) is rent charges as CSV, of one lease or operator, any role.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from __future__ import annotations
 import uuid
 
 from django.contrib import messages
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
@@ -24,10 +26,20 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import LinkInvoiceForm, ManualPaymentForm
 from ledger.models import ChargeNote, RentCharge, RentChargeStatus
-from ledger.services import rent_run
+from ledger.services import csv_export, rent_run
+from ledger.services.csv_export import CsvWriter
 from ledger.services.rent_run import MarkAction, MarkResult
 from ledger.views.jobs import already_submitted, busy, job_context, submit
-from ledger.views.operators import _actor, _held, _hold, _role, role_required
+from ledger.views.operators import (
+    _actor,
+    _held,
+    _hold,
+    _role,
+    csv_response,
+    export_name,
+    role_required,
+    uuid_param,
+)
 from ledger.views.run import _billing_only
 from payments import operator_sync
 from payments.models import JobKind
@@ -50,6 +62,55 @@ def _report(request: HttpRequest, result: MarkResult | None) -> None:
         messages.error(request, result.message)
     else:
         messages.warning(request, result.message)
+
+
+EXPORT_HEADER = (
+    "Store",
+    "Store number",
+    "Operator",
+    "Rent month",
+    "Debit of the month",
+    "Due date",
+    "Amount due (USD)",
+    "Paid (USD)",
+    "Balance (USD)",
+    "Status",
+    "Needs review",
+)
+
+
+@role_required
+@require_safe
+def charge_export(request: HttpRequest) -> StreamingHttpResponse:
+    """``ledger:charges:export`` (PLAN-011 D5): rent charges, of one lease (``lease``) or
+    one operator (``operator``) when given, newest month first as the lease page lists
+    them; an unreadable filter is ignored."""
+    charges = RentCharge.objects.select_related("lease__store", "lease__operator")
+    lease = uuid_param(request, "lease")
+    if lease is not None:
+        charges = charges.filter(lease_id=lease)
+    operator = uuid_param(request, "operator")
+    if operator is not None:
+        charges = charges.filter(lease__operator_id=operator)
+    records = (
+        [
+            charge.lease.store.external_label,
+            charge.lease.store.store_number,
+            charge.lease.operator.display_name if charge.lease.operator is not None else "",
+            f"{charge.period_month:%Y-%m}",
+            charge.seq,
+            charge.due_on,
+            charge.amount_due,
+            charge.amount_paid,
+            charge.balance,
+            charge.get_status_display(),
+            charge.needs_review,
+        ]
+        for charge in charges.order_by(
+            "-period_month", "lease__store__external_label", "seq", "id"
+        )[: csv_export.CSV_MAX_ROWS + 1].iterator(chunk_size=2_000)
+    )
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("rent-charges"))
 
 
 @role_required

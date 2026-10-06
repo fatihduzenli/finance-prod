@@ -30,7 +30,15 @@ Rules kept here, not in the views:
 - **Edit** (:func:`edit_charge`): cost, price, vendor and due date; the price is locked
   once any payment exists on the charge, and a waived or voided charge is not edited.
 - **Waive** (:func:`waive`, admin): a note is mandatory; refused once any payment on the
-  charge is settled. Nothing is sent to the payment provider.
+  charge is settled, and refused while the charge has a live provider invoice
+  (:func:`live_provider_invoice`; PLAN-011 D0): cancel first. Nothing is sent to the
+  payment provider.
+- **Delete the invoice of a waived charge** (:func:`delete_waived_invoice`, admin;
+  PLAN-011 D0): the remedy for a charge waived before that rule. It queues
+  ``invoice_delete`` with :data:`WAIVED_INVOICE_PARAM`; the worker deletes the provider
+  invoice (:func:`payments.one_off_invoices.delete_waived`) and, once the provider
+  confirmed, :func:`mark_waived_invoice_deleted` voids the local invoice and leaves the
+  charge ``waived``. :func:`waived_with_live_invoice` lists the charges still to clear.
 - **Cancel** (:func:`cancel_charge`, billing; PLAN-010d D6): a note is mandatory;
   refused once anything is paid or a payment is pending. It queues the delete of the
   provider invoice (``invoice_delete``) or, for an ``autopay_due`` charge whose
@@ -79,7 +87,8 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
+from django.db.models import Exists, OuterRef, Sum
+from django.db.models.functions import Trim, Upper
 from django.utils import timezone
 
 import payments
@@ -118,7 +127,7 @@ from ledger.services.rent_run import (
     PaymentOutcome,
 )
 from ledger.validators import validate_no_payment_data, visible_text
-from payments import jobs, offline_marking
+from payments import invoice_sync, jobs, offline_marking
 from payments.models import ExternalRef, Job, JobKind, JobStatus
 
 ENTITY_ONE_OFF_CHARGE = "one_off_charge"
@@ -176,6 +185,37 @@ WAIVE_SETTLED = "A charge with a settled payment cannot be waived. Nothing was c
 WAIVE_ALREADY = "This charge is already waived. Nothing was changed."
 WAIVE_VOIDED = "This charge is voided. Nothing was changed."
 WAIVED = "Charge waived."
+#: The sentences of PLAN-011 D0 name the provider as staff know it (``PROVIDER_LABEL``).
+WAIVE_LIVE_INVOICE = (
+    f"This charge has a live {payments.PROVIDER_LABEL} invoice. Cancel it first "
+    f"({payments.PROVIDER_LABEL} deletes the invoice), then waive if anything is still owed."
+)
+#: What each closing action does, shown beside it on the charge page (PLAN-011 D0).
+CANCEL_MEANING = (
+    f"removes the {payments.PROVIDER_LABEL} invoice and closes the charge, nothing owed"
+)
+WAIVE_MEANING = (
+    f"closes a charge that has no {payments.PROVIDER_LABEL} invoice without collecting it"
+)
+#: The dashboard's heading over :func:`waived_with_live_invoice` (D0).
+WAIVED_LIVE_HEADING = f"Waived with a live {payments.PROVIDER_LABEL} invoice"
+#: The line beside "Delete provider invoice" on the charge page (D0).
+DELETE_INVOICE_HINT = (
+    f"This charge is waived but its {payments.PROVIDER_LABEL} invoice is still live. The "
+    "charge stays waived."
+)
+DELETE_INVOICE_NOT_WAIVED = (
+    "Only a waived charge's invoice is deleted here; cancel the charge instead. Nothing was "
+    "changed."
+)
+DELETE_INVOICE_NONE = (
+    f"This charge has no live {payments.PROVIDER_LABEL} invoice. Nothing was changed."
+)
+DELETE_INVOICE_REQUESTED = (
+    "Delete requested. The invoice is marked void once the payment provider confirms the "
+    "delete; the charge stays waived."
+)
+WAIVED_INVOICE_DELETED = "The provider invoice was deleted. The charge stays waived."
 RETURNED = "An ACH payment on this charge was returned."
 DISPUTED = "A payment on this charge is disputed."
 TOTAL_MISMATCH = (
@@ -273,6 +313,10 @@ PAYMENT_ACTION = "one_off_charge.payment_recorded"
 LARGE_DEBIT_ACTION = "one_off_charge.large_debit_confirmed"
 CANCEL_ACTION = "one_off_charge.cancel_requested"
 VOIDED_ACTION = "one_off_charge.voided"
+WAIVED_INVOICE_DELETE_ACTION = "one_off_charge.waived_invoice_delete_requested"
+WAIVED_INVOICE_DELETED_ACTION = "one_off_charge.waived_invoice_deleted"
+#: The ``invoice_delete`` job parameter that makes it the remedy of a waived charge.
+WAIVED_INVOICE_PARAM = "waived"
 CHARGE_NOW_REQUESTED_ACTION = "one_off_charge.charge_now_requested"
 CHARGED_ACTION = "one_off_charge.charged"
 CHARGE_FAILED_ACTION = "one_off_charge.charge_failed"
@@ -380,6 +424,47 @@ def provider_schedule(charge: OneOffCharge) -> str:
         .values_list("external_id", flat=True)
         .first()
         or ""
+    )
+
+
+def _live(invoice: Invoice) -> bool:
+    """Whether a linked invoice is still live at the provider as far as we know: not
+    ``void`` here and not last seen ``DELETED`` there (PLAN-011 D0)."""
+    deleted = str(invoice.provider_status).strip().upper() == invoice_sync.PROVIDER_DELETED
+    return invoice.internal_status != InvoiceStatus.VOID and not deleted
+
+
+def live_provider_invoice(charge: OneOffCharge) -> tuple[Invoice, str] | None:
+    """The charge's invoice with a current provider reference when it is live, and that
+    reference; ``None`` otherwise (PLAN-011 D0)."""
+    linked = rent_run.provider_invoice(charge)
+    if linked is None or not _live(linked[0]):
+        return None
+    return linked
+
+
+def waived_with_live_invoice() -> list[OneOffCharge]:
+    """Waived charges whose invoice is still live at the provider (one query; PLAN-011
+    D0): the dashboard lists them until the remedy has cleared each."""
+    current_ref = ExternalRef.objects.filter(
+        entity_type=rent_run.ENTITY_INVOICE,
+        entity_id=OuterRef("pk"),
+        provider=leases.PROVIDER_KEY,
+        external_kind=rent_run.KIND_INVOICE,
+        superseded_at__isnull=True,
+    )
+    live = (
+        Invoice.objects.filter(one_off_charge=OuterRef("pk"))
+        .exclude(internal_status=InvoiceStatus.VOID)
+        .annotate(shown=Upper(Trim("provider_status")))
+        .exclude(shown=invoice_sync.PROVIDER_DELETED)
+        .filter(Exists(current_ref))
+    )
+    return list(
+        OneOffCharge.objects.filter(status=OneOffChargeStatus.WAIVED)
+        .filter(Exists(live))
+        .select_related("operator", "lease__store", "lease__operator", "fee_type")
+        .order_by("waived_at", "id")
     )
 
 
@@ -790,7 +875,8 @@ def edit_charge(
 def waive(
     charge_id: uuid.UUID, *, note: str, actor: User | None, now: datetime | None = None
 ) -> Outcome:
-    """Waive a one-off charge (admin): a note is mandatory; refused once a payment settled."""
+    """Waive a one-off charge (admin): a note is mandatory; refused once a payment settled
+    and while the charge has a live provider invoice (PLAN-011 D0)."""
     text = visible_text(note or "")
     if not text:
         return Outcome(False, WAIVE_NOTE_REQUIRED, "note")
@@ -805,6 +891,8 @@ def waive(
             return Outcome(False, WAIVE_VOIDED)
         if has_settled_payment(charge):
             return Outcome(False, WAIVE_SETTLED)
+        if live_provider_invoice(charge) is not None:
+            return Outcome(False, WAIVE_LIVE_INVOICE)
         before = charge_state(charge)
         charge.status = OneOffChargeStatus.WAIVED
         charge.waived_at = now or timezone.now()
@@ -878,6 +966,61 @@ def cancel_charge(charge_id: uuid.UUID, *, note: str, actor: User | None) -> Out
         )
         job = jobs.enqueue(kind, charge, None, actor)
     return Outcome(True, CANCEL_REQUESTED, charge=charge, job=job)
+
+
+# --- Deleting a waived charge's invoice (PLAN-011 D0) ---------------------------------
+
+
+def delete_invoice_refusal(charge: OneOffCharge) -> str:
+    """Why the invoice of the charge cannot be deleted by the remedy now, or ``""``."""
+    if charge.status != OneOffChargeStatus.WAIVED:
+        return DELETE_INVOICE_NOT_WAIVED
+    if live_provider_invoice(charge) is None:
+        return DELETE_INVOICE_NONE
+    return ""
+
+
+def delete_waived_invoice(charge_id: uuid.UUID, *, actor: User | None) -> Outcome:
+    """Request the delete of a waived charge's live provider invoice (admin; D0).
+
+    Queues ``invoice_delete`` with :data:`WAIVED_INVOICE_PARAM`; the charge's status is
+    never changed. Refused, with nothing queued, when the charge is not waived, has no
+    live provider invoice, or a provider request is already waiting.
+    """
+    with transaction.atomic():
+        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        reason = delete_invoice_refusal(charge)
+        if reason:
+            return Outcome(False, reason)
+        if jobs.is_active(jobs.latest_for(charge)):
+            return Outcome(False, CANCEL_BUSY)
+        _audit(
+            actor,
+            WAIVED_INVOICE_DELETE_ACTION,
+            charge,
+            charge_state(charge),
+            charge_state(charge),
+        )
+        job = jobs.enqueue(JobKind.INVOICE_DELETE, charge, {WAIVED_INVOICE_PARAM: True}, actor)
+    return Outcome(True, DELETE_INVOICE_REQUESTED, charge=charge, job=job)
+
+
+def mark_waived_invoice_deleted(
+    charge_id: uuid.UUID, *, actor: User | None, context: Mapping[str, Any]
+) -> Outcome:
+    """Mark the waived charge's invoice void once the provider confirmed its delete (D0;
+    the worker only). The charge stays ``waived``; audited
+    :data:`WAIVED_INVOICE_DELETED_ACTION`."""
+    with transaction.atomic():
+        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        if charge.status != OneOffChargeStatus.WAIVED:
+            return Outcome(False, DELETE_INVOICE_NOT_WAIVED)
+        before = charge_state(charge)
+        charge.invoices.exclude(internal_status=InvoiceStatus.VOID).update(
+            internal_status=InvoiceStatus.VOID, updated_at=timezone.now()
+        )
+        _audit(actor, WAIVED_INVOICE_DELETED_ACTION, charge, before, {**before, **context})
+    return Outcome(True, WAIVED_INVOICE_DELETED, charge=charge)
 
 
 # --- Charge now (PLAN-010d D4) --------------------------------------------------------

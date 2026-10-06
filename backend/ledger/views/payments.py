@@ -39,7 +39,14 @@ from ledger.services import one_off_charges, refunds
 from ledger.services import payments_ledger as ledger
 from ledger.services.rent_run import charge_review_message
 from ledger.views.jobs import already_submitted, job_context, submit
-from ledger.views.operators import PAGE_SIZE, _held, _hold, _role, role_required
+from ledger.views.operators import (
+    PAGE_SIZE,
+    _held,
+    _hold,
+    _role,
+    csv_response,
+    role_required,
+)
 from payments.models import JobKind
 from payments.provider import mask_identifier
 from payments.webhooks.handlers.common import ENTITY_PAYMENT
@@ -74,14 +81,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
 @require_safe
 def payment_export(request: HttpRequest) -> StreamingHttpResponse:
     selected = ledger.parse_filter(request.GET)
-    response = StreamingHttpResponse(
-        ledger.csv_lines(selected), content_type="text/csv; charset=utf-8"
-    )
-    response["Content-Disposition"] = (
-        f'attachment; filename="payments-{timezone.localdate():%Y-%m-%d}.csv"'
-    )
-    response["Cache-Control"] = "no-store"
-    return response
+    return csv_response(ledger.csv_lines(selected), f"payments-{timezone.localdate():%Y-%m-%d}.csv")
 
 
 # --- The payment page, refunds and voids (D6 to D8) ----------------------------------------

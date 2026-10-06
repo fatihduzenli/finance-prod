@@ -842,8 +842,13 @@ def test_every_webhook_route_is_classified_with_the_planned_roles() -> None:
         "ledger:webhooks:list",
         "ledger:webhooks:detail",
         "ledger:webhooks:replay",
+        "ledger:webhooks:export",
     }
-    assert {"ledger:webhooks:list", "ledger:webhooks:detail"} <= registry.READ_ONLY_ROUTE_NAMES
+    assert {
+        "ledger:webhooks:list",
+        "ledger:webhooks:detail",
+        "ledger:webhooks:export",
+    } <= registry.READ_ONLY_ROUTE_NAMES
     rule = registry.rule_for("ledger:webhooks:replay")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     assert registry.rule_for("admin:payments_webhookevent_change") is not None
@@ -908,8 +913,8 @@ def test_the_detail_page_shows_the_redacted_payload_as_a_table() -> None:
     assert response.status_code == 200
     page = response.content.decode()
     assert '<table id="payload">' in page
-    assert "<code>status</code></td><td>SENT</td>" in page
-    assert "<code>customer.firstname</code></td><td>Pat</td>" in page
+    assert '<code>status</code></td><td data-label="Value">SENT</td>' in page
+    assert '<code>customer.firstname</code></td><td data-label="Value">Pat</td>' in page
     assert "invoice-identifier-1" not in page and "invo…er-1" in page
     assert "customer-identifier-1" not in page and "cust…er-1" in page
     assert CARD not in page

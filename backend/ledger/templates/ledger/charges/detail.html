@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Charge {{ lease.store.external_label }} {{ charge.period_month|date:"Y-m" }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Rent run</a></p>
@@ -31,6 +32,7 @@
   </dl>
 
   <h2>Invoices</h2>
+  {% responsive_table %}
   <table id="invoices">
     <thead><tr><th>Number</th><th>Date</th><th>Total</th><th>Provider status</th></tr></thead>
     <tbody>
@@ -41,9 +43,11 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   <p class="muted">Provider status is copied from the payment provider as it is.</p>
 
   <h2>Payments</h2>
+  {% responsive_table %}
   <table id="payments">
     <thead><tr><th>Received</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Note</th><th>Recorded by</th></tr></thead>
     <tbody>
@@ -62,6 +66,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 
   <h2>Notes</h2>
   {% for note in notes %}

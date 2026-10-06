@@ -1,0 +1,40 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}A/R aging{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
+  <h1>A/R aging</h1>
+  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}">Export CSV</a></p>
+  {% if too_slow %}
+    <p class="warning" id="aging-too-slow" role="status">{{ too_slow }}</p>
+  {% else %}
+  <p class="muted">Open balances on {{ today|date:"Y-m-d" }} by operator and days past due: rent, insurance and one-off charges not waived or voided, deposits left out; the same charges as the dashboard's total outstanding. Current is not yet due or due today. Aging is by due date; revenue is by settled month. Amounts in US dollars.</p>
+  {% responsive_table "scroll" %}
+  <table id="aging">
+    <thead>
+      <tr><th>Operator</th>{% for bucket, label in buckets %}<th>{{ label }}</th>{% endfor %}<th>Total</th><th>Open charges</th></tr>
+    </thead>
+    <tbody>
+      {% for row in report.rows %}
+        <tr class="aging-row">
+          <td>{% if row.operator_id %}<a href="{% url 'ledger:operators:statement' pk=row.operator_id %}">{{ row.operator_name }}</a>{% else %}No operator{% endif %}</td>
+          {% for amount in row.amounts %}<td class="money">{{ amount }}</td>{% endfor %}
+          <td class="money row-total">{{ row.total }}</td>
+          <td>{{ row.count }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8" class="muted">Nothing is owed.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr id="aging-total">
+        <th scope="row">Total</th>
+        {% for amount in report.totals.amounts %}<th class="money bucket-total">{{ amount }}</th>{% endfor %}
+        <th class="money" id="aging-grand-total">{{ report.totals.total }}</th>
+        <th id="aging-count">{{ report.totals.count }}</th>
+      </tr>
+    </tfoot>
+  </table>
+  {% endresponsive_table %}
+  {% endif %}
+{% endblock %}

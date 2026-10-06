@@ -141,7 +141,7 @@ def test_the_export_streams_only_after_every_record_is_computed() -> None:
         streamed: Any = response
         body = b"".join(streamed.streaming_content).decode()
         assert len(captured.captured_queries) == computed
-    assert body.splitlines()[0].startswith("level,store,operator,month")
+    assert body.splitlines()[0].startswith("Level,Store,Operator,Month")
     assert body.splitlines()[-1].startswith("total,")
 
 

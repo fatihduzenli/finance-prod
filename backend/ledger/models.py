@@ -511,6 +511,12 @@ class RentCharge(GuardedModel):
 
     class Meta:
         db_table = "rent_charges"
+        indexes = [
+            # PLAN-011 D6: the grid and the run page read a lease's charges by month through
+            # the left prefix of the unique constraint (lease, period_month, seq).
+            # PLAN-011 D6: arrears and the dashboard's overdue read charges by status and due date.
+            models.Index(fields=["status", "due_on"], name="rent_charges_status_due_idx"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["lease", "period_month", "seq"], name="rent_charges_period_unique"
@@ -569,6 +575,10 @@ class InsuranceCharge(GuardedModel):
 
     class Meta:
         db_table = "insurance_charges"
+        indexes = [
+            # PLAN-011 D6: arrears and aging read a lease's insurance charges by due date.
+            models.Index(fields=["lease", "due_on"], name="insurance_lease_due_idx"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["lease", "policy_year"], name="insurance_charges_lease_year_unique"
@@ -872,6 +882,10 @@ class OneOffCharge(GuardedModel):
 
     class Meta:
         db_table = "one_off_charges"
+        indexes = [
+            # PLAN-011 D6: arrears and aging read an operator's open one-off charges.
+            models.Index(fields=["operator", "status"], name="one_off_charges_op_status_idx"),
+        ]
         constraints = [
             _positive("one_off_charges", "price"),
             models.CheckConstraint(
@@ -1094,6 +1108,10 @@ class Invoice(GuardedModel):
 
     class Meta:
         db_table = "invoices"
+        indexes = [
+            # PLAN-011 D6: the dashboard lists invoices whose provider status is ATTEMPTED.
+            models.Index(fields=["provider_status"], name="invoices_provider_status_idx"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=Q(invoice_number__regex=r"^INV-[0-9]{4}-[0-9]{4,}$"),
@@ -1237,6 +1255,10 @@ class Payment(GuardedModel):
 
     class Meta:
         db_table = "payments"
+        indexes = [
+            # PLAN-011 D6: the dashboard's "paid this month" reads settled payments by date.
+            models.Index(fields=["settled_on", "status"], name="payments_settled_status_idx"),
+        ]
         constraints = [
             _positive("payments", "amount"),
             models.CheckConstraint(

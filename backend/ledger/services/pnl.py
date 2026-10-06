@@ -35,7 +35,8 @@ with no end date, is never active. The columns:
 - **fees collected**: settled ``one_off`` payments on those charges and ``insurance``
   payments by ``settled_on`` month minus their settled refunds, plus the withheld part
   of resolved deposits by ``resolved_on`` month (``withheld_deposits``, shown apart as
-  well);
+  well); the insurance parts of fees billed and collected are also kept apart
+  (``insurance_billed``, ``insurance_collected``) for the revenue report (PLAN-011 D4);
 - **landlord rent** and **other costs**: the live store cost row in effect on the
   month's first day (a superseded row, PLAN-010c D10, counts for nothing); none is
   "unknown" (``None``), never zero. An empty other cost on a row in effect is zero;
@@ -67,17 +68,16 @@ Everything is computed with a fixed number of grouped queries, whatever the numb
 stores, leases or months (:func:`rows`); the arithmetic is ``Decimal``.
 
 **The CSV** (:func:`csv_lines`): one header row, then the rows the page shows (the
-groups, or with ``detail=1`` the underlying rows), then a ``total`` row. ``level`` says
-which. Money is plain with two decimals. An unknown amount is written as the empty
-string and its ``*_known`` column says ``no``; a known one says ``yes``.
-``cost_only_months`` counts the cost-only rows in the line (0 or 1 for a detail row);
-``unknown_inputs`` names the unknown costs. Text cells go
-through the payments ledger's formula-safe cell.
+groups, or with ``detail=1`` the underlying rows), then a ``total`` row. ``Level`` says
+which. Written by :class:`ledger.services.csv_export.CsvWriter`: money is plain with two
+decimals and text cells are formula-safe. An unknown amount is written as the empty
+string and its ``... known`` column says ``no``; a known one says ``yes``.
+``Cost-only months`` counts the cost-only rows in the line (0 or 1 for a detail row);
+``Unknown inputs`` names the unknown costs.
 """
 
 from __future__ import annotations
 
-import csv
 import re
 import uuid
 from collections import defaultdict
@@ -110,7 +110,8 @@ from ledger.models import (
     Store,
     StoreCost,
 )
-from ledger.services.payments_ledger import CsvLine, csv_money, csv_text, deposits_released
+from ledger.services.csv_export import CsvWriter
+from ledger.services.payments_ledger import deposits_released
 
 #: The longest range shown, in months.
 MAX_MONTHS = 36
@@ -270,9 +271,12 @@ class Figures:
     rent_billed: Decimal = ZERO
     rent_collected: Decimal = ZERO
     fees_billed: Decimal = ZERO
-    #: Includes ``withheld_deposits``.
+    #: Includes ``withheld_deposits`` and ``insurance_collected``.
     fees_collected: Decimal = ZERO
     withheld_deposits: Decimal = ZERO
+    #: The insurance part of ``fees_billed`` and ``fees_collected`` (PLAN-011 D4).
+    insurance_billed: Decimal = ZERO
+    insurance_collected: Decimal = ZERO
     #: ``None``: unknown.
     landlord_rent: Decimal | None = ZERO
     other_costs: Decimal | None = ZERO
@@ -341,6 +345,8 @@ def _sum(rows: Iterable[Figures]) -> dict[str, Any]:
         "fees_billed": total("fees_billed"),
         "fees_collected": total("fees_collected"),
         "withheld_deposits": total("withheld_deposits"),
+        "insurance_billed": total("insurance_billed"),
+        "insurance_collected": total("insurance_collected"),
         "landlord_rent": known("landlord_rent"),
         "other_costs": known("other_costs"),
         "fee_costs": known("fee_costs"),
@@ -354,6 +360,8 @@ class _Acc:
     fees_billed: Decimal = ZERO
     fees_collected: Decimal = ZERO
     withheld_deposits: Decimal = ZERO
+    insurance_billed: Decimal = ZERO
+    insurance_collected: Decimal = ZERO
     fee_costs: Decimal = ZERO
     fee_costs_unknown: bool = False
     cost_only: bool = False
@@ -482,22 +490,21 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         for paid in source:
             net = _money_or_zero(paid["paid"]) - _money_or_zero(paid["refunded"])
             acc[_key(paid)].rent_collected += net
-    fee_payments = (
-        _payments(PaymentKind.INSURANCE, "insurance_charge", start, end),
-        _payments(
-            PaymentKind.ONE_OFF,
-            "one_off_charge",
-            start,
-            end,
-            not_deposit,
-            ~arrears,
-            operator=one_off_operator,
-        ),
-    )
-    for source in fee_payments:
-        for paid in source:
-            net = _money_or_zero(paid["paid"]) - _money_or_zero(paid["refunded"])
-            acc[_key(paid)].fees_collected += net
+    for paid in _payments(PaymentKind.INSURANCE, "insurance_charge", start, end):
+        net = _money_or_zero(paid["paid"]) - _money_or_zero(paid["refunded"])
+        acc[_key(paid)].fees_collected += net
+        acc[_key(paid)].insurance_collected += net
+    for paid in _payments(
+        PaymentKind.ONE_OFF,
+        "one_off_charge",
+        start,
+        end,
+        not_deposit,
+        ~arrears,
+        operator=one_off_operator,
+    ):
+        net = _money_or_zero(paid["paid"]) - _money_or_zero(paid["refunded"])
+        acc[_key(paid)].fees_collected += net
 
     setup = OneOffCategory.SETUP
     one_off = (
@@ -570,6 +577,7 @@ def _add_insurance(acc: dict[_Key, _Acc], start: date, end: date) -> None:
     for charge in charges:
         row = acc[_key(charge)]
         row.fees_billed += _money_or_zero(charge["billed"])
+        row.insurance_billed += _money_or_zero(charge["billed"])
         cost = premium_costs.get(charge["policy_year"])
         if cost is None:
             row.fee_costs_unknown = True
@@ -701,6 +709,8 @@ def rows(query: PnlQuery) -> list[PnlRow]:
                 fees_billed=item.fees_billed,
                 fees_collected=item.fees_collected,
                 withheld_deposits=item.withheld_deposits,
+                insurance_billed=item.insurance_billed,
+                insurance_collected=item.insurance_collected,
                 landlord_rent=store_costs.landlord_rent,
                 other_costs=store_costs.other_costs,
                 fee_costs=None if item.fee_costs_unknown else item.fee_costs,
@@ -785,48 +795,48 @@ def deposits_held(query: PnlQuery) -> Decimal:
 # --- CSV ------------------------------------------------------------------------------
 
 CSV_HEADER: tuple[str, ...] = (
-    "level",
-    "store",
-    "operator",
-    "month",
-    "rent_billed",
-    "rent_collected",
-    "fees_billed",
-    "fees_collected",
-    "withheld_deposits",
-    "landlord_rent",
-    "landlord_rent_known",
-    "other_costs",
-    "other_costs_known",
-    "fee_costs",
-    "fee_costs_known",
-    "margin_billed",
-    "margin_billed_known",
-    "margin_collected",
-    "margin_collected_known",
-    "cost_only_months",
-    "unknown_inputs",
+    "Level",
+    "Store",
+    "Operator",
+    "Month",
+    "Rent billed (USD)",
+    "Rent collected (USD)",
+    "Fees billed (USD)",
+    "Fees collected (USD)",
+    "Withheld deposits (USD)",
+    "Landlord rent (USD)",
+    "Landlord rent known",
+    "Other costs (USD)",
+    "Other costs known",
+    "Fee costs (USD)",
+    "Fee costs known",
+    "Margin billed (USD)",
+    "Margin billed known",
+    "Margin collected (USD)",
+    "Margin collected known",
+    "Cost-only months",
+    "Unknown inputs",
 )
 
 
-def _maybe(value: Decimal | None) -> list[str]:
+def _maybe(value: Decimal | None) -> list[object]:
     """An amount that may be unknown: the amount and ``yes``, or empty and ``no``."""
-    return ["", "no"] if value is None else [csv_money(value), "yes"]
+    return [None, False] if value is None else [value, True]
 
 
 def _record(
-    level: str, store: str, operator: str, month: str, item: Figures, cost_only: str
-) -> list[str]:
+    level: str, store: str, operator: str, month: str, item: Figures, cost_only: int
+) -> list[object]:
     return [
         level,
-        csv_text(store),
-        csv_text(operator),
+        store,
+        operator,
         month,
-        csv_money(item.rent_billed),
-        csv_money(item.rent_collected),
-        csv_money(item.fees_billed),
-        csv_money(item.fees_collected),
-        csv_money(item.withheld_deposits),
+        item.rent_billed,
+        item.rent_collected,
+        item.fees_billed,
+        item.fees_collected,
+        item.withheld_deposits,
         *_maybe(item.landlord_rent),
         *_maybe(item.other_costs),
         *_maybe(item.fee_costs),
@@ -837,7 +847,7 @@ def _record(
     ]
 
 
-def csv_records(query: PnlQuery) -> Iterator[list[str]]:
+def csv_records(query: PnlQuery) -> Iterator[list[object]]:
     """The records of :func:`csv_lines`, header excluded."""
     found = rows(query)
     if query.detail:
@@ -849,15 +859,15 @@ def csv_records(query: PnlQuery) -> Iterator[list[str]]:
                 row.operator,
                 _label(row.month),
                 row,
-                "1" if row.cost_only else "0",
+                1 if row.cost_only else 0,
             )
     else:
         for group in grouped(found, query.group):
             store = group.label if query.group == GROUP_STORE else ""
             operator = group.label if query.group == GROUP_OPERATOR else ""
             month = group.label if query.group == GROUP_MONTH else ""
-            yield _record(query.group, store, operator, month, group, str(group.cost_only_count))
-    yield _record("total", "", "", "", total(found), str(sum(1 for row in found if row.cost_only)))
+            yield _record(query.group, store, operator, month, group, group.cost_only_count)
+    yield _record("total", "", "", "", total(found), sum(1 for row in found if row.cost_only))
 
 
 def csv_lines(query: PnlQuery) -> Iterator[str]:
@@ -865,10 +875,7 @@ def csv_lines(query: PnlQuery) -> Iterator[str]:
     return csv_lines_of(csv_records(query))
 
 
-def csv_lines_of(records: Iterable[list[str]]) -> Iterator[str]:
+def csv_lines_of(records: Iterable[list[object]]) -> Iterator[str]:
     """The header, then ``records``, as CSV lines. The export computes its records
     first (inside the report's statement timeout, PLAN-010c D11) and streams these."""
-    writer = csv.writer(CsvLine())
-    yield writer.writerow(CSV_HEADER)
-    for record in records:
-        yield writer.writerow(record)
+    return CsvWriter(CSV_HEADER).lines(records)

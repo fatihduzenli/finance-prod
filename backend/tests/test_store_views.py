@@ -249,7 +249,7 @@ def test_a_closed_store_is_saved_and_listed_with_its_status(admin: Client) -> No
     assert store.status == StoreStatus.CLOSED
     assert store.closed_at is not None and store.closed_at.isoformat() == "2026-06-30"
     page = admin.get(LIST).content.decode()
-    assert "Closed One" in page and "<td>Closed</td>" in page
+    assert "Closed One" in page and '<td data-label="Status">Closed</td>' in page
     detail = admin.get(paths(store)["detail"]).content.decode()
     assert "2026-06-30" in detail and "Closed" in detail
 
@@ -333,9 +333,13 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     corrections = ("correct_cost", "close_cost")
     assert names == {
         f"ledger:stores:{short}"
-        for short in ("list", "detail", "set_cost", *POST_ROUTES, *corrections)
+        for short in ("list", "detail", "export", "set_cost", *POST_ROUTES, *corrections)
     }
-    assert {"ledger:stores:list", "ledger:stores:detail"} <= registry.READ_ONLY_ROUTE_NAMES
+    assert {
+        "ledger:stores:list",
+        "ledger:stores:detail",
+        "ledger:stores:export",
+    } <= registry.READ_ONLY_ROUTE_NAMES
     for short in (*POST_ROUTES, *corrections):
         rule = registry.rule_for(f"ledger:stores:{short}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}

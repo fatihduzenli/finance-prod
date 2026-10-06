@@ -1,0 +1,38 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Payments by method{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
+  <h1>Payments by method</h1>
+  {% url 'ledger:reports:payments_by_method' as action %}{% url 'ledger:reports:payments_by_method_export' as export %}
+  {% include "ledger/reports/_range.html" with action=action export=export %}
+  {% if too_slow %}
+    <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
+  {% else %}
+  <p class="muted">Settled payments by settled month and method, less the refunds settled that month. Deposits and deposit refunds are left out, as on the dashboard's "paid this month". Amounts in US dollars.</p>
+  <p class="muted" id="cards-note">{{ cards_note }}</p>
+  {% responsive_table "scroll" %}
+  <table id="payments-by-method">
+    <thead>
+      <tr><th>Month</th><th>ACH</th><th>Zelle</th><th>Wire</th><th>Other</th><th>Total</th><th>Payments</th></tr>
+    </thead>
+    <tbody>
+      {% for item in report.months %}
+        <tr class="method-month" data-month="{{ item.month|date:'Y-m' }}">
+          <th scope="row">{{ item.month|date:"Y-m" }}</th>
+          {% for amount in item.ordered %}<td class="money">{{ amount }}</td>{% endfor %}
+          <td class="money month-total">{{ item.total }}</td><td>{{ item.count }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr id="method-total">
+        <th scope="row">Total</th>
+        {% for amount in report.total.ordered %}<td class="money">{{ amount }}</td>{% endfor %}
+        <td class="money">{{ report.total.total }}</td><td>{{ report.total.count }}</td>
+      </tr>
+    </tfoot>
+  </table>
+  {% endresponsive_table %}
+  {% endif %}
+{% endblock %}

@@ -508,7 +508,7 @@ def test_the_second_firing_while_the_job_still_waits_queues_nothing(
     [run] = started_runs()
     assert (run.trigger, run.requested_by) == (ReconciliationTrigger.SCHEDULED, None)
     page = billing.get("/reconciliation/").content.decode()
-    assert "<td>Scheduled</td>" in page
+    assert '<td data-label="How">Scheduled</td>' in page
     assert NOT_DUE not in page
 
 

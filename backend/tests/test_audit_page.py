@@ -26,7 +26,7 @@ import documents_storage
 from accounts.roles import Role
 from documents_storage.memory import MemoryDocumentStorage
 from ledger.models import AuditLog, Lease, Operator, Store
-from ledger.services import audit
+from ledger.services import audit, csv_export
 from ledger.services import documents as documents_service
 from ledger.views import audit as audit_views
 from ledger.views.reports import ReportTooSlow
@@ -399,7 +399,7 @@ def test_the_csv_is_capped_with_a_last_line_saying_so(
         log(NOW - timedelta(minutes=n), action=f"step.{n}")
     lines = export(admin()[0])
     assert [line[3] for line in lines[1:4]] == ["step.0", "step.1", "step.2"]
-    assert lines[4] == [audit.CSV_TRUNCATED, audit.CSV_TRUNCATED_TEXT.format(limit=3)]
+    assert lines[4] == [csv_export.TRUNCATED, csv_export.TRUNCATED_TEXT.format(limit=3)]
     assert len(lines) == 5
     monkeypatch.setattr(audit, "CSV_MAX_ROWS", 5)
     assert len(export(admin()[0])) == 6

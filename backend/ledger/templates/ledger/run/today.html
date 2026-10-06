@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Rent run {{ run.day|date:"Y-m-d" }}{% endblock %}
 {% block content %}
   <h1>Rent run {{ run.day|date:"Y-m-d" }}</h1>
@@ -34,6 +35,8 @@
   {% endif %}
 
   <h2>Due today</h2>
+  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:run:export' %}">Export CSV</a></p>
+  {% responsive_table %}
   <table id="due-today">
     <thead><tr><th>Store</th><th>Operator</th><th>Debit</th><th>Channel</th><th>Amount</th><th>Carried balance</th><th>This month</th><th>Last month</th></tr></thead>
     <tbody>
@@ -53,10 +56,12 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   <p class="muted" id="carried-balance-note">"Carried balance" is what earlier charges of the lease still owe. It is not added to today's amount.</p>
   <p class="muted" id="large-debit-note">"Large debit" marks an amount above ${{ threshold }}. That amount is a placeholder until the payment provider states its per-transaction limit (Q25).</p>
 
   <h2>Skipped today</h2>
+  {% responsive_table %}
   <table id="skipped-today">
     <thead><tr><th>Store</th><th>Status</th><th>Channel</th><th>Reason</th></tr></thead>
     <tbody>
@@ -72,8 +77,10 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 
   <h2>Insurance due in the next {{ insurance_days }} days</h2>
+  {% responsive_table %}
   <table id="insurance-due">
     <thead><tr><th>Due</th><th>Store</th><th>Policy year</th><th>Premium</th><th>Charge</th></tr></thead>
     <tbody>
@@ -90,6 +97,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   <p class="muted">Insurance charges are created by the <code>generate_insurance_charges</code> command on or after each anniversary. Insurance autopay is a later step.</p>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

@@ -572,3 +572,11 @@ immediately from the operator's linked bank method.
   whether a one-occurrence schedule behaves, whether a deleted invoice reads `DELETED` or 404.
 - The audit log page `/audit/` (admin) exists from this step; the Documents sections show an
   Activity list.
+
+### ADR-0009 addendum (2026-10-06): Waive and a live invoice
+
+Owner finding: waiving a one-off charge whose invoice was live at Stax left the invoice
+collectable. Decision: Waive is refused while the provider invoice is live ("Cancel first");
+Cancel deletes the invoice and closes the charge; a charge already waived with a live invoice
+gets an admin action "Delete provider invoice" (the Cancel path, charge stays waived) and is
+listed on the dashboard until cleared. Both actions are audited and explained on the page.

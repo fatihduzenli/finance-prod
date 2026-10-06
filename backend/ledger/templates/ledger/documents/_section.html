@@ -1,8 +1,11 @@
 {% comment %}
 Documents of a store or a lease (docs/qa/PLAN-010c D7), included by both detail pages.
 Context from ledger.views.documents.section_context. The upload is a plain multipart form
-post; ledger/document_drop.js only moves a dropped file into the file input.
+post with one file, from the file input or the "Take photo" input (PLAN-011 D9);
+ledger/document_drop.js only moves a dropped file into the file input and clears the
+other input when one is chosen.
 {% endcomment %}
+{% load responsive %}
 <section id="documents">
   <h2>Documents</h2>
   {% if not documents_feature_on %}
@@ -14,6 +17,8 @@ post; ledger/document_drop.js only moves a dropped file into the file input.
       <div class="js-document-drop" style="border:1px dashed #999;border-radius:4px;padding:.25rem .75rem .75rem;">
         <label for="{{ documents_form.file.id_for_label }}">File (PDF, Word .docx, JPEG, PNG or HEIC; at most 25 MB)</label>
         {{ documents_form.file }}
+        <label for="{{ documents_form.photo.id_for_label }}">Take photo</label>
+        {{ documents_form.photo }}
         <p class="muted js-document-drop-hint" hidden>Or drop one file here.</p>
       </div>
       <label for="{{ documents_form.kind.id_for_label }}">Kind</label>
@@ -31,6 +36,8 @@ post; ledger/document_drop.js only moves a dropped file into the file input.
     </div>
   {% endif %}
 
+  <p class="actions"><a class="btn" id="export-documents" href="{{ documents_export_url }}">Export CSV</a></p>
+  {% responsive_table %}
   <table id="documents-list">
     <thead><tr><th>Kind</th><th>File</th><th>Size</th><th>Uploaded by</th><th>Date</th><th>Note</th><th></th></tr></thead>
     <tbody>
@@ -62,8 +69,10 @@ post; ledger/document_drop.js only moves a dropped file into the file input.
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
 
   <h3 id="documents-activity-title">Activity</h3>
+  {% responsive_table %}
   <table id="documents-activity">
     <thead><tr><th>Time (New York)</th><th>Action</th><th>User</th><th>Kind</th><th>Outcome</th></tr></thead>
     <tbody>
@@ -80,5 +89,6 @@ post; ledger/document_drop.js only moves a dropped file into the file input.
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   {% if documents_activity_url %}<p><a href="{{ documents_activity_url }}" id="documents-activity-link">All document activity in the audit log</a></p>{% endif %}
 </section>

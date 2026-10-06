@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load responsive %}
 {% block title %}Webhook events{% endblock %}
 {% block content %}
   <h1>Webhook events</h1>
@@ -14,7 +15,9 @@
       {% for name in event_types %}<option value="{{ name }}"{% if name == event_type %} selected{% endif %}>{{ name }}</option>{% endfor %}
     </select>
     <button class="btn" type="submit">Filter</button>
+    <a class="btn" id="export-csv" href="{% url 'ledger:webhooks:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Export CSV</a>
   </form>
+  {% responsive_table %}
   <table id="webhook-events">
     <thead>
       <tr><th>Received</th><th>Type</th><th>Name from</th><th>Object</th><th>Outcome</th><th>Failed attempts</th><th>Duplicates</th></tr>
@@ -35,6 +38,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endresponsive_table %}
   {% if page.paginator.num_pages > 1 %}
     <p class="actions">
       {% if page.has_previous %}<a class="btn" href="?{% if outcome %}outcome={{ outcome|urlencode:'' }}&amp;{% endif %}{% if event_type %}type={{ event_type|urlencode:'' }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
