@@ -708,3 +708,14 @@ the login page myself." The condition for starting Prompt 4 is met.
   `SET CONSTRAINTS ALL IMMEDIATE` before the trigger is re-enabled; a seeded PostgreSQL round-trip
   test that reproduces the staging error; CI now waits for the web revision before touching the
   worker and the job. Full gate re-run (table in the addendum). **Needs a new "push".**
+
+## Update, 2026-10-06, PLAN-010d on staging
+
+- Owner typed "push". `main` at `a2b3842`; CI run 37409289582 green with the new order (web
+  update → web wait → worker and job → verification). Web revision `finance-staging-web--0000032`
+  Healthy and Running on that image; `deploy_migrate` applied ledger 0017–0021 and payments
+  0010–0013 over the existing staging rows ("migrations are up to date"); environment check ok;
+  `/healthz` 200. Worker revision 0000004 restarted on the commit ("Worker started" 03:42 UTC);
+  the reconcile job uses the image. The worker and job are back in step with the schema.
+- Next: the owner's 10d done-when clicks (RUNBOOK §13). Reminder: a cancelled charge shows
+  `DELETED` in Stax.
