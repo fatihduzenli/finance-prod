@@ -55,7 +55,14 @@ from accounts.roles import Role, meets, role_of
 from accounts.views import forbidden
 from ledger.forms import LinkForm, OperatorCreateForm, OperatorForm
 from ledger.models import ZERO, Note, NoteEntityType, Operator, RentCharge, SyncStatus
-from ledger.services import csv_export, one_off_charges
+from ledger.services import (
+    attention,
+    collections,
+    contacts,
+    csv_export,
+    one_off_charges,
+    statement_links,
+)
 from ledger.services.csv_export import CsvWriter
 from ledger.validators import contains_card_number
 from ledger.views.jobs import busy, job_context, submit
@@ -343,6 +350,20 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_new_charge": billing and active,
             "one_off_charges": one_off_charges.operator_charges(operator),
             "can_archive": meets(role, Role.ADMIN) and active,
+            # PLAN-011b D6, D7: the operator's own attention items as banners, and the
+            # latest contact log entries.
+            "attention": attention.attention(timezone.localdate(), operator=operator.pk),
+            "contact_entries": list(contacts.entries(operator)[: contacts.PAGE_LIMIT + 1]),
+            "contact_limit": contacts.PAGE_LIMIT,
+            "can_add_contact": billing and active,
+            # PLAN-011b D4: the collection e-mails sent to the operator, and the
+            # "handled personally" switch (billing).
+            "collection_log": collections.operator_log(operator, collections.LOG_LIMIT),
+            "collection_log_limit": collections.LOG_LIMIT,
+            "can_set_handled": billing and active,
+            # PLAN-011b D4: the signed statement links (billing revokes them).
+            "can_revoke_links": billing,
+            "statement_link_days": statement_links.MAX_AGE_DAYS,
         },
     )
 

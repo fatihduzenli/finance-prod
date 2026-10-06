@@ -10,9 +10,23 @@ charges:
   pending charge is still owed until its payment settles);
 - **insurance**: insurance charges with an amount (a charge that still needs its premium
   has no amount and is owed nothing yet), less their settled ``insurance`` payments and
-  plus their settled refunds; a legacy charge the sheet shows paid owes nothing;
+  what their re-debits collected, plus their settled refunds; a legacy charge the sheet
+  shows paid owes nothing;
 - **one-off**: one-off charges with a ``balance`` above zero, neither ``waived`` nor
   ``voided``, except deposits (a refundable fee type: money held, never owed revenue).
+
+**A rescheduled return** (PLAN-011b D5): the returned payment reopened its charge, and the
+Reschedule made a ``redebit`` one-off charge that collects the same amount again. What
+the re-debit collects (up to its price; its NSF fee never counts) is paid on that charge
+too (:func:`ledger.services.rent_run.redebit_collected`: stored on a rent or one-off
+charge, derived here for an insurance charge). The open amount is owed once: while the
+re-debit charge is neither waived nor voided, what it has still to collect is taken off
+the open balance of the charge the returned payment was for (:func:`carried_by_redebits`),
+so the operator owes the re-debit and its NSF fee, and once the re-debit is paid nothing
+is left on either. A re-debit of a returned payment on a re-debit's invoice carries that
+payment's amount: what the first re-debit's balance leaves over is carried by its NSF
+fee. A re-debit is listed as a one-off charge (``Re-debit: Re-debit of Rent 2026-09``);
+its fee as ``NSF fee: ...``.
 
 Every other figure here sums those rows: the dashboard's total outstanding and overdue
 (:func:`dashboard`), the arrears list (:func:`arrears`) and the A/R aging (:func:`aging`,
@@ -45,7 +59,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -182,7 +196,9 @@ def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
     ]
 
 
-def _insurance_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
+def _insurance_balances(
+    operator: uuid.UUID | None, collected: Mapping[uuid.UUID, Decimal]
+) -> list[OpenBalance]:
     settled = Q(payments__status=PaymentStatus.SETTLED, payments__kind=PaymentKind.INSURANCE)
     charges = InsuranceCharge.objects.filter(amount__isnull=False).exclude(
         legacy_status=LegacyStatus.PAID
@@ -210,7 +226,12 @@ def _insurance_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
     )
     found = []
     for row in rows:
-        balance = _money(row["amount"]) - _money(row["paid"]) + _money(row["refunded"])
+        balance = (
+            _money(row["amount"])
+            - _money(row["paid"])
+            + _money(row["refunded"])
+            - collected.get(row["pk"], ZERO)
+        )
         if balance <= 0:
             continue
         found.append(
@@ -282,12 +303,108 @@ def _one_off_description(categories: Mapping[str, object], row: Mapping[str, obj
     return f"{label}: {detail}" if detail else label
 
 
+def carried_by_redebits(
+    operator: uuid.UUID | None = None,
+) -> tuple[dict[tuple[str, uuid.UUID], Decimal], dict[uuid.UUID, Decimal]]:
+    """In one query (PLAN-011b D5): per (kind, charge id), the amount live re-debit
+    charges have still to collect again for the charge a returned payment was for; and
+    per insurance charge, what its re-debits collected (each up to its price, whatever
+    its status since), as :func:`ledger.services.rent_run.redebit_collected` counts it
+    for the charges that store their paid amount."""
+    rows = OneOffCharge.objects.filter(
+        category=OneOffCategory.REDEBIT, source_payment__isnull=False
+    )
+    if operator is not None:
+        rows = rows.filter(
+            Q(operator=operator) | Q(operator__isnull=True, lease__operator=operator)
+        )
+    carried: dict[tuple[str, uuid.UUID], Decimal] = {}
+    insurance_collected: dict[uuid.UUID, Decimal] = {}
+    for status, price, paid, rent, insurance, one_off in rows.values_list(
+        "status",
+        "price",
+        "amount_paid",
+        "source_payment__rent_charge",
+        "source_payment__insurance_charge",
+        "source_payment__one_off_charge",
+    ).order_by():
+        collected = min(max(_money(paid), ZERO), _money(price))
+        if insurance is not None:
+            insurance_collected[insurance] = insurance_collected.get(insurance, ZERO) + collected
+        if status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
+            continue
+        for kind, charge in (
+            (KIND_RENT, rent),
+            (KIND_INSURANCE, insurance),
+            (KIND_ONE_OFF, one_off),
+        ):
+            if charge is not None:
+                key = (kind, charge)
+                carried[key] = carried.get(key, ZERO) + _money(price) - collected
+    return carried, insurance_collected
+
+
+def _spill_to_companions(
+    rows: list[OpenBalance], carried: Mapping[tuple[str, uuid.UUID], Decimal]
+) -> dict[tuple[str, uuid.UUID], Decimal]:
+    """``carried``, where a re-debit of a payment on a re-debit's invoice carries that
+    payment's whole amount: what the first re-debit's own balance leaves over is carried
+    by its billed companion fees, in creation order (the allocation of PLAN-011b D5).
+    One more query, only when a re-debit is carried."""
+    sources = [charge for kind, charge in carried if kind == KIND_ONE_OFF]
+    if not sources:
+        return dict(carried)
+    companions: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for companion in (
+        OneOffCharge.objects.filter(companion_of__in=sources)
+        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .order_by("created_at", "id")
+        .only("pk", "companion_of_id")
+    ):
+        if companion.companion_of_id is not None:
+            companions.setdefault(companion.companion_of_id, []).append(companion.pk)
+    balances = {(row.kind, row.charge_id): row.balance for row in rows}
+    spilled = dict(carried)
+    for source, fees in companions.items():
+        left = carried[(KIND_ONE_OFF, source)] - balances.get((KIND_ONE_OFF, source), ZERO)
+        for fee in fees:
+            if left <= 0:
+                break
+            key = (KIND_ONE_OFF, fee)
+            share = min(left, balances.get(key, ZERO))
+            spilled[key] = spilled.get(key, ZERO) + share
+            left -= share
+    return spilled
+
+
+def _less_carried(
+    rows: list[OpenBalance], carried: Mapping[tuple[str, uuid.UUID], Decimal]
+) -> list[OpenBalance]:
+    kept = []
+    for row in rows:
+        amount = carried.get((row.kind, row.charge_id))
+        if amount is None:
+            kept.append(row)
+        elif row.balance > amount:
+            kept.append(replace(row, balance=row.balance - amount))
+    return kept
+
+
 def open_balances(today: date, operator: uuid.UUID | None = None) -> list[OpenBalance]:
-    """Every open charge (three queries), oldest due first; with ``operator``, only the
+    """Every open charge (four queries; five when a re-debit is itself carried by a later
+    re-debit), oldest due first; with ``operator``, only the
     charges billed to that operator (a one-off charge's own operator, else its lease's).
-    ``today`` does not change which charges are open; it is taken so that every caller
-    states the day it reads."""
-    rows = _rent_balances(operator) + _insurance_balances(operator) + _one_off_balances(operator)
+    A charge whose returned payment was rescheduled owes only what its re-debit does not
+    collect again (see the module docstring). ``today`` does not change which charges
+    are open; it is taken so that every caller states the day it reads."""
+    carried, insurance_collected = carried_by_redebits(operator)
+    rows = (
+        _rent_balances(operator)
+        + _insurance_balances(operator, insurance_collected)
+        + _one_off_balances(operator)
+    )
+    if carried:
+        rows = _less_carried(rows, _spill_to_companions(rows, carried))
     return sorted(rows, key=lambda row: (row.due_on, row.kind, row.store_label, str(row.charge_id)))
 
 

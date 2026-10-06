@@ -228,6 +228,10 @@ class JobKind(models.TextChoices):
     SCHEDULE_DELETE = "schedule_delete", "Delete the provider schedule"
     #: PLAN-010d D4: "Charge now", the single pay-an-invoice attempt of a one-off charge.
     INVOICE_PAY = "invoice_pay", "Charge the provider invoice now"
+    #: PLAN-011b D4, D8: a collection e-mail to an operator, and a staff user's morning
+    #: e-mail (a calendar entry, or a promise to pay due that day).
+    MESSAGE_SEND = "message_send", "Send a collection e-mail"
+    CALENDAR_EMAIL = "calendar_email", "Send a morning e-mail"
 
 
 class JobEntity(models.TextChoices):
@@ -243,6 +247,10 @@ class JobEntity(models.TextChoices):
     #: Not a row: the reconciliation, one fixed entity ID (``payments.jobs.RECONCILIATION``).
     RECONCILIATION = "reconciliation", "Reconciliation"
     ONE_OFF_CHARGE = "one_off_charge", "One-off charge"
+    #: PLAN-011b D4, D8.
+    OUTBOUND_MESSAGE = "outbound_message", "Outbound message"
+    CALENDAR_ENTRY = "calendar_entry", "Calendar entry"
+    CONTACT_ENTRY = "contact_entry", "Contact entry"
 
 
 class JobStatus(models.TextChoices):

@@ -267,7 +267,12 @@ limiter, breaker, retries, validation and failure budget; see
 at `/operators/` (list, search, detail, create, edit, archive, retry, manual link), with
 each new or edited operator linked to or created as a Stax customer, the boot-time
 environment check, and the reserved `documents` and `outbound_messages` tables; see
-[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). Prompt 11 (PLAN-011): the dashboard at `/`, the month grid, arrears, the reports menu (aging,
+[`docs/qa/PLAN-006-operators.md`](docs/qa/PLAN-006-operators.md). Prompt 11b (PLAN-011b): collections ladder by Gmail (delegated service account; catch-all outside
+production), NSF re-debit from the returns queue, attention list, contact log, calendar with an
+ICS feed, New York time; see
+[`docs/qa/PLAN-011b-collections-nsf-attention-calendar.md`](docs/qa/PLAN-011b-collections-nsf-attention-calendar.md)
+and ADR-0010.
+Prompt 11 (PLAN-011): the dashboard at `/`, the month grid, arrears, the reports menu (aging,
 revenue, payments by method, deposits, statement, P&L), CSV on every list, phone layout and
 home-screen install (static-only service worker), camera capture; see
 [`docs/qa/PLAN-011-dashboard-reports-mobile.md`](docs/qa/PLAN-011-dashboard-reports-mobile.md).

@@ -1,0 +1,76 @@
+{% load responsive %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Statement: {{ operator.display_name }}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #1a1a1a; background: #fff; margin: 0; padding: 16px; line-height: 1.4; }
+    main { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+    .muted { color: #555; }
+    .table-scroll { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+    th, td { border-bottom: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+    .money { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    tr.overdue td { color: #8a1c1c; }
+    @media print { body { padding: 0; } }
+  </style>
+</head>
+<body>
+<main>
+  <p class="muted">{{ company }}</p>
+  <h1>Statement: {{ operator.display_name }}</h1>
+  {% if operator.legal_name or operator.company %}<p>{{ operator.legal_name }}{% if operator.legal_name and operator.company %} · {% endif %}{{ operator.company }}</p>{% endif %}
+  <p class="muted">As of {{ report.today|date:"Y-m-d" }}; payment history {{ report.range.from_month|date:"Y-m" }} to {{ report.range.to_month|date:"Y-m" }} (the last {{ months }} months). Every store. Amounts in US dollars.</p>
+
+  <h2>Open charges</h2>
+  {% responsive_table "scroll" %}
+  <table id="open-charges">
+    <thead><tr><th>Store</th><th>Charge</th><th>Due date</th><th class="money">Balance</th></tr></thead>
+    <tbody>
+      {% for item in report.open_charges %}
+        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|date:"Y-m-d" }}</td><td class="money">{{ item.balance }}</td></tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">Nothing is owed.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><th scope="row" colspan="3">Open balance</th><th class="money" id="open-total">{{ report.open_total }}</th></tr>
+      <tr><th scope="row" colspan="3">of which overdue</th><th class="money" id="overdue-total">{{ report.overdue_total }}</th></tr>
+    </tfoot>
+  </table>
+  {% endresponsive_table %}
+
+  <h2>Payment history</h2>
+  {% responsive_table "scroll" %}
+  <table id="payment-history">
+    <thead><tr><th>Date</th><th>Store</th><th>Charge</th><th>Kind</th><th>Status</th><th class="money">Amount</th></tr></thead>
+    <tbody>
+      {% for line in report.history %}
+        <tr class="history-line"><td>{{ line.on|date:"Y-m-d"|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_status_display }}</td><td class="money">{{ line.payment.amount }}</td></tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted">No payment in these months.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+
+  <h2>Totals</h2>
+  {% responsive_table "scroll" %}
+  <table id="statement-totals">
+    <tbody>
+      <tr><th scope="row">Paid in these months</th><td class="money" id="paid-total">{{ report.paid }}</td></tr>
+      <tr><th scope="row">Refunded in these months</th><td class="money" id="refunded-total">{{ report.refunded }}</td></tr>
+      <tr><th scope="row">Deposits held from these months</th><td class="money" id="deposits-held">{{ report.deposits_held }}</td></tr>
+      <tr><th scope="row">Pending in these months</th><td class="money" id="pending-total">{{ report.pending }}</td></tr>
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  <p class="muted">A pending payment is not yet collected. Deposits are money held for you, not a payment of a charge. Questions: reply to the e-mail that brought you here.</p>
+</main>
+</body>
+</html>

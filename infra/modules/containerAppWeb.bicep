@@ -80,6 +80,21 @@ param djangoSecretKeySecretName string
 @description('Vault secret name for the Sentry DSN. Leave empty to run without Sentry; the env var is then not set at all.')
 param sentryDsnSecretName string = ''
 
+@description('MAIL_ENABLED (PLAN-011b D3): true sends the collection e-mails through the Gmail API. While false the service-account key is not referenced at all, so the deployment works before the owner has stored it in the vault.')
+param mailEnabled bool = false
+
+@description('GMAIL_SENDER: the company mailbox the e-mails are sent as. An address, not a secret.')
+param gmailSender string = ''
+
+@description('MAIL_CATCH_ALL: when set, every e-mail goes to this staff address instead (required outside production while mail is on). An address, not a secret; passed on the command line at deploy time.')
+param mailCatchAll string = ''
+
+@description('COMPANY_NAME: the {company} merge field of the e-mails.')
+param companyName string = 'Global Retail Groups'
+
+@description('Vault secret name for the Gmail service-account key (JSON). Referenced only when mailEnabled is true.')
+param gmailServiceAccountSecretName string = 'gmail-service-account-key'
+
 @description('Custom hostname to bind, e.g. staging.monvera.io. Empty means the app is reachable on its default ingress host name only.')
 param customDomainName string = ''
 
@@ -201,6 +216,22 @@ var baseEnv = [
     value: azureClientId
   }
   {
+    name: 'MAIL_ENABLED'
+    value: mailEnabled ? 'true' : 'false'
+  }
+  {
+    name: 'GMAIL_SENDER'
+    value: gmailSender
+  }
+  {
+    name: 'MAIL_CATCH_ALL'
+    value: mailCatchAll
+  }
+  {
+    name: 'COMPANY_NAME'
+    value: companyName
+  }
+  {
     name: 'STAX_API_KEY'
     secretRef: 'stax-api-key'
   }
@@ -222,6 +253,23 @@ var sentryEnv = [
   {
     name: 'SENTRY_DSN'
     secretRef: 'sentry-dsn'
+  }
+]
+
+// PLAN-011b D3, D9: the Gmail service-account key, by vault reference, only while mail
+// is on (the env guard requires it then, and nothing reads it otherwise).
+var mailSecrets = [
+  {
+    name: 'gmail-service-account-json'
+    keyVaultUrl: '${keyVaultUri}secrets/${gmailServiceAccountSecretName}'
+    identity: identityResourceId
+  }
+]
+
+var mailSecretEnv = [
+  {
+    name: 'GMAIL_SERVICE_ACCOUNT_JSON'
+    secretRef: 'gmail-service-account-json'
   }
 ]
 
@@ -259,7 +307,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
           identity: identityResourceId
         }
       ]
-      secrets: wireSentry ? concat(baseSecrets, sentrySecrets) : baseSecrets
+      secrets: concat(baseSecrets, wireSentry ? sentrySecrets : [], mailEnabled ? mailSecrets : [])
     }
     template: {
       containers: [
@@ -270,7 +318,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json(cpuCores)
             memory: memory
           }
-          env: wireSentry ? concat(baseEnv, sentryEnv) : baseEnv
+          env: concat(baseEnv, wireSentry ? sentryEnv : [], mailEnabled ? mailSecretEnv : [])
           probes: [
             {
               type: 'Readiness'

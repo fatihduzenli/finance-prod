@@ -1,0 +1,19 @@
+{% load responsive %}
+{% responsive_table %}
+<table class="contacts" id="contact-entries">
+  <thead><tr><th>Date</th><th>Kind</th><th>Note</th><th>Promise</th><th>Recorded by</th></tr></thead>
+  <tbody>
+    {% for entry in entries %}
+      <tr class="contact-entry" id="contact-{{ entry.pk }}">
+        <td>{{ entry.happened_on|date:"Y-m-d" }}</td>
+        <td>{{ entry.get_kind_display }}</td>
+        <td style="white-space:pre-wrap;">{{ entry.body }}</td>
+        <td>{% if entry.kind == "promise" %}${{ entry.promised_amount }} by {{ entry.promised_date|date:"Y-m-d" }}{% if entry.closed_by_id %} <span class="badge">Closed {{ entry.closed_by.happened_on|date:"Y-m-d" }}</span>{% else %} <span class="badge">Open</span>{% endif %}{% else %}—{% endif %}</td>
+        <td>{{ entry.author.get_username|default:"—" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="muted">No contact entries.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}

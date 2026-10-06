@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 import dj_database_url
 
 from finance import log_redaction, sentry
-from finance.env_guard import EnvGuardError, validate
+from finance.env_guard import PROJECT_TIME_ZONE, EnvGuardError, validate
 
 # backend/
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -160,7 +160,8 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+#: America/New_York (PLAN-011b D1); storage stays UTC because USE_TZ is True.
+TIME_ZONE = PROJECT_TIME_ZONE
 USE_I18N = True
 USE_TZ = True
 
@@ -211,6 +212,19 @@ DOCUMENTS_CONTAINER = _config.documents_container
 AZURE_CLIENT_ID = _config.azure_client_id
 #: PostgreSQL statement timeout of the P&L page and export, in milliseconds (D11).
 REPORT_STATEMENT_TIMEOUT_MS = _config.report_statement_timeout_ms
+
+# --- Outbound mail (docs/qa/PLAN-011b-collections-nsf-attention-calendar.md D3, D4) ----
+#: Off unless "true": every send is then "suppressed" and nothing leaves the app.
+MAIL_ENABLED = _config.mail_enabled
+#: The company mailbox the service account sends as (domain-wide delegation).
+GMAIL_SENDER = _config.gmail_sender
+#: Server-side only: the service-account key, from a vault reference. Read by
+#: ``mail.get_sender`` alone; never rendered, logged or exported.
+GMAIL_SERVICE_ACCOUNT_JSON = _config.gmail_service_account_json
+#: When set, every message goes to this address instead (required outside production).
+MAIL_CATCH_ALL = _config.mail_catch_all
+#: The ``{company}`` merge field of the collection e-mails.
+COMPANY_NAME = _config.company_name
 
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -270,6 +284,7 @@ LOGGING = {
                 django_secret_key=SECRET_KEY,
                 database_url=_config.database_url,
                 redis_url=REDIS_URL,
+                others=log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
             ),
         },
     },
@@ -310,4 +325,5 @@ sentry.init(
     stax_env=STAX_ENV,
     stax_api_key=STAX_API_KEY,
     stax_webhook_url_token=STAX_WEBHOOK_URL_TOKEN,
+    other_secrets=log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
 )

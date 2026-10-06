@@ -1115,10 +1115,19 @@ def test_the_scheduled_job_queues_reconcile_at_both_utc_hours_as_no_caller() -> 
     assert "name: 'STAX_CALLER'\n    value: 'none'\n" in module
     assert "value: 'worker'" not in module
     worker = (REPO / "infra/modules/containerAppWorker.bicep").read_text()
+    # The mail settings (PLAN-011b D9) are the worker's, the web app's and the daily
+    # job's; the reconciliation sends no e-mail.
+    mail_secrets = {"gmail-service-account-json"}
+    mail_env = {"MAIL_ENABLED", "GMAIL_SENDER", "MAIL_CATCH_ALL", "COMPANY_NAME"}
+    mail_env |= {"GMAIL_SERVICE_ACCOUNT_JSON"}
     for secret in re.findall(r"name: '([a-z-]+)'\n    keyVaultUrl", worker):
-        assert f"name: '{secret}'\n    keyVaultUrl" in module
+        if secret not in mail_secrets:
+            assert f"name: '{secret}'\n    keyVaultUrl" in module
     for name in re.findall(r"name: '([A-Z_]+)'\n", worker):
-        assert f"name: '{name}'\n" in module
+        if name not in mail_env:
+            assert f"name: '{name}'\n" in module
+    for name in (*mail_secrets, *mail_env):
+        assert name not in module
 
 
 def test_main_wires_the_job_with_the_web_image_and_names_it() -> None:

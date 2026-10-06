@@ -68,6 +68,8 @@
   </table>
   {% endresponsive_table %}
 
+  {% include "ledger/collections/_charge.html" %}
+
   <h2>Notes</h2>
   {% for note in notes %}
     <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|date:"Y-m-d" }}</span></p>

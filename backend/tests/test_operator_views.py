@@ -441,6 +441,14 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:export",
         "ledger:operators:statement",
         "ledger:operators:statement_export",
+        # PLAN-011b D7: the contact log, its CSV export and adding an entry.
+        "ledger:operators:contacts",
+        "ledger:operators:contacts_export",
+        "ledger:operators:contacts_add",
+        # PLAN-011b D4: marking the operator as handled personally, and revoking every
+        # signed statement link sent to it.
+        "ledger:operators:handled_personally",
+        "ledger:operators:statement_links_revoke",
     }
     assert {
         "ledger:operators:list",
@@ -448,13 +456,18 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:export",
         "ledger:operators:statement",
         "ledger:operators:statement_export",
+        "ledger:operators:contacts",
+        "ledger:operators:contacts_export",
     } <= registry.READ_ONLY_ROUTE_NAMES
     expected = {
+        "contacts_add": Role.BILLING,
         "create": Role.BILLING,
         "edit": Role.BILLING,
         "retry_sync": Role.BILLING,
         "link": Role.BILLING,
         "new_charge": Role.BILLING,
+        "handled_personally": Role.BILLING,
+        "statement_links_revoke": Role.BILLING,
         "archive": Role.ADMIN,
     }
     for short, role in expected.items():
@@ -504,10 +517,16 @@ def test_no_delete_route_exists() -> None:
     for name in ("delete", "remove", "destroy"):
         with pytest.raises(NoReverseMatch):
             reverse(f"ledger:operators:{name}", kwargs={"pk": uuid.uuid4()})
-    # The exceptions remove no row: a document's soft delete (PLAN-010c D7) hides a file,
-    # and a waived charge's "Delete provider invoice" (PLAN-011 D0) deletes the invoice at
-    # the provider and marks the local invoice void.
-    allowed = {"ledger:documents:delete", "ledger:one_off_charges:delete_invoice"}
+    # The exceptions remove no money record: a document's soft delete (PLAN-010c D7) hides
+    # a file, a waived charge's "Delete provider invoice" (PLAN-011 D0) deletes the invoice
+    # at the provider and marks the local invoice void, and a calendar note or reminder
+    # (PLAN-011b D8) is deleted by its author or an admin with its text kept in the audit
+    # row.
+    allowed = {
+        "ledger:documents:delete",
+        "ledger:one_off_charges:delete_invoice",
+        "ledger:calendar:delete",
+    }
     assert not any(
         "delete" in raw
         for name, raw, _ in iter_routes()

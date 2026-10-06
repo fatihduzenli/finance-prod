@@ -1,7 +1,7 @@
 """Ledger routes (PLAN-006-operators.md §4.1, PLAN-007-leases-and-rent-run.md §4.1,
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
 D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11, PLAN-010c
-D7, D10, PLAN-010d D1, D2, D4, D6, D8, PLAN-011 D0 to D5).
+D7, D10, PLAN-010d D1, D2, D4, D6, D8, PLAN-011 D0 to D5, PLAN-011b D4, D7, D8).
 
 Namespace ``ledger``.
 
@@ -17,11 +17,14 @@ view runs. The view then parses the UUID and loads the row, or answers 404.
 
 from __future__ import annotations
 
-from django.urls import include, path
+from django.urls import include, path, re_path
 
 from ledger.views import (
     audit,
+    calendar,
     charges,
+    collections,
+    contacts,
     dashboard,
     deposits,
     documents,
@@ -33,6 +36,7 @@ from ledger.views import (
     reports,
     returns,
     run,
+    statement_links,
     stores,
     webhooks,
 )
@@ -52,6 +56,22 @@ operator_patterns = (
         path("<str:pk>/charges/new/", one_off_charges.operator_new_charge, name="new_charge"),
         path("<str:pk>/statement/", reports.statement_page, name="statement"),
         path("<str:pk>/statement/export.csv", reports.statement_export, name="statement_export"),
+        # The contact log (PLAN-011b D7).
+        path("<str:pk>/contacts/", contacts.contacts_page, name="contacts"),
+        path("<str:pk>/contacts/new/", contacts.contacts_add, name="contacts_add"),
+        path("<str:pk>/contacts/export.csv", contacts.contacts_export, name="contacts_export"),
+        # The collections ladder (PLAN-011b D4).
+        path(
+            "<str:pk>/handled-personally/",
+            collections.operator_handled_personally,
+            name="handled_personally",
+        ),
+        # The signed statement links (PLAN-011b D4): billing revokes every link sent.
+        path(
+            "<str:pk>/statement-links/revoke/",
+            statement_links.statement_links_revoke,
+            name="statement_links_revoke",
+        ),
     ],
     "operators",
 )
@@ -113,6 +133,7 @@ charge_patterns = (
         path("<str:pk>/payments/new/", charges.charge_record_payment, name="record_payment"),
         path("<str:pk>/retry-mark/", charges.charge_retry_mark, name="retry_mark"),
         path("<str:pk>/link-invoice/", charges.charge_link_invoice, name="link_invoice"),
+        path("<str:pk>/send-step/", collections.rent_charge_send_step, name="send_step"),
     ],
     "charges",
 )
@@ -134,6 +155,7 @@ one_off_charge_patterns = (
         ),
         path("<str:pk>/retry/", one_off_charges.charge_retry, name="retry"),
         path("<str:pk>/charge-now/", one_off_charges.charge_now, name="charge_now"),
+        path("<str:pk>/send-step/", collections.one_off_charge_send_step, name="send_step"),
     ],
     "one_off_charges",
 )
@@ -164,6 +186,7 @@ return_patterns = (
         path("", returns.return_list, name="list"),
         path("export.csv", returns.return_export, name="export"),
         path("<str:pk>/resolve/", returns.return_resolve, name="resolve"),
+        path("<str:pk>/reschedule/", returns.return_reschedule, name="reschedule"),
     ],
     "returns",
 )
@@ -240,8 +263,24 @@ arrears_patterns = (
     "arrears",
 )
 
+calendar_patterns = (
+    [
+        path("", calendar.calendar_page, name="page"),
+        path("new/", calendar.calendar_add, name="add"),
+        # Public: the token in the path is the credential (PLAN-011b D8). Everything after
+        # feed/ is captured, so every variant of the path reaches the view and gets its
+        # silent 404 rather than an unresolved-path answer logged with the path.
+        re_path(r"^feed/(?P<rest>[\s\S]*)\Z", calendar.calendar_feed, name="feed"),
+        path("<str:pk>/", calendar.calendar_detail, name="detail"),
+        path("<str:pk>/edit/", calendar.calendar_edit, name="edit"),
+        path("<str:pk>/delete/", calendar.calendar_delete, name="delete"),
+    ],
+    "calendar",
+)
+
 urlpatterns = [
     path("", dashboard.home, name="home"),
+    path("calendar/", include(calendar_patterns)),
     path("grid/", include(grid_patterns)),
     path("arrears/", include(arrears_patterns)),
     path("operators/", include(operator_patterns)),
@@ -253,6 +292,8 @@ urlpatterns = [
     path("payments/", include(payment_patterns)),
     path("webhooks/", include(webhook_patterns)),
     path("returns/", include(return_patterns)),
+    # The operator's own statement behind a signed link, without a session (PLAN-011b D4).
+    path("statement/<str:token>/", statement_links.statement_link_page, name="statement_link"),
     path("reconciliation/", include(reconciliation_patterns)),
     path("reports/", include(report_patterns)),
     path("documents/", include(document_patterns)),

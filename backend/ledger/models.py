@@ -22,8 +22,10 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
 from django.db.models.expressions import Combinable
-from django.db.models.functions import Lower, Trim
+from django.db.models.functions import Length, Lower, Trim
+from django.db.models.lookups import Exact
 
+from ledger import merge
 from ledger.validators import validate_json_has_no_payment_data, validate_no_payment_data
 
 MONEY_MAX_DIGITS = 12
@@ -245,6 +247,15 @@ class Operator(GuardedModel):
     creation_key = models.UUIDField(unique=True, null=True, blank=True, editable=False)
     #: Set when the provider held several customers with this e-mail (PLAN-006 D3).
     needs_review = models.BooleanField(default=False)
+    #: The collection e-mails skip this operator: someone handles it in person
+    #: (PLAN-011b D4); the note says who and why.
+    handled_personally = models.BooleanField(default=False)
+    handled_personally_note = free_text()
+    #: Returned debits rescheduled so far (PLAN-011b D5): 0 means the next NSF fee is the
+    #: first-return fee. Raised by the Reschedule action only, never by a webhook.
+    nsf_return_count = models.IntegerField(default=0)
+    #: Every signed statement link issued before this moment is refused (PLAN-011b D4).
+    statement_links_revoked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     archived_at = models.DateTimeField(null=True, blank=True)
@@ -253,6 +264,7 @@ class Operator(GuardedModel):
         db_table = "operators"
         constraints = [
             _not_blank("operators", "display_name"),
+            _not_negative("operators", "nsf_return_count"),
             models.CheckConstraint(
                 condition=Q(email=Lower(Trim("email"))), name="operators_email_normalised"
             ),
@@ -791,6 +803,10 @@ class OneOffCategory(models.TextChoices):
     ADJUSTMENT = "adjustment", "Adjustment"
     DAMAGE = "damage", "Damage"
     OTHER = "other", "Other"
+    #: The re-collection of a returned debit (PLAN-011b D5); ``source_payment`` names it.
+    REDEBIT = "redebit", "Re-debit"
+    #: The fee for a returned debit, made with its re-debit (``companion_of``).
+    NSF_FEE = "nsf_fee", "NSF fee"
 
 
 class CollectionMethod(models.TextChoices):
@@ -815,7 +831,14 @@ NON_SETUP_CATEGORIES: list[str] = [
     OneOffCategory.ADJUSTMENT.value,
     OneOffCategory.DAMAGE.value,
     OneOffCategory.OTHER.value,
+    OneOffCategory.REDEBIT.value,
+    OneOffCategory.NSF_FEE.value,
 ]
+#: The fee types of the NSF fee (PLAN-011b D5): the first return of an operator, then
+#: every later one. Seeded inactive, so the setup checklist never offers them.
+NSF_FEE_FIRST = "nsf_fee_first"
+NSF_FEE_LATER = "nsf_fee_later"
+NSF_FEE_CODES: tuple[str, ...] = (NSF_FEE_FIRST, NSF_FEE_LATER)
 
 
 class OneOffCharge(GuardedModel):
@@ -877,6 +900,15 @@ class OneOffCharge(GuardedModel):
     void_note = free_text()
     #: The idempotency identifier of the single "Charge now" attempt (D4), set once.
     charge_now_key = models.UUIDField(null=True, blank=True, unique=True, editable=False)
+    #: PLAN-011b D5: the returned payment a ``redebit`` charge collects again (one
+    #: re-debit per return), and the ``redebit`` charge an ``nsf_fee`` charge goes with
+    #: (one fee per re-debit). A payment on their shared invoice pays the re-debit first.
+    source_payment = models.ForeignKey(
+        "Payment", on_delete=models.PROTECT, null=True, blank=True, related_name="redebits"
+    )
+    companion_of = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="companions"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -925,6 +957,22 @@ class OneOffCharge(GuardedModel):
                 fields=["lease", "fee_type"],
                 condition=Q(legacy=False),
                 name="one_off_charges_lease_fee_type_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(category="redebit", source_payment__isnull=False)
+                | (~Q(category="redebit") & Q(source_payment__isnull=True)),
+                name="one_off_charges_source_payment_iff_redebit",
+            ),
+            models.CheckConstraint(
+                condition=Q(category="nsf_fee", companion_of__isnull=False)
+                | (~Q(category="nsf_fee") & Q(companion_of__isnull=True)),
+                name="one_off_charges_companion_iff_nsf_fee",
+            ),
+            models.UniqueConstraint(
+                fields=["source_payment"], name="one_off_charges_one_redebit_per_payment"
+            ),
+            models.UniqueConstraint(
+                fields=["companion_of"], name="one_off_charges_one_fee_per_redebit"
             ),
             _valid_choice("one_off_charges", "status", OneOffChargeStatus),
             _valid_choice("one_off_charges", "category", OneOffCategory),
@@ -1206,6 +1254,13 @@ class PaymentStatus(models.TextChoices):
     VOIDED = "voided", "Voided"
 
 
+class ResolutionKind(models.TextChoices):
+    """How staff resolved a returned payment (PLAN-008 D6, PLAN-011b D5)."""
+
+    NOTE = "note", "Resolved with a note"
+    RESCHEDULED = "rescheduled", "Rescheduled"
+
+
 class Payment(GuardedModel):
     invoice = models.ForeignKey(
         Invoice, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
@@ -1250,6 +1305,10 @@ class Payment(GuardedModel):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     resolution_note = free_text()
+    #: PLAN-011b D5: ``note`` (resolved with a note) or ``rescheduled`` (a re-debit on
+    #: ``redebit_date``, a New York date); empty while unresolved.
+    resolution_kind = _choice(ResolutionKind, blank=True, default="")
+    redebit_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1304,6 +1363,17 @@ class Payment(GuardedModel):
                 | (Q(status="returned") & Q(resolution_note__regex=_NOT_BLANK)),
                 name="payments_resolved_return_has_note",
             ),
+            models.CheckConstraint(
+                condition=Q(resolved_at__isnull=True, resolution_kind="")
+                | (Q(resolved_at__isnull=False) & ~Q(resolution_kind="")),
+                name="payments_resolution_kind_iff_resolved",
+            ),
+            models.CheckConstraint(
+                condition=Q(resolution_kind="rescheduled", redebit_date__isnull=False)
+                | (~Q(resolution_kind="rescheduled") & Q(redebit_date__isnull=True)),
+                name="payments_redebit_date_iff_rescheduled",
+            ),
+            _valid_choice("payments", "resolution_kind", ResolutionKind, blank=True),
             _valid_choice("payments", "kind", PaymentKind),
             _valid_choice("payments", "method", PaymentMethod),
             _valid_choice("payments", "status", PaymentStatus),
@@ -1378,7 +1448,7 @@ class DepositResolution(GuardedModel):
         ]
 
 
-# --- Documents (PLAN-010c D4) and a reserved table (PLAN-006 D8, no UI) -------------
+# --- Documents (PLAN-010c D4) --------------------------------------------------------
 
 
 class DocumentSource(models.TextChoices):
@@ -1496,24 +1566,326 @@ class Document(GuardedModel):
         return self.original_filename
 
 
+# --- Collections ladder and outbound e-mail (PLAN-011b D4) ---------------------------
+
+
+#: Longest template subject (PLAN-011b D4).
+TEMPLATE_SUBJECT_MAX_LENGTH = 200
+#: The latest day a ladder step may fall on.
+STEP_MAX_DAY_OFFSET = 365
+
+
+class MessageTemplate(GuardedModel):
+    """A collection e-mail's subject and text (PLAN-011b D4), edited in the Django admin.
+
+    The subject and the body may use the merge fields of :mod:`ledger.merge` only; any
+    other field, attribute or index access, conversion or format specification is
+    refused on save (:meth:`clean` and :meth:`save`) and never rendered.
+    """
+
+    code = models.SlugField(max_length=64, unique=True, validators=[validate_no_payment_data])
+    subject = guarded_char(TEMPLATE_SUBJECT_MAX_LENGTH)
+    body = free_text(blank=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "message_templates"
+        ordering = ("code",)
+        constraints = [
+            _not_blank("message_templates", "subject"),
+            _not_blank("message_templates", "body"),
+            models.CheckConstraint(
+                condition=Q(code__regex=r"^[a-z0-9_]+$"), name="message_templates_code_shape"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.code
+
+    def merge_field_errors(self) -> dict[str, list[str]]:
+        found = {name: merge.problems(getattr(self, name) or "") for name in ("subject", "body")}
+        return {name: texts for name, texts in found.items() if texts}
+
+    def clean(self) -> None:
+        super().clean()
+        errors = self.merge_field_errors()
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        errors = self.merge_field_errors()
+        if errors:
+            raise ValidationError(errors)
+        super().save(*args, **kwargs)
+
+
+class CollectionStep(GuardedModel):
+    """One rung of the collections ladder (PLAN-011b D4): ``day_offset`` days after a
+    charge's due date (New York days), its template is sent, once per charge. Edited in
+    the Django admin; a step no longer used is made inactive, never deleted."""
+
+    day_offset = models.PositiveSmallIntegerField()
+    template = models.ForeignKey(MessageTemplate, on_delete=models.PROTECT, related_name="steps")
+    active = models.BooleanField(default=True)
+    position = models.SmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "collection_steps"
+        ordering = ("day_offset", "position")
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(day_offset__gte=1, day_offset__lte=STEP_MAX_DAY_OFFSET),
+                name="collection_steps_day_offset_range",
+            ),
+            models.UniqueConstraint(fields=["day_offset"], name="collection_steps_day_unique"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Day {self.day_offset}"
+
+
+class MessageStatus(models.TextChoices):
+    """What became of an outbound message (PLAN-011b D4); a closed list."""
+
+    QUEUED = "queued", "Queued"
+    SENT = "sent", "Sent"
+    FAILED = "failed", "Failed"
+    SUPPRESSED = "suppressed", "Suppressed"
+    CATCH_ALL = "catch_all", "Sent to the catch-all address"
+
+
+class ChargeEntityType(models.TextChoices):
+    """The charges a collection e-mail can be about."""
+
+    RENT_CHARGE = "rent_charge", "Rent charge"
+    ONE_OFF_CHARGE = "one_off_charge", "One-off charge"
+
+
 class OutboundMessage(GuardedModel):
-    """Reserved for a later prompt: a message sent to an operator. No UI, no admin."""
+    """One collection e-mail to an operator about one charge (PLAN-011b D4).
+
+    The charge is named generically (``charge_entity_type``, ``charge_entity_id``), as
+    audit rows name their entity. One ladder row per (charge, step): a hand send of a
+    step already logged is a second row marked ``manual``, made only on an explicit
+    confirmation. ``subject`` and ``body_sha256`` are written when the message is
+    rendered for sending; the body itself is never stored. ``error`` is a class name.
+    """
 
     operator = models.ForeignKey(
         Operator, on_delete=models.PROTECT, related_name="outbound_messages"
     )
-    template = free_text(blank=False)
+    template = models.ForeignKey(MessageTemplate, on_delete=models.PROTECT, related_name="+")
+    step = models.ForeignKey(CollectionStep, on_delete=models.PROTECT, related_name="messages")
+    charge_entity_type = _choice(ChargeEntityType)
+    charge_entity_id = models.UUIDField()
+    to_address = models.EmailField(validators=[validate_no_payment_data])
     subject = free_text()
-    #: Identifiers of ``documents`` rows attached to the message.
-    document_refs = guarded_json(default=list, blank=True)
+    #: The SHA-256 of the text body sent, in lower-case hexadecimal; an identifier.
+    body_sha256 = models.CharField(max_length=64, blank=True, default="")
+    status = _choice(MessageStatus, default=MessageStatus.QUEUED)
+    #: The mail service's message ID (Gmail's); an identifier.
+    mail_message_id = models.CharField(max_length=128, blank=True, default="")
+    #: The class name of the failure, never a message (CHECK); guarded like free text.
+    error = guarded_char(100, blank=True, default="")
+    manual = models.BooleanField(default=False)
+    queued_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    #: Who sent it by hand; null for the ladder.
     sent_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
-    sent_at = models.DateTimeField(null=True, blank=True)
-    delivery_status = free_text()
 
     class Meta:
         db_table = "outbound_messages"
+        indexes = [
+            models.Index(fields=["operator", "queued_at"], name="outbound_messages_op_idx"),
+            models.Index(
+                fields=["charge_entity_type", "charge_entity_id"],
+                name="outbound_messages_charge_idx",
+            ),
+        ]
+        constraints = [
+            _valid_choice("outbound_messages", "status", MessageStatus),
+            _valid_choice("outbound_messages", "charge_entity_type", ChargeEntityType),
+            models.CheckConstraint(
+                condition=Q(body_sha256__regex=r"^([0-9a-f]{64})?$"),
+                name="outbound_messages_body_sha256_hex",
+            ),
+            models.CheckConstraint(
+                condition=Q(error__regex=r"^([A-Za-z_][A-Za-z0-9_]*)?$"),
+                name="outbound_messages_error_class_name",
+            ),
+            models.CheckConstraint(
+                condition=Q(mail_message_id__regex=r"^[A-Za-z0-9_-]*$"),
+                name="outbound_messages_mail_message_id_shape",
+            ),
+            models.CheckConstraint(
+                condition=Q(manual=False) | Q(sent_by__isnull=False),
+                name="outbound_messages_manual_has_sender",
+            ),
+            models.UniqueConstraint(
+                fields=["charge_entity_type", "charge_entity_id", "step"],
+                condition=Q(manual=False),
+                name="outbound_messages_one_per_charge_step",
+            ),
+        ]
+
+
+# --- Contact log and calendar (PLAN-011b D7, D8) ------------------------------------
+
+
+class ContactKind(models.TextChoices):
+    CALL = "call", "Call"
+    EMAIL = "email", "E-mail"
+    VISIT = "visit", "Visit"
+    PROMISE = "promise", "Promise to pay"
+
+
+#: The kinds other than ``promise``: each CHECK reads only valid kinds (see one-off charges).
+NON_PROMISE_CONTACT_KINDS: list[str] = [
+    ContactKind.CALL.value,
+    ContactKind.EMAIL.value,
+    ContactKind.VISIT.value,
+]
+
+
+class ContactEntry(GuardedModel):
+    """One dated contact with an operator: a call, an e-mail, a visit or a promise to pay
+    (PLAN-011b D7). Billing adds them; nothing edits or deletes one.
+
+    A promise carries ``promised_date`` and ``promised_amount``; no other kind does
+    (CHECK). A later entry may close a promise: the promise's ``closed_by`` names it.
+    When a promise is broken is decided by :mod:`ledger.services.contacts`.
+    """
+
+    operator = models.ForeignKey(Operator, on_delete=models.PROTECT, related_name="contact_entries")
+    kind = _choice(ContactKind)
+    happened_on = models.DateField()
+    promised_date = models.DateField(null=True, blank=True)
+    promised_amount = MoneyField(null=True, blank=True)
+    body = free_text(blank=False)
+    #: On a promise: the later entry that closed it.
+    closed_by = models.OneToOneField(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="closes"
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "contact_entries"
+        indexes = [
+            models.Index(fields=["operator", "happened_on"], name="contact_entries_op_day_idx"),
+        ]
+        constraints = [
+            _not_blank("contact_entries", "body"),
+            _valid_choice("contact_entries", "kind", ContactKind),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(kind="promise")
+                    | Q(promised_date__isnull=False, promised_amount__isnull=False)
+                )
+                & (
+                    ~Q(kind__in=NON_PROMISE_CONTACT_KINDS)
+                    | Q(promised_date__isnull=True, promised_amount__isnull=True)
+                ),
+                name="contact_entries_promise_fields",
+            ),
+            models.CheckConstraint(
+                condition=Q(promised_amount__isnull=True) | Q(promised_amount__gt=0),
+                name="contact_entries_promised_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(closed_by__isnull=True) | (Q(kind="promise") & ~Q(closed_by=F("id"))),
+                name="contact_entries_closed_by_promise_only",
+            ),
+        ]
+
+
+class CalendarEntryKind(models.TextChoices):
+    NOTE = "note", "Note"
+    REMINDER = "reminder", "Reminder"
+
+
+#: Longest calendar title: it is an event's summary line (PLAN-011b D8).
+CALENDAR_TITLE_MAX_LENGTH = 120
+
+
+class CalendarEntry(GuardedModel):
+    """A dated note or reminder on the staff calendar (PLAN-011b D8).
+
+    Entries are shared staff notes: every staff user sees every entry, on the page and
+    in their own calendar feed. There is no private entry. ``email_morning`` asks for an
+    e-mail to the author on the morning of ``on`` (the daily tick, PLAN-011b D8).
+    """
+
+    kind = _choice(CalendarEntryKind)
+    store = models.ForeignKey(
+        Store, on_delete=models.PROTECT, null=True, blank=True, related_name="calendar_entries"
+    )
+    operator = models.ForeignKey(
+        Operator,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="calendar_entries",
+    )
+    lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="calendar_entries"
+    )
+    on = models.DateField()
+    title = guarded_char(CALENDAR_TITLE_MAX_LENGTH)
+    body = free_text()
+    email_morning = models.BooleanField(default=False)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "calendar_entries"
+        indexes = [models.Index(fields=["on"], name="calendar_entries_on_idx")]
+        constraints = [
+            _not_blank("calendar_entries", "title"),
+            _valid_choice("calendar_entries", "kind", CalendarEntryKind),
+        ]
+
+
+class CalendarFeed(models.Model):
+    """A user's calendar feed token (PLAN-011b D8): only its SHA-256 is stored.
+
+    The token is shown once, when it is made. A user has at most one live feed; making a
+    new one revokes the old. A revoked feed answers 404 like an unknown one. The feed is
+    per user only so that it can be revoked: it carries the same shared entries for
+    everyone.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="calendar_feeds"
+    )
+    #: The token's SHA-256 digest, 32 bytes: binary, so no text guard can misread it.
+    token_hash = models.BinaryField(max_length=32, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "calendar_feeds"
+        constraints = [
+            models.CheckConstraint(
+                condition=Exact(Length("token_hash"), 32), name="calendar_feeds_token_hash_size"
+            ),
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=Q(revoked_at__isnull=True),
+                name="calendar_feeds_one_live_per_user",
+            ),
+        ]
 
 
 # --- Audit and import --------------------------------------------------------------

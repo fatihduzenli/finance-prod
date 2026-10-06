@@ -1,5 +1,6 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
+{% load tz %}
 {% block title %}Reconciliation{% endblock %}
 {% block content %}
   <h1>Reconciliation</h1>
@@ -57,7 +58,7 @@
           <td>{{ item.mismatch.get_kind_display }}</td>
           <td>{{ item.mismatch.entity_type }} {{ item.entity_masked }}</td>
           <td>{{ item.mismatch.detail }}</td>
-          <td>{% if item.mismatch.resolved_at %}{{ item.mismatch.resolved_at|date:"Y-m-d H:i" }} UTC{% if item.mismatch.resolved_by %} by {{ item.mismatch.resolved_by.get_username }}{% endif %}: {{ item.mismatch.resolution_note }}{% else %}<span class="muted">Open</span>{% endif %}</td>
+          <td>{% if item.mismatch.resolved_at %}{{ item.mismatch.resolved_at|utc|date:"Y-m-d H:i" }} UTC{% if item.mismatch.resolved_by %} by {{ item.mismatch.resolved_by.get_username }}{% endif %}: {{ item.mismatch.resolution_note }}{% else %}<span class="muted">Open</span>{% endif %}</td>
           <td>
             {% if not item.mismatch.resolved_at %}
               <form method="post" action="{% url 'ledger:reconciliation:resolve' pk=item.mismatch.pk %}" class="js-single-submit">

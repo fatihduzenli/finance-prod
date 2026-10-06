@@ -15,6 +15,7 @@ from django.urls import include, path
 from two_factor.urls import urlpatterns as two_factor_urlpatterns
 
 from finance import pwa
+from ledger.views import calendar as calendar_views
 
 
 def healthz(request: HttpRequest) -> JsonResponse:
@@ -40,6 +41,18 @@ urlpatterns = [
                 [
                     path("manifest.webmanifest", pwa.manifest, name="manifest"),
                     path("sw.js", pwa.service_worker, name="service_worker"),
+                    # The user's own settings: the calendar feed (PLAN-011b D8).
+                    path("settings/", calendar_views.settings_page, name="settings"),
+                    path(
+                        "settings/calendar-feed/new/",
+                        calendar_views.feed_create,
+                        name="feed_create",
+                    ),
+                    path(
+                        "settings/calendar-feed/revoke/",
+                        calendar_views.feed_revoke,
+                        name="feed_revoke",
+                    ),
                 ],
                 "finance",
             )

@@ -45,6 +45,7 @@ GUARD_TRIGGERS = {
             "payments.migrations.0005_jobs",
             "ledger.migrations.0014_store_costs_deposit_resolutions",
             "ledger.migrations.0019_one_off_charges_constraints",
+            "ledger.migrations.0023_contacts_and_calendar",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -107,6 +108,7 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0011_one_off_jobs_rows",
                 "[ ] 0012_one_off_jobs_constraints",
                 "[ ] 0013_invoice_pay_job",
+                "[ ] 0014_mail_jobs",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):

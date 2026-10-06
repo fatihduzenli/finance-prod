@@ -188,6 +188,8 @@ EXPECTED_ROUTES = {
     "ledger:reconciliation:export",
     "ledger:documents:export_store",
     "ledger:documents:export_lease",
+    # PLAN-011b D7: an operator's contact log.
+    "ledger:operators:contacts_export",
 }
 #: Exports whose page needs more than a viewer: the export needs the same.
 EXPORT_ROLES = {"ledger:audit:export": Role.ADMIN, "ledger:reconciliation:export": Role.BILLING}
@@ -207,6 +209,7 @@ def _paths() -> dict[str, str]:
     lease = a_lease(a_store("Store 7"), an_operator("Operator 7"))
     owners = {
         "ledger:operators:statement_export": str(lease.operator_id),
+        "ledger:operators:contacts_export": str(lease.operator_id),
         "ledger:documents:export_store": str(lease.store_id),
         "ledger:documents:export_lease": str(lease.pk),
     }

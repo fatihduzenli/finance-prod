@@ -7,7 +7,7 @@ Stax credentials, and neither may reach an error tracker (root ``CLAUDE.md`` §5
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, cast
 from urllib.parse import quote, quote_plus
 
@@ -45,14 +45,16 @@ def init(
     *,
     stax_api_key: str = "",
     stax_webhook_url_token: str = "",
+    other_secrets: Iterable[str] = (),
 ) -> None:
     """Initialise Sentry. An empty DSN turns error reporting off entirely.
 
-    The two secret values are kept (as a compiled pattern, never logged) so the
-    scrubber can replace them in any string of an event as a last line of defence.
+    The secret values (the two above and ``other_secrets``, PLAN-011b D3) are kept (as a
+    compiled pattern, never logged) so the scrubber can replace them in any string of an
+    event as a last line of defence.
     """
     global _secret_pattern
-    _secret_pattern = _compile_secret_pattern(stax_api_key, stax_webhook_url_token)
+    _secret_pattern = _compile_secret_pattern(stax_api_key, stax_webhook_url_token, *other_secrets)
     if not dsn:
         return
     sentry_sdk.init(

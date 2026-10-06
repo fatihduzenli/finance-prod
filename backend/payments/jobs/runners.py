@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from datetime import date
 from decimal import Decimal
 
 import payments
 from ledger.models import Operator
-from ledger.services import leases, one_off_charges, refunds, rent_run
+from ledger.services import calendar, collections, leases, one_off_charges, refunds, rent_run
 from ledger.services.leases import AutopayOutcome, MethodsRefresh
 from ledger.services.rent_run import MarkAction, MarkResult, MatchAction, MatchReport
 from payments import jobs, one_off_invoices, operator_sync, reconciliation
@@ -311,6 +312,18 @@ def reconcile_run_job(job: Job) -> Result:
     return run.status == ReconciliationStatus.DONE, reconcile_text(run)
 
 
+def message_send_job(job: Job) -> Result:
+    """PLAN-011b D4: one collection e-mail, rendered and sent."""
+    outcome = collections.send(job.entity_id)
+    return outcome.ok, outcome.message
+
+
+def calendar_email_job(job: Job) -> Result:
+    """PLAN-011b D8: one morning e-mail (a calendar entry or a promise to pay)."""
+    day = date.fromisoformat(str(job.params[calendar.MORNING_DAY]))
+    return calendar.send_morning_email(job.entity_type, job.entity_id, day)
+
+
 RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.OPERATOR_SYNC: operator_sync_job,
     JobKind.OPERATOR_RETRY: operator_retry_job,
@@ -334,4 +347,6 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.SCHEDULE_CREATE: schedule_create_job,
     JobKind.SCHEDULE_DELETE: schedule_delete_job,
     JobKind.INVOICE_PAY: invoice_pay_job,
+    JobKind.MESSAGE_SEND: message_send_job,
+    JobKind.CALENDAR_EMAIL: calendar_email_job,
 }

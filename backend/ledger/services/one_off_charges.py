@@ -69,6 +69,21 @@ Rules kept here, not in the views:
   attempt, as on rent charges.
 - **Linking an invoice** (:func:`link_invoice`): the rent rules of
   :func:`ledger.services.rent_run.link_charge_invoice`, with the same sentences.
+- **Re-debit and NSF fee** (PLAN-011b D5; made by :func:`ledger.services.nsf.reschedule`):
+  a ``redebit`` charge and its ``nsf_fee`` companion (``companion_of``) share the
+  re-debit's invoice or schedule, whose lines are the re-debit and the fee unless the fee
+  is waived or voided (:func:`billed_companions`, :func:`billed_total`). A payment on that
+  invoice is a payment of the re-debit charge and is **allocated** re-debit first: the
+  re-debit's paid amount is capped at its price while a billed companion exists, and the
+  rest pays the companions in creation order (:func:`allocated_overflow`);
+  :func:`refresh_companions` recomputes them after the re-debit. A companion is not
+  cancelled on its own (it has no invoice): cancelling the re-debit voids it too
+  (:func:`mark_voided`); it is not waived while the re-debit's invoice is live.
+  What a re-debit collects (up to its price; the fee never counts) is paid on the
+  charge whose returned payment it collects again, rent, insurance or one-off
+  (:func:`ledger.services.rent_run.redebit_collected`): take :func:`redebit_sources`
+  before the re-debit's payments are recomputed and :func:`refresh_sources` after, and
+  audit each change it returns.
 
 Every write is audited (entity ``one_off_charge``); provider identifiers are masked.
 Money is ``Decimal`` throughout.
@@ -95,11 +110,13 @@ import payments
 from accounts.roles import Role, meets, role_of
 from ledger.models import (
     DESCRIPTION_MAX_LENGTH,
+    NSF_FEE_CODES,
     ZERO,
     AuditLog,
     CollectionMethod,
     CollectionStatus,
     FeeType,
+    InsuranceCharge,
     Invoice,
     InvoiceStatus,
     Lease,
@@ -110,8 +127,9 @@ from ledger.models import (
     Payment,
     PaymentKind,
     PaymentStatus,
+    RentCharge,
 )
-from ledger.services import leases, numbering, rent_run
+from ledger.services import insurance, leases, numbering, rent_run
 from ledger.services.rent_run import (
     CENT,
     MONEY_MAX,
@@ -271,6 +289,10 @@ CANCEL_PAID = (
 )
 PAY_VOIDED = "This charge is voided. Nothing was recorded."
 CANCEL_PENDING = "A payment on this charge is pending. Nothing was changed."
+CANCEL_COMPANION = (
+    "This fee is billed on its re-debit's invoice: cancel the re-debit charge, which cancels "
+    "the fee too. Nothing was changed."
+)
 CANCEL_BUSY = (
     "A request to the payment provider is already waiting for this charge. Nothing was changed."
 )
@@ -373,8 +395,13 @@ class SetupRefused(Exception):  # noqa: N818 (reads as an outcome, like LeaseRef
 
 
 def checklist_types() -> list[FeeType]:
-    """The active fee types, in catalogue order: one checklist row each (D5)."""
-    return list(FeeType.objects.filter(active=True).order_by("sort_order", "name", "id"))
+    """The active fee types, in catalogue order: one checklist row each (D5). The NSF fee
+    types are never offered, even when an admin made them active (PLAN-011b D5)."""
+    return list(
+        FeeType.objects.filter(active=True)
+        .exclude(code__in=NSF_FEE_CODES)
+        .order_by("sort_order", "name", "id")
+    )
 
 
 def charges_of(lease: Lease) -> list[OneOffCharge]:
@@ -889,9 +916,11 @@ def waive(
             return Outcome(False, WAIVE_ALREADY)
         if charge.status == OneOffChargeStatus.VOIDED:
             return Outcome(False, WAIVE_VOIDED)
-        if has_settled_payment(charge):
+        if has_settled_payment(charge) or charge.amount_paid > 0:
             return Outcome(False, WAIVE_SETTLED)
-        if live_provider_invoice(charge) is not None:
+        # A companion fee is billed on its re-debit's invoice (PLAN-011b D5).
+        billed_on = charge.companion_of if charge.companion_of_id is not None else charge
+        if billed_on is not None and live_provider_invoice(billed_on) is not None:
             return Outcome(False, WAIVE_LIVE_INVOICE)
         before = charge_state(charge)
         charge.status = OneOffChargeStatus.WAIVED
@@ -914,6 +943,8 @@ def cancel_refusal(charge: OneOffCharge) -> str:
         return CANCEL_VOIDED
     if charge.collection == CollectionMethod.NONE:
         return CANCEL_SETUP
+    if charge.companion_of_id is not None:
+        return CANCEL_COMPANION
     if charge.status == OneOffChargeStatus.WAIVED:
         return CANCEL_WAIVED
     if charge.amount_paid > 0 or has_settled_payment(charge):
@@ -1264,7 +1295,40 @@ def mark_voided(
             before,
             {**charge_state(charge), "note": note, **context},
         )
+        _void_companions(charge, actor, note, context, now)
     return Outcome(True, VOIDED, charge=charge)
+
+
+def _void_companions(
+    charge: OneOffCharge,
+    actor: User | None,
+    note: str,
+    context: Mapping[str, Any],
+    now: datetime | None,
+) -> None:
+    """The fee of a voided re-debit goes with it (PLAN-011b D5): its line was on the
+    deleted invoice or schedule. A waived or already voided fee is left as it is."""
+    for companion in (
+        OneOffCharge.objects.select_for_update()
+        .filter(companion_of=charge)
+        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .order_by("created_at", "id")
+    ):
+        before = charge_state(companion)
+        companion.status = OneOffChargeStatus.VOIDED
+        companion.voided_at = now or timezone.now()
+        companion.voided_by = actor
+        companion.void_note = note
+        companion.save(
+            update_fields=["status", "voided_at", "voided_by", "void_note", "updated_at"]
+        )
+        _audit(
+            actor,
+            VOIDED_ACTION,
+            companion,
+            before,
+            {**charge_state(companion), "note": note, "with": str(charge.pk), **context},
+        )
 
 
 def flag(charge_id: uuid.UUID, action: str, context: Mapping[str, Any]) -> None:
@@ -1313,13 +1377,14 @@ def record_payment(
             return PaymentOutcome(False, PAY_WAIVED)
         if charge.status == OneOffChargeStatus.VOIDED:
             return PaymentOutcome(False, PAY_VOIDED)
-        balance = charge.price - settled(charge)
+        balance = charge.price - paid_in(charge)
         if balance <= 0:
             return PaymentOutcome(False, PAY_NOTHING_DUE)
         if amount > balance:
             return PaymentOutcome(False, PAY_OVER_BALANCE, "amount")
         whole = balance == charge.price and amount == balance
         before = charge_state(charge)
+        sources = redebit_sources(charge)
         payment = Payment(
             one_off_charge=charge,
             kind=PaymentKind.ONE_OFF,
@@ -1353,6 +1418,15 @@ def record_payment(
                 "creation_key": str(creation_key) if creation_key is not None else None,
             },
         )
+        for change in refresh_sources(sources):
+            AuditLog.objects.create(
+                actor=actor,
+                action=change.action,
+                entity_type=change.entity_type,
+                entity_id=str(change.entity_id),
+                before=change.before,
+                after={**change.after, "payment": str(payment.pk), "redebit": str(charge.pk)},
+            )
         linked = rent_run.provider_invoice(charge)
         if linked is None:
             return PaymentOutcome(
@@ -1423,15 +1497,80 @@ def settled(charge: OneOffCharge) -> Decimal:
     return (Decimal(paid) - Decimal(refunded)).quantize(CENT)
 
 
+def paid_in(charge: OneOffCharge) -> Decimal:
+    """:func:`settled`, plus what the re-debits of the charge's returned payments
+    collected again for it (PLAN-011b D5)."""
+    return settled(charge) + rent_run.redebit_collected(one_off_charge=charge)
+
+
+def billed_companions(charge: OneOffCharge) -> list[OneOffCharge]:
+    """The companions billed with ``charge`` (PLAN-011b D5): neither waived nor voided,
+    in creation order. Empty for any charge but a re-debit."""
+    if charge.category != OneOffCategory.REDEBIT:
+        return []
+    return list(
+        OneOffCharge.objects.filter(companion_of=charge)
+        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .order_by("created_at", "id")
+    )
+
+
+def billed_total(charge: OneOffCharge) -> Decimal:
+    """What the charge's invoice or schedule bills: its price and its billed companions'."""
+    return sum((Decimal(item.price) for item in billed_companions(charge)), Decimal(charge.price))
+
+
+def allocated_overflow(fee: OneOffCharge) -> Decimal:
+    """The part of ``fee`` paid by the payments on the re-debit it goes with (PLAN-011b
+    D5): the settled amount beyond the re-debit's price, less the earlier companions'
+    prices, between zero and the fee's price."""
+    if fee.companion_of_id is None:
+        return ZERO
+    source = OneOffCharge.objects.get(pk=fee.companion_of_id)
+    remaining = paid_in(source) - Decimal(source.price)
+    for companion in billed_companions(source):
+        if companion.pk == fee.pk:
+            return max(min(remaining, Decimal(fee.price)), ZERO)
+        remaining -= Decimal(companion.price)
+    return ZERO
+
+
+def refresh_companions(
+    charge: OneOffCharge,
+) -> list[tuple[OneOffCharge, dict[str, Any], dict[str, Any]]]:
+    """Recompute the companions of ``charge`` after its payments changed (PLAN-011b D5),
+    under their row locks; each one that changed, with its state before and after, for
+    the caller's audit row."""
+    changed = []
+    for companion in (
+        OneOffCharge.objects.select_for_update()
+        .filter(companion_of=charge)
+        .order_by("created_at", "id")
+    ):
+        before = charge_state(companion)
+        recompute(companion)
+        after = charge_state(companion)
+        if after != before:
+            changed.append((companion, before, after))
+    return changed
+
+
 def recompute(charge: OneOffCharge) -> None:
     """Recompute the paid amount and the status from the payments (D3).
 
     Paid in full: ``paid``; partly: ``partial``; nothing: ``owed``. A waived charge is
-    left as it is. The caller holds the row lock and writes the audit row.
+    left as it is. The caller holds the row lock and writes the audit row. A re-debit
+    with a billed companion keeps at most its price; a companion fee adds what the
+    re-debit's payments leave over (PLAN-011b D5). What the re-debits of the charge's
+    returned payments collected again counts as paid (:func:`paid_in`).
     """
     if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
         return
-    paid = settled(charge)
+    paid = paid_in(charge)
+    if charge.category == OneOffCategory.REDEBIT and billed_companions(charge):
+        paid = min(paid, charge.price)
+    elif charge.category == OneOffCategory.NSF_FEE:
+        paid += allocated_overflow(charge)
     if paid >= charge.price and paid > 0:
         status = OneOffChargeStatus.PAID
     elif paid > 0:
@@ -1442,6 +1581,102 @@ def recompute(charge: OneOffCharge) -> None:
         charge.amount_paid = paid
         charge.status = status
         charge.save(update_fields=["amount_paid", "status", "updated_at"])
+
+
+Source = RentCharge | InsuranceCharge | OneOffCharge
+
+
+@dataclass(frozen=True, slots=True)
+class SourceChange:
+    """A charge a re-debit's payments moved (PLAN-011b D5), for the caller's audit row:
+    ``action`` on ``entity_type`` ``entity_id``, ``allocated_from`` the re-debit whose
+    payments paid a companion fee."""
+
+    action: str
+    entity_type: str
+    entity_id: uuid.UUID
+    before: dict[str, Any]
+    after: dict[str, Any]
+    allocated_from: uuid.UUID | None = None
+
+
+def redebit_sources(charge: OneOffCharge) -> list[tuple[Source, dict[str, Any]]]:
+    """The charges a re-debit collects again for, nearest first (the charge its
+    returned payment was for; when that is itself a re-debit, that one's source too),
+    each under its row lock with its state now. Empty for any other charge. Taken
+    before the re-debit's payments are recomputed; :func:`refresh_sources` after."""
+    found: list[tuple[Source, dict[str, Any]]] = []
+    current = charge
+    while current.category == OneOffCategory.REDEBIT and current.source_payment_id is not None:
+        payment = Payment.objects.get(pk=current.source_payment_id)
+        source: Source
+        if payment.rent_charge_id is not None:
+            source = RentCharge.objects.select_for_update().get(pk=payment.rent_charge_id)
+        elif payment.insurance_charge_id is not None:
+            source = InsuranceCharge.objects.select_for_update().get(pk=payment.insurance_charge_id)
+        elif payment.one_off_charge_id is not None:
+            source = OneOffCharge.objects.select_for_update().get(pk=payment.one_off_charge_id)
+        else:
+            break
+        found.append((source, source_state(source)))
+        if not isinstance(source, OneOffCharge):
+            break
+        current = source
+    return found
+
+
+def refresh_sources(sources: list[tuple[Source, dict[str, Any]]]) -> list[SourceChange]:
+    """Recompute the charges of :func:`redebit_sources` (a one-off source's companion
+    fees too), nearest first; each one whose state moved."""
+    changes = []
+    for source, before in sources:
+        if isinstance(source, RentCharge):
+            rent_run.recompute_charge(source)
+            action, entity = "rent_charge.payment_applied", rent_run.ENTITY_CHARGE
+        elif isinstance(source, OneOffCharge):
+            recompute(source)
+            action, entity = "one_off_charge.payment_applied", ENTITY_ONE_OFF_CHARGE
+        else:
+            action, entity = "insurance_charge.payment_applied", insurance.ENTITY_INSURANCE
+        after = source_state(source)
+        if after != before:
+            changes.append(SourceChange(action, entity, source.pk, before, after))
+        if isinstance(source, OneOffCharge):
+            changes.extend(
+                SourceChange(
+                    "one_off_charge.payment_allocated",
+                    ENTITY_ONE_OFF_CHARGE,
+                    companion.pk,
+                    companion_before,
+                    companion_after,
+                    allocated_from=source.pk,
+                )
+                for companion, companion_before, companion_after in refresh_companions(source)
+            )
+    return changes
+
+
+def source_state(source: Source) -> dict[str, Any]:
+    """The audited fields of a re-debit's source charge. An insurance charge stores no
+    paid amount (its paid state is derived): its ``amount_paid`` is derived here, as the
+    open balances derive it."""
+    if isinstance(source, RentCharge):
+        return rent_run.charge_state(source)
+    if isinstance(source, OneOffCharge):
+        return charge_state(source)
+    rows = Payment.objects.filter(
+        insurance_charge=source, kind=PaymentKind.INSURANCE, status=PaymentStatus.SETTLED
+    )
+    paid = rows.filter(is_refund=False).aggregate(total=Sum("amount"))["total"] or ZERO
+    refunded = rows.filter(is_refund=True).aggregate(total=Sum("amount"))["total"] or ZERO
+    collected = rent_run.redebit_collected(insurance_charge=source)
+    return {
+        "lease": str(source.lease_id),
+        "policy_year": source.policy_year,
+        "amount": str(source.amount) if source.amount is not None else None,
+        "amount_paid": str((Decimal(paid) - Decimal(refunded) + collected).quantize(CENT)),
+        "needs_review": source.needs_review,
+    }
 
 
 # --- Helpers --------------------------------------------------------------------------

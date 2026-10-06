@@ -20,13 +20,14 @@ import uuid
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import LinkInvoiceForm, ManualPaymentForm
-from ledger.models import ChargeNote, RentCharge, RentChargeStatus
-from ledger.services import csv_export, rent_run
+from ledger.models import ChargeEntityType, ChargeNote, RentCharge, RentChargeStatus
+from ledger.services import collections, csv_export, rent_run
 from ledger.services.csv_export import CsvWriter
 from ledger.services.rent_run import MarkAction, MarkResult
 from ledger.views.jobs import already_submitted, busy, job_context, submit
@@ -139,6 +140,13 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_link_invoice": billing and not charge.invoices.exists(),
             "retry_wait_message": (
                 operator_sync.retry_wait_message(retry_wait) if retry_wait else ""
+            ),
+            # PLAN-011b D4: the charge's collection e-mails and the hand send.
+            **collections.charge_context(
+                ChargeEntityType.RENT_CHARGE,
+                charge.pk,
+                billing=billing,
+                url=reverse("ledger:charges:send_step", kwargs={"pk": charge.pk}),
             ),
         },
     )

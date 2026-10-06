@@ -1480,16 +1480,24 @@ def test_the_worker_and_the_job_are_updated_only_after_the_web_wait() -> None:
 
 
 def _run_step(
-    tmp_path: Path, step_name: str, web: str, workers: str, job_tag: str = "0" * 40
+    tmp_path: Path,
+    step_name: str,
+    web: str,
+    workers: str,
+    job_tag: str = "0" * 40,
+    daily_tag: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """The script of step ``step_name`` with ``az``, ``date`` and ``sleep`` stubbed: ``az``
-    prints the count given per app and the job's image with ``job_tag``, the clock jumps
-    100 s per reading, sleep returns at once."""
+    prints the count given per app and the reconcile job's image with ``job_tag`` (the
+    daily job's with ``daily_tag``, ``job_tag`` when not given), the clock jumps 100 s per
+    reading, sleep returns at once."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    daily = job_tag if daily_tag is None else daily_tag
     stubs = {
         "az": f'case "$*" in *web-app*) echo {web};; *worker-app*) echo {workers};; '
-        f"*reconcile-job*) echo registry.azurecr.io/finance-web:{job_tag};; esac\n",
+        f"*reconcile-job*) echo registry.azurecr.io/finance-web:{job_tag};; "
+        f"*daily-job*) echo registry.azurecr.io/finance-web:{daily};; esac\n",
         "date": f'n=$(cat "{tmp_path}/clock" 2>/dev/null || echo 0)\n'
         f'echo $((n + 100)) > "{tmp_path}/clock"\necho $((n + 1000))\n',
         "sleep": "exit 0\n",
@@ -1504,6 +1512,7 @@ def _run_step(
         "WEB_APP_NAME": "web-app",
         "WORKER_APP_NAME": "worker-app",
         "RECONCILE_JOB_NAME": "reconcile-job",
+        "DAILY_JOB_NAME": "daily-job",
         "RESOURCE_GROUP": "group",
         "IMAGE_TAG": "0" * 40,
     }
@@ -1513,9 +1522,13 @@ def _run_step(
 
 
 def _run_verification(
-    tmp_path: Path, web: str, workers: str, job_tag: str = "0" * 40
+    tmp_path: Path,
+    web: str,
+    workers: str,
+    job_tag: str = "0" * 40,
+    daily_tag: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return _run_step(tmp_path, VERIFY, web, workers, job_tag)
+    return _run_step(tmp_path, VERIFY, web, workers, job_tag, daily_tag)
 
 
 def test_the_web_wait_passes_once_the_web_revision_is_live(tmp_path: Path) -> None:
@@ -1540,6 +1553,35 @@ def test_the_verification_passes_when_both_revisions_are_live(tmp_path: Path) ->
     result = _run_verification(tmp_path, "1", "1")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "web and worker run this commit" in result.stdout
+
+
+def test_the_verification_fails_when_the_daily_job_is_on_another_image(tmp_path: Path) -> None:
+    # PLAN-011b D9: the daily collections job is verified like the reconcile job.
+    result = _run_verification(tmp_path, "1", "1", "0" * 40, "1" * 40)
+    assert result.returncode == 1
+    assert "daily job=0" in result.stdout
+    assert "reconcile or daily job does not use it" in result.stderr
+
+
+def test_the_daily_job_is_rolled_after_the_reconcile_job_and_before_the_verification() -> None:
+    text = CI.read_text()
+    daily = _step("Roll the daily job onto the new image")
+    assert '|| echo "update returned an error; verifying the revision instead"' in daily
+    assert '--image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG"' in daily
+    assert "az containerapp job update" in daily
+    assert "vars.DAILY_JOB_NAME || 'finance-staging-daily'" in daily
+    order = [
+        text.index(f"- name: {WAIT}"),
+        text.index("- name: Roll the reconcile job"),
+        text.index("- name: Roll the daily job"),
+        text.index(f"- name: {VERIFY}"),
+    ]
+    assert order == sorted(order)
+    verify = _step(VERIFY)
+    assert "vars.DAILY_JOB_NAME || 'finance-staging-daily'" in verify
+    assert 'job_on_commit "$DAILY_JOB_NAME"' in verify
+    assert 'job_on_commit "$RECONCILE_JOB_NAME"' in verify
+    assert "DAILY_JOB_NAME" not in _step(WAIT)
 
 
 @pytest.mark.parametrize(

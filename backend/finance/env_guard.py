@@ -11,6 +11,7 @@ read from the environment is ever echoed (root ``CLAUDE.md`` §5.2).
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -55,7 +56,12 @@ RECONCILE_INTEGERS: dict[str, tuple[int, int, int]] = {
 #: milliseconds (default, smallest, largest).
 REPORT_STATEMENT_TIMEOUT_MS = (15_000, 1_000, 120_000)
 DEFAULT_RECONCILE_LOCAL_TIME = "02:00"
-DEFAULT_RECONCILE_TIMEZONE = "America/New_York"
+#: PLAN-011b D1: the project's time zone (``settings.TIME_ZONE``). Storage stays UTC
+#: (``USE_TZ``); every "today", charge period, debit day and date taken from a provider
+#: timestamp is a New York date.
+PROJECT_TIME_ZONE = "America/New_York"
+#: The reconciliation's zone defaults to the project's (PLAN-011b D1).
+DEFAULT_RECONCILE_TIMEZONE = PROJECT_TIME_ZONE
 _WHOLE_NUMBER = re.compile(r"[0-9]{1,6}")
 _LOCAL_TIME = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 #: An IANA zone name such as America/New_York: no path, no dots at the start.
@@ -74,6 +80,18 @@ _CONTAINER_NAME = re.compile(r"(?!.*--)[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 _CLIENT_ID = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
+
+#: PLAN-011b D3: outbound mail. ``MAIL_ENABLED`` is off unless "true"; when it is on, the
+#: mailbox and the service-account key are required, and outside production so is the
+#: catch-all address that receives every message. The key is checked to be a JSON object
+#: holding these keys; only missing key names are ever reported, never a value.
+SERVICE_ACCOUNT_KEYS: tuple[str, ...] = ("client_email", "private_key", "token_uri")
+#: One plain address, ASCII, no display name (the same shape ``mail.base`` accepts).
+_ADDRESS = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
+#: PLAN-011b D4: the ``{company}`` merge field. Plain text, one line.
+DEFAULT_COMPANY_NAME = "Global Retail Groups"
+COMPANY_NAME_MAX_LENGTH = 200
+_ONE_LINE = re.compile(r"[^\x00-\x1f\x7f]+")
 
 _SQLITE_SCHEME_PREFIX = "sqlite"
 _WEB_URL_SCHEMES: tuple[str, ...] = ("http", "https")
@@ -125,6 +143,13 @@ class Config:
     azure_client_id: str = ""
     #: PLAN-010c D11.
     report_statement_timeout_ms: int = REPORT_STATEMENT_TIMEOUT_MS[0]
+    #: PLAN-011b D3. The key is a credential: kept out of ``repr``.
+    mail_enabled: bool = False
+    gmail_sender: str = ""
+    gmail_service_account_json: str = field(default="", repr=False)
+    mail_catch_all: str = ""
+    #: PLAN-011b D4.
+    company_name: str = DEFAULT_COMPANY_NAME
 
 
 def _positive_amount(value: str) -> Decimal | None:
@@ -158,6 +183,61 @@ def _zone(value: str) -> str | None:
     except (ZoneInfoNotFoundError, ValueError):
         return None
     return value
+
+
+def _service_account_problem(raw: str) -> str | None:
+    """Why the service-account key is unusable, naming keys only; ``None`` when usable."""
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return "GMAIL_SERVICE_ACCOUNT_JSON is not valid JSON"
+    if not isinstance(parsed, dict):
+        return "GMAIL_SERVICE_ACCOUNT_JSON must be a JSON object"
+    missing = [
+        name
+        for name in SERVICE_ACCOUNT_KEYS
+        if not isinstance(parsed.get(name), str) or not parsed.get(name)
+    ]
+    if missing:
+        return f"GMAIL_SERVICE_ACCOUNT_JSON lacks the keys: {', '.join(missing)}"
+    return None
+
+
+def _mail_problems(
+    env: Mapping[str, str], app_env: str
+) -> tuple[list[str], bool, str, str, str, str]:
+    """PLAN-011b D3, D4: the mail settings' problems, then the values."""
+    problems: list[str] = []
+    mail_enabled = env.get("MAIL_ENABLED", "") or "false"
+    if mail_enabled not in BOOLEAN_FLAGS:
+        problems.append(f"MAIL_ENABLED is not one of: {', '.join(BOOLEAN_FLAGS)}")
+    enabled = mail_enabled == "true"
+    gmail_sender = env.get("GMAIL_SENDER", "")
+    mail_catch_all = env.get("MAIL_CATCH_ALL", "")
+    key = env.get("GMAIL_SERVICE_ACCOUNT_JSON", "")
+    for name, value in (("GMAIL_SENDER", gmail_sender), ("MAIL_CATCH_ALL", mail_catch_all)):
+        if value and not _ADDRESS.fullmatch(value):
+            problems.append(f"{name} must be one plain e-mail address")
+    if enabled:
+        if not gmail_sender:
+            problems.append("GMAIL_SENDER is required when MAIL_ENABLED is true")
+        if not key:
+            problems.append("GMAIL_SERVICE_ACCOUNT_JSON is required when MAIL_ENABLED is true")
+        if app_env != "production" and not mail_catch_all:
+            problems.append(
+                "MAIL_CATCH_ALL is required when MAIL_ENABLED is true and APP_ENV is not "
+                "'production'"
+            )
+    if key:
+        problem = _service_account_problem(key)
+        if problem is not None:
+            problems.append(problem)
+    company_name = env.get("COMPANY_NAME", "") or DEFAULT_COMPANY_NAME
+    if len(company_name) > COMPANY_NAME_MAX_LENGTH or not _ONE_LINE.fullmatch(company_name):
+        problems.append(
+            f"COMPANY_NAME must be one line of at most {COMPANY_NAME_MAX_LENGTH} characters"
+        )
+    return problems, enabled, gmail_sender, key, mail_catch_all, company_name
 
 
 def validate(env: Mapping[str, str]) -> Config:
@@ -315,6 +395,11 @@ def validate(env: Mapping[str, str]) -> Config:
     elif documents_storage_account_url and not azure_client_id:
         problems.append("AZURE_CLIENT_ID is required when DOCUMENTS_STORAGE_ACCOUNT_URL is set")
 
+    mail_problems, mail_enabled, gmail_sender, gmail_key, mail_catch_all, company_name = (
+        _mail_problems(env, app_env)
+    )
+    problems.extend(mail_problems)
+
     if (
         problems
         or large_debit_warning_amount is None
@@ -353,4 +438,9 @@ def validate(env: Mapping[str, str]) -> Config:
         documents_container=documents_container,
         azure_client_id=azure_client_id,
         report_statement_timeout_ms=report_statement_timeout_ms,
+        mail_enabled=mail_enabled,
+        gmail_sender=gmail_sender,
+        gmail_service_account_json=gmail_key,
+        mail_catch_all=mail_catch_all,
+        company_name=company_name,
     )

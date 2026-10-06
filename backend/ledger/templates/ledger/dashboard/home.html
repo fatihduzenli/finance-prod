@@ -1,5 +1,6 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
+{% load tz %}
 {% block title %}Dashboard{% endblock %}
 {% block head %}<style>
   .figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.75rem;margin:1rem 0;}
@@ -11,6 +12,8 @@
 {% block content %}
   <h1>Dashboard</h1>
   <p class="muted">As of {{ data.today|date:"Y-m-d" }}. Amounts in US dollars.</p>
+
+  {% include "ledger/_attention.html" with banners=False %}
 
   <section aria-labelledby="failed-heading" class="alert-list" id="failed-attempts">
     <h2 id="failed-heading" style="margin-top:0;">Failed payment attempts: {{ data.failed_attempts_count }}</h2>
@@ -54,7 +57,7 @@
 
   <h2>Last reconciliation</h2>
   {% if data.last_reconciliation %}
-    <p id="last-reconciliation"><a href="{% url 'ledger:reconciliation:page' %}">{{ data.last_reconciliation.get_status_display }}, started {{ data.last_reconciliation.started_at|date:"Y-m-d H:i" }} UTC</a></p>
+    <p id="last-reconciliation"><a href="{% url 'ledger:reconciliation:page' %}">{{ data.last_reconciliation.get_status_display }}, started {{ data.last_reconciliation.started_at|utc|date:"Y-m-d H:i" }} UTC</a></p>
   {% else %}
     <p id="last-reconciliation" class="muted">No reconciliation has run yet.</p>
   {% endif %}

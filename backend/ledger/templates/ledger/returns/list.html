@@ -3,12 +3,12 @@
 {% block title %}Returned payments{% endblock %}
 {% block content %}
   <h1>Returned payments</h1>
-  <p class="muted">ACH debits the payment provider reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing here debits again.</p>
+  <p class="muted">ACH debits the payment provider reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing debits again unless staff reschedule it: <strong>Reschedule</strong> takes the date the operator agreed and makes one invoice for the returned amount plus the NSF fee ({{ nsf_first }} on an operator's first return, {{ nsf_later }} afterwards), debited from the linked bank account on that date, or sent by e-mail when the operator has none.</p>
   <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Export CSV</a></p>
   {% responsive_table %}
   <table id="returns">
     <thead>
-      <tr><th>Operator</th><th>Store</th><th>Amount</th><th>Code</th><th>Reason</th><th>Returned at</th>{% if can_resolve %}<th>Resolve</th>{% endif %}</tr>
+      <tr><th>Operator</th><th>Store</th><th>Amount</th><th>Code</th><th>Reason</th><th>Returned at</th>{% if can_resolve %}<th>Resolve or reschedule</th>{% endif %}</tr>
     </thead>
     <tbody>
       {% for item in rows %}
@@ -21,11 +21,21 @@
           <td>{{ item.returned_at|date:"Y-m-d H:i"|default:"—" }}</td>
           {% if can_resolve %}
             <td>
+              <form method="post" action="{% url 'ledger:returns:reschedule' pk=item.payment.pk %}" class="js-single-submit reschedule-form" id="reschedule-{{ item.payment.pk }}">
+                {% csrf_token %}
+                <label for="redebit-date-{{ item.payment.pk }}">Re-debit date (New York) *</label>
+                <input type="date" name="redebit_date" id="redebit-date-{{ item.payment.pk }}" min="{{ today|date:'Y-m-d' }}" required>
+                {% if can_waive %}<label class="inline"><input type="checkbox" name="waive_fee" id="waive-fee-{{ item.payment.pk }}"> Waive the NSF fee (a note is required)</label>{% endif %}
+                <label class="inline"><input type="checkbox" name="confirm" id="confirm-{{ item.payment.pk }}"> I confirm a debit above the large-debit threshold</label>
+                <label for="reschedule-note-{{ item.payment.pk }}">Note</label>
+                <textarea name="note" id="reschedule-note-{{ item.payment.pk }}" rows="2" maxlength="2000"></textarea>
+                <button class="btn" type="submit">Reschedule</button>
+              </form>
               <form method="post" action="{% url 'ledger:returns:resolve' pk=item.payment.pk %}" class="js-single-submit">
                 {% csrf_token %}
                 <label for="note-{{ item.payment.pk }}">Note *</label>
                 <textarea name="note" id="note-{{ item.payment.pk }}" rows="2" maxlength="2000" required></textarea>
-                <button class="btn" type="submit">Resolve</button>
+                <button class="btn" type="submit">Resolve with a note</button>
               </form>
             </td>
           {% endif %}

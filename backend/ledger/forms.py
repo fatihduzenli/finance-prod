@@ -17,9 +17,12 @@ from django.core.validators import RegexValidator
 from django.db.models import Q
 
 from ledger.models import (
+    CALENDAR_TITLE_MAX_LENGTH,
     NAME_MAX_LENGTH,
+    CalendarEntryKind,
     CollectionMethod,
     CollectionStatus,
+    ContactKind,
     DepositResolutionKind,
     DocumentKind,
     FeeType,
@@ -527,6 +530,27 @@ class ResolveReturnForm(forms.Form):
         return note
 
 
+class RescheduleReturnForm(forms.Form):
+    """Reschedule a returned payment (PLAN-011b D5): the agreed re-debit date, the fee
+    waiver (admin; the note is then required) and a note. The service judges the rules."""
+
+    redebit_date = forms.DateField(
+        widget=forms.DateInput(attrs={"type": "date"}),
+        error_messages={"required": "Enter the re-debit date.", "invalid": "Enter a valid date."},
+    )
+    waive_fee = forms.BooleanField(required=False)
+    note = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        required=False,
+        validators=[validate_no_payment_data],
+    )
+    confirm = forms.BooleanField(required=False)
+
+    def clean_note(self) -> str:
+        return visible_text(self.cleaned_data["note"])
+
+
 # --- One-off charges (PLAN-010d D2, D6) ----------------------------------------------------
 
 #: The longest description the form accepts; the service refuses above 120 characters with
@@ -985,3 +1009,119 @@ class DocumentDeleteForm(forms.Form):
         if not note:
             raise forms.ValidationError(self.fields["note"].error_messages["required"])
         return note
+
+
+# --- Contact log and calendar (PLAN-011b D7, D8) -------------------------------------------
+
+#: The longest contact note accepted.
+CONTACT_BODY_MAX_LENGTH = 2000
+
+
+class ContactEntryForm(forms.Form):
+    """Add one contact entry to an operator's log (D7). The form checks shape; the
+    service (:func:`ledger.services.contacts.add_entry`) decides every rule."""
+
+    kind = forms.ChoiceField(
+        choices=ContactKind.choices, error_messages={"required": "Choose the kind of contact."}
+    )
+    happened_on = forms.DateField(
+        label="Date", widget=forms.DateInput(attrs={"type": "date"}), help_text="New York date."
+    )
+    promised_date = forms.DateField(
+        required=False,
+        label="Promised date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="Promise to pay only.",
+    )
+    promised_amount = forms.DecimalField(
+        required=False,
+        label="Promised amount (USD)",
+        min_value=Decimal("0.01"),
+        max_value=Decimal("9999999999.99"),
+        max_digits=12,
+        decimal_places=2,
+        help_text="Promise to pay only.",
+    )
+    closes = forms.ChoiceField(required=False, label="Closes the promise")
+    body = forms.CharField(
+        label="Note",
+        widget=forms.Textarea(attrs={"rows": 3}),
+        max_length=CONTACT_BODY_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": "A note is required: say what was said or agreed."},
+    )
+
+    def __init__(self, *args: Any, promises: list[tuple[str, str]], **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        closes = self.fields["closes"]
+        if isinstance(closes, forms.ChoiceField):
+            closes.choices = [("", "None")] + promises
+
+    def clean_body(self) -> str:
+        body = visible_text(self.cleaned_data["body"])
+        if not body:
+            raise forms.ValidationError(self.fields["body"].error_messages["required"])
+        return body
+
+
+class CalendarEntryForm(forms.Form):
+    """Add or change a calendar note or reminder (D8). Record choices are UUIDs; the
+    view checks they exist."""
+
+    kind = forms.ChoiceField(
+        choices=CalendarEntryKind.choices, error_messages={"required": "Choose note or reminder."}
+    )
+    on = forms.DateField(label="Date", widget=forms.DateInput(attrs={"type": "date"}))
+    title = forms.CharField(
+        max_length=CALENDAR_TITLE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": "A title is required."},
+    )
+    body = forms.CharField(
+        required=False,
+        label="Text",
+        widget=forms.Textarea(attrs={"rows": 3}),
+        max_length=2000,
+        validators=[validate_no_payment_data],
+    )
+    email_morning = forms.BooleanField(
+        required=False,
+        label="E-mail me that morning",
+        help_text="An e-mail to you on the morning of that day (09:00 New York).",
+    )
+    store = forms.ChoiceField(required=False, label="Store")
+    operator = forms.ChoiceField(required=False, label="Operator")
+    lease = forms.ChoiceField(required=False, label="Lease")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        choices: dict[str, list[tuple[str, str]]] = {
+            "store": [
+                (str(pk), label)
+                for pk, label in Store.objects.order_by("external_label", "id").values_list(
+                    "pk", "external_label"
+                )
+            ],
+            "operator": [
+                (str(pk), label)
+                for pk, label in Operator.objects.filter(archived_at__isnull=True)
+                .order_by("display_name", "id")
+                .values_list("pk", "display_name")
+            ],
+            "lease": [
+                (str(pk), f"{label} from {started or 'no start date'}")
+                for pk, label, started in Lease.objects.order_by(
+                    "store__external_label", "started_on", "id"
+                ).values_list("pk", "store__external_label", "started_on")
+            ],
+        }
+        for name, options in choices.items():
+            field = self.fields[name]
+            if isinstance(field, forms.ChoiceField):
+                field.choices = [("", "None")] + options
+
+    def clean_title(self) -> str:
+        title = visible_text(self.cleaned_data["title"])
+        if not title:
+            raise forms.ValidationError(self.fields["title"].error_messages["required"])
+        return title

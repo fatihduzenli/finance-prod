@@ -22,7 +22,12 @@ States, from the re-fetched transaction only:
 
 A transaction for an invoice linked to a one-off charge is a payment of kind ``one_off``
 on that charge (PLAN-010b D6, PLAN-010d D7); it pays, reopens and flags that charge as a
-rent payment does its rent charge.
+rent payment does its rent charge. On a re-debit's invoice (PLAN-011b D5) the payment pays
+the re-debit first and what is left pays its NSF fee
+(:func:`ledger.services.one_off_charges.refresh_companions`), each audited; and the
+re-debit's part is paid on the charge the returned payment was for, which reopens again
+when that payment is returned, refunded or voided
+(:func:`ledger.services.one_off_charges.refresh_sources`), each audited.
 
 ``returned`` and ``voided`` are final. Every write is keyed on provider IDs and every
 recomputation is pure, so a repeated or replayed event changes nothing.
@@ -42,6 +47,7 @@ import payments
 from ledger.models import (
     InsuranceCharge,
     Invoice,
+    OneOffCategory,
     OneOffCharge,
     Payment,
     PaymentKind,
@@ -381,6 +387,7 @@ def _refresh_charge(payment: Payment, *, returned: bool) -> None:
             audit("rent_charge.payment_applied", ENTITY_CHARGE, charge.pk, before, after | context)
     elif payment.one_off_charge_id is not None:
         one_off = OneOffCharge.objects.select_for_update().get(pk=payment.one_off_charge_id)
+        sources = one_off_charges.redebit_sources(one_off)
         before = one_off_charges.charge_state(one_off)
         one_off_charges.recompute(one_off)
         if returned and not one_off.needs_review:
@@ -388,12 +395,23 @@ def _refresh_charge(payment: Payment, *, returned: bool) -> None:
             one_off.save(update_fields=["needs_review", "updated_at"])
         after = one_off_charges.charge_state(one_off)
         if returned:
-            action = "one_off_charge.ach_returned"
+            audit(
+                "one_off_charge.ach_returned",
+                ENTITY_ONE_OFF_CHARGE,
+                one_off.pk,
+                before,
+                after | context,
+            )
         elif after != before:
-            action = "one_off_charge.payment_applied"
-        else:
-            return
-        audit(action, ENTITY_ONE_OFF_CHARGE, one_off.pk, before, after | context)
+            audit(
+                "one_off_charge.payment_applied",
+                ENTITY_ONE_OFF_CHARGE,
+                one_off.pk,
+                before,
+                after | context,
+            )
+        _allocate_to_companions(one_off, context)
+        _apply_to_sources(one_off, sources, context)
     elif payment.insurance_charge_id is not None and returned:
         insurance = InsuranceCharge.objects.select_for_update().get(pk=payment.insurance_charge_id)
         flagged = insurance.needs_review
@@ -406,6 +424,41 @@ def _refresh_charge(payment: Payment, *, returned: bool) -> None:
             insurance.pk,
             {"needs_review": flagged},
             {"needs_review": True, "policy_year": insurance.policy_year} | context,
+        )
+
+
+def _allocate_to_companions(charge: OneOffCharge, context: dict[str, Any]) -> None:
+    """PLAN-011b D5: a payment on a re-debit's invoice pays the re-debit first, then its
+    NSF fee; each companion whose paid amount or status moved gets its own audit row."""
+    if charge.category != OneOffCategory.REDEBIT:
+        return
+    for companion, before, after in one_off_charges.refresh_companions(charge):
+        audit(
+            "one_off_charge.payment_allocated",
+            ENTITY_ONE_OFF_CHARGE,
+            companion.pk,
+            before,
+            after | context | {"allocated_from": str(charge.pk)},
+        )
+
+
+def _apply_to_sources(
+    charge: OneOffCharge,
+    sources: list[tuple[one_off_charges.Source, dict[str, Any]]],
+    context: dict[str, Any],
+) -> None:
+    """PLAN-011b D5: what a re-debit collects is paid on the charge its returned payment
+    was for (rent, insurance or one-off); each source that moved gets its own audit row."""
+    for change in one_off_charges.refresh_sources(sources):
+        extra = {"redebit": str(charge.pk)}
+        if change.allocated_from is not None:
+            extra["allocated_from"] = str(change.allocated_from)
+        audit(
+            change.action,
+            change.entity_type,
+            change.entity_id,
+            change.before,
+            change.after | context | extra,
         )
 
 

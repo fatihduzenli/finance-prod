@@ -970,7 +970,8 @@ def test_the_number_of_queries_does_not_depend_on_the_number_of_rows() -> None:
     busy_more(20)
     many = queries_for(query(JULY, AUGUST))
     # PLAN-010d D7 added one: the settled payments of arrears charges (rent collected).
-    assert empty == few == many == 13
+    # PLAN-011b D5 added one: the settled payments of re-debit charges, split.
+    assert empty == few == many == 14
 
 
 def busy_more(count: int) -> None:
@@ -1007,5 +1008,6 @@ def test_500_stores_by_12_months_in_under_two_seconds() -> None:
         found = pnl.rows(selected)
     elapsed = time.perf_counter() - started
     assert len(found) == 500 * 12
-    assert len(captured) == 13  # PLAN-010d D7: arrears payments count as rent collected
+    # PLAN-010d D7: arrears payments count as rent collected; PLAN-011b D5: re-debits.
+    assert len(captured) == 14
     assert elapsed < 2.0, f"rows() took {elapsed:.2f}s"

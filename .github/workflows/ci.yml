@@ -144,11 +144,11 @@ jobs:
             || echo "update returned an error; verifying the revision instead"
 
       # The web revision applies the migrations when it starts (deploy_migrate), so the
-      # worker and the reconcile job move to the new image only once an active web
-      # revision on this commit is Healthy and Running: new code never runs against the
-      # old schema (staging incident of 2026-10-06). Read-only az query, the live()
-      # of the verification step below; after 10 minutes the job fails here and neither
-      # the worker nor the reconcile job is updated.
+      # worker, the reconcile job and the daily job move to the new image only once an
+      # active web revision on this commit is Healthy and Running: new code never runs
+      # against the old schema (staging incident of 2026-10-06). Read-only az query, the
+      # live() of the verification step below; after 10 minutes the job fails here and
+      # none of the three is updated.
       - name: Wait for the web revision to be live on this commit
         env:
           WEB_APP_NAME: ${{ vars.WEB_APP_NAME }}
@@ -208,16 +208,33 @@ jobs:
             --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG" \
             || echo "update returned an error; verifying the revision instead"
 
+      # The daily collections job (PLAN-011b D8, D9) runs the same image too, rolled after
+      # the reconcile job with the same tolerance; its next firing uses the new image.
+      - name: Roll the daily job onto the new image
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          DAILY_JOB_NAME: ${{ vars.DAILY_JOB_NAME || 'finance-staging-daily' }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          az containerapp job update \
+            --name "$DAILY_JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG" \
+            || echo "update returned an error; verifying the revision instead"
+
       # Read-only az queries. Passes only when, for both apps, an active revision runs
       # the image tagged with this commit and reports Healthy and Running (a running
       # state that starts with Running, so RunningAtMaxScale of the one-replica worker
-      # counts), and the reconcile job's template names the image tagged with this
-      # commit (a job has no revisions); polls for up to 10 minutes, then fails.
+      # counts), and the reconcile and daily jobs' templates name the image tagged with
+      # this commit (a job has no revisions); polls for up to 10 minutes, then fails.
       - name: Verify the web and worker revisions are live on this commit
         env:
           WEB_APP_NAME: ${{ vars.WEB_APP_NAME }}
           WORKER_APP_NAME: ${{ vars.WORKER_APP_NAME || 'finance-staging-worker' }}
           RECONCILE_JOB_NAME: ${{ vars.RECONCILE_JOB_NAME || 'finance-staging-reconcile' }}
+          DAILY_JOB_NAME: ${{ vars.DAILY_JOB_NAME || 'finance-staging-daily' }}
           RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
@@ -231,7 +248,7 @@ jobs:
           }
           job_on_commit() {
             image="$(az containerapp job show \
-              --name "$RECONCILE_JOB_NAME" \
+              --name "$1" \
               --resource-group "$RESOURCE_GROUP" \
               --query "properties.template.containers[0].image" \
               --output tsv 2>/dev/null || true)"
@@ -244,14 +261,15 @@ jobs:
           while :; do
             web="$(live "$WEB_APP_NAME")"
             worker="$(live "$WORKER_APP_NAME")"
-            job="$(job_on_commit)"
-            echo "live revisions on $IMAGE_TAG: web=${web:-0} worker=${worker:-0} reconcile job=${job}"
-            if [ "${web:-0}" -ge 1 ] && [ "${worker:-0}" -ge 1 ] && [ "$job" -eq 1 ]; then
-              echo "web and worker run this commit, Healthy and Running; the reconcile job uses it"
+            job="$(job_on_commit "$RECONCILE_JOB_NAME")"
+            daily="$(job_on_commit "$DAILY_JOB_NAME")"
+            echo "live revisions on $IMAGE_TAG: web=${web:-0} worker=${worker:-0} reconcile job=${job} daily job=${daily}"
+            if [ "${web:-0}" -ge 1 ] && [ "${worker:-0}" -ge 1 ] && [ "$job" -eq 1 ] && [ "$daily" -eq 1 ]; then
+              echo "web and worker run this commit, Healthy and Running; the reconcile and daily jobs use it"
               exit 0
             fi
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "a revision on this commit is not live after 10 minutes, or the reconcile job does not use it" >&2
+              echo "a revision on this commit is not live after 10 minutes, or the reconcile or daily job does not use it" >&2
               exit 1
             fi
             sleep 15

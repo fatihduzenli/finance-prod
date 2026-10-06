@@ -25,7 +25,7 @@ from django.utils.safestring import SafeString
 from django.views.decorators.http import require_safe
 
 from ledger.models import PaymentChannel, PaymentStatus
-from ledger.services import grid, one_off_charges, receivables
+from ledger.services import attention, grid, one_off_charges, receivables
 from ledger.views.operators import csv_response, role_required
 from ledger.views.reports import TOO_SLOW, ReportTooSlow, bounded
 
@@ -33,9 +33,11 @@ from ledger.views.reports import TOO_SLOW, ReportTooSlow, bounded
 @role_required
 @require_safe
 def home(request: HttpRequest) -> HttpResponse:
-    """``ledger:home`` (D1): who owes what, and since when."""
+    """``ledger:home`` (D1): what needs attention (PLAN-011b D6), then who owes what,
+    and since when."""
     today = timezone.localdate()
     data = receivables.dashboard(today)
+    needs = attention.attention(today)
     payments_query = urlencode(
         {
             "date_from": data.month_start.isoformat(),
@@ -48,6 +50,7 @@ def home(request: HttpRequest) -> HttpResponse:
         "ledger/dashboard/home.html",
         {
             "data": data,
+            "attention": needs,
             "payments_query": payments_query,
             "waived_live_heading": one_off_charges.WAIVED_LIVE_HEADING,
             "not_sent": [

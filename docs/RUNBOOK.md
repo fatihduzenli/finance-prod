@@ -394,3 +394,60 @@ whose invoice is live at Stax is refused: cancel first. A charge already waived 
 invoice (there was one from the night of 2026-10-05) shows on the dashboard until an admin
 presses **Delete provider invoice** on its page, which removes the invoice through the worker
 and records it in the audit log.
+
+## 15. Collections e-mails, returns and NSF, attention list, contact log, calendar (PLAN-011b)
+
+**Collections e-mails.** Each morning (09:00 New York) the app looks at overdue rent and one-off
+charges and queues the next step for each: day 3 friendly reminder, day 10 formal notice, day 20
+final notice (steps and templates are edited in the Django admin by an admin; merge fields
+`{operator}`, `{store}`, `{amount}`, `{due_date}`, `{days_late}`, `{statement_link}`, `{company}`).
+The worker sends from the company mailbox through Google. One message per charge per step, one
+step per day, never to an operator marked **Handled personally** (operator page, with a note),
+never without an e-mail address, never for a paid, waived, voided or pending charge. Every message
+appears in the operator's and the charge's **Collection e-mails** log with its status: `sent`,
+`catch_all` (sandbox), `suppressed` (mail off or rule), `failed` (class name). Billing can send a
+step by hand from the charge page. **On staging every e-mail goes to the catch-all address** with
+the real recipient in the subject. Mail is off until the owner stores the Google key and enables
+it (§15.1).
+
+**Returns and NSF.** A returned ACH debit sits in the returns queue and on the dashboard
+("Returned debit not rescheduled: store, amount, returned date") until staff resolve it. After
+calling the operator, choose **Reschedule**, enter the agreed date and a note: the app creates a
+re-debit charge for the original amount and an NSF fee charge (100.00 on the operator's first
+return, 50.00 afterwards; an admin can waive the fee with a note), one Stax invoice or schedule
+with the two lines, and the attention item disappears. The re-debit date shows on the calendar.
+When the re-debit settles, the original month reads paid again. The fee is never created by the
+webhook, so a bank-side error can be resolved with a plain note and no fee.
+
+**Attention list** (dashboard): overdue charges, returned debits not rescheduled, promises to pay
+past their date, insurance due in 30 days or a missing premium, leases ending in 60 days, landlord
+leases ending in 90 days, stores without an open date, operators without an e-mail, stores vacant
+over 30 days, schedules flagged after a rent change, dead-letter webhooks, reconciliation
+mismatches, and today's calendar entries. Each links to its page; the operator page shows that
+operator's items.
+
+**Contact log** (operator page, billing): calls, e-mails, visits and promises to pay (date and
+amount). A promise past its date with money still owed is an attention item until a later entry
+closes it or a payment settles. CSV export.
+
+**Calendar** (`/calendar/`): notes and reminders per store, operator, lease or general, with an
+optional e-mail to you that morning; generated entries for debit days, re-debit dates, insurance
+anniversaries and lease ends. **Google Calendar:** on `/settings/`, create your feed address, copy
+it once, and add it in Google Calendar as "From URL". The address is a secret: anyone holding it
+sees the shared staff calendar; revoke it on the same page if it leaks. No amounts or bank data
+appear in the feed.
+
+### 15.1 Enabling mail (owner and Workspace admin)
+
+Follow plan §9 of `docs/qa/PLAN-011b-collections-nsf-attention-calendar.md`: Cloud project and
+service account, Gmail API, domain-wide delegation with `gmail.send`, the key into Key Vault as
+`gmail-service-account-key`, DKIM published. Then the deployment is run with `mailEnabled=true`,
+`gmailSender=<the mailbox>` and `mailCatchAll=<staff address>` (staging). The first e-mail on
+staging arrives at the catch-all.
+
+### 15.2 Time zone
+
+The app keeps New York days: charge periods, debit days, "today", the nightly job, report months.
+Storage stays UTC. `tz_audit` lists the few rows whose stored date was derived under UTC and would
+differ; `tz_apply --audited N` realigns exactly those rows with an audit entry each, and only on
+the owner's word.

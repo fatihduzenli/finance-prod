@@ -61,6 +61,16 @@ costs (``carries_store_costs`` is false).
 cost row whose ``landlord_lease_end`` has not passed by the month's first day) and no
 lease active on any day. Its row has no operator and is flagged.
 
+**Re-debits and NSF fees** (PLAN-011b D5): an ``nsf_fee`` charge is a fee like any
+other (billed by due date). A ``redebit`` charge is never billed (the charge its returned
+payment was for is billed already); the settled payments on it are collected, by
+``settled_on`` month: the part that pays the re-debit's price (payments in settled
+order, refunds taken back from that part first) counts as **rent collected** when the
+re-collected payment was rent (a rent payment, a payment on an ``arrears`` charge, or on a
+re-debit of either, two levels deep) and as **fees collected** otherwise; the part beyond
+the price pays the NSF fee and counts as fees collected (:func:`_add_redebits`, one
+query).
+
 **Deposits** (refundable fee types) are counted nowhere, except their withheld part as
 above and :func:`deposits_held` (the page footer).
 
@@ -464,7 +474,7 @@ def _key(item: Mapping[str, Any]) -> _Key:
 
 
 def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> None:
-    """Rent and fees billed and collected, withheld deposits and fee costs (7 queries)."""
+    """Rent and fees billed and collected, withheld deposits and fee costs (8 queries)."""
     rent_charges = (
         RentCharge.objects.filter(period_month__gte=start, period_month__lte=end)
         .exclude(status=RentChargeStatus.WAIVED)
@@ -480,6 +490,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         one_off_charge__fee_type__refundable=False
     )
     arrears = Q(one_off_charge__category=OneOffCategory.ARREARS)
+    redebit = Q(one_off_charge__category=OneOffCategory.REDEBIT)
     rent_payments = (
         _payments(PaymentKind.RENT, "rent_charge", start, end),
         _payments(
@@ -501,6 +512,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         end,
         not_deposit,
         ~arrears,
+        ~redebit,
         operator=one_off_operator,
     ):
         net = _money_or_zero(paid["paid"]) - _money_or_zero(paid["refunded"])
@@ -532,11 +544,15 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         if charge["category"] == OneOffCategory.ARREARS:
             row.rent_billed += _money_or_zero(charge["billed"])
             continue
+        if charge["category"] == OneOffCategory.REDEBIT:
+            # Collected only: what it re-collects was billed on its own charge (D5).
+            continue
         row.fees_billed += _money_or_zero(charge["billed"])
         row.fee_costs += _money_or_zero(charge["cost_total"])
         row.fee_costs_unknown |= bool(charge["missing"])
 
     _add_insurance(acc, start, end)
+    _add_redebits(acc, start, end)
 
     withheld = (
         DepositResolution.objects.filter(
@@ -555,6 +571,72 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         amount = _money_or_zero(resolution["total"])
         row.withheld_deposits += amount
         row.fees_collected += amount
+
+
+def _rent_like(kind: object, category: object) -> bool:
+    """A payment of rent: of kind ``rent``, or on an ``arrears`` one-off charge."""
+    return kind == PaymentKind.RENT or (
+        kind == PaymentKind.ONE_OFF and category == OneOffCategory.ARREARS
+    )
+
+
+def _re_collects_rent(row: Mapping[str, Any]) -> bool:
+    """Whether a re-debit charge collects rent again: its returned payment was rent, or
+    was a payment on a re-debit of rent (two levels; deeper counts as fees)."""
+    if _rent_like(row["kind_1"], row["category_1"]):
+        return True
+    return row["category_1"] == OneOffCategory.REDEBIT and _rent_like(
+        row["kind_2"], row["category_2"]
+    )
+
+
+def _add_redebits(acc: dict[_Key, _Acc], start: date, end: date) -> None:
+    """Settled payments on re-debit charges, split between the re-debit's price (rent or
+    fees by what it re-collects) and the NSF fee beyond it (fees); see the module
+    docstring. Every settled payment up to ``end`` is read, in settled order, so that the
+    split of a payment in the range knows what the earlier ones paid (1 query)."""
+    source = "one_off_charge__source_payment"
+    payments = (
+        Payment.objects.filter(
+            kind=PaymentKind.ONE_OFF,
+            status=PaymentStatus.SETTLED,
+            settled_on__lte=end,
+            one_off_charge__category=OneOffCategory.REDEBIT,
+        )
+        .values(
+            "amount",
+            "is_refund",
+            "settled_on",
+            charge=F("one_off_charge"),
+            price=F("one_off_charge__price"),
+            store=F("one_off_charge__lease__store"),
+            operator=Coalesce("one_off_charge__operator", "one_off_charge__lease__operator"),
+            kind_1=F(f"{source}__kind"),
+            category_1=F(f"{source}__one_off_charge__category"),
+            kind_2=F(f"{source}__one_off_charge__source_payment__kind"),
+            category_2=F(f"{source}__one_off_charge__source_payment__one_off_charge__category"),
+        )
+        .order_by("settled_on", "created_at", "id")
+    )
+    paid: dict[uuid.UUID, Decimal] = defaultdict(lambda: ZERO)
+    for row in payments:
+        price = _money_or_zero(row["price"])
+        amount = _money_or_zero(row["amount"])
+        signed = -amount if row["is_refund"] else amount
+        before = paid[row["charge"]]
+        after = before + signed
+        paid[row["charge"]] = after
+        on_price = min(max(after, ZERO), price) - min(max(before, ZERO), price)
+        beyond = signed - on_price
+        settled_on = row["settled_on"]
+        if settled_on is None or settled_on < start:
+            continue
+        target = acc[(row["store"], row["operator"], settled_on.replace(day=1))]
+        if _re_collects_rent(row):
+            target.rent_collected += on_price
+        else:
+            target.fees_collected += on_price
+        target.fees_collected += beyond
 
 
 def _add_insurance(acc: dict[_Key, _Acc], start: date, end: date) -> None:
@@ -688,7 +770,7 @@ def _place_store_costs(
 
 def rows(query: PnlQuery) -> list[PnlRow]:
     """One row per (store, operator, month) of the range, sorted by store, month and
-    operator (see the module docstring for every column). Thirteen queries, whatever the
+    operator (see the module docstring for every column). Fourteen queries, whatever the
     number of rows."""
     start, end = query.from_month, query.end
     acc: dict[_Key, _Acc] = defaultdict(_Acc)

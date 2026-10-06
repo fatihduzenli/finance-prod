@@ -302,9 +302,23 @@ class _Owed:
     owed: Decimal
 
 
+@dataclass
+class _Redebit:
+    """A rescheduled return: the re-debit, its NSF fee, and what was settled on the
+    re-debit (allocated re-debit first, then the fee)."""
+
+    redebit: OneOffCharge
+    fee: OneOffCharge
+    settled: list[Payment]
+
+    def total(self) -> Decimal:
+        return sum((payment.amount for payment in self.settled), ZERO)
+
+
 class _World:
-    """Random charges, payments, refunds, waivers, voids and deposits, and what is owed on
-    each charge, kept here from the operations alone (the oracle)."""
+    """Random charges, payments, refunds, waivers, voids, deposits and rescheduled returns
+    (rent, insurance and one-off), and what is owed on each charge, kept here from the
+    operations alone (the oracle)."""
 
     def __init__(self, seed: int) -> None:
         self.random = random.Random(seed)  # noqa: S311 - test data, not security
@@ -314,6 +328,7 @@ class _World:
         self.insurance: list[tuple[InsuranceCharge, Decimal]] = []
         self.insurance_payments: list[Payment] = []
         self.one_off: list[OneOffCharge] = []
+        self.redebits: list[_Redebit] = []
         self.ran: Counter[str] = Counter()
 
     def amount(self, low: int = 1, high: int = 500_000) -> Decimal:
@@ -453,6 +468,92 @@ class _World:
             one_off_payment(charge, "1.00", TODAY)
         self.owed[charge.pk] = _Owed(charge.due_date, ZERO)
 
+    def reschedule_return(self) -> None:
+        """A returned payment of part or all of a new charge, rescheduled: a re-debit of
+        the returned amount and its NSF fee. The returned part is owed once, on the
+        re-debit; what is left of the charge stays on it."""
+        operator = self.random.choice(self.operators)
+        lease = a_lease(operator=operator)
+        due = self.due()
+        amount = self.amount()
+        returned = self.amount(1, int(amount * 100))
+        kind = self.random.choice(["rent", "insurance", "one_off"])
+        source: dict[str, Any]
+        if kind == "rent":
+            rent = a_rent_charge(lease, due.replace(day=1), due=str(amount))
+            source = {"rent_charge": rent, "kind": PaymentKind.RENT}
+            charge_id = rent.pk
+        elif kind == "insurance":
+            insurance = an_insurance_charge(lease, due.year, due, str(amount))
+            source = {
+                "insurance_charge": insurance,
+                "kind": PaymentKind.INSURANCE,
+                "policy_year": due.year,
+            }
+            charge_id = insurance.pk
+        else:
+            one_off = a_one_off_charge(operator, str(amount), due)
+            source = {"one_off_charge": one_off, "kind": PaymentKind.ONE_OFF}
+            charge_id = one_off.pk
+        payment = Payment.objects.create(
+            method=PaymentMethod.ACH,
+            amount=returned,
+            status=PaymentStatus.RETURNED,
+            returned_at=datetime(2026, 10, 1, 12, 0, tzinfo=UTC),
+            **source,
+        )
+        on = TODAY + timedelta(days=self.random.randint(0, 30))
+        redebit = a_one_off_charge(
+            operator,
+            str(returned),
+            on,
+            lease=lease,
+            category=OneOffCategory.REDEBIT,
+            source_payment=payment,
+        )
+        fee = a_one_off_charge(
+            operator,
+            str(self.amount(1, 10_000)),
+            on,
+            lease=lease,
+            category=OneOffCategory.NSF_FEE,
+            companion_of=redebit,
+        )
+        self.redebits.append(_Redebit(redebit, fee, []))
+        self.owed[charge_id] = _Owed(due, amount - returned)
+        self.owed[redebit.pk] = _Owed(on, returned)
+        self.owed[fee.pk] = _Owed(on, fee.price)
+
+    def _reallocate(self, item: _Redebit) -> None:
+        total = item.total()
+        self.owed[item.redebit.pk].owed = item.redebit.price - min(total, item.redebit.price)
+        over = max(total - item.redebit.price, ZERO)
+        self.owed[item.fee.pk].owed = item.fee.price - min(over, item.fee.price)
+
+    def settle_redebit(self) -> None:
+        open_items = [
+            item for item in self.redebits if item.total() < item.redebit.price + item.fee.price
+        ]
+        if not open_items:
+            return
+        item = self.random.choice(open_items)
+        left = item.redebit.price + item.fee.price - item.total()
+        payment = one_off_payment(item.redebit, str(min(self.amount(), left)), TODAY)
+        transaction_handler._refresh_charge(payment, returned=False)
+        item.settled.append(payment)
+        self._reallocate(item)
+
+    def return_redebit_payment(self) -> None:
+        paid = [item for item in self.redebits if item.settled]
+        if not paid:
+            return
+        item = self.random.choice(paid)
+        payment = item.settled.pop(self.random.randrange(len(item.settled)))
+        payment.status = PaymentStatus.RETURNED
+        payment.save(update_fields=["status"])
+        transaction_handler._refresh_charge(payment, returned=True)
+        self._reallocate(item)
+
     def step(self) -> None:
         operation = self.random.choice(
             [
@@ -467,6 +568,10 @@ class _World:
                 self.add_one_off,
                 self.close_one_off,
                 self.add_deposit,
+                self.reschedule_return,
+                self.settle_redebit,
+                self.settle_redebit,
+                self.return_redebit_payment,
             ]
         )
         operation()
@@ -494,7 +599,7 @@ def test_the_aging_total_equals_the_dashboard_under_random_data(today: date) -> 
         assert report.totals.count == count, round_number
         found = {name: amount for name, amount in report.totals.buckets.items() if amount}
         assert found == {name: amount for name, amount in buckets.items() if amount}, round_number
-    assert len(world.owed) > 60 and len(world.ran) == 10, world.ran  # every operation ran
+    assert len(world.owed) > 60 and len(world.ran) == 13, world.ran  # every operation ran
 
 
 # --- Revenue by month -------------------------------------------------------------------
@@ -951,7 +1056,8 @@ def test_the_report_query_counts_do_not_grow_with_the_data(today: date) -> None:
     small = _counts(operator)
     _more(operator, 15)
     assert _counts(operator) == small
-    assert small == {"aging": 3, "revenue": 13, "by_method": 1, "deposits": 3, "statement": 4}
+    # PLAN-011b D5: one more each for the re-debits (open balances, P&L collected).
+    assert small == {"aging": 4, "revenue": 14, "by_method": 1, "deposits": 3, "statement": 5}
 
 
 def test_a_pending_charge_is_owed_and_current_until_due(today: date) -> None:

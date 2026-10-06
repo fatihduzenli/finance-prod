@@ -26,6 +26,7 @@ two_factor/_base.html.
     <a href="{% url 'ledger:grid:page' %}" id="nav-grid">Grid</a>
     <a href="{% url 'ledger:home' %}" id="nav-home">Dashboard</a>
     <a href="{% url 'ledger:arrears:page' %}" id="nav-arrears">Arrears</a>
+    <a href="{% url 'ledger:calendar:page' %}" id="nav-calendar">Calendar</a>
     <a href="{% url 'ledger:stores:list' %}">Stores</a>
     <a href="{% url 'ledger:operators:list' %}">Operators</a>
     <a href="{% url 'ledger:leases:list' %}">Leases</a>
@@ -38,6 +39,7 @@ two_factor/_base.html.
     <a href="{% url 'ledger:reconciliation:page' %}">Reconciliation</a>
     {% if request.user|is_admin %}<a href="{% url 'ledger:audit:page' %}" id="nav-audit">Audit</a>{% endif %}
     <a href="{% url 'admin:index' %}">Admin</a>
+    <a href="{% url 'finance:settings' %}" id="nav-settings">Settings</a>
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form>
     </div>
   </nav>

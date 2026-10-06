@@ -1360,11 +1360,18 @@ def test_only_a_returned_payment_can_be_resolved(fake: FakeProvider) -> None:
 def test_the_returns_routes_are_classified_and_none_re_debits() -> None:
     routes = iter_routes()
     names = {name for name, _, _ in routes if name and "returns" in name}
-    # PLAN-011 D5: the queue's CSV export reads only.
-    assert names == {"ledger:returns:list", "ledger:returns:resolve", "ledger:returns:export"}
+    # PLAN-011 D5: the queue's CSV export reads only. PLAN-011b D5: Reschedule (billing)
+    # is the one staff action that re-debits, on a date staff enter.
+    assert names == {
+        "ledger:returns:list",
+        "ledger:returns:resolve",
+        "ledger:returns:export",
+        "ledger:returns:reschedule",
+    }
     assert {"ledger:returns:list", "ledger:returns:export"} <= registry.READ_ONLY_ROUTE_NAMES
-    rule = registry.rule_for("ledger:returns:resolve")
-    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    for unsafe in ("ledger:returns:resolve", "ledger:returns:reschedule"):
+        rule = registry.rule_for(unsafe)
+        assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     for name, raw, _ in routes:
         for word in ("debit", "repay", "recharge", "retry-payment"):
             assert word not in f"{name} {raw}".lower(), name

@@ -29,7 +29,9 @@ class and the field names it rejected (never provider text).
   marks the local invoice void. The charge stays ``waived``.
 - :func:`schedule` (``schedule_create``): the one-occurrence schedule of an
   ``autopay_due`` charge on its due date with the operator's linked bank method, its
-  reference ``OOC-<first 8 of the charge id>``; :func:`delete_schedule`
+  reference ``OOC-<first 8 of the charge id>``; a re-debit's schedule (PLAN-011b D5)
+  carries two lines, the re-debit and its NSF fee unless waived (:func:`charge_amounts`),
+  and the invoice it generates links to the re-debit charge; :func:`delete_schedule`
   (``schedule_delete``) deletes it while it has generated no invoice.
 - :func:`pay` (``invoice_pay``): "Charge now" (D4), one attempt. The local rules are
   checked again (:func:`ledger.services.one_off_charges.charge_now_refusal`), the
@@ -309,12 +311,29 @@ def find_provider_invoices(
     ]
 
 
+def charge_amounts(charge: OneOffCharge, total: Decimal | None = None) -> Amounts:
+    """What the charge's invoice or schedule bills, no tax. One line (the description,
+    quantity 1, ``total`` or the price), except for a re-debit with a billed NSF fee
+    (PLAN-011b D5): one line for the re-debit and one per billed companion, and the
+    total is their sum."""
+    companions = one_off_charges.billed_companions(charge)
+    if not companions:
+        amount = charge.price if total is None else total
+        return Amounts(amount, amount, ZERO, (LineItem(charge.description, Decimal(1), amount),))
+    lines = (
+        LineItem(charge.description, Decimal(1), charge.price),
+        *(LineItem(item.description, Decimal(1), item.price) for item in companions),
+    )
+    amount = sum((line.total for line in lines), ZERO)
+    return Amounts(amount, amount, ZERO, lines)
+
+
 def _invoice_input(charge: OneOffCharge, invoice: Invoice, customer: str) -> InvoiceInput:
-    """D3: one line item (the description, quantity 1), no tax, our number as reference."""
-    line = LineItem(charge.description, Decimal(1), invoice.total)
+    """D3: one line item (the description, quantity 1), no tax, our number as reference;
+    a re-debit's invoice carries its NSF fee as a second line (:func:`charge_amounts`)."""
     return InvoiceInput(
         customer_external_id=customer,
-        amounts=Amounts(invoice.total, invoice.subtotal, ZERO, (line,)),
+        amounts=charge_amounts(charge, invoice.total),
         due_on=invoice.due_date,
         invoice_date=invoice.issue_date,
         memo="",
@@ -631,7 +650,7 @@ def _adoptable(
         record
         for record in provider.list_scheduled_invoices(ScheduleQuery(customer_external_id=customer))
         if record.external_id not in linked
-        and record.total == charge.price
+        and record.total == one_off_charges.billed_total(charge)
         and record.rule.startswith(day)
         and "COUNT=1" in record.rule
     ]
@@ -670,11 +689,10 @@ def schedule(charge_id: uuid.UUID, actor: User | None, *, now: datetime | None =
         return False, NO_BANK_METHOD
     provider = payments.get_provider()
     rule = schedule_rule(charge.due_date, moment)
-    line = LineItem(charge.description, Decimal(1), charge.price)
     request = ScheduleInput(
         customer_external_id=customer,
         payment_method_external_id=method,
-        amounts=Amounts(charge.price, charge.price, ZERO, (line,)),
+        amounts=charge_amounts(charge),
         rule=rule,
         email_notification=bool(operator.email),
         reference=schedule_reference(charge),
@@ -957,7 +975,8 @@ def _create_for_schedule(
             return SECOND_INVOICE, None
         issued = invoice_sync.invoice_date(record) or timezone.localdate()
         due = invoice_sync.due_date(record)
-        total = record.total if _usable(record.total) and record.total is not None else charge.price
+        expected = one_off_charges.billed_total(charge)
+        total = record.total if _usable(record.total) and record.total is not None else expected
         invoice = Invoice.objects.create(
             invoice_number=numbering.next_invoice_number(issued.year),
             operator=operator,
@@ -992,7 +1011,7 @@ def _create_for_schedule(
                 "schedule": mask_identifier(invoice_sync.schedule_id(record)),
             },
         )
-        if total != charge.price:
+        if total != expected:
             one_off_charges.flag(
                 charge.pk,
                 "one_off_charge.total_mismatch",

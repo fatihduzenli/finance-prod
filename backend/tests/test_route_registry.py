@@ -77,7 +77,15 @@ def test_read_only_routes_have_no_unsafe_rule() -> None:
 
 def test_public_set_is_exactly_login_healthz_webhook_receiver_and_static() -> None:
     # The webhook receiver is public and takes POST (PLAN-008 D2); it checks its token.
-    assert registry.PUBLIC_ROUTE_NAMES == {"two_factor:login", "healthz", "webhooks:receive"}
+    # The calendar feed is public for GET only; its token is the credential (PLAN-011b D8).
+    # So is the operator's statement behind a signed link (PLAN-011b D4).
+    assert registry.PUBLIC_ROUTE_NAMES == {
+        "two_factor:login",
+        "healthz",
+        "webhooks:receive",
+        "ledger:calendar:feed",
+        "ledger:statement_link",
+    }
     assert registry.PUBLIC_UNSAFE_ROUTE_NAMES == {"two_factor:login", "webhooks:receive"}
     assert registry.PUBLIC_PATH_PREFIXES == (f"/{settings.STATIC_URL.lstrip('/')}",)
 

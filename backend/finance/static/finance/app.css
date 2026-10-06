@@ -43,6 +43,33 @@ img, iframe { max-width: 100%; }
 .table-scroll > table { width: auto; min-width: 100%; border-collapse: separate; border-spacing: 0; }
 .table-scroll > table th:first-child, .table-scroll > table td:first-child { position: sticky; left: 0; background: var(--paper); z-index: 1; }
 
+/* --- Attention list (PLAN-011b D6) ------------------------------------------------------- */
+.attention { border-left: 4px solid #b26a00; padding-left: .75rem; margin: 1rem 0; }
+.attention h2 { margin-top: 0; }
+.attention-list { list-style: none; padding: 0; margin: 0; }
+.attention-item { padding: .3rem .5rem; margin-bottom: .25rem; border-radius: 4px; background: #fff6dd; }
+.attention-item.severity-high { background: #fdecee; }
+.attention-item.severity-low { background: #f2f2f2; }
+.attention-item a { color: inherit; }
+
+/* --- Calendar (PLAN-011b D8) ------------------------------------------------------------- */
+.calendar-kinds { border: 0; padding: 0; margin: .5rem 0; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.calendar-kinds legend { font-weight: 600; padding: 0; }
+label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0; font-weight: 400; }
+.calendar-month { border: 1px solid #ddd; }
+.calendar-head, .calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.calendar-head span { font-weight: 600; padding: .3rem .4rem; border-bottom: 1px solid #ddd; }
+.calendar-day { min-height: 6rem; border-right: 1px solid #eee; border-bottom: 1px solid #eee; padding: .25rem .35rem; font-size: .85rem; overflow-wrap: anywhere; }
+.calendar-day.other-month { background: #fafafa; color: var(--muted); }
+.calendar-day.today { outline: 2px solid var(--ink); outline-offset: -2px; }
+.calendar-date { font-weight: 600; }
+.calendar-day ul { list-style: none; padding: 0; margin: .2rem 0 0; }
+.calendar-item { margin-bottom: .15rem; padding: .1rem .25rem; border-radius: 3px; background: #eef4ff; }
+.calendar-item a { color: inherit; text-decoration: none; }
+.calendar-item.kind-reminder { background: #fff6dd; } .calendar-item.kind-debit { background: #e9f7ec; }
+.calendar-item.kind-insurance { background: #f3e9f7; } .calendar-item.kind-lease_end { background: #fdecee; }
+.feed-new { border: 1px solid #ddd; border-radius: 6px; padding: .75rem; background: #e9f7ec; }
+
 /* --- Tablet and phone: menu toggle, touch targets ---------------------------------------- */
 @media (max-width: 1023.98px) {
   body > nav { padding: .5rem 1rem; }
@@ -81,7 +108,13 @@ img, iframe { max-width: 100%; }
   .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 600; color: #444; overflow-wrap: anywhere; }
   .table-cards > table td:empty { display: none; }
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
-  table.grid th.store-col { min-width: 8rem !important; max-width: 9rem; white-space: normal !important; }
+  /* The phone keeps the sideways scroll and the fixed store column, narrower. */
+  table.grid th.store-col { width: 8rem !important; min-width: 8rem !important; max-width: 9rem !important; white-space: normal !important; }
+  /* The month becomes a list of the days that have items. */
+  .calendar-head { display: none; }
+  .calendar-week { display: block; }
+  .calendar-day { min-height: 0; border-right: 0; }
+  .calendar-day.empty, .calendar-day.other-month { display: none; }
 }
 
 /* --- Print ---------------------------------------------------------------------------------- */

@@ -43,9 +43,20 @@ class RouteRule:
     methods: frozenset[str]
 
 
-#: Reachable without a session. Exactly the login flow, the health probe (§3) and the
-#: webhook receiver, which checks its URL token itself (PLAN-008 D2).
-PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset({"two_factor:login", "healthz", "webhooks:receive"})
+#: Reachable without a session. Exactly the login flow, the health probe (§3), the
+#: webhook receiver, which checks its URL token itself (PLAN-008 D2), the calendar
+#: feed, whose token in the path is the credential and which takes GET and HEAD only
+#: (PLAN-011b D8), and the operator's statement behind a signed, expiring, revocable
+#: link, GET and HEAD only (PLAN-011b D4).
+PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset(
+    {
+        "two_factor:login",
+        "healthz",
+        "webhooks:receive",
+        "ledger:calendar:feed",
+        "ledger:statement_link",
+    }
+)
 
 #: Public routes that also accept an unsafe method: the login form posts to itself, and
 #: the payment provider posts events to the receiver (CSRF-exempt; 404 without the token).
@@ -114,6 +125,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:webhooks:replay": RouteRule(min_role=Role.BILLING, methods=POST),
     # Returns queue (PLAN-008 D6): resolving needs billing; nothing re-debits.
     "ledger:returns:resolve": RouteRule(min_role=Role.BILLING, methods=POST),
+    # PLAN-011b D5: Reschedule a return (billing; the view refuses the fee waiver below
+    # admin with 403).
+    "ledger:returns:reschedule": RouteRule(min_role=Role.BILLING, methods=POST),
     # Refund and void of an ACH payment (PLAN-009 D6, D7): admin. The views refuse the
     # GET of the confirmation pages below admin too.
     "ledger:payments:refund": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -156,6 +170,25 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:documents:upload_store": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:documents:upload_lease": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:documents:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # The contact log (PLAN-011b D7): adding an entry needs billing. The view refuses the
+    # form's GET below billing too.
+    "ledger:operators:contacts_add": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Calendar entries (PLAN-011b D8, D10): billing; the author changes their own entry,
+    # an admin any (checked by the view and the service). The views refuse the forms'
+    # GET below billing too.
+    "ledger:calendar:add": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:calendar:edit": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:calendar:delete": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The collections ladder (PLAN-011b D4, D10): marking an operator as handled
+    # personally and sending a step by hand need billing.
+    "ledger:operators:handled_personally": RouteRule(min_role=Role.BILLING, methods=POST),
+    # PLAN-011b D4: revoke every signed statement link of an operator (billing).
+    "ledger:operators:statement_links_revoke": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:charges:send_step": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:send_step": RouteRule(min_role=Role.BILLING, methods=POST),
+    # One's own calendar feed (PLAN-011b D8, D10): any role, for their own feed only.
+    "finance:feed_create": RouteRule(min_role=Role.VIEWER, methods=POST),
+    "finance:feed_revoke": RouteRule(min_role=Role.VIEWER, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every
@@ -177,6 +210,9 @@ ADMIN_MODEL_PREFIX_RULES: dict[str, RouteRule] = {
     # The fee catalogue and the insurance premiums, edited in the admin (PLAN-010b D12).
     "admin:ledger_feetype_": RouteRule(min_role=Role.ADMIN, methods=POST),
     "admin:ledger_insurancepremium_": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # The collections ladder's steps and e-mail templates (PLAN-011b D4, D10).
+    "admin:ledger_collectionstep_": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "admin:ledger_messagetemplate_": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Routes that take no unsafe method at all. GET is open to any verified user (the view
@@ -270,6 +306,14 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # The web app manifest and the service worker (PLAN-011 D9): any verified role.
         "finance:manifest",
         "finance:service_worker",
+        # The contact log page and its CSV export (PLAN-011b D7): any verified role.
+        "ledger:operators:contacts",
+        "ledger:operators:contacts_export",
+        # The calendar page and an entry's page (PLAN-011b D8): any verified role.
+        "ledger:calendar:page",
+        "ledger:calendar:detail",
+        # One's own settings page (PLAN-011b D8): any verified role.
+        "finance:settings",
     }
 )
 

@@ -12,6 +12,7 @@ environment, and nothing here logs, prints or ``repr``-s a value (root ``CLAUDE.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Iterable
@@ -56,6 +57,7 @@ def secret_values(
     django_secret_key: str,
     database_url: str,
     redis_url: str,
+    others: Iterable[str] = (),
 ) -> frozenset[str]:
     """Every string the formatter must redact, including URL-quoted forms.
 
@@ -63,7 +65,7 @@ def secret_values(
     is written in the URL (percent-encoded) and decoded, because a driver error may
     show either.
     """
-    bases = [stax_api_key, stax_webhook_url_token, django_secret_key]
+    bases = [stax_api_key, stax_webhook_url_token, django_secret_key, *others]
     for url in (database_url, redis_url):
         password = _url_password(url)
         if password:
@@ -75,6 +77,30 @@ def secret_values(
             continue
         values.update((base, quote(base, safe=""), quote_plus(base, safe="")))
     return frozenset(values)
+
+
+def service_account_secrets(raw: str) -> tuple[str, ...]:
+    """The parts of a service-account key (PLAN-011b D3) a log line must never show: the
+    whole JSON text, the private key as stored and with its line breaks escaped as JSON
+    writes them, each line of the key's body, and the key's ID. Empty when ``raw`` is
+    empty or not a JSON object."""
+    if not raw:
+        return ()
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return (raw,)
+    if not isinstance(parsed, dict):
+        return (raw,)
+    values = [raw]
+    private_key = parsed.get("private_key")
+    if isinstance(private_key, str) and private_key:
+        values += [private_key, private_key.replace("\n", "\\n")]
+        values += [line.strip() for line in private_key.splitlines() if "-----" not in line]
+    key_id = parsed.get("private_key_id")
+    if isinstance(key_id, str):
+        values.append(key_id)
+    return tuple(value for value in values if len(value) >= MIN_SECRET_LENGTH)
 
 
 def _url_password(url: str) -> str:

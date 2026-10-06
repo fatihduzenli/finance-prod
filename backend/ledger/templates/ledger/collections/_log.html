@@ -1,0 +1,19 @@
+{% load responsive %}{% responsive_table %}
+<table class="message-log" id="message-log">
+  <thead><tr><th>When</th><th>Step</th><th>Status</th><th>To</th>{% if show_charge %}<th>Charge</th>{% endif %}<th>Sent by</th></tr></thead>
+  <tbody>
+    {% for row in log %}
+      <tr>
+        <td>{{ row.when|date:"Y-m-d H:i" }}</td>
+        <td>Day {{ row.step }} <span class="muted">({{ row.template }})</span></td>
+        <td>{{ row.status_label }}{% if row.error %} <span class="muted">({{ row.error }})</span>{% endif %}</td>
+        <td>{{ row.to }}</td>
+        {% if show_charge %}<td>{% if row.charge_type == "rent_charge" %}<a href="{% url 'ledger:charges:detail' pk=row.charge_id %}">Rent charge</a>{% else %}<a href="{% url 'ledger:one_off_charges:detail' pk=row.charge_id %}">One-off charge</a>{% endif %}</td>{% endif %}
+        <td>{% if row.manual %}<span class="badge">Manual</span> {% endif %}{{ row.sent_by|default:"Ladder" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="{% if show_charge %}6{% else %}5{% endif %}" class="muted">No collection e-mails.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}

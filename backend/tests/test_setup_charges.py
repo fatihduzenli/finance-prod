@@ -1046,12 +1046,15 @@ WRITE_ROUTES = {
     "ledger:one_off_charges:charge_now": Role.ADMIN,
     # PLAN-011 D0, D10: deleting a waived charge's live provider invoice, admin.
     "ledger:one_off_charges:delete_invoice": Role.ADMIN,
+    # PLAN-011b D4: sending a step of the collections ladder by hand, billing.
+    "ledger:one_off_charges:send_step": Role.BILLING,
 }
 
 POST_ONLY_ROUTES = {
     "ledger:one_off_charges:retry_mark",
     "ledger:one_off_charges:retry",
     "ledger:one_off_charges:delete_invoice",
+    "ledger:one_off_charges:send_step",
 }
 
 
@@ -1071,6 +1074,7 @@ def routes(charge: OneOffCharge) -> dict[str, str]:
         "ledger:one_off_charges:retry": f"{base}retry/",
         "ledger:one_off_charges:charge_now": f"{base}charge-now/",
         "ledger:one_off_charges:delete_invoice": f"{base}delete-invoice/",
+        "ledger:one_off_charges:send_step": f"{base}send-step/",
     }
 
 

@@ -54,6 +54,10 @@ IDENTIFIER_COLUMNS = {
     ("import_audit", "target_id"),
     # A file's SHA-256 as 64 hex characters (PLAN-010c D4); a CHECK holds it to that shape.
     ("documents", "sha256"),
+    # The sent e-mail's body digest (64 hex) and Gmail's message id (PLAN-011b D4); both
+    # held to their shape by a CHECK.
+    ("outbound_messages", "body_sha256"),
+    ("outbound_messages", "mail_message_id"),
 }
 
 

@@ -81,9 +81,11 @@ from ledger.models import (
     AuditLog,
     CollectionSchedule,
     CollectionStatus,
+    InsuranceCharge,
     Invoice,
     Lease,
     LeaseRentHistory,
+    OneOffCategory,
     OneOffCharge,
     Payment,
     PaymentChannel,
@@ -1021,7 +1023,7 @@ def record_manual_payment(
             return PaymentOutcome(True, PAY_ALREADY, replayed=True)
         if charge.status == RentChargeStatus.WAIVED:
             return PaymentOutcome(False, PAY_WAIVED)
-        balance = charge.amount_due - _settled(charge)
+        balance = charge.amount_due - _paid(charge)
         if balance <= 0:
             return PaymentOutcome(False, PAY_NOTHING_DUE)
         if amount > balance:
@@ -1046,7 +1048,7 @@ def record_manual_payment(
             # The card-number guard: the transaction is rolled back with nothing saved.
             transaction.set_rollback(True)
             return PaymentOutcome(False, PAY_NOTE_PAYMENT_DATA, "note")
-        charge.amount_paid = _settled(charge)
+        charge.amount_paid = _paid(charge)
         charge.status = (
             RentChargeStatus.PAID
             if charge.amount_paid >= charge.amount_due
@@ -1385,11 +1387,12 @@ def recompute_charge(charge: RentCharge) -> None:
     Paid in full: ``paid``; partly: ``partial``; nothing settled but a payment pending:
     ``pending``; nothing settled after a payment was returned or reopened: ``unpaid``;
     otherwise the status stays (``due``). A waived charge is left as it is. The caller
-    holds the row lock and writes the audit row.
+    holds the row lock and writes the audit row. What the re-debits of the charge's
+    returned payments collected again counts as paid (:func:`redebit_collected`).
     """
     if charge.status == RentChargeStatus.WAIVED:
         return
-    paid = _settled(charge)
+    paid = _paid(charge)
     payments = Payment.objects.filter(rent_charge=charge, is_refund=False)
     if paid >= charge.amount_due and paid > 0:
         status = RentChargeStatus.PAID
@@ -1426,6 +1429,27 @@ def _settled(charge: RentCharge) -> Decimal:
     paid = rows.filter(is_refund=False).aggregate(total=Sum("amount"))["total"] or ZERO
     refunded = rows.filter(is_refund=True).aggregate(total=Sum("amount"))["total"] or ZERO
     return (Decimal(paid) - Decimal(refunded)).quantize(CENT)
+
+
+def _paid(charge: RentCharge) -> Decimal:
+    """What the charge has been paid: its settled payments and what its re-debits
+    collected again."""
+    return _settled(charge) + redebit_collected(rent_charge=charge)
+
+
+def redebit_collected(**source: RentCharge | InsuranceCharge | OneOffCharge) -> Decimal:
+    """What the re-debit charges of a charge's returned payments collected again for it
+    (PLAN-011b D5): each re-debit's paid amount up to its price, so its NSF fee never
+    counts. ``source`` names the charge: ``rent_charge=``, ``insurance_charge=`` or
+    ``one_off_charge=``. A re-debit's paid amount already follows its settled payments,
+    returns, refunds and voids (and the re-debits of its own returned payments)."""
+    [(field, charge)] = source.items()
+    rows = OneOffCharge.objects.filter(
+        category=OneOffCategory.REDEBIT, **{f"source_payment__{field}": charge}
+    ).values_list("amount_paid", "price")
+    return sum(
+        (min(max(Decimal(paid), ZERO), Decimal(price)) for paid, price in rows), ZERO
+    ).quantize(CENT)
 
 
 # --- Helpers --------------------------------------------------------------------------

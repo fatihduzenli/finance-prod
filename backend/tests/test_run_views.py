@@ -54,6 +54,8 @@ POST_ROUTES = (
     "ledger:charges:record_payment",
     "ledger:charges:retry_mark",
     "ledger:charges:link_invoice",
+    # PLAN-011b D4: sending a step of the collections ladder by hand.
+    "ledger:charges:send_step",
 )
 READ_ROUTES = (
     "ledger:run:today",

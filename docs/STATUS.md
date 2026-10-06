@@ -792,3 +792,22 @@ the login page myself." The condition for starting Prompt 4 is met.
 - **Owner decision (item 7 of 11b):** the project time zone becomes America/New_York (storage
   stays UTC); nothing migrates silently: the rows whose date would change are listed first. Must
   land before Prompt 13.
+
+## Update, 2026-10-06, PLAN-011b (collections, NSF, attention, calendar, New York time) — QA PASS, not pushed
+
+- Built in three batches plus one rework: New York time with `tz_audit`/`tz_apply`; the grid at
+  12 months per laptop screen with a visible scrollbar; attention list; contact log; calendar
+  with a revocable ICS feed; the Gmail sender by delegated service account with a mandatory
+  catch-all outside production; the collections ladder (3/10/20) run by a new daily job; the
+  returns queue's Reschedule with the NSF fee (100/50, admin-editable, waivable) as a two-line
+  Stax invoice, owed once and paying the original month when it settles; a signed, revocable
+  statement link for operators. QA `docs/qa/QA-011b-collections-nsf-attention-calendar.md`:
+  PASS, 4,740 tests on PostgreSQL. ADR-0010; RUNBOOK §15; plan §9 holds the owner's Workspace
+  steps and the DNS findings (SPF covers Google; DKIM not published; recommended).
+- Rollout: "push", then "deploy" with `mailEnabled=false` (daily job created, env added, key
+  not required yet). Then Fable runs `tz_audit` on staging (read-only) and shows the list;
+  `tz_apply` only on the owner's word. Mail is enabled in a later deployment once the owner has
+  done plan §9 and stored the key.
+- An untracked folder `static:brand/` (Monvera logos and icons, added 2026-10-06 17:35 local)
+  appeared in the working tree; it is not part of this plan and was **left out of the commit**
+  pending the owner's instruction.

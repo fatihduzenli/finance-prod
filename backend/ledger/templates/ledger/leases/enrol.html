@@ -1,5 +1,6 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
+{% load tz %}
 {% block title %}Autopay for {{ lease.store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a></p>
@@ -20,7 +21,7 @@
             <td>{{ item.debit.seq }}</td>
             <td>{{ item.debit.debit_day }}</td>
             <td>${{ item.debit.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}</td>
-            <td>{{ item.starts|date:"Y-m-d H:i" }} UTC{% if item.changes_message %}<br><strong class="schedule-review">{{ item.changes_message }}</strong>{% endif %}</td>
+            <td>{{ item.starts|utc|date:"Y-m-d H:i" }} UTC{% if item.changes_message %}<br><strong class="schedule-review">{{ item.changes_message }}</strong>{% endif %}</td>
           </tr>
         {% empty %}
           <tr><td colspan="4" class="muted">No rent is in effect on the first debit date.</td></tr>
@@ -39,7 +40,7 @@
       <p id="methods-error"><strong>{{ choices.error }}</strong>{% if choices.fields %} Fields the provider rejected: {{ choices.fields|join:", " }}.{% endif %}</p>
     {% else %}
       <div class="actions">
-        {% if choices.fetched_at %}<span id="methods-as-of" class="muted">Methods as of {{ choices.fetched_at|date:"Y-m-d H:i" }} UTC</span>{% else %}<span id="methods-not-read"><strong>{{ methods_not_read }}</strong></span>{% endif %}
+        {% if choices.fetched_at %}<span id="methods-as-of" class="muted">Methods as of {{ choices.fetched_at|utc|date:"Y-m-d H:i" }} UTC</span>{% else %}<span id="methods-not-read"><strong>{{ methods_not_read }}</strong></span>{% endif %}
         <form method="post" class="js-single-submit">
           {% csrf_token %}<button class="btn" type="submit" name="refresh_methods" value="1" id="refresh-methods"{% if job_refresh %} disabled{% endif %}>Refresh methods</button>
         </form>

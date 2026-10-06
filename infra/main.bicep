@@ -222,6 +222,28 @@ param workerMemory string = '1Gi'
 @description('The nightly reconciliation: a scheduled Container Apps job on the web image, cron 06:00 and 07:00 UTC, running at 02:00 New York (PLAN-010 D5). Set as the GitHub repository variable RECONCILE_JOB_NAME.')
 param reconcileJobName string = '${resourceNamePrefix}-reconcile'
 
+// ---------------------------------------------------------------------------
+// Daily collections job and outbound mail (PLAN-011b D3, D8, D9)
+// ---------------------------------------------------------------------------
+
+@description('The daily collections tick: a scheduled Container Apps job on the web image, cron 13:00 UTC, which queues the collection and morning e-mails for the worker (PLAN-011b D8). Set as the GitHub repository variable DAILY_JOB_NAME.')
+param dailyJobName string = '${resourceNamePrefix}-daily'
+
+@description('MAIL_ENABLED: true sends e-mail through the Gmail API. While false (the default) the service-account key is not referenced at all, so this deployment works before the key is in the vault. Turn it on only once the vault holds the key named below.')
+param mailEnabled bool = false
+
+@description('GMAIL_SENDER: the company mailbox the e-mails are sent as. An address, not a secret.')
+param gmailSender string = ''
+
+@description('MAIL_CATCH_ALL: the staff address that receives every e-mail; required outside production while mail is on. An address, not a secret: pass it on the command line at deploy time; it is not committed.')
+param mailCatchAll string = ''
+
+@description('COMPANY_NAME: the {company} merge field of the e-mails.')
+param companyName string = 'Global Retail Groups'
+
+@description('Vault secret name of the Gmail service-account key (the JSON key file, stored by the owner). Only the name lives here.')
+param gmailServiceAccountSecretName string = 'gmail-service-account-key'
+
 @description('Vault secret name for the Stax API key of this environment.')
 param staxApiKeySecretName string
 
@@ -434,6 +456,11 @@ module web 'modules/containerAppWeb.bicep' = {
     databaseUrlSecretName: databaseUrlSecretName
     djangoSecretKeySecretName: djangoSecretKeySecretName
     sentryDsnSecretName: sentryDsnSecretName
+    mailEnabled: mailEnabled
+    gmailSender: gmailSender
+    mailCatchAll: mailCatchAll
+    companyName: companyName
+    gmailServiceAccountSecretName: gmailServiceAccountSecretName
     // Reading the storage module's outputs makes the web app depend on the whole
     // module, so the role assignment exists before the revision that uses it.
     documentsStorageAccountUrl: storage.outputs.blobEndpoint
@@ -496,6 +523,11 @@ module worker 'modules/containerAppWorker.bicep' = {
     databaseUrlSecretName: databaseUrlSecretName
     djangoSecretKeySecretName: djangoSecretKeySecretName
     sentryDsnSecretName: sentryDsnSecretName
+    mailEnabled: mailEnabled
+    gmailSender: gmailSender
+    mailCatchAll: mailCatchAll
+    companyName: companyName
+    gmailServiceAccountSecretName: gmailServiceAccountSecretName
     cpuCores: workerCpuCores
     memory: workerMemory
     tags: tags
@@ -543,6 +575,45 @@ module reconcileJob 'modules/containerAppJobReconcile.bicep' = {
   ]
 }
 
+// The daily collections tick (PLAN-011b D8, D9): the reconcile job's environment,
+// identity, image and vault references, plus the mail settings (and the Gmail key only
+// while mail is on), STAX_CALLER=none: it only queues e-mails; the worker sends them.
+module dailyJob 'modules/containerAppJobDaily.bicep' = {
+  name: 'container-app-job-daily'
+  params: {
+    location: location
+    jobName: dailyJobName
+    environmentId: containerAppsEnvironment.outputs.environmentId
+    image: webImage
+    identityResourceId: identity.outputs.identityId
+    registryLoginServer: registry.outputs.loginServer
+    keyVaultUri: keyVaultUri
+    appEnv: appEnv
+    staxEnv: staxEnv
+    staxApiBaseUrl: staxApiBaseUrl
+    staxExpectedMerchantId: staxExpectedMerchantId
+    staxMaxTxnAmount: staxMaxTxnAmount
+    appBaseUrl: effectiveAppBaseUrl
+    staxApiKeySecretName: staxApiKeySecretName
+    staxWebhookUrlTokenSecretName: staxWebhookUrlTokenSecretName
+    databaseUrlSecretName: databaseUrlSecretName
+    djangoSecretKeySecretName: djangoSecretKeySecretName
+    sentryDsnSecretName: sentryDsnSecretName
+    mailEnabled: mailEnabled
+    gmailSender: gmailSender
+    mailCatchAll: mailCatchAll
+    companyName: companyName
+    gmailServiceAccountSecretName: gmailServiceAccountSecretName
+    tags: tags
+  }
+  dependsOn: [
+    keyVaultAccess
+    postgresSecrets
+    // The web app's start applies the migrations the job needs.
+    web
+  ]
+}
+
 // ---------------------------------------------------------------------------
 // Outputs. Names, IDs and public addresses only; never a secret value.
 // ---------------------------------------------------------------------------
@@ -563,6 +634,9 @@ output workerAppName string = worker.outputs.appName
 
 @description('Set as the GitHub repository variable RECONCILE_JOB_NAME.')
 output reconcileJobName string = reconcileJob.outputs.jobName
+
+@description('Set as the GitHub repository variable DAILY_JOB_NAME.')
+output dailyJobName string = dailyJob.outputs.jobName
 
 @description('Ingress host name of the web app.')
 output webAppFqdn string = web.outputs.fqdn

@@ -1,0 +1,281 @@
+"""Adversarial cases for PLAN-011b (mail, ladder, NSF, calendar feed, time zone, statement
+links), by the QA owner (plan §7). Opus's files prove each feature; these cases try to make
+the system mail a real address, leak the key, charge a fee by itself, or hand a link to the
+wrong reader."""
+
+from __future__ import annotations
+
+import io
+import json
+import logging
+from datetime import date, timedelta
+from decimal import Decimal
+from typing import Any
+
+import pytest
+from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.test import Client, override_settings
+from django.utils import timezone
+
+from accounts.roles import Role
+from ledger import merge
+from ledger.models import AuditLog, CalendarEntry, OneOffCharge, OutboundMessage
+from ledger.services import statement_links
+from tests import test_collections as ladder
+from tests.test_calendar import feed_path, make_feed
+from tests.test_collections import (
+    CATCH_ALL,
+    CEO,
+    operator,
+    rent_charge,
+    step,
+    tick,
+)
+from tests.test_mail import PRIVATE_KEY_MARKER, marker_info
+from tests.test_operator_views import client_for
+
+pytestmark = pytest.mark.django_db
+
+# The ladder file's clock fixture, re-exported under its own name so pytest finds it here.
+clock = ladder.clock
+
+D = Decimal
+CARD = "4111 1111 1111 1111"
+
+
+# --- the key never leaves the mail package ----------------------------------------------
+
+
+def test_the_service_account_key_is_in_no_log_row_page_or_error(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, settings: Any
+) -> None:
+    """A marker inside the key must be absent from everything observable after a send that
+    fails at the token exchange (the worst case: the exception path)."""
+    import httpx
+
+    from mail import gmail
+
+    info = marker_info()
+    settings.MAIL_ENABLED = True
+    settings.GMAIL_SENDER = "billing@example.com"
+    settings.GMAIL_SERVICE_ACCOUNT_JSON = json.dumps(info)
+    settings.MAIL_CATCH_ALL = CATCH_ALL
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "boom " + PRIVATE_KEY_MARKER})
+
+    monkeypatch.setattr(gmail, "_transport", lambda: httpx.MockTransport(refuse), raising=False)
+    monkeypatch.setattr(gmail, "RETRY_DELAY_SECONDS", 0, raising=False)
+    caplog.set_level(logging.DEBUG)
+    charge = rent_charge(owner=operator(email=CEO))
+    step(3)
+    with override_settings(STAX_CALLER="worker"):
+        try:
+            tick()
+            from tests.job_helpers import run_queued_jobs
+
+            run_queued_jobs()
+        except Exception as error:  # the fence is about what leaks, not whether it fails
+            assert PRIVATE_KEY_MARKER not in str(error)
+    dump = caplog.text
+    for row in AuditLog.objects.all():
+        dump += str(row.before) + str(row.after)
+    for message in OutboundMessage.objects.all():
+        dump += (message.error or "") + message.subject + str(message.status)
+    admin, _ = client_for(Role.ADMIN)
+    dump += admin.get(f"/operators/{charge.lease.operator_id}/").content.decode()
+    dump += admin.get("/audit/").content.decode()
+    assert PRIVATE_KEY_MARKER not in dump
+    assert info["private_key"] not in dump
+
+
+# --- the ladder can never reach a real address outside production -----------------------
+
+
+def test_outside_production_every_envelope_goes_to_the_catch_all(clock: Any) -> None:
+    from mail.memory import MemoryMailSender
+
+    memory = MemoryMailSender()
+    with (
+        override_settings(
+            APP_ENV="staging",
+            MAIL_ENABLED=True,
+            MAIL_CATCH_ALL=CATCH_ALL,
+            GMAIL_SENDER="billing@example.com",
+            STAX_CALLER="worker",
+        ),
+        pytest.MonkeyPatch.context() as mp,
+    ):
+        import mail
+
+        # Only the base sender is replaced: get_sender() itself must wrap it in the
+        # catch-all because MAIL_CATCH_ALL is set.
+        mp.setattr(mail, "_base_sender", lambda: memory)
+        for address in (CEO, "someone@realcompany.example", "x+tag@example.org"):
+            rent_charge(due_on=date(2026, 9, 1), owner=operator(email=address))
+        step(3)
+        tick()
+        from tests.job_helpers import run_queued_jobs
+
+        run_queued_jobs()
+    assert memory.sent, "nothing was sent"
+    for message in memory.sent:
+        assert message.to == CATCH_ALL
+        assert "[to: " in message.subject
+    assert all(m.status in ("catch_all", "sent") for m in OutboundMessage.objects.all())
+
+
+def test_no_catch_all_outside_production_refuses_at_boot_and_at_send() -> None:
+    from finance.env_guard import EnvGuardError, validate
+
+    env = {
+        "APP_ENV": "staging",
+        "STAX_ENV": "sandbox",
+        "STAX_API_BASE_URL": "https://apiprod.fattlabs.com",
+        "APP_BASE_URL": "https://staging.example.com",
+        "DJANGO_SECRET_KEY": "placeholder-not-secret",
+        "STAX_API_KEY": "FAKE-CI-KEY-XYZ123",
+        "DATABASE_URL": "postgresql://postgres@localhost/x",
+        "MAIL_ENABLED": "true",
+        "GMAIL_SENDER": "billing@example.com",
+        "GMAIL_SERVICE_ACCOUNT_JSON": json.dumps(marker_info()),
+    }
+    with pytest.raises(EnvGuardError) as raised:
+        validate(env)
+    assert "MAIL_CATCH_ALL" in str(raised.value)
+    assert PRIVATE_KEY_MARKER not in str(raised.value)
+
+
+# --- templates cannot reach into objects ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "{operator.__class__}",
+        "{operator.__dict__}",
+        "{operator[0]}",
+        "{amount!r}",
+        "{amount:>{operator}}",
+        "{0}",
+        "{}",
+        "{settings}",
+        "{company.__init__.__globals__}",
+    ],
+)
+def test_a_template_cannot_reach_attributes_indexes_or_unknown_names(body: str) -> None:
+    assert merge.problems(body), body
+    values = {name: "x" for name in merge.MERGE_FIELDS}
+    with pytest.raises((merge.TemplateRefused, KeyError, ValueError, AttributeError, IndexError)):
+        merge.render(body, values)
+
+
+# --- NSF fee only by hand ---------------------------------------------------------------
+
+
+@pytest.fixture
+def fake(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from payments.fake import FakeProvider
+
+    provider = FakeProvider()
+    monkeypatch.setattr("payments.get_provider", lambda: provider)
+    return provider
+
+
+def test_reschedule_is_closed_to_viewers_and_the_waiver_to_billing(fake: Any) -> None:
+    from tests.test_nsf import a_return
+
+    payment = a_return(fake)
+    viewer, _ = client_for(Role.VIEWER)
+    assert (
+        viewer.post(
+            f"/returns/{payment.pk}/reschedule/",
+            {"redebit_date": (timezone.localdate() + timedelta(days=3)).isoformat(), "note": "n"},
+        ).status_code
+        == 403
+    )
+    billing, _ = client_for(Role.BILLING)
+    response = billing.post(
+        f"/returns/{payment.pk}/reschedule/",
+        {
+            "redebit_date": (timezone.localdate() + timedelta(days=3)).isoformat(),
+            "note": "n",
+            "waive_fee": "on",
+            "waive_note": "goodwill",
+        },
+    )
+    assert response.status_code in (302, 403)
+    fee = OneOffCharge.objects.filter(category="nsf_fee").first()
+    if fee is not None:
+        assert fee.status != "waived", "billing must not waive the NSF fee"
+
+
+# --- the calendar feed token ------------------------------------------------------------
+
+
+def test_feed_tokens_are_not_guessable_and_a_revoked_one_is_dead(settings: Any) -> None:
+    _, user = client_for(Role.BILLING)
+    token = make_feed(user)
+    assert len(token) >= 43  # 32 random bytes, urlsafe
+    anonymous = Client()
+    assert anonymous.get(feed_path(token)).status_code == 200
+    near_misses = [token[:-1] + ("A" if token[-1] != "A" else "B"), token.upper(), token[:-2]]
+    for wrong in near_misses:
+        assert anonymous.get(feed_path(wrong)).status_code == 404
+    from ledger.models import CalendarFeed
+
+    CalendarFeed.objects.filter(user=user).update(revoked_at=timezone.now())
+    assert anonymous.get(feed_path(token)).status_code == 404
+    assert token not in "".join(str(r.after) + str(r.before) for r in AuditLog.objects.all())
+
+
+def test_the_feed_never_carries_a_card_number_or_a_private_marker(settings: Any) -> None:
+    _, user = client_for(Role.BILLING)
+    token = make_feed(user)
+    from django.core.exceptions import ValidationError
+
+    for title in (f"Pay {CARD}", "Routing 123456780 Account 987654321012"):
+        with pytest.raises(ValidationError):
+            CalendarEntry.objects.create(
+                kind="note", on=timezone.localdate(), title=title, body="", author=user
+            )
+    CalendarEntry.objects.create(
+        kind="note", on=timezone.localdate(), title="Call Sam", body="about rent", author=user
+    )
+    body = Client().get(feed_path(token)).content.decode()
+    assert "Call Sam" in body and "4111" not in body
+
+
+# --- statement links --------------------------------------------------------------------
+
+
+def test_a_statement_link_cannot_be_forged_bent_or_reused_after_revocation() -> None:
+    from tests.test_lease_services import make_operator
+
+    first = make_operator(email="a-link@example.com", customer=None)
+    second = make_operator(email="b-link@example.com", customer=None)
+    token = statement_links.make_token(first)
+    anonymous = Client()
+    assert anonymous.get(f"/statement/{token}/").status_code == 200
+    forged = token.replace(str(first.pk)[:8], str(second.pk)[:8])
+    assert anonymous.get(f"/statement/{forged}/").status_code == 404
+    assert anonymous.get(f"/statement/{token[:-3]}/").status_code == 404
+    assert anonymous.get(f"/statement/{token}x/").status_code == 404
+    page = anonymous.get(f"/statement/{token}/").content.decode()
+    assert "b-link@example.com" not in page
+    assert "/operators/" not in page and "<script" not in page.lower()
+    billing, _ = client_for(Role.BILLING)
+    billing.post(f"/operators/{first.pk}/statement-links/revoke/", {})
+    assert anonymous.get(f"/statement/{token}/").status_code == 404
+
+
+# --- tz_apply refuses without the matching audit ----------------------------------------
+
+
+def test_tz_apply_refuses_a_wrong_count_and_writes_nothing() -> None:
+    out = io.StringIO()
+    before = AuditLog.objects.count()
+    with pytest.raises(CommandError):
+        call_command("tz_apply", "--audited", "999999", stdout=out)
+    assert AuditLog.objects.count() == before

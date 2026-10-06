@@ -1,0 +1,19 @@
+{% extends "finance/base.html" %}
+{% block title %}Contact log: {{ operator.display_name }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>
+  <h1>Contact log: {{ operator.display_name }}</h1>
+  <p class="actions">
+    {% if can_add %}<a class="btn" id="add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Add contact</a>{% endif %}
+    <a class="btn" id="export-contacts" href="{% url 'ledger:operators:contacts_export' pk=operator.pk %}">Export CSV</a>
+  </p>
+  <p class="muted">Newest first. Dates are New York days.</p>
+  {% include "ledger/operators/_contacts_table.html" with entries=page.object_list %}
+  {% if page.paginator.num_pages > 1 %}
+    <p class="actions pagination">
+      {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+    </p>
+  {% endif %}
+{% endblock %}

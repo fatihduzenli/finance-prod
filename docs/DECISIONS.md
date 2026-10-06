@@ -580,3 +580,53 @@ collectable. Decision: Waive is refused while the provider invoice is live ("Can
 Cancel deletes the invoice and closes the charge; a charge already waived with a live invoice
 gets an admin action "Delete provider invoice" (the Cancel path, charge stays waived) and is
 listed on the dashboard until cleared. Both actions are audited and explained on the page.
+
+## ADR-0010 — Mail by a delegated service account; NSF only by staff; New York time
+
+**Date:** 2026-10-06
+**Status:** Accepted (owner's Prompt 11b text and items 7–8, 2026-10-06)
+
+### Decision
+
+1. **Outbound mail** goes through the Gmail API as the company mailbox, authenticated by a Google
+   Cloud service account with domain-wide delegation and the single scope `gmail.send`. No
+   password and no SMTP app password exist. The service-account key lives in Key Vault
+   (`gmail-service-account-key`) and reaches the worker and the web app as a secret reference;
+   no model ever reads it; it is redacted from logs and Sentry; nothing outside `backend/mail/`
+   imports Google's libraries. Mail is off by default (`MAIL_ENABLED`). **Outside production a
+   catch-all address is mandatory**: every message, whoever it is for, is delivered to the staff
+   catch-all with the real recipient named in the subject and a header. The domain's SPF already
+   includes Google; the Workspace DKIM key should be published (plan §9).
+2. **The collections ladder** (day 3, 10, 20 by default; admin-editable steps and templates with
+   whitelisted merge fields) runs once a day from a queue-only scheduled job; the worker sends.
+   One message per charge and step; one step per tick; never to an operator handled personally,
+   without an e-mail, or for a charge that is paid, waived, voided or pending. Every message is
+   logged with its status. The statement link in a message is a signed, 30-day, revocable,
+   read-only page with no bank data and no links into the app.
+3. **NSF rule.** A returned debit is never charged a fee by the webhook. Staff resolve it in the
+   returns queue with **Reschedule**: an agreed re-debit date, one Stax one-off invoice with two
+   lines (the original amount and the NSF fee: 100.00 on the operator's first return, 50.00 on
+   later ones, both admin-editable fee types, waivable by an admin with a note). Locally a
+   `redebit` charge and an `nsf_fee` charge; the money is owed once (the re-debit carries the
+   source charge's balance, and a settled re-debit pays the source charge); the counter
+   increments on the staff action only.
+4. **Time.** The project time zone is America/New_York; storage stays UTC. Dates derived from
+   provider timestamps before the switch are realigned only after the owner has seen the list
+   (`tz_audit`), by `tz_apply`, each row audited.
+5. **Attention list, contact log, calendar and ICS feed** as PLAN-011b D6–D8: shared staff notes;
+   a per-user revocable 256-bit feed token, hashed at rest, rate-limited, audited without the
+   token.
+
+### Alternatives rejected
+
+- SMTP with an app password (a password to store and rotate); a transactional mail provider (a
+  new vendor for a few hundred messages a month; the owner named Workspace); an NSF fee created
+  automatically on the return webhook (bank-side errors would be fined); keeping UTC days (the
+  books are kept in New York).
+
+### Consequences
+
+- One infrastructure deployment: vault references for the key, mail settings, a daily scheduled
+  job. Go-live needs the Workspace admin steps in plan §9.
+- Known limits: the two-line Stax invoice and schedule are verified only when ACH works on the
+  sandbox; the ICS and the statement link are credentialed by their URL (revocable, logged).

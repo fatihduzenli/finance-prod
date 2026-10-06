@@ -338,6 +338,8 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0015_documents_reshape",
         "ledger.migrations.0016_store_cost_corrections",
         "ledger.migrations.0019_one_off_charges_constraints",
+        "ledger.migrations.0023_contacts_and_calendar",
+        "ledger.migrations.0024_collections_ladder",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",
@@ -361,6 +363,10 @@ IDENTIFIER_COLUMNS = {
     "import_audit.target_id",
     # A SHA-256 in hexadecimal (PLAN-010c D4), like webhook_events.dedupe_hash.
     "documents.sha256",
+    # PLAN-011b D4: the sent body's SHA-256 and the mail service's message ID, each held
+    # to its shape by a CHECK.
+    "outbound_messages.body_sha256",
+    "outbound_messages.mail_message_id",
 }
 
 
@@ -411,7 +417,10 @@ def test_guard_covers_every_open_text_column_except_the_named_identifiers() -> N
 
 #: An identifier with a shape of its own holds the Luhn-valid run inside that shape:
 #: ``documents.sha256`` must be 64 lower-case hexadecimal characters (its CHECK).
-IDENTIFIER_VALUES = {"documents.sha256": "4111111111111111" + "abcdef" * 8}
+IDENTIFIER_VALUES = {
+    "documents.sha256": "4111111111111111" + "abcdef" * 8,
+    "outbound_messages.body_sha256": "4111111111111111" + "abcdef" * 8,
+}
 
 IDENTIFIER_FIELDS = [
     (model, field)
@@ -544,6 +553,15 @@ def _accepted_samples(model: type[models.Model], field: models.Field[Any, Any]) 
         return [text for text in samples if re.fullmatch(r"INV-[0-9]{4}-[0-9]{4,}", text)]
     if column == "operators.email":
         return [text.lower() for text in samples if text == text.strip()]
+    # PLAN-011b D4: a template code and an error class name have a CHECK of their own.
+    if column == "message_templates.code":
+        return [text for text in samples if re.fullmatch(r"[a-z0-9_]+", text)] + [
+            "friendly_reminder_2026"
+        ]
+    if column == "outbound_messages.error":
+        return [text for text in samples if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", text)] + [
+            "ConnectTimeout"
+        ]
     return samples
 
 

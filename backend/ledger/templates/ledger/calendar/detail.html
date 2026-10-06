@@ -1,0 +1,24 @@
+{% extends "finance/base.html" %}
+{% block title %}{{ entry.title }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:calendar:page' %}?month={{ entry.on|date:'Y-m' }}">&larr; Calendar {{ entry.on|date:"Y-m" }}</a></p>
+  <h1>{{ entry.title }}</h1>
+  <dl>
+    <dt>Kind</dt><dd>{{ entry.get_kind_display }}</dd>
+    <dt>Date</dt><dd>{{ entry.on|date:"Y-m-d" }}</dd>
+    <dt>Text</dt><dd style="white-space:pre-wrap;">{{ entry.body|default:"—" }}</dd>
+    <dt>Store</dt><dd>{% if entry.store %}<a href="{% url 'ledger:stores:detail' pk=entry.store.pk %}">{{ entry.store.external_label }}</a>{% else %}—{% endif %}</dd>
+    <dt>Operator</dt><dd>{% if entry.operator %}<a href="{% url 'ledger:operators:detail' pk=entry.operator.pk %}">{{ entry.operator.display_name }}</a>{% else %}—{% endif %}</dd>
+    <dt>Lease</dt><dd>{% if entry.lease %}<a href="{% url 'ledger:leases:detail' pk=entry.lease.pk %}">{{ entry.lease.store.external_label }}</a>{% else %}—{% endif %}</dd>
+    <dt>Morning e-mail</dt><dd>{% if entry.email_morning %}Yes: e-mailed to the author on the morning of that day{% else %}No{% endif %}</dd>
+    <dt>Author</dt><dd>{{ entry.author.get_username|default:"—" }}, {{ entry.created_at|date:"Y-m-d H:i" }}</dd>
+  </dl>
+  {% if can_change %}
+    <div class="actions">
+      <a class="btn" id="calendar-edit" href="{% url 'ledger:calendar:edit' pk=entry.pk %}">Edit</a>
+      <form method="post" action="{% url 'ledger:calendar:delete' pk=entry.pk %}" onsubmit="return window.confirm('Delete this calendar entry?');">
+        {% csrf_token %}<button class="btn btn-danger" type="submit" id="calendar-delete">Delete</button>
+      </form>
+    </div>
+  {% endif %}
+{% endblock %}

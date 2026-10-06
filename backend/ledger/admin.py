@@ -5,8 +5,8 @@ Staff create and edit operators, stores and leases on the staff screens, which w
 audit log (and, for operators and leases, talk to the payment provider). The admin only
 lists them: no add, change or delete permission, so nothing can be hard-deleted here.
 The ``admin`` group holds ``view_*`` on the three models (ledger migration 0008), so an
-admin-group user who is not a superuser can open them. The reserved tables (documents,
-outbound messages) are deliberately not registered.
+admin-group user who is not a superuser can open them. Documents and the outbound
+message log are deliberately not registered (their pages are the staff screens).
 
 The fee catalogue and the insurance premiums are edited here, by an admin only
 (docs/qa/PLAN-010b D1, D9, D12): add and change, never delete (a fee type no longer
@@ -14,6 +14,11 @@ offered is made inactive; a premium is kept for the years it priced). The ``admi
 group holds view, add and change on both (ledger migration 0013); the registry refuses
 any POST to them below admin. Every save writes an ``audit_log`` row with the fields
 before and after.
+
+The collections ladder's steps and e-mail templates (docs/qa/PLAN-011b D4, D10) are
+edited here the same way, by an admin only, add and change, never delete (a step no
+longer used is made inactive). A template whose subject or text uses anything but the
+whitelisted merge fields is refused on save (``MessageTemplate.clean``, :mod:`ledger.merge`).
 """
 
 from __future__ import annotations
@@ -26,7 +31,17 @@ from django.contrib.auth.models import User
 from django.db import models
 from django.http import HttpRequest
 
-from ledger.models import AuditLog, FeeType, InsurancePremium, Lease, Operator, Store
+from ledger import merge
+from ledger.models import (
+    AuditLog,
+    CollectionStep,
+    FeeType,
+    InsurancePremium,
+    Lease,
+    MessageTemplate,
+    Operator,
+    Store,
+)
 
 if TYPE_CHECKING:
     _ModelAdminBase = admin.ModelAdmin[Any]
@@ -164,3 +179,31 @@ class InsurancePremiumAdmin(AuditedAdmin):
     ordering = ("-policy_year",)
     audited_fields = ("policy_year", "amount", "cost")
     entity_type = "insurance_premium"
+
+
+@admin.register(MessageTemplate)
+class MessageTemplateAdmin(AuditedAdmin):
+    list_display = ("code", "subject", "updated_at")
+    ordering = ("code",)
+    fields = ("code", "subject", "body")
+    audited_fields = ("code", "subject", "body")
+    entity_type = "message_template"
+
+    def get_form(
+        self, request: HttpRequest, obj: Any = None, change: bool = False, **kwargs: Any
+    ) -> type[forms.ModelForm[Any]]:
+        form = super().get_form(request, obj, change, **kwargs)
+        for name in ("subject", "body"):
+            if name in form.base_fields:
+                form.base_fields[name].help_text = f"Merge fields: {merge.FIELDS_TEXT}."
+        return form
+
+
+@admin.register(CollectionStep)
+class CollectionStepAdmin(AuditedAdmin):
+    list_display = ("day_offset", "template", "active", "position")
+    list_filter = ("active",)
+    ordering = ("day_offset", "position")
+    list_select_related = ("template",)
+    audited_fields = ("day_offset", "template_id", "active", "position")
+    entity_type = "collection_step"

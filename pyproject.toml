@@ -21,6 +21,7 @@ dependencies = [
     "azure-storage-blob==12.31.0",
     "azure-identity==1.26.0",
     "pypdf==6.19.0",
+    "google-auth==2.60.0",
 ]
 
 [dependency-groups]

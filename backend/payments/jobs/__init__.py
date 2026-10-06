@@ -78,6 +78,13 @@ ENTITY_OF_KIND: dict[str, str] = {
     JobKind.SCHEDULE_CREATE: JobEntity.ONE_OFF_CHARGE,
     JobKind.SCHEDULE_DELETE: JobEntity.ONE_OFF_CHARGE,
     JobKind.INVOICE_PAY: JobEntity.ONE_OFF_CHARGE,
+    JobKind.MESSAGE_SEND: JobEntity.OUTBOUND_MESSAGE,
+    JobKind.CALENDAR_EMAIL: JobEntity.CALENDAR_ENTRY,
+}
+#: Further entities a kind acts on besides its :data:`ENTITY_OF_KIND` one: a morning
+#: e-mail is a calendar entry's or a promise to pay's (PLAN-011b D8).
+OTHER_ENTITIES_OF_KIND: dict[str, frozenset[str]] = {
+    JobKind.CALENDAR_EMAIL: frozenset({JobEntity.CONTACT_ENTRY}),
 }
 
 #: ``app_label.ModelName`` of each entity type.
@@ -88,6 +95,9 @@ _ENTITY_OF_MODEL: dict[str, str] = {
     "ledger.OneOffCharge": JobEntity.ONE_OFF_CHARGE,
     "ledger.Payment": JobEntity.PAYMENT,
     "payments.WebhookEvent": JobEntity.WEBHOOK_EVENT,
+    "ledger.OutboundMessage": JobEntity.OUTBOUND_MESSAGE,
+    "ledger.CalendarEntry": JobEntity.CALENDAR_ENTRY,
+    "ledger.ContactEntry": JobEntity.CONTACT_ENTRY,
 }
 
 
@@ -135,7 +145,8 @@ def entity_type_of(entity: Entity) -> str:
     except KeyError:
         raise ValueError(
             "Jobs act on operators, leases, rent charges, one-off charges, payments, "
-            "webhook events, the rent run and the reconciliation only"
+            "webhook events, outbound messages, calendar and contact entries, the rent run "
+            "and the reconciliation only"
         ) from None
 
 
@@ -168,7 +179,9 @@ def enqueue(
     """
     job_kind = JobKind(kind)
     entity_type = entity_type_of(entity)
-    if ENTITY_OF_KIND[job_kind] != entity_type:
+    if ENTITY_OF_KIND[job_kind] != entity_type and entity_type not in OTHER_ENTITIES_OF_KIND.get(
+        job_kind, frozenset()
+    ):
         raise ValueError("This job kind does not act on this entity")
     if replay_key is not None:
         existing = _replayed(replay_key, job_kind, entity_type, entity.pk)

@@ -1,0 +1,30 @@
+{% extends "finance/base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+  <h1>Settings</h1>
+  <h2 id="calendar-feed">Calendar feed</h2>
+  <p>Subscribe to the staff calendar from Google Calendar or another calendar app: debit days, insurance anniversaries, lease ends and the shared notes and reminders, from 30 days ago to 180 days ahead. The address is yours: anyone who has it can read the calendar, so keep it private, and revoke it if it leaks.</p>
+  {% if new_url %}
+    <div class="feed-new" id="feed-new" role="status">
+      <p><strong>Your new calendar address. It is shown this once; copy it now.</strong></p>
+      <input type="text" readonly id="feed-url" value="{{ new_url }}" aria-label="Calendar feed address" onclick="this.select();">
+      <p class="muted">In Google Calendar: Other calendars, From URL, paste the address.</p>
+    </div>
+  {% endif %}
+  {% if feed %}
+    <p id="feed-status">You have a calendar feed, created {{ feed.created_at|date:"Y-m-d H:i" }}.</p>
+    <div class="actions">
+      <form method="post" action="{% url 'finance:feed_create' %}" onsubmit="return window.confirm('Make a new address? The current one stops working.');">
+        {% csrf_token %}<button class="btn" type="submit" id="feed-create">Replace the address</button>
+      </form>
+      <form method="post" action="{% url 'finance:feed_revoke' %}" onsubmit="return window.confirm('Revoke the calendar address? It stops working at once.');">
+        {% csrf_token %}<button class="btn btn-danger" type="submit" id="feed-revoke">Revoke</button>
+      </form>
+    </div>
+  {% else %}
+    <p id="feed-status" class="muted">You have no calendar feed.</p>
+    <form method="post" action="{% url 'finance:feed_create' %}" class="actions">
+      {% csrf_token %}<button class="btn btn-primary" type="submit" id="feed-create">Create a calendar address</button>
+    </form>
+  {% endif %}
+{% endblock %}

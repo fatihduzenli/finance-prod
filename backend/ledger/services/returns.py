@@ -3,8 +3,10 @@
 An ACH debit the provider reports returned lands here (``payments.status = returned``,
 ``resolved_at`` null) through the webhook processor, which also reopens the charge.
 Staff resolve a return with a mandatory note; that sets ``resolved_at``,
-``resolved_by`` and ``resolution_note`` and writes an audit row. Resolving changes
-nothing else: no charge, no provider call, and nothing anywhere re-debits.
+``resolved_by``, ``resolution_note`` and ``resolution_kind = note`` and writes an audit
+row. Resolving with a note changes nothing else: no charge, no provider call. The other
+resolution, **Reschedule** (a re-debit on an agreed date with the NSF fee, PLAN-011b D5),
+is :func:`ledger.services.nsf.reschedule`.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from ledger.models import AuditLog, Operator, Payment, PaymentStatus, Store
+from ledger.models import AuditLog, Operator, Payment, PaymentStatus, ResolutionKind, Store
 from ledger.services.payments_ledger import charge_lease
 from ledger.validators import visible_text
 
@@ -106,8 +108,11 @@ def resolve_return(
         payment.resolved_at = now or timezone.now()
         payment.resolved_by = actor
         payment.resolution_note = text
+        payment.resolution_kind = ResolutionKind.NOTE
         try:
-            payment.save(update_fields=["resolved_at", "resolved_by", "resolution_note"])
+            payment.save(
+                update_fields=["resolved_at", "resolved_by", "resolution_note", "resolution_kind"]
+            )
         except ValidationError:
             # The card-number guard: nothing was saved.
             return ResolveOutcome(False, RESOLVE_NOTE_PAYMENT_DATA)
@@ -122,6 +127,7 @@ def resolve_return(
                 "resolved_at": payment.resolved_at.isoformat(),
                 "return_code": payment.return_code,
                 "resolution_note": text,
+                "resolution_kind": payment.resolution_kind,
             },
         )
     return ResolveOutcome(True, RESOLVED)

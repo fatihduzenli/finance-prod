@@ -285,10 +285,53 @@ def new_lease_document(**fields: Any) -> ledger.Document:
     return new_document(store=None, **fields)
 
 
+def new_message_template(**fields: Any) -> ledger.MessageTemplate:
+    values = {"code": f"test_template_{next(_numbers)}", "subject": "Notice", "body": "Owed."}
+    return ledger.MessageTemplate(**{**values, **fields})
+
+
+def new_collection_step(**fields: Any) -> ledger.CollectionStep:
+    _default(fields, "template", lambda: saved(new_message_template()))
+    return ledger.CollectionStep(**{"day_offset": 100 + next(_numbers) % 200, **fields})
+
+
 def new_outbound_message(**fields: Any) -> ledger.OutboundMessage:
     _default(fields, "operator", lambda: saved(new_operator()))
-    values = {"template": "termination_notice", "subject": "Notice", "delivery_status": ""}
+    _default(fields, "step", lambda: saved(new_collection_step()))
+    values = {
+        "template": fields["step"].template,
+        "charge_entity_type": "rent_charge",
+        "charge_entity_id": uuid.uuid4(),
+        "to_address": "ops@example.com",
+        "subject": "Notice",
+    }
     return ledger.OutboundMessage(**{**values, **fields})
+
+
+def new_contact_entry(**fields: Any) -> ledger.ContactEntry:
+    _default(fields, "operator", lambda: saved(new_operator()))
+    values = {"kind": "call", "happened_on": date(2026, 10, 5), "body": "Called about rent."}
+    return ledger.ContactEntry(**{**values, **fields})
+
+
+def new_promise(**fields: Any) -> ledger.ContactEntry:
+    values = {
+        "kind": "promise",
+        "promised_date": date(2026, 10, 9),
+        "promised_amount": D("1500.00"),
+    }
+    return new_contact_entry(**{**values, **fields})
+
+
+def new_calendar_entry(**fields: Any) -> ledger.CalendarEntry:
+    values = {"kind": "note", "on": date(2026, 10, 20), "title": "Visit the store."}
+    return ledger.CalendarEntry(**{**values, **fields})
+
+
+def new_calendar_feed(**fields: Any) -> ledger.CalendarFeed:
+    _default(fields, "user", make_user)
+    values = {"token_hash": uuid.uuid4().bytes * 2}
+    return ledger.CalendarFeed(**{**values, **fields})
 
 
 LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
@@ -315,7 +358,12 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.LegacyRecord: new_legacy_record,
     ledger.ImportAudit: new_import_audit,
     ledger.Document: new_document,
+    ledger.MessageTemplate: new_message_template,
+    ledger.CollectionStep: new_collection_step,
     ledger.OutboundMessage: new_outbound_message,
+    ledger.ContactEntry: new_contact_entry,
+    ledger.CalendarEntry: new_calendar_entry,
+    ledger.CalendarFeed: new_calendar_feed,
 }
 
 
@@ -391,6 +439,22 @@ def unique_pair(
     return build
 
 
+def _second_redebit(*, same_payment: bool) -> ledger.OneOffCharge:
+    """Save a re-debit of one payment; return an unsaved re-debit of the same or another."""
+    payment = saved(new_payment(status="returned"))
+    insert(new_one_off_charge(category="redebit", description="Re-debit", source_payment=payment))
+    other = payment if same_payment else saved(new_payment(status="returned"))
+    return new_one_off_charge(category="redebit", description="Re-debit", source_payment=other)
+
+
+def _second_fee(*, same_redebit: bool) -> ledger.OneOffCharge:
+    """Save an NSF fee of one charge; return an unsaved fee of the same or another."""
+    first = saved(new_one_off_charge())
+    insert(new_one_off_charge(category="nsf_fee", description="NSF fee", companion_of=first))
+    other = first if same_redebit else saved(new_one_off_charge())
+    return new_one_off_charge(category="nsf_fee", description="NSF fee", companion_of=other)
+
+
 def choice_cases(
     factories: dict[type[models.Model], Callable[..., models.Model]],
 ) -> list[ConstraintCase]:
@@ -446,6 +510,12 @@ def _field_unique(
 _CARD = "4111 1111 1111 1111"
 _UUID_1 = uuid.UUID("5f0c2d8e-9b1a-4c3e-8f7d-2a6b1c9e0d4f")
 _UUID_2 = uuid.UUID("0b7e6a1c-3d2f-4e8a-9c5b-7d1e2f3a4b6c")
+
+
+def _second_promise_closed_by_the_same_entry() -> ledger.ContactEntry:
+    closing = saved(new_contact_entry())
+    insert(new_promise(operator=closing.operator, closed_by=closing))
+    return new_promise(operator=closing.operator, closed_by=closing)
 
 
 def _two_charges(**second: Any) -> tuple[ledger.RentCharge, ledger.RentCharge]:
@@ -993,6 +1063,16 @@ LEDGER_CASES: list[ConstraintCase] = [
         ),
     ),
     ConstraintCase(
+        "contact_entries_promise_fields",
+        new_contact_entry,
+        lambda: new_contact_entry(promised_amount=D("100.00"), promised_date=date(2026, 10, 9)),
+    ),
+    ConstraintCase(
+        "contact_entries_promise_fields",
+        new_promise,
+        lambda: new_promise(promised_amount=None),
+    ),
+    ConstraintCase(
         "payments_refund_deposit_manual",
         lambda: new_payment(
             kind="refund_deposit",
@@ -1011,12 +1091,14 @@ LEDGER_CASES: list[ConstraintCase] = [
             status="returned",
             resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
             resolution_note="Operator paid by wire.",
+            resolution_kind="note",
         ),
         lambda: new_payment(
             method="ach",
             status="settled",
             resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
             resolution_note="Not a return.",
+            resolution_kind="note",
         ),
     ),
     # documents (PLAN-010c D4)
@@ -1061,13 +1143,214 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_document(sha256="0123456789abcdef" * 4),
         lambda: new_document(sha256="0123456789ABCDEF" * 4),
     ),
+    # contact_entries (PLAN-011b D7)
+    ConstraintCase(
+        "contact_entries_body_not_blank",
+        new_contact_entry,
+        lambda: new_contact_entry(body=" \n\t"),
+    ),
+    ConstraintCase(
+        "contact_entries_promise_fields",
+        new_promise,
+        lambda: new_promise(promised_date=None),
+    ),
+    ConstraintCase(
+        "contact_entries_promised_amount_positive",
+        new_promise,
+        lambda: new_promise(promised_amount=D("0.00")),
+    ),
+    ConstraintCase(
+        "contact_entries_closed_by_promise_only",
+        lambda: new_promise(closed_by=saved(new_contact_entry())),
+        lambda: new_contact_entry(closed_by=saved(new_contact_entry())),
+    ),
+    ConstraintCase(
+        "contact_entries.closed_by_id",
+        unique_pair(
+            new_promise,
+            {"closed_by": None},
+            {"closed_by": lambda row: saved(new_contact_entry(operator=row.operator))},
+        ),
+        lambda: _second_promise_closed_by_the_same_entry(),
+        column="closed_by_id",
+    ),
+    # calendar_entries (PLAN-011b D8)
+    ConstraintCase(
+        "calendar_entries_title_not_blank",
+        new_calendar_entry,
+        lambda: new_calendar_entry(title="   "),
+    ),
+    # calendar_feeds (PLAN-011b D8)
+    ConstraintCase(
+        "calendar_feeds_token_hash_size",
+        lambda: new_calendar_feed(token_hash=bytes(32)),
+        lambda: new_calendar_feed(token_hash=bytes(31)),
+    ),
+    ConstraintCase(
+        "calendar_feeds_one_live_per_user",
+        unique_pair(
+            new_calendar_feed,
+            {"revoked_at": datetime(2026, 10, 1, tzinfo=UTC)},
+            {"user": lambda row: row.user},
+        ),
+        unique_pair(new_calendar_feed, {}, {"user": lambda row: row.user}),
+    ),
+    _field_unique("calendar_feeds", "token_hash", new_calendar_feed, b"\x01" * 32, b"\x02" * 32),
+    # message_templates, collection_steps, outbound_messages (PLAN-011b D4)
+    ConstraintCase(
+        "message_templates_subject_not_blank",
+        new_message_template,
+        lambda: new_message_template(subject=" "),
+    ),
+    ConstraintCase(
+        "message_templates_body_not_blank",
+        new_message_template,
+        lambda: new_message_template(body="\n"),
+    ),
+    ConstraintCase(
+        "message_templates_code_shape",
+        lambda: new_message_template(code="test_code_ok"),
+        lambda: new_message_template(code="Test-Code"),
+    ),
+    _field_unique("message_templates", "code", new_message_template, "test_one", "test_two"),
+    ConstraintCase(
+        "collection_steps_day_offset_range",
+        lambda: new_collection_step(day_offset=365),
+        lambda: new_collection_step(day_offset=366),
+    ),
+    ConstraintCase(
+        "collection_steps_day_unique",
+        unique_pair(new_collection_step, {"day_offset": 300}, {"day_offset": 301}),
+        unique_pair(new_collection_step, {"day_offset": 300}, {"day_offset": 300}),
+    ),
+    ConstraintCase(
+        "outbound_messages_body_sha256_hex",
+        lambda: new_outbound_message(body_sha256="0123456789abcdef" * 4),
+        lambda: new_outbound_message(body_sha256="0123456789ABCDEF" * 4),
+    ),
+    ConstraintCase(
+        "outbound_messages_error_class_name",
+        lambda: new_outbound_message(error="ReadTimeout"),
+        lambda: new_outbound_message(error="Read timeout"),
+    ),
+    ConstraintCase(
+        "outbound_messages_mail_message_id_shape",
+        lambda: new_outbound_message(mail_message_id="18f0a1b2_c-D"),
+        lambda: new_outbound_message(mail_message_id="18f0 a1b2"),
+    ),
+    ConstraintCase(
+        "outbound_messages_manual_has_sender",
+        lambda: new_outbound_message(manual=True, sent_by=make_user()),
+        lambda: new_outbound_message(manual=True, sent_by=None),
+    ),
+    ConstraintCase(
+        "outbound_messages_one_per_charge_step",
+        unique_pair(
+            new_outbound_message,
+            {},
+            {
+                "step": lambda row: row.step,
+                "charge_entity_id": lambda row: row.charge_entity_id,
+                "manual": True,
+                "sent_by": lambda row: make_user(),
+            },
+        ),
+        unique_pair(
+            new_outbound_message,
+            {},
+            {"step": lambda row: row.step, "charge_entity_id": lambda row: row.charge_entity_id},
+        ),
+    ),
     # legacy_records
     ConstraintCase(
         "legacy_records_row_unique",
         unique_pair(new_legacy_record, {}, {"row_number": 3}),
         unique_pair(new_legacy_record, {}, {}),
     ),
-    *choice_cases(LEDGER_FACTORIES),
+    # PLAN-011b D5: re-debit and NSF fee charges, the NSF counter, the resolution kind.
+    ConstraintCase(
+        "one_off_charges_source_payment_iff_redebit",
+        lambda: new_one_off_charge(
+            category="redebit",
+            description="Re-debit of Rent 2026-09",
+            source_payment=saved(new_payment()),
+        ),
+        lambda: new_one_off_charge(source_payment=saved(new_payment())),
+    ),
+    ConstraintCase(
+        "one_off_charges_companion_iff_nsf_fee",
+        lambda: new_one_off_charge(
+            category="nsf_fee", description="NSF fee", companion_of=saved(new_one_off_charge())
+        ),
+        lambda: new_one_off_charge(category="nsf_fee", description="NSF fee"),
+    ),
+    ConstraintCase(
+        "one_off_charges_one_redebit_per_payment",
+        lambda: _second_redebit(same_payment=False),
+        lambda: _second_redebit(same_payment=True),
+    ),
+    ConstraintCase(
+        "one_off_charges_one_fee_per_redebit",
+        lambda: _second_fee(same_redebit=False),
+        lambda: _second_fee(same_redebit=True),
+    ),
+    ConstraintCase(
+        "operators_nsf_return_count_not_negative",
+        lambda: new_operator(nsf_return_count=0),
+        lambda: new_operator(nsf_return_count=-1),
+    ),
+    ConstraintCase(
+        "payments_resolution_kind_iff_resolved",
+        lambda: new_payment(
+            status="returned",
+            resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
+            resolution_note="Rescheduled.",
+            resolution_kind="note",
+        ),
+        lambda: new_payment(
+            status="returned",
+            resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
+            resolution_note="Rescheduled.",
+        ),
+    ),
+    ConstraintCase(
+        "payments_redebit_date_iff_rescheduled",
+        lambda: new_payment(
+            status="returned",
+            resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
+            resolution_note="Rescheduled.",
+            resolution_kind="rescheduled",
+            redebit_date=date(2026, 10, 9),
+        ),
+        lambda: new_payment(
+            status="returned",
+            resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
+            resolution_note="Rescheduled.",
+            resolution_kind="rescheduled",
+        ),
+    ),
+    # A bogus resolution kind on an unresolved payment breaks the pairing CHECK as well;
+    # on a resolved one only the choice CHECK.
+    ConstraintCase(
+        "payments_resolution_kind_valid",
+        lambda: new_payment(
+            status="returned",
+            resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
+            resolution_note="Done.",
+            resolution_kind="note",
+        ),
+        lambda: new_payment(
+            status="returned",
+            resolved_at=datetime(2026, 10, 1, tzinfo=UTC),
+            resolution_note="Done.",
+            resolution_kind="bogus",
+        ),
+    ),
+    *(
+        case
+        for case in choice_cases(LEDGER_FACTORIES)
+        if case.name != "payments_resolution_kind_valid"
+    ),
 ]
 
 # Rejections the table above does not show with a single mutation.

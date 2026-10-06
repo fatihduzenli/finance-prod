@@ -33,6 +33,7 @@ from django import forms
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
@@ -49,6 +50,7 @@ from ledger.forms import (
     WaiveForm,
 )
 from ledger.models import (
+    ChargeEntityType,
     CollectionMethod,
     DepositResolution,
     Lease,
@@ -57,7 +59,7 @@ from ledger.models import (
     OneOffChargeStatus,
     Operator,
 )
-from ledger.services import csv_export, rent_run
+from ledger.services import collections, csv_export, rent_run
 from ledger.services import one_off_charges as service
 from ledger.services.csv_export import CsvWriter
 from ledger.views.charges import _report
@@ -220,6 +222,13 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "resolution": DepositResolution.objects.filter(setup_charge=charge)
             .select_related("to_lease__store", "created_by")
             .first(),
+            # PLAN-011b D4: the charge's collection e-mails and the hand send.
+            **collections.charge_context(
+                ChargeEntityType.ONE_OFF_CHARGE,
+                charge.pk,
+                billing=billing,
+                url=reverse("ledger:one_off_charges:send_step", kwargs={"pk": charge.pk}),
+            ),
         },
     )
 
