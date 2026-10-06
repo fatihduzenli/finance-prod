@@ -821,3 +821,18 @@ the login page myself." The condition for starting Prompt 4 is met.
   job `finance-staging-daily` does not exist until the Bicep deployment (expected; documented
   in the plan). The app now keeps New York days.
 - Next: "deploy" with `mailEnabled=false`; then `tz_audit` (read-only) and the owner's clicks.
+
+## Update, 2026-10-06, PLAN-011b deployed; tz_audit clean
+
+- Owner typed "deploy". Template deployment `staging-plan-011b` succeeded (3 min 9 s, no failed
+  operations) with `mailEnabled=false`. Verified: job `finance-staging-daily` (cron `0 13 * * *`,
+  `STAX_CALLER=none`, `collections_tick`, timeout 300, no retries); web revision
+  `finance-staging-web--0000036` Healthy and Running with `MAIL_ENABLED=false`, empty sender and
+  catch-all, `COMPANY_NAME`, and **no** Gmail secret reference; worker revision 0000008 healthy;
+  `/healthz` 200.
+- `tz_audit` run read-only inside the web container: **0 rows to realign** (ACH payments: none
+  with a differing date; invoice issue dates all agree under New York); nothing differs for
+  other reasons; the "unchanged by design" list printed. `tz_apply` is therefore not needed and
+  was not run.
+- Next: the owner's 11b clicks (RUNBOOK §15); mail enablement after the owner's Workspace steps
+  (plan §9) in a later deployment with `mailEnabled=true gmailSender=… mailCatchAll=…`.
