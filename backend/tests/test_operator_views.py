@@ -252,7 +252,8 @@ def test_a_duplicate_email_is_a_form_error(billing: Client, fake: FakeProvider) 
 def test_a_card_number_in_a_text_field_is_refused(billing: Client, fake: FakeProvider) -> None:
     response = billing.post(NEW, form_data(notes="card 4111 1111 1111 1111"), follow=True)
     assert response.redirect_chain == [(NEW, 302)]
-    assert "4111" not in response.content.decode()
+    body = response.content.decode()
+    assert "4111 1111 1111 1111" not in body and "4111111111111111" not in body
     assert "card or account numbers" in response.content.decode()
     assert Operator.objects.count() == 0
     assert fake.calls == []
@@ -696,10 +697,11 @@ def test_a_held_form_is_not_shown_on_another_form(billing: Client, fake: FakePro
 def test_a_card_number_is_never_held_in_the_session(billing: Client, fake: FakeProvider) -> None:
     billing.post(NEW, form_data(notes="card 4111 1111 1111 1111", city="Kept City"))
     stored = " ".join(str(session.get_decoded()) for session in Session.objects.all())
-    assert "4111" not in stored
+    # The whole number in both spellings: a random session hash can hold "4111" by chance.
+    assert "4111 1111 1111 1111" not in stored and "4111111111111111" not in stored
     assert "Kept City" in stored
     page = billing.get(NEW).content.decode()
-    assert "4111" not in page
+    assert "4111 1111 1111 1111" not in page and "4111111111111111" not in page
     assert "card or account numbers" in page
     assert 'value="Kept City"' in page
 

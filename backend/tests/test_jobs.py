@@ -1429,6 +1429,7 @@ def test_both_updates_tolerate_an_error_and_the_check_comes_before_the_smoke_tes
     assert "vars.RECONCILE_JOB_NAME || 'finance-staging-reconcile'" in reconcile
     order = [
         text.index("- name: Roll the web container app"),
+        text.index("- name: Wait for the web revision to be live on this commit"),
         text.index("- name: Roll the worker container app"),
         text.index("- name: Roll the reconcile job"),
         text.index("- name: Verify the web and worker revisions are live on this commit"),
@@ -1447,12 +1448,43 @@ def test_both_updates_tolerate_an_error_and_the_check_comes_before_the_smoke_tes
     )
 
 
-def _run_verification(
-    tmp_path: Path, web: str, workers: str, job_tag: str = "0" * 40
+WAIT = "Wait for the web revision to be live on this commit"
+VERIFY = "Verify the web and worker revisions are live on this commit"
+
+
+def _live_function(step: str) -> str:
+    script = _run_block(step)
+    start = script.index("live() {")
+    return script[start : script.index("\n}\n", start) + 3]
+
+
+def test_the_worker_and_the_job_are_updated_only_after_the_web_wait() -> None:
+    # Staging incident of 2026-10-06: the worker and the reconcile job ran the new code
+    # against the old schema while the web revision's migrations had failed.
+    text = CI.read_text()
+    wait = text.index(f"- name: {WAIT}")
+    assert text.index("- name: Roll the web container app") < wait
+    assert wait < text.index("- name: Roll the worker container app")
+    assert wait < text.index("- name: Roll the reconcile job")
+    step = _step(WAIT)
+    assert "IMAGE_TAG: ${{ github.sha }}" in step
+    script = _run_block(step)
+    # The same check as the final verification, for the web only, read-only.
+    assert _live_function(step) == _live_function(_step(VERIFY))
+    assert 'live "$WEB_APP_NAME"' in script and "600" in script
+    assert "WORKER_APP_NAME" not in step and "RECONCILE_JOB_NAME" not in step
+    assert not re.search(r"\baz (?!containerapp revision list)", script)
+    # A failed wait stops the job: nothing after it runs regardless.
+    deploy = text[text.index("- name: Roll the web container app") :]
+    assert "continue-on-error" not in deploy and "always()" not in deploy
+
+
+def _run_step(
+    tmp_path: Path, step_name: str, web: str, workers: str, job_tag: str = "0" * 40
 ) -> subprocess.CompletedProcess[str]:
-    """The verification script with ``az``, ``date`` and ``sleep`` stubbed: ``az`` prints
-    the count given per app and the job's image with ``job_tag``, the clock jumps 100 s
-    per reading, sleep returns at once."""
+    """The script of step ``step_name`` with ``az``, ``date`` and ``sleep`` stubbed: ``az``
+    prints the count given per app and the job's image with ``job_tag``, the clock jumps
+    100 s per reading, sleep returns at once."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     stubs = {
@@ -1466,7 +1498,7 @@ def _run_verification(
         path = bin_dir / name
         path.write_text(f"#!/bin/bash\n{body}")
         path.chmod(path.stat().st_mode | stat.S_IEXEC)
-    script = _run_block(_step("Verify the web and worker revisions are live on this commit"))
+    script = _run_block(_step(step_name))
     env = {
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "WEB_APP_NAME": "web-app",
@@ -1478,6 +1510,30 @@ def _run_verification(
     return subprocess.run(  # noqa: S603 (a fixed interpreter and the repository's own script)
         ["/bin/bash", "-c", script], env=env, capture_output=True, text=True, timeout=60
     )
+
+
+def _run_verification(
+    tmp_path: Path, web: str, workers: str, job_tag: str = "0" * 40
+) -> subprocess.CompletedProcess[str]:
+    return _run_step(tmp_path, VERIFY, web, workers, job_tag)
+
+
+def test_the_web_wait_passes_once_the_web_revision_is_live(tmp_path: Path) -> None:
+    # The worker is not live yet (it is updated after this step): only the web counts.
+    result = _run_step(tmp_path, WAIT, "1", "0", "1" * 40)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "rolling the worker and the reconcile job" in result.stdout
+
+
+def test_the_web_wait_fails_after_ten_minutes_without_a_live_web_revision(
+    tmp_path: Path,
+) -> None:
+    result = _run_step(tmp_path, WAIT, "0", "1")
+    assert result.returncode == 1
+    assert "not live after 10 minutes" in result.stderr
+    assert "were not updated" in result.stderr
+    # Polled until the deadline: the stubbed clock moves 100 s per reading.
+    assert result.stdout.count("live web revisions on") >= 6
 
 
 def test_the_verification_passes_when_both_revisions_are_live(tmp_path: Path) -> None:

@@ -225,7 +225,7 @@ def test_a_card_number_anywhere_in_a_row_refuses_that_row_and_writes_nothing_for
     assert report.refused == 2 and report.created == 0
     assert not StoreCost.objects.filter(store__in=[first, second]).exists()
     for _, reason in report.refusals:
-        assert CARD not in reason and "4111" not in reason
+        assert CARD not in reason and CARD_SPACED not in reason
 
 
 def test_a_dry_run_with_refused_rows_exits_one_and_writes_nothing(tmp_path: Path) -> None:

@@ -16,6 +16,7 @@ import sys
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 import pytest
@@ -43,13 +44,13 @@ GUARD_TRIGGERS = {
             "payments.migrations.0002_postgresql_guards",
             "payments.migrations.0005_jobs",
             "ledger.migrations.0014_store_costs_deposit_resolutions",
-            "ledger.migrations.0017_one_off_charges",
+            "ledger.migrations.0019_one_off_charges_constraints",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
 }
-#: The trigger ledger 0017 replaced (``setup_charges`` became ``one_off_charges``,
-#: PLAN-010d D1): gone after the round trip, back only below 0017.
+#: The trigger ledger 0017 dropped and 0019 replaced (``setup_charges`` became
+#: ``one_off_charges``, PLAN-010d D1): gone after the round trip, back only below 0017.
 RENAMED_TRIGGERS = {
     f"{table}_payment_data_guard"
     for table in importlib.import_module("ledger.migrations.0012_setup_charges").GUARDED_COLUMNS
@@ -103,7 +104,9 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0008_setup_payment_mark",
                 "[ ] 0009_setup_payment_retry_mark",
                 "[ ] 0010_one_off_jobs",
-                "[ ] 0011_invoice_pay_job",
+                "[ ] 0011_one_off_jobs_rows",
+                "[ ] 0012_one_off_jobs_constraints",
+                "[ ] 0013_invoice_pay_job",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):
@@ -191,6 +194,226 @@ def test_round_trip_on_a_fresh_postgresql_database(
     result = _manage(repo_root, scratch_postgresql_url, "migrate", "--noinput")
     assert result.returncode == 0, result.stderr
     _seed_twice(repo_root, scratch_postgresql_url)
+
+
+# --- The rename of PLAN-010d D1 over existing rows ----------------------------------
+#
+# The staging deployment of 2026-10-06 failed: ``ledger.0017`` updated ``audit_log`` rows
+# that have an actor, which queues the deferred foreign-key checks of that table, and a
+# later ``ALTER TABLE audit_log`` in the same transaction was refused ("pending trigger
+# events"). The round trip above runs on empty tables and cannot see that, so this one
+# seeds rows at the state before the rename (with the historical models, in the real
+# ``manage.py``), migrates forward and back, and reads the rows with plain SQL.
+
+STATE_BEFORE_RENAME = (
+    ("ledger", "0016_store_cost_corrections"),
+    ("payments", "0009_setup_payment_retry_mark"),
+)
+
+
+APPEND_ONLY_STATE = "SELECT tgenabled FROM pg_trigger WHERE tgname = 'audit_log_append_only'"
+
+
+def seed_before_the_rename() -> None:
+    """Seed rows with the models of ``STATE_BEFORE_RENAME``; print their ids as JSON.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    import json
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_RENAME)).apps
+    user = apps.get_model("auth", "User")
+    first = user.objects.create(username="rename-staff-one", password="!")
+    second = user.objects.create(username="rename-staff-two", password="!")
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Rename LLC")
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 0917", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store, operator=operator, collection_status="prospective", payment_channel="unknown"
+    )
+    fee_type = apps.get_model("ledger", "FeeType").objects.create(
+        code="rename_deposit", name="Rename deposit", refundable=True
+    )
+    charge = apps.get_model("ledger", "SetupCharge").objects.create(
+        lease=lease, fee_type=fee_type, price=Decimal("100.00"), due_date=date(2026, 10, 1)
+    )
+    payment = apps.get_model("ledger", "Payment").objects.create(
+        setup_charge=charge,
+        kind="setup",
+        method="wire",
+        amount=Decimal("100.00"),
+        status="settled",
+        note="Wire.",
+        recorded_by=first,
+    )
+    invoice = apps.get_model("ledger", "Invoice").objects.create(
+        invoice_number="INV-2026-0917",
+        operator=operator,
+        setup_charge=charge,
+        issue_date=date(2026, 9, 1),
+        due_date=date(2026, 10, 1),
+        subtotal=Decimal("100.00"),
+        total=Decimal("100.00"),
+    )
+    resolution = apps.get_model("ledger", "DepositResolution").objects.create(
+        setup_charge=charge,
+        kind="refunded",
+        amount=Decimal("100.00"),
+        resolved_on=date(2026, 10, 2),
+        method="wire",
+        note="Refunded by wire.",
+        created_by=first,
+    )
+    job = apps.get_model("payments", "Job")
+    mark = job.objects.create(
+        kind="setup_payment_mark",
+        entity_type="setup_charge",
+        entity_id=charge.pk,
+        requested_by=second,
+    )
+    retry = job.objects.create(
+        kind="setup_payment_retry_mark", entity_type="setup_charge", entity_id=charge.pk
+    )
+    audit = apps.get_model("ledger", "AuditLog")
+    pk = str(charge.pk)
+    for actor, action, entity_type, entity_id, before, after in (
+        (first, "setup_charge.created", "setup_charge", pk, None, {"setup_charge": pk}),
+        (second, "setup_charge.waived", "setup_charge", pk, {"setup_charge": pk}, {"x": 1}),
+        (first, "payment.recorded", "payment", str(payment.pk), None, {"setup_charge": pk}),
+        (None, "setup_charge.created", "setup_charge", pk, None, None),
+        (second, "lease.updated", "lease", str(lease.pk), {"a": 1}, {"a": 2}),
+    ):
+        audit.objects.create(
+            actor=actor,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            before=before,
+            after=after,
+        )
+    print(
+        json.dumps(
+            {
+                "users": [first.pk, second.pk],
+                "operator": str(operator.pk),
+                "charge": pk,
+                "payment": str(payment.pk),
+                "invoice": str(invoice.pk),
+                "resolution": str(resolution.pk),
+                "jobs": [str(mark.pk), str(retry.pk)],
+                "lease": str(lease.pk),
+            }
+        )
+    )
+
+
+def _audit_rows(database_url: str) -> list[tuple[object, ...]]:
+    import psycopg
+
+    with psycopg.connect(database_url) as scratch:
+        return list(
+            scratch.execute(
+                "SELECT actor_id, action, entity_type, before, after FROM audit_log ORDER BY id"
+            )
+        )
+
+
+def _one(database_url: str, query: str) -> tuple[object, ...]:
+    import psycopg
+
+    with psycopg.connect(database_url) as scratch:
+        rows = list(scratch.execute(query))
+    assert len(rows) == 1, (query, rows)
+    return tuple(rows[0])
+
+
+def _expected_audit(seeded: dict[str, Any], entity: str) -> list[tuple[object, ...]]:
+    first, second = seeded["users"]
+    pk = seeded["charge"]
+    return [
+        (first, f"{entity}.created", entity, None, {entity: pk}),
+        (second, f"{entity}.waived", entity, {entity: pk}, {"x": 1}),
+        (first, "payment.recorded", "payment", None, {entity: pk}),
+        (None, f"{entity}.created", entity, None, None),
+        (second, "lease.updated", "lease", {"a": 1}, {"a": 2}),
+    ]
+
+
+def _jobs(database_url: str) -> list[tuple[object, ...]]:
+    import psycopg
+
+    with psycopg.connect(database_url) as scratch:
+        return list(
+            scratch.execute("SELECT kind, entity_type FROM jobs ORDER BY created_at, id::text")
+        )
+
+
+def _migrate_to(repo_root: Path, database_url: str, *targets: tuple[str, str]) -> None:
+    for label, name in targets:
+        result = _manage(repo_root, database_url, "migrate", label, name, "--noinput")
+        assert result.returncode == 0, (label, name, result.stdout, result.stderr)
+
+
+@requires_postgresql
+def test_the_rename_migrates_over_existing_rows_and_back(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import json
+
+    url = scratch_postgresql_url
+    _migrate_to(repo_root, url, *STATE_BEFORE_RENAME)
+    seeded_run = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_the_rename as seed; seed()",
+    )
+    assert seeded_run.returncode == 0, seeded_run.stderr
+    seeded = json.loads(seeded_run.stdout.strip().splitlines()[-1])
+    charge, operator = seeded["charge"], seeded["operator"]
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _audit_rows(url) == _expected_audit(seeded, "one_off_charge")
+    assert _one(
+        url,
+        "SELECT operator_id::text, lease_id::text, category, collection, description, status "
+        "FROM one_off_charges",
+    ) == (operator, seeded["lease"], "setup", "none", "Rename deposit", "owed")
+    assert _one(url, "SELECT kind, one_off_charge_id::text FROM payments") == ("one_off", charge)
+    assert _one(url, "SELECT one_off_charge_id::text FROM invoices") == (charge,)
+    assert _one(url, "SELECT setup_charge_id::text FROM deposit_resolutions") == (charge,)
+    assert _jobs(url) == [
+        ("one_off_payment_mark", "one_off_charge"),
+        ("one_off_payment_retry_mark", "one_off_charge"),
+    ]
+    assert _one(url, APPEND_ONLY_STATE) == ("O",)  # enabled
+
+    _migrate_to(repo_root, url, *STATE_BEFORE_RENAME)
+    assert _audit_rows(url) == _expected_audit(seeded, "setup_charge")
+    assert _one(url, "SELECT lease_id::text, status FROM setup_charges") == (
+        seeded["lease"],
+        "owed",
+    )
+    assert _one(url, "SELECT kind, setup_charge_id::text FROM payments") == ("setup", charge)
+    assert _one(url, "SELECT setup_charge_id::text FROM invoices") == (charge,)
+    assert _one(url, "SELECT setup_charge_id::text FROM deposit_resolutions") == (charge,)
+    assert _jobs(url) == [
+        ("setup_payment_mark", "setup_charge"),
+        ("setup_payment_retry_mark", "setup_charge"),
+    ]
+    assert _one(url, APPEND_ONLY_STATE) == ("O",)  # enabled
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _audit_rows(url) == _expected_audit(seeded, "one_off_charge")
 
 
 # --- Row 2 --------------------------------------------------------------------------

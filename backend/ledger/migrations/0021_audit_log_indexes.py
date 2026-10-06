@@ -8,7 +8,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ledger", "0018_guard_bidi_marks"),
+        ("ledger", "0020_guard_bidi_marks"),
     ]
 
     operations = [

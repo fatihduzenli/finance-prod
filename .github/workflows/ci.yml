@@ -143,6 +143,41 @@ jobs:
             --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG" \
             || echo "update returned an error; verifying the revision instead"
 
+      # The web revision applies the migrations when it starts (deploy_migrate), so the
+      # worker and the reconcile job move to the new image only once an active web
+      # revision on this commit is Healthy and Running: new code never runs against the
+      # old schema (staging incident of 2026-10-06). Read-only az query, the live()
+      # of the verification step below; after 10 minutes the job fails here and neither
+      # the worker nor the reconcile job is updated.
+      - name: Wait for the web revision to be live on this commit
+        env:
+          WEB_APP_NAME: ${{ vars.WEB_APP_NAME }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          live() {
+            az containerapp revision list \
+              --name "$1" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "[?properties.active && ends_with(properties.template.containers[0].image, ':$IMAGE_TAG') && properties.healthState == 'Healthy' && starts_with(properties.runningState, 'Running')] | length(@)" \
+              --output tsv 2>/dev/null || echo 0
+          }
+          deadline=$(( $(date +%s) + 600 ))
+          while :; do
+            web="$(live "$WEB_APP_NAME")"
+            echo "live web revisions on $IMAGE_TAG: ${web:-0}"
+            if [ "${web:-0}" -ge 1 ]; then
+              echo "web runs this commit, Healthy and Running; rolling the worker and the reconcile job"
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "the web revision on this commit is not live after 10 minutes; the worker and the reconcile job were not updated" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+
       - name: Roll the worker container app onto the new image
         env:
           ACR_NAME: ${{ vars.ACR_NAME }}
@@ -158,7 +193,7 @@ jobs:
             || echo "update returned an error; verifying the revision instead"
 
       # The scheduled reconciliation job (PLAN-010 D5, D13) runs the same image; the next
-      # firing after this update uses it. Same tolerance as the two updates above.
+      # firing after this update uses it. Same tolerance as the other two updates.
       - name: Roll the reconcile job onto the new image
         env:
           ACR_NAME: ${{ vars.ACR_NAME }}

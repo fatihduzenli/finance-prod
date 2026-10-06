@@ -1202,7 +1202,7 @@ def test_an_operator_level_charge_is_on_a_row_without_a_store_that_carries_no_co
 
 LEDGER_BEFORE = ("ledger", "0016_store_cost_corrections")
 PAYMENTS_BEFORE = ("payments", "0009_setup_payment_retry_mark")
-RENAME = importlib.import_module("ledger.migrations.0017_one_off_charges")
+RENAME = importlib.import_module("ledger.migrations.0018_one_off_charges_rows")
 
 
 def _migrate(*targets: tuple[str, str]) -> Any:

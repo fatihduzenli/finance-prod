@@ -696,3 +696,15 @@ the login page myself." The condition for starting Prompt 4 is met.
   reference; a wire payment marks it paid with the memo; a second charge cancelled shows
   **DELETED** in Stax (there is no "voided" for an invoice); `/audit/` filtered by
   `document.uploaded` shows the owner's uploads and a billing user gets 403.
+
+## Update, 2026-10-06, PLAN-010d push failed at the migration; fixed, awaiting a new push
+
+- Owner typed "push"; `main` at `4b855f9`. CI tests green; the web revision 0000031 failed to
+  start: `ledger.0017` was refused by PostgreSQL (`cannot ALTER TABLE "audit_log" because it has
+  pending trigger events`); rolled back; **staging web still runs 10c (revision 0000030) on
+  `ledger.0016`**. The worker and the reconcile job were rolled onto the new image before the
+  web wait and run new code against the old schema until the next deployment (staging only).
+- Cause and fix in the QA-010d addendum: migrations split into schema / rows / constraints with
+  `SET CONSTRAINTS ALL IMMEDIATE` before the trigger is re-enabled; a seeded PostgreSQL round-trip
+  test that reproduces the staging error; CI now waits for the web revision before touching the
+  worker and the job. Full gate re-run (table in the addendum). **Needs a new "push".**

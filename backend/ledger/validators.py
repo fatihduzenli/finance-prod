@@ -35,7 +35,7 @@ ROUTING_ACCOUNT_MAX_GAP = 20
 #: (PLAN-010d Batch A finding): left-to-right and right-to-left marks (U+200E, U+200F),
 #: the embeddings, overrides and pop (U+202A to U+202E) and the isolates (U+2066 to
 #: U+2069). The database function ``finance_contains_card_number`` removes the same
-#: characters (migration ``ledger.0018``).
+#: characters (migration ``ledger.0020``).
 INVISIBLE_CHARACTERS = (
     "\u200b\u200c\u200d\u2060\ufeff"
     "\u200e\u200f"

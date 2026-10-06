@@ -1,19 +1,22 @@
-"""One-off charge jobs (docs/qa/PLAN-010d-one-off-charges-and-audit-page.md D1 to D3, D6).
+"""One-off charge jobs, the schema (docs/qa/PLAN-010d-one-off-charges-and-audit-page.md D1
+to D3, D6).
 
 The job kinds ``setup_payment_mark`` and ``setup_payment_retry_mark`` become
 ``one_off_payment_mark`` and ``one_off_payment_retry_mark``, and the job entity type
-``setup_charge`` becomes ``one_off_charge``; existing job rows are rewritten. New kinds:
-``invoice_create``, ``invoice_send``, ``invoice_delete``, ``schedule_create`` and
-``schedule_delete``. Only the closed lists of the CHECK constraints and the rows
-change; no column or trigger. The reverse rewrites the rows back and refuses while a
-job of a new kind exists.
+``setup_charge`` becomes ``one_off_charge``. New kinds: ``invoice_create``,
+``invoice_send``, ``invoice_delete``, ``schedule_create`` and ``schedule_delete``. Only
+the closed lists of the CHECK constraints and the rows change; no column or trigger.
+
+Three migrations, each in its own transaction, so that ``jobs`` is never altered after
+rows of it were updated in the same transaction (PostgreSQL refuses that with "pending
+trigger events" once a deferred foreign-key check of ``requested_by`` is queued): this
+one drops the two CHECK constraints and updates no row, ``0011_one_off_jobs_rows`` only
+rewrites the rows, ``0012_one_off_jobs_constraints`` adds the new CHECK constraints.
 """
 
 from __future__ import annotations
 
-from django.apps.registry import Apps
 from django.db import migrations, models
-from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 RENAMED_KINDS: dict[str, str] = {
     "setup_payment_mark": "one_off_payment_mark",
@@ -28,7 +31,6 @@ NEW_KINDS: tuple[str, ...] = (
 )
 OLD_ENTITY = "setup_charge"
 NEW_ENTITY = "one_off_charge"
-CANNOT_REVERSE = "Jobs of the one-off invoice kinds exist; this migration refuses to reverse."
 
 KINDS_BEFORE = [
     "operator_sync",
@@ -57,22 +59,6 @@ ENTITIES = [
     "reconciliation",
     NEW_ENTITY,
 ]
-
-
-def forwards(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    job = apps.get_model("payments", "Job")
-    for old, new in RENAMED_KINDS.items():
-        job.objects.filter(kind=old).update(kind=new)
-    job.objects.filter(entity_type=OLD_ENTITY).update(entity_type=NEW_ENTITY)
-
-
-def backwards(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    job = apps.get_model("payments", "Job")
-    if job.objects.filter(kind__in=NEW_KINDS).exists():
-        raise RuntimeError(CANNOT_REVERSE)
-    for old, new in RENAMED_KINDS.items():
-        job.objects.filter(kind=new).update(kind=old)
-    job.objects.filter(entity_type=NEW_ENTITY).update(entity_type=OLD_ENTITY)
 
 
 class Migration(migrations.Migration):
@@ -134,19 +120,6 @@ class Migration(migrations.Migration):
                     ("schedule_delete", "Delete the provider schedule"),
                 ],
                 max_length=32,
-            ),
-        ),
-        migrations.RunPython(forwards, backwards, elidable=False),
-        migrations.AddConstraint(
-            model_name="job",
-            constraint=models.CheckConstraint(
-                condition=models.Q(("kind__in", KINDS)), name="jobs_kind_valid"
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="job",
-            constraint=models.CheckConstraint(
-                condition=models.Q(("entity_type__in", ENTITIES)), name="jobs_entity_type_valid"
             ),
         ),
     ]

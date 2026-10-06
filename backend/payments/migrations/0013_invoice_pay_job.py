@@ -31,7 +31,7 @@ def backwards(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("payments", "0010_one_off_jobs"),
+        ("payments", "0012_one_off_jobs_constraints"),
     ]
 
     # The check runs last forwards, so it runs first in reverse, before the old CHECK

@@ -50,7 +50,7 @@ def backwards(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ledger", "0017_one_off_charges"),
+        ("ledger", "0019_one_off_charges_constraints"),
     ]
 
     operations = [

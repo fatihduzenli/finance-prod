@@ -337,15 +337,15 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0014_store_costs_deposit_resolutions",
         "ledger.migrations.0015_documents_reshape",
         "ledger.migrations.0016_store_cost_corrections",
-        "ledger.migrations.0017_one_off_charges",
+        "ledger.migrations.0019_one_off_charges_constraints",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",
         "payments.migrations.0007_reconciliation",
     ):
         triggers.update(importlib.import_module(module).GUARDED_COLUMNS)
-    # ledger 0017 renamed ``setup_charges`` to ``one_off_charges`` and replaced its trigger
-    # (PLAN-010d D1): the old table's entry names a table that no longer exists.
+    # ledger 0017 renamed ``setup_charges`` to ``one_off_charges`` and 0019 replaced its
+    # trigger (PLAN-010d D1): the old table's entry names a table that no longer exists.
     del triggers["setup_charges"]
     expected = {f"{table}.{column}" for table, columns in triggers.items() for column in columns}
     assert set(GUARDED_IDS) == expected
@@ -668,7 +668,7 @@ def test_database_function_agrees_with_the_validator_on_the_amended_alphabet() -
     assert disagreements == []
 
 
-# --- Bidirectional marks (PLAN-010d Batch A finding, ledger 0018) --------------------------
+# --- Bidirectional marks (PLAN-010d Batch A finding, ledger 0020) --------------------------
 
 BIDI_MARKS = [
     chr(code) for code in (0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A))
