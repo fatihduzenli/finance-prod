@@ -730,3 +730,9 @@ the login page myself." The condition for starting Prompt 4 is met.
   QA `docs/qa/QA-010d-a-invoice-date-format.md`: PASS. TODO-VERIFY-026 part answered.
 - After the deploy the owner presses the single **Retry** on `INV-2026-0003`; the retry first
   looks for an invoice Stax may already hold with that reference (none exists), then creates.
+
+## Update, 2026-10-06, PLAN-010d-a on staging
+
+- Owner typed "push". `main` at `6f153de`; CI run 37414601899 green (web first, then worker and
+  job; all three on the commit). Web and worker healthy; `/healthz` 200. The owner now presses
+  the single Retry on `INV-2026-0003`.
