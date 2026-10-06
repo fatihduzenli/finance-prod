@@ -811,3 +811,13 @@ the login page myself." The condition for starting Prompt 4 is met.
 - **Owner, in writing:** the brand folder is theirs (misnamed by Finder); the six Monvera brand
   files now sit in `static/brand/`, **uncommitted by instruction**, for Prompt 12c. Every commit
   until then excludes `static/brand/`.
+
+## Update, 2026-10-06, PLAN-011b pushed; infrastructure deployment pending
+
+- Owner typed "push". `main` at `698e6c4`; CI tests green; web revision
+  `finance-staging-web--0000035` Healthy and Running on the commit (`deploy_migrate` applied
+  ledger 0023–0027 and payments 0014; environment check ok; `/healthz` 200); worker revision
+  0000007 and the reconcile job on the commit. The CI verification ended red because the daily
+  job `finance-staging-daily` does not exist until the Bicep deployment (expected; documented
+  in the plan). The app now keeps New York days.
+- Next: "deploy" with `mailEnabled=false`; then `tz_audit` (read-only) and the owner's clicks.
