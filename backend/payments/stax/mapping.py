@@ -77,10 +77,21 @@ def money_string(value: Decimal) -> str:
 
 
 def iso_date(value: date) -> str:
-    # TODO-VERIFY-026: the date format Stax expects in body and query fields
-    # (invoice_date_at, due_at, start_date, end_date, startDate, endDate). ISO 8601
-    # (YYYY-MM-DD) is assumed.
+    # TODO-VERIFY-026: the date format of the query fields (start_date, end_date,
+    # startDate, endDate). ISO 8601 (YYYY-MM-DD) is assumed; staging has accepted it.
+    # The body fields invoice_date_at and due_at are not dates: see stax_datetime.
     return value.isoformat()
+
+
+def stax_datetime(value: date, *, end_of_day: bool) -> str:
+    """``date(2026, 10, 16)`` -> ``"2026-10-16 00:00:00"`` or ``"2026-10-16 23:59:59"``.
+
+    TODO-VERIFY-026 (body fields, resolved 2026-10-06): ``invoice_date_at`` and ``due_at``
+    are ``Y-m-d H:i:s`` (date, a space, time, no timezone). Staging refused a bare
+    ``YYYY-MM-DD`` in both with a 422; the create-an-invoice example is
+    ``"due_at": "2025-12-19 23:59:59"`` and Stax's own webhook bodies use the same shape.
+    """
+    return f"{value.isoformat()} {'23:59:59' if end_of_day else '00:00:00'}"
 
 
 def encode_json(value: object) -> bytes:
@@ -209,9 +220,9 @@ def invoice_body(invoice: InvoiceInput, payment_page_url: str) -> Body:
         "is_partial_payment_enabled": False,
     }
     if invoice.invoice_date is not None:
-        body["invoice_date_at"] = iso_date(invoice.invoice_date)
+        body["invoice_date_at"] = stax_datetime(invoice.invoice_date, end_of_day=False)
     if invoice.due_on is not None:
-        body["due_at"] = iso_date(invoice.due_on)
+        body["due_at"] = stax_datetime(invoice.due_on, end_of_day=True)
     return body
 
 
@@ -229,7 +240,7 @@ def invoice_update_body(update: InvoiceUpdate) -> Body:
     if update.memo is not None:
         body.setdefault("meta", {})["memo"] = update.memo
     if update.due_on is not None:
-        body["due_at"] = iso_date(update.due_on)
+        body["due_at"] = stax_datetime(update.due_on, end_of_day=True)
     return body
 
 

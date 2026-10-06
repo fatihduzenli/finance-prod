@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from django.test import Client, override_settings
+from django.utils import timezone
 
 from accounts import registry
 from accounts.roles import Role
@@ -383,7 +384,11 @@ def test_enable_through_the_screen_then_a_second_click_creates_nothing(
     assert CollectionSchedule.objects.filter(state=ScheduleState.ACTIVE).count() == 2
     page = admin.get(route["detail"]).content.decode()
     assert service.ALREADY_ENABLED in page
-    assert "Active" in page and "2026-10-05" in page and "2026-10-20" in page
+    # The first debit of each day is the next such day after now, whatever day it is.
+    now = timezone.now()
+    for day in (5, 20):
+        assert service.next_debit_at(day, now).date().isoformat() in page
+    assert "Active" in page
     for ref in ExternalRef.objects.filter(external_kind="schedule"):
         assert ref.external_id not in page  # masked: first four and last four only
 

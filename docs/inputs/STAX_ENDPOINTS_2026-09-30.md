@@ -113,3 +113,12 @@ Anything not in this file is unverified and must be `TODO-VERIFY` in code.
 == get-self-and-teams-info: GET /self
 == team-summary: GET /query/statistics/teamSummary
 ```
+
+## Observed 2026-10-06: date-time shape of invoice body fields
+
+`POST /invoice` rejected `invoice_date_at` and `due_at` given as `YYYY-MM-DD` (422 naming both
+fields; staging, PLAN-010d click 1). The accepted shape is `Y-m-d H:i:s` with a space and no
+timezone: the spec's response example `"due_at": "2025-12-19 23:59:59"`, and the invoice objects
+Stax sent by webhook (`"invoice_date_at": "2026-10-02 20:50:23"`). The app now sends
+`invoice_date_at` as `YYYY-MM-DD 00:00:00` and `due_at` as `YYYY-MM-DD 23:59:59`. Query-string
+dates on the list calls stay `YYYY-MM-DD`, which staging accepts.

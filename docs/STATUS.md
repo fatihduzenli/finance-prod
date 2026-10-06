@@ -719,3 +719,14 @@ the login page myself." The condition for starting Prompt 4 is met.
   the reconcile job uses the image. The worker and job are back in step with the schema.
 - Next: the owner's 10d done-when clicks (RUNBOOK §13). Reminder: a cancelled charge shows
   `DELETED` in Stax.
+
+## Update, 2026-10-06, PLAN-010d-a: invoice body dates
+
+- **Owner, in writing:** 10d click 1 failed at the Stax call: `ProviderRejected (fields: due_at,
+  invoice_date_at)` on `INV-2026-0003`; no invoice at Stax; the owner has not retried.
+- Cause: we sent `YYYY-MM-DD`; Stax wants `Y-m-d H:i:s` (spec example `2025-12-19 23:59:59`;
+  Stax's own webhook bodies `2026-10-02 20:50:23`). Fixed in `mapping.py`
+  (`invoice_date_at` start of day, `due_at` 23:59:59); the 422 pinned through the real transport.
+  QA `docs/qa/QA-010d-a-invoice-date-format.md`: PASS. TODO-VERIFY-026 part answered.
+- After the deploy the owner presses the single **Retry** on `INV-2026-0003`; the retry first
+  looks for an invoice Stax may already hold with that reference (none exists), then creates.

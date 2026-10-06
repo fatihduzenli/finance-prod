@@ -322,7 +322,7 @@ def test_create_invoice_body_is_ach_only_with_exact_money() -> None:
             "reference": "r1",
         },
         "is_partial_payment_enabled": False,
-        "due_at": "2026-10-01",
+        "due_at": "2026-10-01 23:59:59",
     }
     assert record.total == D("12581.00")
     assert record.raw_status == "DRAFT"
@@ -502,6 +502,70 @@ def test_the_staging_email_receipt_rejection_is_a_provider_rejected_naming_the_f
         )
     assert caught.value.error_fields == ("email_receipt",)
     assert len(rig.recorder.requests) == 1
+
+
+# --- Staging 2026-10-06: invoice_date_at and due_at are "Y-m-d H:i:s" -------------------
+
+#: The 422 messages Stax gives for a bare date in each body field (Laravel style).
+DATE_TIME_REJECTION = {
+    "due_at": ["The due at does not match the format Y-m-d H:i:s."],
+    "invoice_date_at": ["The invoice date at does not match the format Y-m-d H:i:s."],
+}
+STAX_DATE_TIME = re.compile(r"\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\Z")
+
+
+def _stax_like_date_time_check(request: httpx.Request) -> httpx.Response:
+    """Answers as Stax does: 422 naming each date field that is not ``Y-m-d H:i:s``."""
+    body = json.loads(request.content)
+    refused = {
+        key: message
+        for key, message in DATE_TIME_REJECTION.items()
+        if key in body and not STAX_DATE_TIME.match(str(body[key]))
+    }
+    if refused:
+        return httpx.Response(422, json=refused)
+    return httpx.Response(200, json={"id": "inv-1", "status": "DRAFT", "total": "12581.00"})
+
+
+@pytest.mark.parametrize(
+    ("end_of_day", "expected"), [(False, "2026-10-06 00:00:00"), (True, "2026-10-06 23:59:59")]
+)
+def test_stax_datetime_is_date_space_time(end_of_day: bool, expected: str) -> None:
+    assert mapping.stax_datetime(date(2026, 10, 6), end_of_day=end_of_day) == expected
+
+
+def test_the_mock_refuses_a_bare_date_in_both_fields_with_a_provider_rejected() -> None:
+    rig = make_rig(_stax_like_date_time_check)
+    old_shape = {"customer_id": "cus-1", "invoice_date_at": "2026-10-06", "due_at": "2026-10-16"}
+    with pytest.raises(ProviderRejected) as caught:
+        rig.transport.send(Method.POST, adapter.INVOICES, json=old_shape, idempotent=False)
+    assert caught.value.status == 422
+    assert caught.value.error_fields == ("due_at", "invoice_date_at")
+    assert len(rig.recorder.requests) == 1
+
+
+def test_create_invoice_sends_date_times_stax_accepts() -> None:
+    rig = make_rig(_stax_like_date_time_check)
+    record = StaxProvider(rig.transport).create_invoice(
+        InvoiceInput("cus-1", _amounts(), due_on=date(2026, 10, 16), invoice_date=date(2026, 10, 6))
+    )
+    [request] = rig.recorder.requests
+    body = _body(request)
+    assert isinstance(body, dict)
+    assert body["invoice_date_at"] == "2026-10-06 00:00:00"
+    assert body["due_at"] == "2026-10-16 23:59:59"
+    assert (record.external_id, record.raw_status) == ("inv-1", "DRAFT")
+
+
+def test_update_invoice_sends_due_at_as_end_of_day() -> None:
+    rig = make_rig(_stax_like_date_time_check)
+    StaxProvider(rig.transport).update_invoice("inv-1", InvoiceUpdate(due_on=date(2026, 10, 16)))
+    [request] = rig.recorder.requests
+    assert (request.method, request.url.path) == ("PUT", "/invoice/inv-1")
+    assert _body(request) == {"due_at": "2026-10-16 23:59:59"}
+    assert mapping.invoice_update_body(InvoiceUpdate(due_on=date(2026, 10, 16))) == {
+        "due_at": "2026-10-16 23:59:59"
+    }
 
 
 def test_send_email_body_is_cc_emails() -> None:
