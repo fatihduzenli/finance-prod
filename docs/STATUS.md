@@ -770,3 +770,13 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Rollout: one "push" (migration ledger 0022, indexes only). No infrastructure change.
 - Deferred by written decision: `TIME_ZONE` and settlement dates (note above); the Google Sheet
   push stays unbuilt (amendment 7).
+
+## Update, 2026-10-06, PLAN-011 on staging
+
+- Owner typed "push". `main` at `aebcd68`; CI run 37509045369 green (web first, then worker and
+  job; all three on the commit). Web revision `finance-staging-web--0000034` Healthy and Running;
+  migration 0022 applied; environment check ok; `/healthz` 200; `app.css` served; the manifest and
+  `/sw.js` answer 401 to a signed-out request (by design) and every page carries
+  `Cache-Control: private, no-store`.
+- Next: the owner's laptop and phone clicks (RUNBOOK §14), including "Delete provider invoice"
+  on `INV-2026-0004`.
