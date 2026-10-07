@@ -61,13 +61,15 @@ Rules kept here, not in the views:
   note and the form's creation key; :func:`ledger.services.rent_run.payment_refusal`),
   kind ``one_off``; it closes the open promises it keeps
   (:func:`ledger.services.contacts.close_kept_by_payment`, PLAN-012 D4). The provider
-  invoice, when one is linked and the payment covers the whole price, is never marked
-  here: the outcome says ``mark_due`` and the caller queues the ``one_off_payment_mark``
-  job, which runs :func:`mark_provider_invoice` in the worker with the rent rules of
-  :func:`ledger.services.rent_run.mark_charge_invoice`. A partial payment, or one that
-  differs from the invoice total, flags the charge and makes no call. A failed marking is
-  retried by hand (:func:`retry_provider_mark`, the ``one_off_payment_retry_mark`` job),
-  refused for ``RETRY_LOCK_SECONDS`` after the last attempt, as on rent charges.
+  invoice, when one is linked and the payment covers the whole price (on a builder
+  invoice: once the lines' payments together cover the invoice, PLAN-012c-a D2), is
+  never marked here: the outcome says ``mark_due`` and the caller queues the
+  ``one_off_payment_mark`` job, which runs :func:`mark_provider_invoice` in the worker
+  with the rent rules of :func:`ledger.services.rent_run.mark_charge_invoice`. A partial
+  payment, or one that differs from the invoice total, flags the charge and makes no
+  call. A failed marking is retried by hand (:func:`retry_provider_mark`, the
+  ``one_off_payment_retry_mark`` job), refused for ``RETRY_LOCK_SECONDS`` after the last
+  attempt, as on rent charges.
 - **Linking an invoice** (:func:`link_invoice`): the rent rules of
   :func:`ledger.services.rent_run.link_charge_invoice`, with the same sentences.
 - **Re-debit and NSF fee** (PLAN-011b D5; made by :func:`ledger.services.nsf.reschedule`):
@@ -92,11 +94,16 @@ Rules kept here, not in the views:
   (``email`` or ``charge_now``). The invoice is linked to the **first** line's charge and
   its line items name every line's charge (``invoice_line_items.one_off_charge``); the
   later lines are billed with the first exactly as a companion fee is billed with its
-  re-debit (:func:`billed_with`, :func:`billed_companions`): a payment on the invoice is
-  a payment of the first charge and pays the lines in line order, refunds and returns
-  take it back from the last line first; a later line is not cancelled, charged or paid
-  by hand on its own (the first line's cancel voids every line), and is not waived while
-  the invoice is live.
+  re-debit (:func:`billed_with`, :func:`billed_companions`): a payment on the invoice at
+  the provider is a payment of the first charge and pays the lines in line order, what
+  a later line's own payments already paid left out (:func:`allocated_overflow`);
+  refunds and returns take it back from the last line first. Every line's charge has
+  the invoice (:func:`invoices_of`, PLAN-012c-a D1): its page shows it, Link invoice is
+  refused and Waive is refused while it is live. A later line is not cancelled or
+  charged now on its own (the first line's cancel voids every line), but a manual
+  payment may be recorded on any line, up to that line's balance (PLAN-012c-a D2): the
+  invoice is marked paid at the provider once the lines' payments together cover it
+  (:func:`invoice_covered`), and the marking clears every line's marking flag.
 
 Every write is audited (entity ``one_off_charge``); provider identifiers are masked.
 Money is ``Decimal`` throughout.
@@ -115,7 +122,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, Sum
+from django.db.models import Exists, OuterRef, Q, QuerySet, Sum
 from django.db.models.functions import Trim, Upper
 from django.utils import timezone
 
@@ -243,6 +250,10 @@ DELETE_INVOICE_NOT_WAIVED = (
 DELETE_INVOICE_NONE = (
     f"This charge has no live {payments.PROVIDER_LABEL} invoice. Nothing was changed."
 )
+DELETE_INVOICE_SHARED = (
+    f"This {payments.PROVIDER_LABEL} invoice also bills charges that are not waived: cancel "
+    "it from its first line's charge. Nothing was changed."
+)
 DELETE_INVOICE_REQUESTED = (
     "Delete requested. The invoice is marked void once the payment provider confirms the "
     "delete; the charge stays waived."
@@ -314,10 +325,6 @@ CANCEL_LINE = (
 LINK_LINE = (
     "This charge is a later line of a multi-line invoice: it is billed on its first line's "
     "invoice. Nothing was linked."
-)
-PAY_LINE = (
-    "This charge is a later line of a multi-line invoice: record the payment on the "
-    "invoice's first line's charge, which pays the lines in order. Nothing was recorded."
 )
 CANCEL_BUSY = (
     "A request to the payment provider is already waiting for this charge. Nothing was changed."
@@ -493,6 +500,12 @@ def _live(invoice: Invoice) -> bool:
     return invoice.internal_status != InvoiceStatus.VOID and not deleted
 
 
+def invoices_of(charge: OneOffCharge) -> QuerySet[Invoice]:
+    """The charge's invoices, by issue date and number: those linked to it and the
+    builder invoice whose line item names it (PLAN-012c-a D1)."""
+    return rent_run.charge_invoices(charge)
+
+
 def live_provider_invoice(charge: OneOffCharge) -> tuple[Invoice, str] | None:
     """The charge's invoice with a current provider reference when it is live, and that
     reference; ``None`` otherwise (PLAN-011 D0)."""
@@ -513,7 +526,9 @@ def waived_with_live_invoice() -> list[OneOffCharge]:
         superseded_at__isnull=True,
     )
     live = (
-        Invoice.objects.filter(one_off_charge=OuterRef("pk"))
+        Invoice.objects.filter(
+            Q(one_off_charge=OuterRef("pk")) | Q(line_items__one_off_charge=OuterRef("pk"))
+        )
         .exclude(internal_status=InvoiceStatus.VOID)
         .annotate(shown=Upper(Trim("provider_status")))
         .exclude(shown=invoice_sync.PROVIDER_DELETED)
@@ -538,7 +553,8 @@ def review_message(charge: OneOffCharge) -> str:
     if not charge.needs_review:
         return ""
     parts = []
-    if charge.invoices.exclude(total=billed_total(charge)).exists():
+    # A later line's invoice bills its first line's total (PLAN-012c-a D1).
+    if invoices_of(charge).exclude(total=billed_total(billed_with(charge) or charge)).exists():
         parts.append(TOTAL_MISMATCH)
     if _flagged_by(charge, ONE_OFF.action("linked_total_differs")):
         parts.append(rent_run.LINKED_TOTAL_DIFFERS)
@@ -1040,7 +1056,7 @@ def cancel_job_kind(charge: OneOffCharge) -> str:
     generated its invoice yet; ``invoice_delete`` otherwise."""
     if (
         charge.collection == CollectionMethod.AUTOPAY_DUE
-        and not charge.invoices.exists()
+        and not invoices_of(charge).exists()
         and provider_schedule(charge)
     ):
         return JobKind.SCHEDULE_DELETE
@@ -1087,8 +1103,15 @@ def delete_invoice_refusal(charge: OneOffCharge) -> str:
     """Why the invoice of the charge cannot be deleted by the remedy now, or ``""``."""
     if charge.status != OneOffChargeStatus.WAIVED:
         return DELETE_INVOICE_NOT_WAIVED
-    if live_provider_invoice(charge) is None:
+    linked = live_provider_invoice(charge)
+    if linked is None:
         return DELETE_INVOICE_NONE
+    if any(
+        line.status not in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
+        for line in invoice_charges(linked[0])
+    ):
+        # A builder invoice billing other lines too (PLAN-012c-a D1).
+        return DELETE_INVOICE_SHARED
     return ""
 
 
@@ -1128,7 +1151,7 @@ def mark_waived_invoice_deleted(
         if charge.status != OneOffChargeStatus.WAIVED:
             return Outcome(False, DELETE_INVOICE_NOT_WAIVED)
         before = charge_state(charge)
-        charge.invoices.exclude(internal_status=InvoiceStatus.VOID).update(
+        invoices_of(charge).exclude(internal_status=InvoiceStatus.VOID).update(
             internal_status=InvoiceStatus.VOID, updated_at=timezone.now()
         )
         _audit(actor, WAIVED_INVOICE_DELETED_ACTION, charge, before, {**before, **context})
@@ -1373,7 +1396,7 @@ def mark_voided(
         charge.voided_by = actor
         charge.void_note = note
         charge.save(update_fields=["status", "voided_at", "voided_by", "void_note", "updated_at"])
-        charge.invoices.exclude(internal_status=InvoiceStatus.VOID).update(
+        invoices_of(charge).exclude(internal_status=InvoiceStatus.VOID).update(
             internal_status=InvoiceStatus.VOID, updated_at=timezone.now()
         )
         _audit(
@@ -1447,8 +1470,13 @@ def record_payment(
 
     Never calls the provider: when the charge has a provider invoice and the payment
     covers the whole price at its total, the outcome has ``mark_due=True`` and the
-    caller queues :func:`mark_provider_invoice` for the worker. ``creation_key`` is kept
-    in the audit row and looked up under the charge's row lock.
+    caller queues :func:`mark_provider_invoice` for the worker. On a builder invoice
+    (any line, PLAN-012c-a D2) the rule is the invoice's: ``mark_due`` once the lines'
+    payments together cover it (:func:`invoice_covered`), the partial-amount flag on
+    the paying charge before. The amount is at most the charge's balance: a later line's
+    own price less what it was paid, never more. ``creation_key`` is kept in the audit
+    row and looked up under the charge's row lock (on a builder invoice, every line's
+    lock, first line first).
     """
     text = visible_text(note or "")
     reference = (reference or "").strip()
@@ -1456,19 +1484,15 @@ def record_payment(
     if refused is not None:
         return refused
     with transaction.atomic():
-        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        charge = lock_lines(charge_id)
         if creation_key is not None and _payment_for_key(charge, creation_key):
             return PaymentOutcome(True, PAY_ALREADY, replayed=True)
         if charge.status == OneOffChargeStatus.WAIVED:
             return PaymentOutcome(False, PAY_WAIVED)
         if charge.status == OneOffChargeStatus.VOIDED:
             return PaymentOutcome(False, PAY_VOIDED)
-        if is_later_line(charge):
-            return PaymentOutcome(False, PAY_LINE)
-        # What the charge's invoice bills: its price and its billed companions' or later
-        # lines' (PLAN-011b D5, PLAN-012 D6), which the payment pays in order.
-        billed = billed_total(charge)
-        balance = billed - paid_in(charge)
+        billed, collected = _billed_and_collected(charge)
+        balance = billed - collected
         if balance <= 0:
             return PaymentOutcome(False, PAY_NOTHING_DUE)
         if amount > balance:
@@ -1532,11 +1556,43 @@ def record_payment(
             return PaymentOutcome(
                 True, PAY_RECORDED, payment=payment, provider=MarkResult(MarkAction.NO_INVOICE)
             )
-        if not (whole and linked[0].total == amount):
-            reason = offline_marking.PARTIAL_AMOUNT if not whole else offline_marking.TOTAL_DIFFERS
+        reason = _not_marked_reason(linked[0], whole=whole, amount=amount)
+        if reason:
             result = rent_run.not_updated(ONE_OFF, charge, payment, linked, reason, actor)
             return PaymentOutcome(True, PAY_RECORDED, payment=payment, provider=result)
     return PaymentOutcome(True, PAY_RECORDED, payment=payment, mark_due=True)
+
+
+def _billed_and_collected(charge: OneOffCharge) -> tuple[Decimal, Decimal]:
+    """What a manual payment on ``charge`` may pay at most, as what is billed and what
+    was collected of it. A charge billed with another (a later line or a companion fee):
+    its price and what it holds (its own payments and its share of the other's). Any
+    other charge: what its invoice bills (its price and its billed companions' or later
+    lines', PLAN-011b D5, PLAN-012 D6), which the payment pays in order, and what was
+    paid on it and on those companions or lines themselves (PLAN-012c-a D2)."""
+    if billed_with(charge) is not None:
+        return Decimal(charge.price), paid_in(charge) + allocated_overflow(charge)
+    companions = billed_companions(charge)
+    collected = paid_in(charge) + sum((paid_in(row) for row in companions), ZERO)
+    return billed_total(charge), collected
+
+
+def _not_marked_reason(invoice: Invoice, *, whole: bool, amount: Decimal) -> str:
+    """Why the provider invoice is not marked after a manual payment (the flag text of
+    :mod:`payments.offline_marking`), or ``""`` to mark it. A builder invoice is marked
+    once :func:`invoice_covered`, when its total is what its lines bill (PLAN-012c-a
+    D2); any other invoice when the payment pays the whole charge at the invoice's total."""
+    if is_builder_invoice(invoice):
+        if not invoice_covered(invoice):
+            return offline_marking.PARTIAL_AMOUNT
+        if invoice.total != invoice_billed(invoice):
+            return offline_marking.TOTAL_DIFFERS
+        return ""
+    if not whole:
+        return offline_marking.PARTIAL_AMOUNT
+    if invoice.total != amount:
+        return offline_marking.TOTAL_DIFFERS
+    return ""
 
 
 def mark_provider_invoice(
@@ -1651,6 +1707,75 @@ def is_later_line(charge: OneOffCharge) -> bool:
     )
 
 
+def is_builder_invoice(invoice: Invoice) -> bool:
+    """Whether the invoice builder made ``invoice``: its line items name its charges."""
+    return InvoiceLineItem.objects.filter(invoice=invoice, one_off_charge__isnull=False).exists()
+
+
+def invoice_charges(invoice: Invoice) -> list[OneOffCharge]:
+    """The charges ``invoice`` bills, whatever their status: the charge it is linked to,
+    then its line items' charges in line order (PLAN-012c-a D1)."""
+    lines = list(
+        OneOffCharge.objects.filter(invoice_lines__invoice=invoice).order_by(
+            "invoice_lines__position"
+        )
+    )
+    first = invoice.one_off_charge
+    if first is None:
+        return lines
+    return [first, *(line for line in lines if line.pk != first.pk)]
+
+
+def _billed_lines(invoice: Invoice) -> list[OneOffCharge]:
+    return [
+        row
+        for row in invoice_charges(invoice)
+        if row.status not in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
+    ]
+
+
+def invoice_billed(invoice: Invoice) -> Decimal:
+    """What ``invoice`` bills: the prices of its charges neither waived nor voided (as
+    :func:`billed_total` counts them)."""
+    return sum((Decimal(row.price) for row in _billed_lines(invoice)), ZERO)
+
+
+def invoice_covered(invoice: Invoice) -> bool:
+    """Whether the settled payments (less settled refunds) on the charges ``invoice``
+    bills, waived and voided lines left out, reach what it bills (:func:`invoice_billed`;
+    PLAN-012c-a D2). Pending payments never count."""
+    lines = _billed_lines(invoice)
+    billed = sum((Decimal(row.price) for row in lines), ZERO)
+    return billed > 0 and sum((paid_in(row) for row in lines), ZERO) >= billed
+
+
+def lock_lines(charge_id: uuid.UUID) -> OneOffCharge:
+    """The charge under its row lock. A line of a builder invoice takes the locks of
+    every line of that invoice first, first line first and then in line order (the order
+    :func:`refresh_companions` takes them in), so payments on two lines are serialised
+    (PLAN-012c-a D2)."""
+    first_id = (
+        InvoiceLineItem.objects.filter(one_off_charge_id=charge_id)
+        .values_list("invoice__one_off_charge", flat=True)
+        .first()
+    )
+    if first_id is not None:
+        first = OneOffCharge.objects.select_for_update().get(pk=first_id)
+        _later_lines(first, lock=True)
+    return OneOffCharge.objects.select_for_update().get(pk=charge_id)
+
+
+def _marked_siblings(charge: OneOffCharge, invoice: Invoice) -> list[OneOffCharge]:
+    """The other charges of a builder ``invoice`` (any status), whose marking flags are
+    cleared once it is marked paid (PLAN-012c-a D2); locked first line first, as
+    :func:`lock_lines` takes them."""
+    if not is_builder_invoice(invoice):
+        return []
+    ids = [row.pk for row in invoice_charges(invoice) if row.pk != charge.pk]
+    locked = {row.pk: row for row in OneOffCharge.objects.select_for_update().filter(pk__in=ids)}
+    return [locked[pk] for pk in ids if pk in locked]
+
+
 def billed_companions(charge: OneOffCharge) -> list[OneOffCharge]:
     """The charges billed with ``charge`` (PLAN-011b D5, PLAN-012 D6): neither waived
     nor voided, in the order a payment pays them. Empty for any charge but a re-debit or
@@ -1670,16 +1795,19 @@ def billed_total(charge: OneOffCharge) -> Decimal:
 def allocated_overflow(fee: OneOffCharge) -> Decimal:
     """The part of ``fee`` paid by the payments on the charge it is billed with
     (:func:`billed_with`; PLAN-011b D5, PLAN-012 D6): the settled amount beyond that
-    charge's price, less the earlier companions' prices, between zero and the fee's
-    price."""
+    charge's price, less what the earlier companions took, between zero and what the
+    fee's own payments leave of its price (PLAN-012c-a D2: a later line paid on its own
+    takes no more)."""
     source = billed_with(fee)
     if source is None:
         return ZERO
     remaining = paid_in(source) - Decimal(source.price)
     for companion in billed_companions(source):
+        open_part = max(Decimal(companion.price) - paid_in(companion), ZERO)
+        share = max(min(remaining, open_part), ZERO)
         if companion.pk == fee.pk:
-            return max(min(remaining, Decimal(fee.price)), ZERO)
-        remaining -= Decimal(companion.price)
+            return share
+        remaining -= share
     return ZERO
 
 
@@ -1865,5 +1993,11 @@ def _audit(
 
 #: One-off charges, for the shared payment, marking and link rules of the rent run.
 ONE_OFF = rent_run.ChargeKind(
-    OneOffCharge, ENTITY_ONE_OFF_CHARGE, "price", charge_state, billed=billed_total
+    OneOffCharge,
+    ENTITY_ONE_OFF_CHARGE,
+    "price",
+    charge_state,
+    billed=billed_total,
+    locker=lock_lines,
+    siblings=_marked_siblings,
 )

@@ -490,9 +490,14 @@ draft (named `DRAFT-` and eight characters of its id); the draft page offers **P
 **Cancel**. **Send** takes the next `INV-YYYY-NNNN` number, makes **one one-off charge per line**
 (category from the fee type: setup fee, arrears, adjustment, damage, other) and **one Stax invoice
 with all the lines**, which the worker creates and sends by e-mail; the charges show the invoice
-and each other ("billed with"). A payment on that invoice is allocated to the lines in order, so
-a partial payment pays the first line first; the statement, the ledger, the P&L and deposits held
-read the lines, not the payment's first charge. **Charge now** debits the invoice total from the
+and each other ("billed with"). Every line's page shows the invoice and its provider status,
+offers **Record a payment**, and refuses Waive while the Stax invoice is live (PLAN-012c-a). A
+provider payment on the invoice is allocated to the lines in order; a wire, Zelle or other payment
+is recorded on the line it pays. When the lines' settled payments together cover the invoice, the
+Stax invoice is marked paid as cash or check with the memo and the "partial amount" flag clears
+on every line; until then the paying line carries the flag. The statement, the ledger, the P&L
+and deposits held read the lines, not the payment's first charge. The read-only command
+`invoice_line_links --check` lists any builder invoice whose lines and charges disagree. **Charge now** debits the invoice total from the
 operator's linked bank method after the 10d confirmation page (large amounts need the typed
 confirmation; `STAX_PAY_INVOICE_ENABLED` must be on). **Cancel** on a draft deletes nothing in
 Stax (nothing was sent); cancelling a sent invoice is the charge page's cancel as before. Staff

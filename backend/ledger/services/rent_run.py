@@ -84,6 +84,7 @@ from ledger.models import (
     CollectionStatus,
     InsuranceCharge,
     Invoice,
+    InvoiceLineItem,
     Lease,
     LeaseRentHistory,
     OneOffCategory,
@@ -243,6 +244,12 @@ class ChargeKind:
     #: What the charge's invoice bills, when more than its amount (a one-off charge
     #: billed with companions or later lines, PLAN-011b D5, PLAN-012 D6).
     billed: Callable[[Any], Decimal] | None = None
+    #: Takes the charge's row lock, and first those of the charges billed on the same
+    #: invoice when it shares one (a builder invoice's lines, PLAN-012c-a D2).
+    locker: Callable[[uuid.UUID], Any] | None = None
+    #: The other charges billed on ``invoice`` with the charge, under their row locks:
+    #: their marking flags are cleared once the invoice is marked (PLAN-012c-a D2).
+    siblings: Callable[[Any, Invoice], list[Any]] | None = None
 
     def action(self, reason: str) -> str:
         return f"{self.entity}.{reason}"
@@ -255,6 +262,9 @@ class ChargeKind:
         return self.billed(charge) if self.billed is not None else self.amount(charge)
 
     def lock(self, charge_id: uuid.UUID) -> ChargeRow:
+        if self.locker is not None:
+            locked: ChargeRow = self.locker(charge_id)
+            return locked
         return self.model._default_manager.select_for_update().get(pk=charge_id)
 
     @property
@@ -1181,9 +1191,23 @@ def _last_mark_event(charge: ChargeRow, kind: ChargeKind) -> AuditLog | None:
     )
 
 
+def charge_invoices(charge: ChargeRow) -> QuerySet[Invoice]:
+    """The charge's invoices by issue date and number. A one-off charge's are the
+    invoices linked to it and the invoice whose line item names it, so a later line of a
+    builder invoice has that invoice (PLAN-012c-a D1); a rent charge's are its own."""
+    if isinstance(charge, OneOffCharge):
+        rows = Invoice.objects.filter(
+            Q(one_off_charge=charge)
+            | Q(pk__in=InvoiceLineItem.objects.filter(one_off_charge=charge).values("invoice_id"))
+        )
+        return rows.order_by("issue_date", "invoice_number")
+    return charge.invoices.order_by("issue_date", "invoice_number")
+
+
 def provider_invoice(charge: ChargeRow) -> tuple[Invoice, str] | None:
-    """The charge's first invoice with a current provider reference, and that reference."""
-    for invoice in charge.invoices.order_by("issue_date", "invoice_number"):
+    """The charge's first invoice (:func:`charge_invoices`) with a current provider
+    reference, and that reference."""
+    for invoice in charge_invoices(charge):
         ref = (
             ExternalRef.objects.filter(
                 entity_type=ENTITY_INVOICE,
@@ -1328,7 +1352,8 @@ def _mark(
                     ref,
                     offline_marking.offline_payment(
                         method=payment.method,
-                        amount=payment.amount,
+                        # The invoice is marked paid as a whole (never sent; PLAN-012c-a D4).
+                        amount=Decimal(invoice.total),
                         paid_on=payment.settled_on or payment.initiated_on or timezone.localdate(),
                         note=payment.note,
                         reference=payment.reference,
@@ -1380,6 +1405,22 @@ def _mark(
                 "provider_changes": changes,
             },
         )
+        for sibling in kind.siblings(charge, invoice) if kind.siblings is not None else ():
+            sibling_before = {**kind.state(sibling), "review_message": sibling.review_message}
+            _clear_review(sibling, kind)
+            _audit(
+                actor,
+                kind.action("provider_marked"),
+                kind.entity,
+                sibling.pk,
+                sibling_before,
+                {
+                    **kind.state(sibling),
+                    "review_message": sibling.review_message,
+                    **context,
+                    "with": str(charge.pk),
+                },
+            )
         return MarkResult(MarkAction.MARKED, MARK_DONE)
 
 

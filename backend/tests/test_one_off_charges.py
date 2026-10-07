@@ -45,7 +45,7 @@ from ledger.models import (
 from ledger.services import one_off_charges as service
 from ledger.services import pnl
 from ledger.services.one_off_charges import ChargeInput
-from payments import jobs, one_off_invoices
+from payments import jobs, offline_marking, one_off_invoices
 from payments.errors import ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
 from payments.models import ExternalRef, Job, JobKind, JobStatus
@@ -1411,3 +1411,22 @@ def test_a_wire_payment_recorded_here_marks_the_one_off_invoice_paid_at_the_prov
     paid = fresh(charge)
     assert (paid.status, paid.amount_paid) == (OneOffChargeStatus.PAID, D("3000.00"))
     assert invoice_of(charge).provider_status == "PAID"
+
+
+def test_a_single_charge_paid_in_two_parts_is_still_flagged_and_never_marked(
+    fake: FakeProvider, worker: None
+) -> None:
+    """PLAN-012c-a D2 is the builder invoice's rule: a one-off charge on an invoice of its
+    own keeps the whole-payment rule, and its invoices are its own (D1)."""
+    charge = created(an_operator(fake), item(amount="300.00"))
+    run_queued_jobs()
+    assert list(service.invoices_of(charge)) == [invoice_of(charge)]
+    assert not service.is_builder_invoice(invoice_of(charge))
+    for amount in ("100.00", "200.00"):
+        outcome = service.record_payment(
+            charge.pk, method="wire", amount=D(amount), paid_on=today(), note="Wire.", actor=None
+        )
+        assert outcome.ok and not outcome.mark_due
+    assert fresh(charge).review_message == offline_marking.PARTIAL_AMOUNT
+    assert fresh(charge).status == OneOffChargeStatus.PAID
+    assert not calls(fake, "mark_invoice_paid_cash_or_check")

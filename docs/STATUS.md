@@ -939,3 +939,25 @@ the login page myself." The condition for starting Prompt 4 is met.
   the store page's Add entry button and route use it; the store form locks the lease and names a
   non-current lease's state in its title. No migration. QA-012c. Ships with 012a and 012b in one
   push; one Publish Request for the three commits.
+
+## Update, 2026-10-07, Prompt 12 findings 3 and 4 → PLAN-012c-a
+
+- **Owner, in writing (INV-2026-0006, store 2476, Damage Repair $300 + late fee $50):** (3) only
+  line 1 is linked to the invoice; the late fee page shows no invoice, no Record a payment, and
+  offers Waive; every builder line must be linked, Waive refused while the Stax invoice is live,
+  and the staging data repaired; (4) a $300 wire on line 1 flags "partial amount" (fine); recording
+  the remaining $50 must mark the invoice paid as cash at Stax with the memo and clear the flag;
+  add a line-by-line test. Invoice-level payment entry is Step 12d.
+- Plan `docs/qa/PLAN-012c-a-builder-lines-linked-and-paid-line-by-line.md` assigned to Opus: a
+  charge's invoices resolved through the line items everywhere; Record a payment on any line; the
+  invoice marked once its lines' settled payments cover the total, flags cleared on every line;
+  a read-only `invoice_line_links --check` command for the staging verification (the line-item
+  links already exist, so no data migration). Same push as 012a, 012b, 012c.
+
+## Update, 2026-10-07, PLAN-012c-a built and gated
+
+- A one-off charge's invoices are resolved through the line items (`invoices_of`,
+  `rent_run.charge_invoices`); Record a payment on every line; a builder invoice is marked paid
+  as cash once its lines' settled payments cover what it bills, flags cleared on every line; the
+  waived-invoice delete remedy refuses a shared invoice; read-only `invoice_line_links --check`.
+  No migration. QA-012c-a. Ships with 012a, 012b, 012c in one push.

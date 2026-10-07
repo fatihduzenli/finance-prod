@@ -175,12 +175,12 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
     closed = charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
     retry_wait = service.retry_wait(charge) if billing else None
     jobs = job_context(charge)
-    invoices = list(charge.invoices.order_by("issue_date", "invoice_number"))
+    # Every line of a builder invoice has the invoice (PLAN-012c-a D1).
+    invoices = list(service.invoices_of(charge))
     linked = rent_run.provider_invoice(charge)
     schedule = service.provider_schedule(charge)
     # A setup charge billed on an invoice (PLAN-012 D6) is not edited here.
     setup = charge.category == OneOffCategory.SETUP and charge.collection == CollectionMethod.NONE
-    later_line = service.is_later_line(charge)
     return render(
         request,
         "ledger/one_off_charges/detail.html",
@@ -194,9 +194,9 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "schedule_masked": mask_identifier(schedule) if schedule else "",
             "payments": charge.payments.order_by("-settled_on", "-created_at"),
             "review_message": service.review_message(charge),
-            # A later line of a builder invoice is paid through its first line's charge.
-            "can_record": billing and not closed and charge.balance > 0 and not later_line,
-            "can_link_invoice": billing and not closed and not invoices and not later_line,
+            # Any line of a builder invoice takes a payment of its own (PLAN-012c-a D2).
+            "can_record": billing and not closed and charge.balance > 0,
+            "can_link_invoice": billing and not closed and not invoices,
             "can_edit": billing and not closed and setup,
             "can_waive": admin and not closed and not service.has_settled_payment(charge),
             "waive_refusal": (
@@ -409,7 +409,7 @@ def charge_link(request: HttpRequest, pk: str) -> HttpResponse:
         {
             "form": form,
             "charge": charge,
-            "has_invoice": charge.invoices.exists(),
+            "has_invoice": service.invoices_of(charge).exists(),
             "rows": rent_run.unlinked_invoices(charge),
         },
     )

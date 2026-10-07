@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import io
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -21,6 +22,8 @@ from typing import Any
 
 import pytest
 from django.conf import settings
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import override_settings
 
 from accounts.roles import Role
@@ -45,9 +48,19 @@ from ledger.models import (
     Store,
     StoreStatus,
 )
-from ledger.services import invoice_builder, nsf, payments_ledger, pnl, receivables, reports
+from ledger.services import (
+    invoice_builder,
+    nsf,
+    payments_ledger,
+    pnl,
+    receivables,
+    rent_run,
+    reports,
+)
 from ledger.services import one_off_charges as one_off_service
 from ledger.services.invoice_builder import LineInput
+from payments import offline_marking
+from payments.errors import ProviderUnavailable
 from payments.fake import FakeProvider
 from payments.models import ExternalRef, Job, JobKind, JobStatus
 from payments.provider import Amounts, InvoiceInput, PayWithStoredMethod
@@ -882,11 +895,7 @@ def test_a_manual_payment_on_the_first_line_pays_the_invoice_in_order(
     fake: FakeProvider, worker: None
 ) -> None:
     draft, _ = sent_two(fake)
-    first, second = charges_of(draft)
-    later = one_off_service.record_payment(
-        second.pk, method="wire", amount=D("10.00"), paid_on=TODAY, note="Wire.", actor=None
-    )
-    assert (later.ok, later.message) == (False, one_off_service.PAY_LINE)
+    first, _second = charges_of(draft)
     outcome = one_off_service.record_payment(
         first.pk, method="wire", amount=D("150.00"), paid_on=TODAY, note="Wire.", actor=None
     )
@@ -1219,7 +1228,7 @@ def test_the_open_balances_owe_each_line_once(fake: FakeProvider, worker: None) 
     assert (row.charge_id, row.balance) == (charges_of(draft)[1].pk, D("30.00"))
 
 
-def test_a_later_line_is_paid_linked_and_charged_only_through_the_first(
+def test_a_later_line_is_linked_and_charged_only_through_the_first_but_takes_a_payment(
     fake: FakeProvider, worker: None
 ) -> None:
     draft, invoice = sent_two(fake)
@@ -1234,10 +1243,14 @@ def test_a_later_line_is_paid_linked_and_charged_only_through_the_first(
     )
     client, _ = client_for(Role.BILLING)
     page = client.get(f"/one-off-charges/{second.pk}/").content.decode()
-    for hidden in ('id="record-payment"', 'id="link-invoice"', 'id="cancel-charge"'):
+    for hidden in ('id="link-invoice"', 'id="cancel-charge"'):
         assert hidden not in page, hidden
+    # PLAN-012c-a D1, D2: the later line shows its invoice and takes a payment.
+    assert 'id="record-payment"' in page and invoice.invoice_number in page
+    assert "No invoice linked" not in page
     first_page = client.get(f"/one-off-charges/{first.pk}/").content.decode()
     assert 'id="record-payment"' in first_page and 'id="edit-charge"' not in first_page
+    assert 'id="link-invoice"' not in first_page
 
 
 # --- Review findings of Batch B ------------------------------------------------------------
@@ -1396,3 +1409,336 @@ def test_every_line_item_writer_sets_the_kind_explicitly(repo_root: Path) -> Non
     writers = _keywords_of_calls(repo_root, "InvoiceLineItem")
     assert writers
     assert [place for place, names in writers if "kind" not in names] == []
+
+
+# --- PLAN-012c-a: every line linked to its invoice, paid line by line ----------------------
+
+
+def sent_lines(fake: FakeProvider, *lines: tuple[str, str]) -> tuple[InvoiceDraft, Invoice]:
+    """A draft of ``lines`` (item, unit amount) sent, its invoice created by the worker."""
+    operator, lease = a_world(fake)
+    draft = a_draft(operator, lease, [line(item, unit) for item, unit in lines])
+    invoice = sent(draft).invoice
+    assert invoice is not None
+    run_queued_jobs()
+    return draft, fresh(invoice)
+
+
+def owners_invoice(fake: FakeProvider) -> tuple[InvoiceDraft, Invoice]:
+    """INV-2026-0006's shape: Damage Repair 300.00 and a late fee 50.00."""
+    return sent_lines(fake, ("Damage Repair", "300.00"), ("Late fee", "50.00"))
+
+
+def wire(amount: str, reference: str) -> dict[str, str]:
+    return {
+        "creation_key": str(uuid.uuid4()),
+        "method": "wire",
+        "amount": amount,
+        "paid_on": TODAY.isoformat(),
+        "reference": reference,
+        "note": f"Wire {reference} received.",
+    }
+
+
+def post_wire(charge: OneOffCharge, amount: str, reference: str) -> None:
+    client, _ = client_for(Role.BILLING)
+    response = client.post(f"/one-off-charges/{charge.pk}/payments/new/", wire(amount, reference))
+    assert response.status_code == 302
+
+
+def manual(charge: OneOffCharge, amount: str) -> Any:
+    return one_off_service.record_payment(
+        charge.pk, method="wire", amount=D(amount), paid_on=TODAY, note="Wire.", actor=None
+    )
+
+
+def marks(fake: FakeProvider) -> list[tuple[object, ...]]:
+    return calls(fake, "mark_invoice_paid_cash_or_check")
+
+
+def flag_of(charge: OneOffCharge) -> str:
+    return str(fresh(charge).review_message)
+
+
+def test_the_owners_invoice_paid_line_by_line_marks_it_once_and_clears_both_flags(
+    fake: FakeProvider, worker: None
+) -> None:
+    draft, invoice = owners_invoice(fake)
+    repair, late_fee = charges_of(draft)
+    post_wire(repair, "300.00", "WIRE-300")
+    run_queued_jobs()
+    assert marks(fake) == []
+    assert flag_of(repair) == offline_marking.PARTIAL_AMOUNT and fresh(repair).needs_review
+    assert flag_of(late_fee) == "" and not fresh(late_fee).needs_review
+    post_wire(late_fee, "50.00", "WIRE-50")
+    assert Job.objects.filter(kind=JobKind.ONE_OFF_PAYMENT_MARK).count() == 1
+    [job] = run_queued_jobs()
+    assert (job.kind, job.entity_id, job.status) == (
+        JobKind.ONE_OFF_PAYMENT_MARK,
+        late_fee.pk,
+        JobStatus.DONE,
+    )
+    [(ref, offline)] = marks(fake)
+    assert ref == provider_ref(invoice)
+    assert getattr(offline, "check_number", "") == "WIRE-50"
+    assert getattr(offline, "note", "").startswith("Paid by wire on 10/06/2026. Wire WIRE-50")
+    assert getattr(offline, "amount", None) == D("350.00")
+    for charge in (repair, late_fee):
+        row = fresh(charge)
+        assert (row.status, row.balance, row.needs_review, row.review_message) == (
+            OneOffChargeStatus.PAID,
+            D("0.00"),
+            False,
+            "",
+        )
+        assert not one_off_service.review_message(row)
+    assert fresh(invoice).provider_status == "PAID"
+    cleared = AuditLog.objects.get(
+        action="one_off_charge.provider_marked", entity_id=str(repair.pk)
+    )
+    assert cleared.after is not None and cleared.after["with"] == str(late_fee.pk)
+    assert receivables.open_balances(TODAY, operator=fresh(draft).operator_id) == []
+    # The late fee's page shows the invoice and its provider status.
+    page = client_for(Role.BILLING)[0].get(f"/one-off-charges/{late_fee.pk}/").content.decode()
+    assert invoice.invoice_number in page and "PAID" in page
+
+
+def test_the_late_fee_first_then_the_repair_marks_once(fake: FakeProvider, worker: None) -> None:
+    draft, invoice = owners_invoice(fake)
+    repair, late_fee = charges_of(draft)
+    first_pay = manual(late_fee, "50.00")
+    assert first_pay.ok and not first_pay.mark_due
+    assert flag_of(late_fee) == offline_marking.PARTIAL_AMOUNT and flag_of(repair) == ""
+    post_wire(repair, "300.00", "WIRE-300")
+    run_queued_jobs()
+    [(ref, _)] = marks(fake)
+    assert ref == provider_ref(invoice)
+    assert (flag_of(repair), flag_of(late_fee)) == ("", "")
+    assert [row.status for row in charges_of(draft)] == [OneOffChargeStatus.PAID] * 2
+
+
+def test_a_three_line_invoice_paid_in_three_payments_marks_on_the_last(
+    fake: FakeProvider, worker: None
+) -> None:
+    draft, invoice = sent_lines(
+        fake, ("Repair", "100.00"), ("Late fee", "50.00"), ("Sign", "25.00")
+    )
+    first, second, third = charges_of(draft)
+    for charge, amount in ((second, "50.00"), (first, "100.00")):
+        outcome = manual(charge, amount)
+        assert outcome.ok and not outcome.mark_due
+    assert not one_off_service.invoice_covered(fresh(invoice))
+    last = manual(third, "25.00")
+    assert last.ok and last.mark_due
+    assert one_off_service.invoice_covered(fresh(invoice))
+    assert paid_states(draft) == [
+        (D("100.00"), "paid"),
+        (D("50.00"), "paid"),
+        (D("25.00"), "paid"),
+    ]
+
+
+def test_one_payment_of_the_whole_invoice_on_the_first_line_is_marked_at_once(
+    fake: FakeProvider, worker: None
+) -> None:
+    draft, invoice = owners_invoice(fake)
+    repair, late_fee = charges_of(draft)
+    post_wire(repair, "350.00", "WIRE-350")
+    [job] = run_queued_jobs()
+    assert (job.kind, job.entity_id) == (JobKind.ONE_OFF_PAYMENT_MARK, repair.pk)
+    assert len(marks(fake)) == 1
+    assert paid_states(draft) == [(D("300.00"), "paid"), (D("50.00"), "paid")]
+    assert AuditLog.objects.filter(
+        action=one_off_service.ALLOCATED_ACTION, entity_id=str(late_fee.pk)
+    ).exists()
+    assert (flag_of(repair), flag_of(late_fee)) == ("", "")
+
+
+def test_coverage_is_to_the_cent(fake: FakeProvider, worker: None) -> None:
+    draft, invoice = owners_invoice(fake)
+    repair, late_fee = charges_of(draft)
+    assert not manual(repair, "299.99").mark_due
+    short = manual(late_fee, "50.00")
+    assert short.ok and not short.mark_due
+    assert not one_off_service.invoice_covered(fresh(invoice))
+    assert flag_of(late_fee) == offline_marking.PARTIAL_AMOUNT
+    cent = manual(repair, "0.01")
+    assert cent.ok and cent.mark_due
+    assert (
+        one_off_service.mark_provider_invoice(repair.pk, cent.payment.pk, actor=None).action
+        == rent_run.MarkAction.MARKED
+    )
+    assert len(marks(fake)) == 1
+    assert (flag_of(repair), flag_of(late_fee)) == ("", "")
+
+
+def test_the_first_line_overpaid_by_a_cent_reaches_the_later_line_and_marks(
+    fake: FakeProvider, worker: None
+) -> None:
+    draft, _ = owners_invoice(fake)
+    repair, _late_fee = charges_of(draft)
+    assert not manual(repair, "299.99").mark_due
+    assert manual(repair, "50.01").mark_due
+    assert paid_states(draft) == [(D("300.00"), "paid"), (D("50.00"), "paid")]
+
+
+def test_a_later_line_takes_at_most_its_own_balance(fake: FakeProvider, worker: None) -> None:
+    draft, _ = owners_invoice(fake)
+    repair, late_fee = charges_of(draft)
+    over = manual(late_fee, "50.01")
+    assert (over.ok, over.message, over.field) == (False, rent_run.PAY_OVER_BALANCE, "amount")
+    # What the first line's payment already paid of it is not owed again.
+    assert manual(repair, "320.00").ok
+    assert fresh(late_fee).balance == D("30.00")
+    again = manual(late_fee, "30.01")
+    assert (again.ok, again.message) == (False, rent_run.PAY_OVER_BALANCE)
+    assert manual(late_fee, "30.00").mark_due
+    nothing = manual(late_fee, "1.00")
+    assert (nothing.ok, nothing.message) == (False, rent_run.PAY_NOTHING_DUE)
+    on_first = manual(repair, "0.01")
+    assert (on_first.ok, on_first.message) == (False, rent_run.PAY_NOTHING_DUE)
+    assert sum((row[0] for row in paid_states(draft)), D("0")) == D("350.00")
+    assert not Payment.objects.filter(amount__in=[D("50.01"), D("30.01")]).exists()
+
+
+def test_a_line_paid_on_its_own_is_skipped_by_the_first_lines_overflow(
+    fake: FakeProvider, worker: None
+) -> None:
+    draft, _ = sent_lines(fake, ("Repair", "100.00"), ("Late fee", "50.00"), ("Sign", "25.00"))
+    first, second, _third = charges_of(draft)
+    assert manual(second, "50.00").ok
+    outcome = manual(first, "125.00")
+    assert outcome.ok and outcome.mark_due
+    assert paid_states(draft) == [
+        (D("100.00"), "paid"),
+        (D("50.00"), "paid"),
+        (D("25.00"), "paid"),
+    ]
+    refused = manual(first, "0.01")
+    assert (refused.ok, refused.message) == (False, rent_run.PAY_NOTHING_DUE)
+
+
+def test_a_waived_later_line_lowers_what_covers_the_invoice(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator, lease = a_world(fake)
+    draft = a_draft(
+        operator,
+        lease,
+        [line("Repair", "100.00"), line("Late fee", "50.00"), line("Sign", "25.00")],
+    )
+    invoice = sent(draft).invoice
+    assert invoice is not None
+    first, second, third = charges_of(draft)
+    # Not at the provider yet: the line may be waived; the provider invoice leaves it out.
+    assert one_off_service.waive(third.pk, note="Goodwill.", actor=user(Role.ADMIN)).ok
+    run_queued_jobs()
+    assert created_invoices(fake)[0].amounts.total == D("150.00")
+    Invoice.objects.filter(pk=invoice.pk).update(total=D("150.00"), subtotal=D("150.00"))
+    assert one_off_service.invoice_billed(fresh(invoice)) == D("150.00")
+    assert not manual(second, "50.00").mark_due
+    last = manual(first, "100.00")
+    assert last.ok and last.mark_due
+    assert one_off_service.invoice_covered(fresh(invoice))
+    assert fresh(third).status == OneOffChargeStatus.WAIVED
+
+
+def test_a_builder_invoice_whose_total_differs_from_its_lines_is_not_marked(
+    fake: FakeProvider, worker: None
+) -> None:
+    draft, invoice = owners_invoice(fake)
+    repair, late_fee = charges_of(draft)
+    Invoice.objects.filter(pk=invoice.pk).update(total=D("360.00"), subtotal=D("360.00"))
+    assert not manual(repair, "300.00").mark_due
+    covered = manual(late_fee, "50.00")
+    assert covered.ok and not covered.mark_due
+    assert flag_of(late_fee) == offline_marking.TOTAL_DIFFERS
+    assert marks(fake) == []
+
+
+def test_waive_on_a_later_line_is_refused_while_the_invoice_is_live(
+    fake: FakeProvider, worker: None
+) -> None:
+    draft, invoice = owners_invoice(fake)
+    repair, late_fee = charges_of(draft)
+    assert one_off_service.live_provider_invoice(late_fee) is not None
+    outcome = one_off_service.waive(late_fee.pk, note="Goodwill.", actor=user(Role.ADMIN))
+    assert (outcome.ok, outcome.message) == (False, one_off_service.WAIVE_LIVE_INVOICE)
+    admin, _ = client_for(Role.ADMIN)
+    page = admin.get(f"/one-off-charges/{late_fee.pk}/").content.decode()
+    assert 'id="waive-refusal"' in page and invoice.invoice_number in page
+    waive_page = admin.get(f"/one-off-charges/{late_fee.pk}/waive/").content.decode()
+    assert one_off_service.WAIVE_LIVE_INVOICE in waive_page
+    admin.post(f"/one-off-charges/{late_fee.pk}/waive/", {"note": "Goodwill."})
+    assert fresh(late_fee).status == OneOffChargeStatus.OWED
+    for charge in (repair, late_fee):
+        assert (
+            'id="link-invoice"' not in admin.get(f"/one-off-charges/{charge.pk}/").content.decode()
+        )
+        assert list(one_off_service.invoices_of(charge)) == [invoice]
+
+
+def test_the_delete_remedy_is_refused_on_a_waived_line_of_an_invoice_billing_others(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator, lease = a_world(fake)
+    draft = a_draft(operator, lease, two_lines())
+    sent(draft)
+    _first, second = charges_of(draft)
+    # Waived before the invoice reached the provider, which then made it with the first.
+    assert one_off_service.waive(second.pk, note="Goodwill.", actor=user(Role.ADMIN)).ok
+    run_queued_jobs()
+    assert one_off_service.live_provider_invoice(fresh(second)) is not None
+    assert one_off_service.delete_invoice_refusal(fresh(second)) == (
+        one_off_service.DELETE_INVOICE_SHARED
+    )
+    outcome = one_off_service.delete_waived_invoice(second.pk, actor=user(Role.ADMIN))
+    assert (outcome.ok, outcome.message) == (False, one_off_service.DELETE_INVOICE_SHARED)
+    assert not Job.objects.filter(kind=JobKind.INVOICE_DELETE).exists()
+    assert [row.pk for row in one_off_service.waived_with_live_invoice()] == [second.pk]
+
+
+def test_a_failed_mark_flags_the_paying_line_and_its_retry_clears_both(
+    fake: FakeProvider, worker: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    draft, invoice = owners_invoice(fake)
+    repair, late_fee = charges_of(draft)
+    assert manual(repair, "300.00").ok
+    fake.fail_next("mark_invoice_paid_cash_or_check", ProviderUnavailable(503, "unavailable"))
+    post_wire(late_fee, "50.00", "WIRE-50")
+    [job] = run_queued_jobs()
+    assert job.status in (JobStatus.FAILED, JobStatus.DEAD)
+    assert flag_of(late_fee).startswith("Stax invoice not marked paid")
+    assert flag_of(repair) == offline_marking.PARTIAL_AMOUNT
+    assert one_off_service.retry_wait(fresh(late_fee)) is not None
+    assert one_off_service.retry_wait(fresh(repair)) is None
+    monkeypatch.setattr("django.utils.timezone.now", lambda: NOW + timedelta(minutes=2))
+    result = one_off_service.retry_provider_mark(late_fee.pk, actor=None)
+    assert result.action == rent_run.MarkAction.MARKED
+    assert len(marks(fake)) == 2
+    assert (flag_of(repair), flag_of(late_fee)) == ("", "")
+    assert fresh(invoice).provider_status == "PAID"
+
+
+def test_invoice_line_links_check_exits_0_on_clean_data_and_1_naming_an_orphan(
+    fake: FakeProvider, worker: None
+) -> None:
+    draft, invoice = owners_invoice(fake)
+    _repair, late_fee = charges_of(draft)
+    out = io.StringIO()
+    call_command("invoice_line_links", "--check", stdout=out)
+    assert "Every builder invoice line names its charge." in out.getvalue()
+    InvoiceLineItem.objects.filter(invoice=invoice, one_off_charge=late_fee).update(
+        one_off_charge=None
+    )
+    out = io.StringIO()
+    with pytest.raises(CommandError) as raised:
+        call_command("invoice_line_links", "--check", stdout=out)
+    assert raised.value.returncode == 1
+    listing = out.getvalue()
+    assert f"{invoice.invoice_number}: line 2 names no charge." in listing
+    assert f"{invoice.invoice_number}: charge {late_fee.pk} has no line on it." in listing
+    # Without --check it lists and exits 0.
+    out = io.StringIO()
+    call_command("invoice_line_links", stdout=out)
+    assert "2 missing link(s)" in out.getvalue()
