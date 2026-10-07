@@ -864,3 +864,11 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Owner typed "push". `main` at `37f5f9c`; CI run 37552860381 green end to end, including the
   verification of all four resources (web, worker, reconcile job, daily job) on the commit.
   `/healthz` 200. The owner refreshes the dashboard to see sena's two past promises.
+
+## Update, 2026-10-07, Prompt 11b closed
+
+- **Owner, in writing:** the two past promises show as not kept and the future one does not.
+  **Prompt 11b closed** (mail enablement, Reschedule on a real return and the Google feed
+  confirmation remain as follow-ups outside the step). Next: Prompt 12 with the owner's
+  amendments (backlog and provider portability documents; contact-log changes; invoice
+  builder; read-only dispute list with evidence upload).
