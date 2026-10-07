@@ -22,8 +22,8 @@ builder) are in `docs/qa/PLAN-012-contact-log-invoice-builder-disputes.md`, not 
 
 ## 2. "Cheaper now than later": schema recommendations for the owner's decision
 
-Each is a decision, not a change. Nothing below is applied until the owner says yes in
-`docs/DECISIONS.md` (Checkpoint 12).
+Each is a decision, not a change. **Both accepted by the owner on 2026-10-07 (ADR-0011);
+the columns are built in PLAN-012a before Step 13.**
 
 | # | Recommendation | Why now is cheaper | Cost now | Cost later |
 |---|---|---|---|---|

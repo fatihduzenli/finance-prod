@@ -634,8 +634,8 @@ listed on the dashboard until cleared. Both actions are audited and explained on
 ## ADR-0011 — Contact log maturity; one invoice builder for every non-rent bill; disputes read-only with evidence
 
 **Date:** 2026-10-07
-**Status:** Accepted (owner's Prompt 12 text and amendments, 2026-10-07). **Two schema
-recommendations await the owner's answer: S1 and S2 (below).**
+**Status:** Accepted (owner's Prompt 12 text and amendments, 2026-10-07). **S1 and S2
+accepted by the owner on 2026-10-07 (below); their columns are built in PLAN-012a.**
 
 ### Decision
 
@@ -668,14 +668,18 @@ recommendations await the owner's answer: S1 and S2 (below).**
    accordingly; the full workflow is BACKLOG §1 row 4.
 4. **Freeze.** Nothing in `docs/BACKLOG.md` §1 starts before Step 17 (Checkpoint 12).
 
-### Open for the owner (Checkpoint 12)
+### Schema recommendations S1 and S2 (owner's answers, 2026-10-07)
 
 - **S1 — line-item kind.** `invoice_line_items.kind` (`charge`, `fee`, `surcharge`, `tax`,
   `discount`) with `invoices.fees` and `invoices.surcharge` as separate stored columns
   (default 0). Recommended now (the builder is the first code that writes several lines per
-  invoice). **Decision: pending.** Until then the builder writes lines without a kind.
+  invoice). **Decision: yes (owner, in writing, 2026-10-07).** To be built in the next plan
+  (PLAN-012a) before Step 13: the builder writes `charge` lines; `fees` and `surcharge`
+  default 0 and nothing writes them yet.
 - **S2 — operator contact consent.** `operators.sms_phone` (E.164), `sms_consent_at`,
-  `email_consent_at`. Recommended before the Step 13 import. **Decision: pending.**
+  `email_consent_at`. Recommended before the Step 13 import. **Decision: yes (owner, in
+  writing, 2026-10-07).** To be built in PLAN-012a; the Step 13 import maps the sheet's
+  phone column where present; no channel uses the columns until BACKLOG §1 item 1.
 
 ### Consequences
 

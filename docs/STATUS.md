@@ -884,7 +884,9 @@ the login page myself." The condition for starting Prompt 4 is met.
   `disputes` and `dispute_evidence`, the operator as a document owner for evidence only).
 - Documents: ADR-0011, RUNBOOK §16, DATA_OWNERSHIP, README matrix rows, `docs/CLAUDE.md`
   Rule 2 amendment, the endpoints file, TODO-VERIFY-062/063, QA-012.
-- **Owner decisions still open:** S1 and S2 (ADR-0011); the freeze statement to staff.
+- **Owner, in writing (2026-10-07): S1 yes, S2 yes** (recorded in ADR-0011 and BACKLOG §2);
+  the columns are a small follow-up plan (PLAN-012a) before Step 13. The freeze statement to
+  staff is the owner's.
 - Next: the owner's "push"; then the staging clicks of the plan's §8 (store 2476 two-line
   invoice; store 2477 promise; the 15-minute edit; viewer cannot delete; the dispute list
   renders empty).
