@@ -39,3 +39,13 @@ column on `payments` (the app is card-free).
 Migration (Step 13) and cutover are where money goes missing. Every item above either calls
 Stax in a loop (1, 3), handles money state (4, 5) or adds a second source of truth (6). The
 feature set is frozen until after Step 17 (Checkpoint 12); the owner tells the staff in writing.
+
+## 4. Test-suite cost (added 2026-10-07)
+
+The seeded migration round trips (`test_migrations_roundtrip.py`: 0031, 0032, 0033 and the
+fresh-database trip) and the rename-migration tests in `test_one_off_charges.py` take about two
+minutes on sqlite and several on the CI PostgreSQL service; the CI unit step limit was raised to
+25 minutes on 2026-10-07 after a 15-minute timeout. Before Step 13 adds its own migration tests:
+run the round trips as their own CI step with their own limit, or build the migrated database
+once per run and reuse it; consider `--reuse-db` for the non-migration tests. Not a feature; may
+be done inside the freeze.

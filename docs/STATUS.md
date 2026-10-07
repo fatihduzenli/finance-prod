@@ -998,3 +998,15 @@ the login page myself." The condition for starting Prompt 4 is met.
 - D5 built and gated the same day: the closing entry's Promise cell names the closed promise with
   a link (operator page, log page, store page; the store page links to the operator page when the
   promise is elsewhere), CSV column "Closes promise"; query counts unchanged.
+
+## Update, 2026-10-07, push of 012c-b: CI timed out, staging not deployed
+
+- Owner typed "Push". `main` at `dce8a44`; CI run 37702713815 **failed**: the unit-test step hit
+  its 15-minute limit (the last green run needed 11 of 15); the deploy was skipped, so staging
+  still runs `e0978d5`. Not a hang: the suite has grown slower since 012a, mostly the seeded
+  migration round trips (0031, 0032, 0033) and the older rename-migration tests, which together
+  take about two minutes on sqlite and several on the CI PostgreSQL service. Local full runs:
+  sqlite 8:48, PostgreSQL 15:04.
+- Fix (verification-only CI config, Fable): the unit step limit 15 → 25 minutes, the job 30 → 40.
+  Follow-up recorded in `docs/BACKLOG.md` §4: make the migration round trips cheaper (one CI step
+  of their own, or a cached post-migration database) before the suite grows further.

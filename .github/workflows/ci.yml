@@ -21,7 +21,7 @@ jobs:
   test:
     name: Lint, types, unit and e2e tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     services:
       postgres:
@@ -82,7 +82,9 @@ jobs:
       # step ends after fifteen, so a hang names its test instead of using the whole
       # job timeout (CI run of 2026-10-05, QA-010b addendum).
       - name: Unit tests
-        timeout-minutes: 15
+        # 25 since PLAN-012c-b: the seeded migration round trips (0031, 0032, 0033) take
+        # several minutes on the CI PostgreSQL service; the last green run needed 11 of 15.
+        timeout-minutes: 25
         run: uv run pytest -m "not e2e" -q -o faulthandler_timeout=300
 
       - name: Install Playwright chromium
