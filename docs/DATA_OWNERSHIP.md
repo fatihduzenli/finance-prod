@@ -284,10 +284,22 @@ scans are covered by the stated policy, not by a check.
 |---|---|---|
 | all fields | App | A draft is ours until **Send** turns it into one invoice and one one-off charge per line; `line_total` is quantity times unit amount to the cent, enforced by a CHECK; `sent_invoice_id` links the invoice; a cancelled draft stays |
 
-### invoice_line_items — `one_off_charge_id` (PLAN-012)
+### invoice_line_items — `one_off_charge_id`, `kind` (PLAN-012, PLAN-012a)
 | Field | Owner | Note |
 |---|---|---|
-| `one_off_charge_id` | App | The charge a builder line became; the allocation key for a payment on a multi-line invoice (lines in order). A `kind` column is **S1**, the owner's decision (BACKLOG §2) |
+| `one_off_charge_id` | App | The charge a builder line became; the allocation key for a payment on a multi-line invoice (lines in order) |
+| `kind` | App | S1 (ADR-0011, PLAN-012a): `charge`, `fee`, `surcharge`, `tax`, `discount` (CHECK). Only `charge` is written today |
+
+### invoices — `fees`, `surcharge` (PLAN-012a)
+| Field | Owner | Note |
+|---|---|---|
+| `fees`, `surcharge` | App | S1: stored apart from `subtotal`, default 0, never negative (CHECK); `total = subtotal + tax + fees + surcharge` (CHECK). Always 0 today and **never sent to the provider** (`Amounts` unchanged) |
+
+### operators — `sms_phone`, `sms_consent_at`, `email_consent_at` (PLAN-012a)
+| Field | Owner | Note |
+|---|---|---|
+| `sms_phone` | App | S2: E.164 (`+` and 8 to 15 digits; CHECK and the payment-data guard); blank allowed; `phone` stays what the provider holds; not in the provider payload |
+| `sms_consent_at`, `email_consent_at` | App | S2: when the operator agreed, entered by billing, never in the future; no channel reads them until BACKLOG §1 item 1; Step 13 may fill the phone from the sheet |
 
 ### disputes, dispute_evidence (PLAN-012)
 | Field | Owner | Note |

@@ -32,6 +32,7 @@ from ledger.models import (
     InsurancePremium,
     Invoice,
     InvoiceLineItem,
+    InvoiceLineKind,
     InvoiceStatus,
     Lease,
     LeaseRentHistory,
@@ -533,6 +534,8 @@ class _Seeder:
                 memo=description,
                 subtotal=amount,
                 tax=Decimal("0.00"),
+                fees=Decimal("0.00"),
+                surcharge=Decimal("0.00"),
                 total=amount,
                 amount_paid=paid,
                 internal_status=spec.internal_status,
@@ -551,6 +554,7 @@ class _Seeder:
                 quantity=Decimal("1.0000"),
                 unit_price=amount,
                 line_total=amount,
+                kind=InvoiceLineKind.CHARGE,
             )
             self.provider_statuses[invoice.pk] = spec.provider_status
             if spec.provider_status:

@@ -267,6 +267,8 @@ def reschedule(
                 memo=redebit.description,
                 subtotal=total,
                 tax=ZERO,
+                fees=ZERO,
+                surcharge=ZERO,
                 total=total,
                 internal_status=InvoiceStatus.DRAFT,
                 allow_card=False,

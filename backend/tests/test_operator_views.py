@@ -6,9 +6,10 @@ every test here, so the views run exactly as deployed but no request leaves.
 
 from __future__ import annotations
 
+import html
 import threading
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -23,7 +24,15 @@ from django.utils import timezone
 from accounts import registry
 from accounts.roles import Role
 from ledger.admin import OperatorAdmin
-from ledger.models import EnrolmentStatus, Operator, SyncStatus
+from ledger.forms import CONSENT_INPUT_FORMAT
+from ledger.models import (
+    CONSENT_IN_FUTURE_MESSAGE,
+    SMS_PHONE_MESSAGE,
+    AuditLog,
+    EnrolmentStatus,
+    Operator,
+    SyncStatus,
+)
 from ledger.views.operators import HELD_FORM_KEY
 from payments import operator_sync
 from payments.errors import CircuitOpen, ProviderRejected, ProviderUnavailable
@@ -999,3 +1008,143 @@ def test_006c_removing_the_email_of_a_linked_operator_updates_and_stays_linked(
     assert "Updated the customer at the payment provider." in response.content.decode()
     operator.refresh_from_db()
     assert (operator.email, operator.sync_status) == (None, SyncStatus.LINKED)
+
+
+# --- PLAN-012a D3: SMS phone and consent times ---------------------------------------------
+
+
+def _local_input(moment: datetime) -> str:
+    """A time as the ``datetime-local`` input sends it, in the project's time zone."""
+    return timezone.localtime(moment).strftime(CONSENT_INPUT_FORMAT)
+
+
+def test_the_form_shows_the_sms_phone_and_consent_fields(billing: Client) -> None:
+    page = billing.get(NEW).content.decode()
+    for label in (
+        "SMS phone (international, +1…)",
+        "SMS consent given on",
+        "E-mail consent given on",
+    ):
+        assert label in page
+    assert page.count('type="datetime-local"') == 2
+
+
+def test_billing_saves_an_sms_phone_and_two_consent_times_without_a_provider_call(
+    billing: Client, fake: FakeProvider
+) -> None:
+    operator = linked_through_the_form(billing, fake)
+    sms_at = (timezone.now() - timedelta(days=2)).replace(microsecond=0)
+    email_at = timezone.now().replace(microsecond=0)
+
+    response = billing.post(
+        f"{detail(operator)}edit/",
+        form_data(
+            sms_phone="+14045551234",
+            sms_consent_at=_local_input(sms_at),
+            email_consent_at=_local_input(email_at),
+        ),
+        follow=True,
+    )
+
+    assert response.redirect_chain[-1][0] == detail(operator)
+    assert fake.calls == []  # not part of the provider payload
+    operator.refresh_from_db()
+    assert (operator.sms_phone, operator.sms_consent_at, operator.email_consent_at) == (
+        "+14045551234",
+        sms_at,
+        email_at,
+    )
+    assert operator.sync_status == SyncStatus.LINKED
+    page = response.content.decode()
+    assert '<dd id="sms-phone">+14045551234</dd>' in page
+    shown = timezone.localtime(sms_at).strftime("%Y-%m-%d %H:%M")
+    assert f'<dd id="sms-consent">{shown}</dd>' in page
+    after = (
+        AuditLog.objects.filter(action="operator.updated", entity_id=str(operator.pk))
+        .latest("id")
+        .after
+    )
+    assert after is not None
+    assert after["sms_phone"] == "+14045551234"
+    assert after["sms_consent_at"] == sms_at.astimezone(UTC).isoformat()
+
+    # Saving the same values again changes nothing and writes no audit row.
+    rows = AuditLog.objects.count()
+    edit = billing.get(f"{detail(operator)}edit/").content.decode()
+    assert f'value="{_local_input(sms_at)}"' in edit
+    billing.post(
+        f"{detail(operator)}edit/",
+        form_data(
+            sms_phone="+14045551234",
+            sms_consent_at=_local_input(sms_at),
+            email_consent_at=_local_input(email_at),
+        ),
+    )
+    assert AuditLog.objects.count() == rows
+
+
+def test_blank_sms_phone_and_consent_times_are_allowed(billing: Client, fake: FakeProvider) -> None:
+    assert billing.post(NEW, form_data(email="")).status_code == 302
+    operator = Operator.objects.get()
+    assert (operator.sms_phone, operator.sms_consent_at, operator.email_consent_at) == (
+        "",
+        None,
+        None,
+    )
+    page = billing.get(detail(operator)).content.decode()
+    assert '<dd id="sms-phone">—</dd>' in page and '<dd id="email-consent">—</dd>' in page
+
+
+@pytest.mark.parametrize("phone", ["404-555-1234", "+1", "+1404555123456789"])
+def test_a_phone_not_in_international_format_is_refused_with_the_format_named(
+    billing: Client, fake: FakeProvider, phone: str
+) -> None:
+    operator = new_operator(email=None)
+    response = billing.post(
+        f"{detail(operator)}edit/", form_data(email="", sms_phone=phone), follow=True
+    )
+    page = response.content.decode()
+    assert response.redirect_chain[-1][0] == f"{detail(operator)}edit/"
+    assert html.escape(SMS_PHONE_MESSAGE) in page
+    operator.refresh_from_db()
+    assert operator.sms_phone == ""
+
+
+def test_a_consent_time_one_minute_ahead_is_refused_and_now_is_accepted(
+    billing: Client, fake: FakeProvider
+) -> None:
+    operator = new_operator(email=None)
+    edit = f"{detail(operator)}edit/"
+    ahead = timezone.now() + timedelta(minutes=1, seconds=5)
+    response = billing.post(
+        edit, form_data(email="", sms_consent_at=_local_input(ahead)), follow=True
+    )
+    assert CONSENT_IN_FUTURE_MESSAGE in response.content.decode()
+    operator.refresh_from_db()
+    assert operator.sms_consent_at is None
+
+    now = timezone.now().replace(microsecond=0)
+    assert (
+        billing.post(edit, form_data(email="", email_consent_at=_local_input(now))).status_code
+        == 302
+    )
+    operator.refresh_from_db()
+    assert operator.email_consent_at == now
+
+
+def test_a_viewer_cannot_change_the_consent(fake: FakeProvider) -> None:
+    operator = new_operator(email=None)
+    client, _ = client_for(Role.VIEWER)
+    response = client.post(
+        f"{detail(operator)}edit/",
+        form_data(
+            email="",
+            sms_phone="+14045551234",
+            sms_consent_at=_local_input(timezone.now() - timedelta(hours=1)),
+        ),
+    )
+    assert response.status_code == 403
+    operator.refresh_from_db()
+    assert (operator.sms_phone, operator.sms_consent_at) == ("", None)
+    page = client.get(detail(operator)).content.decode()
+    assert '<dd id="sms-phone">—</dd>' in page

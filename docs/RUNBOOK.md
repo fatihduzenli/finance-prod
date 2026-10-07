@@ -505,4 +505,11 @@ added once the respond-by time has passed. A dispute not linked to one of our op
 evidence (there is nowhere to keep the file). The full dispute workflow (accept, outcomes,
 reminders before the deadline) is BACKLOG §1 row 4, after Step 17.
 
+**Operator consent (PLAN-012a).** The operator form (billing) has an **SMS phone** in
+international format (`+1` and the number, digits only) and two dates, **SMS consent given on**
+and **E-mail consent given on**, shown on the operator page and in the operator CSV. They are
+records only: nothing sends an SMS, and the collections e-mails do not read them yet. The
+invoice tables also carry a line kind and separate fee and surcharge amounts, always zero today;
+nothing on any page changes.
+
 **Feature freeze.** Nothing in `docs/BACKLOG.md` §1 starts before Step 17 (Checkpoint 12).

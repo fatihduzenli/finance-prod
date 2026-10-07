@@ -15,6 +15,8 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Iterator
+from contextlib import closing
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -49,6 +51,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0028_contact_log_maturity",
             "ledger.migrations.0029_invoice_builder",
             "ledger.migrations.0030_disputes",
+            "ledger.migrations.0031_line_kind_fees_consent",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -420,6 +423,150 @@ def test_the_rename_migrates_over_existing_rows_and_back(
     result = _manage(repo_root, url, "migrate", "--noinput")
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert _audit_rows(url) == _expected_audit(seeded, "one_off_charge")
+
+
+# --- PLAN-012a: line kind, fees and surcharge, consent over existing rows --------------
+#
+# Seeds invoices and lines at ``ledger.0030`` (with the historical models, in the real
+# ``manage.py``), migrates forward, back and forward again on both engines, and reads the
+# rows with plain SQL: every line becomes ``charge``, every invoice gets fees and surcharge
+# 0 and keeps its total. The reverse refuses while an invoice has fees.
+
+STATE_BEFORE_KIND = (("ledger", "0030_disputes"),)
+KIND_MIGRATION = ("ledger", "0031_line_kind_fees_consent")
+INVOICE_ROWS = "SELECT invoice_number, subtotal, tax, total FROM invoices ORDER BY invoice_number"
+INVOICE_MONEY = (1, 2, 3)
+NEW_MONEY = (1, 2)
+NEW_COLUMNS = (
+    "SELECT i.invoice_number, i.fees, i.surcharge, l.position, l.kind "
+    "FROM invoices i JOIN invoice_line_items l ON l.invoice_id = i.id "
+    "ORDER BY i.invoice_number, l.position"
+)
+
+
+def seed_before_the_kind() -> None:
+    """Seed two invoices with lines with the models of ``STATE_BEFORE_KIND``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_KIND)).apps
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Kind LLC")
+    invoice_model = apps.get_model("ledger", "Invoice")
+    line_model = apps.get_model("ledger", "InvoiceLineItem")
+    for number, subtotal, tax, parts in (
+        ("INV-2026-3101", Decimal("150.00"), Decimal("0.00"), ("100.00", "50.00")),
+        ("INV-2026-3102", Decimal("12.34"), Decimal("1.00"), ("12.34",)),
+    ):
+        invoice = invoice_model.objects.create(
+            invoice_number=number,
+            operator=operator,
+            issue_date=date(2026, 9, 1),
+            due_date=date(2026, 10, 1),
+            subtotal=subtotal,
+            tax=tax,
+            total=subtotal + tax,
+        )
+        for position, amount in enumerate(parts, 1):
+            line_model.objects.create(
+                invoice=invoice,
+                position=position,
+                description=f"Line {position}",
+                quantity=Decimal("1.0000"),
+                unit_price=Decimal(amount),
+                line_total=Decimal(amount),
+            )
+
+
+def _rows(database_url: str, query: str, money: tuple[int, ...] = ()) -> list[tuple[str, ...]]:
+    """Rows as text, so both engines compare alike; the ``money`` columns with two places
+    (sqlite returns ``150`` for ``150.00``)."""
+    if database_url.startswith("sqlite:///"):
+        import sqlite3
+
+        with closing(sqlite3.connect(database_url.removeprefix("sqlite:///"))) as scratch:
+            found = scratch.execute(query).fetchall()
+    else:
+        import psycopg
+
+        with psycopg.connect(database_url) as scratch:
+            found = list(scratch.execute(query))
+    return [
+        tuple(
+            f"{Decimal(str(value)):.2f}" if index in money else str(value)
+            for index, value in enumerate(row)
+        )
+        for row in found
+    ]
+
+
+def _kind_round_trip(repo_root: Path, url: str) -> None:
+    _migrate_to(repo_root, url, *STATE_BEFORE_KIND)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_the_kind as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    invoices = _rows(url, INVOICE_ROWS, INVOICE_MONEY)
+    assert invoices == [
+        ("INV-2026-3101", "150.00", "0.00", "150.00"),
+        ("INV-2026-3102", "12.34", "1.00", "13.34"),
+    ]
+    expected = [
+        ("INV-2026-3101", "0.00", "0.00", "1", "charge"),
+        ("INV-2026-3101", "0.00", "0.00", "2", "charge"),
+        ("INV-2026-3102", "0.00", "0.00", "1", "charge"),
+    ]
+
+    _migrate_to(repo_root, url, KIND_MIGRATION)
+    assert _rows(url, INVOICE_ROWS, INVOICE_MONEY) == invoices
+    assert _rows(url, NEW_COLUMNS, NEW_MONEY) == expected
+    assert _rows(url, "SELECT sms_phone, sms_consent_at, email_consent_at FROM operators") == [
+        ("", "None", "None")
+    ]
+
+    _migrate_to(repo_root, url, *STATE_BEFORE_KIND)
+    assert _rows(url, INVOICE_ROWS, INVOICE_MONEY) == invoices
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, INVOICE_ROWS, INVOICE_MONEY) == invoices
+    assert _rows(url, NEW_COLUMNS, NEW_MONEY) == expected
+
+    # An invoice with fees cannot go back: the restored total CHECK could not hold it.
+    with_fees = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from ledger.models import Invoice; from decimal import Decimal as D; "
+        "Invoice.objects.filter(invoice_number='INV-2026-3102')"
+        ".update(fees=D('1.00'), total=D('14.34'))",
+    )
+    assert with_fees.returncode == 0, with_fees.stderr
+    refused = _manage(repo_root, url, "migrate", *STATE_BEFORE_KIND[0], "--noinput")
+    assert refused.returncode != 0
+    assert "refuses to reverse" in refused.stderr
+    assert ("INV-2026-3102", "1.00", "0.00", "1", "charge") in _rows(url, NEW_COLUMNS, NEW_MONEY)
+
+
+def test_the_kind_migration_over_existing_rows_on_sqlite(repo_root: Path, tmp_path: Path) -> None:
+    _kind_round_trip(repo_root, f"sqlite:///{tmp_path / 'kind.sqlite3'}")
+
+
+@requires_postgresql
+def test_the_kind_migration_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    _kind_round_trip(repo_root, scratch_postgresql_url)
 
 
 # --- Row 2 --------------------------------------------------------------------------

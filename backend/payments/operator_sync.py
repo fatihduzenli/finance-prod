@@ -47,7 +47,7 @@ import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -92,6 +92,10 @@ OPERATOR_FIELDS: tuple[str, ...] = (
     "state",
     "postal_code",
     "notes",
+    # PLAN-012a D3: local only, never in the provider payload (PAYLOAD_FIELDS).
+    "sms_phone",
+    "sms_consent_at",
+    "email_consent_at",
 )
 
 #: The operator fields :func:`customer_input` reads, named in the update audit row.
@@ -706,8 +710,16 @@ def _push_summary(
     return values
 
 
+def _json_value(value: Any) -> Any:
+    """A consent time as ISO text in UTC: the audit row is JSON, and the same moment read
+    from the form (local time) and from the database (UTC) must compare equal."""
+    return value.astimezone(UTC).isoformat() if isinstance(value, datetime) else value
+
+
 def _snapshot(operator: Operator) -> dict[str, Any]:
-    values: dict[str, Any] = {name: getattr(operator, name) for name in OPERATOR_FIELDS}
+    values: dict[str, Any] = {
+        name: _json_value(getattr(operator, name)) for name in OPERATOR_FIELDS
+    }
     values["sync_status"] = operator.sync_status
     values["sync_failure"] = operator.sync_failure
     values["sync_failure_fields"] = operator.sync_failure_fields

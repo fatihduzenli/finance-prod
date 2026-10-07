@@ -19,6 +19,7 @@ from django.db.models import Q
 
 from ledger.models import (
     CALENDAR_TITLE_MAX_LENGTH,
+    CONSENT_FIELDS,
     DESCRIPTION_MAX_LENGTH,
     EVIDENCE_NAME_MAX_LENGTH,
     NAME_MAX_LENGTH,
@@ -50,6 +51,8 @@ else:  # ModelForm is only generic in the type stubs.
     _LeaseFormBase = forms.ModelForm
     _StoreFormBase = forms.ModelForm
 
+#: What a ``datetime-local`` input sends and shows, to the second (PLAN-012a D3).
+CONSENT_INPUT_FORMAT = "%Y-%m-%dT%H:%M:%S"
 #: Fixed and value-free (PLAN-006b §1).
 PHONE_MESSAGE = "Enter 10 to 15 digits, for example 4155550132."
 IDENTIFIER_MAX_LENGTH = 255
@@ -84,7 +87,21 @@ class OperatorForm(_OperatorFormBase):
             "state",
             "postal_code",
             "notes",
+            "sms_phone",
+            "sms_consent_at",
+            "email_consent_at",
         )
+        labels = {
+            "sms_phone": "SMS phone (international, +1…)",
+            "sms_consent_at": "SMS consent given on",
+            "email_consent_at": "E-mail consent given on",
+        }
+        widgets = {
+            name: forms.DateTimeInput(
+                attrs={"type": "datetime-local", "step": "1"}, format=CONSENT_INPUT_FORMAT
+            )
+            for name in CONSENT_FIELDS
+        }
 
     def clean_email(self) -> str | None:
         value = self.cleaned_data.get("email") or ""

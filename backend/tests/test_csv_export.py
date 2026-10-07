@@ -20,7 +20,7 @@ from django.test import Client
 
 from accounts import registry
 from accounts.roles import Role, meets
-from ledger.models import Document, DocumentContentType, DocumentKind
+from ledger.models import Document, DocumentContentType, DocumentKind, Operator
 from ledger.services import csv_export
 from ledger.services.csv_export import CsvWriter, cell
 from tests.auth_helpers import iter_routes
@@ -333,3 +333,27 @@ def test_a_documents_export_of_an_unknown_owner_is_404() -> None:
     client, _ = client_for(Role.VIEWER)
     assert client.get(f"/documents/stores/{uuid.uuid4()}/export.csv").status_code == 404
     assert client.get("/documents/leases/not-a-uuid/export.csv").status_code == 404
+
+
+# --- PLAN-012a D3: the operator export's consent columns -----------------------------------
+
+
+@pytest.mark.django_db
+def test_the_operator_export_has_the_sms_phone_and_consent_columns() -> None:
+    sms_at = datetime(2026, 10, 1, 14, 30, tzinfo=UTC)
+    operator = an_operator("Consent LLC")
+    Operator.objects.filter(pk=operator.pk).update(sms_phone="+14045551234", sms_consent_at=sms_at)
+    an_operator("No consent LLC")
+
+    [header, *rows] = export_rows(client_for(Role.VIEWER)[0], "/operators/export.csv")
+
+    columns = ("SMS phone", "SMS consent given on", "E-mail consent given on")
+    assert header[header.index("Phone") + 1 : header.index("Phone") + 4] == list(columns)
+    found = {row[0]: dict(zip(header, row, strict=True)) for row in rows}
+    # A leading "+" is written formula-safe, like every text cell.
+    assert [found["Consent LLC"][name] for name in columns] == [
+        "'+14045551234",
+        "2026-10-01T14:30:00+00:00",
+        "",
+    ]
+    assert [found["No consent LLC"][name] for name in columns] == ["", "", ""]

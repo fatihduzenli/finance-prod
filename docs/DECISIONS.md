@@ -635,7 +635,7 @@ listed on the dashboard until cleared. Both actions are audited and explained on
 
 **Date:** 2026-10-07
 **Status:** Accepted (owner's Prompt 12 text and amendments, 2026-10-07). **S1 and S2
-accepted by the owner on 2026-10-07 (below); their columns are built in PLAN-012a.**
+accepted by the owner on 2026-10-07 and built in PLAN-012a (below).**
 
 ### Decision
 
@@ -673,13 +673,16 @@ accepted by the owner on 2026-10-07 (below); their columns are built in PLAN-012
 - **S1 — line-item kind.** `invoice_line_items.kind` (`charge`, `fee`, `surcharge`, `tax`,
   `discount`) with `invoices.fees` and `invoices.surcharge` as separate stored columns
   (default 0). Recommended now (the builder is the first code that writes several lines per
-  invoice). **Decision: yes (owner, in writing, 2026-10-07).** To be built in the next plan
-  (PLAN-012a) before Step 13: the builder writes `charge` lines; `fees` and `surcharge`
-  default 0 and nothing writes them yet.
+  invoice). **Decision: yes (owner, in writing, 2026-10-07). Built in PLAN-012a (QA-012a):**
+  `invoice_line_items.kind` (CHECK), `invoices.fees` and `invoices.surcharge` (default 0,
+  never negative, `total` is the sum of the parts); the builder writes `charge` lines; the
+  provider contract is unchanged and the two amounts are never sent.
 - **S2 — operator contact consent.** `operators.sms_phone` (E.164), `sms_consent_at`,
   `email_consent_at`. Recommended before the Step 13 import. **Decision: yes (owner, in
-  writing, 2026-10-07).** To be built in PLAN-012a; the Step 13 import maps the sheet's
-  phone column where present; no channel uses the columns until BACKLOG §1 item 1.
+  writing, 2026-10-07). Built in PLAN-012a:** `operators.sms_phone` (E.164, CHECK and
+  guard), `sms_consent_at`, `email_consent_at`, edited by billing on the operator form; the
+  Step 13 import maps the sheet's phone column where present; no channel uses the columns
+  until BACKLOG §1 item 1.
 
 ### Consequences
 

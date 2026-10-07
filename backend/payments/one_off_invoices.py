@@ -1024,6 +1024,8 @@ def _create_for_schedule(
             memo=charge.description,
             subtotal=total,
             tax=ZERO,
+            fees=ZERO,
+            surcharge=ZERO,
             total=total,
             internal_status=InvoiceStatus.READY,
             allow_card=False,

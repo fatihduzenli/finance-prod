@@ -24,6 +24,9 @@
     <dt>Company</dt><dd>{{ operator.company|default:"—" }}</dd>
     <dt>E-mail</dt><dd>{{ operator.email|default:"—" }}</dd>
     <dt>Phone</dt><dd>{{ operator.phone|default:"—" }}</dd>
+    <dt>SMS phone</dt><dd id="sms-phone">{{ operator.sms_phone|default:"—" }}</dd>
+    <dt>SMS consent given on</dt><dd id="sms-consent">{{ operator.sms_consent_at|date:"Y-m-d H:i"|default:"—" }}</dd>
+    <dt>E-mail consent given on</dt><dd id="email-consent">{{ operator.email_consent_at|date:"Y-m-d H:i"|default:"—" }}</dd>
     <dt>Address</dt>
     <dd>{% if operator.address_line1 %}{{ operator.address_line1 }}<br>{% endif %}{% if operator.address_line2 %}{{ operator.address_line2 }}<br>{% endif %}{{ operator.city }}{% if operator.city and operator.state %}, {% endif %}{{ operator.state }} {{ operator.postal_code }}{% if not operator.address_line1 and not operator.city %}—{% endif %}</dd>
   </dl>

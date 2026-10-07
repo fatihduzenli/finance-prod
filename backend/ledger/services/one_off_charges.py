@@ -869,6 +869,8 @@ def _create_one_off(
                 memo=charge.description,
                 subtotal=item.price,
                 tax=ZERO,
+                fees=ZERO,
+                surcharge=ZERO,
                 total=item.price,
                 internal_status=InvoiceStatus.DRAFT,
                 allow_card=False,

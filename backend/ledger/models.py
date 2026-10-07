@@ -19,11 +19,13 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models import F, Q
 from django.db.models.expressions import Combinable
 from django.db.models.functions import Length, Lower, Trim
 from django.db.models.lookups import Exact
+from django.utils import timezone
 
 from ledger import merge
 from ledger.validators import validate_json_has_no_payment_data, validate_no_payment_data
@@ -222,6 +224,18 @@ class SyncFailure(models.TextChoices):
     ALREADY_LINKED_ELSEWHERE = "AlreadyLinkedElsewhere", "Linked to another operator"
 
 
+#: E.164: a plus sign, a country code that does not start with 0, at most 15 digits in all
+#: (PLAN-012a D3). The form, the model and a CHECK hold ``operators.sms_phone`` to it.
+SMS_PHONE_PATTERN = r"^\+[1-9][0-9]{7,14}$"
+SMS_PHONE_MESSAGE = (
+    "Enter the SMS phone in international format: a plus sign, the country code and the "
+    "number, digits only, for example +14045551234."
+)
+CONSENT_IN_FUTURE_MESSAGE = "A consent time cannot be in the future."
+#: The consent columns, in the order the form, the page and the CSV show them.
+CONSENT_FIELDS: tuple[str, ...] = ("sms_consent_at", "email_consent_at")
+
+
 class Operator(GuardedModel):
     """The business that runs a store and pays its rent ("customer" in older prompts)."""
 
@@ -256,6 +270,21 @@ class Operator(GuardedModel):
     nsf_return_count = models.IntegerField(default=0)
     #: Every signed statement link issued before this moment is refused (PLAN-011b D4).
     statement_links_revoked_at = models.DateTimeField(null=True, blank=True)
+    #: The phone for SMS, in E.164 (PLAN-012a D3). ``phone`` stays what the payment
+    #: provider holds. Nothing sends an SMS yet.
+    sms_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        validators=[
+            validate_no_payment_data,
+            RegexValidator(SMS_PHONE_PATTERN, SMS_PHONE_MESSAGE, code="sms_phone"),
+        ],
+    )
+    #: When the operator agreed to SMS and to e-mail (PLAN-012a D3); no channel reads
+    #: them yet.
+    sms_consent_at = models.DateTimeField(null=True, blank=True)
+    email_consent_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     archived_at = models.DateTimeField(null=True, blank=True)
@@ -277,10 +306,25 @@ class Operator(GuardedModel):
             _valid_choice("operators", "enrolment_status", EnrolmentStatus),
             _valid_choice("operators", "sync_status", SyncStatus),
             _valid_choice("operators", "sync_failure", SyncFailure, blank=True),
+            models.CheckConstraint(
+                condition=Q(sms_phone="") | Q(sms_phone__regex=SMS_PHONE_PATTERN),
+                name="operators_sms_phone_e164",
+            ),
         ]
 
     def __str__(self) -> str:
         return self.display_name
+
+    def clean(self) -> None:
+        super().clean()
+        now = timezone.now()
+        errors = {
+            name: CONSENT_IN_FUTURE_MESSAGE
+            for name in CONSENT_FIELDS
+            if (moment := getattr(self, name)) is not None and moment > now
+        }
+        if errors:
+            raise ValidationError(errors, code="consent_in_future")
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         # Stored stripped and lower-case; an empty address is NULL, never ''.
@@ -1114,6 +1158,10 @@ class InvoiceStatus(models.TextChoices):
     VOID = "void", "Void"
 
 
+#: An invoice's total is the sum of these (PLAN-012a D2).
+_INVOICE_PARTS = F("subtotal") + F("tax") + F("fees") + F("surcharge")
+
+
 class Invoice(GuardedModel):
     invoice_number = guarded_char(32, unique=True)
     operator = models.ForeignKey(Operator, on_delete=models.PROTECT, related_name="invoices")
@@ -1134,6 +1182,10 @@ class Invoice(GuardedModel):
     memo = free_text()
     subtotal = MoneyField()
     tax = MoneyField(default=ZERO)
+    #: Fees and a surcharge, stored apart from ``subtotal`` (PLAN-012a D2). Always 0
+    #: today, and never sent to the payment provider.
+    fees = MoneyField(default=ZERO)
+    surcharge = MoneyField(default=ZERO)
     total = MoneyField()
     amount_paid = MoneyField(default=ZERO)
     internal_status = _choice(InvoiceStatus, default=InvoiceStatus.DRAFT)
@@ -1184,12 +1236,14 @@ class Invoice(GuardedModel):
                 name="invoices_at_most_one_source",
             ),
             models.CheckConstraint(
-                condition=Q(total__gt=F("subtotal") + F("tax") - HALF_CENT)
-                & Q(total__lt=F("subtotal") + F("tax") + HALF_CENT),
-                name="invoices_total_is_subtotal_plus_tax",
+                condition=Q(total__gt=_INVOICE_PARTS - HALF_CENT)
+                & Q(total__lt=_INVOICE_PARTS + HALF_CENT),
+                name="invoices_total_is_sum_of_parts",
             ),
             _not_negative("invoices", "subtotal"),
             _not_negative("invoices", "tax"),
+            _not_negative("invoices", "fees"),
+            _not_negative("invoices", "surcharge"),
             _not_negative("invoices", "total"),
             _not_negative("invoices", "amount_paid"),
             models.CheckConstraint(
@@ -1201,6 +1255,17 @@ class Invoice(GuardedModel):
 
     def __str__(self) -> str:
         return self.invoice_number
+
+
+class InvoiceLineKind(models.TextChoices):
+    """What a line bills (PLAN-012a D1). Only ``charge`` is written today; the others
+    are reserved for a later plan."""
+
+    CHARGE = "charge", "Charge"
+    FEE = "fee", "Fee"
+    SURCHARGE = "surcharge", "Surcharge"
+    TAX = "tax", "Tax"
+    DISCOUNT = "discount", "Discount"
 
 
 class InvoiceLineItem(GuardedModel):
@@ -1221,6 +1286,7 @@ class InvoiceLineItem(GuardedModel):
         blank=True,
         related_name="invoice_lines",
     )
+    kind = _choice(InvoiceLineKind, default=InvoiceLineKind.CHARGE)
 
     class Meta:
         db_table = "invoice_line_items"
@@ -1238,6 +1304,7 @@ class InvoiceLineItem(GuardedModel):
                 condition=Q(one_off_charge__isnull=False),
                 name="invoice_line_items_one_per_one_off_charge",
             ),
+            _valid_choice("invoice_line_items", "kind", InvoiceLineKind),
         ]
 
 

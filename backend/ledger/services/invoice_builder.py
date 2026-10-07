@@ -74,6 +74,7 @@ from ledger.models import (
     InvoiceDraftLine,
     InvoiceDraftStatus,
     InvoiceLineItem,
+    InvoiceLineKind,
     InvoiceStatus,
     Lease,
     OneOffCategory,
@@ -688,6 +689,8 @@ def _convert(
             memo=draft.memo,
             subtotal=total,
             tax=ZERO,
+            fees=ZERO,
+            surcharge=ZERO,
             total=total,
             internal_status=InvoiceStatus.DRAFT,
             allow_card=False,
@@ -704,6 +707,7 @@ def _convert(
                     unit_price=line.unit_amount,
                     line_total=line.line_total,
                     one_off_charge=charge,
+                    kind=InvoiceLineKind.CHARGE,
                 )
                 for position, (line, charge) in enumerate(zip(lines, charges, strict=True), 1)
             ]

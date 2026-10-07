@@ -684,6 +684,8 @@ def _match_one(
                 due_date=due if due is not None and due >= issued else issued,
                 subtotal=total,
                 tax=ZERO,
+                fees=ZERO,
+                surcharge=ZERO,
                 total=total,
                 allow_card=False,
                 allow_ach=True,

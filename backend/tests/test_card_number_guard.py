@@ -344,6 +344,7 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0028_contact_log_maturity",
         "ledger.migrations.0029_invoice_builder",
         "ledger.migrations.0030_disputes",
+        "ledger.migrations.0031_line_kind_fees_consent",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",
@@ -565,6 +566,12 @@ def _accepted_samples(model: type[models.Model], field: models.Field[Any, Any]) 
     if column == "outbound_messages.error":
         return [text for text in samples if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", text)] + [
             "ConnectTimeout"
+        ]
+    # PLAN-012a D3: an SMS phone is E.164 (CHECK).
+    if column == "operators.sms_phone":
+        return [text for text in samples if re.fullmatch(ledger_models.SMS_PHONE_PATTERN, text)] + [
+            "+14045551234",
+            "+447911123456",
         ]
     # PLAN-012 D2: a delete reason is not blank, and only on a deleted entry (CHECK).
     if column == "contact_entries.delete_reason":

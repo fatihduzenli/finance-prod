@@ -11,11 +11,12 @@ are reused by the other PLAN-004 test modules.
 
 from __future__ import annotations
 
+import functools
 import itertools
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -23,6 +24,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, models, transaction
+from django.utils import timezone
 
 from ledger import models as ledger
 from ledger.validators import PAYMENT_DATA_MESSAGE
@@ -1034,9 +1036,22 @@ LEDGER_CASES: list[ConstraintCase] = [
         )(),
     ),
     ConstraintCase(
-        "invoices_total_is_subtotal_plus_tax",
-        lambda: new_invoice(subtotal=D("0.10"), tax=D("0.20"), total=D("0.30")),
+        # PLAN-012a D2: total = subtotal + tax + fees + surcharge.
+        "invoices_total_is_sum_of_parts",
+        lambda: new_invoice(
+            subtotal=D("0.10"), tax=D("0.20"), fees=D("0.40"), surcharge=D("0.80"), total=D("1.50")
+        ),
         lambda: new_invoice(subtotal=D("0.10"), tax=D("0.20"), total=D("0.31")),
+    ),
+    ConstraintCase(
+        "invoices_fees_not_negative",
+        lambda: new_invoice(subtotal=D("1.00"), fees=D("0.00"), total=D("1.00")),
+        lambda: new_invoice(subtotal=D("2.00"), fees=D("-1.00"), total=D("1.00")),
+    ),
+    ConstraintCase(
+        "invoices_surcharge_not_negative",
+        lambda: new_invoice(subtotal=D("1.00"), surcharge=D("0.00"), total=D("1.00")),
+        lambda: new_invoice(subtotal=D("2.00"), surcharge=D("-1.00"), total=D("1.00")),
     ),
     ConstraintCase(
         "invoices_subtotal_not_negative",
@@ -1074,6 +1089,12 @@ LEDGER_CASES: list[ConstraintCase] = [
     _field_unique("invoices", "creation_key", new_invoice, _UUID_1, _UUID_2),
     # operators (PLAN-006 D6)
     _field_unique("operators", "creation_key", new_operator, _UUID_1, _UUID_2),
+    # operators (PLAN-012a D3): empty or E.164.
+    ConstraintCase(
+        "operators_sms_phone_e164",
+        lambda: new_operator(sms_phone="+14045551234"),
+        lambda: new_operator(sms_phone="404-555-1234"),
+    ),
     # invoice_line_items
     ConstraintCase(
         "invoice_line_items_position_unique",
@@ -1094,6 +1115,12 @@ LEDGER_CASES: list[ConstraintCase] = [
         "invoice_line_items_one_per_one_off_charge",
         unique_pair(_line_of_a_charge, {}, {}),
         unique_pair(_line_of_a_charge, {}, {"one_off_charge": lambda row: row.one_off_charge}),
+    ),
+    ConstraintCase(
+        # PLAN-012a D1: the closed list.
+        "invoice_line_items_kind_valid",
+        lambda: new_line_item(kind="discount"),
+        lambda: new_line_item(kind="credit"),
     ),
     # invoice_drafts and invoice_draft_lines (PLAN-012 D6)
     ConstraintCase(
@@ -1648,6 +1675,26 @@ EXTRA_REJECTIONS: list[ConstraintCase] = [
             parent_payment=saved(new_payment()),
         ),
     ),
+    # PLAN-012a D2: a total that ignores the fees, or the surcharge, is refused.
+    ConstraintCase(
+        "invoices_total_is_sum_of_parts",
+        new_invoice,
+        lambda: new_invoice(subtotal=D("10.00"), fees=D("2.00"), total=D("10.00")),
+    ),
+    ConstraintCase(
+        "invoices_total_is_sum_of_parts",
+        new_invoice,
+        lambda: new_invoice(subtotal=D("10.00"), surcharge=D("0.30"), total=D("10.00")),
+    ),
+    # PLAN-012a D3: "+1" alone, 16 digits, a leading zero, a space.
+    *(
+        ConstraintCase(
+            "operators_sms_phone_e164",
+            new_operator,
+            functools.partial(new_operator, sms_phone=phone),
+        )
+        for phone in ("+1", "+1404555123456789", "+04045551234", "+1 4045551234")
+    ),
 ]
 
 
@@ -1852,3 +1899,76 @@ def test_audit_log_rejects_update_and_delete(operation: str) -> None:
                 else:
                     cursor.execute("DELETE FROM audit_log WHERE id = %s", [entry.pk])
     assert ledger.AuditLog.objects.get(pk=entry.pk).action == "update"
+
+
+# --- PLAN-012a: line kind, fees and surcharge, operator consent ----------------------
+
+
+def test_new_invoices_and_lines_default_to_no_fees_and_a_charge_line() -> None:
+    line = saved(new_line_item())
+    line.refresh_from_db()
+    invoice = line.invoice
+    invoice.refresh_from_db()
+    assert line.kind == "charge"
+    assert (invoice.fees, invoice.surcharge) == (D("0.00"), D("0.00"))
+    assert invoice.total == invoice.subtotal + invoice.tax
+
+
+def test_line_kind_choices_are_the_closed_list() -> None:
+    assert ledger.InvoiceLineKind.values == ["charge", "fee", "surcharge", "tax", "discount"]
+
+
+@pytest.mark.parametrize("phone", ["", "+14045551234", "+447911123456", "+12345678"])
+def test_sms_phone_accepts_blank_and_e164(phone: str) -> None:
+    operator = new_operator(sms_phone=phone)
+    operator.full_clean()
+    saved(operator)
+
+
+@pytest.mark.parametrize(
+    "phone",
+    ["+1", "+1404555123456789", "404-555-1234", "4045551234", "+1 404 555 1234", "+04045551234"],
+)
+def test_sms_phone_refuses_anything_but_e164_with_a_sentence_naming_the_format(
+    phone: str,
+) -> None:
+    with pytest.raises(ValidationError) as raised:
+        new_operator(sms_phone=phone).full_clean()
+    assert raised.value.message_dict["sms_phone"] == [ledger.SMS_PHONE_MESSAGE]
+    assert "+14045551234" in ledger.SMS_PHONE_MESSAGE
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "+378282246310005",  # a Luhn-valid 15-digit card number in E.164 shape
+        "011000015 1234567",  # a routing number next to an account number
+    ],
+)
+def test_sms_phone_is_covered_by_the_payment_data_guard(text: str) -> None:
+    with pytest.raises(ValidationError, match=PAYMENT_DATA_MESSAGE), transaction.atomic():
+        new_operator(sms_phone=text).save()
+    assert not ledger.Operator.objects.exists()
+
+
+@requires_postgresql
+def test_sms_phone_card_number_is_refused_by_the_database_trigger() -> None:
+    operator = saved(new_operator())
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ledger.Operator.objects.filter(pk=operator.pk).update(sms_phone="+378282246310005")
+    operator.refresh_from_db()
+    assert operator.sms_phone == ""
+
+
+@pytest.mark.parametrize("field", ["sms_consent_at", "email_consent_at"])
+def test_a_consent_time_in_the_future_is_refused(field: str) -> None:
+    later = timezone.now() + timedelta(minutes=1)
+    with pytest.raises(ValidationError) as raised:
+        new_operator(**{field: later}).full_clean()
+    assert raised.value.message_dict == {field: [ledger.CONSENT_IN_FUTURE_MESSAGE]}
+
+
+@pytest.mark.parametrize("field", ["sms_consent_at", "email_consent_at"])
+def test_a_consent_time_now_or_earlier_is_accepted(field: str) -> None:
+    for moment in (timezone.now(), datetime(2026, 1, 1, tzinfo=UTC)):
+        new_operator(**{field: moment}).full_clean()

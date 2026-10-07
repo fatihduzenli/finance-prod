@@ -890,3 +890,15 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Next: the owner's "push"; then the staging clicks of the plan's §8 (store 2476 two-line
   invoice; store 2477 promise; the 15-minute edit; viewer cannot delete; the dispute list
   renders empty).
+
+## Update, 2026-10-07, PLAN-012 on staging; PLAN-012a (S1, S2) built and gated
+
+- Owner typed "push" (with S1 yes, S2 yes). `main` at `8623398`; GitHub's Git Operations incident
+  rejected the push three times with an internal error, the fourth attempt went through; CI run
+  37642705922 green end to end, four resources verified, `/healthz` ok. The owner's five clicks
+  of plan §8 are pending.
+- PLAN-012a (one Opus batch, gated by Fable): `invoice_line_items.kind`, `invoices.fees` and
+  `invoices.surcharge` with the total CHECK recreated as the sum of the parts; `operators.sms_phone`
+  (E.164), `sms_consent_at`, `email_consent_at` on the form, page and CSV; every invoice writer sets
+  the new columns explicitly; migration 0031 with a seeded round trip; provider contract unchanged.
+  Uncommitted until the gate's report (QA-012a); then its own Publish Request.

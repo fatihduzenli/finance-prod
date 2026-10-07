@@ -10,10 +10,13 @@ the P&L and the open balances. Nothing reaches a network.
 
 from __future__ import annotations
 
+import ast
+import dataclasses
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -30,6 +33,7 @@ from ledger.models import (
     InvoiceDraft,
     InvoiceDraftStatus,
     InvoiceLineItem,
+    InvoiceLineKind,
     InvoiceStatus,
     Lease,
     OneOffCategory,
@@ -46,7 +50,7 @@ from ledger.services import one_off_charges as one_off_service
 from ledger.services.invoice_builder import LineInput
 from payments.fake import FakeProvider
 from payments.models import ExternalRef, Job, JobKind, JobStatus
-from payments.provider import InvoiceInput, PayWithStoredMethod
+from payments.provider import Amounts, InvoiceInput, PayWithStoredMethod
 from payments.stax import validation
 from tests.job_helpers import run_queued_jobs
 from tests.test_charge_now import store_methods
@@ -1042,3 +1046,48 @@ def test_a_rescheduled_return_on_a_two_line_invoice_is_owed_once(
         fee.pk: Decimal(fee.price),
     }
     assert receivables.total(after) - Decimal(fee.price) == receivables.total(before)
+
+
+# --- PLAN-012a D1, D2: line kind, fees and surcharge -------------------------------------
+
+
+def test_a_builder_invoice_has_charge_lines_and_no_fees_or_surcharge(
+    fake: FakeProvider, worker: None
+) -> None:
+    draft, invoice = sent_two(fake)
+    assert [row.kind for row in invoice.line_items.order_by("position")] == [
+        InvoiceLineKind.CHARGE,
+        InvoiceLineKind.CHARGE,
+    ]
+    assert (invoice.fees, invoice.surcharge) == (D("0.00"), D("0.00"))
+    assert invoice.total == invoice.subtotal + invoice.tax == D("150.00")
+    [request] = created_invoices(fake)
+    # The provider contract is unchanged: no fees and no surcharge reach it.
+    assert request.amounts.total == invoice.total
+    assert not {"fees", "surcharge"} & {field.name for field in dataclasses.fields(Amounts)}
+
+
+def _keywords_of_calls(repo_root: Path, callee: str) -> list[tuple[str, set[str]]]:
+    """Every call of ``callee`` in application code: its place and its keyword names."""
+    found = []
+    for package in ("ledger", "payments"):
+        for path in (repo_root / "backend" / package).rglob("*.py"):
+            if "migrations" in path.parts:
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Call) and ast.unparse(node.func) == callee:
+                    place = f"{path.relative_to(repo_root)}:{node.lineno}"
+                    found.append((place, {kw.arg for kw in node.keywords if kw.arg}))
+    return found
+
+
+def test_every_invoice_writer_sets_fees_and_surcharge_explicitly(repo_root: Path) -> None:
+    writers = _keywords_of_calls(repo_root, "Invoice.objects.create")
+    assert len(writers) >= 6
+    assert [place for place, names in writers if not {"fees", "surcharge"} <= names] == []
+
+
+def test_every_line_item_writer_sets_the_kind_explicitly(repo_root: Path) -> None:
+    writers = _keywords_of_calls(repo_root, "InvoiceLineItem")
+    assert writers
+    assert [place for place, names in writers if "kind" not in names] == []
