@@ -836,3 +836,25 @@ the login page myself." The condition for starting Prompt 4 is met.
   was not run.
 - Next: the owner's 11b clicks (RUNBOOK §15); mail enablement after the owner's Workspace steps
   (plan §9) in a later deployment with `mailEnabled=true gmailSender=… mailCatchAll=…`.
+
+## Update, 2026-10-06, 11b click 1 failed: broken promises hidden; fixed (PLAN-011b-a)
+
+- **Owner, in writing:** three promise entries on operator sena (two past dates, one future) all
+  read "Open" and none showed on the attention list. Other clicks: the Oct 20 calendar note
+  shows on `/calendar/`; the Google feed is added (confirmation after Google refreshes); the grid
+  shows twelve months with a visible scrollbar and a fixed store column; Reschedule waits for
+  Stax ACH.
+- Cause: the rule required the operator to have an open balance and treated any later payment
+  as keeping the promise; sena owes nothing. The list is computed live (not by the daily job).
+- Fix: a past, unclosed promise is broken unless a settled, non-refund payment of at least the
+  promised amount settled between the entry's recording day and the promised date (New York);
+  balance plays no part. Note for the owner: a backdated promise (promised date before the day
+  it was recorded) can only be cleared by a later entry; Prompt 12's rule (3) replaces this.
+- **Owner findings for the Prompt 12 plan (contact log):** (1) edit by the author for 15 minutes,
+  then appended corrections only; admin soft delete with a mandatory reason, shown struck
+  through; (2) a store/lease field on entries (required with more than one active lease,
+  preselected with one), entries shown on the store page too with an Add entry button, promises
+  matched against that lease's balance; (3) a promise closes automatically when a payment at
+  least equal to the promised amount settles on that lease on or before the promised date;
+  (4) a "Previous promise" outcome (Kept, Rescheduled with new date and amount, Broken) replaces
+  the "closes the promise" checkbox; log statuses open, kept, rescheduled, broken.

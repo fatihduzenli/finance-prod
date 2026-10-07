@@ -7,26 +7,26 @@ entry writes an audit row (``contact_entry.created``; and ``contact_entry.promis
 on the promise it closes).
 
 **When a promise is broken** (:func:`broken_promises`), on ``today`` (a New York date),
-a promise is broken when all of these hold:
+a promise is broken when all of these hold, whatever the operator's balance:
 
-1. it is not closed (``closed_by`` is null);
-2. its ``promised_date`` is before ``today``;
-3. its operator still has an open balance on ``today``: at least one open charge billed
-   to it, as :func:`ledger.services.receivables.open_balances` decides (rent, insurance or
-   one-off, deposits left out), due on any date;
-4. no payment of the operator settled on or after the ``promised_date``: no row of
-   ``payments`` with status ``settled``, not a refund, and ``settled_on`` on or after that
-   date, whose charge or invoice is billed to the operator.
+1. it is a promise to pay (``kind`` is ``promise``);
+2. its ``promised_date`` is before ``today`` (a promise due today or later is never
+   broken);
+3. it is not closed (``closed_by`` is null);
+4. no payment kept it: no row of ``payments`` with status ``settled``, not a refund,
+   whose charge or invoice is billed to the operator, with ``amount`` at least the
+   ``promised_amount`` and ``settled_on`` from the New York date of the entry's
+   ``created_at`` to the ``promised_date``, both inclusive.
 
-A broken promise is an attention item (:mod:`ledger.services.attention`) until a later
-entry closes it or such a payment settles. The reads take a fixed number of queries
-whatever the number of promises.
+A broken promise is an attention item (:mod:`ledger.services.attention`) from the day
+after its promised date until a later entry closes it. The read is one query whatever the
+number of promises.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -34,8 +34,8 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max, QuerySet
-from django.db.models.functions import Coalesce
+from django.db.models import Exists, OuterRef, QuerySet
+from django.db.models.functions import Coalesce, TruncDate
 
 from ledger.models import (
     AuditLog,
@@ -45,7 +45,6 @@ from ledger.models import (
     Payment,
     PaymentStatus,
 )
-from ledger.services import receivables
 from ledger.services.csv_export import CsvWriter
 from ledger.validators import contains_bank_routing_pattern, contains_card_number, visible_text
 
@@ -217,9 +216,9 @@ def _audit(
 # --- Broken promises (the module docstring's rule) -----------------------------------------
 
 
-def _last_settled(operators: Iterable[uuid.UUID], since: date) -> dict[uuid.UUID, date]:
-    """Operator -> the latest ``settled_on`` of its settled, non-refund payments on or
-    after ``since``. One query."""
+def _keeping_payments() -> QuerySet[Payment]:
+    """The payments that keep the outer promise (rule 4): settled, not a refund, billed to
+    its operator, at least its amount, settled from the day it was recorded to its date."""
     billed = Coalesce(
         "invoice__operator",
         "rent_charge__lease__operator",
@@ -227,48 +226,33 @@ def _last_settled(operators: Iterable[uuid.UUID], since: date) -> dict[uuid.UUID
         "one_off_charge__operator",
         "one_off_charge__lease__operator",
     )
-    rows = (
-        Payment.objects.filter(status=PaymentStatus.SETTLED, is_refund=False, settled_on__gte=since)
+    return (
+        Payment.objects.filter(
+            status=PaymentStatus.SETTLED,
+            is_refund=False,
+            amount__gte=OuterRef("promised_amount"),
+            settled_on__gte=OuterRef("recorded_on"),
+            settled_on__lte=OuterRef("promised_date"),
+        )
         .annotate(billed=billed)
-        .filter(billed__in=list(operators))
-        .values("billed")
-        .annotate(last=Max("settled_on"))
-        .order_by()
+        .filter(billed=OuterRef("operator_id"))
     )
-    return {row["billed"]: row["last"] for row in rows}
 
 
 def broken_promises(today: date, operator: uuid.UUID | None = None) -> list[ContactEntry]:
-    """The promises broken on ``today`` (see the module docstring), oldest promised date
-    first; with ``operator``, only that operator's. A fixed number of queries."""
-    promises = list(
+    """The promises broken on ``today`` (the module docstring's rule), oldest promised
+    date first; with ``operator``, only that operator's. One query. ``created_at`` is
+    truncated in the current time zone, New York (``settings.TIME_ZONE``)."""
+    return list(
         ContactEntry.objects.filter(
             kind=ContactKind.PROMISE, closed_by__isnull=True, promised_date__lt=today
         )
         .filter(**({"operator": operator} if operator is not None else {}))
+        .annotate(recorded_on=TruncDate("created_at"))
+        .filter(~Exists(_keeping_payments()))
         .select_related("operator")
         .order_by("promised_date", "created_at", "id")
     )
-    if not promises:
-        return []
-    owing = {
-        row.operator_id
-        for row in receivables.open_balances(today, operator=operator)
-        if row.operator_id is not None
-    }
-    candidates = [promise for promise in promises if promise.operator_id in owing]
-    if not candidates:
-        return []
-    since = min(promise.promised_date for promise in candidates if promise.promised_date)
-    settled = _last_settled({promise.operator_id for promise in candidates}, since)
-    return [
-        promise
-        for promise in candidates
-        if promise.promised_date is not None
-        and not (
-            promise.operator_id in settled and settled[promise.operator_id] >= promise.promised_date
-        )
-    ]
 
 
 # --- CSV ---------------------------------------------------------------------------------

@@ -279,3 +279,42 @@ def test_tz_apply_refuses_a_wrong_count_and_writes_nothing() -> None:
     with pytest.raises(CommandError):
         call_command("tz_apply", "--audited", "999999", stdout=out)
     assert AuditLog.objects.count() == before
+
+
+# --- the owner's broken-promise scenario (staging defect of 2026-10-06) ------------------------
+
+
+def test_past_promises_show_at_once_whatever_the_balance_and_future_ones_do_not() -> None:
+    """Operator with nothing owed; three promises recorded today: two past, one future. The
+    two past ones are attention items immediately; the future one is not."""
+    from datetime import date as _date
+
+    from ledger.services import attention, contacts
+    from tests.test_lease_services import make_operator
+
+    sena = make_operator(email="sena-adv@example.com", customer=None)
+    today = timezone.localdate()
+    for promised in (
+        today - timedelta(days=5),
+        today - timedelta(days=1),
+        today + timedelta(days=1),
+    ):
+        outcome = contacts.add_entry(
+            sena.pk,
+            contacts.ContactInput(
+                kind="promise",
+                happened_on=today,
+                body="will pay",
+                promised_date=promised,
+                promised_amount=D("250.00"),
+            ),
+            actor=None,
+        )
+        assert outcome.ok, outcome.message
+    items = [i for i in attention.attention(today).items if i.kind == attention.BROKEN_PROMISE]
+    assert len(items) == 2
+    assert [i.since for i in items] == [today - timedelta(days=5), today - timedelta(days=1)]
+    assert all(isinstance(i.since, _date) and i.since < today for i in items)
+    viewer, _ = client_for(Role.VIEWER)
+    page = viewer.get("/").content.decode()
+    assert page.count("not kept") == 2

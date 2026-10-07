@@ -1,14 +1,17 @@
 """The contact log (docs/qa/PLAN-011b D7, §7): billing adds entries, a promise carries its
 date and amount and nothing else does, a later entry closes a promise, the operator page
-lists the entries newest first with a CSV export, and the exact broken-promise rule."""
+lists the entries newest first with a CSV export, and the exact broken-promise rule: a past,
+open promise is broken whatever the balance unless a settled payment of at least its amount
+kept it between the day it was recorded and its date (owner, 2026-10-06)."""
 
 from __future__ import annotations
 
 import csv
 import io
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.contrib.auth.models import User
@@ -26,6 +29,7 @@ from ledger.models import (
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
+    RentCharge,
     RentChargeStatus,
 )
 from ledger.services import attention, contacts
@@ -39,6 +43,7 @@ D = Decimal
 TODAY = date(2026, 10, 6)
 YESTERDAY = TODAY - timedelta(days=1)
 CARD = "4111 1111 1111 1111"
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 @pytest.fixture
@@ -231,6 +236,68 @@ def test_an_archived_operator_takes_no_entry() -> None:
 # --- Broken promises -----------------------------------------------------------------------
 
 
+def recorded(entry: ContactEntry, on: date, hour: int = 12) -> ContactEntry:
+    """Set the entry's ``created_at`` to ``hour`` o'clock New York time on ``on``."""
+    at = datetime.combine(on, time(hour), tzinfo=NEW_YORK)
+    ContactEntry.objects.filter(pk=entry.pk).update(created_at=at)
+    entry.refresh_from_db()
+    return entry
+
+
+def owners_scenario() -> tuple[Operator, list[ContactEntry]]:
+    """Staging, 2026-10-06: three promises recorded today for an operator owing nothing,
+    promised 2026-10-05 and 2026-10-01 (past) and 2026-10-07 (future)."""
+    operator = an_operator("Sena")
+    entries = [
+        recorded(promise(operator, on=TODAY, by=by), TODAY)
+        for by in (date(2026, 10, 5), date(2026, 10, 7), date(2026, 10, 1))
+    ]
+    return operator, entries
+
+
+def test_the_owners_scenario_lists_both_past_promises_oldest_first_without_a_balance() -> None:
+    operator, (fifth, seventh, first) = owners_scenario()
+    assert contacts.broken_promises(TODAY) == [first, fifth]
+    assert contacts.broken_promises(TODAY, operator=operator.pk) == [first, fifth]
+    items = [item for item in attention.attention(TODAY).items if item.kind == "broken_promise"]
+    assert [item.text for item in items] == [
+        "Promise to pay $1,500.00 by 2026-10-01: Sena, not kept",
+        "Promise to pay $1,500.00 by 2026-10-05: Sena, not kept",
+    ]
+    assert [item.since for item in items] == [date(2026, 10, 1), date(2026, 10, 5)]
+    assert seventh not in contacts.broken_promises(TODAY)
+
+
+@pytest.mark.parametrize("role", [Role.VIEWER, Role.BILLING, Role.ADMIN])
+def test_the_dashboard_shows_the_owners_two_broken_promises(today: date, role: Role) -> None:
+    operator, _ = owners_scenario()
+    client, _ = client_for(role)
+    page = client.get("/").content.decode()
+    assert 'id="attention-none"' not in page
+    first = page.index("Promise to pay $1,500.00 by 2026-10-01: Sena, not kept")
+    fifth = page.index("Promise to pay $1,500.00 by 2026-10-05: Sena, not kept")
+    assert first < fifth
+    assert "by 2026-10-07" not in page
+    assert page.count(f'href="/operators/{operator.pk}/#contacts"') == 2
+
+
+def test_the_operator_page_shows_the_owners_broken_promises_as_banners(today: date) -> None:
+    operator, _ = owners_scenario()
+    other = an_operator("Other")
+    recorded(promise(other, on=TODAY, by=date(2026, 10, 2)), TODAY)
+    client, _ = client_for(Role.VIEWER)
+    page = client.get(f"/operators/{operator.pk}/").content.decode()
+    assert 'class="attention attention-banners"' in page
+    banners = page[
+        page.index('id="attention"') : page.index("</section>", page.index('id="attention"'))
+    ]
+    assert banners.count('data-kind="broken_promise"') == 2
+    assert "Promise to pay $1,500.00 by 2026-10-01: Sena, not kept" in banners
+    assert "Promise to pay $1,500.00 by 2026-10-05: Sena, not kept" in banners
+    assert "by 2026-10-07" not in banners
+    assert "Other" not in banners
+
+
 def test_a_promise_dated_yesterday_with_an_open_balance_is_broken_and_on_the_list() -> None:
     operator = owing_operator()
     entry = promise(operator, by=YESTERDAY)
@@ -246,45 +313,89 @@ def test_a_promise_dated_yesterday_with_an_open_balance_is_broken_and_on_the_lis
 
 
 def test_a_promise_due_today_or_later_is_not_broken() -> None:
-    operator = owing_operator()
+    operator = an_operator()
     promise(operator, by=TODAY)
     promise(operator, by=TODAY + timedelta(days=3))
     assert contacts.broken_promises(TODAY) == []
 
 
-def test_without_an_open_balance_a_past_promise_is_not_broken() -> None:
+def test_without_an_open_balance_a_past_promise_is_still_broken() -> None:
     operator = an_operator()
-    promise(operator, by=YESTERDAY)
-    assert contacts.broken_promises(TODAY) == []
-
-
-def test_a_payment_settled_on_or_after_the_promised_date_keeps_the_promise() -> None:
-    operator = owing_operator()
-    lease = operator.leases.get()
-    entry = promise(operator, by=date(2026, 10, 3))
-    paid = a_rent_charge(lease, date(2026, 9, 1), RentChargeStatus.PAID, "100.00", "100.00")
-    # Settled the day before the promised date: does not count.
-    a_payment(paid, "100.00", date(2026, 10, 2))
+    entry = promise(operator, by=YESTERDAY)
     assert contacts.broken_promises(TODAY) == [entry]
-    # A refund on the date does not count either.
-    refund = a_payment(paid, "50.00", date(2026, 10, 3))
-    Payment.objects.filter(pk=refund.pk).update(
-        is_refund=True, parent_payment=Payment.objects.exclude(pk=refund.pk).first()
+
+
+def paid_charge(operator: Operator) -> RentCharge:
+    return a_rent_charge(
+        operator.leases.get(), date(2026, 9, 1), RentChargeStatus.PAID, "1500.00", "1500.00"
     )
-    assert contacts.broken_promises(TODAY) == [entry]
-    # A pending payment does not count.
-    a_payment(paid, "100.00", None, PaymentStatus.PENDING, initiated_on=date(2026, 10, 4))
-    assert contacts.broken_promises(TODAY) == [entry]
-    # Settled on the promised date: kept.
-    a_payment(paid, "100.00", date(2026, 10, 3))
+
+
+def test_a_settled_payment_of_the_amount_on_the_promised_date_keeps_the_promise() -> None:
+    operator = owing_operator()
+    recorded(promise(operator, by=date(2026, 10, 3)), date(2026, 10, 1))
+    a_payment(paid_charge(operator), "1500.00", date(2026, 10, 3))
     assert contacts.broken_promises(TODAY) == []
+
+
+def test_a_larger_payment_on_the_day_the_promise_was_recorded_keeps_it() -> None:
+    operator = owing_operator()
+    recorded(promise(operator, by=date(2026, 10, 3)), date(2026, 10, 1))
+    a_payment(paid_charge(operator), "1500.01", date(2026, 10, 1))
+    assert contacts.broken_promises(TODAY) == []
+
+
+def test_a_smaller_payment_does_not_keep_the_promise() -> None:
+    operator = owing_operator()
+    entry = recorded(promise(operator, by=date(2026, 10, 3)), date(2026, 10, 1))
+    charge = paid_charge(operator)
+    a_payment(charge, "1499.99", date(2026, 10, 2))
+    a_payment(charge, "1000.00", date(2026, 10, 3))
+    assert contacts.broken_promises(TODAY) == [entry]
+
+
+def test_a_payment_after_the_promised_date_does_not_keep_the_promise() -> None:
+    operator = owing_operator()
+    entry = recorded(promise(operator, by=date(2026, 10, 3)), date(2026, 10, 1))
+    a_payment(paid_charge(operator), "1500.00", date(2026, 10, 4))
+    assert contacts.broken_promises(TODAY) == [entry]
+
+
+def test_a_payment_before_the_promise_was_recorded_does_not_keep_it() -> None:
+    operator = owing_operator()
+    entry = recorded(promise(operator, by=date(2026, 10, 3)), date(2026, 10, 2))
+    a_payment(paid_charge(operator), "1500.00", date(2026, 10, 1))
+    assert contacts.broken_promises(TODAY) == [entry]
+
+
+def test_the_day_the_promise_was_recorded_is_the_new_york_day() -> None:
+    operator = owing_operator()
+    # 21:00 New York on 2026-10-02 is 2026-10-03 in UTC.
+    entry = recorded(promise(operator, by=date(2026, 10, 3)), date(2026, 10, 2), hour=21)
+    assert entry.created_at.astimezone(UTC).date() == date(2026, 10, 3)
+    a_payment(paid_charge(operator), "1500.00", date(2026, 10, 2))
+    assert contacts.broken_promises(TODAY) == []
+
+
+def test_a_refund_or_a_payment_not_settled_never_keeps_the_promise() -> None:
+    operator = owing_operator()
+    entry = recorded(promise(operator, by=date(2026, 10, 3)), date(2026, 10, 1))
+    charge = paid_charge(operator)
+    original = a_payment(charge, "1500.00", date(2026, 9, 5))
+    refund = a_payment(charge, "1500.00", date(2026, 10, 3))
+    Payment.objects.filter(pk=refund.pk).update(is_refund=True, parent_payment=original)
+    assert contacts.broken_promises(TODAY) == [entry]
+    a_payment(charge, "1500.00", None, PaymentStatus.PENDING, initiated_on=date(2026, 10, 2))
+    returned = a_payment(charge, "1500.00", date(2026, 10, 2))
+    Payment.objects.filter(pk=returned.pk).update(status=PaymentStatus.RETURNED)
+    assert contacts.broken_promises(TODAY) == [entry]
 
 
 def test_a_settled_one_off_payment_billed_to_the_operator_counts() -> None:
     from tests.receivables_helpers import a_one_off_charge
 
     operator = owing_operator()
-    entry = promise(operator, by=date(2026, 10, 3))
+    entry = recorded(promise(operator, by=date(2026, 10, 3), amount="50.00"), date(2026, 10, 1))
     charge = a_one_off_charge(operator, "50.00", date(2026, 9, 1))
     assert contacts.broken_promises(TODAY) == [entry]
     Payment.objects.create(
@@ -293,7 +404,7 @@ def test_a_settled_one_off_payment_billed_to_the_operator_counts() -> None:
         method=PaymentMethod.ACH,
         amount=D("50.00"),
         status=PaymentStatus.SETTLED,
-        settled_on=date(2026, 10, 5),
+        settled_on=date(2026, 10, 3),
     )
     assert contacts.broken_promises(TODAY) == []
 
@@ -301,15 +412,14 @@ def test_a_settled_one_off_payment_billed_to_the_operator_counts() -> None:
 def test_another_operators_payment_does_not_keep_the_promise() -> None:
     operator = owing_operator("Acme")
     other = owing_operator("Beta")
-    entry = promise(operator, by=date(2026, 10, 3))
-    charge = a_rent_charge(other.leases.get(), date(2026, 9, 1), RentChargeStatus.PAID)
-    a_payment(charge, "100.00", date(2026, 10, 5))
+    entry = recorded(promise(operator, by=date(2026, 10, 3)), date(2026, 10, 1))
+    a_payment(paid_charge(other), "1500.00", date(2026, 10, 3))
     assert contacts.broken_promises(TODAY) == [entry]
     assert contacts.broken_promises(TODAY, operator=other.pk) == []
 
 
 def test_a_closed_promise_is_not_broken() -> None:
-    operator = owing_operator()
+    operator = an_operator()
     entry = promise(operator, by=YESTERDAY)
     contacts.add_entry(
         operator.pk,
@@ -319,9 +429,22 @@ def test_a_closed_promise_is_not_broken() -> None:
         actor=None,
     )
     assert contacts.broken_promises(TODAY) == []
+    assert [i for i in attention.attention(TODAY).items if i.kind == "broken_promise"] == []
 
 
-def test_broken_promises_read_a_fixed_number_of_queries() -> None:
+def test_other_kinds_are_never_broken_promises() -> None:
+    operator = an_operator()
+    for kind in (ContactKind.CALL, ContactKind.EMAIL, ContactKind.VISIT):
+        outcome = contacts.add_entry(
+            operator.pk,
+            contacts.ContactInput(kind=kind, happened_on=date(2026, 10, 1), body="Talked."),
+            actor=None,
+        )
+        assert outcome.ok
+    assert contacts.broken_promises(TODAY) == []
+
+
+def test_broken_promises_read_one_query() -> None:
     from django.db import connection
     from django.test.utils import CaptureQueriesContext
 
@@ -331,10 +454,12 @@ def test_broken_promises_read_a_fixed_number_of_queries() -> None:
         return len(queries)
 
     promise(owing_operator("First"))
-    small = count()
+    assert count() == 1
     for n in range(6):
         promise(owing_operator(f"Many {n}"))
-    assert count() == small
+        promise(an_operator(f"Owing nothing {n}"))
+    assert count() == 1
+    assert len(contacts.broken_promises(TODAY)) == 13
 
 
 # --- The pages -----------------------------------------------------------------------------
