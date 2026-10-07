@@ -35,6 +35,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import (
+    ITEMS_LIST_ID,
     CancelChargeForm,
     ChargeNowForm,
     InvoiceDraftForm,
@@ -42,7 +43,6 @@ from ledger.forms import (
     draft_lines,
 )
 from ledger.models import (
-    FeeType,
     InvoiceDraft,
     InvoiceDraftStatus,
     Lease,
@@ -97,19 +97,16 @@ def _operator_leases(operator: Operator) -> list[Lease]:
 # --- Forms ----------------------------------------------------------------------------
 
 
-def _fee_types() -> list[FeeType]:
-    return invoice_builder.offered_fee_types()
+def _item_names() -> list[str]:
+    """The names the Item box offers (PLAN-012b D2): the offered catalogue items, in
+    catalogue order."""
+    return [fee_type.name for fee_type in invoice_builder.offered_fee_types()]
 
 
 def _formset(
     data: dict[str, Any] | None = None, initial: list[dict[str, Any]] | None = None
 ) -> Any:
-    return InvoiceLineFormSet(
-        data,
-        initial=initial,
-        prefix=LINES_PREFIX,
-        form_kwargs={"fee_types": _fee_types()},
-    )
+    return InvoiceLineFormSet(data, initial=initial, prefix=LINES_PREFIX)
 
 
 def _hold(request: HttpRequest, target: str, errors: Iterable[str]) -> None:
@@ -148,7 +145,7 @@ def _draft_initial(draft: InvoiceDraft) -> tuple[dict[str, Any], list[dict[str, 
     }
     lines = [
         {
-            "fee_type": str(line.fee_type_id) if line.fee_type_id else "",
+            "item": line.item,
             "description": line.description,
             "quantity": line.quantity,
             "unit_amount": line.unit_amount,
@@ -219,6 +216,8 @@ def _new(
         {
             "form": form,
             "formset": formset,
+            "item_names": _item_names(),
+            "items_list_id": ITEMS_LIST_ID,
             "errors": errors,
             "back": back,
             "heading": heading,
@@ -331,6 +330,8 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
             "preview": invoice_builder.preview(draft),
             "form": form,
             "formset": formset,
+            "item_names": _item_names() if editable else [],
+            "items_list_id": ITEMS_LIST_ID,
             "errors": errors,
             "editable": editable,
             "can_charge_now": editable and admin and one_off_charges.charge_now_enabled(),

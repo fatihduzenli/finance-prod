@@ -570,6 +570,11 @@ class RescheduleReturnForm(forms.Form):
 #: The longest description the form accepts; the service refuses above 120 characters with
 #: its own sentence, so a long paste is answered, not truncated.
 DESCRIPTION_INPUT_MAX_LENGTH = 1000
+#: The longest item the form accepts; the service refuses above 200 characters with its
+#: own sentence.
+ITEM_INPUT_MAX_LENGTH = 1000
+#: The ``id`` of the draft form's one list of catalogue item names (PLAN-012b D2).
+ITEMS_LIST_ID = "draft-items"
 #: Blank line rows a draft form shows besides its lines, so that it works without script.
 BLANK_LINE_ROWS = 5
 
@@ -621,16 +626,27 @@ class InvoiceDraftForm(forms.Form):
 
 
 class InvoiceLineForm(forms.Form):
-    """One line of a draft: a fee type or free text, a quantity (empty: 1) and a unit
-    amount. A row with neither a fee type, a description nor a unit amount is blank and
-    ignored; a row whose Remove box is ticked is dropped."""
+    """One line of a draft (PLAN-012b D1, D2): an item (one box: a catalogue item's name
+    from the list of :data:`ITEMS_LIST_ID`, or a new name), an optional description (the
+    detail), a quantity (empty: 1), a unit amount and Save as catalogue item. The form
+    never sends a fee type: the service resolves the item by its name. A row with neither
+    an item, a description nor a unit amount is blank and ignored; a row whose Remove box
+    is ticked is dropped."""
 
-    fee_type = forms.ChoiceField(required=False, label="Fee type")
+    item = forms.CharField(
+        required=False,
+        label="Item",
+        max_length=ITEM_INPUT_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        widget=forms.TextInput(
+            {"list": ITEMS_LIST_ID, "placeholder": "Catalogue item or a new name"}
+        ),
+    )
     description = forms.CharField(
         required=False,
         max_length=DESCRIPTION_INPUT_MAX_LENGTH,
         validators=[validate_no_payment_data],
-        help_text=f"At most {DESCRIPTION_MAX_LENGTH} characters; empty: the fee type's name.",
+        help_text=f"Optional detail under the item; at most {DESCRIPTION_MAX_LENGTH} characters.",
     )
     quantity = forms.DecimalField(
         required=False, max_digits=12, decimal_places=4, widget=forms.NumberInput({"step": "any"})
@@ -642,27 +658,20 @@ class InvoiceLineForm(forms.Form):
         decimal_places=2,
         widget=forms.NumberInput({"step": "0.01"}),
     )
-
-    def __init__(self, *args: Any, fee_types: Iterable[FeeType] = (), **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.fee_types = {str(row.pk): row for row in fee_types}
-        field = self.fields["fee_type"]
-        if isinstance(field, forms.ChoiceField):
-            field.choices = [("", "Free text")] + [
-                (key, row.name) for key, row in self.fee_types.items()
-            ]
+    save_item = forms.BooleanField(required=False, label="Save as catalogue item")
 
     def is_blank(self) -> bool:
         data = self.cleaned_data
-        return not (data.get("fee_type") or data.get("description") or data.get("unit_amount"))
+        return not (data.get("item") or data.get("description") or data.get("unit_amount"))
 
     def line(self) -> invoice_builder.LineInput:
         data = self.cleaned_data
         return invoice_builder.LineInput(
-            fee_type=self.fee_types.get(data.get("fee_type") or ""),
+            item=data.get("item") or "",
             description=data.get("description") or "",
             quantity=data.get("quantity"),
             unit_amount=data.get("unit_amount"),
+            save_item=data.get("save_item") is True,
         )
 
 

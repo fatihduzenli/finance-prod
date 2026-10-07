@@ -1276,6 +1276,9 @@ class InvoiceLineItem(GuardedModel):
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="line_items")
     position = models.IntegerField()
     description = free_text()
+    #: The line's detail (PLAN-012b D3): on a builder line, the draft line's description;
+    #: the provider line carries it as its ``details``.
+    details = free_text()
     quantity = StrictDecimalField(max_digits=12, decimal_places=4)
     unit_price = MoneyField()
     line_total = MoneyField()
@@ -1378,16 +1381,20 @@ def format_quantity(value: Decimal) -> str:
 
 
 class InvoiceDraftLine(GuardedModel):
-    """One line of a draft: a fee type or free text, a quantity and a unit amount;
-    ``line_total`` is the quantity times the unit amount rounded to the cent (computed
-    by the service, held to it by a CHECK within half a cent)."""
+    """One line of a draft: an item, an optional detail (``description``), a quantity and
+    a unit amount; ``line_total`` is the quantity times the unit amount rounded to the
+    cent (computed by the service, held to it by a CHECK within half a cent).
+
+    ``item`` is the line's text (PLAN-012b D1): a catalogue item's name, then
+    ``fee_type`` names it, or a name typed on the spot, then ``fee_type`` is null."""
 
     draft = models.ForeignKey(InvoiceDraft, on_delete=models.CASCADE, related_name="lines")
     position = models.IntegerField()
     fee_type = models.ForeignKey(
         FeeType, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
-    description = guarded_char(DESCRIPTION_MAX_LENGTH)
+    item = guarded_char(NAME_MAX_LENGTH)
+    description = guarded_char(DESCRIPTION_MAX_LENGTH, blank=True)
     quantity = StrictDecimalField(max_digits=12, decimal_places=4)
     unit_amount = MoneyField()
     line_total = MoneyField()
@@ -1402,7 +1409,7 @@ class InvoiceDraftLine(GuardedModel):
             models.CheckConstraint(
                 condition=Q(position__gte=1), name="invoice_draft_lines_position_positive"
             ),
-            _not_blank("invoice_draft_lines", "description"),
+            _not_blank("invoice_draft_lines", "item"),
             _positive("invoice_draft_lines", "quantity"),
             _positive("invoice_draft_lines", "unit_amount"),
             _positive("invoice_draft_lines", "line_total"),

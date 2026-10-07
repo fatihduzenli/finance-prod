@@ -24,10 +24,10 @@
   </div>
   {% responsive_table %}
   <table id="invoice-lines" class="invoice-lines">
-    <thead><tr><th>Description</th><th class="money">Quantity</th><th class="money">Unit amount</th><th class="money">Amount</th></tr></thead>
+    <thead><tr><th>Item</th><th class="money">Quantity</th><th class="money">Unit amount</th><th class="money">Amount</th></tr></thead>
     <tbody>
       {% for line in preview.lines %}
-        <tr class="invoice-line"><td>{{ line.description }}</td><td class="money">{{ line.quantity_text }}</td><td class="money">${{ line.unit_amount }}</td><td class="money">${{ line.line_total }}</td></tr>
+        <tr class="invoice-line"><td><span class="line-item">{{ line.item }}</span>{% if line.description %}<br><span class="muted line-detail">{{ line.description }}</span>{% endif %}</td><td class="money">{{ line.quantity_text }}</td><td class="money">${{ line.unit_amount }}</td><td class="money">${{ line.line_total }}</td></tr>
       {% endfor %}
     </tbody>
     <tfoot><tr><th scope="row" colspan="3">Total due (US dollars)</th><th class="money" id="invoice-total">${{ preview.total }}</th></tr></tfoot>

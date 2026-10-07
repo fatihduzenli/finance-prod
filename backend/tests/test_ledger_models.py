@@ -248,7 +248,8 @@ def new_invoice_draft_line(**fields: Any) -> ledger.InvoiceDraftLine:
     _default(fields, "draft", lambda: saved(new_invoice_draft()))
     values = {
         "position": 1,
-        "description": "Sign repair",
+        "item": "Sign repair",
+        "description": "",
         "quantity": D("3.0000"),
         "unit_amount": D("33.33"),
         "line_total": D("99.99"),
@@ -1149,9 +1150,10 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_invoice_draft_line(position=0),
     ),
     ConstraintCase(
-        "invoice_draft_lines_description_not_blank",
+        # PLAN-012b D1: the item is the line's text; the description is an optional detail.
+        "invoice_draft_lines_item_not_blank",
         new_invoice_draft_line,
-        lambda: new_invoice_draft_line(description=" \n"),
+        lambda: new_invoice_draft_line(item=" \n"),
     ),
     ConstraintCase(
         "invoice_draft_lines_quantity_positive",

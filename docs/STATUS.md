@@ -902,3 +902,23 @@ the login page myself." The condition for starting Prompt 4 is met.
   (E.164), `sms_consent_at`, `email_consent_at` on the form, page and CSV; every invoice writer sets
   the new columns explicitly; migration 0031 with a seeded round trip; provider contract unchanged.
   Uncommitted until the gate's report (QA-012a); then its own Publish Request.
+
+## Update, 2026-10-07, Prompt 12 click 1 finding → PLAN-012b
+
+- **Owner, in writing:** the builder's "Fee type" column must be an Item combo box (pick a
+  catalogue item or type a new name; no "Free text" value); columns Item, Description (optional
+  detail), Quantity, Unit amount; the typed name is the Stax line text and the description its
+  detail; an optional "Save as catalogue item" tick on a typed item (admin and billing); fix with
+  the next push, the rest of the builder unchanged.
+- Plan `docs/qa/PLAN-012b-builder-item-combo.md` written and assigned to Opus; it ships in the
+  same push as PLAN-012a (`d94ea1c`), so the pending Publish Request is withdrawn until 012b is
+  gated. Note for the owner (plan D4): a catalogue item's charges are category `setup`, as the
+  catalogue has meant since 10b; a typed item without the tick is `other`.
+
+## Update, 2026-10-07, PLAN-012b built and gated
+
+- One Opus batch, gated by Fable: `invoice_draft_lines.item` with the fee type resolved by name,
+  `invoice_line_items.details`, migration 0032 with a seeded round trip, the Item datalist with
+  no "Free text", the Save-as-catalogue-item tick (slug code, reserved NSF and category codes,
+  audited, one item under a race), the provider line's `details`. QA-012b. Ships with PLAN-012a in
+  one push.

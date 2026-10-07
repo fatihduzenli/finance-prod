@@ -345,6 +345,7 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0029_invoice_builder",
         "ledger.migrations.0030_disputes",
         "ledger.migrations.0031_line_kind_fees_consent",
+        "ledger.migrations.0032_builder_item",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",

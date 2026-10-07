@@ -472,9 +472,16 @@ be filtered by status (open, kept, rescheduled, broken). A past, open promise is
 on the attention list and the dashboard whatever the balance (PLAN-011b-a).
 
 **Invoice builder** (replaces "Create one-off charge"; billing). From a store page or an operator
-page choose **New invoice**: pick the lease (or none), add lines (a fee type from the catalogue or
-free text, quantity, unit amount; the line total is quantity times unit amount to the cent), an
-optional memo and due date (default today + 15, New York; never in the past). **Save** keeps a
+page choose **New invoice**: pick the lease (or none), add lines, an
+optional memo and due date. Each line has an **Item** box (PLAN-012b): start typing and pick a
+catalogue item from the list, or type a new name; a **Description** is an optional detail under
+the item; then quantity and unit amount (the line total is quantity times unit amount to the
+cent). The item name is the Stax line text and the charge's description; the detail is the Stax
+line detail. A typed item shows a **Save as catalogue item** tick: when ticked, saving or sending
+the draft adds it to the catalogue (its later charges are category *setup*, like every catalogue
+item; a typed item without the tick is *other*). A name held by an inactive catalogue item cannot
+be saved over; an admin changes it in the catalogue. The due date defaults to today + 15 (New
+York; never in the past). **Save** keeps a
 draft (named `DRAFT-` and eight characters of its id); the draft page offers **Preview** (what the operator sees), **Print**
 (a clean page for the browser's print dialog), **Edit**, **Send**, **Charge now** (admin) and
 **Cancel**. **Send** takes the next `INV-YYYY-NNNN` number, makes **one one-off charge per line**

@@ -327,16 +327,22 @@ def _builder_lines(charge: OneOffCharge) -> list[InvoiceLineItem]:
 
 
 def _provider_line(item: InvoiceLineItem) -> LineItem:
-    """One builder line for the provider: its quantity and unit price when they multiply
-    to its total exactly, else quantity 1 at its total with the charge's description
-    (which names the quantity), so that the lines always sum to the invoice's total."""
+    """One builder line for the provider: its text (the item, PLAN-012b D3), its quantity
+    and unit price when they multiply to its total exactly, else quantity 1 at its total
+    with the charge's description (which names the quantity), so that the lines always
+    sum to the invoice's total; its detail as the line's ``details`` either way."""
     quantity = Decimal(item.quantity)
     if quantity * Decimal(item.unit_price) == Decimal(item.line_total):
         return LineItem(
-            item.description, Decimal(format_quantity(quantity)), Decimal(item.unit_price)
+            item.description,
+            Decimal(format_quantity(quantity)),
+            Decimal(item.unit_price),
+            details=item.details,
         )
     text = item.one_off_charge.description if item.one_off_charge is not None else ""
-    return LineItem(text or item.description, Decimal(1), Decimal(item.line_total))
+    return LineItem(
+        text or item.description, Decimal(1), Decimal(item.line_total), details=item.details
+    )
 
 
 def charge_amounts(charge: OneOffCharge, total: Decimal | None = None) -> Amounts:

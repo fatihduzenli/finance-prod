@@ -1,8 +1,12 @@
 // Add and remove the line rows of an invoice draft (docs/qa/PLAN-012 D6). The form is a
 // plain post and works without this script: it shows a fixed number of blank rows and a
-// Remove box on each row. Here "Add line" copies the last row, blank, under the next
-// index of the management form (at most its MAX_NUM_FORMS), and ticking Remove hides
-// the row (its box stays ticked, so the server drops it). Nothing is sent from here.
+// Save as catalogue item box and a Remove box on each row. Here "Add line" copies the
+// last row, blank, under the next index of the management form (at most its
+// MAX_NUM_FORMS); the copy keeps the Item box's list attribute, so every row offers the
+// form's one list of catalogue names (PLAN-012b D2). Ticking Remove hides the row (its
+// box stays ticked, so the server drops it). The Save box is shown only while the Item
+// box holds a name that is not on the list (case and surrounding spaces ignored); the
+// server ignores it on a listed name either way. Nothing is sent from here.
 (function () {
   "use strict";
   var table = document.getElementById("draft-lines");
@@ -14,6 +18,40 @@
   }
   var body = table.querySelector("tbody");
 
+  function key(text) {
+    return text.trim().toLowerCase();
+  }
+
+  function listed(input) {
+    var list = input.list;
+    if (!list) {
+      return false;
+    }
+    var wanted = key(input.value);
+    return Array.prototype.some.call(list.options, function (option) {
+      return key(option.value) === wanted;
+    });
+  }
+
+  function watchSave(row) {
+    var input = row.querySelector("input[name$='-item']");
+    var box = row.querySelector("input[type=checkbox][name$='-save_item']");
+    if (!input || !box) {
+      return;
+    }
+    var cell = box.closest("td") || box;
+    function update() {
+      var typed = key(input.value) !== "" && !listed(input);
+      cell.style.visibility = typed ? "" : "hidden";
+      if (!typed) {
+        box.checked = false;
+      }
+    }
+    input.addEventListener("input", update);
+    input.addEventListener("change", update);
+    update();
+  }
+
   function watchRemove(row) {
     var box = row.querySelector("input[type=checkbox][name$='-DELETE']");
     if (!box) {
@@ -24,7 +62,12 @@
     });
   }
 
-  Array.prototype.forEach.call(body.querySelectorAll("tr.draft-line"), watchRemove);
+  function watch(row) {
+    watchRemove(row);
+    watchSave(row);
+  }
+
+  Array.prototype.forEach.call(body.querySelectorAll("tr.draft-line"), watch);
   button.hidden = false;
   button.addEventListener("click", function () {
     var rows = body.querySelectorAll("tr.draft-line");
@@ -35,7 +78,7 @@
     }
     var row = rows[rows.length - 1].cloneNode(true);
     row.hidden = false;
-    row.querySelectorAll("input, select, textarea").forEach(function (field) {
+    row.querySelectorAll("input, textarea").forEach(function (field) {
       ["name", "id"].forEach(function (attribute) {
         var value = field.getAttribute(attribute);
         if (value) {
@@ -44,14 +87,12 @@
       });
       if (field.type === "checkbox") {
         field.checked = false;
-      } else if (field.tagName === "SELECT") {
-        field.selectedIndex = 0;
       } else {
         field.value = "";
       }
     });
     body.appendChild(row);
-    watchRemove(row);
+    watch(row);
     total.value = String(count + 1);
   });
 })();

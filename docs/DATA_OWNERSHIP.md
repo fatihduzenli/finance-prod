@@ -177,6 +177,10 @@ Superseded by `one_off_charges` with `legacy=true` (PLAN-010b D13, PLAN-010d D1)
 | `id`, `created_at`, `updated_at` | System | |
 | `code`, `name`, `default_cost`, `default_price`, `refundable`, `active`, `sort_order` | App | Admin only. `refundable` marks a deposit (a liability). `first_year_insurance` is seeded inactive (ADR-0007) |
 
+Since PLAN-012b billing may add a catalogue item from the invoice builder ("Save as catalogue
+item"): `code` is a slug of the name (never an NSF or category code), `default_price` the line's
+unit amount, audited `fee_type.created`. Everything else about the catalogue stays the admin's.
+
 ### one_off_charges (was `setup_charges`; PLAN-010d D1)
 | Field | Owner | Note |
 |---|---|---|
@@ -283,12 +287,14 @@ scans are covered by the stated policy, not by a check.
 | Field | Owner | Note |
 |---|---|---|
 | all fields | App | A draft is ours until **Send** turns it into one invoice and one one-off charge per line; `line_total` is quantity times unit amount to the cent, enforced by a CHECK; `sent_invoice_id` links the invoice; a cancelled draft stays |
+| `invoice_draft_lines.item`, `description`, `fee_type_id` | App | PLAN-012b: `item` is the line's text (not blank, CHECK), `description` an optional detail, `fee_type_id` set when the item names an offered catalogue item (resolved by name, case-insensitive) |
 
 ### invoice_line_items — `one_off_charge_id`, `kind` (PLAN-012, PLAN-012a)
 | Field | Owner | Note |
 |---|---|---|
 | `one_off_charge_id` | App | The charge a builder line became; the allocation key for a payment on a multi-line invoice (lines in order) |
 | `kind` | App | S1 (ADR-0011, PLAN-012a): `charge`, `fee`, `surcharge`, `tax`, `discount` (CHECK). Only `charge` is written today |
+| `details` | App | PLAN-012b: the line's optional detail, sent to the provider as the line's detail; `description` is the item name |
 
 ### invoices — `fees`, `surcharge` (PLAN-012a)
 | Field | Owner | Note |

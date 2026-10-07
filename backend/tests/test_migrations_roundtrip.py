@@ -52,6 +52,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0029_invoice_builder",
             "ledger.migrations.0030_disputes",
             "ledger.migrations.0031_line_kind_fees_consent",
+            "ledger.migrations.0032_builder_item",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -567,6 +568,146 @@ def test_the_kind_migration_over_existing_rows_on_postgresql(
     repo_root: Path, scratch_postgresql_url: str
 ) -> None:
     _kind_round_trip(repo_root, scratch_postgresql_url)
+
+
+# --- PLAN-012b: the Item column over existing rows ----------------------------------------
+#
+# Seeds draft lines (with a fee type and without one) and an invoice line at
+# ``ledger.0031``, migrates forward, back and forward again on both engines, and reads
+# the rows with plain SQL: a line's item is its fee type's name, else its old description,
+# which becomes empty; the reverse restores a blank description from the item, cut to
+# the description's 120 characters.
+
+STATE_BEFORE_ITEM = (("ledger", "0031_line_kind_fees_consent"),)
+ITEM_MIGRATION = ("ledger", "0032_builder_item")
+DRAFT_LINES_AFTER = (
+    "SELECT position, item, description, "
+    "CASE WHEN fee_type_id IS NULL THEN 'typed' ELSE 'catalogue' END, line_total "
+    "FROM invoice_draft_lines ORDER BY position"
+)
+DRAFT_LINES_BEFORE = (
+    "SELECT position, description, "
+    "CASE WHEN fee_type_id IS NULL THEN 'typed' ELSE 'catalogue' END, line_total "
+    "FROM invoice_draft_lines ORDER BY position"
+)
+LINE_ITEM_ROWS = "SELECT description, details, line_total FROM invoice_line_items"
+
+
+def seed_before_the_item() -> None:
+    """Seed a draft with three lines and an invoice with one line with the models of
+    ``STATE_BEFORE_ITEM``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_ITEM)).apps
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Item LLC")
+    film = apps.get_model("ledger", "FeeType").objects.create(
+        code="window_film_seed", name="Window film"
+    )
+    draft = apps.get_model("ledger", "InvoiceDraft").objects.create(operator=operator)
+    line_model = apps.get_model("ledger", "InvoiceDraftLine")
+    for position, fee_type, description in (
+        (1, film, "Window film"),
+        (2, film, "Film for the front door"),
+        (3, None, "Poster repair"),
+    ):
+        line_model.objects.create(
+            draft=draft,
+            position=position,
+            fee_type=fee_type,
+            description=description,
+            quantity=Decimal("1.0000"),
+            unit_amount=Decimal("10.00"),
+            line_total=Decimal("10.00"),
+        )
+    invoice = apps.get_model("ledger", "Invoice").objects.create(
+        invoice_number="INV-2026-3201",
+        operator=operator,
+        issue_date=date(2026, 10, 1),
+        due_date=date(2026, 10, 16),
+        subtotal=Decimal("10.00"),
+        tax=Decimal("0.00"),
+        total=Decimal("10.00"),
+    )
+    apps.get_model("ledger", "InvoiceLineItem").objects.create(
+        invoice=invoice,
+        position=1,
+        description="Poster repair",
+        quantity=Decimal("1.0000"),
+        unit_price=Decimal("10.00"),
+        line_total=Decimal("10.00"),
+    )
+
+
+def _item_round_trip(repo_root: Path, url: str) -> None:
+    _migrate_to(repo_root, url, *STATE_BEFORE_ITEM)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_the_item as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    before = [
+        ("1", "Window film", "catalogue", "10.00"),
+        ("2", "Film for the front door", "catalogue", "10.00"),
+        ("3", "Poster repair", "typed", "10.00"),
+    ]
+    assert _rows(url, DRAFT_LINES_BEFORE, (3,)) == before
+    after = [
+        ("1", "Window film", "Window film", "catalogue", "10.00"),
+        ("2", "Window film", "Film for the front door", "catalogue", "10.00"),
+        ("3", "Poster repair", "", "typed", "10.00"),
+    ]
+    line_items = [("Poster repair", "", "10.00")]
+
+    _migrate_to(repo_root, url, ITEM_MIGRATION)
+    assert _rows(url, DRAFT_LINES_AFTER, (4,)) == after
+    assert _rows(url, LINE_ITEM_ROWS, (2,)) == line_items
+
+    _migrate_to(repo_root, url, *STATE_BEFORE_ITEM)
+    assert _rows(url, DRAFT_LINES_BEFORE, (3,)) == before
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, DRAFT_LINES_AFTER, (4,)) == after
+    assert _rows(url, LINE_ITEM_ROWS, (2,)) == line_items
+
+    # A typed item longer than the old description goes back cut to 120 characters.
+    changed = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from ledger.models import InvoiceDraftLine, InvoiceLineItem; "
+        "InvoiceDraftLine.objects.filter(position=3).update(item='y' * 200); "
+        "InvoiceLineItem.objects.update(details='Left panel')",
+    )
+    assert changed.returncode == 0, changed.stderr
+    assert ("3", "y" * 200, "", "typed", "10.00") in _rows(url, DRAFT_LINES_AFTER, (4,))
+    _migrate_to(repo_root, url, *STATE_BEFORE_ITEM)
+    assert _rows(url, DRAFT_LINES_BEFORE, (3,)) == [*before[:2], ("3", "y" * 120, "typed", "10.00")]
+    assert _rows(url, "SELECT description, line_total FROM invoice_line_items", (1,)) == [
+        ("Poster repair", "10.00")
+    ]
+
+
+def test_the_item_migration_over_existing_rows_on_sqlite(repo_root: Path, tmp_path: Path) -> None:
+    _item_round_trip(repo_root, f"sqlite:///{tmp_path / 'item.sqlite3'}")
+
+
+@requires_postgresql
+def test_the_item_migration_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    _item_round_trip(repo_root, scratch_postgresql_url)
 
 
 # --- Row 2 --------------------------------------------------------------------------
