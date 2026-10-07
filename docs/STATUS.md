@@ -961,3 +961,14 @@ the login page myself." The condition for starting Prompt 4 is met.
   as cash once its lines' settled payments cover what it bills, flags cleared on every line; the
   waived-invoice delete remedy refuses a shared invoice; read-only `invoice_line_links --check`.
   No migration. QA-012c-a. Ships with 012a, 012b, 012c in one push.
+
+## Update, 2026-10-07, PLAN-012a, 012b, 012c, 012c-a on staging
+
+- Owner typed "push". `main` at `e0978d5`; the CI run green end to end (tests, deploy, the four
+  resources verified); `/healthz` ok. Migrations 0031 and 0032 applied by the deploy. The owner's
+  clicks: INV-2026-0006 (the late fee page, the $50 wire, the flags), the builder's Item box on
+  store 2476, Add entry on store 2477, then clicks 3 to 5 of PLAN-012. `invoice_line_links
+  --check` on staging awaits the owner's authorization (a read-only command in the web container).
+- **Staging check (owner-authorized, 2026-10-07):** `python /app/backend/manage.py invoice_line_links
+  --check` in the web container printed "Every builder invoice line names its charge." and listed
+  nothing: INV-2026-0006's late fee line is linked; no data repair needed.
