@@ -96,7 +96,7 @@
 
   <h2>Setup and one-off charges</h2>
   <p class="actions"><a class="btn" id="export-one-off-charges" href="{% url 'ledger:one_off_charges:export' %}?lease={{ lease.pk }}">Export CSV</a></p>
-  {% if can_add_setup_charge or can_new_charge %}<p class="actions">{% if can_add_setup_charge %}<a class="btn" href="{% url 'ledger:leases:add_setup_charge' pk=lease.pk %}" id="add-setup-charge">Add setup charge</a>{% endif %}{% if can_new_charge %} <a class="btn" href="{% url 'ledger:leases:new_charge' pk=lease.pk %}" id="new-one-off-charge">Create one-off charge</a>{% endif %}</p>{% endif %}
+  {% if can_add_setup_charge or can_new_invoice %}<p class="actions">{% if can_add_setup_charge %}<a class="btn" href="{% url 'ledger:leases:add_setup_charge' pk=lease.pk %}" id="add-setup-charge">Add setup charge</a>{% endif %}{% if can_new_invoice %} <a class="btn" href="{% url 'ledger:invoices:new_operator' pk=lease.operator.pk %}?lease={{ lease.pk }}" id="new-invoice">New invoice</a>{% endif %}</p>{% endif %}
   {% responsive_table %}
   <table id="setup-charges">
     <thead><tr><th>Charge</th><th>Due</th><th>Cost</th><th>Price</th><th>Paid</th><th>Balance</th><th>Status</th><th>Deposit</th></tr></thead>

@@ -1014,63 +1014,22 @@ def form(**overrides: Any) -> dict[str, str]:
     return values
 
 
-def test_the_operator_page_form_creates_an_operator_level_charge(
-    fake: FakeProvider, worker: None
+def test_the_removed_create_form_answers_410_and_the_pages_offer_new_invoice(
+    fake: FakeProvider,
 ) -> None:
-    operator = an_operator(fake)
-    make_lease(operator=operator)
-    make_lease(operator=operator)
-    client, _ = client_for(Role.BILLING)
-    page = client.get(f"/operators/{operator.pk}/").content.decode()
-    assert 'id="new-one-off-charge"' in page
-    blank = client.get(f"/operators/{operator.pk}/charges/new/").content.decode()
-    assert 'name="lease"' in blank and "No lease (the operator)" in blank
-    assert "Charge now" not in blank  # admins only
-    response = client.post(f"/operators/{operator.pk}/charges/new/", form())
-    charge = OneOffCharge.objects.get()
-    assert response["Location"] == f"/one-off-charges/{charge.pk}/"
-    assert (charge.lease_id, charge.operator_id) == (None, operator.pk)
-    run_queued_jobs()
-    assert invoice_of(charge).internal_status == InvoiceStatus.SENT
-    listing = client.get(f"/operators/{operator.pk}/").content.decode()
-    assert f"/one-off-charges/{charge.pk}/" in listing
-
-
-def test_the_operator_page_form_puts_the_charge_on_the_chosen_lease(fake: FakeProvider) -> None:
-    operator = an_operator(fake)
-    make_lease(operator=operator)
-    chosen = make_lease(operator=operator)
-    client, _ = client_for(Role.BILLING)
-    client.post(f"/operators/{operator.pk}/charges/new/", form(lease=str(chosen.pk)))
-    assert OneOffCharge.objects.get().lease_id == chosen.pk
-
-
-def test_the_lease_page_form_fixes_the_lease(fake: FakeProvider) -> None:
+    """PLAN-012 D6: "Create one-off charge" is replaced by New invoice on the store and
+    operator pages; its URLs answer 410 Gone with a sentence, and create nothing."""
     operator = an_operator(fake)
     lease = make_lease(operator=operator)
     client, _ = client_for(Role.BILLING)
-    detail = client.get(f"/leases/{lease.pk}/").content.decode()
-    assert 'id="new-one-off-charge"' in detail
-    blank = client.get(f"/leases/{lease.pk}/charges/new/").content.decode()
-    assert 'name="lease"' not in blank
-    client.post(f"/leases/{lease.pk}/charges/new/", form())
-    charge = OneOffCharge.objects.get()
-    assert (charge.lease_id, charge.operator_id) == (lease.pk, operator.pk)
-    page = client.get(f"/leases/{lease.pk}/").content.decode()
-    assert f"/one-off-charges/{charge.pk}/" in page and charge.description in page
-
-
-def test_a_refused_form_shows_the_sentence_and_keeps_no_card_number(fake: FakeProvider) -> None:
-    operator = an_operator(fake)
-    client, _ = client_for(Role.BILLING)
-    path = f"/operators/{operator.pk}/charges/new/"
-    client.post(path, form(description=f"Card {CARD}"))
-    page = client.get(path).content.decode()
-    assert "card or account numbers" in page and CARD not in page
-    client.post(path, form(description="x" * 10_000))
-    assert "at most 1000 characters" in client.get(path).content.decode()
-    client.post(path, form(description="x" * 121))
-    assert service.DESCRIPTION_TOO_LONG in client.get(path).content.decode()
+    for page in (f"/operators/{operator.pk}/", f"/leases/{lease.pk}/"):
+        text = client.get(page).content.decode()
+        assert 'id="new-one-off-charge"' not in text and 'id="new-invoice"' in text, page
+    for path in (f"/operators/{operator.pk}/charges/new/", f"/leases/{lease.pk}/charges/new/"):
+        response = client.get(path)
+        assert response.status_code == 410, path
+        assert "replaced by New invoice" in response.content.decode()
+        assert client.post(path, form()).status_code == 410
     assert not OneOffCharge.objects.exists()
 
 
@@ -1082,27 +1041,17 @@ def test_the_description_is_escaped_on_the_page(fake: FakeProvider) -> None:
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
 
 
-def test_an_admin_is_offered_charge_now_and_the_page_says_when_the_flag_is_off(
-    fake: FakeProvider,
-) -> None:
+def test_the_charge_page_says_when_the_charge_now_flag_is_off(fake: FakeProvider) -> None:
     operator = an_operator(fake)
-    client, _ = client_for(Role.ADMIN)
-    path = f"/operators/{operator.pk}/charges/new/"
-    assert "Charge now" in client.get(path).content.decode()
-    client.post(path, form(collection="charge_now", amount="100.00"))
-    charge = OneOffCharge.objects.get()
+    client, admin = client_for(Role.ADMIN)
+    charge = created(
+        operator, item(CollectionMethod.CHARGE_NOW, "100.00", confirmed=True), actor=admin
+    )
     page = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
     # PLAN-010d Batch B: the confirmation step exists; with the flag off it is not offered.
     assert 'id="charge-now-refusal"' in page
     assert service.CHARGE_NOW_DISABLED in page
     assert 'id="charge-now"' not in page
-
-
-def test_a_billing_post_of_charge_now_is_refused(fake: FakeProvider) -> None:
-    operator = an_operator(fake)
-    client, _ = client_for(Role.BILLING)
-    client.post(f"/operators/{operator.pk}/charges/new/", form(collection="charge_now"))
-    assert not OneOffCharge.objects.exists()
 
 
 @pytest.mark.parametrize(
@@ -1128,9 +1077,6 @@ def test_a_viewer_cannot_create_cancel_or_retry(fake: FakeProvider, path: str) -
 def test_unknown_or_malformed_ids_are_404(fake: FakeProvider) -> None:
     client, _ = client_for(Role.BILLING)
     for path in (
-        f"/operators/{uuid.uuid4()}/charges/new/",
-        "/operators/not-a-uuid/charges/new/",
-        f"/leases/{uuid.uuid4()}/charges/new/",
         f"/one-off-charges/{uuid.uuid4()}/cancel/",
         "/one-off-charges/%25/",
     ):
@@ -1415,9 +1361,8 @@ def test_the_create_pages_refuse_a_viewer(fake: FakeProvider) -> None:
         assert viewer.get(path).status_code == 403, path
     page = viewer.get(f"/one-off-charges/{charge.pk}/").content.decode()
     assert 'id="cancel-charge"' not in page and 'id="retry-provider"' not in page
-    assert (
-        'id="new-one-off-charge"' not in viewer.get(f"/operators/{operator.pk}/").content.decode()
-    )
+    for listing in (f"/operators/{operator.pk}/", f"/leases/{lease.pk}/"):
+        assert 'id="new-invoice"' not in viewer.get(listing).content.decode()
 
 
 def test_the_billing_cancel_page_names_the_refusal(fake: FakeProvider) -> None:

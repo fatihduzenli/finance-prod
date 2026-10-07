@@ -80,6 +80,8 @@ ENTITY_OF_KIND: dict[str, str] = {
     JobKind.INVOICE_PAY: JobEntity.ONE_OFF_CHARGE,
     JobKind.MESSAGE_SEND: JobEntity.OUTBOUND_MESSAGE,
     JobKind.CALENDAR_EMAIL: JobEntity.CALENDAR_ENTRY,
+    JobKind.DISPUTES_SYNC: JobEntity.DISPUTES,
+    JobKind.DISPUTE_EVIDENCE_UPLOAD: JobEntity.DISPUTE_EVIDENCE,
 }
 #: Further entities a kind acts on besides its :data:`ENTITY_OF_KIND` one: a morning
 #: e-mail is a calendar entry's or a promise to pay's (PLAN-011b D8).
@@ -98,6 +100,7 @@ _ENTITY_OF_MODEL: dict[str, str] = {
     "ledger.OutboundMessage": JobEntity.OUTBOUND_MESSAGE,
     "ledger.CalendarEntry": JobEntity.CALENDAR_ENTRY,
     "ledger.ContactEntry": JobEntity.CONTACT_ENTRY,
+    "ledger.DisputeEvidence": JobEntity.DISPUTE_EVIDENCE,
 }
 
 
@@ -113,6 +116,8 @@ class Target:
 RENT_RUN = Target(JobEntity.RENT_RUN, uuid.UUID(int=0))
 #: The reconciliation: one entity for every "Run now" job (PLAN-010 D10).
 RECONCILIATION = Target(JobEntity.RECONCILIATION, uuid.UUID(int=0))
+#: The dispute list: one entity for every ``disputes_sync`` job (PLAN-012 D8).
+DISPUTES = Target(JobEntity.DISPUTES, uuid.UUID(int=0))
 #: The ``params`` key of a ``reconcile_run`` job naming how it started (scheduled or
 #: manual); a job without it is manual.
 TRIGGER = "trigger"
@@ -145,8 +150,8 @@ def entity_type_of(entity: Entity) -> str:
     except KeyError:
         raise ValueError(
             "Jobs act on operators, leases, rent charges, one-off charges, payments, "
-            "webhook events, outbound messages, calendar and contact entries, the rent run "
-            "and the reconciliation only"
+            "webhook events, outbound messages, calendar and contact entries, dispute "
+            "evidence, the rent run, the reconciliation and the dispute list only"
         ) from None
 
 

@@ -18,6 +18,15 @@ Two things are read from a body, and only key names or one identifier (PLAN-006a
   ``[A-Za-z0-9_.-]`` and cut, from at most the first 64 KB; never a value;
 - on a 2xx to one of the create paths, the top-level ``id`` (``object_id=``) when it is
   a plain identifier of at most 64 characters.
+
+A third is read for the caller, never logged: on a 4xx to a call that names the refusals
+it recognises (``refusal_patterns``), the first message string of the body that matches
+one of them, is at most :data:`REFUSAL_REASON_MAX_LENGTH` characters and holds no card or
+account number becomes :attr:`ProviderRejected.reason` (PLAN-012 D8).
+
+A request body is JSON, or ``multipart/form-data`` (:class:`Multipart`, PLAN-012 D8: the
+dispute evidence upload), encoded here once per call with a random boundary; the same
+choke point, retry policy and logging apply to both.
 """
 
 from __future__ import annotations
@@ -25,8 +34,9 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+import secrets
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from urllib.parse import quote
 
@@ -39,6 +49,7 @@ from payments.errors import (
     ProviderUnavailable,
     TransportError,
 )
+from payments.redaction import is_safe_text
 from payments.stax import mapping
 from payments.stax.breaker import CircuitBreaker, Outcome, get_breaker
 from payments.stax.budget import FailureBudget, get_budget
@@ -80,9 +91,80 @@ CREATE_PATHS = frozenset(
         "/invoice/{id}/pay",
         "/transaction/{id}/refund",
         "/transaction/{id}/void",
+        "/file/dispute",
     }
 )
 _CREATED_ID = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
+
+
+#: PLAN-012 D8: what is read of a 4xx body for :attr:`ProviderRejected.reason`.
+REFUSAL_MESSAGE_KEYS: tuple[str, ...] = ("message", "error", "errors")
+REFUSAL_REASON_MAX_LENGTH = 200
+#: How deep a 4xx body is searched for a message string.
+_REFUSAL_MAX_DEPTH = 3
+#: A multipart field name or a file name sent: plain characters only.
+_MULTIPART_TOKEN = re.compile(r"\A[A-Za-z0-9._-]{1,100}\Z")
+
+
+@dataclass(frozen=True, slots=True)
+class FilePart:
+    field_name: str
+    filename: str
+    content_type: str
+    data: bytes = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class Multipart:
+    """A ``multipart/form-data`` body: text fields in order, then one file."""
+
+    fields: tuple[tuple[str, str], ...]
+    file: FilePart
+
+
+def encode_multipart(form: Multipart, boundary: str) -> bytes:
+    """The body of ``form`` with ``boundary``. Field and file names must be plain tokens
+    and a text value may not hold a line break, so nothing can end a part early."""
+    names = [name for name, _ in form.fields] + [form.file.field_name, form.file.filename]
+    if not all(_MULTIPART_TOKEN.match(name) for name in names):
+        raise ValueError("A multipart name must be a plain token")
+    if any("\r" in value or "\n" in value for _, value in form.fields):
+        raise ValueError("A multipart text value may not hold a line break")
+    if "\r" in form.file.content_type or "\n" in form.file.content_type:
+        raise ValueError("A multipart content type may not hold a line break")
+    dash = f"--{boundary}".encode("ascii")
+    parts: list[bytes] = []
+    for name, value in form.fields:
+        parts += [
+            dash,
+            b"\r\n",
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("ascii"),
+            value.encode("utf-8"),
+            b"\r\n",
+        ]
+    parts += [
+        dash,
+        b"\r\n",
+        (
+            f'Content-Disposition: form-data; name="{form.file.field_name}"; '
+            f'filename="{form.file.filename}"\r\n'
+            f"Content-Type: {form.file.content_type}\r\n\r\n"
+        ).encode("ascii"),
+        form.file.data,
+        b"\r\n",
+        dash,
+        b"--\r\n",
+    ]
+    return b"".join(parts)
+
+
+def multipart_boundary(form: Multipart) -> str:
+    """A random boundary that occurs in no part of ``form``."""
+    while True:
+        boundary = f"finance-{secrets.token_hex(16)}"
+        token = boundary.encode("ascii")
+        if token not in form.file.data and all(boundary not in value for _, value in form.fields):
+            return boundary
 
 
 class Method(StrEnum):
@@ -196,9 +278,11 @@ class StaxTransport:
         object_id: str = "",
         params: Mapping[str, str | int | bool] | None = None,
         json: Mapping[str, object] | None = None,
+        multipart: Multipart | None = None,
         idempotent: bool,
         boot_check: bool = False,
         retry: RetryPolicy = RetryPolicy.STANDARD,
+        refusal_patterns: tuple[re.Pattern[str], ...] = (),
     ) -> object:
         """Send one logical request; return the decoded JSON body (``None`` if empty).
 
@@ -213,16 +297,27 @@ class StaxTransport:
         ``retry=RetryPolicy.NONE`` sends exactly one request: no 429, 5xx or network
         error is repeated (the caller check, breaker, limiter, budget and logging still
         apply).
+
+        ``multipart`` sends a ``multipart/form-data`` body instead of ``json`` (never
+        both). ``refusal_patterns`` names the 4xx messages the caller recognises
+        (:func:`refusal_reason`).
         """
         if not boot_check and settings.STAX_CALLER != WORKER:
             raise ProviderNotPermittedHere("This process is not permitted to call the provider")
+        if json is not None and multipart is not None:
+            raise ValueError("A request body is JSON or multipart, not both")
         client = self.client
         url = path.replace(ID_PLACEHOLDER, quote(object_id, safe="")) if object_id else path
         content = mapping.encode_json(json) if json is not None else None
+        headers: dict[str, str] | None = None
+        if multipart is not None:
+            boundary = multipart_boundary(multipart)
+            content = encode_multipart(multipart, boundary)
+            headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
 
         attempts = 1 if retry is RetryPolicy.NONE else MAX_ATTEMPTS
         for attempt in range(1, attempts + 1):
-            result = self._attempt(client, method, url, path, object_id, params, content)
+            result = self._attempt(client, method, url, path, object_id, params, content, headers)
             if result.outcome is Outcome.SUCCESS:
                 if result.unreadable:
                     raise ProviderUnavailable(
@@ -230,7 +325,14 @@ class StaxTransport:
                     )
                 return result.data
             if result.outcome is Outcome.CLIENT_ERROR and result.status is not None:
-                raise ProviderRejected(result.status, error_fields=result.error_fields or ())
+                reason = ""
+                if refusal_patterns and result.response is not None:
+                    reason = refusal_reason(
+                        result.response.content, refusal_patterns, self._configured_key()
+                    )
+                raise ProviderRejected(
+                    result.status, error_fields=result.error_fields or (), reason=reason
+                )
             retryable = result.outcome is Outcome.THROTTLED or (
                 idempotent and result.outcome in (Outcome.SERVER_ERROR, Outcome.NETWORK_ERROR)
             )
@@ -250,6 +352,7 @@ class StaxTransport:
         object_id: str,
         params: Mapping[str, str | int | bool] | None,
         content: bytes | None,
+        headers: Mapping[str, str] | None = None,
     ) -> _Attempt:
         breaker = self.breaker
         breaker.before_call()
@@ -258,7 +361,11 @@ class StaxTransport:
             started = self.clock.monotonic_ms()
             try:
                 response = client.request(
-                    method.value, url, params=dict(params) if params else None, content=content
+                    method.value,
+                    url,
+                    params=dict(params) if params else None,
+                    content=content,
+                    headers=dict(headers) if headers else None,
                 )
             except httpx.TransportError as error:
                 result = _Attempt(Outcome.NETWORK_ERROR, None, None, type(error).__name__)
@@ -338,6 +445,45 @@ def error_fields(body: bytes, api_key: str = "") -> tuple[str, ...]:
             keys.extend(nested)
     names = {name for name in (safe_field_name(key, api_key) for key in keys) if name}
     return tuple(sorted(names)[:ERROR_FIELDS_MAX])
+
+
+def _message_strings(value: object, depth: int = 0) -> Iterator[str]:
+    """The strings of a 4xx body where a message is kept: the body itself, the values of
+    :data:`REFUSAL_MESSAGE_KEYS`, and strings in lists or objects under them."""
+    if depth > _REFUSAL_MAX_DEPTH:
+        return
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _message_strings(item, depth + 1)
+    elif isinstance(value, dict):
+        keys = REFUSAL_MESSAGE_KEYS if depth == 0 else tuple(value)
+        for key in keys:
+            if key in value:
+                yield from _message_strings(value[key], depth + 1)
+
+
+def refusal_reason(body: bytes, patterns: tuple[re.Pattern[str], ...], api_key: str = "") -> str:
+    """The first message string of a 4xx body that matches one of ``patterns``, with its
+    whitespace collapsed, when it is at most :data:`REFUSAL_REASON_MAX_LENGTH` characters
+    and holds no card or account number and not the API key; else ``""``. Never
+    logged."""
+    try:
+        parsed = json.loads(body[:ERROR_BODY_MAX_BYTES])
+    except (ValueError, RecursionError):
+        return ""
+    for text in _message_strings(parsed):
+        flat = " ".join(text.split())
+        if (
+            flat
+            and len(flat) <= REFUSAL_REASON_MAX_LENGTH
+            and any(pattern.search(flat) for pattern in patterns)
+            and is_safe_text(flat)
+            and not (api_key and api_key in flat)
+        ):
+            return flat
+    return ""
 
 
 def safe_field_name(key: str, api_key: str = "") -> str:

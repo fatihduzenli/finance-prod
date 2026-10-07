@@ -17,6 +17,9 @@ Every POST ends in a redirect, whatever the outcome; a form with errors is held 
 session for the next GET, as on the operator and lease screens.
 
 The list exports as CSV (``stores:export``, PLAN-011 D5): the same search, every page.
+
+The detail page lists the contact log entries about a lease of the store, with **Add
+entry** for billing (PLAN-012 D3, :mod:`ledger.views.contacts`).
 """
 
 from __future__ import annotations
@@ -44,10 +47,10 @@ from ledger.forms import (
     StoreForm,
 )
 from ledger.models import DocumentKind, Store, StoreCost, StoreCostSource
-from ledger.services import csv_export, store_costs
+from ledger.services import contacts, csv_export, store_costs
 from ledger.services import stores as service
 from ledger.services.csv_export import CsvWriter
-from ledger.views import documents
+from ledger.views import contact_log, documents
 from ledger.views.leases import _admin_only
 from ledger.views.operators import (
     PAGE_SIZE,
@@ -157,6 +160,23 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_correct_cost": meets(_role(request), Role.ADMIN),
             "open_cost": store_costs.open_cost(store),
             "close_form": StoreCostCloseForm(),
+            # PLAN-012 D3: the entries about a lease of this store, and Add entry.
+            "contact_rows": contact_log.log_rows(
+                request,
+                list(
+                    contacts.store_entries(
+                        store, include_deleted=contact_log.include_deleted(request)
+                    )[: contacts.PAGE_LIMIT + 1]
+                ),
+            ),
+            "contact_limit": contacts.PAGE_LIMIT,
+            "contact_add_url": contact_log.store_add_url(request, store, today),
+            # PLAN-012 D6: New invoice on the store's lease in effect today (billing).
+            "can_new_invoice": meets(_role(request), Role.BILLING)
+            and any(
+                lease.operator is not None and lease.operator.archived_at is None
+                for lease in contacts.store_leases(store, today)
+            ),
             **documents.section_context(request, store),
         },
     )

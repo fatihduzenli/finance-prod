@@ -8,6 +8,7 @@ which runs when the form validates the model instance.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -18,29 +19,25 @@ from django.db.models import Q
 
 from ledger.models import (
     CALENDAR_TITLE_MAX_LENGTH,
+    DESCRIPTION_MAX_LENGTH,
+    EVIDENCE_NAME_MAX_LENGTH,
     NAME_MAX_LENGTH,
     CalendarEntryKind,
-    CollectionMethod,
     CollectionStatus,
     ContactKind,
     DepositResolutionKind,
     DocumentKind,
     FeeType,
     Lease,
-    OneOffCategory,
     Operator,
     PaymentChannel,
     PaymentMethod,
     Store,
 )
+from ledger.services import invoice_builder
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import END_DATE_REQUIRED, END_REASON_REQUIRED
-from ledger.services.one_off_charges import (
-    AMOUNT_MAX,
-    FORM_CATEGORIES,
-    FORM_COLLECTIONS,
-    ChargeInput,
-)
+from ledger.services.one_off_charges import ChargeInput
 from ledger.validators import validate_no_payment_data, visible_text
 from payments.operator_sync import normalise_phone
 
@@ -556,110 +553,122 @@ class RescheduleReturnForm(forms.Form):
 #: The longest description the form accepts; the service refuses above 120 characters with
 #: its own sentence, so a long paste is answered, not truncated.
 DESCRIPTION_INPUT_MAX_LENGTH = 1000
-ONE_OFF_NOTE_HELP = "Required, internal: why the charge is made. Not sent to the operator."
+#: Blank line rows a draft form shows besides its lines, so that it works without script.
+BLANK_LINE_ROWS = 5
 
 
-class OneOffChargeForm(forms.Form):
-    """Create one one-off charge (D2) from the operator page (the lease is chosen among
-    the operator's leases, or left blank) or the lease page (the lease is fixed). The
-    form checks shape; the service re-checks every rule under a row lock. ``Charge now``
-    is offered to admins only."""
+def _lease_label(lease: Lease) -> str:
+    start = lease.started_on.isoformat() if lease.started_on else "no start date"
+    operator = lease.operator.display_name if lease.operator is not None else "no operator"
+    return f"{lease.store.external_label}: {operator}, from {start}"
 
-    creation_key = forms.UUIDField(widget=forms.HiddenInput)
+
+class InvoiceDraftForm(forms.Form):
+    """The header of an invoice draft (PLAN-012 D6): the lease (one of ``leases``; or
+    none, the operator alone, when ``allow_none``), the memo and the optional due date.
+    The form checks shape; :mod:`ledger.services.invoice_builder` checks every rule."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput, required=False)
     lease = forms.ChoiceField(required=False, label="Lease")
-    category = forms.ChoiceField(choices=(), error_messages={"required": "Choose a category."})
-    description = forms.CharField(
-        max_length=DESCRIPTION_INPUT_MAX_LENGTH,
-        validators=[validate_no_payment_data],
-        help_text="The invoice's line, at most 120 characters.",
-        error_messages={"required": "A description is required: it is the invoice's line."},
-    )
-    amount = forms.DecimalField(
-        min_value=Decimal("0.01"), max_value=AMOUNT_MAX, max_digits=12, decimal_places=2
-    )
-    due_date = forms.DateField(label="Due date", widget=forms.DateInput(attrs={"type": "date"}))
-    collection = forms.ChoiceField(
-        choices=(), label="Collect by", error_messages={"required": "Choose how it is collected."}
-    )
-    note = forms.CharField(
+    memo = forms.CharField(
+        required=False,
         widget=forms.Textarea(attrs={"rows": 2}),
-        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        max_length=invoice_builder.MEMO_MAX_LENGTH,
         validators=[validate_no_payment_data],
-        help_text=ONE_OFF_NOTE_HELP,
-        error_messages={"required": "An internal note is required: say why the charge is made."},
+        help_text="Shown on the invoice.",
     )
-    #: PLAN-007c: the confirmation of a debit above the warning threshold. The service
-    #: decides whether it is needed and refuses without it.
-    confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
+    due_date = forms.DateField(
+        required=False,
+        label="Due date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text=(
+            f"Empty: {invoice_builder.DUE_DAYS} days after the invoice is sent (New York time)."
+        ),
+    )
 
     def __init__(
-        self,
-        *args: Any,
-        operator: Operator,
-        lease: Lease | None = None,
-        admin: bool = False,
-        **kwargs: Any,
+        self, *args: Any, leases: Iterable[Lease], allow_none: bool, **kwargs: Any
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.operator = operator
-        self.fixed_lease = lease
-        self.leases = {
-            str(row.pk): row
-            for row in operator.leases.select_related("store").order_by(
-                "store__external_label", "started_on", "id"
-            )
-        }
+        self.leases = {str(row.pk): row for row in leases}
         lease_field = self.fields["lease"]
-        if lease is not None:
-            del self.fields["lease"]
-        elif isinstance(lease_field, forms.ChoiceField):
-            lease_field.choices = [("", "No lease (the operator)")] + [
-                (key, f"{row.store.external_label} from {row.started_on or 'no start date'}")
-                for key, row in self.leases.items()
+        lease_field.required = not allow_none
+        lease_field.error_messages["required"] = "Choose the lease."
+        if isinstance(lease_field, forms.ChoiceField):
+            lease_field.choices = ([("", "No lease (the operator)")] if allow_none else []) + [
+                (key, _lease_label(row)) for key, row in self.leases.items()
             ]
-        category = self.fields["category"]
-        if isinstance(category, forms.ChoiceField):
-            category.choices = [(value, OneOffCategory(value).label) for value in FORM_CATEGORIES]
-        offered = [
-            value for value in FORM_COLLECTIONS if admin or value != CollectionMethod.CHARGE_NOW
-        ]
-        collection = self.fields["collection"]
-        if isinstance(collection, forms.ChoiceField):
-            collection.choices = [(value, CollectionMethod(value).label) for value in offered]
-
-    def clean_description(self) -> str:
-        text = visible_text(self.cleaned_data["description"])
-        if not text:
-            raise forms.ValidationError(self.fields["description"].error_messages["required"])
-        return text
-
-    def clean_note(self) -> str:
-        # Invisible format characters and Unicode whitespace alone are not a note.
-        note = visible_text(self.cleaned_data["note"])
-        if not note:
-            raise forms.ValidationError(self.fields["note"].error_messages["required"])
-        return note
 
     def chosen_lease(self) -> Lease | None:
-        if self.fixed_lease is not None:
-            return self.fixed_lease
         return self.leases.get(self.cleaned_data.get("lease") or "")
 
-    def item(self) -> ChargeInput:
+
+class InvoiceLineForm(forms.Form):
+    """One line of a draft: a fee type or free text, a quantity (empty: 1) and a unit
+    amount. A row with neither a fee type, a description nor a unit amount is blank and
+    ignored; a row whose Remove box is ticked is dropped."""
+
+    fee_type = forms.ChoiceField(required=False, label="Fee type")
+    description = forms.CharField(
+        required=False,
+        max_length=DESCRIPTION_INPUT_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text=f"At most {DESCRIPTION_MAX_LENGTH} characters; empty: the fee type's name.",
+    )
+    quantity = forms.DecimalField(
+        required=False, max_digits=12, decimal_places=4, widget=forms.NumberInput({"step": "any"})
+    )
+    unit_amount = forms.DecimalField(
+        required=False,
+        label="Unit amount",
+        max_digits=12,
+        decimal_places=2,
+        widget=forms.NumberInput({"step": "0.01"}),
+    )
+
+    def __init__(self, *args: Any, fee_types: Iterable[FeeType] = (), **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fee_types = {str(row.pk): row for row in fee_types}
+        field = self.fields["fee_type"]
+        if isinstance(field, forms.ChoiceField):
+            field.choices = [("", "Free text")] + [
+                (key, row.name) for key, row in self.fee_types.items()
+            ]
+
+    def is_blank(self) -> bool:
         data = self.cleaned_data
-        return ChargeInput(
-            fee_type=None,
-            price=data["amount"],
-            cost=None,
-            vendor="",
-            due_date=data["due_date"],
-            note=data["note"],
-            category=data["category"],
-            collection=data["collection"],
-            description=data["description"],
-            confirmed=data.get("confirm") is True,
-            creation_key=data["creation_key"],
+        return not (data.get("fee_type") or data.get("description") or data.get("unit_amount"))
+
+    def line(self) -> invoice_builder.LineInput:
+        data = self.cleaned_data
+        return invoice_builder.LineInput(
+            fee_type=self.fee_types.get(data.get("fee_type") or ""),
+            description=data.get("description") or "",
+            quantity=data.get("quantity"),
+            unit_amount=data.get("unit_amount"),
         )
+
+
+InvoiceLineFormSet = forms.formset_factory(
+    InvoiceLineForm,
+    extra=BLANK_LINE_ROWS,
+    can_delete=True,
+    max_num=invoice_builder.MAX_LINES,
+    validate_max=True,
+    absolute_max=invoice_builder.MAX_LINES + BLANK_LINE_ROWS,
+)
+
+
+def draft_lines(formset: forms.BaseFormSet[InvoiceLineForm]) -> list[invoice_builder.LineInput]:
+    """The lines of a valid formset, in order: blank and removed rows left out."""
+    return [
+        form.line()
+        for form in formset.forms
+        if form.has_changed()
+        and not form.cleaned_data.get("DELETE")
+        and form.cleaned_data
+        and not form.is_blank()
+    ]
 
 
 class CancelChargeForm(forms.Form):
@@ -942,6 +951,27 @@ DOCUMENT_FILE_ACCEPT = "image/*,.pdf,.docx,.heic"
 DOCUMENT_PHOTO_ACCEPT = "image/*"
 
 
+#: The types dispute evidence may be (PLAN-012 D8); narrows the file picker only.
+EVIDENCE_FILE_ACCEPT = ".pdf,.jpg,.jpeg,.png,.tif,.tiff"
+
+
+class DisputeEvidenceForm(forms.Form):
+    """One evidence file for a dispute (PLAN-012 D8). Shape only: the service checks the
+    name, the size, the type, the notice for an image and the respond-by date, and the
+    documents upload runs the 10c checks, so every refusal is audited."""
+
+    name = forms.CharField(label="Name", strip=False, max_length=4 * EVIDENCE_NAME_MAX_LENGTH)
+    file = forms.FileField(
+        label="File",
+        allow_empty_file=True,
+        widget=forms.FileInput(attrs={"accept": EVIDENCE_FILE_ACCEPT}),
+    )
+    acknowledged = forms.BooleanField(
+        label="This is a receipt, lease page or correspondence, not a bank form",
+        required=False,
+    )
+
+
 class DocumentUploadForm(forms.Form):
     """One file, its kind and an optional note. Shape only: the service decides the
     type from the content, checks the size, the kind and the note, and runs the
@@ -976,7 +1006,17 @@ class DocumentUploadForm(forms.Form):
         ),
     )
     #: A select of the kinds; any other value reaches the service, which refuses it.
-    kind = forms.CharField(label="Kind", widget=forms.Select(choices=DocumentKind.choices))
+    kind = forms.CharField(
+        label="Kind",
+        widget=forms.Select(
+            # Dispute evidence is kept on an operator, from the disputes page (PLAN-012 D8).
+            choices=[
+                choice
+                for choice in DocumentKind.choices
+                if choice[0] != DocumentKind.DISPUTE_EVIDENCE
+            ]
+        ),
+    )
     note = forms.CharField(
         required=False,
         strip=False,
@@ -1017,9 +1057,9 @@ class DocumentDeleteForm(forms.Form):
 CONTACT_BODY_MAX_LENGTH = 2000
 
 
-class ContactEntryForm(forms.Form):
-    """Add one contact entry to an operator's log (D7). The form checks shape; the
-    service (:func:`ledger.services.contacts.add_entry`) decides every rule."""
+class ContactEditForm(forms.Form):
+    """The fields of a contact entry its author may change (PLAN-012 D2). The form checks
+    shape; the service (:mod:`ledger.services.contacts`) decides every rule."""
 
     kind = forms.ChoiceField(
         choices=ContactKind.choices, error_messages={"required": "Choose the kind of contact."}
@@ -1042,7 +1082,6 @@ class ContactEntryForm(forms.Form):
         decimal_places=2,
         help_text="Promise to pay only.",
     )
-    closes = forms.ChoiceField(required=False, label="Closes the promise")
     body = forms.CharField(
         label="Note",
         widget=forms.Textarea(attrs={"rows": 3}),
@@ -1051,17 +1090,97 @@ class ContactEntryForm(forms.Form):
         error_messages={"required": "A note is required: say what was said or agreed."},
     )
 
-    def __init__(self, *args: Any, promises: list[tuple[str, str]], **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        closes = self.fields["closes"]
-        if isinstance(closes, forms.ChoiceField):
-            closes.choices = [("", "None")] + promises
-
     def clean_body(self) -> str:
         body = visible_text(self.cleaned_data["body"])
         if not body:
             raise forms.ValidationError(self.fields["body"].error_messages["required"])
         return body
+
+
+#: The outcomes of a previous promise, as the entry form offers them (PLAN-012 D5).
+OUTCOME_CHOICES = [
+    ("kept", "Kept"),
+    ("rescheduled", "Rescheduled"),
+    ("broken", "Broken"),
+]
+
+
+class ContactEntryForm(ContactEditForm):
+    """Add one contact entry to an operator's log (PLAN-011b D7, PLAN-012 D3, D5).
+
+    ``lease``: required when the operator has more than one lease in effect
+    (``lease_required``). ``previous`` and ``outcome``: offered, and required, when the
+    operator has an open promise (``promises``). Each choice of ``promises`` may carry the
+    promise's date and amount for the page's "Rescheduled" preselection."""
+
+    lease = forms.ChoiceField(required=False, label="Store")
+    previous = forms.ChoiceField(required=False, label="Previous promise")
+    outcome = forms.ChoiceField(
+        required=False,
+        label="What happened to it",
+        choices=OUTCOME_CHOICES,
+        widget=forms.RadioSelect,
+        error_messages={"required": "Choose kept, rescheduled or broken."},
+    )
+    field_order = [
+        "lease",
+        "previous",
+        "outcome",
+        "kind",
+        "happened_on",
+        "promised_date",
+        "promised_amount",
+        "body",
+    ]
+
+    def __init__(
+        self,
+        *args: Any,
+        leases: list[tuple[str, str]],
+        lease_required: bool,
+        promises: list[tuple[str, str]],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        lease = self.fields["lease"]
+        if isinstance(lease, forms.ChoiceField):
+            lease.choices = ([] if lease_required else [("", "No particular store")]) + leases
+            lease.required = lease_required
+            lease.error_messages["required"] = "Choose the store this is about."
+        if not leases:
+            del self.fields["lease"]
+        previous = self.fields["previous"]
+        if promises and isinstance(previous, forms.ChoiceField):
+            previous.choices = promises
+            previous.required = True
+            self.fields["outcome"].required = True
+        else:
+            del self.fields["previous"]
+            del self.fields["outcome"]
+
+
+class ContactCorrectionForm(forms.Form):
+    """A correction appended to a contact entry (PLAN-012 D2)."""
+
+    body = forms.CharField(
+        label="Correction",
+        widget=forms.Textarea(attrs={"rows": 3}),
+        max_length=CONTACT_BODY_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": "Say what is corrected."},
+    )
+
+
+class ContactDeleteForm(forms.Form):
+    """The reason an admin deletes a contact entry (PLAN-012 D2)."""
+
+    reason = forms.CharField(
+        label="Reason",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=CONTACT_BODY_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": "A reason is required: say why this entry is deleted."},
+    )
 
 
 class CalendarEntryForm(forms.Form):

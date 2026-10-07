@@ -72,6 +72,7 @@ from ledger.models import (
     CollectionStatus,
     ContactEntry,
     ContactKind,
+    ContactStatus,
     Lease,
     OneOffCategory,
     OneOffCharge,
@@ -717,7 +718,8 @@ def queue_morning_emails(today: date) -> MorningReport:
     promises = ContactEntry.objects.filter(
         kind=ContactKind.PROMISE,
         promised_date=today,
-        closed_by__isnull=True,
+        status=ContactStatus.OPEN,
+        deleted_at__isnull=True,
         author__isnull=False,
     ).order_by("created_at", "id")
     queued_entries = sum(_queue_morning(entry, today) for entry in entries)
@@ -768,7 +770,8 @@ def _morning_item(
             pk=entity_id,
             kind=ContactKind.PROMISE,
             promised_date=on,
-            closed_by__isnull=True,
+            status=ContactStatus.OPEN,
+            deleted_at__isnull=True,
         )
         .first()
     )

@@ -185,6 +185,29 @@ class ScheduleQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class DisputeQuery:
+    """The provider's disputes created in ``date_range`` (PLAN-012 D8); ``status`` empty:
+    every status; ``page`` from 1."""
+
+    date_range: DateRange
+    status: str = ""
+    page: int = 1
+
+
+#: What ``upload_dispute_evidence`` accepts (PLAN-012 D8): less than this many bytes ...
+EVIDENCE_MAX_BYTES = 10_000_000
+#: ... of these types, each sent with this extension.
+EVIDENCE_EXTENSIONS: Mapping[str, str] = {
+    "application/pdf": "pdf",
+    "image/jpeg": "jpeg",
+    "image/png": "png",
+    "image/tiff": "tiff",
+}
+#: Longest evidence name sent.
+EVIDENCE_NAME_MAX_LENGTH = 150
+
+
+@dataclass(frozen=True, slots=True)
 class ScheduleUpdate:
     """D2: amounts and metadata are never edited, so this type has no field for them."""
 
@@ -327,6 +350,35 @@ class AchRejection:
 
 
 @dataclass(frozen=True, slots=True)
+class DisputeRecord:
+    """A dispute (PLAN-012 D8). ``raw_status`` and ``reason`` are the provider's strings,
+    unmodified (Rule 2); ``raw_summary`` holds the documented scalar fields only, never
+    an identifier."""
+
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    transaction_external_id: str = ""
+    reason: str = ""
+    amount: Decimal | None = None
+    respond_by: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    raw_summary: Summary = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class DisputeEvidenceReceipt:
+    """An evidence file the provider accepted; ``external_id`` is ``""`` when the
+    provider's answer names none."""
+
+    external_id: str
+    raw_status: str
+    fetched_at: datetime
+    dispute_external_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class WebhookRecord:
     """A webhook registration (PLAN-008 D9). ``target_url`` carries the URL token and is
     kept out of ``repr``; callers never print it."""
@@ -436,6 +488,19 @@ class PaymentProvider(ABC):
 
     @abstractmethod
     def list_ach_rejections(self, date_range: DateRange) -> list[AchRejection]: ...
+
+    @abstractmethod
+    def list_disputes(self, query: DisputeQuery) -> list[DisputeRecord]:
+        """One page of the merchant's disputes, by respond-by date (PLAN-012 D8)."""
+
+    @abstractmethod
+    def upload_dispute_evidence(
+        self, dispute_external_id: str, name: str, data: bytes, content_type: str
+    ) -> DisputeEvidenceReceipt:
+        """Send one evidence file: fewer than :data:`EVIDENCE_MAX_BYTES` bytes of a type in
+        :data:`EVIDENCE_EXTENSIONS`, else :class:`~payments.errors.ValidationFailed` before
+        any request. A dispute past its respond-by date is refused by the provider
+        (:class:`~payments.errors.ProviderRejected`, with its sentence as ``reason``)."""
 
     @abstractmethod
     def list_webhooks(self) -> list[WebhookRecord]:

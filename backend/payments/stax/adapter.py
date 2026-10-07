@@ -12,6 +12,7 @@ transport, which applies the caller check, breaker, limiter and retry policy.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
@@ -33,6 +34,9 @@ from payments.provider import (
     DateRange,
     DepositDetail,
     DepositRecord,
+    DisputeEvidenceReceipt,
+    DisputeQuery,
+    DisputeRecord,
     InvoiceInput,
     InvoiceQuery,
     InvoiceRecord,
@@ -51,7 +55,7 @@ from payments.provider import (
     WebhookRecord,
 )
 from payments.stax import mapping, validation
-from payments.stax.transport import Method, RetryPolicy, StaxTransport
+from payments.stax.transport import FilePart, Method, Multipart, RetryPolicy, StaxTransport
 
 PROVIDER_NAME = "stax"
 #: The values of {method} on mark-paid that this app may send. The page (read 2026-10-02,
@@ -85,7 +89,19 @@ CUSTOMER_PAYMENT_METHODS = "/customer/{customerId}/payment-method"
 PAYMENT_METHOD = "/payment-method/{id}"  # get-a-payment-method-by-id
 WEBHOOKS = "/webhook"  # get-all-webhooks, create-new-webhook-for-all-of-my-users-merchants
 WEBHOOK = "/webhook/{id}"  # get-webhook-by-id (titled "Delete a Webhook")
+DISPUTES = "/underwriting/disputes"  # list-disputes (docs/BACKLOG.md §1 row 4)
+DISPUTE_FILE = "/file/dispute"  # upload-evidence-for-dispute (docs/BACKLOG.md §1 row 4)
 _CUSTOMER_PAYMENT_METHODS_TEMPLATE = CUSTOMER_PAYMENT_METHODS.replace("{customerId}", "{id}")
+#: upload-evidence-for-dispute: Stax answers 400 once the respond-by date has passed
+#: (PLAN-012 D8). TODO-VERIFY-063: the wording of that message; any message naming the
+#: respond-by date and that it passed, expired or is over is read as that refusal.
+RESPOND_BY_PASSED = re.compile(
+    r"respond[\s_-]*by.*\b(pass|passed|expired|past|over|elapsed)\b"
+    r"|\b(passed|expired|past|elapsed)\b.*respond[\s_-]*by",
+    re.IGNORECASE,
+)
+#: The file name sent with an evidence file: a fixed stem and the type's extension.
+EVIDENCE_FILE_STEM = "evidence"
 
 #: The required `url` body field of create-an-invoice and create-a-scheduled-invoice.
 #: Confirmed 2026-10-01 from the field description of create-an-invoice ("Set it to
@@ -433,6 +449,40 @@ class StaxProvider(PaymentProvider):
         """DELETE /invoice/schedule/{id} (delete-invoice-schedule)."""
         validation.external_id("external_id", external_id)
         self.transport.send(Method.DELETE, SCHEDULE, object_id=external_id, idempotent=True)
+
+    # --- Disputes (PLAN-012 D8) -------------------------------------------------------
+
+    def list_disputes(self, query: DisputeQuery) -> list[DisputeRecord]:
+        """GET /underwriting/disputes (list-disputes): one page, by respond-by date."""
+        validation.dispute_query(query)
+        data = self.transport.send(
+            Method.GET, DISPUTES, params=mapping.dispute_params(query), idempotent=True
+        )
+        fetched_at = self.now()
+        return [mapping.dispute_record(item, fetched_at) for item in mapping.as_list(data)]
+
+    def upload_dispute_evidence(
+        self, dispute_external_id: str, name: str, data: bytes, content_type: str
+    ) -> DisputeEvidenceReceipt:
+        """POST /file/dispute (upload-evidence-for-dispute): multipart ``dispute_id``,
+        ``name`` and ``file``. Not idempotent: a repeat could attach the file twice, so a
+        5xx or a timeout is not retried. A 400 saying the respond-by date has passed
+        carries the provider's sentence as :attr:`ProviderRejected.reason`."""
+        validation.external_id("dispute_external_id", dispute_external_id)
+        extension = validation.dispute_evidence(name, data, content_type)
+        form = Multipart(
+            fields=(("dispute_id", dispute_external_id), ("name", name)),
+            file=FilePart("file", f"{EVIDENCE_FILE_STEM}.{extension}", content_type, data),
+        )
+        answer = self.transport.send(
+            Method.POST,
+            DISPUTE_FILE,
+            object_id=dispute_external_id,
+            multipart=form,
+            idempotent=False,
+            refusal_patterns=(RESPOND_BY_PASSED,),
+        )
+        return mapping.dispute_evidence_receipt(answer, dispute_external_id, self.now())
 
     # --- Webhook registrations (PLAN-008 D9; the registration commands only) ---------
 

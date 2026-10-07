@@ -1,0 +1,22 @@
+{% extends "finance/base.html" %}
+{% block title %}Cancel {{ draft.number }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">&larr; {{ draft.number }}</a></p>
+  <h1>Cancel {% if sent %}invoice {{ draft.sent_invoice.invoice_number }}{% else %}{{ draft.number }}{% endif %}</h1>
+  {% if sent %}
+    <p>The payment provider's invoice is deleted; every line's charge is voided here only once the provider confirms. An invoice with money received follows the refund path and cannot be cancelled.</p>
+    {% if refusal %}<p id="cancel-refusal"><strong>{{ refusal }}</strong></p>{% endif %}
+  {% else %}
+    <p>The draft is closed. Nothing was sent, so nothing reaches the payment provider.</p>
+  {% endif %}
+  <form method="post" id="cancel-form" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {% if sent %}
+      <label for="{{ form.note.id_for_label }}">Note *</label>
+      {{ form.note }}
+      <br><span class="muted">{{ form.note.help_text }}</span>
+    {% endif %}
+    <p class="actions"><button class="btn btn-primary" type="submit" id="cancel-submit">{% if sent %}Cancel invoice{% else %}Cancel draft{% endif %}</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

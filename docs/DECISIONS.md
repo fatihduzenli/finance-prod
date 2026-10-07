@@ -630,3 +630,60 @@ listed on the dashboard until cleared. Both actions are audited and explained on
   job. Go-live needs the Workspace admin steps in plan §9.
 - Known limits: the two-line Stax invoice and schedule are verified only when ACH works on the
   sandbox; the ICS and the statement link are credentialed by their URL (revocable, logged).
+
+## ADR-0011 — Contact log maturity; one invoice builder for every non-rent bill; disputes read-only with evidence
+
+**Date:** 2026-10-07
+**Status:** Accepted (owner's Prompt 12 text and amendments, 2026-10-07). **Two schema
+recommendations await the owner's answer: S1 and S2 (below).**
+
+### Decision
+
+1. **Contact log (owner findings (1)–(4) of 2026-10-06).** An entry is the author's to edit for
+   15 minutes; afterwards only an appended correction changes what it says; an admin may soft
+   delete it with a reason (struck through for billing and admin, invisible to viewers); nothing
+   removes a row. Entries name the store (required with more than one active lease). A promise
+   closes by itself as **kept** when a settled, non-refund payment of at least the promised
+   amount settles on that lease (or operator) between the recording day and the promised date;
+   recording a new entry while a promise is open asks for the previous promise's outcome:
+   **Kept, Rescheduled** (a new promise) or **Broken**. Statuses `open`, `kept`, `rescheduled`,
+   `broken`; old closed promises were migrated as `broken` (accepted 2026-10-07).
+2. **Invoice builder.** "Create one-off charge" is removed (its addresses answer 410). Every
+   non-rent bill is a draft with lines (fee type or free text, quantity, unit amount), previewed
+   and printed, then **sent as one Stax invoice with all its lines** or charged now (admin).
+   Each line becomes one one-off charge (ADR-0009 unchanged), each line item names its charge
+   (`invoice_line_items.one_off_charge`), and a payment on the invoice is allocated to the
+   lines in order; the returned-then-rescheduled rule and deposits held read the lines. The
+   builder offers no autopay-on-due-date collection; an ended lease may still be billed by
+   e-mail (arrears).
+3. **Disputes.** Stax owns dispute state. The app keeps a read-only list (`disputes`), read by
+   the worker from `GET /underwriting/disputes` (daily, on a dispute webhook, on Refresh), with
+   status and reason verbatim, the transaction masked, the payment, operator and store derived
+   from our refs. The one write is **evidence upload** (`POST /file/dispute`, multipart): an
+   admin's action on a file stored first as the operator's document through the 10c path (the
+   Rule 1 checks unchanged; TIFF accepted for this kind only; images need the notice ticked),
+   queued to the worker, **not retried** after a 5xx or timeout (not idempotent), refused once
+   `respond_by` has passed; a provider refusal is shown as its sentence, never a traceback.
+   Nothing accepts, contests or closes a dispute here. Rule 2 of `docs/CLAUDE.md` is amended
+   accordingly; the full workflow is BACKLOG §1 row 4.
+4. **Freeze.** Nothing in `docs/BACKLOG.md` §1 starts before Step 17 (Checkpoint 12).
+
+### Open for the owner (Checkpoint 12)
+
+- **S1 — line-item kind.** `invoice_line_items.kind` (`charge`, `fee`, `surcharge`, `tax`,
+  `discount`) with `invoices.fees` and `invoices.surcharge` as separate stored columns
+  (default 0). Recommended now (the builder is the first code that writes several lines per
+  invoice). **Decision: pending.** Until then the builder writes lines without a kind.
+- **S2 — operator contact consent.** `operators.sms_phone` (E.164), `sms_consent_at`,
+  `email_consent_at`. Recommended before the Step 13 import. **Decision: pending.**
+
+### Consequences
+
+- Two new Stax calls, both through the worker, the limiter and the breaker; the upload is a
+  staff action, the list a paged daily read (BACKLOG §1 row 4 risk column).
+- `documents` gains an operator owner (dispute evidence only, CHECK); `disputes`,
+  `dispute_evidence`, `invoice_drafts`, `invoice_draft_lines`, `contact_corrections` are new
+  tables; `contact_entries` gains `lease`, `status`, `kept_by_payment` and the soft-delete
+  columns; job kinds `disputes_sync` and `dispute_evidence_upload`.
+- TODO-VERIFY-062 (upload response shape) and 063 (wording of the late-upload 400) are open
+  until the first upload on sandbox or live.

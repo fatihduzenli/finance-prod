@@ -1057,7 +1057,9 @@ def test_the_report_query_counts_do_not_grow_with_the_data(today: date) -> None:
     _more(operator, 15)
     assert _counts(operator) == small
     # PLAN-011b D5: one more each for the re-debits (open balances, P&L collected).
-    assert small == {"aging": 4, "revenue": 14, "by_method": 1, "deposits": 3, "statement": 5}
+    # PLAN-012 D6: two more for the revenue (the P&L's multi-line invoices and lines),
+    # and one for the statement (its payments on multi-line invoices, split by line).
+    assert small == {"aging": 4, "revenue": 16, "by_method": 1, "deposits": 3, "statement": 6}
 
 
 def test_a_pending_charge_is_owed_and_current_until_due(today: date) -> None:

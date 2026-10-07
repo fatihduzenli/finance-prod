@@ -13,7 +13,9 @@ page that deals with it and ``since``, the day it began:
   listed: ``payments.resolution_kind`` does not exist yet, so no return counts as
   rescheduled;
 - ``broken_promise``: a promise to pay past its date (the rule is in
-  :mod:`ledger.services.contacts`);
+  :mod:`ledger.services.contacts`); a promise about a lease names its store and what is
+  still open on that lease (PLAN-012 D3: ``"... : Acme on store 2477: owes $1,250.00,
+  not kept"``); one without a lease names the operator only;
 - ``insurance_due``: an insurance anniversary in the next :data:`INSURANCE_DAYS` days
   (the lease that holds the store that day), and ``insurance_premium_missing``: an
   insurance charge still waiting for its premium, or such an anniversary whose policy
@@ -48,14 +50,17 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.db.models import Count, Min, Q
 from django.urls import reverse
 from django.utils import timezone
 
 from ledger.models import (
+    ZERO,
     CollectionSchedule,
     CollectionStatus,
+    ContactEntry,
     InsuranceCharge,
     InsurancePremium,
     Lease,
@@ -157,10 +162,8 @@ class Attention:
 # --- Kinds ---------------------------------------------------------------------------------
 
 
-def _overdue(today: date, operator: uuid.UUID | None) -> list[Item]:
-    rows = [
-        row for row in receivables.open_balances(today, operator=operator) if row.overdue(today)
-    ]
+def _overdue(today: date, balances: list[receivables.OpenBalance]) -> list[Item]:
+    rows = [row for row in balances if row.overdue(today)]
     rows.sort(key=lambda row: (row.due_on, row.store_label, str(row.charge_id)))
     found = []
     for row in rows:
@@ -215,15 +218,28 @@ def _returned(today: date, operator: uuid.UUID | None) -> list[Item]:
     return found
 
 
-def _promises(today: date, operator: uuid.UUID | None) -> list[Item]:
+def _promise_text(promise: ContactEntry, owed: dict[uuid.UUID, Decimal]) -> str:
+    """PLAN-012 D3: a promise on a lease names its store and that lease's open balance."""
+    where = promise.operator.display_name
+    if promise.lease is not None:
+        balance = owed.get(promise.lease.pk, ZERO)
+        where += f" on store {promise.lease.store.external_label}: owes {format_amount(balance)}"
+    amount = format_amount(promise.promised_amount or ZERO)
+    return f"Promise to pay {amount} by {promise.promised_date}: {where}, not kept"
+
+
+def _promises(
+    today: date, operator: uuid.UUID | None, balances: list[receivables.OpenBalance]
+) -> list[Item]:
+    owed: dict[uuid.UUID, Decimal] = {}
+    for row in balances:
+        if row.lease_id is not None:
+            owed[row.lease_id] = owed.get(row.lease_id, ZERO) + row.balance
     return [
         Item(
             kind=BROKEN_PROMISE,
             severity=HIGH,
-            text=(
-                f"Promise to pay {format_amount(promise.promised_amount)} by "
-                f"{promise.promised_date}: {promise.operator.display_name}, not kept"
-            ),
+            text=_promise_text(promise, owed),
             url=_operator_url(promise.operator_id, "#contacts"),
             since=promise.promised_date,
             operator_id=promise.operator_id,
@@ -525,10 +541,11 @@ def attention(
     """Every item for ``today`` (see the module docstring), by severity, then kind, then
     the order within the kind; with ``operator``, only that operator's items."""
     leases = _leases(operator)
+    balances = receivables.open_balances(today, operator=operator)
     sources: list[Callable[[], list[Item]]] = [
-        lambda: _overdue(today, operator),
+        lambda: _overdue(today, balances),
         lambda: _returned(today, operator),
-        lambda: _promises(today, operator),
+        lambda: _promises(today, operator, balances),
         lambda: _insurance(today, leases),
         lambda: _lease_ending(today, leases),
         lambda: _schedules(operator),

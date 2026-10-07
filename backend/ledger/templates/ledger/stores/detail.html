@@ -6,7 +6,7 @@
   <p><a href="{% url 'ledger:stores:list' %}">&larr; Stores</a></p>
   <h1>Store {{ store.external_label }}{% if store.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
 
-  {% if can_edit or can_set_cost %}<div class="actions">{% if can_edit %}<a class="btn" href="{% url 'ledger:stores:edit' pk=store.pk %}">Edit</a>{% endif %}{% if can_set_cost %} <a class="btn" href="{% url 'ledger:stores:set_cost' pk=store.pk %}" id="set-landlord-rent">Set landlord rent</a>{% endif %}</div>{% endif %}
+  {% if can_edit or can_set_cost or can_new_invoice %}<div class="actions">{% if can_edit %}<a class="btn" href="{% url 'ledger:stores:edit' pk=store.pk %}">Edit</a>{% endif %}{% if can_set_cost %} <a class="btn" href="{% url 'ledger:stores:set_cost' pk=store.pk %}" id="set-landlord-rent">Set landlord rent</a>{% endif %}{% if can_new_invoice %} <a class="btn" href="{% url 'ledger:invoices:new_store' pk=store.pk %}" id="new-invoice">New invoice</a>{% endif %}</div>{% endif %}
 
   <dl>
     <dt>Name</dt><dd>{{ store.external_label }}</dd>
@@ -81,6 +81,15 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+
+  <h2 id="contacts">Contact log</h2>
+  <p class="actions">
+    {% if contact_add_url %}<a class="btn" id="add-store-contact" href="{{ contact_add_url }}">Add entry</a>{% endif %}
+    <a class="btn" id="all-store-contacts" href="{% url 'ledger:stores:contacts' pk=store.pk %}">All entries</a>
+  </p>
+  <p class="muted">Entries about a lease of this store. Dates are New York days.</p>
+  {% include "ledger/operators/_contacts_table.html" with rows=contact_rows|slice:contact_limit %}
+  {% if contact_rows|length > contact_limit %}<p class="muted">The {{ contact_limit }} latest are shown; <a href="{% url 'ledger:stores:contacts' pk=store.pk %}">see every entry</a>.</p>{% endif %}
 
   {% include "ledger/documents/_section.html" %}
 {% endblock %}

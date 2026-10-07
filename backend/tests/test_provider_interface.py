@@ -68,6 +68,9 @@ PLANNED_METHODS = {
     "update_scheduled_invoice",
     "delete_scheduled_invoice",
     "list_ach_rejections",
+    # PLAN-012 D8: the dispute list and its evidence.
+    "list_disputes",
+    "upload_dispute_evidence",
     "list_webhooks",
     "create_webhook",
     "delete_webhook",

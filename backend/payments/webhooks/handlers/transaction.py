@@ -23,11 +23,15 @@ States, from the re-fetched transaction only:
 A transaction for an invoice linked to a one-off charge is a payment of kind ``one_off``
 on that charge (PLAN-010b D6, PLAN-010d D7); it pays, reopens and flags that charge as a
 rent payment does its rent charge. On a re-debit's invoice (PLAN-011b D5) the payment pays
-the re-debit first and what is left pays its NSF fee
+the re-debit first and what is left pays its NSF fee, and on a multi-line invoice of the
+invoice builder (PLAN-012 D6) it pays the lines' charges in line order
 (:func:`ledger.services.one_off_charges.refresh_companions`), each audited; and the
 re-debit's part is paid on the charge the returned payment was for, which reopens again
 when that payment is returned, refunded or voided
 (:func:`ledger.services.one_off_charges.refresh_sources`), each audited.
+
+A payment that settles keeps the operator's open promises to pay it meets
+(:func:`ledger.services.contacts.close_kept_by_payment`, PLAN-012 D4).
 
 ``returned`` and ``voided`` are final. Every write is keyed on provider IDs and every
 recomputation is pure, so a repeated or replayed event changes nothing.
@@ -47,7 +51,6 @@ import payments
 from ledger.models import (
     InsuranceCharge,
     Invoice,
-    OneOffCategory,
     OneOffCharge,
     Payment,
     PaymentKind,
@@ -55,7 +58,7 @@ from ledger.models import (
     PaymentStatus,
     RentCharge,
 )
-from ledger.services import one_off_charges, rent_run
+from ledger.services import contacts, one_off_charges, rent_run
 from payments.models import ExternalRef, WebhookOutcome
 from payments.provider import (
     METHOD_BANK,
@@ -365,6 +368,8 @@ def _transition(payment: Payment, record: TransactionRecord, *, settle: bool) ->
         {**_state(payment), "provider_transaction": mask_identifier(record.external_id)},
     )
     _refresh_charge(payment, returned=target == PaymentStatus.RETURNED)
+    if target == PaymentStatus.SETTLED:
+        contacts.close_kept_by_payment(payment)
     return WebhookOutcome.PROCESSED
 
 
@@ -429,12 +434,12 @@ def _refresh_charge(payment: Payment, *, returned: bool) -> None:
 
 def _allocate_to_companions(charge: OneOffCharge, context: dict[str, Any]) -> None:
     """PLAN-011b D5: a payment on a re-debit's invoice pays the re-debit first, then its
-    NSF fee; each companion whose paid amount or status moved gets its own audit row."""
-    if charge.category != OneOffCategory.REDEBIT:
-        return
+    NSF fee; PLAN-012 D6: a payment on a multi-line invoice pays its first line's charge,
+    then each later line's in line order (a return or refund takes it back from the last
+    line first). Each charge whose paid amount or status moved gets its own audit row."""
     for companion, before, after in one_off_charges.refresh_companions(charge):
         audit(
-            "one_off_charge.payment_allocated",
+            one_off_charges.ALLOCATED_ACTION,
             ENTITY_ONE_OFF_CHARGE,
             companion.pk,
             before,

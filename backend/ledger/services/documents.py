@@ -25,6 +25,13 @@ targets), each piece apart from the next by :data:`PIECE_SEPARATOR`. A file carr
 embedded file is refused (``embedded_object``): what it holds cannot be checked. Images,
 and PDFs without a text layer, cannot be checked; the upload box says so (D6).
 
+**Dispute evidence** (PLAN-012 D8) is kept on an operator, and an operator keeps nothing
+else: kind ``dispute_evidence`` is refused on a store or a lease and every other kind on
+an operator (``kind_unknown``). It may be a PDF, JPEG, PNG or TIFF only
+(``evidence_type_not_accepted``); TIFF is accepted for this kind alone. The checks above
+run unchanged; the dispute's own rules (size, the image notice, the respond-by date) are
+:mod:`ledger.services.disputes`'s, before this upload.
+
 **Download and preview** (D3, D7): streamed from the storage in chunks to a user with a
 role, through the app only; every one is audited (``document.downloaded``,
 ``document.previewed``), including a read the storage could not serve. A deleted
@@ -84,17 +91,19 @@ from ledger.models import (
     DocumentKind,
     DocumentSource,
     Lease,
+    Operator,
     Store,
 )
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 
 logger = logging.getLogger(__name__)
 
-Owner = Store | Lease
+Owner = Store | Lease | Operator
 
 ENTITY_DOCUMENT = "document"
 OWNER_STORE = "store"
 OWNER_LEASE = "lease"
+OWNER_OPERATOR = "operator"
 
 ACTION_UPLOADED = "document.uploaded"
 ACTION_UPLOAD_REFUSED = "document.upload_refused"
@@ -143,6 +152,7 @@ DUPLICATE = "duplicate"
 STORAGE_UNAVAILABLE = "storage_unavailable"
 NOTE_REQUIRED = "note_required"
 ALREADY_DELETED = "already_deleted"
+EVIDENCE_TYPE_NOT_ACCEPTED = "evidence_type_not_accepted"
 
 FEATURE_OFF_MESSAGE = "Document storage is not configured."
 MESSAGES: dict[str, str] = {
@@ -174,6 +184,7 @@ MESSAGES: dict[str, str] = {
     STORAGE_UNAVAILABLE: "The file could not be stored. Nothing was saved; try again in a minute.",
     NOTE_REQUIRED: "A note is required: say why the document is deleted.",
     ALREADY_DELETED: "This document was already deleted.",
+    EVIDENCE_TYPE_NOT_ACCEPTED: "Dispute evidence must be a PDF, or a JPEG, PNG or TIFF image.",
 }
 READ_FAILED_MESSAGE = "The file could not be read from storage. Try again in a minute."
 
@@ -184,6 +195,7 @@ DOCX = "docx"
 JPEG = "jpeg"
 PNG = "png"
 HEIC = "heic"
+TIFF = "tiff"
 
 CONTENT_TYPES: dict[str, str] = {
     PDF: DocumentContentType.PDF,
@@ -191,6 +203,7 @@ CONTENT_TYPES: dict[str, str] = {
     JPEG: DocumentContentType.JPEG,
     PNG: DocumentContentType.PNG,
     HEIC: DocumentContentType.HEIC,
+    TIFF: DocumentContentType.TIFF,
 }
 #: The extensions each type may carry, lower-case.
 EXTENSIONS: dict[str, frozenset[str]] = {
@@ -199,7 +212,12 @@ EXTENSIONS: dict[str, frozenset[str]] = {
     JPEG: frozenset({"jpg", "jpeg"}),
     PNG: frozenset({"png"}),
     HEIC: frozenset({"heic"}),
+    TIFF: frozenset({"tif", "tiff"}),
 }
+#: The types dispute evidence may be (PLAN-012 D8); TIFF for this kind only.
+EVIDENCE_TYPES: frozenset[str] = frozenset({PDF, JPEG, PNG, TIFF})
+#: Images: no text to check, accepted as dispute evidence with the notice (PLAN-012 D8).
+IMAGE_TYPES: frozenset[str] = frozenset({JPEG, PNG, HEIC, TIFF})
 #: The policy of every streamed response except a PDF preview (D7).
 SANDBOX_POLICY = "sandbox"
 #: The policy of a PDF preview: no ``sandbox`` (the browser's PDF viewer will not render
@@ -213,6 +231,8 @@ PREVIEWABLE: frozenset[str] = frozenset(
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _JPEG_SIGNATURE = b"\xff\xd8\xff"
 _PDF_SIGNATURE = b"%PDF-"
+#: Little- and big-endian TIFF (PLAN-012 D8).
+_TIFF_SIGNATURES = (b"II*\x00", b"MM\x00*")
 _ZIP_SIGNATURE = b"PK\x03\x04"
 #: ISO base media brands of HEVC-coded HEIF images (HEIC) ...
 _HEIC_BRANDS = frozenset({b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx", b"hevm", b"hevs"})
@@ -342,6 +362,8 @@ def _detect(data: bytes) -> str | Refusal | None:
         return JPEG
     if _is_heic(data):
         return HEIC
+    if data.startswith(_TIFF_SIGNATURES):
+        return TIFF
     if data.startswith(_ZIP_SIGNATURE):
         return _detect_docx(data)
     return None
@@ -907,7 +929,14 @@ def _holds_payment_data(*values: str) -> bool:
 
 
 def _owner_type(owner: Owner) -> str:
-    return OWNER_STORE if isinstance(owner, Store) else OWNER_LEASE
+    if isinstance(owner, Store):
+        return OWNER_STORE
+    return OWNER_OPERATOR if isinstance(owner, Operator) else OWNER_LEASE
+
+
+def _kind_fits(owner: Owner, kind: str) -> bool:
+    """An operator keeps dispute evidence only, and only an operator keeps it (D8)."""
+    return isinstance(owner, Operator) == (kind == DocumentKind.DISPUTE_EVIDENCE)
 
 
 def _owner_filter(owner: Owner) -> dict[str, Owner]:
@@ -927,7 +956,7 @@ def upload(
     raw_name = str(uploaded_file.name or "")
     filename = sanitise_filename(raw_name)
     size = int(uploaded_file.size or 0)
-    known_kind = kind if kind in DocumentKind.values else ""
+    known_kind = kind if kind in DocumentKind.values and _kind_fits(owner, kind) else ""
 
     def refuse(code: str) -> Outcome:
         _audit(
@@ -965,6 +994,11 @@ def upload(
     sniffed = sniff(data, filename)
     if isinstance(sniffed, Refusal):
         return refuse(sniffed.code)
+    evidence = known_kind == DocumentKind.DISPUTE_EVIDENCE
+    if evidence and sniffed.kind not in EVIDENCE_TYPES:
+        return refuse(EVIDENCE_TYPE_NOT_ACCEPTED)
+    if sniffed.kind == TIFF and not evidence:
+        return refuse(TYPE_NOT_ACCEPTED)
     text = extract_text(sniffed, data)
     if isinstance(text, Refusal):
         return refuse(text.code)
@@ -1018,11 +1052,17 @@ def _live(owner: Owner) -> QuerySet[Document]:
 
 
 def _summary(document: Document) -> dict[str, Any]:
-    owner_type = OWNER_STORE if document.store_id is not None else OWNER_LEASE
+    owner_id: uuid.UUID | None
+    if document.store_id is not None:
+        owner_type, owner_id = OWNER_STORE, document.store_id
+    elif document.lease_id is not None:
+        owner_type, owner_id = OWNER_LEASE, document.lease_id
+    else:
+        owner_type, owner_id = OWNER_OPERATOR, document.operator_id
     return {
         "document_id": str(document.pk),
         "owner_type": owner_type,
-        "owner_id": str(document.store_id or document.lease_id),
+        "owner_id": str(owner_id),
         "kind": document.kind,
         "size_bytes": document.size_bytes,
         "sha256_prefix": document.sha256[:SHA256_PREFIX_LENGTH],
@@ -1104,6 +1144,25 @@ def open_for(document: Document, actor: User, inline: bool) -> Opened:
             "Cache-Control": "private, no-store",
         },
     )
+
+
+def read_all(document: Document, actor: User) -> bytes:
+    """The document's bytes, read through :func:`open_for` (so the read is audited as a
+    download by ``actor``), for the dispute evidence upload (PLAN-012 D8). Raises
+    :class:`~documents_storage.StorageUnavailable` when the storage cannot serve them
+    or they are not the bytes stored (size or SHA-256 differ)."""
+    opened = open_for(document, actor, inline=False)
+    chunks: list[bytes] = []
+    size = 0
+    for chunk in opened.chunks:
+        size += len(chunk)
+        if size > document.size_bytes:
+            raise StorageUnavailable("SizeMismatch")
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    if len(data) != document.size_bytes or hashlib.sha256(data).hexdigest() != document.sha256:
+        raise StorageUnavailable("ContentMismatch")
+    return data
 
 
 def content_security_policy(content_type: str, inline: bool) -> str:

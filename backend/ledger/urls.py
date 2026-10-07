@@ -1,14 +1,16 @@
 """Ledger routes (PLAN-006-operators.md §4.1, PLAN-007-leases-and-rent-run.md §4.1,
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
 D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11, PLAN-010c
-D7, D10, PLAN-010d D1, D2, D4, D6, D8, PLAN-011 D0 to D5, PLAN-011b D4, D7, D8).
+D7, D10, PLAN-010d D1, D2, D4, D6, D8, PLAN-011 D0 to D5, PLAN-011b D4, D7, D8, PLAN-012 D2,
+D3, D6 to D8).
 
 Namespace ``ledger``.
 
 Every unsafe route here has a rule in ``accounts.registry``; the read-only ones are
 listed there too, so ``backend/tests/test_route_registry.py`` sees them classified.
 There is no delete route for a record: archiving is the only way to retire an operator,
-and a store is closed through its status. A document's delete is soft (PLAN-010c D7).
+and a store is closed through its status. A document's delete is soft (PLAN-010c D7), and so
+is a contact log entry's (PLAN-012 D2).
 
 ``pk`` is matched as text, as the admin matches its object IDs, so every operator path
 resolves to its route and the role registry decides on an unsafe request before the
@@ -27,7 +29,9 @@ from ledger.views import (
     contacts,
     dashboard,
     deposits,
+    disputes,
     documents,
+    invoices,
     leases,
     one_off_charges,
     operators,
@@ -53,7 +57,8 @@ operator_patterns = (
         path("<str:pk>/archive/", operators.operator_archive, name="archive"),
         path("<str:pk>/retry-sync/", operators.operator_retry_sync, name="retry_sync"),
         path("<str:pk>/link/", operators.operator_link, name="link"),
-        path("<str:pk>/charges/new/", one_off_charges.operator_new_charge, name="new_charge"),
+        # Replaced by the invoice builder (PLAN-012 D6): answers 410 Gone.
+        path("<str:pk>/charges/new/", one_off_charges.create_form_gone, name="new_charge"),
         path("<str:pk>/statement/", reports.statement_page, name="statement"),
         path("<str:pk>/statement/export.csv", reports.statement_export, name="statement_export"),
         # The contact log (PLAN-011b D7).
@@ -86,8 +91,21 @@ store_patterns = (
         path("<str:pk>/cost/", stores.store_set_cost, name="set_cost"),
         path("<str:pk>/cost/close/", stores.store_close_cost, name="close_cost"),
         path("<str:pk>/costs/<str:row>/correct/", stores.store_correct_cost, name="correct_cost"),
+        # The store's contact log (PLAN-012 D3).
+        path("<str:pk>/contacts/", contacts.store_contacts_page, name="contacts"),
+        path("<str:pk>/contacts/new/", contacts.store_contacts_add, name="contacts_add"),
     ],
     "stores",
+)
+
+# One contact log entry (PLAN-012 D2): the author's edit, a correction, an admin's delete.
+contact_patterns = (
+    [
+        path("<str:pk>/edit/", contacts.contact_edit, name="edit"),
+        path("<str:pk>/correct/", contacts.contact_correct, name="correct"),
+        path("<str:pk>/delete/", contacts.contact_delete, name="delete"),
+    ],
+    "contacts",
 )
 
 lease_patterns = (
@@ -106,7 +124,8 @@ lease_patterns = (
             one_off_charges.lease_add_setup_charge,
             name="add_setup_charge",
         ),
-        path("<str:pk>/charges/new/", one_off_charges.lease_new_charge, name="new_charge"),
+        # Replaced by the invoice builder (PLAN-012 D6): answers 410 Gone.
+        path("<str:pk>/charges/new/", one_off_charges.create_form_gone, name="new_charge"),
         path(
             "<str:pk>/deposits/<str:charge>/resolve/",
             deposits.resolve_deposit,
@@ -160,6 +179,22 @@ one_off_charge_patterns = (
     "one_off_charges",
 )
 
+# The invoice builder (PLAN-012 D6, D7).
+invoice_patterns = (
+    [
+        path("new/store/<str:pk>/", invoices.new_store, name="new_store"),
+        path("new/operator/<str:pk>/", invoices.new_operator, name="new_operator"),
+        path("drafts/<str:pk>/", invoices.draft_page, name="draft"),
+        path("drafts/<str:pk>/edit/", invoices.draft_edit, name="edit"),
+        path("drafts/<str:pk>/preview/", invoices.draft_preview, name="preview"),
+        path("drafts/<str:pk>/print/", invoices.draft_print, name="print"),
+        path("drafts/<str:pk>/send/", invoices.draft_send, name="send"),
+        path("drafts/<str:pk>/charge-now/", invoices.draft_charge_now, name="charge_now"),
+        path("drafts/<str:pk>/cancel/", invoices.draft_cancel, name="cancel"),
+    ],
+    "invoices",
+)
+
 payment_patterns = (
     [
         path("", payments.payment_list, name="list"),
@@ -189,6 +224,17 @@ return_patterns = (
         path("<str:pk>/reschedule/", returns.return_reschedule, name="reschedule"),
     ],
     "returns",
+)
+
+dispute_patterns = (
+    [
+        path("", disputes.disputes_page, name="page"),
+        path("export.csv", disputes.disputes_export, name="export"),
+        path("refresh/", disputes.disputes_refresh, name="refresh"),
+        path("<str:pk>/evidence/", disputes.dispute_evidence, name="evidence"),
+        path("evidence/<str:pk>/retry/", disputes.dispute_evidence_retry, name="evidence_retry"),
+    ],
+    "disputes",
 )
 
 reconciliation_patterns = (
@@ -285,11 +331,14 @@ urlpatterns = [
     path("arrears/", include(arrears_patterns)),
     path("operators/", include(operator_patterns)),
     path("stores/", include(store_patterns)),
+    path("contacts/", include(contact_patterns)),
     path("leases/", include(lease_patterns)),
     path("run/", include(run_patterns)),
     path("charges/", include(charge_patterns)),
     path("one-off-charges/", include(one_off_charge_patterns)),
+    path("invoices/", include(invoice_patterns)),
     path("payments/", include(payment_patterns)),
+    path("disputes/", include(dispute_patterns)),
     path("webhooks/", include(webhook_patterns)),
     path("returns/", include(return_patterns)),
     # The operator's own statement behind a signed link, without a session (PLAN-011b D4).

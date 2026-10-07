@@ -5,7 +5,8 @@ Each public function is one job kind's work and returns ``(ok, text)``: whether 
 is ``done`` or ``failed``, and a fixed sentence with, on a provider failure, the error
 class and the field names it rejected (never provider text).
 
-- :func:`create_provider_invoice` (``invoice_create``): local first (docs/CLAUDE.md
+- :func:`create_provider_invoice` (``invoice_create``; for an invoice builder invoice,
+  PLAN-012 D6, every line of the invoice and its memo): local first (docs/CLAUDE.md
   Rule 5): the charge's local invoice exists and carries our number. Before the first
   create call an attempt is recorded; a run that finds an earlier attempt lists the
   customer's invoices of the last :data:`LOOKBACK_DAYS` days first
@@ -69,10 +70,12 @@ from ledger.models import (
     AuditLog,
     CollectionMethod,
     Invoice,
+    InvoiceLineItem,
     InvoiceStatus,
     OneOffCharge,
     OneOffChargeStatus,
     Operator,
+    format_quantity,
 )
 from ledger.services import leases, numbering, one_off_charges, rent_run
 from payments import invoice_sync, operator_sync
@@ -311,11 +314,43 @@ def find_provider_invoices(
     ]
 
 
+def _builder_lines(charge: OneOffCharge) -> list[InvoiceLineItem]:
+    """The line items of the invoice the invoice builder made for ``charge`` (PLAN-012
+    D6), in line order, without the lines whose charge is waived or voided; empty for
+    any other charge."""
+    return list(
+        InvoiceLineItem.objects.filter(invoice__one_off_charge=charge, one_off_charge__isnull=False)
+        .exclude(one_off_charge__status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .select_related("one_off_charge")
+        .order_by("position")
+    )
+
+
+def _provider_line(item: InvoiceLineItem) -> LineItem:
+    """One builder line for the provider: its quantity and unit price when they multiply
+    to its total exactly, else quantity 1 at its total with the charge's description
+    (which names the quantity), so that the lines always sum to the invoice's total."""
+    quantity = Decimal(item.quantity)
+    if quantity * Decimal(item.unit_price) == Decimal(item.line_total):
+        return LineItem(
+            item.description, Decimal(format_quantity(quantity)), Decimal(item.unit_price)
+        )
+    text = item.one_off_charge.description if item.one_off_charge is not None else ""
+    return LineItem(text or item.description, Decimal(1), Decimal(item.line_total))
+
+
 def charge_amounts(charge: OneOffCharge, total: Decimal | None = None) -> Amounts:
     """What the charge's invoice or schedule bills, no tax. One line (the description,
     quantity 1, ``total`` or the price), except for a re-debit with a billed NSF fee
     (PLAN-011b D5): one line for the re-debit and one per billed companion, and the
-    total is their sum."""
+    total is their sum; and for the first line of an invoice builder invoice (PLAN-012
+    D6): one line per line of the invoice whose charge is neither waived nor voided,
+    and the total is their sum."""
+    builder = _builder_lines(charge)
+    if builder:
+        provider_lines = tuple(_provider_line(item) for item in builder)
+        amount = sum((Decimal(item.line_total) for item in builder), ZERO)
+        return Amounts(amount, amount, ZERO, provider_lines)
     companions = one_off_charges.billed_companions(charge)
     if not companions:
         amount = charge.price if total is None else total
@@ -330,13 +365,15 @@ def charge_amounts(charge: OneOffCharge, total: Decimal | None = None) -> Amount
 
 def _invoice_input(charge: OneOffCharge, invoice: Invoice, customer: str) -> InvoiceInput:
     """D3: one line item (the description, quantity 1), no tax, our number as reference;
-    a re-debit's invoice carries its NSF fee as a second line (:func:`charge_amounts`)."""
+    a re-debit's invoice carries its NSF fee as a second line, an invoice builder
+    invoice every line and its memo (:func:`charge_amounts`; PLAN-012 D6)."""
+    built = InvoiceLineItem.objects.filter(invoice=invoice, one_off_charge__isnull=False).exists()
     return InvoiceInput(
         customer_external_id=customer,
         amounts=charge_amounts(charge, invoice.total),
         due_on=invoice.due_date,
         invoice_date=invoice.issue_date,
-        memo="",
+        memo=invoice.memo if built else "",
         reference=invoice.invoice_number,
     )
 
@@ -813,8 +850,9 @@ def pay(charge_id: uuid.UUID, actor: User | None, *, confirmed: bool) -> Result:
     if charge is None:
         return False, NO_CHARGE
     refusal = one_off_charges.charge_now_refusal(charge)
-    if not refusal and leases.is_large_debit(charge.price) and not confirmed:
-        refusal = leases.large_debit_confirmation([charge.price])
+    amount = one_off_charges.billed_total(charge)
+    if not refusal and leases.is_large_debit(amount) and not confirmed:
+        refusal = leases.large_debit_confirmation([amount])
     if not refusal and charge.charge_now_key is None:
         refusal = CHARGE_NOW_NO_KEY
     if refusal:
@@ -872,7 +910,7 @@ def pay(charge_id: uuid.UUID, actor: User | None, *, confirmed: bool) -> Result:
         actor,
         one_off_charges.CHARGED_ACTION,
         {
-            "amount": str(charge.price),
+            "amount": str(amount),
             "invoice_number": invoice.invoice_number,
             "provider_invoice": mask_identifier(ref),
             "provider_transaction": mask_identifier(transaction_record.external_id),

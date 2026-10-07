@@ -1,0 +1,32 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice {{ preview.number }}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #111; background: #fff; margin: 2rem auto; max-width: 52rem; padding: 0 1rem; }
+    .invoice-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+    .invoice-dates { display: grid; grid-template-columns: auto auto; gap: 0.25rem 1rem; margin: 0; }
+    .invoice-dates dd { margin: 0; }
+    .invoice-parties { display: flex; gap: 3rem; flex-wrap: wrap; margin: 1.5rem 0; }
+    .invoice-parties h2 { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.25rem; }
+    .invoice-parties p { margin: 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #ccc; }
+    .money { text-align: right; white-space: nowrap; }
+    tfoot th { border-top: 2px solid #111; border-bottom: 0; }
+    .muted { color: #555; }
+    .save-as-pdf { border: 1px solid #ccc; padding: 0.5rem 1rem; }
+    @media print {
+      .no-print { display: none !important; }
+      body { margin: 0; max-width: none; }
+      tr { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <p class="no-print save-as-pdf" id="save-as-pdf">To save this invoice as a PDF, open your browser's print dialog (Ctrl+P, or Cmd+P on a Mac) and choose "Save as PDF" as the printer.</p>
+  {% include "ledger/invoices/_invoice.html" %}
+</body>
+</html>

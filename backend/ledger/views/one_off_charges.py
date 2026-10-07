@@ -1,18 +1,18 @@
 """One-off charge screens: detail, manual payment, the marking retry, link an invoice,
-edit, waive, cancel, the provider retry, adding a setup charge from the lease page
-(docs/qa/PLAN-010b D5, D6, D12) and creating a one-off charge from the operator or lease
-page (docs/qa/PLAN-010d D2, D6, D9).
+edit, waive, cancel, the provider retry and adding a setup charge from the lease page
+(docs/qa/PLAN-010b D5, D6, D12; PLAN-010d D6, D9). Creating a one-off charge from the
+operator or lease page was replaced by the invoice builder (PLAN-012 D6,
+:mod:`ledger.views.invoices`); its URLs answer 410 Gone (:func:`create_form_gone`).
 
 The detail page is read by any role. Recording a payment, retrying the marking of the
-provider invoice or a failed provider request, linking an invoice, editing, cancelling,
-adding a setup charge and creating a one-off charge (GET of the forms and POST) need
-``billing``; waiving needs ``admin``, and so does deleting the live provider invoice of a
-waived charge (PLAN-011 D0; POST only, queued as ``invoice_delete`` with the waived
-flag); the "Charge now" collection is offered to admins only and refused by the service
-for anyone else, and so is the Charge now confirmation page and its POST (D4), which
-queues the single ``invoice_pay`` attempt and reads the bank method from the stored
-methods snapshot, never from the provider. The registry
-checks the POST first; these views refuse the GET of the forms below the same role.
+provider invoice or a failed provider request, linking an invoice, editing, cancelling
+and adding a setup charge (GET of the forms and POST) need ``billing``; waiving needs
+``admin``, and so does deleting the live provider invoice of a waived charge (PLAN-011
+D0; POST only, queued as ``invoice_delete`` with the waived flag), and so does the Charge
+now confirmation page and its POST (D4), which queues the single ``invoice_pay``
+attempt and reads the bank method from the stored methods snapshot, never from the
+provider. The registry checks the POST first; these views refuse the GET of the forms
+below the same role.
 :mod:`ledger.services.one_off_charges` re-checks every rule under a row lock and writes
 the audit rows. No view calls the provider: the service queues the provider work
 (``invoice_create``, ``schedule_create``, ``invoice_delete``, ``schedule_delete``), a
@@ -44,7 +44,6 @@ from ledger.forms import (
     ChargeNowForm,
     LinkInvoiceForm,
     ManualPaymentForm,
-    OneOffChargeForm,
     SetupChargeAddForm,
     SetupChargeEditForm,
     WaiveForm,
@@ -179,7 +178,9 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
     invoices = list(charge.invoices.order_by("issue_date", "invoice_number"))
     linked = rent_run.provider_invoice(charge)
     schedule = service.provider_schedule(charge)
-    setup = charge.category == OneOffCategory.SETUP
+    # A setup charge billed on an invoice (PLAN-012 D6) is not edited here.
+    setup = charge.category == OneOffCategory.SETUP and charge.collection == CollectionMethod.NONE
+    later_line = service.is_later_line(charge)
     return render(
         request,
         "ledger/one_off_charges/detail.html",
@@ -193,8 +194,9 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "schedule_masked": mask_identifier(schedule) if schedule else "",
             "payments": charge.payments.order_by("-settled_on", "-created_at"),
             "review_message": service.review_message(charge),
-            "can_record": billing and not closed and charge.balance > 0,
-            "can_link_invoice": billing and not closed and not invoices,
+            # A later line of a builder invoice is paid through its first line's charge.
+            "can_record": billing and not closed and charge.balance > 0 and not later_line,
+            "can_link_invoice": billing and not closed and not invoices and not later_line,
             "can_edit": billing and not closed and setup,
             "can_waive": admin and not closed and not service.has_settled_payment(charge),
             "waive_refusal": (
@@ -547,14 +549,6 @@ def _load_lease(pk: str) -> Lease:
     return get_object_or_404(Lease.objects.select_related("store", "operator"), pk=key)
 
 
-def _load_operator(pk: str) -> Operator:
-    try:
-        key = uuid.UUID(pk)
-    except ValueError:
-        raise Http404 from None
-    return get_object_or_404(Operator, pk=key)
-
-
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def lease_add_setup_charge(request: HttpRequest, pk: str) -> HttpResponse:
@@ -582,60 +576,22 @@ def lease_add_setup_charge(request: HttpRequest, pk: str) -> HttpResponse:
     )
 
 
-def _new_charge(
-    request: HttpRequest, operator: Operator, lease: Lease | None, target: str
-) -> HttpResponse:
-    admin = meets(_role(request), Role.ADMIN)
+#: The removed "Create one-off charge" form's answer (PLAN-012 D6).
+CREATE_FORM_GONE = (
+    "Create one-off charge was replaced by New invoice on the store and operator pages."
+)
 
-    def build(data: dict[str, str] | None = None) -> OneOffChargeForm:
-        return OneOffChargeForm(data, operator=operator, lease=lease, admin=admin)
 
-    if request.method == "POST":
-        form = build(request.POST)
-        if form.is_valid():
-            outcome = service.create_charge(
-                operator, form.chosen_lease(), form.item(), _actor(request)
-            )
-            if outcome.ok and outcome.charge is not None:
-                messages.success(request, outcome.message)
-                return redirect("ledger:one_off_charges:detail", pk=outcome.charge.pk)
-            _error(form, outcome.field, outcome.message)
-        _hold(request, target, form)
-        return redirect(request.path)
-    form = _held(request, target, build) or OneOffChargeForm(
-        initial={"creation_key": uuid.uuid4(), "due_date": timezone.localdate()},
-        operator=operator,
-        lease=lease,
-        admin=admin,
-    )
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def create_form_gone(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:operators:new_charge`` and ``ledger:leases:new_charge`` (PLAN-012 D6): the
+    removed form answers 410 Gone with a sentence pointing to New invoice, to billing and
+    above; below billing it answers 403 as the form did (the registry refuses a POST
+    first)."""
+    refused = _refuse_below(request, Role.BILLING)
+    if refused is not None:
+        return refused
     return render(
-        request,
-        "ledger/one_off_charges/new.html",
-        {"form": form, "operator": operator, "lease": lease},
+        request, "ledger/one_off_charges/gone.html", {"message": CREATE_FORM_GONE}, status=410
     )
-
-
-@role_required
-@require_http_methods(["GET", "HEAD", "POST"])
-def operator_new_charge(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:operators:new_charge``: a one-off charge of the operator, on one of its
-    leases or on none (PLAN-010d D2)."""
-    refused = _refuse_below(request, Role.BILLING)
-    if refused is not None:
-        return refused
-    operator = _load_operator(pk)
-    return _new_charge(request, operator, None, f"operator-new-charge:{operator.pk}")
-
-
-@role_required
-@require_http_methods(["GET", "HEAD", "POST"])
-def lease_new_charge(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:leases:new_charge``: a one-off charge on this lease (PLAN-010d D2)."""
-    refused = _refuse_below(request, Role.BILLING)
-    if refused is not None:
-        return refused
-    lease = _load_lease(pk)
-    if lease.operator is None:
-        messages.error(request, service.LEASE_NO_OPERATOR)
-        return redirect("ledger:leases:detail", pk=lease.pk)
-    return _new_charge(request, lease.operator, lease, f"lease-new-charge:{lease.pk}")

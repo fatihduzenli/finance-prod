@@ -1,9 +1,10 @@
 {% extends "finance/base.html" %}
-{% block title %}Add contact: {{ operator.display_name }}{% endblock %}
+{% block title %}Add contact: {{ title }}{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>
-  <h1>Add contact: {{ operator.display_name }}</h1>
+  <p><a href="{{ back_url }}">&larr; Back</a></p>
+  <h1>Add contact: {{ title }}</h1>
   <p class="muted">A call, an e-mail, a visit or a promise to pay. A promise needs its date and amount; nothing else has them. Never write card or account numbers.</p>
+  {% if form.outcome %}<p class="muted" id="previous-promise-help">This operator has an open promise to pay: say what happened to it. Kept closes it as kept; Rescheduled closes it and this entry is the new promise (its date and amount start from the old one); Broken closes it as broken.</p>{% endif %}
   <form method="post" id="contact-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}
@@ -15,5 +16,27 @@
     {% endfor %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-contact">Save</button></p>
   </form>
+  {{ promise_values|json_script:"promise-values" }}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}
+<script>
+  (function () {
+    var form = document.getElementById("contact-form");
+    var source = document.getElementById("promise-values");
+    if (!form || !source) { return; }
+    var promises = JSON.parse(source.textContent);
+    form.querySelectorAll("input[name=outcome]").forEach(function (radio) {
+      radio.addEventListener("change", function () {
+        if (radio.value !== "rescheduled" || !radio.checked) { return; }
+        var previous = form.querySelector("[name=previous]");
+        var old = previous ? promises[previous.value] : null;
+        form.querySelector("[name=kind]").value = "promise";
+        var date = form.querySelector("[name=promised_date]");
+        var amount = form.querySelector("[name=promised_amount]");
+        if (old && !date.value) { date.value = old.date; }
+        if (old && !amount.value) { amount.value = old.amount; }
+      });
+    });
+  })();
+</script>
+{% endblock %}

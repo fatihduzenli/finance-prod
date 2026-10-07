@@ -19,8 +19,16 @@ from datetime import date
 from decimal import Decimal
 
 import payments
-from ledger.models import Operator
-from ledger.services import calendar, collections, leases, one_off_charges, refunds, rent_run
+from ledger.models import OneOffCharge, Operator
+from ledger.services import (
+    calendar,
+    collections,
+    disputes,
+    leases,
+    one_off_charges,
+    refunds,
+    rent_run,
+)
 from ledger.services.leases import AutopayOutcome, MethodsRefresh
 from ledger.services.rent_run import MarkAction, MarkResult, MatchAction, MatchReport
 from payments import jobs, one_off_invoices, operator_sync, reconciliation
@@ -173,8 +181,22 @@ def one_off_payment_retry_mark_job(job: Job) -> Result:
 
 
 def invoice_create_job(job: Job) -> Result:
-    """PLAN-010d D3: the one-off charge's provider invoice (and its e-mail)."""
-    return one_off_invoices.create_provider_invoice(job.entity_id, job.requested_by)
+    """PLAN-010d D3: the one-off charge's provider invoice (and its e-mail). PLAN-012 D6:
+    with :data:`ledger.services.one_off_charges.CHARGE_NOW_PARAM`, a successful create
+    queues the ``invoice_pay`` job (the single attempt of 10d, its confirmation carried
+    over)."""
+    ok, text = one_off_invoices.create_provider_invoice(job.entity_id, job.requested_by)
+    if ok and job.params.get(one_off_charges.CHARGE_NOW_PARAM) is True:
+        charge = OneOffCharge.objects.get(pk=job.entity_id)
+        # A create run twice (a lost worker) queues the attempt once.
+        if jobs.latest_for(charge, [JobKind.INVOICE_PAY]) is None:
+            jobs.enqueue(
+                JobKind.INVOICE_PAY,
+                charge,
+                {"confirmed": job.params.get("confirmed") is True},
+                job.requested_by,
+            )
+    return ok, text
 
 
 def invoice_send_job(job: Job) -> Result:
@@ -324,6 +346,17 @@ def calendar_email_job(job: Job) -> Result:
     return calendar.send_morning_email(job.entity_type, job.entity_id, day)
 
 
+def disputes_sync_job(job: Job) -> Result:
+    """PLAN-012 D8: read the provider's disputes."""
+    outcome = disputes.sync()
+    return outcome.ok, outcome.message
+
+
+def dispute_evidence_upload_job(job: Job) -> Result:
+    """PLAN-012 D8: send one evidence file."""
+    return disputes.upload_evidence(job.entity_id, job.requested_by)
+
+
 RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.OPERATOR_SYNC: operator_sync_job,
     JobKind.OPERATOR_RETRY: operator_retry_job,
@@ -349,4 +382,6 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.INVOICE_PAY: invoice_pay_job,
     JobKind.MESSAGE_SEND: message_send_job,
     JobKind.CALENDAR_EMAIL: calendar_email_job,
+    JobKind.DISPUTES_SYNC: disputes_sync_job,
+    JobKind.DISPUTE_EVIDENCE_UPLOAD: dispute_evidence_upload_job,
 }

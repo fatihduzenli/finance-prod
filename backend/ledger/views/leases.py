@@ -235,7 +235,10 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 for charge in one_off_charges.charges_of(lease)
             ],
             "can_add_setup_charge": meets(_role(request), Role.BILLING),
-            "can_new_charge": meets(_role(request), Role.BILLING) and lease.operator_id is not None,
+            # PLAN-012 D6: New invoice (the operator's page, this lease preselected).
+            "can_new_invoice": meets(_role(request), Role.BILLING)
+            and lease.operator is not None
+            and lease.operator.archived_at is None,
             "notes": Note.objects.filter(
                 entity_type=NoteEntityType.LEASE, entity_id=lease.pk
             ).order_by("-created_at"),

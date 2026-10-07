@@ -35,6 +35,8 @@ Anything not in this file is unverified and must be `TODO-VERIFY` in code.
 | list_webhooks (added 2026-10-01) | `GET /webhook` | get-all-webhooks |
 | create_webhook (added 2026-10-01) | `POST /webhook`, query `target_url`, `event` | create-new-webhook-for-all-of-my-users-merchants |
 | delete_webhook (added 2026-10-01) | `DELETE /webhook/{id}` | get-webhook-by-id (titled "Delete a Webhook") |
+| list_disputes (added 2026-10-07, PLAN-012) | `GET /underwriting/disputes`, query `startDate`, `endDate`, `status`, `page`, `sort` (default `respond_by`); objects `id`, `transaction_id`, `merchant_id`, `reason`, `amount`, `status`, `respond_by`, `created_at`, `updated_at` | list-disputes |
+| upload_dispute_evidence (added 2026-10-07, PLAN-012) | `POST /file/dispute`, multipart `dispute_id`, `name`, `file` (< 10 MB; .jpeg/.pdf/.png/.tiff); 400 after `respond_by` (TODO-VERIFY-062, 063) | upload-evidence-for-dispute |
 
 **Confirmed on 2026-10-01 (closes earlier TODO items):**
 - `url` on `POST /invoice` and `POST /invoice/schedule/`: the spec says *"Set it to

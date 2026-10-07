@@ -1,0 +1,50 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% load static %}
+{% block title %}{{ preview.number }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">&larr; {{ draft.operator.display_name }}</a>{% if draft.lease %} · <a href="{% url 'ledger:stores:detail' pk=draft.lease.store.pk %}">Store {{ draft.lease.store.external_label }}</a>{% endif %}</p>
+  <h1>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1>
+  <dl id="draft-summary">
+    <dt>Operator</dt><dd>{{ draft.operator.display_name }}</dd>
+    <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
+    <dt>Total</dt><dd id="draft-total">${{ preview.total }}</dd>
+    <dt>Due date</dt><dd id="draft-due">{% if preview.invoice or draft.due_date %}{{ preview.due_date|date:"Y-m-d" }}{% else %}{{ due_days }} days after sending{% endif %}</dd>
+  </dl>
+  <p class="actions"><a class="btn" href="{% url 'ledger:invoices:preview' pk=draft.pk %}" id="draft-preview">Preview</a> <a class="btn" href="{% url 'ledger:invoices:print' pk=draft.pk %}" id="draft-print">Print view</a></p>
+
+  {% if editable %}
+    <form method="post" action="{% url 'ledger:invoices:edit' pk=draft.pk %}" id="draft-form" class="js-single-submit" autocomplete="off">
+      {% csrf_token %}
+      {% include "ledger/invoices/_draft_form.html" %}
+      <p class="actions"><button class="btn" type="submit" id="save-draft">Save draft</button></p>
+    </form>
+    <h2>Send</h2>
+    <p class="muted">Send and Charge now use the saved draft: save your changes first. Each line becomes a charge on {% if draft.lease %}the lease of store {{ draft.lease.store.external_label }}{% else %}the operator{% endif %}; one invoice with every line goes to the payment provider.</p>
+    <form method="post" action="{% url 'ledger:invoices:send' pk=draft.pk %}" id="send-form" class="js-single-submit">
+      {% csrf_token %}
+      <p class="actions"><button class="btn btn-primary" type="submit" id="send-draft">Send ${{ preview.total }} by e-mail</button>{% if can_charge_now %} <a class="btn" href="{% url 'ledger:invoices:charge_now' pk=draft.pk %}" id="draft-charge-now">Charge now</a>{% endif %}</p>
+    </form>
+  {% elif first_charge %}
+    <h2>Invoice</h2>
+    <dl id="sent-invoice">
+      <dt>Number</dt><dd id="sent-number">{{ preview.invoice.invoice_number }}</dd>
+      <dt>Here</dt><dd id="sent-internal-status">{{ preview.invoice.get_internal_status_display }}</dd>
+      <dt>At the payment provider</dt><dd id="sent-provider-status">{{ preview.invoice.provider_status|default:"not yet" }}</dd>
+    </dl>
+    {% include "ledger/_job_status.html" %}
+    {% responsive_table %}
+    <table id="sent-charges">
+      <thead><tr><th>Line</th><th>Charge</th><th>Category</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for charge in charges %}
+          <tr class="sent-charge"><td>{{ forloop.counter }}</td><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge.get_category_display }}</td><td class="money">${{ charge.price }}</td><td class="money">${{ charge.amount_paid }}</td><td>{{ charge.get_status_display }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endresponsive_table %}
+    <p class="muted">A payment on this invoice pays the lines in order; a refund or a return takes it back from the last line first.</p>
+  {% endif %}
+  {% if can_cancel %}<p class="actions"><a class="btn" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel</a></p>{% endif %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if editable %}<script src="{% static 'ledger/invoice_lines.js' %}" defer></script>{% endif %}{% endblock %}

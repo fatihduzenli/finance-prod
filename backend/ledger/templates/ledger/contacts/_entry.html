@@ -1,0 +1,9 @@
+<dl id="contact-entry-summary">
+  <dt>Operator</dt><dd><a href="{% url 'ledger:operators:detail' pk=entry.operator_id %}">{{ entry.operator.display_name }}</a></dd>
+  <dt>Store</dt><dd>{% if entry.lease %}{{ entry.lease.store.external_label }}{% else %}—{% endif %}</dd>
+  <dt>Date</dt><dd>{{ entry.happened_on|date:"Y-m-d" }}</dd>
+  <dt>Kind</dt><dd>{{ entry.get_kind_display }}</dd>
+  {% if entry.kind == "promise" %}<dt>Promise</dt><dd>${{ entry.promised_amount }} by {{ entry.promised_date|date:"Y-m-d" }} ({{ entry.get_status_display }})</dd>{% endif %}
+  <dt>Note</dt><dd style="white-space:pre-wrap;">{{ entry.body }}</dd>
+  <dt>Recorded</dt><dd>{{ entry.created_at|date:"Y-m-d H:i" }} by {{ entry.author.get_username|default:"—" }}</dd>
+</dl>

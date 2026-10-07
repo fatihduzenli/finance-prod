@@ -331,15 +331,28 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     # PLAN-010b D8, D12: setting the landlord rent needs billing. PLAN-010c D10:
     # correcting a cost row and closing the open one need admin.
     corrections = ("correct_cost", "close_cost")
+    # PLAN-012 D3: the store's contact log (any role) and adding an entry (billing).
+    contact_log = ("contacts", "contacts_add")
     assert names == {
         f"ledger:stores:{short}"
-        for short in ("list", "detail", "export", "set_cost", *POST_ROUTES, *corrections)
+        for short in (
+            "list",
+            "detail",
+            "export",
+            "set_cost",
+            *POST_ROUTES,
+            *corrections,
+            *contact_log,
+        )
     }
     assert {
         "ledger:stores:list",
         "ledger:stores:detail",
         "ledger:stores:export",
+        "ledger:stores:contacts",
     } <= registry.READ_ONLY_ROUTE_NAMES
+    rule = registry.rule_for("ledger:stores:contacts_add")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     for short in (*POST_ROUTES, *corrections):
         rule = registry.rule_for(f"ledger:stores:{short}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}

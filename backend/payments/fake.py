@@ -13,8 +13,10 @@ from decimal import Decimal
 
 from django.utils import timezone
 
-from payments.errors import FeatureDisabled, ProviderError, ProviderRejected
+from payments.errors import FeatureDisabled, ProviderError, ProviderRejected, ValidationFailed
 from payments.provider import (
+    EVIDENCE_EXTENSIONS,
+    EVIDENCE_MAX_BYTES,
     TRANSACTION_REFUND,
     AchRejection,
     CustomerInput,
@@ -23,6 +25,9 @@ from payments.provider import (
     DateRange,
     DepositDetail,
     DepositRecord,
+    DisputeEvidenceReceipt,
+    DisputeQuery,
+    DisputeRecord,
     InvoiceInput,
     InvoiceQuery,
     InvoiceRecord,
@@ -47,6 +52,11 @@ NOT_FOUND = 404
 DELETED = "DELETED"
 #: The status the services read as sent (``payments.invoice_sync.PROVIDER_SENT``).
 SENT = "SENT"
+#: What the fake answers once a dispute's respond-by date has passed (PLAN-012 D8).
+RESPOND_BY_PASSED = "The respond by date for this dispute has passed."
+BAD_REQUEST = 400
+#: The fake's list page size (PLAN-012 D8: the sync reads every page).
+DISPUTES_PAGE_SIZE = 2
 
 
 class FakeProvider(PaymentProvider):
@@ -64,6 +74,9 @@ class FakeProvider(PaymentProvider):
         self.deposits: list[DepositRecord] = []
         self.ach_rejections: list[AchRejection] = []
         self.webhooks: dict[str, WebhookRecord] = {}
+        #: Disputes by ID, listed by respond-by date; evidence uploads as received.
+        self.disputes: dict[str, DisputeRecord] = {}
+        self.evidence: list[tuple[str, str, bytes, str]] = []
         self._failures: dict[str, ProviderError] = {}
         #: Transactions made by ``pay_invoice``, by idempotency identifier.
         self._paid_by_key: dict[str, str] = {}
@@ -366,6 +379,53 @@ class FakeProvider(PaymentProvider):
         self._call("delete_scheduled_invoice", external_id)
         self._get(self.schedules, external_id)
         del self.schedules[external_id]
+
+    # --- Disputes -----------------------------------------------------------------
+
+    def add_dispute(self, record: DisputeRecord) -> DisputeRecord:
+        """Test control: a dispute the provider reports."""
+        self.disputes[record.external_id] = record
+        return record
+
+    def list_disputes(self, query: DisputeQuery) -> list[DisputeRecord]:
+        """Every dispute created in the range (or without a creation date), of the
+        queried status, by respond-by date, :data:`DISPUTES_PAGE_SIZE` a page."""
+        now = self._call("list_disputes", query)
+        start, end = query.date_range.start, query.date_range.end
+        found = sorted(
+            (
+                replace(record, fetched_at=now)
+                for record in self.disputes.values()
+                if (not query.status or record.raw_status == query.status)
+                and (record.created_at is None or start <= record.created_at.date() <= end)
+            ),
+            key=lambda record: (record.respond_by is None, record.respond_by, record.external_id),
+        )
+        first = (query.page - 1) * DISPUTES_PAGE_SIZE
+        return found[first : first + DISPUTES_PAGE_SIZE]
+
+    def upload_dispute_evidence(
+        self, dispute_external_id: str, name: str, data: bytes, content_type: str
+    ) -> DisputeEvidenceReceipt:
+        now = self._call("upload_dispute_evidence", dispute_external_id, name, content_type)
+        if not data or len(data) >= EVIDENCE_MAX_BYTES:
+            raise ValidationFailed("file must be smaller than the provider's limit")
+        if content_type not in EVIDENCE_EXTENSIONS:
+            raise ValidationFailed("file must be a PDF, JPEG, PNG or TIFF")
+        dispute = self._get(self.disputes, dispute_external_id)
+        if dispute.respond_by is not None and dispute.respond_by < now:
+            raise ProviderRejected(BAD_REQUEST, reason=RESPOND_BY_PASSED)
+        self.evidence.append((dispute_external_id, name, data, content_type))
+        # The status the provider reports once evidence is attached (PLAN-012 D8).
+        self.disputes[dispute_external_id] = replace(
+            dispute, raw_status="EVIDENCE_UPLOADED", updated_at=now, fetched_at=now
+        )
+        return DisputeEvidenceReceipt(
+            external_id=self._next_id("dispute-file"),
+            raw_status="",
+            fetched_at=now,
+            dispute_external_id=dispute_external_id,
+        )
 
     # --- Webhook registrations -----------------------------------------------------
 

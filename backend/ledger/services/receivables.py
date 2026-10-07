@@ -23,10 +23,11 @@ charge, derived here for an insurance charge). The open amount is owed once: whi
 re-debit charge is neither waived nor voided, what it has still to collect is taken off
 the open balance of the charge the returned payment was for (:func:`carried_by_redebits`),
 so the operator owes the re-debit and its NSF fee, and once the re-debit is paid nothing
-is left on either. A re-debit of a returned payment on a re-debit's invoice carries that
-payment's amount: what the first re-debit's balance leaves over is carried by its NSF
-fee. A re-debit is listed as a one-off charge (``Re-debit: Re-debit of Rent 2026-09``);
-its fee as ``NSF fee: ...``.
+is left on either. A re-debit of a returned payment on a charge billed with others (a
+re-debit's invoice, or a builder invoice's first line, PLAN-012 D6) carries that
+payment's amount: what that charge's balance leaves over is carried by its NSF fee, or
+by the invoice's later lines in line order. A re-debit is listed as a one-off charge
+(``Re-debit: Re-debit of Rent 2026-09``); its fee as ``NSF fee: ...``.
 
 Every other figure here sums those rows: the dashboard's total outstanding and overdue
 (:func:`dashboard`), the arrears list (:func:`arrears`) and the A/R aging (:func:`aging`,
@@ -70,6 +71,7 @@ from ledger.models import (
     ZERO,
     InsuranceCharge,
     Invoice,
+    InvoiceLineItem,
     InvoiceStatus,
     LegacyStatus,
     OneOffCategory,
@@ -145,6 +147,8 @@ class OpenBalance:
     period_month: date | None = None
     #: What the charge is for, as a statement names it.
     description: str = ""
+    #: The charge's lease; ``None`` for a one-off charge without one.
+    lease_id: uuid.UUID | None = None
 
     def overdue(self, today: date) -> bool:
         return self.due_on < today
@@ -169,6 +173,7 @@ def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
         "status",
         "period_month",
         "seq",
+        "lease",
         operator=F("lease__operator"),
         operator_name=F("lease__operator__display_name"),
         store=F("lease__store"),
@@ -191,6 +196,7 @@ def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
             status=row["status"],
             period_month=row["period_month"],
             description=_rent_description(row["period_month"], row["seq"]),
+            lease_id=row["lease"],
         )
         for row in values
     ]
@@ -211,6 +217,7 @@ def _insurance_balances(
             "due_on",
             "amount",
             "policy_year",
+            "lease",
             operator=F("lease__operator"),
             operator_name=F("lease__operator__display_name"),
             store=F("lease__store"),
@@ -247,6 +254,7 @@ def _insurance_balances(
                 due_on=row["due_on"],
                 balance=balance,
                 description=f"Insurance, policy year {row['policy_year']}",
+                lease_id=row["lease"],
             )
         )
     return found
@@ -270,6 +278,7 @@ def _one_off_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
         "status",
         "category",
         "description",
+        "lease",
         fee_name=F("fee_type__name"),
         billed=Coalesce("operator", "lease__operator"),
         billed_name=Coalesce("operator__display_name", "lease__operator__display_name"),
@@ -292,6 +301,7 @@ def _one_off_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
             balance=_money(row["balance"]),
             status=row["status"],
             description=_one_off_description(categories, row),
+            lease_id=row["lease"],
         )
         for row in rows
     ]
@@ -344,28 +354,49 @@ def carried_by_redebits(
     return carried, insurance_collected
 
 
+def _billed_siblings(sources: list[uuid.UUID]) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """Per one-off charge in ``sources``, the charges billed with it, neither waived nor
+    voided, in the order a payment on it pays them: a re-debit's companion fees in
+    creation order (PLAN-011b D5), then a builder invoice's later lines in line order
+    (PLAN-012 D6); the sibling definition of the allocation
+    (:func:`ledger.services.one_off_charges.billed_companions`). Two queries."""
+    closed = [OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED]
+    siblings: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for fee, source in (
+        OneOffCharge.objects.filter(companion_of__in=sources)
+        .exclude(status__in=closed)
+        .order_by("created_at", "id")
+        .values_list("pk", "companion_of")
+    ):
+        if source is not None:
+            siblings.setdefault(source, []).append(fee)
+    for later, source in (
+        InvoiceLineItem.objects.filter(
+            invoice__one_off_charge__in=sources, one_off_charge__isnull=False
+        )
+        .exclude(one_off_charge=F("invoice__one_off_charge"))
+        .exclude(one_off_charge__status__in=closed)
+        .order_by("position")
+        .values_list("one_off_charge", "invoice__one_off_charge")
+    ):
+        siblings.setdefault(source, []).append(later)
+    return siblings
+
+
 def _spill_to_companions(
     rows: list[OpenBalance], carried: Mapping[tuple[str, uuid.UUID], Decimal]
 ) -> dict[tuple[str, uuid.UUID], Decimal]:
-    """``carried``, where a re-debit of a payment on a re-debit's invoice carries that
-    payment's whole amount: what the first re-debit's own balance leaves over is carried
-    by its billed companion fees, in creation order (the allocation of PLAN-011b D5).
-    One more query, only when a re-debit is carried."""
+    """``carried``, where a re-debit carries a payment on a charge billed with others (a
+    re-debit's invoice with its NSF fee, or a builder invoice's first line with its later
+    lines): what that charge's own balance leaves over is carried by its siblings in the
+    order a payment pays them (:func:`_billed_siblings`; the allocation of PLAN-011b D5
+    and PLAN-012 D6). Two more queries, only when a one-off charge is carried."""
     sources = [charge for kind, charge in carried if kind == KIND_ONE_OFF]
     if not sources:
         return dict(carried)
-    companions: dict[uuid.UUID, list[uuid.UUID]] = {}
-    for companion in (
-        OneOffCharge.objects.filter(companion_of__in=sources)
-        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
-        .order_by("created_at", "id")
-        .only("pk", "companion_of_id")
-    ):
-        if companion.companion_of_id is not None:
-            companions.setdefault(companion.companion_of_id, []).append(companion.pk)
     balances = {(row.kind, row.charge_id): row.balance for row in rows}
     spilled = dict(carried)
-    for source, fees in companions.items():
+    for source, fees in _billed_siblings(sources).items():
         left = carried[(KIND_ONE_OFF, source)] - balances.get((KIND_ONE_OFF, source), ZERO)
         for fee in fees:
             if left <= 0:
@@ -391,7 +422,7 @@ def _less_carried(
 
 
 def open_balances(today: date, operator: uuid.UUID | None = None) -> list[OpenBalance]:
-    """Every open charge (four queries; five when a re-debit is itself carried by a later
+    """Every open charge (four queries; six when a one-off charge is carried by a
     re-debit), oldest due first; with ``operator``, only the
     charges billed to that operator (a one-off charge's own operator, else its lease's).
     A charge whose returned payment was rescheduled owes only what its re-debit does not

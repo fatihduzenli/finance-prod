@@ -239,6 +239,15 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:payments:void` | POST | admin | GET of the confirmation page is admin only too; pending or settled ACH payments without refunds, whole amount; the payment becomes `voided` (no new row) |
 | `admin:index`, `admin:app_list`, `admin:login`, `admin:jsi18n`, `admin:autocomplete`, `admin:view_on_site`, `admin:password_change_done` | none | — | GET for any verified user; Django admin still checks `is_staff` and model permissions |
 | `two_factor:profile`, `two_factor:disable` | none | — | GET only; disabling one's own second factor is refused |
+| `ledger:contacts:edit` | POST | billing | the entry's author only, within 15 minutes of recording; `:correct` appends a correction (billing); GET of the forms for billing |
+| `ledger:contacts:delete` | POST | admin | soft delete with a mandatory reason; viewers never see the row |
+| `ledger:invoices:new_store`, `:new_operator`, `:edit`, `:send`, `:cancel` | POST | billing | the invoice builder (PLAN-012): drafts, one invoice with all lines on Send; GET of the forms is billing only |
+| `ledger:invoices:draft`, `:preview`, `:print` | none | — | GET for any verified user with a role |
+| `ledger:invoices:charge_now` | POST | admin | the 10d confirmation page; `STAX_PAY_INVOICE_ENABLED` |
+| `ledger:one_off_charges:new*` (the old form) | none | — | answers 410 Gone |
+| `ledger:disputes:page`, `:export` | none | billing | the dispute list and its CSV; viewer is 403; provider IDs masked |
+| `ledger:disputes:refresh` | POST | billing | queues one `disputes_sync` job; BUSY while one waits |
+| `ledger:disputes:evidence`, `:evidence_retry` | POST | admin | stores the file as the operator's document (10c checks) and queues the upload; refused after `respond_by` |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |
 
 The `admin` group also holds Django's model permissions for users, groups, OTP

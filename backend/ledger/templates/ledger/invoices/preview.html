@@ -1,0 +1,14 @@
+{% extends "finance/base.html" %}
+{% block title %}Preview {{ preview.number }}{% endblock %}
+{% block head %}<style>
+  @media print {
+    nav, .no-print, ul.messages { display: none !important; }
+    body { background: #fff; }
+    main { max-width: none; margin: 0; padding: 0; border: 0; }
+  }
+</style>{% endblock %}
+{% block content %}
+  <p class="no-print">{% if billing %}<a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">&larr; {{ draft.number }}</a> · {% endif %}<a href="{% url 'ledger:invoices:print' pk=draft.pk %}" id="print-view">Print view</a></p>
+  <p class="no-print muted" id="preview-status">{{ draft.get_status_display }}{% if preview.invoice %}: invoice {{ preview.invoice.invoice_number }}{% else %}: the due date and the number are set when it is sent.{% endif %}</p>
+  {% include "ledger/invoices/_invoice.html" %}
+{% endblock %}

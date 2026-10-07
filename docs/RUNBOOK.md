@@ -318,8 +318,9 @@ storage is not configured" means the first variable is empty: the feature is off
 
 ## 13. One-off charges, Charge now, cancel, and the audit page (PLAN-010d, ADR-0009)
 
-**Create a one-off charge** from an operator page (lease blank or chosen) or a lease page
-(billing): category (arrears, adjustment, damage, other, or a setup fee type), amount, due date,
+**Create a one-off charge** (replaced by the invoice builder in PLAN-012, §16: the old form
+answers "gone"; what follows describes the charge each builder line becomes) from an operator
+page (lease blank or chosen) or a lease page (billing): category (arrears, adjustment, damage, other, or a setup fee type), amount, due date,
 the description that becomes the invoice line, a mandatory internal note, and how to collect it:
 
 | Collection | What happens |
@@ -427,8 +428,9 @@ mismatches, and today's calendar entries. Each links to its page; the operator p
 operator's items.
 
 **Contact log** (operator page, billing): calls, e-mails, visits and promises to pay (date and
-amount). A promise past its date with money still owed is an attention item until a later entry
-closes it or a payment settles. CSV export.
+amount). Since PLAN-012 (§16) a promise closes by itself when a matching payment settles, entries
+name the store, the author may edit for 15 minutes, and an admin may delete with a reason. CSV
+export.
 
 **Calendar** (`/calendar/`): notes and reminders per store, operator, lease or general, with an
 optional e-mail to you that morning; generated entries for debit days, re-debit dates, insurance
@@ -451,3 +453,56 @@ The app keeps New York days: charge periods, debit days, "today", the nightly jo
 Storage stays UTC. `tz_audit` lists the few rows whose stored date was derived under UTC and would
 differ; `tz_apply --audited N` realigns exactly those rows with an audit entry each, and only on
 the owner's word.
+
+## 16. Contact log maturity, the invoice builder, disputes (PLAN-012, ADR-0011)
+
+**Contact log.** An entry can be changed by its author for **15 minutes** after it was recorded
+(the row shows "editable until"); after that, and for anyone else, use **Add correction**: the
+correction is appended under the entry with its author and time, and the original stands. An
+**admin** may delete an entry with a mandatory reason: the entry stays, struck through, with the
+reason, for billing and admin; viewers do not see it and it is absent from their CSV. A deleted
+promise counts for nothing. Every entry names the **store** when the operator has more than one
+active lease (preselected with one); the store page has its own contact section and **Add entry**
+button. **Promises** close by themselves: when a settled, non-refund payment of at least the
+promised amount settles on that lease (or on the operator, for an entry without a store) between
+the day the promise was recorded and the promised date, the promise reads **Kept** with the payment
+linked. Recording a new entry while a promise is open asks what happened to the **previous
+promise**: Kept, Rescheduled (a new promise with a new date and amount), or Broken. The log can
+be filtered by status (open, kept, rescheduled, broken). A past, open promise is a broken promise
+on the attention list and the dashboard whatever the balance (PLAN-011b-a).
+
+**Invoice builder** (replaces "Create one-off charge"; billing). From a store page or an operator
+page choose **New invoice**: pick the lease (or none), add lines (a fee type from the catalogue or
+free text, quantity, unit amount; the line total is quantity times unit amount to the cent), an
+optional memo and due date (default today + 15, New York; never in the past). **Save** keeps a
+draft (named `DRAFT-` and eight characters of its id); the draft page offers **Preview** (what the operator sees), **Print**
+(a clean page for the browser's print dialog), **Edit**, **Send**, **Charge now** (admin) and
+**Cancel**. **Send** takes the next `INV-YYYY-NNNN` number, makes **one one-off charge per line**
+(category from the fee type: setup fee, arrears, adjustment, damage, other) and **one Stax invoice
+with all the lines**, which the worker creates and sends by e-mail; the charges show the invoice
+and each other ("billed with"). A payment on that invoice is allocated to the lines in order, so
+a partial payment pays the first line first; the statement, the ledger, the P&L and deposits held
+read the lines, not the payment's first charge. **Charge now** debits the invoice total from the
+operator's linked bank method after the 10d confirmation page (large amounts need the typed
+confirmation; `STAX_PAY_INVOICE_ENABLED` must be on). **Cancel** on a draft deletes nothing in
+Stax (nothing was sent); cancelling a sent invoice is the charge page's cancel as before. Staff
+sending a draft twice get the first invoice back; the old charge form's addresses answer "gone".
+
+**Disputes** (`/disputes/`, Payments menu; billing and above). The disputes Stax reports for the
+last 90 days, ordered by **respond-by** date with the days left (highlighted under 7 days; "Past"
+once over), the provider's status and reason **verbatim**, the amount, the operator, store and
+payment when the disputed transaction is ours, and the transaction masked. The list is read by the
+worker: each day with the collections tick, on every dispute webhook, and when billing presses
+**Refresh** (one read queued at a time; the page shows "Last synced"). Stax is the source of truth
+for disputes: nothing here accepts, contests or closes a dispute, and nothing changes the payment
+(the webhook flags the charge for review as before). **Evidence** (admin): under a dispute, give
+the file a name, choose a PDF, JPEG, PNG or TIFF smaller than 10 MB, and for an image tick the
+notice box; the file is stored as a document of the **operator** (kind *dispute evidence*), the
+10c checks run on PDFs (a bank form is refused and nothing is kept), and the worker sends it to
+Stax. The row shows **Queued / Sent / Failed** with the provider's sentence when Stax refuses it
+(after the respond-by date, for example) and **Send again** for a failed row. No evidence can be
+added once the respond-by time has passed. A dispute not linked to one of our operators takes no
+evidence (there is nowhere to keep the file). The full dispute workflow (accept, outcomes,
+reminders before the deadline) is BACKLOG §1 row 4, after Step 17.
+
+**Feature freeze.** Nothing in `docs/BACKLOG.md` §1 starts before Step 17 (Checkpoint 12).

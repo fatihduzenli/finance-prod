@@ -42,6 +42,9 @@ class ProviderRejected(ProviderError):  # noqa: N818 (names fixed by PLAN-005 §
 
     ``error_fields`` holds the key names of the error body, reduced to a safe alphabet
     by the transport (PLAN-006a §3.1); never a value. It is not part of the message.
+    ``reason`` is a sentence the caller may show, set only where a call names the
+    provider's refusals it recognises (PLAN-012 D8: a dispute past its respond-by date);
+    it holds no field value and is not part of the message either.
     """
 
     def __init__(
@@ -50,10 +53,12 @@ class ProviderRejected(ProviderError):  # noqa: N818 (names fixed by PLAN-005 §
         message: str = "The provider rejected the request",
         *,
         error_fields: tuple[str, ...] = (),
+        reason: str = "",
     ) -> None:
         super().__init__(f"{message} (status {status})")
         self.status = status
         self.error_fields = error_fields
+        self.reason = reason
 
 
 class ProviderUnavailable(ProviderError):  # noqa: N818 (names fixed by PLAN-005 §4.1)

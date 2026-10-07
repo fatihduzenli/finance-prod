@@ -134,6 +134,14 @@ disagreeing ledgers.
   app and their Stax invoice is created by the worker, local-first, with our invoice
   number as `meta.reference` (ADR-0009). Cancelling an unpaid one deletes the Stax
   invoice; Stax shows `DELETED`.
+- **Disputes (ADR-0011, PLAN-012):** Stax owns dispute state. The app lists disputes
+  (`GET /underwriting/disputes`) through the worker and shows them; the only write is
+  **evidence upload** (`POST /file/dispute`, multipart), an admin's deliberate action on a
+  file that passed the Rule 1 checks, queued to the worker, never retried after a 5xx or
+  timeout (the call is not idempotent). The app never accepts, contests or closes a dispute.
+- **Several lines on one invoice (PLAN-012):** the invoice builder sends one Stax invoice
+  with all its lines and makes one one-off charge per line; a payment on that invoice is
+  allocated to the lines in order.
 - Cached Stax data always carries `fetched_at`. Any decision logic (overdue,
   follow-up due) uses the cache but shows the staleness.
 

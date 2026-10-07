@@ -872,3 +872,19 @@ the login page myself." The condition for starting Prompt 4 is met.
   confirmation remain as follow-ups outside the step). Next: Prompt 12 with the owner's
   amendments (backlog and provider portability documents; contact-log changes; invoice
   builder; read-only dispute list with evidence upload).
+
+## Update, 2026-10-07, PLAN-012 built and gated (not yet pushed)
+
+- Three batches by Opus, gated by Fable: **A** contact log maturity (edit window, corrections,
+  admin soft delete, store on entries, automatic promise close, previous-promise outcome);
+  **B** the invoice builder (drafts with lines, preview and print, one Stax invoice with all
+  lines and one charge per line, Charge now, cancel; the old form answers 410; sibling
+  allocation generalised; deposits held and the returned-then-rescheduled rule read the lines);
+  **C** the dispute list with evidence upload (two new provider methods, multipart transport,
+  `disputes` and `dispute_evidence`, the operator as a document owner for evidence only).
+- Documents: ADR-0011, RUNBOOK §16, DATA_OWNERSHIP, README matrix rows, `docs/CLAUDE.md`
+  Rule 2 amendment, the endpoints file, TODO-VERIFY-062/063, QA-012.
+- **Owner decisions still open:** S1 and S2 (ADR-0011); the freeze statement to staff.
+- Next: the owner's "push"; then the staging clicks of the plan's §8 (store 2476 two-line
+  invoice; store 2477 promise; the 15-minute edit; viewer cannot delete; the dispute list
+  renders empty).

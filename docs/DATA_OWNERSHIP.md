@@ -262,7 +262,7 @@ Superseded by `one_off_charges` with `legacy=true` (PLAN-010b D13, PLAN-010d D1)
 | Field | Owner | Note |
 |---|---|---|
 | `id`, `uploaded_at` | System | |
-| `store_id` / `lease_id` | App | Exactly one. The record the file belongs to |
+| `store_id` / `lease_id` / `operator_id` | App | Exactly one. The record the file belongs to; an operator holds **dispute evidence only** (PLAN-012) |
 | `kind`, `note` | App | `note` is guarded free text |
 | `original_filename`, `content_type`, `size_bytes`, `sha256` | System | Name sanitised; type read from the content; the digest is an identifier, held to 64 hex characters |
 | `blob_path` | System | Where the bytes live in the private blob container; never a filename; the file itself is **never** in the database |
@@ -271,6 +271,30 @@ Superseded by `one_off_charges` with `legacy=true` (PLAN-010b D13, PLAN-010d D1)
 
 Files are subject to Rule 1 (ADR-0008): PDF and DOCX text is checked at upload; images and
 scans are covered by the stated policy, not by a check.
+
+### contact_entries, contact_corrections (PLAN-011b, PLAN-012)
+| Field | Owner | Note |
+|---|---|---|
+| `kind`, `happened_on`, `body`, `promised_date`, `promised_amount`, `lease_id` | App | Guarded free text; the author may change them for 15 minutes, then corrections are appended (`contact_corrections`, never edited) |
+| `status` | App / System | `open`, `kept`, `rescheduled`, `broken`; `kept` is written by the system when a matching payment settles (`kept_by_payment_id`) or by staff recording the previous promise's outcome |
+| `deleted_at`, `deleted_by_id`, `delete_reason` | App | Admin soft delete with a reason; the row stays and counts for nothing |
+
+### invoice_drafts, invoice_draft_lines (PLAN-012)
+| Field | Owner | Note |
+|---|---|---|
+| all fields | App | A draft is ours until **Send** turns it into one invoice and one one-off charge per line; `line_total` is quantity times unit amount to the cent, enforced by a CHECK; `sent_invoice_id` links the invoice; a cancelled draft stays |
+
+### invoice_line_items — `one_off_charge_id` (PLAN-012)
+| Field | Owner | Note |
+|---|---|---|
+| `one_off_charge_id` | App | The charge a builder line became; the allocation key for a payment on a multi-line invoice (lines in order). A `kind` column is **S1**, the owner's decision (BACKLOG §2) |
+
+### disputes, dispute_evidence (PLAN-012)
+| Field | Owner | Note |
+|---|---|---|
+| `status`, `reason`, `amount`, `respond_by`, `provider_created_at`, `changed_at`, `raw_summary`, `fetched_at` | **Stax** | Read by the worker, stored verbatim (status and reason are the provider's words); never edited here. `raw_summary` holds the documented fields and the transaction **masked**; the provider's dispute ID is in `external_refs` (`dispute`) |
+| `payment_id`, `operator_id`, `store_id` | System | Derived at sync from the disputed transaction's external ref; empty when the transaction is not ours |
+| `dispute_evidence.name`, `document_id`, `status`, `sent_at`, `error` | App / System | The file is a `documents` row of the operator (kind `dispute_evidence`); `status` queued/sent/failed; `error` a class name only; the provider's file ID in `external_refs` (`dispute_file`) |
 
 ### outbound_messages (reserved, no UI)
 | Field | Owner | Note |

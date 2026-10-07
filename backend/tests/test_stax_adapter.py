@@ -37,6 +37,7 @@ from payments.provider import (
     CustomerInput,
     CustomerQuery,
     DateRange,
+    DisputeQuery,
     InvoiceInput,
     InvoiceQuery,
     InvoiceUpdate,
@@ -57,6 +58,9 @@ from tests.stax_helpers import Rig, always, make_rig, sequence
 D = Decimal
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENDPOINTS_FILE = REPO_ROOT / "docs" / "inputs" / "STAX_ENDPOINTS_2026-09-30.md"
+#: PLAN-012 D8: the dispute endpoints were verified on 2026-10-07 and recorded in the
+#: backlog's row 4, not in the endpoints file of 2026-09-30.
+BACKLOG_FILE = REPO_ROOT / "docs" / "BACKLOG.md"
 RULE = "DTSTART=20261001T000000Z;FREQ=MONTHLY"
 RANGE = DateRange(date(2026, 9, 1), date(2026, 9, 30))
 
@@ -132,6 +136,10 @@ ALL_METHODS: dict[str, Call] = {
     ),
     "delete_webhook": lambda p: p.delete_webhook("wh-1"),
     "ping": lambda p: p.ping(),
+    "list_disputes": lambda p: p.list_disputes(DisputeQuery(RANGE)),
+    "upload_dispute_evidence": lambda p: p.upload_dispute_evidence(
+        "dsp-1", "Signed lease page", b"%PDF-1.4 evidence", "application/pdf"
+    ),
 }
 
 
@@ -726,7 +734,7 @@ def _adapter_paths() -> set[str]:
 
 
 def test_every_adapter_path_is_in_the_verified_endpoints_file() -> None:
-    verified = ENDPOINTS_FILE.read_text(encoding="utf-8")
+    verified = ENDPOINTS_FILE.read_text(encoding="utf-8") + BACKLOG_FILE.read_text(encoding="utf-8")
     paths = _adapter_paths()
     assert len(paths) >= 15
     for path in paths:

@@ -232,6 +232,9 @@ class JobKind(models.TextChoices):
     #: e-mail (a calendar entry, or a promise to pay due that day).
     MESSAGE_SEND = "message_send", "Send a collection e-mail"
     CALENDAR_EMAIL = "calendar_email", "Send a morning e-mail"
+    #: PLAN-012 D8: read the provider's disputes; send one evidence file.
+    DISPUTES_SYNC = "disputes_sync", "Read the disputes"
+    DISPUTE_EVIDENCE_UPLOAD = "dispute_evidence_upload", "Send dispute evidence"
 
 
 class JobEntity(models.TextChoices):
@@ -251,6 +254,10 @@ class JobEntity(models.TextChoices):
     OUTBOUND_MESSAGE = "outbound_message", "Outbound message"
     CALENDAR_ENTRY = "calendar_entry", "Calendar entry"
     CONTACT_ENTRY = "contact_entry", "Contact entry"
+    #: PLAN-012 D8. Not a row: the dispute list, one fixed entity ID
+    #: (``payments.jobs.DISPUTES``).
+    DISPUTES = "disputes", "Disputes"
+    DISPUTE_EVIDENCE = "dispute_evidence", "Dispute evidence"
 
 
 class JobStatus(models.TextChoices):

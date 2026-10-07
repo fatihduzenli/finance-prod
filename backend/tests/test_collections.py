@@ -118,6 +118,9 @@ def rent_charge(due_on: date = DUE, *, owner: Operator | None = None, **fields: 
 def tick() -> str:
     out = StringIO()
     call_command("collections_tick", stdout=out)
+    # The tick also queues the day's read of the dispute list (PLAN-012 D8, tested in
+    # test_disputes.py); these tests are about the mail it queues.
+    Job.objects.filter(kind=JobKind.DISPUTES_SYNC).delete()
     return out.getvalue()
 
 

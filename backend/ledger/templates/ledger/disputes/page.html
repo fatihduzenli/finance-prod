@@ -1,0 +1,86 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% load tz %}
+{% block title %}Disputes{% endblock %}
+{% block content %}
+  <h1>Disputes</h1>
+  <p class="muted">The disputes the payment provider reports for the last 90 days, read in the background each day, on a dispute event and when you press Refresh. Statuses and reasons are the provider's own words. Transaction identifiers are masked. Fewer than {{ highlight_days }} days left to respond is highlighted.</p>
+
+  <div class="actions">
+    <form method="post" action="{% url 'ledger:disputes:refresh' %}" class="js-single-submit">
+      {% csrf_token %}<button class="btn btn-primary" type="submit" id="refresh-disputes"{% if job_refresh %} disabled{% endif %}>Refresh</button>
+    </form>
+    <span class="muted" id="last-synced">{% if last_synced %}Last synced {{ last_synced|utc|date:"Y-m-d H:i" }} UTC.{% else %}Not synced yet.{% endif %}</span>
+    <a class="btn" id="export-csv" href="{% url 'ledger:disputes:export' %}">Export CSV</a>
+  </div>
+  {% include "ledger/_job_status.html" %}
+
+  {% responsive_table %}
+  <table id="disputes">
+    <thead>
+      <tr><th>Respond by</th><th>Days left</th><th>Status</th><th>Reason</th><th>Amount</th><th>Operator</th><th>Store</th><th>Payment</th><th>Transaction</th></tr>
+    </thead>
+    <tbody>
+      {% for item in rows %}{% with dispute=item.dispute %}
+        <tr id="dispute-{{ dispute.pk }}" class="{% if item.past %}dispute-past{% elif item.soon %}dispute-soon{% endif %}"{% if item.past %} style="background:#fdecee;"{% elif item.soon %} style="background:#fff6dd;"{% endif %}>
+          <td>{% if dispute.respond_by %}{{ dispute.respond_by|utc|date:"Y-m-d H:i" }} UTC{% else %}—{% endif %}</td>
+          <td class="days-left">{% if item.past %}<strong>Past</strong>{% elif item.days_left is not None %}{% if item.soon %}<strong>{{ item.days_left }}</strong>{% else %}{{ item.days_left }}{% endif %}{% else %}—{% endif %}</td>
+          <td class="dispute-status">{{ dispute.status|default:"—" }}</td>
+          <td>{{ dispute.reason|default:"—" }}</td>
+          <td>{% if dispute.amount is not None %}${{ dispute.amount }}{% else %}—{% endif %}</td>
+          <td>{% if dispute.operator %}<a href="{% url 'ledger:operators:detail' pk=dispute.operator.pk %}">{{ dispute.operator.display_name }}</a>{% else %}<span class="muted">Not linked</span>{% endif %}</td>
+          <td>{% if dispute.store %}<a href="{% url 'ledger:stores:detail' pk=dispute.store.pk %}">{{ dispute.store.external_label }}</a>{% else %}—{% endif %}</td>
+          <td>{% if dispute.payment_id %}<a href="{% url 'ledger:payments:detail' pk=dispute.payment_id %}">Payment</a>{% else %}<span class="muted">Not ours</span>{% endif %}</td>
+          <td>{{ item.transaction|default:"—" }}</td>
+        </tr>
+        <tr id="dispute-{{ dispute.pk }}-evidence">
+          <td colspan="9">
+            <strong>Evidence</strong>
+            {% if item.evidence %}
+              <ul class="evidence-list">
+                {% for entry in item.evidence %}
+                  <li id="evidence-{{ entry.evidence.pk }}">
+                    {{ entry.evidence.name }} ({{ entry.evidence.document.get_content_type_display }}, {{ entry.evidence.document.size_bytes|filesizeformat }}):
+                    <span class="evidence-status">{{ entry.evidence.get_status_display }}</span>{% if entry.evidence.sent_at %} {{ entry.evidence.sent_at|utc|date:"Y-m-d H:i" }} UTC{% endif %}{% if entry.job_text %} <span class="muted evidence-job">{{ entry.job_text }}</span>{% endif %}
+                    <a href="{% url 'ledger:documents:download' pk=entry.evidence.document.pk %}">Download</a>
+                    {% if can_add_evidence and entry.can_retry and not item.past %}
+                      <form method="post" action="{% url 'ledger:disputes:evidence_retry' pk=entry.evidence.pk %}" class="js-single-submit" style="display:inline;">
+                        {% csrf_token %}<button class="btn" type="submit">Send again</button>
+                      </form>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <span class="muted">None sent.</span>
+            {% endif %}
+            {% if can_add_evidence %}
+              {% if item.past %}
+                <p class="muted">The respond-by date has passed: the payment provider no longer takes evidence.</p>
+              {% elif not dispute.operator %}
+                <p class="muted">Evidence needs the dispute linked to one of our operators.</p>
+              {% else %}
+                <details>
+                  <summary>Add evidence</summary>
+                  <form method="post" enctype="multipart/form-data" action="{% url 'ledger:disputes:evidence' pk=dispute.pk %}" class="js-single-submit evidence-form">
+                    {% csrf_token %}
+                    <label for="evidence-name-{{ dispute.pk }}">Name *</label>
+                    <input type="text" name="name" id="evidence-name-{{ dispute.pk }}" maxlength="150" required>
+                    <label for="evidence-file-{{ dispute.pk }}">File (PDF, JPEG, PNG or TIFF; smaller than 10 MB) *</label>
+                    <input type="file" name="file" id="evidence-file-{{ dispute.pk }}" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff" required>
+                    <p class="muted">A PDF is checked for card and account numbers before it is stored. An image cannot be checked: send only a receipt, a signed lease page or correspondence, never a bank form.</p>
+                    <label style="font-weight:normal;"><input type="checkbox" name="acknowledged" value="on"> {{ notice }} (required for an image)</label>
+                    <p class="actions"><button class="btn btn-primary" type="submit">Store and send</button></p>
+                  </form>
+                </details>
+              {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+      {% endwith %}{% empty %}
+        <tr><td colspan="9" class="muted" id="no-disputes">No disputes{% if not last_synced %} read yet. Press Refresh to read the payment provider's list{% endif %}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+{% endblock %}

@@ -206,11 +206,21 @@ HEADERS: frozenset[str] = frozenset(
         "Uploaded at",
         "Uploaded by",
         "Deleted at",
-        # Contact log (PLAN-011b D7)
+        # Contact log (PLAN-011b D7, PLAN-012 D2 to D5)
         "Promised date",
         "Promised amount (USD)",
-        "Promise closed",
+        "Promise status",
         "Recorded at",
+        "Corrections",
+        "Delete reason",
+        # Disputes (PLAN-012 D8)
+        "Respond by",
+        "Days left",
+        "Reason",
+        "Created at provider",
+        "Updated at provider",
+        "Evidence files",
+        "Read at",
     }
 )
 

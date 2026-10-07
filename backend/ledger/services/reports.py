@@ -37,7 +37,9 @@ charges are :func:`ledger.services.receivables.open_balances` for that operator 
 (the charges billed to it); its payment history is every payment billed to it (through
 its charge's lease, a one-off charge's own operator, or the invoice) whose settled date,
 or initiation date while pending, is in the range: payments, refunds, and deposits shown
-as held. An archived operator has a statement like any other.
+as held. A settled payment on a multi-line invoice of the invoice builder counts by the
+lines it paid (:func:`ledger.services.payments_ledger.invoice_line_parts`): its part on a
+deposit line is held, the rest paid. An archived operator has a statement like any other.
 
 Every figure is a ``Sum`` over ``numeric(12,2)`` columns or a ``Decimal`` sum.
 """
@@ -65,7 +67,7 @@ from ledger.models import (
 )
 from ledger.services import pnl, receivables
 from ledger.services.csv_export import CsvWriter
-from ledger.services.payments_ledger import charge_lease
+from ledger.services.payments_ledger import charge_lease, invoice_line_parts
 from payments.models import Deposit, MismatchKind, ReconciliationMismatch
 from payments.provider import mask_identifier
 from payments.webhooks.handlers.common import ENTITY_PAYMENT
@@ -564,7 +566,9 @@ def statement(operator: Operator, selected: ReportRange, today: date) -> Stateme
     charges = receivables.open_balances(today, operator=operator.pk)
     history = []
     sums: dict[str, Decimal] = defaultdict(lambda: ZERO)
-    for payment in statement_payments(operator, selected):
+    payments = statement_payments(operator, selected)
+    split = invoice_line_parts(payments)
+    for payment in payments:
         lease = charge_lease(payment)
         kind = _history_kind(payment)
         history.append(
@@ -576,7 +580,15 @@ def statement(operator: Operator, selected: ReportRange, today: date) -> Stateme
                 description=_charge_description(payment),
             )
         )
-        if payment.status == PaymentStatus.SETTLED:
+        if payment.pk in split:
+            for part in split[payment.pk]:
+                if part.refundable:
+                    sums["held"] += part.share
+                elif part.share < 0:
+                    sums["refunded"] -= part.share
+                else:
+                    sums["paid"] += part.share
+        elif payment.status == PaymentStatus.SETTLED:
             if kind == KIND_DEPOSIT_HELD:
                 sums["held"] += payment.amount
             elif kind == KIND_DEPOSIT_REFUND:

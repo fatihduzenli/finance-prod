@@ -1037,7 +1037,8 @@ WRITE_ROUTES = {
     "ledger:one_off_charges:link": Role.BILLING,
     "ledger:one_off_charges:edit": Role.BILLING,
     "ledger:one_off_charges:waive": Role.ADMIN,
-    # PLAN-010d D2, D6, D9: creating a one-off charge, cancelling it and the provider retry.
+    # PLAN-010d D2, D6, D9: creating a one-off charge (PLAN-012 D6: replaced by New
+    # invoice, it answers 410 to billing), cancelling it and the provider retry.
     "ledger:operators:new_charge": Role.BILLING,
     "ledger:leases:new_charge": Role.BILLING,
     "ledger:one_off_charges:cancel": Role.BILLING,

@@ -19,7 +19,18 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 
 from payments.errors import ValidationFailed
-from payments.provider import Amounts, CustomerInput, DateRange, OfflinePayment, require_money
+from payments.provider import (
+    EVIDENCE_EXTENSIONS,
+    EVIDENCE_MAX_BYTES,
+    EVIDENCE_NAME_MAX_LENGTH,
+    Amounts,
+    CustomerInput,
+    DateRange,
+    DisputeQuery,
+    OfflinePayment,
+    require_money,
+)
+from payments.redaction import is_safe_text
 
 IDEMPOTENCY_ID_MAX_LENGTH = 255
 EXTERNAL_ID_MAX_LENGTH = 255
@@ -216,3 +227,41 @@ def offline_payment(value: OfflinePayment) -> OfflinePayment:
             f"payment_note must be at most {PAYMENT_NOTE_MAX_LENGTH} characters on one line"
         )
     return value
+
+
+#: list-disputes: the status filter is one of the provider's short upper-case words.
+_DISPUTE_STATUS = re.compile(r"[A-Z_]{1,32}")
+
+
+def dispute_query(value: DisputeQuery) -> DisputeQuery:
+    """PLAN-012 D8: a valid range, an optional status word, a page from 1."""
+    date_range(value.date_range)
+    if value.status and not _DISPUTE_STATUS.fullmatch(value.status):
+        raise ValidationFailed("status must be one of the provider's dispute statuses")
+    positive_int("page", value.page)
+    return value
+
+
+def dispute_evidence(name: str, data: bytes, content_type: str) -> str:
+    """upload-evidence-for-dispute (PLAN-012 D8): a name of at most
+    :data:`EVIDENCE_NAME_MAX_LENGTH` characters without control characters or payment
+    data, a file of fewer than :data:`EVIDENCE_MAX_BYTES` bytes and more than none, of a
+    type in :data:`EVIDENCE_EXTENSIONS`. Returns the extension the file is sent with."""
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+        or len(name) > EVIDENCE_NAME_MAX_LENGTH
+        or _CONTROL_CHARACTERS.search(name)
+        or not is_safe_text(name)
+    ):
+        raise ValidationFailed(
+            f"name must be 1 to {EVIDENCE_NAME_MAX_LENGTH} characters of plain text"
+        )
+    if not isinstance(data, bytes) or not data:
+        raise ValidationFailed("file must not be empty")
+    if len(data) >= EVIDENCE_MAX_BYTES:
+        raise ValidationFailed(f"file must be smaller than {EVIDENCE_MAX_BYTES} bytes")
+    extension = EVIDENCE_EXTENSIONS.get(content_type)
+    if extension is None:
+        raise ValidationFailed("file must be a PDF, JPEG, PNG or TIFF")
+    return extension

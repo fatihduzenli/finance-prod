@@ -1,8 +1,10 @@
 """The contact log (docs/qa/PLAN-011b D7, §7): billing adds entries, a promise carries its
-date and amount and nothing else does, a later entry closes a promise, the operator page
-lists the entries newest first with a CSV export, and the exact broken-promise rule: a past,
-open promise is broken whatever the balance unless a settled payment of at least its amount
-kept it between the day it was recorded and its date (owner, 2026-10-06)."""
+date and amount and nothing else does, a later entry records a promise's outcome (PLAN-012
+D5; the edit window, corrections, delete, leases and the automatic close are in
+``test_contact_log.py``), the operator page lists the entries newest first with a CSV
+export, and the exact broken-promise rule: a past, open promise is broken whatever the
+balance unless a settled payment of at least its amount kept it between the day it was
+recorded and its date (owner, 2026-10-06)."""
 
 from __future__ import annotations
 
@@ -182,7 +184,7 @@ def test_the_database_holds_the_promise_rule_too() -> None:
         )
 
 
-def test_a_later_entry_closes_an_open_promise_of_the_same_operator_only() -> None:
+def test_a_later_entry_records_the_outcome_of_an_open_promise_of_the_same_operator_only() -> None:
     operator = an_operator()
     other = an_operator()
     open_promise = promise(operator)
@@ -190,36 +192,45 @@ def test_a_later_entry_closes_an_open_promise_of_the_same_operator_only() -> Non
     refused = contacts.add_entry(
         operator.pk,
         contacts.ContactInput(
-            kind=ContactKind.CALL, happened_on=TODAY, body="Paid?", closes=others_promise.pk
+            kind=ContactKind.CALL,
+            happened_on=TODAY,
+            body="Paid?",
+            previous=others_promise.pk,
+            outcome="broken",
         ),
         actor=None,
     )
-    assert not refused.ok and refused.message == contacts.CLOSES_UNKNOWN
+    assert not refused.ok and refused.message == contacts.PREVIOUS_UNKNOWN
     closing = contacts.add_entry(
         operator.pk,
         contacts.ContactInput(
             kind=ContactKind.CALL,
             happened_on=TODAY,
             body="Agreed new plan.",
-            closes=open_promise.pk,
+            previous=open_promise.pk,
+            outcome="broken",
         ),
         actor=None,
     )
     assert closing.ok and closing.entry is not None
     open_promise.refresh_from_db()
-    assert open_promise.closed_by == closing.entry
+    assert (open_promise.closed_by, open_promise.status) == (closing.entry, "broken")
     assert AuditLog.objects.filter(
-        action="contact_entry.promise_closed", entity_id=str(open_promise.pk)
+        action="contact_entry.outcome_recorded", entity_id=str(open_promise.pk)
     ).exists()
     # A closed promise cannot be closed twice.
     again = contacts.add_entry(
         operator.pk,
         contacts.ContactInput(
-            kind=ContactKind.CALL, happened_on=TODAY, body="Again.", closes=open_promise.pk
+            kind=ContactKind.CALL,
+            happened_on=TODAY,
+            body="Again.",
+            previous=open_promise.pk,
+            outcome="kept",
         ),
         actor=None,
     )
-    assert not again.ok and again.message == contacts.CLOSES_UNKNOWN
+    assert not again.ok and again.message == contacts.PREVIOUS_UNKNOWN
 
 
 def test_an_archived_operator_takes_no_entry() -> None:
@@ -418,13 +429,17 @@ def test_another_operators_payment_does_not_keep_the_promise() -> None:
     assert contacts.broken_promises(TODAY, operator=other.pk) == []
 
 
-def test_a_closed_promise_is_not_broken() -> None:
+def test_a_promise_with_an_outcome_is_not_broken() -> None:
     operator = an_operator()
     entry = promise(operator, by=YESTERDAY)
     contacts.add_entry(
         operator.pk,
         contacts.ContactInput(
-            kind=ContactKind.VISIT, happened_on=TODAY, body="New plan.", closes=entry.pk
+            kind=ContactKind.VISIT,
+            happened_on=TODAY,
+            body="New plan.",
+            previous=entry.pk,
+            outcome="broken",
         ),
         actor=None,
     )
@@ -471,7 +486,6 @@ def contact_post(**overrides: str) -> dict[str, str]:
         "happened_on": "2026-10-06",
         "promised_date": "",
         "promised_amount": "",
-        "closes": "",
         "body": "Called; will pay Friday.",
     }
     return {**data, **overrides}
@@ -497,9 +511,19 @@ def test_billing_adds_from_the_operator_page_and_the_page_lists_newest_first(tod
             body="Promised the full balance.",
         ),
     )
+    # PLAN-012 D5: with an open promise the form asks what happened to it.
+    promised = ContactEntry.objects.get(operator=operator, kind="promise")
     client.post(
         f"/operators/{operator.pk}/contacts/new/",
-        contact_post(happened_on="2026-10-01", body="First visit."),
+        contact_post(
+            happened_on="2026-10-01",
+            body="First visit.",
+            previous=str(promised.pk),
+            outcome="rescheduled",
+            kind="promise",
+            promised_date="2026-10-12",
+            promised_amount="1500.00",
+        ),
     )
     entries = list(ContactEntry.objects.filter(operator=operator))
     assert len(entries) == 3 and all(entry.author == user for entry in entries)
@@ -573,14 +597,15 @@ def test_the_csv_has_readable_headers_and_every_entry_newest_first(today: date) 
     body = b"".join(response.streaming_content).decode()  # type: ignore[attr-defined]
     rows = list(csv.reader(io.StringIO(body)))
     assert rows[0] == list(contacts.CSV_HEADER)
-    assert rows[1][:6] == [
+    assert rows[1][:7] == [
         "2026-10-02",
         "Promise to pay",
+        "",
         "Will pay by Monday.",
         "2026-10-09",
         "1500.00",
-        "no",
+        "Open",
     ]
     # Formula-safe text; no promise fields on a call.
-    assert rows[2][:6] == ["2026-09-01", "Call", "'=SUM(A1)", "", "", ""]
-    assert rows[2][6] == user.get_username()
+    assert rows[2][:7] == ["2026-09-01", "Call", "", "'=SUM(A1)", "", "", ""]
+    assert rows[2][7] == user.get_username()

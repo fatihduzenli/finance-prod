@@ -31,6 +31,9 @@ from payments.provider import (
     CustomerRecord,
     DateRange,
     DepositRecord,
+    DisputeEvidenceReceipt,
+    DisputeQuery,
+    DisputeRecord,
     InvoiceInput,
     InvoiceQuery,
     InvoiceRecord,
@@ -318,6 +321,20 @@ def webhook_params(target_url: str, event: str) -> Params:
 def statement_params(date_range: DateRange) -> Params:
     """Pages get-list-of-deposits, get-detail-of-specific-deposit, ach-rejections."""
     return {"startDate": iso_date(date_range.start), "endDate": iso_date(date_range.end)}
+
+
+def dispute_params(query: DisputeQuery) -> Params:
+    """Page list-disputes (PLAN-012 D8): ``startDate`` and ``endDate`` as dates, the
+    optional ``status``, ``page``, and ``sort`` by respond-by date."""
+    params: Params = {
+        "startDate": iso_date(query.date_range.start),
+        "endDate": iso_date(query.date_range.end),
+        "page": query.page,
+        "sort": "respond_by",
+    }
+    if query.status:
+        params["status"] = query.status
+    return params
 
 
 # --- Requests: schedules ----------------------------------------------------------------
@@ -733,3 +750,51 @@ def merchant_id(data: object) -> str:
     if not value:
         raise _unexpected()
     return value
+
+
+#: list-disputes (PLAN-012 D8, BACKLOG §1 row 4): the object's documented keys. The
+#: summary keeps the scalar ones that are not identifiers (Rule 1, Rule 8).
+DISPUTE_TRANSACTION_KEY = "transaction_id"
+DISPUTE_SUMMARY_KEYS: tuple[str, ...] = (
+    "reason",
+    "amount",
+    "status",
+    "respond_by",
+    "created_at",
+    "updated_at",
+)
+
+
+def dispute_record(data: object, fetched_at: datetime) -> DisputeRecord:
+    """Page list-disputes. ``merchant_id`` and every undocumented key are dropped."""
+    obj = as_object(data)
+    return DisputeRecord(
+        external_id=_required_id(obj),
+        raw_status=_safe_short_text(obj, "status"),
+        fetched_at=fetched_at,
+        transaction_external_id=_text(obj, DISPUTE_TRANSACTION_KEY),
+        reason=_safe_short_text(obj, "reason"),
+        amount=_money(obj, "amount"),
+        respond_by=_datetime(obj, "respond_by"),
+        created_at=_datetime(obj, "created_at"),
+        updated_at=_datetime(obj, "updated_at"),
+        raw_summary=summary({key: obj[key] for key in DISPUTE_SUMMARY_KEYS if key in obj}),
+    )
+
+
+def dispute_evidence_receipt(
+    data: object, dispute_external_id: str, fetched_at: datetime
+) -> DisputeEvidenceReceipt:
+    """Page upload-evidence-for-dispute. TODO-VERIFY-062: the response is assumed to be the
+    file object with its ``id`` (and perhaps a ``status``); an answer without one is
+    accepted, with no file identifier."""
+    obj = data if isinstance(data, Mapping) else {}
+    file_id = obj.get("id")
+    return DisputeEvidenceReceipt(
+        external_id=(
+            str(file_id) if isinstance(file_id, str | int) and not isinstance(file_id, bool) else ""
+        ),
+        raw_status=_safe_short_text(obj, "status"),
+        fetched_at=fetched_at,
+        dispute_external_id=dispute_external_id,
+    )

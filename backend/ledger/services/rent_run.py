@@ -24,7 +24,8 @@ Rules kept here:
 - **Manual payments** (D8): Zelle, wire or other; amount above zero and at most the
   balance; date not in the future; a note; an optional reference. The payment is
   written first, in its own transaction, and ``amount_paid`` is recomputed from settled
-  payments with the status following.
+  payments with the status following. The operator's open promises it keeps are closed
+  (:func:`ledger.services.contacts.close_kept_by_payment`, PLAN-012 D4).
 - **Marking the provider invoice** (PLAN-009 D1 to D3): when the charge has a provider
   invoice and the payment covers the charge's whole amount (nothing was paid before),
   the invoice is re-fetched under the charge's row lock; one the provider already shows
@@ -97,7 +98,7 @@ from ledger.models import (
     ScheduleKind,
     ScheduleState,
 )
-from ledger.services import numbering
+from ledger.services import contacts, numbering
 from ledger.services.leases import (
     ENTITY_SCHEDULE,
     KIND_SCHEDULE,
@@ -239,12 +240,19 @@ class ChargeKind:
     amount_field: str
     #: The audited fields of a charge.
     state: Callable[[Any], dict[str, Any]]
+    #: What the charge's invoice bills, when more than its amount (a one-off charge
+    #: billed with companions or later lines, PLAN-011b D5, PLAN-012 D6).
+    billed: Callable[[Any], Decimal] | None = None
 
     def action(self, reason: str) -> str:
         return f"{self.entity}.{reason}"
 
     def amount(self, charge: ChargeRow) -> Decimal:
         return Decimal(getattr(charge, self.amount_field))
+
+    def invoice_total(self, charge: ChargeRow) -> Decimal:
+        """The total the charge's invoice should show."""
+        return self.billed(charge) if self.billed is not None else self.amount(charge)
 
     def lock(self, charge_id: uuid.UUID) -> ChargeRow:
         return self.model._default_manager.select_for_update().get(pk=charge_id)
@@ -1055,6 +1063,7 @@ def record_manual_payment(
             else RentChargeStatus.PARTIAL
         )
         charge.save(update_fields=["amount_paid", "status", "updated_at"])
+        contacts.close_kept_by_payment(payment)
         _audit(
             actor,
             "rent_charge.payment_recorded",
@@ -1210,7 +1219,7 @@ def _clear_review(charge: ChargeRow, kind: ChargeKind) -> None:
         return
     charge.review_message = ""
     charge.needs_review = (
-        charge.invoices.exclude(total=kind.amount(charge)).exists()
+        charge.invoices.exclude(total=kind.invoice_total(charge)).exists()
         or AuditLog.objects.filter(
             entity_type=kind.entity,
             entity_id=str(charge.pk),

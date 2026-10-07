@@ -47,7 +47,7 @@ import documents_storage
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import DocumentDeleteForm, DocumentUploadForm
-from ledger.models import Document, DocumentKind, Lease, Store
+from ledger.models import Document, DocumentKind, Lease, Operator, Store
 from ledger.services import audit, csv_export
 from ledger.services import documents as service
 from ledger.services.csv_export import CsvWriter
@@ -67,6 +67,9 @@ def _parse(pk: str) -> uuid.UUID:
 def _owner_url(owner: service.Owner) -> str:
     if isinstance(owner, Store):
         return reverse("ledger:stores:detail", kwargs={"pk": owner.pk}) + ANCHOR
+    if isinstance(owner, Operator):
+        # An operator keeps dispute evidence only, listed on the disputes page (PLAN-012 D8).
+        return reverse("ledger:disputes:page")
     return reverse("ledger:leases:detail", kwargs={"pk": owner.pk}) + ANCHOR
 
 
@@ -75,6 +78,8 @@ def _document_owner(document: Document) -> service.Owner:
         return document.store
     if document.lease is not None:
         return document.lease
+    if document.operator is not None:
+        return document.operator
     raise Http404
 
 
@@ -85,7 +90,7 @@ def feature_on() -> bool:
 # --- Context for the owner pages ----------------------------------------------------------
 
 
-def section_context(request: HttpRequest, owner: service.Owner) -> dict[str, Any]:
+def section_context(request: HttpRequest, owner: Store | Lease) -> dict[str, Any]:
     """What the Documents section of a store or lease page renders (D7)."""
     role = _role(request)
     is_admin = meets(role, Role.ADMIN)
@@ -260,7 +265,9 @@ def delete(request: HttpRequest, pk: str) -> HttpResponse:
     """``ledger:documents:delete`` (admin, note required, soft)."""
     if not meets(_role(request), Role.ADMIN):
         return forbidden(request)
-    document = get_object_or_404(Document.objects.select_related("store", "lease"), pk=_parse(pk))
+    document = get_object_or_404(
+        Document.objects.select_related("store", "lease", "operator"), pk=_parse(pk)
+    )
     owner_url = _owner_url(_document_owner(document))
     form = DocumentDeleteForm(request.POST)
     if not form.is_valid():
@@ -280,7 +287,9 @@ def delete(request: HttpRequest, pk: str) -> HttpResponse:
 
 
 def _stream(request: HttpRequest, pk: str, *, inline: bool) -> HttpResponseBase:
-    document = get_object_or_404(Document.objects.select_related("store", "lease"), pk=_parse(pk))
+    document = get_object_or_404(
+        Document.objects.select_related("store", "lease", "operator"), pk=_parse(pk)
+    )
     try:
         opened = service.open_for(document, _actor(request), inline)
     except service.DocumentHidden:

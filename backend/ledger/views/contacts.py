@@ -1,11 +1,19 @@
-"""An operator's contact log (docs/qa/PLAN-011b D7).
+"""The contact log (docs/qa/PLAN-011b D7; PLAN-012 D2 to D5, D9).
 
-- ``ledger:operators:contacts`` (any role): every entry, newest first, paginated; the
-  operator page shows the latest :data:`ledger.services.contacts.PAGE_LIMIT`.
-- ``ledger:operators:contacts_add`` (billing; the registry refuses the POST below billing
-  and the view refuses the form's GET too): add an entry, optionally closing an open
-  promise. A refusal shows the form again with the reason.
-- ``ledger:operators:contacts_export`` (any role): every entry as CSV.
+- ``ledger:operators:contacts`` and ``ledger:stores:contacts`` (any role): every entry of
+  the operator, or about a lease of the store, newest first, paginated, filtered by a
+  promise's status (``?status=open|kept|rescheduled|broken``). A deleted entry is shown
+  struck through with its reason to billing and admin, and left out for a viewer.
+- ``ledger:operators:contacts_add`` and ``ledger:stores:contacts_add`` (billing; the
+  registry refuses the POST below billing and the views refuse the form's GET too): add an
+  entry. The store's form is the form of the operator of the store's lease in effect
+  today, with that lease chosen. When the operator has an open promise the form asks what
+  happened to it (Kept, Rescheduled or Broken). A refusal shows the form again.
+- ``ledger:operators:contacts_export`` (any role): every entry as CSV; a viewer's file
+  leaves out the deleted entries.
+- ``ledger:contacts:edit`` (billing, and only the author: anyone else gets 403) while the
+  edit window is open; ``ledger:contacts:correct`` (billing): append a correction;
+  ``ledger:contacts:delete`` (admin): soft delete with a reason.
 """
 
 from __future__ import annotations
@@ -15,18 +23,33 @@ import uuid
 from django import forms
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.http import HttpRequest, HttpResponse, QueryDict, StreamingHttpResponse
-from django.shortcuts import redirect, render
+from django.db.models import QuerySet
+from django.http import (
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBase,
+    QueryDict,
+    StreamingHttpResponse,
+)
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
-from ledger.forms import ContactEntryForm
-from ledger.models import Operator
+from accounts.views import forbidden
+from ledger.forms import (
+    ContactCorrectionForm,
+    ContactDeleteForm,
+    ContactEditForm,
+    ContactEntryForm,
+)
+from ledger.models import ZERO, ContactEntry, ContactKind, ContactStatus, Lease, Operator, Store
 from ledger.services import contacts
 from ledger.services.leases import format_amount
 from ledger.validators import contains_bank_routing_pattern, contains_card_number
+from ledger.views.contact_log import include_deleted, log_rows, store_add_url
 from ledger.views.operators import (
     PAGE_SIZE,
     _actor,
@@ -36,6 +59,8 @@ from ledger.views.operators import (
     role_required,
 )
 from ledger.views.run import _billing_only
+
+NO_STORE_LEASE = "This store has no lease in effect today; add the entry on the operator's page."
 
 
 def drop_payment_data(form: forms.Form) -> None:
@@ -54,24 +79,31 @@ def drop_payment_data(form: forms.Form) -> None:
     form.data = data
 
 
-def promise_choices(operator: Operator) -> list[tuple[str, str]]:
-    """The open promises a new entry may close, as form choices."""
-    return [
-        (
-            str(promise.pk),
-            f"{format_amount(promise.promised_amount)} by {promise.promised_date}"
-            if promise.promised_amount is not None
-            else f"Promise of {promise.happened_on}",
-        )
-        for promise in contacts.open_promises(operator)
-    ]
+# --- The log ------------------------------------------------------------------------------
 
 
-def contact_form(operator: Operator, data: QueryDict | None = None) -> ContactEntryForm:
-    return ContactEntryForm(
-        data,
-        promises=promise_choices(operator),
-        initial={"happened_on": timezone.localdate(), "kind": "call"},
+def _status(request: HttpRequest) -> str:
+    status = request.GET.get("status", "")
+    return status if status in ContactStatus.values else ""
+
+
+def _log_page(
+    request: HttpRequest, rows: QuerySet[ContactEntry], context: dict[str, object]
+) -> HttpResponse:
+    status = _status(request)
+    page = Paginator(contacts.with_status(rows, status), PAGE_SIZE).get_page(
+        request.GET.get("page")
+    )
+    return render(
+        request,
+        "ledger/operators/contacts.html",
+        {
+            **context,
+            "page": page,
+            "rows": log_rows(request, list(page.object_list)),
+            "status": status,
+            "statuses": ContactStatus.choices,
+        },
     )
 
 
@@ -79,14 +111,160 @@ def contact_form(operator: Operator, data: QueryDict | None = None) -> ContactEn
 @require_safe
 def contacts_page(request: HttpRequest, pk: str) -> HttpResponse:
     operator = _load(pk)
-    page = Paginator(contacts.entries(operator), PAGE_SIZE).get_page(request.GET.get("page"))
+    can_add = meets(_role(request), Role.BILLING) and operator.archived_at is None
+    return _log_page(
+        request,
+        contacts.entries(operator, include_deleted=include_deleted(request)),
+        {
+            "title": operator.display_name,
+            "back_label": operator.display_name,
+            "back_url": reverse("ledger:operators:detail", kwargs={"pk": operator.pk}),
+            "add_url": (
+                reverse("ledger:operators:contacts_add", kwargs={"pk": operator.pk})
+                if can_add
+                else ""
+            ),
+            "export_url": reverse("ledger:operators:contacts_export", kwargs={"pk": operator.pk}),
+        },
+    )
+
+
+def _store(pk: str) -> Store:
+    try:
+        key = uuid.UUID(pk)
+    except ValueError:
+        raise Http404 from None
+    return get_object_or_404(Store, pk=key)
+
+
+@role_required
+@require_safe
+def store_contacts_page(request: HttpRequest, pk: str) -> HttpResponse:
+    store = _store(pk)
+    return _log_page(
+        request,
+        contacts.store_entries(store, include_deleted=include_deleted(request)),
+        {
+            "title": f"store {store.external_label}",
+            "back_label": f"Store {store.external_label}",
+            "back_url": reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
+            "add_url": store_add_url(request, store, timezone.localdate()),
+            "export_url": "",
+        },
+    )
+
+
+@role_required
+@require_safe
+def contacts_export(request: HttpRequest, pk: str) -> StreamingHttpResponse:
+    operator = _load(pk)
+    return csv_response(
+        contacts.csv_lines(operator, include_deleted=include_deleted(request)),
+        f"contacts-{operator.pk}-{timezone.localdate():%Y-%m-%d}.csv",
+    )
+
+
+# --- Adding an entry ------------------------------------------------------------------------
+
+
+def _promise_label(promise: ContactEntry) -> str:
+    label = f"{format_amount(promise.promised_amount or ZERO)} by {promise.promised_date}"
+    if promise.lease is not None:
+        label += f" on store {promise.lease.store.external_label}"
+    return f"{label} (recorded {promise.happened_on})"
+
+
+def entry_form(
+    operator: Operator, data: QueryDict | None = None, *, lease: Lease | None = None
+) -> tuple[ContactEntryForm, dict[str, dict[str, str]]]:
+    """The entry form of ``operator`` (PLAN-012 D3, D5) with ``lease`` chosen (else the
+    one lease in effect, when there is exactly one), and each open promise's date and
+    amount for the page's Rescheduled preselection. The previous promise chosen is the
+    newest open one on the chosen lease, else the newest open one."""
+    today = timezone.localdate()
+    active = list(contacts.active_leases(operator, today))
+    others = (
+        Lease.objects.filter(operator=operator)
+        .exclude(pk__in=[row.pk for row in active])
+        .select_related("store")
+        .order_by("store__external_label", "id")
+    )
+    leases = [(str(row.pk), f"Store {row.store.external_label}") for row in active] + [
+        (str(row.pk), f"Store {row.store.external_label} (not in effect today)") for row in others
+    ]
+    promises = list(contacts.open_promises(operator))
+    chosen = lease or (active[0] if len(active) == 1 else None)
+    previous = next(
+        (row for row in promises if chosen is not None and row.lease_id == chosen.pk),
+        promises[0] if promises else None,
+    )
+    form = ContactEntryForm(
+        data,
+        leases=leases,
+        lease_required=len(active) > 1,
+        promises=[(str(row.pk), _promise_label(row)) for row in promises],
+        initial={
+            "happened_on": today,
+            "kind": ContactKind.CALL,
+            "lease": str(chosen.pk) if chosen is not None else "",
+            "previous": str(previous.pk) if previous is not None else "",
+        },
+    )
+    known = {
+        str(row.pk): {"date": str(row.promised_date or ""), "amount": str(row.promised_amount)}
+        for row in promises
+    }
+    return form, known
+
+
+def _uuid(value: str | None) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(value or "")
+    except ValueError:
+        return None
+
+
+def _add(
+    request: HttpRequest,
+    operator: Operator,
+    *,
+    lease: Lease | None,
+    back_url: str,
+    title: str,
+) -> HttpResponse:
+    data = request.POST if request.method == "POST" else None
+    form, known = entry_form(operator, data, lease=lease)
+    if data is not None and form.is_valid():
+        values = form.cleaned_data
+        outcome = contacts.add_entry(
+            operator.pk,
+            contacts.ContactInput(
+                kind=values["kind"],
+                happened_on=values["happened_on"],
+                body=values["body"],
+                promised_date=values.get("promised_date"),
+                promised_amount=values.get("promised_amount"),
+                lease=_uuid(values.get("lease")),
+                previous=_uuid(values.get("previous")),
+                outcome=values.get("outcome") or "",
+            ),
+            actor=_actor(request),
+        )
+        if outcome.ok:
+            messages.success(request, outcome.message)
+            return redirect(f"{back_url}#contacts")
+        form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
+    if data is not None:
+        drop_payment_data(form)
     return render(
         request,
-        "ledger/operators/contacts.html",
+        "ledger/operators/contact_form.html",
         {
             "operator": operator,
-            "page": page,
-            "can_add": meets(_role(request), Role.BILLING) and operator.archived_at is None,
+            "form": form,
+            "promise_values": known,
+            "back_url": back_url,
+            "title": title,
         },
     )
 
@@ -101,46 +279,168 @@ def contacts_add(request: HttpRequest, pk: str) -> HttpResponse:
     if operator.archived_at is not None:
         messages.error(request, contacts.ARCHIVED)
         return redirect("ledger:operators:detail", pk=operator.pk)
-    if request.method != "POST":
-        return render(
-            request,
-            "ledger/operators/contact_form.html",
-            {"operator": operator, "form": contact_form(operator)},
-        )
-    form = contact_form(operator, request.POST)
-    if form.is_valid():
-        data = form.cleaned_data
-        outcome = contacts.add_entry(
-            operator.pk,
-            contacts.ContactInput(
-                kind=data["kind"],
-                happened_on=data["happened_on"],
-                body=data["body"],
-                promised_date=data.get("promised_date"),
-                promised_amount=data.get("promised_amount"),
-                closes=uuid.UUID(data["closes"]) if data.get("closes") else None,
-            ),
-            actor=_actor(request),
-        )
-        if outcome.ok:
-            messages.success(request, outcome.message)
-            return redirect(
-                f"{reverse('ledger:operators:detail', kwargs={'pk': operator.pk})}#contacts"
-            )
-        form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
-    drop_payment_data(form)
-    return render(
+    return _add(
         request,
-        "ledger/operators/contact_form.html",
-        {"operator": operator, "form": form},
+        operator,
+        lease=None,
+        back_url=reverse("ledger:operators:detail", kwargs={"pk": operator.pk}),
+        title=operator.display_name,
     )
 
 
 @role_required
-@require_safe
-def contacts_export(request: HttpRequest, pk: str) -> StreamingHttpResponse:
-    operator = _load(pk)
-    return csv_response(
-        contacts.csv_lines(operator),
-        f"contacts-{operator.pk}-{timezone.localdate():%Y-%m-%d}.csv",
+@require_http_methods(["GET", "HEAD", "POST"])
+def store_contacts_add(request: HttpRequest, pk: str) -> HttpResponse:
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    store = _store(pk)
+    page = reverse("ledger:stores:detail", kwargs={"pk": store.pk})
+    lease = contacts.store_lease(store, timezone.localdate())
+    if lease is None or lease.operator is None:
+        messages.error(request, NO_STORE_LEASE)
+        return redirect(f"{page}#contacts")
+    if lease.operator.archived_at is not None:
+        messages.error(request, contacts.ARCHIVED)
+        return redirect(f"{page}#contacts")
+    return _add(
+        request,
+        lease.operator,
+        lease=lease,
+        back_url=page,
+        title=f"{lease.operator.display_name}, store {store.external_label}",
     )
+
+
+# --- Edit, correct, delete ------------------------------------------------------------------
+
+
+def _entry(pk: str) -> ContactEntry:
+    try:
+        key = uuid.UUID(pk)
+    except ValueError:
+        raise Http404 from None
+    return get_object_or_404(
+        ContactEntry.objects.select_related("operator", "author", "lease__store"), pk=key
+    )
+
+
+def _log_url(entry: ContactEntry) -> str:
+    page = reverse("ledger:operators:detail", kwargs={"pk": entry.operator_id})
+    return f"{page}#contact-{entry.pk}"
+
+
+def _entry_page(
+    request: HttpRequest, template: str, entry: ContactEntry, form: forms.Form
+) -> HttpResponse:
+    if request.method == "POST":
+        drop_payment_data(form)
+    return render(
+        request,
+        template,
+        {
+            "entry": entry,
+            "form": form,
+            "back_url": _log_url(entry),
+            "edit_until": contacts.edit_closes_at(entry),
+        },
+    )
+
+
+def _refused(request: HttpRequest, entry: ContactEntry, message: str) -> HttpResponse:
+    messages.error(request, message)
+    return redirect(_log_url(entry))
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def contact_edit(request: HttpRequest, pk: str) -> HttpResponseBase:
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    entry = _entry(pk)
+    actor = _actor(request)
+    if entry.author_id != actor.pk:
+        return forbidden(request)
+    if entry.deleted_at is not None:
+        return _refused(request, entry, contacts.DELETED)
+    if not contacts.can_edit(entry, actor, timezone.now()):
+        return _refused(request, entry, contacts.WINDOW_CLOSED)
+    if request.method != "POST":
+        form = ContactEditForm(
+            initial={
+                "kind": entry.kind,
+                "happened_on": entry.happened_on,
+                "promised_date": entry.promised_date,
+                "promised_amount": entry.promised_amount,
+                "body": entry.body,
+            }
+        )
+        return _entry_page(request, "ledger/contacts/edit.html", entry, form)
+    form = ContactEditForm(request.POST)
+    if form.is_valid():
+        values = form.cleaned_data
+        outcome = contacts.edit_entry(
+            entry,
+            contacts.EditInput(
+                kind=values["kind"],
+                happened_on=values["happened_on"],
+                body=values["body"],
+                promised_date=values.get("promised_date"),
+                promised_amount=values.get("promised_amount"),
+            ),
+            actor=actor,
+            now=timezone.now(),
+        )
+        if outcome.ok:
+            messages.success(request, outcome.message)
+            return redirect(_log_url(entry))
+        if outcome.field is None:
+            return _refused(request, entry, outcome.message)
+        form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
+    return _entry_page(request, "ledger/contacts/edit.html", entry, form)
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def contact_correct(request: HttpRequest, pk: str) -> HttpResponseBase:
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    entry = _entry(pk)
+    if entry.deleted_at is not None:
+        return _refused(request, entry, contacts.DELETED)
+    if request.method != "POST":
+        return _entry_page(request, "ledger/contacts/correct.html", entry, ContactCorrectionForm())
+    form = ContactCorrectionForm(request.POST)
+    if form.is_valid():
+        outcome = contacts.add_correction(entry, form.cleaned_data["body"], actor=_actor(request))
+        if outcome.ok:
+            messages.success(request, outcome.message)
+            return redirect(_log_url(entry))
+        if outcome.field is None:
+            return _refused(request, entry, outcome.message)
+        form.add_error("body", outcome.message)
+    return _entry_page(request, "ledger/contacts/correct.html", entry, form)
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def contact_delete(request: HttpRequest, pk: str) -> HttpResponseBase:
+    if not meets(_role(request), Role.ADMIN):
+        return forbidden(request)
+    entry = _entry(pk)
+    if entry.deleted_at is not None:
+        return _refused(request, entry, contacts.DELETED)
+    if request.method != "POST":
+        return _entry_page(request, "ledger/contacts/delete.html", entry, ContactDeleteForm())
+    form = ContactDeleteForm(request.POST)
+    if form.is_valid():
+        outcome = contacts.delete_entry(entry, form.cleaned_data["reason"], actor=_actor(request))
+        if outcome.ok:
+            messages.success(request, outcome.message)
+            return redirect(_log_url(entry))
+        if outcome.field is None:
+            return _refused(request, entry, outcome.message)
+        form.add_error("reason", outcome.message)
+    return _entry_page(request, "ledger/contacts/delete.html", entry, form)

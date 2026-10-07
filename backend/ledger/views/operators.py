@@ -65,6 +65,7 @@ from ledger.services import (
 )
 from ledger.services.csv_export import CsvWriter
 from ledger.validators import contains_card_number
+from ledger.views import contact_log
 from ledger.views.jobs import busy, job_context, submit
 from payments import operator_sync
 from payments.models import JobKind
@@ -347,13 +348,24 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 else ""
             ),
             "can_link": billing and active,
-            "can_new_charge": billing and active,
+            # PLAN-012 D6: New invoice replaces "Create one-off charge"; the drafts.
+            "can_new_invoice": billing and active,
+            "invoice_drafts": operator.invoice_drafts.select_related("lease__store", "sent_invoice")
+            .annotate(total=Sum("lines__line_total"))
+            .order_by("-created_at"),
             "one_off_charges": one_off_charges.operator_charges(operator),
             "can_archive": meets(role, Role.ADMIN) and active,
             # PLAN-011b D6, D7: the operator's own attention items as banners, and the
             # latest contact log entries.
             "attention": attention.attention(timezone.localdate(), operator=operator.pk),
-            "contact_entries": list(contacts.entries(operator)[: contacts.PAGE_LIMIT + 1]),
+            "contact_rows": contact_log.log_rows(
+                request,
+                list(
+                    contacts.entries(
+                        operator, include_deleted=contact_log.include_deleted(request)
+                    )[: contacts.PAGE_LIMIT + 1]
+                ),
+            ),
             "contact_limit": contacts.PAGE_LIMIT,
             "can_add_contact": billing and active,
             # PLAN-011b D4: the collection e-mails sent to the operator, and the

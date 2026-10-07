@@ -1204,12 +1204,23 @@ class Invoice(GuardedModel):
 
 
 class InvoiceLineItem(GuardedModel):
+    """One line of a local invoice. On an invoice made by the invoice builder
+    (PLAN-012 D6) each line names the one-off charge it bills (``one_off_charge``): the
+    lines' order is the order in which a payment on the invoice pays those charges."""
+
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="line_items")
     position = models.IntegerField()
     description = free_text()
     quantity = StrictDecimalField(max_digits=12, decimal_places=4)
     unit_price = MoneyField()
     line_total = MoneyField()
+    one_off_charge = models.ForeignKey(
+        OneOffCharge,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="invoice_lines",
+    )
 
     class Meta:
         db_table = "invoice_line_items"
@@ -1221,7 +1232,123 @@ class InvoiceLineItem(GuardedModel):
                 condition=Q(position__gte=1), name="invoice_line_items_position_positive"
             ),
             _positive("invoice_line_items", "quantity"),
+            # A charge is billed on one line of one invoice.
+            models.UniqueConstraint(
+                fields=["one_off_charge"],
+                condition=Q(one_off_charge__isnull=False),
+                name="invoice_line_items_one_per_one_off_charge",
+            ),
         ]
+
+
+# --- The invoice builder (PLAN-012 D6) ------------------------------------------------
+
+
+class InvoiceDraftStatus(models.TextChoices):
+    """A draft is local only until it is sent (or charged now); a cancelled draft was
+    never sent. A sent draft names its invoice (``sent_invoice``)."""
+
+    DRAFT = "draft", "Draft"
+    SENT = "sent", "Sent"
+    CANCELLED = "cancelled", "Cancelled"
+
+
+class InvoiceDraft(GuardedModel):
+    """An invoice being prepared (PLAN-012 D6): an operator, optionally one of its leases
+    (checked by :mod:`ledger.services.invoice_builder`), a memo, an optional due date and
+    its lines. Nothing of it reaches the payment provider until it is sent, when it
+    becomes one one-off charge per line and one local invoice (``sent_invoice``)."""
+
+    operator = models.ForeignKey(Operator, on_delete=models.PROTECT, related_name="invoice_drafts")
+    lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="invoice_drafts"
+    )
+    memo = free_text()
+    due_date = models.DateField(null=True, blank=True)
+    status = _choice(InvoiceDraftStatus, default=InvoiceDraftStatus.DRAFT)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    sent_invoice = models.ForeignKey(
+        Invoice, on_delete=models.PROTECT, null=True, blank=True, related_name="drafts"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "invoice_drafts"
+        constraints = [
+            _valid_choice("invoice_drafts", "status", InvoiceDraftStatus),
+            models.CheckConstraint(
+                condition=Q(status="sent", sent_invoice__isnull=False)
+                | (~Q(status="sent") & Q(sent_invoice__isnull=True)),
+                name="invoice_drafts_sent_iff_invoice",
+            ),
+            models.UniqueConstraint(
+                fields=["sent_invoice"],
+                condition=Q(sent_invoice__isnull=False),
+                name="invoice_drafts_one_per_invoice",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.number
+
+    @property
+    def number(self) -> str:
+        """What staff call the draft before it is sent: ``DRAFT-`` and the first eight
+        characters of its id, in capitals."""
+        return f"DRAFT-{str(self.pk)[:8].upper()}"
+
+
+def format_quantity(value: Decimal) -> str:
+    """A quantity as staff write it: ``3`` rather than ``3.0000``, ``0.5`` rather than
+    ``0.5000`` (never an exponent)."""
+    quantity = Decimal(value)
+    if quantity == quantity.to_integral_value():
+        return str(quantity.quantize(Decimal(1)))
+    return str(quantity.normalize())
+
+
+class InvoiceDraftLine(GuardedModel):
+    """One line of a draft: a fee type or free text, a quantity and a unit amount;
+    ``line_total`` is the quantity times the unit amount rounded to the cent (computed
+    by the service, held to it by a CHECK within half a cent)."""
+
+    draft = models.ForeignKey(InvoiceDraft, on_delete=models.CASCADE, related_name="lines")
+    position = models.IntegerField()
+    fee_type = models.ForeignKey(
+        FeeType, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    description = guarded_char(DESCRIPTION_MAX_LENGTH)
+    quantity = StrictDecimalField(max_digits=12, decimal_places=4)
+    unit_amount = MoneyField()
+    line_total = MoneyField()
+
+    class Meta:
+        db_table = "invoice_draft_lines"
+        ordering = ("position",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["draft", "position"], name="invoice_draft_lines_position_unique"
+            ),
+            models.CheckConstraint(
+                condition=Q(position__gte=1), name="invoice_draft_lines_position_positive"
+            ),
+            _not_blank("invoice_draft_lines", "description"),
+            _positive("invoice_draft_lines", "quantity"),
+            _positive("invoice_draft_lines", "unit_amount"),
+            _positive("invoice_draft_lines", "line_total"),
+            models.CheckConstraint(
+                condition=Q(line_total__gte=F("quantity") * F("unit_amount") - HALF_CENT)
+                & Q(line_total__lte=F("quantity") * F("unit_amount") + HALF_CENT),
+                name="invoice_draft_lines_total_is_quantity_times_unit",
+            ),
+        ]
+
+    @property
+    def quantity_text(self) -> str:
+        return format_quantity(self.quantity)
 
 
 class PaymentKind(models.TextChoices):
@@ -1464,6 +1591,9 @@ class DocumentKind(models.TextChoices):
     PHOTO = "photo", "Photo"
     NOTICE = "notice", "Notice"
     OTHER = "other", "Other"
+    #: PLAN-012 D8: a file sent to the payment provider for a dispute; kept on the
+    #: dispute's operator, and the only kind an operator keeps.
+    DISPUTE_EVIDENCE = "dispute_evidence", "Dispute evidence"
 
 
 class DocumentContentType(models.TextChoices):
@@ -1475,6 +1605,8 @@ class DocumentContentType(models.TextChoices):
     JPEG = "image/jpeg", "JPEG image"
     PNG = "image/png", "PNG image"
     HEIC = "image/heic", "HEIC image"
+    #: PLAN-012 D8: accepted for dispute evidence only.
+    TIFF = "image/tiff", "TIFF image"
 
 
 #: Longest stored filename (PLAN-010c D5).
@@ -1486,10 +1618,11 @@ SHA256_HEX = r"\A[0-9a-f]{64}\Z"
 
 
 class Document(GuardedModel):
-    """A file kept with a store or a lease (PLAN-010c D4).
+    """A file kept with a store or a lease (PLAN-010c D4), or dispute evidence kept with
+    an operator (PLAN-012 D8).
 
-    The bytes live in Blob Storage at ``blob_path`` (``documents/<store|lease>/<owner
-    uuid>/<document uuid>``, never the filename), never in the database or on the
+    The bytes live in Blob Storage at ``blob_path`` (``documents/<store|lease|operator>/
+    <owner uuid>/<document uuid>``, never the filename), never in the database or on the
     container's disk. Rows are never deleted: an admin's delete sets ``deleted_at``,
     ``deleted_by`` and ``delete_note``, and the blob stays. Written only by
     :mod:`ledger.services.documents`.
@@ -1500,6 +1633,9 @@ class Document(GuardedModel):
     )
     lease = models.ForeignKey(
         Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="documents"
+    )
+    operator = models.ForeignKey(
+        Operator, on_delete=models.PROTECT, null=True, blank=True, related_name="documents"
     )
     kind = _choice(DocumentKind)
     source = _choice(DocumentSource, default=DocumentSource.UPLOAD)
@@ -1529,9 +1665,16 @@ class Document(GuardedModel):
         db_table = "documents"
         constraints = [
             models.CheckConstraint(
-                condition=Q(store__isnull=False, lease__isnull=True)
-                | Q(store__isnull=True, lease__isnull=False),
+                condition=Q(store__isnull=False, lease__isnull=True, operator__isnull=True)
+                | Q(store__isnull=True, lease__isnull=False, operator__isnull=True)
+                | Q(store__isnull=True, lease__isnull=True, operator__isnull=False),
                 name="documents_exactly_one_owner",
+            ),
+            # An operator keeps dispute evidence only, and dispute evidence is kept only
+            # by an operator (PLAN-012 D8).
+            models.CheckConstraint(
+                condition=Q(operator__isnull=True) ^ Q(kind=DocumentKind.DISPUTE_EVIDENCE),
+                name="documents_operator_keeps_dispute_evidence",
             ),
             _valid_choice("documents", "kind", DocumentKind),
             _valid_choice("documents", "source", DocumentSource),
@@ -1560,10 +1703,105 @@ class Document(GuardedModel):
                 condition=Q(deleted_at__isnull=True, lease__isnull=False),
                 name="documents_lease_sha256_live_unique",
             ),
+            models.UniqueConstraint(
+                fields=["operator", "sha256"],
+                condition=Q(deleted_at__isnull=True, operator__isnull=False),
+                name="documents_operator_sha256_live_unique",
+            ),
         ]
 
     def __str__(self) -> str:
         return self.original_filename
+
+
+# --- Disputes (PLAN-012 D8) ----------------------------------------------------------
+
+#: Longest dispute status or reason kept (the provider's short enums, Rule 2).
+DISPUTE_TEXT_MAX_LENGTH = 64
+#: Longest evidence name (the provider's ``name`` field).
+EVIDENCE_NAME_MAX_LENGTH = 150
+
+
+class Dispute(GuardedModel):
+    """A dispute the payment provider reports (PLAN-012 D8), read only.
+
+    Written only by :mod:`ledger.services.disputes` from the provider's list. The
+    provider's identifier lives in ``external_refs`` (``external_kind`` ``dispute``);
+    ``status`` and ``reason`` are the provider's strings, verbatim and without a CHECK
+    (Rule 2). ``payment`` is ours when we hold the disputed transaction; ``operator`` and
+    ``store`` are derived from it at each sync. ``raw_summary`` keeps the documented
+    scalar fields only, the transaction's identifier masked (Rule 1).
+    """
+
+    payment = models.ForeignKey(
+        "Payment", on_delete=models.PROTECT, null=True, blank=True, related_name="disputes"
+    )
+    operator = models.ForeignKey(
+        Operator, on_delete=models.PROTECT, null=True, blank=True, related_name="disputes"
+    )
+    store = models.ForeignKey(
+        Store, on_delete=models.PROTECT, null=True, blank=True, related_name="disputes"
+    )
+    reason = guarded_char(DISPUTE_TEXT_MAX_LENGTH, blank=True)
+    amount = MoneyField(null=True, blank=True)
+    status = guarded_char(DISPUTE_TEXT_MAX_LENGTH, blank=True)
+    respond_by = models.DateTimeField(null=True, blank=True)
+    provider_created_at = models.DateTimeField(null=True, blank=True)
+    #: When the provider last changed the dispute (its ``updated_at``).
+    changed_at = models.DateTimeField(null=True, blank=True)
+    fetched_at = models.DateTimeField()
+    raw_summary = guarded_json(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "disputes"
+        indexes = [models.Index(fields=["respond_by"], name="disputes_respond_by_idx")]
+
+    def __str__(self) -> str:
+        return f"Dispute {self.status}"
+
+
+class DisputeEvidenceStatus(models.TextChoices):
+    QUEUED = "queued", "Queued"
+    SENT = "sent", "Sent"
+    FAILED = "failed", "Failed"
+
+
+class DisputeEvidence(GuardedModel):
+    """One evidence file for a dispute (PLAN-012 D8): the document it is stored as (on
+    the dispute's operator, kind ``dispute_evidence``) and its upload to the provider by
+    the ``dispute_evidence_upload`` job. The provider's file identifier lives in
+    ``external_refs`` (``dispute_file``); ``error`` holds a failure's class name only."""
+
+    dispute = models.ForeignKey(Dispute, on_delete=models.PROTECT, related_name="evidence")
+    document = models.ForeignKey(
+        Document, on_delete=models.PROTECT, related_name="dispute_evidence"
+    )
+    name = guarded_char(EVIDENCE_NAME_MAX_LENGTH)
+    status = _choice(DisputeEvidenceStatus, default=DisputeEvidenceStatus.QUEUED)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    error = guarded_char(100, blank=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dispute_evidence"
+        constraints = [
+            _valid_choice("dispute_evidence", "status", DisputeEvidenceStatus),
+            _not_blank("dispute_evidence", "name"),
+            models.CheckConstraint(
+                condition=Q(status=DisputeEvidenceStatus.SENT, sent_at__isnull=False)
+                | ~Q(status=DisputeEvidenceStatus.SENT),
+                name="dispute_evidence_sent_has_time",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
 
 
 # --- Collections ladder and outbound e-mail (PLAN-011b D4) ---------------------------
@@ -1752,29 +1990,66 @@ NON_PROMISE_CONTACT_KINDS: list[str] = [
 ]
 
 
+class ContactStatus(models.TextChoices):
+    """Where a promise to pay stands (PLAN-012 D4, D5). Every other kind stays ``open``."""
+
+    OPEN = "open", "Open"
+    KEPT = "kept", "Kept"
+    RESCHEDULED = "rescheduled", "Rescheduled"
+    BROKEN = "broken", "Broken"
+
+
+#: The statuses other than ``open``: the CHECK reads only valid statuses, so that a bogus one
+#: fails ``contact_entries_status_valid`` alone.
+CLOSED_CONTACT_STATUSES: list[str] = [
+    ContactStatus.KEPT.value,
+    ContactStatus.RESCHEDULED.value,
+    ContactStatus.BROKEN.value,
+]
+
+
 class ContactEntry(GuardedModel):
     """One dated contact with an operator: a call, an e-mail, a visit or a promise to pay
-    (PLAN-011b D7). Billing adds them; nothing edits or deletes one.
+    (PLAN-011b D7, PLAN-012 D2 to D5). Billing adds them; the author may edit one for a
+    short while, then only an appended :class:`ContactCorrection` changes what it says;
+    an admin may soft delete one with a reason (``deleted_at``, ``deleted_by`` and
+    ``delete_reason``: all three or none, CHECK). Nothing removes a row.
 
-    A promise carries ``promised_date`` and ``promised_amount``; no other kind does
-    (CHECK). A later entry may close a promise: the promise's ``closed_by`` names it.
-    When a promise is broken is decided by :mod:`ledger.services.contacts`.
+    ``lease`` (nullable) names the store the entry is about; the service holds it to a
+    lease of the same operator. A promise carries ``promised_date`` and
+    ``promised_amount``; no other kind does (CHECK). A promise's ``status`` is ``open``
+    until it is kept (by a later entry's outcome, ``closed_by``, or by a settled payment,
+    ``kept_by_payment``), rescheduled or broken; every other kind stays ``open`` (CHECK).
+    When a promise is broken or kept is decided by :mod:`ledger.services.contacts`.
     """
 
     operator = models.ForeignKey(Operator, on_delete=models.PROTECT, related_name="contact_entries")
+    lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="contact_entries"
+    )
     kind = _choice(ContactKind)
     happened_on = models.DateField()
     promised_date = models.DateField(null=True, blank=True)
     promised_amount = MoneyField(null=True, blank=True)
     body = free_text(blank=False)
-    #: On a promise: the later entry that closed it.
+    status = _choice(ContactStatus, default=ContactStatus.OPEN)
+    #: On a promise: the later entry that recorded its outcome.
     closed_by = models.OneToOneField(
         "self", on_delete=models.PROTECT, null=True, blank=True, related_name="closes"
+    )
+    #: On a kept promise: the settled payment that kept it.
+    kept_by_payment = models.ForeignKey(
+        Payment, on_delete=models.PROTECT, null=True, blank=True, related_name="kept_promises"
     )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    delete_reason = free_text()
 
     class Meta:
         db_table = "contact_entries"
@@ -1784,6 +2059,7 @@ class ContactEntry(GuardedModel):
         constraints = [
             _not_blank("contact_entries", "body"),
             _valid_choice("contact_entries", "kind", ContactKind),
+            _valid_choice("contact_entries", "status", ContactStatus),
             models.CheckConstraint(
                 condition=(
                     ~Q(kind="promise")
@@ -1803,7 +2079,40 @@ class ContactEntry(GuardedModel):
                 condition=Q(closed_by__isnull=True) | (Q(kind="promise") & ~Q(closed_by=F("id"))),
                 name="contact_entries_closed_by_promise_only",
             ),
+            models.CheckConstraint(
+                condition=~Q(kind__in=NON_PROMISE_CONTACT_KINDS)
+                | ~Q(status__in=CLOSED_CONTACT_STATUSES),
+                name="contact_entries_status_promise_only",
+            ),
+            models.CheckConstraint(
+                condition=Q(kept_by_payment__isnull=True) | Q(status="kept"),
+                name="contact_entries_kept_by_payment_kept",
+            ),
+            models.CheckConstraint(
+                condition=Q(deleted_at__isnull=True, deleted_by__isnull=True, delete_reason="")
+                | (
+                    Q(deleted_at__isnull=False, deleted_by__isnull=False)
+                    & Q(delete_reason__regex=_NOT_BLANK)
+                ),
+                name="contact_entries_deleted_all_or_none",
+            ),
         ]
+
+
+class ContactCorrection(GuardedModel):
+    """A correction appended to a contact entry once its edit window has closed
+    (PLAN-012 D2). Any billing user adds one; nothing edits or deletes one."""
+
+    entry = models.ForeignKey(ContactEntry, on_delete=models.PROTECT, related_name="corrections")
+    body = free_text(blank=False)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "contact_corrections"
+        constraints = [_not_blank("contact_corrections", "body")]
 
 
 class CalendarEntryKind(models.TextChoices):

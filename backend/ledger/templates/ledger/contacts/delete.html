@@ -1,0 +1,17 @@
+{% extends "finance/base.html" %}
+{% block title %}Delete contact entry{% endblock %}
+{% block content %}
+  <p><a href="{{ back_url }}">&larr; Contact log</a></p>
+  <h1>Delete contact entry</h1>
+  {% include "ledger/contacts/_entry.html" %}
+  <p class="muted">The entry stays in the log, struck through with your reason, for billing and admin; viewers no longer see it. A deleted promise no longer counts as open, kept or broken.</p>
+  <form method="post" id="contact-delete-form" class="js-single-submit">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <label for="{{ form.reason.id_for_label }}">{{ form.reason.label }} *</label>
+    {{ form.reason.errors }}
+    {{ form.reason }}
+    <p class="actions"><button class="btn btn-primary" type="submit" id="confirm-delete-contact">Delete</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

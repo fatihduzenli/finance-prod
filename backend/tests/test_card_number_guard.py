@@ -21,6 +21,7 @@ import pytest
 from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, models, transaction
+from django.utils import timezone
 
 from ledger import models as ledger_models
 from ledger.validators import (
@@ -32,7 +33,7 @@ from ledger.validators import (
     validate_no_payment_data,
 )
 from payments.sync_writer import provider_write
-from tests.test_ledger_models import LEDGER_FACTORIES, requires_postgresql, saved
+from tests.test_ledger_models import LEDGER_FACTORIES, make_user, requires_postgresql, saved
 from tests.test_payments_models import PAYMENTS_FACTORIES
 
 TEST_CARD = "4111 1111 1111 1111"
@@ -340,6 +341,9 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0019_one_off_charges_constraints",
         "ledger.migrations.0023_contacts_and_calendar",
         "ledger.migrations.0024_collections_ladder",
+        "ledger.migrations.0028_contact_log_maturity",
+        "ledger.migrations.0029_invoice_builder",
+        "ledger.migrations.0030_disputes",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",
@@ -562,7 +566,22 @@ def _accepted_samples(model: type[models.Model], field: models.Field[Any, Any]) 
         return [text for text in samples if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", text)] + [
             "ConnectTimeout"
         ]
+    # PLAN-012 D2: a delete reason is not blank, and only on a deleted entry (CHECK).
+    if column == "contact_entries.delete_reason":
+        return [text for text in samples if re.search(r"\S", text)]
     return samples
+
+
+def _existing_row(model: type[models.Model], field: models.Field[Any, Any]) -> models.Model:
+    """A saved row whose ``field`` may hold text: a contact entry's delete reason only
+    exists on a deleted entry (PLAN-012 D2)."""
+    if f"{model._meta.db_table}.{field.column}" == "contact_entries.delete_reason":
+        return saved(
+            FACTORIES[model](
+                deleted_at=timezone.now(), deleted_by=make_user(), delete_reason="Wrong shop."
+            )
+        )
+    return saved(FACTORIES[model]())
 
 
 @requires_postgresql
@@ -576,7 +595,7 @@ def test_trigger_accepts_ordinary_text_when_the_validator_is_bypassed(
     table, column = model._meta.db_table, str(field.column)
     is_json = isinstance(field, models.JSONField)
     placeholder = "%s::jsonb" if is_json else "%s"
-    existing = None if table == "audit_log" else saved(FACTORIES[model]())
+    existing = None if table == "audit_log" else _existing_row(model, field)
     for text in samples:
         value = _card_value(field, text)
         parameter = json.dumps(value) if is_json else value

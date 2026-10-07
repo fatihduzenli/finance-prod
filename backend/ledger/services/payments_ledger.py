@@ -38,11 +38,12 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
-from django.db.models import Exists, OuterRef, Q, QuerySet, Sum
+from django.db.models import Exists, F, OuterRef, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce
 
 from ledger.models import (
@@ -50,7 +51,9 @@ from ledger.models import (
     ChargeNote,
     DepositResolution,
     DepositResolutionKind,
+    InvoiceLineItem,
     Lease,
+    OneOffChargeStatus,
     Operator,
     Payment,
     PaymentKind,
@@ -224,6 +227,102 @@ def ledger_payments(selected: PaymentFilter) -> QuerySet[Payment]:
     return rows.order_by("-on", "-created_at", "-id")
 
 
+def multi_line_charges() -> Any:
+    """The first lines' charges of the invoice builder's multi-line invoices (PLAN-012
+    D6), as a subquery: a payment on one pays the invoice's lines in line order."""
+    return InvoiceLineItem.objects.filter(
+        position__gt=1, one_off_charge__isnull=False, invoice__one_off_charge__isnull=False
+    ).values("invoice__one_off_charge")
+
+
+def on_multi_line_invoice() -> Q:
+    """A settled one-off payment (or refund) on a multi-line invoice's first line: its
+    amount is split by :func:`invoice_line_parts`, never counted by its own charge."""
+    return Q(
+        kind=PaymentKind.ONE_OFF,
+        status=PaymentStatus.SETTLED,
+        one_off_charge__in=multi_line_charges(),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class LinePart:
+    """The part of a payment that paid one line of a multi-line invoice (negative for
+    a refund: taken back from that line)."""
+
+    charge_id: uuid.UUID
+    share: Decimal
+    category: str
+    refundable: bool
+
+
+def _line_share(paid: Decimal, before: Decimal, price: Decimal) -> Decimal:
+    """What ``paid`` (in total, on the invoice) pays of a line whose earlier lines bill
+    ``before``: between zero and its ``price``."""
+    return min(max(paid - before, ZERO), price)
+
+
+def invoice_line_parts(payments: QuerySet[Payment]) -> dict[uuid.UUID, list[LinePart]]:
+    """Per payment of ``payments`` that is :func:`on_multi_line_invoice`, how it paid the
+    invoice's lines (PLAN-012 D6): in line order, refunds taken back from the last line
+    first, the lines of waived or voided charges left out, what is paid beyond every line
+    counted with the first line. The split of a payment depends on the settled payments
+    before it on the same invoice, so every settled payment on those invoices is read in
+    settled order (3 queries). The parts of one payment sum to its signed amount."""
+    wanted = set(payments.filter(on_multi_line_invoice()).values_list("pk", flat=True))
+    if not wanted:
+        return {}
+    charges = Payment.objects.filter(pk__in=wanted).values("one_off_charge")
+    lines: dict[uuid.UUID, list[tuple[uuid.UUID, Decimal, str, bool]]] = {}
+    for line in (
+        InvoiceLineItem.objects.filter(
+            invoice__one_off_charge__in=charges, one_off_charge__isnull=False
+        )
+        .exclude(one_off_charge__status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .values(
+            "one_off_charge",
+            first=F("invoice__one_off_charge"),
+            price=F("one_off_charge__price"),
+            category=F("one_off_charge__category"),
+            refundable=F("one_off_charge__fee_type__refundable"),
+        )
+        .order_by("first", "position")
+    ):
+        lines.setdefault(line["first"], []).append(
+            (
+                line["one_off_charge"],
+                Decimal(line["price"] or ZERO),
+                str(line["category"]),
+                line["refundable"] is True,
+            )
+        )
+    paid: dict[uuid.UUID, Decimal] = {}
+    parts: dict[uuid.UUID, list[LinePart]] = {}
+    for row in (
+        Payment.objects.filter(on_multi_line_invoice(), one_off_charge__in=charges)
+        .values("pk", "amount", "is_refund", charge=F("one_off_charge"))
+        .order_by("settled_on", "created_at", "id")
+    ):
+        amount = Decimal(row["amount"])
+        signed = -amount if row["is_refund"] else amount
+        before = paid.get(row["charge"], ZERO)
+        after = before + signed
+        paid[row["charge"]] = after
+        if row["pk"] not in wanted:
+            continue
+        billed = ZERO
+        split: list[LinePart] = []
+        for charge_id, price, category, refundable in lines.get(row["charge"], []):
+            share = _line_share(after, billed, price) - _line_share(before, billed, price)
+            split.append(LinePart(charge_id, share, category, refundable))
+            billed += price
+        if split:
+            beyond = signed - sum((part.share for part in split), ZERO)
+            split[0] = replace(split[0], share=split[0].share + beyond)
+        parts[row["pk"]] = split
+    return parts
+
+
 def totals(rows: QuerySet[Payment]) -> Totals:
     """Settled (collected), pending, returned and refunded totals, kept apart, and the
     deposits held.
@@ -231,19 +330,24 @@ def totals(rows: QuerySet[Payment]) -> Totals:
     A refund counts unless it was voided; the other three count payments that are not
     refunds, by status. None of the four counts a deposit row (PLAN-010b D7). The
     deposits held subtract what the resolutions of the deposits paid in the set
-    released (:func:`deposits_released`), whatever the resolution's date.
+    released (:func:`deposits_released`), whatever the resolution's date. A settled
+    payment on a multi-line invoice counts by the lines it paid
+    (:func:`invoice_line_parts`): its part on a deposit line is held, the rest collected
+    (refunded, for a refund).
     """
     deposit = Q(one_off_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
+    split = on_multi_line_invoice()
     payment = Q(is_refund=False) & ~deposit
     settled = Q(status=PaymentStatus.SETTLED)
-    held_in = deposit & Q(kind=PaymentKind.ONE_OFF, is_refund=False) & settled
-    held_out = deposit & (Q(kind=PaymentKind.REFUND_DEPOSIT) | Q(is_refund=True)) & settled
+    held_in = deposit & Q(kind=PaymentKind.ONE_OFF, is_refund=False) & settled & ~split
+    held_out = deposit & (Q(kind=PaymentKind.REFUND_DEPOSIT) | Q(is_refund=True)) & settled & ~split
     sums = rows.order_by().aggregate(
-        settled=Sum("amount", filter=payment & settled),
+        settled=Sum("amount", filter=payment & settled & ~split),
         pending=Sum("amount", filter=payment & Q(status=PaymentStatus.PENDING)),
         returned=Sum("amount", filter=payment & Q(status=PaymentStatus.RETURNED)),
         refunded=Sum(
-            "amount", filter=Q(is_refund=True) & ~deposit & ~Q(status=PaymentStatus.VOIDED)
+            "amount",
+            filter=Q(is_refund=True) & ~deposit & ~Q(status=PaymentStatus.VOIDED) & ~split,
         ),
         held_in=Sum("amount", filter=held_in),
         held_out=Sum("amount", filter=held_out),
@@ -252,18 +356,31 @@ def totals(rows: QuerySet[Payment]) -> Totals:
     def money(name: str) -> Decimal:
         return Decimal(sums[name] or ZERO).quantize(CENT)
 
+    collected, refunded, held = money("settled"), money("refunded"), ZERO
+    held_charges: set[uuid.UUID] = set()
+    for payment_parts in invoice_line_parts(rows).values():
+        for part in payment_parts:
+            if part.refundable:
+                held += part.share
+                if part.share > 0:
+                    held_charges.add(part.charge_id)
+            elif part.share < 0:
+                refunded -= part.share
+            else:
+                collected += part.share
     released = deposits_released(
         DepositResolution.objects.filter(
-            setup_charge__in=rows.filter(held_in).order_by().values("one_off_charge_id")
+            Q(setup_charge__in=rows.filter(held_in).order_by().values("one_off_charge_id"))
+            | Q(setup_charge__in=held_charges)
         )
     )
     return Totals(
-        settled=money("settled"),
+        settled=collected,
         pending=money("pending"),
         returned=money("returned"),
-        refunded=money("refunded"),
+        refunded=refunded,
         count=rows.count(),
-        deposits_held=money("held_in") - money("held_out") - released,
+        deposits_held=money("held_in") - money("held_out") + held - released,
     )
 
 

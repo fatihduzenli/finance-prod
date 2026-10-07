@@ -1,0 +1,33 @@
+{% comment %}The draft's header and lines (PLAN-012 D6). Without script the form keeps a fixed
+number of blank rows and a Remove box per row; ledger/invoice_lines.js adds and removes rows.{% endcomment %}
+{% load responsive %}
+{% if errors %}<ul class="errorlist" id="draft-errors">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+{{ form.creation_key }}
+<label for="{{ form.lease.id_for_label }}">{{ form.lease.label }}{% if form.lease.field.required %} *{% endif %}</label>
+{{ form.lease }}
+<label for="{{ form.memo.id_for_label }}">{{ form.memo.label }}</label>
+{{ form.memo }}
+<br><span class="muted">{{ form.memo.help_text }}</span>
+<label for="{{ form.due_date.id_for_label }}">{{ form.due_date.label }}</label>
+{{ form.due_date }}
+<br><span class="muted">{{ form.due_date.help_text }}</span>
+<h2>Lines</h2>
+<p class="muted">A fee type from the catalogue, or free text. The line total is the quantity (empty: 1) times the unit amount, rounded to the cent.</p>
+{{ formset.management_form }}
+{% responsive_table %}
+<table id="draft-lines">
+  <thead><tr><th>Fee type</th><th>Description</th><th>Quantity</th><th>Unit amount</th><th>Remove</th></tr></thead>
+  <tbody>
+    {% for line_form in formset %}
+      <tr class="draft-line">
+        <td>{{ line_form.fee_type }}</td>
+        <td>{{ line_form.description }}</td>
+        <td>{{ line_form.quantity }}</td>
+        <td>{{ line_form.unit_amount }}</td>
+        <td>{{ line_form.DELETE }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}
+<p class="actions"><button class="btn js-only" type="button" id="add-line" hidden>Add line</button></p>

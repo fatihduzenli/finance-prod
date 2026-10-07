@@ -71,6 +71,11 @@ re-debit of either, two levels deep) and as **fees collected** otherwise; the pa
 the price pays the NSF fee and counts as fees collected (:func:`_add_redebits`, one
 query).
 
+**Multi-line invoices** (the invoice builder, PLAN-012 D6): each line is a one-off charge
+billed by its own category as above; a payment on the invoice is a payment of its first
+line's charge, and is collected split as it pays the lines, in line order, each part by
+its line's category (:func:`_add_invoice_lines`, two queries).
+
 **Deposits** (refundable fee types) are counted nowhere, except their withheld part as
 above and :func:`deposits_held` (the page footer).
 
@@ -121,7 +126,12 @@ from ledger.models import (
     StoreCost,
 )
 from ledger.services.csv_export import CsvWriter
-from ledger.services.payments_ledger import deposits_released
+from ledger.services.payments_ledger import (
+    deposits_released,
+    invoice_line_parts,
+    multi_line_charges,
+    on_multi_line_invoice,
+)
 
 #: The longest range shown, in months.
 MAX_MONTHS = 36
@@ -491,10 +501,18 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
     )
     arrears = Q(one_off_charge__category=OneOffCategory.ARREARS)
     redebit = Q(one_off_charge__category=OneOffCategory.REDEBIT)
+    # A payment on a multi-line invoice is split by its lines (_add_invoice_lines).
+    one_line = ~Q(one_off_charge__in=multi_line_charges())
     rent_payments = (
         _payments(PaymentKind.RENT, "rent_charge", start, end),
         _payments(
-            PaymentKind.ONE_OFF, "one_off_charge", start, end, arrears, operator=one_off_operator
+            PaymentKind.ONE_OFF,
+            "one_off_charge",
+            start,
+            end,
+            arrears,
+            one_line,
+            operator=one_off_operator,
         ),
     )
     for source in rent_payments:
@@ -513,6 +531,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         not_deposit,
         ~arrears,
         ~redebit,
+        one_line,
         operator=one_off_operator,
     ):
         net = _money_or_zero(paid["paid"]) - _money_or_zero(paid["refunded"])
@@ -553,6 +572,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
 
     _add_insurance(acc, start, end)
     _add_redebits(acc, start, end)
+    _add_invoice_lines(acc, start, end)
 
     withheld = (
         DepositResolution.objects.filter(
@@ -571,6 +591,37 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         amount = _money_or_zero(resolution["total"])
         row.withheld_deposits += amount
         row.fees_collected += amount
+
+
+def _add_invoice_lines(acc: dict[_Key, _Acc], start: date, end: date) -> None:
+    """Settled payments on multi-line invoices of the invoice builder (PLAN-012 D6),
+    split as they pay the lines (:func:`ledger.services.payments_ledger.invoice_line_parts`).
+    Each part counts by its line's category as the other one-off payments do:
+    ``arrears`` as rent collected, a deposit (a refundable fee type) nowhere, anything
+    else as fees collected (4 queries)."""
+    settled = Payment.objects.filter(
+        on_multi_line_invoice(), settled_on__gte=start, settled_on__lte=end
+    )
+    places = {
+        row["pk"]: row
+        for row in settled.values(
+            "pk",
+            "settled_on",
+            store=F("one_off_charge__lease__store"),
+            operator=Coalesce("one_off_charge__operator", "one_off_charge__lease__operator"),
+        )
+    }
+    for payment, parts in invoice_line_parts(settled).items():
+        row = places[payment]
+        settled_on: date | None = row["settled_on"]
+        if settled_on is None:
+            continue
+        target = acc[(row["store"], row["operator"], settled_on.replace(day=1))]
+        for part in parts:
+            if part.category == OneOffCategory.ARREARS:
+                target.rent_collected += part.share
+            elif not part.refundable:
+                target.fees_collected += part.share
 
 
 def _rent_like(kind: object, category: object) -> bool:
@@ -857,18 +908,36 @@ def total(items: Iterable[Figures]) -> Figures:
 
 def deposits_held(query: PnlQuery) -> Decimal:
     """Deposits held at the end of the range: settled deposit payments (net of their
-    settled refunds) less the deposits refunded, withheld or transferred by then. Not
-    revenue; shown under the report only."""
+    settled refunds) less the deposits refunded, withheld or transferred by then. A
+    payment on a multi-line invoice counts by the lines it paid: its part on a deposit
+    line is held (PLAN-012 D6). Not revenue; shown under the report only."""
     end = query.end
     deposit = Q(one_off_charge__fee_type__refundable=True, status=PaymentStatus.SETTLED)
-    sums = Payment.objects.filter(deposit, settled_on__lte=end).aggregate(
-        paid=Sum("amount", filter=Q(kind=PaymentKind.ONE_OFF, is_refund=False)),
-        refunded=Sum("amount", filter=Q(kind=PaymentKind.ONE_OFF, is_refund=True)),
-        paid_back=Sum("amount", filter=Q(kind=PaymentKind.REFUND_DEPOSIT)),
+    split = on_multi_line_invoice()
+    held_by_lines = sum(
+        (
+            part.share
+            for parts in invoice_line_parts(
+                Payment.objects.filter(split, settled_on__lte=end)
+            ).values()
+            for part in parts
+            if part.refundable
+        ),
+        ZERO,
+    )
+    sums = (
+        Payment.objects.filter(deposit, settled_on__lte=end)
+        .exclude(split)
+        .aggregate(
+            paid=Sum("amount", filter=Q(kind=PaymentKind.ONE_OFF, is_refund=False)),
+            refunded=Sum("amount", filter=Q(kind=PaymentKind.ONE_OFF, is_refund=True)),
+            paid_back=Sum("amount", filter=Q(kind=PaymentKind.REFUND_DEPOSIT)),
+        )
     )
     return (
         _money_or_zero(sums["paid"])
         - _money_or_zero(sums["refunded"])
+        + held_by_lines
         - _money_or_zero(sums["paid_back"])
         - deposits_released(DepositResolution.objects.filter(resolved_on__lte=end))
     )

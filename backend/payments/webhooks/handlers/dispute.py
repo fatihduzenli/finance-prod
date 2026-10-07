@@ -1,8 +1,11 @@
-"""Dispute events (PLAN-008 D4): an audit row and a review flag; there is no dispute table.
+"""Dispute events (PLAN-008 D4): an audit row and a review flag, and (PLAN-012 D8) a read
+of the dispute list.
 
-TODO-VERIFY-053: the provider offers no endpoint that reads a dispute, and the object
-ID of a dispute event is assumed to be the disputed transaction's ID. The transaction is
-re-fetched to confirm it exists; the charge of our payment for it is flagged for review.
+TODO-VERIFY-053: the object ID of a dispute event is assumed to be the disputed
+transaction's ID. The transaction is re-fetched to confirm it exists; the charge of our
+payment for it is flagged for review. Every dispute event, whatever else it finds, queues
+the ``disputes_sync`` job (unless one is already waiting), which updates the
+``disputes`` rows from the provider's list (:mod:`ledger.services.disputes`).
 """
 
 from __future__ import annotations
@@ -28,6 +31,10 @@ UNKNOWN_PAYMENT = ignored("unknown payment")
 
 
 def handle(event_type: str, provider_object_id: str) -> str:
+    # Imported here: the dispute service imports the handlers' shared helpers.
+    from ledger.services import disputes
+
+    disputes.queue_sync(None, disputes.TRIGGER_WEBHOOK)
     if not provider_object_id:
         return NO_OBJECT_ID
     payment = local_payment(provider_object_id)

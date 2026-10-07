@@ -237,6 +237,34 @@ def new_line_item(**fields: Any) -> ledger.InvoiceLineItem:
     return ledger.InvoiceLineItem(**{**values, **fields})
 
 
+def new_invoice_draft(**fields: Any) -> ledger.InvoiceDraft:
+    _default(fields, "operator", lambda: saved(new_operator()))
+    return ledger.InvoiceDraft(**{"memo": "Signage and repairs, October.", **fields})
+
+
+def new_invoice_draft_line(**fields: Any) -> ledger.InvoiceDraftLine:
+    _default(fields, "draft", lambda: saved(new_invoice_draft()))
+    values = {
+        "position": 1,
+        "description": "Sign repair",
+        "quantity": D("3.0000"),
+        "unit_amount": D("33.33"),
+        "line_total": D("99.99"),
+    }
+    return ledger.InvoiceDraftLine(**{**values, **fields})
+
+
+def _line_of_a_charge(**fields: Any) -> ledger.InvoiceLineItem:
+    """A line item naming its one-off charge (PLAN-012 D6)."""
+    _default(fields, "one_off_charge", lambda: saved(new_one_off_charge()))
+    return new_line_item(**fields)
+
+
+def _sent_draft(**fields: Any) -> ledger.InvoiceDraft:
+    _default(fields, "sent_invoice", lambda: saved(new_invoice()))
+    return new_invoice_draft(**{"status": "sent", **fields})
+
+
 def new_payment(**fields: Any) -> ledger.Payment:
     values = {"kind": "rent", "method": "ach", "amount": D("2450.00"), "status": "settled"}
     return ledger.Payment(**{**values, **fields})
@@ -285,6 +313,30 @@ def new_lease_document(**fields: Any) -> ledger.Document:
     return new_document(store=None, **fields)
 
 
+def new_operator_document(**fields: Any) -> ledger.Document:
+    """Dispute evidence kept on an operator (PLAN-012 D8)."""
+    _default(fields, "operator", lambda: saved(new_operator()))
+    return new_document(store=None, kind="dispute_evidence", **fields)
+
+
+def new_dispute(**fields: Any) -> ledger.Dispute:
+    values = {
+        "reason": "FRAUD",
+        "amount": D("2450.00"),
+        "status": "OPEN",
+        "respond_by": datetime(2026, 10, 20, tzinfo=UTC),
+        "fetched_at": datetime(2026, 10, 6, tzinfo=UTC),
+        "raw_summary": {"status": "OPEN"},
+    }
+    return ledger.Dispute(**{**values, **fields})
+
+
+def new_dispute_evidence(**fields: Any) -> ledger.DisputeEvidence:
+    _default(fields, "dispute", lambda: saved(new_dispute()))
+    _default(fields, "document", lambda: saved(new_operator_document()))
+    return ledger.DisputeEvidence(**{"name": "Signed lease page 3", **fields})
+
+
 def new_message_template(**fields: Any) -> ledger.MessageTemplate:
     values = {"code": f"test_template_{next(_numbers)}", "subject": "Notice", "body": "Owed."}
     return ledger.MessageTemplate(**{**values, **fields})
@@ -328,6 +380,12 @@ def new_calendar_entry(**fields: Any) -> ledger.CalendarEntry:
     return ledger.CalendarEntry(**{**values, **fields})
 
 
+def new_contact_correction(**fields: Any) -> ledger.ContactCorrection:
+    _default(fields, "entry", lambda: saved(new_contact_entry()))
+    values = {"body": "The visit was on the 4th."}
+    return ledger.ContactCorrection(**{**values, **fields})
+
+
 def new_calendar_feed(**fields: Any) -> ledger.CalendarFeed:
     _default(fields, "user", make_user)
     values = {"token_hash": uuid.uuid4().bytes * 2}
@@ -353,15 +411,20 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.Note: new_note,
     ledger.Invoice: new_invoice,
     ledger.InvoiceLineItem: new_line_item,
+    ledger.InvoiceDraft: new_invoice_draft,
+    ledger.InvoiceDraftLine: new_invoice_draft_line,
     ledger.Payment: new_payment,
     ledger.AuditLog: new_audit_log,
     ledger.LegacyRecord: new_legacy_record,
     ledger.ImportAudit: new_import_audit,
     ledger.Document: new_document,
+    ledger.Dispute: new_dispute,
+    ledger.DisputeEvidence: new_dispute_evidence,
     ledger.MessageTemplate: new_message_template,
     ledger.CollectionStep: new_collection_step,
     ledger.OutboundMessage: new_outbound_message,
     ledger.ContactEntry: new_contact_entry,
+    ledger.ContactCorrection: new_contact_correction,
     ledger.CalendarEntry: new_calendar_entry,
     ledger.CalendarFeed: new_calendar_feed,
 }
@@ -1027,6 +1090,81 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_line_item(quantity=D("0.0001")),
         lambda: new_line_item(quantity=D("0.0000")),
     ),
+    ConstraintCase(
+        "invoice_line_items_one_per_one_off_charge",
+        unique_pair(_line_of_a_charge, {}, {}),
+        unique_pair(_line_of_a_charge, {}, {"one_off_charge": lambda row: row.one_off_charge}),
+    ),
+    # invoice_drafts and invoice_draft_lines (PLAN-012 D6)
+    ConstraintCase(
+        "invoice_drafts_status_valid",
+        lambda: new_invoice_draft(status="cancelled"),
+        lambda: new_invoice_draft(status="posted"),
+    ),
+    ConstraintCase(
+        "invoice_drafts_sent_iff_invoice",
+        _sent_draft,
+        lambda: new_invoice_draft(status="sent"),
+    ),
+    ConstraintCase(
+        "invoice_drafts_one_per_invoice",
+        unique_pair(_sent_draft, {}, {}),
+        unique_pair(_sent_draft, {}, {"sent_invoice": lambda row: row.sent_invoice}),
+    ),
+    ConstraintCase(
+        "invoice_draft_lines_position_unique",
+        unique_pair(new_invoice_draft_line, {}, {"draft": lambda row: row.draft, "position": 2}),
+        unique_pair(new_invoice_draft_line, {}, {"draft": lambda row: row.draft}),
+    ),
+    ConstraintCase(
+        "invoice_draft_lines_position_positive",
+        lambda: new_invoice_draft_line(position=1),
+        lambda: new_invoice_draft_line(position=0),
+    ),
+    ConstraintCase(
+        "invoice_draft_lines_description_not_blank",
+        new_invoice_draft_line,
+        lambda: new_invoice_draft_line(description=" \n"),
+    ),
+    ConstraintCase(
+        "invoice_draft_lines_quantity_positive",
+        lambda: new_invoice_draft_line(
+            quantity=D("0.0001"), unit_amount=D("100.00"), line_total=D("0.01")
+        ),
+        lambda: new_invoice_draft_line(quantity=D("0.0000"), line_total=D("0.01")),
+        # The total no longer matches the quantity times the unit amount either.
+        exact=False,
+    ),
+    ConstraintCase(
+        "invoice_draft_lines_unit_amount_positive",
+        lambda: new_invoice_draft_line(
+            quantity=D("1"), unit_amount=D("0.01"), line_total=D("0.01")
+        ),
+        lambda: new_invoice_draft_line(
+            quantity=D("1"), unit_amount=D("0.00"), line_total=D("0.01")
+        ),
+        exact=False,
+    ),
+    ConstraintCase(
+        "invoice_draft_lines_line_total_positive",
+        lambda: new_invoice_draft_line(
+            quantity=D("0.5000"), unit_amount=D("0.01"), line_total=D("0.01")
+        ),
+        # 0.0001 times 0.01 rounds to zero: within half a cent of the product, not positive.
+        lambda: new_invoice_draft_line(
+            quantity=D("0.0001"), unit_amount=D("0.01"), line_total=D("0.00")
+        ),
+    ),
+    ConstraintCase(
+        "invoice_draft_lines_total_is_quantity_times_unit",
+        # 0.125 rounds half up to 0.13: half a cent away is accepted.
+        lambda: new_invoice_draft_line(
+            quantity=D("0.5000"), unit_amount=D("0.25"), line_total=D("0.13")
+        ),
+        lambda: new_invoice_draft_line(
+            quantity=D("3.0000"), unit_amount=D("33.33"), line_total=D("100.00")
+        ),
+    ),
     # payments
     ConstraintCase(
         "payments_amount_positive",
@@ -1107,6 +1245,37 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_document(store=None, lease=saved(new_lease())),
         lambda: new_document(store=saved(new_store()), lease=saved(new_lease())),
     ),
+    # PLAN-012 D8: an operator keeps dispute evidence only, and only an operator does.
+    ConstraintCase(
+        "documents_operator_keeps_dispute_evidence",
+        new_operator_document,
+        lambda: new_document(kind="dispute_evidence"),
+    ),
+    ConstraintCase(
+        "documents_operator_sha256_live_unique",
+        unique_pair(new_operator_document, {"sha256": "c" * 64}, {"sha256": "c" * 64}),
+        unique_pair(
+            new_operator_document,
+            {"sha256": "c" * 64},
+            {"sha256": "c" * 64, "operator": lambda row: row.operator},
+        ),
+    ),
+    # dispute_evidence (PLAN-012 D8)
+    ConstraintCase(
+        "dispute_evidence_status_valid",
+        lambda: new_dispute_evidence(status="failed", error="ProviderRejected"),
+        lambda: new_dispute_evidence(status="lost"),
+    ),
+    ConstraintCase(
+        "dispute_evidence_name_not_blank",
+        new_dispute_evidence,
+        lambda: new_dispute_evidence(name=" "),
+    ),
+    ConstraintCase(
+        "dispute_evidence_sent_has_time",
+        lambda: new_dispute_evidence(status="sent", sent_at=datetime(2026, 10, 6, tzinfo=UTC)),
+        lambda: new_dispute_evidence(status="sent"),
+    ),
     ConstraintCase(
         "documents_size_bytes_positive",
         lambda: new_document(size_bytes=1),
@@ -1173,6 +1342,33 @@ LEDGER_CASES: list[ConstraintCase] = [
         ),
         lambda: _second_promise_closed_by_the_same_entry(),
         column="closed_by_id",
+    ),
+    # contact_entries and contact_corrections (PLAN-012 D2, D4, D5)
+    ConstraintCase(
+        "contact_entries_status_promise_only",
+        lambda: new_promise(status="broken"),
+        lambda: new_contact_entry(status="broken"),
+    ),
+    ConstraintCase(
+        "contact_entries_kept_by_payment_kept",
+        lambda: new_promise(status="kept", kept_by_payment=saved(new_payment())),
+        lambda: new_promise(status="open", kept_by_payment=saved(new_payment())),
+    ),
+    ConstraintCase(
+        "contact_entries_deleted_all_or_none",
+        lambda: new_contact_entry(
+            deleted_at=datetime(2026, 10, 7, tzinfo=UTC),
+            deleted_by=make_user(),
+            delete_reason="Wrong operator.",
+        ),
+        lambda: new_contact_entry(
+            deleted_at=datetime(2026, 10, 7, tzinfo=UTC), delete_reason="Wrong operator."
+        ),
+    ),
+    ConstraintCase(
+        "contact_corrections_body_not_blank",
+        new_contact_correction,
+        lambda: new_contact_correction(body=" \n"),
     ),
     # calendar_entries (PLAN-011b D8)
     ConstraintCase(

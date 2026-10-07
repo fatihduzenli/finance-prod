@@ -1,0 +1,38 @@
+{% comment %}The invoice as the operator reads it (PLAN-012 D7): the preview and the print view.{% endcomment %}
+{% load responsive %}
+<section class="invoice-document" id="invoice-document">
+  <header class="invoice-header">
+    <p class="invoice-company" id="invoice-company"><strong>{{ preview.company }}</strong></p>
+    <h1 id="invoice-number">Invoice {{ preview.number }}</h1>
+    <dl class="invoice-dates">
+      <dt>Issued</dt><dd id="invoice-issued">{{ preview.issue_date|date:"Y-m-d" }}</dd>
+      <dt>Due</dt><dd id="invoice-due">{{ preview.due_date|date:"Y-m-d" }}</dd>
+    </dl>
+  </header>
+  <div class="invoice-parties">
+    <div id="invoice-operator">
+      <h2>Billed to</h2>
+      <p>{{ preview.operator.display_name }}{% if preview.operator.legal_name %}<br>{{ preview.operator.legal_name }}{% endif %}{% if preview.operator.company %}<br>{{ preview.operator.company }}{% endif %}
+        {% if preview.operator.address_line1 %}<br>{{ preview.operator.address_line1 }}{% endif %}{% if preview.operator.address_line2 %}<br>{{ preview.operator.address_line2 }}{% endif %}
+        {% if preview.operator.city or preview.operator.state or preview.operator.postal_code %}<br>{{ preview.operator.city }}{% if preview.operator.city and preview.operator.state %}, {% endif %}{{ preview.operator.state }} {{ preview.operator.postal_code }}{% endif %}
+        {% if preview.operator.email %}<br>{{ preview.operator.email }}{% endif %}</p>
+    </div>
+    <div id="invoice-store">
+      <h2>Store</h2>
+      <p>{% if preview.store %}{{ preview.store.external_label }}{% if preview.store.city or preview.store.state %}<br>{{ preview.store.city }}{% if preview.store.city and preview.store.state %}, {% endif %}{{ preview.store.state }}{% endif %}{% else %}Operator account (no store){% endif %}</p>
+    </div>
+  </div>
+  {% responsive_table %}
+  <table id="invoice-lines" class="invoice-lines">
+    <thead><tr><th>Description</th><th class="money">Quantity</th><th class="money">Unit amount</th><th class="money">Amount</th></tr></thead>
+    <tbody>
+      {% for line in preview.lines %}
+        <tr class="invoice-line"><td>{{ line.description }}</td><td class="money">{{ line.quantity_text }}</td><td class="money">${{ line.unit_amount }}</td><td class="money">${{ line.line_total }}</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><th scope="row" colspan="3">Total due (US dollars)</th><th class="money" id="invoice-total">${{ preview.total }}</th></tr></tfoot>
+  </table>
+  {% endresponsive_table %}
+  {% if preview.memo %}<p class="invoice-memo" id="invoice-memo" style="white-space:pre-wrap;">{{ preview.memo }}</p>{% endif %}
+  <p class="muted">Payable by ACH bank transfer.</p>
+</section>

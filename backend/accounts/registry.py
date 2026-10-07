@@ -10,12 +10,12 @@ Read-only routes need no rule for GET; they are listed in ``READ_ONLY_ROUTE_NAME
 the enumeration test (backend/tests/test_route_registry.py) can prove that every route
 in the URL map has been classified. A new route that is not classified fails that test.
 
-Routes still to come: settings get ``Role.ADMIN``; invoices and send get
-``Role.BILLING``. Operators (PLAN-006), leases, the rent run and rent charges
-(PLAN-007), stores (PLAN-007b), webhook events and the returns queue (PLAN-008), and the
-payments ledger, its export, the payment page, the marking retry, refund and void
-(PLAN-009), documents and store-cost corrections (PLAN-010c), and one-off charges, Charge
-now and the audit log page (PLAN-010d) are classified below.
+Routes still to come: settings get ``Role.ADMIN``. The invoice builder (PLAN-012 D6) and
+the dispute list (PLAN-012 D8) are classified below. Operators (PLAN-006), leases, the
+rent run and rent charges (PLAN-007), stores (PLAN-007b), webhook events and the returns
+queue (PLAN-008), and the payments ledger, its export, the payment page, the marking
+retry, refund and void (PLAN-009), documents and store-cost corrections (PLAN-010c), and
+one-off charges, Charge now and the audit log page (PLAN-010d) are classified below.
 """
 
 from __future__ import annotations
@@ -136,14 +136,31 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # billing. The view refuses the page's GET below billing too.
     "ledger:reconciliation:run": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:reconciliation:resolve": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The dispute list (PLAN-012 D8, D9): Refresh needs billing; adding evidence and
+    # sending failed evidence again need admin. The views refuse the page's GET below
+    # billing too.
+    "ledger:disputes:refresh": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:disputes:evidence": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:disputes:evidence_retry": RouteRule(min_role=Role.ADMIN, methods=POST),
     # One-off charges (PLAN-010b D12 as setup charges; PLAN-010d D9): adding a setup
     # charge, creating a one-off charge (Charge now: admin, checked by the service too),
     # editing, recording a payment, retrying the marking or the provider request, linking
     # an invoice and cancelling need billing; waiving needs admin. The views refuse the
     # forms' GET below the same role.
     "ledger:leases:add_setup_charge": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The removed "Create one-off charge" form answers 410 Gone (PLAN-012 D6); a POST below
+    # billing is still refused here first.
     "ledger:leases:new_charge": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:new_charge": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The invoice builder (PLAN-012 D6, D9): a new draft, Save draft, Send and Cancel need
+    # billing; Charge now needs admin. The views refuse the forms' GET (and the draft
+    # page's) below the same role; the preview and the print view are read by any role.
+    "ledger:invoices:new_store": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:invoices:new_operator": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:invoices:edit": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:invoices:send": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:invoices:cancel": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:invoices:charge_now": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:one_off_charges:payment": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:retry_mark": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:retry": RouteRule(min_role=Role.BILLING, methods=POST),
@@ -173,6 +190,14 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # The contact log (PLAN-011b D7): adding an entry needs billing. The view refuses the
     # form's GET below billing too.
     "ledger:operators:contacts_add": RouteRule(min_role=Role.BILLING, methods=POST),
+    # PLAN-012 D2, D3, D9: adding an entry from the store page and appending a correction
+    # need billing; the author's edit needs billing too (the view refuses anyone but the
+    # author with 403); the soft delete needs admin. The views refuse the forms' GET
+    # below those roles too.
+    "ledger:stores:contacts_add": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Calendar entries (PLAN-011b D8, D10): billing; the author changes their own entry,
     # an admin any (checked by the view and the service). The views refuse the forms'
     # GET below billing too.
@@ -255,6 +280,10 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:payments:detail",
         # The reconciliation page; the view itself requires billing (PLAN-010 D10).
         "ledger:reconciliation:page",
+        # The dispute list and its CSV export; the views themselves require billing
+        # (PLAN-012 D8).
+        "ledger:disputes:page",
+        "ledger:disputes:export",
         # The one-off charge page: any verified role (PLAN-010b D6).
         "ledger:one_off_charges:detail",
         # The profit and loss report and its CSV export: any verified role (PLAN-010b
@@ -309,6 +338,13 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # The contact log page and its CSV export (PLAN-011b D7): any verified role.
         "ledger:operators:contacts",
         "ledger:operators:contacts_export",
+        # PLAN-012 D3: the store's contact log.
+        "ledger:stores:contacts",
+        # PLAN-012 D6, D7: an invoice draft's page (billing, checked by the view), its
+        # preview and its print view (any role).
+        "ledger:invoices:draft",
+        "ledger:invoices:preview",
+        "ledger:invoices:print",
         # The calendar page and an entry's page (PLAN-011b D8): any verified role.
         "ledger:calendar:page",
         "ledger:calendar:detail",
