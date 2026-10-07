@@ -858,3 +858,9 @@ the login page myself." The condition for starting Prompt 4 is met.
   least equal to the promised amount settles on that lease on or before the promised date;
   (4) a "Previous promise" outcome (Kept, Rescheduled with new date and amount, Broken) replaces
   the "closes the promise" checkbox; log statuses open, kept, rescheduled, broken.
+
+## Update, 2026-10-07, PLAN-011b-a on staging
+
+- Owner typed "push". `main` at `37f5f9c`; CI run 37552860381 green end to end, including the
+  verification of all four resources (web, worker, reconcile job, daily job) on the commit.
+  `/healthz` 200. The owner refreshes the dashboard to see sena's two past promises.
