@@ -281,18 +281,57 @@ def test_tz_apply_refuses_a_wrong_count_and_writes_nothing() -> None:
     assert AuditLog.objects.count() == before
 
 
-# --- the owner's broken-promise scenario (staging defect of 2026-10-06) ------------------------
+# --- the owner's broken-promise scenario (staging defect of 2026-10-06; one open promise per
+# lease since PLAN-012c-b, so the three promises sit on three leases) ------------------------
 
 
 def test_past_promises_show_at_once_whatever_the_balance_and_future_ones_do_not() -> None:
-    """Operator with nothing owed; three promises recorded today: two past, one future. The
-    two past ones are attention items immediately; the future one is not."""
+    """Operator with nothing owed; three promises recorded today on three stores: two past,
+    one future. The two past ones are attention items immediately; the future one is not."""
     from datetime import date as _date
 
     from ledger.services import attention, contacts
+    from tests.receivables_helpers import a_lease
     from tests.test_lease_services import make_operator
 
     sena = make_operator(email="sena-adv@example.com", customer=None)
+    today = timezone.localdate()
+    for promised in (
+        today - timedelta(days=5),
+        today - timedelta(days=1),
+        today + timedelta(days=1),
+    ):
+        lease = a_lease(operator=sena)
+        outcome = contacts.add_entry(
+            sena.pk,
+            contacts.ContactInput(
+                kind="promise",
+                happened_on=today,
+                body="will pay",
+                promised_date=promised,
+                promised_amount=D("250.00"),
+                lease=lease.pk,
+            ),
+            actor=None,
+        )
+        assert outcome.ok, outcome.message
+    items = [i for i in attention.attention(today).items if i.kind == attention.BROKEN_PROMISE]
+    assert len(items) == 2
+    assert [i.since for i in items] == [today - timedelta(days=5), today - timedelta(days=1)]
+    assert all(isinstance(i.since, _date) and i.since < today for i in items)
+    viewer, _ = client_for(Role.VIEWER)
+    page = viewer.get("/").content.decode()
+    assert page.count("not kept") == 2
+
+
+def test_three_promises_in_one_bucket_leave_one_open_and_at_most_one_attention_item() -> None:
+    """PLAN-012c-b D3: the same three promises on one operator without a store close each
+    other as Rescheduled; only the newest (future) one stays open, so nothing is broken."""
+    from ledger.models import ContactEntry, ContactStatus
+    from ledger.services import attention, contacts
+    from tests.test_lease_services import make_operator
+
+    sena = make_operator(email="sena-one@example.com", customer=None)
     today = timezone.localdate()
     for promised in (
         today - timedelta(days=5),
@@ -311,10 +350,13 @@ def test_past_promises_show_at_once_whatever_the_balance_and_future_ones_do_not(
             actor=None,
         )
         assert outcome.ok, outcome.message
+    rows = ContactEntry.objects.filter(operator=sena, kind="promise").order_by("created_at")
+    assert [r.status for r in rows] == [
+        ContactStatus.RESCHEDULED,
+        ContactStatus.RESCHEDULED,
+        ContactStatus.OPEN,
+    ]
+    assert [r.closed_by_id for r in rows][:2] == [rows[1].pk, rows[2].pk]
     items = [i for i in attention.attention(today).items if i.kind == attention.BROKEN_PROMISE]
-    assert len(items) == 2
-    assert [i.since for i in items] == [today - timedelta(days=5), today - timedelta(days=1)]
-    assert all(isinstance(i.since, _date) and i.since < today for i in items)
-    viewer, _ = client_for(Role.VIEWER)
-    page = viewer.get("/").content.decode()
-    assert page.count("not kept") == 2
+    assert items == []
+    assert len(contacts.broken_promises(today, sena.pk)) <= 1

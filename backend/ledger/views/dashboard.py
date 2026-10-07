@@ -24,6 +24,7 @@ from django.utils.html import conditional_escape, format_html, format_html_join
 from django.utils.safestring import SafeString
 from django.views.decorators.http import require_safe
 
+from accounts.roles import Role, meets, role_of
 from ledger.models import PaymentChannel, PaymentStatus
 from ledger.services import attention, grid, one_off_charges, receivables
 from ledger.views.operators import csv_response, role_required
@@ -51,6 +52,8 @@ def home(request: HttpRequest) -> HttpResponse:
         {
             "data": data,
             "attention": needs,
+            # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
+            "can_record_outcome": meets(role_of(request.user), Role.BILLING),
             "payments_query": payments_query,
             "waived_live_heading": one_off_charges.WAIVED_LIVE_HEADING,
             "not_sent": [

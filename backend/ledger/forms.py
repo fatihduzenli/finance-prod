@@ -26,6 +26,7 @@ from ledger.models import (
     CalendarEntryKind,
     CollectionStatus,
     ContactKind,
+    ContactStatus,
     DepositResolutionKind,
     DocumentKind,
     FeeType,
@@ -1123,8 +1124,10 @@ class ContactEditForm(forms.Form):
         return body
 
 
-#: The outcomes of a previous promise, as the entry form offers them (PLAN-012 D5).
+#: The outcomes of a previous promise, as the entry form offers them (PLAN-012 D5); "Still
+#: open" first, the default (PLAN-012c-b D1).
 OUTCOME_CHOICES = [
+    ("open", "Still open (no change)"),
     ("kept", "Kept"),
     ("rescheduled", "Rescheduled"),
     ("broken", "Broken"),
@@ -1135,9 +1138,10 @@ class ContactEntryForm(ContactEditForm):
     """Add one contact entry to an operator's log (PLAN-011b D7, PLAN-012 D3, D5).
 
     ``lease``: required when the operator has more than one lease in effect
-    (``lease_required``). ``previous`` and ``outcome``: offered, and required, when the
-    operator has an open promise (``promises``). Each choice of ``promises`` may carry the
-    promise's date and amount for the page's "Rescheduled" preselection."""
+    (``lease_required``). ``previous`` and ``outcome``: offered when the operator has an
+    open promise (``promises``); ``previous`` is required, ``outcome`` defaults to "Still
+    open" (PLAN-012c-b D1). Each choice of ``promises`` may carry the promise's date and
+    amount for the page's "Rescheduled" preselection."""
 
     lease = forms.ChoiceField(required=False, label="Store")
     previous = forms.ChoiceField(required=False, label="Previous promise")
@@ -1146,7 +1150,7 @@ class ContactEntryForm(ContactEditForm):
         label="What happened to it",
         choices=OUTCOME_CHOICES,
         widget=forms.RadioSelect,
-        error_messages={"required": "Choose kept, rescheduled or broken."},
+        initial="open",
     )
     field_order = [
         "lease",
@@ -1179,10 +1183,53 @@ class ContactEntryForm(ContactEditForm):
         if promises and isinstance(previous, forms.ChoiceField):
             previous.choices = promises
             previous.required = True
-            self.fields["outcome"].required = True
         else:
             del self.fields["previous"]
             del self.fields["outcome"]
+
+
+#: How the outcome of a promise was learned (PLAN-012c-b D2): the kinds of a Kept or Broken
+#: entry; a Reschedule records a promise.
+OUTCOME_KINDS = [
+    (ContactKind.CALL.value, ContactKind.CALL.label),
+    (ContactKind.EMAIL.value, ContactKind.EMAIL.label),
+    (ContactKind.VISIT.value, ContactKind.VISIT.label),
+]
+
+
+class ContactOutcomeForm(ContactEditForm):
+    """Kept, Reschedule or Broken on one open promise (PLAN-012c-b D2): the date, a note,
+    and for ``rescheduled`` the new promised date and amount (required); for ``kept`` and
+    ``broken``, how it was learned (call, e-mail or visit). ``leases``: the store choice,
+    offered only when the promise names no store and the operator has more than one lease
+    in effect (an entry must then name one)."""
+
+    lease = forms.ChoiceField(
+        label="Store", error_messages={"required": "Choose the store this is about."}
+    )
+    field_order = ["lease", "kind", "happened_on", "promised_date", "promised_amount", "body"]
+
+    def __init__(
+        self, *args: Any, outcome: str, leases: list[tuple[str, str]], **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        lease = self.fields["lease"]
+        if leases and isinstance(lease, forms.ChoiceField):
+            lease.choices = leases
+        else:
+            del self.fields["lease"]
+        kind = self.fields["kind"]
+        if outcome == ContactStatus.RESCHEDULED:
+            del self.fields["kind"]
+            for name in ("promised_date", "promised_amount"):
+                self.fields[name].required = True
+                self.fields[name].help_text = "The new promise; it starts from the old one."
+        else:
+            if isinstance(kind, forms.ChoiceField):
+                kind.choices = OUTCOME_KINDS
+                kind.label = "How you learned it"
+            del self.fields["promised_date"]
+            del self.fields["promised_amount"]
 
 
 class ContactCorrectionForm(forms.Form):

@@ -98,12 +98,18 @@ store_patterns = (
     "stores",
 )
 
-# One contact log entry (PLAN-012 D2): the author's edit, a correction, an admin's delete.
+# One contact log entry (PLAN-012 D2): the author's edit, a correction, an admin's delete;
+# Kept, Reschedule or Broken on an open promise (PLAN-012c-b D2).
 contact_patterns = (
     [
         path("<str:pk>/edit/", contacts.contact_edit, name="edit"),
         path("<str:pk>/correct/", contacts.contact_correct, name="correct"),
         path("<str:pk>/delete/", contacts.contact_delete, name="delete"),
+        re_path(
+            r"^(?P<pk>[^/]+)/outcome/(?P<outcome>kept|rescheduled|broken)/\Z",
+            contacts.contact_outcome,
+            name="outcome",
+        ),
     ],
     "contacts",
 )

@@ -8,7 +8,12 @@
   registry refuses the POST below billing and the views refuse the form's GET too): add an
   entry. The store's form is the form of the operator of the store's lease in effect
   today, with that lease chosen. When the operator has an open promise the form asks what
-  happened to it (Kept, Rescheduled or Broken). A refusal shows the form again.
+  happened to it (Still open, the default, Kept, Rescheduled or Broken), and warns when a
+  new promise would close the open promise of its lease as Rescheduled (PLAN-012c-b D1,
+  D3). A refusal shows the form again.
+- ``ledger:contacts:outcome`` (billing; PLAN-012c-b D2): Kept, Reschedule or Broken on one
+  open promise; the entry goes through :func:`contacts.add_entry` with that promise as
+  ``previous``, then back to the validated local ``next`` at the new entry.
 - ``ledger:operators:contacts_export`` (any role): every entry as CSV; a viewer's file
   leaves out the deleted entries.
 - ``ledger:contacts:edit`` (billing, and only the author: anyone else gets 403) while the
@@ -36,6 +41,7 @@ from django.http import (
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
@@ -45,6 +51,7 @@ from ledger.forms import (
     ContactDeleteForm,
     ContactEditForm,
     ContactEntryForm,
+    ContactOutcomeForm,
 )
 from ledger.models import (
     ZERO,
@@ -231,6 +238,21 @@ def entry_form(
     return form, known
 
 
+def supersede_warnings(operator: Operator) -> dict[str, str]:
+    """PLAN-012c-b D3: per lease (``""``: no lease), the sentence the add form shows when a
+    new promise there would close the open promise as Rescheduled."""
+    warnings: dict[str, str] = {}
+    for row in contacts.open_promises(operator).order_by("-created_at", "-id"):
+        where = "on this store" if row.lease_id is not None else "without a store"
+        warnings.setdefault(
+            str(row.lease_id or ""),
+            f"Saving a promise closes the open promise of "
+            f"{format_amount(row.promised_amount or ZERO)} by {row.promised_date} {where} "
+            "as Rescheduled.",
+        )
+    return warnings
+
+
 def _uuid(value: str | None) -> uuid.UUID | None:
     try:
         return uuid.UUID(value or "")
@@ -270,6 +292,8 @@ def _add(
         form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
     if data is not None:
         drop_payment_data(form)
+    warnings = supersede_warnings(operator)
+    chosen = data.get("lease", "") if data is not None else form.initial.get("lease", "")
     return render(
         request,
         "ledger/operators/contact_form.html",
@@ -277,6 +301,8 @@ def _add(
             "operator": operator,
             "form": form,
             "promise_values": known,
+            "supersede_warning": warnings.get(str(chosen), ""),
+            "supersede_warnings": warnings,
             "back_url": back_url,
             "title": title,
         },
@@ -471,3 +497,113 @@ def contact_delete(request: HttpRequest, pk: str) -> HttpResponseBase:
             return _refused(request, entry, outcome.message)
         form.add_error("reason", outcome.message)
     return _entry_page(request, "ledger/contacts/delete.html", entry, form)
+
+
+# --- Kept, Reschedule, Broken on one promise (PLAN-012c-b D2) -------------------------------
+
+
+def local_next(value: str | None) -> str:
+    """``value`` when it is a path on this site (no scheme, no host, no ``//``), without
+    its fragment; else ``""``."""
+    target = (value or "").split("#", 1)[0]
+    if not target.startswith("/") or target.startswith(("//", "/\\")):
+        return ""
+    if not url_has_allowed_host_and_scheme(target, allowed_hosts=set()):
+        return ""
+    return target
+
+
+def _outcome_leases(promise: ContactEntry) -> list[tuple[str, str]]:
+    """The store choice of the outcome form: only for a promise without a store whose
+    operator has more than one lease in effect (an entry must then name one)."""
+    if promise.lease_id is not None:
+        return []
+    active = list(contacts.active_leases(promise.operator_id, timezone.localdate()))
+    if len(active) < 2:
+        return []
+    return [(str(row.pk), f"Store {row.store.external_label}") for row in active]
+
+
+OUTCOME_TITLES = {
+    ContactStatus.KEPT.value: "Kept",
+    ContactStatus.RESCHEDULED.value: "Reschedule",
+    ContactStatus.BROKEN.value: "Broken",
+}
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def contact_outcome(request: HttpRequest, pk: str, outcome: str) -> HttpResponseBase:
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    if outcome not in contacts.OUTCOMES:
+        raise Http404
+    promise = _entry(pk)
+    if promise.kind != ContactKind.PROMISE:
+        raise Http404
+    back = local_next(request.POST.get("next") or request.GET.get("next")) or reverse(
+        "ledger:operators:detail", kwargs={"pk": promise.operator_id}
+    )
+    if promise.operator.archived_at is not None:
+        messages.error(request, contacts.ARCHIVED)
+        return redirect(f"{back}#contacts")
+    if promise.deleted_at is not None:
+        messages.error(request, contacts.DELETED)
+        return redirect(f"{back}#contacts")
+    if promise.status != ContactStatus.OPEN:
+        messages.error(request, contacts.PROMISE_NOT_OPEN)
+        return redirect(f"{back}#contact-{promise.pk}")
+    leases = _outcome_leases(promise)
+    if request.method != "POST":
+        form = ContactOutcomeForm(
+            outcome=outcome,
+            leases=leases,
+            initial={
+                "kind": ContactKind.CALL,
+                "happened_on": timezone.localdate(),
+                "promised_date": promise.promised_date,
+                "promised_amount": promise.promised_amount,
+            },
+        )
+    else:
+        form = ContactOutcomeForm(request.POST, outcome=outcome, leases=leases)
+        if form.is_valid():
+            values = form.cleaned_data
+            added = contacts.add_entry(
+                promise.operator_id,
+                contacts.ContactInput(
+                    kind=(
+                        ContactKind.PROMISE
+                        if outcome == ContactStatus.RESCHEDULED
+                        else values["kind"]
+                    ),
+                    happened_on=values["happened_on"],
+                    body=values["body"],
+                    promised_date=values.get("promised_date"),
+                    promised_amount=values.get("promised_amount"),
+                    lease=promise.lease_id or _uuid(values.get("lease")),
+                    previous=promise.pk,
+                    outcome=outcome,
+                ),
+                actor=_actor(request),
+            )
+            if added.ok and added.entry is not None:
+                messages.success(request, added.message)
+                return redirect(f"{back}#contact-{added.entry.pk}")
+            if added.field in (None, "previous"):
+                messages.error(request, added.message)
+                return redirect(f"{back}#contact-{promise.pk}")
+            form.add_error(added.field if added.field in form.fields else None, added.message)
+        drop_payment_data(form)
+    return render(
+        request,
+        "ledger/contacts/outcome.html",
+        {
+            "entry": promise,
+            "form": form,
+            "outcome": outcome,
+            "action": OUTCOME_TITLES[outcome],
+            "back_url": back,
+        },
+    )

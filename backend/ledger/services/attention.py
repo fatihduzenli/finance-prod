@@ -146,6 +146,8 @@ class Item:
     url: str
     since: date | None
     operator_id: uuid.UUID | None = None
+    #: A broken promise's entry: its Kept, Reschedule and Broken actions (PLAN-012c-b D2).
+    promise_id: uuid.UUID | None = None
 
 
 @dataclass(slots=True)
@@ -243,6 +245,7 @@ def _promises(
             url=_operator_url(promise.operator_id, "#contacts"),
             since=promise.promised_date,
             operator_id=promise.operator_id,
+            promise_id=promise.pk,
         )
         for promise in contacts.broken_promises(today, operator=operator)
         if promise.promised_amount is not None

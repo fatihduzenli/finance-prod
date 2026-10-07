@@ -26,6 +26,7 @@ from ledger.models import (
     AuditLog,
     ContactEntry,
     ContactKind,
+    Lease,
     Operator,
     Payment,
     PaymentKind,
@@ -66,6 +67,7 @@ def promise(
     by: date = YESTERDAY,
     amount: str = "1500.00",
     actor: User | None = None,
+    lease: Lease | None = None,
 ) -> ContactEntry:
     outcome = contacts.add_entry(
         operator.pk,
@@ -75,6 +77,7 @@ def promise(
             body="Will pay by Monday.",
             promised_date=by,
             promised_amount=D(amount),
+            lease=lease.pk if lease is not None else None,
         ),
         actor=actor,
     )
@@ -257,11 +260,16 @@ def recorded(entry: ContactEntry, on: date, hour: int = 12) -> ContactEntry:
 
 def owners_scenario() -> tuple[Operator, list[ContactEntry]]:
     """Staging, 2026-10-06: three promises recorded today for an operator owing nothing,
-    promised 2026-10-05 and 2026-10-01 (past) and 2026-10-07 (future)."""
+    promised 2026-10-05 and 2026-10-01 (past) and 2026-10-07 (future); on three stores,
+    since a lease holds one open promise (PLAN-012c-b D3)."""
     operator = an_operator("Sena")
     entries = [
-        recorded(promise(operator, on=TODAY, by=by), TODAY)
-        for by in (date(2026, 10, 5), date(2026, 10, 7), date(2026, 10, 1))
+        recorded(promise(operator, on=TODAY, by=by, lease=a_lease(a_store(label), operator)), TODAY)
+        for label, by in (
+            ("S5", date(2026, 10, 5)),
+            ("S7", date(2026, 10, 7)),
+            ("S1", date(2026, 10, 1)),
+        )
     ]
     return operator, entries
 
@@ -272,8 +280,8 @@ def test_the_owners_scenario_lists_both_past_promises_oldest_first_without_a_bal
     assert contacts.broken_promises(TODAY, operator=operator.pk) == [first, fifth]
     items = [item for item in attention.attention(TODAY).items if item.kind == "broken_promise"]
     assert [item.text for item in items] == [
-        "Promise to pay $1,500.00 by 2026-10-01: Sena, not kept",
-        "Promise to pay $1,500.00 by 2026-10-05: Sena, not kept",
+        "Promise to pay $1,500.00 by 2026-10-01: Sena on store S1: owes $0.00, not kept",
+        "Promise to pay $1,500.00 by 2026-10-05: Sena on store S5: owes $0.00, not kept",
     ]
     assert [item.since for item in items] == [date(2026, 10, 1), date(2026, 10, 5)]
     assert seventh not in contacts.broken_promises(TODAY)
@@ -285,8 +293,12 @@ def test_the_dashboard_shows_the_owners_two_broken_promises(today: date, role: R
     client, _ = client_for(role)
     page = client.get("/").content.decode()
     assert 'id="attention-none"' not in page
-    first = page.index("Promise to pay $1,500.00 by 2026-10-01: Sena, not kept")
-    fifth = page.index("Promise to pay $1,500.00 by 2026-10-05: Sena, not kept")
+    first = page.index(
+        "Promise to pay $1,500.00 by 2026-10-01: Sena on store S1: owes $0.00, not kept"
+    )
+    fifth = page.index(
+        "Promise to pay $1,500.00 by 2026-10-05: Sena on store S5: owes $0.00, not kept"
+    )
     assert first < fifth
     assert "by 2026-10-07" not in page
     assert page.count(f'href="/operators/{operator.pk}/#contacts"') == 2
@@ -303,8 +315,12 @@ def test_the_operator_page_shows_the_owners_broken_promises_as_banners(today: da
         page.index('id="attention"') : page.index("</section>", page.index('id="attention"'))
     ]
     assert banners.count('data-kind="broken_promise"') == 2
-    assert "Promise to pay $1,500.00 by 2026-10-01: Sena, not kept" in banners
-    assert "Promise to pay $1,500.00 by 2026-10-05: Sena, not kept" in banners
+    assert (
+        "Promise to pay $1,500.00 by 2026-10-01: Sena on store S1: owes $0.00, not kept" in banners
+    )
+    assert (
+        "Promise to pay $1,500.00 by 2026-10-05: Sena on store S5: owes $0.00, not kept" in banners
+    )
     assert "by 2026-10-07" not in banners
     assert "Other" not in banners
 

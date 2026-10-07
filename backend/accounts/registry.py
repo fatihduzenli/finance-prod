@@ -198,6 +198,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # PLAN-012c-b D2: Kept, Reschedule or Broken on an open promise needs billing; the
+    # view refuses the form's GET below billing too.
+    "ledger:contacts:outcome": RouteRule(min_role=Role.BILLING, methods=POST),
     # Calendar entries (PLAN-011b D8, D10): billing; the author changes their own entry,
     # an admin any (checked by the view and the service). The views refuse the forms'
     # GET below billing too.

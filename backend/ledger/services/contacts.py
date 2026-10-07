@@ -19,9 +19,16 @@ deleted promise counts for nothing: it is never open, kept or broken.
 records it (:func:`record_outcome`, called by :func:`add_entry` with ``previous`` and
 ``outcome``): ``kept`` (``closed_by`` names the new entry), ``rescheduled`` (the new entry
 must itself be a promise; a date or amount it leaves out is the old promise's) or
-``broken``. A payment keeps it automatically (:func:`close_kept_by_payment`, and
+``broken``; ``open`` (or none), "Still open", records the entry and leaves the promise
+as it is (PLAN-012c-b D1). A payment keeps it automatically (:func:`close_kept_by_payment`, and
 :func:`close_kept` as the daily sweep): ``kept`` with ``kept_by_payment`` set and
 ``closed_by`` null. Every other kind stays ``open``.
+
+**One open promise per lease** (PLAN-012c-b D3): a new promise closes every other open
+promise of the operator on the same lease (no lease is a bucket of its own) as
+``rescheduled``, audited with ``"auto": true``; ``closed_by`` is the new entry when it
+records no other outcome, else the next newer promise closed here (``closed_by`` is one to
+one), else null.
 
 **A payment keeps a promise** when all of these hold: the payment is ``settled`` and not a
 refund; its charge or invoice is billed to the promise's operator; when the promise names
@@ -36,7 +43,7 @@ it is a promise, not deleted, with status ``open``, its ``promised_date`` is bef
 above, read again so that a payment the sweep has not reached yet still counts). Whatever
 the balance. It is an attention item (:mod:`ledger.services.attention`) from the day after
 its promised date until an outcome is recorded. The read is one query whatever the number
-of promises.
+of promises, and it keeps the most recently recorded broken promise per (operator, lease).
 """
 
 from __future__ import annotations
@@ -78,6 +85,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services.csv_export import CsvWriter
+from ledger.services.leases import format_amount
 from ledger.validators import contains_bank_routing_pattern, contains_card_number, visible_text
 
 ENTITY_CONTACT = "contact_entry"
@@ -93,6 +101,8 @@ OUTCOMES: tuple[str, ...] = (
     ContactStatus.RESCHEDULED.value,
     ContactStatus.BROKEN.value,
 )
+#: "Still open (no change)" (PLAN-012c-b D1): the entry leaves the previous promise as it is.
+STILL_OPEN = ContactStatus.OPEN.value
 
 BODY_REQUIRED = "A note is required: say what was said or agreed."
 BODY_PAYMENT_DATA = "This text may not contain card or account numbers."
@@ -102,7 +112,10 @@ AMOUNT_POSITIVE = "The promised amount must be more than zero."
 AMOUNT_TOO_LARGE = "The promised amount is too large."
 KIND_REQUIRED = "Choose what kind of contact this was."
 PREVIOUS_UNKNOWN = "That promise is not an open promise of this operator."
-OUTCOME_UNKNOWN = "Choose what happened to the previous promise: kept, rescheduled or broken."
+OUTCOME_UNKNOWN = (
+    "Choose what happened to the previous promise: still open, kept, rescheduled or broken."
+)
+PROMISE_NOT_OPEN = "This promise is no longer open; its outcome is already recorded."
 RESCHEDULE_NEEDS_PROMISE = "A rescheduled promise needs a new promise: choose Promise to pay."
 LEASE_REQUIRED = "This operator has more than one store: choose the store this is about."
 LEASE_UNKNOWN = "That store is not one of this operator's leases."
@@ -145,7 +158,8 @@ class ContactInput:
     lease: uuid.UUID | None = None
     #: An open promise of the operator whose outcome this entry records (D5).
     previous: uuid.UUID | None = None
-    #: ``kept``, ``rescheduled`` or ``broken``; given with ``previous`` only.
+    #: ``kept``, ``rescheduled`` or ``broken``, given with ``previous`` only; ``open`` or
+    #: ``""`` leaves ``previous`` open (PLAN-012c-b D1).
     outcome: str = ""
 
 
@@ -335,15 +349,18 @@ def _outcome_state(entry: ContactEntry) -> dict[str, object]:
 
 
 def add_entry(operator_id: uuid.UUID, data: ContactInput, *, actor: User | None) -> AddOutcome:
-    """Record one entry, and the outcome of ``data.previous`` when there is one. Refusals
-    change nothing and name the field. The body is stored as :func:`visible_text`."""
+    """Record one entry, and the outcome of ``data.previous`` when there is one (``open``
+    or ``""`` leaves it open). A new promise closes the other open promises of its lease
+    (the module docstring's rule). Refusals change nothing and name the field. The body is
+    stored as :func:`visible_text`."""
     body = visible_text(data.body or "")
     if data.kind not in ContactKind.values:
         return AddOutcome(False, KIND_REQUIRED, "kind")
-    if (data.previous is None) != (not data.outcome) or (
-        data.outcome and data.outcome not in OUTCOMES
+    if data.outcome not in ("", STILL_OPEN, *OUTCOMES) or (
+        data.previous is None and data.outcome in OUTCOMES
     ):
         return AddOutcome(False, OUTCOME_UNKNOWN, "outcome")
+    closing = data.outcome if data.outcome in OUTCOMES else ""
     with transaction.atomic():
         operator = Operator.objects.select_for_update().get(pk=operator_id)
         if operator.archived_at is not None:
@@ -358,7 +375,7 @@ def add_entry(operator_id: uuid.UUID, data: ContactInput, *, actor: User | None)
             if previous is None:
                 return AddOutcome(False, PREVIOUS_UNKNOWN, "previous")
         promised_date, promised_amount = data.promised_date, data.promised_amount
-        if previous is not None and data.outcome == ContactStatus.RESCHEDULED:
+        if previous is not None and closing == ContactStatus.RESCHEDULED:
             if data.kind != ContactKind.PROMISE:
                 return AddOutcome(False, RESCHEDULE_NEEDS_PROMISE, "kind")
             if promised_date is None:
@@ -389,25 +406,84 @@ def add_entry(operator_id: uuid.UUID, data: ContactInput, *, actor: User | None)
             entry.save()
         except ValidationError:
             return AddOutcome(False, BODY_PAYMENT_DATA, "body")
-        _audit(actor, "contact_entry.created", entry.pk, None, _state(entry))
-        if previous is not None:
-            record_outcome(previous, data.outcome, entry, actor=actor)
+        created = _state(entry)
+        if previous is not None and not closing:
+            created |= {"previous": str(previous.pk), "outcome": STILL_OPEN}
+        _audit(actor, "contact_entry.created", entry.pk, None, created)
+        if previous is not None and closing:
+            record_outcome(previous, closing, entry, actor=actor)
+        superseded = _close_superseded(entry, actor=actor)
+    if superseded:
+        return AddOutcome(True, _superseded_message(superseded), entry=entry)
     return AddOutcome(True, ADDED, entry=entry)
 
 
+def _promise_words(promise: ContactEntry) -> str:
+    return f"{format_amount(promise.promised_amount or Decimal(0))} by {promise.promised_date}"
+
+
+def _superseded_message(closed: list[ContactEntry]) -> str:
+    if len(closed) == 1:
+        earlier = f"the earlier promise of {_promise_words(closed[0])} is"
+    else:
+        earlier = "the earlier promises of " + ", ".join(_promise_words(row) for row in closed)
+        earlier += " are"
+    return f"Promise recorded; {earlier} closed as Rescheduled."
+
+
+def _close_superseded(entry: ContactEntry, *, actor: User | None) -> list[ContactEntry]:
+    """PLAN-012c-b D3: close every other open promise on the bucket of the new promise
+    ``entry`` as ``rescheduled``, newest first; each audited with ``"auto": true``. The
+    caller holds the operator's row lock. Returns them, newest first."""
+    if entry.kind != ContactKind.PROMISE:
+        return []
+    candidates = list(
+        ContactEntry.objects.select_for_update()
+        .filter(
+            _open_promise(),
+            Q(lease__isnull=True) if entry.lease_id is None else Q(lease_id=entry.lease_id),
+            operator_id=entry.operator_id,
+        )
+        .exclude(pk=entry.pk)
+        .order_by("-created_at", "-id")
+    )
+    closer: ContactEntry | None = entry
+    for promise in candidates:
+        if closer is not None and ContactEntry.objects.filter(closed_by=closer).exists():
+            closer = None
+        record_outcome(
+            promise, ContactStatus.RESCHEDULED, closer, actor=actor, extra={"auto": True}
+        )
+        closer = promise
+    return candidates
+
+
 def record_outcome(
-    promise: ContactEntry, outcome: str, entry: ContactEntry, *, actor: User | None
+    promise: ContactEntry,
+    outcome: str,
+    entry: ContactEntry | None,
+    *,
+    actor: User | None,
+    extra: Mapping[str, object] | None = None,
 ) -> None:
     """Close the open ``promise`` with ``outcome`` (``kept``, ``rescheduled`` or
-    ``broken``), recorded by the later ``entry``; audited. The caller holds the promise's
-    row lock and has checked that a rescheduling entry is a promise."""
+    ``broken``), recorded by the later ``entry`` (``None`` only for an automatic close
+    whose entry already closes another promise); audited, with ``extra`` in the audit's
+    after. The caller holds the promise's row lock and has checked that a rescheduling
+    entry is a promise."""
     if outcome not in OUTCOMES or promise.status != ContactStatus.OPEN or promise.deleted_at:
         raise ValueError("record_outcome needs an open promise and a known outcome")
     before = _outcome_state(promise)
     promise.status = outcome
     promise.closed_by = entry
     promise.save(update_fields=["status", "closed_by"])
-    _audit(actor, "contact_entry.outcome_recorded", promise.pk, before, _outcome_state(promise))
+    _audit(
+        actor,
+        "contact_entry.outcome_recorded",
+        promise.pk,
+        before,
+        {**_outcome_state(promise), **(extra or {})},
+    )
 
 
 def edit_entry(
@@ -610,14 +686,20 @@ def _open_promises(payments: QuerySet[Payment], *, kept: bool) -> QuerySet[Conta
 
 def broken_promises(today: date, operator: uuid.UUID | None = None) -> list[ContactEntry]:
     """The promises broken on ``today`` (the module docstring's rule), oldest promised
-    date first; with ``operator``, only that operator's. One query."""
-    return list(
+    date first; with ``operator``, only that operator's. At most one per (operator, lease)
+    (PLAN-012c-b D3): the most recently recorded, even if the one-open-promise rule were
+    ever bypassed. One query."""
+    rows = (
         _open_promises(Payment.objects.all(), kept=False)
         .filter(promised_date__lt=today)
         .filter(**({"operator": operator} if operator is not None else {}))
         .select_related("operator", "lease__store")
-        .order_by("promised_date", "created_at", "id")
+        .order_by("-created_at", "-id")
     )
+    newest: dict[tuple[uuid.UUID, uuid.UUID | None], ContactEntry] = {}
+    for row in rows:
+        newest.setdefault((row.operator_id, row.lease_id), row)
+    return sorted(newest.values(), key=lambda row: (row.promised_date, row.created_at, row.pk))
 
 
 def _first_keeper(promise: ContactEntry, payments: QuerySet[Payment]) -> Payment | None:

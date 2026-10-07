@@ -710,6 +710,144 @@ def test_the_item_migration_over_existing_rows_on_postgresql(
     _item_round_trip(repo_root, scratch_postgresql_url)
 
 
+# --- PLAN-012c-b: one open promise per lease over existing rows --------------------------
+#
+# Seeds promises at ``ledger.0032``: three open on lease A (the middle one already closes an
+# older rescheduled promise), a deleted open one on lease A, one open on lease B and two
+# open without a lease. Migrates forward, back (a no-op) and forward again on both engines.
+
+STATE_BEFORE_ONE_OPEN = (("ledger", "0032_builder_item"),)
+ONE_OPEN_MIGRATION = ("ledger", "0033_one_open_promise_per_lease")
+PROMISE_ROWS = (
+    "SELECT e.body, e.status, COALESCE(c.body, '-'), "
+    "CASE WHEN e.deleted_at IS NULL THEN 'live' ELSE 'deleted' END "
+    "FROM contact_entries e LEFT JOIN contact_entries c ON c.id = e.closed_by_id "
+    "ORDER BY e.body"
+)
+
+
+def _migration_audits(url: str) -> list[tuple[str, str]]:
+    """The outcome audit rows as (the promise's body, the after as text), by body; ids
+    compared as UUIDs (sqlite stores them without dashes)."""
+    bodies = {
+        uuid.UUID(key): body for key, body in _rows(url, "SELECT id, body FROM contact_entries")
+    }
+    audits = _rows(
+        url,
+        "SELECT entity_id, after FROM audit_log WHERE action = 'contact_entry.outcome_recorded'",
+    )
+    return sorted((bodies[uuid.UUID(key)], after) for key, after in audits)
+
+
+def seed_before_one_open() -> None:
+    """Seed the promises above with the models of ``STATE_BEFORE_ONE_OPEN``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from datetime import UTC, date, datetime, timedelta
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_ONE_OPEN)).apps
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Sena LLC")
+    store_model = apps.get_model("ledger", "Store")
+    lease_model = apps.get_model("ledger", "Lease")
+    leases = {
+        label: lease_model.objects.create(
+            store=store_model.objects.create(external_label=label, state="GA", status="active"),
+            operator=operator,
+            debit_day=5,
+            collection_status="active",
+            payment_channel="wire",
+        )
+        for label in ("A", "B")
+    }
+    admin = apps.get_model("auth", "User").objects.create(username="seed-admin")
+    entries = apps.get_model("ledger", "ContactEntry")
+    start = datetime(2026, 10, 1, 12, tzinfo=UTC)
+    made = {}
+    for minute, (body, lease) in enumerate(
+        (
+            ("X", "A"),
+            ("A1", "A"),
+            ("A2", "A"),
+            ("A3", "A"),
+            ("Adel", "A"),
+            ("B1", "B"),
+            ("N1", None),
+            ("N2", None),
+        )
+    ):
+        row = entries.objects.create(
+            operator=operator,
+            lease=leases[lease] if lease else None,
+            kind="promise",
+            happened_on=date(2026, 10, 1),
+            promised_date=date(2026, 10, 5),
+            promised_amount=Decimal("250.00"),
+            body=body,
+        )
+        entries.objects.filter(pk=row.pk).update(created_at=start + timedelta(minutes=minute))
+        made[body] = row
+    entries.objects.filter(pk=made["X"].pk).update(status="rescheduled", closed_by=made["A2"])
+    entries.objects.filter(pk=made["Adel"].pk).update(
+        deleted_at=start, deleted_by=admin, delete_reason="Wrong operator."
+    )
+
+
+def _one_open_round_trip(repo_root: Path, url: str) -> None:
+    _migrate_to(repo_root, url, *STATE_BEFORE_ONE_OPEN)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_one_open as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    before = _rows(url, PROMISE_ROWS)
+    assert [row[1] for row in before].count("open") == 7
+    after = [
+        ("A1", "rescheduled", "-", "live"),  # A2 already closes X: closed_by stays null
+        ("A2", "rescheduled", "A3", "live"),
+        ("A3", "open", "-", "live"),
+        ("Adel", "open", "-", "deleted"),
+        ("B1", "open", "-", "live"),
+        ("N1", "rescheduled", "N2", "live"),
+        ("N2", "open", "-", "live"),
+        ("X", "rescheduled", "A2", "live"),
+    ]
+
+    _migrate_to(repo_root, url, ONE_OPEN_MIGRATION)
+    assert _rows(url, PROMISE_ROWS) == after
+    audits = _migration_audits(url)
+    assert [row[0] for row in audits] == ["A1", "A2", "N1"]
+    assert all("0033" in row[1] and "rescheduled" in row[1] for row in audits)
+
+    # The reverse is a no-op; forward again changes nothing and writes no audit row.
+    _migrate_to(repo_root, url, *STATE_BEFORE_ONE_OPEN)
+    assert _rows(url, PROMISE_ROWS) == after
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, PROMISE_ROWS) == after
+    assert _migration_audits(url) == audits
+
+
+def test_the_one_open_promise_migration_over_existing_rows_on_sqlite(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    _one_open_round_trip(repo_root, f"sqlite:///{tmp_path / 'one-open.sqlite3'}")
+
+
+@requires_postgresql
+def test_the_one_open_promise_migration_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    _one_open_round_trip(repo_root, scratch_postgresql_url)
+
+
 # --- Row 2 --------------------------------------------------------------------------
 
 

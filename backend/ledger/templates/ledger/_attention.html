@@ -1,10 +1,10 @@
-{% comment %}The attention list (docs/qa/PLAN-011b D6): each item links to the page that deals with it. "banners" shows them as the operator page's banners.{% endcomment %}
+{% comment %}The attention list (docs/qa/PLAN-011b D6): each item links to the page that deals with it. "banners" shows them as the operator page's banners. A broken promise carries Kept, Reschedule and Broken when "can_record_outcome" (billing; PLAN-012c-b D2).{% endcomment %}
 {% if attention.items %}
   <section class="attention{% if banners %} attention-banners{% endif %}" id="attention" aria-labelledby="attention-heading">
     <h2 id="attention-heading">Needs attention: {{ attention.items|length }}</h2>
     <ul class="attention-list">
       {% for item in attention.items %}
-        <li class="attention-item severity-{{ item.severity }}" data-kind="{{ item.kind }}"{% if banners %} role="status"{% endif %}><a href="{{ item.url }}">{{ item.text }}</a>{% if item.since %} <span class="muted">since {{ item.since|date:"Y-m-d" }}</span>{% endif %}</li>
+        <li class="attention-item severity-{{ item.severity }}" data-kind="{{ item.kind }}"{% if banners %} role="status"{% endif %}><a href="{{ item.url }}">{{ item.text }}</a>{% if item.since %} <span class="muted">since {{ item.since|date:"Y-m-d" }}</span>{% endif %}{% if item.promise_id and can_record_outcome %} {% include "ledger/contacts/_outcome_links.html" with promise_id=item.promise_id %}{% endif %}</li>
       {% endfor %}
     </ul>
     {% for label, count in attention.more_lines %}<p class="muted attention-more">And {{ count }} more {{ label }}.</p>{% endfor %}

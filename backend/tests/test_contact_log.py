@@ -606,7 +606,7 @@ def test_add_entry_on_a_store_whose_only_lease_is_not_in_effect(
         assert add_link(store) in page_of(client, f"/stores/{store.pk}/")
     client, _ = client_for(Role.BILLING)
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
-    assert f"<h1>Add contact: Acme, store 2477{suffix}</h1>" in form
+    assert f"<h1>Add entry: Acme, store 2477{suffix}</h1>" in form
     assert f'<option value="{lease.pk}" selected>Store 2477{label}</option>' in form
     response = client.post(
         f"/stores/{store.pk}/contacts/new/", contact_post(lease=str(lease.pk), body="Old lease.")
@@ -631,7 +631,7 @@ def test_the_lease_in_effect_wins_over_an_older_ended_one(today: date) -> None:
     assert contacts.store_contact_lease(store, TODAY) == current
     client, _ = client_for(Role.BILLING)
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
-    assert "<h1>Add contact: New, store 2477</h1>" in form
+    assert "<h1>Add entry: New, store 2477</h1>" in form
 
 
 def test_of_two_ended_leases_the_later_start_wins_then_the_later_creation(
@@ -646,7 +646,7 @@ def test_of_two_ended_leases_the_later_start_wins_then_the_later_creation(
     assert contacts.store_contact_lease(store, TODAY) == later
     client, _ = client_for(Role.BILLING)
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
-    assert "<h1>Add contact: Second, store 2477, lease ended 2024-06-30</h1>" in form
+    assert "<h1>Add entry: Second, store 2477, lease ended 2024-06-30</h1>" in form
     # A lease without a start comes last; between two, the later creation wins.
     other = a_store("2478")
     Lease.objects.filter(pk=undated.pk).update(store=other)
@@ -902,10 +902,9 @@ def test_the_form_asks_for_the_outcome_when_a_promise_is_open(today: date) -> No
     assert 'name="outcome"' in page and 'name="closes"' not in page
     assert f'<option value="{old.pk}" selected>$700.00 by 2026-10-09' in page
     assert '"amount": "700.00"' in page and '"date": "2026-10-09"' in page
-    response = client.post(f"/operators/{operator.pk}/contacts/new/", contact_post())
-    assert response.status_code == 200
-    assert "Choose kept, rescheduled or broken." in response.content.decode()
-    assert ContactEntry.objects.count() == 1
+    assert '<input type="radio" name="outcome" value="open"' in page
+    assert 'value="open" id="id_outcome_0" checked' in page
+    assert "Still open (no change)" in page
 
 
 def outcome_post(old: ContactEntry, outcome: str, **overrides: str) -> dict[str, str]:
@@ -994,7 +993,7 @@ def test_broken_closes_the_old_promise_and_the_new_entry_is_any_kind(today: date
 def test_an_outcome_without_a_promise_or_an_unknown_outcome_is_refused() -> None:
     operator = an_operator()
     old = promise(operator)
-    for previous, outcome in ((None, "kept"), (old.pk, ""), (old.pk, "forgotten")):
+    for previous, outcome in ((None, "kept"), (old.pk, "forgotten"), (None, "pending")):
         refused = contacts.add_entry(
             operator.pk,
             contacts.ContactInput(
@@ -1076,3 +1075,365 @@ def test_unknown_entries_are_404() -> None:
         "/stores/not-a-uuid/contacts/new/",
     ):
         assert client.get(path).status_code == 404, path
+
+
+# --- PLAN-012c-b: Still open, outcome buttons, one open promise per lease, Add entry -------
+
+
+def outcome_url(row: ContactEntry, outcome: str, next_path: str = "") -> str:
+    url = f"/contacts/{row.pk}/outcome/{outcome}/"
+    return f"{url}?next={next_path}" if next_path else url
+
+
+def outcome_form(**overrides: str) -> dict[str, str]:
+    return {"kind": "call", "happened_on": "2026-10-06", "body": "Spoke to them.", **overrides}
+
+
+def outcome_buttons(page: str, row: ContactEntry) -> list[str]:
+    return [
+        outcome
+        for outcome in ("kept", "rescheduled", "broken")
+        if f'href="/contacts/{row.pk}/outcome/{outcome}/?next=' in page
+    ]
+
+
+def test_still_open_records_the_entry_and_leaves_the_promise(today: date) -> None:
+    client, user = client_for(Role.BILLING)
+    operator = an_operator()
+    old = promise(operator, by=date(2026, 10, 9))
+    for body, extra in (("No news.", {"outcome": "open"}), ("Still waiting.", {})):
+        response = client.post(
+            f"/operators/{operator.pk}/contacts/new/",
+            contact_post(previous=str(old.pk), body=body, **extra),
+        )
+        assert response.status_code == 302, body
+        new = ContactEntry.objects.get(body=body)
+        old.refresh_from_db()
+        assert (old.status, old.closed_by) == (ContactStatus.OPEN, None)
+        audit = AuditLog.objects.get(action="contact_entry.created", entity_id=str(new.pk))
+        assert audit.after["previous"] == str(old.pk) and audit.after["outcome"] == "open"
+        assert audit.actor == user
+    assert not AuditLog.objects.filter(action="contact_entry.outcome_recorded").exists()
+
+
+@pytest.mark.parametrize("outcome", ["open", "kept", "rescheduled", "broken"])
+def test_the_previous_promise_block_takes_each_of_the_four_outcomes(
+    today: date, outcome: str
+) -> None:
+    operator = an_operator()
+    old = promise(operator, by=date(2026, 10, 9))
+    kind = ContactKind.PROMISE if outcome == "rescheduled" else ContactKind.CALL
+    added = contacts.add_entry(
+        operator.pk,
+        contacts.ContactInput(
+            kind=kind, happened_on=TODAY, body="Spoke.", previous=old.pk, outcome=outcome
+        ),
+        actor=None,
+    )
+    assert added.ok and added.message == contacts.ADDED, added.message
+    old.refresh_from_db()
+    assert old.status == outcome
+    assert old.closed_by == (None if outcome == "open" else added.entry)
+
+
+def test_the_buttons_are_on_every_open_promise_row_for_billing_only(today: date) -> None:
+    operator = an_operator()
+    store = a_store("2477")
+    lease = a_lease(store, operator)
+    open_row = promise(operator, lease=lease, by=date(2026, 10, 9))
+    kept = promise(operator, by=date(2026, 10, 9))
+    contacts.add_entry(
+        operator.pk,
+        contacts.ContactInput(
+            kind=ContactKind.CALL, happened_on=TODAY, body="Paid.", previous=kept.pk, outcome="kept"
+        ),
+        actor=None,
+    )
+    gone = deleted(promise(operator, by=date(2026, 10, 12)))
+    billing, _ = client_for(Role.BILLING)
+    viewer, _ = client_for(Role.VIEWER)
+    for path in (
+        f"/operators/{operator.pk}/",
+        f"/operators/{operator.pk}/contacts/",
+        f"/stores/{store.pk}/",
+        f"/stores/{store.pk}/contacts/",
+    ):
+        page = table_of(page_of(billing, path))
+        assert outcome_buttons(page, open_row) == ["kept", "rescheduled", "broken"], path
+        assert outcome_buttons(page, kept) == [] and outcome_buttons(page, gone) == [], path
+        assert "/outcome/" not in table_of(page_of(viewer, path)), path
+    # The link comes back to the page it was on.
+    page = page_of(billing, f"/stores/{store.pk}/")
+    assert f"/contacts/{open_row.pk}/outcome/kept/?next=%2Fstores%2F{store.pk}%2F" in page
+    # An archived operator's promise has none.
+    archived(operator)
+    assert outcome_buttons(page_of(billing, f"/operators/{operator.pk}/"), open_row) == []
+
+
+def test_kept_from_the_promise_closes_it_as_the_previous_promise_path_does(today: date) -> None:
+    client, user = client_for(Role.BILLING)
+    operator = an_operator()
+    lease = a_lease(operator=operator)
+    old = promise(operator, lease=lease, by=date(2026, 10, 9))
+    form = page_of(client, outcome_url(old, "kept", f"/operators/{operator.pk}/contacts/"))
+    assert "<h1>Kept: promise of" in form and 'name="promised_date"' not in form
+    assert '<option value="call" selected>Call</option>' in form
+    assert '<option value="promise"' not in form
+    assert 'value="2026-10-06"' in form
+    response = client.post(
+        outcome_url(old, "kept"),
+        outcome_form(kind="email", next=f"/operators/{operator.pk}/contacts/"),
+    )
+    new = ContactEntry.objects.get(body="Spoke to them.")
+    assert response.status_code == 302
+    assert response["Location"] == f"/operators/{operator.pk}/contacts/#contact-{new.pk}"
+    old.refresh_from_db()
+    assert (old.status, old.closed_by, old.kept_by_payment) == ("kept", new, None)
+    assert (new.kind, new.lease, new.author, new.happened_on) == ("email", lease, user, TODAY)
+    audit = AuditLog.objects.get(action="contact_entry.outcome_recorded", entity_id=str(old.pk))
+    assert audit.after == {"status": "kept", "closed_by": str(new.pk), "kept_by_payment": None}
+
+
+def test_reschedule_prefills_the_old_promise_and_takes_new_values(today: date) -> None:
+    client, _ = client_for(Role.BILLING)
+    operator = an_operator()
+    old = promise(operator, by=date(2026, 10, 9), amount="700.00")
+    form = page_of(client, outcome_url(old, "rescheduled"))
+    assert 'name="promised_date" value="2026-10-09"' in form
+    assert 'name="promised_amount" value="700.00"' in form
+    assert 'name="kind"' not in form
+    # Without a new date: refused, nothing written.
+    response = client.post(
+        outcome_url(old, "rescheduled"), outcome_form(promised_date="", promised_amount="700.00")
+    )
+    assert response.status_code == 200 and "This field is required." in response.content.decode()
+    assert ContactEntry.objects.count() == 1
+    response = client.post(
+        outcome_url(old, "rescheduled"),
+        outcome_form(promised_date="2026-10-20", promised_amount="350.00", body="Half later."),
+    )
+    new = ContactEntry.objects.get(body="Half later.")
+    assert response["Location"] == f"/operators/{operator.pk}/#contact-{new.pk}"
+    old.refresh_from_db()
+    assert (old.status, old.closed_by) == (ContactStatus.RESCHEDULED, new)
+    assert (new.kind, new.promised_date, new.promised_amount, new.status) == (
+        "promise",
+        date(2026, 10, 20),
+        D("350.00"),
+        "open",
+    )
+    # The rule's automatic close did not run: the only outcome is the reschedule's.
+    assert AuditLog.objects.filter(action="contact_entry.outcome_recorded").count() == 1
+
+
+def test_broken_from_the_attention_list_comes_back_to_the_dashboard(today: date) -> None:
+    client, _ = client_for(Role.BILLING)
+    operator = an_operator()
+    old = promise(operator, by=date(2026, 10, 1))
+    dashboard = page_of(client, "/")
+    assert outcome_buttons(dashboard, old) == ["kept", "rescheduled", "broken"]
+    assert f"/contacts/{old.pk}/outcome/broken/?next=%2F" in dashboard
+    banners = page_of(client, f"/operators/{operator.pk}/")
+    banners = banners[banners.index('id="attention"') : banners.index("</section>")]
+    assert outcome_buttons(banners, old) == ["kept", "rescheduled", "broken"]
+    response = client.post(
+        outcome_url(old, "broken", "/"), outcome_form(kind="visit", body="Nothing paid.")
+    )
+    new = ContactEntry.objects.get(body="Nothing paid.")
+    assert response["Location"] == f"/#contact-{new.pk}"
+    old.refresh_from_db()
+    assert (old.status, old.closed_by, new.kind) == (ContactStatus.BROKEN, new, "visit")
+    assert contacts.broken_promises(TODAY) == []
+    assert "/outcome/" not in page_of(client, "/")
+
+
+def test_an_outcome_on_a_promise_no_longer_open_is_refused_with_the_sentence(
+    today: date,
+) -> None:
+    client, _ = client_for(Role.BILLING)
+    operator = an_operator()
+    old = promise(operator, by=date(2026, 10, 9))
+    form = page_of(client, outcome_url(old, "kept"))  # opened, then closed meanwhile
+    assert 'id="contact-outcome-form"' in form
+    ContactEntry.objects.filter(pk=old.pk).update(status=ContactStatus.BROKEN)
+    for method in (client.get, client.post):
+        response = method(outcome_url(old, "kept"), outcome_form())
+        assert response.status_code == 302
+        assert response["Location"] == f"/operators/{operator.pk}/#contact-{old.pk}"
+    page = page_of(client, f"/operators/{operator.pk}/")
+    assert contacts.PROMISE_NOT_OPEN in page
+    assert ContactEntry.objects.count() == 1
+    gone = deleted(promise(operator, by=date(2026, 10, 10)))
+    response = client.post(outcome_url(gone, "kept"), outcome_form())
+    assert response.status_code == 302 and ContactEntry.objects.count() == 2
+    assert contacts.DELETED in page_of(client, f"/operators/{operator.pk}/")
+    live = promise(operator, by=date(2026, 10, 11))
+    archived(operator)
+    response = client.post(outcome_url(live, "kept"), outcome_form())
+    assert response.status_code == 302 and ContactEntry.objects.count() == 3
+    live.refresh_from_db()
+    assert live.status == ContactStatus.OPEN
+
+
+def test_the_outcome_form_refuses_a_card_number_a_promise_kind_and_unknown_routes(
+    today: date,
+) -> None:
+    client, _ = client_for(Role.BILLING)
+    operator = an_operator()
+    old = promise(operator, by=date(2026, 10, 9))
+    response = client.post(outcome_url(old, "kept"), outcome_form(body=f"Card {CARD}"))
+    assert response.status_code == 200
+    assert CARD not in response.content.decode()
+    response = client.post(outcome_url(old, "broken"), outcome_form(kind="promise"))
+    assert response.status_code == 200 and "Select a valid choice." in response.content.decode()
+    assert ContactEntry.objects.count() == 1
+    old.refresh_from_db()
+    assert old.status == ContactStatus.OPEN
+    call = entry(operator)
+    for path in (
+        f"/contacts/{uuid.uuid4()}/outcome/kept/",
+        "/contacts/not-a-uuid/outcome/kept/",
+        f"/contacts/{call.pk}/outcome/kept/",
+        f"/contacts/{old.pk}/outcome/open/",
+        f"/contacts/{old.pk}/outcome/forgotten/",
+    ):
+        assert client.get(path).status_code == 404, path
+
+
+def test_an_outcome_on_a_promise_without_a_store_asks_the_store_when_two_are_in_effect(
+    today: date,
+) -> None:
+    client, _ = client_for(Role.BILLING)
+    operator = an_operator()
+    old = promise(operator, by=date(2026, 10, 9))
+    first, second = a_lease(operator=operator), a_lease(operator=operator)
+    form = page_of(client, outcome_url(old, "kept"))
+    assert 'name="lease"' in form
+    response = client.post(outcome_url(old, "kept"), outcome_form())
+    assert response.status_code == 200 and ContactEntry.objects.count() == 1
+    client.post(outcome_url(old, "kept"), outcome_form(lease=str(second.pk)))
+    new = ContactEntry.objects.get(body="Spoke to them.")
+    assert new.lease == second
+    old.refresh_from_db()
+    assert old.status == ContactStatus.KEPT
+    # A promise with a store keeps it; no choice is offered.
+    on_first = promise(operator, lease=first, by=date(2026, 10, 9))
+    assert 'name="lease"' not in page_of(client, outcome_url(on_first, "kept"))
+
+
+def test_a_new_promise_closes_the_open_promise_of_its_lease_as_rescheduled(today: date) -> None:
+    client, user = client_for(Role.BILLING)
+    operator = an_operator()
+    store = a_store("2477")
+    # One lease in effect, so an entry may name no store; the other lease is pending.
+    lease, other = a_lease(store, operator), a_lease(operator=operator, status="prospective")
+    old = promise(operator, lease=lease, by=date(2026, 10, 9), amount="700.00")
+    elsewhere = promise(operator, lease=other, by=date(2026, 10, 9))
+    no_store = promise(operator, by=date(2026, 10, 9))
+    gone = deleted(promise(operator, lease=lease, by=date(2026, 10, 12)))
+    old.refresh_from_db()
+    assert old.status == ContactStatus.RESCHEDULED and old.closed_by == gone
+    ContactEntry.objects.filter(pk=old.pk).update(status=ContactStatus.OPEN, closed_by=None)
+    # The store form warns beforehand.
+    form = page_of(client, f"/stores/{store.pk}/contacts/new/")
+    warning = (
+        "Saving a promise closes the open promise of $700.00 by 2026-10-09 on this store "
+        "as Rescheduled."
+    )
+    assert warning in form
+    assert form.index('id="promise-supersede"') < form.index('name="promised_date"')
+    response = client.post(
+        f"/stores/{store.pk}/contacts/new/",
+        contact_post(
+            kind="promise",
+            promised_date="2026-10-20",
+            promised_amount="500.00",
+            lease=str(lease.pk),
+            previous=str(no_store.pk),
+            outcome="open",
+            body="New date.",
+        ),
+    )
+    assert response.status_code == 302
+    new = ContactEntry.objects.get(body="New date.")
+    old.refresh_from_db()
+    assert (old.status, old.closed_by) == (ContactStatus.RESCHEDULED, new)
+    message = (
+        "Promise recorded; the earlier promise of $700.00 by 2026-10-09 is closed as Rescheduled."
+    )
+    assert message in page_of(client, f"/stores/{store.pk}/")
+    for untouched in (elsewhere, no_store, gone):
+        untouched.refresh_from_db()
+        assert untouched.closed_by != new
+    assert (elsewhere.status, no_store.status) == (ContactStatus.OPEN, ContactStatus.OPEN)
+    audit = AuditLog.objects.filter(
+        action="contact_entry.outcome_recorded", entity_id=str(old.pk)
+    ).latest("at")
+    assert audit.actor == user
+    assert audit.after == {
+        "status": "rescheduled",
+        "closed_by": str(new.pk),
+        "kept_by_payment": None,
+        "auto": True,
+    }
+    # The no-store bucket is its own: a promise without a store closes only no_store.
+    added = contacts.add_entry(
+        operator.pk,
+        contacts.ContactInput(
+            kind=ContactKind.PROMISE,
+            happened_on=TODAY,
+            body="No store.",
+            promised_date=date(2026, 10, 25),
+            promised_amount=D("100.00"),
+        ),
+        actor=None,
+    )
+    no_store.refresh_from_db()
+    assert no_store.status == ContactStatus.RESCHEDULED and no_store.closed_by == added.entry
+    elsewhere.refresh_from_db()
+    new.refresh_from_db()
+    assert (elsewhere.status, new.status) == (ContactStatus.OPEN, ContactStatus.OPEN)
+
+
+def test_an_entry_closing_another_promise_leaves_the_auto_closed_one_without_closed_by(
+    today: date,
+) -> None:
+    operator = an_operator()
+    lease_a, lease_b = a_lease(operator=operator), a_lease(operator=operator)
+    on_a = promise(operator, lease=lease_a, by=date(2026, 10, 9))
+    on_b = promise(operator, lease=lease_b, by=date(2026, 10, 9), amount="300.00")
+    # Reschedule the promise of lease A onto lease B: it closes A by the outcome and B by
+    # the rule; closed_by is one to one, so B's names nothing and its audit says auto.
+    added = contacts.add_entry(
+        operator.pk,
+        contacts.ContactInput(
+            kind=ContactKind.PROMISE,
+            happened_on=TODAY,
+            body="Moved.",
+            lease=lease_b.pk,
+            previous=on_a.pk,
+            outcome="rescheduled",
+        ),
+        actor=None,
+    )
+    assert added.ok and added.message.startswith("Promise recorded; the earlier promise of $300")
+    on_a.refresh_from_db()
+    on_b.refresh_from_db()
+    assert (on_a.status, on_a.closed_by) == (ContactStatus.RESCHEDULED, added.entry)
+    assert (on_b.status, on_b.closed_by) == (ContactStatus.RESCHEDULED, None)
+
+
+def test_the_add_buttons_and_the_form_say_add_entry(today: date) -> None:
+    client, _ = client_for(Role.BILLING)
+    operator = an_operator("Acme")
+    for path in (f"/operators/{operator.pk}/", f"/operators/{operator.pk}/contacts/"):
+        page = page_of(client, path)
+        assert '<a class="btn" id="add-contact"' in page and ">Add entry</a>" in page, path
+        assert "Add contact" not in page, path
+    form = form_page(client, operator)
+    assert "Add entry: Acme | Finance</title>" in form and "<h1>Add entry: Acme</h1>" in form
+
+
+def test_the_outcome_route_is_registered_for_billing() -> None:
+    rule = registry.rule_for("ledger:contacts:outcome")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}

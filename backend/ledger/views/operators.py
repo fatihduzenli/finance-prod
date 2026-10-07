@@ -364,6 +364,8 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
             # PLAN-011b D6, D7: the operator's own attention items as banners, and the
             # latest contact log entries.
             "attention": attention.attention(timezone.localdate(), operator=operator.pk),
+            # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
+            "can_record_outcome": billing and active,
             "contact_rows": contact_log.log_rows(
                 request,
                 list(

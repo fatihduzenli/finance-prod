@@ -140,7 +140,7 @@
 
   <h2 id="contacts">Contact log</h2>
   <p class="actions">
-    {% if can_add_contact %}<a class="btn" id="add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Add contact</a>{% endif %}
+    {% if can_add_contact %}<a class="btn" id="add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Add entry</a>{% endif %}
     <a class="btn" id="all-contacts" href="{% url 'ledger:operators:contacts' pk=operator.pk %}">All entries</a>
     <a class="btn" id="export-contacts" href="{% url 'ledger:operators:contacts_export' pk=operator.pk %}">Export CSV</a>
   </p>

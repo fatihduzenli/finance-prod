@@ -470,7 +470,14 @@ current. **Promises** close by themselves: when a settled, non-refund payment of
 promised amount settles on that lease (or on the operator, for an entry without a store) between
 the day the promise was recorded and the promised date, the promise reads **Kept** with the payment
 linked. Recording a new entry while a promise is open asks what happened to the **previous
-promise**: Kept, Rescheduled (a new promise with a new date and amount), or Broken. The log can
+promise**: **Still open (no change)** by default, or Kept, Rescheduled (a new promise with a new
+date and amount) or Broken (PLAN-012c-b). Every open promise row (operator page, store page,
+attention list) also carries **Kept / Reschedule / Broken** buttons: each opens a small form
+(date, note; Kept and Broken ask how you learned it; Reschedule asks the new date and amount,
+pre-filled) and records the entry exactly as the previous-promise path does. **One open promise
+per store:** saving a new promise closes the open one on that store (or on the operator, with
+no store) as Rescheduled; the form warns beforehand and the message says so, so the attention
+list never shows two promises for one store. The log can
 be filtered by status (open, kept, rescheduled, broken). A past, open promise is a broken promise
 on the attention list and the dashboard whatever the balance (PLAN-011b-a).
 

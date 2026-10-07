@@ -1,7 +1,8 @@
 {% load responsive %}
 {% comment %}
 The contact log (PLAN-011b D7, PLAN-012 D2 to D5). ``rows``: LogRow items
-(ledger.views.contact_log). Corrections are listed under the entry's note. A deleted
+(ledger.views.contact_log). An open promise carries Kept, Reschedule and Broken for billing
+(PLAN-012c-b D2). Corrections are listed under the entry's note. A deleted
 entry is struck through with its reason; only billing and admin are ever given one.
 {% endcomment %}
 {% responsive_table %}
@@ -33,6 +34,7 @@ entry is struck through with its reason; only billing and admin are ever given o
           {% if row.can_edit %}<a class="btn contact-edit" href="{% url 'ledger:contacts:edit' pk=entry.pk %}">Edit</a> <span class="muted contact-edit-until">until {{ row.edit_until|date:"H:i" }}</span>{% endif %}
           {% if row.can_correct %}<a class="btn contact-correct" href="{% url 'ledger:contacts:correct' pk=entry.pk %}">Add correction</a>{% endif %}
           {% if row.can_delete %}<a class="btn contact-delete" href="{% url 'ledger:contacts:delete' pk=entry.pk %}">Delete</a>{% endif %}
+          {% if row.can_record_outcome %}{% include "ledger/contacts/_outcome_links.html" with promise_id=entry.pk %}{% endif %}
         </td>
       </tr>
     {% endwith %}{% empty %}

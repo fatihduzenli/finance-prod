@@ -1,0 +1,21 @@
+{% extends "finance/base.html" %}
+{% block title %}{{ action }}: promise of {{ entry.operator.display_name }}{% endblock %}
+{% block content %}
+  <p><a href="{{ back_url }}">&larr; Back</a></p>
+  <h1>{{ action }}: promise of {{ entry.operator.display_name }}</h1>
+  {% include "ledger/contacts/_entry.html" %}
+  <p class="muted" id="outcome-help">{% if outcome == "rescheduled" %}Saving records a new promise to pay and closes this one as Rescheduled.{% elif outcome == "kept" %}Saving records how you learned it and closes this promise as Kept.{% else %}Saving records how you learned it and closes this promise as Broken.{% endif %} Never write card or account numbers.</p>
+  <form method="post" id="contact-outcome-form" class="js-single-submit">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ back_url }}">
+    {{ form.non_field_errors }}
+    {% for field in form.visible_fields %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
+      {{ field.errors }}
+      {{ field }}
+      {% if field.help_text %}<span class="muted">{{ field.help_text }}</span>{% endif %}
+    {% endfor %}
+    <p class="actions"><button class="btn btn-primary" type="submit" id="save-outcome">Save</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

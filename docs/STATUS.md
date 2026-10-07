@@ -972,3 +972,23 @@ the login page myself." The condition for starting Prompt 4 is met.
 - **Staging check (owner-authorized, 2026-10-07):** `python /app/backend/manage.py invoice_line_links
   --check` in the web container printed "Every builder invoice line names its charge." and listed
   nothing: INV-2026-0006's late fee line is linked; no data repair needed.
+
+## Update, 2026-10-07, Prompt 12 finding 5 → PLAN-012c-b
+
+- **Owner, in writing:** (a) "Still open (no change)" as the default outcome so a call can be
+  recorded while a promise stands; (b) Kept / Reschedule / Broken buttons on every open promise
+  row (store page, operator page, attention list), each a small form that creates the entry
+  through the previous-promise path; (c) at most one open promise per lease: a new promise closes
+  the open one as Rescheduled and the form says so; sena's three open promises to be reduced; the
+  attention list never shows two per lease; (d) "Add entry" on both pages.
+- Plan `docs/qa/PLAN-012c-b-promise-outcomes.md` assigned to Opus (data migration 0033 for the
+  existing rows). The QA owner's own test of the 11b scenario (three promises on one operator,
+  two broken items) is superseded by rule (c) and is rewritten on leases.
+
+## Update, 2026-10-07, PLAN-012c-b built and gated
+
+- "Still open (no change)" default outcome; Kept / Reschedule / Broken on every open promise row
+  and attention item, through the previous-promise path (Kept and Broken ask how it was learned:
+  call, e-mail or visit, since the log has no remark kind); one open promise per lease with the
+  warning and the message; data migration 0033 keeps the newest per bucket and chains `closed_by`
+  (one-to-one); `broken_promises` one per bucket; "Add entry" on all three pages. QA-012c-b.

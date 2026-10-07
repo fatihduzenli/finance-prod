@@ -16,7 +16,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
-from ledger.models import ContactEntry, Store
+from ledger.models import ContactEntry, ContactKind, ContactStatus, Store
 from ledger.services import contacts
 
 
@@ -29,6 +29,8 @@ class LogRow:
     edit_until: datetime | None
     can_correct: bool
     can_delete: bool
+    #: Kept, Reschedule and Broken on an open promise (PLAN-012c-b D2).
+    can_record_outcome: bool
 
 
 def include_deleted(request: HttpRequest) -> bool:
@@ -40,7 +42,8 @@ def include_deleted(request: HttpRequest) -> bool:
 def log_rows(request: HttpRequest, entries: list[ContactEntry]) -> list[LogRow]:
     """The entries with what the request's user may do on each: the author edits inside
     the window; any other billing user, or the author after it, adds a correction; an
-    admin deletes. Nothing on a deleted entry."""
+    admin deletes; billing records the outcome of an open promise of an operator not
+    archived. Nothing on a deleted entry."""
     role = role_of(request.user)
     billing = meets(role, Role.BILLING)
     admin = meets(role, Role.ADMIN)
@@ -57,6 +60,11 @@ def log_rows(request: HttpRequest, entries: list[ContactEntry]) -> list[LogRow]:
                 edit_until=contacts.edit_closes_at(entry) if editable else None,
                 can_correct=billing and live and not editable,
                 can_delete=admin and live,
+                can_record_outcome=billing
+                and live
+                and entry.kind == ContactKind.PROMISE
+                and entry.status == ContactStatus.OPEN
+                and entry.operator.archived_at is None,
             )
         )
     return rows
