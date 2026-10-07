@@ -63,11 +63,11 @@ def log_rows(request: HttpRequest, entries: list[ContactEntry]) -> list[LogRow]:
 
 
 def store_add_url(request: HttpRequest, store: Store, today: date) -> str:
-    """The store's Add entry link (PLAN-012 D3) for billing when a lease of an operator not
-    archived is in effect today; ``""`` otherwise."""
+    """The store's Add entry link (PLAN-012 D3, PLAN-012c D1) for billing when the store
+    has a lease of an operator not archived (:func:`contacts.store_contact_lease`); ``""``
+    otherwise."""
     if not meets(role_of(request.user), Role.BILLING):
         return ""
-    lease = contacts.store_lease(store, today)
-    if lease is None or lease.operator is None or lease.operator.archived_at is not None:
+    if contacts.store_contact_lease(store, today) is None:
         return ""
     return reverse("ledger:stores:contacts_add", kwargs={"pk": store.pk})

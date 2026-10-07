@@ -20,6 +20,7 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
+from django.utils.html import escape
 
 from accounts import registry
 from accounts.roles import Role
@@ -36,6 +37,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services import attention, calendar, contacts, rent_run
+from ledger.views.contacts import NO_STORE_LEASE
 from payments.fake import FakeProvider
 from tests.auth_helpers import make_user
 from tests.receivables_helpers import (
@@ -547,6 +549,181 @@ def test_a_store_without_a_lease_in_effect_offers_no_add_entry() -> None:
     assert "No contact entries." in page and f"/stores/{store.pk}/contacts/new/" not in page
     response = client.get(f"/stores/{store.pk}/contacts/new/")
     assert response.status_code == 302 and response["Location"] == f"/stores/{store.pk}/#contacts"
+
+
+# --- PLAN-012c: Add entry on a store whose lease is not in effect today -------------------
+
+
+def ended(lease: Lease, on: date) -> Lease:
+    Lease.objects.filter(pk=lease.pk).update(collection_status="ended", ended_on=on)
+    lease.refresh_from_db()
+    return lease
+
+
+def archived(operator: Operator) -> Operator:
+    Operator.objects.filter(pk=operator.pk).update(archived_at=timezone.now())
+    operator.refresh_from_db()
+    return operator
+
+
+def without_operator(lease: Lease) -> Lease:
+    Lease.objects.filter(pk=lease.pk).update(operator=None, collection_status="ended")
+    lease.refresh_from_db()
+    return lease
+
+
+def add_link(store: Store) -> str:
+    return f'href="/stores/{store.pk}/contacts/new/"'
+
+
+@pytest.mark.parametrize(
+    ("status", "started", "ended_on", "label", "suffix"),
+    [
+        ("active", date(2026, 11, 1), None, " (not in effect today)", ", lease pending"),
+        ("prospective", None, None, " (not in effect today)", ", lease pending"),
+        ("paused", date(2026, 10, 7), None, " (not in effect today)", ", lease pending"),
+        ("ended", date(2025, 1, 1), date(2026, 9, 30), " (not in effect today)", ""),
+        ("active", date(2025, 1, 1), date(2026, 10, 5), " (not in effect today)", ""),
+        ("paused", date(2025, 1, 1), None, "", ""),
+    ],
+)
+def test_add_entry_on_a_store_whose_only_lease_is_not_in_effect(
+    today: date,
+    status: str,
+    started: date | None,
+    ended_on: date | None,
+    label: str,
+    suffix: str,
+) -> None:
+    operator = an_operator("Acme")
+    store = a_store("2477")
+    lease = a_lease(store, operator, started=started, status=status)
+    if ended_on is not None:
+        Lease.objects.filter(pk=lease.pk).update(ended_on=ended_on)
+        suffix = f", lease ended {ended_on.isoformat()}"
+    for role in (Role.BILLING, Role.ADMIN):
+        client, _ = client_for(role)
+        assert add_link(store) in page_of(client, f"/stores/{store.pk}/")
+    client, _ = client_for(Role.BILLING)
+    form = page_of(client, f"/stores/{store.pk}/contacts/new/")
+    assert f"<h1>Add contact: Acme, store 2477{suffix}</h1>" in form
+    assert f'<option value="{lease.pk}" selected>Store 2477{label}</option>' in form
+    response = client.post(
+        f"/stores/{store.pk}/contacts/new/", contact_post(lease=str(lease.pk), body="Old lease.")
+    )
+    assert response.status_code == 302
+    assert response["Location"] == f"/stores/{store.pk}/#contacts"
+    added = ContactEntry.objects.get()
+    assert (added.operator, added.lease, added.body) == (operator, lease, "Old lease.")
+    assert "Old lease." in table_of(page_of(client, f"/stores/{store.pk}/"))
+    assert "Old lease." in table_of(page_of(client, f"/operators/{operator.pk}/"))
+    viewer, _ = client_for(Role.VIEWER)
+    assert "/contacts/new/" not in page_of(viewer, f"/stores/{store.pk}/")
+    assert viewer.get(f"/stores/{store.pk}/contacts/new/").status_code == 403
+    assert viewer.post(f"/stores/{store.pk}/contacts/new/", contact_post()).status_code == 403
+    assert ContactEntry.objects.count() == 1
+
+
+def test_the_lease_in_effect_wins_over_an_older_ended_one(today: date) -> None:
+    store = a_store("2477")
+    ended(a_lease(store, an_operator("Old"), started=date(2024, 1, 1)), date(2025, 12, 31))
+    current = a_lease(store, an_operator("New"), started=date(2026, 1, 1))
+    assert contacts.store_contact_lease(store, TODAY) == current
+    client, _ = client_for(Role.BILLING)
+    form = page_of(client, f"/stores/{store.pk}/contacts/new/")
+    assert "<h1>Add contact: New, store 2477</h1>" in form
+
+
+def test_of_two_ended_leases_the_later_start_wins_then_the_later_creation(
+    today: date,
+) -> None:
+    store = a_store("2477")
+    ended(a_lease(store, an_operator("First"), started=date(2023, 1, 1)), date(2023, 12, 31))
+    later = ended(
+        a_lease(store, an_operator("Second"), started=date(2024, 1, 1)), date(2024, 6, 30)
+    )
+    undated = a_lease(store, an_operator("Undated"), started=None, status="prospective")
+    assert contacts.store_contact_lease(store, TODAY) == later
+    client, _ = client_for(Role.BILLING)
+    form = page_of(client, f"/stores/{store.pk}/contacts/new/")
+    assert "<h1>Add contact: Second, store 2477, lease ended 2024-06-30</h1>" in form
+    # A lease without a start comes last; between two, the later creation wins.
+    other = a_store("2478")
+    Lease.objects.filter(pk=undated.pk).update(store=other)
+    newer = a_lease(other, an_operator("Newer"), started=None, status="prospective")
+    assert contacts.store_contact_lease(other, TODAY) == newer
+
+
+def test_a_lease_of_an_archived_operator_or_without_an_operator_is_skipped(
+    today: date,
+) -> None:
+    store = a_store("2477")
+    older = ended(a_lease(store, an_operator("Live"), started=date(2023, 1, 1)), date(2023, 12, 31))
+    without_operator(a_lease(store, an_operator(), started=date(2025, 1, 1)))
+    gone = archived(an_operator("Gone"))
+    a_lease(store, gone, started=date(2026, 1, 1))
+    # The lease in effect belongs to an archived operator: the next one is chosen.
+    assert contacts.store_contact_lease(store, TODAY) == older
+    client, _ = client_for(Role.BILLING)
+    assert add_link(store) in page_of(client, f"/stores/{store.pk}/")
+    response = client.post(
+        f"/stores/{store.pk}/contacts/new/", contact_post(lease=str(older.pk), body="Live.")
+    )
+    assert response.status_code == 302
+    added = ContactEntry.objects.get()
+    assert added.lease == older and added.operator.display_name == "Live"
+    # With only archived or operator-less leases left, no button and the route refuses.
+    archived(older.operator)  # type: ignore[arg-type]
+    assert contacts.store_contact_lease(store, TODAY) is None
+    assert add_link(store) not in page_of(client, f"/stores/{store.pk}/")
+    response = client.get(f"/stores/{store.pk}/contacts/new/", follow=True)
+    assert response.redirect_chain == [(f"/stores/{store.pk}/#contacts", 302)]
+    assert escape(NO_STORE_LEASE) in response.content.decode()
+    response = client.post(f"/stores/{store.pk}/contacts/new/", contact_post(body="Gone."))
+    assert response.status_code == 302 and ContactEntry.objects.count() == 1
+
+
+def test_a_store_with_no_lease_shows_the_existing_message(today: date) -> None:
+    store = a_store("3000")
+    client, _ = client_for(Role.BILLING)
+    assert add_link(store) not in page_of(client, f"/stores/{store.pk}/")
+    response = client.get(f"/stores/{store.pk}/contacts/new/", follow=True)
+    assert response.redirect_chain == [(f"/stores/{store.pk}/#contacts", 302)]
+    assert escape(NO_STORE_LEASE) in response.content.decode()
+
+
+def test_the_store_route_records_nothing_on_another_stores_lease_or_operator(
+    today: date,
+) -> None:
+    store = a_store("2477")
+    lease = ended(a_lease(store, an_operator("Acme"), started=date(2024, 1, 1)), date(2025, 6, 30))
+    beta = an_operator("Beta")
+    foreign = a_lease(a_store("9999"), beta)
+    client, _ = client_for(Role.BILLING)
+    response = client.post(
+        f"/stores/{store.pk}/contacts/new/",
+        contact_post(lease=str(foreign.pk), operator=str(beta.pk), body="Sneaky."),
+    )
+    assert response.status_code == 200
+    # The store's lease is locked: no blank choice, and the operator's lease at another
+    # store is not offered either.
+    acme_elsewhere = a_lease(a_store("2476"), lease.operator)
+    form = page_of(client, f"/stores/{store.pk}/contacts/new/")
+    assert "No particular store" not in form and str(acme_elsewhere.pk) not in form
+    for forged in ({"lease": ""}, {"lease": str(acme_elsewhere.pk)}):
+        response = client.post(
+            f"/stores/{store.pk}/contacts/new/",
+            contact_post(operator=str(beta.pk), body="Forged.", **forged),
+        )
+        assert response.status_code == 200
+    assert not ContactEntry.objects.exists()
+    response = client.post(
+        f"/stores/{store.pk}/contacts/new/",
+        contact_post(lease=str(lease.pk), operator=str(beta.pk), body="Named."),
+    )
+    assert response.status_code == 302
+    added = ContactEntry.objects.get()
+    assert (added.operator, added.lease) == (lease.operator, lease)
 
 
 def test_the_attention_text_names_the_store_and_the_leases_balance() -> None:

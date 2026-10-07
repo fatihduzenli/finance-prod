@@ -463,7 +463,10 @@ correction is appended under the entry with its author and time, and the origina
 reason, for billing and admin; viewers do not see it and it is absent from their CSV. A deleted
 promise counts for nothing. Every entry names the **store** when the operator has more than one
 active lease (preselected with one); the store page has its own contact section and **Add entry**
-button. **Promises** close by themselves: when a settled, non-refund payment of at least the
+button, offered whenever the store has a lease with an operator who is not archived (the current
+lease, else the most recent one; PLAN-012c): the form opens with that lease fixed and the
+operator set, and its title says "lease ended …" or "lease pending" when the lease is not
+current. **Promises** close by themselves: when a settled, non-refund payment of at least the
 promised amount settles on that lease (or on the operator, for an entry without a store) between
 the day the promise was recorded and the promised date, the promise reads **Kept** with the payment
 linked. Recording a new entry while a promise is open asks what happened to the **previous

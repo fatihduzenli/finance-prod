@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from django import forms
 from django.contrib import messages
@@ -45,7 +46,16 @@ from ledger.forms import (
     ContactEditForm,
     ContactEntryForm,
 )
-from ledger.models import ZERO, ContactEntry, ContactKind, ContactStatus, Lease, Operator, Store
+from ledger.models import (
+    ZERO,
+    CollectionStatus,
+    ContactEntry,
+    ContactKind,
+    ContactStatus,
+    Lease,
+    Operator,
+    Store,
+)
 from ledger.services import contacts
 from ledger.services.leases import format_amount
 from ledger.validators import contains_bank_routing_pattern, contains_card_number
@@ -177,10 +187,11 @@ def _promise_label(promise: ContactEntry) -> str:
 def entry_form(
     operator: Operator, data: QueryDict | None = None, *, lease: Lease | None = None
 ) -> tuple[ContactEntryForm, dict[str, dict[str, str]]]:
-    """The entry form of ``operator`` (PLAN-012 D3, D5) with ``lease`` chosen (else the
-    one lease in effect, when there is exactly one), and each open promise's date and
-    amount for the page's Rescheduled preselection. The previous promise chosen is the
-    newest open one on the chosen lease, else the newest open one."""
+    """The entry form of ``operator`` (PLAN-012 D3, D5) with ``lease`` chosen and locked
+    (the only choice, required; PLAN-012c D2), else the one lease in effect preselected
+    when there is exactly one; and each open promise's date and amount for the page's
+    Rescheduled preselection. The previous promise chosen is the newest open one on the
+    chosen lease, else the newest open one."""
     today = timezone.localdate()
     active = list(contacts.active_leases(operator, today))
     others = (
@@ -192,6 +203,9 @@ def entry_form(
     leases = [(str(row.pk), f"Store {row.store.external_label}") for row in active] + [
         (str(row.pk), f"Store {row.store.external_label} (not in effect today)") for row in others
     ]
+    if lease is not None:
+        # The store page's form (PLAN-012c D2): its lease is the only choice, and required.
+        leases = [choice for choice in leases if choice[0] == str(lease.pk)]
     promises = list(contacts.open_promises(operator))
     chosen = lease or (active[0] if len(active) == 1 else None)
     previous = next(
@@ -201,7 +215,7 @@ def entry_form(
     form = ContactEntryForm(
         data,
         leases=leases,
-        lease_required=len(active) > 1,
+        lease_required=lease is not None or len(active) > 1,
         promises=[(str(row.pk), _promise_label(row)) for row in promises],
         initial={
             "happened_on": today,
@@ -296,20 +310,33 @@ def store_contacts_add(request: HttpRequest, pk: str) -> HttpResponse:
         return refused
     store = _store(pk)
     page = reverse("ledger:stores:detail", kwargs={"pk": store.pk})
-    lease = contacts.store_lease(store, timezone.localdate())
+    today = timezone.localdate()
+    lease = contacts.store_contact_lease(store, today)
     if lease is None or lease.operator is None:
         messages.error(request, NO_STORE_LEASE)
-        return redirect(f"{page}#contacts")
-    if lease.operator.archived_at is not None:
-        messages.error(request, contacts.ARCHIVED)
         return redirect(f"{page}#contacts")
     return _add(
         request,
         lease.operator,
         lease=lease,
         back_url=page,
-        title=f"{lease.operator.display_name}, store {store.external_label}",
+        title=f"{lease.operator.display_name}, store {store.external_label}"
+        f"{_lease_state(lease, today)}",
     )
+
+
+def _lease_state(lease: Lease, today: date) -> str:
+    """The store form's title suffix (PLAN-012c D2): ``""`` for a lease in effect on
+    ``today``; else ", lease ended YYYY-MM-DD" (ended, or an end before ``today``; the date
+    when known), else ", lease pending" (prospective, or a start after ``today``). A paused
+    or active lease outside those is in effect, so it takes no suffix."""
+    if contacts.store_leases(lease.store, today).filter(pk=lease.pk).exists():
+        return ""
+    if lease.collection_status == CollectionStatus.ENDED or (
+        lease.ended_on is not None and lease.ended_on < today
+    ):
+        return f", lease ended {lease.ended_on.isoformat()}" if lease.ended_on else ", lease ended"
+    return ", lease pending"
 
 
 # --- Edit, correct, delete ------------------------------------------------------------------

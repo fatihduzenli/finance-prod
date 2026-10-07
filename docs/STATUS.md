@@ -922,3 +922,20 @@ the login page myself." The condition for starting Prompt 4 is met.
   no "Free text", the Save-as-catalogue-item tick (slug code, reserved NSF and category codes,
   audited, one item under a race), the provider line's `details`. QA-012b. Ships with PLAN-012a in
   one push.
+
+## Update, 2026-10-07, Prompt 12 click 2 finding → PLAN-012c
+
+- **Owner, in writing:** store 2477's page lists the contact log but has no "Add entry" button;
+  add it, opening the same form with the store/lease preselected and the operator fixed; same push
+  as the builder fix.
+- Cause: Batch A showed the button only for a lease in effect today (active or paused, started,
+  not ended); 2477's lease is outside that rule. PLAN-012c widens it to any lease of the store with
+  a non-archived operator (the current one first, else the most recent) and names a non-current
+  lease's status in the form title. Assigned to Opus.
+
+## Update, 2026-10-07, PLAN-012c built and gated
+
+- `contacts.store_contact_lease` (current lease of a non-archived operator, else the most recent);
+  the store page's Add entry button and route use it; the store form locks the lease and names a
+  non-current lease's state in its title. No migration. QA-012c. Ships with 012a and 012b in one
+  push; one Publish Request for the three commits.

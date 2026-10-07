@@ -50,7 +50,17 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import BooleanField, Case, Exists, OuterRef, Prefetch, Q, QuerySet, When
+from django.db.models import (
+    BooleanField,
+    Case,
+    Exists,
+    F,
+    OuterRef,
+    Prefetch,
+    Q,
+    QuerySet,
+    When,
+)
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
@@ -240,6 +250,24 @@ def store_lease(store: Store, today: date) -> Lease | None:
     """The store's lease in effect on ``today`` that has an operator; on a hand-over day
     the later start wins."""
     return store_leases(store, today).first()
+
+
+def store_contact_lease(store: Store, today: date) -> Lease | None:
+    """The lease the store page's Add entry is about (PLAN-012c D1): the store's lease in
+    effect on ``today`` of an operator not archived (the later start on a hand-over day),
+    else the store's most recent lease of an operator not archived (latest ``started_on``,
+    a lease without one last, then latest ``created_at``); ``None`` when there is none."""
+    current = store_leases(store, today).filter(operator__archived_at__isnull=True).first()
+    if current is not None:
+        return current
+    return (
+        Lease.objects.filter(
+            store=store, operator__isnull=False, operator__archived_at__isnull=True
+        )
+        .select_related("operator", "store")
+        .order_by(F("started_on").desc(nulls_last=True), "-created_at")
+        .first()
+    )
 
 
 def edit_closes_at(entry: ContactEntry) -> datetime:
