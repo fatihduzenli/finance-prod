@@ -105,7 +105,10 @@ def _status(request: HttpRequest) -> str:
 
 
 def _log_page(
-    request: HttpRequest, rows: QuerySet[ContactEntry], context: dict[str, object]
+    request: HttpRequest,
+    rows: QuerySet[ContactEntry],
+    context: dict[str, object],
+    store: Store | None = None,
 ) -> HttpResponse:
     status = _status(request)
     page = Paginator(contacts.with_status(rows, status), PAGE_SIZE).get_page(
@@ -117,7 +120,7 @@ def _log_page(
         {
             **context,
             "page": page,
-            "rows": log_rows(request, list(page.object_list)),
+            "rows": log_rows(request, list(page.object_list), store=store),
             "status": status,
             "statuses": ContactStatus.choices,
         },
@@ -168,6 +171,7 @@ def store_contacts_page(request: HttpRequest, pk: str) -> HttpResponse:
             "add_url": store_add_url(request, store, timezone.localdate()),
             "export_url": "",
         },
+        store,
     )
 
 

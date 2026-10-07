@@ -477,7 +477,9 @@ attention list) also carries **Kept / Reschedule / Broken** buttons: each opens 
 pre-filled) and records the entry exactly as the previous-promise path does. **One open promise
 per store:** saving a new promise closes the open one on that store (or on the operator, with
 no store) as Rescheduled; the form warns beforehand and the message says so, so the attention
-list never shows two promises for one store. The log can
+list never shows two promises for one store. The entry that closed a promise says so in its Promise
+column ("Closed $2000.00 by 2026-10-01 as Broken", linked to the promise) on both pages and in
+the CSV column **Closes promise**. The log can
 be filtered by status (open, kept, rescheduled, broken). A past, open promise is a broken promise
 on the attention list and the dashboard whatever the balance (PLAN-011b-a).
 

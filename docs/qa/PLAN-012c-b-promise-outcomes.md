@@ -75,6 +75,19 @@ calendar, mail.
   their history). `broken_promises` returns at most one promise per bucket, the open one, and
   **as a defence** orders by `created_at` descending and keeps the first per bucket even if the
   rule were ever bypassed; the attention list therefore never shows two for one lease.
+- **D5 — the closing entry shows what it closed (owner's (e), added 2026-10-07).** An entry
+  that recorded a promise's outcome (`ContactEntry.closed_by` points at it; Kept, Rescheduled or
+  Broken, by the previous-promise block, the outcome buttons, or the one-open rule) shows in its
+  **Promise** column, where today it shows "—": "Closed $2,000.00 by 2026-10-01 as Broken", the
+  amount and date being the original promise's and the outcome its status, with the text linked
+  to the original promise's row (`#contact-<pk>`) on the operator page, the operator's log page
+  and the store page (the store page links to the operator page's anchor when the promise is
+  not on that store). A Rescheduled entry that is itself a promise shows both: its own promise
+  and, beneath, "Closed … as Rescheduled". The CSV export gains one reviewed header, **Closes
+  promise**, with the same sentence without the link. When the closing entry closed no promise
+  through `closed_by` (the one-to-one chain's null case) nothing shows; the audit row keeps it.
+  A deleted original promise still shows the sentence (the history stands) and the link.
+
 - **D4 — "Add entry".** The operator page, the operator's contact log page and the add form's
   title read **Add entry** (the element ids stay; the store page already says it). Nothing else
   renamed.
@@ -95,11 +108,12 @@ billing); migration `0033`. No provider or environment change. New registry rule
 | D2 routes, form, buttons | `urls.py`, `accounts/registry.py`, `views/contacts.py`, `forms.py`, new `contacts/outcome.html`, `_contacts_table.html`, `_attention.html` | the three buttons on every open promise row and attention item; each form creates the entry through `add_entry` |
 | D3 rule, migration, attention | `services/contacts.py`, `services/attention.py`, `migrations/0033_*.py`, `tests/test_migrations_roundtrip.py` | a new promise closes the bucket's open one as Rescheduled with the sentence; the migration leaves one open per bucket on a seeded database; `broken_promises` one per bucket |
 | D4 labels | `operators/detail.html`, `operators/contacts.html`, `contact_form.html` | "Add entry" on all three |
+| D5 closed-promise cell | `views/contact_log.py` (`LogRow`), `_contacts_table.html`, `services/contacts.py` (`_csv_record`, `csv_export.HEADERS`) | the sentence and the link on the three pages; the CSV column |
 | Tests | `tests/test_contact_log.py`, `tests/test_contacts.py`, `tests/test_attention*.py` as fits | §6 |
 
 ## 6. Test plan (before implementation)
 
-Happy: a call recorded with "Still open" while a promise is open → entry saved, promise open,
+Happy (D5): a Kept, a Broken and a Rescheduled closing entry each show "Closed $X by D as …" linked to the original promise on the operator page, the log page and the store page, and the CSV column reads the sentence; the Rescheduled entry shows its own promise too; a closing entry whose `closed_by` is null shows nothing. Happy: a call recorded with "Still open" while a promise is open → entry saved, promise open,
 audit names it; Kept / Reschedule / Broken from the operator page, the store page and the
 attention list each create the entry and close the promise exactly as the previous-promise
 path (same status, `closed_by`, audit action); Reschedule pre-fills date and amount and takes

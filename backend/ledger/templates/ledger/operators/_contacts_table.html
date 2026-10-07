@@ -2,7 +2,8 @@
 {% comment %}
 The contact log (PLAN-011b D7, PLAN-012 D2 to D5). ``rows``: LogRow items
 (ledger.views.contact_log). An open promise carries Kept, Reschedule and Broken for billing
-(PLAN-012c-b D2). Corrections are listed under the entry's note. A deleted
+(PLAN-012c-b D2). An entry that recorded a promise's outcome names it under its Promise
+column and links to its row (D5). Corrections are listed under the entry's note. A deleted
 entry is struck through with its reason; only billing and admin are ever given one.
 {% endcomment %}
 {% responsive_table %}
@@ -19,7 +20,7 @@ entry is struck through with its reason; only billing and admin are ever given o
             {% for correction in entry.corrections.all %}<div class="contact-correction" id="correction-{{ correction.pk }}"><s><span class="badge">Correction</span> {{ correction.created_at|date:"Y-m-d H:i" }} {{ correction.author.get_username|default:"—" }}: <span style="white-space:pre-wrap;">{{ correction.body }}</span></s></div>{% endfor %}
             <div class="contact-deleted-note"><span class="badge">Deleted</span> {{ entry.deleted_at|date:"Y-m-d H:i" }} by {{ entry.deleted_by.get_username|default:"—" }}: <span class="contact-delete-reason" style="white-space:pre-wrap;">{{ entry.delete_reason }}</span></div>
           </td>
-          <td>{% if entry.kind == "promise" %}<s>${{ entry.promised_amount }} by {{ entry.promised_date|date:"Y-m-d" }}</s>{% else %}—{% endif %}</td>
+          <td>{% if entry.kind == "promise" %}<s>${{ entry.promised_amount }} by {{ entry.promised_date|date:"Y-m-d" }}</s>{% elif not row.closes_text %}—{% endif %}{% if row.closes_text %}<div class="contact-closes"><s><a href="{{ row.closes_url }}">{{ row.closes_text }}</a></s></div>{% endif %}</td>
         {% else %}
           <td>{{ entry.happened_on|date:"Y-m-d" }}</td>
           <td>{{ entry.get_kind_display }}</td>
@@ -27,7 +28,7 @@ entry is struck through with its reason; only billing and admin are ever given o
           <td><span style="white-space:pre-wrap;">{{ entry.body }}</span>
             {% for correction in entry.corrections.all %}<div class="contact-correction" id="correction-{{ correction.pk }}"><span class="badge">Correction</span> {{ correction.created_at|date:"Y-m-d H:i" }} {{ correction.author.get_username|default:"—" }}: <span style="white-space:pre-wrap;">{{ correction.body }}</span></div>{% endfor %}
           </td>
-          <td>{% if entry.kind == "promise" %}${{ entry.promised_amount }} by {{ entry.promised_date|date:"Y-m-d" }} <span class="badge promise-status promise-{{ entry.status }}">{{ entry.get_status_display }}</span>{% if entry.kept_by_payment %} <span class="muted">payment settled {{ entry.kept_by_payment.settled_on|date:"Y-m-d" }}</span>{% elif entry.closed_by %} <span class="muted">recorded {{ entry.closed_by.happened_on|date:"Y-m-d" }}</span>{% endif %}{% else %}—{% endif %}</td>
+          <td>{% if entry.kind == "promise" %}${{ entry.promised_amount }} by {{ entry.promised_date|date:"Y-m-d" }} <span class="badge promise-status promise-{{ entry.status }}">{{ entry.get_status_display }}</span>{% if entry.kept_by_payment %} <span class="muted">payment settled {{ entry.kept_by_payment.settled_on|date:"Y-m-d" }}</span>{% elif entry.closed_by %} <span class="muted">recorded {{ entry.closed_by.happened_on|date:"Y-m-d" }}</span>{% endif %}{% elif not row.closes_text %}—{% endif %}{% if row.closes_text %}<div class="contact-closes"><a href="{{ row.closes_url }}">{{ row.closes_text }}</a></div>{% endif %}</td>
         {% endif %}
         <td>{{ entry.author.get_username|default:"—" }}</td>
         <td>

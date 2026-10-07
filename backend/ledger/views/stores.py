@@ -168,6 +168,7 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
                         store, include_deleted=contact_log.include_deleted(request)
                     )[: contacts.PAGE_LIMIT + 1]
                 ),
+                store=store,
             ),
             "contact_limit": contacts.PAGE_LIMIT,
             "contact_add_url": contact_log.store_add_url(request, store, today),

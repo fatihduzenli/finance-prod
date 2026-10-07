@@ -139,6 +139,7 @@ CSV_HEADER: tuple[str, ...] = (
     "Promised date",
     "Promised amount (USD)",
     "Promise status",
+    "Closes promise",
     "Recorded by",
     "Recorded at",
     "Corrections",
@@ -189,7 +190,13 @@ def _listed(rows: QuerySet[ContactEntry], include_deleted: bool) -> QuerySet[Con
         rows = rows.filter(deleted_at__isnull=True)
     return (
         rows.select_related(
-            "author", "deleted_by", "closed_by", "kept_by_payment", "lease__store", "operator"
+            "author",
+            "deleted_by",
+            "closed_by",
+            "closes__lease",
+            "kept_by_payment",
+            "lease__store",
+            "operator",
         )
         .prefetch_related(
             Prefetch(
@@ -212,6 +219,22 @@ def entries(operator: Operator, *, include_deleted: bool = True) -> QuerySet[Con
 def store_entries(store: Store, *, include_deleted: bool = True) -> QuerySet[ContactEntry]:
     """The entries about a lease of ``store``, newest first, as :func:`entries`."""
     return _listed(ContactEntry.objects.filter(lease__store=store), include_deleted)
+
+
+def closed_promise(entry: ContactEntry) -> ContactEntry | None:
+    """The promise whose outcome ``entry`` recorded (its ``closed_by`` is ``entry``), or
+    ``None``: read from the ``closes`` join of :func:`entries` and :func:`store_entries`."""
+    closed: ContactEntry | None = getattr(entry, "closes", None)
+    return closed
+
+
+def closes_sentence(promise: ContactEntry) -> str:
+    """PLAN-012c-b D5: "Closed $2000.00 by 2026-10-01 as Broken", the closed promise's
+    amount, date and outcome."""
+    return (
+        f"Closed ${promise.promised_amount} by {promise.promised_date:%Y-%m-%d} "
+        f"as {promise.get_status_display()}"
+    )
 
 
 def with_status(rows: QuerySet[ContactEntry], status: str) -> QuerySet[ContactEntry]:
@@ -788,6 +811,7 @@ def _csv_record(entry: ContactEntry) -> list[object]:
         entry.promised_date,
         entry.promised_amount,
         entry.get_status_display() if entry.kind == ContactKind.PROMISE else "",
+        closes_sentence(closed) if (closed := closed_promise(entry)) is not None else "",
         entry.author.get_username() if entry.author is not None else "",
         entry.created_at,
         _corrections_text(entry),

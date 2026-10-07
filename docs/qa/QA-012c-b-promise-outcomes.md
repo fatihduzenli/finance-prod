@@ -82,4 +82,27 @@ new secret name.
 - No browser test of the buttons or of the warning that follows the store select.
 - The migration has not been run on staging data; the owner's click on sena is the check.
 
+### Addendum, 2026-10-07: D5 (owner's finding 5e)
+
+The closing entry's Promise cell reads "Closed $<amount> by <date> as <Kept|Rescheduled|Broken>",
+linked to the closed promise's row (the store page links to the operator page when the promise
+is about another store or none); a Rescheduled entry shows its own promise first; the CSV gains
+the reviewed column **Closes promise**; a deleted closed promise, and a deleted closing entry,
+keep the sentence (struck through); the null-closer case shows nothing. Opus: five new tests
+(the three outcomes on the four pages and the CSV; the store page's two link cases; the null
+case; the deleted cases; the query count of the four pages unchanged with 0, 1 and 6 closing
+pairs, a test that bites without the lease join). Fable: one adversarial case (a viewer sees the
+sentence on all three pages with a local link to the right row and still no buttons; the CSV has
+the header and the sentence; a deleted original promise keeps the sentence and leaks no reason).
+
+Design choices accepted: the amount is written as the rest of the log writes it (`$2000.00`, no
+thousands separator; the owner's example used a comma, and changing it would change every
+promise cell, a separate wording pass); the local link is the page's own path plus the anchor,
+so a filtered or paginated log page stays where it is; a link may point at a row not currently
+shown (beyond the page limit, filtered out, or deleted for a viewer), which is the row's address
+all the same.
+
+Gate rerun on the final code: ruff, format, mypy, lock, migrations clean on both engines;
+sqlite 4,642 passed, 577 skipped; PostgreSQL 5,216 passed, 3 skipped; e2e 7 passed; secret scans clean.
+
 **Verdict: PASS** (pending the owner's clicks).

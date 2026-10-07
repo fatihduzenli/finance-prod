@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -1437,3 +1438,244 @@ def test_the_add_buttons_and_the_form_say_add_entry(today: date) -> None:
 def test_the_outcome_route_is_registered_for_billing() -> None:
     rule = registry.rule_for("ledger:contacts:outcome")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+
+
+# --- PLAN-012c-b D5: the closing entry shows what it closed -----------------------------------
+
+
+def closing(
+    operator: Operator,
+    previous: ContactEntry,
+    outcome: str,
+    *,
+    lease: Lease | None = None,
+    kind: str = ContactKind.CALL,
+    body: str = "Spoke to them.",
+    by: date | None = None,
+    amount: str | None = None,
+) -> ContactEntry:
+    added = contacts.add_entry(
+        operator.pk,
+        contacts.ContactInput(
+            kind=kind,
+            happened_on=TODAY,
+            body=body,
+            promised_date=by,
+            promised_amount=D(amount) if amount is not None else None,
+            lease=lease.pk if lease is not None else None,
+            previous=previous.pk,
+            outcome=outcome,
+        ),
+        actor=None,
+    )
+    assert added.ok and added.entry is not None, added.message
+    return added.entry
+
+
+def promise_cell(log: str, row: ContactEntry) -> str:
+    """The Promise column (the fifth cell) of ``row`` in the table ``log``."""
+    tr = log.split(f'id="contact-{row.pk}"')[1].split("</tr>")[0]
+    cells: list[str] = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.DOTALL)
+    return cells[4]
+
+
+def closes_link(cell: str) -> tuple[str, str]:
+    """The href and the text of the cell's "Closed ..." link."""
+    [_, link] = cell.split('<div class="contact-closes">')
+    href = link.split('href="')[1].split('"')[0]
+    text = link.split('">', 1)[1].split("</a>")[0]
+    return href, text
+
+
+def three_closings(
+    operator: Operator, lease: Lease
+) -> dict[str, tuple[ContactEntry, ContactEntry]]:
+    """A Kept, a Broken and a Rescheduled promise on ``lease``, each with its closing entry."""
+    kept = promise(operator, lease=lease, by=date(2026, 10, 1), amount="2000.00")
+    kept_by = closing(operator, kept, "kept", lease=lease, body="Paid in the office.")
+    broken = promise(operator, lease=lease, by=date(2026, 10, 3), amount="300.00")
+    broken_by = closing(operator, broken, "broken", lease=lease, body="Will not pay.")
+    moved = promise(operator, lease=lease, by=date(2026, 10, 4), amount="400.00")
+    moved_by = closing(
+        operator,
+        moved,
+        "rescheduled",
+        lease=lease,
+        kind=ContactKind.PROMISE,
+        by=date(2026, 10, 20),
+        amount="450.00",
+        body="New date.",
+    )
+    return {
+        "Closed $2000.00 by 2026-10-01 as Kept": (kept, kept_by),
+        "Closed $300.00 by 2026-10-03 as Broken": (broken, broken_by),
+        "Closed $400.00 by 2026-10-04 as Rescheduled": (moved, moved_by),
+    }
+
+
+def test_the_closing_entries_name_their_promise_on_every_page_and_in_the_csv(
+    today: date,
+) -> None:
+    operator = an_operator("Acme")
+    store = a_store("2477")
+    lease = a_lease(store, operator)
+    closings = three_closings(operator, lease)
+    plain = entry(operator, lease=lease, body="Just a call.")
+    client, _ = client_for(Role.BILLING)
+    for path in (
+        f"/operators/{operator.pk}/",
+        f"/operators/{operator.pk}/contacts/",
+        f"/operators/{operator.pk}/contacts/?status=all",
+        f"/stores/{store.pk}/",
+        f"/stores/{store.pk}/contacts/",
+    ):
+        log = table_of(page_of(client, path))
+        for sentence, (closed, closer) in closings.items():
+            href, text = closes_link(promise_cell(log, closer))
+            assert text == sentence, path
+            # The original promise is on this page: the link stays here.
+            assert href == f"{escape(path)}#contact-{closed.pk}", path
+            # The original promise itself names nothing it closed.
+            assert "contact-closes" not in promise_cell(log, closed), path
+        assert promise_cell(log, plain) == "—", path
+    # The Rescheduled closing entry is a promise: its own promise first, then the sentence.
+    _, moved_by = closings["Closed $400.00 by 2026-10-04 as Rescheduled"]
+    cell = promise_cell(table_of(page_of(client, f"/operators/{operator.pk}/")), moved_by)
+    own = cell.index("$450.00 by 2026-10-20")
+    assert own < cell.index('<div class="contact-closes">') < cell.index("as Rescheduled")
+    assert 'promise-status promise-open">Open<' in cell
+    # The call closings show the sentence alone, without "—".
+    _, kept_by = closings["Closed $2000.00 by 2026-10-01 as Kept"]
+    kept_cell = promise_cell(table_of(page_of(client, f"/operators/{operator.pk}/")), kept_by)
+    assert kept_cell.startswith('<div class="contact-closes">') and "—" not in kept_cell
+    # The CSV column reads the same sentence without the link.
+    body = b"".join(
+        client.get(f"/operators/{operator.pk}/contacts/export.csv").streaming_content  # type: ignore[attr-defined]
+    ).decode()
+    [header, *records] = list(csv.reader(io.StringIO(body)))
+    column = header.index("Closes promise")
+    assert header[column - 1] == "Promise status"
+    by_note = {record[3]: record[column] for record in records}
+    assert by_note["Paid in the office."] == "Closed $2000.00 by 2026-10-01 as Kept"
+    assert by_note["Will not pay."] == "Closed $300.00 by 2026-10-03 as Broken"
+    assert by_note["New date."] == "Closed $400.00 by 2026-10-04 as Rescheduled"
+    assert by_note["Just a call."] == "" and "href" not in body
+
+
+def test_the_store_page_links_to_the_operator_page_for_a_promise_not_on_that_store(
+    today: date,
+) -> None:
+    operator = an_operator("Acme")
+    here, there = a_store("2477"), a_store("2476")
+    # One lease in effect, so a promise may name no store; this store's lease is pending.
+    their_lease = a_lease(there, operator)
+    my_lease = a_lease(here, operator, status="prospective")
+    on_there = promise(operator, lease=their_lease, by=date(2026, 10, 1), amount="2000.00")
+    moved = closing(operator, on_there, "broken", lease=my_lease, body="Moved here.")
+    no_store = promise(operator, by=date(2026, 10, 2), amount="100.00")
+    kept = closing(operator, no_store, "kept", lease=my_lease, body="Paid here.")
+    client, _ = client_for(Role.BILLING)
+    operator_page = f"/operators/{operator.pk}/"
+    for path in (f"/stores/{here.pk}/", f"/stores/{here.pk}/contacts/"):
+        log = table_of(page_of(client, path))
+        assert closes_link(promise_cell(log, moved)) == (
+            f"{operator_page}#contact-{on_there.pk}",
+            "Closed $2000.00 by 2026-10-01 as Broken",
+        )
+        assert closes_link(promise_cell(log, kept)) == (
+            f"{operator_page}#contact-{no_store.pk}",
+            "Closed $100.00 by 2026-10-02 as Kept",
+        )
+    # On the operator page both promises are listed: the links stay there.
+    log = table_of(page_of(client, operator_page))
+    assert closes_link(promise_cell(log, moved))[0] == f"{operator_page}#contact-{on_there.pk}"
+    assert closes_link(promise_cell(log, kept))[0] == f"{operator_page}#contact-{no_store.pk}"
+
+
+def test_an_entry_whose_closed_by_names_nothing_shows_nothing(today: date) -> None:
+    operator = an_operator()
+    lease_a, lease_b = a_lease(operator=operator), a_lease(operator=operator)
+    on_a = promise(operator, lease=lease_a, by=date(2026, 10, 9), amount="200.00")
+    on_b = promise(operator, lease=lease_b, by=date(2026, 10, 9), amount="300.00")
+    # The closing entry closes A by its outcome and B by the one-open rule; B's closed_by
+    # stays null (one to one), so only A is named.
+    moved = closing(
+        operator,
+        on_a,
+        "rescheduled",
+        lease=lease_b,
+        kind=ContactKind.PROMISE,
+        by=date(2026, 10, 20),
+        body="Moved.",
+    )
+    on_b.refresh_from_db()
+    assert on_b.status == ContactStatus.RESCHEDULED and on_b.closed_by is None
+    client, _ = client_for(Role.BILLING)
+    log = table_of(page_of(client, f"/operators/{operator.pk}/"))
+    cell = promise_cell(log, moved)
+    assert cell.count("contact-closes") == 1 and "$200.00 by 2026-10-09 as Rescheduled" in cell
+    assert "$300.00" not in cell
+    for row in (on_a, on_b):
+        assert "contact-closes" not in promise_cell(log, row)
+    assert contacts.closed_promise(ContactEntry.objects.get(pk=on_b.pk)) is None
+
+
+def test_a_deleted_promise_or_closing_entry_keeps_the_sentence(today: date) -> None:
+    operator = an_operator()
+    lease = a_lease(operator=operator)
+    original = promise(operator, lease=lease, by=date(2026, 10, 1), amount="2000.00")
+    closer = closing(operator, original, "broken", lease=lease, body="Will not pay.")
+    sentence = "Closed $2000.00 by 2026-10-01 as Broken"
+    deleted(original, "Entered twice.")
+    path = f"/operators/{operator.pk}/"
+    for role in (Role.BILLING, Role.VIEWER):
+        client, _ = client_for(role)
+        cell = promise_cell(table_of(page_of(client, path)), closer)
+        assert closes_link(cell) == (f"{path}#contact-{original.pk}", sentence), role
+    # The deleted closing entry's row shows it too, struck through like the rest of the row.
+    deleted(closer, "Wrong operator.")
+    admin, _ = client_for(Role.ADMIN)
+    cell = promise_cell(table_of(page_of(admin, path)), closer)
+    assert cell == (
+        f'<div class="contact-closes"><s><a href="{path}#contact-{original.pk}">'
+        f"{sentence}</a></s></div>"
+    )
+    body = b"".join(
+        admin.get(f"{path}contacts/export.csv").streaming_content  # type: ignore[attr-defined]
+    ).decode()
+    assert sentence in body
+
+
+def test_the_pages_read_the_closed_promises_in_their_own_queries(today: date) -> None:
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    operator = an_operator()
+    lease = a_lease(operator=operator)
+    client, _ = client_for(Role.BILLING)
+
+    def count(path: str) -> int:
+        with CaptureQueriesContext(connection) as queries:
+            assert client.get(path).status_code == 200
+        return len(queries)
+
+    def closed_pair(n: int) -> None:
+        old = promise(operator, lease=lease, by=date(2026, 10, 1), amount=f"{100 + n}.00")
+        closing(operator, old, ("kept", "broken")[n % 2], lease=lease, body=f"Closer {n}.")
+
+    paths = (
+        f"/operators/{operator.pk}/",
+        f"/operators/{operator.pk}/contacts/",
+        f"/stores/{lease.store_id}/",
+        f"/stores/{lease.store_id}/contacts/",
+    )
+    entry(operator, lease=lease, body="A call.")
+    plain = {path: count(path) for path in paths}
+    closed_pair(0)
+    one = {path: count(path) for path in paths}
+    for n in range(1, 6):
+        closed_pair(n)
+    many = {path: count(path) for path in paths}
+    assert plain == one == many
+    log = table_of(page_of(client, paths[0]))
+    assert log.count('<div class="contact-closes">') == 6

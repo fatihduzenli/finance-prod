@@ -623,5 +623,5 @@ def test_the_csv_has_readable_headers_and_every_entry_newest_first(today: date) 
         "Open",
     ]
     # Formula-safe text; no promise fields on a call.
-    assert rows[2][:7] == ["2026-09-01", "Call", "", "'=SUM(A1)", "", "", ""]
-    assert rows[2][7] == user.get_username()
+    assert rows[2][:8] == ["2026-09-01", "Call", "", "'=SUM(A1)", "", "", "", ""]
+    assert rows[2][8] == user.get_username()

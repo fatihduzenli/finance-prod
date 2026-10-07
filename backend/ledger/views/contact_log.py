@@ -31,6 +31,10 @@ class LogRow:
     can_delete: bool
     #: Kept, Reschedule and Broken on an open promise (PLAN-012c-b D2).
     can_record_outcome: bool
+    #: "Closed $X by D as ..." when the entry recorded a promise's outcome, and the link to
+    #: that promise's row (PLAN-012c-b D5); both ``""`` otherwise.
+    closes_text: str = ""
+    closes_url: str = ""
 
 
 def include_deleted(request: HttpRequest) -> bool:
@@ -39,11 +43,23 @@ def include_deleted(request: HttpRequest) -> bool:
     return meets(role_of(request.user), Role.BILLING)
 
 
-def log_rows(request: HttpRequest, entries: list[ContactEntry]) -> list[LogRow]:
+def _closes_url(request: HttpRequest, promise: ContactEntry, store: Store | None) -> str:
+    """The closed promise's row: on this page, unless the page is ``store``'s and the
+    promise is not about a lease of it; then on the operator page."""
+    anchor = f"#contact-{promise.pk}"
+    if store is not None and (promise.lease is None or promise.lease.store_id != store.pk):
+        return reverse("ledger:operators:detail", kwargs={"pk": promise.operator_id}) + anchor
+    return request.get_full_path() + anchor
+
+
+def log_rows(
+    request: HttpRequest, entries: list[ContactEntry], *, store: Store | None = None
+) -> list[LogRow]:
     """The entries with what the request's user may do on each: the author edits inside
     the window; any other billing user, or the author after it, adds a correction; an
     admin deletes; billing records the outcome of an open promise of an operator not
-    archived. Nothing on a deleted entry."""
+    archived. Nothing on a deleted entry. An entry that closed a promise names it and links
+    to it (D5); ``store`` is the store whose page lists ``entries``, if any."""
     role = role_of(request.user)
     billing = meets(role, Role.BILLING)
     admin = meets(role, Role.ADMIN)
@@ -51,6 +67,7 @@ def log_rows(request: HttpRequest, entries: list[ContactEntry]) -> list[LogRow]:
     now = timezone.now()
     rows = []
     for entry in entries:
+        closed = contacts.closed_promise(entry)
         editable = billing and contacts.can_edit(entry, user, now)
         live = entry.deleted_at is None
         rows.append(
@@ -65,6 +82,8 @@ def log_rows(request: HttpRequest, entries: list[ContactEntry]) -> list[LogRow]:
                 and entry.kind == ContactKind.PROMISE
                 and entry.status == ContactStatus.OPEN
                 and entry.operator.archived_at is None,
+                closes_text=contacts.closes_sentence(closed) if closed is not None else "",
+                closes_url=_closes_url(request, closed, store) if closed is not None else "",
             )
         )
     return rows

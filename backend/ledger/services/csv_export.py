@@ -213,6 +213,7 @@ HEADERS: frozenset[str] = frozenset(
         "Promised date",
         "Promised amount (USD)",
         "Promise status",
+        "Closes promise",
         "Recorded at",
         "Corrections",
         "Delete reason",

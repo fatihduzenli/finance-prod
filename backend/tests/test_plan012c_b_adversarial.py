@@ -193,3 +193,48 @@ def test_migration_0033_keeps_the_newest_open_per_bucket_and_is_idempotent() -> 
     assert AuditLog.objects.count() - audits == written
     assert len(contacts.broken_promises(TODAY, operator.pk)) == 0
     assert timezone.localdate() == TODAY
+
+
+# --- D5: the closing entry names what it closed for every reader; the link stays local ------
+
+
+def test_the_closing_entry_names_the_promise_for_viewers_too_and_its_link_stays_on_site() -> None:
+    from tests.test_contact_log import page_of, table_of
+
+    operator = an_operator("A")
+    lease = a_lease(operator=operator)
+    row = promise(operator, lease=lease, by=date(2026, 10, 1), amount="2000.00")
+    outcome = contacts.add_entry(
+        operator.pk,
+        contacts.ContactInput(
+            kind="call",
+            happened_on=TODAY,
+            body="Will not pay.",
+            lease=lease.pk,
+            previous=row.pk,
+            outcome="broken",
+        ),
+        actor=None,
+    )
+    assert outcome.ok and outcome.entry is not None, outcome.message
+    sentence = "Closed $2000.00 by 2026-10-01 as Broken"
+    viewer, _ = client_for(Role.VIEWER)
+    for path in (
+        f"/operators/{operator.pk}/",
+        f"/operators/{operator.pk}/contacts/",
+        f"/stores/{lease.store_id}/",
+    ):
+        page = page_of(viewer, path)
+        log = table_of(page)
+        assert sentence in log, path
+        href = log.split(sentence)[0].rsplit('href="', 1)[1].split('"')[0]
+        assert href.startswith("/") and not href.startswith("//") and "#contact-" in href, href
+        assert href.endswith(f"#contact-{row.pk}")
+        assert "/outcome/" not in log  # a viewer still has no buttons
+    export = b"".join(viewer.get(f"/operators/{operator.pk}/contacts/export.csv")).decode()
+    assert "Closes promise" in export.splitlines()[0]
+    assert sentence in export
+    # Deleting the original promise keeps the sentence; its deletion reason never reaches a viewer.
+    deleted(ContactEntry.objects.get(pk=row.pk), "Entered twice MARKER-D5-REASON.")
+    page = page_of(viewer, f"/operators/{operator.pk}/")
+    assert sentence in table_of(page) and "MARKER-D5-REASON" not in page

@@ -992,3 +992,9 @@ the login page myself." The condition for starting Prompt 4 is met.
   call, e-mail or visit, since the log has no remark kind); one open promise per lease with the
   warning and the message; data migration 0033 keeps the newest per bucket and chains `closed_by`
   (one-to-one); `broken_promises` one per bucket; "Add entry" on all three pages. QA-012c-b.
+- **Owner, in writing (finding 5e):** an entry that closes a promise shows nothing about it; show
+  "Closed $2,000.00 by 2026-10-01 as Broken" with a link to the original promise on the store page,
+  the operator page and the CSV. Added to PLAN-012c-b as D5; the Publish Request waits for it.
+- D5 built and gated the same day: the closing entry's Promise cell names the closed promise with
+  a link (operator page, log page, store page; the store page links to the operator page when the
+  promise is elsewhere), CSV column "Closes promise"; query counts unchanged.
