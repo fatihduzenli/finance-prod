@@ -1010,3 +1010,10 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Fix (verification-only CI config, Fable): the unit step limit 15 → 25 minutes, the job 30 → 40.
   Follow-up recorded in `docs/BACKLOG.md` §4: make the migration round trips cheaper (one CI step
   of their own, or a cached post-migration database) before the suite grows further.
+
+## Update, 2026-10-08, PLAN-012c-b (finding 5 a–e) on staging
+
+- Owner typed "push" for `81921bf`. CI run 37716995619 green end to end: the unit step took 12:47 of
+  its new 25-minute limit, the deploy ran and the four resources were verified; `/healthz` ok.
+  Staging runs `81921bf` (code of `dce8a44`): migration 0033 applied, so sena shows one open
+  promise. The owner's clicks for finding 5 (a)–(e) and the earlier PLAN-012 clicks are pending.
