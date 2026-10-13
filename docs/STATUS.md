@@ -1017,3 +1017,14 @@ the login page myself." The condition for starting Prompt 4 is met.
   its new 25-minute limit, the deploy ran and the four resources were verified; `/healthz` ok.
   Staging runs `81921bf` (code of `dce8a44`): migration 0033 applied, so sena shows one open
   promise. The owner's clicks for finding 5 (a)–(e) and the earlier PLAN-012 clicks are pending.
+
+## Update, 2026-10-13, Checkpoint 12 closed
+
+- **Owner, in writing:** all 14 staging clicks passed (the $50 wire marking INV-2026-0006 paid at
+  Stax, the Item box with a catalogue save, Add entry on store 2477, the promise buttons from all
+  three pages, the one-open-promise rule, the "Still open" default, the closing-entry sentence and
+  CSV column, the 15-minute edit window, viewer read-only, soft delete, the empty Disputes page,
+  the SMS fields). **Checkpoint 12 closed**, with 12a and finding 5.
+- Next: Step 12b (owner's text of 2026-10-13): lease-end wizard, operator transfer wizard,
+  installment plans, proration (4a), deposits excluded from revenue everywhere; Fable plans
+  (PLAN-012e), Opus builds in batches, one checkpoint report before the push.
