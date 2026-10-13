@@ -694,3 +694,46 @@ accepted by the owner on 2026-10-07 and built in PLAN-012a (below).**
   columns; job kinds `disputes_sync` and `dispute_evidence_upload`.
 - TODO-VERIFY-062 (upload response shape) and 063 (wording of the late-upload 400) are open
   until the first upload on sandbox or live.
+
+## ADR-0012 — Deposits at lease end; proration; installments count once
+
+**Date:** 2026-10-13
+**Status:** Proposed (owner's Step 12b rules, confirmed in writing 2026-10-13; the proration
+rounding rule awaits the owner's confirmation, see D1 of PLAN-012e)
+
+### Decision
+
+1. **Deposit at lease end.** A security deposit stays a liability until the lease ends (ADR-0007).
+   The end-of-lease wizard settles it in one resolution row: the part refunded (by Zelle, wire or
+   check, recorded as a `refund_deposit` payment, never through Stax) and the part withheld
+   (deductions typed as lines: damage, cleaning, unpaid-balance offset, other). An unpaid-balance
+   offset moves the withheld amount onto the open charges, oldest first, as settled manual
+   payments of method `other` with the reference "deposit offset", so the receivable reads paid
+   and the liability released; what the deposit does not cover becomes one charge, "Lease-end
+   balance", collected by hand. The refund is a liability release, never an expense; a withheld
+   amount is revenue in its month, as ADR-0007 says. The final statement is stored as a PDF under
+   the store's documents (kind `final_statement`) and e-mailed to the operator when mail is on.
+2. **Proration.** A lease charged mid-month pays for the days used: amount = monthly rent × days
+   used ÷ days in that calendar month, rounded once to the cent (the owner's example:
+   13–31 Oct, 19 of 31 days of $2,000.00 = $1,225.81); start and end days both count; "Prorate
+   first month" on the lease (default on) and "Prorate last month" in the wizard (default on).
+   **If the owner prefers the per-day rounding of the rule's wording ($64.52 × 19 = $1,225.88),
+   that replaces this line.**
+3. **Transfer.** The outgoing lease is ended through the same wizard (reason `transfer`); the
+   incoming lease starts no earlier than the day after; the incoming operator's deposit and setup
+   charges are a builder draft for review, so nothing reaches Stax before staff send it; no day
+   has two leases in effect on one store.
+4. **Installments.** A plan splits an open charge into 2–12 charges of category `installment`
+   (equal amounts, the rounding cent on the last), collected as the parent is; the parent is
+   covered by the plan and counted once: billed as itself, collected through its installments;
+   a returned installment follows the NSF rule and puts the plan on the attention list;
+   reschedule shifts the unpaid ones, cancel returns the remainder to the parent.
+5. **One new dependency**, `reportlab` (BSD), to write the statement PDF; the alternative (the
+   browser's print, no stored document) does not meet "stored under the store's documents".
+
+### Consequences
+
+- New tables `lease_ends`, `lease_end_deductions`, `lease_transfers`, `installment_plans`; new
+  columns on `leases`, `rent_charges`, `one_off_charges`, `outbound_messages`; mail gains
+  attachments; four migrations; `docs/CLAUDE.md` §5 ("send email itself") is amended by the
+  final-statement e-mail, which goes through the same mail package and catch-all as the ladder.
