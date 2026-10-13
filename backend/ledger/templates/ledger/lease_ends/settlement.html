@@ -1,0 +1,23 @@
+{% extends "finance/base.html" %}
+{% block title %}End lease {{ store.external_label }}: settlement{% endblock %}
+{% block content %}
+  {% include "ledger/lease_ends/_steps.html" %}
+  <p class="muted" id="step-help">Say how and when the refund is paid back by Zelle, wire or check; leave the method empty when nothing is refunded.</p>
+  <dl>
+    <dt>Refund due to the operator</dt><dd id="refund-due">${{ figures.refund_due }}</dd>
+    <dt>Amount owed by the operator</dt><dd id="amount-owed">${{ figures.amount_owed }}</dd>
+  </dl>
+  <form method="post" id="lease-end-settlement" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form.visible_fields %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
+      {{ field.errors }}
+      {{ field }}
+      {% if field.help_text %}<br><span class="muted">{{ field.help_text }}</span>{% endif %}
+    {% endfor %}
+    <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
+  </form>
+  {% include "ledger/lease_ends/_cancel.html" %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

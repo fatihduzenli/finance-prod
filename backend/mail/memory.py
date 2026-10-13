@@ -53,8 +53,8 @@ class NullSender:
 
 class CatchAllSender:
     """Delivers every message to ``address`` instead of its recipient: the subject starts
-    with ``[to: <recipient>] `` and an ``X-Original-To`` header names the recipient. The
-    receipt says ``catch_all``."""
+    with ``[to: <recipient>] `` and an ``X-Original-To`` header names the recipient; the
+    attachments go with it. The receipt says ``catch_all``."""
 
     def __init__(self, inner: MailSender, address: str) -> None:
         self.inner = inner
@@ -67,5 +67,6 @@ class CatchAllSender:
             text=message.text,
             html=message.html,
             headers=(*message.headers, (ORIGINAL_TO, message.to)),
+            attachments=message.attachments,
         )
         return replace(self.inner.send(rewritten), disposition=CATCH_ALL)

@@ -248,6 +248,9 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:disputes:page`, `:export` | none | billing | the dispute list and its CSV; viewer is 403; provider IDs masked |
 | `ledger:disputes:refresh` | POST | billing | queues one `disputes_sync` job; BUSY while one waits |
 | `ledger:disputes:evidence`, `:evidence_retry` | POST | admin | stores the file as the operator's document (10c checks) and queues the upload; refused after `respond_by` |
+| `ledger:stores:end_lease`, `ledger:lease_ends:*` | POST | admin | the end-of-lease wizard (PLAN-012e); GET of every step is admin only too; `:pdf` downloads the stored statement |
+| `ledger:leases:stop_autopay` | POST | admin | deletes the lease's provider schedules through the worker; confirmation page on GET (admin) |
+| `ledger:stores:transfer`, `ledger:transfers:*` | POST | admin | the operator-transfer wizard (PLAN-012e) |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |
 
 The `admin` group also holds Django's model permissions for users, groups, OTP

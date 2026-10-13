@@ -18,7 +18,14 @@ Once its lease has ended, an admin resolves it once (:func:`resolve_deposit`, on
 
 ``withheld_amount`` is the part of the paid deposit the business keeps: paid less the
 amount for a refund or a transfer, the amount itself when withheld. "Paid" is the
-deposit's settled ``one_off`` payments less their settled refunds. Every rule is checked
+deposit's settled ``one_off`` payments less their settled refunds.
+
+**At a lease end** (PLAN-012e D5(d)) the wizard resolves each deposit with
+:func:`resolve_deposit_split`: one row whose ``amount`` is the part refunded (kind
+``refunded``, by Zelle, wire or other) and whose ``withheld_amount`` is the part kept for
+the deductions, or, when nothing is refunded, kind ``withheld`` for the whole deposit.
+``offset_amount`` is the part of the withheld amount the wizard applies to the lease's
+open charges as "deposit offset" payments. Every rule is checked
 before anything is written, under the deposit's row lock (and the target lease's for a
 transfer); a refusal is one sentence and writes nothing. Every resolution is audited
 (entity ``one_off_charge``). No call reaches the payment provider.
@@ -84,6 +91,12 @@ WITHHELD_PART = (
 TARGET_OTHER_OPERATOR = "A deposit moves only to a lease of the same operator. Nothing was saved."
 TARGET_ENDED = "A deposit cannot move to a lease that has ended. Nothing was saved."
 TARGET_HAS_DEPOSIT = "That lease already has a security deposit charge. Nothing was saved."
+SPLIT_NOT_WHOLE = (
+    "The refunded and withheld parts must add up to what was paid on the deposit (${paid}). "
+    "Nothing was saved."
+)
+SPLIT_NEGATIVE = "The refunded and withheld parts cannot be negative. Nothing was saved."
+OFFSET_ABOVE_WITHHELD = "The offset cannot be more than the withheld part. Nothing was saved."
 NO_DEPOSIT_TYPE = "The security deposit fee type is missing. Nothing was saved."
 DONE = {
     DepositResolutionKind.REFUNDED: "Deposit refunded.",
@@ -243,6 +256,129 @@ def resolve_deposit(
     return Outcome(True, DONE[DepositResolutionKind(kind)], resolution=resolution)
 
 
+def _split_shape_refusal(
+    refunded: Decimal,
+    withheld: Decimal,
+    offset: Decimal,
+    resolved_on: date,
+    method: str,
+    note: str,
+    today: date,
+) -> Outcome | None:
+    for value in (refunded, withheld, offset):
+        if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+            return _refused(SPLIT_NEGATIVE, "amount")
+        if value != value.quantize(CENT):
+            return _refused(NOT_CENTS, "amount")
+        if value > MONEY_MAX:
+            return _refused(TOO_LARGE, "amount")
+    if refunded + withheld <= 0:
+        return _refused(AMOUNT_NOT_POSITIVE, "amount")
+    if offset > withheld:
+        return _refused(OFFSET_ABOVE_WITHHELD, "amount")
+    if resolved_on > today:
+        return _refused(DATE_FUTURE, "resolved_on")
+    if not note:
+        return _refused(NOTE_REQUIRED, "note")
+    try:
+        validate_no_payment_data(note)
+    except ValidationError:
+        return _refused(PAYMENT_DATA_MESSAGE, "note")
+    if refunded > 0 and method not in MANUAL_PAYMENT_METHODS:
+        return _refused(METHOD_REQUIRED, "method")
+    if refunded == 0 and method:
+        return _refused(METHOD_NOT_REFUND, "method")
+    return None
+
+
+def resolve_deposit_split(
+    setup_charge: OneOffCharge,
+    refunded: Decimal,
+    withheld: Decimal,
+    *,
+    offset: Decimal = Decimal("0.00"),
+    method: str,
+    resolved_on: date,
+    reference: str,
+    note: str,
+    actor: User | None,
+    today: date | None = None,
+) -> Outcome:
+    """Resolve a deposit at a lease end in one row (PLAN-012e D5(d)): ``refunded`` paid
+    back by ``method`` (a ``refund_deposit`` payment with ``reference``) and ``withheld``
+    kept, together exactly what was paid on it; ``offset`` of the withheld part goes to
+    the lease's open charges (written by the caller). Kind ``refunded`` when anything is
+    refunded, else ``withheld``. The rules of :func:`resolve_deposit` hold (a deposit,
+    its lease ended, resolved once), under the deposit's row lock."""
+    text = visible_text(note or "")
+    method = (method or "").strip()
+    reference = visible_text(reference or "")
+    refused = _split_shape_refusal(
+        refunded, withheld, offset, resolved_on, method, text, today or timezone.localdate()
+    )
+    if refused is not None:
+        return refused
+    kind = DepositResolutionKind.REFUNDED if refunded > 0 else DepositResolutionKind.WITHHELD
+    try:
+        with transaction.atomic():
+            charge = (
+                OneOffCharge.objects.select_for_update(of=("self",))
+                .select_related("fee_type", "lease", "lease__store")
+                .get(pk=setup_charge.pk)
+            )
+            if not is_deposit(charge) or charge.lease is None:
+                return _refused(NOT_REFUNDABLE)
+            if charge.lease.ended_on is None:
+                return _refused(LEASE_NOT_ENDED)
+            if DepositResolution.objects.filter(setup_charge=charge).exists():
+                return _refused(ALREADY_RESOLVED)
+            paid = one_off_charges.settled(charge)
+            if refunded + withheld != paid:
+                return _refused(SPLIT_NOT_WHOLE.format(paid=paid), "amount")
+            resolution = DepositResolution.objects.create(
+                setup_charge=charge,
+                kind=kind,
+                amount=refunded if refunded > 0 else withheld,
+                withheld_amount=withheld,
+                offset_amount=offset,
+                resolved_on=resolved_on,
+                method=method if refunded > 0 else "",
+                note=text,
+                created_by=actor,
+            )
+            effects: dict[str, Any] = {}
+            if refunded > 0:
+                payment = _payment(
+                    charge,
+                    PaymentKind.REFUND_DEPOSIT,
+                    method,
+                    refunded,
+                    resolved_on,
+                    text,
+                    actor,
+                    reference=reference,
+                )
+                effects = {"payment": str(payment.pk)}
+            AuditLog.objects.create(
+                actor=actor,
+                action=f"one_off_charge.deposit_{kind}",
+                entity_type=one_off_charges.ENTITY_ONE_OFF_CHARGE,
+                entity_id=str(charge.pk),
+                before={"paid": str(paid)},
+                after={
+                    **_state(resolution),
+                    "offset_amount": str(resolution.offset_amount),
+                    "split": True,
+                    **effects,
+                },
+            )
+    except IntegrityError:
+        return _refused(ALREADY_RESOLVED)
+    except ValidationError:
+        return _refused(PAYMENT_DATA_MESSAGE, "note")
+    return Outcome(True, DONE[kind], resolution=resolution)
+
+
 def _charge_refusal(charge: OneOffCharge, kind: str, amount: Decimal) -> Outcome | None:
     if not is_deposit(charge) or charge.lease is None:
         return _refused(NOT_REFUNDABLE)
@@ -340,6 +476,8 @@ def _payment(
     on: date,
     note: str,
     actor: User | None,
+    *,
+    reference: str = "",
 ) -> Payment:
     payment = Payment(
         one_off_charge=charge,
@@ -349,6 +487,7 @@ def _payment(
         status=PaymentStatus.SETTLED,
         initiated_on=on,
         settled_on=on,
+        reference=reference,
         note=note,
         recorded_by=actor,
     )

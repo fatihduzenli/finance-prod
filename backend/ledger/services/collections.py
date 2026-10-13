@@ -15,8 +15,9 @@ seen 25 days late therefore gets the day-20 step only, never three e-mails at on
 the ladder never goes back down. One ladder row per (charge, step) is also a unique
 constraint, so two ticks at once still queue one.
 
-**Queue and send.** :func:`queue_due` writes one :class:`OutboundMessage` (``queued``)
-per due step and a ``message_send`` job for the worker. :func:`send` (the job) renders
+**Queue and send.** :func:`queue_due` writes one :class:`OutboundMessage` (``queued``,
+kind ``ladder``) per due step and a ``message_send`` job for the worker, through
+:func:`ledger.services.messages.queue` (PLAN-012e D8). :func:`send` (the job) renders
 the template with the charge's figures at that moment (:mod:`ledger.merge`), delivers it
 through :func:`mail.get_sender` and records ``sent``, ``catch_all``, ``suppressed`` (mail
 off, or the charge or operator no longer qualifies) or ``failed`` with the error's class
@@ -53,6 +54,7 @@ from ledger.models import (
     AuditLog,
     ChargeEntityType,
     CollectionStep,
+    MessageKind,
     MessageStatus,
     OneOffCharge,
     OneOffChargeStatus,
@@ -61,12 +63,10 @@ from ledger.models import (
     RentCharge,
     RentChargeStatus,
 )
-from ledger.services import receivables, statement_links
+from ledger.services import messages, receivables, statement_links
 from ledger.services.leases import format_amount
 from ledger.validators import contains_bank_routing_pattern, contains_card_number, visible_text
 from mail.base import SUBJECT_MAX_LENGTH
-from payments import jobs
-from payments.models import JobKind
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,9 @@ def _reachable_operators(ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, Operator]:
 def _logged_offsets(charge_ids: Iterable[uuid.UUID]) -> dict[tuple[str, uuid.UUID], int]:
     """(charge type, charge id) -> the largest step offset already logged by the ladder."""
     rows = (
-        OutboundMessage.objects.filter(manual=False, charge_entity_id__in=list(charge_ids))
+        OutboundMessage.objects.filter(
+            kind=MessageKind.LADDER, manual=False, charge_entity_id__in=list(charge_ids)
+        )
         .values("charge_entity_type", "charge_entity_id")
         .annotate(latest=Max("step__day_offset"))
         .order_by()
@@ -223,7 +225,7 @@ def _audit(
         after={
             "charge_type": message.charge_entity_type,
             "charge": str(message.charge_entity_id),
-            "step": message.step.day_offset,
+            "step": message.step.day_offset if message.step is not None else None,
             "manual": message.manual,
             **after,
         },
@@ -242,17 +244,15 @@ def _queue(
     """One queued row and its job; ``None`` when the ladder row already exists."""
     try:
         with transaction.atomic():
-            message = OutboundMessage.objects.create(
-                operator=operator,
-                template=step.template,
+            message = messages.queue(
+                MessageKind.LADDER,
+                operator,
+                step.template,
+                messages.MessageContext(charge_type, charge_id),
+                actor=actor,
                 step=step,
-                charge_entity_type=charge_type,
-                charge_entity_id=charge_id,
-                to_address=operator.email or "",
                 manual=manual,
-                sent_by=actor,
             )
-            jobs.enqueue(JobKind.MESSAGE_SEND, message, None, actor)
             _audit("collections.queued", message, actor, {})
     except IntegrityError:
         return None
@@ -285,6 +285,8 @@ class ChargeFigures:
 
 
 def charge_figures(charge_type: str, charge_id: uuid.UUID) -> ChargeFigures | None:
+    if charge_type not in CHARGE_TYPES.values():
+        return None
     if charge_type == ChargeEntityType.RENT_CHARGE:
         rent = RentCharge.objects.select_related("lease__store").filter(pk=charge_id).first()
         if rent is None:
@@ -393,6 +395,8 @@ def send(message_id: uuid.UUID, today: date | None = None) -> Outcome:
             return Outcome(False, GONE)
         if message.status != MessageStatus.QUEUED:
             return Outcome(True, NOT_QUEUED.format(status=message.get_status_display().lower()))
+        if message.kind != MessageKind.LADDER:
+            return Outcome(False, GONE)
         figures = charge_figures(message.charge_entity_type, message.charge_entity_id)
         reason = _skip_reason(message, figures)
         if reason or figures is None:
@@ -506,7 +510,8 @@ class LogRow:
     """One message as the pages list it: the address masked, never the body."""
 
     when: object
-    step: int
+    #: The ladder step's day; ``None`` for a final statement (PLAN-012e D8).
+    step: int | None
     template: str
     status: str
     status_label: str
@@ -522,7 +527,7 @@ def _rows(found: Iterable[OutboundMessage]) -> list[LogRow]:
     return [
         LogRow(
             when=message.sent_at or message.queued_at,
-            step=message.step.day_offset,
+            step=message.step.day_offset if message.step is not None else None,
             template=message.template.code,
             status=message.status,
             status_label=message.get_status_display(),

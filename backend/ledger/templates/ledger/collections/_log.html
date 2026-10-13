@@ -5,10 +5,10 @@
     {% for row in log %}
       <tr>
         <td>{{ row.when|date:"Y-m-d H:i" }}</td>
-        <td>Day {{ row.step }} <span class="muted">({{ row.template }})</span></td>
+        <td>{% if row.step is not None %}Day {{ row.step }}{% else %}Final statement{% endif %} <span class="muted">({{ row.template }})</span></td>
         <td>{{ row.status_label }}{% if row.error %} <span class="muted">({{ row.error }})</span>{% endif %}</td>
         <td>{{ row.to }}</td>
-        {% if show_charge %}<td>{% if row.charge_type == "rent_charge" %}<a href="{% url 'ledger:charges:detail' pk=row.charge_id %}">Rent charge</a>{% else %}<a href="{% url 'ledger:one_off_charges:detail' pk=row.charge_id %}">One-off charge</a>{% endif %}</td>{% endif %}
+        {% if show_charge %}<td>{% if row.charge_type == "rent_charge" %}<a href="{% url 'ledger:charges:detail' pk=row.charge_id %}">Rent charge</a>{% elif row.charge_type == "lease_end" %}<a href="{% url 'ledger:lease_ends:confirm' pk=row.charge_id %}">Lease end</a>{% else %}<a href="{% url 'ledger:one_off_charges:detail' pk=row.charge_id %}">One-off charge</a>{% endif %}</td>{% endif %}
         <td>{% if row.manual %}<span class="badge">Manual</span> {% endif %}{{ row.sent_by|default:"Ladder" }}</td>
       </tr>
     {% empty %}

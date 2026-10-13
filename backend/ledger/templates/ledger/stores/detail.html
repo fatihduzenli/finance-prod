@@ -6,7 +6,7 @@
   <p><a href="{% url 'ledger:stores:list' %}">&larr; Stores</a></p>
   <h1>Store {{ store.external_label }}{% if store.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
 
-  {% if can_edit or can_set_cost or can_new_invoice %}<div class="actions">{% if can_edit %}<a class="btn" href="{% url 'ledger:stores:edit' pk=store.pk %}">Edit</a>{% endif %}{% if can_set_cost %} <a class="btn" href="{% url 'ledger:stores:set_cost' pk=store.pk %}" id="set-landlord-rent">Set landlord rent</a>{% endif %}{% if can_new_invoice %} <a class="btn" href="{% url 'ledger:invoices:new_store' pk=store.pk %}" id="new-invoice">New invoice</a>{% endif %}</div>{% endif %}
+  {% if can_edit or can_set_cost or can_new_invoice or can_end_lease %}<div class="actions">{% if can_edit %}<a class="btn" href="{% url 'ledger:stores:edit' pk=store.pk %}">Edit</a>{% endif %}{% if can_set_cost %} <a class="btn" href="{% url 'ledger:stores:set_cost' pk=store.pk %}" id="set-landlord-rent">Set landlord rent</a>{% endif %}{% if can_new_invoice %} <a class="btn" href="{% url 'ledger:invoices:new_store' pk=store.pk %}" id="new-invoice">New invoice</a>{% endif %}{% if can_end_lease %} <a class="btn" href="{% url 'ledger:stores:transfer' pk=store.pk %}" id="store-transfer">Transfer to another operator</a> <a class="btn btn-danger" href="{% url 'ledger:stores:end_lease' pk=store.pk %}" id="store-end-lease">End lease</a>{% endif %}</div>{% endif %}
 
   <dl>
     <dt>Name</dt><dd>{{ store.external_label }}</dd>
@@ -15,7 +15,7 @@
     <dt>State</dt><dd>{{ store.state|default:"—" }}</dd>
     <dt>Open date</dt><dd>{% if store.open_date %}{{ store.open_date|date:"Y-m-d" }}{% else %}— <span class="badge">Needs open date</span>{% endif %}</dd>
     <dt>Closed date</dt><dd>{{ store.closed_at|date:"Y-m-d"|default:"—" }}</dd>
-    <dt>Status</dt><dd>{{ store.get_status_display }}</dd>
+    <dt>Status</dt><dd>{{ store.get_status_display }}{% if vacant_since %} <span class="badge" id="vacant-since">Vacant since {{ vacant_since|date:"Y-m-d" }}</span>{% endif %}</dd>
   </dl>
 
   <h2>Costs and margin</h2>
@@ -73,7 +73,7 @@
           <td>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</td>
           <td>{{ lease.started_on|date:"Y-m-d"|default:"—" }}</td>
           <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>
-          <td>{{ lease.get_collection_status_display }}</td>
+          <td>{{ lease.get_collection_status_display }}{% if lease.lease_end and lease.lease_end.status == "confirmed" and can_edit %} <a href="{% url 'ledger:lease_ends:confirm' pk=lease.lease_end.pk %}">Final statement</a>{% endif %}</td>
         </tr>
       {% empty %}
         <tr><td colspan="5" class="muted">No leases.</td></tr>

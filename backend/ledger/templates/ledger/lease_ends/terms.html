@@ -1,0 +1,19 @@
+{% extends "finance/base.html" %}
+{% block title %}End lease {{ store.external_label }}: end date{% endblock %}
+{% block content %}
+  {% include "ledger/lease_ends/_steps.html" %}
+  <p class="muted" id="step-help">Say on which day the lease ended and why; nothing changes until you confirm on the last step.</p>
+  <form method="post" id="lease-end-terms" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form.visible_fields %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
+      {{ field.errors }}
+      {{ field }}
+      {% if field.help_text %}<br><span class="muted">{{ field.help_text }}</span>{% endif %}
+    {% endfor %}
+    <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
+  </form>
+  {% include "ledger/lease_ends/_cancel.html" %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

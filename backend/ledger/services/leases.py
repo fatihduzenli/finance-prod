@@ -114,6 +114,7 @@ LEASE_FIELDS: tuple[str, ...] = (
     "payment_channel",
     "started_on",
     "collection_status",
+    "prorate_first_month",
 )
 _RULE_DAY = re.compile(r"\ADTSTART=(\d{4})(\d{2})(\d{2})T")
 
@@ -143,6 +144,9 @@ RESUME_REFUSED = (
 ALREADY_ENABLED = "Autopay is already set up for every debit day. Nothing was created."
 NOTHING_TO_PAUSE = "No active schedule to pause."
 NOTHING_TO_RESUME = "No paused schedule to resume."
+#: PLAN-012e D5 amendment: stopping autopay.
+NOTHING_TO_STOP = "No active or paused schedule to stop."
+AUTOPAY_STOPPED = "Autopay stopped: the provider schedules are deleted."
 CHOOSE_METHOD = "Choose a bank payment method."
 METHOD_NOT_FOUND = (
     "That payment method is not one of this operator's methods at the payment provider. "
@@ -180,6 +184,7 @@ class AutopayAction(StrEnum):
     ENABLED = "enabled"
     PAUSED = "paused"
     RESUMED = "resumed"
+    STOPPED = "stopped"
     ALREADY = "already"
     REFUSED = "refused"
     FAILED = "failed"
@@ -200,6 +205,7 @@ class AutopayOutcome:
             AutopayAction.ENABLED,
             AutopayAction.PAUSED,
             AutopayAction.RESUMED,
+            AutopayAction.STOPPED,
             AutopayAction.ALREADY,
         )
 
@@ -713,6 +719,7 @@ def end_lease(
     *,
     actor: User | None,
     today: date | None = None,
+    reason: str = "",
 ) -> Lease:
     """Set the lease's end date and reason and its status to ``ended`` (PLAN-010b Batch C).
 
@@ -720,9 +727,10 @@ def end_lease(
     the date is missing, before the start date or in the future, the reason is empty
     or holds a card or account number, or a rent schedule is active at the payment
     provider (autopay must be paused first; nothing here calls the provider). Checked
-    under the lease's row lock and audited as ``lease.ended``.
+    under the lease's row lock and audited as ``lease.ended``; ``reason`` is the
+    end-of-lease wizard's reason code (PLAN-012e D5), kept in the audit row.
     """
-    reason = visible_text(end_reason or "")
+    text = visible_text(end_reason or "")
     with transaction.atomic():
         lease = _locked(lease_id)
         if lease.ended_on is not None:
@@ -735,20 +743,23 @@ def end_lease(
             raise LeaseRefused(
                 "ended_on", END_BEFORE_START.format(start=lease.started_on.isoformat())
             )
-        if not reason:
+        if not text:
             raise LeaseRefused("end_reason", END_REASON_REQUIRED)
         try:
-            validate_no_payment_data(reason)
+            validate_no_payment_data(text)
         except ValidationError:
             raise LeaseRefused("end_reason", PAYMENT_DATA_MESSAGE) from None
         if autopay_on(lease):
             raise LeaseRefused(None, END_AUTOPAY_ON)
         before = {**_snapshot(lease), **_end_snapshot(lease)}
         lease.ended_on = ended_on
-        lease.end_reason = reason
+        lease.end_reason = text
         lease.collection_status = CollectionStatus.ENDED
         lease.save(update_fields=["ended_on", "end_reason", "collection_status", "updated_at"])
-        _audit(actor, "lease.ended", lease, before, {**_snapshot(lease), **_end_snapshot(lease)})
+        after = {**_snapshot(lease), **_end_snapshot(lease)}
+        if reason:
+            after["reason"] = reason
+        _audit(actor, "lease.ended", lease, before, after)
     return lease
 
 
@@ -976,6 +987,63 @@ def resume_autopay(
     return AutopayOutcome(AutopayAction.RESUMED, "Autopay resumed.")
 
 
+def stoppable_schedules(lease: Lease) -> list[tuple[CollectionSchedule, str]]:
+    """The lease's rent and insurance schedules active or paused at the provider (a row
+    with a provider schedule ID), with that ID, in kind and seq order: what "Stop
+    autopay" deletes and what the end-of-lease wizard lists as blockers."""
+    rows = lease.schedules.filter(
+        kind__in=[ScheduleKind.RENT, ScheduleKind.INSURANCE],
+        state__in=[ScheduleState.ACTIVE, ScheduleState.PAUSED],
+    ).order_by("kind", "seq")
+    return [(row, ref) for row in rows if (ref := schedule_ref(row))]
+
+
+def stop_autopay(lease_id: uuid.UUID, *, actor: User | None) -> AutopayOutcome:
+    """PLAN-012e D5 amendment: delete every rent and insurance schedule of the lease
+    active or paused at the provider (a 404 counts as already gone, as
+    :func:`enable_autopay` treats stale rows), one at a time; each deleted row is set
+    ``ended`` and audited ``lease.autopay_stopped``. Nothing else on the lease changes.
+    Any other provider failure stops at that row, audited, and leaves it as it was; the
+    rows already deleted stay ended."""
+    with transaction.atomic():
+        lease = _locked(lease_id)
+        rows = stoppable_schedules(lease)
+        if not rows:
+            return AutopayOutcome(AutopayAction.ALREADY, NOTHING_TO_STOP)
+        provider = payments.get_provider()
+        for row, ref in rows:
+            try:
+                provider.delete_scheduled_invoice(ref)
+            except ProviderRejected as error:
+                if error.status != HTTPStatus.NOT_FOUND:
+                    return _failed(
+                        actor,
+                        lease,
+                        "lease.autopay_stop_failed",
+                        error,
+                        {"kind": row.kind, "seq": row.seq},
+                    )
+            except ProviderError as error:
+                return _failed(
+                    actor,
+                    lease,
+                    "lease.autopay_stop_failed",
+                    error,
+                    {"kind": row.kind, "seq": row.seq},
+                )
+            before = {"kind": row.kind, **_schedule_snapshot(row, ref)}
+            row.state = ScheduleState.ENDED
+            row.save(update_fields=["state", "updated_at"])
+            _audit(
+                actor,
+                "lease.autopay_stopped",
+                lease,
+                before,
+                {"kind": row.kind, **_schedule_snapshot(row, ref)},
+            )
+    return AutopayOutcome(AutopayAction.STOPPED, AUTOPAY_STOPPED)
+
+
 # --- Helpers --------------------------------------------------------------------------
 
 
@@ -1169,6 +1237,7 @@ def _snapshot(lease: Lease) -> dict[str, Any]:
         "payment_channel": lease.payment_channel,
         "started_on": lease.started_on.isoformat() if lease.started_on else None,
         "collection_status": lease.collection_status,
+        "prorate_first_month": lease.prorate_first_month,
         "rent": str(open_row.amount) if open_row is not None else None,
         "rent_from": open_row.effective_from.isoformat() if open_row is not None else None,
     }

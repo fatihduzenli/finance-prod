@@ -1,0 +1,51 @@
+{% load responsive %}
+<section id="statement-figures">
+  {% if figures.last_month %}
+    <h2>Last month ({{ figures.last_month.month|date:"F Y" }})</h2>
+    {% if figures.last_month.text %}<p id="last-month-text">Prorated: {{ figures.last_month.text }}</p>{% else %}<p id="last-month-text">Full month at ${{ figures.last_month.rent }}.</p>{% endif %}
+    {% if figures.last_month.credit %}<p id="last-month-credit">Credit: ${{ figures.last_month.credit }} paid for days after the end date, refunded with the settlement.</p>{% endif %}
+  {% endif %}
+  {% if figures.after_end %}
+    <h2>After the end date</h2>
+    <ul id="after-end">
+      {% for item in figures.after_end %}
+        <li>{{ item.text }}: {% if item.credit %}${{ item.credit }}, refunded with the settlement{% else %}${{ item.amount_due }}{% endif %}.</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  <h2>Open balance</h2>
+  {% responsive_table %}
+  <table id="open-lines">
+    <thead><tr><th>Charge</th><th>Due</th><th>Balance</th></tr></thead>
+    <tbody>
+      {% for line in figures.open_lines %}
+        <tr><td>{{ line.description }}</td><td>{{ line.due_on|date:"Y-m-d" }}</td><td>${{ line.balance }}</td></tr>
+      {% empty %}
+        <tr><td colspan="3" class="muted">Nothing is open.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><th colspan="2">Open balance</th><th id="open-total">${{ figures.open_total }}</th></tr></tfoot>
+  </table>
+  {% endresponsive_table %}
+  <h2>Deposit</h2>
+  <dl>
+    {% for deposit in figures.deposits %}<dt>{{ deposit.label }}</dt><dd>${{ deposit.held }}</dd>{% endfor %}
+    <dt>Deposit held</dt><dd id="deposit-held">${{ figures.deposit_held }}</dd>
+  </dl>
+  {% if figures.deductions %}
+    <h2>Deductions</h2>
+    <dl id="deduction-lines">
+      {% for line in figures.deductions %}<dt>{{ line.label }}{% if line.description %}: {{ line.description }}{% endif %}</dt><dd>${{ line.amount }}</dd>{% endfor %}
+      <dt>Deductions</dt><dd id="deductions-total">${{ figures.deductions_total }}</dd>
+    </dl>
+  {% endif %}
+  <h2>Settlement</h2>
+  <dl id="settlement-figures">
+    <dt>Deposit kept for the deductions</dt><dd id="withheld">${{ figures.withheld }}</dd>
+    <dt>Of which applied to the open balance</dt><dd id="offset-applied">${{ figures.offset_applied }}</dd>
+    <dt>Refund due to the operator</dt><dd id="refund-due">${{ figures.refund_due }}</dd>
+    <dt>Amount owed by the operator</dt><dd id="amount-owed">${{ figures.amount_owed }}</dd>
+    {% if figures.debt %}<dt>Lease-end balance charged</dt><dd id="debt">${{ figures.debt }}</dd>{% endif %}
+    {% if figures.still_open %}<dt>Still open on its charges</dt><dd id="still-open">${{ figures.still_open }}</dd>{% endif %}
+  </dl>
+</section>

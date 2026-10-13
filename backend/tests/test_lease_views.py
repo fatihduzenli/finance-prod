@@ -143,7 +143,7 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     names = {name for name, _, _ in iter_routes() if name and name.startswith("ledger:leases:")}
     # PLAN-010b D5, D7, D12: adding one setup charge from the lease page needs billing;
     # resolving a deposit needs admin, as the lease routes do. Batch C: ending a lease
-    # needs admin.
+    # needs admin. PLAN-012e D5 amendment: so does stopping autopay.
     assert names == {
         f"ledger:leases:{short}"
         for short in (
@@ -154,6 +154,7 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             "new_charge",
             "resolve_deposit",
             "end",
+            "stop_autopay",
             *POST_ROUTES,
         )
     }
@@ -173,6 +174,9 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     rule = registry.rule_for("ledger:leases:resolve_deposit")
     assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
     rule = registry.rule_for("ledger:leases:end")
+    assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
+    # PLAN-012e D5 amendment: stopping autopay needs admin.
+    rule = registry.rule_for("ledger:leases:stop_autopay")
     assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
 
 

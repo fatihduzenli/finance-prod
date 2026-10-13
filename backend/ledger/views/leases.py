@@ -1,5 +1,5 @@
-"""Lease screens: list, detail, create, edit, end, enrol, pause, resume (PLAN-007 §4.1,
-PLAN-010b Batch C).
+"""Lease screens: list, detail, create, edit, end, enrol, pause, resume, stop autopay
+(PLAN-007 §4.1, PLAN-010b Batch C, PLAN-012e D5 amendment).
 
 Access: every view requires a signed-in, second-factor-verified user with a role
 (middleware plus :func:`~ledger.views.operators.role_required`). Unsafe methods are
@@ -8,7 +8,7 @@ enrolment page shows the operator's payment methods, so its GET is limited to ``
 here too.
 
 No view calls the provider: every change goes through :mod:`ledger.services.leases`,
-which writes the audit log. Enable, pause and resume are queued as jobs
+which writes the audit log. Enable, pause, resume and stop are queued as jobs
 (:mod:`ledger.views.jobs`, PLAN-010 D3) that run the service in the worker; the detail
 page shows the latest one. The enrolment page lists the methods from the latest
 snapshot ("Methods as of ..."); its "Refresh methods" button (a POST to the same URL
@@ -39,7 +39,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
-from ledger.forms import EndLeaseForm, EnrolForm, LeaseCreateForm, LeaseForm
+from ledger.forms import EnrolForm, LeaseCreateForm, LeaseForm
 from ledger.models import (
     ChargeNote,
     DocumentKind,
@@ -247,6 +247,7 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_enrol": admin,
             "can_pause": admin and ScheduleState.ACTIVE in linked_states,
             "can_resume": admin and ScheduleState.PAUSED in linked_states,
+            "can_stop": admin and bool(service.stoppable_schedules(lease)),
             **documents.section_context(request, lease),
         },
     )
@@ -354,38 +355,13 @@ def lease_edit(request: HttpRequest, pk: str) -> HttpResponse:
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def lease_end(request: HttpRequest, pk: str) -> HttpResponse:
-    """End the lease (admin, PLAN-010b Batch C): its end date, reason and ``ended``
-    status. Refused while autopay is on; nothing calls the provider."""
+    """The old End lease route (PLAN-010b Batch C): admin only, and it now sends the
+    admin to the end-of-lease wizard of the lease's store (PLAN-012e D4)."""
     refused = _admin_only(request)
     if refused is not None:
         return refused
     lease = _load(pk)
-    target = f"lease-end:{lease.pk}"
-    if request.method == "POST":
-        form = EndLeaseForm(request.POST)
-        if form.is_valid():
-            try:
-                service.end_lease(
-                    lease.pk,
-                    form.cleaned_data["ended_on"],
-                    form.cleaned_data["end_reason"],
-                    actor=_actor(request),
-                )
-            except LeaseRefused as refusal:
-                form.add_error(refusal.field, str(refusal))
-            else:
-                messages.success(request, "Lease ended.")
-                return redirect("ledger:leases:detail", pk=lease.pk)
-        _hold(request, target, form)
-        return redirect("ledger:leases:end", pk=lease.pk)
-    form = _held(request, target, EndLeaseForm) or EndLeaseForm(
-        initial={"ended_on": timezone.localdate()}
-    )
-    return render(
-        request,
-        "ledger/leases/end.html",
-        {"form": form, "lease": lease, "autopay_on": service.autopay_on(lease)},
-    )
+    return redirect("ledger:stores:end_lease", pk=lease.store_id)
 
 
 @role_required
@@ -485,3 +461,34 @@ def lease_resume(request: HttpRequest, pk: str) -> HttpResponse:
     if not busy(request, lease):
         submit(request, JobKind.AUTOPAY_RESUME, lease)
     return redirect("ledger:leases:detail", pk=lease.pk)
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_stop_autopay(request: HttpRequest, pk: str) -> HttpResponse:
+    """Stop autopay (admin, PLAN-012e D5 amendment): a confirmation page listing the
+    schedules active or paused at the provider; its POST queues the ``autopay_stop`` job,
+    which deletes them at the provider."""
+    refused = _admin_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    rows = service.stoppable_schedules(lease)
+    if request.method == "POST":
+        if not rows:
+            messages.info(request, service.NOTHING_TO_STOP)
+        elif not busy(request, lease):
+            submit(request, JobKind.AUTOPAY_STOP, lease)
+        return redirect("ledger:leases:detail", pk=lease.pk)
+    return render(
+        request,
+        "ledger/leases/stop_autopay.html",
+        {
+            **job_context(lease),
+            "lease": lease,
+            "schedules": [
+                {"row": row, "schedule_masked": mask_identifier(ref)} for row, ref in rows
+            ],
+            "nothing_to_stop": service.NOTHING_TO_STOP,
+        },
+    )

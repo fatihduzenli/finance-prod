@@ -1028,3 +1028,22 @@ the login page myself." The condition for starting Prompt 4 is met.
 - Next: Step 12b (owner's text of 2026-10-13): lease-end wizard, operator transfer wizard,
   installment plans, proration (4a), deposits excluded from revenue everywhere; Fable plans
   (PLAN-012e), Opus builds in batches, one checkpoint report before the push.
+
+## Update, 2026-10-13, PLAN-012e Batches A and B built and gated (not pushed)
+
+- **A:** proration (one rounding; the owner's example $1,225.81; "Prorate first month" on the
+  lease; months after the end never charged), the end-of-lease wizard (terms, blockers incl.
+  live rent/insurance invoices and the new **Stop autopay** action, statement with the last month
+  reduced/credited/created and after-end months waived or credited, deductions, settlement with
+  the deposit split and the unpaid-balance offset counted once, confirm with "are you sure"), the
+  PDF through `reportlab==5.0.1` (BSD; transitive `pillow==12.3.0`, MIT-CMU), the statement
+  e-mail with an attachment through a seeded template; migrations ledger 0034–0036, payments
+  0016–0017.
+- **B:** the transfer wizard (operator pick or inline create, blockers incl. open balances per
+  charge, the lease-end steps with reason `transfer`, the incoming lease ≥ end + 1 with one
+  builder draft for the deposit and setup lines, the hand-over invariant); migration 0037.
+- Gate (both batches, final code): ruff, format, mypy, lock, migrations clean; sqlite 4,854
+  passed; PostgreSQL 5,458 passed (18:40); e2e 7; secret scans clean; Fable's adversarial file
+  16 cases green. **For the owner at the checkpoint:** the proration rounding rule (D1), the new
+  dependency, and whether a lease-end balance charge may remain on the outgoing operator after a
+  transfer (Opus's choice: yes, as in a plain lease end).

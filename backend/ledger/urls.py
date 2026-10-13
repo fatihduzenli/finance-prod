@@ -2,7 +2,7 @@
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
 D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11, PLAN-010c
 D7, D10, PLAN-010d D1, D2, D4, D6, D8, PLAN-011 D0 to D5, PLAN-011b D4, D7, D8, PLAN-012 D2,
-D3, D6 to D8).
+D3, D6 to D8, PLAN-012e D4 to D7).
 
 Namespace ``ledger``.
 
@@ -32,6 +32,7 @@ from ledger.views import (
     disputes,
     documents,
     invoices,
+    lease_ends,
     leases,
     one_off_charges,
     operators,
@@ -42,6 +43,7 @@ from ledger.views import (
     run,
     statement_links,
     stores,
+    transfers,
     webhooks,
 )
 
@@ -94,8 +96,39 @@ store_patterns = (
         # The store's contact log (PLAN-012 D3).
         path("<str:pk>/contacts/", contacts.store_contacts_page, name="contacts"),
         path("<str:pk>/contacts/new/", contacts.store_contacts_add, name="contacts_add"),
+        # The end-of-lease wizard (PLAN-012e D4): start or resume.
+        path("<str:pk>/end-lease/", lease_ends.store_end_lease, name="end_lease"),
+        # The transfer wizard (PLAN-012e D6): start or resume.
+        path("<str:pk>/transfer/", transfers.store_transfer, name="transfer"),
     ],
     "stores",
+)
+
+# The end-of-lease wizard's steps (PLAN-012e D4, D5, D7), keyed by the draft.
+lease_end_patterns = (
+    [
+        path("<str:pk>/terms/", lease_ends.terms, name="terms"),
+        path("<str:pk>/blockers/", lease_ends.blockers, name="blockers"),
+        path("<str:pk>/statement/", lease_ends.statement, name="statement"),
+        path("<str:pk>/settlement/", lease_ends.settlement, name="settlement"),
+        path("<str:pk>/confirm/", lease_ends.confirm, name="confirm"),
+        path("<str:pk>/cancel/", lease_ends.cancel, name="cancel"),
+        path("<str:pk>/statement.pdf", lease_ends.pdf, name="pdf"),
+    ],
+    "lease_ends",
+)
+
+# The transfer wizard's steps (PLAN-012e D6), keyed by the transfer.
+transfer_patterns = (
+    [
+        path("<str:pk>/operator/", transfers.operator, name="operator"),
+        path("<str:pk>/end/", transfers.end, name="end"),
+        path("<str:pk>/blockers/", transfers.blockers, name="blockers"),
+        path("<str:pk>/incoming/", transfers.incoming, name="incoming"),
+        path("<str:pk>/confirm/", transfers.confirm, name="confirm"),
+        path("<str:pk>/cancel/", transfers.cancel, name="cancel"),
+    ],
+    "transfers",
 )
 
 # One contact log entry (PLAN-012 D2): the author's edit, a correction, an admin's delete;
@@ -125,6 +158,7 @@ lease_patterns = (
         path("<str:pk>/enrol/", leases.lease_enrol, name="enrol"),
         path("<str:pk>/pause/", leases.lease_pause, name="pause"),
         path("<str:pk>/resume/", leases.lease_resume, name="resume"),
+        path("<str:pk>/stop-autopay/", leases.lease_stop_autopay, name="stop_autopay"),
         path(
             "<str:pk>/setup-charges/new/",
             one_off_charges.lease_add_setup_charge,
@@ -339,6 +373,8 @@ urlpatterns = [
     path("stores/", include(store_patterns)),
     path("contacts/", include(contact_patterns)),
     path("leases/", include(lease_patterns)),
+    path("lease-ends/", include(lease_end_patterns)),
+    path("transfers/", include(transfer_patterns)),
     path("run/", include(run_patterns)),
     path("charges/", include(charge_patterns)),
     path("one-off-charges/", include(one_off_charge_patterns)),

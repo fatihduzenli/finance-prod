@@ -395,6 +395,44 @@ def new_calendar_feed(**fields: Any) -> ledger.CalendarFeed:
     return ledger.CalendarFeed(**{**values, **fields})
 
 
+def new_lease_end(**fields: Any) -> ledger.LeaseEnd:
+    """A draft lease end (PLAN-012e D4)."""
+    _default(fields, "lease", lambda: saved(new_lease()))
+    values = {"ended_on": date(2026, 10, 31), "reason": "moved_out"}
+    return ledger.LeaseEnd(**{**values, **fields})
+
+
+def new_confirmed_lease_end(**fields: Any) -> ledger.LeaseEnd:
+    values = {"status": "confirmed", "confirmed_at": datetime(2026, 11, 1, 12, tzinfo=UTC)}
+    return new_lease_end(**{**values, **fields})
+
+
+def new_lease_end_deduction(**fields: Any) -> ledger.LeaseEndDeduction:
+    _default(fields, "lease_end", lambda: saved(new_lease_end()))
+    values = {"kind": "cleaning", "description": "Deep clean", "amount": D("150.00")}
+    return ledger.LeaseEndDeduction(**{**values, **fields})
+
+
+def new_lease_transfer(**fields: Any) -> ledger.LeaseTransfer:
+    _default(fields, "outgoing_lease", lambda: saved(new_lease()))
+    _default(fields, "store", lambda: fields["outgoing_lease"].store)
+    return ledger.LeaseTransfer(**fields)
+
+
+def new_final_statement_message(**fields: Any) -> ledger.OutboundMessage:
+    """A final statement e-mail (PLAN-012e D8): no step, a lease end, a document."""
+    _default(fields, "operator", lambda: saved(new_operator()))
+    _default(fields, "template", lambda: saved(new_message_template()))
+    values = {
+        "kind": "final_statement",
+        "step": None,
+        "charge_entity_type": "lease_end",
+        "charge_entity_id": uuid.uuid4(),
+        "to_address": "ops@example.com",
+    }
+    return ledger.OutboundMessage(**{**values, **fields})
+
+
 LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.Operator: new_operator,
     ledger.Store: new_store,
@@ -430,6 +468,9 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.ContactCorrection: new_contact_correction,
     ledger.CalendarEntry: new_calendar_entry,
     ledger.CalendarFeed: new_calendar_feed,
+    ledger.LeaseEnd: new_lease_end,
+    ledger.LeaseEndDeduction: new_lease_end_deduction,
+    ledger.LeaseTransfer: new_lease_transfer,
 }
 
 
@@ -582,6 +623,38 @@ def _second_promise_closed_by_the_same_entry() -> ledger.ContactEntry:
     closing = saved(new_contact_entry())
     insert(new_promise(operator=closing.operator, closed_by=closing))
     return new_promise(operator=closing.operator, closed_by=closing)
+
+
+def _second_transfer_of_one_end() -> ledger.LeaseTransfer:
+    end = saved(new_lease_end())
+    insert(new_lease_transfer(lease_end=end))
+    return new_lease_transfer(lease_end=end)
+
+
+def _same_lease_transfer() -> ledger.LeaseTransfer:
+    lease = saved(new_lease())
+    return new_lease_transfer(outgoing_lease=lease, incoming_lease=lease)
+
+
+def _confirmed_transfer(**fields: Any) -> ledger.LeaseTransfer:
+    values: dict[str, Any] = {
+        "status": "confirmed",
+        "confirmed_at": datetime(2026, 11, 1, 12, tzinfo=UTC),
+        "lease_end": saved(new_lease_end()),
+        "incoming_lease": saved(new_lease()),
+    }
+    return new_lease_transfer(**{**values, **fields})
+
+
+def _second_store_transfer(*, confirmed_first: bool) -> Callable[[], ledger.LeaseTransfer]:
+    """Save a transfer of a store (confirmed or a draft); return a second draft of it."""
+
+    def build() -> ledger.LeaseTransfer:
+        first = _confirmed_transfer() if confirmed_first else new_lease_transfer()
+        insert(first)
+        return new_lease_transfer(store=first.store, outgoing_lease=first.outgoing_lease)
+
+    return build
 
 
 def _two_charges(**second: Any) -> tuple[ledger.RentCharge, ledger.RentCharge]:
@@ -935,6 +1008,12 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_deposit_resolution(kind="transferred", method="", to_lease=saved(new_lease())),
         lambda: new_deposit_resolution(kind="transferred", method="", to_lease=None),
     ),
+    # PLAN-012e D5(d): the offset part lies within the withheld part.
+    ConstraintCase(
+        "deposit_resolutions_offset_within_withheld",
+        lambda: new_deposit_resolution(withheld_amount=D("100.00"), offset_amount=D("100.00")),
+        lambda: new_deposit_resolution(withheld_amount=D("100.00"), offset_amount=D("100.01")),
+    ),
     ConstraintCase(
         "deposit_resolutions.setup_charge_id",
         unique_pair(new_deposit_resolution, {}, {}),
@@ -1280,6 +1359,12 @@ LEDGER_CASES: list[ConstraintCase] = [
         new_operator_document,
         lambda: new_document(kind="dispute_evidence"),
     ),
+    # PLAN-012e D5: a final statement is kept by a store only.
+    ConstraintCase(
+        "documents_final_statement_on_store",
+        lambda: new_document(kind="final_statement"),
+        lambda: new_document(store=None, lease=saved(new_lease()), kind="final_statement"),
+    ),
     ConstraintCase(
         "documents_operator_sha256_live_unique",
         unique_pair(new_operator_document, {"sha256": "c" * 64}, {"sha256": "c" * 64}),
@@ -1485,6 +1570,107 @@ LEDGER_CASES: list[ConstraintCase] = [
             {},
             {"step": lambda row: row.step, "charge_entity_id": lambda row: row.charge_entity_id},
         ),
+    ),
+    # PLAN-012e D8: kinds of outbound messages.
+    ConstraintCase(
+        "outbound_messages_step_iff_ladder",
+        new_final_statement_message,
+        lambda: new_final_statement_message(kind="ladder"),
+    ),
+    ConstraintCase(
+        "outbound_messages_document_only_final_statement",
+        lambda: new_final_statement_message(document=saved(new_document())),
+        lambda: new_outbound_message(document=saved(new_document())),
+    ),
+    ConstraintCase(
+        "outbound_messages_one_final_statement",
+        unique_pair(
+            new_final_statement_message,
+            {},
+            {
+                "charge_entity_id": lambda row: row.charge_entity_id,
+                "manual": True,
+                "sent_by": lambda row: make_user(),
+            },
+        ),
+        unique_pair(
+            new_final_statement_message,
+            {},
+            {"charge_entity_id": lambda row: row.charge_entity_id},
+        ),
+    ),
+    # lease_ends, lease_end_deductions, lease_transfers (PLAN-012e D4, D6)
+    ConstraintCase(
+        "lease_ends_confirmed_complete",
+        new_confirmed_lease_end,
+        lambda: new_confirmed_lease_end(reason=""),
+    ),
+    ConstraintCase(
+        "lease_ends_confirmed_at_iff_confirmed",
+        new_lease_end,
+        lambda: new_lease_end(confirmed_at=datetime(2026, 11, 1, 12, tzinfo=UTC)),
+    ),
+    ConstraintCase(
+        "lease_ends.lease_id",
+        unique_pair(new_lease_end, {}, {}),
+        unique_pair(new_lease_end, {}, {"lease": _same_lease}),
+        column="lease_id",
+    ),
+    ConstraintCase(
+        "lease_transfers.lease_end_id",
+        unique_pair(
+            new_lease_transfer,
+            {"lease_end": None},
+            {"lease_end": lambda row: saved(new_lease_end())},
+        ),
+        _second_transfer_of_one_end,
+        column="lease_end_id",
+    ),
+    ConstraintCase(
+        "lease_end_deductions_amount_positive",
+        lambda: new_lease_end_deduction(amount=D("0.01")),
+        lambda: new_lease_end_deduction(amount=D("0.00")),
+    ),
+    ConstraintCase(
+        "lease_transfers_two_leases",
+        lambda: new_lease_transfer(incoming_lease=saved(new_lease())),
+        lambda: _same_lease_transfer(),
+    ),
+    # PLAN-012e D6: the transfer wizard's state (0037).
+    ConstraintCase(
+        "lease_transfers_incoming_debit_day_range",
+        lambda: new_lease_transfer(incoming_debit_day=31),
+        lambda: new_lease_transfer(incoming_debit_day=0),
+    ),
+    ConstraintCase(
+        "lease_transfers_incoming_second_debit_day_range",
+        lambda: new_lease_transfer(incoming_second_debit_day=1),
+        lambda: new_lease_transfer(incoming_second_debit_day=32),
+    ),
+    ConstraintCase(
+        "lease_transfers_incoming_rent_positive",
+        lambda: new_lease_transfer(incoming_rent=D("0.01")),
+        lambda: new_lease_transfer(incoming_rent=D("0.00")),
+    ),
+    ConstraintCase(
+        "lease_transfers_deposit_amount_not_negative",
+        lambda: new_lease_transfer(deposit_amount=D("0.00")),
+        lambda: new_lease_transfer(deposit_amount=D("-0.01")),
+    ),
+    ConstraintCase(
+        "lease_transfers_confirmed_complete",
+        _confirmed_transfer,
+        lambda: _confirmed_transfer(incoming_lease=None),
+    ),
+    ConstraintCase(
+        "lease_transfers_confirmed_at_iff_confirmed",
+        new_lease_transfer,
+        lambda: new_lease_transfer(confirmed_at=datetime(2026, 11, 1, 12, tzinfo=UTC)),
+    ),
+    ConstraintCase(
+        "lease_transfers_one_draft_per_store",
+        _second_store_transfer(confirmed_first=True),
+        _second_store_transfer(confirmed_first=False),
     ),
     # legacy_records
     ConstraintCase(

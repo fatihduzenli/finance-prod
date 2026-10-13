@@ -25,7 +25,6 @@ from ledger.models import (
 from ledger.services import leases as service
 from ledger.services.leases import LeaseRefused
 from payments.models import ExternalRef
-from tests.test_deposits import held_deposit
 from tests.test_lease_services import make_lease
 from tests.test_operator_views import client_for
 
@@ -206,52 +205,20 @@ def test_a_user_without_a_role_is_refused() -> None:
     assert client.get(end_path(a_lease())).status_code == 403
 
 
-def test_an_admin_ends_a_lease_from_the_page_and_resolve_deposit_appears() -> None:
-    deposit = held_deposit(ended=False)
-    lease = deposit.lease
-    assert lease is not None
-    client, user = client_for(Role.ADMIN)
-    detail_path = f"/leases/{lease.pk}/"
-    resolve = f"/leases/{lease.pk}/deposits/{deposit.pk}/resolve/"
-    before = client.get(detail_path).content.decode()
-    assert f'href="{end_path(lease)}"' in before and resolve not in before
-    form = client.get(end_path(lease)).content.decode()
-    assert 'id="end-lease-form"' in form and 'id="autopay-on"' not in form
-    response = client.post(end_path(lease), {"ended_on": yesterday(), "end_reason": REASON})
-    assert (response.status_code, response["Location"]) == (302, detail_path)
-    after = client.get(detail_path).content.decode()
-    assert f'<dd id="lease-ended-on">{yesterday()}</dd>' in after
-    assert REASON in after and "Lease ended." in after
-    assert end_path(lease) not in after
-    assert resolve in after
-    assert AuditLog.objects.get(action="lease.ended").actor == user
-
-
-def test_a_refusal_is_held_on_the_form() -> None:
-    lease = a_lease()
-    schedule(lease)
-    client, _ = client_for(Role.ADMIN)
-    assert 'id="autopay-on"' in client.get(end_path(lease)).content.decode()
-    response = client.post(end_path(lease), {"ended_on": yesterday(), "end_reason": REASON})
-    assert response["Location"] == end_path(lease)
-    assert service.END_AUTOPAY_ON in client.get(end_path(lease)).content.decode()
-    future = (timezone.localdate() + timedelta(days=1)).isoformat()
-    client.post(end_path(lease), {"ended_on": future, "end_reason": REASON})
-    assert service.END_IN_FUTURE in client.get(end_path(lease)).content.decode()
-    client.post(end_path(lease), {"ended_on": "", "end_reason": ""})
-    page = client.get(end_path(lease)).content.decode()
-    assert service.END_DATE_REQUIRED in page and service.END_REASON_REQUIRED in page
-    assert Lease.objects.get(pk=lease.pk).ended_on is None
-
-
-def test_a_card_number_in_the_reason_is_refused_and_never_held() -> None:
+def test_the_old_route_sends_an_admin_to_the_wizard_and_changes_nothing() -> None:
+    """PLAN-012e D4: End lease is the end-of-lease wizard of the lease's store; the old
+    form is gone and its route redirects, GET or POST, writing nothing."""
     lease = a_lease()
     client, _ = client_for(Role.ADMIN)
-    client.post(end_path(lease), {"ended_on": yesterday(), "end_reason": f"Paid with {CARD}"})
-    page = client.get(end_path(lease)).content.decode()
-    assert "may not contain card or account numbers" in page
-    assert CARD not in page and CARD.replace(" ", "") not in page
+    wizard = f"/stores/{lease.store_id}/end-lease/"
+    assert f'href="{end_path(lease)}"' in client.get(f"/leases/{lease.pk}/").content.decode()
+    for response in (
+        client.get(end_path(lease)),
+        client.post(end_path(lease), {"ended_on": yesterday(), "end_reason": REASON}),
+    ):
+        assert (response.status_code, response["Location"]) == (302, wizard)
     assert Lease.objects.get(pk=lease.pk).ended_on is None
+    assert not AuditLog.objects.filter(action="lease.ended").exists()
 
 
 def test_the_end_page_of_an_unknown_lease_is_404() -> None:

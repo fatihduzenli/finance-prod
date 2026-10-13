@@ -45,6 +45,11 @@ Rules kept here:
   one invoice (a unique partial index on ``invoices.rent_charge``). A manual link whose
   total differs from the balance needs the confirmation and a note, and flags the
   charge.
+- **Proration** (PLAN-012e D2, D3): the charge of a lease's start month, when the lease
+  starts after the 1st and ``prorate_first_month`` is on, is for the days used
+  (:func:`ledger.services.proration.prorated`), split between two debits as a full
+  month is, with the arithmetic in ``proration_text``. A day after the month of the
+  lease's ``ended_on`` is never charged.
 - **Carried balance** (PLAN-009 D5): the open balances of a lease's earlier charges are
   shown with each due debit and on the charge page; a new charge's amount never
   includes them.
@@ -99,7 +104,7 @@ from ledger.models import (
     ScheduleKind,
     ScheduleState,
 )
-from ledger.services import contacts, numbering
+from ledger.services import contacts, numbering, proration
 from ledger.services.leases import (
     ENTITY_SCHEDULE,
     KIND_SCHEDULE,
@@ -298,6 +303,8 @@ class DueDebit:
     last_month: RentCharge | None
     #: Open balances of the lease's earlier charges (PLAN-009 D5); not part of ``amount``.
     carried_balance: Decimal = ZERO
+    #: The arithmetic of a prorated first month (PLAN-012e D2); ``""`` for a full month.
+    proration_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,7 +449,8 @@ def leases_due(day: date) -> RunDay:
             skipped.append(SkippedLease(lease, reason or SKIP_NO_RENT))
             continue
         debit_days = [d for d in (lease.debit_day, lease.second_debit_day) if d is not None]
-        amounts = debit_amounts(rent.amount, twice_monthly=len(debit_days) == 2)
+        month = first_month(lease, period, rent.amount)
+        amounts = debit_amounts(month.amount, twice_monthly=len(debit_days) == 2)
         charges = {
             (charge.period_month, charge.seq): charge
             for charge in lease.rent_charges.filter(period_month__in=[period, previous])
@@ -462,9 +470,26 @@ def leases_due(day: date) -> RunDay:
                     charge=charges.get((period, seq)),
                     last_month=charges.get((previous, seq)),
                     carried_balance=_carried(lease.pk, period, seq),
+                    proration_text=month.text,
                 )
             )
     return RunDay(day, tuple(due), tuple(skipped))
+
+
+def first_month(lease: Lease, period: date, rent: Decimal) -> proration.Prorated:
+    """The rent of ``period`` for ``lease``: prorated from the start date when ``period``
+    is the start month, the lease starts after the 1st and ``prorate_first_month`` is on
+    (PLAN-012e D2); the full rent otherwise."""
+    start = lease.started_on
+    last = proration.days_in(period)
+    if (
+        lease.prorate_first_month
+        and start is not None
+        and start.replace(day=1) == period
+        and start.day > 1
+    ):
+        return proration.prorated(rent, period, start.day, last)
+    return proration.Prorated(last, last, rent, "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,6 +521,7 @@ def due_counts(day: date) -> DueCounts:
         Lease.objects.filter(collection_status=CollectionStatus.ACTIVE)
         .exclude(payment_channel=PaymentChannel.UNKNOWN)
         .filter(Q(started_on__isnull=True) | Q(started_on__lte=day))
+        .filter(Q(ended_on__isnull=True) | Q(ended_on__gte=day.replace(day=1)))
         .filter(rent_in_effect)
         .filter(Q(debit_day__in=days) | Q(second_debit_day__in=days))
     )
@@ -539,6 +565,8 @@ def _skip_reason(lease: Lease, day: date) -> str:
         return SKIP_UNKNOWN_CHANNEL
     if lease.started_on is not None and lease.started_on > day:
         return SKIP_NOT_STARTED
+    if lease.ended_on is not None and lease.ended_on < day.replace(day=1):
+        return SKIP_ENDED
     return ""
 
 
@@ -560,6 +588,7 @@ def create_charges(day: date, *, actor: User | None) -> ChargeRunReport:
                     "due_on": day,
                     "amount_due": item.amount,
                     "status": RentChargeStatus.DUE,
+                    "proration_text": item.proration_text or None,
                 },
             )
             if made:
@@ -1517,6 +1546,7 @@ def _charge(charge: RentCharge) -> dict[str, Any]:
         "amount_paid": str(charge.amount_paid),
         "status": charge.status,
         "needs_review": charge.needs_review,
+        "proration_text": charge.proration_text,
     }
 
 

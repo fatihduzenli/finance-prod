@@ -1,0 +1,12 @@
+<li>The lease ends on {{ end.ended_on|date:"Y-m-d" }} ({{ figures.reason }}) and the store becomes vacant.</li>
+{% if figures.last_month %}{% for change in figures.last_month.changes %}
+  <li>{% if change.charge_id %}The rent charge of {{ figures.last_month.month|date:"Y-m" }} (debit {{ change.seq }}) changes from ${{ change.before }} to ${{ change.after }}{% if change.refund %} and ${{ change.refund }} paid beyond it is refunded{% endif %}.{% else %}A rent charge of ${{ change.after }} is created for {{ figures.last_month.month|date:"Y-m" }}, due {{ change.due_on|date:"Y-m-d" }}.{% endif %}</li>
+{% endfor %}{% endif %}
+{% for item in figures.after_end %}
+  <li>The rent charge of {{ item.month|date:"Y-m" }} (debit {{ item.seq }}) is waived (after the end date){% if item.credit %} and the ${{ item.credit }} paid on it is refunded{% endif %}.</li>
+{% endfor %}
+{% if figures.offset_applied %}<li>${{ figures.offset_applied }} of the deposit pays the open charges, oldest first ("deposit offset").</li>{% endif %}
+{% for deposit in figures.deposits %}<li>The deposit {{ deposit.label }} (${{ deposit.held }}) is resolved.</li>{% endfor %}
+{% if figures.refund_due %}<li>${{ figures.refund_due }} is recorded as refunded by {{ figures.refund_method_label|default:"(no method set)" }} on {{ figures.refund_on|date:"Y-m-d"|default:"(no date set)" }}.</li>{% endif %}
+{% if figures.debt %}<li>A one-off charge "Lease-end balance" of ${{ figures.debt }} is created, due 15 days after the end date.</li>{% endif %}
+<li>The statement PDF is stored with the store's documents and e-mailed to the operator when mail is on.</li>

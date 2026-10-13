@@ -109,9 +109,27 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:leases:enrol": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:leases:pause": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:leases:resume": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Stop autopay (PLAN-012e D5 amendment): admin. The view refuses the confirmation
+    # page's GET below admin too.
+    "ledger:leases:stop_autopay": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Ending a lease (PLAN-010b Batch C): admin. The view refuses the form's GET below
-    # admin too.
+    # admin too, and sends an admin to the end-of-lease wizard (PLAN-012e D4).
     "ledger:leases:end": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # The end-of-lease wizard (PLAN-012e D4, D5): admin, every step. The views refuse
+    # every GET below admin too.
+    "ledger:stores:end_lease": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:lease_ends:terms": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:lease_ends:statement": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:lease_ends:settlement": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:lease_ends:confirm": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:lease_ends:cancel": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # The transfer wizard (PLAN-012e D6): admin, every step. The views refuse every GET
+    # below admin too.
+    "ledger:stores:transfer": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:transfers:operator": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:transfers:incoming": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:transfers:confirm": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:transfers:cancel": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Rent run and manual payments (PLAN-007 §4.1, D10): billing.
     "ledger:run:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:run:match": RouteRule(min_role=Role.BILLING, methods=POST),
@@ -269,6 +287,14 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # Lease screens that only read (PLAN-007 §4.1).
         "ledger:leases:list",
         "ledger:leases:detail",
+        # The end-of-lease wizard's live items and its PDF (PLAN-012e D5, D7); the views
+        # themselves require admin.
+        "ledger:lease_ends:blockers",
+        "ledger:lease_ends:pdf",
+        # The transfer wizard's way to the end-of-lease steps and its blockers (PLAN-012e
+        # D6); the views themselves require admin.
+        "ledger:transfers:end",
+        "ledger:transfers:blockers",
         # Rent run and charge screens that only read (PLAN-007 §4.1).
         "ledger:run:today",
         "ledger:charges:detail",

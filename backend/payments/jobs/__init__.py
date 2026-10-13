@@ -82,6 +82,8 @@ ENTITY_OF_KIND: dict[str, str] = {
     JobKind.CALENDAR_EMAIL: JobEntity.CALENDAR_ENTRY,
     JobKind.DISPUTES_SYNC: JobEntity.DISPUTES,
     JobKind.DISPUTE_EVIDENCE_UPLOAD: JobEntity.DISPUTE_EVIDENCE,
+    JobKind.LEASE_END_DOCUMENTS: JobEntity.LEASE_END,
+    JobKind.AUTOPAY_STOP: JobEntity.LEASE,
 }
 #: Further entities a kind acts on besides its :data:`ENTITY_OF_KIND` one: a morning
 #: e-mail is a calendar entry's or a promise to pay's (PLAN-011b D8).
@@ -101,6 +103,7 @@ _ENTITY_OF_MODEL: dict[str, str] = {
     "ledger.CalendarEntry": JobEntity.CALENDAR_ENTRY,
     "ledger.ContactEntry": JobEntity.CONTACT_ENTRY,
     "ledger.DisputeEvidence": JobEntity.DISPUTE_EVIDENCE,
+    "ledger.LeaseEnd": JobEntity.LEASE_END,
 }
 
 
@@ -151,7 +154,7 @@ def entity_type_of(entity: Entity) -> str:
         raise ValueError(
             "Jobs act on operators, leases, rent charges, one-off charges, payments, "
             "webhook events, outbound messages, calendar and contact entries, dispute "
-            "evidence, the rent run, the reconciliation and the dispute list only"
+            "evidence, lease ends, the rent run, the reconciliation and the dispute list only"
         ) from None
 
 

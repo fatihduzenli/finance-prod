@@ -314,6 +314,32 @@ scans are covered by the stated policy, not by a check.
 | `payment_id`, `operator_id`, `store_id` | System | Derived at sync from the disputed transaction's external ref; empty when the transaction is not ours |
 | `dispute_evidence.name`, `document_id`, `status`, `sent_at`, `error` | App / System | The file is a `documents` row of the operator (kind `dispute_evidence`); `status` queued/sent/failed; `error` a class name only; the provider's file ID in `external_refs` (`dispute_file`) |
 
+### outbound_messages (PLAN-011b, PLAN-012e)
+| Field | Owner | Note |
+|---|---|---|
+| `kind` | App | `ladder` (a collections step; `step` required) or `final_statement` (the lease-end statement; `step` null, `document` the PDF) |
+| `template_id`, `step_id`, `document_id`, `to_address`, `subject`, `body_sha256`, `status`, `error`, `manual`, `queued_at`, `sent_at`, `sent_by_id` | App / System | The body is never stored, only its digest; `status` queued/sent/catch_all/suppressed/failed; `error` a class name |
+| `mail_message_id` | System | The mail provider's message identifier (identifier column) |
+
+### leases — `prorate_first_month`; rent_charges — `proration_text` (PLAN-012e)
+| Field | Owner | Note |
+|---|---|---|
+| `leases.prorate_first_month` | App | Default on: the start month is charged for the days used (ADR-0012) |
+| `rent_charges.proration_text` | System | The arithmetic shown on the charge, the grid and the statement; empty for a full month |
+
+### lease_ends, lease_end_deductions, lease_transfers (PLAN-012e)
+| Field | Owner | Note |
+|---|---|---|
+| `lease_ends.ended_on`, `reason`, `reason_note`, `prorate_last_month`, `refund_method`, `refund_on`, `refund_reference`, `settlement_note` | App | The wizard's terms and settlement; `refund_method` zelle/wire/check (never ach); the reference and notes are guarded text |
+| `lease_ends.status`, `statement_json`, `document_id`, `refund_payment_id`, `debt_charge_id`, `confirmed_at` | System | `draft`/`confirmed`; the figures as confirmed; the stored PDF; the refund payment; the "Lease-end balance" charge |
+| `lease_end_deductions.kind`, `description`, `amount` | App | damage / cleaning / unpaid_balance / other; one row per typed line |
+| `lease_transfers.*` | System | The outgoing lease, its lease end, the incoming lease and the move-in draft; written once at confirm |
+
+### deposit_resolutions — `offset_amount` (PLAN-012e)
+| Field | Owner | Note |
+|---|---|---|
+| `offset_amount` | App | The part of `withheld_amount` applied to open charges as the unpaid-balance offset; counted once in revenue (ADR-0012) |
+
 ### outbound_messages (reserved, no UI)
 | Field | Owner | Note |
 |---|---|---|

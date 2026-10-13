@@ -1,0 +1,44 @@
+{% extends "finance/base.html" %}
+{% block title %}Transfer store {{ store.external_label }}: incoming operator{% endblock %}
+{% block content %}
+  {% include "ledger/lease_ends/_steps.html" %}
+  <p class="muted" id="step-help">Find the operator who takes the store over by name and choose them, or create a new operator below. An archived operator or the current one cannot be chosen.</p>
+  {% if transfer.incoming_operator %}<p id="chosen-operator">Chosen: <strong>{{ transfer.incoming_operator.display_name }}</strong>. <a href="{% url 'ledger:transfers:end' pk=transfer.pk %}">Continue</a></p>{% endif %}
+  <form method="get" id="operator-search">
+    <label for="operator-query">Operator name</label>
+    <input type="search" name="q" id="operator-query" value="{{ query }}" maxlength="200">
+    <button class="btn" type="submit">Search</button>
+  </form>
+  {% if query %}
+    <ul id="operator-results">
+      {% for row in results %}
+        <li>{{ row.display_name }}{% if row.company %} ({{ row.company }}){% endif %}
+          <form method="post" class="js-single-submit inline-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="pick">
+            <input type="hidden" name="operator" value="{{ row.pk }}">
+            <button class="btn" type="submit">Choose</button>
+          </form>
+        </li>
+      {% empty %}
+        <li class="muted">No operator matches. Create one below.</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  <h2>New operator</h2>
+  <p class="muted">With an e-mail address, saving also links or creates the operator's customer at the payment provider, as on the operator form.</p>
+  <form method="post" id="operator-create" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create">
+    {{ create_form.non_field_errors }}
+    {% for field in create_form.hidden_fields %}{{ field }}{% endfor %}
+    {% for field in create_form.visible_fields %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
+      {{ field.errors }}
+      {{ field }}
+    {% endfor %}
+    <p class="actions"><button class="btn btn-primary" type="submit" id="create-operator">Save and choose</button></p>
+  </form>
+  {% include "ledger/lease_ends/_cancel.html" %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

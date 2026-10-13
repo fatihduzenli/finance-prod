@@ -1,0 +1,11 @@
+{% extends "finance/base.html" %}
+{% block title %}Lease end {{ store.external_label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
+  <h1>Lease end {{ store.external_label }}</h1>
+  <p id="lease-ended">The lease ended on {{ end.ended_on|date:"Y-m-d" }} ({{ figures.reason }}); confirmed {{ end.confirmed_at|date:"Y-m-d H:i" }}.</p>
+  <p id="statement-pdf">{% if end.document %}<a href="{% url 'ledger:lease_ends:pdf' pk=end.pk %}">Download the statement PDF</a>{% else %}The statement PDF is being prepared{% if job_text %} ({{ job_text }}){% endif %}.{% endif %}</p>
+  {% for message in log %}<p class="muted statement-email">E-mail to the operator: {{ message.get_status_display }}{% if message.error %} ({{ message.error }}){% endif %}.</p>{% endfor %}
+  {% include "ledger/lease_ends/_figures.html" %}
+  {% if end.debt_charge %}<p><a href="{% url 'ledger:one_off_charges:detail' pk=end.debt_charge.pk %}" id="debt-charge">Lease-end balance charge</a></p>{% endif %}
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "finance/base.html" %}
+{% block title %}End lease {{ store.external_label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
+  <h1>End lease {{ store.external_label }}</h1>
+  <p class="muted">The wizard takes you through the end date, the items still live at the payment provider, the final statement, the settlement and a last confirmation; you can leave it and come back.</p>
+  {% if lease %}
+    <p id="lease-to-end">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}.</p>
+    <form method="post" id="start-lease-end" class="js-single-submit">
+      {% csrf_token %}
+      <p class="actions"><button class="btn btn-primary" type="submit">{% if draft %}Continue{% else %}Start{% endif %}</button></p>
+    </form>
+  {% else %}
+    <p id="no-lease">This store has no lease to end.</p>
+  {% endif %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

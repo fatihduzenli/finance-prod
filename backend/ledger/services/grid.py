@@ -202,6 +202,8 @@ class Cell:
     has_note: bool = False
     #: The first initiation date of a pending payment of the cell's charges.
     pending_from: date | None = None
+    #: The arithmetic of the cell's prorated charges (PLAN-012e D2), for its title.
+    proration_text: str = ""
 
     @property
     def text(self) -> str:
@@ -326,6 +328,7 @@ class _Charge:
     amount_due: Decimal
     amount_paid: Decimal
     has_note: bool
+    proration_text: str = ""
 
 
 def _charges(start: date, end: date) -> dict[tuple[uuid.UUID, date], list[_Charge]]:
@@ -341,13 +344,14 @@ def _charges(start: date, end: date) -> dict[tuple[uuid.UUID, date], list[_Charg
             "amount_due",
             "amount_paid",
             "has_note",
+            "proration_text",
         )
         .order_by("lease__store", "period_month", "lease__created_at", "seq", "pk")
     )
     found: dict[tuple[uuid.UUID, date], list[_Charge]] = defaultdict(list)
-    for pk, store, month, status, due, paid, has_note in rows:
+    for pk, store, month, status, due, paid, has_note, text in rows:
         found[(store, month)].append(
-            _Charge(pk, status, Decimal(str(due)), Decimal(str(paid)), bool(has_note))
+            _Charge(pk, status, Decimal(str(due)), Decimal(str(paid)), bool(has_note), text or "")
         )
     return found
 
@@ -427,6 +431,9 @@ def _cell(
         charge_id=charges[0].pk,
         has_note=any(charge.has_note for charge in charges),
         pending_from=pending.get((store_id, month)) if status == STATUS_PENDING else None,
+        proration_text="; ".join(
+            charge.proration_text for charge in charges if charge.proration_text
+        ),
     )
 
 

@@ -136,6 +136,12 @@ def messages_of(charge: RentCharge | OneOffCharge) -> list[OutboundMessage]:
     )
 
 
+def day_of(message: OutboundMessage) -> int:
+    """The ladder step's day of a collection e-mail (every ladder row has a step)."""
+    assert message.step is not None
+    return message.step.day_offset
+
+
 # --- The seed --------------------------------------------------------------------------
 
 
@@ -171,12 +177,12 @@ def test_a_step_is_due_from_00_00_new_york_and_not_at_23_59_the_day_before(
     charge = rent_charge(due_on)
     clock(at(due_on + timedelta(days=offset - 1), 23, 59))
     tick()
-    before = [message.step.day_offset for message in messages_of(charge)]
+    before = [day_of(message) for message in messages_of(charge)]
     assert offset not in before
     assert before == ([] if offset == 3 else [{10: 3, 20: 10}[offset]])
     clock(at(due_on + timedelta(days=offset), 0, 0))
     tick()
-    assert [message.step.day_offset for message in messages_of(charge)][-1] == offset
+    assert [day_of(message) for message in messages_of(charge)][-1] == offset
 
 
 def test_the_tick_queues_the_step_and_the_worker_sends_to_the_catch_all(
@@ -189,7 +195,7 @@ def test_the_tick_queues_the_step_and_the_worker_sends_to_the_catch_all(
     assert "Collection e-mails queued: 1 " in output
     assert CEO not in output and "2450" not in output
     [queued] = messages_of(charge)
-    assert queued.status == MessageStatus.QUEUED and queued.step.day_offset == 3
+    assert queued.status == MessageStatus.QUEUED and day_of(queued) == 3
     job = Job.objects.get(kind=JobKind.MESSAGE_SEND)
     assert (job.entity_type, job.entity_id, job.requested_by) == (
         "outbound_message",
@@ -262,7 +268,7 @@ def test_a_charge_first_seen_25_days_late_gets_the_day_20_step_only(
     clock(at(DUE + timedelta(days=25)))
     tick()
     run_queued_jobs()
-    assert [message.step.day_offset for message in messages_of(charge)] == [20]
+    assert [day_of(message) for message in messages_of(charge)] == [20]
     assert memory.sent[0].subject.startswith("[to: ") and "Final notice" in memory.sent[0].subject
     clock(at(DUE + timedelta(days=40)))
     tick()
@@ -275,7 +281,7 @@ def test_the_ladder_climbs_one_step_at_a_time(clock: Any, memory: MemoryMailSend
         clock(at(DUE + timedelta(days=days)))
         tick()
         run_queued_jobs()
-    assert [message.step.day_offset for message in messages_of(charge)] == [3, 10, 20]
+    assert [day_of(message) for message in messages_of(charge)] == [3, 10, 20]
     assert len(memory.sent) == 3
 
 
@@ -591,7 +597,7 @@ def test_billing_sends_a_step_by_hand_and_a_repeat_needs_the_confirmation(
     response = client.post(send_url(charge), {"step": str(step10.pk)})
     assert response.status_code == 302
     [first] = messages_of(charge)
-    assert (first.manual, first.sent_by, first.step.day_offset) == (False, user, 10)
+    assert (first.manual, first.sent_by, day_of(first)) == (False, user, 10)
 
     client.post(send_url(charge), {"step": str(step10.pk)})
     assert len(messages_of(charge)) == 1  # refused without the confirmation

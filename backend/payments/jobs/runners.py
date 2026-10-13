@@ -22,9 +22,10 @@ import payments
 from ledger.models import OneOffCharge, Operator
 from ledger.services import (
     calendar,
-    collections,
     disputes,
+    lease_end,
     leases,
+    messages,
     one_off_charges,
     refunds,
     rent_run,
@@ -152,6 +153,11 @@ def autopay_pause_job(job: Job) -> Result:
 
 def autopay_resume_job(job: Job) -> Result:
     return _autopay(leases.resume_autopay(job.entity_id, actor=job.requested_by))
+
+
+def autopay_stop_job(job: Job) -> Result:
+    """PLAN-012e D5 amendment: delete the lease's provider schedules."""
+    return _autopay(leases.stop_autopay(job.entity_id, actor=job.requested_by))
 
 
 def payment_mark_job(job: Job) -> Result:
@@ -335,8 +341,9 @@ def reconcile_run_job(job: Job) -> Result:
 
 
 def message_send_job(job: Job) -> Result:
-    """PLAN-011b D4: one collection e-mail, rendered and sent."""
-    outcome = collections.send(job.entity_id)
+    """PLAN-011b D4, PLAN-012e D8: one e-mail (a collection e-mail or a final
+    statement), rendered and sent."""
+    outcome = messages.send(job.entity_id)
     return outcome.ok, outcome.message
 
 
@@ -355,6 +362,12 @@ def disputes_sync_job(job: Job) -> Result:
 def dispute_evidence_upload_job(job: Job) -> Result:
     """PLAN-012 D8: send one evidence file."""
     return disputes.upload_evidence(job.entity_id, job.requested_by)
+
+
+def lease_end_documents_job(job: Job) -> Result:
+    """PLAN-012e §4: the final statement PDF of a confirmed lease end, stored under the
+    store's documents, and its e-mail queued."""
+    return lease_end.produce_documents(job.entity_id, job.requested_by)
 
 
 RUNNERS: dict[str, Callable[[Job], Result]] = {
@@ -384,4 +397,6 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.CALENDAR_EMAIL: calendar_email_job,
     JobKind.DISPUTES_SYNC: disputes_sync_job,
     JobKind.DISPUTE_EVIDENCE_UPLOAD: dispute_evidence_upload_job,
+    JobKind.LEASE_END_DOCUMENTS: lease_end_documents_job,
+    JobKind.AUTOPAY_STOP: autopay_stop_job,
 }

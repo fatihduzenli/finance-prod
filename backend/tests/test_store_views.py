@@ -333,6 +333,8 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     corrections = ("correct_cost", "close_cost")
     # PLAN-012 D3: the store's contact log (any role) and adding an entry (billing).
     contact_log = ("contacts", "contacts_add")
+    # PLAN-012e D4, D6: End lease and Transfer start their wizards (admin).
+    lease_end = ("end_lease", "transfer")
     assert names == {
         f"ledger:stores:{short}"
         for short in (
@@ -343,6 +345,7 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
             *POST_ROUTES,
             *corrections,
             *contact_log,
+            *lease_end,
         )
     }
     assert {
@@ -353,7 +356,7 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     } <= registry.READ_ONLY_ROUTE_NAMES
     rule = registry.rule_for("ledger:stores:contacts_add")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
-    for short in (*POST_ROUTES, *corrections):
+    for short in (*POST_ROUTES, *corrections, *lease_end):
         rule = registry.rule_for(f"ledger:stores:{short}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
     rule = registry.rule_for("ledger:stores:set_cost")

@@ -412,6 +412,9 @@ class Lease(GuardedModel):
     ended_on = models.DateField(null=True, blank=True)
     end_reason = free_text()
     needs_review = models.BooleanField(default=False)
+    #: PLAN-012e D2: the first rent charge of a lease that starts after the 1st is for
+    #: the days used. Leases billed before the switch existed are never rewritten.
+    prorate_first_month = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -561,6 +564,9 @@ class RentCharge(GuardedModel):
     #: Why the payment provider's invoice was not updated after a manual payment
     #: (PLAN-009 D2, D3): a fixed text written by the rent run, or empty.
     review_message = free_text(default="")
+    #: PLAN-012e D1 to D3: the arithmetic of a prorated month ("13–31 Oct, 19 of 31 days
+    #: of $2,000.00 = $1,225.81"); null for a full month.
+    proration_text = free_text(null=True, default=None)
     local_ref = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1609,6 +1615,10 @@ class DepositResolution(GuardedModel):
     kind = _choice(DepositResolutionKind)
     amount = MoneyField()
     withheld_amount = MoneyField(default=ZERO)
+    #: PLAN-012e D5(d): the part of ``withheld_amount`` applied to the lease's open
+    #: charges as "deposit offset" payments. Those payments are the revenue; this part
+    #: is not counted again as a withheld deposit.
+    offset_amount = MoneyField(default=ZERO)
     resolved_on = models.DateField()
     method = _choice(PaymentMethod, blank=True, default="")
     note = free_text(blank=False)
@@ -1630,6 +1640,11 @@ class DepositResolution(GuardedModel):
         constraints = [
             _positive("deposit_resolutions", "amount"),
             _not_negative("deposit_resolutions", "withheld_amount"),
+            models.CheckConstraint(
+                condition=Q(offset_amount=0)
+                | (Q(offset_amount__gt=0) & Q(offset_amount__lte=F("withheld_amount"))),
+                name="deposit_resolutions_offset_within_withheld",
+            ),
             _not_blank("deposit_resolutions", "note"),
             # A refund names how it was paid back, never through the provider; the other
             # kinds name no method. (Each rule reads only valid kinds, so an unknown kind
@@ -1668,6 +1683,9 @@ class DocumentKind(models.TextChoices):
     #: PLAN-012 D8: a file sent to the payment provider for a dispute; kept on the
     #: dispute's operator, and the only kind an operator keeps.
     DISPUTE_EVIDENCE = "dispute_evidence", "Dispute evidence"
+    #: PLAN-012e D5, D7: the PDF statement of a lease end, made by the app and kept on
+    #: the store only.
+    FINAL_STATEMENT = "final_statement", "Final statement"
 
 
 class DocumentContentType(models.TextChoices):
@@ -1749,6 +1767,11 @@ class Document(GuardedModel):
             models.CheckConstraint(
                 condition=Q(operator__isnull=True) ^ Q(kind=DocumentKind.DISPUTE_EVIDENCE),
                 name="documents_operator_keeps_dispute_evidence",
+            ),
+            # A final statement is kept by a store only (PLAN-012e D5).
+            models.CheckConstraint(
+                condition=~Q(kind=DocumentKind.FINAL_STATEMENT) | Q(store__isnull=False),
+                name="documents_final_statement_on_store",
             ),
             _valid_choice("documents", "kind", DocumentKind),
             _valid_choice("documents", "source", DocumentSource),
@@ -1888,9 +1911,10 @@ STEP_MAX_DAY_OFFSET = 365
 
 
 class MessageTemplate(GuardedModel):
-    """A collection e-mail's subject and text (PLAN-011b D4), edited in the Django admin.
+    """An e-mail's subject and text (PLAN-011b D4, PLAN-012e D8), edited in the Django admin.
 
-    The subject and the body may use the merge fields of :mod:`ledger.merge` only; any
+    The subject and the body may use the merge fields of :mod:`ledger.merge` for the
+    template's code only (:func:`ledger.merge.fields_for`); any
     other field, attribute or index access, conversion or format specification is
     refused on save (:meth:`clean` and :meth:`save`) and never rendered.
     """
@@ -1916,7 +1940,10 @@ class MessageTemplate(GuardedModel):
         return self.code
 
     def merge_field_errors(self) -> dict[str, list[str]]:
-        found = {name: merge.problems(getattr(self, name) or "") for name in ("subject", "body")}
+        fields = merge.fields_for(self.code or "")
+        found = {
+            name: merge.problems(getattr(self, name) or "", fields) for name in ("subject", "body")
+        }
         return {name: texts for name, texts in found.items() if texts}
 
     def clean(self) -> None:
@@ -1970,29 +1997,48 @@ class MessageStatus(models.TextChoices):
 
 
 class ChargeEntityType(models.TextChoices):
-    """The charges a collection e-mail can be about."""
+    """What an outbound message is about: a charge of the collections ladder, or a lease
+    end whose final statement it carries (PLAN-012e D8)."""
 
     RENT_CHARGE = "rent_charge", "Rent charge"
     ONE_OFF_CHARGE = "one_off_charge", "One-off charge"
+    LEASE_END = "lease_end", "Lease end"
+
+
+class MessageKind(models.TextChoices):
+    """Why an outbound message is sent (PLAN-012e D8); a closed list."""
+
+    LADDER = "ladder", "Collections ladder"
+    FINAL_STATEMENT = "final_statement", "Final statement"
 
 
 class OutboundMessage(GuardedModel):
-    """One collection e-mail to an operator about one charge (PLAN-011b D4).
+    """One e-mail to an operator (PLAN-011b D4, PLAN-012e D8): a collection e-mail about
+    one charge (``kind`` ``ladder``, with its ``step``), or the final statement of a lease
+    end (``kind`` ``final_statement``, no step, the PDF in ``document``).
 
-    The charge is named generically (``charge_entity_type``, ``charge_entity_id``), as
+    The subject is named generically (``charge_entity_type``, ``charge_entity_id``), as
     audit rows name their entity. One ladder row per (charge, step): a hand send of a
     step already logged is a second row marked ``manual``, made only on an explicit
-    confirmation. ``subject`` and ``body_sha256`` are written when the message is
-    rendered for sending; the body itself is never stored. ``error`` is a class name.
+    confirmation; one final statement row per lease end. ``subject`` and ``body_sha256``
+    are written when the message is rendered for sending; the body itself is never
+    stored. ``error`` is a class name.
     """
 
     operator = models.ForeignKey(
         Operator, on_delete=models.PROTECT, related_name="outbound_messages"
     )
     template = models.ForeignKey(MessageTemplate, on_delete=models.PROTECT, related_name="+")
-    step = models.ForeignKey(CollectionStep, on_delete=models.PROTECT, related_name="messages")
+    kind = _choice(MessageKind, default=MessageKind.LADDER)
+    step = models.ForeignKey(
+        CollectionStep, on_delete=models.PROTECT, null=True, blank=True, related_name="messages"
+    )
     charge_entity_type = _choice(ChargeEntityType)
     charge_entity_id = models.UUIDField()
+    #: The attachment of a final statement (PLAN-012e D8); null otherwise.
+    document = models.ForeignKey(
+        Document, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
     to_address = models.EmailField(validators=[validate_no_payment_data])
     subject = free_text()
     #: The SHA-256 of the text body sent, in lower-case hexadecimal; an identifier.
@@ -2005,7 +2051,8 @@ class OutboundMessage(GuardedModel):
     manual = models.BooleanField(default=False)
     queued_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True, blank=True)
-    #: Who sent it by hand; null for the ladder.
+    #: Who sent it by hand, or who confirmed the lease end of a final statement; null
+    #: for the ladder.
     sent_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
@@ -2022,6 +2069,30 @@ class OutboundMessage(GuardedModel):
         constraints = [
             _valid_choice("outbound_messages", "status", MessageStatus),
             _valid_choice("outbound_messages", "charge_entity_type", ChargeEntityType),
+            _valid_choice("outbound_messages", "kind", MessageKind),
+            # A ladder message names its step and a charge; a final statement names a
+            # lease end and no step. (Each rule reads only valid kinds.)
+            models.CheckConstraint(
+                condition=(
+                    ~Q(kind=MessageKind.LADDER)
+                    | Q(
+                        step__isnull=False,
+                        charge_entity_type__in=[
+                            ChargeEntityType.RENT_CHARGE,
+                            ChargeEntityType.ONE_OFF_CHARGE,
+                        ],
+                    )
+                )
+                & (
+                    ~Q(kind=MessageKind.FINAL_STATEMENT)
+                    | Q(step__isnull=True, charge_entity_type=ChargeEntityType.LEASE_END)
+                ),
+                name="outbound_messages_step_iff_ladder",
+            ),
+            models.CheckConstraint(
+                condition=Q(kind=MessageKind.FINAL_STATEMENT) | Q(document__isnull=True),
+                name="outbound_messages_document_only_final_statement",
+            ),
             models.CheckConstraint(
                 condition=Q(body_sha256__regex=r"^([0-9a-f]{64})?$"),
                 name="outbound_messages_body_sha256_hex",
@@ -2042,6 +2113,11 @@ class OutboundMessage(GuardedModel):
                 fields=["charge_entity_type", "charge_entity_id", "step"],
                 condition=Q(manual=False),
                 name="outbound_messages_one_per_charge_step",
+            ),
+            models.UniqueConstraint(
+                fields=["charge_entity_type", "charge_entity_id"],
+                condition=Q(kind=MessageKind.FINAL_STATEMENT, manual=False),
+                name="outbound_messages_one_final_statement",
             ),
         ]
 
@@ -2269,6 +2345,214 @@ class CalendarFeed(models.Model):
                 name="calendar_feeds_one_live_per_user",
             ),
         ]
+
+
+# --- Lease end and transfer (PLAN-012e D4, D5, D6) -----------------------------------
+
+
+class LeaseEndReason(models.TextChoices):
+    MOVED_OUT = "moved_out", "Moved out"
+    TERMINATED = "terminated", "Terminated"
+    TRANSFER = "transfer", "Transfer to another operator"
+    OTHER = "other", "Other"
+
+
+class LeaseEndStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    CONFIRMED = "confirmed", "Confirmed"
+
+
+class RefundMethod(models.TextChoices):
+    """How a lease-end refund is paid back (PLAN-012e D5(d)): never through the payment
+    provider. A check is recorded as a payment of method ``other``."""
+
+    ZELLE = "zelle", "Zelle"
+    WIRE = "wire", "Wire"
+    CHECK = "check", "Check"
+
+
+#: Longest refund reference (a Zelle confirmation, a wire reference, a check number).
+REFUND_REFERENCE_MAX_LENGTH = 100
+#: Longest deduction description.
+DEDUCTION_DESCRIPTION_MAX_LENGTH = 200
+
+
+class LeaseEnd(GuardedModel):
+    """The end-of-lease wizard's state and, once confirmed, its figures (PLAN-012e D4).
+
+    One per lease: a draft can be left and resumed and is deleted on Cancel; a confirmed
+    row keeps ``statement_json`` as the figures were at confirm, the PDF (``document``,
+    set by the ``lease_end_documents`` job), and the rows the settlement wrote.
+    Written only by :mod:`ledger.services.lease_end`.
+    """
+
+    lease = models.OneToOneField(Lease, on_delete=models.PROTECT, related_name="lease_end")
+    ended_on = models.DateField(null=True, blank=True)
+    reason = _choice(LeaseEndReason, blank=True, default="")
+    #: Free words for the reason (required for ``other``).
+    reason_note = free_text()
+    prorate_last_month = models.BooleanField(default=True)
+    status = _choice(LeaseEndStatus, default=LeaseEndStatus.DRAFT)
+    refund_method = _choice(RefundMethod, blank=True, default="")
+    refund_on = models.DateField(null=True, blank=True)
+    refund_reference = guarded_char(REFUND_REFERENCE_MAX_LENGTH, blank=True, default="")
+    settlement_note = free_text()
+    statement_json = guarded_json(default=dict, blank=True)
+    document = models.ForeignKey(
+        Document, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    refund_payment = models.ForeignKey(
+        "Payment", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    debt_charge = models.ForeignKey(
+        OneOffCharge, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "lease_ends"
+        constraints = [
+            _valid_choice("lease_ends", "reason", LeaseEndReason, blank=True),
+            _valid_choice("lease_ends", "status", LeaseEndStatus),
+            _valid_choice("lease_ends", "refund_method", RefundMethod, blank=True),
+            # A confirmed end has its date, its reason and its moment.
+            models.CheckConstraint(
+                condition=~Q(status=LeaseEndStatus.CONFIRMED)
+                | (Q(ended_on__isnull=False, confirmed_at__isnull=False) & ~Q(reason="")),
+                name="lease_ends_confirmed_complete",
+            ),
+            models.CheckConstraint(
+                condition=Q(status=LeaseEndStatus.CONFIRMED) | Q(confirmed_at__isnull=True),
+                name="lease_ends_confirmed_at_iff_confirmed",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Lease end {self.pk}"
+
+
+class DeductionKind(models.TextChoices):
+    DAMAGE = "damage", "Damage"
+    CLEANING = "cleaning", "Cleaning"
+    UNPAID_BALANCE = "unpaid_balance", "Unpaid balance offset"
+    OTHER = "other", "Other"
+
+
+class LeaseEndDeduction(GuardedModel):
+    """One typed deduction from the deposit on a lease end's statement (PLAN-012e D5(c))."""
+
+    lease_end = models.ForeignKey(LeaseEnd, on_delete=models.CASCADE, related_name="deductions")
+    kind = _choice(DeductionKind)
+    description = guarded_char(DEDUCTION_DESCRIPTION_MAX_LENGTH, blank=True, default="")
+    amount = MoneyField()
+    position = models.SmallIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "lease_end_deductions"
+        ordering = ("position", "created_at")
+        constraints = [
+            _valid_choice("lease_end_deductions", "kind", DeductionKind),
+            _positive("lease_end_deductions", "amount"),
+        ]
+
+
+class LeaseTransferStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    CONFIRMED = "confirmed", "Confirmed"
+
+
+class LeaseTransfer(GuardedModel):
+    """A hand-over of a store from one operator to another (PLAN-012e D6): the outgoing
+    lease, its end, the incoming lease and the builder draft of the move-in charges.
+
+    The transfer wizard's state while a draft (one per store): the incoming operator and
+    the incoming lease's terms (``incoming_*``), the deposit amount and the ticked setup
+    items (``setup_lines``: ``[{"fee_type": <id>, "price": "<amount>"}]``, catalogue
+    order). Confirmed, it names the incoming lease and the draft it made. Written only by
+    :mod:`ledger.services.transfer`.
+    """
+
+    store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="transfers")
+    outgoing_lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, related_name="transfers_out"
+    )
+    incoming_lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="transfers_in"
+    )
+    lease_end = models.OneToOneField(
+        LeaseEnd, on_delete=models.PROTECT, null=True, blank=True, related_name="transfer"
+    )
+    draft = models.ForeignKey(
+        InvoiceDraft, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    status = _choice(LeaseTransferStatus, default=LeaseTransferStatus.DRAFT)
+    incoming_operator = models.ForeignKey(
+        Operator, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    incoming_started_on = models.DateField(null=True, blank=True)
+    incoming_rent = MoneyField(null=True, blank=True)
+    incoming_debit_day = models.SmallIntegerField(null=True, blank=True)
+    incoming_second_debit_day = models.SmallIntegerField(null=True, blank=True)
+    incoming_channel = _choice(PaymentChannel, blank=True, default="")
+    incoming_prorate_first_month = models.BooleanField(default=True)
+    deposit_amount = MoneyField(null=True, blank=True)
+    setup_lines = guarded_json(default=list, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "lease_transfers"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(incoming_lease__isnull=True) | ~Q(incoming_lease=F("outgoing_lease")),
+                name="lease_transfers_two_leases",
+            ),
+            _valid_choice("lease_transfers", "status", LeaseTransferStatus),
+            _valid_choice("lease_transfers", "incoming_channel", PaymentChannel, blank=True),
+            _day_of_month("lease_transfers", "incoming_debit_day"),
+            _day_of_month("lease_transfers", "incoming_second_debit_day"),
+            models.CheckConstraint(
+                condition=Q(incoming_rent__isnull=True) | Q(incoming_rent__gt=0),
+                name="lease_transfers_incoming_rent_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(deposit_amount__isnull=True) | Q(deposit_amount__gte=0),
+                name="lease_transfers_deposit_amount_not_negative",
+            ),
+            # A confirmed transfer names its end, its incoming lease and its moment.
+            models.CheckConstraint(
+                condition=~Q(status=LeaseTransferStatus.CONFIRMED)
+                | Q(
+                    confirmed_at__isnull=False,
+                    lease_end__isnull=False,
+                    incoming_lease__isnull=False,
+                ),
+                name="lease_transfers_confirmed_complete",
+            ),
+            models.CheckConstraint(
+                condition=Q(status=LeaseTransferStatus.CONFIRMED) | Q(confirmed_at__isnull=True),
+                name="lease_transfers_confirmed_at_iff_confirmed",
+            ),
+            # One transfer in progress per store.
+            models.UniqueConstraint(
+                fields=["store"],
+                condition=Q(status=LeaseTransferStatus.DRAFT),
+                name="lease_transfers_one_draft_per_store",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Lease transfer {self.pk}"
 
 
 # --- Audit and import --------------------------------------------------------------

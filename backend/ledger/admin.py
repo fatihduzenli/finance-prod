@@ -193,9 +193,11 @@ class MessageTemplateAdmin(AuditedAdmin):
         self, request: HttpRequest, obj: Any = None, change: bool = False, **kwargs: Any
     ) -> type[forms.ModelForm[Any]]:
         form = super().get_form(request, obj, change, **kwargs)
+        # PLAN-012e D8: the final statement template has its own fields.
+        text = merge.fields_text(merge.fields_for(obj.code)) if obj is not None else ""
         for name in ("subject", "body"):
             if name in form.base_fields:
-                form.base_fields[name].help_text = f"Merge fields: {merge.FIELDS_TEXT}."
+                form.base_fields[name].help_text = f"Merge fields: {text or merge.FIELDS_TEXT}."
         return form
 
 

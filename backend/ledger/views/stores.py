@@ -47,7 +47,7 @@ from ledger.forms import (
     StoreForm,
 )
 from ledger.models import DocumentKind, Store, StoreCost, StoreCostSource
-from ledger.services import contacts, csv_export, store_costs
+from ledger.services import contacts, csv_export, lease_end, store_costs
 from ledger.services import stores as service
 from ledger.services.csv_export import CsvWriter
 from ledger.views import contact_log, documents
@@ -145,12 +145,20 @@ def store_export(request: HttpRequest) -> StreamingHttpResponse:
 def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
     store = _load(pk)
     today = timezone.localdate()
+    admin = meets(_role(request), Role.ADMIN)
     return render(
         request,
         "ledger/stores/detail.html",
         {
             "store": store,
-            "leases": store.leases.select_related("operator").order_by("started_on", "id"),
+            "leases": store.leases.select_related("operator", "lease_end").order_by(
+                "started_on", "id"
+            ),
+            # PLAN-012e D4 to D6: End lease and Transfer to another operator (admin) for
+            # the lease in effect; the store is vacant by derivation once no lease of it
+            # is in effect.
+            "can_end_lease": admin and lease_end.current_lease(store, today) is not None,
+            "vacant_since": lease_end.vacant_since(store, today),
             "can_edit": meets(_role(request), Role.ADMIN),
             "can_set_cost": meets(_role(request), Role.BILLING),
             "cost": store_costs.current_cost(store, today),

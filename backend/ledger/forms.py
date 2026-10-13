@@ -27,18 +27,21 @@ from ledger.models import (
     CollectionStatus,
     ContactKind,
     ContactStatus,
+    DeductionKind,
     DepositResolutionKind,
     DocumentKind,
     FeeType,
     Lease,
+    LeaseEndReason,
     Operator,
     PaymentChannel,
     PaymentMethod,
+    RefundMethod,
     Store,
 )
 from ledger.services import invoice_builder
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
-from ledger.services.leases import END_DATE_REQUIRED, END_REASON_REQUIRED
+from ledger.services.leases import END_DATE_REQUIRED
 from ledger.services.one_off_charges import ChargeInput
 from ledger.validators import validate_no_payment_data, visible_text
 from payments.operator_sync import normalise_phone
@@ -190,9 +193,20 @@ class LeaseForm(_LeaseFormBase):
             "payment_channel",
             "started_on",
             "collection_status",
+            "prorate_first_month",
         )
         widgets = {"started_on": forms.DateInput(attrs={"type": "date"})}
-        labels = {"collection_status": "Status", "started_on": "Start date"}
+        labels = {
+            "collection_status": "Status",
+            "started_on": "Start date",
+            "prorate_first_month": "Prorate first month",
+        }
+        help_texts = {
+            "prorate_first_month": (
+                "When the lease starts after the 1st, the first month's rent is charged "
+                "for the days used only."
+            )
+        }
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -944,30 +958,248 @@ class DepositResolutionForm(forms.Form):
         return note
 
 
-class EndLeaseForm(forms.Form):
-    """End a lease (admin, PLAN-010b Batch C). The service re-checks every rule under
-    the lease's row lock; the form checks shape only."""
+# --- End of lease (PLAN-012e D4, D5) -------------------------------------------------------
+
+#: Deduction rows the statement step shows.
+DEDUCTION_ROWS = 8
+
+
+class LeaseEndTermsForm(forms.Form):
+    """Step 1 of the end-of-lease wizard; the service checks every rule again."""
 
     ended_on = forms.DateField(
         label="End date",
         widget=forms.DateInput(attrs={"type": "date"}),
-        help_text="The last day of the lease: not before it started, not in the future.",
+        help_text="The last day the operator had the store: not before the lease started, "
+        "not in the future.",
         error_messages={"required": END_DATE_REQUIRED},
     )
-    end_reason = forms.CharField(
-        label="Reason",
-        widget=forms.Textarea(attrs={"rows": 3}),
-        max_length=PAYMENT_NOTE_MAX_LENGTH,
-        validators=[validate_no_payment_data],
-        error_messages={"required": END_REASON_REQUIRED},
+    reason = forms.ChoiceField(
+        choices=[("", "—"), *LeaseEndReason.choices],
+        help_text="Why the lease ends; Other needs a few words below.",
+    )
+    reason_note = forms.CharField(
+        label="Reason in words",
+        required=False,
+        strip=False,
+        widget=forms.Textarea(attrs={"rows": 2, "maxlength": PAYMENT_NOTE_MAX_LENGTH}),
+        help_text="Optional, except for Other; never a card or account number.",
+    )
+    prorate_last_month = forms.BooleanField(
+        label="Prorate last month",
+        required=False,
+        initial=True,
+        help_text="Charge the last month for the days up to the end date only.",
     )
 
-    def clean_end_reason(self) -> str:
-        # Invisible format characters and Unicode whitespace alone are not a reason.
-        reason = visible_text(self.cleaned_data["end_reason"])
-        if not reason:
-            raise forms.ValidationError(END_REASON_REQUIRED)
-        return reason
+    def __init__(self, *args: Any, fixed_reason: str = "", **kwargs: Any) -> None:
+        """``fixed_reason``: the reason cannot be changed (a transfer's lease end)."""
+        super().__init__(*args, **kwargs)
+        if fixed_reason:
+            reason = self.fields["reason"]
+            reason.initial = fixed_reason
+            reason.disabled = True
+            reason.help_text = "A transfer ends the lease; the reason is fixed."
+
+
+class LeaseEndDeductionsForm(forms.Form):
+    """Step 3: the typed deductions from the deposit, one row each; an empty row is
+    skipped. The service checks every rule again."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        for index in range(1, DEDUCTION_ROWS + 1):
+            self.fields[f"kind_{index}"] = forms.ChoiceField(
+                label="Kind", required=False, choices=[("", "—"), *DeductionKind.choices]
+            )
+            self.fields[f"description_{index}"] = forms.CharField(
+                label="Description", required=False, strip=False, max_length=200
+            )
+            self.fields[f"amount_{index}"] = forms.DecimalField(
+                label="Amount",
+                required=False,
+                min_value=Decimal("0.01"),
+                max_value=RENT_MAX,
+                max_digits=12,
+                decimal_places=2,
+            )
+
+    def rows(self) -> list[dict[str, forms.BoundField]]:
+        return [
+            {part: self[f"{part}_{index}"] for part in ("kind", "description", "amount")}
+            for index in range(1, DEDUCTION_ROWS + 1)
+        ]
+
+    def lines(self) -> list[tuple[str, str, Decimal]]:
+        """The filled rows as (kind, description, amount); call after validation."""
+        found = []
+        for index in range(1, DEDUCTION_ROWS + 1):
+            kind = self.cleaned_data.get(f"kind_{index}") or ""
+            amount = self.cleaned_data.get(f"amount_{index}")
+            description = self.cleaned_data.get(f"description_{index}") or ""
+            if not kind and amount is None and not description.strip():
+                continue
+            found.append((kind, description, amount if amount is not None else Decimal("0")))
+        return found
+
+
+class LeaseEndSettlementForm(forms.Form):
+    """Step 4: how a refund is paid back. The service checks every rule again."""
+
+    method = forms.ChoiceField(
+        label="Refund method",
+        required=False,
+        choices=[("", "—"), *RefundMethod.choices],
+        help_text="How the refund is paid: Zelle, wire or check, never the payment provider.",
+    )
+    refund_on = forms.DateField(
+        label="Refund date",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="The day the refund is sent; not in the future.",
+    )
+    reference = forms.CharField(
+        label="Reference",
+        required=False,
+        strip=False,
+        max_length=100,
+        help_text="A Zelle confirmation, a wire reference or a check number; no account number.",
+    )
+    note = forms.CharField(
+        required=False,
+        strip=False,
+        widget=forms.Textarea(attrs={"rows": 2, "maxlength": PAYMENT_NOTE_MAX_LENGTH}),
+        help_text="Anything staff should know about the settlement.",
+    )
+
+
+class LeaseEndConfirmForm(forms.Form):
+    confirmed = forms.BooleanField(
+        label="I have read the effects above and want to end the lease",
+        required=True,
+        widget=_ExactCheckboxInput,
+        error_messages={"required": "Tick the box to confirm."},
+    )
+
+
+# --- Transfer (PLAN-012e D6) ---------------------------------------------------------------
+
+
+class TransferOperatorForm(forms.Form):
+    """Step 1 of the transfer: the operator picked from the search. The service checks
+    that it is not archived and not the outgoing one."""
+
+    operator = forms.UUIDField(
+        widget=forms.HiddenInput, error_messages={"required": "Choose an operator."}
+    )
+
+
+class TransferIncomingForm(forms.Form):
+    """The incoming lease's terms, its deposit and its setup checklist (one tick and price
+    per offered catalogue item that is not a deposit, the price defaulting from the
+    catalogue). The service checks every rule again."""
+
+    started_on = forms.DateField(
+        label="Start date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="The first day of the incoming lease: the day after the outgoing lease "
+        "ends, or later.",
+    )
+    rent = forms.DecimalField(
+        label="Monthly rent",
+        min_value=Decimal("0.01"),
+        max_value=RENT_MAX,
+        max_digits=12,
+        decimal_places=2,
+    )
+    debit_day = forms.IntegerField(label="Debit day", min_value=1, max_value=31)
+    second_debit_day = forms.IntegerField(
+        label="Second debit day",
+        min_value=1,
+        max_value=31,
+        required=False,
+        help_text="Only for a lease debited twice a month.",
+    )
+    payment_channel = forms.ChoiceField(
+        label="Payment channel",
+        choices=[("", "—")]
+        + [
+            (value, label)
+            for value, label in PaymentChannel.choices
+            if value != PaymentChannel.UNKNOWN
+        ],
+        help_text="How the incoming operator pays the rent.",
+    )
+    prorate_first_month = forms.BooleanField(
+        label="Prorate first month",
+        required=False,
+        initial=True,
+        help_text="When the lease starts after the 1st, the first month's rent is charged "
+        "for the days used only.",
+    )
+    deposit_amount = forms.DecimalField(
+        label="Security deposit",
+        required=False,
+        min_value=Decimal("0.00"),
+        max_value=RENT_MAX,
+        max_digits=12,
+        decimal_places=2,
+        help_text="Paid by the incoming operator; zero or empty for none. It goes on the "
+        "move-in invoice draft.",
+    )
+
+    def __init__(self, *args: Any, fee_types: Iterable[FeeType] = (), **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fee_types = list(fee_types)
+        for fee_type in self.fee_types:
+            name = _setup_name(fee_type)
+            self.fields[f"{name}_tick"] = forms.BooleanField(
+                required=False, widget=_ExactCheckboxInput, label=fee_type.name
+            )
+            self.fields[f"{name}_price"] = _money_field(
+                "Price", minimum=Decimal("0.01"), initial=fee_type.default_price
+            )
+
+    def lease_fields(self) -> list[forms.BoundField]:
+        return [field for field in self.visible_fields() if not field.name.startswith(SETUP)]
+
+    def setup_rows(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "fee_type": fee_type,
+                "tick": self[f"{_setup_name(fee_type)}_tick"],
+                "price": self[f"{_setup_name(fee_type)}_price"],
+            }
+            for fee_type in self.fee_types
+        ]
+
+    def clean(self) -> dict[str, Any]:
+        data = super().clean() or {}
+        for fee_type in self.fee_types:
+            name = _setup_name(fee_type)
+            if data.get(f"{name}_tick") is True and data.get(f"{name}_price") is None:
+                if f"{name}_price" not in self.errors:
+                    self.add_error(f"{name}_price", SETUP_PRICE_REQUIRED)
+        return data
+
+    def setup_items(self) -> list[tuple[FeeType, Decimal]]:
+        """The ticked rows of a valid form as (fee type, price), in catalogue order."""
+        items = []
+        for fee_type in self.fee_types:
+            name = _setup_name(fee_type)
+            price = self.cleaned_data.get(f"{name}_price")
+            if self.cleaned_data.get(f"{name}_tick") is True and price is not None:
+                items.append((fee_type, price))
+        return items
+
+
+class TransferConfirmForm(forms.Form):
+    confirmed = forms.BooleanField(
+        label="I have read the effects above and want to transfer the store",
+        required=True,
+        widget=_ExactCheckboxInput,
+        error_messages={"required": "Tick the box to confirm."},
+    )
 
 
 # --- Documents (PLAN-010c D7) --------------------------------------------------------------
@@ -1036,11 +1268,12 @@ class DocumentUploadForm(forms.Form):
     kind = forms.CharField(
         label="Kind",
         widget=forms.Select(
-            # Dispute evidence is kept on an operator, from the disputes page (PLAN-012 D8).
+            # Dispute evidence is kept on an operator, from the disputes page (PLAN-012 D8);
+            # a final statement is made by the end-of-lease wizard (PLAN-012e D7).
             choices=[
                 choice
                 for choice in DocumentKind.choices
-                if choice[0] != DocumentKind.DISPUTE_EVIDENCE
+                if choice[0] not in (DocumentKind.DISPUTE_EVIDENCE, DocumentKind.FINAL_STATEMENT)
             ]
         ),
     )

@@ -493,7 +493,7 @@ def provider_schedule(charge: OneOffCharge) -> str:
     )
 
 
-def _live(invoice: Invoice) -> bool:
+def invoice_is_live(invoice: Invoice) -> bool:
     """Whether a linked invoice is still live at the provider as far as we know: not
     ``void`` here and not last seen ``DELETED`` there (PLAN-011 D0)."""
     deleted = str(invoice.provider_status).strip().upper() == invoice_sync.PROVIDER_DELETED
@@ -510,7 +510,7 @@ def live_provider_invoice(charge: OneOffCharge) -> tuple[Invoice, str] | None:
     """The charge's invoice with a current provider reference when it is live, and that
     reference; ``None`` otherwise (PLAN-011 D0)."""
     linked = rent_run.provider_invoice(charge)
-    if linked is None or not _live(linked[0]):
+    if linked is None or not invoice_is_live(linked[0]):
         return None
     return linked
 

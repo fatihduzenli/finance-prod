@@ -25,6 +25,10 @@ targets), each piece apart from the next by :data:`PIECE_SEPARATOR`. A file carr
 embedded file is refused (``embedded_object``): what it holds cannot be checked. Images,
 and PDFs without a text layer, cannot be checked; the upload box says so (D6).
 
+**Final statements** (PLAN-012e D5, D7) are the app's own PDFs of a lease end, kept on
+the store only (``kind_unknown`` on a lease or an operator); every check above runs on
+them unchanged.
+
 **Dispute evidence** (PLAN-012 D8) is kept on an operator, and an operator keeps nothing
 else: kind ``dispute_evidence`` is refused on a store or a lease and every other kind on
 an operator (``kind_unknown``). It may be a PDF, JPEG, PNG or TIFF only
@@ -935,7 +939,10 @@ def _owner_type(owner: Owner) -> str:
 
 
 def _kind_fits(owner: Owner, kind: str) -> bool:
-    """An operator keeps dispute evidence only, and only an operator keeps it (D8)."""
+    """An operator keeps dispute evidence only, and only an operator keeps it (D8); a
+    final statement is kept by a store only (PLAN-012e D5)."""
+    if kind == DocumentKind.FINAL_STATEMENT:
+        return isinstance(owner, Store)
     return isinstance(owner, Operator) == (kind == DocumentKind.DISPUTE_EVIDENCE)
 
 

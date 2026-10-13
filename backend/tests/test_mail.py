@@ -207,6 +207,79 @@ def test_the_catch_all_rewrites_the_envelope_and_names_the_recipient() -> None:
     assert delivered.text == a_message().text
 
 
+# --- Attachments (PLAN-012e D8) -----------------------------------------------------------
+
+PDF = b"%PDF-1.4 statement"
+
+
+def a_pdf(**overrides: Any) -> mail.Attachment:
+    values: dict[str, Any] = {
+        "filename": "final-statement-20261019.pdf",
+        "content_type": "application/pdf",
+        "data": PDF,
+    }
+    return mail.Attachment(**{**values, **overrides})
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"filename": "../etc/passwd.pdf"},
+        {"filename": "statement.pdf\r\nBcc: x@example.com"},
+        {"filename": "statement"},
+        {"filename": ".pdf"},
+        {"content_type": "text/html"},
+        {"data": b""},
+        {"data": b"x" * (10 * 1024 * 1024 + 1)},
+    ],
+)
+def test_an_attachment_refuses_a_bad_name_type_or_size(fields: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        a_pdf(**fields)
+
+
+def test_a_message_takes_attachments_only() -> None:
+    with pytest.raises(ValueError):
+        a_message(attachments=(("statement.pdf", "application/pdf", PDF),))
+
+
+def test_with_an_attachment_the_mime_message_is_multipart_mixed() -> None:
+    raw = mime_bytes(a_message(attachments=(a_pdf(),)), SENDER)
+    parsed = message_from_bytes(raw, policy=policy.default)
+    assert isinstance(parsed, EmailMessage)
+    assert parsed.get_content_type() == "multipart/mixed"
+    text = parsed.get_body(("plain",))
+    html = parsed.get_body(("html",))
+    assert text is not None and "You owe $10.00." in text.get_content()
+    assert html is not None and "<p>Hello</p>" in html.get_content()
+    [attached] = list(parsed.iter_attachments())
+    assert attached.get_filename() == "final-statement-20261019.pdf"
+    assert attached.get_content_type() == "application/pdf"
+    assert attached.get_content() == PDF
+
+
+def test_without_an_attachment_the_mime_message_is_unchanged() -> None:
+    parsed = message_from_bytes(mime_bytes(a_message(), SENDER), policy=policy.default)
+    assert parsed.get_content_type() == "multipart/alternative"
+
+
+def test_the_catch_all_keeps_the_attachment() -> None:
+    memory = MemoryMailSender()
+    CatchAllSender(memory, CATCH_ALL).send(a_message(attachments=(a_pdf(),)))
+    [delivered] = memory.sent
+    assert delivered.to == CATCH_ALL and delivered.attachments == (a_pdf(),)
+
+
+def test_the_gmail_sender_posts_the_attachment(rsa_key: rsa.RSAPrivateKey) -> None:
+    recorder = Recorder()
+    sender, _ = sender_for(rsa_key, recorder, Clock(1_790_000_000))
+    sender.send(a_message(attachments=(a_pdf(),)))
+    sent = sent_mime(recorder.requests[-1])
+    [attached] = list(sent.iter_attachments())
+    assert attached.get_filename() == "final-statement-20261019.pdf"
+    assert attached.get_content() == PDF
+
+
 def test_the_null_sender_suppresses_and_reaches_nothing() -> None:
     receipt = NullSender().send(a_message())
     assert receipt.disposition == mail.SUPPRESSED

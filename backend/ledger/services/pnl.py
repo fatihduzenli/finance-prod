@@ -34,9 +34,11 @@ with no end date, is never active. The columns:
   month;
 - **fees collected**: settled ``one_off`` payments on those charges and ``insurance``
   payments by ``settled_on`` month minus their settled refunds, plus the withheld part
-  of resolved deposits by ``resolved_on`` month (``withheld_deposits``, shown apart as
-  well); the insurance parts of fees billed and collected are also kept apart
-  (``insurance_billed``, ``insurance_collected``) for the revenue report (PLAN-011 D4);
+  of resolved deposits by ``resolved_on`` month less any part offset against the
+  lease's open charges at its end (PLAN-012e D5(d): those payments count where they
+  paid) (``withheld_deposits``, shown apart as well); the insurance parts of fees
+  billed and collected are also kept apart (``insurance_billed``,
+  ``insurance_collected``) for the revenue report (PLAN-011 D4);
 - **landlord rent** and **other costs**: the live store cost row in effect on the
   month's first day (a superseded row, PLAN-010c D10, counts for nothing); none is
   "unknown" (``None``), never zero. An empty other cost on a row in effect is zero;
@@ -574,16 +576,21 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
     _add_redebits(acc, start, end)
     _add_invoice_lines(acc, start, end)
 
+    # PLAN-012e D5(d): the offset part of a withheld deposit paid the lease's open
+    # charges, and those payments are counted where they were paid; only the rest of
+    # the withheld amount is revenue here.
     withheld = (
         DepositResolution.objects.filter(
-            resolved_on__gte=start, resolved_on__lte=end, withheld_amount__gt=0
+            resolved_on__gte=start,
+            resolved_on__lte=end,
+            withheld_amount__gt=F("offset_amount"),
         )
         .values(
             store=F("setup_charge__lease__store"),
             operator=Coalesce("setup_charge__operator", "setup_charge__lease__operator"),
             month=TruncMonth("resolved_on"),
         )
-        .annotate(total=Sum("withheld_amount"))
+        .annotate(total=Sum(F("withheld_amount") - F("offset_amount")))
         .order_by()
     )
     for resolution in withheld:

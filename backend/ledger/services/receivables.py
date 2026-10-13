@@ -158,8 +158,11 @@ def _money(value: object) -> Decimal:
     return Decimal(str(value)) if value is not None else ZERO
 
 
-def _rent_description(period_month: date, seq: int) -> str:
-    return f"Rent {period_month:%Y-%m}" + (f" (debit {seq})" if seq > 1 else "")
+def _rent_description(period_month: date, seq: int, proration_text: str | None = None) -> str:
+    """``Rent 2026-10``, ``(debit 2)`` for a second debit, and a prorated month's
+    arithmetic (PLAN-012e D2)."""
+    text = f"Rent {period_month:%Y-%m}" + (f" (debit {seq})" if seq > 1 else "")
+    return f"{text}: {proration_text}" if proration_text else text
 
 
 def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
@@ -174,6 +177,7 @@ def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
         "period_month",
         "seq",
         "lease",
+        "proration_text",
         operator=F("lease__operator"),
         operator_name=F("lease__operator__display_name"),
         store=F("lease__store"),
@@ -195,7 +199,7 @@ def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
             balance=_money(row["balance"]),
             status=row["status"],
             period_month=row["period_month"],
-            description=_rent_description(row["period_month"], row["seq"]),
+            description=_rent_description(row["period_month"], row["seq"], row["proration_text"]),
             lease_id=row["lease"],
         )
         for row in values

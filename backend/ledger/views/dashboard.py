@@ -76,7 +76,17 @@ def cell_html(cell: grid.Cell, charge_url: str) -> SafeString:
     """One grid cell, as the template wrote it, built here: 12,000 cells through the
     template engine (a ``{% url %}`` each) took longer than the page's 2 s (D6)."""
     css = f"cell cell-{cell.status}" if cell.status else "cell"
-    if cell.charge_id is not None:
+    if cell.charge_id is not None and cell.proration_text:
+        # PLAN-012e D2: a prorated month shows its arithmetic as the link's title.
+        inner = format_html(
+            '<a href="{}" aria-label="{}" title="{}">{}{}</a>',
+            charge_url.replace(_CHARGE_PK, str(cell.charge_id)),
+            cell.label,
+            cell.proration_text,
+            cell.text,
+            _NOTE if cell.has_note else "",
+        )
+    elif cell.charge_id is not None:
         inner = format_html(
             '<a href="{}" aria-label="{}">{}{}</a>',
             charge_url.replace(_CHARGE_PK, str(cell.charge_id)),

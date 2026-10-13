@@ -1,0 +1,37 @@
+{% extends "finance/base.html" %}
+{% block title %}Transfer store {{ store.external_label }}: confirm{% endblock %}
+{% block content %}
+  {% include "ledger/lease_ends/_steps.html" %}
+  <p class="muted" id="step-help">Read both effects and tick the box: the outgoing lease ends and the incoming lease starts in one step, or nothing changes. This cannot be undone from here.</p>
+  <h2>Are you sure?</h2>
+  <h3>The outgoing lease ({{ lease.operator.display_name }})</h3>
+  <ul id="effects">
+    {% include "ledger/lease_ends/_effects.html" %}
+  </ul>
+  <h3>The incoming lease ({{ transfer.incoming_operator.display_name }})</h3>
+  <ul id="incoming-effects">
+    <li>A lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_started_on|date:"Y-m-d" }} at ${{ transfer.incoming_rent }} a month, debited on day {{ transfer.incoming_debit_day }}{% if transfer.incoming_second_debit_day %} and day {{ transfer.incoming_second_debit_day }}{% endif %} ({{ transfer.get_incoming_channel_display }}){% if transfer.incoming_prorate_first_month %}, the first month prorated{% endif %}.</li>
+    {% if transfer.deposit_amount or setup %}
+      <li>One invoice draft "Move-in charges for store {{ store.external_label }}" is saved for review, with:
+        <ul id="draft-lines">
+          {% if transfer.deposit_amount %}<li>{{ deposit_type.name|default:"Security deposit" }}: ${{ transfer.deposit_amount }}</li>{% endif %}
+          {% for line in setup %}<li>{{ line.fee_type.name }}: ${{ line.price }}</li>{% endfor %}
+        </ul>
+        No charge exists and nothing reaches the payment provider until the draft is sent.</li>
+    {% else %}
+      <li>No deposit and no setup charge: no invoice draft is made.</li>
+    {% endif %}
+  </ul>
+  <p>Nothing is sent to the payment provider.</p>
+  {% if settlement_missing %}<p id="settlement-missing"><strong>A refund is due: set its method and date on the settlement step first.</strong></p>{% endif %}
+  {% include "ledger/lease_ends/_figures.html" %}
+  <form method="post" id="transfer-confirm" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {{ form.confirmed.errors }}
+    <label for="{{ form.confirmed.id_for_label }}">{{ form.confirmed }} {{ form.confirmed.label }}</label>
+    <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-transfer">Transfer the store</button></p>
+  </form>
+  {% include "ledger/lease_ends/_cancel.html" %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

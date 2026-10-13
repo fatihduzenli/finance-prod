@@ -53,6 +53,9 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0030_disputes",
             "ledger.migrations.0031_line_kind_fees_consent",
             "ledger.migrations.0032_builder_item",
+            "ledger.migrations.0034_proration",
+            "ledger.migrations.0035_lease_end_transfer",
+            "ledger.migrations.0037_transfer_fields",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -117,6 +120,8 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0013_invoice_pay_job",
                 "[ ] 0014_mail_jobs",
                 "[ ] 0015_dispute_jobs",
+                "[ ] 0016_lease_end_jobs",
+                "[ ] 0017_autopay_stop_job",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):
@@ -846,6 +851,221 @@ def test_the_one_open_promise_migration_over_existing_rows_on_postgresql(
     repo_root: Path, scratch_postgresql_url: str
 ) -> None:
     _one_open_round_trip(repo_root, scratch_postgresql_url)
+
+
+# --- PLAN-012e: proration, lease ends, message kinds, the documents job ------------------
+#
+# Seeds a lease, a rent charge, a collection e-mail and a deposit resolution at ``ledger.0033``
+# and ``payments.0015``, migrates forward, back and forward again on both engines, and reads
+# the rows with plain SQL: the lease gets the switch on, the charge no proration text, the
+# e-mail kind ``ladder``, the resolution an offset of 0; the final statement template is
+# seeded and taken back. The reverse refuses while a lease end exists.
+
+STATE_BEFORE_LEASE_END = (
+    ("ledger", "0033_one_open_promise_per_lease"),
+    ("payments", "0015_dispute_jobs"),
+)
+LEASE_END_ROWS = (
+    "SELECT l.prorate_first_month, r.amount_due, r.proration_text, m.kind, m.document_id, "
+    "d.offset_amount FROM leases l JOIN rent_charges r ON r.lease_id = l.id "
+    "JOIN outbound_messages m ON m.operator_id = l.operator_id "
+    "JOIN deposit_resolutions d ON d.created_by_id IS NULL"
+)
+FINAL_TEMPLATE = "SELECT count(*) FROM message_templates WHERE code = 'final_statement'"
+
+
+def seed_before_lease_end() -> None:
+    """Seed the rows above with the models of ``STATE_BEFORE_LEASE_END``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    import uuid as uuid_module
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_LEASE_END)).apps
+    operator = apps.get_model("ledger", "Operator").objects.create(
+        display_name="End LLC", email="end@example.com"
+    )
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 1201", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store,
+        operator=operator,
+        debit_day=1,
+        collection_status="active",
+        payment_channel="wire",
+    )
+    apps.get_model("ledger", "RentCharge").objects.create(
+        lease=lease,
+        period_month=date(2026, 10, 1),
+        due_on=date(2026, 10, 1),
+        amount_due=Decimal("2000.00"),
+        status="due",
+    )
+    step = apps.get_model("ledger", "CollectionStep").objects.get(day_offset=3)
+    apps.get_model("ledger", "OutboundMessage").objects.create(
+        operator=operator,
+        template=step.template,
+        step=step,
+        charge_entity_type="rent_charge",
+        charge_entity_id=uuid_module.uuid4(),
+        to_address="end@example.com",
+    )
+    fee_type = apps.get_model("ledger", "FeeType").objects.create(
+        code="end_deposit", name="End deposit", refundable=True
+    )
+    charge = apps.get_model("ledger", "OneOffCharge").objects.create(
+        lease=lease,
+        operator=operator,
+        fee_type=fee_type,
+        price=Decimal("500.00"),
+        due_date=date(2026, 1, 1),
+    )
+    apps.get_model("ledger", "DepositResolution").objects.create(
+        setup_charge=charge,
+        kind="withheld",
+        amount=Decimal("500.00"),
+        withheld_amount=Decimal("500.00"),
+        resolved_on=date(2026, 10, 2),
+        note="Kept for repairs.",
+    )
+
+
+def _lease_end_round_trip(repo_root: Path, url: str) -> None:
+    _migrate_to(repo_root, url, *STATE_BEFORE_LEASE_END)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_lease_end as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    after = [("True", "2000.00", "None", "ladder", "None", "0.00")]
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    rows = _rows(url, LEASE_END_ROWS, (1, 5))
+    # sqlite reads a boolean as 1.
+    assert [("True" if row[0] in ("True", "1") else row[0], *row[1:]) for row in rows] == after
+    assert _rows(url, FINAL_TEMPLATE) == [("1",)]
+
+    _migrate_to(repo_root, url, *STATE_BEFORE_LEASE_END)
+    assert _rows(url, FINAL_TEMPLATE) == [("0",)]
+    assert _rows(url, "SELECT amount_due FROM rent_charges", (0,)) == [("2000.00",)]
+    assert _rows(url, "SELECT count(*) FROM outbound_messages") == [("1",)]
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, FINAL_TEMPLATE) == [("1",)]
+
+    # A lease end cannot be lost by going back.
+    made = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from ledger.models import Lease, LeaseEnd; "
+        "LeaseEnd.objects.create(lease=Lease.objects.get())",
+    )
+    assert made.returncode == 0, made.stderr
+    refused = _manage(repo_root, url, "migrate", "ledger", "0034_proration", "--noinput")
+    assert refused.returncode != 0 and "refuses to reverse" in refused.stderr
+    assert _rows(url, "SELECT count(*) FROM lease_ends") == [("1",)]
+
+
+def test_the_lease_end_migrations_over_existing_rows_on_sqlite(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    _lease_end_round_trip(repo_root, f"sqlite:///{tmp_path / 'lease-end.sqlite3'}")
+
+
+@requires_postgresql
+def test_the_lease_end_migrations_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    _lease_end_round_trip(repo_root, scratch_postgresql_url)
+
+
+# --- PLAN-012e D6: the transfer wizard's state ------------------------------------------
+#
+# Seeds a bare transfer (store and outgoing lease only) at ``ledger.0036``, migrates
+# forward, back and forward again on PostgreSQL (the engine of the trigger; sqlite runs
+# 0037 in the plain round trip), and reads the row with plain SQL: a draft, no incoming
+# terms, the first month prorated, no setup line. The new JSON column is guarded, and
+# the reverse refuses once a transfer holds an incoming term.
+
+STATE_BEFORE_TRANSFER_FIELDS = (("ledger", "0036_messages_kind"),)
+TRANSFER_ROWS = (
+    "SELECT status, incoming_operator_id, incoming_rent, incoming_prorate_first_month, "
+    "deposit_amount, setup_lines::text FROM lease_transfers"
+)
+
+
+def seed_before_transfer_fields() -> None:
+    """Seed one bare transfer with the models of ``STATE_BEFORE_TRANSFER_FIELDS``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_TRANSFER_FIELDS)).apps
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 1301", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store, collection_status="prospective", payment_channel="unknown"
+    )
+    apps.get_model("ledger", "LeaseTransfer").objects.create(store=store, outgoing_lease=lease)
+
+
+@requires_postgresql
+def test_the_transfer_fields_migration_over_an_existing_row_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_TRANSFER_FIELDS)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_transfer_fields as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    after = [("draft", "None", "None", "True", "None", "[]")]
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, TRANSFER_ROWS) == after
+    _migrate_to(repo_root, url, *STATE_BEFORE_TRANSFER_FIELDS)
+    assert _rows(url, "SELECT count(*) FROM lease_transfers") == [("1",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, TRANSFER_ROWS) == after
+
+    # The setup lines are guarded by the trigger.
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute(
+            "UPDATE lease_transfers SET setup_lines = "
+            """'[{"price": "1.00", "fee_type": "4111 1111 1111 1111"}]'"""
+        )
+    # A transfer holding an incoming term cannot be lost by going back.
+    with psycopg.connect(url) as scratch:
+        scratch.execute("UPDATE lease_transfers SET incoming_rent = 2500")
+    refused = _manage(repo_root, url, "migrate", "ledger", "0036_messages_kind", "--noinput")
+    assert refused.returncode != 0 and "refuses to reverse" in refused.stderr
+    assert _rows(url, "SELECT incoming_rent FROM lease_transfers", (0,)) == [("2500.00",)]
 
 
 # --- Row 2 --------------------------------------------------------------------------

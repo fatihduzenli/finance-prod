@@ -235,6 +235,10 @@ class JobKind(models.TextChoices):
     #: PLAN-012 D8: read the provider's disputes; send one evidence file.
     DISPUTES_SYNC = "disputes_sync", "Read the disputes"
     DISPUTE_EVIDENCE_UPLOAD = "dispute_evidence_upload", "Send dispute evidence"
+    #: PLAN-012e §4: the final statement PDF of a lease end, stored, and its e-mail queued.
+    LEASE_END_DOCUMENTS = "lease_end_documents", "Make the final statement and its e-mail"
+    #: PLAN-012e D5 amendment: delete the lease's rent and insurance schedules.
+    AUTOPAY_STOP = "autopay_stop", "Stop autopay"
 
 
 class JobEntity(models.TextChoices):
@@ -258,6 +262,8 @@ class JobEntity(models.TextChoices):
     #: (``payments.jobs.DISPUTES``).
     DISPUTES = "disputes", "Disputes"
     DISPUTE_EVIDENCE = "dispute_evidence", "Dispute evidence"
+    #: PLAN-012e §4.
+    LEASE_END = "lease_end", "Lease end"
 
 
 class JobStatus(models.TextChoices):

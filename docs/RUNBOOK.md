@@ -537,3 +537,32 @@ invoice tables also carry a line kind and separate fee and surcharge amounts, al
 nothing on any page changes.
 
 **Feature freeze.** Nothing in `docs/BACKLOG.md` §1 starts before Step 17 (Checkpoint 12).
+
+## 17. Lease end, operator transfer, installment plans, proration (PLAN-012e, ADR-0012)
+
+**Proration.** A lease that starts mid-month is charged for the days used: rent × days used ÷
+days in the month, rounded once to the cent, start and end days both counted; the first rent
+charge shows the arithmetic ("13–31 Oct, 19 of 31 days of $2,000.00 = $1,225.81") on the charge
+page, the grid cell and the statement. "Prorate first month" on the lease form (default on) turns
+it off for a lease that pays a full first month. Months after a lease's end date are never
+charged.
+
+**End lease** (store page, admin). Four steps, which can be left and resumed; Cancel deletes the
+draft and changes nothing. (1) **Terms:** the end date (today by default, never in the future),
+the reason (moved out, terminated, transfer, other) with a few words, and "Prorate last month"
+(default on). (2) **Blockers:** every charge with a live Stax invoice or a provider schedule, every
+rent or insurance schedule that is active or paused at Stax, every pending provider payment, each
+with a link to where it is cancelled, collected or stopped; **Stop autopay** (lease page, admin)
+deletes the schedules at Stax through the worker so the blocker clears. The wizard cannot pass
+while anything is listed and checks again at confirm. (3) **Statement:** the last month's rent
+reduced to the days used (an unpaid charge is reduced; a paid one gives the excess back as a
+credit; a missing one is created), rent charged for months after the end date waived (or credited
+when paid), every open balance on the lease, the deposit held, and the **deductions** you type
+(damage, cleaning, unpaid balance offset, other); refund due = deposit − deductions, or the
+amount owed. (4) **Settlement:** how the refund is paid (Zelle, wire or check; never through
+Stax), the date and a reference; an unpaid-balance offset pays the oldest open charges from the
+deposit; what the deposit does not cover becomes one charge, "Lease-end balance", collected by
+hand. **Confirm** lists every effect and needs the box ticked. Then the lease is ended, the store
+shows "Vacant since <date>", the worker stores the final statement as a PDF under the store's
+documents (kind *Final statement*) and queues the e-mail to the operator (sent when mail is on,
+to the catch-all on staging, recorded as suppressed when mail is off). Every step is audited.

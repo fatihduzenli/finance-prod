@@ -20,6 +20,7 @@
         {% csrf_token %}<button class="btn" type="submit" id="resume-autopay">Resume autopay</button>
       </form>
     {% endif %}
+    {% if can_stop %}<a class="btn btn-danger" id="stop-autopay" href="{% url 'ledger:leases:stop_autopay' pk=lease.pk %}">Stop autopay</a>{% endif %}
   </div>
 
   <dl>
@@ -29,6 +30,7 @@
     <dt>Channel</dt><dd>{{ lease.get_payment_channel_display }}</dd>
     <dt>Debit days</dt><dd>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</dd>
     <dt>Start date</dt><dd>{{ lease.started_on|date:"Y-m-d"|default:"—" }}</dd>
+    <dt>Prorate first month</dt><dd id="prorate-first-month">{{ lease.prorate_first_month|yesno:"Yes,No" }}</dd>
     {% if lease.ended_on %}<dt>End date</dt><dd id="lease-ended-on">{{ lease.ended_on|date:"Y-m-d" }}</dd>
     <dt>End reason</dt><dd id="lease-end-reason">{{ lease.end_reason|default:"—" }}</dd>{% endif %}
     <dt>Current rent</dt><dd id="current-rent">{% if rent %}${{ rent.amount }} from {{ rent.effective_from|date:"Y-m-d" }}{% else %}—{% endif %}</dd>

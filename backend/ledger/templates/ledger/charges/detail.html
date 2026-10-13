@@ -25,6 +25,7 @@
     <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
     <dt>Due</dt><dd>{{ charge.due_on|date:"Y-m-d" }}</dd>
     <dt>Amount due</dt><dd id="amount-due">${{ charge.amount_due }}</dd>
+    {% if charge.proration_text %}<dt>Prorated</dt><dd id="proration-text">{{ charge.proration_text }}</dd>{% endif %}
     <dt>Paid</dt><dd id="amount-paid">${{ charge.amount_paid }}</dd>
     <dt>Balance</dt><dd id="balance">${{ charge.balance }}</dd>
     <dt>Carried balance</dt><dd id="carried-balance">${{ carried_balance }} <span class="muted">from earlier charges, not part of this charge</span></dd>

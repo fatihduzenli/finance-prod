@@ -87,6 +87,9 @@ def test_columns_are_as_listed() -> None:
         "queued_at",
         "sent_at",
         "sent_by_id",
+        # PLAN-012e D8: the message's kind and a final statement's attachment.
+        "kind",
+        "document_id",
     }
 
 

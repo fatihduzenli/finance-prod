@@ -1,0 +1,26 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}End lease {{ store.external_label }}: statement{% endblock %}
+{% block content %}
+  {% include "ledger/lease_ends/_steps.html" %}
+  <p class="muted" id="step-help">Check the figures and list what is kept from the deposit; the unpaid balance offset pays the open charges from the deposit and can be lowered but never raised above the open balance.</p>
+  {% include "ledger/lease_ends/_figures.html" %}
+  <h2>Deductions from the deposit</h2>
+  <form method="post" id="lease-end-deductions" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% responsive_table %}
+    <table id="deduction-rows">
+      <thead><tr><th>Kind</th><th>Description</th><th>Amount</th></tr></thead>
+      <tbody>
+        {% for row in form.rows %}
+          <tr><td>{{ row.kind.errors }}{{ row.kind }}</td><td>{{ row.description.errors }}{{ row.description }}</td><td>{{ row.amount.errors }}{{ row.amount }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endresponsive_table %}
+    <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
+  </form>
+  {% include "ledger/lease_ends/_cancel.html" %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
