@@ -1082,3 +1082,15 @@ right after this push and before Step 12d. Decision 3 is built as PLAN-012e D14 
 `lease_end_balance`); Fable's six adversarial cases green; the whole tree re-gated: sqlite
 5,011 passed; PostgreSQL 5,626 passed (21:37); e2e 7; secret scans clean. Committed on top
 of `b3ad928`; the push waits for the owner's word on the updated Publish Request.
+
+## Update, 2026-10-14, Step 12b (PLAN-012e A, B, C, D14) deployed to staging
+
+Pushed `81921bf..3cde4bc` on the owner's word. CI run 38651101891: lint, types, unit and e2e
+green (the unit step took 22:11 of its 25-minute limit; BACKLOG §4 is now urgent and goes first
+in 12b-a: the seeded migration round trips as their own step with their own limit); deploy
+staging green. Staging revision `finance-staging-web--0000041` is healthy on image `3cde4bc`,
+`deploy_migrate` applied the pending migrations (ledger 0034–0039, payments 0016–0017) and
+reports up to date, `/healthz` 200. Owner's staging clicks for Checkpoint 12b: a lease starting
+on the 13th; End lease blocked on a live invoice and clean on another store; Transfer, including
+one with deductions above the deposit (blocked, allowed with a reason, on the attention list);
+a 3-installment split on a hand-collected charge and the P&L unchanged by it. Next: 12b-a.
