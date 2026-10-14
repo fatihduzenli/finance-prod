@@ -25,6 +25,23 @@
   <p>Nothing is sent to the payment provider.</p>
   {% if settlement_missing %}<p id="settlement-missing"><strong>A refund is due: set its method and date on the settlement step first.</strong></p>{% endif %}
   {% include "ledger/lease_ends/_figures.html" %}
+  {% if debt > 0 %}
+    <p id="transfer-debt"><strong>The outgoing operator would still owe {{ debt_amount }} after the deposit.</strong> A balance left after a transfer blocks it; an admin may allow it with a written reason. The "Lease-end balance" charge then stays on the outgoing operator and on the attention list until it is paid.</p>
+    {% if transfer.debt_override_at %}{% include "ledger/transfers/_debt_allowed.html" %}{% endif %}
+    {% if not debt_allowed %}
+      {% if transfer.debt_override_at %}<p id="debt-grew">The balance grew since it was allowed (${{ transfer.debt_override_amount }}): allow it again to confirm.</p>{% endif %}
+      <form method="post" action="{% url 'ledger:transfers:override_debt' pk=transfer.pk %}" id="debt-override-form" class="js-single-submit" autocomplete="off">
+        {% csrf_token %}
+        {{ override_form.non_field_errors }}
+        {{ override_form.reason.errors }}
+        <label for="{{ override_form.reason.id_for_label }}">Reason</label>
+        {{ override_form.reason }}
+        <p class="muted">{{ override_form.reason.help_text }}</p>
+        <p class="actions"><button class="btn" type="submit" id="allow-balance">Allow the balance to remain</button></p>
+      </form>
+    {% endif %}
+  {% endif %}
+  {% if debt <= 0 or debt_allowed %}
   <form method="post" id="transfer-confirm" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
@@ -32,6 +49,9 @@
     <label for="{{ form.confirmed.id_for_label }}">{{ form.confirmed }} {{ form.confirmed.label }}</label>
     <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-transfer">Transfer the store</button></p>
   </form>
+  {% else %}
+    {{ form.non_field_errors }}
+  {% endif %}
   {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

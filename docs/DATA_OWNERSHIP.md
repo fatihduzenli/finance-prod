@@ -334,6 +334,7 @@ scans are covered by the stated policy, not by a check.
 | `lease_ends.status`, `statement_json`, `document_id`, `refund_payment_id`, `debt_charge_id`, `confirmed_at` | System | `draft`/`confirmed`; the figures as confirmed; the stored PDF; the refund payment; the "Lease-end balance" charge |
 | `lease_end_deductions.kind`, `description`, `amount` | App | damage / cleaning / unpaid_balance / other; one row per typed line |
 | `lease_transfers.*` | System | The outgoing lease, its lease end, the incoming lease and the move-in draft; written once at confirm |
+| `lease_transfers.debt_override_amount`, `debt_override_reason`, `debt_override_by_id`, `debt_override_at` | App | An admin's permission for a lease-end balance to remain on the outgoing operator (all four set together, CHECK); the reason is guarded text; audited as `lease_transfer.debt_overridden` |
 
 ### installment_plans, one_off_charges.plan / installment_no (PLAN-012e)
 | Field | Owner | Note |

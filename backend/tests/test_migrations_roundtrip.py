@@ -57,6 +57,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0035_lease_end_transfer",
             "ledger.migrations.0037_transfer_fields",
             "ledger.migrations.0038_installments",
+            "ledger.migrations.0039_transfer_debt_override",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -1154,6 +1155,101 @@ def test_the_installments_migration_over_an_existing_row_on_postgresql(
     refused = _manage(repo_root, url, "migrate", "ledger", "0037_transfer_fields", "--noinput")
     assert refused.returncode != 0 and "refuses to reverse" in refused.stderr
     assert _rows(url, "SELECT count(*) FROM installment_plans") == [("1",)]
+
+
+# --- PLAN-012e D14: a lease-end balance allowed to remain after a transfer --------------
+#
+# Seeds a bare transfer at ``ledger.0038``, migrates forward, back and forward again on
+# PostgreSQL (the engine of the trigger; sqlite runs 0039 in the plain round trip), and
+# reads the row with plain SQL: nothing allowed. The reason is guarded by the trigger, the
+# CHECK holds the four columns together, and the reverse drops them plainly.
+
+STATE_BEFORE_DEBT_OVERRIDE = (("ledger", "0038_installments"),)
+OVERRIDE_ROWS = (
+    "SELECT status, debt_override_amount, debt_override_reason, debt_override_by_id, "
+    "debt_override_at FROM lease_transfers"
+)
+
+
+def seed_before_debt_override() -> None:
+    """Seed one bare transfer with the models of ``STATE_BEFORE_DEBT_OVERRIDE``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_DEBT_OVERRIDE)).apps
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 1401", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store, collection_status="prospective", payment_channel="unknown"
+    )
+    apps.get_model("ledger", "LeaseTransfer").objects.create(store=store, outgoing_lease=lease)
+
+
+@requires_postgresql
+def test_the_debt_override_migration_over_an_existing_row_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_DEBT_OVERRIDE)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_debt_override as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    after = [("draft", "None", "", "None", "None")]
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, OVERRIDE_ROWS) == after
+    _migrate_to(repo_root, url, *STATE_BEFORE_DEBT_OVERRIDE)
+    assert _rows(url, "SELECT count(*) FROM lease_transfers") == [("1",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, OVERRIDE_ROWS) == after
+
+    allow = (
+        "UPDATE lease_transfers SET debt_override_amount = 500, debt_override_at = now(), "
+        "debt_override_reason = %s"
+    )
+    # The reason is guarded by the trigger.
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute(allow, ("4111 1111 1111 1111",))
+    # An amount without a reason, or a reason without its moment, breaks the CHECK.
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute(allow, (" ",))
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute("UPDATE lease_transfers SET debt_override_reason = 'Agreed'")
+    with psycopg.connect(url) as scratch:
+        scratch.execute(allow, ("Agreed with the owner",))
+    # The setup lines stay guarded by the recreated trigger.
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute(
+            "UPDATE lease_transfers SET setup_lines = "
+            """'[{"price": "1.00", "fee_type": "4111 1111 1111 1111"}]'"""
+        )
+    # The reverse drops the columns plainly; the transfer stays, still guarded by 0037's
+    # trigger.
+    _migrate_to(repo_root, url, *STATE_BEFORE_DEBT_OVERRIDE)
+    assert _rows(url, "SELECT count(*) FROM lease_transfers") == [("1",)]
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute(
+            "UPDATE lease_transfers SET setup_lines = "
+            """'[{"price": "1.00", "fee_type": "4111 1111 1111 1111"}]'"""
+        )
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, OVERRIDE_ROWS) == after
 
 
 # --- Row 2 --------------------------------------------------------------------------

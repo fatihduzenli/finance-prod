@@ -1205,6 +1205,25 @@ class TransferConfirmForm(forms.Form):
     )
 
 
+class TransferDebtOverrideForm(forms.Form):
+    """Allow a lease-end balance to remain after a transfer (PLAN-012e D14, admin): a
+    written reason, nothing else."""
+
+    reason = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Required: why the balance may remain on the outgoing operator.",
+        error_messages={"required": "A reason is required: say why the balance may remain."},
+    )
+
+    def clean_reason(self) -> str:
+        reason = visible_text(self.cleaned_data["reason"])
+        if not reason:
+            raise forms.ValidationError(self.fields["reason"].error_messages["required"])
+        return reason
+
+
 # --- Documents (PLAN-010c D7) --------------------------------------------------------------
 
 DOCUMENT_NOTE_MAX_LENGTH = 2000

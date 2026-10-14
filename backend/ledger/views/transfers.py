@@ -10,6 +10,10 @@ there), the transfer's blockers, the statement and the settlement, then the inco
 lease and one confirm for both effects. A step whose earlier step is not done redirects
 to it; nothing past the blockers is offered while one is listed.
 
+A lease-end balance blocks the confirm (D14): the confirm page shows it, and an admin
+allows it to remain with a written reason (``ledger:transfers:override_debt``, POST
+only), which the confirm and confirmed pages then show as "Allowed by".
+
 Every change goes through :mod:`ledger.services.transfer`, which audits it; an operator
 created on the operator step goes through :func:`payments.operator_sync.create_operator`
 and queues its sync job as the operator form does. No view calls the payment provider.
@@ -21,11 +25,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
 from django.contrib import messages
 from django.db import IntegrityError
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
@@ -35,6 +40,7 @@ from accounts.views import forbidden
 from ledger.forms import (
     OperatorCreateForm,
     TransferConfirmForm,
+    TransferDebtOverrideForm,
     TransferIncomingForm,
     TransferOperatorForm,
 )
@@ -105,6 +111,7 @@ def _load(pk: str) -> LeaseTransfer:
             "incoming_operator",
             "incoming_lease",
             "draft",
+            "debt_override_by",
         ),
         pk=_key(pk),
     )
@@ -431,8 +438,43 @@ def confirm(request: HttpRequest, pk: str) -> HttpResponse:
             setup=service.setup_lines(transfer),
             deposit_type=service.deposit_type(),
             settlement_missing=figures.refund_due > 0 and not end_row.refund_method,
+            debt=figures.debt,
+            debt_amount=leases.format_amount(figures.debt),
+            debt_allowed=_debt_allowed(transfer, figures.debt),
+            override_form=TransferDebtOverrideForm(),
         ),
     )
+
+
+def _debt_allowed(transfer: LeaseTransfer, debt: Decimal) -> bool:
+    """Whether the balance on the page is within the admin's allowance (D14)."""
+    allowed = transfer.debt_override_amount
+    return transfer.debt_override_at is not None and allowed is not None and debt <= allowed
+
+
+@role_required
+def override_debt(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:transfers:override_debt`` (admin, POST only; D14): allow the lease-end
+    balance to remain on the outgoing operator with a written reason. Below admin every
+    method is refused with 403 first."""
+    refused = _admin(request)
+    if refused is not None:
+        return refused
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    transfer = _load(pk)
+    form = TransferDebtOverrideForm(request.POST)
+    if not form.is_valid():
+        # The form's own sentences, as messages: the confirm page holds its own form.
+        for error in form.errors.get("reason", []):
+            messages.error(request, str(error))
+        return redirect("ledger:transfers:confirm", pk=transfer.pk)
+    outcome = service.override_debt(transfer, form.cleaned_data["reason"], _actor(request))
+    if outcome.ok:
+        messages.success(request, outcome.message)
+    else:
+        messages.error(request, outcome.message)
+    return redirect("ledger:transfers:confirm", pk=transfer.pk)
 
 
 @role_required

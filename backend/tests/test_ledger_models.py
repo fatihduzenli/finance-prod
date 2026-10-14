@@ -690,6 +690,17 @@ def _confirmed_transfer(**fields: Any) -> ledger.LeaseTransfer:
     return new_lease_transfer(**{**values, **fields})
 
 
+def _debt_override_transfer(**fields: Any) -> ledger.LeaseTransfer:
+    """A transfer whose outgoing balance an admin allowed (PLAN-012e D14)."""
+    values: dict[str, Any] = {
+        "debt_override_amount": D("125.00"),
+        "debt_override_reason": "Owner agreed to carry it.",
+        "debt_override_by": make_user(),
+        "debt_override_at": datetime(2026, 11, 1, 12, tzinfo=UTC),
+    }
+    return new_lease_transfer(**{**values, **fields})
+
+
 def _second_store_transfer(*, confirmed_first: bool) -> Callable[[], ledger.LeaseTransfer]:
     """Save a transfer of a store (confirmed or a draft); return a second draft of it."""
 
@@ -1716,6 +1727,17 @@ LEDGER_CASES: list[ConstraintCase] = [
         _second_store_transfer(confirmed_first=True),
         _second_store_transfer(confirmed_first=False),
     ),
+    # PLAN-012e D14: an allowed balance has its amount, a reason and the moment; else none.
+    ConstraintCase(
+        "lease_transfers_debt_override_complete",
+        new_lease_transfer,
+        lambda: new_lease_transfer(debt_override_reason="Owner agreed to carry it."),
+    ),
+    ConstraintCase(
+        "lease_transfers_debt_override_complete",
+        _debt_override_transfer,
+        lambda: _debt_override_transfer(debt_override_reason=" "),
+    ),
     # legacy_records
     ConstraintCase(
         "legacy_records_row_unique",
@@ -1847,6 +1869,11 @@ LEDGER_CASES: list[ConstraintCase] = [
 
 # Rejections the table above does not show with a single mutation.
 EXTRA_REJECTIONS: list[ConstraintCase] = [
+    ConstraintCase(
+        "lease_transfers_debt_override_complete",
+        _debt_override_transfer,
+        lambda: _debt_override_transfer(debt_override_amount=None),
+    ),
     ConstraintCase(
         "leases_second_debit_day_valid",
         new_lease,

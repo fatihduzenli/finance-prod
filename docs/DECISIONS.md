@@ -698,8 +698,9 @@ accepted by the owner on 2026-10-07 and built in PLAN-012a (below).**
 ## ADR-0012 — Deposits at lease end; proration; installments count once
 
 **Date:** 2026-10-13
-**Status:** Proposed (owner's Step 12b rules, confirmed in writing 2026-10-13; the proration
-rounding rule awaits the owner's confirmation, see D1 of PLAN-012e)
+**Status:** Accepted (owner's Step 12b rules, confirmed in writing 2026-10-13; the owner's
+decisions of 2026-10-14: single rounding kept, `reportlab` accepted, debt after a transfer
+blocks unless an admin overrides with a reason, follow-up 12b-a approved)
 
 ### Decision
 
@@ -714,15 +715,18 @@ rounding rule awaits the owner's confirmation, see D1 of PLAN-012e)
    amount is revenue in its month, as ADR-0007 says. The final statement is stored as a PDF under
    the store's documents (kind `final_statement`) and e-mailed to the operator when mail is on.
 2. **Proration.** A lease charged mid-month pays for the days used: amount = monthly rent × days
-   used ÷ days in that calendar month, rounded once to the cent (the owner's example:
-   13–31 Oct, 19 of 31 days of $2,000.00 = $1,225.81); start and end days both count; "Prorate
-   first month" on the lease (default on) and "Prorate last month" in the wizard (default on).
-   **If the owner prefers the per-day rounding of the rule's wording ($64.52 × 19 = $1,225.88),
-   that replaces this line.**
+   used ÷ days in that calendar month, **rounded once, at the end, to the cent** (the daily rate
+   itself is never rounded; the owner's example: 13–31 Oct, 19 of 31 days of $2,000.00 =
+   $1,225.81); start and end days both count; "Prorate first month" on the lease (default on)
+   and "Prorate last month" in the wizard (default on). The rule's wording is this line
+   (owner, 2026-10-14).
 3. **Transfer.** The outgoing lease is ended through the same wizard (reason `transfer`); the
    incoming lease starts no earlier than the day after; the incoming operator's deposit and setup
    charges are a builder draft for review, so nothing reaches Stax before staff send it; no day
-   has two leases in effect on one store.
+   has two leases in effect on one store. **Debt after a transfer** (owner, 2026-10-14): when the
+   statement would leave a "Lease-end balance" on the outgoing operator, the transfer is blocked
+   until an admin allows it with a written reason; the override is audited, the charge stays on
+   the outgoing operator and sits on the attention list until paid.
 4. **Installments.** A plan splits an open charge into 2–12 charges of category `installment`
    (equal amounts, the rounding cent on the last), collected as the parent is; the parent is
    covered by the plan and counted once: billed as itself, collected through its installments;
@@ -733,6 +737,10 @@ rounding rule awaits the owner's confirmation, see D1 of PLAN-012e)
    until it completes or is cancelled (added 2026-10-14 from the QA gate).
 5. **One new dependency**, `reportlab` (BSD), to write the statement PDF; the alternative (the
    browser's print, no stored document) does not meet "stored under the store's documents".
+   Accepted by the owner 2026-10-14.
+6. **Follow-up 12b-a** (owner, 2026-10-14): splitting a charge that has a live Stax invoice or
+   schedule deletes the parent's Stax object without voiding the charge and recreates the
+   collection per installment; built right after the 12b push, before Step 12d.
 
 ### Consequences
 

@@ -15,6 +15,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -350,6 +351,7 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0035_lease_end_transfer",
         "ledger.migrations.0037_transfer_fields",
         "ledger.migrations.0038_installments",
+        "ledger.migrations.0039_transfer_debt_override",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",
@@ -578,19 +580,31 @@ def _accepted_samples(model: type[models.Model], field: models.Field[Any, Any]) 
             "+14045551234",
             "+447911123456",
         ]
-    # PLAN-012 D2: a delete reason is not blank, and only on a deleted entry (CHECK).
-    if column == "contact_entries.delete_reason":
+    # PLAN-012 D2: a delete reason is not blank, and only on a deleted entry (CHECK);
+    # PLAN-012e D14: a debt-override reason is not blank (CHECK).
+    if column in {"contact_entries.delete_reason", "lease_transfers.debt_override_reason"}:
         return [text for text in samples if re.search(r"\S", text)]
     return samples
 
 
 def _existing_row(model: type[models.Model], field: models.Field[Any, Any]) -> models.Model:
     """A saved row whose ``field`` may hold text: a contact entry's delete reason only
-    exists on a deleted entry (PLAN-012 D2)."""
-    if f"{model._meta.db_table}.{field.column}" == "contact_entries.delete_reason":
+    exists on a deleted entry (PLAN-012 D2); a transfer's debt-override reason only with
+    the override's amount and moment (PLAN-012e D14)."""
+    column = f"{model._meta.db_table}.{field.column}"
+    if column == "contact_entries.delete_reason":
         return saved(
             FACTORIES[model](
                 deleted_at=timezone.now(), deleted_by=make_user(), delete_reason="Wrong shop."
+            )
+        )
+    if column == "lease_transfers.debt_override_reason":
+        return saved(
+            FACTORIES[model](
+                debt_override_amount=Decimal("125.00"),
+                debt_override_reason="Owner agreed to carry it.",
+                debt_override_by=make_user(),
+                debt_override_at=timezone.now(),
             )
         )
     return saved(FACTORIES[model]())

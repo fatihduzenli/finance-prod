@@ -2623,8 +2623,9 @@ class LeaseTransfer(GuardedModel):
     The transfer wizard's state while a draft (one per store): the incoming operator and
     the incoming lease's terms (``incoming_*``), the deposit amount and the ticked setup
     items (``setup_lines``: ``[{"fee_type": <id>, "price": "<amount>"}]``, catalogue
-    order). Confirmed, it names the incoming lease and the draft it made. Written only by
-    :mod:`ledger.services.transfer`.
+    order). Confirmed, it names the incoming lease and the draft it made. A lease-end
+    balance left on the outgoing operator needs an admin's written reason
+    (``debt_override_*``, D14). Written only by :mod:`ledger.services.transfer`.
     """
 
     store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="transfers")
@@ -2656,6 +2657,14 @@ class LeaseTransfer(GuardedModel):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    #: D14: a lease-end balance an admin allowed to remain on the outgoing operator, with
+    #: the written reason, who and when; all four set or none.
+    debt_override_amount = MoneyField(null=True, blank=True)
+    debt_override_reason = free_text()
+    debt_override_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    debt_override_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2697,6 +2706,21 @@ class LeaseTransfer(GuardedModel):
                 fields=["store"],
                 condition=Q(status=LeaseTransferStatus.DRAFT),
                 name="lease_transfers_one_draft_per_store",
+            ),
+            # D14: an allowed balance has its amount, its reason and its moment; else none.
+            models.CheckConstraint(
+                condition=Q(
+                    debt_override_at__isnull=True,
+                    debt_override_amount__isnull=True,
+                    debt_override_by__isnull=True,
+                    debt_override_reason="",
+                )
+                | Q(
+                    debt_override_at__isnull=False,
+                    debt_override_amount__isnull=False,
+                    debt_override_reason__regex=_NOT_BLANK,
+                ),
+                name="lease_transfers_debt_override_complete",
             ),
         ]
 

@@ -3,7 +3,8 @@
 per charge), the incoming start date, the hand-over day and the one-lease-per-day
 invariant, the incoming lease and the move-in draft (nothing at the payment provider
 until it is sent), the inline operator and its sync job, the audit, the pages and the
-roles. The adversarial cases are the QA owner's.
+roles; a lease-end balance blocks unless an admin allows it with a written reason (D14).
+The adversarial cases are the QA owner's.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
+from django.utils import timezone
 
 from accounts import registry
 from accounts.roles import Role
@@ -41,7 +43,8 @@ from ledger.models import (
     RefundMethod,
     RentCharge,
 )
-from ledger.services import attention, invoice_builder, lease_end, transfer
+from ledger.services import attention, invoice_builder, lease_end, statements, transfer
+from ledger.services.lease_end import DeductionInput
 from payments.models import ExternalRef, Job, JobKind
 from tests.test_lease_end import (
     ENDED,
@@ -661,3 +664,293 @@ def test_cancel_from_the_page_returns_to_the_store(admin: Any, pinned: None) -> 
     response = client.post(f"/transfers/{row.pk}/cancel/")
     assert response["Location"] == f"/stores/{row.store_id}/"
     assert not LeaseTransfer.objects.exists() and not LeaseEnd.objects.exists()
+
+
+# --- D14: a lease-end balance after a transfer ---------------------------------------------
+
+#: A card number the guard refuses (the guard tests' synthetic one).
+CARD = "4111 1111 1111 1111"
+REASON = "Agreed with the owner: paid by the end of March."
+
+
+def deduct(row: LeaseTransfer, amount: str, user: User | None = None) -> None:
+    """Replace the transfer's deductions with one damage line of ``amount``."""
+    end = fresh(row).lease_end
+    outcome = lease_end.set_deductions(
+        end, [DeductionInput("damage", "Broken door", D(amount))], actor=user, today=TODAY
+    )
+    assert outcome.ok, outcome.message
+
+
+def owing(user: User) -> LeaseTransfer:
+    """A transfer ready to confirm whose statement leaves $500.00 owed: a $2,500.00
+    deduction against the $2,000.00 deposit held."""
+    row = ready(user)
+    deduct(row, "2500.00", user)
+    assert transfer.debt_of(fresh(row), TODAY) == D("500.00")
+    return LeaseTransfer.objects.get(pk=row.pk)
+
+
+def allow(row: LeaseTransfer, user: User | None, reason: str = REASON) -> transfer.Outcome:
+    return transfer.override_debt(fresh(row), reason, user, today=TODAY)
+
+
+def overridden(row: LeaseTransfer) -> tuple[Any, ...]:
+    found = fresh(row)
+    return (
+        found.debt_override_amount,
+        found.debt_override_reason,
+        found.debt_override_by_id,
+        found.debt_override_at,
+    )
+
+
+NOTHING_ALLOWED = (None, "", None, None)
+
+
+def balance_charges() -> list[OneOffCharge]:
+    return list(OneOffCharge.objects.filter(description=lease_end.DEBT_DESCRIPTION))
+
+
+def test_debt_of_is_zero_before_the_end_date_and_without_deductions(admin: Any) -> None:
+    _, user = admin
+    lease = a_clean_lease()
+    row = transfer.start(lease.store, user, today=TODAY)
+    assert transfer.debt_of(row, TODAY) == D(0)
+    assert transfer.debt_of(ready(user), TODAY) == D(0)
+
+
+def test_a_lease_end_balance_blocks_the_confirm_and_writes_nothing(admin: Any) -> None:
+    _, user = admin
+    row = owing(user)
+    before = snapshot()
+    audits = AuditLog.objects.count()
+    outcome = confirm(row, user)
+    assert not outcome.ok
+    assert outcome.message == transfer.DEBT_BLOCKS.format(amount="$500.00")
+    assert snapshot() == before and AuditLog.objects.count() == audits
+    assert fresh(row.outgoing_lease).ended_on is None
+    assert fresh(row).status == LeaseTransferStatus.DRAFT
+    assert fresh(row.lease_end).status == LeaseEndStatus.DRAFT
+    assert not balance_charges()
+
+
+def test_an_admin_allows_the_balance_and_the_charge_stays_on_the_outgoing_operator(
+    admin: Any,
+) -> None:
+    _, user = admin
+    row = owing(user)
+    outcome = allow(row, user, f"  {REASON}  ")
+    assert outcome.ok and outcome.message == transfer.DEBT_ALLOWED.format(amount="$500.00")
+    amount, reason, by, at = overridden(row)
+    assert (amount, reason, by) == (D("500.00"), REASON, user.pk) and at is not None
+    entry = AuditLog.objects.get(action="lease_transfer.debt_overridden")
+    assert (entry.entity_type, entry.entity_id, entry.actor_id) == (
+        "lease_transfer",
+        str(row.pk),
+        user.pk,
+    )
+    assert entry.before is not None and "debt_override_amount" not in entry.before
+    assert entry.after is not None
+    assert (entry.after["debt_override_amount"], entry.after["debt_override_reason"]) == (
+        "500.00",
+        REASON,
+    )
+    assert entry.after["debt_override_by"] == user.pk
+
+    confirmed = confirm(row, user)
+    assert confirmed.ok, confirmed.message
+    end = fresh(row.lease_end)
+    assert end.status == LeaseEndStatus.CONFIRMED
+    [charge] = balance_charges()
+    assert end.debt_charge_id == charge.pk
+    assert (charge.operator_id, charge.lease_id, charge.price, charge.status) == (
+        row.outgoing_lease.operator_id,
+        row.outgoing_lease_id,
+        D("500.00"),
+        OneOffChargeStatus.OWED,
+    )
+    done = AuditLog.objects.get(action="lease_transfer.confirmed")
+    assert done.after is not None
+    assert (done.after["debt"], done.after["debt_override_amount"]) == ("500.00", "500.00")
+    assert done.after["debt_override_by"] == user.pk and done.after["debt_override_at"]
+
+
+def test_a_clean_confirm_audits_a_zero_debt_and_no_allowance(admin: Any) -> None:
+    _, user = admin
+    row = ready(user)
+    assert confirm(row, user).ok
+    done = AuditLog.objects.get(action="lease_transfer.confirmed")
+    assert done.after is not None and done.after["debt"] == "0.00"
+    assert "debt_override_amount" not in done.after
+    assert not balance_charges()
+
+
+@pytest.mark.parametrize("reason", ["", "   ", "\u200b\u200b"])
+def test_the_allowance_needs_a_reason(admin: Any, reason: str) -> None:
+    _, user = admin
+    row = owing(user)
+    outcome = allow(row, user, reason)
+    assert not outcome.ok and outcome.message == transfer.REASON_REQUIRED
+    assert outcome.field == "reason"
+    assert overridden(row) == NOTHING_ALLOWED
+    assert not AuditLog.objects.filter(action="lease_transfer.debt_overridden").exists()
+
+
+@pytest.mark.parametrize("role", [Role.BILLING, Role.VIEWER])
+def test_only_an_admin_may_allow_the_balance(role: Role) -> None:
+    client, user = client_for(role)
+    _, admin_user = client_for(Role.ADMIN)
+    row = owing(admin_user)
+    outcome = allow(row, user)
+    assert not outcome.ok and outcome.message == transfer.OVERRIDE_ADMIN
+    assert not allow(row, None).ok
+    response = client.post(f"/transfers/{row.pk}/allow-balance/", {"reason": REASON})
+    assert response.status_code == 403
+    assert overridden(row) == NOTHING_ALLOWED
+    assert not AuditLog.objects.filter(action="lease_transfer.debt_overridden").exists()
+    assert not confirm(row, admin_user).ok
+
+
+def test_a_card_number_in_the_reason_is_refused_and_reaches_no_row(
+    admin: Any, pinned: None
+) -> None:
+    client, user = admin
+    row = owing(user)
+    outcome = allow(row, user, f"Paid with {CARD}")
+    assert not outcome.ok and outcome.message == transfer.REASON_PAYMENT_DATA
+    client.post(f"/transfers/{row.pk}/allow-balance/", {"reason": f"Card {CARD}"})
+    page = client.get(f"/transfers/{row.pk}/confirm/").content.decode()
+    assert transfer.REASON_PAYMENT_DATA in page and CARD not in page
+    assert overridden(row) == NOTHING_ALLOWED
+    assert not AuditLog.objects.filter(action="lease_transfer.debt_overridden").exists()
+    assert not any(
+        "4111" in str(entry.after) or "4111" in str(entry.before)
+        for entry in AuditLog.objects.all()
+    )
+
+
+def test_a_balance_grown_after_the_allowance_must_be_allowed_again(admin: Any) -> None:
+    _, user = admin
+    row = owing(user)
+    assert allow(row, user).ok
+    deduct(row, "3000.00", user)
+    before = snapshot()
+    outcome = confirm(row, user)
+    assert not outcome.ok
+    assert outcome.message == transfer.DEBT_GREW.format(now="$1,000.00", allowed="$500.00")
+    assert snapshot() == before
+    again = allow(row, user, "Agreed again for the larger amount.")
+    assert again.ok and again.message == transfer.DEBT_ALLOWED.format(amount="$1,000.00")
+    entries = AuditLog.objects.filter(action="lease_transfer.debt_overridden").order_by("id")
+    assert entries.count() == 2
+    second = entries.last()
+    assert second is not None and second.before is not None
+    assert second.before["debt_override_amount"] == "500.00"
+    assert second.before["debt_override_reason"] == REASON
+    assert confirm(row, user).ok
+    [charge] = balance_charges()
+    assert charge.price == D("1000.00")
+
+
+def test_a_balance_lowered_after_the_allowance_confirms_with_the_lower_amount(
+    admin: Any,
+) -> None:
+    _, user = admin
+    row = owing(user)
+    assert allow(row, user).ok
+    deduct(row, "2200.00", user)
+    assert confirm(row, user).ok
+    [charge] = balance_charges()
+    assert charge.price == D("200.00")
+
+
+def test_nothing_to_allow_when_the_statement_leaves_no_balance(admin: Any) -> None:
+    _, user = admin
+    row = ready(user)
+    outcome = allow(row, user)
+    assert not outcome.ok and outcome.message == transfer.NOTHING_TO_ALLOW
+    assert overridden(row) == NOTHING_ALLOWED
+
+
+def test_a_confirmed_transfer_cannot_be_allowed_a_balance(admin: Any) -> None:
+    _, user = admin
+    row = ready(user)
+    assert confirm(row, user).ok
+    outcome = allow(row, user)
+    assert not outcome.ok and outcome.message == transfer.NOT_DRAFT
+    assert overridden(row) == NOTHING_ALLOWED
+
+
+def test_cancel_removes_a_transfer_with_an_allowance(admin: Any) -> None:
+    _, user = admin
+    row = owing(user)
+    assert allow(row, user).ok
+    assert transfer.cancel(fresh(row), user).ok
+    assert not LeaseTransfer.objects.exists() and not LeaseEnd.objects.exists()
+
+
+def test_the_allow_balance_route_is_admin_only_and_post_only(admin: Any) -> None:
+    rule = registry.rule_for("ledger:transfers:override_debt")
+    assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
+    client, user = admin
+    row = owing(user)
+    assert client.get(f"/transfers/{row.pk}/allow-balance/").status_code == 405
+
+
+def test_the_confirm_page_shows_the_balance_the_form_and_then_the_allowance(
+    admin: Any, pinned: None
+) -> None:
+    client, user = admin
+    row = owing(user)
+    base = f"/transfers/{row.pk}"
+    page = client.get(f"{base}/confirm/").content.decode()
+    assert 'id="transfer-debt"' in page and "would still owe $500.00" in page
+    assert 'id="debt-override-form"' in page and 'name="reason"' in page
+    assert f'action="{base}/allow-balance/"' in page
+    assert "Allow the balance to remain" in page
+    assert 'id="confirm-transfer"' not in page and 'id="debt-allowed"' not in page
+    # A posted confirm is still refused by the service.
+    client.post(f"{base}/confirm/", {"confirmed": "on"})
+    assert fresh(row).status == LeaseTransferStatus.DRAFT
+    # An empty reason comes back with its sentence.
+    response = client.post(f"{base}/allow-balance/", {"reason": "  "})
+    assert response["Location"] == f"{base}/confirm/"
+    assert (
+        "A reason is required: say why the balance may remain."
+        in client.get(f"{base}/confirm/").content.decode()
+    )
+    assert overridden(row) == NOTHING_ALLOWED
+    response = client.post(f"{base}/allow-balance/", {"reason": REASON})
+    assert response["Location"] == f"{base}/confirm/"
+    at = fresh(row).debt_override_at
+    day = timezone.localtime(at).date().isoformat()
+    allowed = f"Allowed by {user.get_username()} on {day}: "
+    page = client.get(f"{base}/confirm/").content.decode()
+    assert 'id="debt-allowed"' in page and allowed in page and REASON in page
+    assert 'id="confirm-transfer"' in page and 'id="debt-override-form"' not in page
+    response = client.post(f"{base}/confirm/", {"confirmed": "on"})
+    assert response["Location"] == f"{base}/confirm/"
+    assert fresh(row).status == LeaseTransferStatus.CONFIRMED
+    done = client.get(f"{base}/confirm/").content.decode()
+    assert 'id="transfer-done"' in done and 'id="debt-allowed"' in done and allowed in done
+
+
+def test_a_grown_balance_shows_the_form_again(admin: Any, pinned: None) -> None:
+    client, user = admin
+    row = owing(user)
+    assert allow(row, user).ok
+    deduct(row, "3000.00", user)
+    page = client.get(f"/transfers/{row.pk}/confirm/").content.decode()
+    assert "would still owe $1,000.00" in page and 'id="debt-grew"' in page
+    assert 'id="debt-override-form"' in page and 'id="confirm-transfer"' not in page
+
+
+def test_the_reason_stays_out_of_the_statement(admin: Any) -> None:
+    _, user = admin
+    row = owing(user)
+    assert allow(row, user).ok
+    assert confirm(row, user).ok
+    end = fresh(row.lease_end)
+    assert REASON not in str(end.statement_json)
+    assert REASON not in str(lease_end.merge_values(statements.final(end, today=TODAY)))

@@ -51,8 +51,9 @@ schedule create/update/delete, invoice create/send/delete, mark paid), cards, su
   days_in_month`, rounded to the cent once (half up).** The owner's rule text says "daily rate
   rounded to the cent, × days", which for the owner's own example gives 64.52 × 19 = **$1,225.88**;
   the owner's example answer is **$1,225.81**, which is the single rounding. The plan follows the
-  example (fairer; the sheet's practice as the example shows) and **asks the owner to confirm at
-  the checkpoint**; switching to the per-day rounding is one line and one test. The text is
+  example (fairer; the sheet's practice as the example shows). **Confirmed by the owner
+  2026-10-14: the single rounding at the end stands; the rule's wording is updated to match
+  (ADR-0012 §2).** The text is
   "13–31 Oct, 19 of 31 days of $2,000.00 = $1,225.81" (en dash, the month's short name, thousands
   separators as the owner wrote). Start and end days both count. A lease starting on the 1st or
   ending on the last day is a full month (no text).
@@ -234,6 +235,26 @@ schedule create/update/delete, invoice create/send/delete, mark paid), cards, su
   a withheld amount becomes revenue in its month as today (ADR-0007). ADR-0012 (Fable) records
   the lease-end handling.
 
+### 3.8 Debt after a transfer (owner's decision 3, 2026-10-14)
+
+- **D14 — block by default, admin override with a reason.** When the outgoing lease's statement
+  would charge a "Lease-end balance" (deductions above the deposit: `statements.final(...).debt`
+  > 0), the transfer's confirm is refused ("The outgoing operator would still owe $X after the
+  deposit. Collect it or change the deductions first; an admin may allow it with a written
+  reason.") until an admin records an **override**: `transfer.override_debt(transfer, reason,
+  actor)` (admin only; reason required and guarded; refused when the statement leaves no debt or
+  the transfer is confirmed) sets `lease_transfers.debt_override_amount / _reason / _by / _at`
+  (migration `0039_transfer_debt_override`, CHECK all-or-nothing, PostgreSQL guard trigger on the
+  reason) and audits `lease_transfer.debt_overridden`. Confirm re-checks: a debt above the
+  allowed amount refuses again ("The balance grew since it was allowed"). Route
+  `ledger:transfers:override_debt` (POST, admin) from the confirm page, which shows the amount,
+  the form (admin) and, once allowed, "Allowed by <user> on <date>: <reason>"; the confirmed page
+  shows the same line; the reason never reaches the operator's PDF or e-mail. The "Lease-end
+  balance" charge stays on the outgoing operator and the **attention list** gains kind
+  `lease_end_balance` (HIGH): one item per confirmed lease end whose debt charge is open, marked
+  "(transfer, allowed by <name>)" when it came through an override; cleared when the charge is
+  paid, waived or voided. Plain lease ends' balances are listed the same way, without the marker.
+
 ## 4. Interface contract
 
 - `proration.prorated(rent, month, first_day, last_day) -> Prorated`; `Lease.prorate_first_month`;
@@ -305,13 +326,22 @@ installment → NSF reschedule works on it, fee by the rule, plan `attention`, t
 cleared on resolution; reschedule shifts only unpaid ones and updates Stax; cancel voids the
 rest, deletes at Stax through the worker, returns the remainder to the parent; the P&L and
 ledger totals equal those of the unsplit charge paid the same amounts; the grid shows progress.
+**Transfer debt (D14):** confirm refused with the sentence and nothing written while the
+statement leaves debt; override by an admin with a reason → fields, audit, confirm passes, the
+charge on the outgoing operator; reason required; billing refused (service and route); a card
+number refused; debt grown after the override refused; zero debt refused; a confirmed transfer
+refused; the confirm and confirmed pages show the override; the attention item for a transfer
+(marked) and a plain end (unmarked), gone when paid, waived or voided; round trip of 0039.
 **Adversarial (Fable):** the wizard cannot end a lease of another store by a forged id; the
 settlement cannot refund more than the deposit held; a deduction with a card number is refused;
 the PDF never contains an account number (the guard runs on our own bytes); the e-mail never
 goes to a real address outside production; a transfer cannot create the incoming lease without
 ending the outgoing one (atomicity under a forced failure); an installment plan cannot be built
 on a charge of another operator's lease; two concurrent confirms leave one plan; totals never
-double count under random plans (property test); a viewer cannot start any wizard.
+double count under random plans (property test); a viewer cannot start any wizard; (D14) an
+override cannot be forged onto another transfer or by a forged role, never bypasses another
+blocker, writes nothing when the statement has no debt, and its reason never reaches the
+operator's statement PDF or e-mail.
 
 ## 7. Risk register
 

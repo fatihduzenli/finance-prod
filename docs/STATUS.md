@@ -1068,3 +1068,17 @@ and installment paragraphs), DATA_OWNERSHIP (`installment_plans`), README rows, 
 **Checkpoint report to the owner before the push** with the decisions: proration rounding (D1),
 the reportlab/pillow dependency, a lease-end balance left after a transfer, and the split of a
 charge that has a live Stax invoice or schedule (follow-up proposal).
+
+## Update, 2026-10-14, owner's decisions on 12b and D14 built (not pushed)
+
+The owner decided: (1) the single rounding at the end stands ($1,225.81), the rule's wording
+now says so (ADR-0012 §2); (2) `reportlab` accepted; (3) debt after a transfer blocks by
+default, an admin may allow it with a written reason, audited, the "Lease-end balance" charge
+staying on the outgoing operator and on the attention list until paid; (4) follow-up **12b-a**
+approved: splitting a charge with a live Stax invoice or schedule deletes the parent's Stax
+object without voiding the charge and recreates the collection per installment, to be built
+right after this push and before Step 12d. Decision 3 is built as PLAN-012e D14 (migration
+0039, `transfer.override_debt`, route `ledger:transfers:override_debt`, attention kind
+`lease_end_balance`); Fable's six adversarial cases green; the whole tree re-gated: sqlite
+5,011 passed; PostgreSQL 5,626 passed (21:37); e2e 7; secret scans clean. Committed on top
+of `b3ad928`; the push waits for the owner's word on the updated Publish Request.

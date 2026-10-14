@@ -30,6 +30,15 @@ with its lease end (:func:`cancel`). Its steps:
    (:func:`ledger.services.invoice_builder.create_draft`): nothing reaches the payment
    provider, and no charge exists, until staff send the draft.
 
+**A lease-end balance blocks by default** (D14, the owner's decision 3 of 2026-10-14).
+When the statement would leave the outgoing operator owing money after the deposit
+(:func:`debt_of`, the ``debt`` of :func:`ledger.services.statements.final`), the confirm
+is refused unless an admin allowed it with a written reason (:func:`override_debt`: the
+amount, the reason, who and when are kept on the transfer and audited). The balance may
+not have grown since it was allowed. Confirmed, the "Lease-end balance" charge stays on
+the outgoing operator and the attention list shows it until it is paid
+(:mod:`ledger.services.attention`, ``lease_end_balance``).
+
 **Invariant:** no day has two leases of the store in effect. The incoming lease starts
 after the end date, and no other lease of the store may be active or paused on or after
 its start; a refusal leaves everything as it was.
@@ -48,12 +57,15 @@ from decimal import Decimal
 from typing import Any
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 
+from accounts.roles import Role, meets, role_of
 from ledger.models import (
+    ZERO,
     AuditLog,
     CollectionStatus,
     FeeType,
@@ -77,6 +89,7 @@ from ledger.services import (
     rent_run,
     statements,
 )
+from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 
 ENTITY = "lease_transfer"
 #: Most operators the search lists.
@@ -132,6 +145,22 @@ CONFIRMED = (
 )
 CONFIRMED_NO_DRAFT = "The store is transferred. The outgoing statement is being prepared."
 CANCELLED = "The transfer was cancelled. Nothing was changed."
+DEBT_BLOCKS = (
+    "The outgoing operator would still owe {amount} after the deposit. Collect it or change "
+    "the deductions first; an admin may allow it with a written reason. Nothing was changed."
+)
+DEBT_GREW = (
+    "The balance grew since it was allowed: {now} now, {allowed} allowed. Allow it again. "
+    "Nothing was changed."
+)
+OVERRIDE_ADMIN = "Only an admin can allow a lease-end balance to remain."
+REASON_REQUIRED = "A reason is required: say why the balance may remain."
+REASON_PAYMENT_DATA = PAYMENT_DATA_MESSAGE
+NOTHING_TO_ALLOW = "The statement leaves no balance; nothing to allow."
+DEBT_ALLOWED = (
+    "Balance of {amount} allowed to remain on the outgoing operator; the charge stays on the "
+    "attention list until paid."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +235,18 @@ def _state(transfer: LeaseTransfer) -> dict[str, Any]:
             str(transfer.deposit_amount) if transfer.deposit_amount is not None else None
         ),
         "setup_lines": list(transfer.setup_lines or []),
+    }
+
+
+def _override_state(transfer: LeaseTransfer) -> dict[str, Any]:
+    """The allowed lease-end balance (D14), when one is set."""
+    if transfer.debt_override_at is None:
+        return {}
+    amount = transfer.debt_override_amount
+    return {
+        "debt_override_amount": str(amount) if amount is not None else None,
+        "debt_override_by": transfer.debt_override_by_id,
+        "debt_override_at": transfer.debt_override_at.isoformat(),
     }
 
 
@@ -346,6 +387,16 @@ def blockers(transfer: LeaseTransfer, today: date | None = None) -> list[lease_e
     """The lease-end blockers of the outgoing lease and its open balances (D6(b))."""
     day = today or timezone.localdate()
     return lease_end.blockers(transfer.outgoing_lease, day) + balance_blockers(transfer, day)
+
+
+def debt_of(transfer: LeaseTransfer, today: date | None = None) -> Decimal:
+    """The lease-end balance the statement would charge the outgoing operator now (the
+    ``debt`` of :func:`ledger.services.statements.final`, as the confirm charges it);
+    zero while the end's terms are not set (D14)."""
+    end = transfer.lease_end
+    if end is None or not lease_end.terms_set(end):
+        return ZERO
+    return statements.final(end, today=today or timezone.localdate()).debt
 
 
 def incoming_lines(transfer: LeaseTransfer) -> list[invoice_builder.LineInput]:
@@ -568,6 +619,58 @@ def cancel(transfer: LeaseTransfer, actor: User | None) -> Outcome:
     return Outcome(True, CANCELLED)
 
 
+def override_debt(
+    transfer: LeaseTransfer, reason: str, actor: User | None, today: date | None = None
+) -> Outcome:
+    """Allow the current lease-end balance to remain on the outgoing operator (admin, D14):
+    the amount, the written reason, who and when are kept on the transfer and audited.
+    Allowing again replaces the earlier allowance."""
+    if actor is None or not meets(role_of(actor), Role.ADMIN):
+        return _refused(OVERRIDE_ADMIN)
+    day = today or timezone.localdate()
+    try:
+        with transaction.atomic():
+            row = _locked_draft(transfer.pk)
+            text = visible_text(reason or "")
+            if not text:
+                raise _Abort(REASON_REQUIRED, "reason")
+            try:
+                validate_no_payment_data(text)
+            except ValidationError:
+                raise _Abort(REASON_PAYMENT_DATA, "reason") from None
+            debt = debt_of(row, day)
+            if debt <= 0:
+                raise _Abort(NOTHING_TO_ALLOW)
+            before = {**_state(row), **_override_state(row)}
+            if row.debt_override_at is not None:
+                before["debt_override_reason"] = row.debt_override_reason
+            row.debt_override_amount = debt
+            row.debt_override_reason = text
+            row.debt_override_by = actor
+            row.debt_override_at = timezone.now()
+            row.save(
+                update_fields=[
+                    "debt_override_amount",
+                    "debt_override_reason",
+                    "debt_override_by",
+                    "debt_override_at",
+                    "updated_at",
+                ]
+            )
+            _audit(
+                actor,
+                "lease_transfer.debt_overridden",
+                row.pk,
+                before,
+                {**_state(row), **_override_state(row), "debt_override_reason": text},
+            )
+    except _Abort as abort:
+        return _refused(abort.message, abort.field)
+    except LeaseTransfer.DoesNotExist:
+        return _refused(GONE)
+    return Outcome(True, DEBT_ALLOWED.format(amount=leases.format_amount(debt)), transfer=row)
+
+
 # --- Confirm -------------------------------------------------------------------------------
 
 
@@ -638,6 +741,16 @@ def confirm(
             found = blockers(row, day)
             if found:
                 raise _Abort(BLOCKED.format(count=len(found)))
+            debt = debt_of(row, day)
+            allowed = row.debt_override_amount
+            if debt > 0 and (row.debt_override_at is None or allowed is None):
+                raise _Abort(DEBT_BLOCKS.format(amount=leases.format_amount(debt)))
+            if allowed is not None and debt > allowed:
+                raise _Abort(
+                    DEBT_GREW.format(
+                        now=leases.format_amount(debt), allowed=leases.format_amount(allowed)
+                    )
+                )
             if _other_lease(row.store, row.outgoing_lease, start):
                 raise _Abort(OTHER_LEASE.format(start=start.isoformat()))
             if row.deposit_amount and deposit_type() is None:
@@ -678,6 +791,8 @@ def confirm(
                     "ended_on": ended.ended_on.isoformat() if ended.ended_on else None,
                     "incoming_lease": str(incoming.pk),
                     "draft": str(draft.pk) if draft is not None else None,
+                    "debt": str(debt),
+                    **_override_state(row),
                 },
             )
     except _Abort as abort:

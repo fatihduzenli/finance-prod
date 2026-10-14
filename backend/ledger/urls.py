@@ -128,6 +128,7 @@ transfer_patterns = (
         path("<str:pk>/incoming/", transfers.incoming, name="incoming"),
         path("<str:pk>/confirm/", transfers.confirm, name="confirm"),
         path("<str:pk>/cancel/", transfers.cancel, name="cancel"),
+        path("<str:pk>/allow-balance/", transfers.override_debt, name="override_debt"),
     ],
     "transfers",
 )

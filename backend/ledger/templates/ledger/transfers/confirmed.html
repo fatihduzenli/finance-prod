@@ -9,4 +9,5 @@
     <li><a href="{% url 'ledger:leases:detail' pk=transfer.incoming_lease.pk %}" id="incoming-lease">The incoming lease</a></li>
     {% if transfer.draft %}<li><a href="{% url 'ledger:invoices:draft' pk=transfer.draft.pk %}" id="move-in-draft">Move-in invoice draft</a>: review it and send it; nothing reaches the payment provider until then.</li>{% endif %}
   </ul>
+  {% if transfer.debt_override_at %}{% include "ledger/transfers/_debt_allowed.html" %}{% endif %}
 {% endblock %}

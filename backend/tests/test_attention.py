@@ -1,15 +1,19 @@
 """The attention list (docs/qa/PLAN-011b D6): every kind appears with its link, the
 returned-debit text verbatim, the boundaries of each window, the operator's own items as
-banners, the dashboard shows the list above the figures, and the reads are bounded."""
+banners, the dashboard shows the list above the figures, and the reads are bounded; a
+lease-end balance stays listed until it is paid (PLAN-012e D14)."""
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
+from django.utils.html import escape
 
 from accounts.roles import Role
 from ledger.models import (
@@ -20,6 +24,8 @@ from ledger.models import (
     InstallmentPlan,
     InsurancePremium,
     Lease,
+    LeaseEnd,
+    OneOffCharge,
     Operator,
     Payment,
     PaymentKind,
@@ -43,6 +49,8 @@ from payments.models import (
     WebhookEvent,
     WebhookOutcome,
 )
+from tests import test_lease_end as le
+from tests import test_transfer as tt
 from tests.receivables_helpers import (
     a_lease,
     a_one_off_charge,
@@ -52,6 +60,7 @@ from tests.receivables_helpers import (
     an_operator,
 )
 from tests.test_operator_views import client_for
+from tests.test_setup_charges import pay
 
 pytestmark = pytest.mark.django_db
 
@@ -375,6 +384,21 @@ def build(n: int) -> None:
         a_rent_charge(lease, date(2026, 8, 1), RentChargeStatus.UNPAID)
         returned_payment(lease)
         returned_installment(lease)
+        LeaseEnd.objects.create(
+            lease=lease,
+            ended_on=TODAY - timedelta(days=1),
+            reason="moved_out",
+            status="confirmed",
+            confirmed_at=NOW,
+            debt_charge=a_one_off_charge(
+                operator,
+                "300.00",
+                TODAY + timedelta(days=14),
+                lease=lease,
+                category="other",
+                description="Lease-end balance",
+            ),
+        )
         an_insurance_charge(lease, 2025, date(2025, 10, 20), None)
         CollectionSchedule.objects.create(
             lease=lease, kind=ScheduleKind.RENT, seq=1, amount=D("3500.00"), needs_review=True
@@ -488,3 +512,111 @@ def test_the_operator_page_shows_its_own_items_as_banners(today: date) -> None:
     assert 'class="attention attention-banners"' in page
     assert "Returned debit not rescheduled: Mine" in page
     assert "Theirs" not in page
+
+
+# --- PLAN-012e D14: lease-end balances ----------------------------------------------------
+
+
+def balances(operator: uuid.UUID | None = None) -> list[attention.Item]:
+    found = attention.attention(le.TODAY, operator=operator, limit=None)
+    return [item for item in found.items if item.kind == attention.LEASE_END_BALANCE]
+
+
+def a_plain_balance() -> LeaseEnd:
+    """A lease ended (not transferred) with $300.00 of deductions above the deposit."""
+    lease = le.a_store_lease()
+    le.october(lease, paid="1225.81")
+    le.deposit(lease, "500.00")
+    end = le.draft(lease)
+    assert le.deductions(end, ("damage", "Broken door", "800.00")).ok
+    assert le.confirm(end).ok
+    return LeaseEnd.objects.get(pk=end.pk)
+
+
+def expected(end: LeaseEnd, amount: str, marker: str = "") -> str:
+    lease = end.lease
+    assert lease.operator is not None
+    return (
+        f"Lease-end balance: {lease.operator.display_name} on store "
+        f"{lease.store.external_label}, {amount} open since {le.ENDED.isoformat()}{marker}"
+    )
+
+
+def test_a_transfer_balance_allowed_by_an_admin_is_listed_with_its_marker() -> None:
+    _, user = client_for(Role.ADMIN)
+    row = tt.owing(user)
+    assert tt.allow(row, user).ok
+    assert tt.confirm(row, user).ok
+    end = le.fresh(row.lease_end)
+    charge = end.debt_charge
+    assert charge is not None
+    [item] = balances()
+    marker = f" (transfer, allowed by {user.get_username()})"
+    assert (item.text, item.url, item.since, item.severity, item.operator_id) == (
+        expected(end, "$500.00", marker),
+        reverse("ledger:one_off_charges:detail", kwargs={"pk": charge.pk}),
+        le.ENDED,
+        attention.HIGH,
+        row.outgoing_lease.operator_id,
+    )
+    # The outgoing operator's banners carry it; the incoming operator's do not.
+    assert [found.text for found in balances(row.outgoing_lease.operator_id)] == [item.text]
+    assert not balances(le.fresh(row).incoming_operator_id)
+
+
+def test_a_plain_lease_end_balance_is_listed_without_the_marker() -> None:
+    end = a_plain_balance()
+    [item] = balances()
+    assert item.text == expected(end, "$300.00")
+    assert "(transfer" not in item.text
+
+
+def test_the_balance_shrinks_with_a_payment_and_goes_once_paid() -> None:
+    end = a_plain_balance()
+    charge = end.debt_charge
+    assert charge is not None
+    assert pay(charge, "100.00").ok
+    [item] = balances()
+    assert item.text == expected(end, "$200.00")
+    assert pay(OneOffCharge.objects.get(pk=charge.pk), "200.00").ok
+    assert OneOffCharge.objects.get(pk=charge.pk).status == "paid"
+    assert not balances()
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"status": "waived", "waived_at": NOW, "waive_note": "Forgiven."},
+        {"status": "voided", "voided_at": NOW, "void_note": "Entered in error."},
+    ],
+)
+def test_a_waived_or_voided_balance_is_not_listed(fields: dict[str, object]) -> None:
+    end = a_plain_balance()
+    assert balances()
+    assert end.debt_charge_id is not None
+    OneOffCharge.objects.filter(pk=end.debt_charge_id).update(**fields)
+    assert not balances()
+
+
+def test_a_draft_lease_end_or_one_without_a_balance_is_not_listed() -> None:
+    lease = le.a_store_lease()
+    le.october(lease, paid="1225.81")
+    le.deposit(lease, "500.00")
+    end = le.draft(lease)
+    assert le.deductions(end, ("damage", "Broken door", "800.00")).ok
+    assert not balances()
+    assert le.deductions(end, ("damage", "Broken door", "400.00")).ok
+    assert le.settle(le.fresh(end)).ok
+    assert le.confirm(end).ok
+    assert LeaseEnd.objects.get(pk=end.pk).debt_charge is None
+    assert not balances()
+
+
+def test_a_viewer_sees_the_balance_on_the_dashboard(monkeypatch: pytest.MonkeyPatch) -> None:
+    end = a_plain_balance()
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: le.TODAY)
+    client, _ = client_for(Role.VIEWER)
+    page = client.get("/").content.decode()
+    assert f'data-kind="{attention.LEASE_END_BALANCE}"' in page
+    assert escape(expected(end, "$300.00")) in page
+    assert f'href="/one-off-charges/{end.debt_charge_id}/"' in page

@@ -577,7 +577,11 @@ entered (start date no earlier than the day after the end, rent, deposit, setup 
 the catalogue), and confirm ends the outgoing lease, creates the incoming one and leaves the
 deposit and setup charges as one invoice-builder draft ("Move-in charges for store <label>")
 for staff to review and send. Nothing reaches Stax until that draft is sent. No store ever has
-two leases in effect on one day.
+two leases in effect on one day. **If the statement would leave a balance** on the outgoing
+operator (deductions above the deposit), the transfer is blocked: collect it or change the
+deductions, or an admin writes a reason on the confirm page ("Allow the balance to remain"); the
+override is audited, the "Lease-end balance" charge stays on the outgoing operator and shows on
+the attention list ("Lease-end balance: …, transfer, allowed by …") until it is paid.
 
 **Installment plans** (billing). On a rent charge page or a one-off charge page, **Split into
 installments** divides what is still owed into 2 to 12 equal installments (the rounding cent on

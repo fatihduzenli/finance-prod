@@ -130,6 +130,7 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:transfers:incoming": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:transfers:confirm": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:transfers:cancel": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:transfers:override_debt": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Rent run and manual payments (PLAN-007 §4.1, D10): billing.
     "ledger:run:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:run:match": RouteRule(min_role=Role.BILLING, methods=POST),

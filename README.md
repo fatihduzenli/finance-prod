@@ -250,7 +250,7 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:disputes:evidence`, `:evidence_retry` | POST | admin | stores the file as the operator's document (10c checks) and queues the upload; refused after `respond_by` |
 | `ledger:stores:end_lease`, `ledger:lease_ends:*` | POST | admin | the end-of-lease wizard (PLAN-012e); GET of every step is admin only too; `:pdf` downloads the stored statement |
 | `ledger:leases:stop_autopay` | POST | admin | deletes the lease's provider schedules through the worker; confirmation page on GET (admin) |
-| `ledger:stores:transfer`, `ledger:transfers:*` | POST | admin | the operator-transfer wizard (PLAN-012e) |
+| `ledger:stores:transfer`, `ledger:transfers:*` | POST | admin | the operator-transfer wizard (PLAN-012e); `:override_debt` records an admin's reason for a lease-end balance to remain |
 | `ledger:charges:split`, `ledger:one_off_charges:split` | POST | billing | Split into installments: preview on GET (billing), confirm on POST (PLAN-012e) |
 | `ledger:plans:detail` | GET | viewer | an installment plan's page |
 | `ledger:plans:reschedule` | POST | billing | moves the unpaid installments; form on GET (billing) |

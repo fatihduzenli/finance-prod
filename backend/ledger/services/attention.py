@@ -17,6 +17,11 @@ page that deals with it and ``since``, the day it began:
   ``attention``), ``"Installment returned: <store>, <parent>, plan <n> of <N> paid"``,
   linking to the plan; cleared once the return is resolved (rescheduled with the NSF
   fee, or resolved with a note);
+- ``lease_end_balance`` (PLAN-012e D14): one item per confirmed lease end whose
+  "Lease-end balance" charge is still open (not paid, waived or voided, a balance above
+  zero), ``"Lease-end balance: <operator> on store <label>, <amount> open since
+  <ended_on>"``, with ``" (transfer, allowed by <name>)"`` when the lease end's transfer
+  had the balance allowed by an admin; linking to the charge;
 - ``broken_promise``: a promise to pay past its date (the rule is in
   :mod:`ledger.services.contacts`); a promise about a lease names its store and what is
   still open on that lease (PLAN-012 D3: ``"... : Acme on store 2477: owes $1,250.00,
@@ -70,6 +75,8 @@ from ledger.models import (
     InsuranceCharge,
     InsurancePremium,
     Lease,
+    LeaseEnd,
+    LeaseEndStatus,
     OneOffChargeStatus,
     Operator,
     Payment,
@@ -91,6 +98,7 @@ _SEVERITY_RANK = {HIGH: 0, MEDIUM: 1, LOW: 2}
 OVERDUE = "overdue"
 RETURNED_DEBIT = "returned_debit"
 INSTALLMENT_RETURNED = "installment_returned"
+LEASE_END_BALANCE = "lease_end_balance"
 BROKEN_PROMISE = "broken_promise"
 INSURANCE_DUE = "insurance_due"
 INSURANCE_PREMIUM_MISSING = "insurance_premium_missing"
@@ -108,6 +116,7 @@ KINDS: tuple[str, ...] = (
     OVERDUE,
     RETURNED_DEBIT,
     INSTALLMENT_RETURNED,
+    LEASE_END_BALANCE,
     BROKEN_PROMISE,
     INSURANCE_PREMIUM_MISSING,
     INSURANCE_DUE,
@@ -125,6 +134,7 @@ KIND_LABELS: dict[str, str] = {
     OVERDUE: "overdue charges",
     RETURNED_DEBIT: "returned debits",
     INSTALLMENT_RETURNED: "installment plans with a returned debit",
+    LEASE_END_BALANCE: "lease-end balances open",
     BROKEN_PROMISE: "broken promises",
     INSURANCE_PREMIUM_MISSING: "insurance premiums missing",
     INSURANCE_DUE: "insurance due soon",
@@ -149,6 +159,12 @@ VACANT_DAYS = 30
 KIND_LIMIT = 25
 RETURNED_TEXT = "Returned debit not rescheduled: {store}, {amount}, returned {date}"
 INSTALLMENT_RETURNED_TEXT = "Installment returned: {store}, {parent}, plan {paid} of {count} paid"
+LEASE_END_BALANCE_TEXT = (
+    "Lease-end balance: {operator} on store {label}, {amount} open since {ended_on}"
+)
+LEASE_END_BALANCE_ALLOWED = " (transfer, allowed by {name})"
+#: A charge in one of these states owes nothing more.
+_SETTLED_CHARGE = (OneOffChargeStatus.PAID, OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,6 +291,53 @@ def _installments_returned(operator: uuid.UUID | None) -> list[Item]:
                 url=reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
                 since=day,
                 operator_id=plan.operator_id,
+            )
+        )
+    return found
+
+
+def _lease_end_balances(operator: uuid.UUID | None) -> list[Item]:
+    """One item per confirmed lease end whose lease-end balance charge is open, earliest
+    end first (one query)."""
+    rows = (
+        LeaseEnd.objects.filter(
+            status=LeaseEndStatus.CONFIRMED,
+            debt_charge__isnull=False,
+            debt_charge__balance__gt=0,
+        )
+        .exclude(debt_charge__status__in=_SETTLED_CHARGE)
+        .select_related(
+            "lease__store",
+            "debt_charge__operator",
+            "transfer__debt_override_by",
+        )
+        .order_by("ended_on", "id")
+    )
+    if operator is not None:
+        rows = rows.filter(debt_charge__operator=operator)
+    found = []
+    for end in rows:
+        charge = end.debt_charge
+        if charge is None:
+            continue
+        text = LEASE_END_BALANCE_TEXT.format(
+            operator=charge.operator.display_name if charge.operator is not None else "No operator",
+            label=end.lease.store.external_label,
+            amount=format_amount(charge.balance),
+            ended_on=end.ended_on,
+        )
+        held_by = getattr(end, "transfer", None)
+        if held_by is not None and held_by.debt_override_at is not None:
+            by = held_by.debt_override_by
+            text += LEASE_END_BALANCE_ALLOWED.format(name=by.get_username() if by else "unknown")
+        found.append(
+            Item(
+                kind=LEASE_END_BALANCE,
+                severity=HIGH,
+                text=text,
+                url=reverse("ledger:one_off_charges:detail", kwargs={"pk": charge.pk}),
+                since=end.ended_on,
+                operator_id=charge.operator_id,
             )
         )
     return found
@@ -609,6 +672,7 @@ def attention(
         lambda: _overdue(today, balances),
         lambda: _returned(today, operator),
         lambda: _installments_returned(operator),
+        lambda: _lease_end_balances(operator),
         lambda: _promises(today, operator, balances),
         lambda: _insurance(today, leases),
         lambda: _lease_ending(today, leases),

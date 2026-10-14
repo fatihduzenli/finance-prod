@@ -136,6 +136,57 @@ remedy is a split that deletes the parent's provider object without voiding it (
 path), proposed as a follow-up for the owner's decision at the checkpoint.
 
 
+### D14 (debt after a transfer; owner's decision 3 of 2026-10-14)
+
+**Scope.** `backend/ledger` (`models.py` four `lease_transfers.debt_override_*` columns with an
+all-or-nothing CHECK; migration `0039_transfer_debt_override` with the guard trigger recreated
+over the new text column; `services/transfer.py` `debt_of`, `override_debt`, the confirm's two
+refusals and audit; `services/attention.py` kind `lease_end_balance`; `views/transfers.py`,
+`forms.py`, `urls.py`, templates `transfers/confirm.html`, `confirmed.html`, new
+`_debt_allowed.html`), `accounts/registry.py`, tests. No new dependency or environment variable.
+
+**Commands run (final code, D14 included; the whole tree re-gated).**
+
+| Command | Database | Exit | Result |
+|---|---|---|---|
+| `uv run ruff check .`, `uv run ruff format --check .` | n/a | 0 | clean, 465 files formatted |
+| `uv run mypy` (strict) | n/a | 0 | no issues in 378 source files |
+| `uv lock --check` | n/a | 0 | consistent |
+| `manage.py makemigrations --check --dry-run` | sqlite, PostgreSQL 16 | 0 | No changes detected |
+| `uv run pytest -m "not e2e" -q -o faulthandler_timeout=300` | sqlite | 0 | 5,011 passed, 618 skipped; 11:16 wall |
+| same | PostgreSQL 16 | 0 | 5,626 passed, 3 skipped; 21:37 wall |
+| `uv run pytest -m e2e -q` | PostgreSQL 16 | 0 | 7 passed |
+| `bash scripts/check-no-secrets.sh`; pattern scan of the diff since `b3ad928` and every new file | n/a | 0 | clean |
+
+**Tests (Gate 2).** Opus: `test_transfer.py` (+17: refused with the sentence and nothing
+written; override with a reason → fields, audit, confirm, the charge on the outgoing operator;
+reason required; billing refused by service and route; a card number refused; debt grown refused;
+zero debt refused; a confirmed transfer refused; a balance that dropped still confirms at the lower
+amount; the confirm and confirmed pages), `test_attention.py` (+7: the item marked for a transfer,
+unmarked for a plain end, gone when paid, waived or voided; dashboard), seeded PostgreSQL round
+trip of 0039 over an existing transfer row. Fable (`test_plan012e_d14_adversarial.py`, 6 cases):
+an override cannot be forged onto another transfer by posted ids, nor by viewer, billing or
+anonymous (403/401), and the route has no GET page (405); an override never bypasses another
+blocker (a live installment plan added after the override still refuses the confirm, nothing
+written, the override untouched); an override without debt is refused by service and route and
+writes nothing, and the confirm then needs none; the debt cannot grow behind an override; the
+reason never reaches the operator's statement PDF or the e-mail's subject, text, html or
+attachment while the audit keeps it; the lease-end balance stays on the attention list (viewer's
+dashboard too) through a part payment and leaves it when paid in full.
+
+**Findings (D14; one rework cycle, test files only).**
+
+| # | Severity | Where | Finding | Outcome |
+|---|---|---|---|---|
+| 8 | MAJOR | `test_ledger_models` | The new CHECK `lease_transfers_debt_override_complete` had no constraint case (the file's every-constraint rule failed on both engines) | Resolved: two cases and one extra rejection in `test_ledger_models` (empty accepted; reason without the moment, moment with a blank reason, and a complete override without the amount refused) |
+| 9 | MAJOR | `0039` / `test_card_number_guard` | On PostgreSQL the guard-trigger test writes a reason alone by a raw update, which the all-or-nothing CHECK refused (`CheckViolation`) | Resolved without touching the schema: the guard test's existing companion-value convention (as for `contact_entries.delete_reason`) now seeds a complete override, so the trigger is what the test exercises; the strict CHECK stands |
+
+Design choices accepted: the override form's errors
+as flash messages (the session holds one form at a time); allowing again replaces the earlier
+allowance with the old one in the audit's `before`; a balance that dropped below the allowance
+confirms at the lower amount; the user shown by username; the GET of the override route is 405
+after the role check (a viewer gets 403 first).
+
 **Confidentiality gate (§5.4).** Secret scans clean on every gate; no secret-store read by either
 model; no new credential-capable file type; no new secret name; the PDF is generated from our
 own rows and checked by the 10c guard before storage.
@@ -147,7 +198,7 @@ own rows and checked by the 10c guard before storage.
   unused at runtime but present.
 - No browser test drives the wizards or the stop-autopay page; the owner's staging clicks are
   the browser check.
-- The PostgreSQL suite takes 20:39 on this machine (CI ran the 18:40 suite in 12:47) of the 25-minute CI step; BACKLOG §4 stands.
+- The PostgreSQL suite takes 21:37 on this machine (CI ran the 18:40 suite in 12:47) of the 25-minute CI step; BACKLOG §4 stands.
 - Real Stax behaviour of `update_invoice` (due date) and of `update_scheduled_invoice` with a
   new one-occurrence rule is exercised only on staging (TODO-VERIFY-029).
 - Two confirms at the same moment are tested with threads on PostgreSQL only; the row lock and
@@ -156,4 +207,4 @@ own rows and checked by the 10c guard before storage.
   are the browser check.
 - Real Gmail with an attachment and real Blob storage are exercised only on staging.
 
-**Verdict:** PASS (Batches A, B and C; three MAJOR in A/B and three in C resolved; one MINOR in C deferred by written decision; residual risk as listed).
+**Verdict:** PASS (Batches A, B, C and D14; three MAJOR in A/B and three in C resolved; one MINOR in C deferred by written decision; residual risk as listed).
