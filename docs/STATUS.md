@@ -1047,3 +1047,24 @@ the login page myself." The condition for starting Prompt 4 is met.
   16 cases green. **For the owner at the checkpoint:** the proration rounding rule (D1), the new
   dependency, and whether a lease-end balance charge may remain on the outgoing operator after a
   transfer (Opus's choice: yes, as in a plain lease end).
+
+## Update, 2026-10-14, PLAN-012e Batch C built and gated (not pushed)
+
+Step 12b is complete in the working tree: Batch C (installment plans, D9–D12) on top of
+`02c9765`. A plan splits what is owed on a rent or one-off charge into 2–12 installments
+(equal, the rounding cent on the last; weekly, every two weeks or monthly from a first date;
+preview editable before confirm), each an `installment` one-off charge collected as the parent
+is; the parent leaves the open balances, aging, arrears and attention while the plan runs and is
+marked paid by the plan at completion without a payment row; a returned installment follows the
+NSF rule and puts the plan on the attention list; Reschedule (billing) moves the unpaid ones at
+Stax through the worker; Cancel (admin, note) voids the rest and returns the remainder to the
+parent; the P&L, ledger and grid count once under the parent, each payment in the month it
+settled; migration ledger 0038. Gate after one rework cycle (three MAJOR: a 500 on an oversized
+amount, the P&L month of installment payments, lease end not blocked by a live plan; all
+resolved; one MINOR deferred, the twice-monthly grid cell): ruff, format, mypy (376 files), lock,
+migrations clean; sqlite 4,973 passed; PostgreSQL 5,583 passed (20:39); e2e 7; secret scans
+clean; Fable's adversarial file 20 cases green (+1 PostgreSQL-only). Docs: RUNBOOK §17 (transfer
+and installment paragraphs), DATA_OWNERSHIP (`installment_plans`), README rows, ADR-0012, QA-012e.
+**Checkpoint report to the owner before the push** with the decisions: proration rounding (D1),
+the reportlab/pillow dependency, a lease-end balance left after a transfer, and the split of a
+charge that has a live Stax invoice or schedule (follow-up proposal).

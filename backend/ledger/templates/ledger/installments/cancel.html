@@ -1,0 +1,17 @@
+{% extends "finance/base.html" %}
+{% block title %}Cancel the installment plan of {{ parent_label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:plans:detail' pk=plan.pk %}">&larr; Installment plan, {{ parent_label }}</a></p>
+  <h1>Cancel the installment plan of {{ parent_label }}</h1>
+  <p class="muted" id="page-help">{{ help }}</p>
+  <form method="post" id="cancel-form" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <label for="{{ form.note.id_for_label }}">Note *</label>
+    {{ form.note.errors }}
+    {{ form.note }}
+    <br><span class="muted">{{ form.note.help_text }}</span>
+    <p class="actions"><button class="btn btn-danger" type="submit" id="cancel-submit">Cancel the plan</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

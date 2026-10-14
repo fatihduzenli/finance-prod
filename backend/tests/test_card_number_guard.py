@@ -349,6 +349,7 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0034_proration",
         "ledger.migrations.0035_lease_end_transfer",
         "ledger.migrations.0037_transfer_fields",
+        "ledger.migrations.0038_installments",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",

@@ -32,6 +32,8 @@
     <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
   </dl>
 
+  {% include "ledger/installments/_parent.html" %}
+
   <h2>Invoices</h2>
   {% responsive_table %}
   <table id="invoices">

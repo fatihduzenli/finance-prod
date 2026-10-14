@@ -1,0 +1,11 @@
+{% load responsive %}
+{% responsive_table %}
+<table id="plan-installments">
+  <thead><tr><th>Installment</th><th>Due</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for installment in installments %}
+      <tr class="plan-installment"><td><a href="{% url 'ledger:one_off_charges:detail' pk=installment.pk %}">{{ installment.installment_no }} of {{ count }}</a></td><td>{{ installment.due_date|date:"Y-m-d" }}</td><td class="money">${{ installment.price }}</td><td class="money">${{ installment.amount_paid }}</td><td>{{ installment.get_status_display }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}

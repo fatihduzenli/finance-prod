@@ -419,6 +419,49 @@ def new_lease_transfer(**fields: Any) -> ledger.LeaseTransfer:
     return ledger.LeaseTransfer(**fields)
 
 
+def new_installment_plan(**fields: Any) -> ledger.InstallmentPlan:
+    """An active plan of a one-off charge (PLAN-012e D9)."""
+    if "rent_charge" not in fields:
+        _default(fields, "one_off_charge", lambda: saved(new_one_off_charge()))
+    parent = fields.get("one_off_charge") or fields.get("rent_charge")
+    _default(
+        fields,
+        "operator",
+        lambda: (
+            parent.operator if isinstance(parent, ledger.OneOffCharge) else saved(new_operator())
+        ),
+    )
+    values = {
+        "count": 3,
+        "first_due": date(2026, 11, 1),
+        "cadence": "monthly",
+        "collection": "manual",
+        "confirmed_at": datetime(2026, 10, 6, 12, tzinfo=UTC),
+    }
+    return ledger.InstallmentPlan(**{**values, **fields})
+
+
+def new_installment(**fields: Any) -> ledger.OneOffCharge:
+    """An installment of a plan (PLAN-012e D9)."""
+    _default(fields, "plan", lambda: saved(new_installment_plan()))
+    values = {"category": "installment", "description": "Installment 1 of 3", "installment_no": 1}
+    return new_one_off_charge(**{**values, **fields})
+
+
+def _second_plan(*, cancelled_first: bool, rent: bool) -> ledger.InstallmentPlan:
+    parent = saved(new_rent_charge()) if rent else saved(new_one_off_charge())
+    key = "rent_charge" if rent else "one_off_charge"
+    first: dict[str, Any] = {key: parent}
+    if cancelled_first:
+        first |= {
+            "status": "cancelled",
+            "cancelled_at": datetime(2026, 10, 7, tzinfo=UTC),
+            "note": "Stopped",
+        }
+    insert(new_installment_plan(**first))
+    return new_installment_plan(**{key: parent})
+
+
 def new_final_statement_message(**fields: Any) -> ledger.OutboundMessage:
     """A final statement e-mail (PLAN-012e D8): no step, a lease end, a document."""
     _default(fields, "operator", lambda: saved(new_operator()))
@@ -471,6 +514,7 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.LeaseEnd: new_lease_end,
     ledger.LeaseEndDeduction: new_lease_end_deduction,
     ledger.LeaseTransfer: new_lease_transfer,
+    ledger.InstallmentPlan: new_installment_plan,
 }
 
 
@@ -1704,6 +1748,43 @@ LEDGER_CASES: list[ConstraintCase] = [
         "one_off_charges_one_fee_per_redebit",
         lambda: _second_fee(same_redebit=False),
         lambda: _second_fee(same_redebit=True),
+    ),
+    # PLAN-012e D9: installment plans (0038).
+    ConstraintCase(
+        "one_off_charges_plan_iff_installment",
+        lambda: new_installment(),
+        lambda: new_installment(plan=None),
+    ),
+    ConstraintCase(
+        "installment_plans_one_parent",
+        lambda: new_installment_plan(),
+        lambda: new_installment_plan(
+            rent_charge=saved(new_rent_charge()), one_off_charge=saved(new_one_off_charge())
+        ),
+    ),
+    ConstraintCase(
+        "installment_plans_count_range",
+        lambda: new_installment_plan(count=12),
+        lambda: new_installment_plan(count=13),
+    ),
+    ConstraintCase(
+        "installment_plans_cancelled_has_note",
+        lambda: new_installment_plan(
+            status="cancelled", cancelled_at=datetime(2026, 10, 7, tzinfo=UTC), note="Stopped"
+        ),
+        lambda: new_installment_plan(
+            status="cancelled", cancelled_at=datetime(2026, 10, 7, tzinfo=UTC)
+        ),
+    ),
+    ConstraintCase(
+        "installment_plans_one_per_rent_charge",
+        lambda: _second_plan(cancelled_first=True, rent=True),
+        lambda: _second_plan(cancelled_first=False, rent=True),
+    ),
+    ConstraintCase(
+        "installment_plans_one_per_one_off_charge",
+        lambda: _second_plan(cancelled_first=True, rent=False),
+        lambda: _second_plan(cancelled_first=False, rent=False),
     ),
     ConstraintCase(
         "operators_nsf_return_count_not_negative",

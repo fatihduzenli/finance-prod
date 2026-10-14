@@ -56,6 +56,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0034_proration",
             "ledger.migrations.0035_lease_end_transfer",
             "ledger.migrations.0037_transfer_fields",
+            "ledger.migrations.0038_installments",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -1066,6 +1067,93 @@ def test_the_transfer_fields_migration_over_an_existing_row_on_postgresql(
     refused = _manage(repo_root, url, "migrate", "ledger", "0036_messages_kind", "--noinput")
     assert refused.returncode != 0 and "refuses to reverse" in refused.stderr
     assert _rows(url, "SELECT incoming_rent FROM lease_transfers", (0,)) == [("2500.00",)]
+
+
+# --- PLAN-012e D9: installment plans ----------------------------------------------------
+#
+# Seeds one one-off charge at ``ledger.0037``, migrates forward, back and forward again on
+# PostgreSQL (the engine of the trigger; sqlite runs 0038 in the plain round trip), and
+# reads the row with plain SQL: unchanged, no plan, no installment number. The plan's
+# note is guarded by the trigger, the new category is accepted only with a plan, and the
+# reverse refuses once a plan exists.
+
+STATE_BEFORE_INSTALLMENTS = (("ledger", "0037_transfer_fields"),)
+CHARGE_ROWS = "SELECT category, price, status, plan_id, installment_no FROM one_off_charges"
+
+
+def seed_before_installments() -> None:
+    """Seed one arrears charge with the models of ``STATE_BEFORE_INSTALLMENTS``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_INSTALLMENTS)).apps
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Plan Co")
+    apps.get_model("ledger", "OneOffCharge").objects.create(
+        operator=operator,
+        category="arrears",
+        collection="manual",
+        description="Arrears",
+        price=Decimal("1000.00"),
+        due_date=date(2026, 10, 1),
+        status="owed",
+    )
+
+
+@requires_postgresql
+def test_the_installments_migration_over_an_existing_row_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_INSTALLMENTS)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_installments as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    after = [("arrears", "1000.00", "owed", "None", "None")]
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, CHARGE_ROWS, (1,)) == after
+    _migrate_to(repo_root, url, *STATE_BEFORE_INSTALLMENTS)
+    assert _rows(url, "SELECT count(*) FROM one_off_charges") == [("1",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, CHARGE_ROWS, (1,)) == after
+
+    with psycopg.connect(url) as scratch:
+        [(charge, operator)] = list(scratch.execute("SELECT id, operator_id FROM one_off_charges"))
+        # An installment without a plan breaks its CHECK.
+        with pytest.raises(psycopg.errors.CheckViolation):
+            scratch.execute("UPDATE one_off_charges SET category = 'installment'")
+    plan = (
+        "INSERT INTO installment_plans (id, one_off_charge_id, operator_id, count, "
+        "first_due, cadence, collection, status, confirmed_at, note, created_at, updated_at) "
+        "VALUES (%s, %s, %s, 3, '2026-11-01', 'monthly', 'manual', 'active', now(), %s, "
+        "now(), now())"
+    )
+    # The plan's note is guarded by the trigger.
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute(plan, (uuid.uuid4(), charge, operator, "4111 1111 1111 1111"))
+    with psycopg.connect(url) as scratch:
+        scratch.execute(plan, (uuid.uuid4(), charge, operator, ""))
+    # A plan cannot be lost by going back.
+    refused = _manage(repo_root, url, "migrate", "ledger", "0037_transfer_fields", "--noinput")
+    assert refused.returncode != 0 and "refuses to reverse" in refused.stderr
+    assert _rows(url, "SELECT count(*) FROM installment_plans") == [("1",)]
 
 
 # --- Row 2 --------------------------------------------------------------------------

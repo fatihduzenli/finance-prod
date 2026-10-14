@@ -25,7 +25,10 @@ transaction and audited:
   re-debit and the fee (the fee left out when waived), with the re-debit charge's
   reference (:func:`payments.one_off_invoices.charge_amounts`).
 
-The return webhook never calls this: no fee exists without the staff action.
+The return webhook never calls this: no fee exists without the staff action. A returned
+installment (PLAN-012e D11) is rescheduled the same way; its plan's status is brought up
+to date once the return is resolved
+(:func:`ledger.services.one_off_charges.sync_plan`).
 """
 
 from __future__ import annotations
@@ -354,6 +357,10 @@ def reschedule(
         )
         kind = JobKind.SCHEDULE_CREATE if debit else JobKind.INVOICE_CREATE
         job = jobs.enqueue(kind, redebit, None, actor)
+        if payment.one_off_charge is not None and payment.one_off_charge.plan_id is not None:
+            # PLAN-012e D11: the return of an installment is resolved; its plan leaves
+            # ``attention`` once no other return of it is open.
+            one_off_charges.sync_plan(payment.one_off_charge.plan_id, actor=actor)
     fee_text = FEE_WAIVED if waive_fee else _money(fee_price)
     if debit:
         message = RESCHEDULED_DEBIT.format(

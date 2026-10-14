@@ -62,6 +62,7 @@ from ledger.services import collections, csv_export, rent_run
 from ledger.services import one_off_charges as service
 from ledger.services.csv_export import CsvWriter
 from ledger.views.charges import _report
+from ledger.views.installments import parent_context
 from ledger.views.jobs import already_submitted, busy, job_context, submit
 from ledger.views.operators import (
     _actor,
@@ -195,10 +196,16 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "payments": charge.payments.order_by("-settled_on", "-created_at"),
             "review_message": service.review_message(charge),
             # Any line of a builder invoice takes a payment of its own (PLAN-012c-a D2).
-            "can_record": billing and not closed and charge.balance > 0,
+            "can_record": billing
+            and not closed
+            and charge.balance > 0
+            and not rent_run.on_live_plan(one_off_charge=charge),
             "can_link_invoice": billing and not closed and not invoices,
             "can_edit": billing and not closed and setup,
-            "can_waive": admin and not closed and not service.has_settled_payment(charge),
+            "can_waive": admin
+            and not closed
+            and charge.category != OneOffCategory.INSTALLMENT
+            and not service.has_settled_payment(charge),
             "waive_refusal": (
                 service.WAIVE_LIVE_INVOICE
                 if not closed and service.live_provider_invoice(charge) is not None
@@ -221,6 +228,17 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 operator_sync.retry_wait_message(retry_wait) if retry_wait else ""
             ),
             **_charge_now_context(charge, admin, closed, jobs["job_refresh"]),
+            # PLAN-012e D9, D10: an installment's plan, or the parent's plan and Split.
+            "installment_plan": charge.plan,
+            **(
+                {}
+                if charge.plan_id is not None
+                else parent_context(
+                    charge,
+                    billing=billing,
+                    split_url=reverse("ledger:one_off_charges:split", kwargs={"pk": charge.pk}),
+                )
+            ),
             "resolution": DepositResolution.objects.filter(setup_charge=charge)
             .select_related("to_lease__store", "created_by")
             .first(),

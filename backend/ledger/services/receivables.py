@@ -15,6 +15,13 @@ charges:
 - **one-off**: one-off charges with a ``balance`` above zero, neither ``waived`` nor
   ``voided``, except deposits (a refundable fee type: money held, never owed revenue).
 
+**Installment plans** (PLAN-012e D9, D12): a rent or one-off charge whose plan is live
+(``active`` or ``attention``) is not listed: what it owes is owed through its
+installments, each a one-off charge listed on its own due date (``Installment:
+Installment 1 of 3: Rent 2026-10``). The installments of a cancelled plan are not listed
+either: their parent is open again for what they did not collect, while the worker
+voids them.
+
 **A rescheduled return** (PLAN-011b D5): the returned payment reopened its charge, and the
 Reschedule made a ``redebit`` one-off charge that collects the same amount again. What
 the re-debit collects (up to its price; its NSF fee never counts) is paid on that charge
@@ -68,7 +75,9 @@ from django.db.models import Exists, F, Max, OuterRef, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce
 
 from ledger.models import (
+    LIVE_PLAN_STATUSES,
     ZERO,
+    InstallmentPlanStatus,
     InsuranceCharge,
     Invoice,
     InvoiceLineItem,
@@ -166,7 +175,11 @@ def _rent_description(period_month: date, seq: int, proration_text: str | None =
 
 
 def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
-    rows = RentCharge.objects.filter(balance__gt=0).exclude(status=RentChargeStatus.WAIVED)
+    rows = (
+        RentCharge.objects.filter(balance__gt=0)
+        .exclude(status=RentChargeStatus.WAIVED)
+        .exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
+    )
     if operator is not None:
         rows = rows.filter(lease__operator=operator)
     values = rows.values(
@@ -269,6 +282,8 @@ def _one_off_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
         OneOffCharge.objects.filter(balance__gt=0)
         .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
         .filter(Q(fee_type__isnull=True) | Q(fee_type__refundable=False))
+        .exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
+        .exclude(plan__status=InstallmentPlanStatus.CANCELLED)
     )
     if operator is not None:
         charges = charges.filter(

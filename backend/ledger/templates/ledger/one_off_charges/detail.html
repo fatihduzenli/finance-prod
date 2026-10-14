@@ -71,6 +71,12 @@
     {% if charge.waived_at %}<dt>Waived</dt><dd id="waived">{{ charge.waived_at|date:"Y-m-d" }} by {{ charge.waived_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.waive_note }}</span></dd>{% endif %}
   </dl>
 
+  {% if installment_plan %}
+    <p id="installment-of">Installment {{ charge.installment_no }} of {{ installment_plan.count }} of an <a href="{% url 'ledger:plans:detail' pk=installment_plan.pk %}">installment plan</a> ({{ installment_plan.get_status_display|lower }}).</p>
+  {% else %}
+    {% include "ledger/installments/_parent.html" %}
+  {% endif %}
+
   {% if resolution %}
     <h2>Deposit resolution</h2>
     <dl id="deposit-resolution">

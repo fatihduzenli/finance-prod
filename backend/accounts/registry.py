@@ -134,6 +134,13 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:run:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:run:match": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:charges:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Installment plans (PLAN-012e D10, D11): Split into installments and Reschedule need
+    # billing, Cancel needs admin. The views refuse the GET of their forms below the same
+    # role.
+    "ledger:charges:split": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:split": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:plans:reschedule": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:plans:cancel": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Linking an unlinked invoice to a rent charge (PLAN-008a §2 rule 4): admin or
     # billing. The view refuses the GET of the form below billing too.
     "ledger:charges:link_invoice": RouteRule(min_role=Role.BILLING, methods=POST),
@@ -315,6 +322,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:disputes:export",
         # The one-off charge page: any verified role (PLAN-010b D6).
         "ledger:one_off_charges:detail",
+        # An installment plan's page: any verified role (PLAN-012e D11).
+        "ledger:plans:detail",
         # The profit and loss report and its CSV export: any verified role (PLAN-010b
         # D11, D12).
         "ledger:reports:pnl",

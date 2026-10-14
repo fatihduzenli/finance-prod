@@ -28,6 +28,9 @@ release of those deposits whatever its date (a release after ``date_to`` include
 it can differ from the P&L footer, which counts up to the end of its range. (A known
 limitation, deferred.)
 
+A payment on an installment (PLAN-012e D12) is listed as any one-off payment and names
+the charge its plan splits (``Installment of`` in the export, a link on the page).
+
 The CSV export (:func:`csv_lines`) has one header row and one row per payment, written
 by :class:`ledger.services.csv_export.CsvWriter` (plain-English headers, amounts as plain
 decimals with two places, dates ISO 8601, formula-safe text, at most
@@ -61,6 +64,7 @@ from ledger.models import (
     PaymentStatus,
     Store,
 )
+from ledger.services import installments
 from ledger.services.csv_export import CsvWriter
 from payments.models import ExternalRef
 from payments.operator_sync import PROVIDER_KEY
@@ -102,6 +106,7 @@ CSV_HEADER: tuple[str, ...] = (
     "Provider transaction (masked)",
     "Return code",
     "Recorded by",
+    "Installment of",
 )
 
 
@@ -193,6 +198,8 @@ def ledger_payments(selected: PaymentFilter) -> QuerySet[Payment]:
         "one_off_charge__lease__store",
         "one_off_charge__lease__operator",
         "one_off_charge__operator",
+        "one_off_charge__plan__rent_charge",
+        "one_off_charge__plan__one_off_charge__fee_type",
         "recorded_by",
     ).annotate(
         on=Coalesce("settled_on", "initiated_on"),
@@ -474,7 +481,16 @@ def csv_record(row: LedgerRow) -> list[object]:
         row.transaction,
         payment.return_code,
         payment.recorded_by.get_username() if payment.recorded_by is not None else "",
+        installment_of(payment),
     ]
+
+
+def installment_of(payment: Payment) -> str:
+    """What the plan of the payment's installment splits, or ``""`` (PLAN-012e D12)."""
+    charge = payment.one_off_charge
+    if charge is None or charge.plan is None:
+        return ""
+    return installments.parent_label(charge.plan.parent)
 
 
 def _records(selected: PaymentFilter) -> Iterator[list[object]]:

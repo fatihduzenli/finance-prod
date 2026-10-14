@@ -11,7 +11,9 @@ The wizard's state is one :class:`~ledger.models.LeaseEnd` row per lease
    not fully paid with a live provider invoice, a one-off charge with a provider
    schedule, a rent or insurance schedule active or paused at the
    provider (its link is the lease's Stop autopay page), a payment of the lease that is
-   pending. The wizard never calls the
+   pending, an installment plan that is live (active or needing attention) on a rent or
+   one-off charge of the lease (PLAN-012e D5; its link is the plan's page: let it
+   complete or cancel it). The wizard never calls the
    provider: the existing actions clear them, and nothing past this step is offered
    while one is listed. Confirm checks them again.
 3. **Statement and deductions** (:func:`ledger.services.statements.final`,
@@ -68,6 +70,7 @@ import mail
 from documents_storage import StorageUnavailable
 from ledger import merge
 from ledger.models import (
+    LIVE_PLAN_STATUSES,
     AuditLog,
     ChargeEntityType,
     CollectionMethod,
@@ -75,6 +78,7 @@ from ledger.models import (
     DeductionKind,
     Document,
     DocumentKind,
+    InstallmentPlan,
     InsuranceCharge,
     Invoice,
     Lease,
@@ -106,6 +110,7 @@ from ledger.models import (
 from ledger.services import (
     deposits,
     documents,
+    installments,
     leases,
     messages,
     one_off_charges,
@@ -143,6 +148,7 @@ LIVE_INVOICE = "live_invoice"
 ONE_OFF_SCHEDULE = "one_off_schedule"
 AUTOPAY = "autopay"
 PENDING_PAYMENT = "pending_payment"
+INSTALLMENT_PLAN = "installment_plan"
 
 # --- Fixed sentences -----------------------------------------------------------------------
 
@@ -392,6 +398,23 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
                 f"{what} autopay (debit {row.seq}) is {state} at the payment provider. "
                 "It must be stopped first.",
                 stop_url,
+            )
+        )
+    plans = (
+        InstallmentPlan.objects.filter(status__in=LIVE_PLAN_STATUSES)
+        .filter(Q(rent_charge__lease=lease) | Q(one_off_charge__lease=lease))
+        .select_related("rent_charge", "one_off_charge")
+        .order_by("confirmed_at", "id")
+    )
+    for plan in plans:
+        progress = installments.progress(plan)
+        found.append(
+            Blocker(
+                INSTALLMENT_PLAN,
+                f"{installments.parent_label(plan.parent)}: an installment plan is live "
+                f"({progress.paid_count} of {progress.count} paid). Let it complete or "
+                "cancel it first.",
+                reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
             )
         )
     pending = (

@@ -31,6 +31,8 @@ from ledger.models import (
     DepositResolution,
     Document,
     DocumentKind,
+    InstallmentPlan,
+    InstallmentPlanStatus,
     InsuranceCharge,
     Invoice,
     InvoiceStatus,
@@ -43,6 +45,7 @@ from ledger.models import (
     OneOffCharge,
     OutboundMessage,
     Payment,
+    PaymentChannel,
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
@@ -52,7 +55,15 @@ from ledger.models import (
     ScheduleKind,
     ScheduleState,
 )
-from ledger.services import deposits, lease_end, leases, pnl, rent_run, statements
+from ledger.services import (
+    deposits,
+    installments,
+    lease_end,
+    leases,
+    pnl,
+    rent_run,
+    statements,
+)
 from ledger.services import one_off_charges as one_off_service
 from ledger.services.lease_end import DeductionInput
 from ledger.services.leases import AutopayAction
@@ -573,6 +584,87 @@ def test_confirm_checks_the_blockers_again_and_writes_nothing() -> None:
         AuditLog.objects.count(),
         Payment.objects.count(),
         RentCharge.objects.get().amount_due,
+    ) == before
+    assert fresh(lease).ended_on is None and fresh(end).status == LeaseEndStatus.DRAFT
+
+
+def a_wire_lease() -> Lease:
+    """A lease paid by wire: its charges are collected by hand, so a split makes nothing
+    at the payment provider."""
+    return a_store_lease(payment_channel=PaymentChannel.WIRE)
+
+
+def a_manual_charge(lease: Lease) -> OneOffCharge:
+    return OneOffCharge.objects.create(
+        operator=lease.operator,
+        lease=lease,
+        category=OneOffCategory.DAMAGE,
+        collection="manual",
+        description="Broken shelf",
+        price=D("300.00"),
+        due_date=OCTOBER,
+    )
+
+
+def a_live_plan(parent: RentCharge | OneOffCharge, count: int = 2) -> InstallmentPlan:
+    first = date(2026, 10, 25)
+    lines, refused = installments.preview(parent, count, first, "monthly", today=TODAY)
+    assert refused is None, refused
+    made = installments.create_plan(parent, count, first, "monthly", lines, None, today=TODAY)
+    assert made.ok and made.plan is not None, made.message
+    return made.plan
+
+
+@pytest.mark.parametrize("parent_kind", ["rent", "one_off"])
+def test_a_live_installment_plan_blocks_with_a_link_to_the_plan(parent_kind: str) -> None:
+    lease = a_wire_lease()
+    parent = october(lease) if parent_kind == "rent" else a_manual_charge(lease)
+    plan = a_live_plan(parent)
+    [found] = lease_end.blockers(lease)
+    assert found.kind == lease_end.INSTALLMENT_PLAN
+    assert found.url == f"/plans/{plan.pk}/"
+    label = "Rent 2026-10" if isinstance(parent, RentCharge) else parent.label
+    assert found.text == (
+        f"{label}: an installment plan is live (0 of 2 paid). Let it complete or cancel it first."
+    )
+
+
+def test_a_plan_that_needs_attention_still_blocks() -> None:
+    lease = a_wire_lease()
+    plan = a_live_plan(a_manual_charge(lease))
+    InstallmentPlan.objects.filter(pk=plan.pk).update(status=InstallmentPlanStatus.ATTENTION)
+    assert [item.kind for item in lease_end.blockers(lease)] == [lease_end.INSTALLMENT_PLAN]
+
+
+def test_a_completed_installment_plan_does_not_block() -> None:
+    lease = a_wire_lease()
+    plan = a_live_plan(a_manual_charge(lease))
+    for row in installments.installments_of(plan):
+        assert pay(row, str(row.price), paid_on=TODAY, today=TODAY).ok
+    assert fresh(plan).status == InstallmentPlanStatus.COMPLETED
+    assert lease_end.blockers(lease) == []
+
+
+def test_a_cancelled_installment_plan_does_not_block() -> None:
+    lease = a_wire_lease()
+    plan = a_live_plan(october(lease))
+    _, admin_user = client_for(Role.ADMIN)
+    assert installments.cancel(plan, "Ending the lease.", admin_user).ok
+    assert lease_end.blockers(lease) == []
+
+
+def test_confirm_refuses_while_an_installment_plan_is_live() -> None:
+    lease = a_wire_lease()
+    charge = a_manual_charge(lease)
+    end = draft(lease)
+    a_live_plan(charge)  # made between the steps
+    before = (AuditLog.objects.count(), Payment.objects.count(), OneOffCharge.objects.count())
+    outcome = confirm(end)
+    assert not outcome.ok and outcome.message == lease_end.BLOCKED.format(count=1)
+    assert (
+        AuditLog.objects.count(),
+        Payment.objects.count(),
+        OneOffCharge.objects.count(),
     ) == before
     assert fresh(lease).ended_on is None and fresh(end).status == LeaseEndStatus.DRAFT
 

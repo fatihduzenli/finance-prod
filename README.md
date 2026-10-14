@@ -251,6 +251,10 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:stores:end_lease`, `ledger:lease_ends:*` | POST | admin | the end-of-lease wizard (PLAN-012e); GET of every step is admin only too; `:pdf` downloads the stored statement |
 | `ledger:leases:stop_autopay` | POST | admin | deletes the lease's provider schedules through the worker; confirmation page on GET (admin) |
 | `ledger:stores:transfer`, `ledger:transfers:*` | POST | admin | the operator-transfer wizard (PLAN-012e) |
+| `ledger:charges:split`, `ledger:one_off_charges:split` | POST | billing | Split into installments: preview on GET (billing), confirm on POST (PLAN-012e) |
+| `ledger:plans:detail` | GET | viewer | an installment plan's page |
+| `ledger:plans:reschedule` | POST | billing | moves the unpaid installments; form on GET (billing) |
+| `ledger:plans:cancel` | POST | admin | cancels the plan with a note; form on GET (admin) |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |
 
 The `admin` group also holds Django's model permissions for users, groups, OTP

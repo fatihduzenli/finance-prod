@@ -91,8 +91,12 @@ schedule create/update/delete, invoice create/send/delete, mark paid), cards, su
   charge on the lease with a live provider invoice (`live_provider_invoice`) or a provider
   schedule (`provider_schedule`), every rent or insurance schedule in state active or paused with
   a schedule ref (`leases.live_schedules`), every rent charge or one-off charge with a pending
-  (unsettled) provider payment; each listed with a link (charge page, lease page's autopay
-  controls). The wizard cannot pass (b) while the list is non-empty; it re-checks at confirm.
+  (unsettled) provider payment; **and (amended 2026-10-14, QA finding) every installment plan
+  that is live (`active` or `attention`) on a rent or one-off charge of the lease**, linked to
+  the plan page ("let it complete or cancel it first": the last-month proration would otherwise
+  cut a parent whose installments still bill the original split); each listed with a link
+  (charge page, lease page's autopay controls, plan page). The wizard cannot pass (b) while the
+  list is non-empty; it re-checks at confirm.
   "Collect or cancel first": the existing cancel / pause actions are the way; the wizard makes
   no provider call itself. (c) **Final statement** (`statements.final(lease_end) -> Final`):
   prorated last rent (D3), every open balance on the lease (rent, insurance, one-off, by
@@ -213,8 +217,10 @@ schedule create/update/delete, invoice create/send/delete, mark paid), cards, su
   the unpaid remainder (its `amount_paid` set to the installments' paid sum, audited), the plan
   `cancelled`.
 - **D12 — grid, reports, ledger.** Installment payments count under the parent: `pnl` and
-  `reports` attribute an installment's payments to the parent's category and month (rent parent
-  → rent collected in the parent's `period_month`; one-off parent → its category); installments
+  `reports` attribute an installment's payments to the parent's **category** (rent parent or
+  `arrears` → rent collected; other one-off parent → fees collected) **in the month the payment
+  settled, like every other payment** (amended 2026-10-14: the first wording said "the parent's
+  month", which would let a later installment payment rewrite a closed month); installments
   are never billed lines themselves (`fees_billed` excludes category `installment`); the grid
   cell of a rent parent shows the plan's progress; the payments ledger lists installment
   payments with the parent named; `receivables.open_balances` lists the unpaid installments
@@ -288,8 +294,9 @@ step; a viewer and billing get 403 on the wizard; Cancel deletes the draft and w
 incoming start ≤ end refused; the hand-over day; the incoming lease, the draft with the deposit
 and the setup lines (and nothing created at Stax until the draft is sent); the operator created
 inline queues its sync job; the invariant over 400 random days; audit.
-**Installments:** split rounding (1000/3, 100/7, 0.05/2 → refused as the cent cannot split,
-999.99/12); dates for each cadence incl. the 31st monthly (clamped) and leap February; count
+**Installments:** split rounding (1000/3, 100/7, 0.05/2 → 0.02 and 0.03 by D9 (rounded down,
+the remainder on the last; refused only when a share would be below one cent, 0.01/2; amended
+2026-10-14), 999.99/12); dates for each cadence incl. the 31st monthly (clamped) and leap February; count
 1 and 13 refused; a first date in the past refused; edits that break the sum or the order
 refused; the parent excluded from open balances, aging, arrears and attention while active;
 each collection kind creates the right provider objects (fake), none for manual; a payment on

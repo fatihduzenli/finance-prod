@@ -2,7 +2,7 @@
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
 D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11, PLAN-010c
 D7, D10, PLAN-010d D1, D2, D4, D6, D8, PLAN-011 D0 to D5, PLAN-011b D4, D7, D8, PLAN-012 D2,
-D3, D6 to D8, PLAN-012e D4 to D7).
+D3, D6 to D8, PLAN-012e D4 to D7, D10, D11).
 
 Namespace ``ledger``.
 
@@ -31,6 +31,7 @@ from ledger.views import (
     deposits,
     disputes,
     documents,
+    installments,
     invoices,
     lease_ends,
     leases,
@@ -193,8 +194,19 @@ charge_patterns = (
         path("<str:pk>/retry-mark/", charges.charge_retry_mark, name="retry_mark"),
         path("<str:pk>/link-invoice/", charges.charge_link_invoice, name="link_invoice"),
         path("<str:pk>/send-step/", collections.rent_charge_send_step, name="send_step"),
+        path("<str:pk>/split/", installments.charge_split, name="split"),
     ],
     "charges",
+)
+
+# Installment plans (PLAN-012e D10, D11).
+plan_patterns = (
+    [
+        path("<str:pk>/", installments.plan_detail, name="detail"),
+        path("<str:pk>/reschedule/", installments.plan_reschedule, name="reschedule"),
+        path("<str:pk>/cancel/", installments.plan_cancel, name="cancel"),
+    ],
+    "plans",
 )
 
 one_off_charge_patterns = (
@@ -215,6 +227,7 @@ one_off_charge_patterns = (
         path("<str:pk>/retry/", one_off_charges.charge_retry, name="retry"),
         path("<str:pk>/charge-now/", one_off_charges.charge_now, name="charge_now"),
         path("<str:pk>/send-step/", collections.one_off_charge_send_step, name="send_step"),
+        path("<str:pk>/split/", installments.one_off_split, name="split"),
     ],
     "one_off_charges",
 )
@@ -378,6 +391,7 @@ urlpatterns = [
     path("run/", include(run_patterns)),
     path("charges/", include(charge_patterns)),
     path("one-off-charges/", include(one_off_charge_patterns)),
+    path("plans/", include(plan_patterns)),
     path("invoices/", include(invoice_patterns)),
     path("payments/", include(payment_patterns)),
     path("disputes/", include(dispute_patterns)),

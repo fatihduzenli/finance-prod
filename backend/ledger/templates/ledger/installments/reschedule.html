@@ -1,0 +1,16 @@
+{% extends "finance/base.html" %}
+{% block title %}Reschedule the installments of {{ parent_label }}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'ledger:plans:detail' pk=plan.pk %}">&larr; Installment plan, {{ parent_label }}</a></p>
+  <h1>Reschedule the installments of {{ parent_label }}</h1>
+  <p class="muted" id="page-help">{{ help }}</p>
+  <form method="post" id="reschedule-form" class="js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <p><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field.errors }}<br>{{ field }}</p>
+    {% endfor %}
+    <p class="actions"><button class="btn btn-primary" type="submit" id="reschedule-submit">Move the unpaid installments</button></p>
+  </form>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

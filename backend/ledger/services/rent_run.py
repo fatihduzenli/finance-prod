@@ -52,7 +52,12 @@ Rules kept here:
   lease's ``ended_on`` is never charged.
 - **Carried balance** (PLAN-009 D5): the open balances of a lease's earlier charges are
   shown with each due debit and on the charge page; a new charge's amount never
-  includes them.
+  includes them. A charge split into a live installment plan (PLAN-012e D9) is owed
+  through its installments and is not carried.
+- **Installment plans** (PLAN-012e D9 to D11): a manual payment on a charge whose plan is
+  live is refused (it is paid through its installments), and an invoice is never linked
+  to it automatically. What the installments of its completed or cancelled plans were
+  paid counts as paid on it (:func:`plan_covered`), with no payment row.
 
 The manual payment checks, the provider marking and the invoice link are shared with
 one-off charges (PLAN-010b D6, PLAN-010d D1) through :class:`ChargeKind`: :data:`RENT`
@@ -83,10 +88,12 @@ from django.utils import timezone
 
 import payments
 from ledger.models import (
+    LIVE_PLAN_STATUSES,
     ZERO,
     AuditLog,
     CollectionSchedule,
     CollectionStatus,
+    InstallmentPlanStatus,
     InsuranceCharge,
     Invoice,
     InvoiceLineItem,
@@ -183,6 +190,10 @@ PAY_WAIVED = "This charge is waived. Nothing was recorded."
 PAY_NOTHING_DUE = "Nothing is due on this charge. Nothing was recorded."
 PAY_ALREADY = "This payment was already recorded. Nothing was changed."
 PAY_RECORDED = "Payment recorded."
+PAY_ON_PLAN = (
+    "This charge is paid through its installment plan: record the payment on an "
+    "installment. Nothing was recorded."
+)
 
 #: Audit actions of the provider marking (PLAN-009 D1 to D3).
 MARKED_ACTION = "rent_charge.provider_marked"
@@ -553,6 +564,7 @@ def _carried(lease_id: uuid.UUID, period: date, seq: int) -> Decimal:
         RentCharge.objects.filter(lease_id=lease_id, balance__gt=0)
         .filter(Q(period_month__lt=period) | Q(period_month=period, seq__lt=seq))
         .exclude(status=RentChargeStatus.WAIVED)
+        .exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
         .aggregate(total=Sum("balance"))["total"]
     )
     return Decimal(total or ZERO).quantize(CENT)
@@ -879,7 +891,7 @@ def _auto_candidates(operator_id: uuid.UUID, total: Decimal, issued: date) -> Qu
         amount_due=total,
         period_month=issued.replace(day=1),
         invoices__isnull=True,
-    )
+    ).exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
 
 
 def _attach(charge: ChargeRow, invoice: Invoice, kind: ChargeKind | None = None) -> None:
@@ -1072,6 +1084,8 @@ def record_manual_payment(
             return PaymentOutcome(True, PAY_ALREADY, replayed=True)
         if charge.status == RentChargeStatus.WAIVED:
             return PaymentOutcome(False, PAY_WAIVED)
+        if on_live_plan(rent_charge=charge):
+            return PaymentOutcome(False, PAY_ON_PLAN)
         balance = charge.amount_due - _paid(charge)
         if balance <= 0:
             return PaymentOutcome(False, PAY_NOTHING_DUE)
@@ -1513,9 +1527,32 @@ def _settled(charge: RentCharge) -> Decimal:
 
 
 def _paid(charge: RentCharge) -> Decimal:
-    """What the charge has been paid: its settled payments and what its re-debits
-    collected again."""
-    return _settled(charge) + redebit_collected(rent_charge=charge)
+    """What the charge has been paid: its settled payments, what its re-debits
+    collected again and what the installments of its ended plans were paid."""
+    return (
+        _settled(charge) + redebit_collected(rent_charge=charge) + plan_covered(rent_charge=charge)
+    )
+
+
+def on_live_plan(**parent: RentCharge | OneOffCharge) -> bool:
+    """Whether the charge (``rent_charge=`` or ``one_off_charge=``) has an installment
+    plan that is live (PLAN-012e D9): its balance is owed through the installments."""
+    [charge] = parent.values()
+    return charge.installment_plans.filter(status__in=LIVE_PLAN_STATUSES).exists()
+
+
+def plan_covered(**parent: RentCharge | OneOffCharge) -> Decimal:
+    """What the installments of the charge's completed or cancelled plans were paid
+    (PLAN-012e D9, D11): counted as paid on the charge, with no payment row of its own.
+    ``parent`` names the charge: ``rent_charge=`` or ``one_off_charge=``. A live plan
+    counts nothing here: its parent is not paid until the plan completes."""
+    [(field, charge)] = parent.items()
+    total = OneOffCharge.objects.filter(
+        category=OneOffCategory.INSTALLMENT,
+        **{f"plan__{field}": charge},
+        plan__status__in=[InstallmentPlanStatus.COMPLETED, InstallmentPlanStatus.CANCELLED],
+    ).aggregate(total=Sum("amount_paid"))["total"]
+    return Decimal(total or ZERO).quantize(CENT)
 
 
 def redebit_collected(**source: RentCharge | InsuranceCharge | OneOffCharge) -> Decimal:

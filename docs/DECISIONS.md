@@ -727,7 +727,10 @@ rounding rule awaits the owner's confirmation, see D1 of PLAN-012e)
    (equal amounts, the rounding cent on the last), collected as the parent is; the parent is
    covered by the plan and counted once: billed as itself, collected through its installments;
    a returned installment follows the NSF rule and puts the plan on the attention list;
-   reschedule shifts the unpaid ones, cancel returns the remainder to the parent.
+   reschedule shifts the unpaid ones, cancel returns the remainder to the parent. Each
+   installment payment is counted in the month it settled, like every other payment (a split
+   never rewrites a closed month). A live plan on a charge of a lease blocks that lease's end
+   until it completes or is cancelled (added 2026-10-14 from the QA gate).
 5. **One new dependency**, `reportlab` (BSD), to write the statement PDF; the alternative (the
    browser's print, no stored document) does not meet "stored under the store's documents".
 
@@ -735,5 +738,5 @@ rounding rule awaits the owner's confirmation, see D1 of PLAN-012e)
 
 - New tables `lease_ends`, `lease_end_deductions`, `lease_transfers`, `installment_plans`; new
   columns on `leases`, `rent_charges`, `one_off_charges`, `outbound_messages`; mail gains
-  attachments; four migrations; `docs/CLAUDE.md` §5 ("send email itself") is amended by the
+  attachments; migrations `ledger` 0034–0038 and `payments` 0016–0017; `docs/CLAUDE.md` §5 ("send email itself") is amended by the
   final-statement e-mail, which goes through the same mail package and catch-all as the ladder.

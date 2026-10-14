@@ -56,6 +56,8 @@ POST_ROUTES = (
     "ledger:charges:link_invoice",
     # PLAN-011b D4: sending a step of the collections ladder by hand.
     "ledger:charges:send_step",
+    # PLAN-012e D10: Split into installments.
+    "ledger:charges:split",
 )
 READ_ROUTES = (
     "ledger:run:today",

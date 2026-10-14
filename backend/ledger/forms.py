@@ -22,6 +22,8 @@ from ledger.models import (
     CONSENT_FIELDS,
     DESCRIPTION_MAX_LENGTH,
     EVIDENCE_NAME_MAX_LENGTH,
+    INSTALLMENTS_MAX,
+    INSTALLMENTS_MIN,
     NAME_MAX_LENGTH,
     CalendarEntryKind,
     CollectionStatus,
@@ -31,6 +33,7 @@ from ledger.models import (
     DepositResolutionKind,
     DocumentKind,
     FeeType,
+    InstallmentCadence,
     Lease,
     LeaseEndReason,
     Operator,
@@ -1550,3 +1553,65 @@ class CalendarEntryForm(forms.Form):
         if not title:
             raise forms.ValidationError(self.fields["title"].error_messages["required"])
         return title
+
+
+# --- Installment plans (PLAN-012e D10, D11) ----------------------------------------------
+
+
+def _cadence_field() -> forms.ChoiceField:
+    return forms.ChoiceField(
+        choices=InstallmentCadence.choices,
+        initial=InstallmentCadence.MONTHLY,
+        error_messages={
+            "required": "Choose weekly, every two weeks or monthly.",
+            "invalid_choice": "Choose weekly, every two weeks or monthly.",
+        },
+    )
+
+
+def _first_due_field() -> forms.DateField:
+    return forms.DateField(
+        label="First installment's date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        error_messages={
+            "required": "Enter the first installment's date.",
+            "invalid": "Enter the first installment's date.",
+        },
+    )
+
+
+class SplitForm(forms.Form):
+    """Split into installments (D10, billing), first step: how many, from when, how often.
+    Read from the query string: the preview that follows writes nothing."""
+
+    count = forms.IntegerField(
+        label="Number of installments",
+        min_value=INSTALLMENTS_MIN,
+        max_value=INSTALLMENTS_MAX,
+        initial=3,
+        error_messages={
+            "required": f"Choose between {INSTALLMENTS_MIN} and {INSTALLMENTS_MAX} installments.",
+            "invalid": f"Choose between {INSTALLMENTS_MIN} and {INSTALLMENTS_MAX} installments.",
+            "min_value": f"Choose between {INSTALLMENTS_MIN} and {INSTALLMENTS_MAX} installments.",
+            "max_value": f"Choose between {INSTALLMENTS_MIN} and {INSTALLMENTS_MAX} installments.",
+        },
+    )
+    first_due = _first_due_field()
+    cadence = _cadence_field()
+
+
+class PlanRescheduleForm(forms.Form):
+    """Reschedule an installment plan (D11, billing): the unpaid installments' new start."""
+
+    first_due = _first_due_field()
+    cadence = _cadence_field()
+
+
+class PlanCancelForm(CancelChargeForm):
+    """Cancel an installment plan (D11, admin): a note, nothing else."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        note = self.fields["note"]
+        note.help_text = "Required: why the plan is cancelled."
+        note.error_messages["required"] = "A note is required: say why the plan is cancelled."

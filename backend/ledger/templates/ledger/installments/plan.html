@@ -1,0 +1,23 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Installment plan, {{ parent_label }}{% endblock %}
+{% block content %}
+  <p><a href="{{ parent_url }}">&larr; {{ parent_label }}</a>{% if plan.lease %} · <a href="{% url 'ledger:leases:detail' pk=plan.lease.pk %}">Lease {{ plan.lease.store.external_label }}</a>{% endif %}</p>
+  <h1>Installment plan, {{ parent_label }} <span class="badge" id="plan-status">{{ plan.get_status_display }}</span></h1>
+  <p class="muted" id="page-help">{{ plan_help }}</p>
+  <p id="plan-progress"><strong>{{ progress.text }}</strong></p>
+  {% if can_reschedule or can_cancel %}
+    <p class="actions">
+      {% if can_reschedule %}<a class="btn" href="{% url 'ledger:plans:reschedule' pk=plan.pk %}" id="plan-reschedule">Reschedule</a>{% endif %}
+      {% if can_cancel %}<a class="btn" href="{% url 'ledger:plans:cancel' pk=plan.pk %}" id="plan-cancel">Cancel plan</a>{% endif %}
+    </p>
+  {% endif %}
+  <dl id="plan-summary">
+    <dt>Operator</dt><dd>{{ plan.operator.display_name }}</dd>
+    <dt>Installments</dt><dd>{{ plan.count }}, {{ plan.get_cadence_display|lower }}</dd>
+    <dt>Collected by</dt><dd id="plan-collection">{{ plan.get_collection_display }}</dd>
+    <dt>Created</dt><dd>{{ plan.confirmed_at|date:"Y-m-d" }}{% if plan.created_by %} by {{ plan.created_by }}{% endif %}</dd>
+    {% if plan.cancelled_at %}<dt>Cancelled</dt><dd id="plan-cancelled">{{ plan.cancelled_at|date:"Y-m-d" }}: <span style="white-space:pre-wrap;">{{ plan.note }}</span></dd>{% endif %}
+  </dl>
+  {% include "ledger/installments/_installments.html" with installments=progress.installments count=plan.count %}
+{% endblock %}

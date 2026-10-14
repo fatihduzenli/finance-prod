@@ -78,6 +78,15 @@ billed by its own category as above; a payment on the invoice is a payment of it
 line's charge, and is collected split as it pays the lines, in line order, each part by
 its line's category (:func:`_add_invoice_lines`, two queries).
 
+**Installment plans** (PLAN-012e D12): the money of a split charge is counted once,
+under its parent. The parent stays billed as it was; an ``installment`` charge is never
+billed. A settled payment on an installment (less its settled refunds) is collected
+under the parent's category in the month the payment settled (``settled_on``), like
+every other payment, and a refund in its own ``settled_on`` month: as **rent collected**
+when the parent is a rent charge or an ``arrears`` charge, and as fees collected
+otherwise (:func:`_add_installments`, one query). A re-debit of a returned installment
+payment re-collects rent when the installment's parent is rent.
+
 **Deposits** (refundable fee types) are counted nowhere, except their withheld part as
 above and :func:`deposits_held` (the page footer).
 
@@ -503,6 +512,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
     )
     arrears = Q(one_off_charge__category=OneOffCategory.ARREARS)
     redebit = Q(one_off_charge__category=OneOffCategory.REDEBIT)
+    installment = Q(one_off_charge__category=OneOffCategory.INSTALLMENT)
     # A payment on a multi-line invoice is split by its lines (_add_invoice_lines).
     one_line = ~Q(one_off_charge__in=multi_line_charges())
     rent_payments = (
@@ -533,6 +543,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         not_deposit,
         ~arrears,
         ~redebit,
+        ~installment,
         one_line,
         operator=one_off_operator,
     ):
@@ -565,8 +576,9 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         if charge["category"] == OneOffCategory.ARREARS:
             row.rent_billed += _money_or_zero(charge["billed"])
             continue
-        if charge["category"] == OneOffCategory.REDEBIT:
-            # Collected only: what it re-collects was billed on its own charge (D5).
+        if charge["category"] in (OneOffCategory.REDEBIT, OneOffCategory.INSTALLMENT):
+            # Collected only: what it collects was billed on its own charge (PLAN-011b
+            # D5) or on its plan's parent (PLAN-012e D12).
             continue
         row.fees_billed += _money_or_zero(charge["billed"])
         row.fee_costs += _money_or_zero(charge["cost_total"])
@@ -575,6 +587,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
     _add_insurance(acc, start, end)
     _add_redebits(acc, start, end)
     _add_invoice_lines(acc, start, end)
+    _add_installments(acc, start, end)
 
     # PLAN-012e D5(d): the offset part of a withheld deposit paid the lease's open
     # charges, and those payments are counted where they were paid; only the rest of
@@ -631,6 +644,41 @@ def _add_invoice_lines(acc: dict[_Key, _Acc], start: date, end: date) -> None:
                 target.fees_collected += part.share
 
 
+def _add_installments(acc: dict[_Key, _Acc], start: date, end: date) -> None:
+    """Settled payments on installments, less their settled refunds, by ``settled_on``
+    month and under the category of the plan's parent (PLAN-012e D12; see the module
+    docstring). One query."""
+    plan = "one_off_charge__plan"
+    rows = (
+        Payment.objects.filter(
+            kind=PaymentKind.ONE_OFF,
+            status=PaymentStatus.SETTLED,
+            settled_on__gte=start,
+            settled_on__lte=end,
+            one_off_charge__category=OneOffCategory.INSTALLMENT,
+        )
+        .values(
+            store=F("one_off_charge__lease__store"),
+            operator=Coalesce("one_off_charge__operator", "one_off_charge__lease__operator"),
+            month=TruncMonth("settled_on"),
+            rent_parent=F(f"{plan}__rent_charge"),
+            parent_category=F(f"{plan}__one_off_charge__category"),
+        )
+        .annotate(
+            paid=Sum("amount", filter=Q(is_refund=False)),
+            refunded=Sum("amount", filter=Q(is_refund=True)),
+        )
+        .order_by()
+    )
+    for row in rows:
+        net = _money_or_zero(row["paid"]) - _money_or_zero(row["refunded"])
+        target = acc[_key(row)]
+        if row["rent_parent"] is not None or row["parent_category"] == OneOffCategory.ARREARS:
+            target.rent_collected += net
+        else:
+            target.fees_collected += net
+
+
 def _rent_like(kind: object, category: object) -> bool:
     """A payment of rent: of kind ``rent``, or on an ``arrears`` one-off charge."""
     return kind == PaymentKind.RENT or (
@@ -640,9 +688,12 @@ def _rent_like(kind: object, category: object) -> bool:
 
 def _re_collects_rent(row: Mapping[str, Any]) -> bool:
     """Whether a re-debit charge collects rent again: its returned payment was rent, or
-    was a payment on a re-debit of rent (two levels; deeper counts as fees)."""
+    was a payment on a re-debit of rent (two levels; deeper counts as fees), or on an
+    installment of a rent charge or of an ``arrears`` charge (PLAN-012e D12)."""
     if _rent_like(row["kind_1"], row["category_1"]):
         return True
+    if row["category_1"] == OneOffCategory.INSTALLMENT:
+        return row["plan_rent"] is not None or row["plan_category"] == OneOffCategory.ARREARS
     return row["category_1"] == OneOffCategory.REDEBIT and _rent_like(
         row["kind_2"], row["category_2"]
     )
@@ -673,6 +724,8 @@ def _add_redebits(acc: dict[_Key, _Acc], start: date, end: date) -> None:
             category_1=F(f"{source}__one_off_charge__category"),
             kind_2=F(f"{source}__one_off_charge__source_payment__kind"),
             category_2=F(f"{source}__one_off_charge__source_payment__one_off_charge__category"),
+            plan_rent=F(f"{source}__one_off_charge__plan__rent_charge"),
+            plan_category=F(f"{source}__one_off_charge__plan__one_off_charge__category"),
         )
         .order_by("settled_on", "created_at", "id")
     )

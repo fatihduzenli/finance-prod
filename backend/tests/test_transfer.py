@@ -46,8 +46,11 @@ from payments.models import ExternalRef, Job, JobKind
 from tests.test_lease_end import (
     ENDED,
     TODAY,
+    a_live_plan,
+    a_manual_charge,
     a_schedule,
     a_store_lease,
+    a_wire_lease,
     an_email_charge,
     deposit,
     fresh,
@@ -282,6 +285,14 @@ def test_each_lease_end_blocker_blocks_the_transfer(kind: str) -> None:
         )
     row = begin(lease)
     assert kind in {item.kind for item in transfer.blockers(row, TODAY)}
+
+
+def test_a_live_installment_plan_blocks_the_transfer() -> None:
+    lease = a_wire_lease()
+    plan = a_live_plan(a_manual_charge(lease))
+    row = begin(lease)
+    found = [item for item in transfer.blockers(row, TODAY) if item.url == f"/plans/{plan.pk}/"]
+    assert [item.kind for item in found] == [lease_end.INSTALLMENT_PLAN]
 
 
 def test_confirm_reads_the_blockers_again_and_writes_nothing(admin: Any) -> None:

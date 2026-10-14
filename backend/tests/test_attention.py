@@ -17,6 +17,7 @@ from ledger.models import (
     CollectionSchedule,
     CollectionStatus,
     ContactKind,
+    InstallmentPlan,
     InsurancePremium,
     Lease,
     Operator,
@@ -44,6 +45,7 @@ from payments.models import (
 )
 from tests.receivables_helpers import (
     a_lease,
+    a_one_off_charge,
     a_rent_charge,
     a_store,
     an_insurance_charge,
@@ -77,6 +79,44 @@ def opened(store: Store, day: date) -> Store:
     Store.objects.filter(pk=store.pk).update(open_date=day, needs_open_date=False)
     store.refresh_from_db()
     return store
+
+
+def returned_installment(lease: Lease) -> InstallmentPlan:
+    """A plan of one installment's returned debit, not resolved (PLAN-012e D11)."""
+    assert lease.operator is not None
+    plan = InstallmentPlan.objects.create(
+        rent_charge=a_rent_charge(lease, date(2026, 7, 1), RentChargeStatus.UNPAID),
+        operator=lease.operator,
+        lease=lease,
+        count=2,
+        first_due=date(2026, 9, 1),
+        cadence="monthly",
+        collection="autopay_due",
+        status="attention",
+        confirmed_at=datetime(2026, 8, 20, tzinfo=UTC),
+    )
+    installment = a_one_off_charge(
+        lease.operator,
+        "1750.00",
+        date(2026, 9, 1),
+        lease=lease,
+        category="installment",
+        collection="autopay_due",
+        description="Installment 1 of 2: Rent 2026-07",
+        plan=plan,
+        installment_no=1,
+    )
+    Payment.objects.create(
+        one_off_charge=installment,
+        kind=PaymentKind.ONE_OFF,
+        method=PaymentMethod.ACH,
+        amount=D("1750.00"),
+        status=PaymentStatus.RETURNED,
+        initiated_on=date(2026, 9, 1),
+        returned_at=datetime(2026, 9, 4, 12, 0, tzinfo=UTC),
+        return_code="R01",
+    )
+    return plan
 
 
 def returned_payment(lease: Lease, amount: str = "3500.00") -> Payment:
@@ -334,6 +374,7 @@ def build(n: int) -> None:
         Lease.objects.filter(pk=lease.pk).update(ended_on=TODAY + timedelta(days=20))
         a_rent_charge(lease, date(2026, 8, 1), RentChargeStatus.UNPAID)
         returned_payment(lease)
+        returned_installment(lease)
         an_insurance_charge(lease, 2025, date(2025, 10, 20), None)
         CollectionSchedule.objects.create(
             lease=lease, kind=ScheduleKind.RENT, seq=1, amount=D("3500.00"), needs_review=True
@@ -384,6 +425,35 @@ def test_the_list_reads_a_fixed_number_of_queries(today: date) -> None:
     assert set(kinds(every)) >= set(attention.KINDS) - {attention.RECONCILIATION_MISMATCHES}
     assert queries() == small
     assert queries(Operator.objects.order_by("display_name").first()) == small_operator
+
+
+def test_a_returned_installment_is_one_item_per_plan_linking_to_it(today: date) -> None:
+    lease = a_lease(a_store("2204 FOREST PARK", 2204), an_operator("Acme"))
+    plan = returned_installment(lease)
+    items = [
+        item
+        for item in attention.attention(TODAY).items
+        if item.kind == attention.INSTALLMENT_RETURNED
+    ]
+    assert [(item.text, item.url, item.since, item.severity) for item in items] == [
+        (
+            "Installment returned: 2204 FOREST PARK, Rent 2026-07, plan 0 of 2 paid",
+            f"/plans/{plan.pk}/",
+            date(2026, 9, 4),
+            attention.HIGH,
+        )
+    ]
+    assert attention.attention(TODAY, operator=lease.operator_id).items
+    Payment.objects.filter(one_off_charge__plan=plan).update(
+        resolved_at=datetime(2026, 10, 5, tzinfo=UTC),
+        resolution_note="Paid by wire",
+        resolution_kind="note",
+    )
+    assert not [
+        item
+        for item in attention.attention(TODAY).items
+        if item.kind == attention.INSTALLMENT_RETURNED
+    ]
 
 
 # --- The pages -----------------------------------------------------------------------------

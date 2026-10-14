@@ -23,7 +23,10 @@ transfer, make one cell with their sums. The cell's status, from its charges' st
 leaving out waived ones (all waived: ``waived``): all ``paid`` is ``paid``; any
 ``pending`` is ``pending``; something paid but not all is ``partial``; any ``unpaid`` is
 ``unpaid``; otherwise ``due``. A month with no charge before the month the store's first
-lease started is ``not due``; any other month with no charge is blank. A cell links to
+lease started is ``not due``; any other month with no charge is blank. A charge split
+into a live installment plan (PLAN-012e D12) counts what its installments were paid as
+paid (``partial`` once any is paid, else ``due``) and the cell shows the plan's progress
+(``plan 1 of 3 paid, 333.33 of 1,000.00``); a completed plan's charge is ``paid``. A cell links to
 its first charge (by lease creation and sequence) and shows the note marker when any of its
 charges has a note.
 
@@ -36,9 +39,10 @@ and the sum collected (``amount_paid``).
 headed ``YYYY-MM``, with the cell text (:func:`cell_text`); written by
 :class:`ledger.services.csv_export.CsvWriter`, so text cells are formula-safe.
 
-Three queries build the grid whatever the number of stores and months: the stores with
-their leases, the rent charges of the range (with a note flag), and the first initiation
-date of their pending payments. Money is ``Decimal``.
+Five queries build the grid whatever the number of stores and months: the stores with
+their leases, the rent charges of the range (with a note flag), the first initiation
+date of their pending payments, and the live installment plans of the range's charges
+with their installments. Money is ``Decimal``.
 """
 
 from __future__ import annotations
@@ -46,7 +50,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 
@@ -66,6 +70,7 @@ from ledger.models import (
     RentChargeStatus,
     Store,
 )
+from ledger.services import installments
 from ledger.services.csv_export import CsvWriter
 from ledger.services.pnl import (
     CAPPED,
@@ -204,6 +209,8 @@ class Cell:
     pending_from: date | None = None
     #: The arithmetic of the cell's prorated charges (PLAN-012e D2), for its title.
     proration_text: str = ""
+    #: The progress of the cell's live installment plans (PLAN-012e D12).
+    plan_text: str = ""
 
     @property
     def text(self) -> str:
@@ -222,6 +229,8 @@ def _amount(value: Decimal) -> str:
 
 def cell_text(cell: Cell) -> str:
     """The cell as the CSV writes it (D2)."""
+    if cell.plan_text:
+        return cell.plan_text
     if cell.status == STATUS_PAID:
         return f"paid {_amount(cell.amount_paid)}"
     if cell.status == STATUS_UNPAID:
@@ -329,6 +338,7 @@ class _Charge:
     amount_paid: Decimal
     has_note: bool
     proration_text: str = ""
+    plan_text: str = ""
 
 
 def _charges(start: date, end: date) -> dict[tuple[uuid.UUID, date], list[_Charge]]:
@@ -348,11 +358,23 @@ def _charges(start: date, end: date) -> dict[tuple[uuid.UUID, date], list[_Charg
         )
         .order_by("lease__store", "period_month", "lease__created_at", "seq", "pk")
     )
+    plans = installments.live_rent_progress(start, end)
     found: dict[tuple[uuid.UUID, date], list[_Charge]] = defaultdict(list)
     for pk, store, month, status, due, paid, has_note, text in rows:
-        found[(store, month)].append(
-            _Charge(pk, status, Decimal(str(due)), Decimal(str(paid)), bool(has_note), text or "")
+        charge = _Charge(
+            pk, status, Decimal(str(due)), Decimal(str(paid)), bool(has_note), text or ""
         )
+        plan = plans.get(pk)
+        if plan is not None:
+            # The parent's own paid amount stays; its installments pay the rest.
+            paid_now = charge.amount_paid + plan.paid
+            charge = replace(
+                charge,
+                status=STATUS_PARTIAL if paid_now > 0 else STATUS_DUE,
+                amount_paid=paid_now,
+                plan_text=plan.short_text,
+            )
+        found[(store, month)].append(charge)
     return found
 
 
@@ -434,6 +456,7 @@ def _cell(
         proration_text="; ".join(
             charge.proration_text for charge in charges if charge.proration_text
         ),
+        plan_text="; ".join(charge.plan_text for charge in charges if charge.plan_text),
     )
 
 

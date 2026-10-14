@@ -84,6 +84,8 @@ HEADERS: frozenset[str] = frozenset(
         "Provider transaction (masked)",
         "Return code",
         "Recorded by",
+        # PLAN-012e D12: the charge an installment's plan splits.
+        "Installment of",
         # Profit and loss
         "Rent billed (USD)",
         "Rent collected (USD)",

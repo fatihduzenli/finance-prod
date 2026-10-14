@@ -12,6 +12,11 @@ page that deals with it and ``since``, the day it began:
   return the returns queue still holds (``status = returned``, ``resolved_at`` null) is
   listed: ``payments.resolution_kind`` does not exist yet, so no return counts as
   rescheduled;
+- ``installment_returned`` (PLAN-012e D11): one item per installment plan while one of
+  its installments has a returned payment not resolved (the plan's status is then
+  ``attention``), ``"Installment returned: <store>, <parent>, plan <n> of <N> paid"``,
+  linking to the plan; cleared once the return is resolved (rescheduled with the NSF
+  fee, or resolved with a note);
 - ``broken_promise``: a promise to pay past its date (the rule is in
   :mod:`ledger.services.contacts`); a promise about a lease names its store and what is
   still open on that lease (PLAN-012 D3: ``"... : Acme on store 2477: owes $1,250.00,
@@ -61,16 +66,20 @@ from ledger.models import (
     CollectionSchedule,
     CollectionStatus,
     ContactEntry,
+    InstallmentPlan,
     InsuranceCharge,
     InsurancePremium,
     Lease,
+    OneOffChargeStatus,
     Operator,
+    Payment,
+    PaymentStatus,
     ScheduleState,
     Store,
     StoreCost,
     StoreStatus,
 )
-from ledger.services import calendar, contacts, insurance, receivables, returns
+from ledger.services import calendar, contacts, installments, insurance, receivables, returns
 from ledger.services.leases import format_amount
 from payments.models import ReconciliationMismatch, WebhookEvent, WebhookOutcome
 
@@ -81,6 +90,7 @@ _SEVERITY_RANK = {HIGH: 0, MEDIUM: 1, LOW: 2}
 
 OVERDUE = "overdue"
 RETURNED_DEBIT = "returned_debit"
+INSTALLMENT_RETURNED = "installment_returned"
 BROKEN_PROMISE = "broken_promise"
 INSURANCE_DUE = "insurance_due"
 INSURANCE_PREMIUM_MISSING = "insurance_premium_missing"
@@ -97,6 +107,7 @@ CALENDAR_TODAY = "calendar_today"
 KINDS: tuple[str, ...] = (
     OVERDUE,
     RETURNED_DEBIT,
+    INSTALLMENT_RETURNED,
     BROKEN_PROMISE,
     INSURANCE_PREMIUM_MISSING,
     INSURANCE_DUE,
@@ -113,6 +124,7 @@ KINDS: tuple[str, ...] = (
 KIND_LABELS: dict[str, str] = {
     OVERDUE: "overdue charges",
     RETURNED_DEBIT: "returned debits",
+    INSTALLMENT_RETURNED: "installment plans with a returned debit",
     BROKEN_PROMISE: "broken promises",
     INSURANCE_PREMIUM_MISSING: "insurance premiums missing",
     INSURANCE_DUE: "insurance due soon",
@@ -136,6 +148,7 @@ VACANT_DAYS = 30
 #: Most items of one kind the dashboard lists.
 KIND_LIMIT = 25
 RETURNED_TEXT = "Returned debit not rescheduled: {store}, {amount}, returned {date}"
+INSTALLMENT_RETURNED_TEXT = "Installment returned: {store}, {parent}, plan {paid} of {count} paid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +228,53 @@ def _returned(today: date, operator: uuid.UUID | None) -> list[Item]:
                 url=f"{reverse('ledger:returns:list')}#return-{payment.pk}",
                 since=returned_on,
                 operator_id=operator_id,
+            )
+        )
+    return found
+
+
+def _installments_returned(operator: uuid.UUID | None) -> list[Item]:
+    """One item per plan with a returned installment payment not resolved, earliest
+    return first (three queries)."""
+    returns_open = Payment.objects.filter(
+        status=PaymentStatus.RETURNED,
+        is_refund=False,
+        resolved_at__isnull=True,
+        one_off_charge__plan__isnull=False,
+    )
+    if operator is not None:
+        returns_open = returns_open.filter(one_off_charge__plan__operator=operator)
+    since: dict[uuid.UUID, date | None] = {}
+    for plan_id, returned_at in returns_open.values_list(
+        "one_off_charge__plan", "returned_at"
+    ).order_by("returned_at", "id"):
+        day = timezone.localdate(returned_at) if returned_at is not None else None
+        since.setdefault(plan_id, day)
+    plans = (
+        InstallmentPlan.objects.filter(pk__in=list(since))
+        .select_related("lease__store", "rent_charge", "one_off_charge__fee_type")
+        .annotate(
+            paid=Count("installments", filter=Q(installments__status=OneOffChargeStatus.PAID))
+        )
+    )
+    by_pk = {plan.pk: plan for plan in plans}
+    found = []
+    for plan_id, day in since.items():
+        plan = by_pk[plan_id]
+        store = plan.lease.store.external_label if plan.lease is not None else "No store"
+        found.append(
+            Item(
+                kind=INSTALLMENT_RETURNED,
+                severity=HIGH,
+                text=INSTALLMENT_RETURNED_TEXT.format(
+                    store=store,
+                    parent=installments.parent_label(plan.parent),
+                    paid=plan.paid,
+                    count=plan.count,
+                ),
+                url=reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
+                since=day,
+                operator_id=plan.operator_id,
             )
         )
     return found
@@ -548,6 +608,7 @@ def attention(
     sources: list[Callable[[], list[Item]]] = [
         lambda: _overdue(today, balances),
         lambda: _returned(today, operator),
+        lambda: _installments_returned(operator),
         lambda: _promises(today, operator, balances),
         lambda: _insurance(today, leases),
         lambda: _lease_ending(today, leases),

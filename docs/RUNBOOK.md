@@ -566,3 +566,39 @@ hand. **Confirm** lists every effect and needs the box ticked. Then the lease is
 shows "Vacant since <date>", the worker stores the final statement as a PDF under the store's
 documents (kind *Final statement*) and queues the e-mail to the operator (sent when mail is on,
 to the catch-all on staging, recorded as suppressed when mail is off). Every step is audited.
+An installment plan that is live on a charge of the lease is a blocker too: let it complete or
+cancel it (admin) first.
+
+**Transfer** (store page, admin). Pick the incoming operator from the list or create one on the
+spot (name, e-mail, phone, SMS phone and consents); the transfer cannot pass while the outgoing
+operator owes anything or any lease-end blocker stands (the same list, with links); then the
+end-of-lease steps run for the outgoing lease (reason *transfer*); then the incoming lease is
+entered (start date no earlier than the day after the end, rent, deposit, setup charges from
+the catalogue), and confirm ends the outgoing lease, creates the incoming one and leaves the
+deposit and setup charges as one invoice-builder draft ("Move-in charges for store <label>")
+for staff to review and send. Nothing reaches Stax until that draft is sent. No store ever has
+two leases in effect on one day.
+
+**Installment plans** (billing). On a rent charge page or a one-off charge page, **Split into
+installments** divides what is still owed into 2 to 12 equal installments (the rounding cent on
+the last), from a first date (today or later) weekly, every two weeks or monthly (the 31st
+becomes the month's last day); the preview can be edited line by line before confirming as long
+as the amounts still add up and the dates stay in order. Each installment is a charge of its own
+("Installment 2 of 3: Rent 2026-10"), collected the way the parent is: autopay on the due date
+(one Stax schedule each; needs the linked bank method), by e-mail (one Stax invoice each) or by
+hand (nothing at Stax). While the plan runs the parent is paid through its installments only: it
+leaves the open balances, aging, arrears and the attention list, its page and grid cell show
+"plan n of N paid, $X of $Y", and a payment typed on it is refused. When every installment is
+paid the plan is completed and the parent is marked paid with an audit row and no payment of its
+own. A charge cannot be split while a Stax invoice or schedule of it is live, while a payment on
+it is pending, or while rent autopay would debit it: collect, cancel or stop those first (see
+the sentence on the page). Deposits, re-debits, NSF fees and installments are never split. A
+**returned installment** debit follows the NSF rule from the returns queue (re-debit plus the
+fee, $100 the first time and $50 after, agreed by phone) and puts the plan on the attention list
+("Installment returned: …") until the return is resolved. **Reschedule** (billing, plan page)
+moves the installments not yet paid to new dates from a new first date; Stax schedules and
+invoices follow through the worker. **Cancel** (admin, a note) cancels the unpaid installments
+(their Stax objects are deleted by the worker) and leaves the parent open for what they did not
+collect. The P&L and the payments ledger count the money once, under the parent, each payment
+in the month it settled; installments are never billed lines; the ledger's CSV names the parent
+in "Installment of".

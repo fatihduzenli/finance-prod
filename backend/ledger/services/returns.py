@@ -4,7 +4,9 @@ An ACH debit the provider reports returned lands here (``payments.status = retur
 ``resolved_at`` null) through the webhook processor, which also reopens the charge.
 Staff resolve a return with a mandatory note; that sets ``resolved_at``,
 ``resolved_by``, ``resolution_note`` and ``resolution_kind = note`` and writes an audit
-row. Resolving with a note changes nothing else: no charge, no provider call. The other
+row. Resolving with a note changes nothing else: no charge, no provider call; a returned
+installment's plan (PLAN-012e D11) leaves ``attention`` once no return of it is open
+(:func:`ledger.services.one_off_charges.sync_plan`). The other
 resolution, **Reschedule** (a re-debit on an agreed date with the NSF fee, PLAN-011b D5),
 is :func:`ledger.services.nsf.reschedule`.
 """
@@ -23,6 +25,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from ledger.models import AuditLog, Operator, Payment, PaymentStatus, ResolutionKind, Store
+from ledger.services import one_off_charges
 from ledger.services.payments_ledger import charge_lease
 from ledger.validators import visible_text
 
@@ -130,4 +133,6 @@ def resolve_return(
                 "resolution_kind": payment.resolution_kind,
             },
         )
+        if payment.one_off_charge is not None and payment.one_off_charge.plan_id is not None:
+            one_off_charges.sync_plan(payment.one_off_charge.plan_id, actor=actor)
     return ResolveOutcome(True, RESOLVED)

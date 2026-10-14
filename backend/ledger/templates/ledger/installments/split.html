@@ -1,0 +1,52 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Split {{ parent_label }} into installments{% endblock %}
+{% block content %}
+  <p><a href="{{ parent_url }}">&larr; {{ parent_label }}</a></p>
+  <h1>Split {{ parent_label }} into installments</h1>
+  <p class="muted" id="page-help">{{ split_help }}</p>
+  <dl id="split-summary">
+    <dt>Balance to split</dt><dd id="split-balance">${{ balance }}</dd>
+    <dt>Each installment collected by</dt><dd id="split-collection">{{ collection }}</dd>
+  </dl>
+  {% if refusal %}
+    <p id="split-refusal"><strong>{{ refusal }}</strong></p>
+  {% else %}
+    <form method="get" action="{{ action }}" id="split-form" autocomplete="off">
+      {{ form.non_field_errors }}
+      {% for field in form %}
+        <p><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field.errors }}<br>{{ field }}</p>
+      {% endfor %}
+      <p class="actions"><button class="btn" type="submit" id="split-preview">Preview</button></p>
+    </form>
+    {% if lines %}
+      <h2>Preview</h2>
+      <p class="muted" id="preview-help">{{ preview_help }}</p>
+      <form method="post" action="{{ action }}" id="confirm-form" class="js-single-submit" autocomplete="off">
+        {% csrf_token %}
+        <input type="hidden" name="count" value="{{ count }}">
+        <input type="hidden" name="first_due" value="{{ first_due }}">
+        <input type="hidden" name="cadence" value="{{ cadence }}">
+        {% responsive_table %}
+        <table id="split-lines">
+          <thead><tr><th>Installment</th><th>Due</th><th>Amount (USD)</th></tr></thead>
+          <tbody>
+            {% for number, due, amount in lines %}
+              <tr class="split-line">
+                <td>{{ number }} of {{ count }}</td>
+                <td><input type="date" name="due_{{ number }}" value="{{ due }}" required aria-label="Installment {{ number }} due date"></td>
+                <td><input type="text" inputmode="decimal" name="amount_{{ number }}" value="{{ amount }}" required maxlength="10" aria-label="Installment {{ number }} amount"></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endresponsive_table %}
+        {% if large_debit %}
+          <p><label><input type="checkbox" name="{{ confirm_field }}" id="split-confirmed"> I confirm the large autopay debits.</label></p>
+        {% endif %}
+        <p class="actions"><button class="btn btn-primary" type="submit" id="split-confirm">Create the plan</button></p>
+      </form>
+    {% endif %}
+  {% endif %}
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

@@ -23,6 +23,7 @@ from ledger.models import OneOffCharge, Operator
 from ledger.services import (
     calendar,
     disputes,
+    installments,
     lease_end,
     leases,
     messages,
@@ -190,7 +191,10 @@ def invoice_create_job(job: Job) -> Result:
     """PLAN-010d D3: the one-off charge's provider invoice (and its e-mail). PLAN-012 D6:
     with :data:`ledger.services.one_off_charges.CHARGE_NOW_PARAM`, a successful create
     queues the ``invoice_pay`` job (the single attempt of 10d, its confirmation carried
-    over)."""
+    over). PLAN-012e D11: with :data:`ledger.services.installments.RESCHEDULE_PARAM`, the
+    provider invoice of a moved installment gets its new due date."""
+    if job.params.get(installments.RESCHEDULE_PARAM) is True:
+        return one_off_invoices.move_invoice(job.entity_id, job.requested_by)
     ok, text = one_off_invoices.create_provider_invoice(job.entity_id, job.requested_by)
     if ok and job.params.get(one_off_charges.CHARGE_NOW_PARAM) is True:
         charge = OneOffCharge.objects.get(pk=job.entity_id)
@@ -219,7 +223,11 @@ def invoice_delete_job(job: Job) -> Result:
 
 
 def schedule_create_job(job: Job) -> Result:
-    """PLAN-010d D2: the one-occurrence schedule of an ``autopay_due`` charge."""
+    """PLAN-010d D2: the one-occurrence schedule of an ``autopay_due`` charge. PLAN-012e
+    D11: with :data:`ledger.services.installments.RESCHEDULE_PARAM`, the schedule of a
+    moved installment gets its new date."""
+    if job.params.get(installments.RESCHEDULE_PARAM) is True:
+        return one_off_invoices.move_schedule(job.entity_id, job.requested_by)
     return one_off_invoices.schedule(job.entity_id, job.requested_by)
 
 

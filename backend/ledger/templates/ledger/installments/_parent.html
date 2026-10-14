@@ -1,0 +1,11 @@
+{% if plan_progress %}
+  <h2>Installment plan</h2>
+  <p id="parent-plan-progress"><a href="{% url 'ledger:plans:detail' pk=plan_progress.plan.pk %}">{{ plan_progress.text }}</a> <span class="badge">{{ plan_progress.plan.get_status_display }}</span></p>
+  {% if plan_live %}<p class="muted">While the plan runs, this charge is paid through its installments; record payments on them.</p>{% endif %}
+  {% include "ledger/installments/_installments.html" with installments=plan_progress.installments count=plan_progress.count %}
+{% endif %}
+{% if can_split %}
+  <p class="actions"><a class="btn" href="{{ split_url }}" id="split-installments">Split into installments</a> <span class="muted">{{ split_help }}</span></p>
+{% elif split_refusal %}
+  <p class="muted" id="split-refusal">Split into installments is not possible now: {{ split_refusal }}</p>
+{% endif %}

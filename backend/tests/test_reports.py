@@ -24,8 +24,11 @@ from django.utils import timezone
 
 from accounts.roles import Role
 from ledger.models import (
+    LIVE_PLAN_STATUSES,
     CollectionStatus,
     FeeType,
+    InstallmentCadence,
+    InstallmentPlan,
     InsuranceCharge,
     LegacyStatus,
     OneOffCategory,
@@ -33,13 +36,14 @@ from ledger.models import (
     OneOffChargeStatus,
     Operator,
     Payment,
+    PaymentChannel,
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
 )
-from ledger.services import pnl, receivables, reports
+from ledger.services import installments, one_off_charges, pnl, receivables, reports
 from payments.models import (
     Deposit,
     MismatchKind,
@@ -316,9 +320,10 @@ class _Redebit:
 
 
 class _World:
-    """Random charges, payments, refunds, waivers, voids, deposits and rescheduled returns
-    (rent, insurance and one-off), and what is owed on each charge, kept here from the
-    operations alone (the oracle)."""
+    """Random charges, payments, refunds, waivers, voids, deposits, rescheduled returns
+    (rent, insurance and one-off) and installment plans (PLAN-012e D12: split, paid in
+    part, cancelled), and what is owed on each charge, kept here from the operations
+    alone (the oracle)."""
 
     def __init__(self, seed: int) -> None:
         self.random = random.Random(seed)  # noqa: S311 - test data, not security
@@ -329,6 +334,9 @@ class _World:
         self.insurance_payments: list[Payment] = []
         self.one_off: list[OneOffCharge] = []
         self.redebits: list[_Redebit] = []
+        self.plans: list[tuple[InstallmentPlan, RentCharge | OneOffCharge]] = []
+        self.installments: list[OneOffCharge] = []
+        self.admin: Any = None
         self.ran: Counter[str] = Counter()
 
     def amount(self, low: int = 1, high: int = 500_000) -> Decimal:
@@ -479,10 +487,13 @@ class _World:
         returned = self.amount(1, int(amount * 100))
         kind = self.random.choice(["rent", "insurance", "one_off"])
         source: dict[str, Any]
+        owed_from = due
         if kind == "rent":
             rent = a_rent_charge(lease, due.replace(day=1), due=str(amount))
             source = {"rent_charge": rent, "kind": PaymentKind.RENT}
             charge_id = rent.pk
+            # The rent charge is due on the lease's debit day of that month.
+            owed_from = rent.due_on
         elif kind == "insurance":
             insurance = an_insurance_charge(lease, due.year, due, str(amount))
             source = {
@@ -520,7 +531,7 @@ class _World:
             companion_of=redebit,
         )
         self.redebits.append(_Redebit(redebit, fee, []))
-        self.owed[charge_id] = _Owed(due, amount - returned)
+        self.owed[charge_id] = _Owed(owed_from, amount - returned)
         self.owed[redebit.pk] = _Owed(on, returned)
         self.owed[fee.pk] = _Owed(on, fee.price)
 
@@ -554,6 +565,75 @@ class _World:
         transaction_handler._refresh_charge(payment, returned=True)
         self._reallocate(item)
 
+    def split_charge(self) -> None:
+        """A new charge, rent (of a lease paid by wire) or one-off (paid by hand), split
+        into installments: from now on its balance is owed through them (PLAN-012e D9)."""
+        operator = self.random.choice(self.operators)
+        due = self.due()
+        amount = self.amount(200)
+        parent: RentCharge | OneOffCharge
+        if self.random.random() < 0.5:
+            lease = a_lease(operator=operator, channel=PaymentChannel.WIRE)
+            parent = a_rent_charge(lease, due.replace(day=1), due=str(amount))
+            parent_due = parent.due_on
+        else:
+            parent = a_one_off_charge(operator, str(amount), due)
+            parent_due = parent.due_date
+        count = self.random.randint(2, 12)
+        cadence = self.random.choice(list(InstallmentCadence.values))
+        first = TODAY + timedelta(days=self.random.randint(0, 30))
+        lines, refused = installments.preview(parent, count, first, cadence, today=TODAY)
+        assert refused is None, refused
+        made = installments.create_plan(parent, count, first, cadence, lines, None, today=TODAY)
+        assert made.ok and made.plan is not None, made.message
+        self.plans.append((made.plan, parent))
+        self.owed[parent.pk] = _Owed(parent_due, ZERO)
+        for row in installments.installments_of(made.plan):
+            self.installments.append(row)
+            self.owed[row.pk] = _Owed(row.due_date, row.price)
+
+    def pay_installment(self) -> None:
+        """A manual payment of part or all of one installment: it pays that one only."""
+        open_rows = [row for row in self.installments if self.owed[row.pk].owed > 0]
+        if not open_rows:
+            return
+        row = self.random.choice(open_rows)
+        pay = min(self.amount(), self.owed[row.pk].owed)
+        recorded = one_off_charges.record_payment(
+            row.pk,
+            method=PaymentMethod.ZELLE,
+            amount=pay,
+            paid_on=TODAY,
+            note="Paid by Zelle",
+            actor=None,
+            today=TODAY,
+        )
+        assert recorded.ok, recorded.message
+        self.owed[row.pk].owed -= pay
+
+    def cancel_plan(self) -> None:
+        """An admin cancels a live plan none of whose installments is part paid: the
+        unpaid installments are owed no more and the parent is owed what they left."""
+        candidates = []
+        for plan, parent in self.plans:
+            rows = installments.installments_of(plan)
+            plan.refresh_from_db()
+            part_paid = any(0 < row.amount_paid < row.price for row in rows)
+            if plan.status in LIVE_PLAN_STATUSES and not part_paid:
+                candidates.append((plan, parent, rows))
+        if not candidates:
+            return
+        plan, parent, rows = self.random.choice(candidates)
+        if self.admin is None:
+            self.admin = client_for(Role.ADMIN)[1]
+        done = installments.cancel(plan, "The operator asked to stop the plan.", self.admin)
+        assert done.ok, done.message
+        left = ZERO
+        for row in rows:
+            left += self.owed[row.pk].owed
+            self.owed[row.pk].owed = ZERO
+        self.owed[parent.pk].owed = left
+
     def step(self) -> None:
         operation = self.random.choice(
             [
@@ -572,6 +652,10 @@ class _World:
                 self.settle_redebit,
                 self.settle_redebit,
                 self.return_redebit_payment,
+                self.split_charge,
+                self.pay_installment,
+                self.pay_installment,
+                self.cancel_plan,
             ]
         )
         operation()
@@ -599,7 +683,7 @@ def test_the_aging_total_equals_the_dashboard_under_random_data(today: date) -> 
         assert report.totals.count == count, round_number
         found = {name: amount for name, amount in report.totals.buckets.items() if amount}
         assert found == {name: amount for name, amount in buckets.items() if amount}, round_number
-    assert len(world.owed) > 60 and len(world.ran) == 13, world.ran  # every operation ran
+    assert len(world.owed) > 60 and len(world.ran) == 16, world.ran  # every operation ran
 
 
 # --- Revenue by month -------------------------------------------------------------------
@@ -1059,7 +1143,8 @@ def test_the_report_query_counts_do_not_grow_with_the_data(today: date) -> None:
     # PLAN-011b D5: one more each for the re-debits (open balances, P&L collected).
     # PLAN-012 D6: two more for the revenue (the P&L's multi-line invoices and lines),
     # and one for the statement (its payments on multi-line invoices, split by line).
-    assert small == {"aging": 4, "revenue": 16, "by_method": 1, "deposits": 3, "statement": 6}
+    # PLAN-012e D12: one more for the revenue (installment payments, under their parent).
+    assert small == {"aging": 4, "revenue": 17, "by_method": 1, "deposits": 3, "statement": 6}
 
 
 def test_a_pending_charge_is_owed_and_current_until_due(today: date) -> None:

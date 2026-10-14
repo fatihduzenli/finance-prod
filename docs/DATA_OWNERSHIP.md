@@ -335,6 +335,14 @@ scans are covered by the stated policy, not by a check.
 | `lease_end_deductions.kind`, `description`, `amount` | App | damage / cleaning / unpaid_balance / other; one row per typed line |
 | `lease_transfers.*` | System | The outgoing lease, its lease end, the incoming lease and the move-in draft; written once at confirm |
 
+### installment_plans, one_off_charges.plan / installment_no (PLAN-012e)
+| Field | Owner | Note |
+|---|---|---|
+| `installment_plans.rent_charge_id` / `one_off_charge_id`, `operator_id`, `lease_id`, `count`, `first_due`, `cadence`, `collection` | App | Set once at confirm from the parent charge (exactly one parent; count 2–12; collection as the parent's); `first_due` and `cadence` follow a reschedule |
+| `installment_plans.status`, `confirmed_at`, `cancelled_at`, `created_by_id` | System | `active` / `attention` (a returned installment unresolved) / `completed` / `cancelled`; derived from the installments' payments on every recompute; at most one plan that is not cancelled per parent (partial unique indexes) |
+| `installment_plans.note` | App | The admin's cancel note; guarded text (PostgreSQL trigger) |
+| `one_off_charges.plan_id`, `installment_no` | System | Set exactly for category `installment` (CHECK); an installment's description, price and due date come from the confirmed preview; its payments are its own, counted under the parent in reports |
+
 ### deposit_resolutions — `offset_amount` (PLAN-012e)
 | Field | Owner | Note |
 |---|---|---|

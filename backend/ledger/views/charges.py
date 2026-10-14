@@ -30,6 +30,7 @@ from ledger.models import ChargeEntityType, ChargeNote, RentCharge, RentChargeSt
 from ledger.services import collections, csv_export, rent_run
 from ledger.services.csv_export import CsvWriter
 from ledger.services.rent_run import MarkAction, MarkResult
+from ledger.views.installments import parent_context
 from ledger.views.jobs import already_submitted, busy, job_context, submit
 from ledger.views.operators import (
     _actor,
@@ -135,7 +136,14 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "carried_balance": rent_run.carried_balance(charge),
             "can_record": billing
             and charge.status != RentChargeStatus.WAIVED
-            and charge.balance > 0,
+            and charge.balance > 0
+            and not rent_run.on_live_plan(rent_charge=charge),
+            # PLAN-012e D9, D10: the plan's progress and the Split button.
+            **parent_context(
+                charge,
+                billing=billing,
+                split_url=reverse("ledger:charges:split", kwargs={"pk": charge.pk}),
+            ),
             "can_retry_mark": retry_wait == 0 and not jobs["job_refresh"],
             "can_link_invoice": billing and not charge.invoices.exists(),
             "retry_wait_message": (

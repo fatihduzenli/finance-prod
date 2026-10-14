@@ -34,6 +34,12 @@ class and the field names it rejected (never provider text).
   carries two lines, the re-debit and its NSF fee unless waived (:func:`charge_amounts`),
   and the invoice it generates links to the re-debit charge; :func:`delete_schedule`
   (``schedule_delete``) deletes it while it has generated no invoice.
+- :func:`move_schedule` and :func:`move_invoice` (``schedule_create`` and
+  ``invoice_create`` with ``params.reschedule``; PLAN-012e D11): an installment moved
+  to a new date. The schedule's rule is updated to one occurrence on the new date
+  (refused once it generated its invoice, or when the date has passed); the provider
+  invoice's due date is updated (a paid or deleted one is never touched). Without a
+  provider object yet, each creates it as the plain job does.
 - :func:`pay` (``invoice_pay``): "Charge now" (D4), one attempt. The local rules are
   checked again (:func:`ledger.services.one_off_charges.charge_now_refusal`), the
   invoice is re-fetched (one the provider shows paid or deleted is never charged), then
@@ -86,12 +92,14 @@ from payments.provider import (
     InvoiceInput,
     InvoiceQuery,
     InvoiceRecord,
+    InvoiceUpdate,
     LineItem,
     PaymentProvider,
     PayWithStoredMethod,
     ScheduleInput,
     ScheduleQuery,
     ScheduleRecord,
+    ScheduleUpdate,
     mask_identifier,
 )
 from payments.webhooks.events import ignored
@@ -170,6 +178,14 @@ CHARGE_STAYS_OPEN = " The charge stays open; Charge now is possible again in one
 CHARGE_PAID_AT_PROVIDER = "The payment provider shows the invoice paid. Nothing was charged."
 CHARGE_DELETED = "The payment provider shows the invoice deleted. Nothing was charged."
 CHARGE_NOW_NO_KEY = "The charge has no Charge now identifier. Nothing was charged."
+MOVED_SCHEDULE = "Autopay moved to {date}."
+MOVE_SCHEDULE_FIRED = "The schedule already generated its invoice. Its date was not changed."
+MOVE_SCHEDULE_FAILED = "The payment provider did not move the schedule"
+MOVED_INVOICE = "Invoice {number} at the payment provider is now due {date}."
+MOVE_INVOICE_CLOSED = (
+    "The payment provider shows the invoice paid or deleted. Its due date was not changed."
+)
+MOVE_INVOICE_FAILED = "The payment provider did not change the invoice's due date"
 
 OTHER_OPERATOR = ignored("reference of another operator")
 SECOND_INVOICE = ignored("second invoice for a one-off charge")
@@ -836,6 +852,89 @@ def delete_schedule(charge_id: uuid.UUID, actor: User | None) -> Result:
             superseded_at__isnull=True,
         ).update(superseded_at=timezone.now())
     return ok, text
+
+
+# --- Moving an installment (PLAN-012e D11) --------------------------------------------
+
+
+def move_schedule(
+    charge_id: uuid.UUID, actor: User | None, *, now: datetime | None = None
+) -> Result:
+    """The ``schedule_create`` job with ``params.reschedule``; see the module docstring."""
+    charge = _charge(charge_id)
+    if charge is None:
+        return False, NO_CHARGE
+    if charge.status == OneOffChargeStatus.VOIDED:
+        return True, VOIDED_NOTHING
+    ref = _schedule_ref(charge)
+    if not ref:
+        return schedule(charge_id, actor, now=now)
+    moment = now or timezone.now()
+    if charge.due_date < timezone.localdate(moment):
+        return False, DUE_PASSED
+    if charge.invoices.exists():
+        return False, MOVE_SCHEDULE_FIRED
+    rule = schedule_rule(charge.due_date, moment)
+    provider = payments.get_provider()
+    try:
+        generated = [
+            record
+            for record in provider.list_invoices(InvoiceQuery(schedule_external_id=ref))
+            if invoice_sync.schedule_id(record) == ref and not invoice_sync.shows_deleted(record)
+        ]
+        if generated:
+            return False, MOVE_SCHEDULE_FIRED
+        record = provider.update_scheduled_invoice(ref, ScheduleUpdate(rule=rule))
+    except ProviderError as error:
+        return _failed(
+            charge, actor, "one_off_charge.schedule_move_failed", error, MOVE_SCHEDULE_FAILED
+        )
+    _audit(
+        actor,
+        "one_off_charge.schedule_moved",
+        ENTITY_CHARGE,
+        charge.pk,
+        {"schedule": mask_identifier(ref), "rule": record.rule or rule},
+    )
+    return True, MOVED_SCHEDULE.format(date=charge.due_date.isoformat())
+
+
+def move_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
+    """The ``invoice_create`` job with ``params.reschedule``; see the module docstring."""
+    charge = _charge(charge_id)
+    if charge is None:
+        return False, NO_CHARGE
+    if charge.status == OneOffChargeStatus.VOIDED:
+        return True, VOIDED_NOTHING
+    invoice = _invoice(charge)
+    ref = _ref(invoice) if invoice is not None else ""
+    if invoice is None or not ref:
+        return create_provider_invoice(charge_id, actor)
+    provider = payments.get_provider()
+    try:
+        record = _fetch(provider.get_invoice, ref)
+        if record is None or invoice_sync.shows_paid(record) or invoice_sync.shows_deleted(record):
+            return False, MOVE_INVOICE_CLOSED
+        record = provider.update_invoice(ref, InvoiceUpdate(due_on=invoice.due_date))
+    except ProviderError as error:
+        return _failed(
+            charge, actor, "one_off_charge.invoice_move_failed", error, MOVE_INVOICE_FAILED
+        )
+    invoice_sync.record_provider_state(invoice.pk, record)
+    _audit(
+        actor,
+        "one_off_charge.invoice_moved",
+        ENTITY_CHARGE,
+        charge.pk,
+        {
+            "invoice_number": invoice.invoice_number,
+            "provider_invoice": mask_identifier(ref),
+            "due_date": invoice.due_date.isoformat(),
+        },
+    )
+    return True, MOVED_INVOICE.format(
+        number=invoice.invoice_number, date=invoice.due_date.isoformat()
+    )
 
 
 # --- Charge now (D4) -------------------------------------------------------------------

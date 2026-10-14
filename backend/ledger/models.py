@@ -857,6 +857,8 @@ class OneOffCategory(models.TextChoices):
     REDEBIT = "redebit", "Re-debit"
     #: The fee for a returned debit, made with its re-debit (``companion_of``).
     NSF_FEE = "nsf_fee", "NSF fee"
+    #: One installment of a plan (PLAN-012e D9); ``plan`` and ``installment_no`` name it.
+    INSTALLMENT = "installment", "Installment"
 
 
 class CollectionMethod(models.TextChoices):
@@ -872,6 +874,9 @@ class CollectionMethod(models.TextChoices):
 
 #: Longest description of a one-off charge: the invoice's line item (PLAN-010d D1).
 DESCRIPTION_MAX_LENGTH = 120
+#: The fewest and most installments of a plan (PLAN-012e D9).
+INSTALLMENTS_MIN = 2
+INSTALLMENTS_MAX = 12
 #: Why a save that changes a stored ``charge_now_key`` is refused (PLAN-010d D4).
 CHARGE_NOW_KEY_FIXED = "The Charge now identifier of a one-off charge cannot change once set."
 #: The categories other than ``setup``: each CHECK below reads only valid categories, so
@@ -883,6 +888,7 @@ NON_SETUP_CATEGORIES: list[str] = [
     OneOffCategory.OTHER.value,
     OneOffCategory.REDEBIT.value,
     OneOffCategory.NSF_FEE.value,
+    OneOffCategory.INSTALLMENT.value,
 ]
 #: The fee types of the NSF fee (PLAN-011b D5): the first return of an operator, then
 #: every later one. Seeded inactive, so the setup checklist never offers them.
@@ -959,6 +965,16 @@ class OneOffCharge(GuardedModel):
     companion_of = models.ForeignKey(
         "self", on_delete=models.PROTECT, null=True, blank=True, related_name="companions"
     )
+    #: PLAN-012e D9: the plan an ``installment`` charge belongs to, and its place in it
+    #: (1 to the plan's count); both set exactly for that category.
+    plan = models.ForeignKey(
+        "InstallmentPlan",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="installments",
+    )
+    installment_no = models.SmallIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1024,6 +1040,16 @@ class OneOffCharge(GuardedModel):
             models.UniqueConstraint(
                 fields=["companion_of"], name="one_off_charges_one_fee_per_redebit"
             ),
+            models.CheckConstraint(
+                condition=Q(
+                    category="installment",
+                    plan__isnull=False,
+                    installment_no__gte=1,
+                    installment_no__lte=INSTALLMENTS_MAX,
+                )
+                | (~Q(category="installment") & Q(plan__isnull=True, installment_no__isnull=True)),
+                name="one_off_charges_plan_iff_installment",
+            ),
             _valid_choice("one_off_charges", "status", OneOffChargeStatus),
             _valid_choice("one_off_charges", "category", OneOffCategory),
             _valid_choice("one_off_charges", "collection", CollectionMethod),
@@ -1062,6 +1088,129 @@ class OneOffCharge(GuardedModel):
         if self.description:
             return self.description
         return self.fee_type.name if self.fee_type is not None else ""
+
+
+# --- Installment plans (PLAN-012e D9 to D11) ----------------------------------------
+
+
+class InstallmentPlanStatus(models.TextChoices):
+    """``active`` while installments are open; ``attention`` while one of them has a
+    returned payment not resolved; ``completed`` once every installment is paid;
+    ``cancelled`` by an admin (the unpaid installments are cancelled)."""
+
+    ACTIVE = "active", "Active"
+    ATTENTION = "attention", "Needs attention"
+    COMPLETED = "completed", "Completed"
+    CANCELLED = "cancelled", "Cancelled"
+
+
+#: The plan statuses in which the plan, not its parent, carries the balance.
+LIVE_PLAN_STATUSES: list[str] = [
+    InstallmentPlanStatus.ACTIVE.value,
+    InstallmentPlanStatus.ATTENTION.value,
+]
+
+
+class InstallmentCadence(models.TextChoices):
+    WEEKLY = "weekly", "Weekly"
+    BIWEEKLY = "biweekly", "Every two weeks"
+    MONTHLY = "monthly", "Monthly"
+
+
+class InstallmentCollection(models.TextChoices):
+    """How each installment is collected: as its parent was (D9)."""
+
+    AUTOPAY_DUE = "autopay_due", "Autopay on the due date"
+    EMAIL = "email", "Send by email"
+    MANUAL = "manual", "Manual payment"
+
+
+class InstallmentPlan(GuardedModel):
+    """A plan that splits the open balance of one charge, a rent charge or a one-off
+    charge (exactly one), into ``count`` installments (PLAN-012e D9). Each installment is
+    a :class:`OneOffCharge` of category ``installment`` (``plan``, ``installment_no``).
+    While the plan is live (:data:`LIVE_PLAN_STATUSES`) its parent is left out of every
+    open balance and its installments are owed instead. At most one plan per parent
+    that is not cancelled."""
+
+    rent_charge = models.ForeignKey(
+        RentCharge,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="installment_plans",
+    )
+    one_off_charge = models.ForeignKey(
+        OneOffCharge,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="installment_plans",
+    )
+    operator = models.ForeignKey(
+        Operator, on_delete=models.PROTECT, related_name="installment_plans"
+    )
+    lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="installment_plans"
+    )
+    count = models.SmallIntegerField()
+    first_due = models.DateField()
+    cadence = _choice(InstallmentCadence)
+    collection = _choice(InstallmentCollection)
+    status = _choice(InstallmentPlanStatus, default=InstallmentPlanStatus.ACTIVE)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    confirmed_at = models.DateTimeField()
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    #: The admin's note of the cancel (D11).
+    note = free_text()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "installment_plans"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(rent_charge__isnull=False, one_off_charge__isnull=True)
+                | Q(rent_charge__isnull=True, one_off_charge__isnull=False),
+                name="installment_plans_one_parent",
+            ),
+            models.CheckConstraint(
+                condition=Q(count__gte=INSTALLMENTS_MIN, count__lte=INSTALLMENTS_MAX),
+                name="installment_plans_count_range",
+            ),
+            models.CheckConstraint(
+                condition=Q(status="cancelled", cancelled_at__isnull=False, note__regex=_NOT_BLANK)
+                | (~Q(status="cancelled") & Q(cancelled_at__isnull=True)),
+                name="installment_plans_cancelled_has_note",
+            ),
+            models.UniqueConstraint(
+                fields=["rent_charge"],
+                condition=~Q(status="cancelled"),
+                name="installment_plans_one_per_rent_charge",
+            ),
+            models.UniqueConstraint(
+                fields=["one_off_charge"],
+                condition=~Q(status="cancelled"),
+                name="installment_plans_one_per_one_off_charge",
+            ),
+            _valid_choice("installment_plans", "cadence", InstallmentCadence),
+            _valid_choice("installment_plans", "collection", InstallmentCollection),
+            _valid_choice("installment_plans", "status", InstallmentPlanStatus),
+        ]
+
+    def __str__(self) -> str:
+        return f"Installment plan {self.pk}"
+
+    @property
+    def parent(self) -> RentCharge | OneOffCharge:
+        """The charge the plan splits."""
+        if self.rent_charge is not None:
+            return self.rent_charge
+        if self.one_off_charge is None:
+            raise ValueError("An installment plan has a parent.")
+        return self.one_off_charge
 
 
 # --- Store costs (PLAN-010b D8) ------------------------------------------------------
