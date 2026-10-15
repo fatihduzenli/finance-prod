@@ -761,3 +761,37 @@ blocks unless an admin overrides with a reason, follow-up 12b-a approved)
   columns on `leases`, `rent_charges`, `one_off_charges`, `outbound_messages`; mail gains
   attachments; migrations `ledger` 0034–0038 and `payments` 0016–0017; `docs/CLAUDE.md` §5 ("send email itself") is amended by the
   final-statement e-mail, which goes through the same mail package and catch-all as the ladder.
+
+## ADR-0013 — Manual payment allocation and lease credits
+
+**Date:** 2026-10-15
+**Status:** Proposed (owner's Step 12d text, 2026-10-15; built by PLAN-012d Batch B)
+
+### Decision
+
+1. **A payment is allocated by hand.** When staff record a payment from the store page they
+   enter the amount, method, date and note once, and then type how much of it goes to each open
+   charge of the store's current lease (rent, one-off, insurance), oldest due first. Nothing is
+   pre-filled unless exactly one charge is open. The form refuses to save until the allocations
+   add up to the payment, or the user keeps the remainder as a credit. Each allocated part is a
+   settled payment on its charge, written through the existing per-charge rules (one payment
+   row per charge, the same Stax paid-as-cash marking once a charge's invoice is fully covered,
+   partial coverage flagged for review), all parts sharing one allocation group and one
+   idempotency key family.
+2. **The remainder is a credit on the lease, not revenue.** Money received and not applied is
+   a liability of the business to the operator, like a deposit: it is never billed, never
+   collected in the P&L, shown as "Credit $X" in the store header and as "Credits held" in the
+   P&L footer. Applying a credit to a charge later is a settled payment of method `credit` (no
+   provider involved); it counts as collected in the month applied, under the charge's
+   category. A credit is refunded only through the lease end (a refund-due line settled by the
+   settlement method, like an overpaid last month); a transfer is refused while a credit
+   remains. Receivables ignore credits.
+3. **Why manual.** Automatic allocation (oldest first) would hide the operator's intent (a
+   payment meant for the deposit, not the rent) and make the Stax marking unpredictable; the
+   spreadsheet practice was to write the money against the row the operator paid for.
+
+### Consequences
+
+New columns `payments.allocation_group`, `payments.credit_id`, a new table `lease_credits`, a
+new payment method `credit`; the lease-end statement and the transfer blockers read credits;
+the per-charge payment forms stay for single-charge entry from a charge page.
