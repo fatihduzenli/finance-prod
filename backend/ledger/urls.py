@@ -2,7 +2,7 @@
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
 D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11, PLAN-010c
 D7, D10, PLAN-010d D1, D2, D4, D6, D8, PLAN-011 D0 to D5, PLAN-011b D4, D7, D8, PLAN-012 D2,
-D3, D6 to D8, PLAN-012e D4 to D7, D10, D11).
+D3, D6 to D8, PLAN-012e D4 to D7, D10, D11, PLAN-012d D2, D3).
 
 Namespace ``ledger``.
 
@@ -101,6 +101,9 @@ store_patterns = (
         path("<str:pk>/end-lease/", lease_ends.store_end_lease, name="end_lease"),
         # The transfer wizard (PLAN-012e D6): start or resume.
         path("<str:pk>/transfer/", transfers.store_transfer, name="transfer"),
+        # The workspace's action bar (PLAN-012d D2): Record a payment and Charge now.
+        path("<str:pk>/payments/new/", stores.store_record_payment, name="record_payment"),
+        path("<str:pk>/charge-now/", stores.store_charge_now_pick, name="charge_now_pick"),
     ],
     "stores",
 )
@@ -246,6 +249,7 @@ invoice_patterns = (
         path("drafts/<str:pk>/send/", invoices.draft_send, name="send"),
         path("drafts/<str:pk>/charge-now/", invoices.draft_charge_now, name="charge_now"),
         path("drafts/<str:pk>/cancel/", invoices.draft_cancel, name="cancel"),
+        path("drafts/<str:pk>/delete/", invoices.draft_delete, name="delete_draft"),
     ],
     "invoices",
 )

@@ -641,3 +641,26 @@ invoices follow through the worker. **Cancel** (admin, a note) cancels the unpai
 collect. The P&L and the payments ledger count the money once, under the parent, each payment
 in the month it settled; installments are never billed lines; the ledger's CSV names the parent
 in "Installment of".
+
+## 18. The store page as the workspace (PLAN-012d, ADR-0013)
+
+**One page per store.** The store page opens on a header card (operator, the lease in effect with
+its rent, start and end, autopay state, the total open balance, a credit held if any, the next
+scheduled payment, an open promise if any) and one **action bar**: Create invoice, Record a
+payment, Charge now, Add setup charge, Schedule a payment (from Batch B), Upload document, Add
+contact entry, Edit lease, End lease, Transfer to another operator, Create missing charges. A
+vacant store shows **New lease** instead and hides the lease-dependent actions; viewers see no
+bar. Each action opens the existing form with the store and lease already known: those fields
+are hidden and shown as one read-only line at the top, and a successful save returns to the
+store page on the tab that shows the result (payments to Payments, an invoice to Invoices, a
+charge to Charges, a document to Documents, an entry to Contact log). The **tabs**: Charges (open
+by default; paid; all; every lease of the store), Invoices (unpaid by default; all; the provider
+status; and the store's **drafts** with Edit, Send and Delete), Payments, Schedules, Documents,
+Contact log and History (admin: the newest 200 audit rows of the store's own records, linked to
+the audit page). "Charge now" on the bar lists the charges that can be charged now, each with its
+own confirm page. The **lease page** keeps lease terms, rent history, debit days, the proration
+switch, autopay controls, notes and documents, and links to the store page for everything else.
+Charge, invoice, plan and payment pages carry "← Store NNNN". The attention list, the grid and
+the rent run link store pages. **Rent run** left the main navigation: charges are created by the
+daily job, by saving a lease and by the catch-up; the page lives under **Admin** (with the Django
+admin and the audit page) for the daily report, Match invoices and the CSV export.

@@ -2,7 +2,7 @@
 {% load responsive %}
 {% block title %}{{ charge.label }}{% if lease %} {{ lease.store.external_label }}{% endif %}{% endblock %}
 {% block content %}
-  <p>{% if lease %}<a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a>{% elif operator %}<a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a>{% endif %}</p>
+  {% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif operator %}<p><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>{% endif %}
   <h1>{{ charge.label }}{% if charge.status == "voided" %} <span class="badge" id="voided-badge">Voided</span>{% endif %}{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">Legacy</span>{% endif %}{% if charge.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
 

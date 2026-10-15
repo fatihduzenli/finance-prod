@@ -256,6 +256,10 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:plans:reschedule` | POST | billing | moves the unpaid installments; form on GET (billing) |
 | `ledger:plans:cancel` | POST | admin | cancels the plan with a note; form on GET (admin) |
 | `ledger:charges:retry_release` | POST | billing | repeats a failed release of a rent charge's Stax invoice or autopay move (PLAN-012b-b D13) |
+| `ledger:stores:detail?tab=` | GET | viewer | the store workspace (PLAN-012d): tabs charges, invoices, payments, schedules, documents, contacts, history (admin) |
+| `ledger:stores:record_payment` | POST | billing | record a payment for the store (PLAN-012d Batch B; Batch A: opens the Charges tab) |
+| `ledger:stores:charge_now_pick` | GET | admin | the store's charges eligible for Charge now, each to its confirm page |
+| `ledger:invoices:delete_draft` | POST | billing | deletes a never-sent invoice draft (audited) |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |
 
 The `admin` group also holds Django's model permissions for users, groups, OTP

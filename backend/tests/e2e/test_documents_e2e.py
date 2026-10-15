@@ -51,13 +51,13 @@ def test_upload_by_input_and_by_drop_then_preview(
     _sign_in(page, live_server, "e2e-documents")
     store_page = f"{live_server.url}/stores/{store.pk}/"
 
-    page.goto(store_page)
+    page.goto(f"{store_page}?tab=documents")
     page.locator("#id_file").set_input_files(
         {"name": "plan.png", "mimeType": "image/png", "buffer": PNG}
     )
     page.select_option("#id_kind", "floor_plan")
     page.locator("#upload-document").click()
-    page.wait_for_url(f"{store_page}#documents")
+    page.wait_for_url(f"{store_page}?tab=documents#tab-documents")
     assert "Document uploaded." in page.content()
     assert page.locator("#documents-list").inner_text().count("plan.png") == 1
 
@@ -78,7 +78,7 @@ def test_upload_by_input_and_by_drop_then_preview(
     assert hint.inner_text() == "Selected: front.jpg"
     assert page.evaluate("document.querySelector('#id_file').files.length") == 1
     page.locator("#upload-document").click()
-    page.wait_for_url(f"{store_page}#documents")
+    page.wait_for_url(f"{store_page}?tab=documents#tab-documents")
     assert Document.objects.count() == 2
     assert len(storage.blobs) == 2
 
@@ -111,13 +111,13 @@ def test_a_pdf_lease_previews_in_the_frame(
         page = browser.new_page()
         _sign_in(page, live_server, "e2e-documents-pdf")
         store_page = f"{live_server.url}/stores/{store.pk}/"
-        page.goto(store_page)
+        page.goto(f"{store_page}?tab=documents")
         page.locator("#id_file").set_input_files(
             {"name": "lease.pdf", "mimeType": "application/pdf", "buffer": make_pdf([["Lease"]])}
         )
         page.select_option("#id_kind", "lease_agreement")
         page.locator("#upload-document").click()
-        page.wait_for_url(f"{store_page}#documents")
+        page.wait_for_url(f"{store_page}?tab=documents#tab-documents")
         pdf = Document.objects.get(original_filename="lease.pdf")
         preview_url = f"{live_server.url}/documents/{pdf.pk}/preview/"
 

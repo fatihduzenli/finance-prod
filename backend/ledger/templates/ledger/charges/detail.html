@@ -2,7 +2,8 @@
 {% load responsive %}
 {% block title %}Charge {{ lease.store.external_label }} {{ charge.period_month|date:"Y-m" }}{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Rent run</a></p>
+  {% include "ledger/_store_crumb.html" %}
+  <p class="muted"><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Rent run</a></p>
   <h1>Rent {{ charge.period_month|date:"Y-m" }}, debit {{ charge.seq }}{% if charge.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
 

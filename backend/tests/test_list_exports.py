@@ -141,8 +141,10 @@ def test_the_rent_charges_export_of_one_lease(today: date) -> None:
     by_operator = records(viewer(), "/charges/export.csv", {"operator": str(lease.operator_id)})
     assert len(by_operator) == 2
     assert len(records(viewer(), "/charges/export.csv", {"lease": "x"})) == 3
-    page = viewer().get(f"/leases/{lease.pk}/").content.decode()
-    assert f'href="/charges/export.csv?lease={lease.pk}"' in page
+    # PLAN-012d D4: the export link moved to the store page's Charges tab.
+    page = viewer().get(f"/stores/{lease.store_id}/").content.decode()
+    assert f'href="/charges/export.csv?store={lease.store_id}"' in page
+    assert len(records(viewer(), "/charges/export.csv", {"store": str(lease.store_id)})) == 2
 
 
 def test_the_one_off_export_of_an_operator_and_of_a_lease(today: date) -> None:
@@ -227,7 +229,9 @@ def test_every_list_page_links_its_export(today: date) -> None:
         "/audit/": "/audit/export.csv",
         "/grid/": "/grid/export.csv",
         "/arrears/": "/arrears/export.csv",
-        f"/stores/{lease.store_id}/": f"/documents/stores/{lease.store_id}/export.csv",
+        f"/stores/{lease.store_id}/?tab=documents": (
+            f"/documents/stores/{lease.store_id}/export.csv"
+        ),
         f"/leases/{lease.pk}/": f"/documents/leases/{lease.pk}/export.csv",
     }
     for page, export in pages.items():

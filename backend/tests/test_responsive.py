@@ -223,7 +223,7 @@ def test_the_detail_pages_render_as_cards(monkeypatch: pytest.MonkeyPatch) -> No
     assert re.search(
         r'<div class="table-scroll" tabindex="0">\s*<table id="open-charges">', statement
     )
-    store_page = client.get(f"/stores/{lease.store_id}/").content.decode()
+    store_page = client.get(f"/stores/{lease.store_id}/?tab=documents").content.decode()
     assert re.search(r'<div class="table-cards">\s*<table id="documents-list">', store_page)
 
 

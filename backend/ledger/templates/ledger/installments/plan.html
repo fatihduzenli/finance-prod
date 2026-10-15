@@ -2,6 +2,7 @@
 {% load responsive %}
 {% block title %}Installment plan, {{ parent_label }}{% endblock %}
 {% block content %}
+  {% include "ledger/_store_crumb.html" %}
   <p><a href="{{ parent_url }}">&larr; {{ parent_label }}</a>{% if plan.lease %} · <a href="{% url 'ledger:leases:detail' pk=plan.lease.pk %}">Lease {{ plan.lease.store.external_label }}</a>{% endif %}</p>
   <h1>Installment plan, {{ parent_label }} <span class="badge" id="plan-status">{{ plan.get_status_display }}</span></h1>
   <p class="muted" id="page-help">{{ plan_help }}</p>

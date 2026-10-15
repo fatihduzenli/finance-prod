@@ -517,7 +517,7 @@ def test_the_store_page_lists_its_entries_and_add_entry_preselects_its_lease(
     mine = promise(operator, lease=lease, actor=author, body="Pays 2477 Friday.")
     entry(operator, lease=other, actor=author, body="About 2476.")
     client, _ = client_for(Role.BILLING)
-    page = page_of(client, f"/stores/{store.pk}/")
+    page = page_of(client, f"/stores/{store.pk}/?tab=contacts")
     assert 'id="contacts"' in page and f'href="/stores/{store.pk}/contacts/new/"' in page
     log = table_of(page)
     assert "Pays 2477 Friday." in log and "About 2476." not in log
@@ -535,21 +535,24 @@ def test_the_store_page_lists_its_entries_and_add_entry_preselects_its_lease(
         contact_post(lease=str(lease.pk), previous=str(mine.pk), outcome="broken", body="Nope."),
     )
     assert response.status_code == 302
-    assert response["Location"] == f"/stores/{store.pk}/#contacts"
+    assert response["Location"] == f"/stores/{store.pk}/?tab=contacts#tab-contacts"
     added = ContactEntry.objects.get(body="Nope.")
     assert added.lease == lease and added.operator == operator
     viewer, _ = client_for(Role.VIEWER)
-    assert "/contacts/new/" not in page_of(viewer, f"/stores/{store.pk}/")
+    assert "/contacts/new/" not in page_of(viewer, f"/stores/{store.pk}/?tab=contacts")
     assert viewer.get(f"/stores/{store.pk}/contacts/new/").status_code == 403
 
 
 def test_a_store_without_a_lease_in_effect_offers_no_add_entry() -> None:
     store: Store = a_store("3000")
     client, _ = client_for(Role.BILLING)
-    page = page_of(client, f"/stores/{store.pk}/")
+    page = page_of(client, f"/stores/{store.pk}/?tab=contacts")
     assert "No contact entries." in page and f"/stores/{store.pk}/contacts/new/" not in page
     response = client.get(f"/stores/{store.pk}/contacts/new/")
-    assert response.status_code == 302 and response["Location"] == f"/stores/{store.pk}/#contacts"
+    assert (
+        response.status_code == 302
+        and response["Location"] == f"/stores/{store.pk}/?tab=contacts#tab-contacts"
+    )
 
 
 # --- PLAN-012c: Add entry on a store whose lease is not in effect today -------------------
@@ -604,7 +607,7 @@ def test_add_entry_on_a_store_whose_only_lease_is_not_in_effect(
         suffix = f", lease ended {ended_on.isoformat()}"
     for role in (Role.BILLING, Role.ADMIN):
         client, _ = client_for(role)
-        assert add_link(store) in page_of(client, f"/stores/{store.pk}/")
+        assert add_link(store) in page_of(client, f"/stores/{store.pk}/?tab=contacts")
     client, _ = client_for(Role.BILLING)
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
     assert f"<h1>Add entry: Acme, store 2477{suffix}</h1>" in form
@@ -613,13 +616,13 @@ def test_add_entry_on_a_store_whose_only_lease_is_not_in_effect(
         f"/stores/{store.pk}/contacts/new/", contact_post(lease=str(lease.pk), body="Old lease.")
     )
     assert response.status_code == 302
-    assert response["Location"] == f"/stores/{store.pk}/#contacts"
+    assert response["Location"] == f"/stores/{store.pk}/?tab=contacts#tab-contacts"
     added = ContactEntry.objects.get()
     assert (added.operator, added.lease, added.body) == (operator, lease, "Old lease.")
-    assert "Old lease." in table_of(page_of(client, f"/stores/{store.pk}/"))
+    assert "Old lease." in table_of(page_of(client, f"/stores/{store.pk}/?tab=contacts"))
     assert "Old lease." in table_of(page_of(client, f"/operators/{operator.pk}/"))
     viewer, _ = client_for(Role.VIEWER)
-    assert "/contacts/new/" not in page_of(viewer, f"/stores/{store.pk}/")
+    assert "/contacts/new/" not in page_of(viewer, f"/stores/{store.pk}/?tab=contacts")
     assert viewer.get(f"/stores/{store.pk}/contacts/new/").status_code == 403
     assert viewer.post(f"/stores/{store.pk}/contacts/new/", contact_post()).status_code == 403
     assert ContactEntry.objects.count() == 1
@@ -666,7 +669,7 @@ def test_a_lease_of_an_archived_operator_or_without_an_operator_is_skipped(
     # The lease in effect belongs to an archived operator: the next one is chosen.
     assert contacts.store_contact_lease(store, TODAY) == older
     client, _ = client_for(Role.BILLING)
-    assert add_link(store) in page_of(client, f"/stores/{store.pk}/")
+    assert add_link(store) in page_of(client, f"/stores/{store.pk}/?tab=contacts")
     response = client.post(
         f"/stores/{store.pk}/contacts/new/", contact_post(lease=str(older.pk), body="Live.")
     )
@@ -676,9 +679,9 @@ def test_a_lease_of_an_archived_operator_or_without_an_operator_is_skipped(
     # With only archived or operator-less leases left, no button and the route refuses.
     archived(older.operator)  # type: ignore[arg-type]
     assert contacts.store_contact_lease(store, TODAY) is None
-    assert add_link(store) not in page_of(client, f"/stores/{store.pk}/")
+    assert add_link(store) not in page_of(client, f"/stores/{store.pk}/?tab=contacts")
     response = client.get(f"/stores/{store.pk}/contacts/new/", follow=True)
-    assert response.redirect_chain == [(f"/stores/{store.pk}/#contacts", 302)]
+    assert response.redirect_chain == [(f"/stores/{store.pk}/?tab=contacts#tab-contacts", 302)]
     assert escape(NO_STORE_LEASE) in response.content.decode()
     response = client.post(f"/stores/{store.pk}/contacts/new/", contact_post(body="Gone."))
     assert response.status_code == 302 and ContactEntry.objects.count() == 1
@@ -687,9 +690,9 @@ def test_a_lease_of_an_archived_operator_or_without_an_operator_is_skipped(
 def test_a_store_with_no_lease_shows_the_existing_message(today: date) -> None:
     store = a_store("3000")
     client, _ = client_for(Role.BILLING)
-    assert add_link(store) not in page_of(client, f"/stores/{store.pk}/")
+    assert add_link(store) not in page_of(client, f"/stores/{store.pk}/?tab=contacts")
     response = client.get(f"/stores/{store.pk}/contacts/new/", follow=True)
-    assert response.redirect_chain == [(f"/stores/{store.pk}/#contacts", 302)]
+    assert response.redirect_chain == [(f"/stores/{store.pk}/?tab=contacts#tab-contacts", 302)]
     assert escape(NO_STORE_LEASE) in response.content.decode()
 
 
@@ -1156,7 +1159,7 @@ def test_the_buttons_are_on_every_open_promise_row_for_billing_only(today: date)
     for path in (
         f"/operators/{operator.pk}/",
         f"/operators/{operator.pk}/contacts/",
-        f"/stores/{store.pk}/",
+        f"/stores/{store.pk}/?tab=contacts",
         f"/stores/{store.pk}/contacts/",
     ):
         page = table_of(page_of(billing, path))
@@ -1164,7 +1167,7 @@ def test_the_buttons_are_on_every_open_promise_row_for_billing_only(today: date)
         assert outcome_buttons(page, kept) == [] and outcome_buttons(page, gone) == [], path
         assert "/outcome/" not in table_of(page_of(viewer, path)), path
     # The link comes back to the page it was on.
-    page = page_of(billing, f"/stores/{store.pk}/")
+    page = page_of(billing, f"/stores/{store.pk}/?tab=contacts")
     assert f"/contacts/{open_row.pk}/outcome/kept/?next=%2Fstores%2F{store.pk}%2F" in page
     # An archived operator's promise has none.
     archived(operator)
@@ -1362,7 +1365,7 @@ def test_a_new_promise_closes_the_open_promise_of_its_lease_as_rescheduled(today
     message = (
         "Promise recorded; the earlier promise of $700.00 by 2026-10-09 is closed as Rescheduled."
     )
-    assert message in page_of(client, f"/stores/{store.pk}/")
+    assert message in page_of(client, f"/stores/{store.pk}/?tab=contacts")
     for untouched in (elsewhere, no_store, gone):
         untouched.refresh_from_db()
         assert untouched.closed_by != new
@@ -1526,7 +1529,7 @@ def test_the_closing_entries_name_their_promise_on_every_page_and_in_the_csv(
         f"/operators/{operator.pk}/",
         f"/operators/{operator.pk}/contacts/",
         f"/operators/{operator.pk}/contacts/?status=all",
-        f"/stores/{store.pk}/",
+        f"/stores/{store.pk}/?tab=contacts",
         f"/stores/{store.pk}/contacts/",
     ):
         log = table_of(page_of(client, path))
@@ -1576,7 +1579,7 @@ def test_the_store_page_links_to_the_operator_page_for_a_promise_not_on_that_sto
     kept = closing(operator, no_store, "kept", lease=my_lease, body="Paid here.")
     client, _ = client_for(Role.BILLING)
     operator_page = f"/operators/{operator.pk}/"
-    for path in (f"/stores/{here.pk}/", f"/stores/{here.pk}/contacts/"):
+    for path in (f"/stores/{here.pk}/?tab=contacts", f"/stores/{here.pk}/contacts/"):
         log = table_of(page_of(client, path))
         assert closes_link(promise_cell(log, moved)) == (
             f"{operator_page}#contact-{on_there.pk}",
@@ -1666,7 +1669,7 @@ def test_the_pages_read_the_closed_promises_in_their_own_queries(today: date) ->
     paths = (
         f"/operators/{operator.pk}/",
         f"/operators/{operator.pk}/contacts/",
-        f"/stores/{lease.store_id}/",
+        f"/stores/{lease.store_id}/?tab=contacts",
         f"/stores/{lease.store_id}/contacts/",
     )
     entry(operator, lease=lease, body="A call.")

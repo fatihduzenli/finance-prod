@@ -434,7 +434,9 @@ def test_the_route_is_admin_only() -> None:
 def test_billing_and_viewer_cannot_resolve_a_deposit(role: Role) -> None:
     charge = held_deposit()
     client, _ = client_for(role)
-    lease_page = client.get(f"/leases/{charge.lease_id}/").content.decode()
+    store = lease_of(charge).store_id
+    lease_page = client.get(f"/stores/{store}/?tab=charges&filter=all").content.decode()
+    assert "Deposit" in lease_page  # the row is listed (PLAN-012d D4) ...
     assert "Resolve deposit" not in lease_page and "resolve-deposit" not in lease_page
     assert client.get(resolve_path(charge)).status_code == 403
     assert client.post(resolve_path(charge), form()).status_code == 403
@@ -446,7 +448,8 @@ def test_the_lease_page_offers_the_action_only_once_ended_and_for_deposits() -> 
     sign = a_charge("1000.00", fee("sign_fee"), operator=lease_of(charge).operator)
     OneOffCharge.objects.filter(pk=sign.pk).update(lease=lease_of(charge))
     client, _ = client_for(Role.ADMIN)
-    lease_page = f"/leases/{charge.lease_id}/"
+    # PLAN-012d D4: the action is on the store page's Charges tab (a paid deposit: "All").
+    lease_page = f"/stores/{lease_of(charge).store_id}/?tab=charges&filter=all"
     assert resolve_path(charge) not in client.get(lease_page).content.decode()
     end(lease_of(charge))
     shown = client.get(lease_page).content.decode()
@@ -469,7 +472,8 @@ def test_an_admin_resolves_through_the_page_and_the_deposit_page_shows_it() -> N
     assert 'id="deposit-resolution"' in detail and "Refunded on 2026-10-01" in detail
     assert '<dd id="resolution-withheld">$500.00</dd>' in detail
     assert "Kept 500 for repairs." in detail
-    lease_page = client.get(f"/leases/{charge.lease_id}/").content.decode()
+    store = lease_of(charge).store_id
+    lease_page = client.get(f"/stores/{store}/?tab=charges&filter=all").content.decode()
     assert "Refunded $2000.00" in lease_page and resolve_path(charge) not in lease_page
 
 

@@ -1,0 +1,54 @@
+{% comment %}The Schedules tab (docs/qa/PLAN-012d D3): ledger.services.workspace.schedules_tab.{% endcomment %}
+{% load responsive %}
+<h2>Autopay schedules</h2>
+{% for text in autopay_moved %}<p class="autopay-moved"><strong>{{ text }}</strong></p>{% endfor %}
+{% responsive_table %}
+<table id="store-schedules">
+  <thead><tr><th>Lease</th><th>Kind</th><th>Debit</th><th>Day</th><th>Amount</th><th>State</th><th>Next debit</th><th>Provider schedule</th></tr></thead>
+  <tbody>
+    {% for item in schedule_rows %}
+      <tr>
+        <td><a href="{% url 'ledger:leases:detail' pk=item.row.lease.pk %}">From {{ item.row.lease.started_on|date:"Y-m-d"|default:"no start date" }}</a></td>
+        <td>{{ item.row.get_kind_display }}</td>
+        <td>{{ item.row.seq }}</td>
+        <td>{{ item.row.debit_day|default:"—" }}</td>
+        <td class="money">${{ item.row.amount }}</td>
+        <td>{{ item.row.get_state_display }}{% if item.review_message %}<br><strong class="schedule-review">{{ item.review_message }}</strong>{% endif %}</td>
+        <td>{% if item.next_run %}{{ item.next_run|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+        <td>{{ item.schedule_masked|default:"—" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8" class="muted">Autopay is not set up.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}
+<p class="muted">Next debit is computed here from the debit day; the provider runs the schedule. Enable, pause, resume and stop autopay on the lease page.</p>
+
+<h2>One-off charges collected by autopay</h2>
+{% responsive_table %}
+<table id="store-autopay-charges">
+  <thead><tr><th>Charge</th><th>Due</th><th>Balance</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for charge in autopay_charges %}
+      <tr><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge.due_date|date:"Y-m-d" }}</td><td class="money">${{ charge.balance }}</td><td>{{ charge.get_status_display }}</td></tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">None.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}
+
+<h2>Installment plans</h2>
+{% responsive_table %}
+<table id="store-plans">
+  <thead><tr><th>Plan</th><th>Installments</th><th>First due</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for plan in live_plans %}
+      <tr><td><a href="{% url 'ledger:plans:detail' pk=plan.pk %}">{% if plan.rent_charge %}Rent {{ plan.rent_charge.period_month|date:"Y-m" }}{% elif plan.one_off_charge %}{{ plan.one_off_charge.label }}{% else %}Plan{% endif %}</a></td><td>{{ plan.count }}, {{ plan.get_cadence_display|lower }}</td><td>{{ plan.first_due|date:"Y-m-d" }}</td><td>{{ plan.get_status_display }}</td></tr>
+    {% empty %}
+      <tr><td colspan="4" class="muted">No live plan.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}

@@ -7,7 +7,9 @@
 - ``ledger:operators:contacts_add`` and ``ledger:stores:contacts_add`` (billing; the
   registry refuses the POST below billing and the views refuse the form's GET too): add an
   entry. The store's form is the form of the operator of the store's lease in effect
-  today, with that lease chosen. When the operator has an open promise the form asks what
+  today, with that lease chosen; it returns to the store page's Contact log tab, and
+  opened from the store page (``?store=&lease=``, PLAN-012d D2) it hides the lease and
+  shows the read-only line. When the operator has an open promise the form asks what
   happened to it (Still open, the default, Kept, Rescheduled or Broken), and warns when a
   new promise would close the open promise of its lease as Rescheduled (PLAN-012c-b D1,
   D3). A refusal shows the form again.
@@ -41,7 +43,6 @@ from django.http import (
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
@@ -63,9 +64,10 @@ from ledger.models import (
     Operator,
     Store,
 )
-from ledger.services import contacts
+from ledger.services import contacts, workspace
 from ledger.services.leases import format_amount
 from ledger.validators import contains_bank_routing_pattern, contains_card_number
+from ledger.views import store_context
 from ledger.views.contact_log import include_deleted, log_rows, store_add_url
 from ledger.views.operators import (
     PAGE_SIZE,
@@ -76,6 +78,7 @@ from ledger.views.operators import (
     role_required,
 )
 from ledger.views.run import _billing_only
+from ledger.views.store_context import StoreContext, local_next
 
 NO_STORE_LEASE = "This store has no lease in effect today; add the entry on the operator's page."
 
@@ -271,9 +274,16 @@ def _add(
     lease: Lease | None,
     back_url: str,
     title: str,
+    done_url: str = "",
+    context: StoreContext | None = None,
 ) -> HttpResponse:
+    """The add form; a saved entry returns to ``done_url``, else to the log on
+    ``back_url``. Opened from the store page (``context``, PLAN-012d D2) the lease field
+    is hidden and the read-only line names it."""
     data = request.POST if request.method == "POST" else None
     form, known = entry_form(operator, data, lease=lease)
+    if context is not None and lease is not None and "lease" in form.fields:
+        form.fields["lease"].widget = forms.HiddenInput()
     if data is not None and form.is_valid():
         values = form.cleaned_data
         outcome = contacts.add_entry(
@@ -292,7 +302,7 @@ def _add(
         )
         if outcome.ok:
             messages.success(request, outcome.message)
-            return redirect(f"{back_url}#contacts")
+            return redirect(done_url or f"{back_url}#contacts")
         form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
     if data is not None:
         drop_payment_data(form)
@@ -309,6 +319,7 @@ def _add(
             "supersede_warnings": warnings,
             "back_url": back_url,
             "title": title,
+            "store_context": context,
         },
     )
 
@@ -339,19 +350,26 @@ def store_contacts_add(request: HttpRequest, pk: str) -> HttpResponse:
     if refused is not None:
         return refused
     store = _store(pk)
-    page = reverse("ledger:stores:detail", kwargs={"pk": store.pk})
+    context = store_context.from_request(request, store=store)
+    tab = workspace.tab_url(store.pk, workspace.TAB_CONTACTS)
     today = timezone.localdate()
     lease = contacts.store_contact_lease(store, today)
     if lease is None or lease.operator is None:
         messages.error(request, NO_STORE_LEASE)
-        return redirect(f"{page}#contacts")
+        return redirect(tab)
+    if context is not None:
+        # The entry is about the store's contact lease whatever lease the link named.
+        context = StoreContext(store=store, lease=lease)
     return _add(
         request,
         lease.operator,
         lease=lease,
-        back_url=page,
+        back_url=reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
         title=f"{lease.operator.display_name}, store {store.external_label}"
         f"{_lease_state(lease, today)}",
+        # PLAN-012d D8: back to the store page's Contact log tab.
+        done_url=tab,
+        context=context,
     )
 
 
@@ -504,17 +522,6 @@ def contact_delete(request: HttpRequest, pk: str) -> HttpResponseBase:
 
 
 # --- Kept, Reschedule, Broken on one promise (PLAN-012c-b D2) -------------------------------
-
-
-def local_next(value: str | None) -> str:
-    """``value`` when it is a path on this site (no scheme, no host, no ``//``), without
-    its fragment; else ``""``."""
-    target = (value or "").split("#", 1)[0]
-    if not target.startswith("/") or target.startswith(("//", "/\\")):
-        return ""
-    if not url_has_allowed_host_and_scheme(target, allowed_hosts=set()):
-        return ""
-    return target
 
 
 def _outcome_leases(promise: ContactEntry) -> list[tuple[str, str]]:

@@ -15,3 +15,9 @@ register = template.Library()
 @register.filter
 def is_admin(user: AbstractBaseUser | AnonymousUser | None) -> bool:
     return user is not None and meets(role_of(user), Role.ADMIN)
+
+
+@register.filter
+def is_billing(user: AbstractBaseUser | AnonymousUser | None) -> bool:
+    """Billing or admin: the navigation's Rent run under Admin (PLAN-012d D5)."""
+    return user is not None and meets(role_of(user), Role.BILLING)

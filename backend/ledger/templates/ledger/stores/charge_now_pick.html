@@ -1,0 +1,24 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Charge now: store {{ store.external_label }}{% endblock %}
+{% block content %}
+  <p class="crumb" id="store-crumb"><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
+  <h1>Charge now: store {{ store.external_label }}</h1>
+  <p class="muted">The store's charges with an invoice at the payment provider that can be debited now from the operator's bank account. Each opens its confirmation page; nothing is charged from this page.</p>
+  {% responsive_table %}
+  <table id="charge-now-eligible">
+    <thead><tr><th>Charge</th><th>Due</th><th>Balance</th><th></th></tr></thead>
+    <tbody>
+      {% for row in eligible %}
+        <tr><td><a href="{% url 'ledger:one_off_charges:detail' pk=row.charge.pk %}">{{ row.charge.label }}</a></td><td>{{ row.charge.due_date|date:"Y-m-d" }}</td><td class="money">${{ row.charge.balance }}</td><td><a class="btn btn-primary charge-now-confirm" href="{% url 'ledger:one_off_charges:charge_now' pk=row.charge.pk %}">Charge now</a></td></tr>
+      {% empty %}
+        <tr><td colspan="4" class="muted">No charge of this store can be charged now.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  {% if refused %}
+    <h2>Not chargeable now</h2>
+    <ul id="charge-now-refused">{% for row in refused %}<li><a href="{% url 'ledger:one_off_charges:detail' pk=row.charge.pk %}">{{ row.charge.label }}</a>: {{ row.refusal }}</li>{% endfor %}</ul>
+  {% endif %}
+{% endblock %}

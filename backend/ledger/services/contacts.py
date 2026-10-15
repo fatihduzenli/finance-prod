@@ -254,6 +254,21 @@ def open_promises(operator: Operator) -> QuerySet[ContactEntry]:
     return entries(operator).filter(_open_promise())
 
 
+def open_promise(operator: Operator | None, lease: Lease | None) -> ContactEntry | None:
+    """The store page's header (PLAN-012d D1): the operator's newest open promise, not
+    deleted, about ``lease`` or about no store; ``None`` without an operator."""
+    if operator is None:
+        return None
+    about = Q(lease__isnull=True)
+    if lease is not None:
+        about |= Q(lease=lease)
+    return (
+        ContactEntry.objects.filter(_open_promise(), about, operator=operator)
+        .order_by("-happened_on", "-created_at", "-id")
+        .first()
+    )
+
+
 def _in_effect(today: date) -> Q:
     """Collecting or paused, started on or before ``today`` (or no start date), not ended
     before it."""

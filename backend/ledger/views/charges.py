@@ -2,7 +2,9 @@
 (PLAN-007 §4.1, D8; PLAN-009 D1 to D3, D5; PLAN-008a §2 rule 4), and the Retry of a
 split charge's failed release (PLAN-012b-b D13, billing).
 
-The detail page is read by any role and shows the carried balance of earlier charges.
+The detail page is read by any role and shows the carried balance of earlier charges,
+under "← Store NNNN" (PLAN-012d D5). The payment form opened from the store page
+(``?store=``) returns to its Payments tab (D8).
 Recording a payment (GET of the form and POST), retrying the marking of the provider
 invoice and linking an invoice (GET of the list and POST) need ``billing``; the
 registry checks the POST first. The service re-checks
@@ -28,9 +30,10 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import LinkInvoiceForm, ManualPaymentForm
 from ledger.models import ChargeEntityType, ChargeNote, RentCharge, RentChargeStatus
-from ledger.services import collections, csv_export, installments, rent_run
+from ledger.services import collections, csv_export, installments, rent_run, workspace
 from ledger.services.csv_export import CsvWriter
 from ledger.services.rent_run import MarkAction, MarkResult
+from ledger.views import store_context
 from ledger.views.installments import parent_context
 from ledger.views.jobs import already_submitted, busy, job_context, submit
 from ledger.views.operators import (
@@ -87,13 +90,16 @@ EXPORT_HEADER = (
 @role_required
 @require_safe
 def charge_export(request: HttpRequest) -> StreamingHttpResponse:
-    """``ledger:charges:export`` (PLAN-011 D5): rent charges, of one lease (``lease``) or
-    one operator (``operator``) when given, newest month first as the lease page lists
-    them; an unreadable filter is ignored."""
+    """``ledger:charges:export`` (PLAN-011 D5): rent charges, of one lease (``lease``), one
+    store (``store``, the store page's Charges tab, PLAN-012d D4) or one operator
+    (``operator``) when given, newest month first; an unreadable filter is ignored."""
     charges = RentCharge.objects.select_related("lease__store", "lease__operator")
     lease = uuid_param(request, "lease")
     if lease is not None:
         charges = charges.filter(lease_id=lease)
+    store = uuid_param(request, "store")
+    if store is not None:
+        charges = charges.filter(lease__store_id=store)
     operator = uuid_param(request, "operator")
     if operator is not None:
         charges = charges.filter(lease__operator_id=operator)
@@ -132,6 +138,8 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             **jobs,
             "charge": charge,
             "lease": charge.lease,
+            # PLAN-012d D5: "← Store NNNN".
+            "crumb_store": charge.lease.store,
             "invoices": rent_run.charge_invoices(charge),
             "payments": charge.payments.order_by("-settled_on", "-created_at"),
             "notes": ChargeNote.objects.filter(rent_charge=charge).order_by("-created_at"),
@@ -171,6 +179,13 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
     if not meets(_role(request), Role.BILLING):
         return forbidden(request)
     charge = _load(pk)
+    context = store_context.for_lease(request, charge.lease)
+    done = store_context.return_url(
+        request,
+        context,
+        workspace.TAB_PAYMENTS,
+        reverse("ledger:charges:detail", kwargs={"pk": charge.pk}),
+    )
     target = f"charge-payment:{charge.pk}"
     if request.method == "POST":
         form = ManualPaymentForm(request.POST)
@@ -178,7 +193,7 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
             data = form.cleaned_data
             if already_submitted(data["creation_key"]):
                 messages.info(request, rent_run.PAY_ALREADY)
-                return redirect("ledger:charges:detail", pk=charge.pk)
+                return redirect(done)
             outcome = rent_run.record_manual_payment(
                 charge.pk,
                 method=data["method"],
@@ -204,14 +219,18 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
                 else:
                     messages.success(request, outcome.message)
                 _report(request, outcome.provider)
-                return redirect("ledger:charges:detail", pk=charge.pk)
+                return redirect(done)
             form.add_error(outcome.field, outcome.message)
         _hold(request, target, form)
-        return redirect("ledger:charges:record_payment", pk=charge.pk)
+        return redirect(request.get_full_path())
     form = _held(request, target, ManualPaymentForm) or ManualPaymentForm(
         initial={"creation_key": uuid.uuid4()}
     )
-    return render(request, "ledger/charges/payment_form.html", {"form": form, "charge": charge})
+    return render(
+        request,
+        "ledger/charges/payment_form.html",
+        {"form": form, "charge": charge, "store_context": context},
+    )
 
 
 @role_required

@@ -27,6 +27,7 @@ from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlencode
 
+from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
@@ -34,6 +35,7 @@ from django.db.models import Exists, OuterRef, Prefetch, Q, QuerySet
 from django.db.models.functions import Lower
 from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
@@ -49,13 +51,14 @@ from ledger.models import (
     NoteEntityType,
     Operator,
     ScheduleState,
+    Store,
 )
-from ledger.services import csv_export, deposits, one_off_charges
+from ledger.services import csv_export, one_off_charges
 from ledger.services import leases as service
 from ledger.services.csv_export import CsvWriter
 from ledger.services.leases import LeaseRefused
 from ledger.services.one_off_charges import SetupRefused
-from ledger.views import documents
+from ledger.views import documents, store_context
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import (
     PAGE_SIZE,
@@ -190,6 +193,9 @@ def lease_export(request: HttpRequest) -> StreamingHttpResponse:
 @role_required
 @require_safe
 def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
+    """The lease's terms (PLAN-012d D4): dates, rent history, debit days, the proration
+    switch, autopay and its controls, notes and documents. Its charges, invoices and
+    payments are on the store page, which the page links."""
     lease = _load(pk)
     admin = meets(_role(request), Role.ADMIN)
     now = timezone.now()
@@ -230,20 +236,6 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "autopay_moved": moved.text if moved is not None else "",
             "blockers": service.autopay_blockers(lease),
             "notes_info": service.enrolment_notes(lease),
-            "charges": lease.rent_charges.order_by("-period_month", "seq"),
-            "setup_rows": [
-                {
-                    "charge": charge,
-                    "resolution": getattr(charge, "deposit_resolution", None),
-                    "can_resolve": admin and deposits.can_resolve(charge),
-                }
-                for charge in one_off_charges.charges_of(lease)
-            ],
-            "can_add_setup_charge": meets(_role(request), Role.BILLING),
-            # PLAN-012 D6: New invoice (the operator's page, this lease preselected).
-            "can_new_invoice": meets(_role(request), Role.BILLING)
-            and lease.operator is not None
-            and lease.operator.archived_at is None,
             "notes": Note.objects.filter(
                 entity_type=NoteEntityType.LEASE, entity_id=lease.pk
             ).order_by("-created_at"),
@@ -267,18 +259,54 @@ def _admin_only(request: HttpRequest) -> HttpResponse | None:
     return None
 
 
+def _lock_known(form: forms.BaseForm, names: tuple[str, ...]) -> None:
+    """A lease form opened from the store page (PLAN-012d D2): the fields the store page
+    names are hidden and disabled, so their value is the form's initial one whatever is
+    posted; the page shows the read-only line instead."""
+    for name in names:
+        field = form.fields.get(name)
+        if field is not None:
+            field.widget = forms.HiddenInput()
+            field.disabled = True
+
+
+def _create_context(request: HttpRequest) -> store_context.StoreContext | None:
+    """New lease opened from a vacant store's page (``?store=``): that store, or 404."""
+    raw = (request.GET.get("store") or "").strip()
+    if not raw:
+        return None
+    try:
+        key = uuid.UUID(raw)
+    except ValueError:
+        raise Http404 from None
+    if request.GET.get("lease"):
+        raise Http404
+    return store_context.from_request(request, store=get_object_or_404(Store, pk=key))
+
+
+def _create_form(data: Any, context: store_context.StoreContext | None) -> LeaseCreateForm:
+    initial = {} if context is None else {"store": context.store.pk}
+    form = LeaseCreateForm(data, initial=initial)
+    if context is not None:
+        _lock_known(form, ("store",))
+    return form
+
+
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def lease_create(request: HttpRequest) -> HttpResponse:
+    """New lease; opened from a vacant store's page (``?store=``, PLAN-012d D2) the store
+    is known: its field is hidden and the save returns to the store page."""
     refused = _admin_only(request)
     if refused is not None:
         return refused
+    context = _create_context(request)
     if request.method == "POST":
         existing = service.lease_for_creation_key(request.POST.get("creation_key"))
         if existing is not None:
             messages.info(request, ALREADY_SAVED)
-            return redirect("ledger:leases:detail", pk=existing.pk)
-        form = LeaseCreateForm(request.POST)
+            return redirect(_saved_url(request, existing, context))
+        form = _create_form(request.POST, context)
         if form.is_valid():
             try:
                 lease, created, charges = one_off_charges.create_lease_with_checklist(
@@ -296,21 +324,32 @@ def lease_create(request: HttpRequest) -> HttpResponse:
                     documents.upload_after_create(request, lease, "lease")
                 else:
                     messages.info(request, ALREADY_SAVED)
-                return redirect("ledger:leases:detail", pk=lease.pk)
+                return redirect(_saved_url(request, lease, context))
         _hold(request, "lease-create", form)
-        return redirect("ledger:leases:create")
-    form = _held(request, "lease-create", LeaseCreateForm) or LeaseCreateForm(
-        initial={"creation_key": uuid.uuid4()}
-    )
+        return redirect(request.get_full_path())
+    held = _held(request, "lease-create", lambda data: _create_form(data, context))
+    if held is None:
+        held = _create_form(None, context)
+        held.initial["creation_key"] = uuid.uuid4()
     return render(
         request,
         "ledger/leases/form.html",
         {
-            "form": form,
+            "form": held,
             "lease": None,
             "document_form": documents.create_form(DocumentKind.LEASE_AGREEMENT),
+            "store_context": context,
         },
     )
+
+
+def _saved_url(
+    request: HttpRequest, lease: Lease, context: store_context.StoreContext | None
+) -> str:
+    """After a lease form: the store page when opened from it (D8), else a local
+    ``?next=``, else the lease page."""
+    page = reverse("ledger:leases:detail", kwargs={"pk": lease.pk})
+    return store_context.return_url(request, context, None, page)
 
 
 def _saved_message(charges: int) -> str:
@@ -325,16 +364,26 @@ def _checklist_refusal(refusal: SetupRefused) -> str:
     return f"{name}: {refusal.message} The lease was not saved."
 
 
+def _edit_form(lease: Lease, data: Any, context: store_context.StoreContext | None) -> LeaseForm:
+    form = LeaseForm(data, instance=lease, initial=None if data is not None else _initial(lease))
+    if context is not None:
+        _lock_known(form, ("store", "operator"))
+    return form
+
+
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def lease_edit(request: HttpRequest, pk: str) -> HttpResponse:
+    """Edit a lease; opened from the store page (``?store=&lease=``, PLAN-012d D2) the
+    store and operator are hidden and the save returns to the store page (D8)."""
     refused = _admin_only(request)
     if refused is not None:
         return refused
     lease = _load(pk)
+    context = store_context.for_lease(request, lease)
     target = f"lease-edit:{lease.pk}"
     if request.method == "POST":
-        form = LeaseForm(request.POST, instance=lease)
+        form = _edit_form(lease, request.POST, context)
         if form.is_valid():
             try:
                 service.update_lease(
@@ -348,13 +397,17 @@ def lease_edit(request: HttpRequest, pk: str) -> HttpResponse:
                 form.add_error(refusal.field, str(refusal))
             else:
                 messages.success(request, "Lease saved.")
-                return redirect("ledger:leases:detail", pk=lease.pk)
+                return redirect(_saved_url(request, lease, context))
         _hold(request, target, form)
-        return redirect("ledger:leases:edit", pk=lease.pk)
-    form = _held(request, target, lambda data: LeaseForm(data, instance=lease)) or LeaseForm(
-        instance=lease, initial=_initial(lease)
+        return redirect(request.get_full_path())
+    form = _held(request, target, lambda data: _edit_form(lease, data, context)) or _edit_form(
+        lease, None, context
     )
-    return render(request, "ledger/leases/form.html", {"form": form, "lease": lease})
+    return render(
+        request,
+        "ledger/leases/form.html",
+        {"form": form, "lease": lease, "store_context": context},
+    )
 
 
 @role_required

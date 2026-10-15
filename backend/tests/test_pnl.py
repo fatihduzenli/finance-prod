@@ -813,7 +813,8 @@ def test_the_export_is_a_streamed_csv_attachment() -> None:
 
 def test_the_nav_links_to_the_report_next_to_payments() -> None:
     page = get("/payments/").content.decode()
-    payments_at = page.index('href="/payments/">Payments</a>')
+    # PLAN-012d D5: the current section's link carries aria-current="page".
+    payments_at = page.index('href="/payments/" aria-current="page">Payments</a>')
     assert page.index('href="/reports/pnl/">Profit and loss</a>') > payments_at
 
 

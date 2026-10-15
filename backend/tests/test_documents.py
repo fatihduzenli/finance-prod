@@ -767,6 +767,11 @@ def store_url(store: Store) -> str:
     return reverse("ledger:stores:detail", kwargs={"pk": store.pk})
 
 
+def store_documents(store: Store) -> str:
+    """The store page's Documents tab (PLAN-012d D3), where the section is."""
+    return f"{store_url(store)}?tab=documents"
+
+
 def lease_url(lease: Lease) -> str:
     return reverse("ledger:leases:detail", kwargs={"pk": lease.pk})
 
@@ -794,9 +799,11 @@ def test_billing_uploads_from_the_page_and_the_list_shows_it(owner_kind: str) ->
     owner = saved(new_store()) if owner_kind == "store" else saved(new_lease())
     client, _ = client_of(Role.BILLING)
     response = post_file(client, owner, "Floor plan.png", PNG, kind="floor_plan", note="Ground")
-    detail = store_url(owner) if isinstance(owner, Store) else lease_url(owner)
+    detail = store_documents(owner) if isinstance(owner, Store) else lease_url(owner)
     assert response.status_code == 302
-    assert response["Location"] == detail + "#documents"
+    # PLAN-012d D8: a store's upload returns to its Documents tab.
+    anchor = "#tab-documents" if isinstance(owner, Store) else "#documents"
+    assert response["Location"] == detail + anchor
     page = page_messages(client, detail)
     assert "Document uploaded." in page
     assert 'id="documents-list"' in page
@@ -852,7 +859,7 @@ def test_a_viewer_sees_the_list_but_no_upload_box_and_cannot_post() -> None:
     billing, _ = client_of(Role.BILLING)
     post_file(billing, store, "a.png", PNG)
     viewer, _ = client_of(Role.VIEWER)
-    page = page_messages(viewer, store_url(store))
+    page = page_messages(viewer, store_documents(store))
     assert "a.png" in page
     assert 'id="document-upload"' not in page
     assert "Delete" not in page.split('id="documents-list"')[1]
@@ -1007,9 +1014,9 @@ def test_delete_from_the_page_needs_admin_and_a_note() -> None:
     assert document.deleted_at is None
     assert admin.post(url, {"note": "Wrong store."}).status_code == 302
     assert Document.objects.get(pk=document.pk).deleted_at is not None
-    admin_page = page_messages(admin, store_url(store))
+    admin_page = page_messages(admin, store_documents(store))
     assert "Document deleted." in admin_page and "Wrong store." in admin_page
-    assert "a.png" not in page_messages(billing, store_url(store))
+    assert "a.png" not in page_messages(billing, store_documents(store))
     download = reverse("ledger:documents:download", kwargs={"pk": document.pk})
     assert billing.get(download).status_code == 404
     assert admin.get(download).status_code == 200
@@ -1042,12 +1049,12 @@ def test_feature_off_is_rendered_and_enforced(monkeypatch: pytest.MonkeyPatch) -
     store = saved(new_store())
     lease = saved(new_lease())
     admin, _ = client_of(Role.ADMIN)
-    for url in (store_url(store), lease_url(lease), "/stores/new/", "/leases/new/"):
+    for url in (store_documents(store), lease_url(lease), "/stores/new/", "/leases/new/"):
         page = page_messages(admin, url)
         assert "Document storage is not configured." in page, url
         assert 'type="file"' not in page, url
     post_file(admin, store, "a.png", PNG)
-    assert "Document storage is not configured." in page_messages(admin, store_url(store))
+    assert "Document storage is not configured." in page_messages(admin, store_documents(store))
     assert Document.objects.count() == 0
 
 

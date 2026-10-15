@@ -18,11 +18,12 @@
       <label for="audit-to" style="margin:0;">To</label>
       <input type="date" name="to" id="audit-to" value="{{ query.date_to|date:'Y-m-d' }}">
       {% if query.documents_of %}<input type="hidden" name="documents_of" value="{{ query.documents_of.0 }}:{{ query.documents_of.1 }}">{% endif %}
+      {% if query.store_of %}<input type="hidden" name="store_of" value="{{ query.store_of }}">{% endif %}
       <button class="btn" type="submit">Show</button>
       <a class="btn" id="audit-export" href="{% url 'ledger:audit:export' %}?{{ export_query }}">Export CSV</a>
     </div>
   </form>
-  <p class="muted">Newest first, {{ page_size }} rows a page. Dates are New York calendar days, at most {{ max_days }} days. An action or entity id ending in * matches every value that starts with the text before it. Identifiers are masked; amounts are shown as they were recorded.{% if query.documents_of %} Showing the document activity of one {{ query.documents_of.0 }}.{% endif %}</p>
+  <p class="muted">Newest first, {{ page_size }} rows a page. Dates are New York calendar days, at most {{ max_days }} days. An action or entity id ending in * matches every value that starts with the text before it. Identifiers are masked; amounts are shown as they were recorded.{% if query.documents_of %} Showing the document activity of one {{ query.documents_of.0 }}.{% endif %}{% if query.store_of %} Showing the rows of one store and its records.{% endif %}</p>
   {% if messages_shown %}
     <ul class="messages" id="audit-messages">{% for text in messages_shown %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}

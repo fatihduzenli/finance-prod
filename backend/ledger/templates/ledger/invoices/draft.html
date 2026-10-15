@@ -3,7 +3,9 @@
 {% load static %}
 {% block title %}{{ preview.number }}{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">&larr; {{ draft.operator.display_name }}</a>{% if draft.lease %} · <a href="{% url 'ledger:stores:detail' pk=draft.lease.store.pk %}">Store {{ draft.lease.store.external_label }}</a>{% endif %}</p>
+  {% include "ledger/_store_crumb.html" %}
+  <p><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">&larr; {{ draft.operator.display_name }}</a></p>
+  {% if store_context %}<p class="muted" id="known-fields">{{ store_context.line }}</p>{% endif %}
   <h1>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1>
   <dl id="draft-summary">
     <dt>Operator</dt><dd>{{ draft.operator.display_name }}</dd>
@@ -14,14 +16,14 @@
   <p class="actions"><a class="btn" href="{% url 'ledger:invoices:preview' pk=draft.pk %}" id="draft-preview">Preview</a> <a class="btn" href="{% url 'ledger:invoices:print' pk=draft.pk %}" id="draft-print">Print view</a></p>
 
   {% if editable %}
-    <form method="post" action="{% url 'ledger:invoices:edit' pk=draft.pk %}" id="draft-form" class="js-single-submit" autocomplete="off">
+    <form method="post" action="{% url 'ledger:invoices:edit' pk=draft.pk %}{{ context_query }}" id="draft-form" class="js-single-submit" autocomplete="off">
       {% csrf_token %}
       {% include "ledger/invoices/_draft_form.html" %}
       <p class="actions"><button class="btn" type="submit" id="save-draft">Save draft</button></p>
     </form>
     <h2>Send</h2>
     <p class="muted">Send and Charge now use the saved draft: save your changes first. Each line becomes a charge on {% if draft.lease %}the lease of store {{ draft.lease.store.external_label }}{% else %}the operator{% endif %}; one invoice with every line goes to the payment provider.</p>
-    <form method="post" action="{% url 'ledger:invoices:send' pk=draft.pk %}" id="send-form" class="js-single-submit">
+    <form method="post" action="{% url 'ledger:invoices:send' pk=draft.pk %}{{ context_query }}" id="send-form" class="js-single-submit">
       {% csrf_token %}
       <p class="actions"><button class="btn btn-primary" type="submit" id="send-draft">Send ${{ preview.total }} by e-mail</button>{% if can_charge_now %} <a class="btn" href="{% url 'ledger:invoices:charge_now' pk=draft.pk %}" id="draft-charge-now">Charge now</a>{% endif %}</p>
     </form>

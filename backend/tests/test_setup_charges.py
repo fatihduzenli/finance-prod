@@ -1233,9 +1233,13 @@ def test_billing_links_edits_and_adds_through_the_pages() -> None:
     assert duplicate["Location"] == paths["ledger:leases:add_setup_charge"]
     page = client.get(paths["ledger:leases:add_setup_charge"]).content.decode()
     assert "already has a charge for Access fee" in page
+    # PLAN-012d D2 to D4: the charges and Add setup charge are on the store page.
+    lease = lease_of(charge)
+    store_page = client.get(f"/stores/{lease.store_id}/?tab=charges&filter=all").content.decode()
+    assert 'id="store-charges"' in store_page and 'id="bar-add-setup-charge"' in store_page
+    assert f"/one-off-charges/{new.pk}/" in store_page
     lease_page = client.get(f"/leases/{charge.lease_id}/").content.decode()
-    assert 'id="setup-charges"' in lease_page and 'id="add-setup-charge"' in lease_page
-    assert f"/one-off-charges/{new.pk}/" in lease_page
+    assert 'id="setup-charges"' not in lease_page and 'id="store-charges-link"' in lease_page
 
 
 def test_the_vendor_with_a_card_number_is_refused_on_the_add_form_and_never_held() -> None:

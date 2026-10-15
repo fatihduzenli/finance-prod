@@ -1224,3 +1224,25 @@ with "Existing open charge", a month select, the width bug, trash-icon remove, t
 of the main navigation with "Create missing charges" per store, the grid window (10 past,
 current, next) with a From/To picker; tests; a new ADR for manual payment allocation. Done
 before 12c (the design pass). Plan: PLAN-012d.
+
+## Update, 2026-10-15, PLAN-012d Batch A built and gated (not pushed)
+
+Batch A of Step 12d: the store page is the workspace (header card; the action bar with Create
+invoice, Record a payment (the Charges tab until Batch B), Charge now (a pick page), Add setup
+charge, Upload document, Add contact entry, Edit lease, End lease, Transfer, Create missing
+charges; "New lease" on a vacant store; viewers see no bar; forms opened from the store hide the
+known fields, show one read-only line and return to the right tab); tabs Charges (every lease of
+the store), Invoices (with the store's drafts and Edit, Send, Delete), Payments, Schedules,
+Documents, Contact log, History (admin); the lease page keeps lease terms only; charge, invoice,
+plan and payment pages carry "← Store NNNN"; the attention list, grid and run page link store
+pages; Rent run left the main nav for an Admin menu; `aria-current` marks the section. No
+migration. Two rework cycles: "Schedule a payment" moved to Batch B (the setup-charge form cannot
+schedule a debit) and the insurance figure shared with receivables; then the nav's second role
+check had added a query to every page (revenue broke its budget in the volume test) — the role
+is now resolved once per request, every page two queries lighter. Gate: ruff, format, mypy (392
+files), lock, migrations clean; sqlite 5,178 passed; PostgreSQL 23 + 5,773 passed; e2e 7; secret
+scans clean; Fable's adversarial file 5 cases green. One MINOR deferred (12d-2: the Charges tab's
+rent and one-off rows read the stored balance, so a rescheduled return's carried amount is not
+subtracted as the header does; Batch D). Note: the PostgreSQL unit selection took 15:04 locally
+on a slow run (12:44 on CI before this batch); CI's figure on the next push decides whether the
+step needs a further split. Batch B assigned.

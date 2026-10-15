@@ -1,0 +1,23 @@
+{% comment %}The History tab (docs/qa/PLAN-012d D3; admin): ledger.services.audit.rows_for_store.{% endcomment %}
+{% load responsive %}
+<h2>History</h2>
+<p class="actions"><a class="btn" id="history-all" href="{{ history_url }}">Open in the audit log</a></p>
+{% responsive_table %}
+<table id="store-history">
+  <thead><tr><th>Time (New York)</th><th>Action</th><th>User</th><th>Record</th><th>After</th></tr></thead>
+  <tbody>
+    {% for row in history_rows %}
+      <tr class="history-row">
+        <td>{{ row.at_new_york }}</td>
+        <td>{{ row.action }}</td>
+        <td>{{ row.user|default:"—" }}</td>
+        <td>{{ row.entity_type }} {{ row.entity_id }}</td>
+        <td>{% for name, value in row.after %}{{ name }}: {{ value }}{% if not forloop.last %}; {% endif %}{% endfor %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="muted">No history yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}
+<p class="muted">The {{ history_size }} newest rows of this store, its leases and their charges, invoices, payments, schedules, documents, contact entries, lease ends, transfers and installment plans.</p>

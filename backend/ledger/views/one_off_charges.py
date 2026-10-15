@@ -58,9 +58,10 @@ from ledger.models import (
     OneOffChargeStatus,
     Operator,
 )
-from ledger.services import collections, csv_export, rent_run
+from ledger.services import collections, csv_export, rent_run, workspace
 from ledger.services import one_off_charges as service
 from ledger.services.csv_export import CsvWriter
+from ledger.views import store_context
 from ledger.views.charges import _report
 from ledger.views.installments import parent_context
 from ledger.views.jobs import already_submitted, busy, job_context, submit
@@ -133,14 +134,18 @@ EXPORT_HEADER = (
 @require_safe
 def charge_export(request: HttpRequest) -> StreamingHttpResponse:
     """``ledger:one_off_charges:export`` (PLAN-011 D5): one-off charges, of one lease
-    (``lease``) or billed to one operator (``operator``, as the operator page lists them)
-    when given, newest due first; an unreadable filter is ignored."""
+    (``lease``), of one store's leases (``store``, the store page's Charges tab, PLAN-012d
+    D4) or billed to one operator (``operator``, as the operator page lists them) when
+    given, newest due first; an unreadable filter is ignored."""
     charges = OneOffCharge.objects.select_related(
         "operator", "lease__store", "lease__operator", "fee_type"
     )
     lease = uuid_param(request, "lease")
     if lease is not None:
         charges = charges.filter(lease_id=lease)
+    store = uuid_param(request, "store")
+    if store is not None:
+        charges = charges.filter(lease__store_id=store)
     operator = uuid_param(request, "operator")
     if operator is not None:
         charges = charges.filter(operator_id=operator)
@@ -189,6 +194,8 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             **jobs,
             "charge": charge,
             "lease": charge.lease,
+            # PLAN-012d D5: "← Store NNNN".
+            "crumb_store": charge.lease.store if charge.lease is not None else None,
             "operator": _operator(charge),
             "invoices": invoices,
             # PLAN-012b-a D5: an invoice released for the installment plan.
@@ -325,6 +332,13 @@ def charge_payment(request: HttpRequest, pk: str) -> HttpResponse:
     if refused is not None:
         return refused
     charge = _load(pk)
+    context = _charge_context(request, charge)
+    done = store_context.return_url(
+        request,
+        context,
+        workspace.TAB_PAYMENTS,
+        reverse("ledger:one_off_charges:detail", kwargs={"pk": charge.pk}),
+    )
     target = f"one-off-charge-payment:{charge.pk}"
     if request.method == "POST":
         form = ManualPaymentForm(request.POST)
@@ -332,7 +346,7 @@ def charge_payment(request: HttpRequest, pk: str) -> HttpResponse:
             data = form.cleaned_data
             if already_submitted(data["creation_key"]):
                 messages.info(request, rent_run.PAY_ALREADY)
-                return redirect("ledger:one_off_charges:detail", pk=charge.pk)
+                return redirect(done)
             outcome = service.record_payment(
                 charge.pk,
                 method=data["method"],
@@ -357,16 +371,30 @@ def charge_payment(request: HttpRequest, pk: str) -> HttpResponse:
                 else:
                     messages.success(request, outcome.message)
                 _report(request, outcome.provider)
-                return redirect("ledger:one_off_charges:detail", pk=charge.pk)
+                return redirect(done)
             _error(form, outcome.field, outcome.message)
         _hold(request, target, form)
-        return redirect("ledger:one_off_charges:payment", pk=charge.pk)
+        return redirect(request.get_full_path())
     form = _held(request, target, ManualPaymentForm) or ManualPaymentForm(
         initial={"creation_key": uuid.uuid4()}
     )
     return render(
-        request, "ledger/one_off_charges/payment_form.html", {"form": form, "charge": charge}
+        request,
+        "ledger/one_off_charges/payment_form.html",
+        {"form": form, "charge": charge, "store_context": context},
     )
+
+
+def _charge_context(
+    request: HttpRequest, charge: OneOffCharge
+) -> store_context.StoreContext | None:
+    """The store page a charge's form was opened from (``?store=``, PLAN-012d D8); 404
+    for another store, and for a charge without a lease."""
+    if charge.lease is None:
+        if request.GET.get("store") or request.GET.get("lease"):
+            raise Http404
+        return None
+    return store_context.for_lease(request, charge.lease)
 
 
 @role_required
@@ -578,11 +606,14 @@ def _load_lease(pk: str) -> Lease:
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def lease_add_setup_charge(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:leases:add_setup_charge``: one setup charge on an existing lease (D5)."""
+    """``ledger:leases:add_setup_charge``: one setup charge on an existing lease (D5).
+    Opened from the store page (``?store=&lease=``, PLAN-012d D2) it shows the read-only
+    line and returns to the store's Charges tab."""
     refused = _refuse_below(request, Role.BILLING)
     if refused is not None:
         return refused
     lease = _load_lease(pk)
+    context = store_context.for_lease(request, lease)
     target = f"lease-add-setup-charge:{lease.pk}"
     if request.method == "POST":
         form = SetupChargeAddForm(request.POST)
@@ -590,15 +621,20 @@ def lease_add_setup_charge(request: HttpRequest, pk: str) -> HttpResponse:
             outcome = service.add_charge(lease.pk, form.item(), actor=_actor(request))
             if outcome.ok and outcome.charge is not None:
                 messages.success(request, outcome.message)
-                return redirect("ledger:one_off_charges:detail", pk=outcome.charge.pk)
+                detail = reverse("ledger:one_off_charges:detail", kwargs={"pk": outcome.charge.pk})
+                return redirect(
+                    store_context.return_url(request, context, workspace.TAB_CHARGES, detail)
+                )
             _error(form, outcome.field, outcome.message)
         _hold(request, target, form)
-        return redirect("ledger:leases:add_setup_charge", pk=lease.pk)
+        return redirect(request.get_full_path())
     form = _held(request, target, SetupChargeAddForm) or SetupChargeAddForm(
         initial={"due_date": lease.started_on or timezone.localdate()}
     )
     return render(
-        request, "ledger/one_off_charges/form.html", {"form": form, "charge": None, "lease": lease}
+        request,
+        "ledger/one_off_charges/form.html",
+        {"form": form, "charge": None, "lease": lease, "store_context": context},
     )
 
 

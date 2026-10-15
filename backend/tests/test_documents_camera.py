@@ -73,7 +73,8 @@ def browser_post(client: Client, url: str, fields: dict[str, str], files: dict[s
 def test_the_store_and_lease_pages_offer_a_file_and_a_photo_input() -> None:
     lease = saved(new_lease())
     client, _ = client_of(Role.BILLING)
-    for url in (store_url(lease.store), lease_url(lease)):
+    # PLAN-012d D3: the store's Documents section is its page's Documents tab.
+    for url in (f"{store_url(lease.store)}?tab=documents", lease_url(lease)):
         page = page_messages(client, url)
         assert (
             f'<input type="file" name="file" {FILE_ACCEPT} class="js-document-file" id="id_file">'

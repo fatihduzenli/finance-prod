@@ -1,0 +1,2 @@
+{% comment %}A form opened from the store page (docs/qa/PLAN-012d D2, D8): the way back and the one read-only line that replaces the hidden fields (store, lease, operator). Context: store_context (ledger.views.store_context.StoreContext).{% endcomment %}{% if store_context %}<p class="crumb" id="store-crumb"><a href="{% url 'ledger:stores:detail' pk=store_context.store.pk %}">&larr; Store {{ store_context.store.external_label }}</a></p>
+<p class="muted" id="known-fields">{{ store_context.line }}</p>{% endif %}

@@ -9,8 +9,9 @@ when it ends with ``*``; ``%`` and ``_`` are plain characters), ``from`` and ``t
 (New York calendar days, both included; by default the last :data:`DEFAULT_DAYS` days,
 at most :data:`MAX_DAYS`; a year outside :data:`MIN_YEAR`..:data:`MAX_YEAR` is unreadable,
 so no date arithmetic can leave the calendar), ``documents_of`` (``store:<id>`` or
-``lease:<id>``: the ``document.*`` rows of that record, as its Activity list reads them)
-and ``page``.
+``lease:<id>``: the ``document.*`` rows of that record, as its Activity list reads them),
+``store_of`` (a store id: the rows of the store and of its records, as the store page's
+History tab reads them, :func:`store_filter`; PLAN-012d D3) and ``page``.
 A filter longer than :data:`FILTER_MAX_LENGTH` characters is dropped.
 
 Rows are newest first, :data:`PAGE_SIZE` per page, read with one query (no count). The
@@ -35,10 +36,27 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
-from django.db.models import Q, QuerySet
+from django.db.models import CharField, Q, QuerySet, Value
 from django.utils import timezone
 
-from ledger.models import AuditLog, Document, Lease, Store
+from ledger.models import (
+    AuditLog,
+    CollectionSchedule,
+    ContactEntry,
+    Document,
+    InstallmentPlan,
+    InsuranceCharge,
+    Invoice,
+    InvoiceDraft,
+    Lease,
+    LeaseEnd,
+    LeaseTransfer,
+    OneOffCharge,
+    Payment,
+    RentCharge,
+    Store,
+    StoreCost,
+)
 from ledger.services import csv_export
 from ledger.services.csv_export import CsvWriter
 from payments.provider import mask_identifier
@@ -87,6 +105,9 @@ CAPPED = "The range is at most {days} days; it now starts on {start}."
 TOO_LONG = "A filter longer than {limit} characters was ignored: {name}."
 UNKNOWN_USER = "No user has that username; no rows match."
 BAD_OWNER = "The documents filter could not be read and was ignored."
+BAD_STORE = "The store filter could not be read and was ignored."
+#: The newest rows the store page's History tab shows (PLAN-012d D3).
+STORE_HISTORY_SIZE = 200
 PAGE_CAPPED = "Pages after {limit} are not shown; narrow the filters."
 
 _ISO_DATE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
@@ -109,6 +130,8 @@ class AuditQuery:
     entity_id: str = ""
     #: ``(owner type, owner id)`` of the ``documents_of`` filter, or ``None``.
     documents_of: tuple[str, uuid.UUID] | None = None
+    #: The store of the ``store_of`` filter, or ``None``.
+    store_of: uuid.UUID | None = None
     page: int = 1
     #: Why the query differs from what was asked, one sentence each.
     messages: tuple[str, ...] = ()
@@ -126,6 +149,8 @@ class AuditQuery:
                 values[name] = value
         if self.documents_of is not None:
             values["documents_of"] = f"{self.documents_of[0]}:{self.documents_of[1]}"
+        if self.store_of is not None:
+            values["store_of"] = str(self.store_of)
         shown = self.page if page is None else page
         if shown > 1:
             values["page"] = str(shown)
@@ -171,7 +196,7 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> AuditQu
     day = today or today_in_new_york()
     messages: list[str] = []
     text: dict[str, str] = {}
-    for name in ("action", "user", "entity_type", "entity_id", "documents_of"):
+    for name in ("action", "user", "entity_type", "entity_id", "documents_of", "store_of"):
         value = (params.get(name, "") or "").strip()
         if len(value) > FILTER_MAX_LENGTH:
             messages.append(TOO_LONG.format(limit=FILTER_MAX_LENGTH, name=name))
@@ -197,6 +222,12 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> AuditQu
         owner = _owner(text["documents_of"])
         if owner is None:
             messages.append(BAD_OWNER)
+    store_of = None
+    if text["store_of"]:
+        try:
+            store_of = uuid.UUID(text["store_of"])
+        except ValueError:
+            messages.append(BAD_STORE)
     page = _page(params.get("page", "") or "")
     if page > MAX_PAGE:
         page = MAX_PAGE
@@ -209,6 +240,7 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> AuditQu
         entity_type=text["entity_type"],
         entity_id=text["entity_id"],
         documents_of=owner,
+        store_of=store_of,
         page=page,
         messages=tuple(messages),
     )
@@ -260,7 +292,89 @@ def _filtered(query: AuditQuery) -> QuerySet[AuditLog] | None:
         found = found.filter(_text_filter("entity_id", query.entity_id))
     if query.documents_of is not None:
         found = found.filter(_documents_filter(*query.documents_of))
+    if query.store_of is not None:
+        found = found.filter(store_filter(query.store_of))
     return found.select_related("actor").order_by("-at", "-id")
+
+
+def _store_records(store_id: uuid.UUID) -> dict[str, list[str]]:
+    """Per entity type, the ids of the store's records (one query, a union): the store,
+    its leases and cost rows, their rent, one-off and insurance charges, invoices, invoice
+    drafts, payments, schedules, documents, contact entries, lease ends, transfers and
+    installment plans."""
+    on_store = Q(lease__store_id=store_id)
+    on_charge = (
+        Q(rent_charge__lease__store_id=store_id)
+        | Q(one_off_charge__lease__store_id=store_id)
+        | Q(insurance_charge__lease__store_id=store_id)
+    )
+    sources: list[tuple[str, QuerySet[Any]]] = [
+        ("store", Store.objects.filter(pk=store_id)),
+        ("store_cost", StoreCost.objects.filter(store_id=store_id)),
+        ("lease", Lease.objects.filter(store_id=store_id)),
+        ("rent_charge", RentCharge.objects.filter(on_store)),
+        ("one_off_charge", OneOffCharge.objects.filter(on_store)),
+        ("insurance_charge", InsuranceCharge.objects.filter(on_store)),
+        (
+            "invoice",
+            Invoice.objects.filter(
+                on_charge
+                | Q(line_items__one_off_charge__lease__store_id=store_id)
+                | Q(line_items__rent_charge__lease__store_id=store_id)
+            ),
+        ),
+        ("invoice_draft", InvoiceDraft.objects.filter(on_store)),
+        ("payment", Payment.objects.filter(on_charge)),
+        ("collection_schedule", CollectionSchedule.objects.filter(on_store)),
+        ("document", Document.objects.filter(Q(store_id=store_id) | on_store)),
+        ("contact_entry", ContactEntry.objects.filter(on_store)),
+        ("lease_end", LeaseEnd.objects.filter(on_store)),
+        ("lease_transfer", LeaseTransfer.objects.filter(store_id=store_id)),
+        ("installment_plan", InstallmentPlan.objects.filter(on_store)),
+    ]
+    parts = [
+        rows.annotate(record_type=Value(kind, output_field=CharField())).values_list(
+            "record_type", "pk"
+        )
+        for kind, rows in sources
+    ]
+    found: dict[str, list[str]] = {}
+    for kind, pk in parts[0].union(*parts[1:]):
+        found.setdefault(kind, []).append(str(pk))
+    return found
+
+
+def store_filter(store_id: uuid.UUID) -> Q:
+    """The audit rows of a store and of its records (:func:`_store_records`); a filter
+    that matches nothing when the store has none."""
+    condition = Q(pk__in=[])
+    for kind, ids in _store_records(store_id).items():
+        condition |= Q(entity_type=kind, entity_id__in=ids)
+    return condition
+
+
+def rows_for_store(store: Store) -> list[AuditRow]:
+    """The store page's History tab (PLAN-012d D3): the newest
+    :data:`STORE_HISTORY_SIZE` rows of the store and of its records, newest first,
+    masked as on the audit page."""
+    found = list(
+        AuditLog.objects.filter(store_filter(store.pk))
+        .select_related("actor")
+        .order_by("-at", "-id")[:STORE_HISTORY_SIZE]
+    )
+    owners = _document_owners(row.entity_id for row in found if row.entity_type == ENTITY_DOCUMENT)
+    return [_row(row, owners) for row in found]
+
+
+def store_query(store: Store, today: date | None = None) -> dict[str, str]:
+    """The ``/audit/`` query of the store's rows, over the longest range the page
+    allows (the History tab's link)."""
+    end = today or today_in_new_york()
+    return {
+        "store_of": str(store.pk),
+        "from": (end - timedelta(days=MAX_DAYS - 1)).isoformat(),
+        "to": end.isoformat(),
+    }
 
 
 @dataclass(frozen=True, slots=True)

@@ -531,12 +531,14 @@ def test_no_delete_route_exists() -> None:
     # at the provider and marks the local invoice void, and a calendar note or reminder
     # (PLAN-011b D8) is deleted by its author or an admin with its text kept in the audit
     # row. A contact log entry's delete is soft (PLAN-012 D2): the row stays, struck through
-    # with the admin's reason.
+    # with the admin's reason. A never-sent invoice draft (PLAN-012d D3) is no money
+    # record: nothing of it reached the provider, and its delete is audited with the draft.
     allowed = {
         "ledger:documents:delete",
         "ledger:one_off_charges:delete_invoice",
         "ledger:calendar:delete",
         "ledger:contacts:delete",
+        "ledger:invoices:delete_draft",
     }
     assert not any(
         "delete" in raw

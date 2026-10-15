@@ -17,6 +17,15 @@ body > nav button { background: none; border: 1px solid #fff; color: #fff; borde
 .nav-toggle { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
 .nav-toggle-label { display: none; color: #fff; font-weight: 600; cursor: pointer; border: 1px solid #fff; border-radius: 4px; padding: 0 .9rem; line-height: calc(var(--tap) - 2px); min-height: var(--tap); box-sizing: border-box; user-select: none; }
 .nav-toggle:focus-visible + .nav-toggle-label { outline: 2px solid #ffd400; outline-offset: 2px; }
+/* The current section, and the Admin menu (PLAN-012d D5). */
+body > nav a[aria-current="page"] { text-decoration: underline; text-underline-offset: 4px; }
+.nav-menu { position: relative; color: #fff; font-weight: 600; }
+.nav-menu summary { cursor: pointer; }
+.nav-menu[open] { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: center; }
+/* The store page's tabs (PLAN-012d D3): the open one is marked. */
+.store-tabs a[aria-current="page"], #charge-filters a[aria-current="page"], #invoice-filters a[aria-current="page"] { background: var(--ink); color: #fff; }
+.header-card { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
+.header-card dt { font-weight: 600; } .header-card dd { margin: 0; }
 
 /* --- Page --------------------------------------------------------------------------- */
 main { max-width: 64rem; margin: 1.5rem auto; padding: 1.5rem 2rem; background: var(--paper); border: 1px solid #ddd; border-radius: 6px; }

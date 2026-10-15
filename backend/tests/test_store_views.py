@@ -335,6 +335,8 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     contact_log = ("contacts", "contacts_add")
     # PLAN-012e D4, D6: End lease and Transfer start their wizards (admin).
     lease_end = ("end_lease", "transfer")
+    # PLAN-012d D2: the action bar's Record a payment (billing) and Charge now (admin).
+    workspace_bar = ("record_payment", "charge_now_pick")
     assert names == {
         f"ledger:stores:{short}"
         for short in (
@@ -346,8 +348,12 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
             *corrections,
             *contact_log,
             *lease_end,
+            *workspace_bar,
         )
     }
+    assert "ledger:stores:charge_now_pick" in registry.READ_ONLY_ROUTE_NAMES
+    rule = registry.rule_for("ledger:stores:record_payment")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     assert {
         "ledger:stores:list",
         "ledger:stores:detail",
@@ -417,7 +423,8 @@ def test_every_post_route_enforces_csrf() -> None:
 
 
 def test_the_nav_links_to_the_store_list(admin: Client) -> None:
-    assert '<a href="/stores/">Stores</a>' in admin.get(LIST).content.decode()
+    page = admin.get(LIST).content.decode()
+    assert '<a href="/stores/" aria-current="page">Stores</a>' in page
 
 
 # --- Row 4: the admin lists stores, operators and leases read-only --------------------------------

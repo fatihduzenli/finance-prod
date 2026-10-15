@@ -60,9 +60,12 @@ the Leases list (kept), e-mail receipts, insurance autopay changes.
   `stores:record_payment` (new, D6; billing); **Charge now** → `stores:charge_now_pick` (new:
   the store's charges with a live Stax invoice and an operator with a bank method, one button
   each to the existing confirm page; admin); **Add setup charge** → `leases:add_setup_charge`
-  (billing); **Schedule a payment** → `leases:add_setup_charge?collection=autopay_due` (the
-  existing one-off form with "Autopay on the due date" preselected and the date field first;
-  billing; **owner's confirmation asked**: this is the nearest existing form); **Upload
+  (billing); **Schedule a payment** → `stores:schedule_payment` (**Batch B**, amended 2026-10-15: the
+  setup-charge form cannot schedule a debit; a small form, item from the catalogue or typed,
+  description, amount, date, creating a one-off charge collected by "Autopay on the due date"
+  through `one_off_charges.add_charge` with `CollectionMethod.AUTOPAY_DUE`, so the existing
+  `schedule_create` job makes the one-occurrence Stax schedule; needs the operator's linked bank
+  method; billing); **Upload
   document** → the documents section's form (scrolls to it; billing); **Add contact entry** →
   `stores:contacts_add` (billing); **Edit lease** → `leases:edit` (admin); **End lease** →
   `stores:end_lease` (admin); **Transfer to another operator** → `stores:transfer` (admin). A
@@ -220,8 +223,8 @@ the Leases list (kept), e-mail receipts, insurance autopay changes.
 
 ## 4. Interface contract
 
-Routes (new): `ledger:stores:record_payment` (billing), `ledger:stores:charge_now_pick`
-(admin), `ledger:stores:create_charges` (POST, billing), `ledger:invoices:rent_amount` (GET
+Routes (new): `ledger:stores:record_payment` (billing), `ledger:stores:schedule_payment`
+(billing, Batch B), `ledger:stores:charge_now_pick` (admin), `ledger:stores:create_charges` (POST, billing), `ledger:invoices:rent_amount` (GET
 JSON, billing), `ledger:invoices:delete_draft` (POST, billing; a never-sent draft). Query
 parameters: `?tab=`, `?store=`, `?lease=`, `?collection=`, `?next=` (local path). Models:
 `Payment.allocation_group` (UUID, null), `Payment.credit` (FK `LeaseCredit`, null),
@@ -238,7 +241,7 @@ No new dependency, environment variable or provider call.
 | Batch | Decisions | Done when |
 |---|---|---|
 | A | D1, D2 (bar without the new payment form), D3, D4, D5, D7, D8; drafts' Edit/Send/Delete on the store page; the "already on draft" link | the store page shows header, bar and tabs with today's data; the lease page is details only; detail pages link the store; nav and attention link stores; every old route answers; forms opened from the store hide the known fields and return to the tab |
-| B | D6, D6a, D6b, insurance manual payment, migration 0042, ADR-0013 (Fable) | a payment split over charges with a credit remainder, applied later; Stax marked when covered; P&L footer; lease end and transfer rules |
+| B | D6, D6a, D6b, insurance manual payment, `stores:schedule_payment`, migration 0042, ADR-0013 (Fable) | a payment split over charges with a credit remainder, applied later; Stax marked when covered; P&L footer; lease end and transfer rules |
 | C | D9, D10, migrations 0043, 0044 | the checklist without ticks and with the flag; the builder's combo, month select, amount endpoint, existing-charge line, width, trash, numbering |
 | D | D11, D12, D13 | the run page's list and the tick's row; the dashboard line; "Create missing charges"; the grid window and picker |
 | E | D14 | the operator page as the workspace with the store selector and the drafts' actions |

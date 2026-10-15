@@ -1022,7 +1022,8 @@ def test_the_removed_create_form_answers_410_and_the_pages_offer_new_invoice(
     operator = an_operator(fake)
     lease = make_lease(operator=operator)
     client, _ = client_for(Role.BILLING)
-    for page in (f"/operators/{operator.pk}/", f"/leases/{lease.pk}/"):
+    # PLAN-012d D2, D4: the store page's bar has Create invoice; the lease page no longer.
+    for page in (f"/operators/{operator.pk}/", f"/stores/{lease.store_id}/"):
         text = client.get(page).content.decode()
         assert 'id="new-one-off-charge"' not in text and 'id="new-invoice"' in text, page
     for path in (f"/operators/{operator.pk}/charges/new/", f"/leases/{lease.pk}/charges/new/"):

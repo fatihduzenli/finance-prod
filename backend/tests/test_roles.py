@@ -5,14 +5,17 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, User
+from django.db import connection
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, override_settings
+from django.test.utils import CaptureQueriesContext
 
 from accounts import registry
 from accounts.middleware import RoleEnforcementMiddleware
 from accounts.registry import POST, RouteRule, is_allowed
 from accounts.roles import Role, role_of
+from accounts.templatetags.roles import is_admin, is_billing
 from tests.auth_helpers import iter_routes, make_user, sample_path, verified_client
 
 pytestmark = pytest.mark.django_db
@@ -43,11 +46,40 @@ def _client_for(username: str, role: Role | None, **kwargs: bool) -> Client:
 
 
 def test_role_of_returns_the_highest_group() -> None:
+    # The role is read once per user object (as once per request), so each check
+    # after a group change reads a fresh object, as the next request would.
     user, _ = make_user("multi", Role.VIEWER)
     user.groups.add(Group.objects.get(name="billing"))
-    assert role_of(user) is Role.BILLING
+    assert role_of(User.objects.get(pk=user.pk)) is Role.BILLING
     user.groups.add(Group.objects.get(name="admin"))
+    assert role_of(User.objects.get(pk=user.pk)) is Role.ADMIN
+
+
+def test_role_of_reads_the_groups_once_per_user_object() -> None:
+    user, _ = make_user("cached", Role.BILLING)
+    with CaptureQueriesContext(connection) as queries:
+        assert role_of(user) is Role.BILLING
+        assert role_of(user) is Role.BILLING
+        assert is_billing(user)
+        assert not is_admin(user)
+    assert len(queries) == 1
+
+
+def test_role_of_reads_the_groups_once_for_each_user_object() -> None:
+    user, _ = make_user("twice", Role.ADMIN)
+    first, second = User.objects.get(pk=user.pk), User.objects.get(pk=user.pk)
+    with CaptureQueriesContext(connection) as queries:
+        assert role_of(first) is Role.ADMIN
+        assert role_of(second) is Role.ADMIN
+        assert is_admin(first) and is_billing(second)
+    assert len(queries) == 2
+
+
+def test_role_of_cached_role_does_not_outlive_deactivation() -> None:
+    user, _ = make_user("deactivated", Role.ADMIN)
     assert role_of(user) is Role.ADMIN
+    user.is_active = False
+    assert role_of(user) is None
 
 
 def test_role_of_ignores_look_alike_groups() -> None:

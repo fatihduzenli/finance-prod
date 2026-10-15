@@ -1,0 +1,12 @@
+{% comment %}The store page's header card (docs/qa/PLAN-012d D1): ledger.services.workspace.Header.{% endcomment %}
+<section id="workspace-header" aria-label="Store summary">
+  <dl class="header-card">
+    <dt>Operator</dt><dd id="header-operator">{% if header.operator %}<a href="{% url 'ledger:operators:detail' pk=header.operator.pk %}">{{ header.operator.display_name }}</a>{% else %}—{% endif %}</dd>
+    <dt>Lease</dt><dd id="header-lease">{% if header.lease %}<a href="{% url 'ledger:leases:detail' pk=header.lease.pk %}">From {{ header.lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if header.lease.ended_on %} to {{ header.lease.ended_on|date:"Y-m-d" }}{% endif %}{% if header.rent %}, rent ${{ header.rent.amount }} a month{% endif %}{% else %}No current lease{% if vacant_since %}, vacant since {{ vacant_since|date:"Y-m-d" }}{% endif %}{% endif %}</dd>
+    <dt>Autopay</dt><dd id="header-autopay">{{ header.autopay }}{% if header.autopay_moved %}; {{ header.autopay_moved }}{% endif %}</dd>
+    <dt>Open balance</dt><dd id="header-open-balance">${{ header.open_balance }}</dd>
+    <dt>Credit</dt><dd id="header-credit">${{ header.credit }}</dd>
+    <dt>Next scheduled payment</dt><dd id="header-next-payment">{% if header.next_payment %}{{ header.next_payment.on|date:"Y-m-d" }}: {{ header.next_payment.what }}{% else %}None scheduled{% endif %}</dd>
+    <dt>Open promise</dt><dd id="header-open-promise">{% if header.open_promise %}${{ header.open_promise.promised_amount }} by {{ header.open_promise.promised_date|date:"Y-m-d" }}{% else %}None{% endif %}</dd>
+  </dl>
+</section>

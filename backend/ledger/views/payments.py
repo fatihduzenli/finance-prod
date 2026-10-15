@@ -120,6 +120,8 @@ def _summary(payment: Payment, facts: refunds.PaymentFacts) -> dict[str, object]
         "invoice": payment.invoice,
         "charge": payment.rent_charge,
         "one_off_charge": payment.one_off_charge,
+        # PLAN-012d D5: "← Store NNNN".
+        "crumb_store": row.store,
     }
 
 

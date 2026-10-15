@@ -2,6 +2,7 @@
 {% load responsive %}
 {% block title %}Payment{% endblock %}
 {% block content %}
+  {% include "ledger/_store_crumb.html" %}
   <p><a href="{% url 'ledger:payments:list' %}">&larr; Payments</a>{% if charge %} · <a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Charge</a>{% elif one_off_charge %} · <a href="{% url 'ledger:one_off_charges:detail' pk=one_off_charge.pk %}">One-off charge</a>{% endif %}</p>
   <h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of ${{ payment.amount }}</h1>
   {% if can_refund or can_void %}

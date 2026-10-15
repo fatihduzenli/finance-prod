@@ -250,11 +250,11 @@ def _insurance_balances(
     )
     found = []
     for row in rows:
-        balance = (
-            _money(row["amount"])
-            - _money(row["paid"])
-            + _money(row["refunded"])
-            - collected.get(row["pk"], ZERO)
+        balance = insurance_owed(
+            _money(row["amount"]),
+            paid=_money(row["paid"]),
+            refunded=_money(row["refunded"]),
+            collected=collected.get(row["pk"], ZERO),
         )
         if balance <= 0:
             continue
@@ -275,6 +275,25 @@ def _insurance_balances(
             )
         )
     return found
+
+
+def insurance_owed(
+    amount: Decimal | None,
+    *,
+    paid: Decimal,
+    refunded: Decimal,
+    collected: Decimal,
+    carried: Decimal = ZERO,
+    legacy_status: str = "",
+) -> Decimal:
+    """What one insurance charge owes (the module docstring): nothing while it needs its
+    premium or when the sheet shows it paid; else its amount less its settled payments
+    (``paid``) and what its re-debits collected (``collected``), plus its settled refunds
+    (``refunded``), less what its live re-debits have still to collect (``carried``);
+    never below zero."""
+    if amount is None or legacy_status == LegacyStatus.PAID:
+        return ZERO
+    return max(amount - paid + refunded - collected - carried, ZERO)
 
 
 def _one_off_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
@@ -347,6 +366,30 @@ def carried_by_redebits(
         rows = rows.filter(
             Q(operator=operator) | Q(operator__isnull=True, lease__operator=operator)
         )
+    return _redebit_amounts(rows)
+
+
+def insurance_redebits(
+    charges: Iterable[uuid.UUID],
+) -> tuple[dict[uuid.UUID, Decimal], dict[uuid.UUID, Decimal]]:
+    """For the insurance charges ``charges``, in one query: per charge, what its live
+    re-debits have still to collect (as :func:`carried_by_redebits` carries it) and what
+    its re-debits collected; so that :func:`insurance_owed` reads the balance
+    :func:`open_balances` lists."""
+    carried, collected = _redebit_amounts(
+        OneOffCharge.objects.filter(
+            category=OneOffCategory.REDEBIT, source_payment__insurance_charge__in=list(charges)
+        )
+    )
+    return (
+        {charge: amount for (kind, charge), amount in carried.items() if kind == KIND_INSURANCE},
+        collected,
+    )
+
+
+def _redebit_amounts(
+    rows: QuerySet[OneOffCharge],
+) -> tuple[dict[tuple[str, uuid.UUID], Decimal], dict[uuid.UUID, Decimal]]:
     carried: dict[tuple[str, uuid.UUID], Decimal] = {}
     insurance_collected: dict[uuid.UUID, Decimal] = {}
     for status, price, paid, rent, insurance, one_off in rows.values_list(

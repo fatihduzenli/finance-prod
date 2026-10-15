@@ -474,11 +474,11 @@ def test_the_activity_list_shows_uploads_downloads_and_refusals_of_that_record_o
         "uploaded",
     ]
     viewer, _ = client_for(Role.VIEWER)
-    body = viewer.get(f"/stores/{store.pk}/").content.decode()
+    body = viewer.get(f"/stores/{store.pk}/?tab=documents").content.decode()
     assert body.count('class="document-activity"') == 3
     assert 'id="documents-activity-link"' not in body
     admin_client, _ = admin()
-    body = admin_client.get(f"/stores/{store.pk}/").content.decode()
+    body = admin_client.get(f"/stores/{store.pk}/?tab=documents").content.decode()
     assert 'id="documents-activity-link"' in body
     assert f"documents_of=store%3A{store.pk}" in body
     lease_body = admin_client.get(f"/leases/{lease.pk}/").content.decode()
@@ -513,5 +513,5 @@ def test_the_audit_link_lists_the_same_rows(storage: MemoryDocumentStorage) -> N
 def test_a_new_record_shows_no_activity(storage: MemoryDocumentStorage) -> None:
     store: Store = saved(new_store())
     assert audit.activity_for(store) == []
-    body = client_for(Role.VIEWER)[0].get(f"/stores/{store.pk}/").content.decode()
+    body = client_for(Role.VIEWER)[0].get(f"/stores/{store.pk}/?tab=documents").content.decode()
     assert "No document activity yet." in body

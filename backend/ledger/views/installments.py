@@ -242,6 +242,8 @@ def plan_detail(request: HttpRequest, pk: str) -> HttpResponse:
         "ledger/installments/plan.html",
         {
             "plan": plan,
+            # PLAN-012d D5: "← Store NNNN".
+            "crumb_store": plan.lease.store if plan.lease is not None else None,
             "progress": service.progress(plan),
             "parent_label": service.parent_label(plan.parent),
             "parent_url": service.parent_url(plan.parent),

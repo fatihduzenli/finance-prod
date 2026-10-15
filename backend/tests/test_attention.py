@@ -281,7 +281,8 @@ def test_insurance_due_in_30_days_and_a_missing_premium(today: date) -> None:
     assert late.pk
     due = of_kind(attention.INSURANCE_DUE)
     assert [(item.text, item.url) for item in due] == [
-        ("Insurance due 2026-11-05: Soon (A)", f"/leases/{soon.pk}/")
+        # PLAN-012d D5: the store page's Charges tab.
+        ("Insurance due 2026-11-05: Soon (A)", f"/stores/{soon.store_id}/?tab=charges#tab-charges")
     ]
     # A charge still waiting for its premium.
     waiting = a_lease(opened(a_store("Waiting"), date(2020, 3, 1)), an_operator("C"))
@@ -296,7 +297,7 @@ def test_an_upcoming_anniversary_without_a_premium_is_missing(today: date) -> No
     lease = a_lease(opened(a_store("NoPremium"), date(2020, 10, 20)), an_operator("D"))
     [item] = of_kind(attention.INSURANCE_PREMIUM_MISSING)
     assert item.text == "Insurance premium for 2026 missing, due 2026-10-20: NoPremium (D)"
-    assert item.url == f"/leases/{lease.pk}/"
+    assert item.url == f"/stores/{lease.store_id}/?tab=charges#tab-charges"
     assert of_kind(attention.INSURANCE_DUE) == []
 
 
@@ -309,8 +310,8 @@ def test_leases_ending_in_60_days_including_today(today: date) -> None:
     Lease.objects.filter(pk=ends_day_61.pk).update(ended_on=TODAY + timedelta(days=61))
     items = of_kind(attention.LEASE_ENDING)
     assert [item.url for item in items] == [
-        f"/leases/{ends_today.pk}/",
-        f"/leases/{ends_day_60.pk}/",
+        f"/stores/{ends_today.store_id}/?tab=schedules#tab-schedules",
+        f"/stores/{ends_day_60.store_id}/?tab=schedules#tab-schedules",
     ]
     assert items[0].text == "Lease ends 2026-10-06: Today (A)"
 
@@ -388,7 +389,7 @@ def test_a_schedule_flagged_after_a_rent_change(today: date) -> None:
     )
     [item] = of_kind(attention.SCHEDULE_REVIEW)
     assert item.text == "Rent schedule to review after a lease change: Flagged (A)"
-    assert item.url == f"/leases/{lease.pk}/"
+    assert item.url == f"/stores/{lease.store_id}/?tab=schedules#tab-schedules"
 
 
 def test_dead_letters_and_open_mismatches_are_counted(today: date) -> None:

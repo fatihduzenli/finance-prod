@@ -7,7 +7,8 @@ leases, or the operator alone) saves a **draft** and opens its page. The draft p
 (billing) edits the lines (rows are added and removed by a small script; without it the
 page shows a fixed number of blank rows and a Remove box per row), the memo and the due
 date, and offers Preview, Print view, Send (billing), Charge now (admin, with the
-confirmation of PLAN-010d D4) and Cancel. After sending it shows the invoice number, the
+confirmation of PLAN-010d D4), Cancel and Delete (a never-sent draft, billing, no note
+and no confirmation page; PLAN-012d D3). After sending it shows the invoice number, the
 invoice's state at the payment provider, its latest provider request and each line's
 charge. The preview and the print view (a standalone page with the print stylesheet and
 no navigation; "Save as PDF" from the browser's print dialog) are read by any role.
@@ -16,15 +17,23 @@ The registry checks every POST first; these views refuse the forms' GET below th
 role. :mod:`ledger.services.invoice_builder` re-checks every rule under the draft's row
 lock and writes the audit rows. No view calls the provider. Every POST ends in a
 redirect; a form with errors is held in the session for the next GET, without any value
-that holds a card number.
+that holds a card number. A refusal naming another open draft links its number to that
+draft's page.
+
+Opened from the store page (``?store=&lease=``, PLAN-012d D2, D8;
+:mod:`ledger.views.store_context`), the forms hide the lease, show the read-only line,
+keep the context through Save draft, and Send and Delete return to the store page's
+Invoices tab.
 """
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Iterable
 from typing import Any
 
+from django import forms
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -50,16 +59,20 @@ from ledger.models import (
     Operator,
     Store,
 )
-from ledger.services import contacts, invoice_builder, one_off_charges
+from ledger.services import contacts, invoice_builder, one_off_charges, workspace
 from ledger.validators import contains_card_number
+from ledger.views import store_context
 from ledger.views.jobs import job_context
 from ledger.views.operators import _actor, _role, role_required
+from ledger.views.store_context import StoreContext
 
 #: The session key of a draft form held with its errors.
 HELD_KEY = "invoice_draft_form"
 LINES_PREFIX = "lines"
 NO_LEASE_TODAY = "This store has no lease in effect today: choose the operator's page instead."
 NOT_EDITABLE = "This invoice is no longer a draft."
+#: A draft's number in a refusal (:data:`ledger.services.invoice_builder.LINE_RENT_ON_DRAFT`).
+DRAFT_NUMBER = re.compile(r"DRAFT-[0-9A-F]{8}")
 
 
 # --- Loading --------------------------------------------------------------------------
@@ -164,6 +177,58 @@ def _form_errors(form: Any, formset: Any) -> list[str]:
     return found
 
 
+def _error_items(errors: Iterable[str], operators: Iterable[Operator]) -> list[dict[str, str]]:
+    """The error sentences as the form shows them: a sentence naming another open draft
+    of the same operators ("... is already on draft DRAFT-...", PLAN-012d) links that
+    draft's number to its page; the sentence itself stays as the service wrote it."""
+    texts = [str(error) for error in errors]
+    numbers = {match.group(0) for text in texts for match in DRAFT_NUMBER.finditer(text)}
+    drafts: dict[str, str] = {}
+    if numbers:
+        for draft in InvoiceDraft.objects.filter(
+            operator__in=list(operators), status=InvoiceDraftStatus.DRAFT
+        ).only("pk"):
+            if draft.number in numbers:
+                drafts[draft.number] = reverse("ledger:invoices:draft", kwargs={"pk": draft.pk})
+    items = []
+    for text in texts:
+        match = DRAFT_NUMBER.search(text)
+        if match is None or match.group(0) not in drafts:
+            items.append({"text": text})
+            continue
+        items.append(
+            {
+                "text": text[: match.start()],
+                "number": match.group(0),
+                "url": drafts[match.group(0)],
+                "after": text[match.end() :],
+            }
+        )
+    return items
+
+
+def _hide_lease(form: InvoiceDraftForm) -> None:
+    """A draft opened from the store page with its lease (PLAN-012d D2): the lease is
+    known, so its field is hidden and the read-only line names it."""
+    form.fields["lease"].widget = forms.HiddenInput()
+
+
+def _draft_context(request: HttpRequest, draft: InvoiceDraft) -> StoreContext | None:
+    """The store page a draft was opened from (``?store=``); 404 for a store other than
+    the draft's lease's, and for an operator-level draft."""
+    if draft.lease is None:
+        if request.GET.get("store") or request.GET.get("lease"):
+            raise Http404
+        return None
+    return store_context.for_lease(request, draft.lease)
+
+
+def _draft_url(draft: InvoiceDraft, context: StoreContext | None) -> str:
+    return reverse("ledger:invoices:draft", kwargs={"pk": draft.pk}) + (
+        context.query if context is not None else ""
+    )
+
+
 def _draft_initial(draft: InvoiceDraft) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     header = {
         "lease": str(draft.lease_id) if draft.lease_id else "",
@@ -203,6 +268,7 @@ def _new(
     preselected: Lease | None,
     back: str,
     heading: str,
+    context: StoreContext | None = None,
 ) -> HttpResponse:
     target = f"invoice-new:{request.path}"
     operators = (
@@ -233,7 +299,7 @@ def _new(
                 )
             if outcome.ok and outcome.draft is not None:
                 messages.success(request, outcome.message)
-                return redirect("ledger:invoices:draft", pk=outcome.draft.pk)
+                return redirect(_draft_url(outcome.draft, context))
             _hold(request, target, [outcome.message])
         else:
             _hold(request, target, _form_errors(form, formset))
@@ -254,6 +320,8 @@ def _new(
             allow_none=allow_none,
         )
         formset = _formset(rent_leases=rent_leases, default_lease=preselected)
+    if context is not None and context.lease is not None:
+        _hide_lease(form)
     return render(
         request,
         "ledger/invoices/new.html",
@@ -262,7 +330,8 @@ def _new(
             "formset": formset,
             "item_names": _item_names(),
             "items_list_id": ITEMS_LIST_ID,
-            "errors": errors,
+            "errors": _error_items(errors, operators),
+            "store_context": context,
             "back": back,
             "heading": heading,
             "due_days": invoice_builder.DUE_DAYS,
@@ -284,17 +353,27 @@ def new_store(request: HttpRequest, pk: str) -> HttpResponse:
         for lease in contacts.store_leases(store, timezone.localdate())
         if lease.operator is not None and lease.operator.archived_at is None
     ]
+    context = store_context.from_request(request, store=store)
     if not leases:
         messages.error(request, NO_LEASE_TODAY)
         return redirect("ledger:stores:detail", pk=store.pk)
+    if context is not None and context.lease is not None and context.lease not in leases:
+        # A lease of this store that is not in effect today: the choice stays open.
+        context = StoreContext(store=store, lease=None)
+    preselected = context.lease if context is not None and context.lease else leases[0]
     return _new(
         request,
         operator=None,
         leases=leases,
         allow_none=False,
-        preselected=leases[0],
-        back=reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
+        preselected=preselected,
+        back=(
+            context.tab_url(workspace.TAB_INVOICES)
+            if context is not None
+            else reverse("ledger:stores:detail", kwargs={"pk": store.pk})
+        ),
         heading=f"New invoice: store {store.external_label}",
+        context=context,
     )
 
 
@@ -311,6 +390,10 @@ def new_operator(request: HttpRequest, pk: str) -> HttpResponse:
         messages.error(request, invoice_builder.OPERATOR_ARCHIVED)
         return redirect("ledger:operators:detail", pk=operator.pk)
     leases = _operator_leases(operator)
+    wanted_store = request.GET.get("store", "")
+    if wanted_store and wanted_store not in {str(lease.store_id) for lease in leases}:
+        # PLAN-012d D2: a store of another operator is never pre-filled.
+        raise Http404
     wanted = request.GET.get("lease", "")
     preselected = next((lease for lease in leases if str(lease.pk) == wanted), None)
     return _new(
@@ -359,6 +442,7 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
     if refused is not None:
         return refused
     draft = _load(pk)
+    context = _draft_context(request, draft)
     admin = meets(_role(request), Role.ADMIN)
     editable = draft.status == InvoiceDraftStatus.DRAFT
     target = f"invoice-edit:{draft.pk}"
@@ -376,6 +460,8 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
         header, lines = _draft_initial(draft)
         form = InvoiceDraftForm(initial=header, leases=leases, allow_none=True)
         formset = _formset(initial=lines, rent_leases=rent_leases, default_lease=draft.lease)
+    if form is not None and context is not None:
+        _hide_lease(form)
     sent = _sent_context(draft) if draft.status == InvoiceDraftStatus.SENT else {}
     return render(
         request,
@@ -388,8 +474,11 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
             "formset": formset,
             "item_names": _item_names() if editable else [],
             "items_list_id": ITEMS_LIST_ID,
-            "errors": errors,
+            "errors": _error_items(errors, [draft.operator]),
             "editable": editable,
+            "store_context": context,
+            "context_query": context.query if context is not None else "",
+            "crumb_store": draft.lease.store if draft.lease is not None else None,
             "can_charge_now": editable and admin and one_off_charges.charge_now_enabled(),
             "can_cancel": draft.status == InvoiceDraftStatus.DRAFT
             or (draft.status == InvoiceDraftStatus.SENT and not sent.get("cancel_refusal")),
@@ -406,6 +495,7 @@ def draft_edit(request: HttpRequest, pk: str) -> HttpResponse:
     if refused is not None:
         return refused
     draft = _load(pk)
+    context = _draft_context(request, draft)
     target = f"invoice-edit:{draft.pk}"
     form = InvoiceDraftForm(request.POST, leases=_operator_leases(draft.operator), allow_none=True)
     formset = _formset(
@@ -424,11 +514,11 @@ def draft_edit(request: HttpRequest, pk: str) -> HttpResponse:
         )
         if outcome.ok:
             messages.success(request, outcome.message)
-            return redirect("ledger:invoices:draft", pk=draft.pk)
+            return redirect(_draft_url(draft, context))
         _hold(request, target, [outcome.message])
     else:
         _hold(request, target, _form_errors(form, formset))
-    return redirect("ledger:invoices:draft", pk=draft.pk)
+    return redirect(_draft_url(draft, context))
 
 
 @role_required
@@ -440,12 +530,44 @@ def draft_send(request: HttpRequest, pk: str) -> HttpResponse:
     if refused is not None:
         return refused
     draft = _load(pk)
+    context = _draft_context(request, draft)
     outcome = invoice_builder.send(draft.pk, _actor(request))
+    if outcome.ok:
+        messages.success(request, outcome.message)
+        if context is not None:
+            # PLAN-012d D8: sent from the store page, back to its Invoices tab.
+            return redirect(context.tab_url(workspace.TAB_INVOICES))
+    else:
+        messages.error(request, outcome.message)
+    return redirect(_draft_url(draft, context))
+
+
+@role_required
+@require_POST
+def draft_delete(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:invoices:delete_draft`` (billing; PLAN-012d D3): a never-sent draft is
+    deleted outright, without a note or a confirmation page; a sent invoice is refused
+    (it keeps its cancel form). Back to the store page's Invoices tab when opened from
+    it, else to the operator page."""
+    refused = _refuse_below(request, Role.BILLING)
+    if refused is not None:
+        return refused
+    draft = _load(pk)
+    context = _draft_context(request, draft)
+    outcome = invoice_builder.delete_draft(draft.pk, _actor(request))
+    if context is not None:
+        back = context.tab_url(workspace.TAB_INVOICES)
+    elif outcome.ok:
+        back = reverse("ledger:operators:detail", kwargs={"pk": draft.operator_id}) + (
+            "#invoice-drafts"
+        )
+    else:
+        back = _draft_url(draft, None)
     if outcome.ok:
         messages.success(request, outcome.message)
     else:
         messages.error(request, outcome.message)
-    return redirect("ledger:invoices:draft", pk=draft.pk)
+    return redirect(back)
 
 
 @role_required

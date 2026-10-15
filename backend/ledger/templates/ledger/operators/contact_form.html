@@ -1,13 +1,14 @@
 {% extends "finance/base.html" %}
 {% block title %}Add entry: {{ title }}{% endblock %}
 {% block content %}
-  <p><a href="{{ back_url }}">&larr; Back</a></p>
+  {% if store_context %}{% include "ledger/_store_context.html" %}{% else %}<p><a href="{{ back_url }}">&larr; Back</a></p>{% endif %}
   <h1>Add entry: {{ title }}</h1>
   <p class="muted">A call, an e-mail, a visit or a promise to pay. A promise needs its date and amount; nothing else has them. Never write card or account numbers.</p>
   {% if form.outcome %}<p class="muted" id="previous-promise-help">This operator has an open promise to pay. Still open records this entry and leaves the promise as it is; Kept closes it as kept; Rescheduled closes it and this entry is the new promise (its date and amount start from the old one); Broken closes it as broken.</p>{% endif %}
   <form method="post" id="contact-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}
+    {% for field in form.hidden_fields %}{{ field }}{% endfor %}
     {% for field in form.visible_fields %}
       {% if field.name == "promised_date" %}<p class="muted" id="promise-supersede"{% if not supersede_warning %} hidden{% endif %}>{{ supersede_warning }}</p>{% endif %}
       <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>

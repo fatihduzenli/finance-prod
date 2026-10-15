@@ -97,7 +97,15 @@ from ledger.models import (
     StoreCost,
     StoreStatus,
 )
-from ledger.services import calendar, contacts, installments, insurance, receivables, returns
+from ledger.services import (
+    calendar,
+    contacts,
+    installments,
+    insurance,
+    receivables,
+    returns,
+    workspace,
+)
 from ledger.services.leases import format_amount
 from payments.models import ReconciliationMismatch, WebhookEvent, WebhookOutcome
 
@@ -484,8 +492,10 @@ def _leases(operator: uuid.UUID | None) -> list[Lease]:
     return list(rows.order_by("store__external_label", "id"))
 
 
-def _lease_url(lease: Lease) -> str:
-    return reverse("ledger:leases:detail", kwargs={"pk": lease.pk})
+def _lease_url(lease: Lease, tab: str) -> str:
+    """The store page's tab of an item about a lease (PLAN-012d D5): Charges for the
+    insurance items, Schedules for a lease ending and a schedule to review."""
+    return workspace.tab_url(lease.store_id, tab)
 
 
 def _where(lease: Lease) -> str:
@@ -527,7 +537,7 @@ def _insurance(today: date, leases: list[Lease]) -> list[Item]:
                         if no_premium
                         else f"Insurance due {due}: {_where(lease)}"
                     ),
-                    url=_lease_url(lease),
+                    url=_lease_url(lease, workspace.TAB_CHARGES),
                     since=due,
                     operator_id=lease.operator_id,
                 )
@@ -542,7 +552,7 @@ def _insurance(today: date, leases: list[Lease]) -> list[Item]:
                 kind=INSURANCE_PREMIUM_MISSING,
                 severity=MEDIUM,
                 text=f"Insurance premium for {year} missing, due {due}: {_where(holder)}",
-                url=_lease_url(holder),
+                url=_lease_url(holder, workspace.TAB_CHARGES),
                 since=due,
                 operator_id=holder.operator_id,
             )
@@ -557,7 +567,7 @@ def _lease_ending(today: date, leases: list[Lease]) -> list[Item]:
             kind=LEASE_ENDING,
             severity=MEDIUM,
             text=f"Lease ends {lease.ended_on}: {_where(lease)}",
-            url=_lease_url(lease),
+            url=_lease_url(lease, workspace.TAB_SCHEDULES),
             since=lease.ended_on,
             operator_id=lease.operator_id,
         )
@@ -585,7 +595,7 @@ def _schedules(operator: uuid.UUID | None) -> list[Item]:
                 f"{schedule.get_kind_display()} schedule to review after a lease change: "
                 f"{_where(schedule.lease)}"
             ),
-            url=_lease_url(schedule.lease),
+            url=_lease_url(schedule.lease, workspace.TAB_SCHEDULES),
             since=timezone.localdate(schedule.updated_at),
             operator_id=schedule.lease.operator_id,
         )

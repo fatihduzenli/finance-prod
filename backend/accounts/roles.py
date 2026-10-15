@@ -26,10 +26,28 @@ RANK: dict[Role, int] = {Role.VIEWER: 1, Role.BILLING: 2, Role.ADMIN: 3}
 GROUP_NAMES: tuple[str, ...] = tuple(role.value for role in Role)
 
 
+#: Attribute on a ``User`` instance holding its group-derived role once read.
+_ROLE_CACHE_ATTR = "_finance_role_cache"
+
+
 def role_of(user: AbstractBaseUser | AnonymousUser) -> Role | None:
-    """The user's highest role, or None for anonymous, inactive or group-less users."""
+    """The user's highest role, or None for anonymous, inactive or group-less users.
+
+    The groups are read once per user object and kept on it: a request's ``user`` is one
+    object, so the middleware, the views and the navigation's filters share one query.
+    A group change made after that read shows on the next request's (new) object.
+    """
     if not isinstance(user, User) or not user.is_authenticated or not user.is_active:
         return None
+    try:
+        cached: Role | None = getattr(user, _ROLE_CACHE_ATTR)
+    except AttributeError:
+        cached = _role_from_groups(user)
+        setattr(user, _ROLE_CACHE_ATTR, cached)
+    return cached
+
+
+def _role_from_groups(user: User) -> Role | None:
     names = set(user.groups.filter(name__in=GROUP_NAMES).values_list("name", flat=True))
     roles = [Role(name) for name in names]
     if not roles:

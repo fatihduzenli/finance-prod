@@ -1,0 +1,26 @@
+{% comment %}The Payments tab (docs/qa/PLAN-012d D3): the payments ledger's rows for this store.{% endcomment %}
+{% load responsive %}
+<h2>Payments</h2>
+<p class="actions"><a class="btn" id="store-payments-ledger" href="{{ payments_ledger_url }}">Open in the payments ledger</a></p>
+{% responsive_table %}
+<table id="store-payments">
+  <thead><tr><th>Paid on</th><th>Initiated</th><th>Charge</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Transaction</th></tr></thead>
+  <tbody>
+    {% for row in payment_rows %}
+      <tr class="store-payment">
+        <td><a href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.payment.settled_on|date:"Y-m-d"|default:"—" }}</a></td>
+        <td>{{ row.payment.initiated_on|date:"Y-m-d"|default:"—" }}</td>
+        <td>{% include "ledger/payments/_charge.html" with payment=row.payment %}</td>
+        <td>{{ row.payment.get_method_display }}</td>
+        <td class="money">{% if row.payment.is_refund %}&minus;{% endif %}${{ row.payment.amount }}</td>
+        <td>{% if row.payment.is_refund %}<span class="badge">Refund</span> {% endif %}{{ row.payment.get_status_display }}</td>
+        <td>{{ row.payment.reference|default:"—" }}</td>
+        <td>{{ row.transaction|default:"—" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8" class="muted">No payments.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}
+{% if payments_more %}<p class="muted">The {{ payments_limit }} latest are shown; the payments ledger has every one.</p>{% endif %}

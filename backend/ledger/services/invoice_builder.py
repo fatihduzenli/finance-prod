@@ -56,6 +56,8 @@ saving (:data:`LINE_SAVE_NOT_OFFERED`).
   cancelled through :func:`ledger.services.one_off_charges.cancel_charge` on its first
   line's charge (a note is required; refused once anything is paid or pending), which
   voids every line once the provider confirmed the delete.
+- :func:`delete_draft` (billing; PLAN-012d D3): a never-sent draft is deleted with its
+  lines, audited ``invoice_draft.deleted``; a sent invoice keeps the cancel above.
 
 **Rent lines** (docs/qa/PLAN-012b-b-catch-up-rent-lines-wizard-fixes.md D4 to D7): a line
 may name a lease of the draft's operator and a month (``rent_lease``, ``rent_month``)
@@ -118,6 +120,7 @@ from ledger.models import (
     InvoiceLineKind,
     InvoiceStatus,
     Lease,
+    LeaseTransfer,
     OneOffCategory,
     OneOffCharge,
     Operator,
@@ -154,6 +157,7 @@ CREATED_ACTION = "invoice_draft.created"
 UPDATED_ACTION = "invoice_draft.updated"
 SENT_ACTION = "invoice_draft.sent"
 CANCELLED_ACTION = "invoice_draft.cancelled"
+DELETED_ACTION = "invoice_draft.deleted"
 CANCEL_REQUESTED_ACTION = "invoice_draft.cancel_requested"
 #: A catalogue item saved from the builder (D4); the admin's own is ``.created_in_admin``.
 ENTITY_FEE_TYPE = "fee_type"
@@ -265,6 +269,13 @@ CHARGE_REQUESTED = (
     "invoice; this page shows the outcome."
 )
 CANCELLED = "Draft cancelled. Nothing was sent."
+DELETED = "Draft {number} deleted. Nothing was sent."
+DELETE_SENT = (
+    "This invoice was sent; it cannot be deleted. Cancel it from its page. Nothing was changed."
+)
+DELETE_TRANSFER = (
+    "This draft belongs to a transfer; cancel it from its page instead. Nothing was changed."
+)
 #: The internal note of each line's charge.
 LINE_NOTE = "Line {line} of invoice {number}, made with the invoice builder from {draft}."
 #: Appended to that note when the line has a detail (D3).
@@ -1371,6 +1382,30 @@ def cancel(draft_id: uuid.UUID, actor: User | None, *, note: str = "") -> Outcom
             {"invoice_number": draft.sent_invoice.invoice_number if draft.sent_invoice else None},
         )
     return Outcome(outcome.ok, outcome.message, outcome.field, draft=draft, job=outcome.job)
+
+
+def delete_draft(draft_id: uuid.UUID, actor: User | None) -> Outcome:
+    """Delete a never-sent draft outright (billing; PLAN-012d D3): its lines go with it,
+    audited ``invoice_draft.deleted`` with the draft as it was. A sent invoice keeps its
+    cancel form (:data:`DELETE_SENT`); a cancelled draft is left as it is
+    (:data:`ALREADY_CANCELLED`); the draft a transfer made is cancelled instead
+    (:data:`DELETE_TRANSFER`). Nothing reaches the payment provider."""
+    if not _is_billing(actor):
+        return Outcome(False, BILLING_ONLY)
+    with transaction.atomic():
+        draft = InvoiceDraft.objects.select_for_update().filter(pk=draft_id).first()
+        if draft is None:
+            return Outcome(False, NOT_A_DRAFT)
+        if draft.status == InvoiceDraftStatus.SENT:
+            return Outcome(False, DELETE_SENT, draft=draft)
+        if draft.status != InvoiceDraftStatus.DRAFT:
+            return Outcome(False, ALREADY_CANCELLED, draft=draft)
+        if LeaseTransfer.objects.filter(draft=draft).exists():
+            return Outcome(False, DELETE_TRANSFER, draft=draft)
+        number = draft.number
+        _audit(actor, DELETED_ACTION, draft, draft_state(draft), None)
+        draft.delete()
+    return Outcome(True, DELETED.format(number=number))
 
 
 # --- Helpers --------------------------------------------------------------------------

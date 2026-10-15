@@ -19,9 +19,10 @@ owner's page shows it in a frame; images are shown in that frame too, as the doc
 itself, never in an ``<img>`` tag of the page. Downloads are ``attachment`` with
 ``sandbox``.
 
-Every POST ends in a redirect to the owner's page, whatever the outcome; the outcome is
-a message there. The section's rows (not the files) export as CSV for every role, deleted
-rows for admins only, as on the page (PLAN-011 D5).
+Every POST ends in a redirect to the owner's page (a store's: its Documents tab,
+PLAN-012d D8), whatever the outcome; the outcome is a message there. The section's rows
+(not the files) export as CSV for every role, deleted rows for admins only, as on the
+page (PLAN-011 D5).
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import DocumentDeleteForm, DocumentUploadForm
 from ledger.models import Document, DocumentKind, Lease, Operator, Store
-from ledger.services import audit, csv_export
+from ledger.services import audit, csv_export, workspace
 from ledger.services import documents as service
 from ledger.services.csv_export import CsvWriter
 from ledger.views.operators import _actor, _role, csv_response, export_name, role_required
@@ -66,11 +67,19 @@ def _parse(pk: str) -> uuid.UUID:
 
 def _owner_url(owner: service.Owner) -> str:
     if isinstance(owner, Store):
-        return reverse("ledger:stores:detail", kwargs={"pk": owner.pk}) + ANCHOR
+        # PLAN-012d D8: the store page's Documents tab.
+        return workspace.tab_url(owner.pk, workspace.TAB_DOCUMENTS)
     if isinstance(owner, Operator):
         # An operator keeps dispute evidence only, listed on the disputes page (PLAN-012 D8).
         return reverse("ledger:disputes:page")
     return reverse("ledger:leases:detail", kwargs={"pk": owner.pk}) + ANCHOR
+
+
+def _page_url(owner: Store | Lease) -> str:
+    """The owner's page; a preview link adds ``?preview=`` (it opens the store page's
+    Documents tab, PLAN-012d)."""
+    name = "ledger:stores:detail" if isinstance(owner, Store) else "ledger:leases:detail"
+    return reverse(name, kwargs={"pk": owner.pk})
 
 
 def _document_owner(document: Document) -> service.Owner:
@@ -120,7 +129,10 @@ def section_context(request: HttpRequest, owner: Store | Lease) -> dict[str, Any
         "documents_upload_url": reverse(f"ledger:documents:{upload_name}", kwargs={"pk": owner.pk}),
         "documents_form": DocumentUploadForm(initial={"kind": default_kind}),
         "documents_preview": preview,
-        "documents_owner_url": _owner_url(owner).removesuffix(ANCHOR),
+        "documents_owner_url": _page_url(owner),
+        "documents_close_url": _owner_url(owner)
+        if isinstance(owner, Store)
+        else _page_url(owner) + ANCHOR,
         "documents_activity": audit.activity_for(owner),
         "documents_export_url": reverse(
             f"ledger:documents:{'export_store' if isinstance(owner, Store) else 'export_lease'}",

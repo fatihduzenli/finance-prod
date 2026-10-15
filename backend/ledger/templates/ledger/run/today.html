@@ -43,7 +43,7 @@
     <tbody>
       {% for item in run.due %}
         <tr>
-          <td><a href="{% url 'ledger:leases:detail' pk=item.lease.pk %}">{{ item.lease.store.external_label }}</a></td>
+          <td><a href="{% url 'ledger:stores:detail' pk=item.lease.store.pk %}">{{ item.lease.store.external_label }}</a></td>
           <td>{{ item.lease.operator.display_name|default:"—" }}</td>
           <td>{{ item.seq }} (day {{ item.debit_day }})</td>
           <td>{{ item.lease.get_payment_channel_display }}</td>
@@ -68,7 +68,7 @@
     <tbody>
       {% for item in run.skipped %}
         <tr>
-          <td><a href="{% url 'ledger:leases:detail' pk=item.lease.pk %}">{{ item.lease.store.external_label }}</a></td>
+          <td><a href="{% url 'ledger:stores:detail' pk=item.lease.store.pk %}">{{ item.lease.store.external_label }}</a></td>
           <td>{{ item.lease.get_collection_status_display }}</td>
           <td>{{ item.lease.get_payment_channel_display }}</td>
           <td>{{ item.reason }}</td>
@@ -88,7 +88,7 @@
       {% for item in insurance_due %}
         <tr>
           <td>{{ item.due_on|date:"Y-m-d" }}</td>
-          <td><a href="{% url 'ledger:leases:detail' pk=item.lease.pk %}">{{ item.lease.store.external_label }}</a></td>
+          <td><a href="{% url 'ledger:stores:detail' pk=item.lease.store.pk %}">{{ item.lease.store.external_label }}</a></td>
           <td>{{ item.policy_year }}</td>
           <td>{% if item.amount is not None %}${{ item.amount }}{% else %}<strong>Premium missing</strong>{% endif %}</td>
           <td>{% if item.charge %}Created{% if item.charge.needs_premium %}, needs premium{% endif %}{% else %}<span class="muted">Not yet created</span>{% endif %}</td>

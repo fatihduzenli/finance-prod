@@ -145,6 +145,8 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                # PLAN-012d D5: the navigation's current section (aria-current).
+                "finance.context_processors.navigation",
             ],
         },
     },

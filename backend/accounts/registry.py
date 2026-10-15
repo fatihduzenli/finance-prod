@@ -188,6 +188,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:invoices:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:invoices:send": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:invoices:cancel": RouteRule(min_role=Role.BILLING, methods=POST),
+    # PLAN-012d D3: Delete of a never-sent draft (billing; POST only).
+    "ledger:invoices:delete_draft": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:invoices:charge_now": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:one_off_charges:payment": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:retry_mark": RouteRule(min_role=Role.BILLING, methods=POST),
@@ -223,6 +225,10 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # author with 403); the soft delete needs admin. The views refuse the forms' GET
     # below those roles too.
     "ledger:stores:contacts_add": RouteRule(min_role=Role.BILLING, methods=POST),
+    # PLAN-012d D2, D6: the store page's Record a payment (billing). Batch B adds its
+    # POST (the payment form); until then the view takes GET only and refuses it below
+    # billing.
+    "ledger:stores:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -381,6 +387,9 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:operators:contacts_export",
         # PLAN-012 D3: the store's contact log.
         "ledger:stores:contacts",
+        # PLAN-012d D2: the store's charges that can be charged now, each linking to its
+        # confirmation page; the view itself requires admin.
+        "ledger:stores:charge_now_pick",
         # PLAN-012 D6, D7: an invoice draft's page (billing, checked by the view), its
         # preview and its print view (any role).
         "ledger:invoices:draft",

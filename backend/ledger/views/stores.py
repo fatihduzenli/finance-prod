@@ -18,13 +18,19 @@ session for the next GET, as on the operator and lease screens.
 
 The list exports as CSV (``stores:export``, PLAN-011 D5): the same search, every page.
 
-The detail page lists the contact log entries about a lease of the store, with **Add
-entry** for billing (PLAN-012 D3, :mod:`ledger.views.contacts`).
+The detail page is the store's workspace (docs/qa/PLAN-012d-store-workspace.md D1 to D3,
+:mod:`ledger.services.workspace`): a header card, the action bar for billing and admin,
+and tabs rendered one at a time (``?tab=``): Charges, Invoices (with the store's drafts),
+Payments, Schedules, Documents, Contact log (the entries about a lease of the store, with
+**Add entry** for billing; PLAN-012 D3) and History (admin). ``stores:record_payment``
+(billing) and ``stores:charge_now_pick`` (admin) are the bar's Record a payment and
+Charge now; their GET is refused below those roles.
 """
 
 from __future__ import annotations
 
 import uuid
+from typing import Any
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -46,8 +52,23 @@ from ledger.forms import (
     StoreCreateForm,
     StoreForm,
 )
-from ledger.models import DocumentKind, Store, StoreCost, StoreCostSource
-from ledger.services import contacts, csv_export, lease_end, store_costs
+from ledger.models import (
+    CollectionMethod,
+    DocumentKind,
+    OneOffCharge,
+    OneOffChargeStatus,
+    Store,
+    StoreCost,
+    StoreCostSource,
+)
+from ledger.services import (
+    contacts,
+    csv_export,
+    lease_end,
+    one_off_charges,
+    store_costs,
+    workspace,
+)
 from ledger.services import stores as service
 from ledger.services.csv_export import CsvWriter
 from ledger.views import contact_log, documents
@@ -143,57 +164,106 @@ def store_export(request: HttpRequest) -> StreamingHttpResponse:
 @role_required
 @require_safe
 def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
+    """The store page as the workspace (PLAN-012d D1 to D3): the header card, the action
+    bar (billing and admin), the open tab (``?tab=``, Charges by default; a document
+    preview opens Documents), then the store's details, costs and leases."""
     store = _load(pk)
     today = timezone.localdate()
-    admin = meets(_role(request), Role.ADMIN)
+    role = _role(request)
+    admin = meets(role, Role.ADMIN)
+    default = workspace.TAB_DOCUMENTS if request.GET.get("preview") else workspace.TAB_CHARGES
+    tab = workspace.chosen_tab(request.GET.get("tab"), role, default=default)
+    space = workspace.store_workspace(
+        store, today, role, tab=tab, chosen=request.GET.get("filter", "")
+    )
     in_progress = lease_end.store_in_progress(store)
+    context: dict[str, Any] = {
+        "store": store,
+        "space": space,
+        "header": space.header,
+        **space.data,
+        "leases": store.leases.select_related("operator", "lease_end").order_by("started_on", "id"),
+        "vacant_since": lease_end.vacant_since(store, today),
+        # PLAN-012b-b D9: a lease end whose statement step opened, with Continue and
+        # Cancel (admin); a draft that never got there shows nothing.
+        "end_in_progress": in_progress,
+        "end_in_progress_transfer": (
+            lease_end.draft_transfer(in_progress) if in_progress is not None else None
+        ),
+        "can_edit": admin,
+        "can_set_cost": meets(role, Role.BILLING),
+        "cost": store_costs.current_cost(store, today),
+        "operator_rent": store_costs.operator_rent(store, today),
+        "margin": store_costs.margin(store, today),
+        "cost_history": store_costs.history_entries(store),
+        "can_correct_cost": admin,
+        "open_cost": store_costs.open_cost(store),
+        "close_form": StoreCostCloseForm(),
+        "billing": meets(role, Role.BILLING),
+    }
+    if tab == workspace.TAB_CONTACTS:
+        # PLAN-012 D3: the entries about a lease of this store, and Add entry.
+        context.update(
+            {
+                "contact_rows": contact_log.log_rows(
+                    request,
+                    list(
+                        contacts.store_entries(
+                            store, include_deleted=contact_log.include_deleted(request)
+                        )[: contacts.PAGE_LIMIT + 1]
+                    ),
+                    store=store,
+                ),
+                "contact_limit": contacts.PAGE_LIMIT,
+                "contact_add_url": contact_log.store_add_url(request, store, today),
+            }
+        )
+    if tab == workspace.TAB_DOCUMENTS:
+        context.update(documents.section_context(request, store))
+    return render(request, "ledger/stores/detail.html", context)
+
+
+@role_required
+@require_safe
+def store_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:stores:record_payment`` (billing; PLAN-012d D2). Batch B of PLAN-012d
+    builds the payment form here (one amount allocated over the store's open charges,
+    D6). Until then the bar's "Record a payment" opens the per-charge choice: the
+    Charges tab, open charges, each with its Record payment link."""
+    if not meets(_role(request), Role.BILLING):
+        return forbidden(request)
+    store = _load(pk)
+    return redirect(workspace.tab_url(store.pk, workspace.TAB_CHARGES))
+
+
+@role_required
+@require_safe
+def store_charge_now_pick(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:stores:charge_now_pick`` (admin; PLAN-012d D2): the store's one-off
+    charges collected by Charge now that are still owed, each with the sentence that
+    stops it or a button to its existing confirmation page. Local data only."""
+    if not meets(_role(request), Role.ADMIN):
+        return forbidden(request)
+    store = _load(pk)
+    candidates = (
+        OneOffCharge.objects.filter(
+            lease__store=store, collection=CollectionMethod.CHARGE_NOW, balance__gt=0
+        )
+        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .select_related("operator", "lease__operator", "lease__store", "fee_type")
+        .order_by("due_date", "created_at", "id")
+    )
+    rows = [
+        {"charge": charge, "refusal": one_off_charges.charge_now_refusal(charge)}
+        for charge in candidates
+    ]
     return render(
         request,
-        "ledger/stores/detail.html",
+        "ledger/stores/charge_now_pick.html",
         {
             "store": store,
-            "leases": store.leases.select_related("operator", "lease_end").order_by(
-                "started_on", "id"
-            ),
-            # PLAN-012e D4 to D6: End lease and Transfer to another operator (admin) for
-            # the lease in effect; the store is vacant by derivation once no lease of it
-            # is in effect.
-            "can_end_lease": admin and lease_end.current_lease(store, today) is not None,
-            "vacant_since": lease_end.vacant_since(store, today),
-            # PLAN-012b-b D9: a lease end whose statement step opened, with Continue and
-            # Cancel (admin); a draft that never got there shows nothing.
-            "end_in_progress": in_progress,
-            "end_in_progress_transfer": (
-                lease_end.draft_transfer(in_progress) if in_progress is not None else None
-            ),
-            "can_edit": meets(_role(request), Role.ADMIN),
-            "can_set_cost": meets(_role(request), Role.BILLING),
-            "cost": store_costs.current_cost(store, today),
-            "operator_rent": store_costs.operator_rent(store, today),
-            "margin": store_costs.margin(store, today),
-            "cost_history": store_costs.history_entries(store),
-            "can_correct_cost": meets(_role(request), Role.ADMIN),
-            "open_cost": store_costs.open_cost(store),
-            "close_form": StoreCostCloseForm(),
-            # PLAN-012 D3: the entries about a lease of this store, and Add entry.
-            "contact_rows": contact_log.log_rows(
-                request,
-                list(
-                    contacts.store_entries(
-                        store, include_deleted=contact_log.include_deleted(request)
-                    )[: contacts.PAGE_LIMIT + 1]
-                ),
-                store=store,
-            ),
-            "contact_limit": contacts.PAGE_LIMIT,
-            "contact_add_url": contact_log.store_add_url(request, store, today),
-            # PLAN-012 D6: New invoice on the store's lease in effect today (billing).
-            "can_new_invoice": meets(_role(request), Role.BILLING)
-            and any(
-                lease.operator is not None and lease.operator.archived_at is None
-                for lease in contacts.store_leases(store, today)
-            ),
-            **documents.section_context(request, store),
+            "eligible": [row for row in rows if not row["refusal"]],
+            "refused": [row for row in rows if row["refusal"]],
         },
     )
 

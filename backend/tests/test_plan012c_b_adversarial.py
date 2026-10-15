@@ -222,7 +222,7 @@ def test_the_closing_entry_names_the_promise_for_viewers_too_and_its_link_stays_
     for path in (
         f"/operators/{operator.pk}/",
         f"/operators/{operator.pk}/contacts/",
-        f"/stores/{lease.store_id}/",
+        f"/stores/{lease.store_id}/?tab=contacts",  # PLAN-012d: the log is a tab
     ):
         page = page_of(viewer, path)
         log = table_of(page)

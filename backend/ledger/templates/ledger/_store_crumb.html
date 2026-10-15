@@ -1,0 +1,1 @@
+{% comment %}"← Store NNNN" (docs/qa/PLAN-012d D5): the store page of the record a detail page shows, when it has a store. Context: crumb_store.{% endcomment %}{% if crumb_store %}<p class="crumb" id="store-crumb"><a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}">&larr; Store {{ crumb_store.external_label }}</a></p>{% endif %}
