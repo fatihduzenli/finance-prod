@@ -6,6 +6,7 @@
   <h1>Installment plan, {{ parent_label }} <span class="badge" id="plan-status">{{ plan.get_status_display }}</span></h1>
   <p class="muted" id="page-help">{{ plan_help }}</p>
   <p id="plan-progress"><strong>{{ progress.text }}</strong></p>
+  {% if release_pending %}<p id="release-pending"><strong>{{ release_pending }}</strong></p>{% endif %}
   {% if can_reschedule or can_cancel %}
     <p class="actions">
       {% if can_reschedule %}<a class="btn" href="{% url 'ledger:plans:reschedule' pk=plan.pk %}" id="plan-reschedule">Reschedule</a>{% endif %}

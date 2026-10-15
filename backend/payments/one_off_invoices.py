@@ -28,6 +28,14 @@ class and the field names it rejected (never provider text).
   re-fetch as :func:`delete`; once the provider shows the invoice ``DELETED`` (or no
   longer has it) :func:`ledger.services.one_off_charges.mark_waived_invoice_deleted`
   marks the local invoice void. The charge stays ``waived``.
+- :func:`release_invoice` and :func:`release_schedule` (``invoice_delete`` and
+  ``schedule_delete`` with ``params.release``; PLAN-012b-a D3): the live single-charge
+  invoice or the unfired schedule of a split parent, deleted at the provider exactly as
+  the cancel deletes it, then, in one transaction under the parent's row lock, the
+  invoice ``void`` with the provider's ``DELETED`` (or the schedule reference
+  superseded), the charge untouched, and the plan's side
+  (:func:`ledger.services.installments.after_release`). A second run finds the object
+  gone and only completes the plan's side.
 - :func:`schedule` (``schedule_create``): the one-occurrence schedule of an
   ``autopay_due`` charge on its due date with the operator's linked bank method, its
   reference ``OOC-<first 8 of the charge id>``; a re-debit's schedule (PLAN-011b D5)
@@ -83,7 +91,7 @@ from ledger.models import (
     Operator,
     format_quantity,
 )
-from ledger.services import leases, numbering, one_off_charges, rent_run
+from ledger.services import installments, leases, numbering, one_off_charges, rent_run
 from payments import invoice_sync, operator_sync
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef, WebhookOutcome
@@ -186,6 +194,13 @@ MOVE_INVOICE_CLOSED = (
     "The payment provider shows the invoice paid or deleted. Its due date was not changed."
 )
 MOVE_INVOICE_FAILED = "The payment provider did not change the invoice's due date"
+RELEASE_SHARED = (
+    "The invoice bills other charges too; it is not released for one of them. Nothing was deleted."
+)
+RELEASE_SCHEDULE_FIRED = (
+    "The schedule already generated its invoice. The charge stays open; cancel the "
+    "installment plan, then collect or cancel that invoice."
+)
 
 OTHER_OPERATOR = ignored("reference of another operator")
 SECOND_INVOICE = ignored("second invoice for a one-off charge")
@@ -665,6 +680,132 @@ def delete_waived(charge_id: uuid.UUID, actor: User | None) -> Result:
         },
     )
     return outcome.ok, outcome.message
+
+
+# --- Releasing a split parent's object (PLAN-012b-a D3) --------------------------------
+
+
+def _release_target(charge_id: uuid.UUID) -> OneOffCharge | Result:
+    """The parent of an installment plan, or the job's outcome when it is not one."""
+    charge = _charge(charge_id)
+    if charge is None:
+        return False, NO_CHARGE
+    if not charge.installment_plans.exists():
+        return False, installments.RELEASE_NO_PLAN
+    return charge
+
+
+def _released(
+    charge_id: uuid.UUID, actor: User | None, mark: Callable[[OneOffCharge], dict[str, Any]]
+) -> Result:
+    """The local side of a release, in one transaction under the parent's row lock:
+    ``mark`` (which returns the audit context), then the plan's side
+    (:func:`ledger.services.installments.after_release`)."""
+    with transaction.atomic():
+        parent = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        context = mark(parent)
+        return installments.after_release(parent, actor, context)
+
+
+def release_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
+    """The ``invoice_delete`` job with ``params.release``: the split parent's live
+    single-charge invoice deleted at the provider as :func:`delete` deletes it (a paid
+    one never; a 404 counts as deleted; re-fetched after), then, locally, the invoice
+    ``void`` with the provider's ``DELETED`` and the charge untouched. A parent with no
+    live invoice any more (a second run) deletes nothing and only completes the plan's
+    side."""
+    target = _release_target(charge_id)
+    if not isinstance(target, OneOffCharge):
+        return target
+    charge = target
+    linked = one_off_charges.live_provider_invoice(charge)
+    if linked is None:
+        return _released(charge.pk, actor, lambda parent: {})
+    invoice, ref = linked
+    if invoice.one_off_charge_id != charge.pk or len(one_off_charges.invoice_charges(invoice)) > 1:
+        return False, RELEASE_SHARED
+    provider = payments.get_provider()
+    try:
+        record = _fetch(provider.get_invoice, ref)
+        if record is not None and invoice_sync.shows_paid(record):
+            return False, DELETE_PAID
+        if record is not None and not invoice_sync.shows_deleted(record):
+            try:
+                provider.delete_invoice(ref)
+            except ProviderRejected as error:
+                if error.status != NOT_FOUND:
+                    raise
+            record = _fetch(provider.get_invoice, ref)
+    except ProviderError as error:
+        return _failed(charge, actor, "one_off_charge.release_failed", error, DELETE_FAILED)
+    if record is not None and not invoice_sync.shows_deleted(record):
+        return False, DELETE_NOT_CONFIRMED
+
+    def mark(parent: OneOffCharge) -> dict[str, Any]:
+        context = {
+            "invoice_number": invoice.invoice_number,
+            "provider_invoice": mask_identifier(ref),
+            "provider_status": record.raw_status if record is not None else "not found",
+        }
+        invoice.refresh_from_db()
+        if invoice.internal_status == InvoiceStatus.VOID:
+            # A concurrent run marked it first.
+            return context
+        if record is not None:
+            invoice_sync.record_provider_state(invoice.pk, record)
+        else:
+            invoice_sync.record_provider_status(invoice.pk, invoice_sync.PROVIDER_DELETED)
+        one_off_charges.mark_invoice_released(
+            invoice, actor=actor, context={**context, "charge": str(parent.pk)}
+        )
+        return context
+
+    return _released(charge.pk, actor, mark)
+
+
+def release_schedule(charge_id: uuid.UUID, actor: User | None) -> Result:
+    """The ``schedule_delete`` job with ``params.release``: the split parent's schedule
+    deleted at the provider as :func:`delete_schedule` deletes it (a 404 counts as gone;
+    then the provider must neither list it nor show an invoice it generated), then,
+    locally, its reference superseded and the charge untouched. A parent with no current
+    schedule any more (a second run) deletes nothing and only completes the plan's side."""
+    target = _release_target(charge_id)
+    if not isinstance(target, OneOffCharge):
+        return target
+    charge = target
+    if one_off_charges.invoices_of(charge).exists():
+        return False, RELEASE_SCHEDULE_FIRED
+    ref = _schedule_ref(charge)
+    if not ref:
+        return _released(charge.pk, actor, lambda parent: {})
+    provider = payments.get_provider()
+    try:
+        try:
+            provider.delete_scheduled_invoice(ref)
+        except ProviderRejected as error:
+            if error.status != NOT_FOUND:
+                raise
+        generated = [
+            record
+            for record in provider.list_invoices(InvoiceQuery(schedule_external_id=ref))
+            if invoice_sync.schedule_id(record) == ref and not invoice_sync.shows_deleted(record)
+        ]
+        still = _fetch(provider.get_scheduled_invoice, ref)
+    except ProviderError as error:
+        return _failed(
+            charge, actor, "one_off_charge.release_failed", error, SCHEDULE_DELETE_FAILED
+        )
+    if generated:
+        return False, RELEASE_SCHEDULE_FIRED
+    if still is not None:
+        return False, SCHEDULE_NOT_CONFIRMED
+
+    def mark(parent: OneOffCharge) -> dict[str, Any]:
+        context = {"schedule": mask_identifier(ref)}
+        one_off_charges.mark_schedule_released(parent, actor=actor, context=context)
+        return context
+
+    return _released(charge.pk, actor, mark)
 
 
 # --- Schedules (D2, D6) ---------------------------------------------------------------

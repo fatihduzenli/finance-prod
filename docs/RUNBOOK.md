@@ -594,9 +594,18 @@ hand (nothing at Stax). While the plan runs the parent is paid through its insta
 leaves the open balances, aging, arrears and the attention list, its page and grid cell show
 "plan n of N paid, $X of $Y", and a payment typed on it is refused. When every installment is
 paid the plan is completed and the parent is marked paid with an audit row and no payment of its
-own. A charge cannot be split while a Stax invoice or schedule of it is live, while a payment on
-it is pending, or while rent autopay would debit it: collect, cancel or stop those first (see
-the sentence on the page). Deposits, re-debits, NSF fees and installments are never split. A
+own. A one-off charge whose own Stax invoice (one charge on it) or schedule is live can be
+split: the split page says so, and on confirm the worker **releases** that invoice or schedule
+(deletes it at Stax; the charge stays open here, never voided) and only then creates the
+installments' own invoices or schedules; the plan page says "Waiting for the payment provider to
+release…" until then, and a failed release shows on the charge page with Retry. If the operator
+pays the old invoice before it is released (or a late payment arrives after), the payment lands
+on the charge, the plan goes on the attention list ("Payment on a split charge: …") and staff
+cancel or reschedule the plan. While a plan runs, its charge cannot be cancelled or waived on
+its own: cancel the plan. A line of a multi-line invoice cannot be split while that invoice is
+live; a rent charge's invoice is cancelled first (that never voids the rent charge), and rent
+autopay must be stopped or paused first. Deposits, re-debits, NSF fees and installments are
+never split (PLAN-012b-a). A
 **returned installment** debit follows the NSF rule from the returns queue (re-debit plus the
 fee, $100 the first time and $50 after, agreed by phone) and puts the plan on the attention list
 ("Installment returned: …") until the return is resolved. **Reschedule** (billing, plan page)

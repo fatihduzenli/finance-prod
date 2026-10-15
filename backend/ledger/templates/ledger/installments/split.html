@@ -12,6 +12,7 @@
   {% if refusal %}
     <p id="split-refusal"><strong>{{ refusal }}</strong></p>
   {% else %}
+    {% if release_notice %}<p id="release-notice"><strong>{{ release_notice }}</strong></p>{% endif %}
     <form method="get" action="{{ action }}" id="split-form" autocomplete="off">
       {{ form.non_field_errors }}
       {% for field in form %}

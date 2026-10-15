@@ -191,6 +191,8 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "lease": charge.lease,
             "operator": _operator(charge),
             "invoices": invoices,
+            # PLAN-012b-a D5: an invoice released for the installment plan.
+            "released_invoices": service.released_invoices(charge),
             "provider_invoice_masked": mask_identifier(linked[1]) if linked else "",
             "schedule_masked": mask_identifier(schedule) if schedule else "",
             "payments": charge.payments.order_by("-settled_on", "-created_at"),
@@ -205,7 +207,8 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_waive": admin
             and not closed
             and charge.category != OneOffCategory.INSTALLMENT
-            and not service.has_settled_payment(charge),
+            and not service.has_settled_payment(charge)
+            and not rent_run.on_live_plan(one_off_charge=charge),
             "waive_refusal": (
                 service.WAIVE_LIVE_INVOICE
                 if not closed and service.live_provider_invoice(charge) is not None
@@ -391,7 +394,8 @@ def charge_retry(request: HttpRequest, pk: str) -> HttpResponse:
         if kind is None:
             messages.info(request, NOTHING_TO_RETRY)
         else:
-            submit(request, kind, charge)
+            # A failed release is repeated with its flag (PLAN-012b-a D3).
+            submit(request, kind, charge, service.retry_params(charge))
     return redirect("ledger:one_off_charges:detail", pk=charge.pk)
 
 
@@ -507,7 +511,11 @@ def charge_waive(request: HttpRequest, pk: str) -> HttpResponse:
             "charge": charge,
             "waive_meaning": service.WAIVE_MEANING,
             "refusal": (
-                service.WAIVE_LIVE_INVOICE if service.live_provider_invoice(charge) else ""
+                service.WAIVE_PARENT_ON_PLAN
+                if rent_run.on_live_plan(one_off_charge=charge)
+                else service.WAIVE_LIVE_INVOICE
+                if service.live_provider_invoice(charge)
+                else ""
             ),
         },
     )

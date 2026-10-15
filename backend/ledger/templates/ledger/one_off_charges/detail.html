@@ -102,6 +102,7 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  {% for released in released_invoices %}<p class="invoice-released"{% if forloop.first %} id="invoice-released"{% endif %}>{{ released }}</p>{% endfor %}
   <p class="muted">Provider status is copied from the payment provider as it is.</p>
 
   <h2>Payments</h2>

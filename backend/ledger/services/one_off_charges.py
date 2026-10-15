@@ -109,11 +109,21 @@ Rules kept here, not in the views:
   :mod:`ledger.services.installments`): an ``installment`` charge is paid like any
   other, and its recompute brings its plan up to date (:func:`sync_plan`): ``completed``
   once every installment that is not voided is paid, ``attention`` while one has a
-  returned payment not resolved, ``active`` otherwise; a completed or cancelled plan's
+  returned payment not resolved or a payment on the parent itself lowered its balance
+  below the plan's total (:func:`parent_paid_on_plan`, PLAN-012b-a D4; a payment on a
+  parent re-checks its live plan here, the parent's row lock taken before the plan's),
+  ``active`` otherwise; a completed or cancelled plan's
   installments count as paid on the parent (:func:`ledger.services.rent_run.plan_covered`),
   audited as ``covered_by_plan`` on the parent with no payment row. An installment is
   not waived, and not cancelled on its own while its plan is live: the plan is
-  cancelled. A manual payment on a parent whose plan is live is refused.
+  cancelled. A manual payment on a parent whose plan is live is refused, and so are a
+  cancel (:data:`CANCEL_PARENT_ON_PLAN`) and a waive (:data:`WAIVE_PARENT_ON_PLAN`) of
+  that parent: the plan is cancelled first (PLAN-012b-a). The release below is not a
+  cancel and never passes through :func:`cancel_refusal`. A split
+  parent's live invoice or schedule is released (PLAN-012b-a D3): the worker marks the
+  invoice ``void`` (:func:`mark_invoice_released`) or supersedes the schedule reference
+  (:func:`mark_schedule_released`) and the charge stays owed at its price; a failed
+  release is retried with its flag (:func:`retry_kind`, :func:`retry_params`).
 
 Every write is audited (entity ``one_off_charge``); provider identifiers are masked.
 Money is ``Decimal`` throughout.
@@ -354,6 +364,15 @@ CANCEL_INSTALLMENT = (
     "An installment is not cancelled on its own: cancel the installment plan instead. "
     "Nothing was changed."
 )
+#: A parent whose installment plan is live (PLAN-012b-a): its balance is owed through
+#: the installments, so it is neither cancelled nor waived on its own.
+CANCEL_PARENT_ON_PLAN = (
+    "This charge is paid through its installment plan: cancel the plan instead. Nothing was "
+    "changed."
+)
+WAIVE_PARENT_ON_PLAN = (
+    "This charge is paid through its installment plan: cancel the plan first. Nothing was changed."
+)
 
 # Charge now (PLAN-010d D4).
 CHARGE_NOW_DISABLED = "Charge now is not enabled in this environment."
@@ -393,6 +412,15 @@ WAIVED_INVOICE_DELETE_ACTION = "one_off_charge.waived_invoice_delete_requested"
 WAIVED_INVOICE_DELETED_ACTION = "one_off_charge.waived_invoice_deleted"
 #: The ``invoice_delete`` job parameter that makes it the remedy of a waived charge.
 WAIVED_INVOICE_PARAM = "waived"
+#: The ``invoice_delete`` or ``schedule_delete`` job parameter that makes it the release
+#: of a split parent's provider object (PLAN-012b-a D3): deleted there, the charge kept.
+RELEASE_PARAM = "release"
+#: The audit action of a split parent's invoice released at the provider (D3).
+INVOICE_RELEASED_ACTION = "invoice.released_for_installments"
+#: The audit action of a split parent's schedule released at the provider (D3).
+SCHEDULE_RELEASED_ACTION = "one_off_charge.schedule_released_for_installments"
+#: What the charge page says of a released invoice (D5).
+INVOICE_RELEASED = "Invoice {number} was released at the payment provider for the installment plan."
 #: The ``invoice_create`` job parameter of an invoice builder invoice charged now
 #: (PLAN-012 D6): once the invoice is at the provider, the worker queues the single
 #: ``invoice_pay`` attempt.
@@ -1016,8 +1044,9 @@ def edit_charge(
 def waive(
     charge_id: uuid.UUID, *, note: str, actor: User | None, now: datetime | None = None
 ) -> Outcome:
-    """Waive a one-off charge (admin): a note is mandatory; refused once a payment settled
-    and while the charge has a live provider invoice (PLAN-011 D0)."""
+    """Waive a one-off charge (admin): a note is mandatory; refused once a payment settled,
+    while the charge has a live provider invoice (PLAN-011 D0) and while it is the parent
+    of a live installment plan (PLAN-012b-a)."""
     text = visible_text(note or "")
     if not text:
         return Outcome(False, WAIVE_NOTE_REQUIRED, "note")
@@ -1032,6 +1061,8 @@ def waive(
             return Outcome(False, WAIVE_VOIDED)
         if charge.category == OneOffCategory.INSTALLMENT:
             return Outcome(False, WAIVE_INSTALLMENT)
+        if rent_run.on_live_plan(one_off_charge=charge):
+            return Outcome(False, WAIVE_PARENT_ON_PLAN)
         if has_settled_payment(charge) or charge.amount_paid > 0:
             return Outcome(False, WAIVE_SETTLED)
         # A companion fee is billed on its re-debit's invoice (PLAN-011b D5), a later line
@@ -1067,6 +1098,8 @@ def cancel_refusal(charge: OneOffCharge) -> str:
         ).exists()
     ):
         return CANCEL_INSTALLMENT
+    if rent_run.on_live_plan(one_off_charge=charge):
+        return CANCEL_PARENT_ON_PLAN
     if charge.companion_of_id is not None:
         return CANCEL_COMPANION
     if is_later_line(charge):
@@ -1186,6 +1219,67 @@ def mark_waived_invoice_deleted(
         )
         _audit(actor, WAIVED_INVOICE_DELETED_ACTION, charge, before, {**before, **context})
     return Outcome(True, WAIVED_INVOICE_DELETED, charge=charge)
+
+
+# --- Releasing a split parent's provider object (PLAN-012b-a D3, D5) -------------------
+
+
+def mark_invoice_released(
+    invoice: Invoice, *, actor: User | None, context: Mapping[str, Any]
+) -> None:
+    """Mark a split parent's invoice void once the provider confirmed its delete (D3; the
+    worker only, under the parent's row lock). The charge is not touched: it stays owed
+    at its price. Audited :data:`INVOICE_RELEASED_ACTION` on the invoice."""
+    before = {
+        "internal_status": invoice.internal_status,
+        "provider_status": invoice.provider_status,
+    }
+    Invoice.objects.filter(pk=invoice.pk).update(
+        internal_status=InvoiceStatus.VOID, updated_at=timezone.now()
+    )
+    invoice.refresh_from_db(fields=["internal_status", "provider_status"])
+    AuditLog.objects.create(
+        actor=actor,
+        action=INVOICE_RELEASED_ACTION,
+        entity_type=rent_run.ENTITY_INVOICE,
+        entity_id=str(invoice.pk),
+        before=before,
+        after={
+            "internal_status": invoice.internal_status,
+            "provider_status": invoice.provider_status,
+            "invoice_number": invoice.invoice_number,
+            **context,
+        },
+    )
+
+
+def mark_schedule_released(
+    charge: OneOffCharge, *, actor: User | None, context: Mapping[str, Any]
+) -> None:
+    """Supersede a split parent's schedule reference once the provider confirmed its
+    delete, as the cancel path does (D3; the worker only, under the parent's row lock).
+    The charge stays owed at its price. Audited :data:`SCHEDULE_RELEASED_ACTION`."""
+    ExternalRef.objects.filter(
+        entity_type=ENTITY_ONE_OFF_CHARGE,
+        entity_id=charge.pk,
+        external_kind=KIND_SCHEDULE,
+        superseded_at__isnull=True,
+    ).update(superseded_at=timezone.now())
+    state = charge_state(charge)
+    _audit(actor, SCHEDULE_RELEASED_ACTION, charge, state, {**state, **context})
+
+
+def released_invoices(charge: OneOffCharge) -> list[str]:
+    """What the charge page says of the charge's invoices released for an installment
+    plan (D5), one sentence each, by invoice number."""
+    invoices = {str(invoice.pk): invoice.invoice_number for invoice in invoices_of(charge)}
+    released = AuditLog.objects.filter(
+        action=INVOICE_RELEASED_ACTION,
+        entity_type=rent_run.ENTITY_INVOICE,
+        entity_id__in=list(invoices),
+    ).values_list("entity_id", flat=True)
+    numbers = sorted({invoices[entity_id] for entity_id in released})
+    return [INVOICE_RELEASED.format(number=number) for number in numbers]
 
 
 # --- Charge now (PLAN-010d D4) --------------------------------------------------------
@@ -1382,12 +1476,29 @@ def retry_kind(charge: OneOffCharge) -> str | None:
     ):
         return None
     if job.kind in (JobKind.INVOICE_DELETE, JobKind.SCHEDULE_DELETE):
+        if job.params.get(RELEASE_PARAM) is True:
+            # A failed release (PLAN-012b-a D3) is repeated as it was, never as a cancel.
+            return str(job.kind)
         return None if cancel_refusal(charge) else cancel_job_kind(charge)
     if job.kind == JobKind.INVOICE_CREATE and charge.collection == CollectionMethod.EMAIL:
         linked = rent_run.provider_invoice(charge)
         if linked is not None and linked[0].internal_status != InvoiceStatus.SENT:
             return JobKind.INVOICE_SEND
     return str(job.kind)
+
+
+def retry_params(charge: OneOffCharge) -> dict[str, bool] | None:
+    """The parameters the manual retry queues with :func:`retry_kind`: the release flag
+    of a failed release (PLAN-012b-a D3); ``None`` otherwise."""
+    job = jobs.latest_for(charge)
+    if (
+        job is not None
+        and job.kind in (JobKind.INVOICE_DELETE, JobKind.SCHEDULE_DELETE)
+        and job.params.get(RELEASE_PARAM) is True
+        and retry_kind(charge) is not None
+    ):
+        return {RELEASE_PARAM: True}
+    return None
 
 
 def cancel_note(charge: OneOffCharge) -> str:
@@ -1893,6 +2004,14 @@ def recompute(charge: OneOffCharge) -> None:
         charge.save(update_fields=["amount_paid", "status", "updated_at"])
     if charge.plan_id is not None:
         sync_plan(charge.plan_id)
+    elif charge.category != OneOffCategory.INSTALLMENT:
+        # A payment on a split parent while its plan is live (PLAN-012b-a D4): the caller
+        # holds the parent's row lock; the plan's is taken after it.
+        with transaction.atomic():
+            for plan in InstallmentPlan.objects.select_for_update().filter(
+                one_off_charge=charge, status__in=LIVE_PLAN_STATUSES
+            ):
+                apply_plan_status(plan, actor=None)
 
 
 # --- Installment plans (PLAN-012e D9 to D11) ------------------------------------------
@@ -1901,6 +2020,9 @@ ENTITY_PLAN = "installment_plan"
 PLAN_STATUS_ACTION = "installment_plan.status_changed"
 #: The action of the audit row of a parent whose paid amount follows its plan.
 COVERED_BY_PLAN = "covered_by_plan"
+#: Why a plan is ``attention`` (PLAN-012e D11, PLAN-012b-a D4): the ``reason`` audited.
+INSTALLMENT_RETURNED = "installment_returned"
+PARENT_PAID = "parent_paid"
 
 
 def plan_state(plan: InstallmentPlan) -> dict[str, Any]:
@@ -1918,10 +2040,51 @@ def plan_state(plan: InstallmentPlan) -> dict[str, Any]:
     }
 
 
+def parent_paid_on_plan(plan: InstallmentPlan) -> Decimal:
+    """What was paid on a one-off parent itself while its plan runs (PLAN-012b-a D3, D4):
+    how far the parent's balance, the plan's own installments left out, is below the
+    plan's total (the prices of its installments not voided). A payment on the parent's
+    old invoice before its release, or a late one after it. Zero for a rent parent, a
+    waived or voided parent, or nothing paid."""
+    if plan.one_off_charge_id is None:
+        return ZERO
+    parent = OneOffCharge.objects.get(pk=plan.one_off_charge_id)
+    if parent.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
+        return ZERO
+    rows = OneOffCharge.objects.filter(plan=plan, category=OneOffCategory.INSTALLMENT)
+    total = rows.exclude(status=OneOffChargeStatus.VOIDED).aggregate(total=Sum("price"))["total"]
+    paid = paid_in(parent)
+    if plan.status in (InstallmentPlanStatus.COMPLETED, InstallmentPlanStatus.CANCELLED):
+        # This plan's installments count as paid on the parent then (plan_covered).
+        paid -= Decimal(rows.aggregate(total=Sum("amount_paid"))["total"] or ZERO)
+    balance = Decimal(parent.price) - min(paid, Decimal(parent.price))
+    return max(Decimal(total or ZERO) - balance, ZERO)
+
+
+def plan_attention_reason(plan: InstallmentPlan) -> str:
+    """Why a live plan needs attention, or ``""``: :data:`INSTALLMENT_RETURNED` while an
+    installment has a returned payment not resolved (D11), :data:`PARENT_PAID` while a
+    payment on the parent itself lowered its balance below the plan's total
+    (PLAN-012b-a D4)."""
+    returned = Payment.objects.filter(
+        one_off_charge__plan=plan,
+        status=PaymentStatus.RETURNED,
+        is_refund=False,
+        resolved_at__isnull=True,
+    )
+    if returned.exists():
+        return INSTALLMENT_RETURNED
+    if parent_paid_on_plan(plan) > 0:
+        return PARENT_PAID
+    return ""
+
+
 def plan_status(plan: InstallmentPlan) -> str:
     """What the plan's status should be now (D9, D11): ``completed`` once every
     installment that is not voided is paid, ``attention`` while one has a returned
-    payment not resolved, ``active`` otherwise; ``cancelled`` stays."""
+    payment not resolved or a payment on the parent lowered its balance below the plan's
+    total (:func:`plan_attention_reason`, PLAN-012b-a D4), ``active`` otherwise;
+    ``cancelled`` stays."""
     if plan.status == InstallmentPlanStatus.CANCELLED:
         return InstallmentPlanStatus.CANCELLED
     statuses = list(
@@ -1931,38 +2094,54 @@ def plan_status(plan: InstallmentPlan) -> str:
     )
     if statuses and all(status == OneOffChargeStatus.PAID for status in statuses):
         return InstallmentPlanStatus.COMPLETED
-    returned = Payment.objects.filter(
-        one_off_charge__plan=plan,
-        status=PaymentStatus.RETURNED,
-        is_refund=False,
-        resolved_at__isnull=True,
-    )
-    if returned.exists():
+    if plan_attention_reason(plan):
         return InstallmentPlanStatus.ATTENTION
     return InstallmentPlanStatus.ACTIVE
+
+
+def apply_plan_status(plan: InstallmentPlan, *, actor: User | None) -> InstallmentPlan:
+    """Set the plan's status to :func:`plan_status` when it differs, audited
+    :data:`PLAN_STATUS_ACTION` (with the ``reason`` of an ``attention``). The caller
+    holds the plan's row lock."""
+    status = plan_status(plan)
+    if status != plan.status:
+        before = plan_state(plan)
+        plan.status = status
+        plan.save(update_fields=["status", "updated_at"])
+        after = plan_state(plan)
+        if status == InstallmentPlanStatus.ATTENTION:
+            after["reason"] = plan_attention_reason(plan)
+        AuditLog.objects.create(
+            actor=actor,
+            action=PLAN_STATUS_ACTION,
+            entity_type=ENTITY_PLAN,
+            entity_id=str(plan.pk),
+            before=before,
+            after=after,
+        )
+    return plan
+
+
+def lock_plan_parent(plan_id: uuid.UUID) -> None:
+    """Take the row lock of the plan's parent, before the plan's (PLAN-012b-a D4): a
+    payment on the parent locks the parent, then its plan; so does every plan path."""
+    plan = InstallmentPlan.objects.only("rent_charge_id", "one_off_charge_id").get(pk=plan_id)
+    if plan.rent_charge_id is not None:
+        RentCharge.objects.select_for_update().filter(pk=plan.rent_charge_id).first()
+    elif plan.one_off_charge_id is not None:
+        OneOffCharge.objects.select_for_update().filter(pk=plan.one_off_charge_id).first()
 
 
 def sync_plan(plan_id: uuid.UUID, *, actor: User | None = None) -> InstallmentPlan:
     """Bring the plan's status up to date (:func:`plan_status`) and recompute its parent
     (D9): a completed or cancelled plan's installments count as paid on the parent.
     Each change is audited: the plan's status, and the parent's paid amount and status
-    as ``<entity>.covered_by_plan``. Takes the plan's row lock, then the parent's; the
+    as ``<entity>.covered_by_plan``. Takes the parent's row lock, then the plan's; the
     caller may hold an installment's."""
     with transaction.atomic():
+        lock_plan_parent(plan_id)
         plan = InstallmentPlan.objects.select_for_update().get(pk=plan_id)
-        status = plan_status(plan)
-        if status != plan.status:
-            before = plan_state(plan)
-            plan.status = status
-            plan.save(update_fields=["status", "updated_at"])
-            AuditLog.objects.create(
-                actor=actor,
-                action=PLAN_STATUS_ACTION,
-                entity_type=ENTITY_PLAN,
-                entity_id=str(plan.pk),
-                before=before,
-                after=plan_state(plan),
-            )
+        apply_plan_status(plan, actor=actor)
         recompute_parent(plan, actor=actor, context={"plan": str(plan.pk)})
     return plan
 

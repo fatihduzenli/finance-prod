@@ -128,6 +128,46 @@ def returned_installment(lease: Lease) -> InstallmentPlan:
     return plan
 
 
+def split_paid(lease: Lease) -> InstallmentPlan:
+    """A live plan whose one-off parent was paid $400.00 on itself after the split
+    (PLAN-012b-a D4): its balance, $600.00, is below the plan's total, $1,000.00."""
+    assert lease.operator is not None
+    parent = a_one_off_charge(
+        lease.operator,
+        "1000.00",
+        date(2026, 9, 1),
+        lease=lease,
+        status="partial",
+        paid="400.00",
+        collection="email",
+        description="Damage to the shelving",
+    )
+    plan = InstallmentPlan.objects.create(
+        one_off_charge=parent,
+        operator=lease.operator,
+        lease=lease,
+        count=2,
+        first_due=date(2026, 10, 20),
+        cadence="monthly",
+        collection="email",
+        status="attention",
+        confirmed_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
+    for number in (1, 2):
+        a_one_off_charge(
+            lease.operator,
+            "500.00",
+            date(2026, 9 + number, 20),
+            lease=lease,
+            category="installment",
+            collection="email",
+            description=f"Installment {number} of 2: Damage to the shelving",
+            plan=plan,
+            installment_no=number,
+        )
+    return plan
+
+
 def returned_payment(lease: Lease, amount: str = "3500.00") -> Payment:
     charge = a_rent_charge(lease, date(2026, 10, 1), RentChargeStatus.UNPAID)
     return Payment.objects.create(
@@ -384,6 +424,7 @@ def build(n: int) -> None:
         a_rent_charge(lease, date(2026, 8, 1), RentChargeStatus.UNPAID)
         returned_payment(lease)
         returned_installment(lease)
+        split_paid(lease)
         LeaseEnd.objects.create(
             lease=lease,
             ended_on=TODAY - timedelta(days=1),
@@ -449,6 +490,32 @@ def test_the_list_reads_a_fixed_number_of_queries(today: date) -> None:
     assert set(kinds(every)) >= set(attention.KINDS) - {attention.RECONCILIATION_MISMATCHES}
     assert queries() == small
     assert queries(Operator.objects.order_by("display_name").first()) == small_operator
+
+
+def test_a_payment_on_a_split_parent_is_one_item_per_plan_until_it_ends(today: date) -> None:
+    """PLAN-012b-a D4."""
+    lease = a_lease(a_store("2204 FOREST PARK", 2204), an_operator("Acme"))
+    plan = split_paid(lease)
+    [item] = of_kind(attention.SPLIT_CHARGE_PAID)
+    assert item.text == (
+        "Payment on a split charge: 2204 FOREST PARK, Damage to the shelving, $400.00 paid "
+        "before its invoice was released; cancel or reschedule the plan"
+    )
+    assert item.url == f"/plans/{plan.pk}/" and item.severity == attention.HIGH
+    assert item.operator_id == plan.operator_id
+    parent_id = plan.one_off_charge_id
+    assert parent_id is not None
+    assert of_kind(attention.SPLIT_CHARGE_PAID, an_operator("Other")) == []
+    # A parent whose balance is the plan's total has no item; nor has a plan that ended.
+    OneOffCharge.objects.filter(pk=parent_id).update(amount_paid=D("0.00"), status="owed")
+    assert of_kind(attention.SPLIT_CHARGE_PAID) == []
+    OneOffCharge.objects.filter(pk=parent_id).update(amount_paid=D("400.00"), status="partial")
+    InstallmentPlan.objects.filter(pk=plan.pk).update(status="completed")
+    assert of_kind(attention.SPLIT_CHARGE_PAID) == []
+    InstallmentPlan.objects.filter(pk=plan.pk).update(
+        status="cancelled", cancelled_at=NOW, note="Stopped."
+    )
+    assert of_kind(attention.SPLIT_CHARGE_PAID) == []
 
 
 def test_a_returned_installment_is_one_item_per_plan_linking_to_it(today: date) -> None:

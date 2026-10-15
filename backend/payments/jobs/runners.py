@@ -216,9 +216,13 @@ def invoice_send_job(job: Job) -> Result:
 
 def invoice_delete_job(job: Job) -> Result:
     """PLAN-010d D6: the cancel of an invoiced one-off charge; with the waived flag
-    (PLAN-011 D0), the delete of a waived charge's live invoice."""
+    (PLAN-011 D0), the delete of a waived charge's live invoice; with
+    :data:`ledger.services.installments.RELEASE_PARAM` (PLAN-012b-a D3), the release of a
+    split parent's invoice, the charge kept."""
     if job.params.get(one_off_charges.WAIVED_INVOICE_PARAM) is True:
         return one_off_invoices.delete_waived(job.entity_id, job.requested_by)
+    if job.params.get(installments.RELEASE_PARAM) is True:
+        return one_off_invoices.release_invoice(job.entity_id, job.requested_by)
     return one_off_invoices.delete(job.entity_id, job.requested_by)
 
 
@@ -232,7 +236,11 @@ def schedule_create_job(job: Job) -> Result:
 
 
 def schedule_delete_job(job: Job) -> Result:
-    """PLAN-010d D6: the cancel of an ``autopay_due`` charge whose schedule has not fired."""
+    """PLAN-010d D6: the cancel of an ``autopay_due`` charge whose schedule has not fired;
+    with :data:`ledger.services.installments.RELEASE_PARAM` (PLAN-012b-a D3), the release
+    of a split parent's schedule, the charge kept."""
+    if job.params.get(installments.RELEASE_PARAM) is True:
+        return one_off_invoices.release_schedule(job.entity_id, job.requested_by)
     return one_off_invoices.delete_schedule(job.entity_id, job.requested_by)
 
 

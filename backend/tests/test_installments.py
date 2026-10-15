@@ -12,6 +12,7 @@ network.
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -471,9 +472,11 @@ def test_a_closed_or_special_charge_is_not_split(
     assert installments.split_refusal(parent) == message
 
 
-def test_a_charge_with_a_live_provider_invoice_or_schedule_is_not_split(
+def test_a_charge_with_a_live_provider_invoice_or_schedule_is_split_with_a_release(
     fake: FakeProvider, worker: None
 ) -> None:
+    """PLAN-012b-a D2: the split is offered while the request waits for nothing, and it
+    names what the confirm releases; before PLAN-012b-a this was refused."""
     operator = an_operator(fake)
     emailed = a_one_off(operator, collection=CollectionMethod.EMAIL)
     Invoice.objects.create(
@@ -491,11 +494,18 @@ def test_a_charge_with_a_live_provider_invoice_or_schedule_is_not_split(
     jobs.enqueue(JobKind.INVOICE_CREATE, emailed, None, None)
     assert installments.split_refusal(emailed) == installments.REQUEST_WAITING
     run_queued_jobs()
-    assert installments.split_refusal(emailed).startswith("Invoice INV-2026-9001")
+    assert installments.split_refusal(emailed) == ""
+    assert installments.release_notice(emailed) == (
+        "Invoice INV-2026-9001 at the payment provider will be deleted (the charge stays open "
+        "here) and each installment is collected on its own."
+    )
     autopay = a_one_off(operator, collection=CollectionMethod.AUTOPAY_DUE, due=FIRST)
     jobs.enqueue(JobKind.SCHEDULE_CREATE, autopay, None, None)
     run_queued_jobs()
-    assert installments.split_refusal(autopay) == installments.LIVE_SCHEDULE
+    assert installments.split_refusal(autopay) == ""
+    assert installments.release_notice(autopay) == installments.RELEASE_NOTICE_SCHEDULE
+    nothing_live = a_one_off(operator, collection=CollectionMethod.EMAIL)
+    assert installments.release_notice(nothing_live) == ""
 
 
 def test_a_pending_payment_or_a_debited_rent_month_is_not_split(fake: FakeProvider) -> None:
@@ -942,6 +952,91 @@ def test_an_installment_is_not_waived_or_cancelled_on_its_own(fake: FakeProvider
     assert not cancelled.ok and cancelled.message == one_off_charges.CANCEL_INSTALLMENT
 
 
+@pytest.mark.parametrize("status", [InstallmentPlanStatus.ACTIVE, InstallmentPlanStatus.ATTENTION])
+def test_a_parent_on_a_live_plan_is_not_cancelled_or_waived_on_its_own(
+    fake: FakeProvider, status: str
+) -> None:
+    parent = a_one_off(an_operator(fake), collection=CollectionMethod.EMAIL)
+    plan = plan_for(parent)
+    InstallmentPlan.objects.filter(pk=plan.pk).update(status=status)
+    assert one_off_charges.cancel_refusal(parent) == one_off_charges.CANCEL_PARENT_ON_PLAN
+    cancelled = one_off_charges.cancel_charge(parent.pk, note="Stop", actor=a_user(Role.BILLING))
+    assert not cancelled.ok and cancelled.message == one_off_charges.CANCEL_PARENT_ON_PLAN
+    waived = one_off_charges.waive(parent.pk, note="Goodwill", actor=a_user(Role.ADMIN))
+    assert not waived.ok and waived.message == one_off_charges.WAIVE_PARENT_ON_PLAN
+    parent.refresh_from_db()
+    assert parent.status == OneOffChargeStatus.OWED
+    assert not Job.objects.filter(entity_id=parent.pk).exists()
+    assert not AuditLog.objects.filter(
+        entity_id=str(parent.pk),
+        action__in=[one_off_charges.CANCEL_ACTION, "one_off_charge.waived"],
+    ).exists()
+
+
+def test_a_parent_whose_plan_was_cancelled_may_be_cancelled_or_waived_again(
+    fake: FakeProvider,
+) -> None:
+    parent = a_one_off(an_operator(fake))
+    plan = plan_for(parent)
+    assert installments.cancel(plan, "Changed our mind.", a_user(Role.ADMIN)).ok
+    parent.refresh_from_db()
+    assert one_off_charges.cancel_refusal(parent) == ""
+    waived = one_off_charges.waive(parent.pk, note="Goodwill", actor=a_user(Role.ADMIN))
+    assert waived.ok, waived.message
+    parent.refresh_from_db()
+    assert parent.status == OneOffChargeStatus.WAIVED
+
+
+def test_a_parent_whose_plan_completed_is_refused_only_as_a_paid_charge(
+    fake: FakeProvider,
+) -> None:
+    parent = a_one_off(an_operator(fake))
+    plan = plan_for(parent)
+    for row, amount in zip(rows_of(plan), ("333.33", "333.33", "333.34"), strict=True):
+        assert pay(row, amount).ok
+    plan.refresh_from_db()
+    parent.refresh_from_db()
+    assert plan.status == InstallmentPlanStatus.COMPLETED
+    assert one_off_charges.cancel_refusal(parent) == one_off_charges.CANCEL_PAID
+    waived = one_off_charges.waive(parent.pk, note="Goodwill", actor=a_user(Role.ADMIN))
+    assert not waived.ok and waived.message == one_off_charges.WAIVE_SETTLED
+
+
+def test_the_charge_page_hides_cancel_and_waive_of_a_parent_on_a_live_plan(
+    fake: FakeProvider,
+) -> None:
+    parent = a_one_off(an_operator(fake), collection=CollectionMethod.EMAIL)
+    admin, _ = client_for(Role.ADMIN)
+    before = admin.get(f"/one-off-charges/{parent.pk}/").content.decode()
+    assert 'id="cancel-charge"' in before and 'id="waive-charge"' in before
+    plan = plan_for(parent)
+    page = admin.get(f"/one-off-charges/{parent.pk}/").content.decode()
+    assert 'id="cancel-charge"' not in page and 'id="waive-charge"' not in page
+    assert 'id="close-actions"' not in page
+    assert f"/plans/{plan.pk}/" in page
+    waive_form = admin.get(f"/one-off-charges/{parent.pk}/waive/").content.decode()
+    assert one_off_charges.WAIVE_PARENT_ON_PLAN in waive_form
+    cancel_form = admin.get(f"/one-off-charges/{parent.pk}/cancel/").content.decode()
+    assert one_off_charges.CANCEL_PARENT_ON_PLAN in cancel_form
+
+
+def test_the_cancel_and_waive_routes_refuse_a_parent_on_a_live_plan(fake: FakeProvider) -> None:
+    parent = a_one_off(an_operator(fake), collection=CollectionMethod.EMAIL)
+    plan_for(parent)
+    admin, _ = client_for(Role.ADMIN)
+    cancelled = admin.post(f"/one-off-charges/{parent.pk}/cancel/", {"note": "Stop"})
+    assert cancelled["Location"] == f"/one-off-charges/{parent.pk}/cancel/"
+    assert (
+        one_off_charges.CANCEL_PARENT_ON_PLAN in admin.get(cancelled["Location"]).content.decode()
+    )
+    waived = admin.post(f"/one-off-charges/{parent.pk}/waive/", {"note": "Goodwill"})
+    assert waived["Location"] == f"/one-off-charges/{parent.pk}/waive/"
+    assert one_off_charges.WAIVE_PARENT_ON_PLAN in admin.get(waived["Location"]).content.decode()
+    parent.refresh_from_db()
+    assert parent.status == OneOffChargeStatus.OWED
+    assert not Job.objects.filter(entity_id=parent.pk).exists()
+
+
 # --- Counted once (D12) -------------------------------------------------------------------------
 
 
@@ -1191,3 +1286,502 @@ def test_the_invoice_page_points_to_the_split_of_its_charge(fake: FakeProvider) 
     client, _ = client_for(Role.BILLING)
     page = client.get(f"/invoices/drafts/{draft.pk}/").content.decode()
     assert f'href="/one-off-charges/{charge.pk}/split/"' in page
+
+
+# --- Releasing the parent's provider object (PLAN-012b-a D2 to D5) -----------------------------
+
+
+@pytest.fixture
+def ticking(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A clock one millisecond on at each read, so a charge's latest job is the newest
+    (two jobs never share a creation time); the day stays :data:`TODAY`."""
+    clock = itertools.count()
+    monkeypatch.setattr(
+        "django.utils.timezone.now", lambda: NOW + timedelta(milliseconds=next(clock))
+    )
+
+
+def live_emailed(
+    operator: Operator, number: str = "INV-2026-9001", *, lease: Lease | None = None
+) -> tuple[OneOffCharge, Invoice]:
+    """An e-mailed one-off parent whose own single-charge invoice is live at the fake."""
+    from payments import jobs
+
+    parent = a_one_off(operator, collection=CollectionMethod.EMAIL, lease=lease)
+    invoice = Invoice.objects.create(
+        invoice_number=number,
+        operator=operator,
+        one_off_charge=parent,
+        issue_date=TODAY,
+        due_date=TODAY,
+        subtotal=D("1000.00"),
+        total=D("1000.00"),
+    )
+    jobs.enqueue(JobKind.INVOICE_CREATE, parent, None, None)
+    run_queued_jobs()
+    assert one_off_charges.live_provider_invoice(parent) is not None
+    return parent, invoice
+
+
+def live_autopay(operator: Operator) -> OneOffCharge:
+    """An ``autopay_due`` one-off parent whose own schedule is live at the fake."""
+    from payments import jobs
+
+    parent = a_one_off(operator, collection=CollectionMethod.AUTOPAY_DUE, due=FIRST)
+    jobs.enqueue(JobKind.SCHEDULE_CREATE, parent, None, None)
+    run_queued_jobs()
+    assert one_off_charges.provider_schedule(parent)
+    return parent
+
+
+def jobs_of(charge: OneOffCharge) -> list[Job]:
+    return list(Job.objects.filter(entity_id=charge.pk).order_by("created_at", "id"))
+
+
+def installment_jobs(plan: InstallmentPlan) -> list[Job]:
+    return list(Job.objects.filter(entity_id__in=[row.pk for row in rows_of(plan)]))
+
+
+def actions_on(entity_id: object) -> list[str]:
+    return list(
+        AuditLog.objects.filter(entity_id=str(entity_id))
+        .order_by("id")
+        .values_list("action", flat=True)
+    )
+
+
+def owed_at_price(parent: OneOffCharge) -> bool:
+    parent.refresh_from_db()
+    return (parent.status, parent.price, parent.amount_paid) == (
+        OneOffChargeStatus.OWED,
+        D("1000.00"),
+        D("0.00"),
+    )
+
+
+def test_a_live_invoice_is_released_and_each_installment_gets_its_own(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from payments.provider import mask_identifier
+
+    parent, invoice = live_emailed(an_operator(fake))
+    ref = provider_ref(invoice)
+    client, _ = client_for(Role.BILLING)
+    split = client.get(
+        f"/one-off-charges/{parent.pk}/split/",
+        {"count": "3", "first_due": FIRST.isoformat(), "cadence": "monthly"},
+    ).content.decode()
+    assert 'id="release-notice"' in split and "Invoice INV-2026-9001 at the payment" in split
+    before = len(calls(fake, "create_invoice"))
+    plan = plan_for(parent)
+    # The confirm queues the release alone; no installment job yet.
+    [release] = [job for job in jobs_of(parent) if job.kind == JobKind.INVOICE_DELETE]
+    assert release.params == {installments.RELEASE_PARAM: True}
+    assert installment_jobs(plan) == []
+    requested = AuditLog.objects.get(action=installments.RELEASE_REQUESTED_ACTION)
+    assert requested.entity_id == str(parent.pk)
+    assert requested.after["plan"] == str(plan.pk)
+    assert requested.after["invoice_number"] == "INV-2026-9001"
+    assert requested.after["provider_invoice"] == mask_identifier(ref) != ref
+    page = client.get(f"/plans/{plan.pk}/").content.decode()
+    assert (
+        '<p id="release-pending"><strong>Waiting for the payment provider to release invoice '
+        "INV-2026-9001.</strong></p>"
+    ) in page
+    run_queued_jobs()
+    release.refresh_from_db()
+    assert release.status == "done", release.result
+    assert calls(fake, "delete_invoice") == [(ref,)]
+    invoice.refresh_from_db()
+    assert (invoice.internal_status, invoice.provider_status) == ("void", "DELETED")
+    assert owed_at_price(parent)
+    assert sorted(job.kind for job in installment_jobs(plan)) == [JobKind.INVOICE_CREATE] * 3
+    assert len(calls(fake, "create_invoice")) == before + 3
+    assert all(provider_ref(Invoice.objects.get(one_off_charge=row)) for row in rows_of(plan))
+    released = AuditLog.objects.get(action=one_off_charges.INVOICE_RELEASED_ACTION)
+    assert released.entity_id == str(invoice.pk)
+    assert released.after["provider_invoice"] == mask_identifier(ref)
+    assert ref not in str(released.after) and ref not in str(requested.after)
+    plan_row = AuditLog.objects.get(action=installments.RELEASED_ACTION)
+    assert plan_row.entity_id == str(plan.pk) and plan_row.after["queued"] == 3
+    assert "one_off_charge.voided" not in actions_on(parent.pk)
+    assert one_off_charges.live_provider_invoice(parent) is None
+    page = client.get(f"/plans/{plan.pk}/").content.decode()
+    assert 'id="release-pending"' not in page
+    charge_page = client.get(f"/one-off-charges/{parent.pk}/").content.decode()
+    assert (
+        '<p class="invoice-released" id="invoice-released">Invoice INV-2026-9001 was released '
+        "at the payment provider for the installment plan.</p>"
+    ) in charge_page
+    plan.refresh_from_db()
+    assert plan.status == InstallmentPlanStatus.ACTIVE
+
+
+def test_a_live_schedule_is_released_and_each_installment_gets_its_own(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    parent = live_autopay(an_operator(fake))
+    schedule = one_off_charges.provider_schedule(parent)
+    plan = plan_for(parent)
+    [release] = [job for job in jobs_of(parent) if job.kind == JobKind.SCHEDULE_DELETE]
+    assert release.params == {installments.RELEASE_PARAM: True}
+    assert installment_jobs(plan) == []
+    assert installments.release_pending(plan) == installments.RELEASE_PENDING_SCHEDULE
+    run_queued_jobs()
+    release.refresh_from_db()
+    assert release.status == "done", release.result
+    assert calls(fake, "delete_scheduled_invoice") == [(schedule,)]
+    assert one_off_charges.provider_schedule(parent) == ""
+    assert ExternalRef.objects.get(external_id=schedule).superseded_at is not None
+    assert owed_at_price(parent)
+    assert len(calls(fake, "create_scheduled_invoice")) == 1 + 3
+    assert all(one_off_charges.provider_schedule(row) for row in rows_of(plan))
+    row = AuditLog.objects.get(action=one_off_charges.SCHEDULE_RELEASED_ACTION)
+    assert row.entity_id == str(parent.pk) and schedule not in str(row.after)
+    assert installments.release_pending(plan) == ""
+
+
+def test_a_line_of_a_multi_line_live_invoice_is_not_released(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    operator = an_operator(fake)
+    first = a_one_off(operator, collection=CollectionMethod.EMAIL)
+    second = a_one_off(operator, "200.00", collection=CollectionMethod.EMAIL)
+    invoice = Invoice.objects.create(
+        invoice_number="INV-2026-9200",
+        operator=operator,
+        one_off_charge=first,
+        issue_date=TODAY,
+        due_date=TODAY,
+        subtotal=D("1200.00"),
+        total=D("1200.00"),
+    )
+    for position, charge in enumerate((first, second), start=1):
+        InvoiceLineItem.objects.create(
+            invoice=invoice,
+            position=position,
+            description=charge.description,
+            quantity=D("1"),
+            unit_price=charge.price,
+            line_total=charge.price,
+            one_off_charge=charge,
+        )
+    ExternalRef.objects.create(
+        entity_type="invoice",
+        entity_id=invoice.pk,
+        provider="stax_pay",
+        external_kind="invoice",
+        external_id="fake-invoice-shared",
+    )
+    shared = installments.LIVE_INVOICE_SHARED.format(number="INV-2026-9200")
+    assert shared == (
+        "Invoice INV-2026-9200 has other lines; it cannot be released for one of them. "
+        "Collect it or cancel it first."
+    )
+    assert installments.split_refusal(first) == shared
+    assert installments.split_refusal(second) == shared
+    outcome = installments.create_plan(
+        first,
+        2,
+        FIRST,
+        "monthly",
+        [Line(FIRST, D("500.00")), Line(date(2026, 11, 20), D("500.00"))],
+        a_user(Role.BILLING),
+    )
+    assert (outcome.ok, outcome.message) == (False, shared)
+    assert nothing_written() and not Job.objects.exists()
+    draft = InvoiceDraft.objects.create(
+        operator=operator,
+        status=InvoiceDraftStatus.SENT,
+        sent_invoice=invoice,
+        created_by=a_user(Role.BILLING),
+    )
+    client, _ = client_for(Role.BILLING)
+    page = client.get(f"/invoices/drafts/{draft.pk}/").content.decode()
+    assert "To pay in installments, split each line from its charge page." in page
+
+
+def test_a_schedule_that_generated_its_invoice_is_not_released(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    operator = an_operator(fake)
+    parent = live_autopay(operator)
+    Invoice.objects.create(
+        invoice_number="INV-2026-9300",
+        operator=operator,
+        one_off_charge=parent,
+        issue_date=FIRST,
+        due_date=FIRST,
+        subtotal=D("1000.00"),
+        total=D("1000.00"),
+    )
+    assert installments.split_refusal(parent) == (
+        "The schedule already generated its invoice; collect or cancel it first."
+    )
+    assert installments.release_kind(parent) == ""
+
+
+def test_a_rent_parent_with_a_live_invoice_is_refused_as_before(fake: FakeProvider) -> None:
+    operator = an_operator(fake)
+    rent = a_rent(operator)
+    invoice = Invoice.objects.create(
+        invoice_number="INV-2026-9400",
+        operator=operator,
+        rent_charge=rent,
+        issue_date=TODAY,
+        due_date=TODAY,
+        subtotal=D("1000.00"),
+        total=D("1000.00"),
+    )
+    ExternalRef.objects.create(
+        entity_type="invoice",
+        entity_id=invoice.pk,
+        provider="stax_pay",
+        external_kind="invoice",
+        external_id="fake-invoice-rent",
+    )
+    assert installments.split_refusal(rent) == installments.LIVE_INVOICE.format(
+        number="INV-2026-9400"
+    )
+    assert installments.release_kind(rent) == "" and installments.release_notice(rent) == ""
+
+
+def test_a_failed_release_waits_and_the_retry_reruns_it_with_its_flag(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from payments.errors import ProviderUnavailable
+
+    parent, invoice = live_emailed(an_operator(fake))
+    fake.fail_next("delete_invoice", ProviderUnavailable(503, "unavailable"))
+    plan = plan_for(parent)
+    [failed] = [job for job in run_queued_jobs() if job.kind == JobKind.INVOICE_DELETE]
+    assert failed.status == "failed" and "ProviderUnavailable" in failed.result
+    assert installment_jobs(plan) == []
+    assert owed_at_price(parent)
+    invoice.refresh_from_db()
+    assert invoice.internal_status != "void"
+    assert one_off_charges.retry_kind(parent) == JobKind.INVOICE_DELETE
+    assert one_off_charges.retry_params(parent) == {installments.RELEASE_PARAM: True}
+    viewer, _ = client_for(Role.VIEWER)
+    plan_page = viewer.get(f"/plans/{plan.pk}/").content.decode()
+    assert "Waiting for the payment provider to release invoice INV-2026-9001." in plan_page
+    assert (
+        'id="retry-provider"' not in viewer.get(f"/one-off-charges/{parent.pk}/").content.decode()
+    )
+    client, _ = client_for(Role.BILLING)
+    page = client.get(f"/one-off-charges/{parent.pk}/").content.decode()
+    assert 'id="retry-provider"' in page and "ProviderUnavailable" in page
+    client.post(f"/one-off-charges/{parent.pk}/retry/")
+    retried = Job.objects.filter(entity_id=parent.pk, kind=JobKind.INVOICE_DELETE).latest(
+        "created_at", "id"
+    )
+    assert retried.pk != failed.pk and retried.params == {installments.RELEASE_PARAM: True}
+    run_queued_jobs()
+    retried.refresh_from_db()
+    assert retried.status == "done", retried.result
+    invoice.refresh_from_db()
+    assert (invoice.internal_status, invoice.provider_status) == ("void", "DELETED")
+    assert owed_at_price(parent)
+    assert len(installment_jobs(plan)) == 3
+    assert "Waiting for" not in client.get(f"/plans/{plan.pk}/").content.decode()
+
+
+def test_a_payment_on_the_parent_before_the_release_puts_the_plan_in_attention(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    parent, invoice = live_emailed(an_operator(fake))
+    plan = plan_for(parent)
+    # A partial payment settles on the parent's old invoice before the worker releases it.
+    provider_txn(
+        fake,
+        "txn-parent-1",
+        total=D("400.00"),
+        invoice_external_id=provider_ref(invoice),
+        customer_external_id=CUSTOMER,
+    )
+    deliver("create_transaction", id="txn-parent-1")
+    settle(fake, "txn-parent-1")
+    assert deliver("update_transaction_settled", id="txn-parent-1") == "processed"
+    parent.refresh_from_db()
+    plan.refresh_from_db()
+    assert parent.amount_paid == D("400.00")
+    assert plan.status == InstallmentPlanStatus.ATTENTION
+    changed = AuditLog.objects.filter(
+        action="installment_plan.status_changed", entity_id=str(plan.pk)
+    ).latest("id")
+    assert changed.after["status"] == "attention" and changed.after["reason"] == "parent_paid"
+    [release] = [job for job in run_queued_jobs() if job.kind == JobKind.INVOICE_DELETE]
+    assert release.status == "done" and release.result == installments.RELEASED_PARENT_PAID
+    assert installment_jobs(plan) == []
+    assert not Payment.objects.filter(one_off_charge__plan=plan).exists()
+    [item] = [
+        item
+        for item in attention.attention(TODAY).items
+        if item.kind == attention.SPLIT_CHARGE_PAID
+    ]
+    assert item.text == (
+        "Payment on a split charge: No store, Arrears July to September 2026, $400.00 paid "
+        "before its invoice was released; cancel or reschedule the plan"
+    )
+    assert item.url == f"/plans/{plan.pk}/" and item.severity == attention.HIGH
+    outcome = installments.cancel(plan, "Paid on the old invoice.", a_user(Role.ADMIN))
+    assert outcome.ok, outcome.message
+    run_queued_jobs()
+    parent.refresh_from_db()
+    assert parent.balance == D("600.00") and parent.status == OneOffChargeStatus.PARTIAL
+    assert not [
+        item
+        for item in attention.attention(TODAY).items
+        if item.kind == attention.SPLIT_CHARGE_PAID
+    ]
+
+
+def test_the_release_run_twice_changes_nothing_and_queues_no_second_set(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from payments import jobs
+
+    parent, _ = live_emailed(an_operator(fake))
+    plan = plan_for(parent)
+    run_queued_jobs()
+    queued = len(installment_jobs(plan))
+    audited = AuditLog.objects.count()
+    provider_calls = len(fake.calls)
+    jobs.enqueue(JobKind.INVOICE_DELETE, parent, {installments.RELEASE_PARAM: True}, None)
+    [again] = run_queued_jobs()
+    assert (again.status, again.result) == ("done", installments.RELEASE_ALREADY)
+    assert len(installment_jobs(plan)) == queued == 3
+    assert AuditLog.objects.count() == audited
+    assert len(fake.calls) == provider_calls
+    assert owed_at_price(parent)
+
+
+def test_a_plan_cancelled_before_the_release_runs_gets_nothing_queued(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    parent, invoice = live_emailed(an_operator(fake))
+    created = len(calls(fake, "create_invoice"))
+    plan = plan_for(parent)
+    assert installments.cancel(plan, "Changed our mind.", a_user(Role.ADMIN)).ok
+    done = run_queued_jobs()
+    [release] = [
+        job for job in done if job.kind == JobKind.INVOICE_DELETE and job.entity_id == parent.pk
+    ]
+    assert (release.status, release.result) == ("done", installments.RELEASED_PLAN_CLOSED)
+    assert calls(fake, "delete_invoice") == [(provider_ref(invoice),)]
+    assert len(calls(fake, "create_invoice")) == created
+    assert not Job.objects.filter(
+        entity_id__in=[row.pk for row in rows_of(plan)], kind=JobKind.INVOICE_CREATE
+    ).exists()
+    assert owed_at_price(parent)
+    assert installments.release_pending(plan) == ""
+
+
+def test_the_release_runs_on_a_parent_whose_cancel_is_refused(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    parent, invoice = live_emailed(an_operator(fake))
+    plan = plan_for(parent)
+    assert one_off_charges.cancel_refusal(parent) == one_off_charges.CANCEL_PARENT_ON_PLAN
+    [release] = [job for job in run_queued_jobs() if job.kind == JobKind.INVOICE_DELETE]
+    assert release.status == "done", release.result
+    assert calls(fake, "delete_invoice") == [(provider_ref(invoice),)]
+    invoice.refresh_from_db()
+    assert invoice.internal_status == "void"
+    assert owed_at_price(parent)
+    assert len(installment_jobs(plan)) == 3
+
+
+def test_the_schedule_release_runs_on_a_parent_whose_cancel_is_refused(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    parent = live_autopay(an_operator(fake))
+    plan_for(parent)
+    assert one_off_charges.cancel_refusal(parent) == one_off_charges.CANCEL_PARENT_ON_PLAN
+    [release] = [job for job in run_queued_jobs() if job.kind == JobKind.SCHEDULE_DELETE]
+    assert release.status == "done", release.result
+    assert owed_at_price(parent)
+
+
+def test_the_lease_end_blockers_see_no_live_invoice_after_a_release(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from ledger.services import lease_end
+
+    operator = an_operator(fake)
+    lease = make_lease(operator=operator)
+    parent, _ = live_emailed(operator, lease=lease)
+    plan_for(parent)
+    assert lease_end.LIVE_INVOICE in [found.kind for found in lease_end.blockers(lease, TODAY)]
+    run_queued_jobs()
+    found = lease_end.blockers(lease, TODAY)
+    # The installments' own invoices are live now; the parent's is not.
+    assert not [blocker for blocker in found if "INV-2026-9001" in blocker.text]
+    assert lease_end.INSTALLMENT_PLAN in [blocker.kind for blocker in found]
+
+
+def test_a_released_single_line_builder_invoice_keeps_its_line_links(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    parent, invoice = live_emailed(an_operator(fake))
+    InvoiceLineItem.objects.create(
+        invoice=invoice,
+        position=1,
+        description=parent.description,
+        quantity=D("1"),
+        unit_price=parent.price,
+        line_total=parent.price,
+        one_off_charge=parent,
+    )
+    assert installments.split_refusal(parent) == ""
+    plan_for(parent)
+    run_queued_jobs()
+    invoice.refresh_from_db()
+    assert invoice.internal_status == "void"
+    call_command("invoice_line_links", "--check", stdout=StringIO())
+
+
+def test_the_invoice_page_says_the_split_releases_a_live_single_charge_invoice(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    parent, invoice = live_emailed(an_operator(fake))
+    InvoiceLineItem.objects.create(
+        invoice=invoice,
+        position=1,
+        description=parent.description,
+        quantity=D("1"),
+        unit_price=parent.price,
+        line_total=parent.price,
+        one_off_charge=parent,
+    )
+    assert parent.operator is not None
+    draft = InvoiceDraft.objects.create(
+        operator=parent.operator,
+        status=InvoiceDraftStatus.SENT,
+        sent_invoice=invoice,
+        created_by=a_user(Role.BILLING),
+    )
+    client, _ = client_for(Role.BILLING)
+    page = client.get(f"/invoices/drafts/{draft.pk}/").content.decode()
+    assert (
+        "Split into installments from the charge page; the invoice is released at the payment "
+        "provider when the plan is confirmed."
+    ) in page
+    assert f'href="/one-off-charges/{parent.pk}/split/"' in page
+
+
+def test_a_release_job_on_a_charge_without_a_plan_deletes_nothing(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from payments import jobs
+
+    parent, invoice = live_emailed(an_operator(fake))
+    jobs.enqueue(JobKind.INVOICE_DELETE, parent, {installments.RELEASE_PARAM: True}, None)
+    [job] = run_queued_jobs()
+    assert (job.status, job.result) == ("failed", installments.RELEASE_NO_PLAN)
+    assert calls(fake, "delete_invoice") == []
+    assert one_off_charges.live_provider_invoice(parent) is not None

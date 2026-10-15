@@ -17,6 +17,12 @@ page that deals with it and ``since``, the day it began:
   ``attention``), ``"Installment returned: <store>, <parent>, plan <n> of <N> paid"``,
   linking to the plan; cleared once the return is resolved (rescheduled with the NSF
   fee, or resolved with a note);
+- ``split_charge_paid`` (PLAN-012b-a D4): one item per live installment plan whose
+  one-off parent's balance is below the plan's total (a payment landed on the parent
+  itself, on its old invoice before the release or late after it; the plan is then
+  ``attention``), ``"Payment on a split charge: <store>, <parent>, <amount> paid before
+  its invoice was released; cancel or reschedule the plan"``, linking to the plan;
+  cleared once the plan is cancelled or completed;
 - ``lease_end_balance`` (PLAN-012e D14): one item per confirmed lease end whose
   "Lease-end balance" charge is still open (not paid, waived or voided, a balance above
   zero), ``"Lease-end balance: <operator> on store <label>, <amount> open since
@@ -62,11 +68,12 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import Count, Min, Q
+from django.db.models import Count, F, Min, Q, Sum
 from django.urls import reverse
 from django.utils import timezone
 
 from ledger.models import (
+    LIVE_PLAN_STATUSES,
     ZERO,
     CollectionSchedule,
     CollectionStatus,
@@ -98,6 +105,7 @@ _SEVERITY_RANK = {HIGH: 0, MEDIUM: 1, LOW: 2}
 OVERDUE = "overdue"
 RETURNED_DEBIT = "returned_debit"
 INSTALLMENT_RETURNED = "installment_returned"
+SPLIT_CHARGE_PAID = "split_charge_paid"
 LEASE_END_BALANCE = "lease_end_balance"
 BROKEN_PROMISE = "broken_promise"
 INSURANCE_DUE = "insurance_due"
@@ -116,6 +124,7 @@ KINDS: tuple[str, ...] = (
     OVERDUE,
     RETURNED_DEBIT,
     INSTALLMENT_RETURNED,
+    SPLIT_CHARGE_PAID,
     LEASE_END_BALANCE,
     BROKEN_PROMISE,
     INSURANCE_PREMIUM_MISSING,
@@ -134,6 +143,7 @@ KIND_LABELS: dict[str, str] = {
     OVERDUE: "overdue charges",
     RETURNED_DEBIT: "returned debits",
     INSTALLMENT_RETURNED: "installment plans with a returned debit",
+    SPLIT_CHARGE_PAID: "split charges paid before their invoice was released",
     LEASE_END_BALANCE: "lease-end balances open",
     BROKEN_PROMISE: "broken promises",
     INSURANCE_PREMIUM_MISSING: "insurance premiums missing",
@@ -159,6 +169,10 @@ VACANT_DAYS = 30
 KIND_LIMIT = 25
 RETURNED_TEXT = "Returned debit not rescheduled: {store}, {amount}, returned {date}"
 INSTALLMENT_RETURNED_TEXT = "Installment returned: {store}, {parent}, plan {paid} of {count} paid"
+SPLIT_CHARGE_PAID_TEXT = (
+    "Payment on a split charge: {store}, {parent}, {amount} paid before its invoice was "
+    "released; cancel or reschedule the plan"
+)
 LEASE_END_BALANCE_TEXT = (
     "Lease-end balance: {operator} on store {label}, {amount} open since {ended_on}"
 )
@@ -290,6 +304,48 @@ def _installments_returned(operator: uuid.UUID | None) -> list[Item]:
                 ),
                 url=reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
                 since=day,
+                operator_id=plan.operator_id,
+            )
+        )
+    return found
+
+
+def _split_charges_paid(operator: uuid.UUID | None) -> list[Item]:
+    """One item per live plan whose one-off parent's balance is below the plan's total
+    (PLAN-012b-a D4), oldest change first (one query). While the plan is live the
+    parent's stored paid amount holds only what was paid on the parent itself."""
+    plans = (
+        InstallmentPlan.objects.filter(status__in=LIVE_PLAN_STATUSES, one_off_charge__isnull=False)
+        .exclude(one_off_charge__status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .annotate(
+            total=Sum(
+                "installments__price",
+                filter=~Q(installments__status=OneOffChargeStatus.VOIDED),
+            )
+        )
+        .filter(total__gt=F("one_off_charge__price") - F("one_off_charge__amount_paid"))
+        .select_related("lease__store", "one_off_charge__fee_type")
+        .order_by("updated_at", "id")
+    )
+    if operator is not None:
+        plans = plans.filter(operator=operator)
+    found = []
+    for plan in plans:
+        parent = plan.one_off_charge
+        if parent is None:
+            continue
+        paid = Decimal(plan.total) - (Decimal(parent.price) - Decimal(parent.amount_paid))
+        found.append(
+            Item(
+                kind=SPLIT_CHARGE_PAID,
+                severity=HIGH,
+                text=SPLIT_CHARGE_PAID_TEXT.format(
+                    store=plan.lease.store.external_label if plan.lease is not None else "No store",
+                    parent=installments.parent_label(parent),
+                    amount=format_amount(paid),
+                ),
+                url=reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
+                since=timezone.localdate(plan.updated_at),
                 operator_id=plan.operator_id,
             )
         )
@@ -672,6 +728,7 @@ def attention(
         lambda: _overdue(today, balances),
         lambda: _returned(today, operator),
         lambda: _installments_returned(operator),
+        lambda: _split_charges_paid(operator),
         lambda: _lease_end_balances(operator),
         lambda: _promises(today, operator, balances),
         lambda: _insurance(today, leases),

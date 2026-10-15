@@ -1094,3 +1094,20 @@ reports up to date, `/healthz` 200. Owner's staging clicks for Checkpoint 12b: a
 on the 13th; End lease blocked on a live invoice and clean on another store; Transfer, including
 one with deductions above the deposit (blocked, allowed with a reason, on the attention list);
 a 3-installment split on a hand-collected charge and the P&L unchanged by it. Next: 12b-a.
+
+## Update, 2026-10-14, PLAN-012b-a built and gated (not pushed)
+
+Both parts of 12b-a, in the owner's order, on top of `c3f2b2f`; nothing pushed until the owner
+confirms the 12b clicks. **Part 1 (Fable, CI config only):** the 21 seeded migration tests run
+as their own CI step "Migration tests" (limit 15) and the unit step runs the complement (limit
+20); measured locally on PostgreSQL: migration selection 8:04, unit selection
+13:58 (the undivided suite was 21:44; CI ran it in 22:11); BACKLOG §4 closed. **Part 2
+(Opus):** a one-off charge whose own single-charge Stax invoice or schedule is live can be split;
+the worker releases that object (deleted at Stax, the charge never voided, the local invoice
+void/DELETED) and only then creates the installments' objects; a payment on the old invoice
+before or after the release puts the plan on the attention list ("Payment on a split charge");
+a parent on a live plan can no longer be cancelled or waived on its own; multi-line live
+invoices and rent invoices unchanged. One MAJOR found and resolved in the rework (the parent's
+cancel/waive). Gate on the final tree: ruff, format, mypy (379 files), lock, migrations clean;
+sqlite 5,039 passed; PostgreSQL as the two CI selections, 21 and 5,633 passed; e2e 7; secret
+scans clean; Fable's adversarial file 6 cases green. QA: `docs/qa/QA-012b-a-…md`.

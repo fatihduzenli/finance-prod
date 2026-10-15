@@ -292,6 +292,8 @@ def _sent_context(draft: InvoiceDraft) -> dict[str, Any]:
         "charges": invoice_builder.sent_charges(draft),
         "first_charge": first,
         "cancel_refusal": one_off_charges.cancel_refusal(first),
+        # PLAN-012b-a D5: a live single-charge invoice is released by the split.
+        "invoice_live": one_off_charges.live_provider_invoice(first) is not None,
     }
 
 

@@ -45,7 +45,7 @@
     {% endresponsive_table %}
     <p class="muted">A payment on this invoice pays the lines in order; a refund or a return takes it back from the last line first.</p>
     {% if charges|length == 1 %}
-      <p class="actions"><a class="btn" href="{% url 'ledger:one_off_charges:split' pk=first_charge.pk %}" id="invoice-split">Split into installments</a> <span class="muted">from the invoice's charge; it is offered once the invoice is no longer live at the payment provider.</span></p>
+      <p class="actions"><a class="btn" href="{% url 'ledger:one_off_charges:split' pk=first_charge.pk %}" id="invoice-split">Split into installments</a> <span class="muted">{% if invoice_live %}Split into installments from the charge page; the invoice is released at the payment provider when the plan is confirmed.{% else %}from the invoice's charge.{% endif %}</span></p>
     {% else %}
       <p class="muted" id="invoice-split-lines">To pay in installments, split each line from its charge page.</p>
     {% endif %}

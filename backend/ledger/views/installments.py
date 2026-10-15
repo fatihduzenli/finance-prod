@@ -126,6 +126,8 @@ def _split_page(request: HttpRequest, parent: service.Parent, url: str) -> HttpR
         "balance": service.balance_of(parent),
         "collection": InstallmentCollection(service.collection_of(parent)).label,
         "refusal": refusal,
+        # PLAN-012b-a D2: the parent's live provider object the confirm releases.
+        "release_notice": "" if refusal else service.release_notice(parent),
         "split_help": service.SPLIT_HELP,
         "preview_help": service.PREVIEW_HELP,
         "action": url,
@@ -246,6 +248,8 @@ def plan_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_reschedule": live and meets(_role(request), Role.BILLING),
             "can_cancel": live and meets(_role(request), Role.ADMIN),
             "plan_help": service.PLAN_HELP,
+            # PLAN-012b-a D3: the release of the parent's provider object waits or failed.
+            "release_pending": service.release_pending(plan),
         },
     )
 

@@ -14,11 +14,16 @@ A plan splits the open balance of one charge, a rent charge or a one-off charge 
 - **Who may be split** (:func:`split_refusal`, local data only): the parent is open (not
   waived or voided) with a balance above zero; it has no plan that is not cancelled; no
   payment on it is pending (a rent charge whose month debit started is ``pending``);
-  nothing of it is live at the payment provider (an invoice with a provider reference
-  not deleted there, a one-off charge's schedule, a provider request still waiting, or,
-  for a rent charge due today or later, the lease's active rent autopay that would debit
-  it); it is not a deposit, a re-debit, an NSF fee or an installment; its operator is
-  known and not archived; the collection's provider prerequisites hold.
+  nothing of it is live at the payment provider that the split cannot release (a rent
+  charge's invoice with a provider reference not deleted there, a multi-line invoice of
+  a one-off charge (:data:`LIVE_INVOICE_SHARED`), a one-off charge's schedule that
+  generated its invoice, a provider request still waiting, or, for a rent charge due
+  today or later, the lease's active rent autopay that would debit it); it is not a
+  deposit, a re-debit, an NSF fee or an installment; its operator is known and not
+  archived; the collection's provider prerequisites hold. A one-off charge's own live
+  single-charge invoice, or its schedule that generated no invoice, is **released** by
+  the confirm (PLAN-012b-a D2, :func:`release_kind`; the split page says so,
+  :func:`release_notice`).
 - **Collection** (:func:`collection_of`): as the parent's. A one-off charge's own
   (``autopay_due``, ``email``, ``manual``; ``charge_now`` is collected by ``email``,
   setup's ``none`` by ``manual``); a rent charge's from its lease's channel (the payment
@@ -32,7 +37,17 @@ A plan splits the open balance of one charge, a rent charge or a one-off charge 
   n of N: <parent>"), each collected as the plan says: ``autopay_due`` queues
   ``schedule_create`` (one one-occurrence schedule each, as PLAN-010d D2); ``email`` makes
   a local invoice and queues ``invoice_create``; ``manual`` makes nothing at the payment
-  provider. Audited: the plan, each installment and the parent.
+  provider. Audited: the plan, each installment and the parent. A parent whose provider
+  object is released (PLAN-012b-a D3) gets no installment job yet: its own
+  ``invoice_delete`` or ``schedule_delete`` job is queued with :data:`RELEASE_PARAM`
+  (audited :data:`RELEASE_REQUESTED_ACTION`, the identifier masked); the worker deletes
+  the object at the provider without voiding the charge
+  (:func:`payments.one_off_invoices.release_invoice`, ``release_schedule``) and then,
+  in the same transaction, :func:`after_release` queues one job per installment, only
+  while the plan is live, nothing was paid on the parent meanwhile (else the plan is
+  ``attention``, PLAN-012b-a D4) and no installment job exists yet; audited
+  :data:`RELEASED_ACTION` once. The plan page says the release waits while that job is
+  queued, running or failed (:func:`release_pending`); the charge page's Retry repeats it.
 - **While the plan is live** (``active`` or ``attention``) the parent is left out of
   every open balance (:mod:`ledger.services.receivables`, hence aging, arrears, the
   dashboard and the attention list) and its installments are owed instead; a payment on
@@ -107,12 +122,16 @@ from ledger.services.leases import format_amount
 from ledger.services.one_off_charges import ENTITY_PLAN, plan_state
 from ledger.validators import validate_no_payment_data, visible_text
 from payments import jobs
-from payments.models import JobKind
+from payments.models import Job, JobKind, JobStatus
+from payments.provider import mask_identifier
 
 CENT = Decimal("0.01")
 #: The ``params`` flag of a ``schedule_create`` or ``invoice_create`` job that moves an
 #: existing provider object to the installment's new date.
 RESCHEDULE_PARAM = "reschedule"
+#: The ``params`` flag of an ``invoice_delete`` or ``schedule_delete`` job that releases a
+#: split parent's provider object (PLAN-012b-a D3): deleted there, the charge kept owed.
+RELEASE_PARAM = one_off_charges.RELEASE_PARAM
 #: How an installment's description begins.
 DESCRIPTION_TEMPLATE = "Installment {number} of {count}: {label}"
 
@@ -121,6 +140,8 @@ RESCHEDULED_ACTION = "installment_plan.rescheduled"
 CANCELLED_ACTION = "installment_plan.cancelled"
 INSTALLMENT_RESCHEDULED_ACTION = "one_off_charge.installment_rescheduled"
 SPLIT_ACTION = "split_into_installments"
+RELEASE_REQUESTED_ACTION = "one_off_charge.release_requested"
+RELEASED_ACTION = "installment_plan.released"
 
 # --- Fixed sentences ------------------------------------------------------------------
 
@@ -146,6 +167,36 @@ LIVE_INVOICE = (
 LIVE_SCHEDULE = (
     "A payment provider schedule will collect this charge: collect it or cancel the charge first."
 )
+LIVE_INVOICE_SHARED = (
+    "Invoice {number} has other lines; it cannot be released for one of them. Collect it or "
+    "cancel it first."
+)
+SCHEDULE_FIRED = "The schedule already generated its invoice; collect or cancel it first."
+#: What the split page says when the parent's provider object is released (D2).
+RELEASE_NOTICE_INVOICE = (
+    "Invoice {number} at the payment provider will be deleted (the charge stays open here) "
+    "and each installment is collected on its own."
+)
+RELEASE_NOTICE_SCHEDULE = (
+    "The payment provider schedule of this charge will be deleted (the charge stays open "
+    "here) and each installment is collected on its own."
+)
+#: What the plan page says while the release job waits or failed (D3).
+RELEASE_PENDING_INVOICE = "Waiting for the payment provider to release invoice {number}."
+RELEASE_PENDING_SCHEDULE = (
+    "Waiting for the payment provider to release the schedule of this charge."
+)
+#: The release job's outcomes (D3).
+RELEASED = "Released at the payment provider; {count} installment requests queued."
+RELEASED_PLAN_CLOSED = (
+    "Released at the payment provider. The plan is cancelled or completed: nothing more was queued."
+)
+RELEASED_PARENT_PAID = (
+    "Released at the payment provider. A payment on the charge landed first: the plan needs "
+    "attention and no installment was queued."
+)
+RELEASE_ALREADY = "Already released at the payment provider. Nothing was changed."
+RELEASE_NO_PLAN = "This charge has no installment plan. Nothing was released."
 AUTOPAY_WILL_DEBIT = (
     "Rent autopay will debit this charge on its due date: stop or pause autopay first."
 )
@@ -430,12 +481,79 @@ def _one_off_refusal(charge: OneOffCharge) -> str:
     if charge.fee_type is not None and charge.fee_type.refundable:
         return DEPOSIT
     billed_on = one_off_charges.billed_with(charge) or charge
+    if billed_on.pk == charge.pk and _schedule_fired(charge):
+        return SCHEDULE_FIRED
     invoice = _live_invoice(billed_on)
     if invoice is not None:
-        return LIVE_INVOICE.format(number=invoice.invoice_number)
-    if one_off_charges.provider_schedule(billed_on):
+        if billed_on.pk != charge.pk or len(one_off_charges.invoice_charges(invoice)) > 1:
+            # A line of a multi-line invoice: never released for one line (D2).
+            return LIVE_INVOICE_SHARED.format(number=invoice.invoice_number)
+        return ""
+    if billed_on.pk != charge.pk and one_off_charges.provider_schedule(billed_on):
         return LIVE_SCHEDULE
     return ""
+
+
+def _schedule_fired(charge: OneOffCharge) -> bool:
+    """An ``autopay_due`` charge whose provider schedule already generated its invoice."""
+    return bool(one_off_charges.provider_schedule(charge)) and (
+        one_off_charges.invoices_of(charge).exists()
+    )
+
+
+def release_kind(parent: Parent) -> str:
+    """The job that releases the parent's own provider object when it is split
+    (PLAN-012b-a D2, D3): ``invoice_delete`` for a one-off parent's live single-charge
+    invoice, ``schedule_delete`` for its schedule that generated no invoice; ``""`` when
+    nothing is live (and for a rent parent). Valid once :func:`split_refusal` is ``""``."""
+    if isinstance(parent, RentCharge) or one_off_charges.billed_with(parent) is not None:
+        return ""
+    if _live_invoice(parent) is not None:
+        return JobKind.INVOICE_DELETE
+    if one_off_charges.provider_schedule(parent) and not _schedule_fired(parent):
+        return JobKind.SCHEDULE_DELETE
+    return ""
+
+
+def release_notice(parent: Parent) -> str:
+    """What the split page says of the provider object the confirm releases (D2), or
+    ``""`` when nothing is live."""
+    kind = release_kind(parent)
+    if kind == JobKind.INVOICE_DELETE:
+        invoice = _live_invoice(parent)
+        return RELEASE_NOTICE_INVOICE.format(number=invoice.invoice_number if invoice else "")
+    if kind == JobKind.SCHEDULE_DELETE:
+        return RELEASE_NOTICE_SCHEDULE
+    return ""
+
+
+def release_job(parent: Parent) -> Job | None:
+    """The parent's latest job when it is a release (D3), else ``None``."""
+    if isinstance(parent, RentCharge):
+        return None
+    job = jobs.latest_for(parent)
+    if (
+        job is None
+        or job.kind not in (JobKind.INVOICE_DELETE, JobKind.SCHEDULE_DELETE)
+        or job.params.get(RELEASE_PARAM) is not True
+    ):
+        return None
+    return job
+
+
+def release_pending(plan: InstallmentPlan) -> str:
+    """What the plan page says while the release of its parent's provider object is
+    queued, running or failed (D3), or ``""``."""
+    if plan.status not in LIVE_PLAN_STATUSES or plan.one_off_charge is None:
+        return ""
+    parent = plan.one_off_charge
+    job = release_job(parent)
+    if job is None or not (jobs.is_active(job) or job.status in (JobStatus.FAILED, JobStatus.DEAD)):
+        return ""
+    if job.kind == JobKind.SCHEDULE_DELETE:
+        return RELEASE_PENDING_SCHEDULE
+    invoice = _live_invoice(parent) or one_off_charges.invoices_of(parent).first()
+    return RELEASE_PENDING_INVOICE.format(number=invoice.invoice_number if invoice else "")
 
 
 def split_refusal(parent: Parent, today: date | None = None) -> str:
@@ -587,6 +705,8 @@ def _make_installment(
     label: str,
     actor: User | None,
     today: date,
+    *,
+    queue: bool,
 ) -> OneOffCharge:
     description = DESCRIPTION_TEMPLATE.format(number=number, count=plan.count, label=label)
     collection = CollectionMethod(plan.collection)
@@ -636,11 +756,21 @@ def _make_installment(
             "invoice_number": invoice.invoice_number if invoice is not None else None,
         },
     )
-    if collection == CollectionMethod.AUTOPAY_DUE:
-        jobs.enqueue(JobKind.SCHEDULE_CREATE, charge, None, actor)
-    elif collection == CollectionMethod.EMAIL:
-        jobs.enqueue(JobKind.INVOICE_CREATE, charge, None, actor)
+    if queue:
+        _queue_provider_job(charge, actor)
     return charge
+
+
+def _queue_provider_job(installment: OneOffCharge, actor: User | None) -> bool:
+    """Queue the installment's provider object as its collection says (D9): a schedule
+    for ``autopay_due``, an invoice for ``email``, nothing for ``manual``."""
+    if installment.collection == CollectionMethod.AUTOPAY_DUE:
+        jobs.enqueue(JobKind.SCHEDULE_CREATE, installment, None, actor)
+        return True
+    if installment.collection == CollectionMethod.EMAIL:
+        jobs.enqueue(JobKind.INVOICE_CREATE, installment, None, actor)
+        return True
+    return False
 
 
 def create_plan(
@@ -705,8 +835,13 @@ def create_plan(
                 },
             )
             label = parent_label(locked)
+            # The parent's live provider object is released first; the release job
+            # queues the installments' own objects after it (PLAN-012b-a D3).
+            release = release_kind(locked)
             for number, line in enumerate(lines, start=1):
-                _make_installment(plan, number, line, label, actor, day)
+                _make_installment(plan, number, line, label, actor, day, queue=not release)
+            if release and isinstance(locked, OneOffCharge):
+                _request_release(locked, plan, release, actor)
             entity, state = _parent_state(locked)
             _audit(
                 actor,
@@ -720,6 +855,70 @@ def create_plan(
         # A concurrent confirm on the same parent committed first.
         return Outcome(False, HAS_PLAN)
     return Outcome(True, CREATED.format(count=count), plan=plan)
+
+
+def _request_release(
+    parent: OneOffCharge, plan: InstallmentPlan, kind: str, actor: User | None
+) -> None:
+    """Queue the release of the parent's provider object (D3), audited on the parent
+    with the provider identifier masked."""
+    if kind == JobKind.INVOICE_DELETE:
+        linked = one_off_charges.live_provider_invoice(parent)
+        target: dict[str, object] = {
+            "invoice_number": linked[0].invoice_number if linked else None,
+            "provider_invoice": mask_identifier(linked[1]) if linked else None,
+        }
+    else:
+        target = {"schedule": mask_identifier(one_off_charges.provider_schedule(parent))}
+    state = one_off_charges.charge_state(parent)
+    _audit(
+        actor,
+        RELEASE_REQUESTED_ACTION,
+        one_off_charges.ENTITY_ONE_OFF_CHARGE,
+        parent.pk,
+        state,
+        {**state, "plan": str(plan.pk), "job_kind": kind, **target},
+    )
+    jobs.enqueue(kind, parent, {RELEASE_PARAM: True}, actor)
+
+
+def after_release(
+    parent: OneOffCharge, actor: User | None, context: dict[str, object]
+) -> tuple[bool, str]:
+    """The plan's side of a release (D3; the worker only, in the release's transaction,
+    under the parent's row lock): the plan's lock, then, when the plan is still live and
+    nothing was paid on the parent meanwhile, one provider job per installment, only if
+    none was queued for the plan yet; audited :data:`RELEASED_ACTION` once. A plan no
+    longer live gets nothing; a payment on the parent puts the plan in ``attention``
+    (D4) and queues nothing."""
+    found = plan_of(parent)
+    if found is None:
+        return False, RELEASE_NO_PLAN
+    plan = InstallmentPlan.objects.select_for_update().get(pk=found.pk)
+    if plan.status not in LIVE_PLAN_STATUSES:
+        return True, RELEASED_PLAN_CLOSED
+    one_off_charges.apply_plan_status(plan, actor=actor)
+    if one_off_charges.parent_paid_on_plan(plan) > 0:
+        return True, RELEASED_PARENT_PAID
+    rows = installments_of(plan)
+    queued = 0
+    asked = Job.objects.filter(
+        entity_type=jobs.entity_type_of(parent), entity_id__in=[row.pk for row in rows]
+    )
+    if not asked.exists():
+        for row in rows:
+            if row.status == OneOffChargeStatus.OWED and _queue_provider_job(row, actor):
+                queued += 1
+    audited = AuditLog.objects.filter(
+        action=RELEASED_ACTION, entity_type=ENTITY_PLAN, entity_id=str(plan.pk)
+    )
+    if not queued and audited.exists():
+        return True, RELEASE_ALREADY
+    state = plan_state(plan)
+    _audit(
+        actor, RELEASED_ACTION, ENTITY_PLAN, plan.pk, state, {**state, **context, "queued": queued}
+    )
+    return True, RELEASED.format(count=queued)
 
 
 # --- Reschedule (D11) -------------------------------------------------------------------------
@@ -738,13 +937,15 @@ def _shiftable(installment: OneOffCharge) -> bool:
 
 
 def _lock_plan(plan_id: uuid.UUID) -> tuple[InstallmentPlan, list[OneOffCharge]]:
-    """The plan's installments, then the plan, under their row locks (the order of a
-    payment on an installment: the installment first)."""
+    """The plan's installments, then its parent, then the plan, under their row locks
+    (the order of a payment on an installment: the installment first)."""
     rows = list(
         OneOffCharge.objects.select_for_update()
         .filter(plan_id=plan_id)
         .order_by("installment_no", "created_at", "id")
     )
+    # The parent before the plan, as a payment on the parent takes them (PLAN-012b-a D4).
+    one_off_charges.lock_plan_parent(plan_id)
     plan = InstallmentPlan.objects.select_for_update().get(pk=plan_id)
     return plan, rows
 
