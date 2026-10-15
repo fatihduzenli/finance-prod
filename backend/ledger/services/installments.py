@@ -14,16 +14,17 @@ A plan splits the open balance of one charge, a rent charge or a one-off charge 
 - **Who may be split** (:func:`split_refusal`, local data only): the parent is open (not
   waived or voided) with a balance above zero; it has no plan that is not cancelled; no
   payment on it is pending (a rent charge whose month debit started is ``pending``);
-  nothing of it is live at the payment provider that the split cannot release (a rent
-  charge's invoice with a provider reference not deleted there, a multi-line invoice of
-  a one-off charge (:data:`LIVE_INVOICE_SHARED`), a one-off charge's schedule that
-  generated its invoice, a provider request still waiting, or, for a rent charge due
-  today or later, the lease's active rent autopay that would debit it); it is not a
-  deposit, a re-debit, an NSF fee or an installment; its operator is known and not
-  archived; the collection's provider prerequisites hold. A one-off charge's own live
-  single-charge invoice, or its schedule that generated no invoice, is **released** by
-  the confirm (PLAN-012b-a D2, :func:`release_kind`; the split page says so,
-  :func:`release_notice`).
+  nothing of it is live at the payment provider that the split cannot release (a
+  multi-line invoice (:data:`LIVE_INVOICE_SHARED`), a one-off charge's schedule that
+  generated its invoice, a provider request still waiting, or a rent charge's live
+  invoice while the lease's rent autopay would also debit it); it is not a deposit, a
+  re-debit, an NSF fee or an installment; its operator is known and not archived; the
+  collection's provider prerequisites hold. The parent's own live single-charge invoice
+  (one-off or rent), a one-off charge's schedule that generated no invoice, or, for a
+  rent charge due today or later, the lease's active rent autopay that would debit it,
+  is **released** by the confirm (PLAN-012b-a D2, PLAN-012b-b D13,
+  :func:`release_kind`; the split page says so, :func:`release_notice`): the rent
+  autopay is moved past the month (:func:`ledger.services.leases.move_autopay`).
 - **Collection** (:func:`collection_of`): as the parent's. A one-off charge's own
   (``autopay_due``, ``email``, ``manual``; ``charge_now`` is collected by ``email``,
   setup's ``none`` by ``manual``); a rent charge's from its lease's channel (the payment
@@ -40,14 +41,15 @@ A plan splits the open balance of one charge, a rent charge or a one-off charge 
   provider. Audited: the plan, each installment and the parent. A parent whose provider
   object is released (PLAN-012b-a D3) gets no installment job yet: its own
   ``invoice_delete`` or ``schedule_delete`` job is queued with :data:`RELEASE_PARAM`
-  (audited :data:`RELEASE_REQUESTED_ACTION`, the identifier masked); the worker deletes
-  the object at the provider without voiding the charge
+  (audited ``<entity>.release_requested``, the identifiers masked); the worker deletes
+  the object at the provider without voiding the charge, or moves the rent autopay
   (:func:`payments.one_off_invoices.release_invoice`, ``release_schedule``) and then,
   in the same transaction, :func:`after_release` queues one job per installment, only
   while the plan is live, nothing was paid on the parent meanwhile (else the plan is
   ``attention``, PLAN-012b-a D4) and no installment job exists yet; audited
   :data:`RELEASED_ACTION` once. The plan page says the release waits while that job is
-  queued, running or failed (:func:`release_pending`); the charge page's Retry repeats it.
+  queued, running or failed (:func:`release_pending`); the charge page's Retry repeats it
+  (a rent charge's: :func:`retry_release`).
 - **While the plan is live** (``active`` or ``attention``) the parent is left out of
   every open balance (:mod:`ledger.services.receivables`, hence aging, arrears, the
   dashboard and the attention list) and its installments are owed instead; a payment on
@@ -98,7 +100,6 @@ from ledger.models import (
     ZERO,
     AuditLog,
     CollectionMethod,
-    CollectionSchedule,
     InstallmentCadence,
     InstallmentCollection,
     InstallmentPlan,
@@ -114,7 +115,6 @@ from ledger.models import (
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
-    ScheduleKind,
     ScheduleState,
 )
 from ledger.services import leases, numbering, one_off_charges, rent_run
@@ -122,7 +122,7 @@ from ledger.services.leases import format_amount
 from ledger.services.one_off_charges import ENTITY_PLAN, plan_state
 from ledger.validators import validate_no_payment_data, visible_text
 from payments import jobs
-from payments.models import Job, JobKind, JobStatus
+from payments.models import Job, JobEntity, JobKind, JobStatus
 from payments.provider import mask_identifier
 
 CENT = Decimal("0.01")
@@ -141,6 +141,7 @@ CANCELLED_ACTION = "installment_plan.cancelled"
 INSTALLMENT_RESCHEDULED_ACTION = "one_off_charge.installment_rescheduled"
 SPLIT_ACTION = "split_into_installments"
 RELEASE_REQUESTED_ACTION = "one_off_charge.release_requested"
+RENT_RELEASE_REQUESTED_ACTION = "rent_charge.release_requested"
 RELEASED_ACTION = "installment_plan.released"
 
 # --- Fixed sentences ------------------------------------------------------------------
@@ -160,10 +161,6 @@ HAS_PLAN = "This charge already has an installment plan."
 NOT_SPLITTABLE = "A re-debit, an NSF fee or an installment is not split into installments."
 DEPOSIT = "A deposit is not split into installments."
 PENDING = "A payment on this charge is pending: wait until it settles or is returned."
-LIVE_INVOICE = (
-    "Invoice {number} of this charge is live at the payment provider: collect it or cancel "
-    "it first."
-)
 LIVE_SCHEDULE = (
     "A payment provider schedule will collect this charge: collect it or cancel the charge first."
 )
@@ -181,10 +178,18 @@ RELEASE_NOTICE_SCHEDULE = (
     "The payment provider schedule of this charge will be deleted (the charge stays open "
     "here) and each installment is collected on its own."
 )
+RELEASE_NOTICE_AUTOPAY = (
+    "Rent autopay of this lease will skip this month's debit: its payment provider "
+    "schedule is deleted and created again from next month's debit (the charge stays open "
+    "here), and each installment is collected on its own."
+)
 #: What the plan page says while the release job waits or failed (D3).
 RELEASE_PENDING_INVOICE = "Waiting for the payment provider to release invoice {number}."
 RELEASE_PENDING_SCHEDULE = (
     "Waiting for the payment provider to release the schedule of this charge."
+)
+RELEASE_PENDING_AUTOPAY = (
+    "Waiting for the payment provider to move the lease's rent autopay past this month."
 )
 #: The release job's outcomes (D3).
 RELEASED = "Released at the payment provider; {count} installment requests queued."
@@ -197,6 +202,8 @@ RELEASED_PARENT_PAID = (
 )
 RELEASE_ALREADY = "Already released at the payment provider. Nothing was changed."
 RELEASE_NO_PLAN = "This charge has no installment plan. Nothing was released."
+#: A rent charge with a live invoice that the lease's rent autopay would debit too: one
+#: release cannot free both (D13).
 AUTOPAY_WILL_DEBIT = (
     "Rent autopay will debit this charge on its due date: stop or pause autopay first."
 )
@@ -453,6 +460,12 @@ def _live_invoice(charge: Parent) -> Invoice | None:
     return None
 
 
+def _autopay_will_debit(charge: RentCharge, today: date) -> bool:
+    """Whether the lease's active rent autopay would debit this charge: it is due today
+    or later and a rent schedule of the lease is active at the provider (D13)."""
+    return charge.due_on >= today and leases.autopay_on(charge.lease)
+
+
 def _rent_refusal(charge: RentCharge, today: date) -> str:
     if charge.status == RentChargeStatus.WAIVED:
         return CLOSED
@@ -460,12 +473,11 @@ def _rent_refusal(charge: RentCharge, today: date) -> str:
         return PENDING
     invoice = _live_invoice(charge)
     if invoice is not None:
-        return LIVE_INVOICE.format(number=invoice.invoice_number)
-    autopay = CollectionSchedule.objects.filter(
-        lease=charge.lease, kind=ScheduleKind.RENT, state=ScheduleState.ACTIVE
-    )
-    if charge.due_on >= today and autopay.exists():
-        return AUTOPAY_WILL_DEBIT
+        if invoice.rent_charge_id != charge.pk or one_off_charges.invoice_line_count(invoice) > 1:
+            # A Rent line of a multi-line invoice: never released for one line (D13).
+            return LIVE_INVOICE_SHARED.format(number=invoice.invoice_number)
+        if _autopay_will_debit(charge, today):
+            return AUTOPAY_WILL_DEBIT
     return ""
 
 
@@ -501,12 +513,20 @@ def _schedule_fired(charge: OneOffCharge) -> bool:
     )
 
 
-def release_kind(parent: Parent) -> str:
+def release_kind(parent: Parent, today: date | None = None) -> str:
     """The job that releases the parent's own provider object when it is split
-    (PLAN-012b-a D2, D3): ``invoice_delete`` for a one-off parent's live single-charge
-    invoice, ``schedule_delete`` for its schedule that generated no invoice; ``""`` when
-    nothing is live (and for a rent parent). Valid once :func:`split_refusal` is ``""``."""
-    if isinstance(parent, RentCharge) or one_off_charges.billed_with(parent) is not None:
+    (PLAN-012b-a D2, D3; PLAN-012b-b D13): ``invoice_delete`` for the parent's live
+    single-charge invoice; ``schedule_delete`` for a one-off parent's schedule that
+    generated no invoice, or for a rent parent the lease's active rent autopay would
+    debit (moved past the month); ``""`` when nothing is live. Valid once
+    :func:`split_refusal` is ``""``."""
+    if isinstance(parent, RentCharge):
+        if _live_invoice(parent) is not None:
+            return JobKind.INVOICE_DELETE
+        if _autopay_will_debit(parent, today or timezone.localdate()):
+            return JobKind.SCHEDULE_DELETE
+        return ""
+    if one_off_charges.billed_with(parent) is not None:
         return ""
     if _live_invoice(parent) is not None:
         return JobKind.INVOICE_DELETE
@@ -523,14 +543,12 @@ def release_notice(parent: Parent) -> str:
         invoice = _live_invoice(parent)
         return RELEASE_NOTICE_INVOICE.format(number=invoice.invoice_number if invoice else "")
     if kind == JobKind.SCHEDULE_DELETE:
-        return RELEASE_NOTICE_SCHEDULE
+        return RELEASE_NOTICE_AUTOPAY if isinstance(parent, RentCharge) else RELEASE_NOTICE_SCHEDULE
     return ""
 
 
 def release_job(parent: Parent) -> Job | None:
-    """The parent's latest job when it is a release (D3), else ``None``."""
-    if isinstance(parent, RentCharge):
-        return None
+    """The parent's latest job when it is a release (D3, D13), else ``None``."""
     job = jobs.latest_for(parent)
     if (
         job is None
@@ -544,16 +562,29 @@ def release_job(parent: Parent) -> Job | None:
 def release_pending(plan: InstallmentPlan) -> str:
     """What the plan page says while the release of its parent's provider object is
     queued, running or failed (D3), or ``""``."""
-    if plan.status not in LIVE_PLAN_STATUSES or plan.one_off_charge is None:
+    if plan.status not in LIVE_PLAN_STATUSES:
         return ""
-    parent = plan.one_off_charge
+    parent = plan.parent
     job = release_job(parent)
     if job is None or not (jobs.is_active(job) or job.status in (JobStatus.FAILED, JobStatus.DEAD)):
         return ""
     if job.kind == JobKind.SCHEDULE_DELETE:
-        return RELEASE_PENDING_SCHEDULE
-    invoice = _live_invoice(parent) or one_off_charges.invoices_of(parent).first()
+        return (
+            RELEASE_PENDING_AUTOPAY if isinstance(parent, RentCharge) else RELEASE_PENDING_SCHEDULE
+        )
+    invoice = _live_invoice(parent) or rent_run.charge_invoices(parent).first()
     return RELEASE_PENDING_INVOICE.format(number=invoice.invoice_number if invoice else "")
+
+
+def retry_release(parent: RentCharge) -> str | None:
+    """The job kind a rent charge's Retry queues (D13): its latest job's, when that is a
+    failed release while the charge's plan is live; ``None`` otherwise."""
+    job = release_job(parent)
+    if job is None or job.status not in (JobStatus.FAILED, JobStatus.DEAD):
+        return None
+    if not parent.installment_plans.filter(status__in=LIVE_PLAN_STATUSES).exists():
+        return None
+    return str(job.kind)
 
 
 def split_refusal(parent: Parent, today: date | None = None) -> str:
@@ -837,10 +868,10 @@ def create_plan(
             label = parent_label(locked)
             # The parent's live provider object is released first; the release job
             # queues the installments' own objects after it (PLAN-012b-a D3).
-            release = release_kind(locked)
+            release = release_kind(locked, day)
             for number, line in enumerate(lines, start=1):
                 _make_installment(plan, number, line, label, actor, day, queue=not release)
-            if release and isinstance(locked, OneOffCharge):
+            if release:
                 _request_release(locked, plan, release, actor)
             entity, state = _parent_state(locked)
             _audit(
@@ -857,24 +888,36 @@ def create_plan(
     return Outcome(True, CREATED.format(count=count), plan=plan)
 
 
-def _request_release(
-    parent: OneOffCharge, plan: InstallmentPlan, kind: str, actor: User | None
-) -> None:
-    """Queue the release of the parent's provider object (D3), audited on the parent
-    with the provider identifier masked."""
+def _request_release(parent: Parent, plan: InstallmentPlan, kind: str, actor: User | None) -> None:
+    """Queue the release of the parent's provider object (D3, D13), audited on the
+    parent with the provider identifiers masked."""
+    target: dict[str, object]
     if kind == JobKind.INVOICE_DELETE:
-        linked = one_off_charges.live_provider_invoice(parent)
-        target: dict[str, object] = {
+        linked = rent_run.provider_invoice(parent)
+        target = {
             "invoice_number": linked[0].invoice_number if linked else None,
             "provider_invoice": mask_identifier(linked[1]) if linked else None,
         }
+    elif isinstance(parent, RentCharge):
+        target = {
+            "schedules": [
+                mask_identifier(ref)
+                for row in leases.live_schedules(parent.lease)
+                if row.state == ScheduleState.ACTIVE and (ref := leases.schedule_ref(row))
+            ]
+        }
     else:
         target = {"schedule": mask_identifier(one_off_charges.provider_schedule(parent))}
-    state = one_off_charges.charge_state(parent)
+    entity, state = _parent_state(parent)
+    action = (
+        RENT_RELEASE_REQUESTED_ACTION
+        if isinstance(parent, RentCharge)
+        else RELEASE_REQUESTED_ACTION
+    )
     _audit(
         actor,
-        RELEASE_REQUESTED_ACTION,
-        one_off_charges.ENTITY_ONE_OFF_CHARGE,
+        action,
+        entity,
         parent.pk,
         state,
         {**state, "plan": str(plan.pk), "job_kind": kind, **target},
@@ -883,7 +926,7 @@ def _request_release(
 
 
 def after_release(
-    parent: OneOffCharge, actor: User | None, context: dict[str, object]
+    parent: Parent, actor: User | None, context: dict[str, object]
 ) -> tuple[bool, str]:
     """The plan's side of a release (D3; the worker only, in the release's transaction,
     under the parent's row lock): the plan's lock, then, when the plan is still live and
@@ -903,7 +946,7 @@ def after_release(
     rows = installments_of(plan)
     queued = 0
     asked = Job.objects.filter(
-        entity_type=jobs.entity_type_of(parent), entity_id__in=[row.pk for row in rows]
+        entity_type=JobEntity.ONE_OFF_CHARGE, entity_id__in=[row.pk for row in rows]
     )
     if not asked.exists():
         for row in rows:

@@ -196,6 +196,8 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
     today = timezone.localdate()
     schedules = []
     linked_states = set()
+    # PLAN-012b-b D13: autopay moved past a split month starts on its new first debit.
+    moved = service.autopay_move(lease, now)
     for row in service.live_schedules(lease):
         ref = service.schedule_ref(row)
         if ref:
@@ -205,6 +207,8 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
             if row.state == ScheduleState.ACTIVE and row.debit_day is not None
             else None
         )
+        if next_run is not None and moved is not None and str(row.pk) in moved.starts:
+            next_run = moved.starts[str(row.pk)]
         schedules.append(
             {
                 "row": row,
@@ -223,6 +227,7 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "upcoming": service.upcoming_rent(lease, today),
             "history": lease.rent_history.order_by("-effective_from"),
             "schedules": schedules,
+            "autopay_moved": moved.text if moved is not None else "",
             "blockers": service.autopay_blockers(lease),
             "notes_info": service.enrolment_notes(lease),
             "charges": lease.rent_charges.order_by("-period_month", "seq"),

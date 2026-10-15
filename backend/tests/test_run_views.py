@@ -58,6 +58,8 @@ POST_ROUTES = (
     "ledger:charges:send_step",
     # PLAN-012e D10: Split into installments.
     "ledger:charges:split",
+    # PLAN-012b-b D13: repeat a failed release of a rent charge's Stax invoice or autopay move.
+    "ledger:charges:retry_release",
 )
 READ_ROUTES = (
     "ledger:run:today",

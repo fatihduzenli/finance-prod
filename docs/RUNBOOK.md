@@ -623,9 +623,15 @@ pays the old invoice before it is released (or a late payment arrives after), th
 on the charge, the plan goes on the attention list ("Payment on a split charge: …") and staff
 cancel or reschedule the plan. While a plan runs, its charge cannot be cancelled or waived on
 its own: cancel the plan. A line of a multi-line invoice cannot be split while that invoice is
-live; a rent charge's invoice is cancelled first (that never voids the rent charge), and rent
-autopay must be stopped or paused first. Deposits, re-debits, NSF fees and installments are
-never split (PLAN-012b-a). A
+live. **Rent charges split the same way** (PLAN-012b-b): a rent charge with its own live Stax
+invoice (a rent-alone builder invoice) is released like a one-off charge; a rent charge that
+autopay would still debit this month is split in one step too: the worker deletes the lease's
+rent schedule at Stax and creates it again from next month's debit (the lease page says
+"Autopay resumes <date> (this month is collected in installments)"), then the installments'
+own schedules follow; a failure between the delete and the create shows on the charge page with
+Retry and voids nothing. A rent charge whose month debit is pending, or whose invoice has other
+lines, or that has both a live invoice and autopay ahead, is still refused. Deposits, re-debits,
+NSF fees and installments are never split (PLAN-012b-a). A
 **returned installment** debit follows the NSF rule from the returns queue (re-debit plus the
 fee, $100 the first time and $50 after, agreed by phone) and puts the plan on the attention list
 ("Installment returned: …") until the return is resolved. **Reschedule** (billing, plan page)

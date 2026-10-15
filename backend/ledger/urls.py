@@ -193,6 +193,7 @@ charge_patterns = (
         path("<str:pk>/", charges.charge_detail, name="detail"),
         path("<str:pk>/payments/new/", charges.charge_record_payment, name="record_payment"),
         path("<str:pk>/retry-mark/", charges.charge_retry_mark, name="retry_mark"),
+        path("<str:pk>/retry-release/", charges.charge_retry_release, name="retry_release"),
         path("<str:pk>/link-invoice/", charges.charge_link_invoice, name="link_invoice"),
         path("<str:pk>/send-step/", collections.rent_charge_send_step, name="send_step"),
         path("<str:pk>/split/", installments.charge_split, name="split"),

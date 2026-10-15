@@ -134,9 +134,64 @@ editable.
 
 ### Batch C — splitting rent (D13)
 
-C_SECTION
+**Scope.** `backend/ledger` (`services/leases.py`: `move_autopay`, `debit_instant`,
+`autopay_move`, the moved-schedule audits; `installments.py`: rent parents in `release_kind`,
+`release_notice`, `release_pending`, `_request_release`, `after_release`, `_rent_refusal`;
+`one_off_charges.parent_paid_on_plan` for rent parents; `rent_run.recompute_charge` applying the
+plan status; `attention.py` the `split_charge_paid` item for rent parents; views `charges`,
+`leases`; templates; `urls.py`, `accounts/registry.py` (`ledger:charges:retry_release`)),
+`backend/payments` (`one_off_invoices.py`: `release_invoice`/`release_schedule` by entity type,
+`release_rent_autopay`; `jobs`: the delete kinds take a rent charge; runners), tests. No
+migration, no new dependency or environment variable; provider calls are the existing delete,
+create and list. TODO-VERIFY-064 recorded (Stax runs a new `DTSTART` without catch-up).
+
+**Commands run (final Batch C code).**
+
+| Command | Database | Exit | Result |
+|---|---|---|---|
+| `uv run ruff check .`, `uv run ruff format --check .` | n/a | 0 | clean, 477 files formatted |
+| `uv run mypy` (strict) | n/a | 0 | no issues in 386 source files |
+| `uv lock --check` | n/a | 0 | consistent |
+| `manage.py makemigrations --check --dry-run` | sqlite, PostgreSQL 16 | 0 | No changes detected |
+| `uv run pytest -m "not e2e" -q -o faulthandler_timeout=300` | sqlite | 1 | 5,133 passed, 621 skipped, 1 failed: the route classification test did not list the new `retry_release` route (test list updated by Fable; the file re-run green on both engines); 7:03 wall |
+| the "Migration tests" selection | PostgreSQL 16 | 0 | 23 passed; 5:32 wall |
+| the "Unit tests" selection | PostgreSQL 16 | 1 | 5,728 passed, 3 skipped; the same one failure; 9:56 wall |
+| `uv run pytest -m e2e -q` | PostgreSQL 16 | 0 | 7 passed |
+| `bash scripts/check-no-secrets.sh`; pattern scan of the diff since `af0e63c` and every new file | n/a | 0 | clean |
+
+**Tests (Gate 2).** Opus: `test_installments.py` (the ACH split with the move's calls, rows,
+audits and the three one-occurrence schedules; twice-monthly; a failure between delete and create
+with Retry; the pending month refused; lease-end blockers after a move and Stop autopay; the
+rent-alone invoice released; the mixed invoice and the invoice-plus-autopay cases refused; the wire
+lease unchanged), `test_lease_services.py` (+7 `move_autopay`/`debit_instant`),
+`test_attention.py` (the rent parent's item). Fable (`test_plan012b_b_c_adversarial.py`, 4
+cases): the moved schedule starts next month, never later, with the audit and the three
+installment schedules after it; a release on another lease's rent charge, or with the other
+lease's schedule in its parameters, deletes nothing of that lease; a late debit of the old
+schedule lands on the rent charge only, the plan goes to attention with its item, the
+installments stay owed and nothing is voided; a lease end after the move sees only the new
+schedule as live and Stop autopay clears it (both schedules deleted at the fake).
+
+**Findings (C).**
+
+| # | Severity | Where | Finding | Outcome |
+|---|---|---|---|---|
+| 4 | MAJOR | `attention._split_charge_paid` | The "payment on a split charge" item covered one-off parents only; a rent parent's plan went to `attention` after a late autopay debit with no item on the list | Resolved: a second query for rent parents (stored `amount_paid`, consistent with `parent_paid_on_plan`), the rent label, the lease's operator for the filter; tested |
+
+Design choices accepted: each debit of a twice-monthly lease keeps its own start point (only
+the split charge's debit skips a month); the retry is tracked per plan in the audit, never
+deletes twice and never recreates a schedule staff stopped meanwhile; a rent charge with both
+its own live invoice and autopay ahead stays refused; a release job that finds a pending payment
+fails with the pending sentence.
+
+**Residual risk.** Stax's handling of the new `DTSTART` (TODO-VERIFY-064; the owner's first
+autopay split on staging settles it); a retry after next month's debit date would send a past
+`DTSTART`, which Stax refuses, visible as a failed job; the move runs under the lease lock, its
+race against a concurrent Stop autopay is reasoned, not tested.
+
+**Verdict (C):** PASS (one MAJOR resolved in one rework cycle; the classification list was a test-list omission).
 
 **Confidentiality gate (§5.4).** Secret scans clean on every gate; no secret-store read by either
 model; no new credential-capable file type; no new secret name.
 
-**Verdict:** FINAL_VERDICT
+**Verdict:** PASS (Batches A, B and C; three MAJOR found in the gates and resolved; no finding deferred; residual risk as listed per batch, TODO-VERIFY-064 open until the first autopay split on staging).

@@ -147,6 +147,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:charges:link_invoice": RouteRule(min_role=Role.BILLING, methods=POST),
     # Retry marking the provider invoice paid (PLAN-009 D2): billing.
     "ledger:charges:retry_mark": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Retry a split rent charge's failed release (PLAN-012b-b D13): billing.
+    "ledger:charges:retry_release": RouteRule(min_role=Role.BILLING, methods=POST),
     # Webhook events (docs/qa/PLAN-008-webhooks.md D8): replay needs billing.
     "ledger:webhooks:replay": RouteRule(min_role=Role.BILLING, methods=POST),
     # Returns queue (PLAN-008 D6): resolving needs billing; nothing re-debits.

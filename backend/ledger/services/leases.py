@@ -44,6 +44,26 @@ Rules kept here:
   run on or after its start.
 - **Ending a lease** (PLAN-010b Batch C): :func:`end_lease` sets the end date, the
   reason and the ``ended`` status; it is refused while autopay is on (pause it first).
+- **Autopay moved for installments** (PLAN-012b-b D13): when a rent charge that the
+  lease's active rent autopay would debit is split, the worker's release job calls
+  :func:`move_autopay`: every active rent schedule of the lease is deleted at the
+  provider as :func:`stop_autopay` deletes it (a 404 counts as already gone; the row is
+  ``ended``, audited ``lease.autopay_deleted_for_move`` with the plan), then created
+  again through the enrolment's create (:func:`_create_one`, the operator's linked bank
+  method) as a new row: the split charge's debit (its seq) from the debit after that
+  charge's debit instant (:func:`debit_instant` of its due date), so its first debit is
+  next month's; any other debit from now, so its next debit is kept. Audited once per
+  plan on the lease as :data:`MOVED_ACTION` with the plan, the skipped and the resumed
+  dates and the new schedules (identifiers masked). A failure between the delete and
+  the create leaves autopay off for that debit, the failure audited; a repeat of the job
+  deletes nothing already deleted for the plan and creates what is missing (adopting a
+  schedule a failed create made). The new schedules are live rent schedules: the lease
+  end and the transfer list them as blockers until autopay is stopped. The lease page
+  says "Autopay resumes <date> (this month is collected in installments)"
+  (:func:`autopay_move`) while the plan is live and that debit is ahead.
+  TODO-VERIFY (to record): the payment provider starts a schedule created with a
+  ``DTSTART`` next month on that date, without catching up the occurrence skipped this
+  month.
 
 Every change writes one ``audit_log`` row; provider identifiers in it are masked.
 Messages are fixed sentences; a provider rejection adds only the field names the
@@ -71,9 +91,11 @@ from django.utils import timezone
 
 import payments
 from ledger.models import (
+    LIVE_PLAN_STATUSES,
     AuditLog,
     CollectionSchedule,
     CollectionStatus,
+    InstallmentPlan,
     Lease,
     LeaseRentHistory,
     Operator,
@@ -100,6 +122,10 @@ from payments.provider import (
 )
 
 ENTITY_LEASE = "lease"
+#: The audit action of a lease whose rent autopay was moved past a split month (D13).
+MOVED_ACTION = "collection_schedule.moved_for_installments"
+#: The audit action of each schedule deleted by that move, with the plan.
+DELETED_FOR_MOVE_ACTION = "lease.autopay_deleted_for_move"
 ENTITY_SCHEDULE = "collection_schedule"
 KIND_SCHEDULE = "schedule"
 PROVIDER_KEY = operator_sync.PROVIDER_KEY
@@ -151,6 +177,9 @@ NOTHING_TO_PAUSE = "No active schedule to pause."
 NOTHING_TO_RESUME = "No paused schedule to resume."
 #: PLAN-012e D5 amendment: stopping autopay.
 NOTHING_TO_STOP = "No active or paused schedule to stop."
+NOTHING_TO_MOVE = "No active rent autopay to move: nothing was changed at the payment provider."
+AUTOPAY_MOVED = "Autopay moved: it resumes {date}; this month is collected in installments."
+AUTOPAY_RESUMES = "Autopay resumes {date} (this month is collected in installments)"
 AUTOPAY_STOPPED = "Autopay stopped: the provider schedules are deleted."
 CHOOSE_METHOD = "Choose a bank payment method."
 METHOD_NOT_FOUND = (
@@ -190,6 +219,7 @@ class AutopayAction(StrEnum):
     PAUSED = "paused"
     RESUMED = "resumed"
     STOPPED = "stopped"
+    MOVED = "moved"
     ALREADY = "already"
     REFUSED = "refused"
     FAILED = "failed"
@@ -211,6 +241,7 @@ class AutopayOutcome:
             AutopayAction.PAUSED,
             AutopayAction.RESUMED,
             AutopayAction.STOPPED,
+            AutopayAction.MOVED,
             AutopayAction.ALREADY,
         )
 
@@ -293,6 +324,11 @@ def next_debit_at(day: int, now: datetime) -> datetime:
             if candidate > now:
                 return candidate
         year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+
+
+def debit_instant(day: date) -> datetime:
+    """The moment a debit due on ``day`` runs: 12:00:00Z that day (D3)."""
+    return datetime(day.year, day.month, day.day, DEBIT_HOUR_UTC, tzinfo=UTC)
 
 
 def schedule_rule(day: int, now: datetime) -> str:
@@ -1057,6 +1093,196 @@ def stop_autopay(lease_id: uuid.UUID, *, actor: User | None) -> AutopayOutcome:
                 {"kind": row.kind, **_schedule_snapshot(row, ref)},
             )
     return AutopayOutcome(AutopayAction.STOPPED, AUTOPAY_STOPPED)
+
+
+@dataclass(frozen=True, slots=True)
+class AutopayMove:
+    """A rent autopay moved past a split month (D13) whose first debit is still ahead."""
+
+    #: The first debit of the split charge's new schedule.
+    resumes: date
+    #: The first debit of each new schedule row still ahead, by the row's id.
+    starts: dict[str, datetime]
+
+    @property
+    def text(self) -> str:
+        return AUTOPAY_RESUMES.format(date=self.resumes.isoformat())
+
+
+def _move_rows(lease: Lease, action: str, plan_id: uuid.UUID) -> dict[int, dict[str, Any]]:
+    """The ``action`` audit rows of the lease for this plan, by seq."""
+    rows = AuditLog.objects.filter(
+        action=action,
+        entity_type=ENTITY_LEASE,
+        entity_id=str(lease.pk),
+        after__plan=str(plan_id),
+    ).values_list("after", flat=True)
+    return {int(after["seq"]): after for after in rows if isinstance(after, dict)}
+
+
+def move_autopay(
+    lease_id: uuid.UUID,
+    *,
+    seq: int,
+    skipped: date,
+    plan_id: uuid.UUID,
+    actor: User | None,
+    now: datetime | None = None,
+) -> AutopayOutcome:
+    """PLAN-012b-b D13: move the lease's active rent autopay past the debit due on
+    ``skipped`` (debit ``seq``), split by plan ``plan_id``; see the module docstring.
+
+    Order: lease row lock; the operator's customer and linked bank method (refused, with
+    no provider call, without them); the rent in effect on each new first debit; then
+    each active schedule not yet deleted for this plan, deleted (a 404 counts as gone),
+    ended and audited :data:`DELETED_FOR_MOVE_ACTION`, one at a time; then each debit
+    deleted for this plan and not yet created again, created (a row left ``failed`` by
+    an earlier run is first looked for at the provider) and audited
+    :data:`MOVED_ACTION`. Any provider failure stops there, audited
+    ``lease.autopay_move_failed``: the rows already deleted stay ended, the job fails and
+    its repeat continues. A debit stopped, paused or enabled again by staff since its
+    delete is left as it is. A lease with nothing to delete or create returns
+    ``ALREADY`` and writes nothing."""
+    moment = now or timezone.now()
+    with transaction.atomic():
+        lease = _locked(lease_id)
+        operator = lease.operator
+        if operator is None:
+            return AutopayOutcome(AutopayAction.REFUSED, NO_OPERATOR)
+        customer = customer_ref(operator)
+        if not customer:
+            return AutopayOutcome(AutopayAction.REFUSED, NO_PROVIDER_CUSTOMER)
+        payment_method = linked_payment_method(operator)
+        if not payment_method:
+            return AutopayOutcome(AutopayAction.REFUSED, NO_BANK_METHOD)
+        deleted = _move_rows(lease, DELETED_FOR_MOVE_ACTION, plan_id)
+        moved = _move_rows(lease, MOVED_ACTION, plan_id)
+        rows = {row.seq: row for row in live_schedules(lease)}
+        old = [
+            (row, ref)
+            for row in rows.values()
+            if row.state == ScheduleState.ACTIVE
+            and row.seq not in deleted
+            and (ref := schedule_ref(row))
+        ]
+        missing = sorted(
+            {row.seq for row, _ in old}
+            | {
+                number
+                for number in deleted
+                if number not in moved
+                and (number not in rows or rows[number].state == ScheduleState.FAILED)
+            }
+        )
+        if not missing:
+            return AutopayOutcome(AutopayAction.ALREADY, NOTHING_TO_MOVE)
+        # The split debit starts after its own debit instant; any other keeps its next.
+        start_from = {
+            number: debit_instant(skipped) if number == seq else moment for number in missing
+        }
+        planned = {
+            debit.seq: debit
+            for number in missing
+            for debit in debit_plan(lease, start_from[number])
+            if debit.seq == number
+        }
+        if len(planned) != len(missing):
+            first = min(start_from.values())
+            return AutopayOutcome(
+                AutopayAction.REFUSED, RENT_NOT_STARTED.format(date=first.date().isoformat())
+            )
+
+        provider = payments.get_provider()
+        for row, ref in old:
+            try:
+                provider.delete_scheduled_invoice(ref)
+            except ProviderRejected as error:
+                if error.status != HTTPStatus.NOT_FOUND:
+                    return _failed(
+                        actor, lease, "lease.autopay_move_failed", error, {"seq": row.seq}
+                    )
+            except ProviderError as error:
+                return _failed(actor, lease, "lease.autopay_move_failed", error, {"seq": row.seq})
+            before = _schedule_snapshot(row, ref)
+            row.state = ScheduleState.ENDED
+            row.save(update_fields=["state", "updated_at"])
+            _audit(
+                actor,
+                DELETED_FOR_MOVE_ACTION,
+                lease,
+                before,
+                {**_schedule_snapshot(row, ref), "plan": str(plan_id)},
+            )
+            rows.pop(row.seq)
+        for number in missing:
+            current = rows.get(number)
+            debit = planned[number]
+            outcome = _create_one(
+                provider,
+                lease,
+                operator,
+                current,
+                debit,
+                customer=customer,
+                payment_method=payment_method,
+                actor=actor,
+                now=start_from[number],
+            )
+            if outcome is not None:
+                return outcome
+            [created] = [
+                row
+                for row in live_schedules(lease)
+                if row.seq == number and row.state == ScheduleState.ACTIVE
+            ]
+            _audit(
+                actor,
+                MOVED_ACTION,
+                lease,
+                None,
+                {
+                    "plan": str(plan_id),
+                    "seq": number,
+                    "skipped": skipped.isoformat() if number == seq else None,
+                    "starts": next_debit_at(debit.debit_day, start_from[number]).isoformat(),
+                    "row": str(created.pk),
+                    "schedule": mask_identifier(schedule_ref(created)),
+                },
+            )
+    resumes = next_debit_at(planned[seq].debit_day, start_from[seq]) if seq in planned else None
+    when = resumes.date().isoformat() if resumes is not None else "-"
+    return AutopayOutcome(AutopayAction.MOVED, AUTOPAY_MOVED.format(date=when))
+
+
+def autopay_move(lease: Lease, now: datetime | None = None) -> AutopayMove | None:
+    """The lease's rent autopay moved past a split month (D13) while the plan is live
+    and the split charge's new first debit is ahead, or ``None`` (local data only)."""
+    moment = now or timezone.now()
+    live = {
+        str(pk)
+        for pk in InstallmentPlan.objects.filter(
+            lease=lease, status__in=LIVE_PLAN_STATUSES
+        ).values_list("pk", flat=True)
+    }
+    if not live:
+        return None
+    rows = AuditLog.objects.filter(
+        action=MOVED_ACTION, entity_type=ENTITY_LEASE, entity_id=str(lease.pk)
+    ).order_by("id")
+    resumes: date | None = None
+    starts: dict[str, datetime] = {}
+    for after in rows.values_list("after", flat=True):
+        if not isinstance(after, dict) or after.get("plan") not in live:
+            continue
+        first = datetime.fromisoformat(str(after["starts"]))
+        if first <= moment:
+            continue
+        starts[str(after["row"])] = first
+        if after.get("skipped"):
+            resumes = first.date()
+    if resumes is None:
+        return None
+    return AutopayMove(resumes=resumes, starts=starts)
 
 
 # --- Helpers --------------------------------------------------------------------------

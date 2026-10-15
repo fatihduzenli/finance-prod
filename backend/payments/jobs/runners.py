@@ -225,7 +225,10 @@ def invoice_delete_job(job: Job) -> Result:
     """PLAN-010d D6: the cancel of an invoiced one-off charge; with the waived flag
     (PLAN-011 D0), the delete of a waived charge's live invoice; with
     :data:`ledger.services.installments.RELEASE_PARAM` (PLAN-012b-a D3), the release of a
-    split parent's invoice, the charge kept."""
+    split parent's invoice, the charge kept (a rent charge's too, PLAN-012b-b D13: the
+    only kind of job a rent charge has here)."""
+    if job.entity_type == JobEntity.RENT_CHARGE:
+        return one_off_invoices.release_invoice(job.entity_id, job.requested_by, job.entity_type)
     if job.params.get(one_off_charges.WAIVED_INVOICE_PARAM) is True:
         return one_off_invoices.delete_waived(job.entity_id, job.requested_by)
     if job.params.get(installments.RELEASE_PARAM) is True:
@@ -245,9 +248,13 @@ def schedule_create_job(job: Job) -> Result:
 def schedule_delete_job(job: Job) -> Result:
     """PLAN-010d D6: the cancel of an ``autopay_due`` charge whose schedule has not fired;
     with :data:`ledger.services.installments.RELEASE_PARAM` (PLAN-012b-a D3), the release
-    of a split parent's schedule, the charge kept."""
-    if job.params.get(installments.RELEASE_PARAM) is True:
-        return one_off_invoices.release_schedule(job.entity_id, job.requested_by)
+    of a split parent's schedule, the charge kept; on a rent charge (PLAN-012b-b D13, the
+    only kind of job a rent charge has here), the move of its lease's rent autopay past
+    the month."""
+    if job.params.get(installments.RELEASE_PARAM) is True or (
+        job.entity_type == JobEntity.RENT_CHARGE
+    ):
+        return one_off_invoices.release_schedule(job.entity_id, job.requested_by, job.entity_type)
     return one_off_invoices.delete_schedule(job.entity_id, job.requested_by)
 
 

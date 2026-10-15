@@ -2187,23 +2187,30 @@ def plan_state(plan: InstallmentPlan) -> dict[str, Any]:
 
 
 def parent_paid_on_plan(plan: InstallmentPlan) -> Decimal:
-    """What was paid on a one-off parent itself while its plan runs (PLAN-012b-a D3, D4):
-    how far the parent's balance, the plan's own installments left out, is below the
-    plan's total (the prices of its installments not voided). A payment on the parent's
-    old invoice before its release, or a late one after it. Zero for a rent parent, a
-    waived or voided parent, or nothing paid."""
-    if plan.one_off_charge_id is None:
-        return ZERO
-    parent = OneOffCharge.objects.get(pk=plan.one_off_charge_id)
-    if parent.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
+    """What was paid on the parent itself while its plan runs (PLAN-012b-a D3, D4;
+    a rent parent too, PLAN-012b-b D13): how far the parent's balance, the plan's own
+    installments left out, is below the plan's total (the prices of its installments not
+    voided). A payment on the parent's old invoice before its release, a debit of the
+    rent autopay before its move, or a late one after it. Zero for a waived or voided
+    parent, or nothing paid."""
+    if plan.rent_charge_id is not None:
+        rent = RentCharge.objects.get(pk=plan.rent_charge_id)
+        if rent.status == RentChargeStatus.WAIVED:
+            return ZERO
+        price, paid = Decimal(rent.amount_due), rent_run.own_paid(rent) + rent_share(rent)
+    elif plan.one_off_charge_id is not None:
+        parent = OneOffCharge.objects.get(pk=plan.one_off_charge_id)
+        if parent.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
+            return ZERO
+        price, paid = Decimal(parent.price), paid_in(parent)
+    else:
         return ZERO
     rows = OneOffCharge.objects.filter(plan=plan, category=OneOffCategory.INSTALLMENT)
     total = rows.exclude(status=OneOffChargeStatus.VOIDED).aggregate(total=Sum("price"))["total"]
-    paid = paid_in(parent)
     if plan.status in (InstallmentPlanStatus.COMPLETED, InstallmentPlanStatus.CANCELLED):
         # This plan's installments count as paid on the parent then (plan_covered).
         paid -= Decimal(rows.aggregate(total=Sum("amount_paid"))["total"] or ZERO)
-    balance = Decimal(parent.price) - min(paid, Decimal(parent.price))
+    balance = price - min(paid, price)
     return max(Decimal(total or ZERO) - balance, ZERO)
 
 

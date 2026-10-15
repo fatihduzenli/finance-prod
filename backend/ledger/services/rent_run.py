@@ -105,6 +105,7 @@ from ledger.models import (
     AuditLog,
     CollectionSchedule,
     CollectionStatus,
+    InstallmentPlan,
     InstallmentPlanStatus,
     InsuranceCharge,
     Invoice,
@@ -1674,7 +1675,10 @@ def recompute_charge(charge: RentCharge) -> None:
     ``pending``; nothing settled after a payment was returned or reopened: ``unpaid``;
     otherwise the status stays (``due``). A waived charge is left as it is. The caller
     holds the row lock and writes the audit row. What the re-debits of the charge's
-    returned payments collected again counts as paid (:func:`redebit_collected`).
+    returned payments collected again counts as paid (:func:`redebit_collected`). A
+    payment on a split charge while its plan is live (a debit of its rent autopay before
+    the move, PLAN-012b-b D13) brings the plan's status up to date, as for a one-off
+    parent (PLAN-012b-a D4): the plan's row lock is taken after the charge's.
     """
     if charge.status == RentChargeStatus.WAIVED:
         return
@@ -1702,6 +1706,13 @@ def recompute_charge(charge: RentCharge) -> None:
         charge.amount_paid = paid
         charge.status = status
         charge.save(update_fields=["amount_paid", "status", "updated_at"])
+    from ledger.services import one_off_charges  # one_off_charges imports this module
+
+    with transaction.atomic():
+        for plan in InstallmentPlan.objects.select_for_update().filter(
+            rent_charge=charge, status__in=LIVE_PLAN_STATUSES
+        ):
+            one_off_charges.apply_plan_status(plan, actor=None)
 
 
 def charge_state(charge: RentCharge) -> dict[str, Any]:

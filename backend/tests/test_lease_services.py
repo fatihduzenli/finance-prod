@@ -1329,3 +1329,133 @@ def test_a_confirmation_with_a_refused_method_writes_no_confirmation_row(
 )
 def test_amounts_in_messages_are_formatted_with_separators(amount: Decimal, text: str) -> None:
     assert service.format_amount(amount) == text
+
+
+# --- Autopay moved past a split month (PLAN-012b-b D13) ------------------------------------------
+
+#: An installment plan's id as the move audits it (the move only records it).
+PLAN = uuid.UUID("00000000-0000-0000-0000-0000000000d1")
+
+
+def linked_lease(fake: FakeProvider, rent: Decimal = RENT, **overrides: Any) -> Lease:
+    """A lease with rent autopay enabled on :data:`NOW` (the 15th's first debit is 15
+    October) and the operator's bank method linked, as the move needs it."""
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease(rent, **overrides)
+    assert enable(lease).ok
+    assert lease.operator is not None
+    ExternalRef.objects.create(
+        entity_type="operator",
+        entity_id=lease.operator.pk,
+        provider="stax_pay",
+        external_kind="payment_method",
+        external_id=BANK,
+    )
+    return lease
+
+
+def move(lease: Lease, actor: User | None = None) -> service.AutopayOutcome:
+    return service.move_autopay(
+        lease.pk, seq=1, skipped=date(2026, 10, 15), plan_id=PLAN, actor=actor, now=NOW
+    )
+
+
+def test_the_move_deletes_the_schedule_and_creates_it_from_next_months_debit(
+    fake: FakeProvider, actor: User
+) -> None:
+    lease = linked_lease(fake)
+    [old] = service.live_schedules(lease)
+    old_ref = service.schedule_ref(old)
+    outcome = move(lease, actor)
+    assert (outcome.action, outcome.message) == (
+        AutopayAction.MOVED,
+        "Autopay moved: it resumes 2026-11-15; this month is collected in installments.",
+    )
+    assert [args for name, args in fake.calls if name == "delete_scheduled_invoice"] == [(old_ref,)]
+    first, second = creates(fake)
+    assert first.rule == "DTSTART=20261015T120000Z;FREQ=MONTHLY"
+    assert second.rule == "DTSTART=20261115T120000Z;FREQ=MONTHLY"
+    assert (second.amounts.total, second.payment_method_external_id) == (D("1500.00"), BANK)
+    old.refresh_from_db()
+    assert old.state == ScheduleState.ENDED
+    [new] = service.live_schedules(lease)
+    assert (new.seq, new.debit_day, new.amount, new.state) == (
+        1,
+        15,
+        D("1500.00"),
+        ScheduleState.ACTIVE,
+    )
+    assert service.schedule_ref(new) not in ("", old_ref)
+    assert actions(lease)[-3:] == [
+        service.DELETED_FOR_MOVE_ACTION,
+        "lease.autopay_enabled",
+        service.MOVED_ACTION,
+    ]
+    entry = AuditLog.objects.get(action=service.MOVED_ACTION)
+    assert entry.actor == actor
+    assert entry.after is not None
+    assert (entry.after["plan"], entry.after["skipped"], entry.after["starts"]) == (
+        str(PLAN),
+        "2026-10-15",
+        "2026-11-15T12:00:00+00:00",
+    )
+    assert service.schedule_ref(new) not in str(entry.after) and old_ref not in str(
+        AuditLog.objects.get(action=service.DELETED_FOR_MOVE_ACTION).after
+    )
+
+
+def test_the_move_run_again_changes_nothing(fake: FakeProvider) -> None:
+    lease = linked_lease(fake)
+    assert move(lease).action is AutopayAction.MOVED
+    provider_calls, audited = len(fake.calls), AuditLog.objects.count()
+    outcome = move(lease)
+    assert (outcome.action, outcome.message) == (AutopayAction.ALREADY, service.NOTHING_TO_MOVE)
+    assert outcome.ok
+    assert (len(fake.calls), AuditLog.objects.count()) == (provider_calls, audited)
+
+
+def test_a_schedule_already_gone_at_the_provider_counts_as_deleted(fake: FakeProvider) -> None:
+    lease = linked_lease(fake)
+    fake.fail_next("delete_scheduled_invoice", ProviderRejected(404))
+    assert move(lease).action is AutopayAction.MOVED
+    assert len(creates(fake)) == 2
+
+
+def test_a_failed_delete_leaves_the_schedule_as_it_was(fake: FakeProvider) -> None:
+    lease = linked_lease(fake)
+    [old] = service.live_schedules(lease)
+    fake.fail_next("delete_scheduled_invoice", ProviderUnavailable(503, "unavailable"))
+    outcome = move(lease)
+    assert (outcome.action, outcome.failure) == (AutopayAction.FAILED, "ProviderUnavailable")
+    old.refresh_from_db()
+    assert old.state == ScheduleState.ACTIVE and service.schedule_ref(old)
+    assert len(creates(fake)) == 1
+    assert "lease.autopay_move_failed" in actions(lease)
+    # The repeat deletes and creates.
+    assert move(lease).action is AutopayAction.MOVED
+
+
+def test_the_move_is_refused_without_a_linked_bank_method(fake: FakeProvider) -> None:
+    fake.add_payment_method(CUSTOMER, method())
+    lease = make_lease()
+    enable(lease)
+    calls = len(fake.calls)
+    outcome = move(lease)
+    assert (outcome.action, outcome.message) == (AutopayAction.REFUSED, service.NO_BANK_METHOD)
+    assert len(fake.calls) == calls
+    assert [row.state for row in service.live_schedules(lease)] == [ScheduleState.ACTIVE]
+
+
+def test_a_lease_without_active_autopay_has_nothing_to_move(fake: FakeProvider) -> None:
+    lease = linked_lease(fake)
+    assert service.pause_autopay(lease.pk, actor=None).ok
+    calls = len(fake.calls)
+    assert move(lease).action is AutopayAction.ALREADY
+    assert len(fake.calls) == calls
+
+
+def test_the_debit_instant_is_noon_utc_of_the_day() -> None:
+    assert service.debit_instant(date(2026, 10, 15)) == datetime(2026, 10, 15, 12, tzinfo=UTC)
+    assert service.next_debit_at(15, service.debit_instant(date(2026, 10, 15))) == datetime(
+        2026, 11, 15, 12, tzinfo=UTC
+    )

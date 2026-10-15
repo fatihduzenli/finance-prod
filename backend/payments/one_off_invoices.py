@@ -35,7 +35,10 @@ class and the field names it rejected (never provider text).
   invoice ``void`` with the provider's ``DELETED`` (or the schedule reference
   superseded), the charge untouched, and the plan's side
   (:func:`ledger.services.installments.after_release`). A second run finds the object
-  gone and only completes the plan's side.
+  gone and only completes the plan's side. The job's entity may be a rent charge
+  (PLAN-012b-b D13): its own live invoice of rent alone is released the same way, and
+  its ``schedule_delete`` moves the lease's rent autopay past the charge's month
+  (:func:`release_rent_autopay`) before the plan's side.
 - :func:`schedule` (``schedule_create``): the one-occurrence schedule of an
   ``autopay_due`` charge on its due date with the operator's linked bank method, its
   reference ``OOC-<first 8 of the charge id>``; a re-debit's schedule (PLAN-011b D5)
@@ -88,6 +91,7 @@ from django.utils import timezone
 
 import payments
 from ledger.models import (
+    LIVE_PLAN_STATUSES,
     ZERO,
     AuditLog,
     CollectionMethod,
@@ -97,6 +101,8 @@ from ledger.models import (
     OneOffCharge,
     OneOffChargeStatus,
     Operator,
+    Payment,
+    PaymentStatus,
     RentCharge,
     RentChargeStatus,
     format_quantity,
@@ -104,7 +110,7 @@ from ledger.models import (
 from ledger.services import installments, leases, numbering, one_off_charges, rent_run
 from payments import invoice_sync, operator_sync
 from payments.errors import ProviderError, ProviderRejected
-from payments.models import ExternalRef, WebhookOutcome
+from payments.models import ExternalRef, JobEntity, WebhookOutcome
 from payments.provider import (
     Amounts,
     InvoiceInput,
@@ -210,6 +216,7 @@ MOVE_INVOICE_FAILED = "The payment provider did not change the invoice's due dat
 RELEASE_SHARED = (
     "The invoice bills other charges too; it is not released for one of them. Nothing was deleted."
 )
+AUTOPAY_MOVE_FAILED = "The rent autopay was not moved past this month; the charge stays open"
 RELEASE_SCHEDULE_FIRED = (
     "The schedule already generated its invoice. The charge stays open; cancel the "
     "installment plan, then collect or cancel that invoice."
@@ -855,9 +862,15 @@ def delete_waived(charge_id: uuid.UUID, actor: User | None) -> Result:
 # --- Releasing a split parent's object (PLAN-012b-a D3) --------------------------------
 
 
-def _release_target(charge_id: uuid.UUID) -> OneOffCharge | Result:
-    """The parent of an installment plan, or the job's outcome when it is not one."""
-    charge = _charge(charge_id)
+Parent = OneOffCharge | RentCharge
+
+
+def _release_target(charge_id: uuid.UUID, entity_type: str) -> Parent | Result:
+    """The parent of an installment plan named by the job's entity (a one-off or a rent
+    charge, PLAN-012b-b D13), or the job's outcome when it is not one."""
+    charge: Parent | None = (
+        _rent_charge(charge_id) if entity_type == JobEntity.RENT_CHARGE else _charge(charge_id)
+    )
     if charge is None:
         return False, NO_CHARGE
     if not charge.installment_plans.exists():
@@ -866,33 +879,50 @@ def _release_target(charge_id: uuid.UUID) -> OneOffCharge | Result:
 
 
 def _released(
-    charge_id: uuid.UUID, actor: User | None, mark: Callable[[OneOffCharge], dict[str, Any]]
+    parent: Parent, actor: User | None, mark: Callable[[Parent], dict[str, Any]]
 ) -> Result:
     """The local side of a release, in one transaction under the parent's row lock:
     ``mark`` (which returns the audit context), then the plan's side
     (:func:`ledger.services.installments.after_release`)."""
     with transaction.atomic():
-        parent = OneOffCharge.objects.select_for_update().get(pk=charge_id)
-        context = mark(parent)
-        return installments.after_release(parent, actor, context)
+        locked: Parent
+        if isinstance(parent, RentCharge):
+            locked = RentCharge.objects.select_for_update().get(pk=parent.pk)
+        else:
+            locked = OneOffCharge.objects.select_for_update().get(pk=parent.pk)
+        context = mark(locked)
+        return installments.after_release(locked, actor, context)
 
 
-def release_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
+def _release_failed(charge: Parent, actor: User | None, error: ProviderError, text: str) -> Result:
+    action = (
+        "rent_charge.release_failed"
+        if isinstance(charge, RentCharge)
+        else "one_off_charge.release_failed"
+    )
+    return _failed(charge, actor, action, error, text)
+
+
+def release_invoice(
+    charge_id: uuid.UUID, actor: User | None, entity_type: str = JobEntity.ONE_OFF_CHARGE
+) -> Result:
     """The ``invoice_delete`` job with ``params.release``: the split parent's live
-    single-charge invoice deleted at the provider as :func:`delete` deletes it (a paid
-    one never; a 404 counts as deleted; re-fetched after), then, locally, the invoice
-    ``void`` with the provider's ``DELETED`` and the charge untouched. A parent with no
-    live invoice any more (a second run) deletes nothing and only completes the plan's
-    side."""
-    target = _release_target(charge_id)
-    if not isinstance(target, OneOffCharge):
+    single-charge invoice (a one-off charge's, or a rent charge's of rent alone,
+    PLAN-012b-b D13; the parent named by ``entity_type``) deleted at the provider as
+    :func:`delete` deletes it (a paid one never; a 404 counts as deleted; re-fetched
+    after), then, locally, the invoice ``void`` with the provider's ``DELETED`` and the
+    charge untouched. A parent with no live invoice any more (a second run) deletes
+    nothing and only completes the plan's side."""
+    target = _release_target(charge_id, entity_type)
+    if not isinstance(target, OneOffCharge | RentCharge):
         return target
     charge = target
-    linked = one_off_charges.live_provider_invoice(charge)
-    if linked is None:
-        return _released(charge.pk, actor, lambda parent: {})
+    linked = rent_run.provider_invoice(charge)
+    if linked is None or not one_off_charges.invoice_is_live(linked[0]):
+        return _released(charge, actor, lambda parent: {})
     invoice, ref = linked
-    if invoice.one_off_charge_id != charge.pk or one_off_charges.invoice_line_count(invoice) > 1:
+    own = invoice.rent_charge_id if isinstance(charge, RentCharge) else invoice.one_off_charge_id
+    if own != charge.pk or one_off_charges.invoice_line_count(invoice) > 1:
         return False, RELEASE_SHARED
     provider = payments.get_provider()
     try:
@@ -907,11 +937,11 @@ def release_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
                     raise
             record = _fetch(provider.get_invoice, ref)
     except ProviderError as error:
-        return _failed(charge, actor, "one_off_charge.release_failed", error, DELETE_FAILED)
+        return _release_failed(charge, actor, error, DELETE_FAILED)
     if record is not None and not invoice_sync.shows_deleted(record):
         return False, DELETE_NOT_CONFIRMED
 
-    def mark(parent: OneOffCharge) -> dict[str, Any]:
+    def mark(parent: Parent) -> dict[str, Any]:
         context = {
             "invoice_number": invoice.invoice_number,
             "provider_invoice": mask_identifier(ref),
@@ -930,24 +960,30 @@ def release_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
         )
         return context
 
-    return _released(charge.pk, actor, mark)
+    return _released(charge, actor, mark)
 
 
-def release_schedule(charge_id: uuid.UUID, actor: User | None) -> Result:
+def release_schedule(
+    charge_id: uuid.UUID, actor: User | None, entity_type: str = JobEntity.ONE_OFF_CHARGE
+) -> Result:
     """The ``schedule_delete`` job with ``params.release``: the split parent's schedule
     deleted at the provider as :func:`delete_schedule` deletes it (a 404 counts as gone;
     then the provider must neither list it nor show an invoice it generated), then,
     locally, its reference superseded and the charge untouched. A parent with no current
-    schedule any more (a second run) deletes nothing and only completes the plan's side."""
-    target = _release_target(charge_id)
+    schedule any more (a second run) deletes nothing and only completes the plan's side.
+    A rent parent's (``entity_type`` rent charge) moves the lease's rent autopay past
+    the month instead (:func:`release_rent_autopay`)."""
+    if entity_type == JobEntity.RENT_CHARGE:
+        return release_rent_autopay(charge_id, actor)
+    target = _release_target(charge_id, entity_type)
     if not isinstance(target, OneOffCharge):
-        return target
+        return target if isinstance(target, tuple) else (False, NO_CHARGE)
     charge = target
     if one_off_charges.invoices_of(charge).exists():
         return False, RELEASE_SCHEDULE_FIRED
     ref = _schedule_ref(charge)
     if not ref:
-        return _released(charge.pk, actor, lambda parent: {})
+        return _released(charge, actor, lambda parent: {})
     provider = payments.get_provider()
     try:
         try:
@@ -962,20 +998,47 @@ def release_schedule(charge_id: uuid.UUID, actor: User | None) -> Result:
         ]
         still = _fetch(provider.get_scheduled_invoice, ref)
     except ProviderError as error:
-        return _failed(
-            charge, actor, "one_off_charge.release_failed", error, SCHEDULE_DELETE_FAILED
-        )
+        return _release_failed(charge, actor, error, SCHEDULE_DELETE_FAILED)
     if generated:
         return False, RELEASE_SCHEDULE_FIRED
     if still is not None:
         return False, SCHEDULE_NOT_CONFIRMED
 
-    def mark(parent: OneOffCharge) -> dict[str, Any]:
+    def mark(parent: Parent) -> dict[str, Any]:
         context = {"schedule": mask_identifier(ref)}
-        one_off_charges.mark_schedule_released(parent, actor=actor, context=context)
+        if isinstance(parent, OneOffCharge):
+            one_off_charges.mark_schedule_released(parent, actor=actor, context=context)
         return context
 
-    return _released(charge.pk, actor, mark)
+    return _released(charge, actor, mark)
+
+
+def release_rent_autopay(charge_id: uuid.UUID, actor: User | None) -> Result:
+    """The ``schedule_delete`` job with ``params.release`` on a split rent charge
+    (PLAN-012b-b D13): while its plan is live and no payment on it is pending, the
+    lease's rent autopay is moved past the charge's month
+    (:func:`ledger.services.leases.move_autopay`, the charge's debit and due date), then
+    the plan's side. A failed move fails the job with its sentence (Retry from the charge
+    page repeats it); the charge is never voided. A plan no longer live moves nothing."""
+    target = _release_target(charge_id, JobEntity.RENT_CHARGE)
+    if not isinstance(target, RentCharge):
+        return target if isinstance(target, tuple) else (False, NO_CHARGE)
+    charge = target
+    context: dict[str, Any] = {}
+    plan = installments.plan_of(charge)
+    if plan is not None and plan.status in LIVE_PLAN_STATUSES:
+        if Payment.objects.filter(rent_charge=charge, status=PaymentStatus.PENDING).exists():
+            return False, installments.PENDING
+        outcome = leases.move_autopay(
+            charge.lease_id, seq=charge.seq, skipped=charge.due_on, plan_id=plan.pk, actor=actor
+        )
+        if not outcome.ok:
+            if outcome.failure:
+                fields = f" (fields: {', '.join(outcome.fields)})" if outcome.fields else ""
+                return False, f"{AUTOPAY_MOVE_FAILED}: {outcome.failure}{fields}.{RETRY_HINT}"
+            return False, f"{AUTOPAY_MOVE_FAILED}. {outcome.message}{RETRY_HINT}"
+        context = {"autopay": outcome.message}
+    return _released(charge, actor, lambda parent: context)
 
 
 # --- Schedules (D2, D6) ---------------------------------------------------------------

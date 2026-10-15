@@ -1,5 +1,6 @@
 """Rent charge screens: detail, manual payment, the marking retry and linking an invoice
-(PLAN-007 §4.1, D8; PLAN-009 D1 to D3, D5; PLAN-008a §2 rule 4).
+(PLAN-007 §4.1, D8; PLAN-009 D1 to D3, D5; PLAN-008a §2 rule 4), and the Retry of a
+split charge's failed release (PLAN-012b-b D13, billing).
 
 The detail page is read by any role and shows the carried balance of earlier charges.
 Recording a payment (GET of the form and POST), retrying the marking of the provider
@@ -27,7 +28,7 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import LinkInvoiceForm, ManualPaymentForm
 from ledger.models import ChargeEntityType, ChargeNote, RentCharge, RentChargeStatus
-from ledger.services import collections, csv_export, rent_run
+from ledger.services import collections, csv_export, installments, rent_run
 from ledger.services.csv_export import CsvWriter
 from ledger.services.rent_run import MarkAction, MarkResult
 from ledger.views.installments import parent_context
@@ -45,6 +46,8 @@ from ledger.views.operators import (
 from ledger.views.run import _billing_only
 from payments import operator_sync
 from payments.models import JobKind
+
+NOTHING_TO_RETRY = "Nothing to retry on this charge."
 
 
 def _load(pk: str) -> RentCharge:
@@ -145,6 +148,8 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 split_url=reverse("ledger:charges:split", kwargs={"pk": charge.pk}),
             ),
             "can_retry_mark": retry_wait == 0 and not jobs["job_refresh"],
+            # PLAN-012b-b D13: a failed release of the split charge's invoice or autopay.
+            "can_retry_release": billing and installments.retry_release(charge) is not None,
             "can_link_invoice": billing and not rent_run.charge_invoices(charge).exists(),
             "retry_wait_message": (
                 operator_sync.retry_wait_message(retry_wait) if retry_wait else ""
@@ -218,6 +223,24 @@ def charge_retry_mark(request: HttpRequest, pk: str) -> HttpResponse:
     charge = _load(pk)
     if not busy(request, charge):
         submit(request, JobKind.PAYMENT_RETRY_MARK, charge)
+    return redirect("ledger:charges:detail", pk=charge.pk)
+
+
+@role_required
+@require_POST
+def charge_retry_release(request: HttpRequest, pk: str) -> HttpResponse:
+    """Repeat a split charge's failed release (PLAN-012b-b D13): a new job of the same
+    kind with the release flag."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    charge = _load(pk)
+    if not busy(request, charge):
+        kind = installments.retry_release(charge)
+        if kind is None:
+            messages.info(request, NOTHING_TO_RETRY)
+        else:
+            submit(request, kind, charge, {installments.RELEASE_PARAM: True})
     return redirect("ledger:charges:detail", pk=charge.pk)
 
 

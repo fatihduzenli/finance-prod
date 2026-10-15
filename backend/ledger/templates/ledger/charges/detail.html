@@ -13,6 +13,11 @@
     </p>
   {% endif %}
   {% include "ledger/_job_status.html" %}
+  {% if can_retry_release %}
+    <form method="post" action="{% url 'ledger:charges:retry_release' pk=charge.pk %}" class="actions js-single-submit">
+      {% csrf_token %}<button class="btn btn-primary" type="submit" id="retry-provider">Retry</button>
+    </form>
+  {% endif %}
   {% if can_retry_mark %}
     <form method="post" action="{% url 'ledger:charges:retry_mark' pk=charge.pk %}" class="actions js-single-submit">
       {% csrf_token %}<button class="btn btn-primary" type="submit" id="retry-mark">Retry marking the invoice paid</button>

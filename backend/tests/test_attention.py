@@ -31,6 +31,7 @@ from ledger.models import (
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
+    RentCharge,
     RentChargeStatus,
     ScheduleKind,
     ScheduleState,
@@ -162,6 +163,38 @@ def split_paid(lease: Lease) -> InstallmentPlan:
             category="installment",
             collection="email",
             description=f"Installment {number} of 2: Damage to the shelving",
+            plan=plan,
+            installment_no=number,
+        )
+    return plan
+
+
+def rent_split_paid(lease: Lease, month: date = date(2026, 10, 1)) -> InstallmentPlan:
+    """A live plan whose rent parent, October's $3,500.00, was paid $1,000.00 on itself
+    (a late debit of its old autopay, PLAN-012b-b D13): its balance, $2,500.00, is below
+    the plan's total, $3,500.00."""
+    assert lease.operator is not None
+    parent = a_rent_charge(lease, month, RentChargeStatus.PARTIAL, paid="1000.00")
+    plan = InstallmentPlan.objects.create(
+        rent_charge=parent,
+        operator=lease.operator,
+        lease=lease,
+        count=2,
+        first_due=date(2026, 10, 20),
+        cadence="monthly",
+        collection="autopay_due",
+        status="attention",
+        confirmed_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
+    for number in (1, 2):
+        a_one_off_charge(
+            lease.operator,
+            "1750.00",
+            date(2026, 9 + number, 20),
+            lease=lease,
+            category="installment",
+            collection="autopay_due",
+            description=f"Installment {number} of 2: Rent 2026-10",
             plan=plan,
             installment_no=number,
         )
@@ -425,6 +458,7 @@ def build(n: int) -> None:
         returned_payment(lease)
         returned_installment(lease)
         split_paid(lease)
+        rent_split_paid(lease, date(2026, 11, 1))
         LeaseEnd.objects.create(
             lease=lease,
             ended_on=TODAY - timedelta(days=1),
@@ -512,6 +546,37 @@ def test_a_payment_on_a_split_parent_is_one_item_per_plan_until_it_ends(today: d
     OneOffCharge.objects.filter(pk=parent_id).update(amount_paid=D("400.00"), status="partial")
     InstallmentPlan.objects.filter(pk=plan.pk).update(status="completed")
     assert of_kind(attention.SPLIT_CHARGE_PAID) == []
+    InstallmentPlan.objects.filter(pk=plan.pk).update(
+        status="cancelled", cancelled_at=NOW, note="Stopped."
+    )
+    assert of_kind(attention.SPLIT_CHARGE_PAID) == []
+
+
+def test_a_payment_on_a_split_rent_parent_is_one_item_until_the_plan_is_cancelled(
+    today: date,
+) -> None:
+    """PLAN-012b-b D13: a rent parent's plan with a payment on the parent itself."""
+    lease = a_lease(a_store("2204 FOREST PARK", 2204), an_operator("Acme"))
+    plan = rent_split_paid(lease)
+    [item] = of_kind(attention.SPLIT_CHARGE_PAID)
+    assert item.text == (
+        "Payment on a split charge: 2204 FOREST PARK, Rent 2026-10, $1,000.00 paid "
+        "before its invoice was released; cancel or reschedule the plan"
+    )
+    assert item.url == f"/plans/{plan.pk}/" and item.severity == attention.HIGH
+    assert item.operator_id == lease.operator_id
+    assert lease.operator is not None
+    assert of_kind(attention.SPLIT_CHARGE_PAID, lease.operator) == [item]
+    assert of_kind(attention.SPLIT_CHARGE_PAID, an_operator("Other")) == []
+    # Nothing paid on the parent itself: no item; nor for a waived parent.
+    rent_id = plan.rent_charge_id
+    assert rent_id is not None
+    RentCharge.objects.filter(pk=rent_id).update(amount_paid=D("0.00"), status="unpaid")
+    assert of_kind(attention.SPLIT_CHARGE_PAID) == []
+    RentCharge.objects.filter(pk=rent_id).update(amount_paid=D("1000.00"), status="waived")
+    assert of_kind(attention.SPLIT_CHARGE_PAID) == []
+    RentCharge.objects.filter(pk=rent_id).update(status="partial")
+    assert len(of_kind(attention.SPLIT_CHARGE_PAID)) == 1
     InstallmentPlan.objects.filter(pk=plan.pk).update(
         status="cancelled", cancelled_at=NOW, note="Stopped."
     )

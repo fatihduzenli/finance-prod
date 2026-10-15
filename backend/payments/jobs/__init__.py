@@ -93,6 +93,10 @@ OTHER_ENTITIES_OF_KIND: dict[str, frozenset[str]] = {
     # charge's.
     JobKind.INVOICE_CREATE: frozenset({JobEntity.RENT_CHARGE}),
     JobKind.INVOICE_SEND: frozenset({JobEntity.RENT_CHARGE}),
+    # PLAN-012b-b D13: the release of a split rent charge's invoice, or the move of its
+    # lease's rent autopay past the month.
+    JobKind.INVOICE_DELETE: frozenset({JobEntity.RENT_CHARGE}),
+    JobKind.SCHEDULE_DELETE: frozenset({JobEntity.RENT_CHARGE}),
 }
 
 #: ``app_label.ModelName`` of each entity type.

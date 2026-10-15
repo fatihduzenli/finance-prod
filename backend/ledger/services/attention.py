@@ -17,12 +17,14 @@ page that deals with it and ``since``, the day it began:
   ``attention``), ``"Installment returned: <store>, <parent>, plan <n> of <N> paid"``,
   linking to the plan; cleared once the return is resolved (rescheduled with the NSF
   fee, or resolved with a note);
-- ``split_charge_paid`` (PLAN-012b-a D4): one item per live installment plan whose
-  one-off parent's balance is below the plan's total (a payment landed on the parent
-  itself, on its old invoice before the release or late after it; the plan is then
-  ``attention``), ``"Payment on a split charge: <store>, <parent>, <amount> paid before
-  its invoice was released; cancel or reschedule the plan"``, linking to the plan;
-  cleared once the plan is cancelled or completed;
+- ``split_charge_paid`` (PLAN-012b-a D4; a rent parent too, PLAN-012b-b D13): one item
+  per live installment plan whose parent's balance is below the plan's total (a payment
+  landed on the parent itself: on a one-off parent's old invoice before the release or
+  late after it, or a debit of a rent parent's autopay before its move or late after
+  it; the plan is then ``attention``), ``"Payment on a split charge: <store>, <parent>,
+  <amount> paid before its invoice was released; cancel or reschedule the plan"`` with
+  the parent's label (``Rent 2026-10`` for a rent parent), linking to the plan; cleared
+  once the plan is cancelled or completed;
 - ``lease_end_balance`` (PLAN-012e D14): one item per confirmed lease end whose
   "Lease-end balance" charge is still open (not paid, waived or voided, a balance above
   zero), ``"Lease-end balance: <operator> on store <label>, <amount> open since
@@ -65,7 +67,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db.models import Count, F, Min, Q, Sum
@@ -88,6 +90,8 @@ from ledger.models import (
     Operator,
     Payment,
     PaymentStatus,
+    RentCharge,
+    RentChargeStatus,
     ScheduleState,
     Store,
     StoreCost,
@@ -311,45 +315,81 @@ def _installments_returned(operator: uuid.UUID | None) -> list[Item]:
 
 
 def _split_charges_paid(operator: uuid.UUID | None) -> list[Item]:
-    """One item per live plan whose one-off parent's balance is below the plan's total
-    (PLAN-012b-a D4), oldest change first (one query). While the plan is live the
-    parent's stored paid amount holds only what was paid on the parent itself."""
-    plans = (
+    """One item per live plan whose parent's balance is below the plan's total
+    (PLAN-012b-a D4; a rent parent, PLAN-012b-b D13), oldest change first (two queries:
+    the one-off parents, the rent parents). While the plan is live the parent's stored
+    paid amount holds only what was paid on the parent itself, as
+    :func:`ledger.services.one_off_charges.parent_paid_on_plan` counts it (a rent
+    charge's is its own payments plus its share of a builder invoice's payments)."""
+    total = Sum(
+        "installments__price",
+        filter=~Q(installments__status=OneOffChargeStatus.VOIDED),
+    )
+    one_off = (
         InstallmentPlan.objects.filter(status__in=LIVE_PLAN_STATUSES, one_off_charge__isnull=False)
         .exclude(one_off_charge__status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
-        .annotate(
-            total=Sum(
-                "installments__price",
-                filter=~Q(installments__status=OneOffChargeStatus.VOIDED),
-            )
-        )
+        .annotate(total=total)
         .filter(total__gt=F("one_off_charge__price") - F("one_off_charge__amount_paid"))
         .select_related("lease__store", "one_off_charge__fee_type")
-        .order_by("updated_at", "id")
+    )
+    rent = (
+        InstallmentPlan.objects.filter(status__in=LIVE_PLAN_STATUSES, rent_charge__isnull=False)
+        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
+        .annotate(total=total)
+        .filter(total__gt=F("rent_charge__amount_due") - F("rent_charge__amount_paid"))
+        .select_related("rent_charge__lease__store")
     )
     if operator is not None:
-        plans = plans.filter(operator=operator)
-    found = []
-    for plan in plans:
-        parent = plan.one_off_charge
-        if parent is None:
-            continue
-        paid = Decimal(plan.total) - (Decimal(parent.price) - Decimal(parent.amount_paid))
-        found.append(
-            Item(
-                kind=SPLIT_CHARGE_PAID,
-                severity=HIGH,
-                text=SPLIT_CHARGE_PAID_TEXT.format(
-                    store=plan.lease.store.external_label if plan.lease is not None else "No store",
-                    parent=installments.parent_label(parent),
-                    amount=format_amount(paid),
-                ),
-                url=reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
-                since=timezone.localdate(plan.updated_at),
-                operator_id=plan.operator_id,
+        one_off = one_off.filter(operator=operator)
+        rent = rent.filter(rent_charge__lease__operator=operator)
+    found: list[tuple[datetime, uuid.UUID, Item]] = []
+    for plan in one_off:
+        if plan.one_off_charge is not None:
+            store = plan.lease.store.external_label if plan.lease is not None else "No store"
+            found.append(
+                _split_item(plan, plan.one_off_charge, plan.total, store, plan.operator_id)
             )
-        )
-    return found
+    for plan in rent:
+        if plan.rent_charge is not None:
+            lease = plan.rent_charge.lease
+            found.append(
+                _split_item(
+                    plan,
+                    plan.rent_charge,
+                    plan.total,
+                    lease.store.external_label,
+                    lease.operator_id,
+                )
+            )
+    return [item for _, _, item in sorted(found, key=lambda row: (row[0], row[1]))]
+
+
+def _split_item(
+    plan: InstallmentPlan,
+    parent: installments.Parent,
+    total: Decimal,
+    store: str,
+    operator_id: uuid.UUID | None,
+) -> tuple[datetime, uuid.UUID, Item]:
+    """A ``split_charge_paid`` item with the plan's last change and key, to order by."""
+    if isinstance(parent, RentCharge):
+        price = Decimal(parent.amount_due)
+    else:
+        price = Decimal(parent.price)
+    paid = Decimal(total) - (price - min(Decimal(parent.amount_paid), price))
+    item = Item(
+        kind=SPLIT_CHARGE_PAID,
+        severity=HIGH,
+        text=SPLIT_CHARGE_PAID_TEXT.format(
+            store=store,
+            parent=installments.parent_label(parent),
+            amount=format_amount(paid),
+        ),
+        url=reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
+        since=timezone.localdate(plan.updated_at),
+        operator_id=operator_id,
+    )
+    return plan.updated_at, plan.pk, item
 
 
 def _lease_end_balances(operator: uuid.UUID | None) -> list[Item]:

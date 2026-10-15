@@ -524,10 +524,11 @@ def test_a_pending_payment_or_a_debited_rent_month_is_not_split(fake: FakeProvid
     assert installments.split_refusal(rent) == installments.PENDING
 
 
-def test_rent_that_autopay_will_debit_is_not_split(fake: FakeProvider) -> None:
+def test_rent_that_autopay_will_debit_is_split_by_moving_autopay(fake: FakeProvider) -> None:
+    """PLAN-012b-b D13: the refusal is gone; the confirm moves the rent autopay."""
     operator = an_operator(fake)
     rent = a_rent(operator, channel=PaymentChannel.PROVIDER_ACH)
-    CollectionSchedule.objects.create(
+    row = CollectionSchedule.objects.create(
         lease=rent.lease,
         kind=ScheduleKind.RENT,
         seq=1,
@@ -535,9 +536,19 @@ def test_rent_that_autopay_will_debit_is_not_split(fake: FakeProvider) -> None:
         amount=D("1000.00"),
         state=ScheduleState.ACTIVE,
     )
-    assert installments.split_refusal(rent) == installments.AUTOPAY_WILL_DEBIT
-    # Past its due date the schedule no longer debits it.
+    ExternalRef.objects.create(
+        entity_type="collection_schedule",
+        entity_id=row.pk,
+        provider="stax_pay",
+        external_kind="schedule",
+        external_id="fake-schedule-rent",
+    )
+    assert installments.split_refusal(rent) == ""
+    assert installments.release_kind(rent) == JobKind.SCHEDULE_DELETE
+    assert installments.release_notice(rent) == installments.RELEASE_NOTICE_AUTOPAY
+    # Past its due date the schedule no longer debits it: nothing to move.
     assert installments.split_refusal(rent, date(2026, 10, 16)) == ""
+    assert installments.release_kind(rent, date(2026, 10, 16)) == ""
 
 
 def test_a_deposit_is_not_split(fake: FakeProvider) -> None:
@@ -1521,7 +1532,8 @@ def test_a_schedule_that_generated_its_invoice_is_not_released(
     assert installments.release_kind(parent) == ""
 
 
-def test_a_rent_parent_with_a_live_invoice_is_refused_as_before(fake: FakeProvider) -> None:
+def test_a_rent_parent_with_its_own_live_invoice_is_released(fake: FakeProvider) -> None:
+    """PLAN-012b-b D13: the ``LIVE_INVOICE`` refusal for rent is gone."""
     operator = an_operator(fake)
     rent = a_rent(operator)
     invoice = Invoice.objects.create(
@@ -1540,10 +1552,11 @@ def test_a_rent_parent_with_a_live_invoice_is_refused_as_before(fake: FakeProvid
         external_kind="invoice",
         external_id="fake-invoice-rent",
     )
-    assert installments.split_refusal(rent) == installments.LIVE_INVOICE.format(
+    assert installments.split_refusal(rent) == ""
+    assert installments.release_kind(rent) == JobKind.INVOICE_DELETE
+    assert installments.release_notice(rent) == installments.RELEASE_NOTICE_INVOICE.format(
         number="INV-2026-9400"
     )
-    assert installments.release_kind(rent) == "" and installments.release_notice(rent) == ""
 
 
 def test_a_failed_release_waits_and_the_retry_reruns_it_with_its_flag(
@@ -1785,3 +1798,400 @@ def test_a_release_job_on_a_charge_without_a_plan_deletes_nothing(
     assert (job.status, job.result) == ("failed", installments.RELEASE_NO_PLAN)
     assert calls(fake, "delete_invoice") == []
     assert one_off_charges.live_provider_invoice(parent) is not None
+
+
+# --- Splitting rent (PLAN-012b-b D13) -----------------------------------------------------------
+
+
+def autopay_lease(fake: FakeProvider, *, debit_day: int = 20, second: int | None = None) -> Lease:
+    """A provider-ACH lease of $1,500.00 whose rent autopay is live at the fake, enabled
+    on :data:`NOW` (the 20th's first debit is 20 October)."""
+    from ledger.services import leases
+    from tests.test_one_off_charges import BANK
+
+    lease = make_lease(
+        operator=an_operator(fake),
+        payment_channel=PaymentChannel.PROVIDER_ACH,
+        debit_day=debit_day,
+        second_debit_day=second,
+    )
+    outcome = leases.enable_autopay(lease.pk, BANK, actor=None, now=NOW)
+    assert outcome.ok, outcome.text
+    return lease
+
+
+def rent_due(lease: Lease, due: date, *, seq: int = 1, amount: str = "1500.00") -> RentCharge:
+    return RentCharge.objects.create(
+        lease=lease,
+        period_month=OCTOBER,
+        seq=seq,
+        due_on=due,
+        amount_due=D(amount),
+        status=RentChargeStatus.DUE,
+    )
+
+
+def rules(fake: FakeProvider) -> list[str]:
+    return [str(arguments[0].rule) for arguments in calls(fake, "create_scheduled_invoice")]  # type: ignore[attr-defined]
+
+
+def rent_owed(rent: RentCharge) -> bool:
+    rent.refresh_from_db()
+    return (rent.status, rent.amount_paid) == (RentChargeStatus.DUE, D("0.00"))
+
+
+def test_a_rent_charge_on_an_autopay_lease_splits_in_one_step_and_autopay_moves_past_the_month(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from ledger.services import leases
+    from payments.provider import mask_identifier
+
+    lease = autopay_lease(fake)
+    [old] = leases.live_schedules(lease)
+    old_ref = leases.schedule_ref(old)
+    assert rules(fake) == ["DTSTART=20261020T120000Z;FREQ=MONTHLY"]
+    rent = rent_due(lease, date(2026, 10, 20))
+    assert installments.split_refusal(rent) == ""
+    client, _ = client_for(Role.BILLING)
+    split = client.get(
+        f"/charges/{rent.pk}/split/",
+        {"count": "3", "first_due": FIRST.isoformat(), "cadence": "monthly"},
+    ).content.decode()
+    assert 'id="release-notice"' in split
+    assert "Rent autopay of this lease will skip this month&#x27;s debit" in split
+    plan = plan_for(rent)
+    assert plan.collection == InstallmentCollection.AUTOPAY_DUE
+    [release] = Job.objects.filter(entity_id=rent.pk)
+    assert (release.kind, release.entity_type) == (JobKind.SCHEDULE_DELETE, "rent_charge")
+    assert release.params == {installments.RELEASE_PARAM: True}
+    assert installment_jobs(plan) == []
+    requested = AuditLog.objects.get(action=installments.RENT_RELEASE_REQUESTED_ACTION)
+    assert requested.entity_id == str(rent.pk) and requested.after["plan"] == str(plan.pk)
+    assert requested.after["schedules"] == [mask_identifier(old_ref)]
+    assert old_ref not in str(requested.after)
+    assert installments.release_pending(plan) == installments.RELEASE_PENDING_AUTOPAY
+    run_queued_jobs()
+    release.refresh_from_db()
+    assert (release.status, release.result) == ("done", installments.RELEASED.format(count=3))
+    # The rent schedule is deleted, then created again from next month's debit.
+    assert calls(fake, "delete_scheduled_invoice") == [(old_ref,)]
+    old.refresh_from_db()
+    assert old.state == ScheduleState.ENDED
+    [new] = leases.live_schedules(lease)
+    new_ref = leases.schedule_ref(new)
+    assert new_ref and new_ref != old_ref and new.pk != old.pk
+    assert (new.seq, new.debit_day, new.amount, new.state) == (
+        1,
+        20,
+        D("1500.00"),
+        ScheduleState.ACTIVE,
+    )
+    assert rules(fake) == [
+        "DTSTART=20261020T120000Z;FREQ=MONTHLY",
+        "DTSTART=20261120T120000Z;FREQ=MONTHLY",
+        # Then one one-occurrence schedule per installment.
+        "DTSTART=20261020T120000Z;FREQ=DAILY;COUNT=1",
+        "DTSTART=20261120T120000Z;FREQ=DAILY;COUNT=1",
+        "DTSTART=20261220T120000Z;FREQ=DAILY;COUNT=1",
+    ]
+    assert all(one_off_charges.provider_schedule(row) for row in rows_of(plan))
+    moved = AuditLog.objects.get(action=leases.MOVED_ACTION)
+    assert (moved.entity_type, moved.entity_id) == ("lease", str(lease.pk))
+    assert moved.after == {
+        "plan": str(plan.pk),
+        "seq": 1,
+        "skipped": "2026-10-20",
+        "starts": "2026-11-20T12:00:00+00:00",
+        "row": str(new.pk),
+        "schedule": mask_identifier(new_ref),
+    }
+    deleted = AuditLog.objects.get(action=leases.DELETED_FOR_MOVE_ACTION)
+    assert deleted.after["plan"] == str(plan.pk) and old_ref not in str(deleted.after)
+    assert new_ref not in str(moved.after)
+    assert rent_owed(rent)
+    assert installments.release_pending(plan) == ""
+    page = client.get(f"/leases/{lease.pk}/").content.decode()
+    assert (
+        '<p id="autopay-moved"><strong>Autopay resumes 2026-11-20 (this month is collected in '
+        "installments)</strong></p>"
+    ) in page
+    table = page.split('id="schedules"')[1].split("</table>")[0]
+    assert ">2026-11-20</td>" in table and "2026-10-20" not in table
+    # Once the plan is no longer live the lease page says nothing more.
+    assert installments.cancel(plan, "Paid another way.", a_user(Role.ADMIN)).ok
+    assert leases.autopay_move(lease) is None
+    assert 'id="autopay-moved"' not in client.get(f"/leases/{lease.pk}/").content.decode()
+
+
+def test_a_twice_monthly_lease_moves_both_schedules_and_skips_only_the_split_debit(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from ledger.services import leases
+
+    lease = autopay_lease(fake, debit_day=10, second=20)
+    refs = sorted(leases.schedule_ref(row) for row in leases.live_schedules(lease))
+    assert sorted(rules(fake)) == [
+        "DTSTART=20261010T120000Z;FREQ=MONTHLY",
+        "DTSTART=20261020T120000Z;FREQ=MONTHLY",
+    ]
+    rent = rent_due(lease, date(2026, 10, 10), amount="750.00")
+    plan = plan_for(rent)
+    run_queued_jobs()
+    assert sorted(arguments[0] for arguments in calls(fake, "delete_scheduled_invoice")) == refs  # type: ignore[type-var]
+    rows = {row.seq: row for row in leases.live_schedules(lease)}
+    assert sorted(rows) == [1, 2]
+    assert all(leases.schedule_ref(row) not in refs for row in rows.values())
+    assert all(row.state == ScheduleState.ACTIVE for row in rows.values())
+    # The split debit (the 10th) resumes next month; the 20th keeps this month's debit.
+    assert sorted(rules(fake)[2:4]) == [
+        "DTSTART=20261020T120000Z;FREQ=MONTHLY",
+        "DTSTART=20261110T120000Z;FREQ=MONTHLY",
+    ]
+    moved = {
+        row.after["seq"]: row.after
+        for row in AuditLog.objects.filter(action=leases.MOVED_ACTION)
+        if isinstance(row.after, dict)
+    }
+    assert (moved[1]["skipped"], moved[1]["starts"]) == ("2026-10-10", "2026-11-10T12:00:00+00:00")
+    assert (moved[2]["skipped"], moved[2]["starts"]) == (None, "2026-10-20T12:00:00+00:00")
+    found = leases.autopay_move(lease)
+    assert found is not None and found.resumes == date(2026, 11, 10)
+    assert len(installment_jobs(plan)) == 3
+    assert rent_owed(rent)
+
+
+def test_a_failure_between_the_delete_and_the_create_fails_the_job_and_retry_completes_it(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from ledger.services import leases
+    from payments import one_off_invoices
+    from payments.errors import ProviderUnavailable
+
+    lease = autopay_lease(fake)
+    [old] = leases.live_schedules(lease)
+    rent = rent_due(lease, date(2026, 10, 20))
+    plan = plan_for(rent)
+    fake.fail_next("create_scheduled_invoice", ProviderUnavailable(503, "unavailable"))
+    [failed] = run_queued_jobs()
+    assert failed.status == "failed"
+    assert failed.result.startswith(one_off_invoices.AUTOPAY_MOVE_FAILED)
+    assert "ProviderUnavailable" in failed.result and "Retry from the charge page." in failed.result
+    old.refresh_from_db()
+    assert old.state == ScheduleState.ENDED
+    [left] = leases.live_schedules(lease)
+    assert left.state == ScheduleState.FAILED and not leases.schedule_ref(left)
+    assert "lease.autopay_failed" in actions_on(lease.pk)
+    assert not AuditLog.objects.filter(action=leases.MOVED_ACTION).exists()
+    # Nothing voided, nothing queued: the rent charge stays owed and the plan waits.
+    assert rent_owed(rent)
+    assert installment_jobs(plan) == []
+    assert installments.release_pending(plan) == installments.RELEASE_PENDING_AUTOPAY
+    viewer, _ = client_for(Role.VIEWER)
+    assert 'id="retry-provider"' not in viewer.get(f"/charges/{rent.pk}/").content.decode()
+    assert viewer.post(f"/charges/{rent.pk}/retry-release/").status_code == 403
+    client, _ = client_for(Role.BILLING)
+    page = client.get(f"/charges/{rent.pk}/").content.decode()
+    assert 'id="retry-provider"' in page and "ProviderUnavailable" in page
+    client.post(f"/charges/{rent.pk}/retry-release/")
+    retried = Job.objects.filter(entity_id=rent.pk).latest("created_at", "id")
+    assert retried.pk != failed.pk and retried.kind == JobKind.SCHEDULE_DELETE
+    assert retried.params == {installments.RELEASE_PARAM: True}
+    run_queued_jobs()
+    retried.refresh_from_db()
+    assert (retried.status, retried.result) == ("done", installments.RELEASED.format(count=3))
+    # The delete is not repeated; the failed row is created at last.
+    assert len(calls(fake, "delete_scheduled_invoice")) == 1
+    [new] = leases.live_schedules(lease)
+    assert new.pk == left.pk and new.state == ScheduleState.ACTIVE and leases.schedule_ref(new)
+    assert "DTSTART=20261120T120000Z;FREQ=MONTHLY" in rules(fake)
+    assert AuditLog.objects.filter(action=leases.MOVED_ACTION).count() == 1
+    assert len(installment_jobs(plan)) == 3
+    assert rent_owed(rent)
+    assert 'id="retry-provider"' not in client.get(f"/charges/{rent.pk}/").content.decode()
+
+
+def test_a_rent_charge_whose_month_debit_is_pending_is_still_refused(fake: FakeProvider) -> None:
+    lease = autopay_lease(fake)
+    rent = rent_due(lease, date(2026, 10, 20))
+    rent.status = RentChargeStatus.PENDING
+    rent.save(update_fields=["status"])
+    assert installments.split_refusal(rent) == installments.PENDING
+    outcome = installments.create_plan(
+        rent,
+        2,
+        FIRST,
+        "monthly",
+        [Line(FIRST, D("750.00")), Line(date(2026, 11, 20), D("750.00"))],
+        a_user(Role.BILLING),
+    )
+    assert (outcome.ok, outcome.message) == (False, installments.PENDING)
+    assert nothing_written() and not Job.objects.filter(entity_id=rent.pk).exists()
+
+
+def test_the_lease_end_sees_the_moved_schedule_as_live_until_autopay_is_stopped(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from ledger.services import lease_end, leases
+
+    lease = autopay_lease(fake)
+    rent = rent_due(lease, date(2026, 10, 20))
+    plan_for(rent)
+    run_queued_jobs()
+    found = lease_end.blockers(lease, TODAY)
+    [autopay] = [blocker for blocker in found if blocker.kind == lease_end.AUTOPAY]
+    assert autopay.text == (
+        "Rent autopay (debit 1) is active at the payment provider. It must be stopped first."
+    )
+    assert lease_end.INSTALLMENT_PLAN in [blocker.kind for blocker in found]
+    [new] = leases.live_schedules(lease)
+    new_ref = leases.schedule_ref(new)
+    assert leases.stop_autopay(lease.pk, actor=None).ok
+    assert calls(fake, "delete_scheduled_invoice")[-1] == (new_ref,)
+    assert lease_end.AUTOPAY not in [blocker.kind for blocker in lease_end.blockers(lease, TODAY)]
+
+
+def rent_alone_invoice(operator: Operator, rent: RentCharge, number: str) -> Invoice:
+    """An invoice builder invoice of one Rent line alone, created and e-mailed at the
+    fake through its rent charge's ``invoice_create`` job (PLAN-012b-b D5)."""
+    from payments import jobs
+
+    invoice = Invoice.objects.create(
+        invoice_number=number,
+        operator=operator,
+        rent_charge=rent,
+        issue_date=TODAY,
+        due_date=TODAY,
+        memo="Rent 2026-10",
+        subtotal=rent.amount_due,
+        total=rent.amount_due,
+    )
+    InvoiceLineItem.objects.create(
+        invoice=invoice,
+        position=1,
+        description="Rent 2026-10",
+        quantity=D("1"),
+        unit_price=rent.amount_due,
+        line_total=rent.amount_due,
+        rent_charge=rent,
+    )
+    jobs.enqueue(JobKind.INVOICE_CREATE, rent, None, None)
+    [created] = run_queued_jobs()
+    assert created.status == "done", created.result
+    return invoice
+
+
+def test_an_emailed_rent_alone_invoice_is_released_and_the_rent_charge_kept(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    from payments.provider import mask_identifier
+
+    operator = an_operator(fake)
+    rent = a_rent(operator)
+    invoice = rent_alone_invoice(operator, rent, "INV-2026-9500")
+    ref = provider_ref(invoice)
+    assert installments.split_refusal(rent) == ""
+    assert installments.release_kind(rent) == JobKind.INVOICE_DELETE
+    plan = plan_for(rent)
+    assert plan.collection == InstallmentCollection.MANUAL
+    [release] = [
+        job for job in Job.objects.filter(entity_id=rent.pk) if job.kind == "invoice_delete"
+    ]
+    assert release.params == {installments.RELEASE_PARAM: True}
+    requested = AuditLog.objects.get(action=installments.RENT_RELEASE_REQUESTED_ACTION)
+    assert requested.after["invoice_number"] == "INV-2026-9500"
+    assert requested.after["provider_invoice"] == mask_identifier(ref) != ref
+    assert installments.release_pending(plan) == installments.RELEASE_PENDING_INVOICE.format(
+        number="INV-2026-9500"
+    )
+    run_queued_jobs()
+    release.refresh_from_db()
+    # Manual installments: nothing to queue at the provider.
+    assert (release.status, release.result) == ("done", installments.RELEASED.format(count=0))
+    assert calls(fake, "delete_invoice") == [(ref,)]
+    invoice.refresh_from_db()
+    assert (invoice.internal_status, invoice.provider_status) == ("void", "DELETED")
+    # The links stay as history.
+    assert invoice.rent_charge_id == rent.pk
+    assert InvoiceLineItem.objects.get(invoice=invoice).rent_charge_id == rent.pk
+    released = AuditLog.objects.get(action=one_off_charges.INVOICE_RELEASED_ACTION)
+    assert released.entity_id == str(invoice.pk) and ref not in str(released.after)
+    assert rent_owed(rent)
+    assert installment_jobs(plan) == []
+    assert installments.release_pending(plan) == ""
+
+
+def test_a_rent_line_of_a_mixed_invoice_is_refused(fake: FakeProvider) -> None:
+    operator = an_operator(fake)
+    rent = a_rent(operator)
+    setup = a_one_off(operator, "200.00", collection=CollectionMethod.EMAIL)
+    invoice = Invoice.objects.create(
+        invoice_number="INV-2026-9600",
+        operator=operator,
+        one_off_charge=setup,
+        issue_date=TODAY,
+        due_date=TODAY,
+        subtotal=D("1200.00"),
+        total=D("1200.00"),
+    )
+    InvoiceLineItem.objects.create(
+        invoice=invoice,
+        position=1,
+        description=setup.description,
+        quantity=D("1"),
+        unit_price=setup.price,
+        line_total=setup.price,
+        one_off_charge=setup,
+    )
+    InvoiceLineItem.objects.create(
+        invoice=invoice,
+        position=2,
+        description="Rent 2026-10",
+        quantity=D("1"),
+        unit_price=rent.amount_due,
+        line_total=rent.amount_due,
+        rent_charge=rent,
+    )
+    ExternalRef.objects.create(
+        entity_type="invoice",
+        entity_id=invoice.pk,
+        provider="stax_pay",
+        external_kind="invoice",
+        external_id="fake-invoice-mixed",
+    )
+    shared = installments.LIVE_INVOICE_SHARED.format(number="INV-2026-9600")
+    assert installments.split_refusal(rent) == shared
+    outcome = installments.create_plan(
+        rent,
+        2,
+        FIRST,
+        "monthly",
+        [Line(FIRST, D("500.00")), Line(date(2026, 11, 20), D("500.00"))],
+        a_user(Role.BILLING),
+    )
+    assert (outcome.ok, outcome.message) == (False, shared)
+    assert nothing_written() and not Job.objects.exists()
+
+
+def test_a_rent_alone_invoice_that_autopay_would_also_debit_is_refused(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    lease = autopay_lease(fake)
+    rent = rent_due(lease, date(2026, 10, 20))
+    assert lease.operator is not None
+    rent_alone_invoice(lease.operator, rent, "INV-2026-9700")
+    assert installments.split_refusal(rent) == installments.AUTOPAY_WILL_DEBIT
+
+
+def test_a_split_of_rent_on_a_wire_lease_is_unchanged(
+    fake: FakeProvider, worker: None, ticking: None
+) -> None:
+    rent = a_rent(an_operator(fake))
+    assert installments.release_kind(rent) == "" and installments.release_notice(rent) == ""
+    plan = plan_for(rent)
+    assert plan.collection == InstallmentCollection.MANUAL
+    assert not Job.objects.exists()
+    assert not AuditLog.objects.filter(
+        action__in=[installments.RENT_RELEASE_REQUESTED_ACTION, installments.RELEASED_ACTION]
+    ).exists()
+    assert installments.release_pending(plan) == ""
+    assert rent_owed(rent)

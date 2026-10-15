@@ -341,7 +341,9 @@ def terms_set(end: LeaseEnd) -> bool:
 
 def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
     """What must be collected or cancelled before the lease ends (D5(b)), each with the
-    page that clears it. Local data only: no provider call."""
+    page that clears it. Local data only: no provider call. A rent autopay moved past a
+    split month (PLAN-012b-b D13) leaves its old schedules ended (no blocker); the new
+    schedules are live rent schedules and block as any other until autopay is stopped."""
     found: list[Blocker] = []
     charges = (
         OneOffCharge.objects.filter(lease=lease)

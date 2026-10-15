@@ -1158,3 +1158,19 @@ item counted as a fee, which the Rent line replaces). One MAJOR found by the rep
 fixed: the transfer's balance blockers ignored the unpaid-balance offset. Gate: ruff, format,
 mypy (385 files), lock, migrations clean; sqlite 5,113 passed; PostgreSQL 23 + 5,708 passed;
 e2e 7; secret scans clean; Fable's adversarial file 12 cases green. Batch C assigned.
+
+## Update, 2026-10-15, PLAN-012b-b Batch C built and gated (not pushed); 12b-b complete
+
+Batch C (owner's item 9): rent charges split through the release path. A rent charge with its
+own live Stax invoice (a rent-alone builder invoice) is released like a one-off charge; a rent
+charge that autopay would still debit this month is split in one step: the worker deletes the
+lease's rent schedule at Stax and creates it again from next month's debit (each debit of a
+twice-monthly lease keeps its own start; the lease page says "Autopay resumes <date>"), then the
+installments' own schedules follow; a failure between delete and create is a failed job with
+Retry and voids nothing; a late debit of the old schedule lands on the rent charge and puts the
+plan on the attention list. One MAJOR found and fixed in the rework (the attention item covered
+one-off parents only). TODO-VERIFY-064 (Stax runs a new `DTSTART` without catch-up) is open
+until the first autopay split on staging. Gate: ruff, format, mypy (386 files), lock, migrations
+clean; sqlite 5,133 passed; PostgreSQL 23 + 5,728 passed; e2e 7; secret scans clean; Fable's
+adversarial file 4 cases green. 12b-b is complete in the working tree (Batches A, B, C
+committed); the checkpoint report goes to the owner before the push.

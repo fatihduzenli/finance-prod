@@ -255,6 +255,7 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:plans:detail` | GET | viewer | an installment plan's page |
 | `ledger:plans:reschedule` | POST | billing | moves the unpaid installments; form on GET (billing) |
 | `ledger:plans:cancel` | POST | admin | cancels the plan with a note; form on GET (admin) |
+| `ledger:charges:retry_release` | POST | billing | repeats a failed release of a rent charge's Stax invoice or autopay move (PLAN-012b-b D13) |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |
 
 The `admin` group also holds Django's model permissions for users, groups, OTP
