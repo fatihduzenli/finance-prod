@@ -740,7 +740,20 @@ blocks unless an admin overrides with a reason, follow-up 12b-a approved)
    Accepted by the owner 2026-10-14.
 6. **Follow-up 12b-a** (owner, 2026-10-14): splitting a charge that has a live Stax invoice or
    schedule deletes the parent's Stax object without voiding the charge and recreates the
-   collection per installment; built right after the 12b push, before Step 12d.
+   collection per installment; built right after the 12b push, before Step 12d. Extended to
+   rent charges by PLAN-012b-b D13 (owner's item 9, 2026-10-15): a rent invoice is released the
+   same way, and a rent autopay schedule is moved past the split month (deleted and created
+   again from the next month's debit).
+7. **The P&L at lease end** (owner's item 8, 2026-10-15; PLAN-012b-b D12). A deposit charge is
+   never a fee billed and a deposit payment never a fee collected. At lease end, the deductions
+   other than the unpaid-balance offset are the **fees billed of the end month**: the part the
+   deposit covers (the withheld amount less the offset) is billed and collected in that month
+   (shown apart as "withheld deposit"), and the rest is the "Lease-end balance" charge, billed in
+   that month and collected when it is paid. The offset part is neither billed nor collected at
+   the end (it paid existing charges, counted where those were billed). So for any month billed
+   is at least collected, and the deposits-held line falls by the withheld and refunded parts.
+   Example (Test Store Three): deposit $500 paid, damage $800 → October fees billed $800, fees
+   collected $500 (withheld), lease-end balance $300 open, deposits held $0.
 
 ### Consequences
 

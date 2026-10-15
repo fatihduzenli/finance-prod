@@ -21,7 +21,10 @@ at about local speed.
 | Timed local run of the unit step's selection on PostgreSQL | 5,633 passed, 3 skipped in 13:58 (exit 0): under the owner's 15 minutes |
 | Limits: migration step 15 (≥ 1.5 × measured), unit step 20 (≥ 1.4 × measured; the owner's requirement is the measured time under 15) | ok |
 
-**Residual risk.** The real CI timing is seen only on the next push; the limits carry the
+**CI confirmation (run 38680501084, push of `a59de59`, 2026-10-15):** Migration tests 10:34
+(limit 15), Unit tests 12:44 (limit 20; under the owner's 15 minutes), e2e 0:36, deploy green.
+
+**Residual risk.** The real CI timing was seen on that run; the limits carry the
 margin above. A new migration test must be added to the migration step's list by hand (the
 comment in the workflow says so); a forgotten one simply runs in the unit step.
 

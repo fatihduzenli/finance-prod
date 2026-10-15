@@ -1111,3 +1111,22 @@ invoices and rent invoices unchanged. One MAJOR found and resolved in the rework
 cancel/waive). Gate on the final tree: ruff, format, mypy (379 files), lock, migrations clean;
 sqlite 5,039 passed; PostgreSQL as the two CI selections, 21 and 5,633 passed; e2e 7; secret
 scans clean; Fable's adversarial file 6 cases green. QA: `docs/qa/QA-012b-a-…md`.
+
+## Update, 2026-10-15, Checkpoint 12b clicks; 12b-a pushed; PLAN-012b-b started
+
+The owner's staging clicks for 12b: tests 2a, 2b, 3, 4 and 5 passed; test 1 (proration on a
+lease starting on the 13th) could not run: **finding 12b-1**, the first rent charge of a
+backdated lease is never created (the run looks at today only). On the owner's word, pushed
+`3cde4bc..a59de59` (the deploy note, the CI step split, 12b-a part 2). PLAN-012b-b written from
+the owner's items 3 to 9: rent run catch-up and the first charge on save (12b-1), a Rent line in
+the invoice builder, a lease end left at blockers leaves nothing behind, the wizards create the
+final prorated rent charge, an unpaid deposit blocks, the P&L rule at lease end (ADR-0012 §7),
+splitting rent through the release path; three batches, each gated; checkpoint before the push.
+Batch A assigned.
+
+## Update, 2026-10-15, PLAN-012b-a deployed to staging
+
+CI run 38680501084 on `a59de59`: Migration tests 10:34 of 15, Unit tests 12:44 of 20 (under the
+owner's 15 minutes), e2e and the deploy green. Staging revision `finance-staging-web--0000042`
+healthy on image `a59de59`, no pending migration, `/healthz` 200. The 12b-a staging click
+(split an e-mailed charge whose Stax invoice is live) is open for the owner.
