@@ -1207,3 +1207,20 @@ the label alone does not give the URL). **For Step 12d:**
 the store page's Invoices tab lists the operator's drafts with Edit, Send and Delete (Cancel);
 the operator page likewise; the "rent <month> of store X is already on draft DRAFT-…" refusal
 (PLAN-012b-b D4, `LINE_RENT_ON_DRAFT`) links to that draft.
+
+## Update, 2026-10-15, Checkpoint 12b-b closed; Step 12d received
+
+The owner's clicks: Istanbul's October charge created by the catch-up (13–31 Oct, 19 of 31
+days = $1,225.81); Test store 2 has no stuck lease end; Test Store Three's P&L row follows
+ADR-0012 §7 (548.39 / 1,800 / 1,500 incl. 500 withheld); Istanbul's November rent invoice sent
+with one charge linked. Click 5 (the autopay split, TODO-VERIFY-064) waits for ACH on the
+sandbox. **Step 12d** received in writing: the store page as the single workspace (header card,
+one action bar, tabs incl. drafts with Edit/Send/Delete, manual payment allocation with credits),
+the lease page as details only, the operator page as the same workspace across stores, detail
+pages with a store link, navigation to store pages, URLs kept with redirects, no "are you sure"
+for reversible actions, forms opened from the store hide the known fields, the setup checklist
+without tick boxes and a "Show in setup checklist" flag, the builder's single combo box per line
+with "Existing open charge", a month select, the width bug, trash-icon remove, the rent run out
+of the main navigation with "Create missing charges" per store, the grid window (10 past,
+current, next) with a From/To picker; tests; a new ADR for manual payment allocation. Done
+before 12c (the design pass). Plan: PLAN-012d.
