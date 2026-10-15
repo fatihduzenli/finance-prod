@@ -1196,3 +1196,14 @@ Istanbul (1991) proration after the first daily tick or "Create today's charges"
 transfer; Test Store Three P&L per ADR-0012 §7; a move-in invoice with a Rent line; an autopay
 rent split (settles TODO-VERIFY-064). Next: Step 12d (invoice-level payment entry) or the
 owner's findings from the clicks.
+
+## Finding 12d-1 (owner, 2026-10-15, staging): invoice drafts are not reachable
+
+An unsent draft (DRAFT-143BF4CD, store Istanbul 1991) is listed nowhere the owner looked: not
+the store page, the lease page, the invoice builder, nor `/invoices/`. Today only the
+**operator page** lists drafts ("Invoices made here", number linked, no actions), and a draft's
+own URL is `/invoices/drafts/<uuid>/` (the DRAFT- label is the id's first eight characters, so
+the label alone does not give the URL). **For Step 12d:**
+the store page's Invoices tab lists the operator's drafts with Edit, Send and Delete (Cancel);
+the operator page likewise; the "rent <month> of store X is already on draft DRAFT-…" refusal
+(PLAN-012b-b D4, `LINE_RENT_ON_DRAFT`) links to that draft.
