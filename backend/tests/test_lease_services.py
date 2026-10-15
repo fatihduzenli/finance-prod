@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -121,8 +121,17 @@ def lease_fields(**overrides: Any) -> dict[str, Any]:
 
 
 def make_lease(rent: Decimal = RENT, **overrides: Any) -> Lease:
+    """A lease saved through the service the day before it starts. Saving runs the rent
+    run's catch-up up to the day it is saved (PLAN-012b-b D2), so this lease has no
+    charge until a run creates one; ``test_rent_catch_up.py`` saves leases late."""
+    fields = lease_fields(**overrides)
+    started: date | None = fields["started_on"]
     lease, created = service.create_lease(
-        lease_fields(**overrides), rent=rent, creation_key=uuid.uuid4(), actor=None
+        fields,
+        rent=rent,
+        creation_key=uuid.uuid4(),
+        actor=None,
+        today=started - timedelta(days=1) if started is not None else None,
     )
     assert created
     return lease

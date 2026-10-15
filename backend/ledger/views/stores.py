@@ -146,6 +146,7 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
     store = _load(pk)
     today = timezone.localdate()
     admin = meets(_role(request), Role.ADMIN)
+    in_progress = lease_end.store_in_progress(store)
     return render(
         request,
         "ledger/stores/detail.html",
@@ -159,6 +160,12 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
             # is in effect.
             "can_end_lease": admin and lease_end.current_lease(store, today) is not None,
             "vacant_since": lease_end.vacant_since(store, today),
+            # PLAN-012b-b D9: a lease end whose statement step opened, with Continue and
+            # Cancel (admin); a draft that never got there shows nothing.
+            "end_in_progress": in_progress,
+            "end_in_progress_transfer": (
+                lease_end.draft_transfer(in_progress) if in_progress is not None else None
+            ),
             "can_edit": meets(_role(request), Role.ADMIN),
             "can_set_cost": meets(_role(request), Role.BILLING),
             "cost": store_costs.current_cost(store, today),

@@ -77,13 +77,21 @@ def health() -> Iterator[tuple[CircuitBreaker, FailureBudget]]:
 
 
 def lease(**overrides: Any) -> Lease:
-    """A lease of its own store and operator; the operator has its own customer ID."""
-    values: dict[str, Any] = {"debit_day": 15}
+    """A lease of its own store and operator; the operator has its own customer ID.
+
+    Unless a test gives its own start, it starts on 1 October 2026, so the run's
+    catch-up (PLAN-012b-b D1) finds no earlier month to charge, and its rent row keeps
+    the 1 January 2026 start these tests were written with (a rent change from
+    2 October is then allowed)."""
+    values: dict[str, Any] = {"debit_day": 15, "started_on": PERIOD}
     values.update(overrides)
     if "operator" not in values:
         tag = uuid.uuid4().hex[:8]
         values["operator"] = make_operator(email=f"{tag}@example.com", customer=f"cus-{tag}")
-    return make_lease(**values)
+    row = make_lease(**values)
+    if "started_on" not in overrides:
+        LeaseRentHistory.objects.filter(lease=row).update(effective_from=date(2026, 1, 1))
+    return row
 
 
 def enrolled(fake: FakeProvider, **overrides: Any) -> tuple[Lease, list[str]]:
@@ -220,7 +228,9 @@ def test_twice_monthly_leases_get_seq_1_and_2_on_their_own_days() -> None:
 
 
 def test_a_debit_day_past_the_month_end_falls_on_the_last_day() -> None:
-    row = lease(debit_day=31, collection_status=CollectionStatus.ACTIVE)
+    row = lease(
+        debit_day=31, collection_status=CollectionStatus.ACTIVE, started_on=date(2026, 9, 1)
+    )
     assert rent_run.leases_due(date(2026, 9, 29)).due == ()
     report = rent_run.create_charges(date(2026, 9, 30), actor=None)
     assert [(c.lease_id, c.period_month, c.due_on) for c in report.created] == [
@@ -238,7 +248,7 @@ def test_the_charge_uses_the_rent_in_effect_on_the_due_date() -> None:
 
 
 def test_the_run_shows_last_months_charge_of_the_same_debit() -> None:
-    row = lease()
+    row = lease(started_on=date(2026, 9, 1))
     rent_run.create_charges(date(2026, 9, 15), actor=None)
     [item] = rent_run.leases_due(DAY).due
     assert item.charge is None

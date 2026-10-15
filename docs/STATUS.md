@@ -1130,3 +1130,17 @@ CI run 38680501084 on `a59de59`: Migration tests 10:34 of 15, Unit tests 12:44 o
 owner's 15 minutes), e2e and the deploy green. Staging revision `finance-staging-web--0000042`
 healthy on image `a59de59`, no pending migration, `/healthz` 200. The 12b-a staging click
 (split an e-mailed charge whose Stax invoice is live) is open for the owner.
+
+## Update, 2026-10-15, PLAN-012b-b Batch A built and gated (not pushed)
+
+Batch A (owner's items 3, 5, 6, 7): the rent run catches up every missing debit since each
+lease's start (24 months back), the daily job now creates charges too (it never did; the owner's
+text names it), a saved lease gets its first prorated charge at once; a lease end is "in
+progress" only once its statement step opened (banner with Continue and Cancel, a transfer
+adopts an earlier draft, term-less drafts swept after 7 days); opening the statement creates the
+final prorated rent charge and catches up earlier months; an unpaid deposit blocks and the
+statement reads "Deposit charged $X, collected $Y"; migration 0040. Gate: ruff, format, mypy
+(383 files), lock, migrations clean; sqlite 5,075 passed; PostgreSQL 22 + 5,670 passed; e2e 7;
+secret scans clean; Fable's adversarial file green (5 + 1 PostgreSQL-only); one of Fable's older
+tests fixed for the first charge on save. **For the owner:** the first daily tick after the
+deploy creates the missing months for every active lease (staging: test data). Batch B assigned.

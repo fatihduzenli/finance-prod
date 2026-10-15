@@ -44,7 +44,7 @@ from ledger.forms import (
     TransferIncomingForm,
     TransferOperatorForm,
 )
-from ledger.models import LeaseTransfer, LeaseTransferStatus, Operator, Store
+from ledger.models import LeaseEnd, LeaseTransfer, LeaseTransferStatus, Operator, Store
 from ledger.services import lease_end, leases, statements
 from ledger.services import transfer as service
 from ledger.views.operators import (
@@ -177,10 +177,22 @@ def store_transfer(request: HttpRequest, pk: str) -> HttpResponse:
             return redirect("ledger:stores:detail", pk=store.pk)
         return redirect("ledger:transfers:operator", pk=transfer.pk)
     lease = found.outgoing_lease if found is not None else lease_end.current_lease(store)
+    # PLAN-012b-b D9: a plain lease end in progress (its statement step opened) is
+    # continued or cancelled first; one that never got there is adopted on Start.
+    plain = (
+        LeaseEnd.objects.filter(lease=lease).first()
+        if found is None and lease is not None
+        else None
+    )
     return render(
         request,
         "ledger/transfers/start.html",
-        {"store": store, "lease": lease, "draft": found},
+        {
+            "store": store,
+            "lease": lease,
+            "draft": found,
+            "end_in_progress": plain if lease_end.in_progress(plain) else None,
+        },
     )
 
 

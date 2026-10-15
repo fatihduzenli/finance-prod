@@ -17,6 +17,7 @@
   {% endif %}
 
   <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. The payment provider's schedules generate the invoices; "Match invoices" links them to these charges. Nothing here debits anyone.</p>
+  <p class="muted" id="catch-up-scope">Creating charges also catches up: every debit date from a lease's start to today that has no charge gets one, due on that date (or on the start date when the first month's debit day is before it), the first month prorated. It looks back at most {{ catch_up_months }} months, this month included.</p>
   <p class="muted" id="match-scope">"Match invoices" reads the invoices of the provider's schedules only. An invoice made on the payment provider's dashboard is not matched here: link it from its charge's page with "Link invoice".</p>
 
   {% if can_run %}

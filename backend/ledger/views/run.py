@@ -7,7 +7,9 @@ It reads only: no provider call and no write.
 
 ``run:create_charges`` and ``run:match`` need ``billing`` (D10; checked by
 ``accounts.registry`` and again here). Both end in a redirect. Creating charges acts on
-the server's today, never a date from the request, with the outcome as messages.
+the server's today, never a date from the request, with the outcome as messages; it
+also catches up the debit dates since each lease's start that have no charge
+(PLAN-012b-b D1), counted as "Created (catch-up)".
 "Match invoices" reads the provider, so it is queued as a ``run_match`` job for the
 worker (PLAN-010 D3); the page shows the latest one and its report lines.
 
@@ -68,6 +70,7 @@ def run_today(request: HttpRequest) -> HttpResponse:
             "health": provider_health(),
             "threshold": settings.LARGE_DEBIT_WARNING_AMOUNT,
             "can_run": meets(_role(request), Role.BILLING),
+            "catch_up_months": rent_run.CATCH_UP_MONTHS,
             "dead_letters": WebhookEvent.objects.filter(outcome=WebhookOutcome.DEAD_LETTER).count(),
         },
     )
@@ -128,7 +131,9 @@ def run_create_charges(request: HttpRequest) -> HttpResponse:
     report = rent_run.create_charges(timezone.localdate(), actor=_actor(request))
     messages.success(
         request,
-        f"Charges created: {len(report.created)}. Already created: {len(report.already)}. "
+        f"Charges created: {len(report.created)}. "
+        f"Created (catch-up): {len(report.caught_up)}. "
+        f"Already created: {len(report.already)}. "
         f"Skipped leases: {len(report.skipped)}.",
     )
     for item in report.skipped[:MAX_LINES]:

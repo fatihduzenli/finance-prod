@@ -203,15 +203,17 @@ def test_the_run_page_lists_due_and_skipped_leases_and_a_double_run_creates_noth
     first = billing.post(CREATE)
     assert (first.status_code, first["Location"]) == (302, RUN)
     after = billing.get(RUN).content.decode()
-    assert "Charges created: 1. Already created: 0. Skipped leases: 1." in after
+    assert (
+        "Charges created: 1. Created (catch-up): 0. Already created: 0. Skipped leases: 1." in after
+    )
     billing.post(CREATE)
     again = billing.get(RUN).content.decode()
-    assert "Charges created: 0. Already created: 1." in again
+    assert "Charges created: 0. Created (catch-up): 0. Already created: 1." in again
     assert RentCharge.objects.filter(lease=due).count() == 1
 
 
 def test_the_run_page_shows_last_months_status_and_balance(billing: Client) -> None:
-    row = lease()
+    row = lease(started_on=date(2026, 9, 1))
     rent_run.create_charges(date(2026, 9, 15), actor=None)
     RentCharge.objects.filter(lease=row).update(
         status=RentChargeStatus.PARTIAL, amount_paid=D("1000.00")

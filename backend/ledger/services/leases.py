@@ -37,6 +37,11 @@ Rules kept here:
   ``active=True`` and a rule with a new future ``DTSTART``. A schedule that no longer
   matches the lease is flagged ``needs_review`` and cannot be resumed; staff pause it
   and enable autopay again, which ends the old row and creates a new schedule.
+- **The first charge on save** (PLAN-012b-b D2): :func:`create_lease` and
+  :func:`update_lease` run the rent run's catch-up for the lease in their transaction
+  (:func:`ledger.services.rent_run.catch_up_lease`), so a lease that started on or
+  before today shows its charges at once; a lease starting later gets nothing until the
+  run on or after its start.
 - **Ending a lease** (PLAN-010b Batch C): :func:`end_lease` sets the end date, the
   reason and the ``ended`` status; it is refused while autopay is on (pause it first).
 
@@ -664,6 +669,7 @@ def create_lease(
             None,
             {**_snapshot(lease), "creation_key": str(creation_key)},
         )
+        _catch_up(lease, actor, today)
     return lease, True
 
 
@@ -709,7 +715,16 @@ def update_lease(
         after = _snapshot(lease)
         if after != before:
             _audit(actor, "lease.updated", lease, before, after)
+        _catch_up(lease, actor, today)
     return lease
+
+
+def _catch_up(lease: Lease, actor: User | None, today: date | None) -> None:
+    """PLAN-012b-b D2: the lease's missing charges up to today, in the caller's
+    transaction (nothing for a lease that starts later or is not active)."""
+    from ledger.services import rent_run  # rent_run imports this module
+
+    rent_run.catch_up_lease(lease, today or timezone.localdate(), actor)
 
 
 def end_lease(

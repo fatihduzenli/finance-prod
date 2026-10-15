@@ -19,7 +19,7 @@
     <thead><tr><th>Charge</th><th>Due</th><th>Balance</th></tr></thead>
     <tbody>
       {% for line in figures.open_lines %}
-        <tr><td>{{ line.description }}</td><td>{{ line.due_on|date:"Y-m-d" }}</td><td>${{ line.balance }}</td></tr>
+        <tr><td>{% if line.url %}<a href="{{ line.url }}">{{ line.description }}</a>{% else %}{{ line.description }}{% endif %}</td><td>{{ line.due_on|date:"Y-m-d" }}</td><td>${{ line.balance }}</td></tr>
       {% empty %}
         <tr><td colspan="3" class="muted">Nothing is open.</td></tr>
       {% endfor %}
@@ -29,7 +29,7 @@
   {% endresponsive_table %}
   <h2>Deposit</h2>
   <dl>
-    {% for deposit in figures.deposits %}<dt>{{ deposit.label }}</dt><dd>${{ deposit.held }}</dd>{% endfor %}
+    {% for deposit in figures.deposits %}<dt>{{ deposit.label }}</dt><dd class="deposit-line">{% if deposit.charged != deposit.held %}{{ deposit.text }}{% else %}${{ deposit.held }}{% endif %}</dd>{% endfor %}
     <dt>Deposit held</dt><dd id="deposit-held">${{ figures.deposit_held }}</dd>
   </dl>
   {% if figures.deductions %}

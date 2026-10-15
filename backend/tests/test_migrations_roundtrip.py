@@ -58,6 +58,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0037_transfer_fields",
             "ledger.migrations.0038_installments",
             "ledger.migrations.0039_transfer_debt_override",
+            "ledger.migrations.0040_lease_end_statement_opened",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -1250,6 +1251,71 @@ def test_the_debt_override_migration_over_an_existing_row_on_postgresql(
     result = _manage(repo_root, url, "migrate", "--noinput")
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert _rows(url, OVERRIDE_ROWS) == after
+
+
+# --- PLAN-012b-b D9: when a lease end's statement step opened ---------------------------
+#
+# Seeds a draft lease end at ``ledger.0039``, migrates forward, back and forward again on
+# PostgreSQL (sqlite runs 0040 in the plain round trip) and reads the row with plain SQL:
+# the new column is null (the draft is not in progress) and the reverse drops it plainly.
+
+STATE_BEFORE_STATEMENT_OPENED = (("ledger", "0039_transfer_debt_override"),)
+OPENED_ROWS = "SELECT status, ended_on, statement_opened_at FROM lease_ends"
+
+
+def seed_before_statement_opened() -> None:
+    """Seed one draft lease end with the models of ``STATE_BEFORE_STATEMENT_OPENED``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_STATEMENT_OPENED)).apps
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 1402", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store, collection_status="prospective", payment_channel="unknown"
+    )
+    apps.get_model("ledger", "LeaseEnd").objects.create(lease=lease)
+
+
+@requires_postgresql
+def test_the_statement_opened_migration_over_an_existing_row_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_STATEMENT_OPENED)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_statement_opened as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    after = [("draft", "None", "None")]
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, OPENED_ROWS) == after
+    with psycopg.connect(url) as scratch:
+        scratch.execute("UPDATE lease_ends SET statement_opened_at = now()")
+    _migrate_to(repo_root, url, *STATE_BEFORE_STATEMENT_OPENED)
+    assert _rows(url, "SELECT count(*) FROM lease_ends") == [("1",)]
+    assert _rows(
+        url,
+        "SELECT count(*) FROM information_schema.columns WHERE table_name = 'lease_ends' "
+        "AND column_name = 'statement_opened_at'",
+    ) == [("0",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, OPENED_ROWS) == after
 
 
 # --- Row 2 --------------------------------------------------------------------------

@@ -545,18 +545,26 @@ days in the month, rounded once to the cent, start and end days both counted; th
 charge shows the arithmetic ("13–31 Oct, 19 of 31 days of $2,000.00 = $1,225.81") on the charge
 page, the grid cell and the statement. "Prorate first month" on the lease form (default on) turns
 it off for a lease that pays a full first month. Months after a lease's end date are never
-charged.
+charged. **The rent run catches up** (PLAN-012b-b): the daily job and the "Create today's
+charges" button both create today's debits and then every missing debit between each lease's
+start date and today (at most 24 months back), the first month prorated, each due on its debit
+date or on the start date when the start falls after that month's debit day; the page reports
+"Created (catch-up): M". A lease saved with a start date on or before today gets its first
+charge at once; a lease starting later gets it on the start date.
 
 **End lease** (store page, admin). Four steps, which can be left and resumed; Cancel deletes the
 draft and changes nothing. (1) **Terms:** the end date (today by default, never in the future),
 the reason (moved out, terminated, transfer, other) with a few words, and "Prorate last month"
 (default on). (2) **Blockers:** every charge with a live Stax invoice or a provider schedule, every
-rent or insurance schedule that is active or paused at Stax, every pending provider payment, each
-with a link to where it is cancelled, collected or stopped; **Stop autopay** (lease page, admin)
+rent or insurance schedule that is active or paused at Stax, every pending provider payment, a
+live installment plan, and a security deposit not collected ("collect it, or waive or cancel the
+charge"), each with a link to where it is cancelled, collected or stopped; **Stop autopay** (lease page, admin)
 deletes the schedules at Stax through the worker so the blocker clears. The wizard cannot pass
-while anything is listed and checks again at confirm. (3) **Statement:** the last month's rent
+while anything is listed and checks again at confirm. (3) **Statement:** opening it creates the
+final month's prorated rent charge (and any missing earlier month) so it appears as a real line
+with its link, offset against the deposit like any other balance; the last month's rent is
 reduced to the days used (an unpaid charge is reduced; a paid one gives the excess back as a
-credit; a missing one is created), rent charged for months after the end date waived (or credited
+credit), the deposit line reads "Deposit charged $X, collected $Y" when they differ, rent charged for months after the end date waived (or credited
 when paid), every open balance on the lease, the deposit held, and the **deductions** you type
 (damage, cleaning, unpaid balance offset, other); refund due = deposit − deductions, or the
 amount owed. (4) **Settlement:** how the refund is paid (Zelle, wire or check; never through
@@ -567,7 +575,11 @@ shows "Vacant since <date>", the worker stores the final statement as a PDF unde
 documents (kind *Final statement*) and queues the e-mail to the operator (sent when mail is on,
 to the catch-all on staging, recorded as suppressed when mail is off). Every step is audited.
 An installment plan that is live on a charge of the lease is a blocker too: let it complete or
-cancel it (admin) first.
+cancel it (admin) first. A lease end that never reached the statement step is not "in
+progress": the store shows no banner and a transfer simply takes the draft over; one that
+reached the statement shows "A lease end is in progress (statement step)" with **Continue** and
+**Cancel** (admin). Drafts whose terms were never set are removed after seven days by the daily
+job.
 
 **Transfer** (store page, admin). Pick the incoming operator from the list or create one on the
 spot (name, e-mail, phone, SMS phone and consents); the transfer cannot pass while the outgoing

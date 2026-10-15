@@ -50,6 +50,18 @@ Rules kept here:
   (:func:`ledger.services.proration.prorated`), split between two debits as a full
   month is, with the arithmetic in ``proration_text``. A day after the month of the
   lease's ``ended_on`` is never charged.
+- **Catch-up** (PLAN-012b-b D1, D2): after today's debits, :func:`create_charges` gives
+  every active lease with a known channel that has started a charge for each debit date
+  from its start month to the day that has none (:func:`catch_up_lease`): due on the
+  debit date, or on the start date when the start month's debit day is before it; the
+  amount as above (the first month prorated, a twice-monthly lease split); audited with
+  ``"catch_up": true``. A month after the month of ``ended_on``, a debit date with no rent
+  in effect and a month that already has the debit's charge are skipped, and it looks
+  back at most :data:`CATCH_UP_MONTHS` months (this month and the 23 before). The daily
+  ``collections_tick`` (actor ``None``) and the run page's button both call
+  :func:`create_charges` (PLAN-012b-b D3); saving a lease runs the catch-up for that lease
+  (:mod:`ledger.services.leases`). Every charge is made by
+  :func:`create_month`, the single-month helper.
 - **Carried balance** (PLAN-009 D5): the open balances of a lease's earlier charges are
   shown with each due debit and on the charge page; a new charge's amount never
   includes them. A charge split into a live installment plan (PLAN-012e D9) is owed
@@ -146,6 +158,9 @@ SKIP_ENDED = "The lease has ended."
 SKIP_UNKNOWN_CHANNEL = "The payment channel is unknown."
 SKIP_NOT_STARTED = "The lease starts after this date."
 SKIP_NO_RENT = "No rent is in effect on this date."
+NO_SUCH_DEBIT = "The lease has no such debit."
+#: PLAN-012b-b D1: the catch-up looks back at most this many months (this month included).
+CATCH_UP_MONTHS = 24
 _STATUS_SKIPS: dict[str, str] = {
     CollectionStatus.PAUSED: SKIP_PAUSED,
     CollectionStatus.PROSPECTIVE: SKIP_PROSPECTIVE,
@@ -340,6 +355,8 @@ class ChargeRunReport:
     created: tuple[RentCharge, ...]
     already: tuple[RentCharge, ...]
     skipped: tuple[SkippedLease, ...]
+    #: PLAN-012b-b D1: the charges the catch-up created for earlier debit dates.
+    caught_up: tuple[RentCharge, ...] = ()
 
 
 class MarkAction(StrEnum):
@@ -586,29 +603,192 @@ def _skip_reason(lease: Lease, day: date) -> str:
 
 
 def create_charges(day: date, *, actor: User | None) -> ChargeRunReport:
-    """One charge per due debit, idempotently (D6)."""
+    """One charge per due debit, idempotently (D6), then the catch-up of every eligible
+    lease (PLAN-012b-b D1)."""
     plan = leases_due(day)
     created: list[RentCharge] = []
     already: list[RentCharge] = []
     for item in plan.due:
-        with transaction.atomic():
-            charge, made = RentCharge.objects.get_or_create(
-                lease=item.lease,
-                period_month=plan.period,
-                seq=item.seq,
-                defaults={
-                    "due_on": day,
-                    "amount_due": item.amount,
-                    "status": RentChargeStatus.DUE,
-                    "proration_text": item.proration_text or None,
-                },
-            )
-            if made:
-                _audit(
-                    actor, "rent_charge.created", ENTITY_CHARGE, charge.pk, None, _charge(charge)
-                )
+        charge, made = create_month(
+            item.lease,
+            plan.period,
+            actor,
+            due_on=day,
+            seq=item.seq,
+            amount=item.amount,
+            proration_text=item.proration_text,
+        )
         (created if made else already).append(charge)
-    return ChargeRunReport(tuple(created), tuple(already), plan.skipped)
+    caught_up: list[RentCharge] = []
+    for lease in _catch_up_leases(day):
+        caught_up.extend(catch_up_lease(lease, day, actor))
+    return ChargeRunReport(tuple(created), tuple(already), plan.skipped, tuple(caught_up))
+
+
+def debit_date(lease: Lease, period: date, debit_day: int) -> date:
+    """The day a debit of ``period`` is due: its debit day (29 to 31 move to the month's
+    last day), or the start date when the lease starts in ``period`` after that day
+    (PLAN-012b-b D1)."""
+    on = period.replace(day=falls_on(debit_day, period.year, period.month))
+    start = lease.started_on
+    if start is not None and start.replace(day=1) == period and on < start:
+        return start
+    return on
+
+
+def create_month(
+    lease: Lease,
+    period: date,
+    actor: User | None,
+    *,
+    due_on: date | None = None,
+    seq: int = 1,
+    amount: Decimal | None = None,
+    proration_text: str = "",
+    context: dict[str, Any] | None = None,
+) -> tuple[RentCharge, bool]:
+    """The rent charge of ``lease`` for ``period`` and debit ``seq``, created when it does
+    not exist yet (PLAN-012b-b D2): the single-month helper of the run, the catch-up and
+    the lease-end wizards. Idempotent: ``rent_charges`` is unique on ``(lease,
+    period_month, seq)``, so a second call, or two at once, return the existing charge
+    (a waived one included) with ``False``.
+
+    ``due_on`` defaults to :func:`debit_date`; ``amount`` to the rent in effect on that
+    date, prorated by :func:`first_month` and split as :func:`debit_amounts`, with its
+    ``proration_text``. A new charge is ``due`` and audited ``rent_charge.created`` with
+    ``context`` added. ``ValueError`` when ``amount`` is not given and the lease has no
+    such debit or no rent is in effect on the due date. Local data only."""
+    days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+    if (due_on is None or amount is None) and not 1 <= seq <= len(days):
+        raise ValueError(NO_SUCH_DEBIT)
+    if due_on is None:
+        due_on = debit_date(lease, period, days[seq - 1])
+    if amount is None:
+        rent = rent_on(lease, due_on)
+        if rent is None:
+            raise ValueError(SKIP_NO_RENT)
+        month = first_month(lease, period, rent.amount)
+        amount = debit_amounts(month.amount, twice_monthly=len(days) == 2)[seq - 1]
+        proration_text = month.text
+    with transaction.atomic():
+        charge, made = RentCharge.objects.get_or_create(
+            lease=lease,
+            period_month=period,
+            seq=seq,
+            defaults={
+                "due_on": due_on,
+                "amount_due": amount,
+                "status": RentChargeStatus.DUE,
+                "proration_text": proration_text or None,
+            },
+        )
+        if made:
+            _audit(
+                actor,
+                "rent_charge.created",
+                ENTITY_CHARGE,
+                charge.pk,
+                None,
+                {**_charge(charge), **(context or {})},
+            )
+    return charge, made
+
+
+def _months_back(period: date, months: int) -> date:
+    index = period.year * 12 + period.month - 1 - months
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def _next_month(period: date) -> date:
+    return _months_back(period, -1)
+
+
+def _catch_up_from(day: date) -> date:
+    """The earliest month the catch-up looks at for ``day``."""
+    return _months_back(day.replace(day=1), CATCH_UP_MONTHS - 1)
+
+
+def _catch_up_leases(day: date) -> QuerySet[Lease]:
+    """The leases the catch-up runs for on ``day``: active, a known channel, started by
+    ``day`` and not ended before the earliest month it looks at."""
+    return (
+        Lease.objects.select_related("store")
+        .filter(collection_status=CollectionStatus.ACTIVE, started_on__lte=day)
+        .exclude(payment_channel=PaymentChannel.UNKNOWN)
+        .filter(debit_day__isnull=False)
+        .filter(Q(ended_on__isnull=True) | Q(ended_on__gte=_catch_up_from(day)))
+        .order_by("store__external_label", "id")
+    )
+
+
+def _rent_in(rows: list[LeaseRentHistory], day: date) -> LeaseRentHistory | None:
+    """:func:`ledger.services.leases.rent_on` over rows already read."""
+    found = [
+        row
+        for row in rows
+        if row.effective_from <= day and (row.effective_to is None or row.effective_to >= day)
+    ]
+    return max(found, key=lambda row: row.effective_from, default=None)
+
+
+def catch_up_lease(lease: Lease, day: date, actor: User | None) -> list[RentCharge]:
+    """Create the missing charges of ``lease`` for the debit dates from its start month
+    to ``day`` (PLAN-012b-b D1, D2); returns the charges created.
+
+    Only for a lease that is active, has a known channel, a debit day and a start date
+    on or before ``day``. Each missing ``(month, debit)`` whose due date
+    (:func:`debit_date`) is on or before ``day`` and has a rent in effect gets a charge
+    through :func:`create_month`, the first month prorated, audited with ``"catch_up":
+    true``. Months after the month of ``ended_on`` and months before
+    :data:`CATCH_UP_MONTHS` are never looked at; a month with the debit's charge (paid,
+    waived or not) is left as it is."""
+    start = lease.started_on
+    if (
+        lease.collection_status != CollectionStatus.ACTIVE
+        or lease.payment_channel == PaymentChannel.UNKNOWN
+        or lease.debit_day is None
+        or start is None
+        or start > day
+    ):
+        return []
+    days = [debit for debit in (lease.debit_day, lease.second_debit_day) if debit is not None]
+    period = max(start.replace(day=1), _catch_up_from(day))
+    until = day.replace(day=1)
+    if lease.ended_on is not None:
+        until = min(until, lease.ended_on.replace(day=1))
+    have = set(
+        RentCharge.objects.filter(lease=lease, period_month__gte=period).values_list(
+            "period_month", "seq"
+        )
+    )
+    rows = list(lease.rent_history.all())
+    made: list[RentCharge] = []
+    while period <= until:
+        for seq, debit_day in enumerate(days, start=1):
+            if (period, seq) in have:
+                continue
+            due = debit_date(lease, period, debit_day)
+            if due > day:
+                continue
+            rent = _rent_in(rows, due)
+            if rent is None:
+                continue
+            month = first_month(lease, period, rent.amount)
+            amount = debit_amounts(month.amount, twice_monthly=len(days) == 2)[seq - 1]
+            charge, created = create_month(
+                lease,
+                period,
+                actor,
+                due_on=due,
+                seq=seq,
+                amount=amount,
+                proration_text=month.text,
+                context={"catch_up": True},
+            )
+            if created:
+                made.append(charge)
+        period = _next_month(period)
+    return made
 
 
 # --- Matching -------------------------------------------------------------------------

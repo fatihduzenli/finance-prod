@@ -173,11 +173,33 @@ def test_start_makes_one_transfer_with_a_lease_end_whose_reason_is_transfer() ->
 
 
 def test_start_is_refused_while_a_plain_lease_end_is_in_progress() -> None:
+    """PLAN-012b-b D9: in progress means its statement step opened."""
     lease = a_clean_lease()
-    lease_end.start(lease, None)
+    end = lease_end.start(lease, None)
+    assert lease_end.set_terms(end, ENDED, "moved_out", True, actor=None, today=TODAY).ok
+    lease_end.open_statement(fresh(end), None, today=TODAY)
+    assert fresh(end).statement_opened_at is not None
     with pytest.raises(ValueError, match="lease end is in progress"):
         transfer.start(lease.store, None, today=TODAY)
     assert not LeaseTransfer.objects.exists()
+
+
+def test_start_adopts_a_plain_draft_that_never_reached_the_statement() -> None:
+    lease = a_clean_lease()
+    end = lease_end.start(lease, None)
+    assert lease_end.set_terms(end, ENDED, "moved_out", False, actor=None, today=TODAY).ok
+    row = transfer.start(lease.store, None, today=TODAY)
+    adopted = fresh(end)
+    assert row.lease_end_id == end.pk
+    assert (adopted.reason, adopted.ended_on, adopted.prorate_last_month) == (
+        LeaseEndReason.TRANSFER,
+        ENDED,
+        False,
+    )
+    audit = AuditLog.objects.get(action="lease_end.adopted_by_transfer")
+    assert audit.entity_id == str(end.pk)
+    assert audit.before is not None and audit.before["reason"] == "moved_out"
+    assert audit.after is not None and audit.after["reason"] == "transfer"
 
 
 def test_the_reason_is_fixed_and_the_lease_end_cannot_be_confirmed_or_cancelled_alone() -> None:

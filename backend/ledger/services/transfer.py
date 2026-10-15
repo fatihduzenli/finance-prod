@@ -15,8 +15,9 @@ with its lease end (:func:`cancel`). Its steps:
 3. **Blockers** (:func:`blockers`): every lease-end blocker, plus every charge of the
    outgoing lease with money still owed once the lease ends (the statement's open
    lines: the last month as prorated, a month after the end waived; before the end date
-   is set, the open balances as they stand). A deposit held is not a blocker. The wizard
-   never calls the payment provider.
+   is set, the open balances as they stand). The end month's charge that does not exist
+   yet is not listed: the statement step creates it (PLAN-012b-b D10). A deposit held is
+   not a blocker. The wizard never calls the payment provider.
 4. **Incoming lease** (:func:`set_incoming`): the start date (the day after the end date
    or later), the rent, the debit day(s), the channel, *Prorate first month*, the
    deposit amount and the setup items ticked from the catalogue.
@@ -352,7 +353,9 @@ def _balance_url(kind: str, charge_id: uuid.UUID | None, lease: Lease) -> str:
 
 def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list[lease_end.Blocker]:
     """Every charge of the outgoing lease with money still owed once it ends, one each
-    with its page (D6(b)). Deposits are never listed (they are held, not owed)."""
+    with its page (D6(b)). Deposits are never listed (they are held, not owed; an unpaid
+    one is a lease-end blocker). A charge the end month still needs is not listed: the
+    statement step creates it (PLAN-012b-b D10)."""
     day = today or timezone.localdate()
     lease = transfer.outgoing_lease
     end = transfer.lease_end
@@ -369,16 +372,14 @@ def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list
         ]
     found = []
     for kind, charge_id, description, balance in lines:
+        if charge_id is None:
+            # PLAN-012b-b D10: the end month's charge not created yet is created when the
+            # statement step opens (lease_end.open_statement); it blocks once it exists.
+            continue
         text = (
             f"{description}: {leases.format_amount(balance)} is still owed by the outgoing "
             "operator. It must be paid before the store is transferred."
         )
-        if charge_id is None:
-            text = (
-                f"{description}: {leases.format_amount(balance)} would be owed at the end and "
-                "is not charged yet. Create the month's charge with the rent run and collect "
-                "it first."
-            )
         found.append(lease_end.Blocker(OPEN_BALANCE, text, _balance_url(kind, charge_id, lease)))
     return found
 
@@ -415,8 +416,11 @@ def incoming_lines(transfer: LeaseTransfer) -> list[invoice_builder.LineInput]:
 
 def start(store: Store, actor: User | None, today: date | None = None) -> LeaseTransfer:
     """The store's transfer in progress, made now with the current lease's end draft
-    (reason ``transfer``) or found. ``ValueError`` with one sentence when the store has no
-    lease in effect, the lease has no operator, or a plain lease end is in progress."""
+    (reason ``transfer``) or found. A plain draft of the lease that never reached the
+    statement step is adopted (:func:`ledger.services.lease_end.adopt_for_transfer`,
+    PLAN-012b-b D9). ``ValueError`` with one sentence when the store has no lease in
+    effect, the lease has no operator, or a plain lease end is in progress (its
+    statement step opened)."""
     day = today or timezone.localdate()
     with transaction.atomic():
         Store.objects.select_for_update().get(pk=store.pk)
@@ -430,8 +434,11 @@ def start(store: Store, actor: User | None, today: date | None = None) -> LeaseT
             raise ValueError(NO_OUTGOING_OPERATOR)
         existing = LeaseEnd.objects.filter(lease=lease).first()
         if existing is not None and existing.status == LeaseEndStatus.DRAFT:
-            raise ValueError(END_IN_PROGRESS)
-        end = lease_end.start(lease, actor, reason=LeaseEndReason.TRANSFER)
+            if lease_end.in_progress(existing):
+                raise ValueError(END_IN_PROGRESS)
+            end = lease_end.adopt_for_transfer(existing, actor)
+        else:
+            end = lease_end.start(lease, actor, reason=LeaseEndReason.TRANSFER)
         transfer = LeaseTransfer.objects.create(
             store=store, outgoing_lease=lease, lease_end=end, created_by=actor
         )

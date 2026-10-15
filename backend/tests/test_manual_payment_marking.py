@@ -592,7 +592,7 @@ def _charge_on(row: Lease, day: date) -> RentCharge:
 
 
 def test_the_carried_balance_sums_earlier_open_balances_and_never_changes_the_amount() -> None:
-    row = lease()
+    row = lease(started_on=date(2026, 7, 1))
     august = _charge_on(row, date(2026, 8, 15))
     september = _charge_on(row, date(2026, 9, 15))
     RentCharge.objects.filter(pk=august.pk).update(
@@ -627,7 +627,7 @@ def test_a_second_debit_carries_the_first_debit_of_the_same_month() -> None:
 
 @pytest.mark.usefixtures("pinned_today")
 def test_the_run_and_charge_pages_show_the_carried_balance(billing: Client) -> None:
-    row = lease()
+    row = lease(started_on=date(2026, 9, 1))
     september = _charge_on(row, date(2026, 9, 15))
     RentCharge.objects.filter(pk=september.pk).update(
         amount_paid=D("1000.00"), status=RentChargeStatus.PARTIAL

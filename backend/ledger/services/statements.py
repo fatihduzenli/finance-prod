@@ -53,6 +53,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db.models import Sum
+from django.urls import reverse
 from django.utils import timezone
 
 from ledger.models import (
@@ -61,6 +62,7 @@ from ledger.models import (
     LeaseEnd,
     LeaseEndReason,
     OneOffCharge,
+    OneOffChargeStatus,
     Payment,
     PaymentStatus,
     RefundMethod,
@@ -154,12 +156,38 @@ class OpenLine:
     due_on: date
     balance: Decimal
 
+    @property
+    def url(self) -> str:
+        """The charge's page (PLAN-012b-b D10); ``""`` for an insurance charge or a
+        charge not created yet."""
+        if self.charge_id is None:
+            return ""
+        if self.kind == receivables.KIND_RENT:
+            return reverse("ledger:charges:detail", kwargs={"pk": self.charge_id})
+        if self.kind == receivables.KIND_ONE_OFF:
+            return reverse("ledger:one_off_charges:detail", kwargs={"pk": self.charge_id})
+        return ""
+
 
 @dataclass(frozen=True, slots=True)
 class DepositLine:
     charge_id: uuid.UUID
     label: str
+    #: What was collected of the deposit (the amount held).
     held: Decimal
+    #: What the deposit charge billed (PLAN-012b-b D11).
+    charged: Decimal
+
+    @property
+    def text(self) -> str:
+        """The line of the deposit (PLAN-012b-b D11): "Deposit charged $500.00, collected
+        $0.00" when they differ, else "Deposit held $500.00"."""
+        if self.charged != self.held:
+            return (
+                f"Deposit charged {proration.money(self.charged)}, "
+                f"collected {proration.money(self.held)}"
+            )
+        return f"Deposit held {proration.money(self.held)}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,6 +342,8 @@ def from_json(data: Mapping[str, Any]) -> Final:
                 charge_id=uuid.UUID(str(item["charge_id"])),
                 label=str(item["label"]),
                 held=_money(item["held"]),
+                # Statements kept before PLAN-012b-b D11 have no "charged".
+                charged=_money(item.get("charged", item["held"])),
             )
             for item in data["deposits"]
         ),
@@ -365,13 +395,16 @@ def _refund_parent(charge: RentCharge, amount: Decimal) -> uuid.UUID | None:
     return None
 
 
-def _due_on(debit_day: int | None, month: date, ended: date) -> date:
+def _due_on(debit_day: int | None, month: date, ended: date, start: date | None) -> date:
     """A new last-month charge is due on its debit day, or on the end date when that
-    day falls after it (or the lease has no debit day)."""
+    day falls after it (or the lease has no debit day), and never before the start
+    date of a lease that started that month (PLAN-012b-b D1)."""
     if debit_day is None:
         return ended
-    day = month.replace(day=falls_on(debit_day, month.year, month.month))
-    return min(day, ended)
+    day = min(month.replace(day=falls_on(debit_day, month.year, month.month)), ended)
+    if start is not None and start.replace(day=1) == month and day < start:
+        return start
+    return day
 
 
 def last_month(lease_end: LeaseEnd) -> LastMonth | None:
@@ -439,7 +472,7 @@ def last_month(lease_end: LeaseEnd) -> LastMonth | None:
                     RentChange(
                         None,
                         free[0],
-                        _due_on(day, month, ended),
+                        _due_on(day, month, ended, start),
                         ZERO,
                         part.amount - billed,
                         ZERO,
@@ -450,7 +483,9 @@ def last_month(lease_end: LeaseEnd) -> LastMonth | None:
     elif not charges and prorate:
         day = debit_days[0] if debit_days else None
         changes.append(
-            RentChange(None, 1, _due_on(day, month, ended), ZERO, part.amount, ZERO, ZERO, None)
+            RentChange(
+                None, 1, _due_on(day, month, ended, start), ZERO, part.amount, ZERO, ZERO, None
+            )
         )
     elif not charges:
         amounts = debit_amounts(rent.amount, twice_monthly=len(debit_days) == 2)
@@ -570,11 +605,14 @@ def deposit_charges(lease_end: LeaseEnd) -> list[OneOffCharge]:
 
 
 def _deposit_lines(lease_end: LeaseEnd) -> list[DepositLine]:
+    """Each deposit held, and each one still owed with what was collected of it
+    (PLAN-012b-b D11; such a deposit blocks the lease end, so confirm never sees one)."""
     lines = []
     for charge in deposit_charges(lease_end):
         held = one_off_charges.settled(charge)
-        if held > 0:
-            lines.append(DepositLine(charge.pk, charge.label, held))
+        owed = charge.status in (OneOffChargeStatus.OWED, OneOffChargeStatus.PARTIAL)
+        if held > 0 or owed:
+            lines.append(DepositLine(charge.pk, charge.label, held, Decimal(charge.price)))
     return lines
 
 
@@ -706,7 +744,7 @@ def _lines(statement: Final) -> list[tuple[str, str, str]]:
     rows.append(("gap", "", ""))
     rows.append(("heading", "Deposit", ""))
     for deposit in statement.deposits:
-        rows.append(("text", f"Held: {deposit.label}", money(deposit.held)))
+        rows.append(("text", f"{deposit.label}: {deposit.text}", money(deposit.held)))
     rows.append(("total", "Deposit held", money(statement.deposit_held)))
     rows.append(("gap", "", ""))
     rows.append(("heading", "Deductions", ""))

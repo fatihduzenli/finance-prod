@@ -149,7 +149,7 @@ def test_a_lease_starting_on_the_1st_bills_a_full_month() -> None:
 
 
 @pytest.mark.django_db
-def test_two_debits_split_the_prorated_month_and_a_debit_before_the_start_is_skipped() -> None:
+def test_two_debits_split_the_prorated_month_and_a_debit_before_the_start_is_due_on_it() -> None:
     lease = a_lease(debit_day=15, second_debit_day=28)
     run(date(2026, 10, 15))
     [first, second] = run(date(2026, 10, 28))
@@ -160,10 +160,15 @@ def test_two_debits_split_the_prorated_month_and_a_debit_before_the_start_is_ski
         D("612.90"),
     )
     assert first.proration_text == second.proration_text == TEXT
+    # PLAN-012b-b D1: the 5th is before the start, so the run's catch-up makes debit 1
+    # due on the start date; debit 2 is due on the 20th.
     other = a_lease(debit_day=5, second_debit_day=20)
-    assert run(date(2026, 10, 5)) == [first, second]  # the 5th is before the start
-    [late] = [row for row in run(date(2026, 10, 20)) if row.lease_id == other.pk]
-    assert (late.seq, late.amount_due) == (2, D("612.90"))
+    assert [row for row in run(date(2026, 10, 5)) if row.lease_id == lease.pk] == [first, second]
+    late = [row for row in run(date(2026, 10, 20)) if row.lease_id == other.pk]
+    assert [(row.seq, row.amount_due, row.due_on) for row in late] == [
+        (1, D("612.91"), date(2026, 10, 13)),
+        (2, D("612.90"), date(2026, 10, 20)),
+    ]
     assert lease.pk != other.pk
 
 
@@ -171,7 +176,11 @@ def test_two_debits_split_the_prorated_month_and_a_debit_before_the_start_is_ski
 def test_a_lease_whose_end_month_has_passed_is_never_charged() -> None:
     lease = a_lease(started_on=date(2026, 1, 1))
     Lease.objects.filter(pk=lease.pk).update(ended_on=date(2026, 9, 30))
-    assert run(date(2026, 9, 15))[0].period_month == date(2026, 9, 1)
+    # The run catches up January to August, then September's debit; never October.
+    assert [row.period_month for row in run(date(2026, 9, 15))] == [
+        date(2026, month, 1) for month in range(1, 10)
+    ]
+    assert [row.period_month for row in run(date(2026, 10, 15))][-1] == date(2026, 9, 1)
     plan = rent_run.leases_due(date(2026, 10, 15))
     assert plan.due == () and [item.reason for item in plan.skipped] == [rent_run.SKIP_ENDED]
     assert rent_run.due_counts(date(2026, 10, 15)).due == 0

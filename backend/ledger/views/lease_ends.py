@@ -10,7 +10,11 @@ to it; nothing past the blockers step is offered while a blocker is listed.
 
 A lease end that is part of a transfer (PLAN-012e D6) shows the transfer's steps: its
 reason is fixed, its live items are the transfer's (``ledger:transfers:blockers``), its
-settlement leads to the incoming lease and its confirm is the transfer's.
+settlement leads to the incoming lease and its confirm is the transfer's; until the
+transfer's incoming operator is chosen, its terms step leads there (a draft the transfer
+adopted, PLAN-012b-b D9). Opening the statement step creates the rent charges the
+statement needs and marks the draft in progress
+(:func:`ledger.services.lease_end.open_statement`).
 
 Every change goes through :mod:`ledger.services.lease_end`, which audits it; no view
 calls the payment provider. Every POST ends in a redirect; a form with errors is held in
@@ -48,7 +52,7 @@ from ledger.models import LeaseEnd, LeaseEndReason, LeaseEndStatus, LeaseTransfe
 from ledger.services import documents, statements, transfer
 from ledger.services import lease_end as service
 from ledger.views.operators import _actor, _held, _hold, _role, role_required
-from ledger.views.transfers import transfer_steps
+from ledger.views.transfers import OPERATOR_FIRST, transfer_steps
 from payments import jobs
 from payments.models import JobKind
 
@@ -200,6 +204,11 @@ def terms(request: HttpRequest, pk: str) -> HttpResponse:
         return done
     target = f"lease-end-terms:{end.pk}"
     held_by = _transfer_of(end)
+    if held_by is not None and not transfer.operator_set(held_by):
+        # PLAN-012b-b D9: a draft adopted by a transfer continues on the transfer's
+        # steps, the incoming operator first.
+        messages.info(request, OPERATOR_FIRST)
+        return redirect("ledger:transfers:operator", pk=held_by.pk)
     fixed = LeaseEndReason.TRANSFER if held_by is not None else ""
     if request.method == "POST":
         form = LeaseEndTermsForm(request.POST, fixed_reason=fixed)
@@ -277,6 +286,9 @@ def statement(request: HttpRequest, pk: str) -> HttpResponse:
             form.add_error(None, outcome.message)
         _hold(request, target, form)
         return redirect("ledger:lease_ends:statement", pk=end.pk)
+    # PLAN-012b-b D9, D10: nothing blocks here; the rent charges the statement needs are
+    # created and the draft is in progress from now on.
+    service.open_statement(end, _actor(request))
     saved = list(end.deductions.all())
     shown = (
         [service.DeductionInput(row.kind, row.description, row.amount) for row in saved]

@@ -58,6 +58,7 @@ from tests.test_ledger_models import (
     new_one_off_charge,
     new_operator,
     new_rent_charge,
+    new_rent_history,
     new_setup_charge,
     saved,
 )
@@ -130,7 +131,7 @@ def step(day_offset: int) -> CollectionStep:
 
 def messages_of(charge: RentCharge | OneOffCharge) -> list[OutboundMessage]:
     return list(
-        OutboundMessage.objects.filter(charge_entity_id=charge.pk)
+        OutboundMessage.objects.filter(charge_entity_id=str(charge.pk))
         .select_related("step")
         .order_by("queued_at", "id")
     )
@@ -247,6 +248,42 @@ def test_a_second_tick_sends_nothing(clock: Any, memory: MemoryMailSender) -> No
     clock(at(date(2026, 10, 9)))
     tick()
     assert len(messages_of(charge)) == 1
+
+
+def test_the_tick_creates_the_missing_rent_charges_once(clock: Any) -> None:
+    """PLAN-012b-b D3: the daily tick creates the charges, as the run page's button does."""
+    today = date(2026, 10, 16)
+    started = saved(new_lease(debit_day=1, started_on=date(2026, 10, 13)))
+    saved(
+        new_rent_history(
+            lease=started, amount=Decimal("2000.00"), effective_from=date(2026, 10, 13)
+        )
+    )
+    ended = saved(new_lease(started_on=date(2026, 8, 1), ended_on=date(2026, 9, 30)))
+    saved(new_rent_history(lease=ended, effective_from=date(2026, 8, 1)))
+    for month in (8, 9):
+        saved(
+            new_rent_charge(
+                lease=ended, period_month=date(2026, month, 1), due_on=date(2026, month, 5)
+            )
+        )
+    clock(at(today))
+    output = tick()
+    assert "Rent charges created: 0. Created (catch-up): 1. Already created: 0." in output
+    [charge] = RentCharge.objects.filter(lease=started)
+    assert (charge.period_month, charge.seq, charge.amount_due, charge.due_on) == (
+        date(2026, 10, 1),
+        1,
+        Decimal("1225.81"),
+        date(2026, 10, 13),
+    )
+    created = AuditLog.objects.get(action="rent_charge.created", entity_id=str(charge.pk))
+    assert created.actor is None
+    assert created.after is not None and created.after["catch_up"] is True
+    assert RentCharge.objects.filter(lease=ended).count() == 2
+    output = tick()
+    assert "Rent charges created: 0. Created (catch-up): 0. Already created: 0." in output
+    assert RentCharge.objects.count() == 3
 
 
 def test_queue_due_twice_at_once_keeps_one_row(clock: Any, memory: MemoryMailSender) -> None:
