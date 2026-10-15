@@ -1185,3 +1185,14 @@ was scheduled (the registry's last run is `ca15`, the 12b-a build; the registry 
 Succeeded). Staging stays on revision 42 (`a59de59`), healthy, `/healthz` 200. A transient fault
 on the Azure side; the remedy is a re-run of the failed job, which is a publish action and waits
 for the owner's word.
+
+## Update, 2026-10-15, PLAN-012b-b deployed to staging
+
+The owner authorized a re-run of the failed deploy job of run 38757250671; every step passed
+(image build, web, worker, reconcile, daily, verification, smoke test). Staging revision
+`finance-staging-web--0000043` healthy on image `262e72c`, `deploy_migrate` applied ledger 0040
+and 0041 and reports up to date, `/healthz` 200. The owner's staging clicks for 12b-b are open:
+Istanbul (1991) proration after the first daily tick or "Create today's charges"; Test store 2
+transfer; Test Store Three P&L per ADR-0012 §7; a move-in invoice with a Rent line; an autopay
+rent split (settles TODO-VERIFY-064). Next: Step 12d (invoice-level payment entry) or the
+owner's findings from the clicks.
