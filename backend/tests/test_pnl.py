@@ -32,6 +32,7 @@ from ledger.models import (
     InsuranceCharge,
     InsurancePremium,
     Lease,
+    LeaseEnd,
     OneOffCharge,
     OneOffChargeStatus,
     Operator,
@@ -1014,3 +1015,180 @@ def test_500_stores_by_12_months_in_under_two_seconds() -> None:
     # PLAN-012 D6: the multi-line invoices' payments and lines; PLAN-012e D12: installments.
     assert len(captured) == 17
     assert elapsed < 2.0, f"rows() took {elapsed:.2f}s"
+
+
+# --- PLAN-012b-b D12: the P&L at lease end (ADR-0012 §7) -----------------------------------
+
+THREE_DAY = date(2026, 10, 14)
+THREE_TODAY = date(2026, 10, 20)
+OCTOBER = date(2026, 10, 1)
+
+
+def describe(row: pnl.PnlRow) -> str:
+    """A row as the page's "Show the rows" lists it, for the QA report."""
+    return (
+        f"{row.store} | {row.operator} | {row.month:%Y-%m} | rent billed "
+        f"{row.rent_billed:.2f} | rent collected {row.rent_collected:.2f} | fees billed "
+        f"{row.fees_billed:.2f} | fees collected {row.fees_collected:.2f} (incl. "
+        f"{row.withheld_deposits:.2f} withheld deposit)"
+    )
+
+
+def store_three(
+    monkeypatch: pytest.MonkeyPatch, *, offset: bool, typed: bool = True
+) -> list[pnl.PnlRow]:
+    """Test Store Three as the owner ran it on staging (item 8, 2026-10-15): a lease that
+    started and ended on 14 October (rent $1,000.00, debit day 1, wire), a $500.00 deposit
+    paid by wire, the first rent billed as a typed $1,000.00 "Rent" item (category
+    ``other``, as the builder billed it before the Rent line) and paid, and a transfer
+    whose statement withholds the deposit against an $800.00 damage deduction, the
+    lease-end balance allowed by an admin. The end month's $32.26 charge the statement
+    step creates (PLAN-012b-b D10) is paid by the unpaid-balance offset the wizard
+    pre-fills (``offset``), or else by wire before the transfer. Returns the store's
+    October rows."""
+    from ledger.services import lease_end, leases, one_off_charges, rent_run, transfer
+    from ledger.services.lease_end import DeductionInput
+    from tests.test_lease_services import lease_fields, make_operator
+    from tests.test_setup_charges import item
+    from tests.test_transfer import allow, incoming, incoming_operator
+
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: THREE_TODAY)
+    _, user = client_for(Role.ADMIN)
+    store = a_store("Test Store Three")
+    lease, _ = leases.create_lease(
+        lease_fields(
+            store=store,
+            operator=make_operator(email="three@example.com", customer="cus-three"),
+            debit_day=1,
+            payment_channel=PaymentChannel.WIRE,
+            started_on=THREE_DAY,
+        ),
+        rent=D("1000.00"),
+        creation_key=uuid.uuid4(),
+        actor=user,
+        today=THREE_DAY,
+    )
+    assert lease.operator is not None
+    held = one_off_charges.add_charge(
+        lease.pk, item(deposit_type(), "500.00", due_date=THREE_DAY), actor=user
+    )
+    made_charges = [held]
+    if typed:
+        made_charges.append(
+            one_off_charges.create_charge(
+                lease.operator,
+                lease,
+                one_off_charges.ChargeInput(
+                    fee_type=None,
+                    price=D("1000.00"),
+                    cost=None,
+                    vendor="",
+                    due_date=THREE_DAY,
+                    note="First rent, typed in the builder.",
+                    category="other",
+                    collection="manual",
+                    description="Rent",
+                ),
+                user,
+                today=THREE_DAY,
+            )
+        )
+    for made in made_charges:
+        assert made.ok and made.charge is not None, made.message
+        assert one_off_charges.record_payment(
+            made.charge.pk,
+            method=PaymentMethod.WIRE,
+            amount=made.charge.price,
+            paid_on=THREE_DAY,
+            note="Wire received.",
+            actor=user,
+            today=THREE_TODAY,
+        ).ok
+    row = transfer.start(store, user, today=THREE_TODAY)
+    assert transfer.set_operator(row, incoming_operator(), actor=user).ok
+    end = LeaseEnd.objects.get(transfer=row)
+    assert lease_end.set_terms(end, THREE_DAY, "transfer", True, actor=user, today=THREE_TODAY).ok
+    end = LeaseEnd.objects.get(pk=end.pk)
+    lease_end.open_statement(end, user, today=THREE_TODAY)
+    deductions = [DeductionInput("damage", "Broken door", D("800.00"))]
+    if offset:
+        deductions = [*lease_end.default_deductions(end, THREE_TODAY), *deductions]
+    else:
+        october = RentCharge.objects.get(lease=lease, period_month=OCTOBER)
+        assert rent_run.record_manual_payment(
+            october.pk,
+            method=PaymentMethod.WIRE,
+            amount=D("32.26"),
+            paid_on=THREE_DAY,
+            note="Wire received.",
+            actor=user,
+            today=THREE_TODAY,
+        ).ok
+    assert lease_end.set_deductions(end, deductions, actor=user, today=THREE_TODAY).ok
+    outcome = incoming(row, user, started_on=THREE_DAY + timedelta(days=1))
+    assert outcome.ok, outcome.message
+    assert allow(row, user).ok
+    done = transfer.confirm(
+        type(row).objects.get(pk=row.pk), user, confirmed=True, today=THREE_TODAY
+    )
+    assert done.ok, done.message
+    return [
+        item
+        for item in pnl.rows(query(OCTOBER, OCTOBER))
+        if item.store == "Test Store Three" and item.operator == "Northwind Stores"
+    ]
+
+
+def test_store_three_rows_follow_adr_0012_7(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The owner's rows (item 8): before ADR-0012 §7 they read "Fees billed 1300.00 /
+    Fees collected 1500.00 incl. 500.00 withheld": the $1,000.00 typed rent line billed
+    and collected as a fee, the $300.00 lease-end balance billed, and the $500.00
+    withheld deposit collected without being billed. Now the withheld $500.00 is billed
+    too: fees billed $800.00 for the lease end (the $500.00 the deposit covers and the
+    $300.00 balance) besides the $1,000.00 line as it is; the deposit is neither billed
+    nor collected; the end month's rent ($32.26, 1 of 31 days) is billed and was paid by
+    wire before the transfer."""
+    [row] = store_three(monkeypatch, offset=False)
+    assert row.fees_billed - row.withheld_deposits == D("1300.00"), describe(row)
+    assert (row.rent_billed, row.rent_collected) == (D("32.26"), D("32.26")), describe(row)
+    assert (row.fees_billed, row.fees_collected, row.withheld_deposits) == (
+        D("1800.00"),
+        D("1500.00"),
+        D("500.00"),
+    ), describe(row)
+    assert pnl.deposits_held(query(OCTOBER, OCTOBER)) == D("0.00")
+
+
+def test_store_three_without_the_typed_line_is_the_adr_example(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0012 §7's example: deposit $500 paid, damage $800 → fees billed $800, fees
+    collected $500 (withheld), the $300 balance open, deposits held $0."""
+    [row] = store_three(monkeypatch, offset=False, typed=False)
+    assert (row.rent_billed, row.rent_collected) == (D("32.26"), D("32.26")), describe(row)
+    assert (row.fees_billed, row.fees_collected, row.withheld_deposits) == (
+        D("800.00"),
+        D("500.00"),
+        D("500.00"),
+    ), describe(row)
+    assert row.fees_billed >= row.fees_collected
+    assert pnl.deposits_held(query(OCTOBER, OCTOBER)) == D("0.00")
+    [balance] = OneOffCharge.objects.filter(description="Lease-end balance")
+    assert (balance.price, balance.status) == (D("300.00"), OneOffChargeStatus.OWED)
+
+
+def test_store_three_with_the_offset_counts_it_as_rent_collected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The offset the wizard pre-fills pays the $32.26 rent (rent collected, by the
+    offset payment's month); the deposit's remaining $467.74 is billed and collected as
+    the withheld deposit and the $332.26 balance is billed: fees billed $800.00, fees
+    collected $467.74. The offset is neither billed nor collected as a fee."""
+    [row] = store_three(monkeypatch, offset=True, typed=False)
+    assert (row.rent_billed, row.rent_collected) == (D("32.26"), D("32.26")), describe(row)
+    assert (row.fees_billed, row.fees_collected, row.withheld_deposits) == (
+        D("800.00"),
+        D("467.74"),
+        D("467.74"),
+    ), describe(row)
+    assert pnl.deposits_held(query(OCTOBER, OCTOBER)) == D("0.00")

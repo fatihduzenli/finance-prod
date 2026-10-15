@@ -492,8 +492,16 @@ cent). The item name is the Stax line text and the charge's description; the det
 line detail. A typed item shows a **Save as catalogue item** tick: when ticked, saving or sending
 the draft adds it to the catalogue (its later charges are category *setup*, like every catalogue
 item; a typed item without the tick is *other*). A name held by an inactive catalogue item cannot
-be saved over; an admin changes it in the catalogue. The due date defaults to today + 15 (New
-York; never in the past). **Save** keeps a
+be saved over; an admin changes it in the catalogue. **Rent** is a line kind of its own
+(PLAN-012b-b): choose Rent, the lease (one of the operator's leases, a lease not yet started is
+allowed) and the month; the amount defaults to the lease rent for that month, prorated for a
+partial first month, and can be edited; one rent line per lease and month, none for a month that
+is already paid, invoiced or on an autopay schedule, none on a twice-monthly lease. Sending
+creates that month's rent charge (or takes the existing unpaid one), links the invoice to it, so
+the rent run and the catch-up never bill the month again; the grid cell shows the invoice
+number and, once paid, "paid" in that month. Deposit, setup and rent lines can share one invoice
+(the move-in invoice); a payment pays the lines in order and the rent part counts as rent. The
+due date defaults to today + 15 (New York; never in the past). **Save** keeps a
 draft (named `DRAFT-` and eight characters of its id); the draft page offers **Preview** (what the operator sees), **Print**
 (a clean page for the browser's print dialog), **Edit**, **Send**, **Charge now** (admin) and
 **Cancel**. **Send** takes the next `INV-YYYY-NNNN` number, makes **one one-off charge per line**

@@ -36,6 +36,7 @@ from ledger.services.rent_run import MarkAction, MarkResult, MatchAction, MatchR
 from payments import jobs, one_off_invoices, operator_sync, reconciliation
 from payments.models import (
     Job,
+    JobEntity,
     JobKind,
     ReconciliationRun,
     ReconciliationStatus,
@@ -193,6 +194,9 @@ def invoice_create_job(job: Job) -> Result:
     queues the ``invoice_pay`` job (the single attempt of 10d, its confirmation carried
     over). PLAN-012e D11: with :data:`ledger.services.installments.RESCHEDULE_PARAM`, the
     provider invoice of a moved installment gets its new due date."""
+    if job.entity_type == JobEntity.RENT_CHARGE:
+        # PLAN-012b-b D5: an invoice builder invoice of one Rent line alone.
+        return one_off_invoices.create_rent_invoice(job.entity_id, job.requested_by)
     if job.params.get(installments.RESCHEDULE_PARAM) is True:
         return one_off_invoices.move_invoice(job.entity_id, job.requested_by)
     ok, text = one_off_invoices.create_provider_invoice(job.entity_id, job.requested_by)
@@ -210,7 +214,10 @@ def invoice_create_job(job: Job) -> Result:
 
 
 def invoice_send_job(job: Job) -> Result:
-    """PLAN-010d D3: the e-mail of the one-off charge's provider invoice, alone."""
+    """PLAN-010d D3: the e-mail of the one-off charge's provider invoice, alone (of an
+    invoice of rent alone on a rent charge, PLAN-012b-b D5)."""
+    if job.entity_type == JobEntity.RENT_CHARGE:
+        return one_off_invoices.send_rent(job.entity_id, job.requested_by)
     return one_off_invoices.send(job.entity_id, job.requested_by)
 
 

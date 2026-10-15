@@ -28,7 +28,11 @@ into a live installment plan (PLAN-012e D12) counts what its installments were p
 paid (``partial`` once any is paid, else ``due``) and the cell shows the plan's progress
 (``plan 1 of 3 paid, 333.33 of 1,000.00``); a completed plan's charge is ``paid``. A cell links to
 its first charge (by lease creation and sequence) and shows the note marker when any of its
-charges has a note.
+charges has a note. A month billed on an invoice builder invoice's Rent line (PLAN-012b-b
+D6) adds that invoice's number to the cell's text (``paid 1,000.00 INV-2026-0012``; not
+once the invoice is void); its
+status is its charge's as any other, so a rent paid before its month is ``paid`` in that
+month's cell.
 
 **Column totals** (:attr:`Grid.columns`): per month, the count of cells of each status
 and the sum collected (``amount_paid``).
@@ -61,6 +65,7 @@ from ledger.models import (
     ZERO,
     ChargeNote,
     CollectionStatus,
+    InvoiceStatus,
     Lease,
     Operator,
     Payment,
@@ -211,6 +216,9 @@ class Cell:
     proration_text: str = ""
     #: The progress of the cell's live installment plans (PLAN-012e D12).
     plan_text: str = ""
+    #: The numbers of the invoices whose Rent line billed the cell's charges (PLAN-012b-b
+    #: D6), in charge order.
+    invoice_numbers: str = ""
 
     @property
     def text(self) -> str:
@@ -228,7 +236,15 @@ def _amount(value: Decimal) -> str:
 
 
 def cell_text(cell: Cell) -> str:
-    """The cell as the CSV writes it (D2)."""
+    """The cell as the CSV writes it (D2), with the numbers of the invoices that billed
+    its charges (PLAN-012b-b D6)."""
+    text = _status_text(cell)
+    if cell.invoice_numbers and text:
+        return f"{text} {cell.invoice_numbers}"
+    return text
+
+
+def _status_text(cell: Cell) -> str:
     if cell.plan_text:
         return cell.plan_text
     if cell.status == STATUS_PAID:
@@ -339,6 +355,7 @@ class _Charge:
     has_note: bool
     proration_text: str = ""
     plan_text: str = ""
+    invoice_number: str = ""
 
 
 def _charges(start: date, end: date) -> dict[tuple[uuid.UUID, date], list[_Charge]]:
@@ -355,14 +372,23 @@ def _charges(start: date, end: date) -> dict[tuple[uuid.UUID, date], list[_Charg
             "amount_paid",
             "has_note",
             "proration_text",
+            "billed_by_invoice__invoice_number",
+            "billed_by_invoice__internal_status",
         )
         .order_by("lease__store", "period_month", "lease__created_at", "seq", "pk")
     )
     plans = installments.live_rent_progress(start, end)
     found: dict[tuple[uuid.UUID, date], list[_Charge]] = defaultdict(list)
-    for pk, store, month, status, due, paid, has_note, text in rows:
+    for pk, store, month, status, due, paid, has_note, text, number, state in rows:
         charge = _Charge(
-            pk, status, Decimal(str(due)), Decimal(str(paid)), bool(has_note), text or ""
+            pk,
+            status,
+            Decimal(str(due)),
+            Decimal(str(paid)),
+            bool(has_note),
+            text or "",
+            # A voided invoice stays named on the charge as history, not in the cell.
+            invoice_number=number if number and state != InvoiceStatus.VOID else "",
         )
         plan = plans.get(pk)
         if plan is not None:
@@ -457,6 +483,9 @@ def _cell(
             charge.proration_text for charge in charges if charge.proration_text
         ),
         plan_text="; ".join(charge.plan_text for charge in charges if charge.plan_text),
+        invoice_numbers=" ".join(
+            charge.invoice_number for charge in charges if charge.invoice_number
+        ),
     )
 
 

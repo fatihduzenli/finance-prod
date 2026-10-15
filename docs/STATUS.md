@@ -1144,3 +1144,17 @@ statement reads "Deposit charged $X, collected $Y"; migration 0040. Gate: ruff, 
 secret scans clean; Fable's adversarial file green (5 + 1 PostgreSQL-only); one of Fable's older
 tests fixed for the first charge on save. **For the owner:** the first daily tick after the
 deploy creates the missing months for every active lease (staging: test data). Batch B assigned.
+
+## Update, 2026-10-15, PLAN-012b-b Batch B built and gated (not pushed)
+
+Batch B (owner's items 4 and 8): the invoice builder's **Rent** line (lease and month, the
+amount defaulting to the prorated first month, one per lease and month, refused for a paid,
+invoiced or autopay month; sending creates or takes the month's rent charge and links the
+invoice, so the run and the catch-up never bill it again; the grid shows the invoice number;
+deposit, setup and rent on one move-in invoice, the payment split by line and the rent part
+counted as rent); migration 0041. The P&L at lease end follows ADR-0012 §7 (the withheld deposit
+billed and collected in the end month; the owner's 1300/1500 rows came from a typed $1,000 "Rent"
+item counted as a fee, which the Rent line replaces). One MAJOR found by the reproduction and
+fixed: the transfer's balance blockers ignored the unpaid-balance offset. Gate: ruff, format,
+mypy (385 files), lock, migrations clean; sqlite 5,113 passed; PostgreSQL 23 + 5,708 passed;
+e2e 7; secret scans clean; Fable's adversarial file 12 cases green. Batch C assigned.

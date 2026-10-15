@@ -355,15 +355,20 @@ def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list
     """Every charge of the outgoing lease with money still owed once it ends, one each
     with its page (D6(b)). Deposits are never listed (they are held, not owed; an unpaid
     one is a lease-end blocker). A charge the end month still needs is not listed: the
-    statement step creates it (PLAN-012b-b D10)."""
+    statement step creates it (PLAN-012b-b D10). Once the terms are set, a balance is
+    listed as the statement leaves it: the unpaid-balance offset pays the open lines
+    oldest due first, as the confirm pays them (PLAN-012b-b D10, D12)."""
     day = today or timezone.localdate()
     lease = transfer.outgoing_lease
     end = transfer.lease_end
     if end is not None and lease_end.terms_set(end):
-        lines = [
-            (line.kind, line.charge_id, line.description, line.balance)
-            for line in statements.final(end, today=day).open_lines
-        ]
+        figures = statements.final(end, today=day)
+        offset = figures.offset_applied
+        lines = []
+        for line in figures.open_lines:
+            covered = min(offset, line.balance)
+            offset -= covered
+            lines.append((line.kind, line.charge_id, line.description, line.balance - covered))
     else:
         lines = [
             (row.kind, row.charge_id, row.description, row.balance)
@@ -372,6 +377,8 @@ def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list
         ]
     found = []
     for kind, charge_id, description, balance in lines:
+        if balance <= 0:
+            continue
         if charge_id is None:
             # PLAN-012b-b D10: the end month's charge not created yet is created when the
             # statement step opens (lease_end.open_statement); it blocks once it exists.

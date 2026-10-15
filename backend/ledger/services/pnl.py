@@ -31,7 +31,10 @@ with no end date, is never active. The columns:
 - **fees billed**: one-off charges of every other category (``setup`` of a
   non-refundable fee type, ``adjustment``, ``damage``, ``other``), neither waived nor
   voided, by ``due_date`` month, plus insurance charges with an amount, by ``due_on``
-  month;
+  month, plus the withheld part of resolved deposits less its offset part, by
+  ``resolved_on`` month (ADR-0012 §7, PLAN-012b-b D12: the deductions the deposit
+  covers are billed and collected in that month; the rest is the "Lease-end balance"
+  charge, billed by its due date), so billed is at least collected for the month;
 - **fees collected**: settled ``one_off`` payments on those charges and ``insurance``
   payments by ``settled_on`` month minus their settled refunds, plus the withheld part
   of resolved deposits by ``resolved_on`` month less any part offset against the
@@ -76,7 +79,10 @@ query).
 **Multi-line invoices** (the invoice builder, PLAN-012 D6): each line is a one-off charge
 billed by its own category as above; a payment on the invoice is a payment of its first
 line's charge, and is collected split as it pays the lines, in line order, each part by
-its line's category (:func:`_add_invoice_lines`, two queries).
+its line's category (:func:`_add_invoice_lines`, two queries). A **Rent** line
+(PLAN-012b-b D7) bills the month's rent charge, billed by ``period_month`` as any rent;
+its part of a payment is rent collected, in the payment's settled month, on the row of
+the lease it bills; a deposit line's part is counted nowhere.
 
 **Installment plans** (PLAN-012e D12): the money of a split charge is counted once,
 under its parent. The parent stays billed as it was; an ``installment`` charge is never
@@ -138,6 +144,7 @@ from ledger.models import (
 )
 from ledger.services.csv_export import CsvWriter
 from ledger.services.payments_ledger import (
+    RENT_LINE,
     deposits_released,
     invoice_line_parts,
     multi_line_charges,
@@ -591,7 +598,8 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
 
     # PLAN-012e D5(d): the offset part of a withheld deposit paid the lease's open
     # charges, and those payments are counted where they were paid; only the rest of
-    # the withheld amount is revenue here.
+    # the withheld amount is revenue here. ADR-0012 §7 (PLAN-012b-b D12): that rest is
+    # the deductions the deposit covers, billed and collected in the resolution month.
     withheld = (
         DepositResolution.objects.filter(
             resolved_on__gte=start,
@@ -610,6 +618,7 @@ def _add_billed_and_collected(acc: dict[_Key, _Acc], start: date, end: date) -> 
         row = acc[_key(resolution)]
         amount = _money_or_zero(resolution["total"])
         row.withheld_deposits += amount
+        row.fees_billed += amount
         row.fees_collected += amount
 
 
@@ -618,7 +627,8 @@ def _add_invoice_lines(acc: dict[_Key, _Acc], start: date, end: date) -> None:
     split as they pay the lines (:func:`ledger.services.payments_ledger.invoice_line_parts`).
     Each part counts by its line's category as the other one-off payments do:
     ``arrears`` as rent collected, a deposit (a refundable fee type) nowhere, anything
-    else as fees collected (4 queries)."""
+    else as fees collected; a Rent line's part (PLAN-012b-b D7) as rent collected on the
+    row of the lease it bills (5 queries)."""
     settled = Payment.objects.filter(
         on_multi_line_invoice(), settled_on__gte=start, settled_on__lte=end
     )
@@ -636,9 +646,12 @@ def _add_invoice_lines(acc: dict[_Key, _Acc], start: date, end: date) -> None:
         settled_on: date | None = row["settled_on"]
         if settled_on is None:
             continue
-        target = acc[(row["store"], row["operator"], settled_on.replace(day=1))]
+        month = settled_on.replace(day=1)
+        target = acc[(row["store"], row["operator"], month)]
         for part in parts:
-            if part.category == OneOffCategory.ARREARS:
+            if part.category == RENT_LINE:
+                acc[(part.store_id, part.operator_id, month)].rent_collected += part.share
+            elif part.category == OneOffCategory.ARREARS:
                 target.rent_collected += part.share
             elif not part.refundable:
                 target.fees_collected += part.share

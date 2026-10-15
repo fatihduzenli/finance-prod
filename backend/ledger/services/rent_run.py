@@ -899,7 +899,7 @@ def _match_one(
                 return line(MatchAction.REPORTED, MATCH_NO_CHARGE.format(**words))
             if _invoice_linked(record.external_id):
                 return line(MatchAction.ALREADY, MATCH_ALREADY_LINKED)
-            if charge.invoices.exists():
+            if charge_invoices(charge).exists():
                 if not charge.needs_review:  # flagged once; later runs only report it
                     _flag(charge, actor, "rent_charge.second_invoice", {"invoice": masked})
                 return line(MatchAction.REPORTED, MATCH_CHARGE_INVOICED.format(**words))
@@ -1071,6 +1071,8 @@ def _auto_candidates(operator_id: uuid.UUID, total: Decimal, issued: date) -> Qu
         amount_due=total,
         period_month=issued.replace(day=1),
         invoices__isnull=True,
+        # PLAN-012b-b D5: a month billed on an invoice builder invoice has its invoice.
+        invoice_lines__isnull=True,
     ).exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
 
 
@@ -1112,7 +1114,7 @@ def auto_link_invoice(
                 charge is None
                 or locked is None
                 or not candidates.filter(pk=charge.pk).exists()
-                or charge.invoices.exists()
+                or charge_invoices(charge).exists()
             ):
                 return _linked(invoice_id), 1
             _attach(charge, locked)
@@ -1191,7 +1193,7 @@ def link_charge_invoice(
                 return LinkOutcome(True, LINK_SAME)
             if is_linked(invoice):
                 return LinkOutcome(False, LINK_CHOOSE, "invoice")
-            if charge.invoices.exists():
+            if charge_invoices(charge).exists():
                 return LinkOutcome(False, LINK_CHARGE_HAS_INVOICE)
             differs = invoice.total != charge.balance
             if differs and not confirm:
@@ -1258,8 +1260,11 @@ def record_manual_payment(
     refusal = payment_refusal(method, amount, paid_on, text, today)
     if refusal is not None:
         return refusal
+    from ledger.services import one_off_charges  # one_off_charges imports this module
+
     with transaction.atomic():
-        charge = RentCharge.objects.select_for_update().get(pk=charge_id)
+        # A builder invoice's Rent line: every line's lock first (PLAN-012b-b D5).
+        charge = one_off_charges.lock_rent_line(charge_id)
         if creation_key is not None and _payment_for_key(charge, creation_key):
             return PaymentOutcome(True, PAY_ALREADY, replayed=True)
         if charge.status == RentChargeStatus.WAIVED:
@@ -1315,8 +1320,14 @@ def record_manual_payment(
             },
         )
         linked = provider_invoice(charge)
-        if linked is not None and not (whole and linked[0].total == amount):
+        if linked is not None and one_off_charges.is_builder_invoice(linked[0]):
+            # PLAN-012b-b D5: a Rent line's invoice is marked once its lines are covered.
+            reason = one_off_charges.not_marked_reason(linked[0], whole=whole, amount=amount)
+        elif linked is not None and not (whole and linked[0].total == amount):
             reason = offline_marking.PARTIAL_AMOUNT if not whole else offline_marking.TOTAL_DIFFERS
+        else:
+            reason = ""
+        if linked is not None and reason:
             result = not_updated(RENT, charge, payment, linked, reason, actor)
             return PaymentOutcome(True, PAY_RECORDED, payment=payment, provider=result)
     if linked is None:
@@ -1415,16 +1426,16 @@ def _last_mark_event(charge: ChargeRow, kind: ChargeKind) -> AuditLog | None:
 
 
 def charge_invoices(charge: ChargeRow) -> QuerySet[Invoice]:
-    """The charge's invoices by issue date and number. A one-off charge's are the
-    invoices linked to it and the invoice whose line item names it, so a later line of a
-    builder invoice has that invoice (PLAN-012c-a D1); a rent charge's are its own."""
-    if isinstance(charge, OneOffCharge):
-        rows = Invoice.objects.filter(
-            Q(one_off_charge=charge)
-            | Q(pk__in=InvoiceLineItem.objects.filter(one_off_charge=charge).values("invoice_id"))
-        )
-        return rows.order_by("issue_date", "invoice_number")
-    return charge.invoices.order_by("issue_date", "invoice_number")
+    """The charge's invoices by issue date and number: the invoices linked to it and the
+    invoice whose line item names it, so a later line of a builder invoice has that
+    invoice (PLAN-012c-a D1), and so has the rent charge of a builder invoice's Rent line
+    (PLAN-012b-b D5)."""
+    field = "one_off_charge" if isinstance(charge, OneOffCharge) else "rent_charge"
+    rows = Invoice.objects.filter(
+        Q(**{field: charge})
+        | Q(pk__in=InvoiceLineItem.objects.filter(**{field: charge}).values("invoice_id"))
+    )
+    return rows.order_by("issue_date", "invoice_number")
 
 
 def provider_invoice(charge: ChargeRow) -> tuple[Invoice, str] | None:
@@ -1706,12 +1717,21 @@ def _settled(charge: RentCharge) -> Decimal:
     return (Decimal(paid) - Decimal(refunded)).quantize(CENT)
 
 
-def _paid(charge: RentCharge) -> Decimal:
-    """What the charge has been paid: its settled payments, what its re-debits
-    collected again and what the installments of its ended plans were paid."""
+def own_paid(charge: RentCharge) -> Decimal:
+    """What the charge was paid by its own means: its settled payments, what its
+    re-debits collected again and what the installments of its ended plans were paid."""
     return (
         _settled(charge) + redebit_collected(rent_charge=charge) + plan_covered(rent_charge=charge)
     )
+
+
+def _paid(charge: RentCharge) -> Decimal:
+    """What the charge has been paid: :func:`own_paid`, and on a builder invoice's Rent
+    line its share of the payments on the invoice (PLAN-012b-b D5, the sibling
+    allocation of :func:`ledger.services.one_off_charges.rent_share`)."""
+    from ledger.services import one_off_charges  # one_off_charges imports this module
+
+    return own_paid(charge) + one_off_charges.rent_share(charge)
 
 
 def on_live_plan(**parent: RentCharge | OneOffCharge) -> bool:

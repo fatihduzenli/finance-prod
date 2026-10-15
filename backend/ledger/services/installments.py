@@ -485,7 +485,7 @@ def _one_off_refusal(charge: OneOffCharge) -> str:
         return SCHEDULE_FIRED
     invoice = _live_invoice(billed_on)
     if invoice is not None:
-        if billed_on.pk != charge.pk or len(one_off_charges.invoice_charges(invoice)) > 1:
+        if billed_on.pk != charge.pk or one_off_charges.invoice_line_count(invoice) > 1:
             # A line of a multi-line invoice: never released for one line (D2).
             return LIVE_INVOICE_SHARED.format(number=invoice.invoice_number)
         return ""

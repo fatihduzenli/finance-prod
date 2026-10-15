@@ -25,7 +25,7 @@
       {% csrf_token %}
       <p class="actions"><button class="btn btn-primary" type="submit" id="send-draft">Send ${{ preview.total }} by e-mail</button>{% if can_charge_now %} <a class="btn" href="{% url 'ledger:invoices:charge_now' pk=draft.pk %}" id="draft-charge-now">Charge now</a>{% endif %}</p>
     </form>
-  {% elif first_charge %}
+  {% elif first_charge or rent_charges %}
     <h2>Invoice</h2>
     <dl id="sent-invoice">
       <dt>Number</dt><dd id="sent-number">{{ preview.invoice.invoice_number }}</dd>
@@ -40,11 +40,16 @@
         {% for charge in charges %}
           <tr class="sent-charge"><td>{{ forloop.counter }}</td><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge.get_category_display }}</td><td class="money">${{ charge.price }}</td><td class="money">${{ charge.amount_paid }}</td><td>{{ charge.get_status_display }}</td></tr>
         {% endfor %}
+        {% for rent in rent_charges %}
+          <tr class="sent-rent-charge"><td>Rent</td><td><a href="{% url 'ledger:charges:detail' pk=rent.pk %}">Rent {{ rent.period_month|date:"F Y" }}, store {{ rent.lease.store.external_label }}</a></td><td>Rent</td><td class="money">${{ rent.amount_due }}</td><td class="money">${{ rent.amount_paid }}</td><td>{{ rent.get_status_display }}</td></tr>
+        {% endfor %}
       </tbody>
     </table>
     {% endresponsive_table %}
     <p class="muted">A payment on this invoice pays the lines in order; a refund or a return takes it back from the last line first.</p>
-    {% if charges|length == 1 %}
+    {% if not first_charge %}
+      <p class="muted" id="invoice-rent-alone">This invoice bills rent alone; the rent charge's page shows its payments.</p>
+    {% elif charges|length == 1 and not rent_charges %}
       <p class="actions"><a class="btn" href="{% url 'ledger:one_off_charges:split' pk=first_charge.pk %}" id="invoice-split">Split into installments</a> <span class="muted">{% if invoice_live %}Split into installments from the charge page; the invoice is released at the payment provider when the plan is confirmed.{% else %}from the invoice's charge.{% endif %}</span></p>
     {% else %}
       <p class="muted" id="invoice-split-lines">To pay in installments, split each line from its charge page.</p>

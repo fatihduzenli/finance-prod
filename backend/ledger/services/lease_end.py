@@ -392,7 +392,8 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
         .order_by("period_month", "seq", "id")
     )
     for rent in rents:
-        invoice = _live_invoice(rent.invoices.all())
+        # A builder invoice's Rent line names the charge too (PLAN-012b-b D5).
+        invoice = _live_invoice(rent_run.charge_invoices(rent))
         if invoice is not None:
             what = f"Rent {rent.period_month:%Y-%m}" + (
                 f" (debit {rent.seq})" if rent.seq > 1 else ""

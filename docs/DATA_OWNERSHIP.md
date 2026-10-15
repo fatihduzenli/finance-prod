@@ -287,6 +287,9 @@ scans are covered by the stated policy, not by a check.
 | Field | Owner | Note |
 |---|---|---|
 | all fields | App | A draft is ours until **Send** turns it into one invoice and one one-off charge per line; `line_total` is quantity times unit amount to the cent, enforced by a CHECK; `sent_invoice_id` links the invoice; a cancelled draft stays |
+| `invoice_draft_lines.rent_lease_id`, `rent_month` | App | PLAN-012b-b D4: a Rent line (both set, the month's first day, no fee type; CHECK) |
+| `invoice_line_items.rent_charge_id` | System | The rent charge a Rent line bills (PLAN-012b-b D5); never with `one_off_charge_id` on one line (CHECK) |
+| `rent_charges.billed_by_invoice_id` | System | The builder invoice that billed the month (PLAN-012b-b D5); shown in the grid cell |
 | `invoice_draft_lines.item`, `description`, `fee_type_id` | App | PLAN-012b: `item` is the line's text (not blank, CHECK), `description` an optional detail, `fee_type_id` set when the item names an offered catalogue item (resolved by name, case-insensitive) |
 
 ### invoice_line_items — `one_off_charge_id`, `kind` (PLAN-012, PLAN-012a)

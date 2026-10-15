@@ -89,6 +89,10 @@ ENTITY_OF_KIND: dict[str, str] = {
 #: e-mail is a calendar entry's or a promise to pay's (PLAN-011b D8).
 OTHER_ENTITIES_OF_KIND: dict[str, frozenset[str]] = {
     JobKind.CALENDAR_EMAIL: frozenset({JobEntity.CONTACT_ENTRY}),
+    # PLAN-012b-b D5: an invoice builder invoice of one Rent line alone is its rent
+    # charge's.
+    JobKind.INVOICE_CREATE: frozenset({JobEntity.RENT_CHARGE}),
+    JobKind.INVOICE_SEND: frozenset({JobEntity.RENT_CHARGE}),
 }
 
 #: ``app_label.ModelName`` of each entity type.

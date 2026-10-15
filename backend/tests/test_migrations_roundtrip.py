@@ -59,6 +59,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0038_installments",
             "ledger.migrations.0039_transfer_debt_override",
             "ledger.migrations.0040_lease_end_statement_opened",
+            "ledger.migrations.0041_rent_lines",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -1316,6 +1317,128 @@ def test_the_statement_opened_migration_over_an_existing_row_on_postgresql(
     result = _manage(repo_root, url, "migrate", "--noinput")
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert _rows(url, OPENED_ROWS) == after
+
+
+# --- PLAN-012b-b D4, D5: rent billed by invoice ----------------------------------------
+#
+# Seeds a rent charge, a draft line and an invoice line at ``ledger.0040``, migrates
+# forward, back and forward again on PostgreSQL (sqlite runs 0041 in the plain round
+# trip) and reads the rows with plain SQL: the new columns are null, the CHECKs hold, and
+# the reverse drops them plainly.
+
+STATE_BEFORE_RENT_LINES = (("ledger", "0040_lease_end_statement_opened"),)
+RENT_LINE_ROWS = (
+    "SELECT (SELECT count(*) FROM invoice_draft_lines WHERE rent_lease_id IS NULL "
+    "AND rent_month IS NULL), "
+    "(SELECT count(*) FROM invoice_line_items WHERE rent_charge_id IS NULL), "
+    "(SELECT count(*) FROM rent_charges WHERE billed_by_invoice_id IS NULL)"
+)
+
+
+def seed_before_rent_lines() -> None:
+    """Seed a rent charge, a draft with one line and an invoice with one line with the
+    models of ``STATE_BEFORE_RENT_LINES``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_RENT_LINES)).apps
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Northwind")
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 1403", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store,
+        operator=operator,
+        debit_day=1,
+        collection_status="active",
+        payment_channel="wire",
+    )
+    apps.get_model("ledger", "RentCharge").objects.create(
+        lease=lease,
+        period_month=date(2026, 10, 1),
+        due_on=date(2026, 10, 1),
+        amount_due=Decimal("1000.00"),
+        status="due",
+    )
+    draft = apps.get_model("ledger", "InvoiceDraft").objects.create(operator=operator)
+    apps.get_model("ledger", "InvoiceDraftLine").objects.create(
+        draft=draft,
+        position=1,
+        item="Cleaning",
+        quantity=Decimal("1"),
+        unit_amount=Decimal("50.00"),
+        line_total=Decimal("50.00"),
+    )
+    invoice = apps.get_model("ledger", "Invoice").objects.create(
+        invoice_number="INV-2026-0901",
+        operator=operator,
+        issue_date=date(2026, 10, 1),
+        due_date=date(2026, 10, 15),
+        subtotal=Decimal("50.00"),
+        total=Decimal("50.00"),
+    )
+    apps.get_model("ledger", "InvoiceLineItem").objects.create(
+        invoice=invoice,
+        position=1,
+        description="Cleaning",
+        quantity=Decimal("1"),
+        unit_price=Decimal("50.00"),
+        line_total=Decimal("50.00"),
+    )
+
+
+@requires_postgresql
+def test_the_rent_lines_migration_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_RENT_LINES)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_rent_lines as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    after = [("1", "1", "1")]
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, RENT_LINE_ROWS) == after
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        # A month without its lease breaks "both or neither".
+        scratch.execute("UPDATE invoice_draft_lines SET rent_month = '2026-10-01'")
+    with psycopg.connect(url) as scratch:
+        scratch.execute(
+            "UPDATE invoice_draft_lines SET rent_lease_id = (SELECT id FROM leases), "
+            "rent_month = '2026-10-01'"
+        )
+        scratch.execute("UPDATE rent_charges SET billed_by_invoice_id = (SELECT id FROM invoices)")
+        scratch.execute(
+            "UPDATE invoice_line_items SET rent_charge_id = (SELECT id FROM rent_charges)"
+        )
+    _migrate_to(repo_root, url, *STATE_BEFORE_RENT_LINES)
+    assert _rows(url, "SELECT count(*) FROM invoice_draft_lines") == [("1",)]
+    assert _rows(
+        url,
+        "SELECT count(*) FROM information_schema.columns WHERE column_name IN "
+        "('rent_lease_id', 'rent_month', 'billed_by_invoice_id') "
+        "OR (table_name = 'invoice_line_items' AND column_name = 'rent_charge_id')",
+    ) == [("0",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, RENT_LINE_ROWS) == after
 
 
 # --- Row 2 --------------------------------------------------------------------------

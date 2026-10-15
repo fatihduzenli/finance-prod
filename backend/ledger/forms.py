@@ -8,6 +8,7 @@ which runs when the form validates the model instance.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal
@@ -643,14 +644,29 @@ class InvoiceDraftForm(forms.Form):
         return self.leases.get(self.cleaned_data.get("lease") or "")
 
 
+#: The kinds of a draft line (PLAN-012b-b D4): an item, or a month of rent.
+LINE_KIND_ITEM = "item"
+LINE_KIND_RENT = "rent"
+LINE_KINDS = ((LINE_KIND_ITEM, "Item"), (LINE_KIND_RENT, "Rent"))
+RENT_LINE_INCOMPLETE = "Choose the lease and the month of the rent."
+
+
 class InvoiceLineForm(forms.Form):
     """One line of a draft (PLAN-012b D1, D2): an item (one box: a catalogue item's name
     from the list of :data:`ITEMS_LIST_ID`, or a new name), an optional description (the
     detail), a quantity (empty: 1), a unit amount and Save as catalogue item. The form
     never sends a fee type: the service resolves the item by its name. A row with neither
     an item, a description nor a unit amount is blank and ignored; a row whose Remove box
-    is ticked is dropped."""
+    is ticked is dropped.
 
+    The kind **Rent** (PLAN-012b-b D4) bills a month of a lease instead of an item: the
+    lease (one of ``rent_leases``, ``default_lease`` preselected) and the month (a month
+    input; a full date is read as written, so the service refuses a day other than the
+    first); an empty unit amount is the month's rent. The service checks every rule."""
+
+    kind = forms.ChoiceField(
+        required=False, label="Kind", choices=LINE_KINDS, initial=LINE_KIND_ITEM
+    )
     item = forms.CharField(
         required=False,
         label="Item",
@@ -677,13 +693,59 @@ class InvoiceLineForm(forms.Form):
         widget=forms.NumberInput({"step": "0.01"}),
     )
     save_item = forms.BooleanField(required=False, label="Save as catalogue item")
+    rent_lease = forms.ChoiceField(required=False, label="Rent: lease")
+    rent_month = forms.DateField(
+        required=False,
+        label="Rent: month",
+        input_formats=["%Y-%m", "%Y-%m-%d"],
+        widget=forms.DateInput({"type": "month", "placeholder": "YYYY-MM"}, format="%Y-%m"),
+    )
+
+    def __init__(
+        self,
+        *args: Any,
+        rent_leases: Iterable[Lease] = (),
+        default_lease: Lease | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        lease_field = self.fields["rent_lease"]
+        if isinstance(lease_field, forms.ChoiceField):
+            lease_field.choices = [("", "Choose the lease")] + [
+                (str(row.pk), _lease_label(row)) for row in rent_leases
+            ]
+        if default_lease is not None:
+            lease_field.initial = str(default_lease.pk)
+
+    @property
+    def is_rent(self) -> bool:
+        return self.cleaned_data.get("kind") == LINE_KIND_RENT
+
+    def clean(self) -> dict[str, Any]:
+        data = super().clean() or {}
+        if data.get("kind") == LINE_KIND_RENT and not (
+            data.get("rent_lease") and data.get("rent_month")
+        ):
+            raise forms.ValidationError(RENT_LINE_INCOMPLETE)
+        return data
 
     def is_blank(self) -> bool:
         data = self.cleaned_data
+        if self.is_rent:
+            return False
         return not (data.get("item") or data.get("description") or data.get("unit_amount"))
 
     def line(self) -> invoice_builder.LineInput:
         data = self.cleaned_data
+        if self.is_rent:
+            return invoice_builder.LineInput(
+                item="",
+                description=data.get("description") or "",
+                quantity=data.get("quantity"),
+                unit_amount=data.get("unit_amount"),
+                rent_lease=uuid.UUID(str(data["rent_lease"])),
+                rent_month=data["rent_month"],
+            )
         return invoice_builder.LineInput(
             item=data.get("item") or "",
             description=data.get("description") or "",

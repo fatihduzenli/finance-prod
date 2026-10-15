@@ -45,6 +45,7 @@ from ledger.models import (
     Operator,
     Payment,
     PaymentStatus,
+    RentCharge,
     Store,
     StoreStatus,
 )
@@ -1742,3 +1743,462 @@ def test_invoice_line_links_check_exits_0_on_clean_data_and_1_naming_an_orphan(
     out = io.StringIO()
     call_command("invoice_line_links", stdout=out)
     assert "2 missing link(s)" in out.getvalue()
+
+
+# --- PLAN-012b-b D4 to D8: the Rent line ------------------------------------------------------
+
+OCTOBER = date(2026, 10, 1)
+NOVEMBER = date(2026, 11, 1)
+#: 14–31 Oct, 18 of 31 days of $1,000.00, rounded once (ADR-0012 §2).
+FIRST_MONTH = D("580.65")
+FIRST_TEXT = "14–31 Oct, 18 of 31 days of $1,000.00 = $580.65"
+
+
+def a_rent_lease(operator: Operator, **fields: Any) -> Lease:
+    """A wire lease of ``operator`` starting 14 October 2026 (rent $1,000.00, debit day
+    1), saved the day before it starts: no charge yet."""
+    values: dict[str, Any] = {
+        "operator": operator,
+        "started_on": date(2026, 10, 14),
+        "debit_day": 1,
+        "payment_channel": "wire",
+        "rent": D("1000.00"),
+    }
+    values.update(fields)
+    return make_lease(**values)
+
+
+def rent_line(
+    lease: Lease,
+    month: date = OCTOBER,
+    unit: str | None = None,
+    *,
+    description: str = "",
+    quantity: str | None = None,
+) -> LineInput:
+    return LineInput(
+        item="",
+        description=description,
+        quantity=D(quantity) if quantity is not None else None,
+        unit_amount=D(unit) if unit is not None else None,
+        rent_lease=lease.pk,
+        rent_month=month,
+    )
+
+
+def move_in(fake: FakeProvider) -> tuple[Operator, Lease, list[LineInput]]:
+    """The move-in invoice's lines: a $500.00 deposit, a $450.00 sign fee and the first
+    rent (prorated)."""
+    from tests.test_setup_charges import deposit_type, fee
+
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    return (
+        operator,
+        lease,
+        [
+            line(deposit_type().name, "500.00"),
+            line(fee("sign_fee").name, "450.00"),
+            rent_line(lease),
+        ],
+    )
+
+
+def refused(operator: Operator, lease: Lease | None, lines: list[LineInput]) -> str:
+    outcome = invoice_builder.create_draft(
+        operator, lease, MEMO, None, lines, user(Role.BILLING), today=TODAY
+    )
+    assert not outcome.ok
+    return outcome.message
+
+
+def the_rent(lease: Lease, month: date = OCTOBER) -> RentCharge:
+    return RentCharge.objects.get(lease=lease, period_month=month)
+
+
+def test_the_rent_line_defaults_to_the_prorated_first_month(fake: FakeProvider) -> None:
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    draft = a_draft(operator, lease, [rent_line(lease)])
+    [row] = invoice_builder.lines_of(draft)
+    label = lease.store.external_label
+    assert (row.rent_lease_id, row.rent_month, row.fee_type_id) == (lease.pk, OCTOBER, None)
+    assert (row.item, row.description) == (f"Rent October 2026, store {label}", FIRST_TEXT)
+    assert (row.quantity, row.unit_amount, row.line_total) == (D(1), FIRST_MONTH, FIRST_MONTH)
+    # A full month is the rent in effect, without a proration text.
+    later = a_draft(operator, lease, [rent_line(lease, NOVEMBER)])
+    [full] = invoice_builder.lines_of(later)
+    assert (full.unit_amount, full.description) == (D("1000.00"), "")
+    assert not RentCharge.objects.exists() and not fake.calls
+
+
+def test_the_rent_line_amount_is_editable_within_the_money_bounds(fake: FakeProvider) -> None:
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    draft = a_draft(operator, lease, [rent_line(lease, unit="600.00", description="Agreed")])
+    [row] = invoice_builder.lines_of(draft)
+    assert (row.unit_amount, row.description) == (D("600.00"), "Agreed")
+    edited = a_draft(operator, lease, [rent_line(lease, NOVEMBER, unit="900.00")])
+    assert invoice_builder.lines_of(edited)[0].description == ""
+    for bad in ("0.00", "0.001", "1000000.00"):
+        message = refused(operator, lease, [rent_line(lease, unit=bad)])
+        assert message == invoice_builder.LINE_UNIT_AMOUNT.format(line=1)
+    message = refused(operator, lease, [rent_line(lease, quantity="2")])
+    assert message == invoice_builder.LINE_RENT_QUANTITY.format(line=1)
+
+
+def test_the_rent_month_must_be_a_month_of_the_lease(fake: FakeProvider) -> None:
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    Lease.objects.filter(pk=lease.pk).update(ended_on=date(2026, 12, 15))
+    label = lease.store.external_label
+    assert refused(operator, lease, [rent_line(lease, date(2026, 10, 2))]) == (
+        invoice_builder.LINE_RENT_MONTH.format(line=1)
+    )
+    assert refused(operator, lease, [rent_line(lease, date(2026, 9, 1))]) == (
+        invoice_builder.LINE_RENT_BEFORE_START.format(
+            line=1, store=label, start="October 2026", month="September 2026"
+        )
+    )
+    assert refused(operator, lease, [rent_line(lease, date(2027, 1, 1))]) == (
+        invoice_builder.LINE_RENT_AFTER_END.format(
+            line=1, store=label, end="December 2026", month="January 2027"
+        )
+    )
+    half = LineInput("", "", None, None, rent_lease=lease.pk)
+    assert refused(operator, lease, [half]) == invoice_builder.LINE_RENT_INCOMPLETE.format(line=1)
+    twice = a_rent_lease(operator, second_debit_day=15)
+    assert refused(operator, twice, [rent_line(twice)]) == (
+        invoice_builder.LINE_RENT_TWICE_MONTHLY.format(
+            line=1, store=twice.store.external_label, month="October 2026"
+        )
+    )
+    other = a_rent_lease(an_operator(fake, customer="cus-other", bank=None))
+    assert refused(operator, lease, [rent_line(other)]) == (
+        invoice_builder.LINE_RENT_LEASE.format(line=1)
+    )
+    assert not InvoiceDraft.objects.exists()
+
+
+def test_a_pending_lease_not_started_yet_may_be_invoiced(fake: FakeProvider) -> None:
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator, collection_status="prospective")
+    draft = a_draft(operator, None, [rent_line(lease)])
+    assert invoice_builder.lines_of(draft)[0].unit_amount == FIRST_MONTH
+
+
+def test_one_rent_line_per_lease_and_month(fake: FakeProvider) -> None:
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    words = {"store": lease.store.external_label, "month": "October 2026"}
+    assert refused(operator, lease, [line(), rent_line(lease), rent_line(lease)]) == (
+        invoice_builder.LINE_RENT_TWICE.format(line=3, **words)
+    )
+    first = a_draft(operator, lease, [line(), rent_line(lease)])
+    assert refused(operator, lease, [rent_line(lease)]) == (
+        invoice_builder.LINE_RENT_ON_DRAFT.format(line=1, draft=first.number, **words)
+    )
+    # Its own draft may be saved again; a cancelled draft holds nothing.
+    outcome = invoice_builder.update_draft(
+        first.pk, lease, MEMO, None, [rent_line(lease)], user(Role.BILLING), today=TODAY
+    )
+    assert outcome.ok, outcome.message
+    assert invoice_builder.cancel(first.pk, user(Role.BILLING)).ok
+    assert a_draft(operator, lease, [rent_line(lease)])
+    # Rent alone has one line.
+    assert refused(
+        operator, lease, [rent_line(lease, NOVEMBER), rent_line(lease, date(2026, 12, 1))]
+    ) == (invoice_builder.RENT_ALONE)
+
+
+@pytest.mark.parametrize("paid", ["1000.00", "400.00"])
+def test_a_rent_line_for_a_paid_or_partly_paid_month_is_refused(
+    fake: FakeProvider, paid: str
+) -> None:
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    charge, _ = rent_run.create_month(lease, NOVEMBER, None)
+    outcome = rent_run.record_manual_payment(
+        charge.pk,
+        method="wire",
+        amount=D(paid),
+        paid_on=TODAY,
+        note="Wire received.",
+        actor=None,
+        today=TODAY,
+    )
+    assert outcome.ok, outcome.message
+    assert refused(operator, lease, [rent_line(lease, NOVEMBER)]) == (
+        invoice_builder.LINE_RENT_BILLED.format(
+            line=1, store=lease.store.external_label, month="November 2026"
+        )
+    )
+
+
+def test_a_rent_line_for_a_month_on_a_live_invoice_is_refused(fake: FakeProvider) -> None:
+    operator, lease, lines = move_in(fake)
+    sent(a_draft(operator, lease, lines))
+    assert refused(operator, lease, [line(), rent_line(lease)]) == (
+        invoice_builder.LINE_RENT_BILLED.format(
+            line=2, store=lease.store.external_label, month="October 2026"
+        )
+    )
+
+
+def test_a_rent_line_on_an_autopay_lease_is_refused(fake: FakeProvider) -> None:
+    from tests.test_lease_end import a_schedule
+
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    a_schedule(lease)
+    assert refused(operator, lease, [rent_line(lease)]) == (
+        invoice_builder.LINE_RENT_AUTOPAY.format(
+            line=1, store=lease.store.external_label, month="October 2026"
+        )
+    )
+
+
+def test_send_creates_the_charge_and_links_the_move_in_invoice(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator, lease, lines = move_in(fake)
+    draft = a_draft(operator, lease, lines, due=date(2026, 10, 20))
+    outcome = sent(draft)
+    invoice = outcome.invoice
+    assert invoice is not None
+    charge = the_rent(lease)
+    assert (charge.amount_due, charge.due_on, charge.status) == (
+        FIRST_MONTH,
+        date(2026, 10, 20),
+        "due",
+    )
+    assert (charge.proration_text, charge.billed_by_invoice_id) == (FIRST_TEXT, invoice.pk)
+    deposit, sign = charges_of(draft)
+    assert (invoice.one_off_charge_id, invoice.rent_charge_id) == (deposit.pk, None)
+    assert invoice.total == D("500.00") + D("450.00") + FIRST_MONTH
+    items = list(InvoiceLineItem.objects.filter(invoice=invoice).order_by("position"))
+    assert [(item.one_off_charge_id, item.rent_charge_id) for item in items] == [
+        (deposit.pk, None),
+        (sign.pk, None),
+        (None, charge.pk),
+    ]
+    assert outcome.job is not None and outcome.job.entity_id == deposit.pk
+    assert list(rent_run.charge_invoices(charge)) == [invoice]
+    created = AuditLog.objects.get(action="rent_charge.created", entity_id=str(charge.pk))
+    assert created.after is not None and created.after["invoice_draft"] == str(draft.pk)
+    assert AuditLog.objects.filter(
+        action="rent_charge.billed_by_invoice", entity_id=str(charge.pk)
+    ).exists()
+    sent_row = AuditLog.objects.get(action=invoice_builder.SENT_ACTION)
+    assert sent_row.after is not None and sent_row.after["rent_charges"] == [str(charge.pk)]
+    run_queued_jobs()
+    [request] = created_invoices(fake)
+    rent_item = request.amounts.line_items[2]
+    label = lease.store.external_label
+    assert (rent_item.description, rent_item.unit_price, rent_item.details) == (
+        f"Rent October 2026, store {label}",
+        FIRST_MONTH,
+        FIRST_TEXT,
+    )
+    assert request.amounts.total == fresh(invoice).total
+    validation.amounts(request.amounts)
+
+
+def test_the_run_and_the_catch_up_skip_a_month_billed_by_invoice(
+    fake: FakeProvider, worker: None
+) -> None:
+    """Rent invoiced before the lease starts: the run on the debit day creates nothing
+    for that month."""
+    operator, lease, lines = move_in(fake)
+    sent(a_draft(operator, lease, lines))
+    before = RentCharge.objects.count()
+    report = rent_run.create_charges(date(2026, 10, 14), actor=None)
+    assert not report.caught_up and not report.created
+    assert RentCharge.objects.count() == before == 1
+    report = rent_run.create_charges(date(2026, 11, 1), actor=None)
+    assert [charge.period_month for charge in report.created] == [NOVEMBER]
+    assert the_rent(lease, NOVEMBER).billed_by_invoice_id is None
+
+
+def test_rent_invoiced_after_the_run_takes_the_existing_charge(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    rent_run.create_charges(date(2026, 10, 14), actor=None)
+    charge = the_rent(lease)
+    assert charge.amount_due == FIRST_MONTH
+    draft = a_draft(operator, lease, [rent_line(lease)])
+    assert invoice_builder.lines_of(draft)[0].unit_amount == FIRST_MONTH
+    invoice = sent(draft).invoice
+    assert invoice is not None
+    assert RentCharge.objects.filter(lease=lease).count() == 1
+    taken = the_rent(lease)
+    assert (taken.pk, taken.billed_by_invoice_id) == (charge.pk, invoice.pk)
+    # Rent alone: the invoice is the rent charge's, and so is its job.
+    assert (invoice.rent_charge_id, invoice.one_off_charge_id) == (charge.pk, None)
+    job = Job.objects.get(kind=JobKind.INVOICE_CREATE)
+    assert (job.entity_type, job.entity_id) == ("rent_charge", charge.pk)
+    run_queued_jobs()
+    [request] = created_invoices(fake)
+    assert [item.unit_price for item in request.amounts.line_items] == [FIRST_MONTH]
+    assert request.reference == invoice.invoice_number and request.memo == MEMO
+    assert fresh(invoice).internal_status == InvoiceStatus.SENT
+    # A second line naming another amount than the charge's is refused.
+    other = a_rent_lease(operator)
+    rent_run.create_charges(date(2026, 10, 14), actor=None)
+    assert refused(operator, other, [rent_line(other, unit="100.00")]) == (
+        invoice_builder.LINE_RENT_AMOUNT.format(
+            line=1,
+            store=other.store.external_label,
+            month="October 2026",
+            amount="$580.65",
+        )
+    )
+
+
+def test_a_payment_on_the_invoice_pays_the_rent_charge_in_line_order(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator, lease, lines = move_in(fake)
+    invoice = sent(a_draft(operator, lease, lines)).invoice
+    assert invoice is not None
+    run_queued_jobs()
+    pay(fake, fresh(invoice), "1000.00")
+    charge = the_rent(lease)
+    # 500.00 deposit, 450.00 sign fee, then 50.00 of the rent.
+    assert (charge.amount_paid, charge.status) == (D("50.00"), "partial")
+    assert AuditLog.objects.filter(
+        action="rent_charge.payment_allocated", entity_id=str(charge.pk)
+    ).exists()
+    pay(fake, fresh(invoice), str(FIRST_MONTH - D("50.00")))
+    charge = the_rent(lease)
+    assert (charge.amount_paid, charge.status, charge.balance) == (FIRST_MONTH, "paid", D("0"))
+    # The rent charge has no payment row of its own: the invoice's paid it.
+    assert not Payment.objects.filter(rent_charge=charge).exists()
+
+
+def test_a_manual_payment_on_the_rent_line_counts_towards_the_invoice(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator, lease, lines = move_in(fake)
+    draft = a_draft(operator, lease, lines)
+    invoice = sent(draft).invoice
+    assert invoice is not None
+    run_queued_jobs()
+    deposit, sign = charges_of(draft)
+    for row in (deposit, sign):
+        outcome = one_off_service.record_payment(
+            row.pk,
+            method="wire",
+            amount=row.price,
+            paid_on=TODAY,
+            note="Wire received.",
+            actor=None,
+            today=TODAY,
+        )
+        assert outcome.ok and not outcome.mark_due, outcome.message
+    outcome = rent_run.record_manual_payment(
+        the_rent(lease).pk,
+        method="wire",
+        amount=FIRST_MONTH,
+        paid_on=TODAY,
+        note="Wire received.",
+        actor=None,
+        today=TODAY,
+        defer_mark=True,
+    )
+    assert outcome.ok and outcome.mark_due, outcome.message
+    assert one_off_service.invoice_covered(fresh(invoice))
+    assert one_off_service.invoice_billed(fresh(invoice)) == fresh(invoice).total
+
+
+def test_the_grid_names_the_invoice_and_shows_rent_paid_in_advance(
+    fake: FakeProvider, worker: None
+) -> None:
+    from ledger.services import grid
+
+    operator, lease, lines = move_in(fake)
+    invoice = sent(a_draft(operator, lease, lines)).invoice
+    assert invoice is not None
+    run_queued_jobs()
+    built = grid.build(grid.parse_query({"from": "2026-10", "to": "2026-10"}, TODAY), TODAY)
+    [row] = [row for row in built.rows if row.store.pk == lease.store_id]
+    [cell] = row.cells
+    assert cell.text == f"due {FIRST_MONTH:,.2f} {invoice.invoice_number}"
+    pay(fake, fresh(invoice), str(fresh(invoice).total))
+    built = grid.build(grid.parse_query({"from": "2026-10", "to": "2026-10"}, TODAY), TODAY)
+    [row] = [row for row in built.rows if row.store.pk == lease.store_id]
+    assert row.cells[0].status == "paid"
+    assert row.cells[0].text == f"paid {FIRST_MONTH:,.2f} {invoice.invoice_number}"
+
+
+def test_the_pnl_counts_the_rent_line_as_rent_and_the_deposit_nowhere(
+    fake: FakeProvider, worker: None
+) -> None:
+    operator, lease, lines = move_in(fake)
+    invoice = sent(a_draft(operator, lease, lines)).invoice
+    assert invoice is not None
+    run_queued_jobs()
+    pay(fake, fresh(invoice), str(fresh(invoice).total))
+    selected = pnl.parse_query({"from": "2026-10", "to": "2026-10", "group": "store"})
+    [row] = [row for row in pnl.rows(selected) if row.store_id == lease.store_id]
+    assert (row.rent_billed, row.rent_collected) == (FIRST_MONTH, FIRST_MONTH)
+    assert (row.fees_billed, row.fees_collected) == (D("450.00"), D("450.00"))
+    assert pnl.deposits_held(selected) == D("500.00")
+    totals = payments_ledger.totals(Payment.objects.all())
+    assert (totals.settled, totals.deposits_held) == (D("450.00") + FIRST_MONTH, D("500.00"))
+
+
+def test_charge_now_and_cancel_of_rent_alone_are_refused(fake: FakeProvider) -> None:
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    draft = a_draft(operator, lease, [rent_line(lease)])
+    outcome = invoice_builder.charge_now(draft.pk, user(Role.ADMIN), confirmed=True)
+    assert (outcome.ok, outcome.message) == (False, invoice_builder.RENT_ALONE_CHARGE_NOW)
+    sent(draft)
+    outcome = invoice_builder.cancel(draft.pk, user(Role.BILLING), note="Wrong month.")
+    assert (outcome.ok, outcome.message) == (False, invoice_builder.RENT_ALONE_CANCEL)
+
+
+def test_the_draft_page_offers_the_rent_kind_and_saves_a_rent_line(fake: FakeProvider) -> None:
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    draft = a_draft(operator, lease, [line()])
+    client, _ = client_for(Role.BILLING)
+    page = client.get(f"/invoices/drafts/{draft.pk}/").content.decode()
+    for field in ("kind", "rent_lease", "rent_month"):
+        assert f'id="id_lines-0-{field}"' in page
+    assert 'type="month"' in page and 'id="rent-line-help"' in page
+    data = {
+        "lease": str(lease.pk),
+        "memo": MEMO,
+        "due_date": "",
+        "lines-TOTAL_FORMS": "2",
+        "lines-INITIAL_FORMS": "0",
+        "lines-MIN_NUM_FORMS": "0",
+        "lines-MAX_NUM_FORMS": "50",
+        "lines-0-kind": "item",
+        "lines-0-item": "Sign repair",
+        "lines-0-unit_amount": "100.00",
+        "lines-0-rent_lease": str(lease.pk),
+        "lines-1-kind": "rent",
+        "lines-1-rent_lease": str(lease.pk),
+        "lines-1-rent_month": "2026-10",
+    }
+    client.post(f"/invoices/drafts/{draft.pk}/edit/", data)
+    first, second = invoice_builder.lines_of(fresh(draft))
+    assert (first.item, first.rent_lease_id) == ("Sign repair", None)
+    assert (second.rent_lease_id, second.rent_month, second.unit_amount) == (
+        lease.pk,
+        OCTOBER,
+        FIRST_MONTH,
+    )
+    page = client.get(f"/invoices/drafts/{draft.pk}/").content.decode()
+    assert 'value="2026-10"' in page
+    # Rent without its month is refused by the form, with nothing changed.
+    data.pop("lines-1-rent_month")
+    client.post(f"/invoices/drafts/{draft.pk}/edit/", data)
+    page = client.get(f"/invoices/drafts/{draft.pk}/").content.decode()
+    assert "Choose the lease and the month of the rent." in page
+    assert len(invoice_builder.lines_of(fresh(draft))) == 2

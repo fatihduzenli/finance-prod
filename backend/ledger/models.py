@@ -567,6 +567,11 @@ class RentCharge(GuardedModel):
     #: PLAN-012e D1 to D3: the arithmetic of a prorated month ("13–31 Oct, 19 of 31 days
     #: of $2,000.00 = $1,225.81"); null for a full month.
     proration_text = free_text(null=True, default=None)
+    #: PLAN-012b-b D5, D6: the invoice builder invoice whose Rent line made or took this
+    #: month's charge (the grid names it); kept as history when that invoice is voided.
+    billed_by_invoice = models.ForeignKey(
+        "Invoice", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
     local_ref = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1425,8 +1430,10 @@ class InvoiceLineKind(models.TextChoices):
 
 class InvoiceLineItem(GuardedModel):
     """One line of a local invoice. On an invoice made by the invoice builder
-    (PLAN-012 D6) each line names the one-off charge it bills (``one_off_charge``): the
-    lines' order is the order in which a payment on the invoice pays those charges."""
+    (PLAN-012 D6) each line names the charge it bills: a one-off charge
+    (``one_off_charge``), or for a Rent line the month's rent charge (``rent_charge``,
+    PLAN-012b-b D5). A payment on the invoice pays its first charge, then the other lines
+    in line order."""
 
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="line_items")
     position = models.IntegerField()
@@ -1439,6 +1446,13 @@ class InvoiceLineItem(GuardedModel):
     line_total = MoneyField()
     one_off_charge = models.ForeignKey(
         OneOffCharge,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="invoice_lines",
+    )
+    rent_charge = models.ForeignKey(
+        RentCharge,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
@@ -1461,6 +1475,10 @@ class InvoiceLineItem(GuardedModel):
                 fields=["one_off_charge"],
                 condition=Q(one_off_charge__isnull=False),
                 name="invoice_line_items_one_per_one_off_charge",
+            ),
+            models.CheckConstraint(
+                condition=Q(one_off_charge__isnull=True) | Q(rent_charge__isnull=True),
+                name="invoice_line_items_one_charge",
             ),
             _valid_choice("invoice_line_items", "kind", InvoiceLineKind),
         ]
@@ -1541,7 +1559,11 @@ class InvoiceDraftLine(GuardedModel):
     cent (computed by the service, held to it by a CHECK within half a cent).
 
     ``item`` is the line's text (PLAN-012b D1): a catalogue item's name, then
-    ``fee_type`` names it, or a name typed on the spot, then ``fee_type`` is null."""
+    ``fee_type`` names it, or a name typed on the spot, then ``fee_type`` is null.
+
+    A **Rent** line (PLAN-012b-b D4) names a lease of the draft's operator and a month
+    (``rent_lease``, ``rent_month``, both or neither, the month's first day) and no fee
+    type; on send it makes or takes that month's rent charge."""
 
     draft = models.ForeignKey(InvoiceDraft, on_delete=models.CASCADE, related_name="lines")
     position = models.IntegerField()
@@ -1553,6 +1575,10 @@ class InvoiceDraftLine(GuardedModel):
     quantity = StrictDecimalField(max_digits=12, decimal_places=4)
     unit_amount = MoneyField()
     line_total = MoneyField()
+    rent_lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    rent_month = models.DateField(null=True, blank=True)
 
     class Meta:
         db_table = "invoice_draft_lines"
@@ -1573,7 +1599,21 @@ class InvoiceDraftLine(GuardedModel):
                 & Q(line_total__lte=F("quantity") * F("unit_amount") + HALF_CENT),
                 name="invoice_draft_lines_total_is_quantity_times_unit",
             ),
+            models.CheckConstraint(
+                condition=Q(rent_lease__isnull=True, rent_month__isnull=True)
+                | Q(
+                    rent_lease__isnull=False,
+                    rent_month__isnull=False,
+                    rent_month__day=1,
+                    fee_type__isnull=True,
+                ),
+                name="invoice_draft_lines_rent_line",
+            ),
         ]
+
+    @property
+    def is_rent(self) -> bool:
+        return self.rent_lease_id is not None
 
     @property
     def quantity_text(self) -> str:

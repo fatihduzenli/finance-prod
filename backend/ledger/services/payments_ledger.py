@@ -62,6 +62,7 @@ from ledger.models import (
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
+    RentChargeStatus,
     Store,
 )
 from ledger.services import installments
@@ -236,9 +237,12 @@ def ledger_payments(selected: PaymentFilter) -> QuerySet[Payment]:
 
 def multi_line_charges() -> Any:
     """The first lines' charges of the invoice builder's multi-line invoices (PLAN-012
-    D6), as a subquery: a payment on one pays the invoice's lines in line order."""
+    D6), a Rent line counted as a line (PLAN-012b-b D5), as a subquery: a payment on one
+    pays the invoice's lines in line order."""
     return InvoiceLineItem.objects.filter(
-        position__gt=1, one_off_charge__isnull=False, invoice__one_off_charge__isnull=False
+        Q(one_off_charge__isnull=False) | Q(rent_charge__isnull=False),
+        position__gt=1,
+        invoice__one_off_charge__isnull=False,
     ).values("invoice__one_off_charge")
 
 
@@ -252,15 +256,23 @@ def on_multi_line_invoice() -> Q:
     )
 
 
+#: The category of a Rent line's part (PLAN-012b-b D7): rent collected.
+RENT_LINE = "rent"
+
+
 @dataclass(frozen=True, slots=True)
 class LinePart:
     """The part of a payment that paid one line of a multi-line invoice (negative for
-    a refund: taken back from that line)."""
+    a refund: taken back from that line). A Rent line's part has the category
+    :data:`RENT_LINE`, its rent charge's id and that charge's store and operator (the
+    lease the line bills, which may be another store of the operator)."""
 
     charge_id: uuid.UUID
     share: Decimal
     category: str
     refundable: bool
+    store_id: uuid.UUID | None = None
+    operator_id: uuid.UUID | None = None
 
 
 def _line_share(paid: Decimal, before: Decimal, price: Decimal) -> Decimal:
@@ -271,16 +283,18 @@ def _line_share(paid: Decimal, before: Decimal, price: Decimal) -> Decimal:
 
 def invoice_line_parts(payments: QuerySet[Payment]) -> dict[uuid.UUID, list[LinePart]]:
     """Per payment of ``payments`` that is :func:`on_multi_line_invoice`, how it paid the
-    invoice's lines (PLAN-012 D6): in line order, refunds taken back from the last line
-    first, the lines of waived or voided charges left out, what is paid beyond every line
-    counted with the first line. The split of a payment depends on the settled payments
-    before it on the same invoice, so every settled payment on those invoices is read in
-    settled order (3 queries). The parts of one payment sum to its signed amount."""
+    invoice's lines (PLAN-012 D6): the first line's charge first, then the others in line
+    order (a Rent line's rent charge among them, PLAN-012b-b D5, unless waived), refunds
+    taken back from the last line first, the lines of waived or voided charges left out,
+    what is paid beyond every line counted with the first line. The split of a payment
+    depends on the settled payments before it on the same invoice, so every settled
+    payment on those invoices is read in settled order (4 queries). The parts of one
+    payment sum to its signed amount."""
     wanted = set(payments.filter(on_multi_line_invoice()).values_list("pk", flat=True))
     if not wanted:
         return {}
     charges = Payment.objects.filter(pk__in=wanted).values("one_off_charge")
-    lines: dict[uuid.UUID, list[tuple[uuid.UUID, Decimal, str, bool]]] = {}
+    ordered: dict[uuid.UUID, list[tuple[bool, int, LinePart]]] = {}
     for line in (
         InvoiceLineItem.objects.filter(
             invoice__one_off_charge__in=charges, one_off_charge__isnull=False
@@ -288,21 +302,58 @@ def invoice_line_parts(payments: QuerySet[Payment]) -> dict[uuid.UUID, list[Line
         .exclude(one_off_charge__status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
         .values(
             "one_off_charge",
+            "position",
             first=F("invoice__one_off_charge"),
             price=F("one_off_charge__price"),
             category=F("one_off_charge__category"),
             refundable=F("one_off_charge__fee_type__refundable"),
         )
-        .order_by("first", "position")
     ):
-        lines.setdefault(line["first"], []).append(
+        ordered.setdefault(line["first"], []).append(
             (
-                line["one_off_charge"],
-                Decimal(line["price"] or ZERO),
-                str(line["category"]),
-                line["refundable"] is True,
+                line["one_off_charge"] != line["first"],
+                line["position"],
+                LinePart(
+                    line["one_off_charge"],
+                    Decimal(line["price"] or ZERO),
+                    str(line["category"]),
+                    line["refundable"] is True,
+                ),
             )
         )
+    for rent in (
+        InvoiceLineItem.objects.filter(
+            invoice__one_off_charge__in=charges, rent_charge__isnull=False
+        )
+        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
+        .values(
+            "rent_charge",
+            "position",
+            first=F("invoice__one_off_charge"),
+            price=F("rent_charge__amount_due"),
+            store=F("rent_charge__lease__store"),
+            operator=F("rent_charge__lease__operator"),
+        )
+    ):
+        ordered.setdefault(rent["first"], []).append(
+            (
+                True,
+                rent["position"],
+                LinePart(
+                    rent["rent_charge"],
+                    Decimal(rent["price"] or ZERO),
+                    RENT_LINE,
+                    False,
+                    rent["store"],
+                    rent["operator"],
+                ),
+            )
+        )
+    # Each line's part carries its price in ``share`` until the split below.
+    lines = {
+        first: [part for _, _, part in sorted(rows, key=lambda row: (row[0], row[1]))]
+        for first, rows in ordered.items()
+    }
     paid: dict[uuid.UUID, Decimal] = {}
     parts: dict[uuid.UUID, list[LinePart]] = {}
     for row in (
@@ -319,9 +370,10 @@ def invoice_line_parts(payments: QuerySet[Payment]) -> dict[uuid.UUID, list[Line
             continue
         billed = ZERO
         split: list[LinePart] = []
-        for charge_id, price, category, refundable in lines.get(row["charge"], []):
+        for line_part in lines.get(row["charge"], []):
+            price = line_part.share
             share = _line_share(after, billed, price) - _line_share(before, billed, price)
-            split.append(LinePart(charge_id, share, category, refundable))
+            split.append(replace(line_part, share=share))
             billed += price
         if split:
             beyond = signed - sum((part.share for part in split), ZERO)

@@ -57,6 +57,29 @@ saving (:data:`LINE_SAVE_NOT_OFFERED`).
   line's charge (a note is required; refused once anything is paid or pending), which
   voids every line once the provider confirmed the delete.
 
+**Rent lines** (docs/qa/PLAN-012b-b-catch-up-rent-lines-wizard-fixes.md D4 to D7): a line
+may name a lease of the draft's operator and a month (``rent_lease``, ``rent_month``)
+instead of an item. :func:`clean_lines` refuses, with nothing written: a lease or a month
+without the other, a lease of another operator, a month that is not a first day, before
+the lease's start month or (an ended lease) after its end month, a lease without a start
+date, a lease debited twice a month (its months are the rent run's), a month with no
+rent in effect, a lease whose rent autopay schedule is live (it would debit the month
+too), a quantity other than 1, the same lease and month twice on the draft
+(:data:`LINE_RENT_TWICE`) or on another open draft of the operator, a month whose charge
+is paid, partly paid, pending, waived, on a live invoice or on a live installment plan
+(:data:`LINE_RENT_BILLED`), an amount other than an unpaid charge's own, and an invoice
+of more than one rent line and nothing else. The amount defaults (an empty unit amount)
+to the charge's when the run made it, else the rent in effect that month
+(:func:`ledger.services.rent_run.first_month`: prorated for a partial start month); the
+item is "Rent <Month YYYY>, store <label>" and the detail, unless typed, the proration
+text. On send the line's charge is made or taken by
+:func:`ledger.services.rent_run.create_month` (due the invoice's due date), its
+``billed_by_invoice`` set and the invoice line names it (``rent_charge``); an invoice of
+one rent line alone is linked to that charge (``invoices.rent_charge``) and its job acts
+on it, any other invoice is linked to its first one-off line's charge as above. A payment
+on the invoice pays the rent charge as it pays a later line
+(:func:`ledger.services.one_off_charges.rent_share`). Never a provider call here.
+
 Every write is audited (entity ``invoice_draft``; the charges as one-off charges).
 Money is ``Decimal`` throughout.
 """
@@ -98,10 +121,13 @@ from ledger.models import (
     OneOffCategory,
     OneOffCharge,
     Operator,
+    RentCharge,
+    RentChargeStatus,
+    ScheduleKind,
     Store,
     format_quantity,
 )
-from ledger.services import leases, numbering, one_off_charges
+from ledger.services import leases, numbering, one_off_charges, rent_run
 from ledger.services.one_off_charges import (
     AMOUNT_MAX,
     CHARGE_NOW_PARAM,
@@ -175,6 +201,47 @@ LINE_TOTAL_TOO_LARGE = "Line {line}: the line total can be at most $999,999.99."
 LINE_SAME_FEE_TYPE = (
     "Line {line}: {name} is already on this invoice; a lease has one charge per fee type."
 )
+LINE_RENT_INCOMPLETE = "Line {line}: choose the lease and the month of the rent."
+LINE_RENT_LEASE = "Line {line}: choose one of this operator's leases for the rent."
+LINE_RENT_MONTH = "Line {line}: the rent month must be a month (its first day)."
+LINE_RENT_NO_START = "Line {line}: the lease of store {store} has no start date yet."
+LINE_RENT_BEFORE_START = (
+    "Line {line}: the lease of store {store} starts in {start}; the rent month cannot be before it."
+)
+LINE_RENT_AFTER_END = (
+    "Line {line}: the lease of store {store} ended in {end}; the rent month cannot be after it."
+)
+LINE_RENT_TWICE_MONTHLY = (
+    "Line {line}: the lease of store {store} is debited twice a month; its rent is billed "
+    "by the rent run."
+)
+LINE_RENT_NO_RENT = "Line {line}: no rent is in effect in {month} on the lease of store {store}."
+LINE_RENT_AUTOPAY = (
+    "Line {line}: the rent of store {store} is collected by autopay; stop autopay before "
+    "billing it by invoice."
+)
+LINE_RENT_QUANTITY = "Line {line}: a rent line's quantity is 1."
+LINE_RENT_TWICE = "Line {line}: rent {month} of store {store} is already on this invoice."
+LINE_RENT_ON_DRAFT = "Line {line}: rent {month} of store {store} is already on draft {draft}."
+LINE_RENT_BILLED = "Line {line}: rent {month} of store {store} is already billed or paid."
+LINE_RENT_WAIVED = "Line {line}: rent {month} of store {store} is waived."
+LINE_RENT_AMOUNT = (
+    "Line {line}: rent {month} of store {store} is already charged at {amount}; the line's "
+    "amount must be {amount}."
+)
+RENT_ALONE = (
+    "An invoice of rent alone has one rent line: bill the other months on their own "
+    "invoices or with another line. Nothing was saved."
+)
+RENT_ALONE_CHARGE_NOW = (
+    "Charge now needs a line other than rent on the invoice. Nothing was charged."
+)
+RENT_ALONE_CANCEL = (
+    "This invoice bills rent alone; it cannot be cancelled from the invoice builder. "
+    "Nothing was changed."
+)
+#: The item of a rent line (PLAN-012b-b D4).
+RENT_ITEM = "Rent {month}, store {store}"
 TOTAL_TOO_LARGE = "The invoice total can be at most $999,999.99. Nothing was saved."
 MEMO_TOO_LONG = f"The memo can be at most {MEMO_MAX_LENGTH} characters."
 MEMO_PAYMENT_DATA = one_off_charges.TEXT_PAYMENT_DATA
@@ -212,13 +279,17 @@ LINE_PREFIX = "Line {line}: "
 class LineInput:
     """One line as staff entered it: an item (a name; resolved to a catalogue item by
     :func:`clean_lines`), an optional detail (``description``), a quantity (``None``: 1),
-    a unit amount, and whether a typed item is saved to the catalogue (D4)."""
+    a unit amount, and whether a typed item is saved to the catalogue (D4). A Rent line
+    (PLAN-012b-b D4) names a lease and a month instead of an item (``None``: the
+    default amount)."""
 
     item: str
     description: str
     quantity: Decimal | None
     unit_amount: Decimal | None
     save_item: bool = False
+    rent_lease: uuid.UUID | None = None
+    rent_month: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +305,15 @@ class CleanLine:
     unit_amount: Decimal
     line_total: Decimal
     save_item: bool = False
+    #: A Rent line's lease and month (PLAN-012b-b D4), and the proration text of the
+    #: month when its amount is the prorated default.
+    rent_lease: Lease | None = None
+    rent_month: date | None = None
+    proration_text: str = ""
+
+    @property
+    def is_rent(self) -> bool:
+        return self.rent_lease is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,7 +401,7 @@ def due_date_for(draft: InvoiceDraft, today: date | None = None) -> date:
 
 
 def lines_of(draft: InvoiceDraft) -> list[InvoiceDraftLine]:
-    return list(draft.lines.select_related("fee_type").order_by("position"))
+    return list(draft.lines.select_related("fee_type", "rent_lease").order_by("position"))
 
 
 def total_of(lines: Sequence[InvoiceDraftLine | CleanLine]) -> Decimal:
@@ -366,9 +446,21 @@ def sent_charges(draft: InvoiceDraft) -> list[OneOffCharge]:
 
 
 def first_charge(draft: InvoiceDraft) -> OneOffCharge | None:
-    """The charge the sent invoice is linked to (its first line's), or ``None``."""
+    """The charge the sent invoice is linked to (its first one-off line's), or ``None``
+    (an invoice of rent alone is linked to its rent charge, PLAN-012b-b D5)."""
     invoice = draft.sent_invoice
     return invoice.one_off_charge if invoice is not None else None
+
+
+def sent_rent_charges(draft: InvoiceDraft) -> list[RentCharge]:
+    """The rent charges of a sent draft's Rent lines, in line order (PLAN-012b-b D5)."""
+    if draft.sent_invoice_id is None:
+        return []
+    return list(
+        RentCharge.objects.filter(invoice_lines__invoice_id=draft.sent_invoice_id)
+        .select_related("lease__store")
+        .order_by("invoice_lines__position")
+    )
 
 
 # --- Validation -----------------------------------------------------------------------
@@ -417,24 +509,8 @@ def _clean_line(
         raise refuse(LINE_DESCRIPTION_TOO_LONG, "description")
     if not _guarded(description):
         raise refuse(LINE_PAYMENT_DATA, "description")
-    quantity = Decimal(1) if line.quantity is None else line.quantity
-    if (
-        not isinstance(quantity, Decimal)
-        or not quantity.is_finite()
-        or quantity <= 0
-        or quantity != quantity.quantize(QUANTITY_STEP)
-        or quantity > QUANTITY_MAX
-    ):
-        raise refuse(LINE_QUANTITY, "quantity")
-    unit = line.unit_amount
-    if (
-        not isinstance(unit, Decimal)
-        or not unit.is_finite()
-        or unit <= 0
-        or unit != unit.quantize(CENT)
-        or unit > AMOUNT_MAX
-    ):
-        raise refuse(LINE_UNIT_AMOUNT, "unit_amount")
+    quantity = _quantity(index, line)
+    unit = _unit_amount(index, line.unit_amount)
     total = (quantity * unit).quantize(CENT, rounding=ROUND_HALF_UP)
     if total <= 0:
         raise refuse(LINE_TOTAL_ZERO, "quantity")
@@ -451,12 +527,182 @@ def _clean_line(
     )
 
 
-def clean_lines(lines: Sequence[LineInput], *, lease: Lease | None) -> list[CleanLine]:
+def _line_refusal(index: int, template: str, field: str, **words: object) -> _Refused:
+    return _Refused(
+        Outcome(False, template.format(line=index, **words), f"lines-{index - 1}-{field}")
+    )
+
+
+def _quantity(index: int, line: LineInput) -> Decimal:
+    quantity = Decimal(1) if line.quantity is None else line.quantity
+    if (
+        not isinstance(quantity, Decimal)
+        or not quantity.is_finite()
+        or quantity <= 0
+        or quantity != quantity.quantize(QUANTITY_STEP)
+        or quantity > QUANTITY_MAX
+    ):
+        raise _line_refusal(index, LINE_QUANTITY, "quantity")
+    return quantity
+
+
+def _unit_amount(index: int, unit: Decimal | None) -> Decimal:
+    if (
+        not isinstance(unit, Decimal)
+        or not unit.is_finite()
+        or unit <= 0
+        or unit != unit.quantize(CENT)
+        or unit > AMOUNT_MAX
+    ):
+        raise _line_refusal(index, LINE_UNIT_AMOUNT, "unit_amount")
+    return unit
+
+
+def month_label(month: date) -> str:
+    """``October 2026``."""
+    return f"{month:%B %Y}"
+
+
+def rent_charge_refusal(charge: RentCharge) -> str:
+    """Why a Rent line cannot take the month's existing charge, as a template of
+    :data:`LINE_RENT_BILLED` or :data:`LINE_RENT_WAIVED`, or ``""`` (PLAN-012b-b D4, D5):
+    paid, partly paid or pending; on a live invoice (a local one not yet at the provider
+    included); on a live installment plan."""
+    if charge.status == RentChargeStatus.WAIVED:
+        return LINE_RENT_WAIVED
+    if (
+        charge.status in (RentChargeStatus.PAID, RentChargeStatus.PARTIAL, RentChargeStatus.PENDING)
+        or charge.amount_paid > 0
+        or rent_run.on_live_plan(rent_charge=charge)
+        or any(
+            one_off_charges.invoice_is_live(invoice) for invoice in rent_run.charge_invoices(charge)
+        )
+    ):
+        return LINE_RENT_BILLED
+    return ""
+
+
+def _clean_rent_line(index: int, line: LineInput, operator: Operator | None) -> CleanLine:
+    """A Rent line checked (PLAN-012b-b D4; see the module docstring), with its item, its
+    detail and its amount, or :class:`_Refused`."""
+    if line.rent_lease is None or line.rent_month is None:
+        raise _line_refusal(index, LINE_RENT_INCOMPLETE, "rent_lease")
+    lease = (
+        Lease.objects.select_related("store").filter(pk=line.rent_lease).first()
+        if isinstance(line.rent_lease, uuid.UUID)
+        else None
+    )
+    if lease is None or operator is None or lease.operator_id != operator.pk:
+        raise _line_refusal(index, LINE_RENT_LEASE, "rent_lease")
+    month = line.rent_month
+    if not isinstance(month, date) or month.day != 1:
+        raise _line_refusal(index, LINE_RENT_MONTH, "rent_month")
+    words: dict[str, object] = {"store": lease.store.external_label, "month": month_label(month)}
+    if lease.started_on is None:
+        raise _line_refusal(index, LINE_RENT_NO_START, "rent_lease", **words)
+    if month < lease.started_on.replace(day=1):
+        start = month_label(lease.started_on)
+        raise _line_refusal(index, LINE_RENT_BEFORE_START, "rent_month", start=start, **words)
+    if lease.ended_on is not None and month > lease.ended_on.replace(day=1):
+        end = month_label(lease.ended_on)
+        raise _line_refusal(index, LINE_RENT_AFTER_END, "rent_month", end=end, **words)
+    if lease.second_debit_day is not None:
+        raise _line_refusal(index, LINE_RENT_TWICE_MONTHLY, "rent_lease", **words)
+    if any(row.kind == ScheduleKind.RENT for row, _ in leases.stoppable_schedules(lease)):
+        raise _line_refusal(index, LINE_RENT_AUTOPAY, "rent_lease", **words)
+    if line.quantity is not None and line.quantity != 1:
+        raise _line_refusal(index, LINE_RENT_QUANTITY, "quantity")
+    existing = RentCharge.objects.filter(lease=lease, period_month=month, seq=1).first()
+    text = ""
+    if existing is not None:
+        refusal = rent_charge_refusal(existing)
+        if refusal:
+            raise _line_refusal(index, refusal, "rent_month", **words)
+        default = Decimal(existing.amount_due)
+        text = existing.proration_text or ""
+    else:
+        due = rent_run.debit_date(lease, month, lease.debit_day or 1)
+        rent = leases.rent_on(lease, due)
+        if rent is None:
+            raise _line_refusal(index, LINE_RENT_NO_RENT, "rent_month", **words)
+        prorated = rent_run.first_month(lease, month, Decimal(rent.amount))
+        default, text = prorated.amount, prorated.text
+    unit = default if line.unit_amount is None else _unit_amount(index, line.unit_amount)
+    if existing is not None and unit != default:
+        amount = leases.format_amount(default)
+        raise _line_refusal(index, LINE_RENT_AMOUNT, "unit_amount", amount=amount, **words)
+    description = visible_text(line.description or "")
+    if len(description) > DESCRIPTION_MAX_LENGTH:
+        raise _line_refusal(index, LINE_DESCRIPTION_TOO_LONG, "description")
+    if not _guarded(description):
+        raise _line_refusal(index, LINE_PAYMENT_DATA, "description")
+    proration = text if unit == default else ""
+    return CleanLine(
+        item=RENT_ITEM.format(month=month_label(month), store=lease.store.external_label),
+        fee_type=None,
+        description=description or proration,
+        quantity=Decimal(1).quantize(QUANTITY_STEP),
+        unit_amount=unit,
+        line_total=unit,
+        rent_lease=lease,
+        rent_month=month,
+        proration_text=proration,
+    )
+
+
+def _check_rent_lines(
+    cleaned: Sequence[CleanLine], operator: Operator | None, draft: uuid.UUID | None
+) -> None:
+    """One Rent line per lease and month on the draft and on the operator's other open
+    drafts; an invoice of more than one Rent line has another line (PLAN-012b-b D4)."""
+    rents = [(index, line) for index, line in enumerate(cleaned, start=1) if line.is_rent]
+    if not rents:
+        return
+    if len(rents) == len(cleaned) and len(rents) > 1:
+        raise _Refused(Outcome(False, RENT_ALONE))
+    seen: set[tuple[uuid.UUID, date]] = set()
+    others = (
+        InvoiceDraftLine.objects.filter(
+            draft__operator=operator,
+            draft__status=InvoiceDraftStatus.DRAFT,
+            rent_lease__isnull=False,
+        )
+        .exclude(draft_id=draft)
+        .select_related("draft")
+    )
+    elsewhere = {(row.rent_lease_id, row.rent_month): row.draft for row in others}
+    for index, line in rents:
+        if line.rent_lease is None or line.rent_month is None:  # pragma: no cover (is_rent)
+            continue
+        key = (line.rent_lease.pk, line.rent_month)
+        words: dict[str, object] = {
+            "store": line.rent_lease.store.external_label,
+            "month": month_label(line.rent_month),
+        }
+        if key in seen:
+            raise _line_refusal(index, LINE_RENT_TWICE, "rent_month", **words)
+        seen.add(key)
+        other = elsewhere.get(key)
+        if other is not None:
+            raise _line_refusal(
+                index, LINE_RENT_ON_DRAFT, "rent_month", draft=other.number, **words
+            )
+
+
+def clean_lines(
+    lines: Sequence[LineInput],
+    *,
+    lease: Lease | None,
+    operator: Operator | None = None,
+    draft: uuid.UUID | None = None,
+) -> list[CleanLine]:
     """Every line checked, totalled and resolved to its catalogue item, in order;
     :class:`_Refused` at the first rule one breaks. A typed item that another line of the
     draft saves to the catalogue is saved with it (it will name the same item). On a
     lease, a catalogue item billed as a setup charge appears once (a lease has one charge
-    per fee type), a saved item included."""
+    per fee type), a saved item included. A Rent line (a lease or a month given) is
+    checked against ``operator`` and the operator's open drafts other than ``draft``
+    (PLAN-012b-b D4)."""
     if not lines:
         raise _Refused(Outcome(False, NO_LINES))
     if len(lines) > MAX_LINES:
@@ -468,7 +714,12 @@ def clean_lines(lines: Sequence[LineInput], *, lease: Lease | None) -> list[Clea
         for fee_type in FeeType.objects.exclude(pk__in=offered_ids).only("name")
     }
     by_name = _offered_by_name(offered)
-    cleaned = [_clean_line(index, line, by_name, held) for index, line in enumerate(lines, start=1)]
+    cleaned = [
+        _clean_rent_line(index, line, operator)
+        if line.rent_lease is not None or line.rent_month is not None
+        else _clean_line(index, line, by_name, held)
+        for index, line in enumerate(lines, start=1)
+    ]
     saved = {catalogue_key(line.item) for line in cleaned if line.save_item}
     cleaned = [
         replace(line, save_item=True)
@@ -494,6 +745,7 @@ def clean_lines(lines: Sequence[LineInput], *, lease: Lease | None) -> list[Clea
                     )
                 )
             seen.add(key)
+    _check_rent_lines(cleaned, operator, draft)
     if total_of(cleaned) > AMOUNT_MAX:
         raise _Refused(Outcome(False, TOTAL_TOO_LARGE))
     return cleaned
@@ -540,9 +792,9 @@ def create_draft(
     if refused is not None:
         return refused
     try:
-        cleaned = clean_lines(lines, lease=lease)
         with transaction.atomic():
             Operator.objects.select_for_update().get(pk=operator.pk)
+            cleaned = clean_lines(lines, lease=lease, operator=operator)
             earlier = _draft_for_key(creation_key)
             if earlier is not None:
                 return Outcome(True, CREATED.format(number=earlier.number), draft=earlier)
@@ -607,9 +859,10 @@ def update_draft(
             refused = _header_refusal(draft.operator, lease, text, due_date, day)
             if refused is not None:
                 return refused
-            cleaned = clean_lines(lines, lease=lease)
-            # A saved catalogue item is created under the operator's row lock (D4).
+            # A saved catalogue item is created, and a Rent line checked against the
+            # operator's other drafts, under the operator's row lock (D4; PLAN-012b-b D4).
             Operator.objects.select_for_update().get(pk=draft.operator_id)
+            cleaned = clean_lines(lines, lease=lease, operator=draft.operator, draft=draft.pk)
             before = draft_state(draft)
             draft.lease = lease
             draft.memo = text
@@ -747,6 +1000,8 @@ def _write_lines(draft: InvoiceDraft, lines: Sequence[CleanLine]) -> None:
                 quantity=line.quantity,
                 unit_amount=line.unit_amount,
                 line_total=line.line_total,
+                rent_lease=line.rent_lease,
+                rent_month=line.rent_month,
             )
             for position, line in enumerate(lines, start=1)
         ]
@@ -856,10 +1111,19 @@ def _convert(
         try:
             lines = clean_lines(
                 [
-                    LineInput(line.item, line.description, line.quantity, line.unit_amount)
+                    LineInput(
+                        line.item,
+                        line.description,
+                        line.quantity,
+                        line.unit_amount,
+                        rent_lease=line.rent_lease_id,
+                        rent_month=line.rent_month,
+                    )
                     for line in stored
                 ],
                 lease=lease,
+                operator=operator,
+                draft=draft.pk,
             )
         except _Refused as error:
             return Outcome(False, error.outcome.message, error.outcome.field, draft=draft)
@@ -867,7 +1131,10 @@ def _convert(
         if not leases.customer_ref(operator):
             return Outcome(False, NO_PROVIDER_CUSTOMER, draft=draft)
         large = leases.is_large_debit(total)
+        rent_alone = all(line.is_rent for line in lines)
         if collection == CollectionMethod.CHARGE_NOW:
+            if rent_alone:
+                return Outcome(False, RENT_ALONE_CHARGE_NOW, draft=draft)
             refusal = _charge_now_refusal(operator, total)
             if refusal:
                 return Outcome(False, refusal, draft=draft)
@@ -877,8 +1144,15 @@ def _convert(
                 )
         due = due_date_for(draft, day)
         number = numbering.next_invoice_number(day.year)
-        charges = []
+        charges: list[OneOffCharge | RentCharge] = []
         for position, line in enumerate(lines, start=1):
+            if line.is_rent:
+                try:
+                    charges.append(_rent_charge(line, position, due, draft, actor))
+                except _Refused as error:
+                    transaction.set_rollback(True)
+                    return Outcome(False, error.outcome.message, error.outcome.field, draft=draft)
+                continue
             category = category_for(line.fee_type)
             item = ChargeInput(
                 fee_type=line.fee_type if category == OneOffCategory.SETUP else None,
@@ -902,10 +1176,15 @@ def _convert(
                 prefix = LINE_PREFIX.format(line=position)
                 return Outcome(False, prefix + made.message, draft=draft)
             charges.append(made.charge)
+        one_offs = [charge for charge in charges if isinstance(charge, OneOffCharge)]
+        rents = [charge for charge in charges if isinstance(charge, RentCharge)]
         invoice = Invoice.objects.create(
             invoice_number=number,
             operator=operator,
-            one_off_charge=charges[0],
+            # The first one-off line's charge; an invoice of one rent line alone is its
+            # rent charge's (PLAN-012b-b D5).
+            one_off_charge=one_offs[0] if one_offs else None,
+            rent_charge=rents[0] if not one_offs else None,
             issue_date=day,
             due_date=due,
             memo=draft.memo,
@@ -929,14 +1208,22 @@ def _convert(
                     quantity=line.quantity,
                     unit_price=line.unit_amount,
                     line_total=line.line_total,
-                    one_off_charge=charge,
+                    one_off_charge=charge if isinstance(charge, OneOffCharge) else None,
+                    rent_charge=charge if isinstance(charge, RentCharge) else None,
                     kind=InvoiceLineKind.CHARGE,
                 )
                 for position, (line, charge) in enumerate(zip(lines, charges, strict=True), 1)
             ]
         )
-        first = charges[0]
+        for rent in rents:
+            _billed_by(rent, invoice, actor)
         params: dict[str, object] | None = None
+        if not one_offs:
+            # One rent line alone: the provider invoice is its rent charge's.
+            job = jobs.enqueue(JobKind.INVOICE_CREATE, rents[0], params, actor)
+            _sent(draft, invoice, actor, number, collection, charges, due)
+            return Outcome(True, SENT.format(number=number), draft=draft, invoice=invoice, job=job)
+        first = one_offs[0]
         if collection == CollectionMethod.CHARGE_NOW:
             first.charge_now_key = uuid.uuid4()
             first.save(update_fields=["charge_now_key", "updated_at"])
@@ -959,25 +1246,91 @@ def _convert(
                 )
             params = {CHARGE_NOW_PARAM: True, "confirmed": confirmed}
         job = jobs.enqueue(JobKind.INVOICE_CREATE, first, params, actor)
-        before = draft_state(draft)
-        draft.status = InvoiceDraftStatus.SENT
-        draft.sent_invoice = invoice
-        draft.save(update_fields=["status", "sent_invoice", "updated_at"])
-        _audit(
-            actor,
-            SENT_ACTION,
-            draft,
-            before,
-            {
-                **draft_state(draft),
-                "invoice_number": number,
-                "collection": collection.value,
-                "charges": [str(charge.pk) for charge in charges],
-                "due_date": due.isoformat(),
-            },
-        )
+        _sent(draft, invoice, actor, number, collection, charges, due)
     template = CHARGE_REQUESTED if collection == CollectionMethod.CHARGE_NOW else SENT
     return Outcome(True, template.format(number=number), draft=draft, invoice=invoice, job=job)
+
+
+def _sent(
+    draft: InvoiceDraft,
+    invoice: Invoice,
+    actor: User | None,
+    number: str,
+    collection: CollectionMethod,
+    charges: Sequence[OneOffCharge | RentCharge],
+    due: date,
+) -> None:
+    """The draft becomes ``sent`` with its invoice, audited with every line's charge."""
+    before = draft_state(draft)
+    draft.status = InvoiceDraftStatus.SENT
+    draft.sent_invoice = invoice
+    draft.save(update_fields=["status", "sent_invoice", "updated_at"])
+    _audit(
+        actor,
+        SENT_ACTION,
+        draft,
+        before,
+        {
+            **draft_state(draft),
+            "invoice_number": number,
+            "collection": collection.value,
+            "charges": [str(row.pk) for row in charges if isinstance(row, OneOffCharge)],
+            "rent_charges": [str(row.pk) for row in charges if isinstance(row, RentCharge)],
+            "due_date": due.isoformat(),
+        },
+    )
+
+
+def _rent_charge(
+    line: CleanLine, position: int, due: date, draft: InvoiceDraft, actor: User | None
+) -> RentCharge:
+    """The month's rent charge of a Rent line on send (PLAN-012b-b D5): made by
+    :func:`ledger.services.rent_run.create_month` (due ``due``, the line's amount and
+    proration text), or the existing one taken, checked again under its row lock (an
+    unpaid charge with nothing live, at the line's amount); :class:`_Refused` otherwise.
+    Runs in the caller's transaction."""
+    lease, month = line.rent_lease, line.rent_month
+    if lease is None or month is None:  # pragma: no cover (only Rent lines come here)
+        raise ValueError("Not a Rent line.")
+    made, created = rent_run.create_month(
+        lease,
+        month,
+        actor,
+        due_on=due,
+        amount=line.line_total,
+        proration_text=line.proration_text,
+        context={"invoice_draft": str(draft.pk), "line": position},
+    )
+    charge = RentCharge.objects.select_for_update().get(pk=made.pk)
+    if created:
+        return charge
+    words: dict[str, object] = {"store": lease.store.external_label, "month": month_label(month)}
+    refusal = rent_charge_refusal(charge)
+    if refusal:
+        raise _line_refusal(position, refusal, "rent_month", **words)
+    if charge.amount_due != line.line_total:
+        amount = leases.format_amount(Decimal(charge.amount_due))
+        raise _line_refusal(position, LINE_RENT_AMOUNT, "unit_amount", amount=amount, **words)
+    return charge
+
+
+def _billed_by(charge: RentCharge, invoice: Invoice, actor: User | None) -> None:
+    """Name the invoice on the rent charge (PLAN-012b-b D5, D6), audited."""
+    before = {"billed_by_invoice": str(charge.billed_by_invoice_id or "") or None}
+    charge.billed_by_invoice = invoice
+    charge.save(update_fields=["billed_by_invoice", "updated_at"])
+    AuditLog.objects.create(
+        actor=actor,
+        action="rent_charge.billed_by_invoice",
+        entity_type=rent_run.ENTITY_CHARGE,
+        entity_id=str(charge.pk),
+        before=before,
+        after={
+            **rent_run.charge_state(charge),
+            "billed_by_invoice": str(invoice.pk),
+            "invoice_number": invoice.invoice_number,
+        },
+    )
 
 
 # --- Cancel ---------------------------------------------------------------------------
@@ -1004,8 +1357,10 @@ def cancel(draft_id: uuid.UUID, actor: User | None, *, note: str = "") -> Outcom
             _audit(actor, CANCELLED_ACTION, draft, before, draft_state(draft))
             return Outcome(True, CANCELLED, draft=draft)
         first = first_charge(draft)
-    if first is None:  # a sent draft always has its invoice's first charge
-        return Outcome(False, NOT_A_DRAFT, draft=draft)
+    if first is None:
+        # A sent draft has its invoice's first charge, unless it bills rent alone.
+        message = RENT_ALONE_CANCEL if sent_rent_charges(draft) else NOT_A_DRAFT
+        return Outcome(False, message, draft=draft)
     outcome = one_off_charges.cancel_charge(first.pk, note=note, actor=actor)
     if outcome.ok:
         _audit(
@@ -1039,6 +1394,14 @@ def draft_state(draft: InvoiceDraft) -> dict[str, Any]:
                 "quantity": str(line.quantity),
                 "unit_amount": str(line.unit_amount),
                 "line_total": str(line.line_total),
+                **(
+                    {
+                        "rent_lease": str(line.rent_lease_id),
+                        "rent_month": line.rent_month.isoformat(),
+                    }
+                    if line.rent_lease_id is not None and line.rent_month is not None
+                    else {}
+                ),
             }
             for line in lines
         ],

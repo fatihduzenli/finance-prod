@@ -64,7 +64,73 @@ due-date rule; the 24-month bound stated on the run page.
 
 ### Batch B — rent billed by invoice (D4–D8), the P&L at lease end (D12)
 
-B_SECTION
+**Scope.** `backend/ledger` (`invoice_builder.py`: the Rent line, `_clean_rent_line`,
+`_check_rent_lines`, `rent_charge_refusal`, `_rent_charge`, `sent_rent_charges`;
+`one_off_charges.py`: the sibling allocation with Rent lines (`rent_share`, `invoice_line_count`,
+`invoice_covered`, `cancel_refusal`); `rent_run.py`: `own_paid`, `charge_invoices` through line
+items; `payments_ledger.invoice_line_parts` with Rent parts; `pnl.py`: ADR-0012 §7 and the Rent
+part as rent collected; `grid.py`: the invoice number; `transfer.balance_blockers` after the
+offset; `lease_end.py`, `installments.py`, `views/invoices.py`, `views/charges.py`, forms,
+templates, `invoice_lines.js`; `models.py`: `InvoiceDraftLine.rent_lease/rent_month`,
+`InvoiceLineItem.rent_charge`, `RentCharge.billed_by_invoice`, two CHECKs; migration 0041),
+`backend/payments` (`one_off_invoices.py`: Rent lines in the invoice body, `create_rent_invoice`,
+`send_rent`; `jobs`: a rent charge as the entity of `invoice_create`/`invoice_send`; the
+transaction webhook's allocation audit), tests. No new dependency or environment variable; no
+provider call the adapter did not already make.
+
+**D12 reproduction (Opus, `tests/test_pnl.py` Store Three cases).** The owner's "Fees billed
+1300.00 / Fees collected 1500.00 incl. 500.00 withheld" came from the first rent billed as a
+typed $1,000 builder item "Rent" (category `other`: $1,000 billed and collected as a fee), the
+$300 lease-end balance billed, and the $500 withheld deposit collected but never billed. Rows
+before (October, Northwind, no offset): rent billed 32.26, rent collected 32.26, fees billed
+1300.00, fees collected 1500.00 (incl. 500.00 withheld). After ADR-0012 §7 with the typed line
+gone (the Rent line replaces it): rent billed 32.26, rent collected 32.26, fees billed 800.00,
+fees collected 500.00 (incl. 500.00 withheld deposit), deposits held 0.00; with the wizard's
+pre-filled $32.26 offset: fees collected 467.74 (incl. 467.74 withheld), rent collected 32.26
+from the offset. The incoming lease's row carries its prorated first month (1370.97) as rent
+billed. **For the owner:** the typed "Rent" line on staging's Test Store Three stays a fee in
+history; new first rents go through the Rent line.
+
+**Commands run (final Batch B code).**
+
+| Command | Database | Exit | Result |
+|---|---|---|---|
+| `uv run ruff check .`, `uv run ruff format --check .` | n/a | 0 | clean, 476 files formatted |
+| `uv run mypy` (strict) | n/a | 0 | no issues in 385 source files |
+| `uv lock --check` | n/a | 0 | consistent |
+| `manage.py makemigrations --check --dry-run` | sqlite, PostgreSQL 16 | 0 | No changes detected |
+| `uv run pytest -m "not e2e" -q -o faulthandler_timeout=300` | sqlite | 0 | 5,113 passed, 621 skipped; 7:02 wall |
+| the "Migration tests" selection | PostgreSQL 16 | 0 | 23 passed; 5:31 wall |
+| the "Unit tests" selection | PostgreSQL 16 | 0 | 5,708 passed, 3 skipped; 9:52 wall |
+| `uv run pytest -m e2e -q` | PostgreSQL 16 | 0 | 7 passed |
+| `bash scripts/check-no-secrets.sh`; pattern scan of the diff since `13b60fd` and every new file | n/a | 0 | clean |
+
+**Tests (Gate 2).** Opus: `test_invoice_builder.py` (+18), `test_pnl.py` (+3 Store Three),
+`test_ledger_models.py` (the two CHECKs), seeded round trip of 0041. Fable
+(`test_plan012b_b_b_adversarial.py`, 12 cases): a rent line cannot bill another operator's lease
+or a lease that does not exist; the amount stays within a cent and `AMOUNT_MAX` (zero, a
+thousandth, negative, a million, NaN refused); a forged month (the 13th, the 31st, 1999) is
+refused; two rent lines for one month are refused on create, on update in another position and
+across drafts; the invoice's rent charge is never billed or paid twice by the run (the run on
+the start date and later creates nothing, the invoice's payment pays the charge, a manual payment
+is then refused, the P&L bills and collects the month once as rent); a move-in invoice counts
+each kind once (rent as rent, the setup fee as fees, the deposit held, the catch-up adds nothing).
+
+**Findings (B).**
+
+| # | Severity | Where | Finding | Outcome |
+|---|---|---|---|---|
+| 3 | MAJOR | `transfer.balance_blockers` | The transfer's open-balance blockers were judged before the unpaid-balance offset, so a balance the deposit covers still blocked the transfer (found by Opus's D12 reproduction) | Resolved: the offset is applied to the open lines, oldest first, and only the remainder blocks |
+
+Design choices accepted: the rent share of a mixed invoice is derived as the one-off lines'
+shares are (no second payment row, so no double count); a lease with a live rent autopay
+schedule and a twice-monthly lease take no Rent line; rent alone allows one Rent line; Charge
+now and the builder's cancel of a rent-alone invoice are refused (the release of Batch C covers
+rent invoices); `Invoice.rent_charge` only on a rent-alone invoice (the one-source CHECK), mixed
+invoices link through the line item; the end month of an ended lease defaults to the full rent,
+editable.
+
+**Verdict (B):** PASS (one MAJOR found by the reproduction and resolved; residual risk: the browser behaviour of the Rent kind's JavaScript is checked by the owner's click).
 
 ### Batch C — splitting rent (D13)
 

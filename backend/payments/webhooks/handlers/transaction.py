@@ -436,11 +436,14 @@ def _allocate_to_companions(charge: OneOffCharge, context: dict[str, Any]) -> No
     """PLAN-011b D5: a payment on a re-debit's invoice pays the re-debit first, then its
     NSF fee; PLAN-012 D6: a payment on a multi-line invoice pays its first line's charge,
     then each later line's in line order (a return or refund takes it back from the last
-    line first). Each charge whose paid amount or status moved gets its own audit row."""
+    line first); PLAN-012b-b D5: a Rent line's rent charge is paid as a later line
+    (``rent_charge.payment_allocated``). Each charge whose paid amount or status moved
+    gets its own audit row."""
     for companion, before, after in one_off_charges.refresh_companions(charge):
+        action, entity = one_off_charges.allocation_audit(companion)
         audit(
-            one_off_charges.ALLOCATED_ACTION,
-            ENTITY_ONE_OFF_CHARGE,
+            action,
+            entity,
             companion.pk,
             before,
             after | context | {"allocated_from": str(charge.pk)},

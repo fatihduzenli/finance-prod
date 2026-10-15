@@ -1252,6 +1252,12 @@ LEDGER_CASES: list[ConstraintCase] = [
         unique_pair(_line_of_a_charge, {}, {"one_off_charge": lambda row: row.one_off_charge}),
     ),
     ConstraintCase(
+        # PLAN-012b-b D5: a line names a one-off charge or a rent charge, not both.
+        "invoice_line_items_one_charge",
+        lambda: new_line_item(rent_charge=saved(new_rent_charge())),
+        lambda: _line_of_a_charge(rent_charge=saved(new_rent_charge())),
+    ),
+    ConstraintCase(
         # PLAN-012a D1: the closed list.
         "invoice_line_items_kind_valid",
         lambda: new_line_item(kind="discount"),
@@ -1317,6 +1323,12 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_invoice_draft_line(
             quantity=D("0.0001"), unit_amount=D("0.01"), line_total=D("0.00")
         ),
+    ),
+    ConstraintCase(
+        # PLAN-012b-b D4: a Rent line has its lease and its month (a first day), or neither.
+        "invoice_draft_lines_rent_line",
+        lambda: new_invoice_draft_line(rent_lease=saved(new_lease()), rent_month=date(2026, 10, 1)),
+        lambda: new_invoice_draft_line(rent_month=date(2026, 10, 1)),
     ),
     ConstraintCase(
         "invoice_draft_lines_total_is_quantity_times_unit",

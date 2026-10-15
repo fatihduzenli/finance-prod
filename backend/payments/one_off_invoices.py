@@ -61,6 +61,13 @@ class and the field names it rejected (never provider text).
   one-off charge's schedule gets its local invoice. One naming another operator's
   invoice, or a second invoice for a charge, is not linked and flags the charge.
 
+- :func:`create_rent_invoice` and :func:`send_rent` (``invoice_create`` and
+  ``invoice_send`` on a rent charge; PLAN-012b-b D5): an invoice builder invoice of one
+  Rent line alone, linked to the month's rent charge. The same check before create,
+  create, link and e-mail as above, the failures audited on the rent charge. A builder
+  invoice with a Rent line and other lines is the first one-off line's as above: its
+  provider lines carry the Rent line (:func:`charge_amounts`).
+
 A ``4xx`` is never retried (the transport retries nothing that is not idempotent); the
 charge page shows the failure and offers the single manual retry, which is a new job.
 """
@@ -76,6 +83,7 @@ from typing import Any
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 import payments
@@ -89,6 +97,8 @@ from ledger.models import (
     OneOffCharge,
     OneOffChargeStatus,
     Operator,
+    RentCharge,
+    RentChargeStatus,
     format_quantity,
 )
 from ledger.services import installments, leases, numbering, one_off_charges, rent_run
@@ -129,6 +139,9 @@ DEBIT_HOUR_UTC = leases.DEBIT_HOUR_UTC
 SCHEDULE_REFERENCE_PREFIX = "OOC-"
 
 INVOICE_ATTEMPT_ACTION = "one_off_charge.provider_invoice_attempted"
+#: The rent charge of an invoice of one Rent line alone (PLAN-012b-b D5).
+ENTITY_RENT_CHARGE = rent_run.ENTITY_CHARGE
+RENT_INVOICE_ATTEMPT_ACTION = "rent_charge.provider_invoice_attempted"
 SCHEDULE_ATTEMPT_ACTION = "one_off_charge.provider_schedule_attempted"
 
 # --- Fixed sentences ------------------------------------------------------------------
@@ -284,13 +297,17 @@ def _audit(
 
 
 def _failed(
-    charge: OneOffCharge, actor: User | None, action: str, error: ProviderError, text: str
+    charge: OneOffCharge | RentCharge,
+    actor: User | None,
+    action: str,
+    error: ProviderError,
+    text: str,
 ) -> Result:
     failure = _failure(error)
     _audit(
         actor,
         action,
-        ENTITY_CHARGE,
+        ENTITY_RENT_CHARGE if isinstance(charge, RentCharge) else ENTITY_CHARGE,
         charge.pk,
         {
             "failure": operator_sync.failure_name(error),
@@ -347,14 +364,32 @@ def find_provider_invoices(
 
 def _builder_lines(charge: OneOffCharge) -> list[InvoiceLineItem]:
     """The line items of the invoice the invoice builder made for ``charge`` (PLAN-012
-    D6), in line order, without the lines whose charge is waived or voided; empty for
-    any other charge."""
+    D6), Rent lines included (PLAN-012b-b D5), in line order, without the lines whose
+    charge is waived or voided; empty for any other charge."""
     return list(
-        InvoiceLineItem.objects.filter(invoice__one_off_charge=charge, one_off_charge__isnull=False)
+        InvoiceLineItem.objects.filter(invoice__one_off_charge=charge)
+        .filter(Q(one_off_charge__isnull=False) | Q(rent_charge__isnull=False))
         .exclude(one_off_charge__status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
         .select_related("one_off_charge")
         .order_by("position")
     )
+
+
+def _rent_lines(invoice: Invoice) -> list[InvoiceLineItem]:
+    """The Rent lines of an invoice of rent alone, not waived, in line order."""
+    return list(
+        InvoiceLineItem.objects.filter(invoice=invoice, rent_charge__isnull=False)
+        .exclude(rent_charge__status=RentChargeStatus.WAIVED)
+        .order_by("position")
+    )
+
+
+def _line_amounts(items: list[InvoiceLineItem]) -> Amounts:
+    """One provider line per line item, no tax; the total is their sum."""
+    provider_lines = tuple(_provider_line(item) for item in items)
+    amount = sum((Decimal(item.line_total) for item in items), ZERO)
+    return Amounts(amount, amount, ZERO, provider_lines)
 
 
 def _provider_line(item: InvoiceLineItem) -> LineItem:
@@ -385,9 +420,7 @@ def charge_amounts(charge: OneOffCharge, total: Decimal | None = None) -> Amount
     and the total is their sum."""
     builder = _builder_lines(charge)
     if builder:
-        provider_lines = tuple(_provider_line(item) for item in builder)
-        amount = sum((Decimal(item.line_total) for item in builder), ZERO)
-        return Amounts(amount, amount, ZERO, provider_lines)
+        return _line_amounts(builder)
     companions = one_off_charges.billed_companions(charge)
     if not companions:
         amount = charge.price if total is None else total
@@ -404,7 +437,11 @@ def _invoice_input(charge: OneOffCharge, invoice: Invoice, customer: str) -> Inv
     """D3: one line item (the description, quantity 1), no tax, our number as reference;
     a re-debit's invoice carries its NSF fee as a second line, an invoice builder
     invoice every line and its memo (:func:`charge_amounts`; PLAN-012 D6)."""
-    built = InvoiceLineItem.objects.filter(invoice=invoice, one_off_charge__isnull=False).exists()
+    built = (
+        InvoiceLineItem.objects.filter(invoice=invoice)
+        .filter(Q(one_off_charge__isnull=False) | Q(rent_charge__isnull=False))
+        .exists()
+    )
     return InvoiceInput(
         customer_external_id=customer,
         amounts=charge_amounts(charge, invoice.total),
@@ -444,6 +481,11 @@ def _link(invoice: Invoice, record: InvoiceRecord, actor: User | None, action: s
             {
                 "invoice_number": invoice.invoice_number,
                 ENTITY_CHARGE: str(invoice.one_off_charge_id),
+                **(
+                    {ENTITY_RENT_CHARGE: str(invoice.rent_charge_id)}
+                    if invoice.rent_charge_id is not None
+                    else {}
+                ),
                 "total": str(invoice.total),
                 "provider_invoice": mask_identifier(record.external_id),
                 "provider_changes": changes,
@@ -512,18 +554,25 @@ def create_provider_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
 
 
 def note_sent(invoice: Invoice, record: InvoiceRecord) -> None:
-    """A one-off invoice the provider shows sent becomes ``sent`` (the webhook and the
-    re-fetch after sending)."""
-    if invoice.one_off_charge_id is None or not invoice_sync.shows_sent(record):
+    """A one-off invoice (or an invoice builder invoice of rent alone, PLAN-012b-b D5)
+    the provider shows sent becomes ``sent`` (the webhook and the re-fetch after
+    sending)."""
+    ours = invoice.one_off_charge_id is not None or (
+        InvoiceLineItem.objects.filter(invoice=invoice, rent_charge__isnull=False).exists()
+    )
+    if not ours or not invoice_sync.shows_sent(record):
         return
     Invoice.objects.filter(
         pk=invoice.pk, internal_status__in=[InvoiceStatus.DRAFT, InvoiceStatus.READY]
     ).update(internal_status=InvoiceStatus.SENT, updated_at=timezone.now())
 
 
-def _send(charge: OneOffCharge, invoice: Invoice, ref: str, actor: User | None) -> Result:
+def _send(
+    charge: OneOffCharge | RentCharge, invoice: Invoice, ref: str, actor: User | None
+) -> Result:
     number = invoice.invoice_number
     provider = payments.get_provider()
+    entity = ENTITY_RENT_CHARGE if isinstance(charge, RentCharge) else ENTITY_CHARGE
     try:
         provider.send_invoice_email(ref)
         record = provider.get_invoice(ref)
@@ -531,7 +580,7 @@ def _send(charge: OneOffCharge, invoice: Invoice, ref: str, actor: User | None) 
         return _failed(
             charge,
             actor,
-            "one_off_charge.invoice_send_failed",
+            f"{entity}.invoice_send_failed",
             error,
             SEND_FAILED.format(number=number),
         )
@@ -566,6 +615,127 @@ def send(charge_id: uuid.UUID, actor: User | None) -> Result:
     if invoice.internal_status == InvoiceStatus.SENT:
         return True, ALREADY_SENT.format(number=invoice.invoice_number)
     return _send(charge, invoice, ref, actor)
+
+
+# --- An invoice of rent alone (PLAN-012b-b D5) -----------------------------------------
+
+
+def _rent_charge(charge_id: uuid.UUID) -> RentCharge | None:
+    return RentCharge.objects.select_related("lease__operator").filter(pk=charge_id).first()
+
+
+def _rent_invoice(charge: RentCharge) -> Invoice | None:
+    """The charge's invoice builder invoice of rent alone (its latest)."""
+    return (
+        Invoice.objects.filter(rent_charge=charge, line_items__rent_charge=charge)
+        .order_by("-issue_date", "-invoice_number")
+        .first()
+    )
+
+
+def create_rent_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
+    """The ``invoice_create`` job of an invoice builder invoice of one Rent line alone
+    (PLAN-012b-b D5): the check before create, the create with our number as reference
+    and the invoice's lines and memo, the link, then the e-mail; as
+    :func:`create_provider_invoice` does for a one-off charge."""
+    charge = _rent_charge(charge_id)
+    if charge is None:
+        return False, NO_CHARGE
+    invoice = _rent_invoice(charge)
+    if invoice is None:
+        return False, NO_LOCAL_INVOICE
+    if invoice.internal_status == InvoiceStatus.VOID:
+        return True, VOIDED_NOTHING
+    number = invoice.invoice_number
+    ref = _ref(invoice)
+    text = ALREADY_CREATED.format(number=number)
+    if not ref:
+        operator = charge.lease.operator
+        customer = leases.customer_ref(operator)
+        if operator is None or not customer:
+            return False, NO_CUSTOMER
+        provider = payments.get_provider()
+        try:
+            found: list[InvoiceRecord] = []
+            if AuditLog.objects.filter(
+                entity_type=ENTITY_RENT_CHARGE,
+                entity_id=str(charge.pk),
+                action=RENT_INVOICE_ATTEMPT_ACTION,
+            ).exists():
+                found = find_provider_invoices(provider, operator, customer, invoice)
+            if len(found) > 1:
+                _flag_rent(charge, {"invoice_number": number, "candidates": len(found)})
+                return False, one_off_charges.SEVERAL_PROVIDER_INVOICES
+            if found:
+                record, action, text = found[0], "invoice.provider_adopted", ADOPTED
+            else:
+                _audit(
+                    actor,
+                    RENT_INVOICE_ATTEMPT_ACTION,
+                    ENTITY_RENT_CHARGE,
+                    charge.pk,
+                    {"number": number},
+                )
+                record = provider.create_invoice(
+                    InvoiceInput(
+                        customer_external_id=customer,
+                        amounts=_line_amounts(_rent_lines(invoice)),
+                        due_on=invoice.due_date,
+                        invoice_date=invoice.issue_date,
+                        memo=invoice.memo,
+                        reference=number,
+                    )
+                )
+                action, text = "invoice.provider_created", CREATED
+        except ProviderError as error:
+            return _failed(
+                charge,
+                actor,
+                "rent_charge.provider_invoice_failed",
+                error,
+                CREATE_FAILED.format(number=number),
+            )
+        if not _link(invoice, record, actor, action):
+            return False, LINK_CONFLICT
+        text = text.format(number=number)
+        ref = record.external_id
+    invoice.refresh_from_db()
+    if invoice.internal_status != InvoiceStatus.SENT:
+        ok, sent = _send(charge, invoice, ref, actor)
+        return ok, f"{text} {sent}"
+    return True, text
+
+
+def send_rent(charge_id: uuid.UUID, actor: User | None) -> Result:
+    """The ``invoice_send`` job of an invoice of rent alone: the e-mail alone."""
+    charge = _rent_charge(charge_id)
+    invoice = _rent_invoice(charge) if charge is not None else None
+    if charge is None or invoice is None:
+        return False, NOT_LINKED
+    ref = _ref(invoice)
+    if not ref:
+        return False, NOT_LINKED
+    if invoice.internal_status == InvoiceStatus.SENT:
+        return True, ALREADY_SENT.format(number=invoice.invoice_number)
+    return _send(charge, invoice, ref, actor)
+
+
+def _flag_rent(charge: RentCharge, context: dict[str, Any]) -> None:
+    """Flag the rent charge for review: several provider invoices could be ours."""
+    with transaction.atomic():
+        locked = RentCharge.objects.select_for_update().get(pk=charge.pk)
+        before = rent_run.charge_state(locked)
+        if not locked.needs_review:
+            locked.needs_review = True
+            locked.save(update_fields=["needs_review", "updated_at"])
+        _audit(
+            None,
+            "rent_charge.provider_invoice_ambiguous",
+            ENTITY_RENT_CHARGE,
+            locked.pk,
+            {**rent_run.charge_state(locked), **context},
+            before,
+        )
 
 
 # --- Delete (D6) ----------------------------------------------------------------------
@@ -722,7 +892,7 @@ def release_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
     if linked is None:
         return _released(charge.pk, actor, lambda parent: {})
     invoice, ref = linked
-    if invoice.one_off_charge_id != charge.pk or len(one_off_charges.invoice_charges(invoice)) > 1:
+    if invoice.one_off_charge_id != charge.pk or one_off_charges.invoice_line_count(invoice) > 1:
         return False, RELEASE_SHARED
     provider = payments.get_provider()
     try:

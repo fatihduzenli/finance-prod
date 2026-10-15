@@ -36,6 +36,7 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import (
     ITEMS_LIST_ID,
+    LINE_KIND_RENT,
     CancelChargeForm,
     ChargeNowForm,
     InvoiceDraftForm,
@@ -103,10 +104,36 @@ def _item_names() -> list[str]:
     return [fee_type.name for fee_type in invoice_builder.offered_fee_types()]
 
 
+def _rent_leases(operators: Iterable[Operator], draft: InvoiceDraft | None = None) -> list[Lease]:
+    """The leases a Rent line offers (PLAN-012b-b D4): the operators' leases in effect or
+    starting later (not ended before today), and those the draft's Rent lines name."""
+    today = timezone.localdate()
+    named = (
+        {line.rent_lease_id for line in invoice_builder.lines_of(draft) if line.rent_lease_id}
+        if draft is not None
+        else set()
+    )
+    rows = Lease.objects.filter(operator__in=list(operators)).select_related("store", "operator")
+    return [
+        lease
+        for lease in rows.order_by("store__external_label", "started_on", "id")
+        if lease.ended_on is None or lease.ended_on >= today or lease.pk in named
+    ]
+
+
 def _formset(
-    data: dict[str, Any] | None = None, initial: list[dict[str, Any]] | None = None
+    data: dict[str, Any] | None = None,
+    initial: list[dict[str, Any]] | None = None,
+    *,
+    rent_leases: Iterable[Lease] = (),
+    default_lease: Lease | None = None,
 ) -> Any:
-    return InvoiceLineFormSet(data, initial=initial, prefix=LINES_PREFIX)
+    return InvoiceLineFormSet(
+        data,
+        initial=initial,
+        prefix=LINES_PREFIX,
+        form_kwargs={"rent_leases": list(rent_leases), "default_lease": default_lease},
+    )
 
 
 def _hold(request: HttpRequest, target: str, errors: Iterable[str]) -> None:
@@ -145,6 +172,15 @@ def _draft_initial(draft: InvoiceDraft) -> tuple[dict[str, Any], list[dict[str, 
     }
     lines = [
         {
+            "kind": LINE_KIND_RENT,
+            "rent_lease": str(line.rent_lease_id),
+            "rent_month": line.rent_month,
+            "description": line.description,
+            "quantity": line.quantity,
+            "unit_amount": line.unit_amount,
+        }
+        if line.rent_lease_id is not None
+        else {
             "item": line.item,
             "description": line.description,
             "quantity": line.quantity,
@@ -169,9 +205,17 @@ def _new(
     heading: str,
 ) -> HttpResponse:
     target = f"invoice-new:{request.path}"
+    operators = (
+        [operator]
+        if operator is not None
+        else list(
+            {lease.operator.pk: lease.operator for lease in leases if lease.operator}.values()
+        )
+    )
+    rent_leases = _rent_leases(operators)
     if request.method == "POST":
         form = InvoiceDraftForm(request.POST, leases=leases, allow_none=allow_none)
-        formset = _formset(request.POST)
+        formset = _formset(request.POST, rent_leases=rent_leases, default_lease=preselected)
         if form.is_valid() and formset.is_valid():
             lease = form.chosen_lease()
             billed = operator or (lease.operator if lease is not None else None)
@@ -197,7 +241,7 @@ def _new(
     data, errors = _held(request, target)
     if data is not None:
         form = InvoiceDraftForm(data, leases=leases, allow_none=allow_none)
-        formset = _formset(data)
+        formset = _formset(data, rent_leases=rent_leases, default_lease=preselected)
         form.is_valid()
         formset.is_valid()
     else:
@@ -209,7 +253,7 @@ def _new(
             leases=leases,
             allow_none=allow_none,
         )
-        formset = _formset()
+        formset = _formset(rent_leases=rent_leases, default_lease=preselected)
     return render(
         request,
         "ledger/invoices/new.html",
@@ -285,11 +329,20 @@ def new_operator(request: HttpRequest, pk: str) -> HttpResponse:
 
 def _sent_context(draft: InvoiceDraft) -> dict[str, Any]:
     first = invoice_builder.first_charge(draft)
+    rents = invoice_builder.sent_rent_charges(draft)
     if first is None:
-        return {"charges": [], "first_charge": None}
+        # An invoice of rent alone (PLAN-012b-b D5): its job acts on the rent charge.
+        return {
+            **(job_context(rents[0]) if rents else {}),
+            "charges": [],
+            "rent_charges": rents,
+            "first_charge": None,
+            "cancel_refusal": invoice_builder.RENT_ALONE_CANCEL if rents else "",
+        }
     return {
         **job_context(first),
         "charges": invoice_builder.sent_charges(draft),
+        "rent_charges": rents,
         "first_charge": first,
         "cancel_refusal": one_off_charges.cancel_refusal(first),
         # PLAN-012b-a D5: a live single-charge invoice is released by the split.
@@ -310,18 +363,19 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
     editable = draft.status == InvoiceDraftStatus.DRAFT
     target = f"invoice-edit:{draft.pk}"
     leases = _operator_leases(draft.operator)
+    rent_leases = _rent_leases([draft.operator], draft)
     data, errors = _held(request, target)
     if not editable:
         form, formset = None, None
     elif data is not None:
         form = InvoiceDraftForm(data, leases=leases, allow_none=True)
-        formset = _formset(data)
+        formset = _formset(data, rent_leases=rent_leases, default_lease=draft.lease)
         form.is_valid()
         formset.is_valid()
     else:
         header, lines = _draft_initial(draft)
         form = InvoiceDraftForm(initial=header, leases=leases, allow_none=True)
-        formset = _formset(initial=lines)
+        formset = _formset(initial=lines, rent_leases=rent_leases, default_lease=draft.lease)
     sent = _sent_context(draft) if draft.status == InvoiceDraftStatus.SENT else {}
     return render(
         request,
@@ -354,7 +408,11 @@ def draft_edit(request: HttpRequest, pk: str) -> HttpResponse:
     draft = _load(pk)
     target = f"invoice-edit:{draft.pk}"
     form = InvoiceDraftForm(request.POST, leases=_operator_leases(draft.operator), allow_none=True)
-    formset = _formset(request.POST)
+    formset = _formset(
+        request.POST,
+        rent_leases=_rent_leases([draft.operator], draft),
+        default_lease=draft.lease,
+    )
     if form.is_valid() and formset.is_valid():
         outcome = invoice_builder.update_draft(
             draft.pk,

@@ -104,6 +104,13 @@ Rules kept here, not in the views:
   payment may be recorded on any line, up to that line's balance (PLAN-012c-a D2): the
   invoice is marked paid at the provider once the lines' payments together cover it
   (:func:`invoice_covered`), and the marking clears every line's marking flag.
+  A **Rent** line (PLAN-012b-b D5) names the month's rent charge instead
+  (``invoice_line_items.rent_charge``): it is paid by the payments on the invoice as a
+  later line is, in line order (:func:`rent_share`, counted as paid on the rent charge by
+  :func:`ledger.services.rent_run.recompute_charge`, audited
+  ``rent_charge.payment_allocated``), its own manual payments count as a later line's do,
+  and :func:`invoice_billed` and :func:`invoice_covered` count it. A rent charge is never
+  voided with the invoice: it stays owed.
 
 - **Installments** (PLAN-012e D9 to D11; plans made by
   :mod:`ledger.services.installments`): an ``installment`` charge is paid like any
@@ -172,6 +179,7 @@ from ledger.models import (
     PaymentKind,
     PaymentStatus,
     RentCharge,
+    RentChargeStatus,
 )
 from ledger.services import contacts, insurance, leases, numbering, rent_run
 from ledger.services.rent_run import (
@@ -1107,9 +1115,15 @@ def cancel_refusal(charge: OneOffCharge) -> str:
     if charge.status == OneOffChargeStatus.WAIVED:
         return CANCEL_WAIVED
     lines = [charge, *_later_lines(charge)]
-    if any(line.amount_paid > 0 or has_settled_payment(line) for line in lines):
+    rents = _rent_lines(charge)
+    if any(line.amount_paid > 0 or has_settled_payment(line) for line in lines) or any(
+        rent.amount_paid > 0 for rent in rents
+    ):
         return CANCEL_PAID
-    if any(has_pending_payment(line) for line in lines):
+    if (
+        any(has_pending_payment(line) for line in lines)
+        or Payment.objects.filter(rent_charge__in=rents, status=PaymentStatus.PENDING).exists()
+    ):
         return CANCEL_PENDING
     return ""
 
@@ -1172,7 +1186,7 @@ def delete_invoice_refusal(charge: OneOffCharge) -> str:
     if any(
         line.status not in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
         for line in invoice_charges(linked[0])
-    ):
+    ) or _billed_rents(linked[0]):
         # A builder invoice billing other lines too (PLAN-012c-a D1).
         return DELETE_INVOICE_SHARED
     return ""
@@ -1678,12 +1692,18 @@ def record_payment(
             },
         )
         for companion, companion_before, companion_after in refresh_companions(charge):
-            _audit(
-                actor,
-                ALLOCATED_ACTION,
-                companion,
-                companion_before,
-                {**companion_after, "payment": str(payment.pk), "allocated_from": str(charge.pk)},
+            action, entity = allocation_audit(companion)
+            AuditLog.objects.create(
+                actor=actor,
+                action=action,
+                entity_type=entity,
+                entity_id=str(companion.pk),
+                before=companion_before,
+                after={
+                    **companion_after,
+                    "payment": str(payment.pk),
+                    "allocated_from": str(charge.pk),
+                },
             )
         for change in refresh_sources(sources):
             AuditLog.objects.create(
@@ -1699,7 +1719,7 @@ def record_payment(
             return PaymentOutcome(
                 True, PAY_RECORDED, payment=payment, provider=MarkResult(MarkAction.NO_INVOICE)
             )
-        reason = _not_marked_reason(linked[0], whole=whole, amount=amount)
+        reason = not_marked_reason(linked[0], whole=whole, amount=amount)
         if reason:
             result = rent_run.not_updated(ONE_OFF, charge, payment, linked, reason, actor)
             return PaymentOutcome(True, PAY_RECORDED, payment=payment, provider=result)
@@ -1715,12 +1735,11 @@ def _billed_and_collected(charge: OneOffCharge) -> tuple[Decimal, Decimal]:
     paid on it and on those companions or lines themselves (PLAN-012c-a D2)."""
     if billed_with(charge) is not None:
         return Decimal(charge.price), paid_in(charge) + allocated_overflow(charge)
-    companions = billed_companions(charge)
-    collected = paid_in(charge) + sum((paid_in(row) for row in companions), ZERO)
+    collected = paid_in(charge) + sum((_own_paid(row) for row in _billed_rows(charge)), ZERO)
     return billed_total(charge), collected
 
 
-def _not_marked_reason(invoice: Invoice, *, whole: bool, amount: Decimal) -> str:
+def not_marked_reason(invoice: Invoice, *, whole: bool, amount: Decimal) -> str:
     """Why the provider invoice is not marked after a manual payment (the flag text of
     :mod:`payments.offline_marking`), or ``""`` to mark it. A builder invoice is marked
     once :func:`invoice_covered`, when its total is what its lines bill (PLAN-012c-a
@@ -1832,6 +1851,115 @@ def _companion_rows(charge: OneOffCharge, *, lock: bool = False) -> list[OneOffC
     return [*fees.order_by("created_at", "id"), *_later_lines(charge, lock=lock)]
 
 
+#: What a payment on a builder invoice pays: a one-off charge, or a Rent line's rent
+#: charge (PLAN-012b-b D5).
+LineRow = OneOffCharge | RentCharge
+
+
+def _rent_lines(charge: OneOffCharge, *, lock: bool = False) -> list[RentCharge]:
+    """The rent charges of the Rent lines of the invoice billed for ``charge`` (the first
+    line's charge of a builder invoice, PLAN-012b-b D5), in line order, whatever their
+    status. Empty for any other charge."""
+    rows = RentCharge.objects.filter(invoice_lines__invoice__one_off_charge=charge)
+    if lock:
+        rows = rows.select_for_update(of=("self",))
+    return list(rows.order_by("invoice_lines__position"))
+
+
+def _paid_rows(charge: OneOffCharge, *, lock: bool = False) -> list[LineRow]:
+    """:func:`_companion_rows` with the Rent lines among the later lines, in line order:
+    every row a payment on ``charge`` pays after it, whatever its status."""
+    rents = _rent_lines(charge, lock=lock)
+    rows = _companion_rows(charge, lock=lock)
+    if not rents:
+        return list(rows)
+    fees = [row for row in rows if row.companion_of_id == charge.pk]
+    later: dict[tuple[str, uuid.UUID], LineRow] = {
+        ("one_off", row.pk): row for row in rows if row.companion_of_id != charge.pk
+    }
+    later.update({("rent", row.pk): row for row in rents})
+    ordered: list[LineRow] = [*fees]
+    for one_off_id, rent_id in (
+        InvoiceLineItem.objects.filter(invoice__one_off_charge=charge)
+        .order_by("position")
+        .values_list("one_off_charge", "rent_charge")
+    ):
+        key = ("one_off", one_off_id) if one_off_id is not None else ("rent", rent_id)
+        found = later.pop(key, None)
+        if found is not None:
+            ordered.append(found)
+    return ordered
+
+
+def _is_billed(row: LineRow) -> bool:
+    if isinstance(row, RentCharge):
+        return bool(row.status != RentChargeStatus.WAIVED)
+    return row.status not in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
+
+
+def _price(row: LineRow) -> Decimal:
+    return Decimal(row.amount_due if isinstance(row, RentCharge) else row.price)
+
+
+def _own_paid(row: LineRow) -> Decimal:
+    """What ``row`` was paid by its own payments (not by its share of another's)."""
+    return rent_run.own_paid(row) if isinstance(row, RentCharge) else paid_in(row)
+
+
+def _billed_rows(charge: OneOffCharge) -> list[LineRow]:
+    """:func:`_paid_rows` neither waived nor voided: what the invoice of ``charge`` bills
+    after it, in the order a payment pays them."""
+    return [row for row in _paid_rows(charge) if _is_billed(row)]
+
+
+def _share(source: OneOffCharge, target: LineRow) -> Decimal:
+    """The part of ``target`` paid by the payments on ``source``, the charge it is billed
+    with: what those payments leave beyond ``source``'s price, taken by the rows billed
+    after it in order, each up to what its own payments leave of its price."""
+    remaining = paid_in(source) - Decimal(source.price)
+    for row in _billed_rows(source):
+        open_part = max(_price(row) - _own_paid(row), ZERO)
+        share = max(min(remaining, open_part), ZERO)
+        if type(row) is type(target) and row.pk == target.pk:
+            return share
+        remaining -= share
+    return ZERO
+
+
+def rent_share(charge: RentCharge) -> Decimal:
+    """What the payments on the builder invoice that bills ``charge`` on a Rent line paid
+    of it (PLAN-012b-b D5): the sibling allocation of the later lines. Zero for a rent
+    charge on no such invoice."""
+    sources = OneOffCharge.objects.filter(invoices__line_items__rent_charge=charge).distinct()
+    return sum((_share(source, charge) for source in sources), ZERO)
+
+
+def allocation_audit(row: LineRow) -> tuple[str, str]:
+    """The audit action and entity of a row whose paid amount an allocation moved."""
+    if isinstance(row, RentCharge):
+        return "rent_charge.payment_allocated", rent_run.ENTITY_CHARGE
+    return ALLOCATED_ACTION, ENTITY_ONE_OFF_CHARGE
+
+
+def _row_state(row: LineRow) -> dict[str, Any]:
+    return rent_run.charge_state(row) if isinstance(row, RentCharge) else charge_state(row)
+
+
+def lock_rent_line(charge_id: uuid.UUID) -> RentCharge:
+    """The rent charge under its row lock; on a builder invoice's Rent line, every line
+    of that invoice is locked first, as :func:`lock_lines` takes them (PLAN-012b-b D5)."""
+    first_id = (
+        InvoiceLineItem.objects.filter(
+            rent_charge_id=charge_id, invoice__one_off_charge__isnull=False
+        )
+        .values_list("invoice__one_off_charge", flat=True)
+        .first()
+    )
+    if first_id is not None:
+        lock_lines(first_id)
+    return RentCharge.objects.select_for_update().get(pk=charge_id)
+
+
 def billed_with(charge: OneOffCharge) -> OneOffCharge | None:
     """The charge whose invoice or schedule bills ``charge`` as a later line: the
     re-debit of a companion fee (PLAN-011b D5) or the first line of a builder invoice
@@ -1882,19 +2010,38 @@ def _billed_lines(invoice: Invoice) -> list[OneOffCharge]:
     ]
 
 
+def _billed_rents(invoice: Invoice) -> list[RentCharge]:
+    """The rent charges of the invoice's Rent lines that are not waived (PLAN-012b-b D5)."""
+    return list(
+        RentCharge.objects.filter(invoice_lines__invoice=invoice).exclude(
+            status=RentChargeStatus.WAIVED
+        )
+    )
+
+
+def invoice_line_count(invoice: Invoice) -> int:
+    """How many charges ``invoice`` bills, one-off and rent, whatever their status."""
+    return (
+        len(invoice_charges(invoice))
+        + RentCharge.objects.filter(invoice_lines__invoice=invoice).count()
+    )
+
+
 def invoice_billed(invoice: Invoice) -> Decimal:
     """What ``invoice`` bills: the prices of its charges neither waived nor voided (as
-    :func:`billed_total` counts them)."""
-    return sum((Decimal(row.price) for row in _billed_lines(invoice)), ZERO)
+    :func:`billed_total` counts them), its Rent lines' rent charges included."""
+    rows: list[LineRow] = [*_billed_lines(invoice), *_billed_rents(invoice)]
+    return sum((_price(row) for row in rows), ZERO)
 
 
 def invoice_covered(invoice: Invoice) -> bool:
     """Whether the settled payments (less settled refunds) on the charges ``invoice``
     bills, waived and voided lines left out, reach what it bills (:func:`invoice_billed`;
-    PLAN-012c-a D2). Pending payments never count."""
-    lines = _billed_lines(invoice)
-    billed = sum((Decimal(row.price) for row in lines), ZERO)
-    return billed > 0 and sum((paid_in(row) for row in lines), ZERO) >= billed
+    PLAN-012c-a D2; a Rent line's own payments count, PLAN-012b-b D5). Pending payments
+    never count."""
+    rows: list[LineRow] = [*_billed_lines(invoice), *_billed_rents(invoice)]
+    billed = sum((_price(row) for row in rows), ZERO)
+    return billed > 0 and sum((_own_paid(row) for row in rows), ZERO) >= billed
 
 
 def lock_lines(charge_id: uuid.UUID) -> OneOffCharge:
@@ -1910,6 +2057,7 @@ def lock_lines(charge_id: uuid.UUID) -> OneOffCharge:
     if first_id is not None:
         first = OneOffCharge.objects.select_for_update().get(pk=first_id)
         _later_lines(first, lock=True)
+        _rent_lines(first, lock=True)
     return OneOffCharge.objects.select_for_update().get(pk=charge_id)
 
 
@@ -1936,8 +2084,9 @@ def billed_companions(charge: OneOffCharge) -> list[OneOffCharge]:
 
 
 def billed_total(charge: OneOffCharge) -> Decimal:
-    """What the charge's invoice or schedule bills: its price and its billed companions'."""
-    return sum((Decimal(item.price) for item in billed_companions(charge)), Decimal(charge.price))
+    """What the charge's invoice or schedule bills: its price and its billed companions',
+    a builder invoice's Rent lines included (PLAN-012b-b D5)."""
+    return sum((_price(row) for row in _billed_rows(charge)), Decimal(charge.price))
 
 
 def allocated_overflow(fee: OneOffCharge) -> Decimal:
@@ -1949,27 +2098,24 @@ def allocated_overflow(fee: OneOffCharge) -> Decimal:
     source = billed_with(fee)
     if source is None:
         return ZERO
-    remaining = paid_in(source) - Decimal(source.price)
-    for companion in billed_companions(source):
-        open_part = max(Decimal(companion.price) - paid_in(companion), ZERO)
-        share = max(min(remaining, open_part), ZERO)
-        if companion.pk == fee.pk:
-            return share
-        remaining -= share
-    return ZERO
+    return _share(source, fee)
 
 
 def refresh_companions(
     charge: OneOffCharge,
-) -> list[tuple[OneOffCharge, dict[str, Any], dict[str, Any]]]:
+) -> list[tuple[LineRow, dict[str, Any], dict[str, Any]]]:
     """Recompute the companions or later lines of ``charge`` after its payments changed
-    (PLAN-011b D5, PLAN-012 D6), under their row locks; each one that changed, with its
-    state before and after, for the caller's audit row."""
-    changed = []
-    for companion in _companion_rows(charge, lock=True):
-        before = charge_state(companion)
-        recompute(companion)
-        after = charge_state(companion)
+    (PLAN-011b D5, PLAN-012 D6), Rent lines' rent charges included (PLAN-012b-b D5),
+    under their row locks; each one that changed, with its state before and after, for
+    the caller's audit row (:func:`allocation_audit`)."""
+    changed: list[tuple[LineRow, dict[str, Any], dict[str, Any]]] = []
+    for companion in _paid_rows(charge, lock=True):
+        before = _row_state(companion)
+        if isinstance(companion, RentCharge):
+            rent_run.recompute_charge(companion)
+        else:
+            recompute(companion)
+        after = _row_state(companion)
         if after != before:
             changed.append((companion, before, after))
     return changed
@@ -1988,7 +2134,7 @@ def recompute(charge: OneOffCharge) -> None:
     if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
         return
     paid = paid_in(charge)
-    if billed_companions(charge):
+    if _billed_rows(charge):
         paid = min(paid, charge.price)
     else:
         paid += allocated_overflow(charge)
@@ -2237,8 +2383,7 @@ def refresh_sources(sources: list[tuple[Source, dict[str, Any]]]) -> list[Source
         if isinstance(source, OneOffCharge):
             changes.extend(
                 SourceChange(
-                    "one_off_charge.payment_allocated",
-                    ENTITY_ONE_OFF_CHARGE,
+                    *allocation_audit(companion),
                     companion.pk,
                     companion_before,
                     companion_after,

@@ -129,7 +129,7 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             **jobs,
             "charge": charge,
             "lease": charge.lease,
-            "invoices": charge.invoices.order_by("issue_date", "invoice_number"),
+            "invoices": rent_run.charge_invoices(charge),
             "payments": charge.payments.order_by("-settled_on", "-created_at"),
             "notes": ChargeNote.objects.filter(rent_charge=charge).order_by("-created_at"),
             "review_message": rent_run.charge_review_message(charge),
@@ -145,7 +145,7 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 split_url=reverse("ledger:charges:split", kwargs={"pk": charge.pk}),
             ),
             "can_retry_mark": retry_wait == 0 and not jobs["job_refresh"],
-            "can_link_invoice": billing and not charge.invoices.exists(),
+            "can_link_invoice": billing and not rent_run.charge_invoices(charge).exists(),
             "retry_wait_message": (
                 operator_sync.retry_wait_message(retry_wait) if retry_wait else ""
             ),
@@ -252,7 +252,7 @@ def charge_link_invoice(request: HttpRequest, pk: str) -> HttpResponse:
         {
             "form": form,
             "charge": charge,
-            "has_invoice": charge.invoices.exists(),
+            "has_invoice": rent_run.charge_invoices(charge).exists(),
             "rows": rent_run.unlinked_invoices(charge),
         },
     )

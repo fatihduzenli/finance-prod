@@ -6,7 +6,10 @@
 // form's one list of catalogue names (PLAN-012b D2). Ticking Remove hides the row (its
 // box stays ticked, so the server drops it). The Save box is shown only while the Item
 // box holds a name that is not on the list (case and surrounding spaces ignored); the
-// server ignores it on a listed name either way. Nothing is sent from here.
+// server ignores it on a listed name either way. A row of the kind Rent (PLAN-012b-b D4)
+// shows its lease and month and hides the Item box and the Save box; any other row hides
+// the lease and month (the server reads them only on a Rent line). Nothing is sent from
+// here.
 (function () {
   "use strict";
   var table = document.getElementById("draft-lines");
@@ -62,9 +65,28 @@
     });
   }
 
+  function watchKind(row) {
+    var kind = row.querySelector("select[name$='-kind']");
+    if (!kind) {
+      return;
+    }
+    function update() {
+      var rent = kind.value === "rent";
+      row.querySelectorAll("td.rent-field").forEach(function (cell) {
+        cell.style.visibility = rent ? "" : "hidden";
+      });
+      row.querySelectorAll("td.line-item, td.save-item").forEach(function (cell) {
+        cell.style.visibility = rent ? "hidden" : "";
+      });
+    }
+    kind.addEventListener("change", update);
+    update();
+  }
+
   function watch(row) {
     watchRemove(row);
     watchSave(row);
+    watchKind(row);
   }
 
   Array.prototype.forEach.call(body.querySelectorAll("tr.draft-line"), watch);
@@ -78,7 +100,7 @@
     }
     var row = rows[rows.length - 1].cloneNode(true);
     row.hidden = false;
-    row.querySelectorAll("input, textarea").forEach(function (field) {
+    row.querySelectorAll("input, textarea, select").forEach(function (field) {
       ["name", "id"].forEach(function (attribute) {
         var value = field.getAttribute(attribute);
         if (value) {
@@ -87,6 +109,11 @@
       });
       if (field.type === "checkbox") {
         field.checked = false;
+      } else if (field.tagName === "SELECT") {
+        // The kind starts as Item; the lease keeps the row's choice (the draft's lease).
+        if (/-kind$/.test(field.name)) {
+          field.value = "item";
+        }
       } else {
         field.value = "";
       }
