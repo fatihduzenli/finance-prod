@@ -79,13 +79,35 @@ jobs:
         run: uv run mypy
 
       # A test that runs longer than five minutes dumps every thread's stack and the
-      # step ends after fifteen, so a hang names its test instead of using the whole
+      # step ends at its limit, so a hang names its test instead of using the whole
       # job timeout (CI run of 2026-10-05, QA-010b addendum).
+      #
+      # PLAN-012b-a part 1 (2026-10-14): the seeded migration tests run as their own
+      # step with their own limit, so the unit step stays under 15 minutes. The two
+      # selections below are complements: every test in the "not e2e" set runs in
+      # exactly one of them (the deselected node ids of the unit step are the node ids
+      # the migration step names). Measured on 2026-10-14 (local PostgreSQL 16, the CI
+      # service runs at about the same speed): migration tests about 8 minutes, the rest
+      # about 14.
+      - name: Migration tests
+        timeout-minutes: 15
+        run: >-
+          uv run pytest -m "not e2e" -q -o faulthandler_timeout=300
+          backend/tests/test_migrations_roundtrip.py
+          backend/tests/test_report_indexes.py
+          "backend/tests/test_one_off_charges.py::test_the_rename_migration_rewrites_rows_and_reverses"
+          "backend/tests/test_one_off_charges.py::test_the_rename_migration_refuses_to_reverse_over_a_one_off_charge"
+          "backend/tests/test_staging_defects_adversarial.py::test_two_concurrent_runs_both_succeed_and_migrate_once"
+
       - name: Unit tests
-        # 25 since PLAN-012c-b: the seeded migration round trips (0031, 0032, 0033) take
-        # several minutes on the CI PostgreSQL service; the last green run needed 11 of 15.
-        timeout-minutes: 25
-        run: uv run pytest -m "not e2e" -q -o faulthandler_timeout=300
+        timeout-minutes: 20
+        run: >-
+          uv run pytest -m "not e2e" -q -o faulthandler_timeout=300
+          --ignore=backend/tests/test_migrations_roundtrip.py
+          --ignore=backend/tests/test_report_indexes.py
+          --deselect "backend/tests/test_one_off_charges.py::test_the_rename_migration_rewrites_rows_and_reverses"
+          --deselect "backend/tests/test_one_off_charges.py::test_the_rename_migration_refuses_to_reverse_over_a_one_off_charge"
+          --deselect "backend/tests/test_staging_defects_adversarial.py::test_two_concurrent_runs_both_succeed_and_migrate_once"
 
       - name: Install Playwright chromium
         run: uv run playwright install --with-deps chromium

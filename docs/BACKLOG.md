@@ -49,3 +49,11 @@ minutes on sqlite and several on the CI PostgreSQL service; the CI unit step lim
 run the round trips as their own CI step with their own limit, or build the migrated database
 once per run and reuse it; consider `--reuse-db` for the non-migration tests. Not a feature; may
 be done inside the freeze.
+
+**Done 2026-10-14 (PLAN-012b-a part 1).** The 12b push ran the unit step 22:11 of 25. The
+seeded migration tests (`test_migrations_roundtrip.py`, `test_report_indexes.py`, the two rename
+tests of `test_one_off_charges.py`, the concurrent-migrate test of
+`test_staging_defects_adversarial.py`: 21 tests, about 8 minutes on PostgreSQL) now run as their
+own CI step, "Migration tests", limit 15; the unit step runs the complement (limit 20, measured
+about 14 minutes locally). Still open: reuse of the migrated database and `--reuse-db`, if the
+unit step grows past 15 again.
