@@ -1174,3 +1174,14 @@ until the first autopay split on staging. Gate: ruff, format, mypy (386 files), 
 clean; sqlite 5,133 passed; PostgreSQL 23 + 5,728 passed; e2e 7; secret scans clean; Fable's
 adversarial file 4 cases green. 12b-b is complete in the working tree (Batches A, B, C
 committed); the checkpoint report goes to the owner before the push.
+
+## Update, 2026-10-15, push of 12b-b: tests green, the image build did not start
+
+Pushed `a59de59..262e72c` on the owner's word. CI run 38757250671: Migration tests 11:34 of 15,
+Unit tests 13:15 of 20, e2e green; **Deploy staging failed** at "Build the image in Azure
+Container Registry": after uploading the build context, the ACR Tasks API answered the schedule
+request with a body that is not JSON (`az acr build`: "Expecting value: line 1 column 1"); no run
+was scheduled (the registry's last run is `ca15`, the 12b-a build; the registry reports
+Succeeded). Staging stays on revision 42 (`a59de59`), healthy, `/healthz` 200. A transient fault
+on the Azure side; the remedy is a re-run of the failed job, which is a publish action and waits
+for the owner's word.
