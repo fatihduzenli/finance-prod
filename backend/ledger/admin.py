@@ -157,9 +157,10 @@ class FeeTypeAdmin(AuditedAdmin):
         "default_price",
         "refundable",
         "active",
+        "show_in_setup",
         "sort_order",
     )
-    list_filter = ("active", "refundable")
+    list_filter = ("active", "refundable", "show_in_setup")
     ordering = ("sort_order", "name")
     audited_fields = (
         "code",
@@ -168,6 +169,7 @@ class FeeTypeAdmin(AuditedAdmin):
         "default_price",
         "refundable",
         "active",
+        "show_in_setup",
         "sort_order",
     )
     entity_type = "fee_type"

@@ -99,7 +99,13 @@ def pinned_today(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def fee(code: str = "sign_fee", **defaults: Any) -> FeeType:
-    values: dict[str, Any] = {"name": code.replace("_", " ").capitalize(), "active": True}
+    """A catalogue item as seeded: active and shown in the setup checklist (PLAN-012d D9;
+    ``show_in_setup=False`` for one the checklist hides)."""
+    values: dict[str, Any] = {
+        "name": code.replace("_", " ").capitalize(),
+        "active": True,
+        "show_in_setup": True,
+    }
     values.update(defaults)
     row, _ = FeeType.objects.get_or_create(code=code, defaults=values)
     if any(getattr(row, name) != value for name, value in values.items()):
@@ -1271,32 +1277,55 @@ def lease_form(**overrides: Any) -> dict[str, Any]:
     return form_data(**overrides)
 
 
-def test_the_new_lease_page_lists_one_row_per_active_fee_type() -> None:
+def test_the_new_lease_page_lists_one_row_per_checklist_item_with_the_price_as_a_hint() -> None:
     fee("sign_fee", default_price=D("1000.00"))
     fee("first_year_insurance", active=False)
     client, _ = client_for(Role.ADMIN)
     page = client.get("/leases/new/").content.decode()
     assert 'id="setup-checklist"' in page and 'id="setup-sign_fee"' in page
     assert 'id="setup-first_year_insurance"' not in page
-    assert 'value="1000.00"' in page
+    # PLAN-012d D9: the catalogue's price is a placeholder, never a value; no tick box.
+    assert 'placeholder="1000.00"' in page and 'value="1000.00"' not in page
+    assert "setup_sign_fee_tick" not in page
+    assert 'id="setup-total"' in page and "Setup charges: <span" in page
+    assert 'data-total-for="setup-checklist">$0.00</span>' in page
+    assert "ledger/table_total.js" in page
 
 
-def test_the_checklist_post_creates_the_lease_and_the_ticked_charges_once() -> None:
-    sign, access = fee("sign_fee"), fee("access_fee")
+def test_the_checklist_hides_an_item_without_the_flag() -> None:
+    fee("sign_fee", default_price=D("1000.00"))
+    fee("phone_fee", default_price=D("50.00"), show_in_setup=False)
+    client, _ = client_for(Role.ADMIN)
+    page = client.get("/leases/new/").content.decode()
+    assert 'id="setup-sign_fee"' in page and 'id="setup-phone_fee"' not in page
+    codes = {row.code for row in service.checklist_types()}
+    assert "sign_fee" in codes and "phone_fee" not in codes
+    # The invoice builder still offers it (the flag is the checklist's only).
+    assert "phone_fee" in {row.code for row in service.offered_types()}
+    # A posted price for the hidden item charges nothing.
+    client.post("/leases/new/", lease_form(setup_phone_fee_price="50.00"))
+    assert Lease.objects.count() == 1 and not OneOffCharge.objects.exists()
+
+
+def test_the_checklist_post_charges_the_rows_with_a_price_once() -> None:
+    sign, access = fee("sign_fee", default_price=D("450.00")), fee("access_fee")
     client, _ = client_for(Role.ADMIN)
     data = lease_form(
         **{
-            "setup_sign_fee_tick": "on",
             "setup_sign_fee_price": "1000.00",
             "setup_sign_fee_cost": "500.00",
             "setup_sign_fee_vendor": "Bright Signs",
-            "setup_access_fee_price": "300.00",
+            # A cost and a vendor without a price: not charged.
+            "setup_access_fee_cost": "20.00",
+            "setup_access_fee_vendor": "Keys Inc",
+            "setup_access_fee_price": "",
         }
     )
     response = client.post("/leases/new/", data)
     lease = Lease.objects.get()
     assert response["Location"] == f"/leases/{lease.pk}/"
     [charge] = OneOffCharge.objects.all()
+    # Charged at the typed value, not the catalogue's default.
     assert (charge.fee_type, charge.price, charge.cost, charge.due_date) == (
         sign,
         D("1000.00"),
@@ -1308,21 +1337,30 @@ def test_the_checklist_post_creates_the_lease_and_the_ticked_charges_once() -> N
     assert not OneOffCharge.objects.filter(fee_type=access).exists()
 
 
-def test_a_ticked_row_without_a_price_or_with_a_card_number_saves_nothing() -> None:
-    fee("sign_fee")
+def test_an_untouched_checklist_charges_nothing_and_never_the_placeholder() -> None:
+    fee("sign_fee", default_price=D("450.00"))
+    fee("access_fee", default_price=D("300.00"))
     client, _ = client_for(Role.ADMIN)
-    data = lease_form(setup_sign_fee_tick="on")
-    client.post("/leases/new/", data)
-    assert "Enter the price of a ticked item." in client.get("/leases/new/").content.decode()
-    client.post(
-        "/leases/new/",
-        {**data, "setup_sign_fee_price": "10.00", "setup_sign_fee_vendor": CARD},
+    response = client.post("/leases/new/", lease_form())
+    assert response.status_code == 302
+    assert Lease.objects.count() == 1 and not OneOffCharge.objects.exists()
+
+
+def test_a_row_with_a_card_number_saves_nothing_and_the_total_line_is_rendered() -> None:
+    fee("sign_fee")
+    fee("access_fee")
+    client, _ = client_for(Role.ADMIN)
+    data = lease_form(
+        setup_sign_fee_price="10.00", setup_access_fee_price="1234.50", setup_sign_fee_vendor=CARD
     )
+    client.post("/leases/new/", data)
     page = client.get("/leases/new/").content.decode()
     assert "may not contain card or account numbers" in page
     # The whole number, not a fragment: a random identifier on the page may hold "4111".
     assert CARD not in page and CARD.replace(" ", "") not in page
     assert (Lease.objects.count(), OneOffCharge.objects.count()) == (0, 0)
+    # The held form shows the total of the prices typed, rendered by the server.
+    assert 'data-total-for="setup-checklist">$1,244.50</span>' in page
 
 
 def test_the_lease_edit_page_has_no_checklist() -> None:

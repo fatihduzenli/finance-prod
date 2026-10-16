@@ -1264,3 +1264,19 @@ cycle: the processor named outside `payments/`, the call-graph scan tripped by a
 under `caffeinate` after a four-hour idle crawl): ruff, format, mypy (396 files), lock,
 migrations clean; sqlite 5,228 passed; PostgreSQL 24 + 5,831 passed; e2e 7; secret scans clean;
 Fable's adversarial file 7 cases green on both engines. Batch C assigned.
+
+## Update, 2026-10-16, PLAN-012d Batch C built and gated (not pushed)
+
+Batch C of Step 12d (owner's 8a and 8b): the setup checklist without tick boxes (a price means
+charged, the catalogue default is a placeholder, a "Show in setup checklist" flag on catalogue
+items set for the seeded ones and off for builder-saved ones, a live total; the transfer's
+incoming step and the lease-end deductions table follow the same table rules); the invoice
+builder's single combo box per line (Rent, Existing open charge, catalogue items, typed names),
+the month select, the amount filled at once from a read-only JSON route, existing open charges
+(the checklist's deposit) attached on send, the full-width Item box, one line on a new draft, the
+trash-icon remove, errors numbered by the visible line; migrations 0043 and 0044. Gate: ruff,
+format, mypy (400 files), lock, migrations clean; sqlite 5,251 passed; PostgreSQL 26 + 5,853
+passed; e2e 7; secret scans clean; Fable's adversarial file 5 cases green on both engines; one
+test-list omission (a constraint case) filled by Fable. **For the owner:** billing an existing
+charge below its balance reprices the charge (a $500 deposit billed at $450 becomes a $450
+deposit, audited). Batch D assigned.

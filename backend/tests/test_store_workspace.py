@@ -834,7 +834,7 @@ def test_the_already_on_draft_refusal_links_the_other_draft() -> None:
     assert first.ok and first.draft is not None, first.message
     second = a_draft(lease, "Poster")
     data = page_data(
-        [{"kind": "rent", "rent_lease": str(lease.pk), "rent_month": "2026-10"}],
+        [{"item": "Rent", "rent_lease": str(lease.pk), "rent_month": "2026-10"}],
         lease=str(lease.pk),
     )
     billing.post(f"/invoices/drafts/{second.pk}/edit/", data)

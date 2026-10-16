@@ -324,7 +324,8 @@ def _incoming_form(
             "deposit_amount": transfer.deposit_amount,
         }
         for line in service.setup_lines(transfer):
-            initial[f"setup_{line.fee_type.code}_tick"] = True
+            # The items already chosen keep their price (PLAN-012d D9: a price means
+            # charged).
             initial[f"setup_{line.fee_type.code}_price"] = line.price
     else:
         outgoing = transfer.outgoing_lease

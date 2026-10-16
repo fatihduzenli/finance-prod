@@ -291,11 +291,12 @@ def search_operators(query: str, transfer: LeaseTransfer) -> list[Operator]:
 
 
 def deposit_type() -> FeeType | None:
-    """The catalogue's security deposit item when it is offered (active)."""
+    """The catalogue's security deposit item when it is offered (active; the wizard's
+    deposit is its own field, whatever the checklist flag, PLAN-012d D9)."""
     return next(
         (
             fee_type
-            for fee_type in one_off_charges.checklist_types()
+            for fee_type in one_off_charges.offered_types()
             if fee_type.code == deposits.DEPOSIT_FEE_CODE
         ),
         None,

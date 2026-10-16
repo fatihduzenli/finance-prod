@@ -1346,6 +1346,17 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_invoice_draft_line(rent_month=date(2026, 10, 1)),
     ),
     ConstraintCase(
+        # PLAN-012d D10: an existing-charge line names the charge and nothing else (no rent
+        # fields, no fee type).
+        "invoice_draft_lines_existing_charge",
+        lambda: new_invoice_draft_line(existing_charge=saved(new_one_off_charge())),
+        # A fee type beside the charge breaks only this CHECK (a lone rent month would trip
+        # the rent-line CHECK first on sqlite).
+        lambda: new_invoice_draft_line(
+            existing_charge=saved(new_one_off_charge()), fee_type=saved(new_fee_type())
+        ),
+    ),
+    ConstraintCase(
         "invoice_draft_lines_total_is_quantity_times_unit",
         # 0.125 rounds half up to 0.13: half a cent away is accepted.
         lambda: new_invoice_draft_line(

@@ -37,13 +37,14 @@ from ledger.models import (
     InstallmentCadence,
     Lease,
     LeaseEndReason,
+    OneOffCharge,
     Operator,
     PaymentChannel,
     PaymentMethod,
     RefundMethod,
     Store,
 )
-from ledger.services import invoice_builder
+from ledger.services import invoice_builder, one_off_charges
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import END_DATE_REQUIRED
 from ledger.services.one_off_charges import ChargeInput
@@ -250,67 +251,65 @@ class LeaseForm(_LeaseFormBase):
 
 class LeaseCreateForm(LeaseForm):
     """Adds the one-time key rendered with the form, so a resubmission saves nothing,
-    and the setup checklist (PLAN-010b D5): per active fee type a tick, cost, price,
-    vendor and due date, the amounts defaulting from the catalogue. A ticked row needs a
-    price; an empty due date is the lease's start date."""
+    and the setup checklist (PLAN-010b D5; PLAN-012d D9): per fee type of
+    :func:`~ledger.services.one_off_charges.checklist_types` a cost, a price, a vendor
+    and a due date. A row is charged when its price has a value: the price input starts
+    empty with the catalogue's default price as its placeholder, never as a value (no
+    tick box; a posted tick is ignored). An empty due date is the lease's start date."""
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.fee_types = list(
-            FeeType.objects.filter(active=True).order_by("sort_order", "name", "id")
-        )
+        self.fee_types = one_off_charges.checklist_types()
         for fee_type in self.fee_types:
             name = _setup_name(fee_type)
-            self.fields[f"{name}_tick"] = forms.BooleanField(
-                required=False, widget=_ExactCheckboxInput, label=fee_type.name
-            )
             self.fields[f"{name}_cost"] = _money_field(
                 "Cost", minimum=Decimal("0.00"), initial=fee_type.default_cost
             )
-            self.fields[f"{name}_price"] = _money_field(
-                "Price", minimum=Decimal("0.01"), initial=fee_type.default_price
-            )
+            self.fields[f"{name}_price"] = _setup_price_field(fee_type)
             self.fields[f"{name}_vendor"] = _vendor_field()
             self.fields[f"{name}_due_date"] = forms.DateField(
                 label="Due date", required=False, widget=forms.DateInput(attrs={"type": "date"})
             )
 
     def setup_rows(self) -> list[dict[str, Any]]:
-        """The checklist, one row of bound fields per active fee type."""
+        """The checklist, one row of bound fields per checklist fee type."""
         return [
             {
                 "fee_type": fee_type,
                 **{
                     part: self[f"{_setup_name(fee_type)}_{part}"]
-                    for part in ("tick", "cost", "price", "vendor", "due_date")
+                    for part in ("cost", "price", "vendor", "due_date")
                 },
             }
             for fee_type in self.fee_types
         ]
+
+    def setup_total(self) -> Decimal:
+        """The sum of the prices typed so far (the total line under the checklist)."""
+        return _setup_total(self, self.fee_types)
 
     def clean(self) -> dict[str, Any]:
         data = super().clean()
         started = data.get("started_on")
         for fee_type in self.fee_types:
             name = _setup_name(fee_type)
-            if data.get(f"{name}_tick") is not True:
+            if data.get(f"{name}_price") is None:
                 continue
-            if data.get(f"{name}_price") is None and f"{name}_price" not in self.errors:
-                self.add_error(f"{name}_price", SETUP_PRICE_REQUIRED)
             if data.get(f"{name}_due_date") is None and started is None:
                 self.add_error(f"{name}_due_date", SETUP_DUE_REQUIRED)
         return data
 
     def setup_items(self) -> list[ChargeInput]:
-        """The ticked rows of a valid form, in catalogue order."""
+        """The rows of a valid form with a price, in catalogue order."""
         data = self.cleaned_data
         started: date | None = data.get("started_on")
         items = []
         for fee_type in self.fee_types:
             name = _setup_name(fee_type)
-            if data.get(f"{name}_tick") is not True:
+            price = data.get(f"{name}_price")
+            if price is None:
                 continue
             due = data.get(f"{name}_due_date") or started
             if due is None:  # refused by clean()
@@ -318,7 +317,7 @@ class LeaseCreateForm(LeaseForm):
             items.append(
                 ChargeInput(
                     fee_type=fee_type,
-                    price=data[f"{name}_price"],
+                    price=price,
                     cost=data.get(f"{name}_cost"),
                     vendor=data.get(f"{name}_vendor") or "",
                     due_date=due,
@@ -331,13 +330,40 @@ class LeaseCreateForm(LeaseForm):
 
 #: The name prefix of every checklist field of the lease create form.
 SETUP = "setup_"
-SETUP_PRICE_REQUIRED = "Enter the price of a ticked item."
 SETUP_DUE_REQUIRED = "Enter a due date, or a start date for the lease."
 COST_HELP = "Empty means the cost is unknown."
+#: The class of an amount input summed by ``ledger/table_total.js`` (the setup checklist's
+#: prices, the lease end's deductions; PLAN-012d D9, D10).
+TOTAL_INPUT_CLASS = "js-total"
 
 
 def _setup_name(fee_type: FeeType) -> str:
     return f"{SETUP}{fee_type.code}"
+
+
+def _setup_price_field(fee_type: FeeType) -> forms.DecimalField:
+    """A checklist row's price (PLAN-012d D9): empty, the catalogue's default price shown
+    as the placeholder only, so an untouched row charges nothing."""
+    field = _money_field("Price", minimum=Decimal("0.01"))
+    field.widget.attrs["class"] = TOTAL_INPUT_CLASS
+    if fee_type.default_price is not None:
+        field.widget.attrs["placeholder"] = f"{Decimal(fee_type.default_price):.2f}"
+    return field
+
+
+def _setup_total(form: forms.BaseForm, fee_types: Iterable[FeeType]) -> Decimal:
+    """The sum of the checklist prices the form holds (posted, or initial on a GET); a
+    price that is not a valid amount counts as nothing."""
+    total = Decimal("0.00")
+    for fee_type in fee_types:
+        bound = form[f"{_setup_name(fee_type)}_price"]
+        try:
+            value = bound.field.clean(bound.value())
+        except forms.ValidationError:
+            continue
+        if isinstance(value, Decimal):
+            total += value
+    return total
 
 
 def _money_field(
@@ -686,8 +712,11 @@ DESCRIPTION_INPUT_MAX_LENGTH = 1000
 ITEM_INPUT_MAX_LENGTH = 1000
 #: The ``id`` of the draft form's one list of catalogue item names (PLAN-012b D2).
 ITEMS_LIST_ID = "draft-items"
-#: Blank line rows a draft form shows besides its lines, so that it works without script.
-BLANK_LINE_ROWS = 5
+#: Blank line rows a draft form shows besides its lines: a new draft opens with one line;
+#: "Add line" adds more (PLAN-012d D10).
+BLANK_LINE_ROWS = 1
+#: The months a Rent line offers around the current one (PLAN-012d D10: ± 12).
+RENT_MONTHS_AROUND = 12
 
 
 def _lease_label(lease: Lease) -> str:
@@ -736,38 +765,61 @@ class InvoiceDraftForm(forms.Form):
         return self.leases.get(self.cleaned_data.get("lease") or "")
 
 
-#: The kinds of a draft line (PLAN-012b-b D4): an item, or a month of rent.
-LINE_KIND_ITEM = "item"
-LINE_KIND_RENT = "rent"
-LINE_KINDS = ((LINE_KIND_ITEM, "Item"), (LINE_KIND_RENT, "Rent"))
+#: The Item box's choice of a Rent line (PLAN-012d D10; the kind select of PLAN-012b-b D4
+#: is gone): the first entry of the list.
+RENT_ITEM = "Rent"
 RENT_LINE_INCOMPLETE = "Choose the lease and the month of the rent."
+EXISTING_LINE_UNKNOWN = "Choose the existing open charge from the list."
+
+
+def rent_months(today: date, around: int = RENT_MONTHS_AROUND) -> list[tuple[str, str]]:
+    """The months a Rent line offers: ``around`` before and after the current one, as
+    (``YYYY-MM``, ``October 2026``)."""
+    first = today.year * 12 + today.month - 1
+    months = []
+    for number in range(first - around, first + around + 1):
+        month = date(number // 12, number % 12 + 1, 1)
+        months.append((f"{month:%Y-%m}", invoice_builder.month_label(month)))
+    return months
+
+
+def _month_value(value: date | str | None) -> str:
+    if isinstance(value, date):
+        return f"{value:%Y-%m}"
+    return str(value or "")
 
 
 class InvoiceLineForm(forms.Form):
-    """One line of a draft (PLAN-012b D1, D2): an item (one box: a catalogue item's name
-    from the list of :data:`ITEMS_LIST_ID`, or a new name), an optional description (the
+    """One line of a draft (PLAN-012b D1, D2; PLAN-012d D10): one Item box on the list
+    of :data:`ITEMS_LIST_ID`, which starts with **Rent**, then the draft's lease's
+    existing open charges ("Existing open charge: <label> ($balance)"), then the
+    catalogue items; any other name is a typed item. An optional description (the
     detail), a quantity (empty: 1), a unit amount and Save as catalogue item. The form
     never sends a fee type: the service resolves the item by its name. A row with neither
-    an item, a description nor a unit amount is blank and ignored; a row whose Remove box
-    is ticked is dropped.
+    an item, a description nor a unit amount is blank and ignored; a removed row (the
+    trash button sets its ``DELETE``) is dropped unchecked.
 
-    The kind **Rent** (PLAN-012b-b D4) bills a month of a lease instead of an item: the
-    lease (one of ``rent_leases``, ``default_lease`` preselected) and the month (a month
-    input; a full date is read as written, so the service refuses a day other than the
-    first); an empty unit amount is the month's rent. The service checks every rule."""
+    **Rent** bills a month of a lease: the lease (one of ``rent_leases``,
+    ``default_lease`` preselected) and the month (a select of ``months``, values
+    ``YYYY-MM``); an empty unit amount is the month's rent. An **existing open charge**
+    names the charge (``existing_charge``, set by the list's script, else found by the
+    box's text among ``existing``); an empty unit amount is its balance. The service
+    checks every rule."""
 
-    kind = forms.ChoiceField(
-        required=False, label="Kind", choices=LINE_KINDS, initial=LINE_KIND_ITEM
-    )
     item = forms.CharField(
         required=False,
         label="Item",
         max_length=ITEM_INPUT_MAX_LENGTH,
         validators=[validate_no_payment_data],
         widget=forms.TextInput(
-            {"list": ITEMS_LIST_ID, "placeholder": "Catalogue item or a new name"}
+            {
+                "list": ITEMS_LIST_ID,
+                "placeholder": "Rent, an open charge, a catalogue item or a new name",
+                "autocomplete": "off",
+            }
         ),
     )
+    existing_charge = forms.CharField(required=False, widget=forms.HiddenInput)
     description = forms.CharField(
         required=False,
         max_length=DESCRIPTION_INPUT_MAX_LENGTH,
@@ -775,29 +827,29 @@ class InvoiceLineForm(forms.Form):
         help_text=f"Optional detail under the item; at most {DESCRIPTION_MAX_LENGTH} characters.",
     )
     quantity = forms.DecimalField(
-        required=False, max_digits=12, decimal_places=4, widget=forms.NumberInput({"step": "any"})
+        required=False,
+        max_digits=12,
+        decimal_places=4,
+        widget=forms.NumberInput({"step": "any", "class": "js-quantity"}),
     )
     unit_amount = forms.DecimalField(
         required=False,
         label="Unit amount",
         max_digits=12,
         decimal_places=2,
-        widget=forms.NumberInput({"step": "0.01"}),
+        widget=forms.NumberInput({"step": "0.01", "class": "js-unit"}),
     )
     save_item = forms.BooleanField(required=False, label="Save as catalogue item")
     rent_lease = forms.ChoiceField(required=False, label="Rent: lease")
-    rent_month = forms.DateField(
-        required=False,
-        label="Rent: month",
-        input_formats=["%Y-%m", "%Y-%m-%d"],
-        widget=forms.DateInput({"type": "month", "placeholder": "YYYY-MM"}, format="%Y-%m"),
-    )
+    rent_month = forms.ChoiceField(required=False, label="Rent: month")
 
     def __init__(
         self,
         *args: Any,
         rent_leases: Iterable[Lease] = (),
         default_lease: Lease | None = None,
+        months: Iterable[tuple[str, str]] = (),
+        existing: Iterable[OneOffCharge] = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -808,22 +860,58 @@ class InvoiceLineForm(forms.Form):
             ]
         if default_lease is not None:
             lease_field.initial = str(default_lease.pk)
+        offered = list(months)
+        stored = _month_value(self.initial.get("rent_month"))
+        if stored and stored not in {value for value, _ in offered}:
+            # A draft's month outside the window stays choosable.
+            parsed = date.fromisoformat(f"{stored}-01")
+            offered = sorted([*offered, (stored, invoice_builder.month_label(parsed))])
+        month_field = self.fields["rent_month"]
+        if isinstance(month_field, forms.ChoiceField):
+            month_field.choices = [("", "Choose the month")] + offered
+        self.existing = {
+            invoice_builder.catalogue_key(invoice_builder.existing_label(row)): row
+            for row in existing
+        }
 
     @property
     def is_rent(self) -> bool:
-        return self.cleaned_data.get("kind") == LINE_KIND_RENT
+        return invoice_builder.catalogue_key(self.cleaned_data.get("item") or "") == (
+            invoice_builder.catalogue_key(RENT_ITEM)
+        )
+
+    @property
+    def is_existing(self) -> bool:
+        return invoice_builder.catalogue_key(self.cleaned_data.get("item") or "").startswith(
+            invoice_builder.catalogue_key(invoice_builder.EXISTING_PREFIX)
+        )
+
+    def clean_rent_month(self) -> date | None:
+        value = self.cleaned_data.get("rent_month") or ""
+        return date.fromisoformat(f"{value}-01") if value else None
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
-        if data.get("kind") == LINE_KIND_RENT and not (
-            data.get("rent_lease") and data.get("rent_month")
-        ):
-            raise forms.ValidationError(RENT_LINE_INCOMPLETE)
+        if "item" not in data:
+            return data
+        if self.is_rent:
+            if not (data.get("rent_lease") and data.get("rent_month")):
+                raise forms.ValidationError(RENT_LINE_INCOMPLETE)
+        elif self.is_existing:
+            chosen = self.existing.get(invoice_builder.catalogue_key(data["item"]))
+            typed = _uuid_or_none(data.get("existing_charge"))
+            if chosen is not None:
+                data["existing_charge"] = chosen.pk
+            elif typed is not None:
+                # The script's choice; the service checks it is this lease's open charge.
+                data["existing_charge"] = typed
+            else:
+                raise forms.ValidationError(EXISTING_LINE_UNKNOWN)
         return data
 
     def is_blank(self) -> bool:
         data = self.cleaned_data
-        if self.is_rent:
+        if self.is_rent or self.is_existing:
             return False
         return not (data.get("item") or data.get("description") or data.get("unit_amount"))
 
@@ -838,6 +926,14 @@ class InvoiceLineForm(forms.Form):
                 rent_lease=uuid.UUID(str(data["rent_lease"])),
                 rent_month=data["rent_month"],
             )
+        if self.is_existing:
+            return invoice_builder.LineInput(
+                item=data.get("item") or "",
+                description=data.get("description") or "",
+                quantity=data.get("quantity"),
+                unit_amount=data.get("unit_amount"),
+                existing_charge=data["existing_charge"],
+            )
         return invoice_builder.LineInput(
             item=data.get("item") or "",
             description=data.get("description") or "",
@@ -845,6 +941,13 @@ class InvoiceLineForm(forms.Form):
             unit_amount=data.get("unit_amount"),
             save_item=data.get("save_item") is True,
         )
+
+
+def _uuid_or_none(value: object) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except ValueError:
+        return None
 
 
 InvoiceLineFormSet = forms.formset_factory(
@@ -857,15 +960,39 @@ InvoiceLineFormSet = forms.formset_factory(
 )
 
 
+def _removed(form: forms.Form) -> bool:
+    """Whether the row's trash button (or its Remove box) set ``DELETE``."""
+    return form["DELETE"].value() is True
+
+
+def kept_rows(formset: forms.BaseFormSet[InvoiceLineForm]) -> list[tuple[int, InvoiceLineForm]]:
+    """The rows the user sees (not removed), each with its visible line number."""
+    return [
+        (number, form)
+        for number, form in enumerate(
+            (form for form in formset.forms if not _removed(form)), start=1
+        )
+    ]
+
+
 def draft_lines(formset: forms.BaseFormSet[InvoiceLineForm]) -> list[invoice_builder.LineInput]:
     """The lines of a valid formset, in order: blank and removed rows left out."""
+    return [form.line() for _, form in _filled(formset)]
+
+
+def line_numbers(formset: forms.BaseFormSet[InvoiceLineForm]) -> list[int]:
+    """The visible line number of each line :func:`draft_lines` returns, in order (the
+    service numbers its refusals by its own list; PLAN-012d D10)."""
+    return [number for number, _ in _filled(formset)]
+
+
+def _filled(
+    formset: forms.BaseFormSet[InvoiceLineForm],
+) -> list[tuple[int, InvoiceLineForm]]:
     return [
-        form.line()
-        for form in formset.forms
-        if form.has_changed()
-        and not form.cleaned_data.get("DELETE")
-        and form.cleaned_data
-        and not form.is_blank()
+        (number, form)
+        for number, form in kept_rows(formset)
+        if form.has_changed() and form.cleaned_data and not form.is_blank()
     ]
 
 
@@ -1160,8 +1287,9 @@ class LeaseEndTermsForm(forms.Form):
 
 
 class LeaseEndDeductionsForm(forms.Form):
-    """Step 3: the typed deductions from the deposit, one row each; an empty row is
-    skipped. The service checks every rule again."""
+    """Step 3: the typed deductions from the deposit, one numbered row each; an empty
+    row is skipped. The total line under the table sums the amounts typed (PLAN-012d
+    D10). The service checks every rule again."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -1179,13 +1307,30 @@ class LeaseEndDeductionsForm(forms.Form):
                 max_value=RENT_MAX,
                 max_digits=12,
                 decimal_places=2,
+                widget=forms.NumberInput({"class": TOTAL_INPUT_CLASS}),
             )
 
-    def rows(self) -> list[dict[str, forms.BoundField]]:
+    def rows(self) -> list[dict[str, Any]]:
         return [
-            {part: self[f"{part}_{index}"] for part in ("kind", "description", "amount")}
+            {
+                "number": index,
+                **{part: self[f"{part}_{index}"] for part in ("kind", "description", "amount")},
+            }
             for index in range(1, DEDUCTION_ROWS + 1)
         ]
+
+    def total(self) -> Decimal:
+        """The sum of the amounts the form holds; an invalid amount counts as nothing."""
+        total = Decimal("0.00")
+        for index in range(1, DEDUCTION_ROWS + 1):
+            bound = self[f"amount_{index}"]
+            try:
+                value = bound.field.clean(bound.value())
+            except forms.ValidationError:
+                continue
+            if isinstance(value, Decimal):
+                total += value
+        return total
 
     def lines(self) -> list[tuple[str, str, Decimal]]:
         """The filled rows as (kind, description, amount); call after validation."""
@@ -1252,9 +1397,10 @@ class TransferOperatorForm(forms.Form):
 
 
 class TransferIncomingForm(forms.Form):
-    """The incoming lease's terms, its deposit and its setup checklist (one tick and price
-    per offered catalogue item that is not a deposit, the price defaulting from the
-    catalogue). The service checks every rule again."""
+    """The incoming lease's terms, its deposit and its setup checklist (one price per
+    checklist item that is not a deposit: empty with the catalogue's default price as the
+    placeholder; a price means charged, PLAN-012d D9). The service checks every rule
+    again."""
 
     started_on = forms.DateField(
         label="Start date",
@@ -1309,43 +1455,28 @@ class TransferIncomingForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.fee_types = list(fee_types)
         for fee_type in self.fee_types:
-            name = _setup_name(fee_type)
-            self.fields[f"{name}_tick"] = forms.BooleanField(
-                required=False, widget=_ExactCheckboxInput, label=fee_type.name
-            )
-            self.fields[f"{name}_price"] = _money_field(
-                "Price", minimum=Decimal("0.01"), initial=fee_type.default_price
-            )
+            self.fields[f"{_setup_name(fee_type)}_price"] = _setup_price_field(fee_type)
 
     def lease_fields(self) -> list[forms.BoundField]:
         return [field for field in self.visible_fields() if not field.name.startswith(SETUP)]
 
     def setup_rows(self) -> list[dict[str, Any]]:
         return [
-            {
-                "fee_type": fee_type,
-                "tick": self[f"{_setup_name(fee_type)}_tick"],
-                "price": self[f"{_setup_name(fee_type)}_price"],
-            }
+            {"fee_type": fee_type, "price": self[f"{_setup_name(fee_type)}_price"]}
             for fee_type in self.fee_types
         ]
 
-    def clean(self) -> dict[str, Any]:
-        data = super().clean() or {}
-        for fee_type in self.fee_types:
-            name = _setup_name(fee_type)
-            if data.get(f"{name}_tick") is True and data.get(f"{name}_price") is None:
-                if f"{name}_price" not in self.errors:
-                    self.add_error(f"{name}_price", SETUP_PRICE_REQUIRED)
-        return data
+    def setup_total(self) -> Decimal:
+        """The sum of the prices typed so far (the total line under the table)."""
+        return _setup_total(self, self.fee_types)
 
     def setup_items(self) -> list[tuple[FeeType, Decimal]]:
-        """The ticked rows of a valid form as (fee type, price), in catalogue order."""
+        """The rows of a valid form with a price, as (fee type, price), in catalogue
+        order (PLAN-012d D9: a price means charged; there is no tick box)."""
         items = []
         for fee_type in self.fee_types:
-            name = _setup_name(fee_type)
-            price = self.cleaned_data.get(f"{name}_price")
-            if self.cleaned_data.get(f"{name}_tick") is True and price is not None:
+            price = self.cleaned_data.get(f"{_setup_name(fee_type)}_price")
+            if price is not None:
                 items.append((fee_type, price))
         return items
 

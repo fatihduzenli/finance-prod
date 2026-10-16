@@ -490,14 +490,21 @@ class SetupRefused(Exception):  # noqa: N818 (reads as an outcome, like LeaseRef
 # --- Reads ----------------------------------------------------------------------------
 
 
-def checklist_types() -> list[FeeType]:
-    """The active fee types, in catalogue order: one checklist row each (D5). The NSF fee
-    types are never offered, even when an admin made them active (PLAN-011b D5)."""
+def offered_types() -> list[FeeType]:
+    """The active fee types, in catalogue order: what the invoice builder's Item box
+    offers. The NSF fee types are never offered, even when an admin made them active
+    (PLAN-011b D5)."""
     return list(
         FeeType.objects.filter(active=True)
         .exclude(code__in=NSF_FEE_CODES)
         .order_by("sort_order", "name", "id")
     )
+
+
+def checklist_types() -> list[FeeType]:
+    """:func:`offered_types` shown in the setup checklist (``show_in_setup``, PLAN-012d
+    D9), in catalogue order: one checklist row each (D5)."""
+    return [fee_type for fee_type in offered_types() if fee_type.show_in_setup]
 
 
 def charges_of(lease: Lease) -> list[OneOffCharge]:

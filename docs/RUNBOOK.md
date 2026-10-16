@@ -675,6 +675,30 @@ and the same form applies it to a later charge ("from credit"). A credit is mone
 revenue; it is refunded through the lease end, and a transfer waits until it is refunded.
 **Schedule a payment** (store page, billing) creates a one-off charge collected by autopay on a
 date you choose (the operator needs a linked bank method); the worker makes the one-occurrence
-Stax schedule. **Rent run** left the main navigation: charges are created by the
+Stax schedule.
+
+**Setup checklist** (lease form and the transfer's incoming step; PLAN-012d). No tick boxes: a
+row is charged when its Price has a value, an empty Price means not charged; the catalogue's
+default price shows as a grey placeholder, never as a filled value, so nothing is charged by
+accident; the total of the included rows shows under the table. Only catalogue items marked
+"Show in setup checklist" appear (the seeded deposit, access, sign, architecture, business
+purchase, phone and insurance items); items saved from the invoice builder are off until an
+admin turns the flag on in the catalogue.
+
+**Invoice builder lines** (PLAN-012d). One picker per line: the Item box lists **Rent**, then
+**Existing open charge** (one of the lease's open charges, such as the checklist's deposit, so it
+joins the invoice instead of being refused as a duplicate), then the catalogue items, and still
+accepts a typed name. Rent reveals the lease and a month select on the line and fills the amount
+at once (the month's rent, prorated or as already charged), visible and editable. A new draft
+opens with one line; "Add line" adds more; the trash icon at the end of a line removes it, and
+removed lines never block the save; errors name the line you see. "Rent … is already on draft
+DRAFT-…" links to that draft. **Rent run** left the main navigation: charges are created by the
 daily job, by saving a lease and by the catch-up; the page lives under **Admin** (with the Django
-admin and the audit page) for the daily report, Match invoices and the CSV export.
+admin and the audit page) for the daily report, Match invoices and the CSV export. The run page
+lists every charge the last run created (store, month, amount, "catch-up" or "today", linked),
+whether the daily job or the button made them, and the dashboard shows one line "Today's rent
+run: N created, M skipped" linking to it. **Create missing charges** on a store's action bar
+runs the catch-up for that store alone and says what it created or "Nothing missing". The
+**grid** opens on the 12 months ending with next month (10 past, the current, the next) with a
+From/To month picker (at most 24 months); a future month billed in advance shows the amount and
+the invoice number.

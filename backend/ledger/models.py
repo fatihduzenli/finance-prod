@@ -808,6 +808,9 @@ class FeeType(GuardedModel):
 
     Edited by an admin in the Django admin. ``refundable`` marks a deposit: money held,
     never revenue. A null default amount means no amount is standard.
+    ``show_in_setup`` (PLAN-012d D9) offers the item as a row of the setup checklist (the
+    new lease form and the transfer's incoming step); an item saved from the invoice
+    builder starts without it.
     """
 
     code = models.SlugField(max_length=64, unique=True, validators=[validate_no_payment_data])
@@ -816,6 +819,7 @@ class FeeType(GuardedModel):
     default_price = MoneyField(null=True, blank=True)
     refundable = models.BooleanField(default=False)
     active = models.BooleanField(default=True)
+    show_in_setup = models.BooleanField(default=False)
     sort_order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1563,7 +1567,11 @@ class InvoiceDraftLine(GuardedModel):
 
     A **Rent** line (PLAN-012b-b D4) names a lease of the draft's operator and a month
     (``rent_lease``, ``rent_month``, both or neither, the month's first day) and no fee
-    type; on send it makes or takes that month's rent charge."""
+    type; on send it makes or takes that month's rent charge.
+
+    An **existing-charge** line (PLAN-012d D10) names an open one-off charge of the
+    draft's lease (``existing_charge``), with no fee type and no rent; on send it
+    attaches that charge to the invoice instead of creating one."""
 
     draft = models.ForeignKey(InvoiceDraft, on_delete=models.CASCADE, related_name="lines")
     position = models.IntegerField()
@@ -1579,6 +1587,9 @@ class InvoiceDraftLine(GuardedModel):
         Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     rent_month = models.DateField(null=True, blank=True)
+    existing_charge = models.ForeignKey(
+        OneOffCharge, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
 
     class Meta:
         db_table = "invoice_draft_lines"
@@ -1609,11 +1620,20 @@ class InvoiceDraftLine(GuardedModel):
                 ),
                 name="invoice_draft_lines_rent_line",
             ),
+            models.CheckConstraint(
+                condition=Q(existing_charge__isnull=True)
+                | Q(rent_lease__isnull=True, rent_month__isnull=True, fee_type__isnull=True),
+                name="invoice_draft_lines_existing_charge",
+            ),
         ]
 
     @property
     def is_rent(self) -> bool:
         return self.rent_lease_id is not None
+
+    @property
+    def is_existing(self) -> bool:
+        return self.existing_charge_id is not None
 
     @property
     def quantity_text(self) -> str:

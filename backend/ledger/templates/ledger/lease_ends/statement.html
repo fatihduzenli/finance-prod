@@ -1,5 +1,6 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
+{% load static %}
 {% block title %}End lease {{ store.external_label }}: statement{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
@@ -10,17 +11,18 @@
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% responsive_table %}
-    <table id="deduction-rows">
-      <thead><tr><th>Kind</th><th>Description</th><th>Amount</th></tr></thead>
+    <table id="deduction-rows" class="js-table-total">
+      <thead><tr><th>#</th><th>Kind</th><th>Description</th><th>Amount</th></tr></thead>
       <tbody>
         {% for row in form.rows %}
-          <tr><td>{{ row.kind.errors }}{{ row.kind }}</td><td>{{ row.description.errors }}{{ row.description }}</td><td>{{ row.amount.errors }}{{ row.amount }}</td></tr>
+          <tr><td class="line-number">{{ row.number }}</td><td>{{ row.kind.errors }}{{ row.kind }}</td><td>{{ row.description.errors }}{{ row.description }}</td><td>{{ row.amount.errors }}{{ row.amount }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
     {% endresponsive_table %}
+    <p class="table-total" id="deductions-typed-total">Deductions: <span class="js-total-out" data-total-for="deduction-rows">${{ form.total|floatformat:"2g" }}</span></p>
     <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
   </form>
   {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}

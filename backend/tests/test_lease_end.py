@@ -1239,6 +1239,11 @@ def test_an_admin_walks_the_wizard_from_the_store_page(admin: Any, pinned: None)
     assert 'id="no-blockers"' in client.get(f"{base}/blockers/").content.decode()
     statement_page = client.get(f"{base}/statement/").content.decode()
     assert TEXT in statement_page and "774.19" in statement_page
+    # PLAN-012d D10: numbered deduction rows and their live total line.
+    assert 'class="line-number" data-label="#">1</td>' in statement_page
+    total_line = 'Deductions: <span class="js-total-out" data-total-for="deduction-rows">$'
+    assert total_line in statement_page
+    assert "ledger/table_total.js" in statement_page
     response = client.post(
         f"{base}/statement/",
         {"kind_1": "cleaning", "description_1": "Floors", "amount_1": "150.00"},
@@ -1647,3 +1652,13 @@ def test_a_later_month_changed_meanwhile_refuses_the_confirm(
     assert not outcome.ok and outcome.message == lease_end.CHANGED_MEANWHILE
     assert fresh(lease).ended_on is None
     assert fresh(charge).status == RentChargeStatus.DUE
+
+
+def test_the_deductions_total_sums_the_amounts_typed() -> None:
+    from ledger.forms import LeaseEndDeductionsForm
+
+    form = LeaseEndDeductionsForm(
+        {"amount_1": "150.00", "amount_2": "1,000", "amount_3": "-5", "amount_4": "49.50"}
+    )
+    assert form.total() == Decimal("199.50")  # the invalid amounts count as nothing
+    assert LeaseEndDeductionsForm().total() == Decimal("0.00")

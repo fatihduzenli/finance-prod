@@ -18,28 +18,29 @@
     {% endfor %}
     {% if not lease %}
       <h2>Setup checklist</h2>
-      <p class="muted">Tick each one-time item the operator is charged. Saving creates the lease and the ticked setup charges together. The cost is what the item costs the business (empty: unknown); the price is what the operator pays. An empty due date is the lease's start date. More items can be added from the lease page later.</p>
+      <p class="muted">Type the price of each one-time item the operator is charged; a row without a price is not charged (the grey amount is the catalogue's usual price, shown as a hint only). Saving creates the lease and those setup charges together. The cost is what the item costs the business (empty: unknown); the price is what the operator pays. An empty due date is the lease's start date. More items can be added from the lease page later.</p>
       {% responsive_table %}
-      <table id="setup-checklist">
+      <table id="setup-checklist" class="js-table-total">
         <thead><tr><th>Charge</th><th>Cost</th><th>Price</th><th>Vendor</th><th>Due date</th></tr></thead>
         <tbody>
           {% for row in form.setup_rows %}
             <tr id="setup-{{ row.fee_type.code }}">
-              <td><label for="{{ row.tick.id_for_label }}">{{ row.tick }} {{ row.fee_type.name }}</label>{% if row.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{{ row.tick.errors }}</td>
+              <td><label for="{{ row.price.id_for_label }}">{{ row.fee_type.name }}</label>{% if row.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}</td>
               <td>{{ row.cost.errors }}{{ row.cost }}</td>
               <td>{{ row.price.errors }}{{ row.price }}</td>
               <td>{{ row.vendor.errors }}{{ row.vendor }}</td>
               <td>{{ row.due_date.errors }}{{ row.due_date }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="5" class="muted">No active fee type.</td></tr>
+            <tr><td colspan="5" class="muted">No item is shown in the setup checklist.</td></tr>
           {% endfor %}
         </tbody>
       </table>
       {% endresponsive_table %}
+      <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-checklist">${{ form.setup_total|floatformat:"2g" }}</span></p>
       {% include "ledger/documents/_create_upload.html" %}
     {% endif %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-lease">Save</button></p>
   </form>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if not lease %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endif %}{% if document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

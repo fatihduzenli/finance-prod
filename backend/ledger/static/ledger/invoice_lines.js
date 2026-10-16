@@ -1,125 +1,235 @@
-// Add and remove the line rows of an invoice draft (docs/qa/PLAN-012 D6). The form is a
-// plain post and works without this script: it shows a fixed number of blank rows and a
-// Save as catalogue item box and a Remove box on each row. Here "Add line" copies the
-// last row, blank, under the next index of the management form (at most its
-// MAX_NUM_FORMS); the copy keeps the Item box's list attribute, so every row offers the
-// form's one list of catalogue names (PLAN-012b D2). Ticking Remove hides the row (its
-// box stays ticked, so the server drops it). The Save box is shown only while the Item
-// box holds a name that is not on the list (case and surrounding spaces ignored); the
-// server ignores it on a listed name either way. A row of the kind Rent (PLAN-012b-b D4)
-// shows its lease and month and hides the Item box and the Save box; any other row hides
-// the lease and month (the server reads them only on a Rent line). Nothing is sent from
-// here.
+// The line rows of an invoice draft (docs/qa/PLAN-012 D6; PLAN-012b D2; PLAN-012d D10).
+// The form is a plain post and works without this script: it shows its rows with a Save
+// as catalogue item box and a Remove box on each. Here:
+// - one Item box per row on the form's one list: "Rent", then the lease's existing open
+//   charges, then the catalogue items; any other text is a typed item;
+// - Rent shows the row's lease and month selects; once both are set, the unit amount is
+//   filled at once from the rent-amount endpoint (read-only, same origin) and stays
+//   editable; its proration text, or why the month cannot be billed, shows under the box;
+// - an existing open charge names the charge in the row's hidden field and fills the unit
+//   amount with its balance (the most it takes); any other text clears the field;
+// - the Save box shows only on a typed item that is not on the list (case and surrounding
+//   spaces ignored); the server ignores it on a listed name either way;
+// - the trash button ticks the row's Remove box and hides the row; the visible rows are
+//   numbered 1, 2, ... and the invoice total under the table is kept live;
+// - "Add line" copies the last row, blank, under the next index of the management form
+//   (at most its MAX_NUM_FORMS).
+// Nothing is sent from here but the read of the rent amount.
 (function () {
   "use strict";
   var table = document.getElementById("draft-lines");
   var button = document.getElementById("add-line");
   var total = document.getElementById("id_lines-TOTAL_FORMS");
   var max = document.getElementById("id_lines-MAX_NUM_FORMS");
+  var totalOut = document.getElementById("lines-total-value");
   if (!table || !button || !total) {
     return;
   }
   var body = table.querySelector("tbody");
+  var amountUrl = table.dataset.rentAmountUrl || "";
 
   function key(text) {
-    return text.trim().toLowerCase();
+    return String(text || "").trim().toLowerCase();
   }
 
-  function listed(input) {
+  function option(input) {
     var list = input.list;
     if (!list) {
-      return false;
+      return null;
     }
     var wanted = key(input.value);
-    return Array.prototype.some.call(list.options, function (option) {
-      return key(option.value) === wanted;
-    });
+    return Array.prototype.find.call(list.options, function (entry) {
+      return key(entry.value) === wanted;
+    }) || null;
   }
 
-  function watchSave(row) {
-    var input = row.querySelector("input[name$='-item']");
-    var box = row.querySelector("input[type=checkbox][name$='-save_item']");
-    if (!input || !box) {
-      return;
-    }
-    var cell = box.closest("td") || box;
-    function update() {
-      var typed = key(input.value) !== "" && !listed(input);
-      cell.style.visibility = typed ? "" : "hidden";
-      if (!typed) {
-        box.checked = false;
+  function cents(text) {
+    var value = Number(String(text || "").trim());
+    return String(text || "").trim() !== "" && isFinite(value) && value > 0 ? value : 0;
+  }
+
+  function money(value) {
+    return "$" + value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  function rows() {
+    return Array.prototype.slice.call(body.querySelectorAll("tr.draft-line"));
+  }
+
+  function refresh() {
+    var number = 0;
+    var sum = 0;
+    rows().forEach(function (row) {
+      var cell = row.querySelector("td.line-number");
+      if (row.hidden) {
+        if (cell) {
+          cell.textContent = "";
+        }
+        return;
       }
-    }
-    input.addEventListener("input", update);
-    input.addEventListener("change", update);
-    update();
-  }
-
-  function watchRemove(row) {
-    var box = row.querySelector("input[type=checkbox][name$='-DELETE']");
-    if (!box) {
-      return;
-    }
-    box.addEventListener("change", function () {
-      row.hidden = box.checked;
+      number += 1;
+      if (cell) {
+        cell.textContent = String(number);
+      }
+      var unit = cents((row.querySelector("input[name$='-unit_amount']") || {}).value);
+      var quantityInput = row.querySelector("input[name$='-quantity']");
+      var quantity = quantityInput && quantityInput.value.trim() !== "" ? cents(quantityInput.value) : 1;
+      sum += Math.round(unit * quantity * 100) / 100;
     });
+    if (totalOut) {
+      totalOut.textContent = money(sum);
+    }
   }
 
-  function watchKind(row) {
-    var kind = row.querySelector("select[name$='-kind']");
-    if (!kind) {
+  function field(row, suffix) {
+    return row.querySelector("[name$='-" + suffix + "']");
+  }
+
+  function fetchRent(row) {
+    var lease = field(row, "rent_lease");
+    var month = field(row, "rent_month");
+    var unit = field(row, "unit_amount");
+    var note = row.querySelector(".rent-text");
+    if (!amountUrl || !lease || !month || !unit || !lease.value || !month.value) {
       return;
     }
-    function update() {
-      var rent = kind.value === "rent";
-      row.querySelectorAll("td.rent-field").forEach(function (cell) {
-        cell.style.visibility = rent ? "" : "hidden";
-      });
-      row.querySelectorAll("td.line-item, td.save-item").forEach(function (cell) {
-        cell.style.visibility = rent ? "hidden" : "";
-      });
-    }
-    kind.addEventListener("change", update);
-    update();
+    var url = amountUrl + (amountUrl.indexOf("?") === -1 ? "?" : "&") +
+      "lease=" + encodeURIComponent(lease.value) + "&month=" + encodeURIComponent(month.value);
+    fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (data) {
+        if (!data) {
+          return;
+        }
+        if (data.amount !== null && data.amount !== undefined) {
+          unit.value = data.amount;
+        }
+        if (note) {
+          note.textContent = data.amount !== null ? (data.text || "") : (data.message || "");
+        }
+        refresh();
+      })
+      .catch(function () { /* the server fills an empty amount on save */ });
   }
 
   function watch(row) {
-    watchRemove(row);
-    watchSave(row);
-    watchKind(row);
-  }
+    var input = field(row, "item");
+    var hidden = field(row, "existing_charge");
+    var save = row.querySelector("input[type=checkbox][name$='-save_item']");
+    var remove = row.querySelector("input[type=checkbox][name$='-DELETE']");
+    var trash = row.querySelector("button.line-trash");
+    var plain = row.querySelector(".no-js-remove");
+    var unit = field(row, "unit_amount");
+    var note = row.querySelector(".rent-text");
+    var lastExisting = hidden ? hidden.value : "";
 
-  Array.prototype.forEach.call(body.querySelectorAll("tr.draft-line"), watch);
-  button.hidden = false;
-  button.addEventListener("click", function () {
-    var rows = body.querySelectorAll("tr.draft-line");
-    var count = parseInt(total.value, 10);
-    var limit = max ? parseInt(max.value, 10) : Infinity;
-    if (!rows.length || !(count < limit)) {
-      return;
-    }
-    var row = rows[rows.length - 1].cloneNode(true);
-    row.hidden = false;
-    row.querySelectorAll("input, textarea, select").forEach(function (field) {
-      ["name", "id"].forEach(function (attribute) {
-        var value = field.getAttribute(attribute);
-        if (value) {
-          field.setAttribute(attribute, value.replace(/lines-\d+-/, "lines-" + count + "-"));
-        }
+    function update(fromTyping) {
+      var chosen = input ? option(input) : null;
+      var kind = chosen ? chosen.dataset.kind || "item" : (input && key(input.value) !== "" ? "typed" : "");
+      row.querySelectorAll("td.rent-field").forEach(function (cell) {
+        cell.style.visibility = kind === "rent" ? "" : "hidden";
       });
-      if (field.type === "checkbox") {
-        field.checked = false;
-      } else if (field.tagName === "SELECT") {
-        // The kind starts as Item; the lease keeps the row's choice (the draft's lease).
-        if (/-kind$/.test(field.name)) {
-          field.value = "item";
+      if (save) {
+        var cell = save.closest("td") || save;
+        cell.style.visibility = kind === "typed" ? "" : "hidden";
+        if (kind !== "typed") {
+          save.checked = false;
         }
-      } else {
-        field.value = "";
+      }
+      if (hidden) {
+        var charge = kind === "existing" ? chosen.dataset.charge : "";
+        if (kind === "existing" || fromTyping) {
+          hidden.value = charge;
+        }
+        if (unit) {
+          if (kind === "existing") {
+            unit.max = chosen.dataset.balance;
+            if (fromTyping && charge !== lastExisting) {
+              unit.value = chosen.dataset.balance;
+            }
+          } else {
+            unit.removeAttribute("max");
+          }
+        }
+        lastExisting = hidden.value;
+      }
+      if (note && kind !== "rent") {
+        note.textContent = "";
+      }
+      if (fromTyping && kind === "rent") {
+        fetchRent(row);
+      }
+      refresh();
+    }
+
+    if (input) {
+      input.addEventListener("input", function () { update(true); });
+      input.addEventListener("change", function () { update(true); });
+    }
+    ["rent_lease", "rent_month"].forEach(function (suffix) {
+      var select = field(row, suffix);
+      if (select) {
+        select.addEventListener("change", function () { fetchRent(row); });
       }
     });
+    row.addEventListener("input", refresh);
+    if (remove && trash) {
+      if (plain) {
+        plain.hidden = true;
+      }
+      trash.hidden = false;
+      trash.addEventListener("click", function () {
+        remove.checked = true;
+        row.hidden = true;
+        refresh();
+      });
+    } else if (remove) {
+      remove.addEventListener("change", function () {
+        row.hidden = remove.checked;
+        refresh();
+      });
+    }
+    update(false);
+  }
+
+  rows().forEach(watch);
+  refresh();
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    var all = rows();
+    var count = parseInt(total.value, 10);
+    var limit = max ? parseInt(max.value, 10) : Infinity;
+    if (!all.length || !(count < limit)) {
+      return;
+    }
+    var row = all[all.length - 1].cloneNode(true);
+    row.hidden = false;
+    row.querySelectorAll("input, textarea, select").forEach(function (input) {
+      ["name", "id"].forEach(function (attribute) {
+        var value = input.getAttribute(attribute);
+        if (value) {
+          input.setAttribute(attribute, value.replace(/lines-\d+-/, "lines-" + count + "-"));
+        }
+      });
+      if (input.type === "checkbox") {
+        input.checked = false;
+      } else if (input.tagName === "SELECT") {
+        // The month starts empty; the lease keeps the row's choice (the draft's lease).
+        if (/-rent_month$/.test(input.name)) {
+          input.value = "";
+        }
+      } else {
+        input.value = "";
+        input.removeAttribute("max");
+      }
+    });
+    var note = row.querySelector(".rent-text");
+    if (note) {
+      note.textContent = "";
+    }
     body.appendChild(row);
     watch(row);
     total.value = String(count + 1);
+    refresh();
   });
 })();

@@ -354,6 +354,8 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0039_transfer_debt_override",
         "ledger.migrations.0040_lease_end_statement_opened",
         "ledger.migrations.0042_payment_allocation_and_credits",
+        "ledger.migrations.0043_fee_type_show_in_setup",
+        "ledger.migrations.0044_draft_existing_charge",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",

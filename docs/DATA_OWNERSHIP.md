@@ -348,6 +348,12 @@ scans are covered by the stated policy, not by a check.
 | `installment_plans.note` | App | The admin's cancel note; guarded text (PostgreSQL trigger) |
 | `one_off_charges.plan_id`, `installment_no` | System | Set exactly for category `installment` (CHECK); an installment's description, price and due date come from the confirmed preview; its payments are its own, counted under the parent in reports |
 
+### fee_types.show_in_setup, invoice_draft_lines.existing_charge_id (PLAN-012d)
+| Field | Owner | Note |
+|---|---|---|
+| `fee_types.show_in_setup` | App | Whether the catalogue item appears in the setup checklist (migration 0043 set it for the seeded items; builder-saved items start off) |
+| `invoice_draft_lines.existing_charge_id` | App | An "Existing open charge" line: the open one-off charge of the lease the invoice will bill instead of creating one (CHECK: never with a rent line or a fee type) |
+
 ### lease_credits, payments.allocation_group / credit_id, payment method `credit` (PLAN-012d, ADR-0013)
 | Field | Owner | Note |
 |---|---|---|

@@ -131,3 +131,62 @@ with a plain invoice makes two payments and flags the charge partial (today's ru
 scheduled payment maps its item as the builder does.
 
 **Verdict (B):** PASS (one rework cycle for five convention tests and the header's credit line; one MINOR deferred by written decision: the insurance invoice is not marked at the provider).
+
+### Batch C — the setup checklist without tick boxes, the builder's single combo box
+
+**Scope.** `backend/ledger` (`models.py`: `FeeType.show_in_setup`,
+`InvoiceDraftLine.existing_charge` with its CHECK; migrations 0043 (with the data step) and 0044;
+`admin.py` the flag; `services/one_off_charges.py` `offered_types`/`checklist_types`;
+`services/invoice_builder.py`: `open_charges`, `existing_charge_closed`, `_clean_existing_line`,
+`_check_existing_lines`, `rent_amount`, `_attach_existing`; `services/transfer.py`
+`deposit_type`; `forms.py`: the checklist without ticks and with `setup_total`, the builder line
+form without `kind`, the month choices, `kept_rows`/`line_numbers`; `views/invoices.py`:
+`_item_options`, `_line_rows`, `_renumber`, the `rent_amount` JSON view; `views/transfers.py`;
+`urls.py`, `accounts/registry.py`; templates `_draft_form.html`, `leases/form.html`,
+`transfers/incoming.html`, `lease_ends/statement.html`; static `invoice_lines.js` rewritten,
+new `table_total.js`, `app.css`), tests. No new dependency, environment variable or provider
+call.
+
+**Commands run (final Batch C code).**
+
+| Command | Database | Exit | Result |
+|---|---|---|---|
+| `uv run ruff check .`, `uv run ruff format --check .` | n/a | 0 | clean, 493 files formatted |
+| `uv run mypy` (strict) | n/a | 0 | no issues in 400 source files |
+| `uv lock --check` | n/a | 0 | consistent |
+| `manage.py makemigrations --check --dry-run` | sqlite, PostgreSQL 16 | 0 | No changes detected |
+| `uv run pytest -m "not e2e" -q -o faulthandler_timeout=300` | sqlite | 1 | 5,251 passed, 631 skipped, 1 failed: the new draft-line CHECK had no constraint case in `test_ledger_models` (Fable added it; the file re-run green on both engines); 13:14 wall |
+| the "Migration tests" selection | PostgreSQL 16 | 0 | 26 passed; 10:59 wall |
+| the "Unit tests" selection | PostgreSQL 16 | 1 | 5,853 passed, 3 skipped; the same one failure; 15:43 wall |
+| `uv run pytest -m e2e -q` | PostgreSQL 16 | 0 | 7 passed |
+| `bash scripts/check-no-secrets.sh`; pattern scan of the diff since `eec5d05` and every new file | n/a | 0 | clean |
+
+**Tests (Gate 2).** Opus: `test_builder_lines.py` (14: one line on a new draft, the list
+order, the month select, a rent line from the Item box, the endpoint's amounts and refusals and
+binding, the checklist deposit attached on send with its audit, repricing by a cent, charges on
+a live invoice or a plan not offered and refused, duplicates refused with the link, rent fields
+or quantity 2 or an operator-level draft refused, removed lines ignored and visible numbering,
+the trash and the total, the CSS rule, builder-saved items hidden, the admin flag),
+`test_setup_charges.py` (the checklist rewritten: placeholder and no value, no tick, total, the
+flag, only priced rows charged), `test_transfer.py` and `test_lease_end.py` (the same table
+rules), seeded round trips of 0043 and 0044 on both engines. Fable (`test_plan012d_c_adversarial.py`,
+5 cases, both engines): the rent-amount endpoint refuses another operator's lease (404), an
+unknown lease, a bad month, a viewer (403) and anonymous (401); an existing charge of another
+operator or of another lease of the same operator cannot be attached and nothing is saved; an
+existing-charge line's amount cannot exceed its balance (nor be zero or negative); a removed
+line with hostile values never blocks the save; a posted tick field charges nothing and the
+placeholder is never a filled value.
+
+**Findings (C).**
+
+| # | Severity | Where | Finding | Outcome |
+|---|---|---|---|---|
+| 10 | decision | `_attach_existing` | Billing an existing charge below its balance reprices the charge to the line amount (a $500 deposit billed at $450 becomes a $450 deposit), audited | **For the owner**: accepted for the gate as the only rule that keeps the invoice total equal to the billed total; the owner confirms or asks for a refusal below the balance |
+
+Design choices accepted: attaching sets the charge's collection to the invoice's (a checklist
+deposit moves from `none` to e-mail); legacy charges, companion fees and charges that ever had a
+plan are never offered; an operator-level draft offers no existing charges; without JavaScript a
+new draft has one row; months older than twelve back cannot be billed from the page; "Rent" is a
+sentinel the Item box reserves.
+
+**Verdict (C):** PASS (no rework cycle; one test-list omission filled by Fable; one decision for the owner: repricing an existing charge billed below its balance).

@@ -26,6 +26,16 @@ body > nav a[aria-current="page"] { text-decoration: underline; text-underline-o
 .store-tabs a[aria-current="page"], #charge-filters a[aria-current="page"], #invoice-filters a[aria-current="page"] { background: var(--ink); color: #fff; }
 .header-card { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
 .header-card dt { font-weight: 600; } .header-card dd { margin: 0; }
+/* The invoice builder's lines (PLAN-012d D10): the Item box takes its cell's full width so
+   the chosen value (a long "Existing open charge: ..." included) shows; the trash button;
+   the visible line numbers; the total line under a table of amounts. */
+#draft-lines td.line-item { min-width: 16rem; }
+td.line-item input { width: 100%; box-sizing: border-box; }
+td.line-item .rent-text { display: block; font-size: .85rem; }
+td.line-number { white-space: nowrap; color: var(--muted); }
+.line-trash { display: inline-flex; align-items: center; justify-content: center; padding: .35rem .5rem; }
+.line-trash[hidden], .no-js-remove[hidden] { display: none; }
+.table-total { font-weight: 600; text-align: right; margin: .5rem 0 1rem; }
 
 /* --- Page --------------------------------------------------------------------------- */
 main { max-width: 64rem; margin: 1.5rem auto; padding: 1.5rem 2rem; background: var(--paper); border: 1px solid #ddd; border-radius: 6px; }

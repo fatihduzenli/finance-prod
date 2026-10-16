@@ -1,8 +1,10 @@
-{% comment %}The draft's header and lines (PLAN-012 D6; the Item box, PLAN-012b D2: a text input
-on the one list of catalogue names; the kind Rent, PLAN-012b-b D4: a lease and a month instead of
-an item). Without script the form keeps a fixed number of blank rows, every field, a Save box and
-a Remove box per row; ledger/invoice_lines.js adds and removes rows, shows the Save box only on a
-typed item and the lease and month only on a Rent line.{% endcomment %}
+{% comment %}The draft's header and lines (PLAN-012 D6; PLAN-012b D2; PLAN-012d D10: one Item box per
+line on one list that starts with Rent, then the lease's existing open charges, then the catalogue
+items; a Rent line shows its lease and month selects, filled from the rent-amount endpoint by the
+script). Without script the form shows its rows, every field, a Save box and a Remove box per row;
+ledger/invoice_lines.js adds rows, removes a row with its trash button (DELETE set, the row hidden),
+numbers the visible rows, keeps the total live, shows the Save box only on a typed item and the
+lease and month only on a Rent line.{% endcomment %}
 {% load responsive %}
 {% if errors %}<ul class="errorlist" id="draft-errors">{% for error in errors %}<li>{{ error.text }}{% if error.url %}<a href="{{ error.url }}" class="draft-link">{{ error.number }}</a>{{ error.after }}{% endif %}</li>{% endfor %}</ul>{% endif %}
 {{ form.creation_key }}
@@ -16,28 +18,30 @@ typed item and the lease and month only on a Rent line.{% endcomment %}
 {{ form.due_date }}
 <br><span class="muted">{{ form.due_date.help_text }}</span>
 <h2>Lines</h2>
-<p class="muted">Item: pick a catalogue item from the list or type a new name; a new name can be saved to the catalogue for the next invoice. The description is an optional detail shown under the item. The line total is the quantity (empty: 1) times the unit amount, rounded to the cent.</p>
-<p class="muted" id="rent-line-help">Rent: choose the kind Rent, the lease and the month; leave the unit amount empty for the month's rent (prorated for a partial first month, or the amount the rent run already charged). The item is "Rent &lt;month&gt;, store &lt;store&gt;"; the quantity is 1. Sending makes the month's rent charge, or takes the one the rent run made, so the month is billed once.</p>
+<p class="muted">Item: choose Rent, an existing open charge of the lease or a catalogue item from the list, or type a new name; a new name can be saved to the catalogue for the next invoice. The description is an optional detail shown under the item. The line total is the quantity (empty: 1) times the unit amount, rounded to the cent.</p>
+<p class="muted" id="rent-line-help">Rent: choose Rent in the Item box, then the lease and the month; the unit amount is the month's rent (prorated for a partial first month, or the amount the rent run already charged) and stays editable; empty, it is that amount. The quantity is 1. Sending makes the month's rent charge, or takes the one the rent run made, so the month is billed once.</p>
+<p class="muted" id="existing-line-help">Existing open charge: the line bills that charge (for example the deposit of the setup checklist) instead of making a new one; the amount is its balance and can be lowered, never raised.</p>
 {{ formset.management_form }}
-<datalist id="{{ items_list_id }}">{% for name in item_names %}<option value="{{ name }}"></option>{% endfor %}</datalist>
+<datalist id="{{ items_list_id }}">{% for option in item_options %}<option value="{{ option.value }}"{% if option.kind != "item" %} data-kind="{{ option.kind }}"{% endif %}{% if option.charge %} data-charge="{{ option.charge }}" data-balance="{{ option.balance }}"{% endif %}></option>{% endfor %}</datalist>
 {% responsive_table %}
-<table id="draft-lines">
-  <thead><tr><th>Kind</th><th>Item</th><th>Rent: lease</th><th>Rent: month</th><th>Description</th><th>Quantity</th><th>Unit amount</th><th>Save as catalogue item</th><th>Remove</th></tr></thead>
+<table id="draft-lines" data-rent-amount-url="{{ rent_amount_url }}">
+  <thead><tr><th>Line</th><th>Item</th><th>Rent: lease</th><th>Rent: month</th><th>Description</th><th>Quantity</th><th>Unit amount</th><th>Save as catalogue item</th><th>Remove</th></tr></thead>
   <tbody>
-    {% for line_form in formset %}
-      <tr class="draft-line">
-        <td>{{ line_form.kind }}</td>
-        <td class="line-item">{{ line_form.item }}</td>
-        <td class="rent-field">{{ line_form.rent_lease }}</td>
-        <td class="rent-field">{{ line_form.rent_month }}</td>
-        <td>{{ line_form.description }}</td>
-        <td>{{ line_form.quantity }}</td>
-        <td>{{ line_form.unit_amount }}</td>
-        <td class="save-item">{{ line_form.save_item }}</td>
-        <td>{{ line_form.DELETE }}</td>
+    {% for row in line_rows %}
+      <tr class="draft-line"{% if row.removed %} hidden{% endif %}>
+        <td class="line-number">{{ row.number|default_if_none:"" }}</td>
+        <td class="line-item">{{ row.form.item }}{{ row.form.existing_charge }}<span class="muted rent-text"></span></td>
+        <td class="rent-field">{{ row.form.rent_lease }}</td>
+        <td class="rent-field">{{ row.form.rent_month }}</td>
+        <td>{{ row.form.description }}</td>
+        <td>{{ row.form.quantity }}</td>
+        <td>{{ row.form.unit_amount }}</td>
+        <td class="save-item">{{ row.form.save_item }}</td>
+        <td class="line-remove"><span class="no-js-remove">{{ row.form.DELETE }}</span><button class="btn line-trash js-only" type="button" aria-label="Remove line" title="Remove line" hidden><svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M6 1h4l1 1h3v2H2V2h3l1-1zM3 5h10l-1 10H4L3 5zm3 2v6h1V7H6zm3 0v6h1V7H9z"/></svg></button></td>
       </tr>
     {% endfor %}
   </tbody>
 </table>
 {% endresponsive_table %}
+<p class="table-total" id="lines-total">Invoice total: <span id="lines-total-value">${{ lines_total|floatformat:"2g" }}</span></p>
 <p class="actions"><button class="btn js-only" type="button" id="add-line" hidden>Add line</button></p>

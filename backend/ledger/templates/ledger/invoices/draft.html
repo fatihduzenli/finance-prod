@@ -22,7 +22,7 @@
       <p class="actions"><button class="btn" type="submit" id="save-draft">Save draft</button></p>
     </form>
     <h2>Send</h2>
-    <p class="muted">Send and Charge now use the saved draft: save your changes first. Each line becomes a charge on {% if draft.lease %}the lease of store {{ draft.lease.store.external_label }}{% else %}the operator{% endif %}; one invoice with every line goes to the payment provider.</p>
+    <p class="muted">Send and Charge now use the saved draft: save your changes first. Each line becomes a charge on {% if draft.lease %}the lease of store {{ draft.lease.store.external_label }}{% else %}the operator{% endif %} (an existing open charge's line bills that charge); one invoice with every line goes to the payment provider.</p>
     <form method="post" action="{% url 'ledger:invoices:send' pk=draft.pk %}{{ context_query }}" id="send-form" class="js-single-submit">
       {% csrf_token %}
       <p class="actions"><button class="btn btn-primary" type="submit" id="send-draft">Send ${{ preview.total }} by e-mail</button>{% if can_charge_now %} <a class="btn" href="{% url 'ledger:invoices:charge_now' pk=draft.pk %}" id="draft-charge-now">Charge now</a>{% endif %}</p>

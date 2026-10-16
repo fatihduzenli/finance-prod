@@ -61,6 +61,8 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0040_lease_end_statement_opened",
             "ledger.migrations.0041_rent_lines",
             "ledger.migrations.0042_payment_allocation_and_credits",
+            "ledger.migrations.0043_fee_type_show_in_setup",
+            "ledger.migrations.0044_draft_existing_charge",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -1561,6 +1563,152 @@ def test_the_credits_migration_over_existing_rows_on_postgresql(
     result = _manage(repo_root, url, "migrate", "--noinput")
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert _rows(url, CREDIT_ROWS) == after
+
+
+# --- PLAN-012d D9, D10: the checklist flag and existing-charge lines ---------------------
+#
+# Seeds fee types (active, inactive, an active NSF fee) at ``ledger.0042``, then a draft
+# line and an open one-off charge, migrates forward, back and forward again on both
+# engines and reads the rows with plain SQL: 0043 shows exactly the active fee types that
+# are not NSF fees in the checklist; 0044's column starts null, and the reverse drops both
+# columns plainly with every row kept.
+
+STATE_BEFORE_SETUP_FLAG = (("ledger", "0042_payment_allocation_and_credits"),)
+SETUP_FLAG_ROWS = (
+    "SELECT code FROM fee_types WHERE show_in_setup ORDER BY code",
+    "SELECT code FROM fee_types WHERE NOT show_in_setup ORDER BY code",
+)
+EXISTING_ROWS = "SELECT count(*) FROM invoice_draft_lines WHERE existing_charge_id IS NULL"
+
+
+def seed_before_setup_flag() -> None:
+    """Seed two fee types (one inactive), make an NSF fee active, and seed a draft with
+    one line and an open one-off charge with the models of ``STATE_BEFORE_SETUP_FLAG``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_SETUP_FLAG)).apps
+    fee_type = apps.get_model("ledger", "FeeType")
+    fee_type.objects.create(code="window-film", name="Window film", active=True)
+    fee_type.objects.create(code="old-fee", name="Old fee", active=False)
+    fee_type.objects.filter(code="nsf_fee_first").update(active=True)
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Eastwind")
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 1405", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store,
+        operator=operator,
+        debit_day=1,
+        collection_status="active",
+        payment_channel="wire",
+    )
+    apps.get_model("ledger", "OneOffCharge").objects.create(
+        operator=operator,
+        lease=lease,
+        category="damage",
+        collection="manual",
+        description="Broken shelf",
+        price=Decimal("150.00"),
+        due_date=date(2026, 10, 1),
+        status="owed",
+    )
+    draft = apps.get_model("ledger", "InvoiceDraft").objects.create(operator=operator, lease=lease)
+    apps.get_model("ledger", "InvoiceDraftLine").objects.create(
+        draft=draft,
+        position=1,
+        item="Broken shelf",
+        quantity=Decimal("1"),
+        unit_amount=Decimal("150.00"),
+        line_total=Decimal("150.00"),
+    )
+
+
+def _setup_flag_round_trip(repo_root: Path, url: str) -> None:
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_SETUP_FLAG)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_setup_flag as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    for _ in range(2):
+        result = _manage(repo_root, url, "migrate", "--noinput")
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        shown = {row[0] for row in _rows(url, SETUP_FLAG_ROWS[0])}
+        hidden = {row[0] for row in _rows(url, SETUP_FLAG_ROWS[1])}
+        assert "window-film" in shown and "security_deposit" in shown
+        assert {"old-fee", "nsf_fee_first", "nsf_fee_later"} <= hidden
+        assert not shown & hidden
+        assert _rows(url, EXISTING_ROWS) == [("1",)]
+        _migrate_to(repo_root, url, *STATE_BEFORE_SETUP_FLAG)
+        assert _rows(url, "SELECT count(*) FROM invoice_draft_lines") == [("1",)]
+        assert _rows(url, "SELECT count(*) FROM fee_types WHERE code = 'window-film'") == [("1",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+
+
+def test_the_setup_flag_and_existing_charge_migrations_over_existing_rows_on_sqlite(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    url = f"sqlite:///{tmp_path / 'setup-flag.sqlite3'}"
+    _setup_flag_round_trip(repo_root, url)
+    import sqlite3
+
+    with closing(sqlite3.connect(url.removeprefix("sqlite:///"))) as scratch:
+        columns = {row[1] for row in scratch.execute("PRAGMA table_info(invoice_draft_lines)")}
+    assert "existing_charge_id" in columns
+
+
+@requires_postgresql
+def test_the_setup_flag_and_existing_charge_migrations_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    _setup_flag_round_trip(repo_root, url)
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        # An existing-charge line is never a catalogue item's or a Rent line.
+        scratch.execute(
+            "UPDATE invoice_draft_lines SET existing_charge_id = "
+            "(SELECT id FROM one_off_charges WHERE description = 'Broken shelf'), "
+            "fee_type_id = (SELECT id FROM fee_types WHERE code = 'window-film')"
+        )
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute(
+            "UPDATE invoice_draft_lines SET existing_charge_id = "
+            "(SELECT id FROM one_off_charges WHERE description = 'Broken shelf'), "
+            "rent_lease_id = (SELECT id FROM leases), rent_month = '2026-10-01'"
+        )
+    with psycopg.connect(url) as scratch:
+        scratch.execute(
+            "UPDATE invoice_draft_lines SET existing_charge_id = "
+            "(SELECT id FROM one_off_charges WHERE description = 'Broken shelf')"
+        )
+    assert _rows(url, EXISTING_ROWS) == [("0",)]
+    # The reverse drops the columns with the rows kept, and forward again.
+    _migrate_to(repo_root, url, *STATE_BEFORE_SETUP_FLAG)
+    assert _rows(
+        url,
+        "SELECT count(*) FROM information_schema.columns WHERE "
+        "(table_name = 'invoice_draft_lines' AND column_name = 'existing_charge_id') "
+        "OR (table_name = 'fee_types' AND column_name = 'show_in_setup')",
+    ) == [("0",)]
+    assert _rows(url, "SELECT count(*) FROM invoice_draft_lines") == [("1",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, EXISTING_ROWS) == [("1",)]
 
 
 # --- Row 2 --------------------------------------------------------------------------

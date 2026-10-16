@@ -5,7 +5,7 @@ D6, D7, D9).
 on a hand-over day; refused when none) and on the operator page (one of the operator's
 leases, or the operator alone) saves a **draft** and opens its page. The draft page
 (billing) edits the lines (rows are added and removed by a small script; without it the
-page shows a fixed number of blank rows and a Remove box per row), the memo and the due
+page shows one blank row and a Remove box per row), the memo and the due
 date, and offers Preview, Print view, Send (billing), Charge now (admin, with the
 confirmation of PLAN-010d D4), Cancel and Delete (a never-sent draft, billing, no note
 and no confirmation page; PLAN-012d D3). After sending it shows the invoice number, the
@@ -20,6 +20,13 @@ redirect; a form with errors is held in the session for the next GET, without an
 that holds a card number. A refusal naming another open draft links its number to that
 draft's page.
 
+Each line has one Item box (PLAN-012d D10) on one list: Rent, the draft's lease's
+existing open charges, then the catalogue items. A new draft opens with one line; the
+script adds lines, removes one with its trash button, numbers the visible lines and keeps
+the total live, and fills a Rent line's amount from ``invoices:rent_amount`` (billing,
+read-only JSON). Errors name the visible line: a removed row is neither checked nor
+counted, and a service refusal is renumbered from its place among the filled lines.
+
 Opened from the store page (``?store=&lease=``, PLAN-012d D2, D8;
 :mod:`ledger.views.store_context`), the forms hide the lease, show the read-only line,
 keep the context through Save draft, and Send and Delete return to the store page's
@@ -31,11 +38,13 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Iterable
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from django import forms
 from django.contrib import messages
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -45,21 +54,26 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import (
     ITEMS_LIST_ID,
-    LINE_KIND_RENT,
+    RENT_ITEM,
     CancelChargeForm,
     ChargeNowForm,
     InvoiceDraftForm,
     InvoiceLineFormSet,
     draft_lines,
+    kept_rows,
+    line_numbers,
+    rent_months,
 )
 from ledger.models import (
     InvoiceDraft,
     InvoiceDraftStatus,
     Lease,
+    OneOffCharge,
     Operator,
     Store,
 )
 from ledger.services import contacts, invoice_builder, one_off_charges, workspace
+from ledger.services.rent_run import CENT
 from ledger.validators import contains_card_number
 from ledger.views import store_context
 from ledger.views.jobs import job_context
@@ -73,6 +87,11 @@ NO_LEASE_TODAY = "This store has no lease in effect today: choose the operator's
 NOT_EDITABLE = "This invoice is no longer a draft."
 #: A draft's number in a refusal (:data:`ledger.services.invoice_builder.LINE_RENT_ON_DRAFT`).
 DRAFT_NUMBER = re.compile(r"DRAFT-[0-9A-F]{8}")
+#: The line a service refusal names, renumbered by the visible line (PLAN-012d D10).
+LINE_NUMBER = re.compile(r"^Line (\d+): ")
+#: The month of the rent-amount endpoint (PLAN-012d D10).
+MONTH = re.compile(r"^(\d{4})-(\d{2})$")
+BAD_MONTH = "The month must be YYYY-MM."
 
 
 # --- Loading --------------------------------------------------------------------------
@@ -111,10 +130,65 @@ def _operator_leases(operator: Operator) -> list[Lease]:
 # --- Forms ----------------------------------------------------------------------------
 
 
-def _item_names() -> list[str]:
-    """The names the Item box offers (PLAN-012b D2): the offered catalogue items, in
-    catalogue order."""
-    return [fee_type.name for fee_type in invoice_builder.offered_fee_types()]
+def _item_options(existing: Iterable[OneOffCharge]) -> list[dict[str, str]]:
+    """What the Item box's list offers (PLAN-012b D2; PLAN-012d D10): Rent, then the
+    existing open charges of the draft's lease (with the charge and its balance for the
+    script), then the offered catalogue items, in catalogue order."""
+    return [
+        {"value": RENT_ITEM, "kind": "rent"},
+        *(
+            {
+                "value": invoice_builder.existing_label(charge),
+                "kind": "existing",
+                "charge": str(charge.pk),
+                "balance": f"{Decimal(charge.balance):.2f}",
+            }
+            for charge in existing
+        ),
+        *(
+            {"value": fee_type.name, "kind": "item"}
+            for fee_type in invoice_builder.offered_fee_types()
+        ),
+    ]
+
+
+def _lines_total(formset: Any) -> Decimal:
+    """The total of the rows the form shows (the line total of each kept row: quantity,
+    empty 1, times the unit amount, rounded to the cent); a value that is not a number
+    counts as nothing. Rendered under the table and kept live by the script."""
+    total = Decimal("0.00")
+    for _, form in kept_rows(formset):
+        try:
+            unit = Decimal(str(form["unit_amount"].value() or "0"))
+            quantity = Decimal(str(form["quantity"].value() or "1"))
+            if not (unit.is_finite() and quantity.is_finite()) or unit <= 0 or quantity <= 0:
+                continue
+            total += (quantity * unit).quantize(CENT, rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            continue
+    return total
+
+
+def _line_rows(formset: Any) -> list[dict[str, Any]]:
+    """The rows as the table shows them: each form, whether it was removed (its row is
+    hidden) and its visible line number (PLAN-012d D10)."""
+    numbers = {id(form): number for number, form in kept_rows(formset)}
+    return [
+        {"form": form, "removed": id(form) not in numbers, "number": numbers.get(id(form))}
+        for form in formset.forms
+    ]
+
+
+def _renumber(message: str, numbers: list[int]) -> str:
+    """A service refusal names the line by its place among the filled lines; the form
+    names it by the visible line (PLAN-012d D10)."""
+    match = LINE_NUMBER.match(message)
+    if match is None:
+        return message
+    index = int(match.group(1))
+    if not 1 <= index <= len(numbers):
+        return message
+    return f"Line {numbers[index - 1]}: " + message[match.end() :]
 
 
 def _rent_leases(operators: Iterable[Operator], draft: InvoiceDraft | None = None) -> list[Lease]:
@@ -140,12 +214,18 @@ def _formset(
     *,
     rent_leases: Iterable[Lease] = (),
     default_lease: Lease | None = None,
+    existing: Iterable[OneOffCharge] = (),
 ) -> Any:
     return InvoiceLineFormSet(
         data,
         initial=initial,
         prefix=LINES_PREFIX,
-        form_kwargs={"rent_leases": list(rent_leases), "default_lease": default_lease},
+        form_kwargs={
+            "rent_leases": list(rent_leases),
+            "default_lease": default_lease,
+            "months": rent_months(timezone.localdate()),
+            "existing": list(existing),
+        },
     )
 
 
@@ -170,7 +250,8 @@ def _held(request: HttpRequest, target: str) -> tuple[dict[str, Any] | None, lis
 def _form_errors(form: Any, formset: Any) -> list[str]:
     """Every error of the header form and the line rows, as sentences."""
     found = [str(error) for errors in form.errors.values() for error in errors]
-    for index, row in enumerate(formset.forms, start=1):
+    # Numbered by the visible line: a removed row is neither checked nor counted.
+    for index, row in kept_rows(formset):
         for errors in row.errors.values():
             found.extend(f"Line {index}: {error}" for error in errors)
     found.extend(str(error) for error in formset.non_form_errors())
@@ -237,14 +318,22 @@ def _draft_initial(draft: InvoiceDraft) -> tuple[dict[str, Any], list[dict[str, 
     }
     lines = [
         {
-            "kind": LINE_KIND_RENT,
+            "item": RENT_ITEM,
             "rent_lease": str(line.rent_lease_id),
-            "rent_month": line.rent_month,
+            "rent_month": f"{line.rent_month:%Y-%m}" if line.rent_month else "",
             "description": line.description,
             "quantity": line.quantity,
             "unit_amount": line.unit_amount,
         }
         if line.rent_lease_id is not None
+        else {
+            "item": invoice_builder.existing_label(line.existing_charge),
+            "existing_charge": str(line.existing_charge_id),
+            "description": line.description,
+            "quantity": line.quantity,
+            "unit_amount": line.unit_amount,
+        }
+        if line.existing_charge is not None
         else {
             "item": line.item,
             "description": line.description,
@@ -279,9 +368,12 @@ def _new(
         )
     )
     rent_leases = _rent_leases(operators)
+    existing = invoice_builder.open_charges(preselected)
     if request.method == "POST":
         form = InvoiceDraftForm(request.POST, leases=leases, allow_none=allow_none)
-        formset = _formset(request.POST, rent_leases=rent_leases, default_lease=preselected)
+        formset = _formset(
+            request.POST, rent_leases=rent_leases, default_lease=preselected, existing=existing
+        )
         if form.is_valid() and formset.is_valid():
             lease = form.chosen_lease()
             billed = operator or (lease.operator if lease is not None else None)
@@ -300,14 +392,16 @@ def _new(
             if outcome.ok and outcome.draft is not None:
                 messages.success(request, outcome.message)
                 return redirect(_draft_url(outcome.draft, context))
-            _hold(request, target, [outcome.message])
+            _hold(request, target, [_renumber(outcome.message, line_numbers(formset))])
         else:
             _hold(request, target, _form_errors(form, formset))
         return redirect(request.get_full_path())
     data, errors = _held(request, target)
     if data is not None:
         form = InvoiceDraftForm(data, leases=leases, allow_none=allow_none)
-        formset = _formset(data, rent_leases=rent_leases, default_lease=preselected)
+        formset = _formset(
+            data, rent_leases=rent_leases, default_lease=preselected, existing=existing
+        )
         form.is_valid()
         formset.is_valid()
     else:
@@ -319,7 +413,7 @@ def _new(
             leases=leases,
             allow_none=allow_none,
         )
-        formset = _formset(rent_leases=rent_leases, default_lease=preselected)
+        formset = _formset(rent_leases=rent_leases, default_lease=preselected, existing=existing)
     if context is not None and context.lease is not None:
         _hide_lease(form)
     return render(
@@ -328,8 +422,11 @@ def _new(
         {
             "form": form,
             "formset": formset,
-            "item_names": _item_names(),
+            "item_options": _item_options(existing),
             "items_list_id": ITEMS_LIST_ID,
+            "lines_total": _lines_total(formset),
+            "line_rows": _line_rows(formset),
+            "rent_amount_url": _rent_amount_url(operators),
             "errors": _error_items(errors, operators),
             "store_context": context,
             "back": back,
@@ -448,18 +545,23 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
     target = f"invoice-edit:{draft.pk}"
     leases = _operator_leases(draft.operator)
     rent_leases = _rent_leases([draft.operator], draft)
+    existing = invoice_builder.open_charges(draft.lease) if editable else []
     data, errors = _held(request, target)
     if not editable:
         form, formset = None, None
     elif data is not None:
         form = InvoiceDraftForm(data, leases=leases, allow_none=True)
-        formset = _formset(data, rent_leases=rent_leases, default_lease=draft.lease)
+        formset = _formset(
+            data, rent_leases=rent_leases, default_lease=draft.lease, existing=existing
+        )
         form.is_valid()
         formset.is_valid()
     else:
         header, lines = _draft_initial(draft)
         form = InvoiceDraftForm(initial=header, leases=leases, allow_none=True)
-        formset = _formset(initial=lines, rent_leases=rent_leases, default_lease=draft.lease)
+        formset = _formset(
+            initial=lines, rent_leases=rent_leases, default_lease=draft.lease, existing=existing
+        )
     if form is not None and context is not None:
         _hide_lease(form)
     sent = _sent_context(draft) if draft.status == InvoiceDraftStatus.SENT else {}
@@ -472,8 +574,11 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
             "preview": invoice_builder.preview(draft),
             "form": form,
             "formset": formset,
-            "item_names": _item_names() if editable else [],
+            "item_options": _item_options(existing) if editable else [],
             "items_list_id": ITEMS_LIST_ID,
+            "lines_total": _lines_total(formset) if formset is not None else None,
+            "line_rows": _line_rows(formset) if formset is not None else [],
+            "rent_amount_url": _rent_amount_url([draft.operator], draft),
             "errors": _error_items(errors, [draft.operator]),
             "editable": editable,
             "store_context": context,
@@ -502,6 +607,7 @@ def draft_edit(request: HttpRequest, pk: str) -> HttpResponse:
         request.POST,
         rent_leases=_rent_leases([draft.operator], draft),
         default_lease=draft.lease,
+        existing=invoice_builder.open_charges(draft.lease),
     )
     if form.is_valid() and formset.is_valid():
         outcome = invoice_builder.update_draft(
@@ -515,7 +621,7 @@ def draft_edit(request: HttpRequest, pk: str) -> HttpResponse:
         if outcome.ok:
             messages.success(request, outcome.message)
             return redirect(_draft_url(draft, context))
-        _hold(request, target, [outcome.message])
+        _hold(request, target, [_renumber(outcome.message, line_numbers(formset))])
     else:
         _hold(request, target, _form_errors(form, formset))
     return redirect(_draft_url(draft, context))
@@ -631,6 +737,69 @@ def draft_cancel(request: HttpRequest, pk: str) -> HttpResponse:
             "form": CancelChargeForm(),
             "refusal": one_off_charges.cancel_refusal(first) if first is not None else "",
         },
+    )
+
+
+# --- The rent amount of a line (PLAN-012d D10) ------------------------------------------
+
+
+def _rent_amount_url(operators: Iterable[Operator], draft: InvoiceDraft | None = None) -> str:
+    """The endpoint the Rent line's script reads, bound to the draft (or, for a new
+    draft of one operator, to that operator)."""
+    url = reverse("ledger:invoices:rent_amount")
+    if draft is not None:
+        return f"{url}?draft={draft.pk}"
+    billed = list(operators)
+    return f"{url}?operator={billed[0].pk}" if len(billed) == 1 else url
+
+
+def _month(text: str) -> date | None:
+    match = MONTH.match(text)
+    if match is None:
+        return None
+    year, month = int(match.group(1)), int(match.group(2))
+    if not (1 <= month <= 12 and 2000 <= year <= 2100):
+        return None
+    return date(year, month, 1)
+
+
+@role_required
+@require_safe
+def rent_amount(request: HttpRequest) -> HttpResponse:
+    """``ledger:invoices:rent_amount`` (billing; read-only JSON): the default amount of a
+    Rent line of ``?lease=`` and ``?month=YYYY-MM`` (the rent run's charge's, else the
+    month's rent, prorated for a partial first month) with its proration text, or why the
+    month cannot be billed (``amount`` null). ``?operator=`` or ``?draft=`` bind the lease:
+    404 for a lease of another operator, as for an unknown lease; 400 for a bad month.
+    Local data only; no identifier is returned."""
+    refused = _refuse_below(request, Role.BILLING)
+    if refused is not None:
+        return refused
+    lease = (
+        Lease.objects.select_related("store", "operator")
+        .filter(pk=_key(request.GET.get("lease", "")))
+        .first()
+    )
+    if lease is None or lease.operator_id is None:
+        raise Http404
+    wanted = request.GET.get("operator", "")
+    if wanted and _key(wanted) != lease.operator_id:
+        raise Http404
+    draft_key = request.GET.get("draft", "")
+    if draft_key:
+        draft = InvoiceDraft.objects.filter(pk=_key(draft_key)).only("operator_id").first()
+        if draft is None or draft.operator_id != lease.operator_id:
+            raise Http404
+    month = _month(request.GET.get("month", ""))
+    if month is None:
+        return JsonResponse({"amount": None, "text": "", "message": BAD_MONTH}, status=400)
+    amount, text, message = invoice_builder.rent_amount(lease, month)
+    return JsonResponse(
+        {
+            "amount": f"{amount:.2f}" if amount is not None else None,
+            "text": text,
+            "message": message,
+        }
     )
 
 

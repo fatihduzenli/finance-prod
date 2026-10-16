@@ -1,9 +1,10 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
+{% load static %}
 {% block title %}Transfer store {{ store.external_label }}: incoming lease{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
-  <p class="muted" id="step-help">Set the lease of {{ transfer.incoming_operator.display_name }}: it starts the day after the outgoing lease ends ({{ end.ended_on|date:"Y-m-d" }}) or later, so that the store never has two leases on one day. The deposit and the ticked setup items go on one invoice draft for you to review and send; nothing reaches the payment provider until it is sent.</p>
+  <p class="muted" id="step-help">Set the lease of {{ transfer.incoming_operator.display_name }}: it starts the day after the outgoing lease ends ({{ end.ended_on|date:"Y-m-d" }}) or later, so that the store never has two leases on one day. The deposit and the setup items with a price go on one invoice draft for you to review and send; nothing reaches the payment provider until it is sent.</p>
   <form method="post" id="transfer-incoming" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
@@ -14,21 +15,22 @@
       {% if field.help_text %}<br><span class="muted">{{ field.help_text }}</span>{% endif %}
     {% endfor %}
     <h2>Setup charges</h2>
-    <p class="muted">Tick each catalogue item the incoming operator pays at move-in; the price defaults from the catalogue.</p>
+    <p class="muted">Type the price of each catalogue item the incoming operator pays at move-in; a row without a price is not charged (the grey amount is the catalogue's usual price, shown as a hint only).</p>
     {% responsive_table %}
-    <table id="setup-rows">
-      <thead><tr><th>Item</th><th>Charge</th><th>Price</th></tr></thead>
+    <table id="setup-rows" class="js-table-total">
+      <thead><tr><th>Item</th><th>Price</th></tr></thead>
       <tbody>
         {% for row in form.setup_rows %}
-          <tr><td>{{ row.fee_type.name }}</td><td>{{ row.tick.errors }}{{ row.tick }}</td><td>{{ row.price.errors }}{{ row.price }}</td></tr>
+          <tr id="setup-{{ row.fee_type.code }}"><td><label for="{{ row.price.id_for_label }}">{{ row.fee_type.name }}</label></td><td>{{ row.price.errors }}{{ row.price }}</td></tr>
         {% empty %}
-          <tr><td colspan="3" class="muted">The catalogue has no setup item.</td></tr>
+          <tr><td colspan="2" class="muted">The setup checklist has no item.</td></tr>
         {% endfor %}
       </tbody>
     </table>
     {% endresponsive_table %}
+    <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-rows">${{ form.setup_total|floatformat:"2g" }}</span></p>
     <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
   </form>
   {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}

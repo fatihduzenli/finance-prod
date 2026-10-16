@@ -719,7 +719,7 @@ def test_the_form_offers_the_catalogue_as_one_list_and_has_no_free_text(fake: Fa
         assert '<option value="Sign fee"></option>' in page
         assert f'<option value="{nsf_name}">' not in page
         assert page.count('list="draft-items"') == page.count('class="draft-line"') > 0
-        assert "Catalogue item or a new name" in page
+        assert "Rent, an open charge, a catalogue item or a new name" in page
         assert "<th>Item</th>" in page and "<th>Save as catalogue item</th>" in page
         assert 'name="lines-0-save_item"' in page and "lines-0-fee_type" not in page
     form_source = (Path(__file__).parents[1] / "ledger" / "forms.py").read_text(encoding="utf-8")
@@ -1077,7 +1077,7 @@ def test_new_invoice_on_the_store_page_preselects_the_lease_and_saves_a_draft(
     path = f"/invoices/new/store/{lease.store_id}/"
     blank = client.get(path).content.decode()
     assert f'<option value="{lease.pk}" selected>' in blank
-    assert blank.count('class="draft-line"') == 5  # blank rows without script
+    assert blank.count('class="draft-line"') == 1  # PLAN-012d D10: a new draft has one line
     response = client.post(
         path,
         page_data(
@@ -2161,15 +2161,20 @@ def test_charge_now_and_cancel_of_rent_alone_are_refused(fake: FakeProvider) -> 
     assert (outcome.ok, outcome.message) == (False, invoice_builder.RENT_ALONE_CANCEL)
 
 
-def test_the_draft_page_offers_the_rent_kind_and_saves_a_rent_line(fake: FakeProvider) -> None:
+def test_the_draft_page_offers_rent_in_the_item_box_and_saves_a_rent_line(
+    fake: FakeProvider,
+) -> None:
     operator = an_operator(fake)
     lease = a_rent_lease(operator)
     draft = a_draft(operator, lease, [line()])
     client, _ = client_for(Role.BILLING)
     page = client.get(f"/invoices/drafts/{draft.pk}/").content.decode()
-    for field in ("kind", "rent_lease", "rent_month"):
+    for field in ("rent_lease", "rent_month"):
         assert f'id="id_lines-0-{field}"' in page
-    assert 'type="month"' in page and 'id="rent-line-help"' in page
+    # PLAN-012d D10: no kind select and no month input; Rent is the list's first entry.
+    assert 'id="id_lines-0-kind"' not in page and 'type="month"' not in page
+    assert 'id="rent-line-help"' in page
+    assert '<datalist id="draft-items"><option value="Rent" data-kind="rent">' in page
     data = {
         "lease": str(lease.pk),
         "memo": MEMO,
@@ -2178,11 +2183,10 @@ def test_the_draft_page_offers_the_rent_kind_and_saves_a_rent_line(fake: FakePro
         "lines-INITIAL_FORMS": "0",
         "lines-MIN_NUM_FORMS": "0",
         "lines-MAX_NUM_FORMS": "50",
-        "lines-0-kind": "item",
         "lines-0-item": "Sign repair",
         "lines-0-unit_amount": "100.00",
         "lines-0-rent_lease": str(lease.pk),
-        "lines-1-kind": "rent",
+        "lines-1-item": "Rent",
         "lines-1-rent_lease": str(lease.pk),
         "lines-1-rent_month": "2026-10",
     }

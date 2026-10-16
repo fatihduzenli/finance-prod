@@ -372,6 +372,41 @@ def test_the_incoming_terms_are_checked() -> None:
     assert fresh(row).incoming_started_on is None
 
 
+def test_the_incoming_checklist_charges_a_row_with_a_price_only() -> None:
+    from ledger.forms import TransferIncomingForm
+
+    sign = fee("sign_fee", default_price=D("450.00"))
+    access = fee("access_fee", default_price=D("300.00"))
+    hidden = fee("phone_fee", show_in_setup=False)
+    types = transfer.setup_types()
+    assert sign in types and access in types and hidden not in types
+    page = str(TransferIncomingForm(fee_types=types)["setup_sign_fee_price"])
+    assert 'placeholder="450.00"' in page and "value=" not in page
+    form = TransferIncomingForm(
+        {
+            "started_on": STARTS.isoformat(),
+            "rent": "2500.00",
+            "debit_day": "1",
+            "payment_channel": "wire",
+            "prorate_first_month": "on",
+            "deposit_amount": "",
+            "setup_sign_fee_price": "500.00",
+            "setup_access_fee_tick": "on",  # a tick alone charges nothing
+            "setup_access_fee_price": "",
+            "setup_phone_fee_price": "40.00",  # not a row of the checklist
+        },
+        fee_types=types,
+    )
+    assert form.is_valid(), form.errors
+    assert form.setup_items() == [(sign, D("500.00"))]
+    assert form.setup_total() == D("500.00")
+    assert not any(name.endswith("_tick") for name in form.fields)
+    # The service refuses an item the checklist hides.
+    row = begin(a_clean_lease())
+    refused = incoming(row, setup=[transfer.SetupInput(hidden, D("40.00"))])
+    assert refused.message == transfer.SETUP_NOT_OFFERED.format(name=hidden.name)
+
+
 def test_the_deposit_defaults_from_the_catalogue_else_from_the_outgoing_deposit() -> None:
     row = begin(a_clean_lease())
     assert transfer.default_deposit(row) == D("2000.00")
@@ -639,6 +674,9 @@ def test_an_admin_walks_the_transfer_from_the_store_page(admin: Any, pinned: Non
     assert client.get(f"/lease-ends/{end.pk}/confirm/")["Location"] == f"{base}/confirm/"
     incoming_page = client.get(f"{base}/incoming/").content.decode()
     assert STARTS.isoformat() in incoming_page and "Sign fee" in incoming_page
+    # PLAN-012d D9: no tick box; the catalogue price is a hint; the total line.
+    assert "setup_sign_fee_tick" not in incoming_page
+    assert 'name="setup_sign_fee_price"' in incoming_page and 'id="setup-total"' in incoming_page
     response = client.post(
         f"{base}/incoming/",
         {
