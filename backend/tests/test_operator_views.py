@@ -617,7 +617,9 @@ def test_the_detail_page_shows_balance_leases_and_masked_ids(
     page = billing.get(detail(operator)).content.decode()
     assert "$2450.00" in page
     assert "Store 900 Testville" in page
-    assert "No invoices yet." in page
+    # PLAN-012d D14: the invoices are on the Invoices tab.
+    invoices = billing.get(detail(operator) + "?tab=invoices").content.decode()
+    assert "No unpaid invoice." in invoices and "No draft." in invoices
     assert customer not in page
     assert f"{customer[:4]}…{customer[-4:]}" in page
 

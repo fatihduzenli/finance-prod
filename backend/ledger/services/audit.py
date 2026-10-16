@@ -52,6 +52,7 @@ from ledger.models import (
     LeaseEnd,
     LeaseTransfer,
     OneOffCharge,
+    Operator,
     Payment,
     RentCharge,
     Store,
@@ -76,6 +77,7 @@ FILTER_MAX_LENGTH = 200
 ACTIVITY_SIZE = 10
 DOCUMENT_ACTIONS = "document."
 ENTITY_DOCUMENT = "document"
+ENTITY_OPERATOR = "operator"
 OWNER_STORE = "store"
 OWNER_LEASE = "lease"
 PREFIX_MARK = "*"
@@ -353,12 +355,16 @@ def store_filter(store_id: uuid.UUID) -> Q:
     return condition
 
 
-def rows_for_store(store: Store) -> list[AuditRow]:
+def rows_for_store(store: Store, *, operator: Operator | None = None) -> list[AuditRow]:
     """The store page's History tab (PLAN-012d D3): the newest
     :data:`STORE_HISTORY_SIZE` rows of the store and of its records, newest first,
-    masked as on the audit page."""
+    masked as on the audit page; with ``operator`` (the operator page, D14), the
+    operator's own rows too."""
+    condition = store_filter(store.pk)
+    if operator is not None:
+        condition |= Q(entity_type=ENTITY_OPERATOR, entity_id=str(operator.pk))
     found = list(
-        AuditLog.objects.filter(store_filter(store.pk))
+        AuditLog.objects.filter(condition)
         .select_related("actor")
         .order_by("-at", "-id")[:STORE_HISTORY_SIZE]
     )

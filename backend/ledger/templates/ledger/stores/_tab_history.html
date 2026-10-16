@@ -20,4 +20,4 @@
   </tbody>
 </table>
 {% endresponsive_table %}
-<p class="muted">The {{ history_size }} newest rows of this store, its leases and their charges, invoices, payments, schedules, documents, contact entries, lease ends, transfers and installment plans.</p>
+<p class="muted">The {{ history_size }} newest rows of this store, its leases and their charges, invoices, payments, schedules, documents, contact entries, lease ends, transfers and installment plans{% if ows %}, and of this operator{% endif %}.</p>

@@ -247,3 +247,68 @@ missing charges writes no run row (it is audited per charge); 12d-2 covers open 
 rows (unpaid deposits and parents on a live plan keep the stored balance as before).
 
 **Verdict (D):** PASS (one rework cycle: the grid pickers as month selects; finding 12d-2 resolved).
+
+### Batch E — the operator page as the workspace; month selects on the reports
+
+**Scope.** `backend/ledger` (`services/workspace.py`: `Owner`, `_owned`, the tab builders
+by owner, `operator_workspace`, `_selected`, `_operator_lease`, `_operator_actions`,
+`operator_tab_url`; `services/credits.py` `rows_for_operator`; `services/audit.py`
+`rows_for_store(operator=)`; `services/grid.py` `picker_months` over any month range;
+`views/operators.py` the detail page on the workspace; `views/invoices.py` the drafts' `next`;
+`views/reports.py` the selects; templates `operators/detail.html` (the workspace section with
+the store selector, the operator-level items kept above), `stores/_header.html`, the tab
+partials with a store column, new `ledger/_month_select.html` used by the grid, the ranged
+reports and the P&L), tests. No migration, no new route, no dependency, no environment variable,
+no provider call.
+
+**Commands run (final Batch E code).**
+
+| Command | Database | Exit | Result |
+|---|---|---|---|
+| `uv run ruff check .`, `uv run ruff format --check .` | n/a | 0 | clean, 497 files formatted |
+| `uv run mypy` (strict) | n/a | 0 | no issues in 404 source files |
+| `uv lock --check` | n/a | 0 | consistent |
+| `manage.py makemigrations --check --dry-run` | sqlite, PostgreSQL 16 | 0 | No changes detected |
+| `uv run pytest -m "not e2e" -q -o faulthandler_timeout=300` | sqlite | 0 | 5,304 passed, 631 skipped; 7:58 wall |
+| the "Migration tests" selection | PostgreSQL 16 | 0 | 26 passed; 6:54 wall |
+| the "Unit tests" selection | PostgreSQL 16 | 0 | 5,906 passed, 3 skipped; 10:47 wall |
+| `uv run pytest -m e2e -q` | PostgreSQL 16 | 0 | 7 passed |
+| `bash scripts/check-no-secrets.sh`; pattern scan of the diff since `2597518` and every new file | n/a | 0 | clean |
+
+**Tests (Gate 2).** Opus: `test_operator_workspace.py` (29: the selector's default, the
+`?store=` switch with the bar's lease, another operator's store or a bad value ignored, a store
+now leased to another operator, an operator with no store, the tabs across stores with a store
+column and exports, Documents and History of the selected store, the drafts' Edit, Send and
+Delete with `next` and an off-site `next` ignored, the operator-level items kept and the old
+lists gone, the roles, the query budget (at most 30 for three stores, constant as data grows), the
+reports' selects and the P&L export's range), three existing tests moved to the Invoices tab.
+Fable (`test_plan012d_e_adversarial.py`, 3 cases, both engines): the selector cannot pick another
+operator's store (neither its figures nor its lease reach the page); the bar's actions carry
+only the selected store's lease and a viewer sees none; the operator page's drafts list has no
+Delete for a sent invoice and the route refuses it.
+
+**Findings (E).**
+
+No finding. Design choices accepted: forms opened from the operator page's bar return to the
+store page's tab (the store context takes priority), the per-charge payment forms and the
+drafts' Send and Delete return to the operator page; the selector lists every store the operator
+ever leased and shows "No current lease of this operator" without a bar when the store is now
+another operator's; the Contact log tab points to the operator-level log above instead of a
+second copy; the store tab partials keep their table ids on the operator page.
+
+**Verdict (E):** PASS (no rework cycle, no finding).
+
+**Confidentiality gate (§5.4).** Secret scans clean on every gate; no secret-store read by either
+model; no new credential-capable file type; no new secret name.
+
+**Residual risk (whole step).** The JavaScript of the payment-allocation form (live remainder,
+single-charge pre-fill), the builder lines (combo, month select, amount fetch, trash) and the
+table totals ran only in unit tests of the server side; the owner's clicks are the browser
+check, Safari included. The insurance manual payment flags review instead of marking at the
+provider (finding 6, deferred). Credits are a new liability: ADR-0013 is Proposed until the
+owner confirms. An existing charge billed below its balance is repriced (finding 10, owner's
+decision). The four migrations 0042–0044 are additive.
+
+**Verdict:** PASS (Batches A–E; findings 1–11: four MAJOR and five MINOR resolved, two MINOR
+deferred by written decision (3 → closed in D as 12d-2; 6 open), two decisions for the owner
+(ADR-0013; the repricing of an existing charge)).

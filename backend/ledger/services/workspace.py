@@ -23,6 +23,14 @@
   owes only what the re-debit does not collect, and reads "Carried by re-debit" once
   nothing is left (finding 12d-2).
 
+:func:`operator_workspace` builds the operator page the same way (D14): the selected
+store (``?store=``, one of the operator's stores, else the first by label) with its header
+card and bar on the operator's current lease of it (nothing when the store's current lease
+is another operator's), the operator's open balance across its stores, and the open tab
+over the operator's records (:data:`Owner`): Charges, Invoices (the operator's drafts,
+operator-level ones included, and invoices), Payments and Schedules with a store column;
+Documents and History (with the operator's own rows) of the selected store.
+
 Nothing here writes or calls the payment provider. Money is ``Decimal``; provider
 identifiers are masked.
 """
@@ -31,7 +39,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -133,6 +141,40 @@ def tab_url(store_id: uuid.UUID, tab: str) -> str:
     """The store page opened on ``tab``, scrolled to it (D8)."""
     page = reverse("ledger:stores:detail", kwargs={"pk": store_id})
     return f"{page}?tab={tab}#tab-{tab}"
+
+
+#: Whose records a tab lists: one store's leases, or one operator's (PLAN-012d D14).
+type Owner = Store | Operator
+
+
+def _owned(owner: Owner, *, direct: bool = False) -> Q:
+    """The rows of ``owner``'s records: the leases of a store, or of an operator
+    (``direct``: by the row's own ``operator`` column, for one-off charges and plans,
+    which may have no lease)."""
+    if isinstance(owner, Operator):
+        return Q(operator=owner) if direct else Q(lease__operator=owner)
+    return Q(lease__store=owner)
+
+
+def _owner_query(owner: Owner) -> dict[str, str]:
+    """The exports' and the ledgers' filter on ``owner``."""
+    return {"operator" if isinstance(owner, Operator) else "store": str(owner.pk)}
+
+
+def operator_tab_url(operator_id: uuid.UUID, tab: str, store_id: uuid.UUID | None = None) -> str:
+    """The operator page opened on ``tab`` (and on ``store_id``), without a fragment, as a
+    form's ``?next=`` is (D14)."""
+    page = reverse("ledger:operators:detail", kwargs={"pk": operator_id})
+    query = {"store": str(store_id)} if store_id is not None else {}
+    return f"{page}?{urlencode({**query, 'tab': tab})}"
+
+
+def _back(owner: Owner, tab: str) -> str:
+    """The query string a form opened from ``owner``'s page carries to come back to its
+    ``tab`` (D8): ``?store=`` on the store page, ``?next=`` on the operator page."""
+    if isinstance(owner, Operator):
+        return "?" + urlencode({"next": operator_tab_url(owner.pk, tab)})
+    return "?" + urlencode({"store": str(owner.pk)})
 
 
 def tabs_for(role: Role | None) -> list[tuple[str, str]]:
@@ -258,25 +300,45 @@ class StoreBalances:
     total: Decimal
 
 
+def _balances_of(
+    rows: Iterable[receivables.OpenBalance],
+    carried: Iterable[tuple[str, uuid.UUID]],
+    store_id: uuid.UUID | None = None,
+) -> StoreBalances:
+    """:class:`StoreBalances` of receivables ``rows`` (those of ``store_id`` when given)."""
+    owed = {
+        (row.kind, row.charge_id): row.balance
+        for row in rows
+        if store_id is None or row.store_id == store_id
+    }
+    return StoreBalances(owed, frozenset(carried), sum(owed.values(), ZERO))
+
+
+def _open_rows(
+    today: date, operator: uuid.UUID
+) -> tuple[list[receivables.OpenBalance], set[tuple[str, uuid.UUID]]]:
+    """The operator's receivables rows and the charges a live re-debit carries."""
+    rows, carrying = receivables.open_balances_and_carried(today, operator=operator)
+    return rows, {key for key, amount in carrying.items() if amount > 0}
+
+
 def store_balances(store: Store, store_leases: Iterable[Lease], today: date) -> StoreBalances:
     """:class:`StoreBalances` of ``store``, one receivables read per operator."""
     operators = sorted(
         {row.operator_id for row in store_leases if row.operator_id is not None}, key=str
     )
-    owed: dict[tuple[str, uuid.UUID], Decimal] = {}
+    rows: list[receivables.OpenBalance] = []
     carried: set[tuple[str, uuid.UUID]] = set()
     for operator in operators:
-        rows, carrying = receivables.open_balances_and_carried(today, operator=operator)
-        owed.update(
-            {(row.kind, row.charge_id): row.balance for row in rows if row.store_id == store.pk}
-        )
-        carried.update(key for key, amount in carrying.items() if amount > 0)
-    return StoreBalances(owed, frozenset(carried), sum(owed.values(), ZERO))
+        found, carrying = _open_rows(today, operator)
+        rows += found
+        carried |= carrying
+    return _balances_of(rows, carried, store.pk)
 
 
-def _header(store: Store, today: date, now: datetime, balances: StoreBalances) -> Header:
-    lease = lease_end.current_lease(store, today)
-    balance = balances.total
+def _header(lease: Lease | None, today: date, now: datetime, balance: Decimal) -> Header:
+    """The header card of ``lease`` (the store's current one, or ``None``), with
+    ``balance`` as its open balance."""
     if lease is None:
         return Header(
             lease=None,
@@ -322,8 +384,16 @@ def _with(url: str, **params: str) -> str:
     return f"{url}?{urlencode(params)}"
 
 
-def _actions(store: Store, header: Header, role: Role | None, today: date) -> list[Action]:
-    """The bar's actions ``role`` may take (D2), in bar order; none for a viewer."""
+def _actions(
+    store: Store,
+    header: Header,
+    role: Role | None,
+    contact_lease: Lease | None,
+    documents_url: str,
+) -> list[Action]:
+    """The bar's actions ``role`` may take (D2), in bar order; none for a viewer. Add
+    contact entry is about ``contact_lease`` (none without one); Upload document opens
+    ``documents_url`` (the page's Documents tab)."""
     billing = meets(role, Role.BILLING)
     admin = meets(role, Role.ADMIN)
     if not billing:
@@ -391,11 +461,10 @@ def _actions(store: Store, header: Header, role: Role | None, today: date) -> li
         Action(
             "upload_document",
             "Upload document",
-            tab_url(store.pk, TAB_DOCUMENTS),
+            documents_url,
             "bar-upload-document",
         )
     )
-    contact_lease = contacts.store_contact_lease(store, today)
     if contact_lease is not None:
         found.append(
             Action(
@@ -488,22 +557,20 @@ def _on_live_plan(column: str) -> Exists:
     )
 
 
-def _rent_rows(store: Store, chosen: str) -> QuerySet[RentCharge]:
-    rows = RentCharge.objects.filter(lease__store=store).annotate(
-        on_plan=_on_live_plan("rent_charge")
-    )
+def _rent_rows(owner: Owner, chosen: str) -> QuerySet[RentCharge]:
+    rows = RentCharge.objects.filter(_owned(owner)).annotate(on_plan=_on_live_plan("rent_charge"))
     if chosen == FILTER_OPEN:
         rows = rows.filter(balance__gt=0).exclude(status=RentChargeStatus.WAIVED)
     elif chosen == FILTER_PAID:
         rows = rows.filter(status=RentChargeStatus.PAID)
-    return rows.select_related("lease__operator").order_by("-due_on", "-seq", "id")
+    return rows.select_related("lease__operator", "lease__store").order_by("-due_on", "-seq", "id")
 
 
 _resolution = DepositResolution.objects.filter(setup_charge=OuterRef("pk"))
 
 
-def _one_off_rows(store: Store, chosen: str) -> QuerySet[OneOffCharge]:
-    rows = OneOffCharge.objects.filter(lease__store=store).annotate(
+def _one_off_rows(owner: Owner, chosen: str) -> QuerySet[OneOffCharge]:
+    rows = OneOffCharge.objects.filter(_owned(owner, direct=True)).annotate(
         on_plan=_on_live_plan("one_off_charge"),
         resolution_kind=Subquery(_resolution.values("kind")[:1]),
         resolution_amount=Subquery(_resolution.values("amount")[:1]),
@@ -512,20 +579,20 @@ def _one_off_rows(store: Store, chosen: str) -> QuerySet[OneOffCharge]:
         rows = rows.filter(balance__gt=0).exclude(status__in=_CLOSED_ONE_OFF)
     elif chosen == FILTER_PAID:
         rows = rows.filter(status=OneOffChargeStatus.PAID)
-    return rows.select_related("fee_type", "lease__operator").order_by(
+    return rows.select_related("fee_type", "lease__operator", "lease__store").order_by(
         "-due_date", "-created_at", "id"
     )
 
 
-def _insurance_rows(store: Store) -> QuerySet[InsuranceCharge]:
+def _insurance_rows(owner: Owner) -> QuerySet[InsuranceCharge]:
     settled = Q(payments__status=PaymentStatus.SETTLED, payments__kind=PaymentKind.INSURANCE)
     return (
-        InsuranceCharge.objects.filter(lease__store=store)
+        InsuranceCharge.objects.filter(_owned(owner))
         .annotate(
             paid_in=Sum("payments__amount", filter=settled & Q(payments__is_refund=False)),
             refunded=Sum("payments__amount", filter=settled & Q(payments__is_refund=True)),
         )
-        .select_related("lease__operator")
+        .select_related("lease__operator", "lease__store")
         .order_by("-due_on", "id")
     )
 
@@ -729,27 +796,33 @@ def _as_receivables(row: ChargeRow, balances: StoreBalances) -> None:
 
 
 def charges_tab(
-    store: Store, chosen: str, role: Role | None, balances: StoreBalances | None = None
+    owner: Owner, chosen: str, role: Role | None, balances: StoreBalances | None = None
 ) -> dict[str, Any]:
     """The Charges tab (D3): the rent, one-off and insurance charges of the store's
-    leases in one table, newest due first, filtered ``open`` (the default), ``paid`` or
-    ``all``; each with its invoices and, for billing, its payment form (which returns to
-    the store page). An open rent or one-off charge shows the balance of
+    leases (of the operator's, with the store named, on the operator page: D14) in one
+    table, newest due first, filtered ``open`` (the default), ``paid`` or ``all``; each
+    with its invoices and, for billing, its payment form (which returns to the page). An
+    open rent or one-off charge shows the balance of
     :func:`ledger.services.receivables.open_balances` (a rescheduled return's carried
     amount subtracted, finding 12d-2), as the insurance row does, so the open charges
     total the header's balance; ``balances`` is the header's, read here when not given.
     Seven queries whatever the number of charges, besides ``balances``."""
     billing = meets(role, Role.BILLING)
-    back = "?" + urlencode({"store": str(store.pk)})
+    back = _back(owner, TAB_PAYMENTS)
     if balances is None:
-        balances = store_balances(store, store.leases.all(), timezone.localdate())
+        today = timezone.localdate()
+        balances = (
+            _balances_of(*_open_rows(today, owner.pk))
+            if isinstance(owner, Operator)
+            else store_balances(owner, owner.leases.all(), today)
+        )
     rows: list[ChargeRow] = []
-    for rent in _rent_rows(store, chosen):
+    for rent in _rent_rows(owner, chosen):
         rent_row = _rent_row(rent, billing, back)
         if rent.balance > 0 and rent.status != RentChargeStatus.WAIVED:
             _as_receivables(rent_row, balances)
         rows.append(rent_row)
-    for one_off in _one_off_rows(store, chosen):
+    for one_off in _one_off_rows(owner, chosen):
         one_off_row = _one_off_row(one_off, role, back)
         if one_off.balance > 0 and one_off.status not in _CLOSED_ONE_OFF:
             _as_receivables(one_off_row, balances)
@@ -757,7 +830,7 @@ def charges_tab(
     if chosen == FILTER_OPEN:
         # A charge a re-debit carries in full is not open any more.
         rows = [listed for listed in rows if listed.balance > 0]
-    insurance = list(_insurance_rows(store))
+    insurance = list(_insurance_rows(owner))
     carried, collected = (
         receivables.insurance_redebits([charge.pk for charge in insurance])
         if insurance
@@ -781,6 +854,8 @@ def charges_tab(
         "charge_filters": CHARGE_FILTERS,
         "charge_total": sum((row.balance for row in rows), ZERO),
         "several_leases": len({row.lease.pk for row in rows if row.lease is not None}) > 1,
+        "by_store": isinstance(owner, Operator),
+        "export_query": urlencode(_owner_query(owner)),
     }
 
 
@@ -801,12 +876,43 @@ def store_invoices(store: Store) -> QuerySet[Invoice]:
     )
 
 
-def invoices_tab(store: Store, chosen: str, role: Role | None) -> dict[str, Any]:
-    """The Invoices tab (D3): the store's never-sent drafts (Edit, Send, Delete for
-    billing), then its invoices with the status here and at the payment provider, filtered
-    ``unpaid`` (the default: neither closed nor void) or ``all``."""
+def _invoice_stores(invoice_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Per invoice, the labels of the stores whose charges it bills, joined (two
+    queries)."""
+    found: dict[uuid.UUID, set[str]] = {}
+    for invoice, *labels in Invoice.objects.filter(pk__in=invoice_ids).values_list(
+        "pk",
+        "rent_charge__lease__store__external_label",
+        "one_off_charge__lease__store__external_label",
+        "insurance_charge__lease__store__external_label",
+    ):
+        found.setdefault(invoice, set()).update(label for label in labels if label)
+    for invoice, *labels in InvoiceLineItem.objects.filter(invoice__in=invoice_ids).values_list(
+        "invoice",
+        "rent_charge__lease__store__external_label",
+        "one_off_charge__lease__store__external_label",
+    ):
+        found.setdefault(invoice, set()).update(label for label in labels if label)
+    return {invoice: ", ".join(sorted(labels)) for invoice, labels in found.items()}
+
+
+def invoices_tab(owner: Owner, chosen: str, role: Role | None) -> dict[str, Any]:
+    """The Invoices tab (D3): the never-sent drafts (Edit, Send, Delete for billing),
+    then the invoices with the status here and at the payment provider, filtered
+    ``unpaid`` (the default: neither closed nor void) or ``all``. A store's are those of
+    its leases; an operator's (D14) every one billing it, its operator-level drafts
+    included, each with the stores it bills."""
     billing = meets(role, Role.BILLING)
-    invoices = store_invoices(store)
+    by_operator = isinstance(owner, Operator)
+    if isinstance(owner, Operator):
+        invoices = Invoice.objects.filter(operator=owner).order_by("-issue_date", "-invoice_number")
+        drafts = InvoiceDraft.objects.filter(operator=owner)
+        # Send and Delete come back to the operator page's Invoices tab.
+        edit_query, return_query = "", _back(owner, TAB_INVOICES)
+    else:
+        invoices = store_invoices(owner)
+        drafts = InvoiceDraft.objects.filter(lease__store=owner)
+        edit_query = return_query = _back(owner, TAB_INVOICES)
     if chosen == FILTER_UNPAID:
         invoices = invoices.exclude(internal_status__in=[InvoiceStatus.CLOSED, InvoiceStatus.VOID])
     invoices_shown = list(invoices.select_related("operator"))
@@ -816,18 +922,23 @@ def invoices_tab(store: Store, chosen: str, role: Role | None) -> dict[str, Any]
         ).values_list("sent_invoice", "pk")
     )
     route = "ledger:invoices:draft" if billing else "ledger:invoices:preview"
+    stores = _invoice_stores([row.pk for row in invoices_shown]) if by_operator else {}
     return {
         "invoice_filter": chosen,
         "invoice_filters": INVOICE_FILTERS,
         "drafts": list(
-            InvoiceDraft.objects.filter(lease__store=store, status=InvoiceDraftStatus.DRAFT)
+            drafts.filter(status=InvoiceDraftStatus.DRAFT)
             .select_related("operator", "lease__store")
             .annotate(total=Sum("lines__line_total"))
             .order_by("-created_at", "id")
         ),
+        "draft_edit_query": edit_query,
+        "draft_return_query": return_query,
+        "by_store": by_operator,
         "invoice_rows": [
             {
                 "invoice": invoice,
+                "stores": stores.get(invoice.pk, ""),
                 "url": (
                     reverse(route, kwargs={"pk": drafts_by_invoice[invoice.pk]})
                     if invoice.pk in drafts_by_invoice
@@ -849,14 +960,21 @@ def invoices_tab(store: Store, chosen: str, role: Role | None) -> dict[str, Any]
 # --- Payments tab --------------------------------------------------------------------------
 
 
-def payments_tab(store: Store) -> dict[str, Any]:
+def payments_tab(owner: Owner) -> dict[str, Any]:
     """The Payments tab (D3, D6b): the newest :data:`PAYMENTS_LIMIT` rows of the payments
-    ledger for this store, with the link to the ledger filtered on it, and the credits of
-    the store's leases with what applied or paid them back."""
-    selected = payments_ledger.PaymentFilter(store=store.pk)
+    ledger for this store (this operator, with the store named: D14), with the link to
+    the ledger filtered on it, and the credits of the leases with what applied or paid
+    them back."""
+    if isinstance(owner, Operator):
+        selected = payments_ledger.PaymentFilter(operator=owner.pk)
+        credit_rows = credits.rows_for_operator(owner)
+    else:
+        selected = payments_ledger.PaymentFilter(store=owner.pk)
+        credit_rows = credits.rows_for_store(owner)
     shown = list(payments_ledger.ledger_payments(selected)[: PAYMENTS_LIMIT + 1])
     return {
-        "credit_rows": credits.rows_for_store(store),
+        "by_store": isinstance(owner, Operator),
+        "credit_rows": credit_rows,
         "payment_rows": payments_ledger.rows_for(shown[:PAYMENTS_LIMIT]),
         "payments_more": len(shown) > PAYMENTS_LIMIT,
         "payments_limit": PAYMENTS_LIMIT,
@@ -869,15 +987,15 @@ def payments_tab(store: Store) -> dict[str, Any]:
 # --- Schedules tab -------------------------------------------------------------------------
 
 
-def schedules_tab(store: Store, today: date, now: datetime) -> dict[str, Any]:
+def schedules_tab(owner: Owner, today: date, now: datetime) -> dict[str, Any]:
     """The Schedules tab (D3): the live rent and insurance schedules of the store's leases
-    (as the lease page shows them: next debit, masked provider schedule, why one needs
-    review), the open one-off charges collected by autopay on their due date, and the
-    live installment plans."""
+    (of the operator's, with the store named: D14; as the lease page shows them: next
+    debit, masked provider schedule, why one needs review), the open one-off charges
+    collected by autopay on their due date, and the live installment plans."""
     schedules = list(
-        CollectionSchedule.objects.filter(lease__store=store)
+        CollectionSchedule.objects.filter(_owned(owner))
         .exclude(state=ScheduleState.ENDED)
-        .select_related("lease")
+        .select_related("lease__store")
         .order_by("lease__started_on", "lease_id", "kind", "seq")
     )
     moves: dict[uuid.UUID, leases.AutopayMove | None] = {}
@@ -907,19 +1025,24 @@ def schedules_tab(store: Store, today: date, now: datetime) -> dict[str, Any]:
             }
         )
     return {
+        "by_store": isinstance(owner, Operator),
         "schedule_rows": rows,
         "autopay_moved": [move.text for move in moves.values() if move is not None],
         "autopay_charges": list(
             OneOffCharge.objects.filter(
-                lease__store=store, collection=CollectionMethod.AUTOPAY_DUE, balance__gt=0
+                _owned(owner, direct=True),
+                collection=CollectionMethod.AUTOPAY_DUE,
+                balance__gt=0,
             )
             .exclude(status__in=_CLOSED_ONE_OFF)
-            .select_related("fee_type")
+            .select_related("fee_type", "lease__store")
             .order_by("due_date", "created_at", "id")
         ),
         "live_plans": list(
-            InstallmentPlan.objects.filter(lease__store=store, status__in=LIVE_PLAN_STATUSES)
-            .select_related("rent_charge", "one_off_charge__fee_type")
+            InstallmentPlan.objects.filter(
+                _owned(owner, direct=True), status__in=LIVE_PLAN_STATUSES
+            )
+            .select_related("rent_charge", "one_off_charge__fee_type", "lease__store")
             .order_by("first_due", "id")
         ),
         "lease_page_leases": sorted(
@@ -932,11 +1055,12 @@ def schedules_tab(store: Store, today: date, now: datetime) -> dict[str, Any]:
 # --- History tab ---------------------------------------------------------------------------
 
 
-def history_tab(store: Store, today: date) -> dict[str, Any]:
-    """The History tab (D3, admin): the newest rows of the store's records, and the
-    audit page filtered on them."""
+def history_tab(store: Store, today: date, operator: Operator | None = None) -> dict[str, Any]:
+    """The History tab (D3, admin): the newest rows of the store's records (and of
+    ``operator`` itself, on the operator page: D14), and the audit page filtered on the
+    store's."""
     return {
-        "history_rows": audit.rows_for_store(store),
+        "history_rows": audit.rows_for_store(store, operator=operator),
         "history_size": audit.STORE_HISTORY_SIZE,
         "history_url": reverse("ledger:audit:page")
         + "?"
@@ -958,6 +1082,28 @@ class Workspace:
     data: dict[str, Any]
 
 
+def _tab_data(
+    owner: Owner,
+    tab: str,
+    chosen: str,
+    role: Role | None,
+    balances: StoreBalances,
+    today: date,
+    now: datetime,
+) -> dict[str, Any]:
+    """The open tab's data over the records of ``owner`` (a store, or an operator); empty
+    for the tabs built elsewhere (Documents, Contact log, History)."""
+    if tab == TAB_CHARGES:
+        return charges_tab(owner, _chosen_filter(chosen, CHARGE_FILTERS), role, balances)
+    if tab == TAB_INVOICES:
+        return invoices_tab(owner, _chosen_filter(chosen, INVOICE_FILTERS), role)
+    if tab == TAB_PAYMENTS:
+        return payments_tab(owner)
+    if tab == TAB_SCHEDULES:
+        return schedules_tab(owner, today, now)
+    return {}
+
+
 def store_workspace(
     store: Store,
     today: date,
@@ -971,23 +1117,142 @@ def store_workspace(
     is a name :func:`chosen_tab` returned, ``chosen`` the tab's filter (``?filter=``)."""
     moment = now or timezone.now()
     balances = store_balances(store, store.leases.all(), today)
-    header = _header(store, today, moment, balances)
-    data: dict[str, Any] = {}
-    if tab == TAB_CHARGES:
-        data = charges_tab(store, _chosen_filter(chosen, CHARGE_FILTERS), role, balances)
-    elif tab == TAB_INVOICES:
-        data = invoices_tab(store, _chosen_filter(chosen, INVOICE_FILTERS), role)
-    elif tab == TAB_PAYMENTS:
-        data = payments_tab(store)
-    elif tab == TAB_SCHEDULES:
-        data = schedules_tab(store, today, moment)
-    elif tab == TAB_HISTORY and meets(role, Role.ADMIN):
-        data = history_tab(store, today)
+    header = _header(lease_end.current_lease(store, today), today, moment, balances.total)
     return Workspace(
         store=store,
         header=header,
-        actions=_actions(store, header, role, today),
+        actions=_actions(
+            store,
+            header,
+            role,
+            contacts.store_contact_lease(store, today),
+            tab_url(store.pk, TAB_DOCUMENTS),
+        ),
+        tabs=tabs_for(role),
+        tab=tab,
+        data=(
+            history_tab(store, today)
+            if tab == TAB_HISTORY and meets(role, Role.ADMIN)
+            else _tab_data(store, tab, chosen, role, balances, today, moment)
+        ),
+    )
+
+
+# --- The operator page (D14) ---------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorWorkspace:
+    """The operator page as the workspace: :class:`Workspace` of the selected store, its
+    header and bar limited to the operator's lease, the tabs over every store of the
+    operator, and the operator's own figures."""
+
+    operator: Operator
+    #: The operator's stores, by label: the selector's choices.
+    stores: list[Store]
+    #: The selected store's workspace; ``None`` when the operator has no store.
+    space: Workspace | None
+    #: The open tab and its data, across the operator's stores.
+    tabs: list[tuple[str, str]]
+    tab: str
+    data: dict[str, Any]
+    #: The open balance of every store of the operator (D14: the operator-level total).
+    open_balance: Decimal
+
+
+def operator_stores(operator: Operator) -> list[Store]:
+    """The stores of the operator's leases, by label (the selector's choices)."""
+    return list(
+        Store.objects.filter(leases__operator=operator).distinct().order_by("external_label", "id")
+    )
+
+
+def _selected(stores: list[Store], raw: str | None) -> Store | None:
+    """The store ``?store=`` names when it is one of ``stores``, else the first; a store
+    of another operator is ignored."""
+    for store in stores:
+        if raw and str(store.pk) == raw.strip():
+            return store
+    return stores[0] if stores else None
+
+
+def _operator_lease(store: Store, operator: Operator, today: date) -> Lease | None:
+    """The store's current lease when it is the operator's; ``None`` otherwise, so that
+    the operator page never shows or acts on another operator's lease."""
+    lease = lease_end.current_lease(store, today)
+    return lease if lease is not None and lease.operator_id == operator.pk else None
+
+
+def _operator_actions(
+    operator: Operator, store: Store, header: Header, role: Role | None
+) -> list[Action]:
+    """The bar of the selected store on the operator page: the store page's actions on
+    the operator's current lease of it (none when the store's current lease is not the
+    operator's); Upload document opens the operator page's Documents tab of the store.
+    Create invoice gets its own element id (the page's New invoice is operator-level)."""
+    if header.lease is None:
+        return []
+    found = _actions(
+        store,
+        header,
+        role,
+        header.lease,
+        operator_tab_url(operator.pk, TAB_DOCUMENTS, store.pk) + f"#tab-{TAB_DOCUMENTS}",
+    )
+    return [
+        replace(action, element_id="bar-new-invoice") if action.key == "create_invoice" else action
+        for action in found
+    ]
+
+
+def operator_workspace(
+    operator: Operator,
+    today: date,
+    role: Role | None,
+    *,
+    tab: str = TAB_CHARGES,
+    store: str | None = None,
+    chosen: str = "",
+    now: datetime | None = None,
+) -> OperatorWorkspace:
+    """The operator page as the workspace (D14) for ``role``: the selected store (``store``
+    is the raw ``?store=``; the operator's only store by default, else the first by
+    label; another operator's store is ignored) with its header card and action bar on
+    the operator's lease of it, and the open tab across all the operator's stores
+    (Charges, Invoices, Payments, Schedules; Documents and History are the selected
+    store's, History with the operator's own rows; the contact log is the page's). One
+    receivables read gives the store's figures and the operator's total."""
+    moment = now or timezone.now()
+    stores = operator_stores(operator)
+    selected = _selected(stores, store)
+    rows, carried = _open_rows(today, operator.pk)
+    balances = _balances_of(rows, carried)
+    space: Workspace | None = None
+    if selected is not None:
+        mine = _balances_of(rows, carried, selected.pk)
+        header = _header(_operator_lease(selected, operator, today), today, moment, mine.total)
+        space = Workspace(
+            store=selected,
+            header=header,
+            actions=_operator_actions(operator, selected, header, role),
+            tabs=tabs_for(role),
+            tab=tab,
+            data={},
+        )
+    if tab == TAB_HISTORY:
+        data = (
+            history_tab(selected, today, operator)
+            if selected is not None and meets(role, Role.ADMIN)
+            else {}
+        )
+    else:
+        data = _tab_data(operator, tab, chosen, role, balances, today, moment)
+    return OperatorWorkspace(
+        operator=operator,
+        stores=stores,
+        space=space,
         tabs=tabs_for(role),
         tab=tab,
         data=data,
+        open_balance=balances.total,
     )

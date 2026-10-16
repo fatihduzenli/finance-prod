@@ -1128,7 +1128,9 @@ def test_new_invoice_on_the_operator_page_may_be_operator_level(fake: FakeProvid
     client.post(path, page_data([{"item": "Late fee", "unit_amount": "25.00"}]))
     draft = InvoiceDraft.objects.get()
     assert (draft.operator_id, draft.lease_id) == (operator.pk, None)
-    listing = client.get(f"/operators/{operator.pk}/").content.decode()
+    # PLAN-012d D14: the operator's drafts, operator-level ones included, are on the
+    # operator page's Invoices tab.
+    listing = client.get(f"/operators/{operator.pk}/?tab=invoices").content.decode()
     assert f"/invoices/drafts/{draft.pk}/" in listing
 
 

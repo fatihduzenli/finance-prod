@@ -8,6 +8,9 @@ read-only, so any unsafe method is refused (403), and the views take GET and HEA
 :func:`ledger.services.pnl.parse_query`, the other reports' range by
 :func:`ledger.services.reports.parse_range` (the same bounds); neither fails: an
 unusable range is replaced and the page says so. Each export applies its page's query.
+The From and To months are plain selects (``ledger/_month_select.html``, the months of
+:func:`ledger.services.grid.picker_months`, as on the grid), never HTML month inputs,
+which Safari does not render (PLAN-012d, the owner's rule).
 The aging has no range: it is the open balances as of today, so that its grand total
 is the dashboard's total outstanding.
 
@@ -42,7 +45,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_safe
 
 from ledger.models import Operator
-from ledger.services import credits, pnl, receivables, reports
+from ledger.services import credits, grid, pnl, receivables, reports
 from ledger.views.operators import csv_response, role_required
 
 logger = logging.getLogger(__name__)
@@ -98,6 +101,7 @@ def _too_slow(request: HttpRequest, query: pnl.PnlQuery) -> HttpResponse:
             "group_label": dict(pnl.GROUP_CHOICES)[query.group],
             "export_query": urlencode(query.as_query()),
             "toggle_query": _toggle(query),
+            "picker_months": grid.picker_months(query),
         },
     )
 
@@ -135,6 +139,7 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
             "group_label": dict(pnl.GROUP_CHOICES)[query.group],
             "export_query": urlencode(query.as_query()),
             "toggle_query": _toggle(query),
+            "picker_months": grid.picker_months(query),
         },
     )
 
@@ -235,6 +240,7 @@ def _ranged_page(
             "report": report,
             "too_slow": TOO_SLOW if report is None else "",
             "export_query": urlencode(selected.as_query()),
+            "picker_months": grid.picker_months(selected),
             **extra,
         },
     )

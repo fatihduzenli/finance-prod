@@ -701,4 +701,10 @@ run: N created, M skipped" linking to it. **Create missing charges** on a store'
 runs the catch-up for that store alone and says what it created or "Nothing missing". The
 **grid** opens on the 12 months ending with next month (10 past, the current, the next) with a
 From/To month picker (at most 24 months); a future month billed in advance shows the amount and
-the invoice number.
+the invoice number. **The operator page** is the same workspace across the operator's stores
+(PLAN-012d): a store selector on the action bar chooses which store the actions act on, the tabs
+show the operator's rows with a store column, and the operator-level items stay above them
+(contact details, SMS phone and consents, the payment-provider block, collection e-mails, the
+operator's contact log and notes); its drafts list has the same Edit, Send and Delete. Every
+month picker in the app (the grid, the reports, the builder's Rent line) is a plain select of
+months, since Safari does not render HTML month inputs.

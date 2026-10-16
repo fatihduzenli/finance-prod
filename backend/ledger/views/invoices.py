@@ -643,6 +643,10 @@ def draft_send(request: HttpRequest, pk: str) -> HttpResponse:
         if context is not None:
             # PLAN-012d D8: sent from the store page, back to its Invoices tab.
             return redirect(context.tab_url(workspace.TAB_INVOICES))
+        # PLAN-012d D14: sent from the operator page (``?next=``), back to it.
+        back = store_context.local_next(request.GET.get("next"))
+        if back:
+            return redirect(back)
     else:
         messages.error(request, outcome.message)
     return redirect(_draft_url(draft, context))
@@ -654,7 +658,8 @@ def draft_delete(request: HttpRequest, pk: str) -> HttpResponse:
     """``ledger:invoices:delete_draft`` (billing; PLAN-012d D3): a never-sent draft is
     deleted outright, without a note or a confirmation page; a sent invoice is refused
     (it keeps its cancel form). Back to the store page's Invoices tab when opened from
-    it, else to the operator page."""
+    it, else to ``?next=`` (a path on this site: the operator page's Invoices tab,
+    PLAN-012d D14), else to the operator page's Invoices tab."""
     refused = _refuse_below(request, Role.BILLING)
     if refused is not None:
         return refused
@@ -664,8 +669,9 @@ def draft_delete(request: HttpRequest, pk: str) -> HttpResponse:
     if context is not None:
         back = context.tab_url(workspace.TAB_INVOICES)
     elif outcome.ok:
-        back = reverse("ledger:operators:detail", kwargs={"pk": draft.operator_id}) + (
-            "#invoice-drafts"
+        back = store_context.local_next(request.GET.get("next")) or (
+            workspace.operator_tab_url(draft.operator_id, workspace.TAB_INVOICES)
+            + f"#tab-{workspace.TAB_INVOICES}"
         )
     else:
         back = _draft_url(draft, None)

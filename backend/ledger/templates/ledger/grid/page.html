@@ -38,13 +38,9 @@
   <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-filters" role="search">
     <div class="actions">
       <label for="from" style="margin:0;">From</label>
-      <select name="from" id="from">
-        {% for month in picker_months %}<option value="{{ month|date:'Y-m' }}"{% if month == query.from_month %} selected{% endif %}>{{ month|date:'F Y' }}</option>{% endfor %}
-      </select>
+      {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}
       <label for="to" style="margin:0;">To</label>
-      <select name="to" id="to">
-        {% for month in picker_months %}<option value="{{ month|date:'Y-m' }}"{% if month == query.to_month %} selected{% endif %}>{{ month|date:'F Y' }}</option>{% endfor %}
-      </select>
+      {% include "ledger/_month_select.html" with name="to" months=picker_months selected=query.to_month %}
       <label for="operator" style="margin:0;">Operator</label>
       <select name="operator" id="operator">
         <option value="">All</option>

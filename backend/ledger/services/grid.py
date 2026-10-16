@@ -63,6 +63,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
+from typing import Protocol
 
 from django.db.models import Exists, Min, OuterRef, Prefetch
 from django.utils import timezone
@@ -209,10 +210,18 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> GridQue
     return GridQuery(start, end, operator, state, channel, status, tuple(messages))
 
 
-def picker_months(query: GridQuery, today: date | None = None) -> list[date]:
-    """The months the page's From and To selects offer, first first: the current month and
-    :data:`PICKER_MONTHS` before and after it, with the range shown added when outside them
-    so that it can always be submitted again."""
+class MonthRange(Protocol):
+    """A query with a month range: the grid's, the P&L's or a report's."""
+
+    @property
+    def months(self) -> list[date]: ...
+
+
+def picker_months(query: MonthRange, today: date | None = None) -> list[date]:
+    """The months a page's From and To selects offer (``ledger/_month_select.html``: the
+    grid and the reports, PLAN-012d D12 and the owner's Safari rule), first first: the
+    current month and :data:`PICKER_MONTHS` before and after it, with the range shown
+    added when outside them so that it can always be submitted again."""
     current = (today or timezone.localdate()).replace(day=1)
     window = {add_months(current, n) for n in range(-PICKER_MONTHS, PICKER_MONTHS + 1)}
     return sorted(window.union(query.months))

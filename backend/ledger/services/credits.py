@@ -33,13 +33,14 @@ from decimal import Decimal
 from typing import Any
 
 from django.contrib.auth.models import User
-from django.db.models import Q, Sum
+from django.db.models import Q, QuerySet, Sum
 
 from ledger.models import (
     ZERO,
     AuditLog,
     Lease,
     LeaseCredit,
+    Operator,
     Payment,
     PaymentKind,
     PaymentMethod,
@@ -255,8 +256,17 @@ class CreditRow:
 def rows_for_store(store: Store) -> list[CreditRow]:
     """The credits of the store's leases, newest first, each with what used it (two
     queries)."""
+    return _rows(LeaseCredit.objects.filter(lease__store=store))
+
+
+def rows_for_operator(operator: Operator) -> list[CreditRow]:
+    """The credits of the operator's leases, as :func:`rows_for_store` (PLAN-012d D14)."""
+    return _rows(LeaseCredit.objects.filter(lease__operator=operator))
+
+
+def _rows(found: QuerySet[LeaseCredit]) -> list[CreditRow]:
     credits = list(
-        LeaseCredit.objects.filter(lease__store=store).order_by("-received_on", "-created_at", "id")
+        found.select_related("lease__store").order_by("-received_on", "-created_at", "id")
     )
     uses: dict[uuid.UUID, list[Payment]] = {}
     if credits:

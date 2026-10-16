@@ -1,17 +1,18 @@
-{% comment %}The Charges tab (docs/qa/PLAN-012d D3): ledger.services.workspace.charges_tab.{% endcomment %}
+{% comment %}The Charges tab (docs/qa/PLAN-012d D3): ledger.services.workspace.charges_tab. On the operator page (D14) the rows are the operator's, with a Store column; "keep_store" keeps the selected store in the filter links.{% endcomment %}
 {% load responsive %}
 <h2>Charges</h2>
 <p class="actions" id="charge-filters">
-  {% for value, label in charge_filters %}<a class="btn" href="?tab=charges&amp;filter={{ value }}#tab-charges"{% if value == charge_filter %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
-  <a class="btn" id="export-charges" href="{% url 'ledger:charges:export' %}?store={{ store.pk }}">Export rent charges CSV</a>
-  <a class="btn" id="export-one-off-charges" href="{% url 'ledger:one_off_charges:export' %}?store={{ store.pk }}">Export one-off charges CSV</a>
+  {% for value, label in charge_filters %}<a class="btn" href="?{{ keep_store }}tab=charges&amp;filter={{ value }}#tab-charges"{% if value == charge_filter %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+  <a class="btn" id="export-charges" href="{% url 'ledger:charges:export' %}?{{ export_query }}">Export rent charges CSV</a>
+  <a class="btn" id="export-one-off-charges" href="{% url 'ledger:one_off_charges:export' %}?{{ export_query }}">Export one-off charges CSV</a>
 </p>
 {% responsive_table %}
 <table id="store-charges">
-  <thead><tr><th>Kind</th><th>Charge</th><th>Due</th><th>Billed</th><th>Paid</th><th>Balance</th><th>Status</th><th>Invoice</th><th></th></tr></thead>
+  <thead><tr>{% if by_store %}<th>Store</th>{% endif %}<th>Kind</th><th>Charge</th><th>Due</th><th>Billed</th><th>Paid</th><th>Balance</th><th>Status</th><th>Invoice</th><th></th></tr></thead>
   <tbody>
     {% for row in charge_rows %}
       <tr class="store-charge store-charge-{{ row.kind }}">
+        {% if by_store %}<td>{% if row.lease %}<a href="{% url 'ledger:stores:detail' pk=row.lease.store_id %}">{{ row.lease.store.external_label }}</a>{% else %}—{% endif %}</td>{% endif %}
         <td>{{ row.kind_label }}</td>
         <td>{% if row.url %}<a href="{{ row.url }}">{{ row.description }}</a>{% else %}{{ row.description }}{% endif %}{% for badge in row.badges %} <span class="badge">{{ badge }}</span>{% endfor %}{% if several_leases and row.lease %}<br><span class="muted">{{ row.lease.operator.display_name|default:"No operator" }}, lease from {{ row.lease.started_on|date:"Y-m-d"|default:"no start date" }}</span>{% endif %}</td>
         <td>{{ row.due|date:"Y-m-d" }}</td>
@@ -23,9 +24,9 @@
         <td>{% if row.payment_url %}<a class="btn record-payment" href="{{ row.payment_url }}">Record payment</a>{% endif %}{% if row.resolve_url %} <a class="btn resolve-deposit" href="{{ row.resolve_url }}">Resolve deposit</a>{% endif %}</td>
       </tr>
     {% empty %}
-      <tr><td colspan="9" class="muted">{% if charge_filter == "open" %}No open charges.{% elif charge_filter == "paid" %}No paid charges.{% else %}No charges.{% endif %}</td></tr>
+      <tr><td colspan="{% if by_store %}10{% else %}9{% endif %}" class="muted">{% if charge_filter == "open" %}No open charges.{% elif charge_filter == "paid" %}No paid charges.{% else %}No charges.{% endif %}</td></tr>
     {% endfor %}
   </tbody>
 </table>
 {% endresponsive_table %}
-<p class="muted">Balance of the charges shown: <strong id="charges-balance">${{ charge_total }}</strong>. Rent, one-off and insurance charges of every lease of this store; a charge's page has its other actions.</p>
+<p class="muted">Balance of the charges shown: <strong id="charges-balance">${{ charge_total }}</strong>. Rent, one-off and insurance charges of every lease of {% if by_store %}this operator{% else %}this store{% endif %}; a charge's page has its other actions.</p>

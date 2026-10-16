@@ -546,10 +546,10 @@ def test_delete_of_a_never_sent_draft_needs_no_note_and_returns_to_the_tab() -> 
     assert row.entity_id == str(draft.pk) and row.actor == user
     assert row.before is not None and row.before["status"] == InvoiceDraftStatus.DRAFT
     assert f"Draft {draft.number} deleted." in page(billing, response["Location"])
-    # Without the store: back to the operator page.
+    # Without the store: back to the operator page's Invoices tab (PLAN-012d D14).
     other = a_draft(lease)
     response = billing.post(reverse("ledger:invoices:delete_draft", kwargs={"pk": other.pk}))
-    assert response["Location"] == f"/operators/{lease.operator_id}/#invoice-drafts"
+    assert response["Location"] == f"/operators/{lease.operator_id}/?tab=invoices#tab-invoices"
 
 
 def test_delete_refuses_a_sent_or_cancelled_draft_and_a_transfers_draft() -> None:

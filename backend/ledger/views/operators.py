@@ -27,7 +27,6 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Callable, Iterator
-from decimal import Decimal
 from functools import wraps
 from typing import Any
 from urllib.parse import urlencode
@@ -38,7 +37,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import IntegrityError
-from django.db.models import Q, QuerySet, Sum
+from django.db.models import Q, QuerySet
 from django.db.models.functions import Lower
 from django.http import (
     Http404,
@@ -54,14 +53,14 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from accounts.roles import Role, meets, role_of
 from accounts.views import forbidden
 from ledger.forms import LinkForm, OperatorCreateForm, OperatorForm
-from ledger.models import ZERO, Note, NoteEntityType, Operator, RentCharge, SyncStatus
+from ledger.models import Note, NoteEntityType, Operator, SyncStatus
 from ledger.services import (
     attention,
     collections,
     contacts,
     csv_export,
-    one_off_charges,
     statement_links,
+    workspace,
 )
 from ledger.services.csv_export import CsvWriter
 from ledger.validators import contains_card_number
@@ -292,15 +291,33 @@ def operator_export(request: HttpRequest) -> StreamingHttpResponse:
 @role_required
 @require_safe
 def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
+    """The operator page as the workspace (PLAN-012d D14): the operator-level items
+    (contact details, SMS phone and consents, the payment-provider block, Collection
+    e-mails, the contact log, notes), then the selected store's header card and action
+    bar (``?store=``, one of the operator's stores) and the open tab (``?tab=``) across
+    the operator's stores (:func:`ledger.services.workspace.operator_workspace`)."""
     operator = _load(pk)
     refs = operator_sync.current_refs(operator)
     customer = refs.get(operator_sync.KIND_CUSTOMER, "")
     method = refs.get(operator_sync.KIND_PAYMENT_METHOD, "")
-    outstanding: Decimal = (
-        RentCharge.objects.filter(lease__operator=operator).aggregate(total=Sum("balance"))["total"]
-        or ZERO
-    )
     role = _role(request)
+    today = timezone.localdate()
+    tab = workspace.chosen_tab(request.GET.get("tab"), role)
+    space = workspace.operator_workspace(
+        operator,
+        today,
+        role,
+        tab=tab,
+        store=request.GET.get("store"),
+        chosen=request.GET.get("filter", ""),
+    )
+    selected = space.space.store if space.space is not None else None
+    tab_context: dict[str, Any] = {}
+    if tab == workspace.TAB_DOCUMENTS and selected is not None:
+        # Imported here: ledger.views.documents imports this module's helpers.
+        from ledger.views import documents
+
+        tab_context = documents.section_context(request, selected)
     active = operator.archived_at is None
     billing = meets(role, Role.BILLING)
     failed = operator.sync_status == SyncStatus.FAILED
@@ -312,7 +329,16 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
         "ledger/operators/detail.html",
         {
             **jobs,
+            **space.data,
+            **tab_context,
             "operator": operator,
+            "ows": space,
+            "space": space.space,
+            "header": space.space.header if space.space is not None else None,
+            "store": selected,
+            "billing": billing,
+            # The tab and filter links keep the selected store (D14).
+            "keep_store": urlencode({"store": str(selected.pk)}) + "&" if selected else "",
             "customer_masked": mask_identifier(customer) if customer else "",
             "payment_method_masked": mask_identifier(method) if method else "",
             "failure_message": (
@@ -325,9 +351,6 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 if failed and operator.sync_failure_fields
                 else ""
             ),
-            "leases": operator.leases.select_related("store").order_by("store__external_label"),
-            "outstanding": outstanding.quantize(Decimal("0.01")),
-            "invoices": operator.invoices.order_by("-issue_date", "invoice_number"),
             "notes": Note.objects.filter(
                 entity_type=NoteEntityType.OPERATOR, entity_id=operator.pk
             ).order_by("-created_at"),
@@ -354,12 +377,9 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 else ""
             ),
             "can_link": billing and active,
-            # PLAN-012 D6: New invoice replaces "Create one-off charge"; the drafts.
+            # PLAN-012 D6: New invoice replaces "Create one-off charge"; the drafts are
+            # on the Invoices tab (PLAN-012d D14).
             "can_new_invoice": billing and active,
-            "invoice_drafts": operator.invoice_drafts.select_related("lease__store", "sent_invoice")
-            .annotate(total=Sum("lines__line_total"))
-            .order_by("-created_at"),
-            "one_off_charges": one_off_charges.operator_charges(operator),
             "can_archive": meets(role, Role.ADMIN) and active,
             # PLAN-011b D6, D7: the operator's own attention items as banners, and the
             # latest contact log entries.

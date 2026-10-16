@@ -1296,3 +1296,14 @@ files), lock, migrations clean; sqlite 5,272 passed; PostgreSQL 26 + 5,874 passe
 scans clean; Fable's adversarial file 3 cases green on both engines. Batch E assigned (the
 operator page as the workspace; the reports pages' month inputs become selects under the same
 rule).
+
+## Update, 2026-10-16, PLAN-012d Batch E built and gated; Step 12d complete (not pushed)
+
+Batch E: the operator page is the same workspace across the operator's stores (a store selector
+on the bar, the tabs with a store column, the operator-level items kept above, the drafts' Edit,
+Send and Delete); every month picker in the app is a plain select (the reports' month inputs
+replaced under the owner's Safari rule). No migration. Gate: ruff, format, mypy (404 files),
+lock, migrations clean; sqlite 5,304 passed; PostgreSQL 26 + 5,906 passed; e2e 7; secret scans
+clean; Fable's adversarial file 3 cases green on both engines. **Step 12d is complete in the
+working tree** (Batches A–E, migrations 0042–0044, ADR-0013 proposed); the checkpoint report
+with the Publish Request goes to the owner.

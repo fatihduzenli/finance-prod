@@ -1,4 +1,4 @@
-{% comment %}The Schedules tab (docs/qa/PLAN-012d D3): ledger.services.workspace.schedules_tab.{% endcomment %}
+{% comment %}The Schedules tab (docs/qa/PLAN-012d D3): ledger.services.workspace.schedules_tab. On the operator page (D14) the operator's, each lease named with its store.{% endcomment %}
 {% load responsive %}
 <h2>Autopay schedules</h2>
 {% for text in autopay_moved %}<p class="autopay-moved"><strong>{{ text }}</strong></p>{% endfor %}
@@ -8,7 +8,7 @@
   <tbody>
     {% for item in schedule_rows %}
       <tr>
-        <td><a href="{% url 'ledger:leases:detail' pk=item.row.lease.pk %}">From {{ item.row.lease.started_on|date:"Y-m-d"|default:"no start date" }}</a></td>
+        <td><a href="{% url 'ledger:leases:detail' pk=item.row.lease.pk %}">{% if by_store %}{{ item.row.lease.store.external_label }}, from{% else %}From{% endif %} {{ item.row.lease.started_on|date:"Y-m-d"|default:"no start date" }}</a></td>
         <td>{{ item.row.get_kind_display }}</td>
         <td>{{ item.row.seq }}</td>
         <td>{{ item.row.debit_day|default:"—" }}</td>

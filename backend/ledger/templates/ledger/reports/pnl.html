@@ -6,9 +6,9 @@
   <form method="get" action="{% url 'ledger:reports:pnl' %}" id="pnl-filters" role="search">
     <div class="actions">
       <label for="from" style="margin:0;">From</label>
-      <input type="month" name="from" id="from" value="{{ query.from_month|date:'Y-m' }}">
+      {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}
       <label for="to" style="margin:0;">To</label>
-      <input type="month" name="to" id="to" value="{{ query.to_month|date:'Y-m' }}">
+      {% include "ledger/_month_select.html" with name="to" months=picker_months selected=query.to_month %}
       <label for="group" style="margin:0;">Group by</label>
       <select name="group" id="group">
         {% for value, label in group_choices %}<option value="{{ value }}"{% if value == query.group %} selected{% endif %}>{{ label }}</option>{% endfor %}
