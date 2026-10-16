@@ -101,8 +101,10 @@ store_patterns = (
         path("<str:pk>/end-lease/", lease_ends.store_end_lease, name="end_lease"),
         # The transfer wizard (PLAN-012e D6): start or resume.
         path("<str:pk>/transfer/", transfers.store_transfer, name="transfer"),
-        # The workspace's action bar (PLAN-012d D2): Record a payment and Charge now.
+        # The workspace's action bar (PLAN-012d D2, D6): Record a payment, Schedule a
+        # payment and Charge now.
         path("<str:pk>/payments/new/", stores.store_record_payment, name="record_payment"),
+        path("<str:pk>/schedule-payment/", stores.store_schedule_payment, name="schedule_payment"),
         path("<str:pk>/charge-now/", stores.store_charge_now_pick, name="charge_now_pick"),
     ],
     "stores",

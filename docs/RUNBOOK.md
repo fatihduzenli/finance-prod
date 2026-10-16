@@ -661,6 +661,20 @@ the audit page). "Charge now" on the bar lists the charges that can be charged n
 own confirm page. The **lease page** keeps lease terms, rent history, debit days, the proration
 switch, autopay controls, notes and documents, and links to the store page for everything else.
 Charge, invoice, plan and payment pages carry "← Store NNNN". The attention list, the grid and
-the rent run link store pages. **Rent run** left the main navigation: charges are created by the
+the rent run link store pages.
+
+**Record a payment** (store page, billing; ADR-0013). Enter the amount, method (Zelle, wire,
+other), date, reference and note once; the form then lists every open charge of the store's
+lease, oldest due first, with its balance, and you type how much of the payment goes to each.
+Nothing is pre-filled unless exactly one charge is open. "Unallocated" updates as you type; the
+form refuses to save until the allocations add up to the amount, or you tick "Keep $X as a
+credit on the lease". Each allocated part is a payment on its charge with today's rules (a
+charge's Stax invoice is marked paid as cash when fully covered; a part payment is flagged for
+review); the kept remainder is a **credit** shown in the header card and on the Payments tab,
+and the same form applies it to a later charge ("from credit"). A credit is money held, never
+revenue; it is refunded through the lease end, and a transfer waits until it is refunded.
+**Schedule a payment** (store page, billing) creates a one-off charge collected by autopay on a
+date you choose (the operator needs a linked bank method); the worker makes the one-occurrence
+Stax schedule. **Rent run** left the main navigation: charges are created by the
 daily job, by saving a lease and by the catch-up; the page lives under **Admin** (with the Django
 admin and the audit page) for the daily report, Match invoices and the CSV export.

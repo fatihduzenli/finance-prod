@@ -396,7 +396,9 @@ def totals(rows: QuerySet[Payment]) -> Totals:
     """
     deposit = Q(one_off_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
     split = on_multi_line_invoice()
-    payment = Q(is_refund=False) & ~deposit
+    # A credit paid back at the lease end (PLAN-012d D6b) is money held going out: in none
+    # of the four.
+    payment = Q(is_refund=False) & ~deposit & ~Q(kind=PaymentKind.CREDIT_REFUND)
     settled = Q(status=PaymentStatus.SETTLED)
     held_in = deposit & Q(kind=PaymentKind.ONE_OFF, is_refund=False) & settled & ~split
     held_out = deposit & (Q(kind=PaymentKind.REFUND_DEPOSIT) | Q(is_refund=True)) & settled & ~split

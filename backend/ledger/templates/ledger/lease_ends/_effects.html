@@ -7,6 +7,7 @@
 {% endfor %}
 {% if figures.offset_applied %}<li>${{ figures.offset_applied }} of the deposit pays the open charges, oldest first ("deposit offset").</li>{% endif %}
 {% for deposit in figures.deposits %}<li>The deposit {{ deposit.label }} (${{ deposit.held }}) is resolved.</li>{% endfor %}
+{% if figures.lease_credit %}<li>The credit held on the lease (${{ figures.lease_credit }}) is paid back with the settlement.</li>{% endif %}
 {% if figures.refund_due %}<li>${{ figures.refund_due }} is recorded as refunded by {{ figures.refund_method_label|default:"(no method set)" }} on {{ figures.refund_on|date:"Y-m-d"|default:"(no date set)" }}.</li>{% endif %}
 {% if figures.debt %}<li>A one-off charge "Lease-end balance" of ${{ figures.debt }} is created, due 15 days after the end date.</li>{% endif %}
 <li>The statement PDF is stored with the store's documents and e-mailed to the operator when mail is on.</li>

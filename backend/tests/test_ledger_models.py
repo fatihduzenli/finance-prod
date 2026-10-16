@@ -476,6 +476,20 @@ def new_final_statement_message(**fields: Any) -> ledger.OutboundMessage:
     return ledger.OutboundMessage(**{**values, **fields})
 
 
+def new_lease_credit(**fields: Any) -> ledger.LeaseCredit:
+    """A credit held on a lease (PLAN-012d D6a)."""
+    _default(fields, "lease", lambda: saved(new_lease()))
+    values = {
+        "amount": D("50.00"),
+        "remaining": D("50.00"),
+        "method": "zelle",
+        "received_on": date(2026, 10, 15),
+        "note": "Kept as a credit.",
+        "allocation_group": uuid.uuid4(),
+    }
+    return ledger.LeaseCredit(**{**values, **fields})
+
+
 LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.Operator: new_operator,
     ledger.Store: new_store,
@@ -515,6 +529,7 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.LeaseEndDeduction: new_lease_end_deduction,
     ledger.LeaseTransfer: new_lease_transfer,
     ledger.InstallmentPlan: new_installment_plan,
+    ledger.LeaseCredit: new_lease_credit,
 }
 
 
@@ -1819,6 +1834,58 @@ LEDGER_CASES: list[ConstraintCase] = [
         "installment_plans_one_per_one_off_charge",
         lambda: _second_plan(cancelled_first=True, rent=False),
         lambda: _second_plan(cancelled_first=False, rent=False),
+    ),
+    # PLAN-012d D6a, D6b: lease credits and credit payments (0042).
+    ConstraintCase(
+        "lease_credits_amount_positive",
+        lambda: new_lease_credit(amount=D("0.01"), remaining=D("0.01")),
+        lambda: new_lease_credit(amount=D("0.00"), remaining=D("0.00")),
+    ),
+    ConstraintCase(
+        "lease_credits_remaining_not_negative",
+        lambda: new_lease_credit(remaining=D("0.00")),
+        lambda: new_lease_credit(remaining=D("-0.01")),
+    ),
+    ConstraintCase(
+        "lease_credits_remaining_at_most_amount",
+        lambda: new_lease_credit(remaining=D("50.00")),
+        lambda: new_lease_credit(remaining=D("50.01")),
+    ),
+    ConstraintCase(
+        "lease_credits_method_manual",
+        lambda: new_lease_credit(method="wire"),
+        lambda: new_lease_credit(method="ach"),
+    ),
+    ConstraintCase(
+        "lease_credits_note_not_blank",
+        lambda: new_lease_credit(note="Kept."),
+        lambda: new_lease_credit(note=" "),
+    ),
+    ConstraintCase(
+        "payments_credit_method_has_credit",
+        lambda: new_payment(method="credit", note="Applied.", credit=saved(new_lease_credit())),
+        lambda: new_payment(method="credit", note="Applied."),
+    ),
+    ConstraintCase(
+        "payments_credit_only_credit_rows",
+        lambda: new_payment(method="credit", note="Applied.", credit=saved(new_lease_credit())),
+        lambda: new_payment(method="wire", note="Wire.", credit=saved(new_lease_credit())),
+    ),
+    ConstraintCase(
+        "payments_credit_refund_shape",
+        lambda: new_payment(
+            kind="credit_refund",
+            method="zelle",
+            note="Paid back.",
+            credit=saved(new_lease_credit()),
+        ),
+        lambda: new_payment(
+            kind="credit_refund",
+            method="zelle",
+            note="Paid back.",
+            credit=saved(new_lease_credit()),
+            rent_charge=saved(new_rent_charge()),
+        ),
     ),
     ConstraintCase(
         "operators_nsf_return_count_not_negative",

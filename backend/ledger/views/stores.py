@@ -23,16 +23,20 @@ The detail page is the store's workspace (docs/qa/PLAN-012d-store-workspace.md D
 and tabs rendered one at a time (``?tab=``): Charges, Invoices (with the store's drafts),
 Payments, Schedules, Documents, Contact log (the entries about a lease of the store, with
 **Add entry** for billing; PLAN-012 D3) and History (admin). ``stores:record_payment``
-(billing) and ``stores:charge_now_pick`` (admin) are the bar's Record a payment and
-Charge now; their GET is refused below those roles.
+(billing; one payment allocated over the open charges, PLAN-012d D6),
+``stores:schedule_payment`` (billing; one debit on a date) and ``stores:charge_now_pick``
+(admin) are the bar's Record a payment, Schedule a payment and Charge now; their GET is
+refused below those roles.
 """
 
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import Q, QuerySet
@@ -46,6 +50,10 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import (
+    ALLOCATION_PREFIX,
+    CREDIT_PREFIX,
+    AllocationPaymentForm,
+    SchedulePaymentForm,
     StoreCostCloseForm,
     StoreCostCorrectForm,
     StoreCostForm,
@@ -63,9 +71,12 @@ from ledger.models import (
 )
 from ledger.services import (
     contacts,
+    credits,
     csv_export,
+    invoice_builder,
     lease_end,
     one_off_charges,
+    payments_entry,
     store_costs,
     workspace,
 )
@@ -223,17 +234,193 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
     return render(request, "ledger/stores/detail.html", context)
 
 
+PAYMENT_FORM = "ledger/stores/record_payment.html"
+
+
+def _no_lease(request: HttpRequest, store: Store) -> HttpResponse:
+    messages.error(request, payments_entry.NO_LEASE)
+    return redirect(workspace.tab_url(store.pk, workspace.TAB_CHARGES))
+
+
+def _forged(request: HttpRequest, form: AllocationPaymentForm) -> bool:
+    """Whether the POST names an allocation or a credit input that is not one of the
+    listed open charges' (a forged or stale charge id)."""
+    return any(
+        key.startswith((ALLOCATION_PREFIX, CREDIT_PREFIX)) and key not in form.fields
+        for key in request.POST
+    )
+
+
+def _prefilled(data: dict[str, str], charges: list[payments_entry.OpenCharge]) -> dict[str, str]:
+    """A re-rendered form's data with the single open charge's allocation filled with
+    ``min(amount, balance)`` when it is empty and the amount reads (D6)."""
+    if len(charges) != 1:
+        return data
+    [charge] = charges
+    if (data.get(charge.field) or "").strip():
+        return data
+    try:
+        amount = Decimal((data.get("amount") or "").strip())
+    except InvalidOperation:
+        return data
+    if not amount.is_finite() or amount <= 0:
+        return data
+    return {**data, charge.field: str(min(amount, charge.balance))}
+
+
+def _unallocated(form: AllocationPaymentForm) -> Decimal:
+    """The amount received less the allocations, as the form holds them (the script keeps
+    it live; the service checks it again)."""
+    if not form.is_bound:
+        return Decimal("0.00")
+
+    def read(name: str) -> Decimal:
+        try:
+            value = Decimal((form.data.get(name) or "").strip() or "0")
+        except InvalidOperation:
+            return Decimal("0.00")
+        return value if value.is_finite() else Decimal("0.00")
+
+    allocated = sum((read(charge.field) for charge in form.charges), Decimal("0.00"))
+    return (read("amount") - allocated).quantize(Decimal("0.01"))
+
+
 @role_required
-@require_safe
+@require_http_methods(["GET", "HEAD", "POST"])
 def store_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:stores:record_payment`` (billing; PLAN-012d D2). Batch B of PLAN-012d
-    builds the payment form here (one amount allocated over the store's open charges,
-    D6). Until then the bar's "Record a payment" opens the per-charge choice: the
-    Charges tab, open charges, each with its Record payment link."""
+    """``ledger:stores:record_payment`` (billing; PLAN-012d D6): one payment received,
+    allocated by hand over the open charges of the store's current lease, the rest kept as
+    a credit on the lease, the credit held applied (:mod:`ledger.services.payments_entry`).
+    Returns to the Payments tab."""
     if not meets(_role(request), Role.BILLING):
         return forbidden(request)
     store = _load(pk)
-    return redirect(workspace.tab_url(store.pk, workspace.TAB_CHARGES))
+    today = timezone.localdate()
+    lease = payments_entry.current_lease(store, today)
+    if lease is None:
+        return _no_lease(request, store)
+    charges = payments_entry.open_charges(lease, today)
+    held = credits.balance(lease)
+    target = f"store-payment:{store.pk}"
+    here = reverse("ledger:stores:record_payment", kwargs={"pk": store.pk})
+    if request.method == "POST":
+        form = AllocationPaymentForm(request.POST, charges=charges)
+        if form.is_valid():
+            data = form.cleaned_data
+            outcome = payments_entry.record_entry(
+                store,
+                payments_entry.EntryInput(
+                    creation_key=data["creation_key"],
+                    method=data["method"],
+                    amount=data["amount"],
+                    paid_on=data["paid_on"],
+                    reference=data["reference"],
+                    note=data["note"],
+                    allocations=form.amounts(ALLOCATION_PREFIX),
+                    applied=form.amounts(CREDIT_PREFIX),
+                    keep_credit=data["keep_credit"],
+                    unlisted=_forged(request, form),
+                ),
+                actor=_actor(request),
+                today=today,
+            )
+            if outcome.ok:
+                if outcome.replayed:
+                    messages.info(request, outcome.message)
+                else:
+                    messages.success(request, outcome.message)
+                for text in outcome.provider_messages:
+                    messages.warning(request, text)
+                return redirect(workspace.tab_url(store.pk, workspace.TAB_PAYMENTS))
+            form.add_error(outcome.field if outcome.field in form.fields else None, outcome.message)
+        _hold(request, target, form)
+        return redirect(here)
+    form = _held(
+        request,
+        target,
+        lambda data: AllocationPaymentForm(_prefilled(data, charges), charges=charges),
+    ) or AllocationPaymentForm(
+        initial={"creation_key": uuid.uuid4(), "paid_on": today}, charges=charges
+    )
+    return render(
+        request,
+        PAYMENT_FORM,
+        {
+            "store": store,
+            "lease": lease,
+            "form": form,
+            "rows": [
+                {
+                    "charge": charge,
+                    "alloc": form[charge.field],
+                    "credit": form[charge.credit_field],
+                }
+                for charge in charges
+            ],
+            "credit_held": held,
+            "single": charges[0] if len(charges) == 1 else None,
+            "unallocated": _unallocated(form),
+        },
+    )
+
+
+SCHEDULE_FORM = "ledger/stores/schedule_payment.html"
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def store_schedule_payment(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:stores:schedule_payment`` (billing; PLAN-012d D2, Batch B): one debit of
+    the operator's bank account on a date, as a one-off charge collected by autopay on its
+    due date (:func:`ledger.services.payments_entry.schedule`). Returns to the Charges tab."""
+    if not meets(_role(request), Role.BILLING):
+        return forbidden(request)
+    store = _load(pk)
+    today = timezone.localdate()
+    lease = payments_entry.current_lease(store, today)
+    if lease is None:
+        return _no_lease(request, store)
+    target = f"store-schedule:{store.pk}"
+    here = reverse("ledger:stores:schedule_payment", kwargs={"pk": store.pk})
+    if request.method == "POST":
+        form = SchedulePaymentForm(request.POST)
+        if form.is_valid():
+            data = form.cleaned_data
+            outcome = payments_entry.schedule(
+                store,
+                item=data["item"],
+                description=data["description"],
+                amount=data["amount"],
+                due_date=data["due_date"],
+                confirmed=data["confirm_large_debit"],
+                creation_key=data["creation_key"],
+                actor=_actor(request),
+                today=today,
+            )
+            if outcome.ok:
+                if outcome.message == one_off_charges.ALREADY_CREATED:
+                    messages.info(request, outcome.message)
+                else:
+                    messages.success(request, outcome.message)
+                return redirect(workspace.tab_url(store.pk, workspace.TAB_CHARGES))
+            field = {"price": "amount", "due_date": "due_date", "confirm": "confirm_large_debit"}
+            form.add_error(field.get(outcome.field or "", None), outcome.message)
+        _hold(request, target, form)
+        return redirect(here)
+    form = _held(request, target, SchedulePaymentForm) or SchedulePaymentForm(
+        initial={"creation_key": uuid.uuid4(), "due_date": today}
+    )
+    return render(
+        request,
+        SCHEDULE_FORM,
+        {
+            "store": store,
+            "lease": lease,
+            "form": form,
+            "item_names": [fee_type.name for fee_type in invoice_builder.offered_fee_types()],
+            "large_debit": settings.LARGE_DEBIT_WARNING_AMOUNT,
+        },
+    )
 
 
 @role_required

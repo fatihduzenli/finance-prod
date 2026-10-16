@@ -150,6 +150,8 @@ CENT = Decimal("0.01")
 #: Largest amount ``numeric(12,2)`` holds.
 MONEY_MAX = Decimal("9999999999.99")
 MANUAL_METHODS: tuple[str, ...] = (PaymentMethod.ZELLE, PaymentMethod.WIRE, PaymentMethod.OTHER)
+#: A credit held on the lease applied to a charge (PLAN-012d D6a): never chosen on a form.
+CREDIT_METHODS: tuple[str, ...] = (PaymentMethod.CREDIT,)
 
 # --- Fixed sentences ------------------------------------------------------------------
 
@@ -1246,6 +1248,8 @@ def record_manual_payment(
     today: date | None = None,
     reference: str = "",
     defer_mark: bool = False,
+    allocation_group: uuid.UUID | None = None,
+    credit_id: uuid.UUID | None = None,
 ) -> PaymentOutcome:
     """Record a Zelle, wire or other payment against a rent charge (D8), then update the
     provider invoice as the module docstring says (PLAN-009 D1 to D3).
@@ -1254,11 +1258,14 @@ def record_manual_payment(
     looked up under the charge's row lock, so a resubmitted form records nothing and
     calls nothing. With ``defer_mark`` (the web, PLAN-010 D3) no provider call is made:
     a payment whose invoice is to be marked returns ``mark_due=True`` and the worker
-    marks it with :func:`mark_provider_invoice`.
+    marks it with :func:`mark_provider_invoice`. ``allocation_group`` and ``credit_id``
+    come from the store page's payment form (PLAN-012d D6a): a payment of method
+    ``credit`` applies the credit ``credit_id`` (the caller holds its row lock and lowers
+    its remaining), and no other method names a credit.
     """
     text = visible_text(note or "")
     reference = (reference or "").strip()
-    refusal = payment_refusal(method, amount, paid_on, text, today)
+    refusal = payment_refusal(method, amount, paid_on, text, today, credit=credit_id is not None)
     if refusal is not None:
         return refusal
     from ledger.services import one_off_charges  # one_off_charges imports this module
@@ -1290,6 +1297,8 @@ def record_manual_payment(
             reference=reference,
             note=text,
             recorded_by=actor,
+            allocation_group=allocation_group,
+            credit_id=credit_id,
         )
         try:
             payment.save()
@@ -1342,14 +1351,22 @@ def record_manual_payment(
 
 
 def payment_refusal(
-    method: str, amount: Decimal, paid_on: date, text: str, today: date | None
+    method: str,
+    amount: Decimal,
+    paid_on: date,
+    text: str,
+    today: date | None,
+    *,
+    credit: bool = False,
 ) -> PaymentOutcome | None:
     """The first rule a manual payment breaks before any row is read (D8), or ``None``.
 
     ``text`` is the note as :func:`~ledger.validators.visible_text` leaves it: without
-    invisible characters or surrounding whitespace (PLAN-010c D12).
+    invisible characters or surrounding whitespace (PLAN-010c D12). With ``credit`` the
+    payment applies a credit held on the lease (PLAN-012d D6a): its method is ``credit``
+    and only then.
     """
-    if method not in MANUAL_METHODS:
+    if method not in (CREDIT_METHODS if credit else MANUAL_METHODS):
         return PaymentOutcome(False, PAY_METHOD, "method")
     if not isinstance(amount, Decimal) or not amount.is_finite() or amount <= 0:
         return PaymentOutcome(False, PAY_NOT_POSITIVE, "amount")

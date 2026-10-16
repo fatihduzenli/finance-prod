@@ -22,8 +22,14 @@ from decimal import Decimal
 from payments.provider import OfflinePayment
 from payments.stax.validation import CHECK_NUMBER_MAX_LENGTH, PAYMENT_NOTE_MAX_LENGTH
 
-#: How the memo names each local method.
-METHOD_WORDS: dict[str, str] = {"wire": "wire", "zelle": "Zelle", "other": "other"}
+#: How the memo names each local method; ``credit`` is a credit held on the lease applied
+#: to the charge (PLAN-012d D6a), never a method staff choose.
+METHOD_WORDS: dict[str, str] = {
+    "wire": "wire",
+    "zelle": "Zelle",
+    "other": "other",
+    "credit": "credit",
+}
 
 _NOT_CHECK_NUMBER = re.compile(r"[^A-Za-z0-9-]")
 _WHITESPACE = re.compile(r"\s+")

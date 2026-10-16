@@ -225,10 +225,11 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # author with 403); the soft delete needs admin. The views refuse the forms' GET
     # below those roles too.
     "ledger:stores:contacts_add": RouteRule(min_role=Role.BILLING, methods=POST),
-    # PLAN-012d D2, D6: the store page's Record a payment (billing). Batch B adds its
-    # POST (the payment form); until then the view takes GET only and refuses it below
-    # billing.
+    # PLAN-012d D2, D6: the store page's Record a payment (one payment allocated over
+    # the open charges) and Schedule a payment (one debit on a date) need billing. The
+    # views refuse the forms' GET below billing too.
     "ledger:stores:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:stores:schedule_payment": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),

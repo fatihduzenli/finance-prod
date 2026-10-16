@@ -1628,6 +1628,9 @@ class PaymentKind(models.TextChoices):
     ONE_OFF = "one_off", "One-off charge"
     #: Money paid back to the operator from a deposit; never a provider refund (D4, D7).
     REFUND_DEPOSIT = "refund_deposit", "Deposit refund"
+    #: Money paid back to the operator from a credit held on the lease, at the lease end
+    #: (PLAN-012d D6b, ADR-0013); never a provider refund.
+    CREDIT_REFUND = "credit_refund", "Credit refund"
 
 
 #: The payment kinds that belong to a one-off charge.
@@ -1637,6 +1640,19 @@ MANUAL_PAYMENT_METHODS: list[str] = ["zelle", "wire", "other"]
 
 
 class PaymentMethod(models.TextChoices):
+    ACH = "ach", "ACH"
+    ZELLE = "zelle", "Zelle"
+    WIRE = "wire", "Wire"
+    OTHER = "other", "Other"
+    #: A credit held on the lease applied to a charge (PLAN-012d D6a, ADR-0013): no money
+    #: moves and no provider is involved.
+    CREDIT = "credit", "Credit"
+
+
+class MoneyMethod(models.TextChoices):
+    """The methods money moves by: :class:`PaymentMethod` without ``credit`` (a deposit
+    resolution's method, PLAN-010b D7)."""
+
     ACH = "ach", "ACH"
     ZELLE = "zelle", "Zelle"
     WIRE = "wire", "Wire"
@@ -1655,6 +1671,50 @@ class ResolutionKind(models.TextChoices):
 
     NOTE = "note", "Resolved with a note"
     RESCHEDULED = "rescheduled", "Rescheduled"
+
+
+class LeaseCredit(GuardedModel):
+    """Money received for a lease and not applied to a charge (PLAN-012d D6a, D6b;
+    ADR-0013): a liability to the operator, never revenue. ``remaining`` falls as the
+    credit is applied to charges (payments of method ``credit``) or paid back at the
+    lease end (a ``credit_refund`` payment). Written only by
+    :mod:`ledger.services.credits` and :mod:`ledger.services.payments_entry`."""
+
+    lease = models.ForeignKey(Lease, on_delete=models.PROTECT, related_name="credits")
+    amount = MoneyField()
+    remaining = MoneyField()
+    method = _choice(MoneyMethod)
+    received_on = models.DateField()
+    reference = free_text()
+    note = free_text()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    #: The payment entry that kept it (:attr:`Payment.allocation_group`).
+    allocation_group = models.UUIDField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "lease_credits"
+        constraints = [
+            _positive("lease_credits", "amount"),
+            _not_negative("lease_credits", "remaining"),
+            models.CheckConstraint(
+                condition=Q(remaining__lte=F("amount")),
+                name="lease_credits_remaining_at_most_amount",
+            ),
+            models.CheckConstraint(
+                # With ``lease_credits_method_valid``: Zelle, wire or other, never ACH.
+                condition=~Q(method=MoneyMethod.ACH.value),
+                name="lease_credits_method_manual",
+            ),
+            _not_blank("lease_credits", "note"),
+            _valid_choice("lease_credits", "method", MoneyMethod),
+        ]
+
+    def __str__(self) -> str:
+        return f"Lease credit {self.pk}"
 
 
 class Payment(GuardedModel):
@@ -1705,6 +1765,13 @@ class Payment(GuardedModel):
     #: ``redebit_date``, a New York date); empty while unresolved.
     resolution_kind = _choice(ResolutionKind, blank=True, default="")
     redebit_date = models.DateField(null=True, blank=True)
+    #: PLAN-012d D6a: the payments of one entry of the store page's payment form, one per
+    #: charge it paid, share this value (the kept credit too); null otherwise.
+    allocation_group = models.UUIDField(null=True, blank=True)
+    #: The credit a ``credit`` payment applied, or a ``credit_refund`` paid back.
+    credit = models.ForeignKey(
+        LeaseCredit, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1769,6 +1836,31 @@ class Payment(GuardedModel):
                 | (~Q(resolution_kind="rescheduled") & Q(redebit_date__isnull=True)),
                 name="payments_redebit_date_iff_rescheduled",
             ),
+            # PLAN-012d D6a, D6b: a credit payment names its credit; only a credit
+            # payment or a credit refund names one.
+            models.CheckConstraint(
+                condition=~Q(method="credit") | Q(credit__isnull=False, is_refund=False),
+                name="payments_credit_method_has_credit",
+            ),
+            models.CheckConstraint(
+                condition=Q(credit__isnull=True) | Q(method="credit") | Q(kind="credit_refund"),
+                name="payments_credit_only_credit_rows",
+            ),
+            # A credit refund is money paid back by hand, of a credit and nothing else.
+            models.CheckConstraint(
+                condition=~Q(kind="credit_refund")
+                | Q(
+                    credit__isnull=False,
+                    is_refund=False,
+                    parent_payment__isnull=True,
+                    method__in=MANUAL_PAYMENT_METHODS,
+                    rent_charge__isnull=True,
+                    insurance_charge__isnull=True,
+                    charge_adjustment__isnull=True,
+                    one_off_charge__isnull=True,
+                ),
+                name="payments_credit_refund_shape",
+            ),
             _valid_choice("payments", "resolution_kind", ResolutionKind, blank=True),
             _valid_choice("payments", "kind", PaymentKind),
             _valid_choice("payments", "method", PaymentMethod),
@@ -1809,7 +1901,7 @@ class DepositResolution(GuardedModel):
     #: is not counted again as a withheld deposit.
     offset_amount = MoneyField(default=ZERO)
     resolved_on = models.DateField()
-    method = _choice(PaymentMethod, blank=True, default="")
+    method = _choice(MoneyMethod, blank=True, default="")
     note = free_text(blank=False)
     to_lease = models.ForeignKey(
         Lease,
@@ -1849,7 +1941,7 @@ class DepositResolution(GuardedModel):
                 name="deposit_resolutions_to_lease_iff_transferred",
             ),
             _valid_choice("deposit_resolutions", "kind", DepositResolutionKind),
-            _valid_choice("deposit_resolutions", "method", PaymentMethod, blank=True),
+            _valid_choice("deposit_resolutions", "method", MoneyMethod, blank=True),
         ]
 
 

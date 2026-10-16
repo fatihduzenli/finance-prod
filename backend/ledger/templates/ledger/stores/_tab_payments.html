@@ -1,4 +1,4 @@
-{% comment %}The Payments tab (docs/qa/PLAN-012d D3): the payments ledger's rows for this store.{% endcomment %}
+{% comment %}The Payments tab (docs/qa/PLAN-012d D3, D6b): the payments ledger's rows for this store, and the credits held on its leases with what used them.{% endcomment %}
 {% load responsive %}
 <h2>Payments</h2>
 <p class="actions"><a class="btn" id="store-payments-ledger" href="{{ payments_ledger_url }}">Open in the payments ledger</a></p>
@@ -24,3 +24,24 @@
 </table>
 {% endresponsive_table %}
 {% if payments_more %}<p class="muted">The {{ payments_limit }} latest are shown; the payments ledger has every one.</p>{% endif %}
+<h2>Credits</h2>
+<p class="muted">Money received and not applied to a charge, held for the operator (never revenue). A credit pays a charge from Record a payment ("From credit"), or is refunded at the lease end.</p>
+{% responsive_table %}
+<table id="store-credits">
+  <thead><tr><th>Received on</th><th>Method</th><th>Amount</th><th>Remaining</th><th>Applied or refunded</th><th>Note</th></tr></thead>
+  <tbody>
+    {% for row in credit_rows %}
+      <tr class="store-credit">
+        <td>{{ row.credit.received_on|date:"Y-m-d" }}</td>
+        <td>{{ row.credit.get_method_display }}</td>
+        <td class="money">${{ row.credit.amount }}</td>
+        <td class="money credit-remaining">${{ row.credit.remaining }}</td>
+        <td>{% for payment in row.uses %}<a href="{% url 'ledger:payments:detail' pk=payment.pk %}">{{ payment.settled_on|date:"Y-m-d" }}: ${{ payment.amount }}</a>{% if payment.kind == "credit_refund" %} refunded{% else %} to {% include "ledger/payments/_charge.html" with payment=payment %}{% endif %}{% if not forloop.last %}; {% endif %}{% empty %}<span class="muted">Not used yet</span>{% endfor %}</td>
+        <td>{{ row.credit.note }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6" class="muted">No credit held or used.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endresponsive_table %}

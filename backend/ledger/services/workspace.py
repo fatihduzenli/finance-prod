@@ -347,7 +347,14 @@ def _actions(store: Store, header: Header, role: Role | None, today: date) -> li
                 "bar-add-setup-charge",
             )
         )
-        # "Schedule a payment" arrives in Batch B as ``ledger:stores:schedule_payment``.
+        found.append(
+            Action(
+                "schedule_payment",
+                "Schedule a payment",
+                reverse("ledger:stores:schedule_payment", kwargs={"pk": store.pk}),
+                "bar-schedule-payment",
+            )
+        )
     found.append(
         Action(
             "upload_document",
@@ -771,11 +778,13 @@ def invoices_tab(store: Store, chosen: str, role: Role | None) -> dict[str, Any]
 
 
 def payments_tab(store: Store) -> dict[str, Any]:
-    """The Payments tab (D3): the newest :data:`PAYMENTS_LIMIT` rows of the payments
-    ledger for this store, with the link to the ledger filtered on it."""
+    """The Payments tab (D3, D6b): the newest :data:`PAYMENTS_LIMIT` rows of the payments
+    ledger for this store, with the link to the ledger filtered on it, and the credits of
+    the store's leases with what applied or paid them back."""
     selected = payments_ledger.PaymentFilter(store=store.pk)
     shown = list(payments_ledger.ledger_payments(selected)[: PAYMENTS_LIMIT + 1])
     return {
+        "credit_rows": credits.rows_for_store(store),
         "payment_rows": payments_ledger.rows_for(shown[:PAYMENTS_LIMIT]),
         "payments_more": len(shown) > PAYMENTS_LIMIT,
         "payments_limit": PAYMENTS_LIMIT,

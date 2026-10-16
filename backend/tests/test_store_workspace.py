@@ -172,7 +172,8 @@ def test_the_header_shows_the_lease_balance_credit_next_payment_and_open_promise
     assert header.open_promise is not None and header.open_promise.promised_amount == D("500")
     html = page(client_for(Role.VIEWER)[0], store_page(lease.store_id))
     assert 'id="header-open-balance">$1945.00<' in html
-    assert 'id="header-credit">$0.00<' in html
+    # The credit line shows only when a credit is held (QA-012d finding 5, "if any").
+    assert 'id="header-credit"' not in html and "<dt>Credit</dt>" not in html
     assert "2026-10-25: Broken shelf" in html
     assert "$500.00 by 2026-10-20" in html
     assert "Acme Ops" in html and "From 2026-09-01" in html
@@ -222,6 +223,7 @@ def test_the_bar_by_role() -> None:
         "create_invoice",
         "record_payment",
         "add_setup_charge",
+        "schedule_payment",
         "upload_document",
         "add_contact",
     ]
@@ -240,20 +242,20 @@ def test_the_bar_by_role() -> None:
     assert f'href="/invoices/new/store/{store.pk}/?store={store.pk}&amp;lease={lease.pk}"' in html
     setup = f"/leases/{lease.pk}/setup-charges/new/"
     assert f'href="{setup}?store={store.pk}&amp;lease={lease.pk}"' in html
-    # "Schedule a payment" waits for Batch B (``ledger:stores:schedule_payment``).
-    assert "Schedule a payment" not in html and "collection=autopay_due" not in html
+    # Batch B: "Schedule a payment" opens ``ledger:stores:schedule_payment``.
+    assert f'href="/stores/{store.pk}/schedule-payment/"' in html
     assert f'href="/stores/{store.pk}/payments/new/"' in html
     assert f'href="/stores/{store.pk}/charge-now/"' in html
     assert f'href="/leases/{lease.pk}/edit/?store={store.pk}&amp;lease={lease.pk}"' in html
     assert 'id="action-bar"' not in page(client_for(Role.VIEWER)[0], store_page(store.pk))
 
 
-def test_record_a_payment_opens_the_charges_tab_until_batch_b() -> None:
+def test_record_a_payment_opens_the_allocation_form() -> None:
+    # Batch B (D6): the form itself; tests/test_payment_allocation.py covers it.
     lease = a_world()
     billing, _ = client_for(Role.BILLING)
-    response = billing.get(reverse("ledger:stores:record_payment", kwargs={"pk": lease.store_id}))
-    assert (response.status_code, response["Location"]) == (302, tab(lease.store_id, "charges"))
-    assert client_for(Role.VIEWER)[0].get(response["Location"]).status_code == 200
+    html = page(billing, reverse("ledger:stores:record_payment", kwargs={"pk": lease.store_id}))
+    assert 'id="allocation-form"' in html and 'id="unallocated"' in html
 
 
 def test_charge_now_lists_the_stores_chargeable_charges_for_admins() -> None:

@@ -35,8 +35,13 @@ unpaid-balance offset first (it is applied to the open charges, oldest first, as
 offset" payments), then the other deductions. What the deposits do not cover of the
 other deductions is the **lease-end balance**, a new charge; what they do not cover of
 the offset stays open on its charges. **Refund due** = deposit held − deductions covered
-+ credit (the last month's and the months after the end); **amount owed** = lease-end
-balance + open balance not offset.
++ credit (the last month's and the months after the end) + the credit held on the lease;
+**amount owed** = lease-end balance + open balance not offset.
+
+**The credit held on the lease** (PLAN-012d D6b, ADR-0013): money received and not applied
+to a charge (:mod:`ledger.services.credits`) is listed, one line per credit with what
+remains of it, and refunded with the settlement like the last month's credit: the
+confirm writes one ``credit_refund`` payment per credit by the settlement method.
 
 Money is ``Decimal`` throughout.
 """
@@ -59,6 +64,7 @@ from django.utils import timezone
 from ledger.models import (
     ZERO,
     DeductionKind,
+    LeaseCredit,
     LeaseEnd,
     LeaseEndReason,
     OneOffCharge,
@@ -149,6 +155,19 @@ class AfterEnd:
 
 
 @dataclass(frozen=True, slots=True)
+class CreditLine:
+    """A credit held on the lease (PLAN-012d D6b), refunded with the settlement."""
+
+    credit_id: uuid.UUID
+    received_on: date
+    remaining: Decimal
+
+    @property
+    def text(self) -> str:
+        return f"Credit held on the lease, received {long_date(self.received_on)}"
+
+
+@dataclass(frozen=True, slots=True)
 class OpenLine:
     kind: str
     charge_id: uuid.UUID | None
@@ -230,6 +249,9 @@ class Final:
     refund_on: date | None
     refund_reference: str
     prepared_on: date
+    #: PLAN-012d D6b: the credits held on the lease, refunded with the settlement.
+    held_credits: tuple[CreditLine, ...] = ()
+    lease_credit: Decimal = ZERO
 
     @property
     def deductions_total(self) -> Decimal:
@@ -371,6 +393,16 @@ def from_json(data: Mapping[str, Any]) -> Final:
         refund_on=_day(data["refund_on"]),
         refund_reference=str(data["refund_reference"]),
         prepared_on=prepared,
+        # Statements kept before PLAN-012d D6b have no credit held on the lease.
+        held_credits=tuple(
+            CreditLine(
+                credit_id=uuid.UUID(str(item["credit_id"])),
+                received_on=date.fromisoformat(item["received_on"]),
+                remaining=_money(item["remaining"]),
+            )
+            for item in data.get("held_credits", ())
+        ),
+        lease_credit=_money(data.get("lease_credit", "0.00")),
     )
 
 
@@ -620,6 +652,18 @@ def _total(amounts: Iterable[Decimal]) -> Decimal:
     return sum(amounts, ZERO)
 
 
+def _credit_lines(lease_end: LeaseEnd) -> list[CreditLine]:
+    """The credits held on the lease with something remaining, oldest first."""
+    return [
+        CreditLine(pk, received, Decimal(remaining))
+        for pk, received, remaining in LeaseCredit.objects.filter(
+            lease=lease_end.lease, remaining__gt=0
+        )
+        .order_by("received_on", "created_at", "id")
+        .values_list("pk", "received_on", "remaining")
+    ]
+
+
 # --- The statement --------------------------------------------------------------------------
 
 
@@ -649,6 +693,8 @@ def final(lease_end: LeaseEnd, *, today: date | None = None) -> Final:
     offset = _total(line.amount for line in deductions if line.kind == DeductionKind.UNPAID_BALANCE)
     other = _total(line.amount for line in deductions if line.kind != DeductionKind.UNPAID_BALANCE)
     credit = (last.credit if last is not None else ZERO) + _total(item.credit for item in later)
+    held_credits = _credit_lines(lease_end)
+    lease_credit = _total(line.remaining for line in held_credits)
     offset_applied = min(offset, held)
     other_withheld = min(other, held - offset_applied)
     withheld = offset_applied + other_withheld
@@ -678,7 +724,7 @@ def final(lease_end: LeaseEnd, *, today: date | None = None) -> Final:
         offset_applied=offset_applied,
         withheld=withheld,
         deposit_refund=deposit_refund,
-        refund_due=deposit_refund + credit,
+        refund_due=deposit_refund + credit + lease_credit,
         debt=debt,
         still_open=still_open,
         amount_owed=debt + still_open,
@@ -686,6 +732,8 @@ def final(lease_end: LeaseEnd, *, today: date | None = None) -> Final:
         refund_on=lease_end.refund_on,
         refund_reference=lease_end.refund_reference,
         prepared_on=day,
+        held_credits=tuple(held_credits),
+        lease_credit=lease_credit,
     )
 
 
@@ -747,6 +795,12 @@ def _lines(statement: Final) -> list[tuple[str, str, str]]:
         rows.append(("text", f"{deposit.label}: {deposit.text}", money(deposit.held)))
     rows.append(("total", "Deposit held", money(statement.deposit_held)))
     rows.append(("gap", "", ""))
+    if statement.held_credits:
+        rows.append(("heading", "Credit on the lease", ""))
+        for held in statement.held_credits:
+            rows.append(("text", f"{held.text}, refunded", money(held.remaining)))
+        rows.append(("total", "Credit held", money(statement.lease_credit)))
+        rows.append(("gap", "", ""))
     rows.append(("heading", "Deductions", ""))
     for deduction in statement.deductions:
         label = deduction.label + (f": {deduction.description}" if deduction.description else "")

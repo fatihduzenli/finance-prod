@@ -81,6 +81,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services import (
+    credits,
     deposits,
     invoice_builder,
     lease_end,
@@ -89,6 +90,7 @@ from ledger.services import (
     receivables,
     rent_run,
     statements,
+    workspace,
 )
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 
@@ -100,6 +102,11 @@ MEMO = "Move-in charges for store {label}"
 # --- Blocker kinds -----------------------------------------------------------------------
 
 OPEN_BALANCE = "open_balance"
+#: PLAN-012d D6b: a credit held on the outgoing lease is the outgoing operator's money.
+CREDIT_HELD = "credit_held"
+CREDIT_REMAINS = (
+    "A credit of {amount} remains on the outgoing operator: refund it in the lease end first."
+)
 
 # --- Fixed sentences -----------------------------------------------------------------------
 
@@ -357,7 +364,8 @@ def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list
     one is a lease-end blocker). A charge the end month still needs is not listed: the
     statement step creates it (PLAN-012b-b D10). Once the terms are set, a balance is
     listed as the statement leaves it: the unpaid-balance offset pays the open lines
-    oldest due first, as the confirm pays them (PLAN-012b-b D10, D12)."""
+    oldest due first, as the confirm pays them (PLAN-012b-b D10, D12). A credit held on
+    the outgoing lease blocks too (PLAN-012d D6b): it is the outgoing operator's money."""
     day = today or timezone.localdate()
     lease = transfer.outgoing_lease
     end = transfer.lease_end
@@ -388,6 +396,15 @@ def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list
             "operator. It must be paid before the store is transferred."
         )
         found.append(lease_end.Blocker(OPEN_BALANCE, text, _balance_url(kind, charge_id, lease)))
+    held = credits.balance(lease)
+    if held > 0:
+        found.append(
+            lease_end.Blocker(
+                CREDIT_HELD,
+                CREDIT_REMAINS.format(amount=leases.format_amount(held)),
+                workspace.tab_url(lease.store_id, workspace.TAB_PAYMENTS),
+            )
+        )
     return found
 
 

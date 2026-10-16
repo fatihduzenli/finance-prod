@@ -1246,3 +1246,21 @@ rent and one-off rows read the stored balance, so a rescheduled return's carried
 subtracted as the header does; Batch D). Note: the PostgreSQL unit selection took 15:04 locally
 on a slow run (12:44 on CI before this batch); CI's figure on the next push decides whether the
 step needs a further split. Batch B assigned.
+
+## Update, 2026-10-15, PLAN-012d Batch B built and gated (not pushed)
+
+Batch B of Step 12d (ADR-0013): **Record a payment** from the store page with manual
+allocation over the lease's open charges (rent, one-off, insurance), nothing pre-filled unless
+one charge is open, the unallocated amount live, the remainder kept as a **credit on the lease**
+when ticked; a credit is applied from the same form later (payment method `credit`), shown in
+the header and the Payments tab, counted as "Credits held" in the P&L footer, refunded at the
+lease end and blocking a transfer while it remains; each allocated part is a payment on its
+charge with today's Stax marking rules; insurance manual payments exist now (flagged for review
+instead of marked at the provider: no insurance mark job, deferred); **Schedule a payment**
+creates an autopay one-off charge on a chosen date; migration 0042 (`lease_credits`,
+`payments.allocation_group/credit_id`, method `credit`, kind `credit_refund`). One rework
+cycle: the processor named outside `payments/`, the call-graph scan tripped by a parameter named
+`provider`, a template load line, a route list, and the header's "Credit $0.00". Gate (re-run
+under `caffeinate` after a four-hour idle crawl): ruff, format, mypy (396 files), lock,
+migrations clean; sqlite 5,228 passed; PostgreSQL 24 + 5,831 passed; e2e 7; secret scans clean;
+Fable's adversarial file 7 cases green on both engines. Batch C assigned.

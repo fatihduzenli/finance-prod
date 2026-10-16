@@ -520,6 +520,98 @@ class ManualPaymentForm(forms.Form):
         return note
 
 
+#: The prefixes of the store payment form's per-charge inputs (PLAN-012d D6).
+ALLOCATION_PREFIX = "alloc_"
+CREDIT_PREFIX = "credit_"
+
+
+class AllocationPaymentForm(forms.Form):
+    """The store page's payment form (PLAN-012d D6): one amount received, allocated by hand
+    over the open charges ``charges`` (each with an ``alloc_<id>`` input and a
+    ``credit_<id>`` input for the credit held), and ``keep_credit`` to keep the rest as a
+    credit on the lease. The amount may be empty when only the credit is applied. The
+    service (:func:`ledger.services.payments_entry.record`) checks every rule again under
+    the lease's row lock; the form checks shape only."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput)
+    method = forms.ChoiceField(choices=MANUAL_METHOD_CHOICES)
+    amount = forms.DecimalField(
+        required=False,
+        max_value=RENT_MAX,
+        max_digits=12,
+        decimal_places=2,
+        label="Amount received",
+        help_text="Leave empty to apply the credit held alone.",
+    )
+    paid_on = forms.DateField(label="Received on", widget=forms.DateInput(attrs={"type": "date"}))
+    reference = ManualPaymentForm.base_fields["reference"]
+    note = ManualPaymentForm.base_fields["note"]
+    keep_credit = forms.BooleanField(
+        required=False, widget=_ExactCheckboxInput, label="Keep the rest as a credit on the lease"
+    )
+
+    def __init__(self, *args: Any, charges: Iterable[Any] = (), **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.charges = list(charges)
+        for charge in self.charges:
+            for prefix in (ALLOCATION_PREFIX, CREDIT_PREFIX):
+                self.fields[f"{prefix}{charge.charge_id}"] = forms.DecimalField(
+                    required=False,
+                    max_digits=12,
+                    decimal_places=2,
+                    label=charge.description,
+                    widget=forms.NumberInput(attrs={"step": "0.01", "inputmode": "decimal"}),
+                )
+
+    clean_note = ManualPaymentForm.clean_note
+
+    def amounts(self, prefix: str) -> dict[uuid.UUID, Decimal]:
+        """The per-charge amounts typed with ``prefix`` (an empty input is zero)."""
+        return {
+            charge.charge_id: self.cleaned_data.get(f"{prefix}{charge.charge_id}")
+            or Decimal("0.00")
+            for charge in self.charges
+        }
+
+
+class SchedulePaymentForm(forms.Form):
+    """Schedule a payment from the store page (PLAN-012d D2, Batch B): an item (a catalogue
+    name or a typed one), an optional description, the amount and the debit date. The
+    service (:func:`ledger.services.one_off_charges.add_charge`) checks every rule."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput)
+    item = forms.CharField(
+        max_length=NAME_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Pick a catalogue item from the list or type a name.",
+        error_messages={"required": "Enter the item: a catalogue name or a typed one."},
+    )
+    description = forms.CharField(
+        required=False,
+        max_length=DESCRIPTION_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        help_text="Optional: a detail shown after the item.",
+    )
+    amount = forms.DecimalField(
+        min_value=Decimal("0.01"), max_value=RENT_MAX, max_digits=12, decimal_places=2
+    )
+    due_date = forms.DateField(
+        label="Debit on",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="Today or later: the operator's bank account is debited on this date.",
+    )
+    confirm_large_debit = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
+
+    def clean_item(self) -> str:
+        item = visible_text(self.cleaned_data["item"])
+        if not item:
+            raise forms.ValidationError(self.fields["item"].error_messages["required"])
+        return item
+
+    def clean_description(self) -> str:
+        return visible_text(self.cleaned_data["description"])
+
+
 class LinkInvoiceForm(forms.Form):
     """Link one of the operator's unlinked invoices to a rent charge (PLAN-008a §2 rule
     4). The invoice is named by its local key; the service checks under row locks that it

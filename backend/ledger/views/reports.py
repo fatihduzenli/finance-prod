@@ -42,7 +42,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_safe
 
 from ledger.models import Operator
-from ledger.services import pnl, receivables, reports
+from ledger.services import credits, pnl, receivables, reports
 from ledger.views.operators import csv_response, role_required
 
 logger = logging.getLogger(__name__)
@@ -107,12 +107,17 @@ def _too_slow(request: HttpRequest, query: pnl.PnlQuery) -> HttpResponse:
 def pnl_report(request: HttpRequest) -> HttpResponse:
     query = pnl.parse_query(request.GET)
 
-    def compute() -> tuple[list[pnl.PnlRow], list[pnl.PnlGroup], Decimal]:
+    def compute() -> tuple[list[pnl.PnlRow], list[pnl.PnlGroup], Decimal, Decimal]:
         rows = pnl.rows(query)
-        return rows, pnl.grouped(rows, query.group), pnl.deposits_held(query)
+        return (
+            rows,
+            pnl.grouped(rows, query.group),
+            pnl.deposits_held(query),
+            credits.held(query.end),
+        )
 
     try:
-        rows, groups, held = bounded(compute)
+        rows, groups, held, credits_held = bounded(compute)
     except ReportTooSlow:
         return _too_slow(request, query)
     return render(
@@ -125,6 +130,7 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
             "row_count": len(rows),
             "cost_only_count": sum(1 for row in rows if row.cost_only),
             "deposits_held": held,
+            "credits_held": credits_held,
             "group_choices": pnl.GROUP_CHOICES,
             "group_label": dict(pnl.GROUP_CHOICES)[query.group],
             "export_query": urlencode(query.as_query()),

@@ -337,6 +337,8 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     lease_end = ("end_lease", "transfer")
     # PLAN-012d D2: the action bar's Record a payment (billing) and Charge now (admin).
     workspace_bar = ("record_payment", "charge_now_pick")
+    # PLAN-012d Batch B: the action bar's Schedule a payment (billing).
+    schedule = ("schedule_payment",)
     assert names == {
         f"ledger:stores:{short}"
         for short in (
@@ -349,11 +351,13 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
             *contact_log,
             *lease_end,
             *workspace_bar,
+            *schedule,
         )
     }
     assert "ledger:stores:charge_now_pick" in registry.READ_ONLY_ROUTE_NAMES
-    rule = registry.rule_for("ledger:stores:record_payment")
-    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    for short in ("record_payment", *schedule):
+        rule = registry.rule_for(f"ledger:stores:{short}")
+        assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     assert {
         "ledger:stores:list",
         "ledger:stores:detail",

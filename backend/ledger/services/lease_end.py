@@ -37,7 +37,9 @@ The wizard's state is one :class:`~ledger.models.LeaseEnd` row per lease
    open charges oldest first as settled manual payments (method ``other``, reference
    "deposit offset"), each deposit is resolved in one row
    (:func:`ledger.services.deposits.resolve_deposit_split`), a credit is refunded on its
-   rent charge, the lease-end balance becomes a one-off charge (category ``other``,
+   rent charge, each credit held on the lease is paid back by the settlement method
+   (:func:`ledger.services.credits.refund_all`, PLAN-012d D6b), the lease-end balance
+   becomes a one-off charge (category ``other``,
    manual, due 15 days after the end), the figures are kept and the
    ``lease_end_documents`` job is queued. The store's status is unchanged: the store is
    vacant because no lease of it is in effect (:func:`vacant_since`).
@@ -117,6 +119,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services import (
+    credits,
     deposits,
     documents,
     installments,
@@ -1169,6 +1172,23 @@ def _resolve_deposits(
     return written, refund_payment
 
 
+def _refund_credits(
+    end: LeaseEnd, figures: statements.Final, on: date, actor: User | None
+) -> list[Payment]:
+    """PLAN-012d D6b: pay back each credit held on the lease by the settlement method; what
+    is held must be what the statement lists (the lease's row lock keeps it so)."""
+    if credits.balance(end.lease) != figures.lease_credit:
+        raise _Abort(CHANGED_MEANWHILE)
+    return credits.refund_all(
+        end.lease,
+        method=_payment_method(end),
+        on=on,
+        reference=end.refund_reference,
+        note=_settlement_text(end, "Credit held on the lease, paid back"),
+        actor=actor,
+    )
+
+
 def _debt_charge(end: LeaseEnd, amount: Decimal, actor: User | None, today: date) -> OneOffCharge:
     """The lease-end balance: a manual one-off charge, nothing at the payment provider."""
     lease = end.lease
@@ -1207,6 +1227,7 @@ def _summary(figures: statements.Final) -> dict[str, Any]:
         "offset_applied": str(figures.offset_applied),
         "withheld": str(figures.withheld),
         "credit": str(figures.credit),
+        "lease_credit": str(figures.lease_credit),
         "refund_due": str(figures.refund_due),
         "debt": str(figures.debt),
         "amount_owed": str(figures.amount_owed),
@@ -1297,6 +1318,9 @@ def _confirm(
         written["offset_payments"] = _apply_offsets(row, figures.offset_applied, on, actor, day)
     resolutions, refund_payment = _resolve_deposits(row, figures, on, actor, day)
     written["deposit_resolutions"] = resolutions
+    if figures.lease_credit > 0:
+        credit_refunds += _refund_credits(row, figures, on, actor)
+        written["credit_refunds"] = [str(payment.pk) for payment in credit_refunds]
     debt = _debt_charge(row, figures.debt, actor, day) if figures.debt > 0 else None
     if refund_payment is None and credit_refunds:
         refund_payment = credit_refunds[0]

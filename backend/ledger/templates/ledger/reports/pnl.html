@@ -64,5 +64,6 @@
   {% endresponsive_table %}
 
   <p id="deposits-held"><strong>Deposits held</strong> at {{ query.end|date:"Y-m-d" }}: <span id="deposits-held-amount">{{ deposits_held }}</span>. <span class="muted">Deposits are money held for operators, not revenue: they are in no figure above except the part withheld at the end of a lease.</span></p>
+  <p id="credits-held"><strong>Credits held</strong> at {{ query.end|date:"Y-m-d" }}: <span id="credits-held-amount">{{ credits_held }}</span>. <span class="muted">Credits are money received and not yet applied to a charge, held for operators, not revenue: a credit counts as collected only when it is applied to a charge, in the month applied.</span></p>
   {% endif %}
 {% endblock %}

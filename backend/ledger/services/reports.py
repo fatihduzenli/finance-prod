@@ -20,7 +20,8 @@ charge due in July and paid in August is July's billing and August's collection.
 
 **Payments by method** (:func:`payments_by_method`): settled payments by ``settled_on``
 month and method (ACH, Zelle, wire, other), less the settled refunds of the month by
-the refund's own method; deposits and deposit refunds left out, as on the dashboard's
+the refund's own method; deposits and deposit refunds left out, and credits applied or
+paid back (PLAN-012d D6b: no money moves by a method), as on the dashboard's
 "paid this month" (:func:`ledger.services.receivables.paid_in`), so a month's total is
 that figure. Cards do not exist in this app; cash or check appear only as the payment
 provider's mark of a manual payment, recorded here as Zelle, wire or other.
@@ -58,6 +59,7 @@ from django.db.models.functions import Coalesce, TruncMonth
 
 from ledger.models import (
     ZERO,
+    MoneyMethod,
     OneOffCategory,
     Operator,
     Payment,
@@ -211,7 +213,8 @@ def revenue_csv_lines(report: Revenue) -> Iterator[str]:
 
 # --- Payments by method ---------------------------------------------------------------
 
-METHODS: tuple[str, ...] = tuple(PaymentMethod.values)
+#: The methods money is received by: a credit applied (PLAN-012d D6a) moves no money.
+METHODS: tuple[str, ...] = tuple(MoneyMethod.values)
 CARDS_NOTE = (
     "Cards do not exist in this app. A manual payment marked at the payment provider as "
     "cash or check is recorded here as Zelle, wire or other, with a note."
@@ -221,6 +224,12 @@ CARDS_NOTE = (
 def _deposit_payment() -> Q:
     """A payment on a deposit (a refundable fee type), its refund, or a deposit refund."""
     return Q(one_off_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
+
+
+def _credit_payment() -> Q:
+    """A credit applied to a charge or paid back (PLAN-012d D6a, D6b): money held, not
+    received or refunded by a method."""
+    return Q(method=PaymentMethod.CREDIT) | Q(kind=PaymentKind.CREDIT_REFUND)
 
 
 @dataclass(slots=True)
@@ -256,6 +265,7 @@ def payments_by_method(selected: ReportRange) -> PaymentsByMethod:
             settled_on__lte=selected.end,
         )
         .exclude(_deposit_payment())
+        .exclude(_credit_payment())
         .values("method", month=TruncMonth("settled_on"))
         .annotate(
             paid=Sum("amount", filter=Q(is_refund=False)),

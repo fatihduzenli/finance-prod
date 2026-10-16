@@ -32,6 +32,13 @@
     {% for deposit in figures.deposits %}<dt>{{ deposit.label }}</dt><dd class="deposit-line">{% if deposit.charged != deposit.held %}{{ deposit.text }}{% else %}${{ deposit.held }}{% endif %}</dd>{% endfor %}
     <dt>Deposit held</dt><dd id="deposit-held">${{ figures.deposit_held }}</dd>
   </dl>
+  {% if figures.held_credits %}
+    <h2>Credit on the lease</h2>
+    <dl id="credit-lines">
+      {% for line in figures.held_credits %}<dt>{{ line.text }}</dt><dd class="credit-line">${{ line.remaining }}, refunded with the settlement</dd>{% endfor %}
+      <dt>Credit held</dt><dd id="lease-credit">${{ figures.lease_credit }}</dd>
+    </dl>
+  {% endif %}
   {% if figures.deductions %}
     <h2>Deductions</h2>
     <dl id="deduction-lines">

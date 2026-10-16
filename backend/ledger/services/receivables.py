@@ -90,6 +90,7 @@ from ledger.models import (
     Payment,
     PaymentChannel,
     PaymentKind,
+    PaymentMethod,
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
@@ -600,7 +601,7 @@ def last_payments() -> dict[uuid.UUID, date]:
     """The latest settled payment date of each operator, over every kind (one query)."""
     rows = (
         Payment.objects.filter(status=PaymentStatus.SETTLED, is_refund=False)
-        .exclude(kind=PaymentKind.REFUND_DEPOSIT)
+        .exclude(kind__in=[PaymentKind.REFUND_DEPOSIT, PaymentKind.CREDIT_REFUND])
         .values(
             billed=Coalesce(
                 "rent_charge__lease__operator",
@@ -861,8 +862,16 @@ class Dashboard:
 
 def paid_in(start: date, end: date) -> Decimal:
     """Settled payments with ``settled_on`` in ``[start, end]`` less the settled refunds
-    in that range; deposits and deposit refunds left out (one query)."""
-    deposit = Q(one_off_charge__fee_type__refundable=True) | Q(kind=PaymentKind.REFUND_DEPOSIT)
+    in that range; deposits and deposit refunds left out, and credits applied or paid
+    back (PLAN-012d D6b: money held, not received; one query)."""
+    deposit = (
+        Q(one_off_charge__fee_type__refundable=True)
+        | Q(kind=PaymentKind.REFUND_DEPOSIT)
+        # A credit applied or paid back moves money held, not money received (PLAN-012d
+        # D6a, D6b).
+        | Q(method=PaymentMethod.CREDIT)
+        | Q(kind=PaymentKind.CREDIT_REFUND)
+    )
     sums = (
         Payment.objects.filter(
             status=PaymentStatus.SETTLED, settled_on__gte=start, settled_on__lte=end

@@ -744,11 +744,14 @@ def one_off_refusal(
 
 def _billed_setup(item: ChargeInput) -> bool:
     """A setup item billed on an invoice (a builder line with a fee type that is not a
-    category, PLAN-012 D6): it has its fee type and is sent by e-mail or charged now."""
+    category, PLAN-012 D6), or debited on its due date (the store page's "Schedule a
+    payment" of a catalogue item, PLAN-012d D2): it has its fee type and is sent by
+    e-mail, charged now or collected by autopay on the due date."""
     return (
         item.category == OneOffCategory.SETUP
         and item.fee_type is not None
-        and item.collection in (CollectionMethod.EMAIL, CollectionMethod.CHARGE_NOW)
+        and item.collection
+        in (CollectionMethod.EMAIL, CollectionMethod.CHARGE_NOW, CollectionMethod.AUTOPAY_DUE)
     )
 
 
@@ -1620,6 +1623,8 @@ def record_payment(
     creation_key: uuid.UUID | None = None,
     today: date | None = None,
     reference: str = "",
+    allocation_group: uuid.UUID | None = None,
+    credit_id: uuid.UUID | None = None,
 ) -> PaymentOutcome:
     """Record a Zelle, wire or other payment against a one-off charge (kind ``one_off``).
 
@@ -1631,11 +1636,14 @@ def record_payment(
     the paying charge before. The amount is at most the charge's balance: a later line's
     own price less what it was paid, never more. ``creation_key`` is kept in the audit
     row and looked up under the charge's row lock (on a builder invoice, every line's
-    lock, first line first).
+    lock, first line first). ``allocation_group`` and ``credit_id`` are those of
+    :func:`ledger.services.rent_run.record_manual_payment` (PLAN-012d D6a).
     """
     text = visible_text(note or "")
     reference = (reference or "").strip()
-    refused = rent_run.payment_refusal(method, amount, paid_on, text, today)
+    refused = rent_run.payment_refusal(
+        method, amount, paid_on, text, today, credit=credit_id is not None
+    )
     if refused is not None:
         return refused
     with transaction.atomic():
@@ -1668,6 +1676,8 @@ def record_payment(
             reference=reference,
             note=text,
             recorded_by=actor,
+            allocation_group=allocation_group,
+            credit_id=credit_id,
         )
         try:
             payment.save()

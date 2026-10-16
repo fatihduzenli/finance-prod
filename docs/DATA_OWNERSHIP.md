@@ -348,6 +348,14 @@ scans are covered by the stated policy, not by a check.
 | `installment_plans.note` | App | The admin's cancel note; guarded text (PostgreSQL trigger) |
 | `one_off_charges.plan_id`, `installment_no` | System | Set exactly for category `installment` (CHECK); an installment's description, price and due date come from the confirmed preview; its payments are its own, counted under the parent in reports |
 
+### lease_credits, payments.allocation_group / credit_id, payment method `credit` (PLAN-012d, ADR-0013)
+| Field | Owner | Note |
+|---|---|---|
+| `lease_credits.lease_id`, `amount`, `method`, `received_on`, `reference`, `note`, `created_by_id`, `allocation_group` | App | The unallocated remainder of a payment recorded from the store page; `reference` and `note` are guarded text |
+| `lease_credits.remaining` | System | Falls as the credit is applied (payments of method `credit`) or refunded at lease end; never below zero |
+| `payments.allocation_group` | System | One UUID per payment-entry form: the parts of one received amount |
+| `payments.credit_id` | System | Set on a payment of method `credit`: the credit it applied |
+
 ### deposit_resolutions — `offset_amount` (PLAN-012e)
 | Field | Owner | Note |
 |---|---|---|

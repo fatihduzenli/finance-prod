@@ -60,6 +60,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0039_transfer_debt_override",
             "ledger.migrations.0040_lease_end_statement_opened",
             "ledger.migrations.0041_rent_lines",
+            "ledger.migrations.0042_payment_allocation_and_credits",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -1439,6 +1440,127 @@ def test_the_rent_lines_migration_over_existing_rows_on_postgresql(
     result = _manage(repo_root, url, "migrate", "--noinput")
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert _rows(url, RENT_LINE_ROWS) == after
+
+
+# --- PLAN-012d D6a, D6b: manual payment allocation and lease credits -------------------
+#
+# Seeds a lease, a rent charge and a manual payment at ``ledger.0041``, migrates forward,
+# back and forward again on PostgreSQL (sqlite runs 0042 in the plain round trip) and reads
+# the rows with plain SQL: the new columns are null, the new CHECKs and the payment-data
+# trigger on ``lease_credits`` hold, and the reverse refuses while a credit exists.
+
+STATE_BEFORE_CREDITS = (("ledger", "0041_rent_lines"),)
+CREDIT_ROWS = (
+    "SELECT (SELECT count(*) FROM payments WHERE allocation_group IS NULL "
+    "AND credit_id IS NULL), (SELECT count(*) FROM payments WHERE method = 'zelle')"
+)
+
+
+def seed_before_credits() -> None:
+    """Seed a lease, a rent charge and a Zelle payment on it with the models of
+    ``STATE_BEFORE_CREDITS``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_CREDITS)).apps
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Eastwind")
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 1404", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store,
+        operator=operator,
+        debit_day=1,
+        collection_status="active",
+        payment_channel="wire",
+    )
+    charge = apps.get_model("ledger", "RentCharge").objects.create(
+        lease=lease,
+        period_month=date(2026, 10, 1),
+        due_on=date(2026, 10, 1),
+        amount_due=Decimal("1000.00"),
+        status="due",
+    )
+    apps.get_model("ledger", "Payment").objects.create(
+        rent_charge=charge,
+        kind="rent",
+        method="zelle",
+        amount=Decimal("400.00"),
+        status="settled",
+        settled_on=date(2026, 10, 2),
+        note="Zelle received.",
+    )
+
+
+@requires_postgresql
+def test_the_credits_migration_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_CREDITS)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_credits as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    after = [("1", "1")]
+
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, CREDIT_ROWS) == after
+    credit = (
+        "INSERT INTO lease_credits (id, lease_id, amount, remaining, method, received_on, "
+        "reference, note, allocation_group, created_at, updated_at) "
+        "VALUES (%s, (SELECT id FROM leases), %s, %s, %s, '2026-10-02', '', %s, %s, now(), now())"
+    )
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        # The payment-data trigger on the new text column.
+        scratch.execute(
+            credit, (uuid.uuid4(), "50.00", "50.00", "zelle", "4111 1111 1111 1111", uuid.uuid4())
+        )
+    for amount, remaining, method, note in (
+        ("50.00", "60.00", "zelle", "Kept"),  # remaining above the amount
+        ("50.00", "50.00", "credit", "Kept"),  # not a manual method
+        ("50.00", "50.00", "zelle", " "),  # a blank note
+        ("0.00", "0.00", "zelle", "Kept"),  # not above zero
+    ):
+        with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+            scratch.execute(credit, (uuid.uuid4(), amount, remaining, method, note, uuid.uuid4()))
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        # A credit payment names its credit.
+        scratch.execute("UPDATE payments SET method = 'credit'")
+    with psycopg.connect(url) as scratch:
+        scratch.execute(credit, (uuid.uuid4(), "50.00", "50.00", "zelle", "Kept", uuid.uuid4()))
+        scratch.execute("UPDATE payments SET allocation_group = %s", (uuid.uuid4(),))
+    # The reverse refuses while a credit exists.
+    back = _manage(repo_root, url, "migrate", *STATE_BEFORE_CREDITS[0], "--noinput")
+    assert back.returncode != 0 and "refuses to reverse" in back.stderr
+    assert _rows(url, "SELECT count(*) FROM lease_credits") == [("1",)]
+    with psycopg.connect(url) as scratch:
+        scratch.execute("DELETE FROM lease_credits")
+    _migrate_to(repo_root, url, *STATE_BEFORE_CREDITS)
+    assert _rows(url, "SELECT count(*) FROM payments") == [("1",)]
+    assert _rows(
+        url,
+        "SELECT count(*) FROM information_schema.columns WHERE table_name = 'payments' "
+        "AND column_name IN ('allocation_group', 'credit_id')",
+    ) == [("0",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, CREDIT_ROWS) == after
 
 
 # --- Row 2 --------------------------------------------------------------------------
