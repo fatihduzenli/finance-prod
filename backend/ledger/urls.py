@@ -2,7 +2,7 @@
 PLAN-007b-stores.md §1, PLAN-008-webhooks.md D6, D8, PLAN-009-payments-ledger.md D2, D4,
 D6 to D8, PLAN-010-worker-and-reconciliation.md D10, PLAN-010b D5 to D8, D11, PLAN-010c
 D7, D10, PLAN-010d D1, D2, D4, D6, D8, PLAN-011 D0 to D5, PLAN-011b D4, D7, D8, PLAN-012 D2,
-D3, D6 to D8, PLAN-012e D4 to D7, D10, D11, PLAN-012d D2, D3).
+D3, D6 to D8, PLAN-012e D4 to D7, D10, D11, PLAN-012d D2, D3, D17).
 
 Namespace ``ledger``.
 
@@ -42,6 +42,7 @@ from ledger.views import (
     reports,
     returns,
     run,
+    search,
     statement_links,
     stores,
     transfers,
@@ -390,6 +391,8 @@ calendar_patterns = (
 
 urlpatterns = [
     path("", dashboard.home, name="home"),
+    # The top-bar search (PLAN-012d D17): any verified role, read only.
+    path("search/", search.search_page, name="search"),
     path("calendar/", include(calendar_patterns)),
     path("grid/", include(grid_patterns)),
     path("arrears/", include(arrears_patterns)),

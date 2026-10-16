@@ -17,6 +17,8 @@ Every POST ends in a redirect, whatever the outcome; a form with errors is held 
 session for the next GET, as on the operator and lease screens.
 
 The list exports as CSV (``stores:export``, PLAN-011 D5): the same search, every page.
+The search (``?q=``, PLAN-012d D16) keeps the stores whose number (as a prefix), name,
+city or operator matches every word; it is kept by the paging and export links.
 
 The detail page is the store's workspace (docs/qa/PLAN-012d-store-workspace.md D1 to D3,
 :mod:`ledger.services.workspace`): a header card, the action bar for billing and admin,
@@ -42,7 +44,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Q, QuerySet
+from django.db.models import QuerySet
 from django.db.models.functions import Lower
 from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -81,6 +83,7 @@ from ledger.services import (
     one_off_charges,
     payments_entry,
     rent_run,
+    search,
     store_costs,
     workspace,
 )
@@ -97,7 +100,6 @@ from ledger.views.operators import (
     csv_response,
     export_name,
     role_required,
-    search_text,
 )
 
 ALREADY_SAVED = "This store was already saved. Nothing was changed."
@@ -116,11 +118,11 @@ def _load(pk: str) -> Store:
 
 
 def _listed(request: HttpRequest) -> tuple[QuerySet[Store], str]:
-    """The stores the list shows for the request's search, in its order."""
-    query = search_text(request)
-    stores = Store.objects.all()
-    if query:
-        stores = stores.filter(Q(external_label__icontains=query) | Q(city__icontains=query))
+    """The stores the list shows for the request's search (PLAN-012d D16: every word
+    matches the store number as a prefix, the name, the city or an operator's name;
+    :func:`ledger.services.search.filter_stores`), in its order."""
+    query = search.clean_query(request.GET.get("q"))
+    stores = search.filter_stores(Store.objects.all(), query)
     return stores.order_by(Lower("external_label"), "id"), query
 
 

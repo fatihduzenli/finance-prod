@@ -309,6 +309,63 @@ provider (finding 6, deferred). Credits are a new liability: ADR-0013 is Propose
 owner confirms. An existing charge billed below its balance is repriced (finding 10, owner's
 decision). The four migrations 0042–0044 are additive.
 
-**Verdict:** PASS (Batches A–E; findings 1–11: four MAJOR and five MINOR resolved, two MINOR
+### Batch F — the Stores list and Grid filter, the top-bar search, no repricing from the builder (owner's 9b and decision 2, 2026-10-16)
+
+**Scope.** `backend/ledger` (new `services/search.py` (`clean_query`, `words`,
+`filter_stores`, `filter_operators`: ORM filters only), new `views/search.py` and
+`templates/search/results.html`; `services/grid.py` (`GridQuery.q`, `_stores(q)`,
+`current_lease`); `views/stores.py` (`_listed`), `views/dashboard.py` (`clear_query`);
+`services/invoice_builder.py` (`LINE_EXISTING_BELOW`, `LINE_EXISTING_CHANGED`, `_attach_existing`
+no longer sets `price`); `static/ledger/invoice_lines.js` (the existing-charge amount read-only);
+templates `stores/list.html`, `grid/page.html` (`#grid-search`, the hidden `q`), `_draft_form.html`;
+`finance/templates/finance/base.html` (`#nav-search`), `app.css`; `urls.py`,
+`accounts/registry.py`), tests. No migration, no dependency, no environment variable, no provider
+call.
+
+**Commands run (final Batch F code).**
+
+| Command | Database | Exit | Result |
+|---|---|---|---|
+| `uv run ruff check .`, `uv run ruff format --check .` | n/a | 0 | clean, 501 files formatted |
+| `uv run mypy` (strict) | n/a | 0 | no issues in 408 source files |
+| `uv lock --check` | n/a | 0 | consistent |
+| `manage.py makemigrations --check --dry-run` | sqlite, PostgreSQL 16 | 0 | No changes detected |
+| `uv run pytest -m "not e2e" -q -o faulthandler_timeout=300` | sqlite | 0 | 5,335 passed, 631 skipped; 8:01 wall |
+| the "Migration tests" selection | PostgreSQL 16 | 0 | 26 passed; 6:50 wall |
+| the "Unit tests" selection | PostgreSQL 16 | 0 | 5,937 passed, 3 skipped; 10:48 wall |
+| `uv run pytest -m e2e -q` | PostgreSQL 16 | 0 | 7 passed |
+| `bash scripts/check-no-secrets.sh`; pattern scan of the diff since `741e082` and every new file | n/a | 0 | clean |
+
+**Tests (Gate 2).** Opus: `test_search.py` (20: number prefix and `#`, name, city, operator,
+several words, no match, empty, an ended lease's operator, the 100-character cut, the list's
+"Filtered by" and Clear, paging, the export link and a filtered export, the grid's rows, hidden
+`q`, range kept, export link, Clear, a filtered grid export, fixed query counts, the search's
+jumps and lists, the masked e-mail, "No match" escaped, an archived operator listed and not
+jumped to, every role, POST refused, anonymous 401, the read-only route, the nav box, the
+responsive load), `test_builder_lines.py` (below-balance refused through the service and the
+page, the race refused at send, the read-only script and help text),
+`test_report_performance.py` ("grid filtered", bound 20). Fable (`test_plan012d_f_adversarial.py`,
+9 cases, both engines): five hostile queries (SQL fragments, markup, a null byte, emoji) answer
+200 on the list, the grid and the search, escaped, with no extra script and no hit; a 5,000-
+character query is cut and answers 200 on all three; the search never jumps to an archived
+operator and lists it as archived, a single live store still jumps, anonymous gets 401; the
+filter is kept through the grid's form and both exports (the other store absent from the
+filtered CSVs); an existing-charge line posted below its balance is refused with the owner's
+sentence and the draft and the charge are unchanged.
+
+**Findings (F).**
+
+No finding. Design choices accepted: a store matches an operator's name through a lease not
+ended before today (a past operator's stores are not found by that name); the search page masks
+e-mails although the operator list shows them; stores ordered by number then name; at most 50
+rows per list with a note, and a single hit with overflow never redirects.
+
+**Verdict (F):** PASS (no rework cycle, no finding).
+
+**Owner's decisions of 2026-10-16.** ADR-0013 Accepted; an existing charge is never billed below
+its balance from the builder (Batch F); insurance paid by hand stays flagged for review (the mark
+job a later item).
+
+**Verdict:** PASS (Batches A–F; findings 1–11: four MAJOR and five MINOR resolved, two MINOR
 deferred by written decision (3 → closed in D as 12d-2; 6 open), two decisions for the owner
 (ADR-0013; the repricing of an existing charge)).

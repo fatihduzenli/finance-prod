@@ -765,7 +765,8 @@ blocks unless an admin overrides with a reason, follow-up 12b-a approved)
 ## ADR-0013 — Manual payment allocation and lease credits
 
 **Date:** 2026-10-15
-**Status:** Proposed (owner's Step 12d text, 2026-10-15; built by PLAN-012d Batch B)
+**Status:** Accepted (owner's Step 12d text, 2026-10-15; built by PLAN-012d Batch B; confirmed by
+the owner in writing 2026-10-16)
 
 ### Decision
 

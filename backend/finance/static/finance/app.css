@@ -13,6 +13,9 @@ body > nav form { margin: 0; }
 body > nav button { background: none; border: 1px solid #fff; color: #fff; border-radius: 4px; padding: .25rem .75rem; cursor: pointer; font: inherit; }
 .nav-links { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: center; flex: 1 1 auto; }
 .nav-links form { margin-left: auto; }
+/* The top-bar search (PLAN-012d D17): pushed right with Settings and Sign out after it. */
+.nav-search ~ form { margin-left: 0; }
+body > nav .nav-search input { width: 14rem; padding: .3rem .5rem; font-size: .95rem; border: 1px solid #fff; border-radius: 4px; }
 /* The "Menu" toggle: a checkbox and its label; no script. Hidden on wide screens. */
 .nav-toggle { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
 .nav-toggle-label { display: none; color: #fff; font-weight: 600; cursor: pointer; border: 1px solid #fff; border-radius: 4px; padding: 0 .9rem; line-height: calc(var(--tap) - 2px); min-height: var(--tap); box-sizing: border-box; user-select: none; }

@@ -1,0 +1,58 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Search{% endblock %}
+{% block content %}
+  {% comment %}The top-bar search's results (PLAN-012d D17): the stores and the operators matching every word;
+  an archived operator is listed and marked, never jumped to.{% endcomment %}
+  <h1>Search</h1>
+  <form method="get" action="{% url 'ledger:search' %}" class="actions" role="search" id="search-form">
+    <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators" style="max-width:24rem;">
+    <button class="btn" type="submit">Search</button>
+  </form>
+  {% if not query %}
+    <p class="muted" id="search-empty">Type a store number, a store name, a city or an operator's name.</p>
+  {% elif results.empty %}
+    <p class="muted" id="search-no-match">No match for '{{ query }}'.</p>
+  {% else %}
+    <h2>Stores</h2>
+    {% if results.stores %}
+      {% responsive_table %}
+      <table id="search-stores">
+        <thead><tr><th>Store number</th><th>Name</th><th>City</th><th>Operator</th></tr></thead>
+        <tbody>
+          {% for hit in results.stores %}
+            <tr>
+              <td>{{ hit.store.store_number|default_if_none:"—" }}</td>
+              <td><a href="{% url 'ledger:stores:detail' pk=hit.store.pk %}">{{ hit.store.external_label }}</a></td>
+              <td>{{ hit.store.city }}</td>
+              <td>{% if hit.operator %}<a href="{% url 'ledger:operators:detail' pk=hit.operator.pk %}">{{ hit.operator.display_name }}</a>{% else %}<span class="muted">No operator</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endresponsive_table %}
+      {% if results.more_stores %}<p class="muted">The first {{ results.stores|length }} stores are shown; add a word to narrow the search.</p>{% endif %}
+    {% else %}
+      <p class="muted" id="search-no-store">No store matches.</p>
+    {% endif %}
+    <h2>Operators</h2>
+    {% if operators %}
+      {% responsive_table %}
+      <table id="search-operators">
+        <thead><tr><th>Name</th><th>E-mail</th></tr></thead>
+        <tbody>
+          {% for operator, email in operators %}
+            <tr>
+              <td><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a>{% if operator.archived_at %} <span class="badge">Archived</span>{% endif %}</td>
+              <td>{{ email }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endresponsive_table %}
+      {% if results.more_operators %}<p class="muted">The first {{ operators|length }} operators are shown; add a word to narrow the search.</p>{% endif %}
+    {% else %}
+      <p class="muted" id="search-no-operator">No operator matches.</p>
+    {% endif %}
+  {% endif %}
+{% endblock %}

@@ -6,8 +6,10 @@
 // - Rent shows the row's lease and month selects; once both are set, the unit amount is
 //   filled at once from the rent-amount endpoint (read-only, same origin) and stays
 //   editable; its proration text, or why the month cannot be billed, shows under the box;
-// - an existing open charge names the charge in the row's hidden field and fills the unit
-//   amount with its balance (the most it takes); any other text clears the field;
+// - an existing open charge names the charge in the row's hidden field, fills the unit
+//   amount with its balance and makes it read-only (the charge is billed at its balance;
+//   PLAN-012d D10 amended; the server refuses any other amount without this script); any
+//   other text clears the field and the amount is editable again;
 // - the Save box shows only on a typed item that is not on the list (case and surrounding
 //   spaces ignored); the server ignores it on a listed name either way;
 // - the trash button ticks the row's Remove box and hides the row; the visible rows are
@@ -143,12 +145,13 @@
         }
         if (unit) {
           if (kind === "existing") {
-            unit.max = chosen.dataset.balance;
-            if (fromTyping && charge !== lastExisting) {
-              unit.value = chosen.dataset.balance;
+            unit.value = chosen.dataset.balance;
+            unit.readOnly = true;
+          } else if (unit.readOnly) {
+            unit.readOnly = false;
+            if (fromTyping && lastExisting !== "") {
+              unit.value = "";
             }
-          } else {
-            unit.removeAttribute("max");
           }
         }
         lastExisting = hidden.value;
@@ -220,7 +223,7 @@
         }
       } else {
         input.value = "";
-        input.removeAttribute("max");
+        input.readOnly = false;
       }
     });
     var note = row.querySelector(".rent-text");

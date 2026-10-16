@@ -5,7 +5,8 @@ asset; the style sheet, the manifest and the service worker are the app's own
 links fold behind "Menu", a checkbox and its label: no script. The Admin item is a
 details menu (Django admin; Rent run for billing and admin; Audit for admins; PLAN-012d
 D5), and the current section's link carries aria-current="page"
-(finance.context_processors.navigation). The SANDBOX banner and the
+(finance.context_processors.navigation). The search box (PLAN-012d D17) is a GET form to
+ledger:search. The SANDBOX banner and the
 title prefix are injected by finance.middleware.SandboxBannerMiddleware. The sign-in pages keep their own base,
 two_factor/_base.html.
 {% endcomment %}{% load roles static %}<!DOCTYPE html>
@@ -45,6 +46,7 @@ two_factor/_base.html.
       {% if request.user|is_billing %}<a href="{% url 'ledger:run:today' %}" id="nav-run"{% if nav_section == "run" %} aria-current="page"{% endif %}>Rent run</a>{% endif %}
       {% if request.user|is_admin %}<a href="{% url 'ledger:audit:page' %}" id="nav-audit"{% if nav_section == "audit" %} aria-current="page"{% endif %}>Audit</a>{% endif %}
     </details>
+    <form method="get" action="{% url 'ledger:search' %}" class="nav-search" id="nav-search" role="search"><input type="search" name="q" id="nav-search-q" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators"></form>
     <a href="{% url 'finance:settings' %}" id="nav-settings"{% if nav_section == "settings" %} aria-current="page"{% endif %}>Settings</a>
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form>
     </div>

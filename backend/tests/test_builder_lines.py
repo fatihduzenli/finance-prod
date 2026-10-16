@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from django.db import transaction
 from django.urls import reverse
 
 from accounts.roles import Role
@@ -248,15 +249,71 @@ def test_the_checklists_deposit_joins_the_invoice_and_is_attached_on_send(
     assert invoice_builder.open_charges(lease) == []
 
 
-def test_an_existing_charge_lowered_by_a_cent_is_billed_at_that_amount(
+def test_an_existing_charge_below_its_balance_is_refused_and_never_repriced(
     fake: FakeProvider,
 ) -> None:
+    """D10 amended (2026-10-16): the line bills the charge at its balance; a lower amount
+    is refused with the sentence, nothing written; the exact balance is billed unchanged."""
     operator, lease = a_world(fake)
     deposit = a_deposit(lease)
-    draft = a_draft(operator, lease, [existing(deposit, "499.99")])
+    refused = invoice_builder.create_draft(
+        operator, lease, MEMO, None, [existing(deposit, "499.99")], user(Role.BILLING), today=TODAY
+    )
+    assert not refused.ok and refused.message == (
+        "Line 1: Security deposit is billed at its balance, $500.00. To change the amount, "
+        "edit the charge first."
+    )
+    assert refused.message == invoice_builder.LINE_EXISTING_BELOW.format(
+        line=1, charge="Security deposit", balance="$500.00"
+    )
+    assert not InvoiceDraft.objects.exists()
+    # Through the page: the same sentence, the draft not made.
+    billing, _ = client_for(Role.BILLING)
+    path = f"/invoices/new/store/{lease.store_id}/"
+    label = "Existing open charge: Security deposit ($500.00)"
+    billing.post(path, page_data([{"item": label, "unit_amount": "250.00"}], lease=str(lease.pk)))
+    assert "is billed at its balance, $500.00. To change the amount, edit the charge first." in (
+        html(billing, path)
+    )
+    assert not InvoiceDraft.objects.exists()
+    # Exactly the balance: billed, the charge's price unchanged.
+    draft = a_draft(operator, lease, [existing(deposit, "500.00")])
     invoice = sent(draft).invoice
-    assert invoice is not None and invoice.total == D("499.99")
-    assert fresh(deposit).price == D("499.99")
+    assert invoice is not None and invoice.total == D("500.00")
+    assert fresh(deposit).price == D("500.00")
+
+
+def test_a_saved_existing_line_whose_charge_was_lowered_is_refused_on_send(
+    fake: FakeProvider,
+) -> None:
+    """The charge edited after the draft was saved: the send refuses the old amount and
+    changes nothing; the charge keeps its new price."""
+    operator, lease = a_world(fake)
+    deposit = a_deposit(lease)
+    draft = a_draft(operator, lease, [existing(deposit)])
+    OneOffCharge.objects.filter(pk=deposit.pk).update(price=D("400.00"))
+    outcome = invoice_builder.send(draft.pk, user(Role.BILLING), today=TODAY)
+    assert not outcome.ok and "can be at most its balance, $400.00" in outcome.message
+    assert not Invoice.objects.exists() and fresh(deposit).price == D("400.00")
+    # Changed between the check and the row lock: refused as changed meanwhile, unpriced.
+    clean = invoice_builder._clean_existing_line(1, existing(deposit), lease, operator)
+    OneOffCharge.objects.filter(pk=deposit.pk).update(price=D("350.00"))
+    with pytest.raises(invoice_builder._Refused) as refusal, transaction.atomic():
+        invoice_builder._attach_existing(clean, 1, CollectionMethod.EMAIL, lease)
+    assert refusal.value.outcome.message == invoice_builder.LINE_EXISTING_CHANGED.format(
+        line=1, charge="Security deposit", balance="$350.00"
+    )
+    deposit = fresh(deposit)
+    assert (deposit.price, deposit.collection) == (D("350.00"), CollectionMethod.NONE)
+
+
+def test_the_existing_lines_amount_is_read_only_on_the_page() -> None:
+    script = (REPO / "ledger" / "static" / "ledger" / "invoice_lines.js").read_text()
+    assert "unit.value = chosen.dataset.balance;\n            unit.readOnly = true;" in script
+    assert "unit.readOnly = false;" in script and "input.readOnly = false;" in script
+    assert "unit.max" not in script
+    form = (REPO / "ledger" / "templates" / "ledger" / "invoices" / "_draft_form.html").read_text()
+    assert "the amount is its balance and cannot be changed here" in form
 
 
 def test_a_charge_on_a_live_invoice_or_a_plan_is_neither_offered_nor_attached(

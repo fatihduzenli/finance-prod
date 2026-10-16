@@ -193,6 +193,16 @@ the Leases list (kept), e-mail receipts, insurance autopay changes.
   draft DRAFT-…" links to that draft. The same table rules (trash icon, visible numbering, live
   total) apply to the setup checklist and the deductions table of the lease end.
 
+### 3.4a Owner's decisions of 2026-10-16
+
+- **D10 amended — never reprice from the builder.** An existing-charge line's amount is the
+  charge's balance; an amount below it is refused ("Line N: <charge> is billed at its balance,
+  $X. To change the amount, edit the charge first."); the amount field is read-only for such a
+  line on the page. To bill a different amount, staff edit the charge (audited) and then bill
+  it. Batch C's repricing path goes.
+- Insurance paid by hand stays flagged for review; the provider mark job is a later item.
+- ADR-0013 Accepted.
+
 ### 3.5 Operations pages (owner's 9, 9a)
 
 - **D11 — rent run out of the nav** (D5). The run page lists **every charge it just created**
@@ -210,6 +220,23 @@ the Leases list (kept), e-mail receipts, insurance autopay changes.
   month's cell shows what is billed or paid in advance with the invoice number (the cell logic
   already reads charges by month; the "not due" state applies only to months before the lease
   started).
+
+### 3.6a Search (owner's 9b, received 2026-10-16)
+
+- **D16 — list filters.** The Stores list and the Grid get one filter box `q`: a store number
+  (exact or prefix), a store name, a city or an operator name (case-insensitive contains, split on
+  spaces, every word must match one of the fields); the filter is kept in the URL (`?q=`), carried
+  by the list's paging and export links and the grid's From/To form, and shown as "Filtered by
+  '…' · Clear". The grid's export respects it. An empty or whitespace-only `q` is no filter; the
+  value is never echoed unescaped and never reaches SQL except as a bound parameter.
+- **D17 — top-bar search.** A search box in the main navigation (`id="nav-search"`, GET to
+  `ledger:search`, any role) jumps straight to the store page when exactly one store matches
+  (number, name or city) and no operator matches, straight to the operator page when exactly one
+  operator matches and no store does, and otherwise renders a results page listing the matching
+  stores (number, name, city, operator) and operators (name, e-mail masked as the pages mask it)
+  with links, "No match" when nothing matches. Matching as D16, over stores and operators the
+  role may see (all roles see both lists today). The results page loads `{% load responsive %}`
+  and carries the query in the box.
 
 ### 3.6 The operator page (owner's 3)
 
@@ -245,6 +272,7 @@ No new dependency, environment variable or provider call.
 | C | D9, D10, migrations 0043, 0044 | the checklist without ticks and with the flag; the builder's combo, month select, amount endpoint, existing-charge line, width, trash, numbering |
 | D | D11, D12, D13 | the run page's list and the tick's row; the dashboard line; "Create missing charges"; the grid window and picker |
 | E | D14 | the operator page as the workspace with the store selector and the drafts' actions |
+| F | D16, D17, D10 amended | the Stores list and the Grid filter by `?q=`; the top-bar search jumps or lists; an existing charge is never billed below its balance |
 
 Fable: adversarial tests per batch, the gate per batch, ADR-0013, RUNBOOK §18, DATA_OWNERSHIP,
 README matrix, QA-012d, the checkpoint report.
@@ -292,6 +320,16 @@ range is capped at 24 months and a reversed range swapped; a viewer cannot creat
 **E.** The operator workspace across two stores with the selector; the drafts' actions; the
 operator-level items kept. **Adversarial (Fable):** the selector cannot pick another operator's
 store; actions act on the selected store's lease only.
+
+**F.** The filter matches number (prefix), name, city and operator, several words; it is kept in
+the URL, the export and the grid form; an empty `q` is no filter; the top-bar search jumps on a
+single store match, on a single operator match, lists on several or mixed matches, says "No
+match"; an existing-charge line below its balance is refused with the sentence and the amount
+field is read-only. **Adversarial (Fable):** a `q` with SQL or markup characters returns 200,
+escaped, with no hit; a very long `q` is cut and answers 200; the search never jumps to an
+archived operator's page or lists a store the role may not see (none today, asserted); the
+filter is kept through the grid's From/To form and the export; an existing-charge line posted
+with a lower amount through the form is refused and the draft unchanged.
 
 ## 7. Risk register
 

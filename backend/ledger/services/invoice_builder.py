@@ -88,13 +88,16 @@ open one-off charge of the draft's lease (``existing_charge``) instead of an ite
 provider schedule or Charge now, no installment plan, not an installment, a companion
 fee or a legacy row; :func:`existing_charge_closed`). :func:`clean_lines` refuses, with
 nothing written: a charge of another lease or operator (or a draft without a lease), a
-charge that is no longer open, a quantity other than 1, an amount above the charge's
-balance (an empty one is the balance), the same charge twice on the draft
+charge that is no longer open, a quantity other than 1, an amount other than the
+charge's balance (an empty one is the balance; above is :data:`LINE_EXISTING_AMOUNT`,
+below :data:`LINE_EXISTING_BELOW`: the builder never reprices a charge, D10 amended of
+2026-10-16; staff edit the charge first), the same charge twice on the draft
 (:data:`LINE_EXISTING_TWICE`) or on another open draft of the operator. The item is the
 charge's label. On send the charge is **attached** to the invoice instead of a new one
-being made (:func:`_attach_existing`, under its row lock, checked again): its collection
-becomes the invoice's, its price the line's amount when that was lowered, the invoice
-line names it, audited ``one_off_charge.attached_to_invoice``.
+being made (:func:`_attach_existing`, under its row lock, checked again, the line's
+amount still its balance, else :data:`LINE_EXISTING_CHANGED`): its collection becomes the
+invoice's (its price never changes), the invoice line names it, audited
+``one_off_charge.attached_to_invoice``.
 
 :func:`rent_amount` is the amount a Rent line takes by default (the endpoint
 ``invoices:rent_amount`` fills the line with it): the run's charge's, else
@@ -261,6 +264,14 @@ LINE_EXISTING_NOT_OPEN = (
 )
 LINE_EXISTING_QUANTITY = "Line {line}: an existing charge's quantity is 1."
 LINE_EXISTING_AMOUNT = "Line {line}: the amount of {charge} can be at most its balance, {balance}."
+LINE_EXISTING_BELOW = (
+    "Line {line}: {charge} is billed at its balance, {balance}. To change the amount, edit the "
+    "charge first."
+)
+LINE_EXISTING_CHANGED = (
+    "Line {line}: {charge} changed meanwhile; its balance is now {balance}. Edit the draft and "
+    "send it again."
+)
 LINE_EXISTING_TWICE = "Line {line}: {charge} is already on this invoice."
 LINE_EXISTING_ON_DRAFT = "Line {line}: {charge} is already on draft {draft}."
 #: The Item box's text of an existing open charge (PLAN-012d D10).
@@ -832,10 +843,10 @@ def _clean_existing_line(
         raise _line_refusal(index, LINE_EXISTING_QUANTITY, "quantity")
     balance = Decimal(charge.balance)
     unit = balance if line.unit_amount is None else _unit_amount(index, line.unit_amount)
-    if unit > balance:
+    if unit != balance:
         raise _line_refusal(
             index,
-            LINE_EXISTING_AMOUNT,
+            LINE_EXISTING_AMOUNT if unit > balance else LINE_EXISTING_BELOW,
             "unit_amount",
             charge=label,
             balance=leases.format_amount(balance),
@@ -1572,9 +1583,9 @@ def _attach_existing(
     line: CleanLine, position: int, collection: CollectionMethod, lease: Lease | None
 ) -> tuple[OneOffCharge, dict[str, Any]]:
     """The charge of an existing-charge line on send (PLAN-012d D10), under its row lock
-    and checked again (open, of the draft's lease and operator, the line's amount within
-    its balance): its collection becomes the invoice's and its price the line's amount
-    when that was lowered; with its state before, for :func:`_attached`.
+    and checked again (open, of the draft's lease and operator, the line's amount still
+    its balance, else :data:`LINE_EXISTING_CHANGED`): its collection becomes the invoice's,
+    its price unchanged (D10 amended); with its state before, for :func:`_attached`.
     :class:`_Refused` otherwise. Runs in the caller's transaction."""
     if line.existing_charge is None:  # pragma: no cover (only existing lines come here)
         raise ValueError("Not an existing-charge line.")
@@ -1589,18 +1600,17 @@ def _attach_existing(
     if existing_charge_closed(charge):
         raise _line_refusal(position, LINE_EXISTING_NOT_OPEN, "item", charge=label)
     balance = Decimal(charge.balance)
-    if line.line_total > balance:
+    if line.line_total != balance:
         raise _line_refusal(
             position,
-            LINE_EXISTING_AMOUNT,
+            LINE_EXISTING_CHANGED,
             "unit_amount",
             charge=label,
             balance=leases.format_amount(balance),
         )
     before = one_off_charges.charge_state(charge)
     charge.collection = collection
-    charge.price = line.line_total
-    charge.save(update_fields=["collection", "price", "updated_at"])
+    charge.save(update_fields=["collection", "updated_at"])
     charge.refresh_from_db()
     return charge, before
 

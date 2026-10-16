@@ -248,6 +248,8 @@ def test_every_page_answers_under_two_seconds_on_volume(monkeypatch: pytest.Monk
     pages: dict[str, tuple[str, dict[str, str], int]] = {
         "dashboard": ("/", {}, 25 + 3 * due_today),
         "grid (500 x 24)": ("/grid/", span, 20),
+        # PLAN-012d D16: the words filter keeps the grid's query count.
+        "grid filtered": ("/grid/", {**span, "q": "store 1"}, 20),
         "arrears": ("/arrears/", {}, 20),
         "aging": ("/reports/aging/", {}, 20),
         "revenue": ("/reports/revenue/", span, 30),

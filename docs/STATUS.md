@@ -1307,3 +1307,25 @@ lock, migrations clean; sqlite 5,304 passed; PostgreSQL 26 + 5,906 passed; e2e 7
 clean; Fable's adversarial file 3 cases green on both engines. **Step 12d is complete in the
 working tree** (Batches A–E, migrations 0042–0044, ADR-0013 proposed); the checkpoint report
 with the Publish Request goes to the owner.
+
+## Update, 2026-10-16, owner's decisions on 12d; Batch F (search) added
+
+The owner confirmed ADR-0013 (Accepted), ruled that an existing charge is never billed below its
+balance from the invoice builder (edit the charge first, audited), and left insurance manual
+payments flagged for review (the mark job a later item). The owner's item **9b** (a filter on the
+Stores list and the Grid by store number, name, city or operator, kept in the URL; a top-bar
+search that jumps to a store or operator) had not reached Fable with the Step 12d text and was
+not built; added to PLAN-012d as Batch F (D16, D17, D10 amended) and assigned. The push waits
+for Batch F's gate and the updated Publish Request.
+
+## Update, 2026-10-16, PLAN-012d Batch F built and gated; Step 12d complete (not pushed)
+
+Batch F (owner's 9b and decision 2): the Stores list and the Grid filter by store number, name,
+city or operator (`?q=`, kept in the URL, the paging, the exports and the grid's From/To form,
+"Clear"); the top-bar search jumps to the one matching store or operator, else lists the matches
+(archived operators listed, never jumped to); an existing charge is never billed below its
+balance from the invoice builder (the amount is read-only; edit the charge first). No migration.
+Gate: ruff, format, mypy (408 files), lock, migrations clean; sqlite 5,335 passed; PostgreSQL
+26 + 5,937 passed; e2e 7; secret scans clean; Fable's adversarial file 9 cases green on both
+engines. Step 12d is complete in the working tree (Batches A–F); the updated Publish Request
+goes to the owner.

@@ -20,7 +20,7 @@ lease and month only on a Rent line.{% endcomment %}
 <h2>Lines</h2>
 <p class="muted">Item: choose Rent, an existing open charge of the lease or a catalogue item from the list, or type a new name; a new name can be saved to the catalogue for the next invoice. The description is an optional detail shown under the item. The line total is the quantity (empty: 1) times the unit amount, rounded to the cent.</p>
 <p class="muted" id="rent-line-help">Rent: choose Rent in the Item box, then the lease and the month; the unit amount is the month's rent (prorated for a partial first month, or the amount the rent run already charged) and stays editable; empty, it is that amount. The quantity is 1. Sending makes the month's rent charge, or takes the one the rent run made, so the month is billed once.</p>
-<p class="muted" id="existing-line-help">Existing open charge: the line bills that charge (for example the deposit of the setup checklist) instead of making a new one; the amount is its balance and can be lowered, never raised.</p>
+<p class="muted" id="existing-line-help">Existing open charge: the line bills that charge (for example the deposit of the setup checklist) instead of making a new one; the amount is its balance and cannot be changed here; to bill a different amount, edit the charge first.</p>
 {{ formset.management_form }}
 <datalist id="{{ items_list_id }}">{% for option in item_options %}<option value="{{ option.value }}"{% if option.kind != "item" %} data-kind="{{ option.kind }}"{% endif %}{% if option.charge %} data-charge="{{ option.charge }}" data-balance="{{ option.balance }}"{% endif %}></option>{% endfor %}</datalist>
 {% responsive_table %}

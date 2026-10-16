@@ -35,7 +35,16 @@
 </style>{% endblock %}
 {% block content %}
   <h1>Grid</h1>
+  {% comment %}PLAN-012d D16: the words filter, its own box; it keeps the range and the other filters, and the
+  filters' form below keeps it (hidden).{% endcomment %}
+  <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-search" class="actions" role="search">
+    <input type="search" name="q" id="grid-q" value="{{ query.q }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Filter stores" style="max-width:24rem;">
+    {% for name, value in query.as_query.items %}{% if name != "q" %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
+    <button class="btn" type="submit">Filter</button>
+  </form>
+  {% if query.q %}<p class="muted" id="grid-filtered">Filtered by '{{ query.q }}' · <a href="{% url 'ledger:grid:page' %}{% if clear_query %}?{{ clear_query }}{% endif %}" id="grid-clear">Clear</a></p>{% endif %}
   <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-filters" role="search">
+    {% if query.q %}<input type="hidden" name="q" value="{{ query.q }}">{% endif %}
     <div class="actions">
       <label for="from" style="margin:0;">From</label>
       {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}

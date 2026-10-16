@@ -14,7 +14,9 @@ not HTML month inputs, which Safari does not render) offering the current month 
 (:func:`picker_months`). The filters are
 ``operator`` (an operator's id), ``state`` (the store's state, any case), ``channel`` (a
 lease payment channel) and ``status`` (a cell status); an unusable one is dropped with a
-sentence.
+sentence. ``q`` (PLAN-012d D16) keeps the stores whose number, name, city or operator
+matches every word (:func:`ledger.services.search.filter_stores`, in the stores query);
+empty, no filter.
 
 **Rows** are stores, in store-number order (stores without a number after, by label):
 label, number, state, and the operator and channel of the store's *current* lease (the
@@ -82,7 +84,7 @@ from ledger.models import (
     RentChargeStatus,
     Store,
 )
-from ledger.services import installments
+from ledger.services import installments, search
 from ledger.services.csv_export import CsvWriter
 from ledger.services.pnl import (
     CAPPED,
@@ -145,6 +147,8 @@ class GridQuery:
     state: str = ""
     channel: str = ""
     status: str = ""
+    #: The words filter (PLAN-012d D16), cleaned by :func:`ledger.services.search.clean_query`.
+    q: str = ""
     #: Why a value differs from what was asked, one sentence each.
     messages: tuple[str, ...] = ()
 
@@ -162,6 +166,7 @@ class GridQuery:
             "state": self.state,
             "channel": self.channel,
             "status": self.status,
+            "q": self.q,
         }
         return {name: value for name, value in values.items() if value}
 
@@ -207,7 +212,8 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> GridQue
     if status and status not in dict(CELL_STATUSES):
         messages.append(BAD_STATUS)
         status = ""
-    return GridQuery(start, end, operator, state, channel, status, tuple(messages))
+    q = search.clean_query(params.get("q", ""))
+    return GridQuery(start, end, operator, state, channel, status, q, tuple(messages))
 
 
 class MonthRange(Protocol):
@@ -340,8 +346,9 @@ class Grid:
     columns: list[ColumnTotal]
 
 
-def _current_lease(leases: list[Lease], today: date) -> Lease | None:
-    """The lease active today, else the latest started (see the module docstring)."""
+def current_lease(leases: list[Lease], today: date) -> Lease | None:
+    """The lease active today, else the latest started (see the module docstring); also
+    the top-bar search's store operator (:mod:`ledger.services.search`)."""
 
     def started(lease: Lease) -> tuple[date, object]:
         return (lease.started_on or date.min, lease.created_at)
@@ -362,11 +369,11 @@ def _first_start(leases: list[Lease]) -> date | None:
     return min(starts) if starts else None
 
 
-def _stores() -> list[Store]:
+def _stores(q: str, today: date) -> list[Store]:
     return list(
-        Store.objects.prefetch_related(
-            Prefetch("leases", queryset=Lease.objects.select_related("operator"))
-        ).order_by("store_number", "external_label", "id")
+        search.filter_stores(Store.objects.all(), q, today)
+        .prefetch_related(Prefetch("leases", queryset=Lease.objects.select_related("operator")))
+        .order_by("store_number", "external_label", "id")
     )
 
 
@@ -460,9 +467,9 @@ def build(query: GridQuery, today: date | None = None) -> Grid:
     pending = _pending_since(start, end)
     rows: list[GridRow] = []
     columns = {month: ColumnTotal(month) for month in months}
-    for store in sorted(_stores(), key=_store_order):
+    for store in sorted(_stores(query.q, day), key=_store_order):
         leases = list(store.leases.all())
-        current = _current_lease(leases, day)
+        current = current_lease(leases, day)
         operator = current.operator if current is not None else None
         channel = current.payment_channel if current is not None else ""
         if query.operator is not None and (operator is None or operator.pk != query.operator):

@@ -356,6 +356,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:grid:export",
         "ledger:arrears:page",
         "ledger:arrears:export",
+        # The top-bar search's results (PLAN-012d D17): any verified role.
+        "ledger:search",
         # The reports menu, the A/R aging, revenue by month, payments by method, deposits
         # versus transactions and the customer statement, with their CSV exports: any
         # verified role (PLAN-011 D4, D10).

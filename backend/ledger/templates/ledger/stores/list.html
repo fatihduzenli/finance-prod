@@ -4,11 +4,12 @@
 {% block content %}
   <h1>Stores</h1>
   <form method="get" action="{% url 'ledger:stores:list' %}" class="actions" role="search">
-    <input type="search" name="q" value="{{ query }}" maxlength="200" placeholder="Name or city" aria-label="Search stores" style="max-width:24rem;">
+    <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Search stores" style="max-width:24rem;">
     <button class="btn" type="submit">Search</button>
     {% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">New store</a>{% endif %}
     <a class="btn" id="export-csv" href="{% url 'ledger:stores:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Export CSV</a>
   </form>
+  {% if query %}<p class="muted" id="stores-filtered">Filtered by '{{ query }}' · <a href="{% url 'ledger:stores:list' %}" id="stores-clear">Clear</a></p>{% endif %}
   {% responsive_table %}
   <table>
     <thead>

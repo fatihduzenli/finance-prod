@@ -707,4 +707,9 @@ show the operator's rows with a store column, and the operator-level items stay 
 (contact details, SMS phone and consents, the payment-provider block, collection e-mails, the
 operator's contact log and notes); its drafts list has the same Edit, Send and Delete. Every
 month picker in the app (the grid, the reports, the builder's Rent line) is a plain select of
-months, since Safari does not render HTML month inputs.
+months, since Safari does not render HTML month inputs. **Search** (PLAN-012d Batch F): the
+Stores list and the Grid filter by store number, name, city or operator (the filter stays in the
+URL, the paging, the export and the grid's From/To form; "Clear" removes it); the search box in
+the top bar jumps straight to the store or the operator when exactly one matches, else lists the
+matches. An existing charge is never billed below its balance from the invoice builder: edit the
+charge first (audited), then bill it.

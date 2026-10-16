@@ -129,6 +129,10 @@ def _grid_page(
             "rows": _grid_rows(built) if built is not None else [],
             "too_slow": TOO_SLOW if built is None else "",
             "export_query": urlencode(query.as_query()),
+            # PLAN-012d D16: "Clear" drops the words filter and keeps the rest.
+            "clear_query": urlencode(
+                {name: value for name, value in query.as_query().items() if name != "q"}
+            ),
             "operators": receivables.arrears_operators(),
             "channels": PaymentChannel.choices,
             "statuses": grid.CELL_STATUSES,

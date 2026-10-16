@@ -260,6 +260,7 @@ role (enrolment routes also allow a signed-in user who has no device yet).
 | `ledger:stores:record_payment` | POST | billing | record a payment for the store and allocate it over its open charges; the remainder as a credit (ADR-0013) |
 | `ledger:stores:schedule_payment` | POST | billing | a one-off charge collected by autopay on a chosen date (PLAN-012d) |
 | `ledger:invoices:rent_amount` | GET | billing | JSON: the rent amount of a lease and month for the builder's Rent line (PLAN-012d) |
+| `ledger:search` | GET | viewer | the top-bar search: jumps to the one matching store or operator, else lists the matches (PLAN-012d Batch F); `?q=` also filters the Stores list and the Grid |
 | `ledger:stores:charge_now_pick` | GET | admin | the store's charges eligible for Charge now, each to its confirm page |
 | `ledger:invoices:delete_draft` | POST | billing | deletes a never-sent invoice draft (audited) |
 | anything else | none | **refused (403)** | an unregistered unsafe route is denied |
