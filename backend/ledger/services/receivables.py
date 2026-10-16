@@ -491,15 +491,30 @@ def open_balances(today: date, operator: uuid.UUID | None = None) -> list[OpenBa
     A charge whose returned payment was rescheduled owes only what its re-debit does not
     collect again (see the module docstring). ``today`` does not change which charges
     are open; it is taken so that every caller states the day it reads."""
+    return open_balances_and_carried(today, operator)[0]
+
+
+def open_balances_and_carried(
+    today: date, operator: uuid.UUID | None = None
+) -> tuple[list[OpenBalance], dict[tuple[str, uuid.UUID], Decimal]]:
+    """:func:`open_balances`, and per (kind, charge id) what live re-debits carry of it
+    (after the spill to the charges billed with it); the store page's Charges tab shows
+    the same figures (PLAN-012d finding 12d-2). A carried charge that is no longer in
+    the rows owes nothing."""
     carried, insurance_collected = carried_by_redebits(operator)
     rows = (
         _rent_balances(operator)
         + _insurance_balances(operator, insurance_collected)
         + _one_off_balances(operator)
     )
+    spilled: dict[tuple[str, uuid.UUID], Decimal] = {}
     if carried:
-        rows = _less_carried(rows, _spill_to_companions(rows, carried))
-    return sorted(rows, key=lambda row: (row.due_on, row.kind, row.store_label, str(row.charge_id)))
+        spilled = _spill_to_companions(rows, carried)
+        rows = _less_carried(rows, spilled)
+    ordered = sorted(
+        rows, key=lambda row: (row.due_on, row.kind, row.store_label, str(row.charge_id))
+    )
+    return ordered, spilled
 
 
 def total(rows: Iterable[OpenBalance]) -> Decimal:

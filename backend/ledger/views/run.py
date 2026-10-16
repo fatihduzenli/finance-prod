@@ -9,7 +9,9 @@ It reads only: no provider call and no write.
 ``accounts.registry`` and again here). Both end in a redirect. Creating charges acts on
 the server's today, never a date from the request, with the outcome as messages; it
 also catches up the debit dates since each lease's start that have no charge
-(PLAN-012b-b D1), counted as "Created (catch-up)".
+(PLAN-012b-b D1), counted as "Created (catch-up)". Each run, the button's and the daily
+tick's, writes a ``rent_run.ticked`` audit row; the page lists the latest one's created
+charges after the buttons (PLAN-012d D11).
 "Match invoices" reads the provider, so it is queued as a ``run_match`` job for the
 worker (PLAN-010 D3); the page shows the latest one and its report lines.
 
@@ -70,6 +72,7 @@ def run_today(request: HttpRequest) -> HttpResponse:
             "health": provider_health(),
             "threshold": settings.LARGE_DEBIT_WARNING_AMOUNT,
             "can_run": meets(_role(request), Role.BILLING),
+            "last_run": rent_run.last_run(),
             "catch_up_months": rent_run.CATCH_UP_MONTHS,
             "dead_letters": WebhookEvent.objects.filter(outcome=WebhookOutcome.DEAD_LETTER).count(),
         },
@@ -128,7 +131,10 @@ def run_create_charges(request: HttpRequest) -> HttpResponse:
     refused = _billing_only(request)
     if refused is not None:
         return refused
-    report = rent_run.create_charges(timezone.localdate(), actor=_actor(request))
+    today = timezone.localdate()
+    actor = _actor(request)
+    report = rent_run.create_charges(today, actor=actor)
+    rent_run.record_run(report, today, actor)
     messages.success(
         request,
         f"Charges created: {len(report.created)}. "

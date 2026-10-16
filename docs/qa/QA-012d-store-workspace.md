@@ -190,3 +190,60 @@ new draft has one row; months older than twelve back cannot be billed from the p
 sentinel the Item box reserves.
 
 **Verdict (C):** PASS (no rework cycle; one test-list omission filled by Fable; one decision for the owner: repricing an existing charge billed below its balance).
+
+### Batch D — the run page's list and the tick's row, the grid window, Create missing charges, finding 12d-2
+
+**Scope.** `backend/ledger` (`services/rent_run.py`: `leases_due(store=)`, `_run`,
+`catch_up_store`, `record_run`, `last_run`, `run_line`, `created_message`;
+`management/commands/collections_tick.py` records the run; `views/run.py`, `templates/run/today.html`
+(the last run and `#created-charges`); `views/dashboard.py`, `dashboard/home.html` (`#run-line`);
+`services/grid.py` (`default_range` 10 + 1 + 1, `picker_bounds`), `grid/page.html` (month selects);
+`views/stores.py` `store_create_charges`; `urls.py`, `accounts/registry.py`;
+`services/workspace.py` (`Action.post`, "Create missing charges", `store_balances`, the Charges
+tab rows on the receivables figures with "Carried by re-debit"); `services/receivables.py`
+`open_balances_and_carried`; `stores/detail.html` POST actions as forms), tests. No migration (the
+run's report is an audit row `rent_run.ticked`), no dependency, no environment variable, no
+provider call.
+
+**Commands run (final Batch D code).**
+
+| Command | Database | Exit | Result |
+|---|---|---|---|
+| `uv run ruff check .`, `uv run ruff format --check .` | n/a | 0 | clean, 495 files formatted |
+| `uv run mypy` (strict) | n/a | 0 | no issues in 402 source files |
+| `uv lock --check` | n/a | 0 | consistent |
+| `manage.py makemigrations --check --dry-run` | sqlite, PostgreSQL 16 | 0 | No changes detected |
+| `uv run pytest -m "not e2e" -q -o faulthandler_timeout=300` | sqlite | 0 | 5,272 passed, 631 skipped; 13:15 wall |
+| the "Migration tests" selection | PostgreSQL 16 | 0 | 26 passed; 11:05 wall |
+| the "Unit tests" selection | PostgreSQL 16 | 0 | 5,874 passed, 3 skipped; 15:45 wall |
+| `uv run pytest -m e2e -q` | PostgreSQL 16 | 0 | 7 passed |
+| `bash scripts/check-no-secrets.sh`; pattern scan of the diff since `ca3c2b9` and every new file | n/a | 0 | clean |
+
+**Tests (Gate 2).** Opus: `test_operations_pages.py` (14: the button and the tick both list
+what they created with store and charge links; the run row and its actor; the dashboard line;
+Create missing charges with catch-up, today's debit and an ended lease, the store scope, the
+audit rows, "Nothing missing", a paused lease named, the bar form, 404s; the grid's default
+window and the pickers, the swap, the cap, hostile values not echoed; a future month billed in
+advance with the invoice number; "not due" only before the start; 12d-2 with rent and one-off
+returns equal to the header), `test_grid.py`, `test_store_views.py`, `test_store_workspace.py`
+updated. Fable (`test_plan012d_d_adversarial.py`, 3 cases): Create missing charges on one store
+never touches another, is refused to a viewer (403) and anonymous (401), creates the three
+missing months once and says "Nothing missing" on a second click, and GET is not an action; the
+grid's default window is December 2025 to November 2026 in the table's own headers, a reversed
+range is swapped, a range wider than 24 months is capped to its latest 24, and hostile values fall
+back to the default window without being echoed and without adding a script to the page; the
+run page's created-charges table names only what it just created, with store links and the
+catch-up marker.
+
+**Findings (D).**
+
+| # | Severity | Where | Finding | Outcome |
+|---|---|---|---|---|
+| 11 | MAJOR | grid pickers | From/To were HTML month inputs; the owner's text rules those out for Safari (item 8b's rule, the same staff and browsers) | Resolved: From and To are selects of the current month ± 24 (the shown range's months added), no JavaScript; the reports pages' own month inputs go to Batch E under the same rule |
+
+Design choices accepted: the button writes the same `rent_run.ticked` row as the tick, with its
+user as actor (the run page shows the latest of either; the dashboard sums today's rows); Create
+missing charges writes no run row (it is audited per charge); 12d-2 covers open rent and one-off
+rows (unpaid deposits and parents on a live plan keep the stored balance as before).
+
+**Verdict (D):** PASS (one rework cycle: the grid pickers as month selects; finding 12d-2 resolved).

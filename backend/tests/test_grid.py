@@ -278,10 +278,17 @@ def test_sql_like_state_text_matches_nothing(today: date) -> None:
 # --- Range ------------------------------------------------------------------------------
 
 
-def test_the_default_range_is_this_month_and_the_eleven_before(today: date) -> None:
+def test_the_default_range_is_ten_months_before_this_one_this_one_and_the_next(
+    today: date,
+) -> None:
+    # PLAN-012d D12: 10 past months, the current and the next.
     query = grid.parse_query({}, TODAY)
-    assert (query.from_month, query.to_month) == (date(2025, 11, 1), OCT)
+    assert (query.from_month, query.to_month) == (date(2025, 12, 1), date(2026, 11, 1))
     assert len(query.months) == 12 and query.messages == ()
+    assert grid.default_range(TODAY) == (date(2025, 12, 1), date(2026, 11, 1))
+    # Only "to" given: the 11 months before it and that month.
+    only_to = grid.parse_query({"to": "2026-06"}, TODAY)
+    assert (only_to.from_month, only_to.to_month) == (date(2025, 7, 1), date(2026, 6, 1))
 
 
 def test_the_range_is_capped_at_24_months(today: date, viewer: Client) -> None:
@@ -294,9 +301,29 @@ def test_the_range_is_capped_at_24_months(today: date, viewer: Client) -> None:
     assert grid.parse_query({"from": "2025-01", "to": "2026-12"}, TODAY).messages == ()
 
 
+def test_the_month_pickers_are_selects_of_the_current_month_and_24_either_side(
+    today: date, viewer: Client
+) -> None:
+    # PLAN-012d D12 (owner, 8b and 9a): plain selects, not HTML month inputs.
+    months = grid.picker_months(grid.parse_query({}, TODAY), TODAY)
+    assert len(months) == 49 and (months[0], months[-1]) == (date(2024, 10, 1), date(2028, 10, 1))
+    assert months == sorted(set(months))
+    # A range shown outside the window is added, so it can be submitted again.
+    old = grid.picker_months(grid.parse_query({"from": "2021-06", "to": "2021-07"}, TODAY), TODAY)
+    assert old[:3] == [date(2021, 6, 1), date(2021, 7, 1), date(2024, 10, 1)] and len(old) == 51
+    html = page(viewer, "")
+    assert 'type="month"' not in html
+    for name in ("from", "to"):
+        select = html.split(f'<select name="{name}" id="{name}">')[1].split("</select>")[0]
+        assert select.count("<option ") == 49 and select.count(" selected") == 1
+    assert '<option value="2026-10">October 2026</option>' in html
+    assert '<option value="2025-12" selected>December 2025</option>' in html
+    assert '<option value="2026-11" selected>November 2026</option>' in html
+
+
 def test_a_bad_or_reversed_range_answers_with_a_sentence(today: date, viewer: Client) -> None:
     bad = grid.parse_query({"from": "2026-13"}, TODAY)
-    assert UNREADABLE.format(start="2025-11", end="2026-10") in bad.messages
+    assert UNREADABLE.format(start="2025-12", end="2026-11") in bad.messages
     swapped = grid.parse_query({"from": "2026-09", "to": "2026-01"}, TODAY)
     assert (swapped.from_month, swapped.to_month) == (date(2026, 1, 1), SEP)
     assert SWAPPED.format(start="2026-01", end="2026-09") in swapped.messages

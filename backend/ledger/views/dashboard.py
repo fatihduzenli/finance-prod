@@ -26,7 +26,7 @@ from django.views.decorators.http import require_safe
 
 from accounts.roles import Role, meets, role_of
 from ledger.models import PaymentChannel, PaymentStatus
-from ledger.services import attention, grid, one_off_charges, receivables
+from ledger.services import attention, grid, one_off_charges, receivables, rent_run
 from ledger.views.operators import csv_response, role_required
 from ledger.views.reports import TOO_SLOW, ReportTooSlow, bounded
 
@@ -55,6 +55,8 @@ def home(request: HttpRequest) -> HttpResponse:
             # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
             "can_record_outcome": meets(role_of(request.user), Role.BILLING),
             "payments_query": payments_query,
+            # PLAN-012d D11: today's rent run in one line, from its audit rows.
+            "run_line": rent_run.run_line(today),
             "waived_live_heading": one_off_charges.WAIVED_LIVE_HEADING,
             "not_sent": [
                 (invoice, receivables.invoice_store_label(invoice)) for invoice in data.not_sent
@@ -121,6 +123,8 @@ def _grid_page(
         "ledger/grid/page.html",
         {
             "query": query,
+            # PLAN-012d D12: the month selects offer the current month +/- 24.
+            "picker_months": grid.picker_months(query),
             "grid": built,
             "rows": _grid_rows(built) if built is not None else [],
             "too_slow": TOO_SLOW if built is None else "",

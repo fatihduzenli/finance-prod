@@ -14,11 +14,14 @@
 - the **action bar** (D2): which actions the role may take on this store, each pointing at
   an existing form with the store and its lease in the query string (``?store=``,
   ``?lease=``); a store without a current lease offers New lease instead of the lease's
-  actions; a viewer gets none;
+  actions; a viewer gets none; Create missing charges posts (PLAN-012d D13);
 - the **open tab** only (D3, ``?tab=``, Charges by default): Charges, Invoices, Payments,
   Schedules and History are built here; Documents and Contact log are built by their own
   view helpers (:mod:`ledger.views.documents`, :mod:`ledger.views.contact_log`). History
-  is for admins; another role asking for it gets Charges.
+  is for admins; another role asking for it gets Charges. The Charges tab's open rows
+  show the header's figures (:class:`StoreBalances`): a charge a live re-debit carries
+  owes only what the re-debit does not collect, and reads "Carried by re-debit" once
+  nothing is left (finding 12d-2).
 
 Nothing here writes or calls the payment provider. Money is ``Decimal``; provider
 identifiers are masked.
@@ -120,6 +123,8 @@ KIND_INSURANCE = "insurance"
 AUTOPAY_NONE = "Not set up"
 NEXT_RENT = "Rent debit"
 NEXT_REDEBIT = "Re-debit of a returned payment"
+#: The status of a charge whose balance a live re-debit collects (finding 12d-2).
+CARRIED_BY_REDEBIT = "Carried by re-debit"
 
 _CLOSED_ONE_OFF = (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
 
@@ -242,21 +247,36 @@ def _next_payment(
     return min(found, key=lambda item: item.on) if found else None
 
 
-def _open_balance(store: Store, operators: Iterable[uuid.UUID], today: date) -> Decimal:
-    """The store's rows of the open balances of every operator its leases bill."""
-    rows = [
-        row
-        for operator in operators
-        for row in receivables.open_balances(today, operator=operator)
-        if row.store_id == store.pk
-    ]
-    return receivables.total(rows)
+@dataclass(frozen=True, slots=True)
+class StoreBalances:
+    """The store's rows of :func:`ledger.services.receivables.open_balances` for every
+    operator its leases bill: what each open charge owes, which charges a live re-debit
+    carries, and their total (the header's open balance)."""
+
+    owed: dict[tuple[str, uuid.UUID], Decimal]
+    carried: frozenset[tuple[str, uuid.UUID]]
+    total: Decimal
 
 
-def _header(store: Store, store_leases: list[Lease], today: date, now: datetime) -> Header:
+def store_balances(store: Store, store_leases: Iterable[Lease], today: date) -> StoreBalances:
+    """:class:`StoreBalances` of ``store``, one receivables read per operator."""
+    operators = sorted(
+        {row.operator_id for row in store_leases if row.operator_id is not None}, key=str
+    )
+    owed: dict[tuple[str, uuid.UUID], Decimal] = {}
+    carried: set[tuple[str, uuid.UUID]] = set()
+    for operator in operators:
+        rows, carrying = receivables.open_balances_and_carried(today, operator=operator)
+        owed.update(
+            {(row.kind, row.charge_id): row.balance for row in rows if row.store_id == store.pk}
+        )
+        carried.update(key for key, amount in carrying.items() if amount > 0)
+    return StoreBalances(owed, frozenset(carried), sum(owed.values(), ZERO))
+
+
+def _header(store: Store, today: date, now: datetime, balances: StoreBalances) -> Header:
     lease = lease_end.current_lease(store, today)
-    operators = {row.operator_id for row in store_leases if row.operator_id is not None}
-    balance = _open_balance(store, sorted(operators, key=str), today)
+    balance = balances.total
     if lease is None:
         return Header(
             lease=None,
@@ -294,6 +314,8 @@ class Action:
     url: str
     element_id: str
     danger: bool = False
+    #: A button posting to ``url`` (with the CSRF token) instead of a link.
+    post: bool = False
 
 
 def _with(url: str, **params: str) -> str:
@@ -353,6 +375,16 @@ def _actions(store: Store, header: Header, role: Role | None, today: date) -> li
                 "Schedule a payment",
                 reverse("ledger:stores:schedule_payment", kwargs={"pk": store.pk}),
                 "bar-schedule-payment",
+            )
+        )
+        # PLAN-012d D13: the run's charges for this store only.
+        found.append(
+            Action(
+                "create_charges",
+                "Create missing charges",
+                reverse("ledger:stores:create_charges", kwargs={"pk": store.pk}),
+                "bar-create-charges",
+                post=True,
             )
         )
     found.append(
@@ -528,7 +560,15 @@ def _insurance_row(
         return None
     if chosen == FILTER_PAID and (not known or balance > 0):
         return None
-    status = "Needs premium" if not known else ("Paid" if balance <= 0 else "Owed")
+    if not known:
+        status = "Needs premium"
+    elif balance > 0:
+        status = "Owed"
+    elif carried.get(charge.pk, ZERO) > 0:
+        # 12d-2: a live re-debit collects what is left, so nothing is owed here.
+        status = CARRIED_BY_REDEBIT
+    else:
+        status = "Paid"
     return ChargeRow(
         kind=KIND_INSURANCE,
         charge_id=charge.pk,
@@ -676,15 +716,47 @@ def _one_off_row(charge: OneOffCharge, role: Role | None, back: str) -> ChargeRo
     )
 
 
-def charges_tab(store: Store, chosen: str, role: Role | None) -> dict[str, Any]:
+def _as_receivables(row: ChargeRow, balances: StoreBalances) -> None:
+    """Give an open rent or one-off row the balance the header counts (finding 12d-2):
+    less what a live re-debit carries, "Carried by re-debit" once that is all of it."""
+    key = (row.kind, row.charge_id)
+    if key in balances.owed:
+        row.balance = balances.owed[key]
+    elif key in balances.carried:
+        row.balance = ZERO
+    if key in balances.carried and row.balance <= 0:
+        row.status = CARRIED_BY_REDEBIT
+
+
+def charges_tab(
+    store: Store, chosen: str, role: Role | None, balances: StoreBalances | None = None
+) -> dict[str, Any]:
     """The Charges tab (D3): the rent, one-off and insurance charges of the store's
     leases in one table, newest due first, filtered ``open`` (the default), ``paid`` or
     ``all``; each with its invoices and, for billing, its payment form (which returns to
-    the store page). Seven queries whatever the number of charges."""
+    the store page). An open rent or one-off charge shows the balance of
+    :func:`ledger.services.receivables.open_balances` (a rescheduled return's carried
+    amount subtracted, finding 12d-2), as the insurance row does, so the open charges
+    total the header's balance; ``balances`` is the header's, read here when not given.
+    Seven queries whatever the number of charges, besides ``balances``."""
     billing = meets(role, Role.BILLING)
     back = "?" + urlencode({"store": str(store.pk)})
-    rows = [_rent_row(charge, billing, back) for charge in _rent_rows(store, chosen)]
-    rows += [_one_off_row(charge, role, back) for charge in _one_off_rows(store, chosen)]
+    if balances is None:
+        balances = store_balances(store, store.leases.all(), timezone.localdate())
+    rows: list[ChargeRow] = []
+    for rent in _rent_rows(store, chosen):
+        rent_row = _rent_row(rent, billing, back)
+        if rent.balance > 0 and rent.status != RentChargeStatus.WAIVED:
+            _as_receivables(rent_row, balances)
+        rows.append(rent_row)
+    for one_off in _one_off_rows(store, chosen):
+        one_off_row = _one_off_row(one_off, role, back)
+        if one_off.balance > 0 and one_off.status not in _CLOSED_ONE_OFF:
+            _as_receivables(one_off_row, balances)
+        rows.append(one_off_row)
+    if chosen == FILTER_OPEN:
+        # A charge a re-debit carries in full is not open any more.
+        rows = [listed for listed in rows if listed.balance > 0]
     insurance = list(_insurance_rows(store))
     carried, collected = (
         receivables.insurance_redebits([charge.pk for charge in insurance])
@@ -898,11 +970,11 @@ def store_workspace(
     """The header, the action bar and the open tab of ``store`` for ``role`` (D1); ``tab``
     is a name :func:`chosen_tab` returned, ``chosen`` the tab's filter (``?filter=``)."""
     moment = now or timezone.now()
-    store_leases = list(store.leases.all())
-    header = _header(store, store_leases, today, moment)
+    balances = store_balances(store, store.leases.all(), today)
+    header = _header(store, today, moment, balances)
     data: dict[str, Any] = {}
     if tab == TAB_CHARGES:
-        data = charges_tab(store, _chosen_filter(chosen, CHARGE_FILTERS), role)
+        data = charges_tab(store, _chosen_filter(chosen, CHARGE_FILTERS), role, balances)
     elif tab == TAB_INVOICES:
         data = invoices_tab(store, _chosen_filter(chosen, INVOICE_FILTERS), role)
     elif tab == TAB_PAYMENTS:

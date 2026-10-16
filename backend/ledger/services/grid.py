@@ -4,12 +4,17 @@ D2; SCOPE Flow 3 and Flow 4).
 Read only: nothing here writes or calls the payment provider.
 
 **The query** (:func:`parse_query`): ``from`` and ``to`` are months written ``YYYY-MM``
-(both inclusive); the default is the current month and the 11 before it. A month that
-cannot be read gives the default range, a ``to`` before ``from`` is swapped and a range
-longer than :data:`MAX_MONTHS` keeps its last :data:`MAX_MONTHS` months, each with a
-sentence, never an error. The filters are ``operator`` (an operator's id), ``state``
-(the store's state, any case), ``channel`` (a lease payment channel) and ``status`` (a
-cell status); an unusable one is dropped with a sentence.
+(both inclusive); the default is the 10 months before the current one, the current
+month and the next (PLAN-012d D12; :func:`default_range`). A month that cannot be read
+gives the default range (it is never echoed), a ``to`` before ``from`` is swapped and a
+range longer than :data:`MAX_MONTHS` keeps its last :data:`MAX_MONTHS` months, each with
+a sentence, never an error. The page's month pickers are plain selects (PLAN-012d D12:
+not HTML month inputs, which Safari does not render) offering the current month and the
+:data:`PICKER_MONTHS` before and after it, with the shown range's months added
+(:func:`picker_months`). The filters are
+``operator`` (an operator's id), ``state`` (the store's state, any case), ``channel`` (a
+lease payment channel) and ``status`` (a cell status); an unusable one is dropped with a
+sentence.
 
 **Rows** are stores, in store-number order (stores without a number after, by label):
 label, number, state, and the operator and channel of the store's *current* lease (the
@@ -32,7 +37,8 @@ charges has a note. A month billed on an invoice builder invoice's Rent line (PL
 D6) adds that invoice's number to the cell's text (``paid 1,000.00 INV-2026-0012``; not
 once the invoice is void); its
 status is its charge's as any other, so a rent paid before its month is ``paid`` in that
-month's cell.
+month's cell, and a future month billed or paid in advance shows it with the invoice
+number (PLAN-012d D12).
 
 **Column totals** (:attr:`Grid.columns`): per month, the count of cells of each status
 and the sum collected (``amount_paid``).
@@ -89,8 +95,12 @@ from ledger.services.pnl import (
 
 #: The longest range shown, in months (D2).
 MAX_MONTHS = 24
-#: The default range: the current month and this many before it.
-DEFAULT_PAST_MONTHS = 11
+#: The default range (PLAN-012d D12): this many months before the current one, the
+#: current month and :data:`DEFAULT_NEXT_MONTHS` after it.
+DEFAULT_PAST_MONTHS = 10
+DEFAULT_NEXT_MONTHS = 1
+#: The month pickers offer the current month and this many before and after it.
+PICKER_MONTHS = 24
 
 STATUS_PAID = RentChargeStatus.PAID.value
 STATUS_UNPAID = RentChargeStatus.UNPAID.value
@@ -121,8 +131,9 @@ STATE_MAX_LENGTH = 50
 
 
 def default_range(today: date | None = None) -> tuple[date, date]:
+    """The 10 months before this one, this month and the next (12 months)."""
     current = (today or timezone.localdate()).replace(day=1)
-    return add_months(current, -DEFAULT_PAST_MONTHS), current
+    return add_months(current, -DEFAULT_PAST_MONTHS), add_months(current, DEFAULT_NEXT_MONTHS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +177,7 @@ def _range(params: Mapping[str, str], today: date | None) -> tuple[date, date, l
     if end is None:
         end = default_to
     if start is None:
-        start = add_months(end, -DEFAULT_PAST_MONTHS)
+        start = add_months(end, -(DEFAULT_PAST_MONTHS + DEFAULT_NEXT_MONTHS))
     if end < start:
         start, end = end, start
         messages.append(SWAPPED.format(start=_label(start), end=_label(end)))
@@ -196,6 +207,15 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> GridQue
         messages.append(BAD_STATUS)
         status = ""
     return GridQuery(start, end, operator, state, channel, status, tuple(messages))
+
+
+def picker_months(query: GridQuery, today: date | None = None) -> list[date]:
+    """The months the page's From and To selects offer, first first: the current month and
+    :data:`PICKER_MONTHS` before and after it, with the range shown added when outside them
+    so that it can always be submitted again."""
+    current = (today or timezone.localdate()).replace(day=1)
+    window = {add_months(current, n) for n in range(-PICKER_MONTHS, PICKER_MONTHS + 1)}
+    return sorted(window.union(query.months))
 
 
 # --- Cells and rows -------------------------------------------------------------------

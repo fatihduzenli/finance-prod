@@ -49,6 +49,7 @@
   <p class="muted">Outstanding: rent, insurance and one-off charges with a balance, not waived or voided, deposits left out. Overdue: due before today.</p>
 
   <h2>Today's run</h2>
+  <p id="run-line"><a href="{% url 'ledger:run:today' %}">Today's rent run: {% if run_line %}{{ run_line.created }} created, {{ run_line.skipped }} skipped{% else %}no run yet today{% endif %}</a></p>
   <ul id="run-summary">
     <li><a href="{% url 'ledger:run:today' %}">Debits due today: <strong id="run-due">{{ data.run.due }}</strong></a></li>
     <li><a href="{% url 'ledger:run:today' %}">Pending: <strong id="run-pending">{{ data.run.pending }}</strong></a></li>

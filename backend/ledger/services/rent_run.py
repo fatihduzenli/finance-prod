@@ -62,6 +62,12 @@ Rules kept here:
   :func:`create_charges` (PLAN-012b-b D3); saving a lease runs the catch-up for that lease
   (:mod:`ledger.services.leases`). Every charge is made by
   :func:`create_month`, the single-month helper.
+- **The run's report** (PLAN-012d D11, D13): each run of :func:`create_charges`, the
+  daily tick's and the run page's button's, writes one ``rent_run.ticked`` audit row
+  (:func:`record_run`) with its counts and the ids of the charges it created; the run
+  page lists the latest one's charges (:func:`last_run`) and the dashboard shows today's
+  in one line (:func:`run_line`). :func:`catch_up_store` is the run for one store (the
+  store page's "Create missing charges"), audited per charge as the run is.
 - **Carried balance** (PLAN-009 D5): the open balances of a lease's earlier charges are
   shown with each due debit and on the charge page; a new charge's amount never
   includes them. A charge split into a live installment plan (PLAN-012e D9) is owed
@@ -86,7 +92,7 @@ import calendar
 import math
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -123,6 +129,7 @@ from ledger.models import (
     RentChargeStatus,
     ScheduleKind,
     ScheduleState,
+    Store,
 )
 from ledger.services import contacts, numbering, proration
 from ledger.services.leases import (
@@ -459,14 +466,16 @@ def _debit_days(day: date) -> list[int]:
     return [day.day] if day.day < last else list(range(day.day, 32))
 
 
-def leases_due(day: date) -> RunDay:
-    """The debits due on ``day`` and the leases due that day that are skipped."""
+def leases_due(day: date, store: Store | None = None) -> RunDay:
+    """The debits due on ``day`` and the leases due that day that are skipped; with
+    ``store``, only that store's leases (PLAN-012d D13)."""
     days = _debit_days(day)
-    leases = (
-        Lease.objects.select_related("store", "operator")
-        .filter(Q(debit_day__in=days) | Q(second_debit_day__in=days))
-        .order_by("store__external_label", "id")
+    leases = Lease.objects.select_related("store", "operator").filter(
+        Q(debit_day__in=days) | Q(second_debit_day__in=days)
     )
+    if store is not None:
+        leases = leases.filter(store=store)
+    leases = leases.order_by("store__external_label", "id")
     period = day.replace(day=1)
     previous = (period - timedelta(days=1)).replace(day=1)
     due: list[DueDebit] = []
@@ -608,7 +617,28 @@ def _skip_reason(lease: Lease, day: date) -> str:
 def create_charges(day: date, *, actor: User | None) -> ChargeRunReport:
     """One charge per due debit, idempotently (D6), then the catch-up of every eligible
     lease (PLAN-012b-b D1)."""
-    plan = leases_due(day)
+    return _run(day, actor, None)
+
+
+def catch_up_store(store: Store, day: date, actor: User | None) -> ChargeRunReport:
+    """:func:`create_charges` for one store (PLAN-012d D13, "Create missing charges"):
+    today's due debits of the store's leases (:func:`create_month`), then
+    :func:`catch_up_lease` for the store's leases the run catches up (its current lease
+    and the leases that ended in the months the catch-up looks at). Audited as the run
+    is (``rent_charge.created``, the catch-up's with ``"catch_up": true``). The store's
+    leases not ended that the run would skip are listed as skipped with the reason."""
+    report = _run(day, actor, store)
+    listed = {item.lease.pk for item in report.skipped}
+    skipped = list(report.skipped)
+    for lease in store.leases.filter(ended_on__isnull=True).order_by("started_on", "id"):
+        reason = _skip_reason(lease, day)
+        if reason and lease.pk not in listed:
+            skipped.append(SkippedLease(lease, reason))
+    return replace(report, skipped=tuple(skipped))
+
+
+def _run(day: date, actor: User | None, store: Store | None) -> ChargeRunReport:
+    plan = leases_due(day, store)
     created: list[RentCharge] = []
     already: list[RentCharge] = []
     for item in plan.due:
@@ -623,7 +653,10 @@ def create_charges(day: date, *, actor: User | None) -> ChargeRunReport:
         )
         (created if made else already).append(charge)
     caught_up: list[RentCharge] = []
-    for lease in _catch_up_leases(day):
+    leases = _catch_up_leases(day)
+    if store is not None:
+        leases = leases.filter(store=store)
+    for lease in leases:
         caught_up.extend(catch_up_lease(lease, day, actor))
     return ChargeRunReport(tuple(created), tuple(already), plan.skipped, tuple(caught_up))
 
@@ -792,6 +825,172 @@ def catch_up_lease(lease: Lease, day: date, actor: User | None) -> list[RentChar
                 made.append(charge)
         period = _next_month(period)
     return made
+
+
+# --- The run's report (PLAN-012d D11, D13) ---------------------------------------------
+
+#: The audit row of a run of :func:`create_charges` (PLAN-012d D11).
+TICKED_ACTION = "rent_run.ticked"
+ENTITY_RUN = "rent_run"
+#: Most created charges the run page lists; the rest are counted.
+RUN_LIST_MAX = 200
+#: Most created charges "Create missing charges" names in its message; the rest are counted.
+MESSAGE_LIST_MAX = 20
+NOTHING_MISSING = "Nothing missing: every rent charge due up to today exists."
+WHEN_TODAY = "today"
+WHEN_CATCH_UP = "catch-up"
+
+
+def record_run(report: ChargeRunReport, day: date, actor: User | None) -> AuditLog:
+    """One ``rent_run.ticked`` audit row for a run of :func:`create_charges` on ``day``
+    (PLAN-012d D11): the daily tick (``actor`` ``None``) and the run page's button (its
+    user). It holds the counts and the ids of the charges created, today's and the
+    catch-up's; ids only."""
+    return AuditLog.objects.create(
+        actor=actor,
+        action=TICKED_ACTION,
+        entity_type=ENTITY_RUN,
+        entity_id=day.isoformat(),
+        before=None,
+        after={
+            "day": day.isoformat(),
+            "created": len(report.created),
+            "caught_up": len(report.caught_up),
+            "already": len(report.already),
+            "skipped": len(report.skipped),
+            "created_ids": [str(charge.pk) for charge in report.created],
+            "caught_up_ids": [str(charge.pk) for charge in report.caught_up],
+        },
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CreatedCharge:
+    charge: RentCharge
+    #: ``"today"`` or ``"catch-up"``.
+    when: str
+
+
+@dataclass(frozen=True, slots=True)
+class RunRecord:
+    """The latest ``rent_run.ticked`` row, read back (PLAN-012d D11)."""
+
+    day: date
+    at: datetime
+    #: ``None`` for the daily tick.
+    actor: User | None
+    created: int
+    caught_up: int
+    already: int
+    skipped: int
+    #: The created charges still there, today's first, at most :data:`RUN_LIST_MAX`.
+    charges: tuple[CreatedCharge, ...]
+
+    @property
+    def total_created(self) -> int:
+        return self.created + self.caught_up
+
+    @property
+    def not_listed(self) -> int:
+        return max(self.total_created - len(self.charges), 0)
+
+
+def _count(after: dict[str, Any], key: str) -> int:
+    value = after.get(key)
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
+def _ids(after: dict[str, Any], key: str) -> list[uuid.UUID]:
+    found: list[uuid.UUID] = []
+    values = after.get(key)
+    for value in values if isinstance(values, list) else []:
+        try:
+            found.append(uuid.UUID(str(value)))
+        except ValueError:
+            continue
+    return found
+
+
+def _run_rows() -> QuerySet[AuditLog]:
+    return AuditLog.objects.filter(action=TICKED_ACTION, entity_type=ENTITY_RUN)
+
+
+def last_run() -> RunRecord | None:
+    """The latest run's report (two queries), or ``None`` before the first run."""
+    row = _run_rows().select_related("actor").order_by("-at", "-id").first()
+    if row is None:
+        return None
+    after = row.after if isinstance(row.after, dict) else {}
+    try:
+        day = date.fromisoformat(row.entity_id)
+    except ValueError:
+        day = timezone.localdate(row.at)
+    wanted = [(pk, WHEN_TODAY) for pk in _ids(after, "created_ids")] + [
+        (pk, WHEN_CATCH_UP) for pk in _ids(after, "caught_up_ids")
+    ]
+    wanted = wanted[:RUN_LIST_MAX]
+    charges = (
+        RentCharge.objects.select_related("lease__store").in_bulk([pk for pk, _ in wanted])
+        if wanted
+        else {}
+    )
+    return RunRecord(
+        day=day,
+        at=row.at,
+        actor=row.actor,
+        created=_count(after, "created"),
+        caught_up=_count(after, "caught_up"),
+        already=_count(after, "already"),
+        skipped=_count(after, "skipped"),
+        charges=tuple(CreatedCharge(charges[pk], when) for pk, when in wanted if pk in charges),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RunLine:
+    """The dashboard's line (PLAN-012d D11): what today's runs created, and what the
+    latest of them skipped."""
+
+    created: int
+    skipped: int
+
+
+def run_line(day: date) -> RunLine | None:
+    """The line for ``day`` from its ``rent_run.ticked`` rows (one query), or ``None``
+    when nothing ran that day."""
+    rows = [
+        after if isinstance(after, dict) else {}
+        for after in _run_rows()
+        .filter(entity_id=day.isoformat())
+        .order_by("-at", "-id")
+        .values_list("after", flat=True)
+    ]
+    if not rows:
+        return None
+    created = sum(_count(after, "created") + _count(after, "caught_up") for after in rows)
+    return RunLine(created=created, skipped=_count(rows[0], "skipped"))
+
+
+def created_message(report: ChargeRunReport) -> str:
+    """What a run created, in one sentence (PLAN-012d D13): ``Created: Rent 2026-08
+    $612.90 (catch-up), ...`` in month order, at most :data:`MESSAGE_LIST_MAX` named; or
+    :data:`NOTHING_MISSING`."""
+    made = [(charge, WHEN_TODAY) for charge in report.created] + [
+        (charge, WHEN_CATCH_UP) for charge in report.caught_up
+    ]
+    if not made:
+        return NOTHING_MISSING
+    made.sort(key=lambda pair: (pair[0].period_month, pair[0].seq, str(pair[0].lease_id)))
+    parts = [
+        f"Rent {charge.period_month:%Y-%m}"
+        + (f" (debit {charge.seq})" if charge.seq > 1 else "")
+        + f" ${charge.amount_due:,.2f} ({when})"
+        for charge, when in made[:MESSAGE_LIST_MAX]
+    ]
+    more = len(made) - MESSAGE_LIST_MAX
+    if more > 0:
+        parts.append(f"and {more} more")
+    return "Created: " + ", ".join(parts) + "."
 
 
 # --- Matching -------------------------------------------------------------------------

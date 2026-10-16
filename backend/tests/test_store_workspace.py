@@ -224,6 +224,7 @@ def test_the_bar_by_role() -> None:
         "record_payment",
         "add_setup_charge",
         "schedule_payment",
+        "create_charges",
         "upload_document",
         "add_contact",
     ]
@@ -505,7 +506,7 @@ def test_a_rescheduled_insurance_return_is_owed_once_on_the_tab_as_in_the_header
     every = workspace.charges_tab(lease.store, workspace.FILTER_ALL, Role.ADMIN)
     [row] = [row for row in every["charge_rows"] if row.charge_id == insurance.pk]
     # What the re-debit collected is paid on the insurance charge.
-    assert (row.balance, row.paid, row.status) == (D("0.00"), D("300.00"), "Paid")
+    assert (row.balance, row.paid, row.status) == (D("0.00"), D("300.00"), "Carried by re-debit")
     assert every["charge_total"] == header.open_balance
 
 

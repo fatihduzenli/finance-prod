@@ -106,6 +106,8 @@ store_patterns = (
         path("<str:pk>/payments/new/", stores.store_record_payment, name="record_payment"),
         path("<str:pk>/schedule-payment/", stores.store_schedule_payment, name="schedule_payment"),
         path("<str:pk>/charge-now/", stores.store_charge_now_pick, name="charge_now_pick"),
+        # PLAN-012d D13: Create missing charges (the rent run for this store).
+        path("<str:pk>/create-charges/", stores.store_create_charges, name="create_charges"),
     ],
     "stores",
 )

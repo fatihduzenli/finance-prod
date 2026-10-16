@@ -1280,3 +1280,19 @@ passed; e2e 7; secret scans clean; Fable's adversarial file 5 cases green on bot
 test-list omission (a constraint case) filled by Fable. **For the owner:** billing an existing
 charge below its balance reprices the charge (a $500 deposit billed at $450 becomes a $450
 deposit, audited). Batch D assigned.
+
+## Update, 2026-10-16, PLAN-012d Batch D built and gated (not pushed)
+
+Batch D of Step 12d (owner's 9 and 9a, finding 12d-2): the run page lists every charge the
+last run created (store, month, amount, "catch-up" or "today", linked), from the daily job or the
+button (one audit row `rent_run.ticked` per run); the dashboard shows "Today's rent run: N
+created, M skipped"; **Create missing charges** on the store's bar runs the catch-up for that
+store only and says what it created or "Nothing missing"; the grid opens on 10 past months, the
+current and the next, with From/To month **selects** (the owner's Safari rule; one rework cycle
+replaced the month inputs) capped at 24 months; the Charges tab's rent and one-off rows now use
+the receivables figures and read "Carried by re-debit" where a re-debit carries the balance, so
+the tab total equals the header (12d-2 closed). No migration. Gate: ruff, format, mypy (402
+files), lock, migrations clean; sqlite 5,272 passed; PostgreSQL 26 + 5,874 passed; e2e 7; secret
+scans clean; Fable's adversarial file 3 cases green on both engines. Batch E assigned (the
+operator page as the workspace; the reports pages' month inputs become selects under the same
+rule).

@@ -26,7 +26,10 @@ Payments, Schedules, Documents, Contact log (the entries about a lease of the st
 (billing; one payment allocated over the open charges, PLAN-012d D6),
 ``stores:schedule_payment`` (billing; one debit on a date) and ``stores:charge_now_pick``
 (admin) are the bar's Record a payment, Schedule a payment and Charge now; their GET is
-refused below those roles.
+refused below those roles. ``stores:create_charges`` (POST, billing) is the bar's Create
+missing charges: the rent run for this store only
+(:func:`ledger.services.rent_run.catch_up_store`, PLAN-012d D13), on the server's today,
+with what it created as the message, back to the Charges tab.
 """
 
 from __future__ import annotations
@@ -77,6 +80,7 @@ from ledger.services import (
     lease_end,
     one_off_charges,
     payments_entry,
+    rent_run,
     store_costs,
     workspace,
 )
@@ -232,6 +236,26 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
     if tab == workspace.TAB_DOCUMENTS:
         context.update(documents.section_context(request, store))
     return render(request, "ledger/stores/detail.html", context)
+
+
+@role_required
+@require_POST
+def store_create_charges(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:stores:create_charges`` (billing, PLAN-012d D13): the rent run's charges
+    for this store only, today's due debits and the catch-up; the message names what was
+    created, or says nothing was missing; back to the Charges tab."""
+    if not meets(_role(request), Role.BILLING):
+        return forbidden(request)
+    store = _load(pk)
+    report = rent_run.catch_up_store(store, timezone.localdate(), _actor(request))
+    text = rent_run.created_message(report)
+    if report.created or report.caught_up:
+        messages.success(request, text)
+    else:
+        messages.info(request, text)
+    for item in report.skipped[: rent_run.MESSAGE_LIST_MAX]:
+        messages.warning(request, f"Skipped {item.lease.store.external_label}: {item.reason}")
+    return redirect(workspace.tab_url(store.pk, workspace.TAB_CHARGES))
 
 
 PAYMENT_FORM = "ledger/stores/record_payment.html"

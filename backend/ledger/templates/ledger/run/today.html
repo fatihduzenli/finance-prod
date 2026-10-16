@@ -30,6 +30,29 @@
       </form>
     </div>
   {% endif %}
+  {% if last_run %}
+    <h2>Last run</h2>
+    <p id="last-run">{{ last_run.day|date:"Y-m-d" }}, {% if last_run.actor %}by {{ last_run.actor.get_username }}{% else %}by the daily run{% endif %}: {{ last_run.created }} created today, {{ last_run.caught_up }} by the catch-up, {{ last_run.already }} already created, {{ last_run.skipped }} skipped.</p>
+    {% responsive_table %}
+    <table id="created-charges">
+      <thead><tr><th>Store</th><th>Month</th><th>Amount</th><th>Created</th><th>Charge</th></tr></thead>
+      <tbody>
+        {% for item in last_run.charges %}
+          <tr>
+            <td><a href="{% url 'ledger:stores:detail' pk=item.charge.lease.store.pk %}">{{ item.charge.lease.store.external_label }}</a></td>
+            <td>{{ item.charge.period_month|date:"Y-m" }}{% if item.charge.seq > 1 %} (debit {{ item.charge.seq }}){% endif %}</td>
+            <td>${{ item.charge.amount_due }}</td>
+            <td>{{ item.when }}</td>
+            <td><a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{{ item.charge.get_status_display }}</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="muted">This run created no charge.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endresponsive_table %}
+    {% if last_run.not_listed %}<p class="muted" id="created-not-listed">{{ last_run.not_listed }} more not listed.</p>{% endif %}
+  {% endif %}
   {% include "ledger/_job_status.html" %}
   {% if match_lines %}
     <ul id="match-report">{% for line in match_lines %}<li>{{ line }}</li>{% endfor %}</ul>

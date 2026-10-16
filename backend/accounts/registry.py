@@ -230,6 +230,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # views refuse the forms' GET below billing too.
     "ledger:stores:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:stores:schedule_payment": RouteRule(min_role=Role.BILLING, methods=POST),
+    # PLAN-012d D13: the store page's Create missing charges (the rent run for one store)
+    # needs billing, as the run page's button does; POST only.
+    "ledger:stores:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),

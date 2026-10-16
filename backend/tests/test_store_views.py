@@ -337,8 +337,9 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     lease_end = ("end_lease", "transfer")
     # PLAN-012d D2: the action bar's Record a payment (billing) and Charge now (admin).
     workspace_bar = ("record_payment", "charge_now_pick")
-    # PLAN-012d Batch B: the action bar's Schedule a payment (billing).
-    schedule = ("schedule_payment",)
+    # PLAN-012d Batch B: the action bar's Schedule a payment (billing). Batch D (D13):
+    # Create missing charges (billing, POST only).
+    schedule = ("schedule_payment", "create_charges")
     assert names == {
         f"ledger:stores:{short}"
         for short in (
