@@ -1342,3 +1342,18 @@ contact entry, missing charges); drafts from the store and operator pages with E
 Delete; the checklist without ticks; the builder's Rent and existing-charge lines in Safari; the
 grid's 12-month window and selects; the operator page's store selector; the top-bar search;
 the below-balance refusal. Next: 12c (the design pass) on this structure.
+
+## Update, 2026-10-16, Checkpoint 12d closed; Step 12c received
+
+All twelve staging clicks passed (store workspace, allocation with a kept credit, drafts with
+Edit/Send/Delete, checklist, builder in Safari, grid window and filter, operator workspace,
+top-bar search, vacant-store bar). **Step 12c** received: the visual design pass on the 12d
+structure, no new features: design tokens in one CSS file, the shell (navy top bar with the
+dark logo and the company name from a new `company_settings` table, the search box, user menu,
+sandbox banner, a left navigation on desktop collapsing to the phone menu), components, the
+dashboard as cards, the grid polish, print stylesheets, PWA icon and favicon from
+`static/brand/` (committed in this step), accessibility with an AA-contrast test, screenshot
+baselines of ten pages at two widths compared in CI, forms that show only what applies (every
+wizard and form walked), and a plain-language copy review with the full before/after list for
+the owner's approval **before** any change. Plan: PLAN-012c; the copy list goes to the owner
+first.
