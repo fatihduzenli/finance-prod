@@ -1329,3 +1329,16 @@ Gate: ruff, format, mypy (408 files), lock, migrations clean; sqlite 5,335 passe
 26 + 5,937 passed; e2e 7; secret scans clean; Fable's adversarial file 9 cases green on both
 engines. Step 12d is complete in the working tree (Batches A–F); the updated Publish Request
 goes to the owner.
+
+## Update, 2026-10-16, PLAN-012d deployed to staging
+
+Pushed `262e72c..aded787` on the owner's word. CI run 38933677713: Migration tests 10:47 of 15,
+Unit tests 10:00 of 20, e2e green; deploy green (the image build 0:57, no repeat of the ACR
+fault). Staging revision `finance-staging-web--0000044` healthy on image `aded787`,
+`deploy_migrate` applied ledger 0042–0044 and reports up to date, `/healthz` 200, `/search/`
+answers 401 to anonymous as every page does. Checkpoint 12d clicks for the owner: everyday work
+on one store from its page (invoice, payment with allocation and a kept credit, document,
+contact entry, missing charges); drafts from the store and operator pages with Edit, Send,
+Delete; the checklist without ticks; the builder's Rent and existing-charge lines in Safari; the
+grid's 12-month window and selects; the operator page's store selector; the top-bar search;
+the below-balance refusal. Next: 12c (the design pass) on this structure.
