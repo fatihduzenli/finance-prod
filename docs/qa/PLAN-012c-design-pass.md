@@ -3,8 +3,8 @@
 **Date:** 2026-10-16 · **Origin:** the owner's Step 12c text of 2026-10-16 (items 1–9 and the
 done-when list). **Lead/QA:** Fable · **Implementer:** Opus · **Ships:** one push after every batch
 is gated and the owner's checkpoint; before Step 13. **Gate on the owner's side:** the copy list
-(§4) is approved in writing before any copy changes; the other batches wait for that approval
-too, as the owner wrote "report the copy list first for approval, then build".
+(§4) was approved in writing on 2026-10-16 with three changes (Bank account check; the badge
+"Needs review" stays; "Returned payment (NSF) fee"), all applied below.
 
 ## 1. Restated objective
 
@@ -169,7 +169,7 @@ Rules first, then the lists; anything not listed keeps its text.
 | No machinery words | "the worker", "queued", "job", "request waiting" | dropped, or "in progress", "will be sent", "waiting" |
 | Autopay, not schedules | "schedule", "provider schedule", "schedule state" (the Stax scheduled invoice) | "autopay" ("Autopay will collect this charge") |
 | Plain verbs | "tick the box", "tick the confirmation" | "check the box" |
-| Review wording | "flagged for review", "Needs review" | "marked Check this", badge **Check this** |
+| Review wording | "flagged for review" | "marked Needs review"; the badge **Needs review** stays (owner) |
 | Marking | "marked paid", "mark" | "marked paid in Stax" |
 | Linking the processor | "sync", "synced", "link provider IDs", "linked" | "update from Stax", "connected to Stax" |
 | Nightly job | "reconciliation", "reconcile" | "nightly check" |
@@ -225,17 +225,17 @@ Rules first, then the lists; anything not listed keeps its text.
 | Arrears | Unpaid balances |
 | Grid | Monthly rent overview |
 | A/R aging | Unpaid by age |
-| Deposits versus transactions | Bank deposits |
+| Deposits versus transactions | Bank account check (owner: "deposit" means the security deposit everywhere else) |
 | Reconciliation | Nightly check |
 | Webhook events / Webhook event: {type} | Messages from Stax / Message from Stax: {type in words} |
 | Audit log | Activity log |
 | Schedule a payment: store {store} | Schedule a payment (unchanged: plain English) |
 | End lease {store}: live items | End lease {store}: still open at Stax |
 | Transfer store {store}: live items and balances | Transfer store {store}: still open at Stax, and balances |
-| Charge {store} {YYYY-MM} / Rent {YYYY-MM}, debit {n} [Needs review] | Rent {Month YYYY}, debit {n} [Check this] |
-| Lease {store} [Needs review] | Lease {store} [Check this] |
-| {charge label} {store} [Voided] [Deposit] [Legacy] [Needs review] | … [Voided] [Deposit] [From the spreadsheet] [Check this] |
-| Store {store} [Needs review] | Store {store} [Check this] |
+| Charge {store} {YYYY-MM} / Rent {YYYY-MM}, debit {n} [Needs review] | Rent {Month YYYY}, debit {n} [Needs review] |
+| Lease {store} [Needs review] | Lease {store} [Needs review] |
+| {charge label} {store} [Voided] [Deposit] [Legacy] [Needs review] | … [Voided] [Deposit] [From the spreadsheet] [Needs review] |
+| Store {store} [Needs review] | Store {store} [Needs review] |
 | Payment / Refund of ${amount} | Payment of $2,000.00 / Refund of $2,000.00 |
 | Cancel {number} (a never-sent draft) | Delete draft {number} |
 | Create one-off charge (the 410 page) | This form has moved (the invoice builder) |
@@ -297,7 +297,7 @@ Rules first, then the lists; anything not listed keeps its text.
 | Stax link failures (SyncFailure) | Provider error; Refused before sending; Not permitted from this process; Feature disabled; Calls paused after repeated failures; Failure budget exhausted; Rate limit wait exceeded; Rejected by the provider; Provider unavailable; Provider unreachable; Wrong merchant; Linked to another operator | Stax error; Not sent; Not allowed here; Turned off; Paused after repeated errors; Too many errors today; Stax is busy, try later; Rejected by Stax; Stax unavailable; Cannot reach Stax; Wrong Stax account; Connected to another operator |
 | Payment method | ACH | Bank debit (ACH) |
 | Payment channel | ACH debit through the payment provider | Bank debit through Stax |
-| One-off category | NSF fee | Returned-payment fee |
+| One-off category | NSF fee | Returned payment (NSF) fee (owner: staff know the term) |
 | Installment collection | Send by email | Send by e-mail |
 | Requests in progress (JobKind, the banner) | Operator sync, Mark the provider invoice paid, Create the provider invoice, Create the provider schedule, Replay webhook event, Run reconciliation, … | Updating the operator in Stax, Marking the invoice paid in Stax, Creating the invoice in Stax, Setting up autopay in Stax, Processing a message from Stax again, Running the nightly check, … (every kind in plain words; list in the inventory) |
 | Request states (JobStatus) | Queued, Running, Done, Failed, Dead | Waiting, In progress, Done, Failed, Gave up |
@@ -306,7 +306,7 @@ Rules first, then the lists; anything not listed keeps its text.
 | E-mail status (MessageStatus) | Queued, Sent to the catch-all address | Waiting, Sent to the test inbox |
 | Evidence status | Queued | Waiting |
 | Rent source | Sheet, current rent; Sheet, inferred; Staff | From the spreadsheet; From the spreadsheet (inferred); Entered by staff |
-| Badges | Needs review; Legacy | Check this; From the spreadsheet |
+| Badges | Needs review; Legacy | Needs review (unchanged); From the spreadsheet |
 | Attention labels | schedules to review; dead-letter webhooks; reconciliation mismatches | autopay to check; messages from Stax given up; nightly check findings |
 
 ### 4.6 Sentences with a technical term (the 123 of the inventory, grouped; the rest unchanged)
@@ -341,7 +341,7 @@ Rules first, then the lists; anything not listed keeps its text.
 | one_off_charges CHARGE_NOW_NOT_LINKED | "The charge's invoice is not at the payment provider yet. Charge now is possible once it is linked." → "The invoice is not in Stax yet. Charge now works once it is." |
 | one_off_charges INVOICE_RELEASED | "…was released at the payment provider for the installment plan." → "…was cancelled in Stax for the installment plan." |
 | rent_run MATCH_OTHER_SCHEDULE, MATCH_FAILED | "…does not name this schedule as its source" → "…does not come from this autopay"; "The payment provider could not list the invoices of a schedule. Matching stopped." → "Stax did not answer. The update stopped." |
-| rent_run MATCH_CHARGE_INVOICED, LINK_DONE_DIFFERS | "flagged for review" → "marked Check this" |
+| rent_run MATCH_CHARGE_INVOICED, LINK_DONE_DIFFERS | "flagged for review" → "marked Needs review" |
 | rent_run MATCH_MISMATCH, TOTAL_MISMATCH, SECOND_INVOICE | "at the payment provider" → "in Stax" |
 | rent_run MARK_DONE | "The invoice at the payment provider is marked paid." → "The invoice is marked paid in Stax." |
 | leases NOT_PROVIDER_CHANNEL | "…is not ACH debit through the payment provider." → "…is not bank debit through Stax." |
@@ -360,7 +360,7 @@ Rules first, then the lists; anything not listed keeps its text.
 | pnl UNREADABLE, views/invoices BAD_MONTH | "(use YYYY-MM)" → "(choose a month)"; "The month must be YYYY-MM." → "Choose a month." |
 | store_costs NOT_CSV, ROW_DATE, ROW_TOO_LONG | "The file is not a CSV in UTF-8 text: save it as "CSV UTF-8" or as .xlsx." → "The file could not be read: save it as CSV UTF-8 or as .xlsx."; dates "(MM/DD/YYYY or YYYY-MM-DD)" → "(month/day/year)"; raw column names → "Other cost description", "Notes" |
 | views/reconciliation RUN_QUEUED, views/run MATCH_QUEUED | "Reconciliation queued. Its state appears below; …" → "The nightly check is starting; its progress shows below; …"; "Matching queued. The report appears below when it is done." → "Updating from Stax; the report appears below when it is done." |
-| Templates (§5c of the inventory) | `_job_status.html` "Payment provider request ({kind}, {time} UTC)… This page refreshes every 5 seconds." → "Stax request in progress: {kind in words}, started {time}. This page refreshes every 5 seconds."; dashboard "An invoice whose last provider status is ATTEMPTED is listed here." → "Invoices Stax could not collect are listed here."; "Last reconciliation / No reconciliation has run yet." → "Last nightly check / No nightly check has run yet."; disputes "Last synced … UTC. Not synced yet." → "Last updated from Stax … / Not updated yet."; lease and store "Provider schedule / Autopay schedules / …the provider runs the schedule." → "Autopay in Stax / Autopay / …Stax runs the autopay."; enrol "One payment provider schedule is created per debit day." → "One autopay is set up in Stax per debit day."; "First debit (DTSTART)" → "First debit"; "Methods as of … UTC" → "Bank methods as of …"; lease form "…keeps its schedules; a … flagged …" → "…keeps its autopay; … marked Check this"; stop autopay "the provider schedule is deleted; re-enrol to start again." → "autopay is cancelled in Stax; set it up again to restart."; one-off cancel "The payment provider's invoice (or … its schedule) is deleted; the provider then shows the invoice as deleted, as it has no "void"." → "The invoice (or its autopay) is cancelled in Stax, which shows it as deleted."; link-invoice pages "…payment provider's dashboard … flagged … tick" → "…the Stax dashboard … marked Check this … check the box"; payment forms "…outside the payment provider … marked …" → "…outside Stax … marked paid in Stax …"; confirm pages "tick the box" → "check the box", "Nothing is sent to the payment provider." → "Nothing is sent to Stax."; blockers "Nothing is live at the payment provider…" → "Nothing is still open in Stax…"; operator page "Retry sync / Provider customer updated … UTC / SMS phone / SMS consent given on" → "Try again / Updated from Stax … / Text-message phone / Text-message consent given on"; reconciliation page → nightly check wording throughout, "flags" → "marks", "job" → dropped; deposits report "Open findings of the nightly reconciliation's deposit step" → "Open findings of the nightly check's bank-deposit step"; P&L column "Flags" → "Notes"; run page "webhook event… dead-lettered" → "a message from Stax was given up", "The payment provider's schedules generate the invoices" → "Stax's autopay makes the invoices", "reads the invoices of the provider's schedules only" → "reads Stax's autopay invoices only"; history tab "…schedules…" → "…autopay…"; webhooks detail "Payload (redacted)" → "Content (without account data)", "the body was not JSON…" → "the message could not be read…"; audit page "Time (UTC)" → "Time" |
+| Templates (§5c of the inventory) | `_job_status.html` "Payment provider request ({kind}, {time} UTC)… This page refreshes every 5 seconds." → "Stax request in progress: {kind in words}, started {time}. This page refreshes every 5 seconds."; dashboard "An invoice whose last provider status is ATTEMPTED is listed here." → "Invoices Stax could not collect are listed here."; "Last reconciliation / No reconciliation has run yet." → "Last nightly check / No nightly check has run yet."; disputes "Last synced … UTC. Not synced yet." → "Last updated from Stax … / Not updated yet."; lease and store "Provider schedule / Autopay schedules / …the provider runs the schedule." → "Autopay in Stax / Autopay / …Stax runs the autopay."; enrol "One payment provider schedule is created per debit day." → "One autopay is set up in Stax per debit day."; "First debit (DTSTART)" → "First debit"; "Methods as of … UTC" → "Bank methods as of …"; lease form "…keeps its schedules; a … flagged …" → "…keeps its autopay; … marked Needs review"; stop autopay "the provider schedule is deleted; re-enrol to start again." → "autopay is cancelled in Stax; set it up again to restart."; one-off cancel "The payment provider's invoice (or … its schedule) is deleted; the provider then shows the invoice as deleted, as it has no "void"." → "The invoice (or its autopay) is cancelled in Stax, which shows it as deleted."; link-invoice pages "…payment provider's dashboard … flagged … tick" → "…the Stax dashboard … marked Needs review … check the box"; payment forms "…outside the payment provider … marked …" → "…outside Stax … marked paid in Stax …"; confirm pages "tick the box" → "check the box", "Nothing is sent to the payment provider." → "Nothing is sent to Stax."; blockers "Nothing is live at the payment provider…" → "Nothing is still open in Stax…"; operator page "Retry sync / Provider customer updated … UTC / SMS phone / SMS consent given on" → "Try again / Updated from Stax … / Text-message phone / Text-message consent given on"; reconciliation page → nightly check wording throughout, "flags" → "marks", "job" → dropped; deposits report "Open findings of the nightly reconciliation's deposit step" → "Open findings of the nightly check's bank-deposit step"; P&L column "Flags" → "Notes"; run page "webhook event… dead-lettered" → "a message from Stax was given up", "The payment provider's schedules generate the invoices" → "Stax's autopay makes the invoices", "reads the invoices of the provider's schedules only" → "reads Stax's autopay invoices only"; history tab "…schedules…" → "…autopay…"; webhooks detail "Payload (redacted)" → "Content (without account data)", "the body was not JSON…" → "the message could not be read…"; audit page "Time (UTC)" → "Time" |
 | Forms (§5d) | "Customer ID / Payment method ID" → "Stax customer ID / Stax bank method ID" (needed to connect; the words stay plain); payment reference help "…are sent with the invoice when it is marked paid." → "…are sent to Stax when the invoice is marked paid."; "Refund method … never the payment provider." → "… never through Stax."; everything else unchanged |
 | Documents notice | "Those stay in Stax or DocuSign." → unchanged (the names are right) |
 

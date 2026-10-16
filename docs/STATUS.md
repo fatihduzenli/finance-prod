@@ -1357,3 +1357,11 @@ baselines of ten pages at two widths compared in CI, forms that show only what a
 wizard and form walked), and a plain-language copy review with the full before/after list for
 the owner's approval **before** any change. Plan: PLAN-012c; the copy list goes to the owner
 first.
+
+## Update, 2026-10-16, 12c copy list approved; Batch A started
+
+The owner approved PLAN-012c §4 with three changes: "Deposits versus transactions" → "Bank
+account check" (not "Bank deposits": deposit means the security deposit elsewhere); the badge
+"Needs review" stays; "NSF fee" → "Returned payment (NSF) fee". Everything else as written,
+including the left nav, the Admin group, the autopay labels and the money filter. Batch A
+(tokens, company settings, the shell, the brand files, PWA, titles) assigned.
