@@ -296,16 +296,22 @@ def test_every_role_reads_the_dashboard_and_none_may_post(today: date, role: Rol
     client, _ = client_for(role)
     response = client.get("/")
     assert response.status_code == 200
-    assert '<a href="/grid/" id="nav-grid">Grid</a>' in response.content.decode()
+    assert '<a href="/grid/" id="nav-grid">Monthly rent overview</a>' in response.content.decode()
     assert client.post("/").status_code == 403
 
 
-def test_the_nav_lists_the_grid_first() -> None:
+def test_the_nav_lists_dashboard_stores_operators_and_the_overview_first() -> None:
+    # PLAN-012c D3: Dashboard, Stores, Operators, Monthly rent overview, then the groups;
+    # System settings (the Django admin) is listed for an admin only.
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
     nav = page[page.index('<nav aria-label="Main">') : page.index("</nav>")]
-    assert nav.index('id="nav-grid"') < nav.index("<a", nav.index("<a") + 1)
-    assert 'href="/admin/"' in nav
+    order = [nav.index(f">{label}</a>") for label in ("Dashboard", "Stores", "Operators")]
+    order += [nav.index('id="nav-grid"'), nav.index('id="nav-reports"'), nav.index(">Admin<")]
+    assert order == sorted(order)
+    assert 'href="/admin/"' not in nav
+    admin_nav = client_for(Role.ADMIN)[0].get("/").content.decode()
+    assert '<a href="/admin/" id="nav-django-admin">System settings</a>' in admin_nav
 
 
 def test_a_user_without_a_role_or_a_session_cannot_read_it() -> None:

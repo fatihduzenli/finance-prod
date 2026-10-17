@@ -1,4 +1,6 @@
-{% load tz %}{% comment %}The latest payment-provider request of this record (PLAN-010 D3).{% endcomment %}
+{% load tz %}{% comment %}The latest payment-provider request of this record (PLAN-010 D3). The processor is named
+by the company settings row (company.provider_name, PLAN-012c D2); the rest of the wording is
+Batch D's copy pass.{% endcomment %}
 {% if job %}
-  <p id="job-status" class="job-{{ job.status }}"><strong>Payment provider request</strong> ({{ job.get_kind_display }}, {{ job.created_at|utc|date:"Y-m-d H:i" }} UTC): <span id="job-state">{{ job_text }}</span>{% if job_refresh %} <span class="muted">This page refreshes every 5 seconds.</span>{% endif %}</p>
+  <p id="job-status" class="job-{{ job.status }}"><strong>{{ company.provider_name }} request</strong> ({{ job.get_kind_display }}, {{ job.created_at|utc|date:"Y-m-d H:i" }} UTC): <span id="job-state">{{ job_text }}</span>{% if job_refresh %} <span class="muted">This page refreshes every 5 seconds.</span>{% endif %}</p>
 {% endif %}

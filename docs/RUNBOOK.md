@@ -713,3 +713,17 @@ URL, the paging, the export and the grid's From/To form; "Clear" removes it); th
 the top bar jumps straight to the store or the operator when exactly one matches, else lists the
 matches. An existing charge is never billed below its balance from the invoice builder: edit the
 charge first (audited), then bill it.
+
+
+## 19. The look of the app (PLAN-012c)
+
+**One look, one file of tokens.** Colours (navy, teal, green and the neutrals), spacing, type,
+radii, shadows and the status colours live in `tokens.css`; every page uses them, so a change of
+palette is one file. **Company settings** (admin: System settings → Company settings): the
+company name and short name (the top bar, the tab titles "Monvera · <page>", the sign-in page),
+the support e-mail, the time zone, an optional logo override (a document stored in the app;
+the brand logo otherwise) and the name of the payment processor as staff see it ("Stax"),
+used wherever a sentence names it. **The shell:** the navy top bar with the logo, the company
+name, the search box and the user menu; the sandbox banner above it on the test system; on a
+laptop a left navigation (Dashboard, Stores, Operators, Monthly rent overview, Reports, Admin),
+on a phone the Menu button. The phone app's icon and splash come from the brand files.

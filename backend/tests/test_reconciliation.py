@@ -1008,7 +1008,8 @@ def test_run_now_is_admin_only_queued_once_and_run_by_the_worker(fake: FakeProvi
 def test_the_nav_links_the_page(fake: FakeProvider) -> None:
     billing, _ = client_for(Role.BILLING)
     page = billing.get("/webhooks/").content.decode()
-    assert 'href="/reconciliation/">Reconciliation</a>' in page
+    # PLAN-012c D3: the Admin group's "Nightly check".
+    assert 'href="/reconciliation/">Nightly check</a>' in page
 
 
 # --- D12: configuration ------------------------------------------------------------------------

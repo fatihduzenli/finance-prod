@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models
+from django.db import DatabaseError, models, transaction
 from django.db.models import F, Q
 from django.db.models.expressions import Combinable
 from django.db.models.functions import Length, Lower, Trim
@@ -2942,3 +2942,116 @@ class ImportAudit(GuardedModel):
         indexes = [
             models.Index(fields=["target_table", "target_id"], name="import_audit_target_idx")
         ]
+
+
+# --- Company settings (PLAN-012c D2) ----------------------------------------------------
+
+
+class CompanyTimeZone(models.TextChoices):
+    """The US time zones the company may work in."""
+
+    NEW_YORK = "America/New_York", "Eastern (New York)"
+    CHICAGO = "America/Chicago", "Central (Chicago)"
+    DENVER = "America/Denver", "Mountain (Denver)"
+    PHOENIX = "America/Phoenix", "Mountain, no daylight saving (Phoenix)"
+    LOS_ANGELES = "America/Los_Angeles", "Pacific (Los Angeles)"
+    ANCHORAGE = "America/Anchorage", "Alaska (Anchorage)"
+    HONOLULU = "Pacific/Honolulu", "Hawaii (Honolulu)"
+
+
+COMPANY_SETTINGS_ID = 1
+COMPANY_NAME_MAX_LENGTH = 100
+#: A logo override is the blob path of a stored document, as
+#: :mod:`ledger.services.documents` builds it: ``documents/<owner type>/<uuid>/<uuid>``.
+#: Nothing else (no URL, no scheme, no ``..``) can be stored.
+_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+LOGO_PATH_PATTERN = rf"\Adocuments/(store|lease|operator)/{_UUID}/{_UUID}\Z"
+LOGO_PATH_MESSAGE = "The logo must be the path of a stored document, or blank."
+#: The stored types a logo override may have: images the preview route serves inline.
+LOGO_CONTENT_TYPES = (DocumentContentType.PNG, DocumentContentType.JPEG)
+
+validate_logo_path = RegexValidator(LOGO_PATH_PATTERN, LOGO_PATH_MESSAGE, code="logo_path")
+
+
+class CompanySettings(PaymentDataGuardedModel):
+    """The one row of company-wide display settings (PLAN-012c D2).
+
+    The company's name and short name (the bar and every page title), the support
+    e-mail, the time zone, a logo override (a stored document; the brand logo when blank)
+    and the payment processor's display name (``processor_name``; no business column is
+    named after the provider, PLAN-004), so no template names the processor. A
+    CHECK holds the table to the row ``id = 1``; :meth:`current` reads it and creates it
+    when it is missing (the admin and the management paths); :meth:`read` only reads it
+    (the page path). Edited in the Django admin by an admin only, never added or
+    deleted there, and every edit is audited (``company_settings.updated``).
+    """
+
+    id = models.PositiveSmallIntegerField(
+        primary_key=True, default=COMPANY_SETTINGS_ID, editable=False
+    )
+    name = guarded_char(COMPANY_NAME_MAX_LENGTH)
+    short_name = guarded_char(COMPANY_NAME_MAX_LENGTH)
+    support_email = models.EmailField(blank=True, validators=[validate_no_payment_data])
+    time_zone = _choice(CompanyTimeZone, default=CompanyTimeZone.NEW_YORK)
+    logo = models.CharField(
+        max_length=200, blank=True, validators=[validate_no_payment_data, validate_logo_path]
+    )
+    processor_name = guarded_char(COMPANY_NAME_MAX_LENGTH)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "company_settings"
+        verbose_name = "company settings"
+        verbose_name_plural = "company settings"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(id=COMPANY_SETTINGS_ID), name="company_settings_singleton"
+            ),
+            _valid_choice("company_settings", "time_zone", CompanyTimeZone),
+            _not_blank("company_settings", "name"),
+            _not_blank("company_settings", "short_name"),
+            _not_blank("company_settings", "processor_name"),
+            models.CheckConstraint(
+                condition=Q(logo="") | Q(logo__regex=LOGO_PATH_PATTERN),
+                name="company_settings_logo_path",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return str(self.name)
+
+    @property
+    def provider_name(self) -> str:
+        """The processor's display name, as templates read it (``company.provider_name``)."""
+        return str(self.processor_name)
+
+    @provider_name.setter
+    def provider_name(self, value: str) -> None:
+        self.processor_name = value
+
+    @classmethod
+    def current(cls) -> CompanySettings:
+        """The row, created with the seed values when it is missing."""
+        from ledger.company_defaults import SEED
+
+        try:
+            with transaction.atomic():
+                row, _ = cls.objects.get_or_create(pk=COMPANY_SETTINGS_ID, defaults=SEED)
+        except DatabaseError:
+            # The table is not there yet (a database before migration 0045): the seed
+            # values, unsaved, so a page such as the 401 page still renders.
+            return cls(pk=COMPANY_SETTINGS_ID, **SEED)
+        return row
+
+    @classmethod
+    def read(cls) -> CompanySettings:
+        """The row, read with one plain query and never created (the page path; the
+        migration seeds it): the seed values, unsaved, when it is missing or the table is
+        not there yet."""
+        from ledger.company_defaults import SEED
+
+        try:
+            row = cls.objects.filter(pk=COMPANY_SETTINGS_ID).first()
+        except DatabaseError:
+            row = None
+        return row if row is not None else cls(pk=COMPANY_SETTINGS_ID, **SEED)

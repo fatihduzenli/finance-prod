@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -63,6 +64,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0042_payment_allocation_and_credits",
             "ledger.migrations.0043_fee_type_show_in_setup",
             "ledger.migrations.0044_draft_existing_charge",
+            "ledger.migrations.0045_company_settings",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -1709,6 +1711,110 @@ def test_the_setup_flag_and_existing_charge_migrations_over_existing_rows_on_pos
     result = _manage(repo_root, url, "migrate", "--noinput")
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert _rows(url, EXISTING_ROWS) == [("1",)]
+
+
+# --- PLAN-012c D2: ledger 0045, company settings --------------------------------------------
+# Seeds an operator at ``ledger.0044``, migrates forward, back and forward again on both
+# engines and reads the rows with plain SQL: 0045 seeds the one company settings row and
+# gives the admin group view and change on it; the reverse drops the table, removes the two
+# permissions and keeps every other row; forward again seeds the row again.
+
+STATE_BEFORE_COMPANY = (("ledger", "0044_draft_existing_charge"),)
+COMPANY_ROW = (
+    "SELECT id, name, short_name, support_email, time_zone, logo, processor_name "
+    "FROM company_settings"
+)
+SEEDED_COMPANY = [("1", "Monvera", "Monvera", "", "America/New_York", "", "Stax")]
+COMPANY_PERMISSIONS = (
+    "SELECT p.codename FROM auth_group_permissions gp "
+    "JOIN auth_group g ON g.id = gp.group_id JOIN auth_permission p ON p.id = gp.permission_id "
+    "WHERE g.name = 'admin' AND p.codename LIKE '%companysettings' ORDER BY p.codename"
+)
+
+
+def seed_before_company() -> None:
+    """Seed an operator with the models of ``STATE_BEFORE_COMPANY``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_COMPANY)).apps
+    apps.get_model("ledger", "Operator").objects.create(display_name="Eastwind")
+
+
+def _company_round_trip(repo_root: Path, url: str) -> None:
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_COMPANY)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_company as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    for _ in range(2):
+        result = _manage(repo_root, url, "migrate", "--noinput")
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert _rows(url, COMPANY_ROW) == SEEDED_COMPANY
+        assert _rows(url, COMPANY_PERMISSIONS) == [
+            ("change_companysettings",),
+            ("view_companysettings",),
+        ]
+        _migrate_to(repo_root, url, *STATE_BEFORE_COMPANY)
+        assert _rows(url, COMPANY_PERMISSIONS) == []
+        assert _rows(url, "SELECT display_name FROM operators") == [("Eastwind",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert _rows(url, COMPANY_ROW) == SEEDED_COMPANY
+
+
+def test_the_company_settings_migration_over_existing_rows_on_sqlite(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    import sqlite3
+
+    url = f"sqlite:///{tmp_path / 'company.sqlite3'}"
+    _company_round_trip(repo_root, url)
+    with closing(sqlite3.connect(url.removeprefix("sqlite:///"))) as scratch:
+        # The CHECKs on the names call REGEXP, which Django registers on its connections.
+        scratch.create_function(
+            "REGEXP", 2, lambda pattern, text: re.search(pattern, text or "") is not None
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="company_settings_singleton"):
+            scratch.execute(
+                "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
+                "logo, processor_name, updated_at) VALUES "
+                "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', '2026-10-16')"
+            )
+
+
+@requires_postgresql
+def test_the_company_settings_migration_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    _company_round_trip(repo_root, url)
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute(
+            "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
+            "logo, processor_name, updated_at) VALUES "
+            "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', now())"
+        )
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute("UPDATE company_settings SET logo = 'https://example.com/logo.svg'")
+    # The free-text columns are guarded by the trigger.
+    for column in ("name", "short_name", "support_email", "processor_name"):
+        with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+            scratch.execute(
+                f"UPDATE company_settings SET {column} = '4111 1111 1111 1111'"  # noqa: S608
+            )
+    assert _rows(url, COMPANY_ROW) == SEEDED_COMPANY
 
 
 # --- Row 2 --------------------------------------------------------------------------

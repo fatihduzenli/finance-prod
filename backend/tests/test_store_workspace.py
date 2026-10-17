@@ -781,6 +781,8 @@ def test_the_run_page_links_stores() -> None:
 
 
 def test_the_nav_moves_rent_run_under_admin_and_marks_the_current_section() -> None:
+    # PLAN-012c D3: the Admin group lists Daily charges (billing and admin), Activity log and
+    # System settings (admin), Messages from Stax and Nightly check (every role, as before).
     def nav(client: Client, url: str) -> str:
         html = page(client, url)
         return html[html.index('<nav aria-label="Main">') : html.index("</nav>")]
@@ -790,18 +792,23 @@ def test_the_nav_moves_rent_run_under_admin_and_marks_the_current_section() -> N
     )
     for client in (viewer, billing, admin):
         text = nav(client, "/stores/")
-        assert '<details class="nav-menu" id="nav-admin-menu"><summary>Admin</summary>' in text
-        assert 'id="nav-django-admin"' in text
-        assert text.index("<details") < text.index('id="nav-django-admin"')
+        heading = '<span class="nav-group-heading" id="nav-admin">Admin</span>'
+        assert heading in text
+        assert text.index('id="nav-admin-menu"') < text.index(heading)
+        assert text.index(heading) < text.index('href="/webhooks/"')
         assert '<a href="/stores/" aria-current="page">Stores</a>' in text
         assert text.count('aria-current="page"') == 1
+        assert 'aria-current="true"' not in text
     assert 'id="nav-run"' not in nav(viewer, "/stores/")
     assert 'id="nav-run"' in nav(billing, "/stores/")
     assert 'id="nav-audit"' not in nav(billing, "/stores/")
     assert 'id="nav-audit"' in nav(admin, "/stores/")
+    assert 'id="nav-django-admin"' not in nav(billing, "/stores/")
+    assert 'id="nav-django-admin"' in nav(admin, "/stores/")
     run = nav(billing, "/run/")
-    assert '<a href="/run/" id="nav-run" aria-current="page">Rent run</a>' in run
-    assert run.index("<details") < run.index('href="/run/"')
+    assert '<a href="/run/" id="nav-run" aria-current="page">Daily charges</a>' in run
+    assert '<span class="nav-group-heading" id="nav-admin" aria-current="true">Admin</span>' in run
+    assert run.index('id="nav-admin"') < run.index('href="/run/"')
     assert 'aria-current="page"' not in nav(
         billing, f"/charges/{a_rent_charge(a_world(), OCTOBER).pk}/"
     )

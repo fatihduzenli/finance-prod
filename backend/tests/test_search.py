@@ -306,7 +306,8 @@ def test_the_route_is_read_only_and_the_box_is_in_the_nav(viewer: Client) -> Non
     assert "ledger:search" in registry.READ_ONLY_ROUTE_NAMES
     assert registry.rule_for("ledger:search") is None
     page = text(viewer.get("/"))
-    nav = page[page.index('<nav aria-label="Main">') : page.index("</nav>")]
+    # PLAN-012c D3: the box sits in the top bar.
+    nav = page[page.index('<header class="topbar"') : page.index("</header>")]
     assert (
         '<form method="get" action="/search/" class="nav-search" id="nav-search" role="search">'
         '<input type="search" name="q" id="nav-search-q" maxlength="100" '

@@ -27,6 +27,7 @@ from django.utils.cache import patch_cache_control
 from accounts.roles import Role
 from finance import pwa
 from finance.middleware import PrivateNoStoreMiddleware
+from ledger.models import CompanySettings
 from tests.auth_helpers import make_user, verified_client
 
 pytestmark = pytest.mark.django_db
@@ -72,18 +73,29 @@ def test_the_manifest_is_served_as_a_web_app_manifest() -> None:
     assert response.status_code == 200
     assert response["Content-Type"] == "application/manifest+json"
     data = json.loads(response.content)
-    assert data["name"] == "Finance" and data["short_name"] == "Finance"
+    # PLAN-012c D2, D4: the company's names, the navy theme and splash, the brand icons.
+    assert data["name"] == "Monvera" and data["short_name"] == "Monvera"
     assert data["start_url"] == "/" and data["scope"] == "/"
     assert data["display"] == "standalone"
-    assert re.fullmatch(r"#[0-9a-f]{6}", data["background_color"])
-    assert re.fullmatch(r"#[0-9a-f]{6}", data["theme_color"])
-    assert [(icon["sizes"], icon["type"]) for icon in data["icons"]] == [
-        ("192x192", "image/png"),
-        ("512x512", "image/png"),
+    assert data["background_color"] == data["theme_color"] == "#0b2545"
+    assert [(icon["src"], icon["sizes"], icon["type"]) for icon in data["icons"]] == [
+        ("/static/finance/brand/monvera_icon_192.png", "192x192", "image/png"),
+        ("/static/finance/brand/monvera_icon_512.png", "512x512", "image/png"),
+        ("/static/finance/brand/monvera_icon.svg", "any", "image/svg+xml"),
     ]
 
 
-@pytest.mark.parametrize(("path", "size"), [(path, sizes) for path, sizes in pwa.ICONS])
+def test_the_manifest_follows_the_company_settings() -> None:
+    row = CompanySettings.current()
+    row.name, row.short_name = "Acme Rentals", "Acme"
+    row.save()
+    data = json.loads(client_for().get("/manifest.webmanifest").content)
+    assert (data["name"], data["short_name"]) == ("Acme Rentals", "Acme")
+
+
+@pytest.mark.parametrize(
+    ("path", "size"), [(path, sizes) for path, sizes, kind in pwa.ICONS if kind == "image/png"]
+)
 def test_each_icon_is_a_png_of_its_declared_size(path: str, size: str) -> None:
     found = finders.find(path)
     assert found is not None, path
@@ -99,7 +111,7 @@ def test_the_manifest_carries_no_setting_no_host_and_no_secret() -> None:
     for value in (settings.SECRET_KEY, settings.STAX_API_KEY, settings.APP_BASE_URL):
         assert value not in body
     for icon in json.loads(body)["icons"]:
-        assert icon["src"].startswith("/static/finance/icons/")
+        assert icon["src"].startswith("/static/finance/brand/")
 
 
 @pytest.mark.parametrize("path", ["/manifest.webmanifest", "/sw.js"])
@@ -130,6 +142,10 @@ def test_the_allow_list_holds_only_the_apps_own_static_files() -> None:
     assert all(isinstance(url, str) and url.startswith("/static/") for url in urls)
     assert all(url.startswith(("/static/finance/", "/static/ledger/")) for url in urls)
     assert "/static/finance/app.css" in urls
+    # PLAN-012c D1, D4: the tokens and the brand files are kept too.
+    assert "/static/finance/tokens.css" in urls
+    assert "/static/finance/brand/monvera_logo_dark.svg" in urls
+    assert "/static/finance/brand/monvera_icon_192.png" in urls
     assert "/static/ledger/document_drop.js" in urls
     assert not any("/admin/" in url or url.endswith((".DS_Store", "~")) for url in urls)
     for page in ("/", "/healthz", "/grid/", "/reports/", "/sw.js", "/manifest.webmanifest"):
@@ -213,8 +229,17 @@ def test_every_staff_page_links_the_manifest_and_registers_the_worker() -> None:
     assert (
         '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">' in page
     )
-    assert '<meta name="theme-color" content="#1a1a1a">' in page
-    assert '<link rel="apple-touch-icon" href="/static/finance/icons/icon-192.png">' in page
+    assert '<meta name="theme-color" content="#0b2545">' in page
+    assert '<link rel="apple-touch-icon" href="/static/finance/brand/monvera_icon_192.png">' in page
+    # PLAN-012c D4: the SVG favicon with the PNG fallback.
+    assert (
+        '<link rel="icon" href="/static/finance/brand/monvera_icon_192.png" type="image/png" '
+        'sizes="192x192">' in page
+    )
+    assert (
+        '<link rel="icon" href="/static/finance/brand/monvera_icon.svg" type="image/svg+xml">'
+        in page
+    )
     assert 'navigator.serviceWorker.register("/sw.js", {scope: "/"})' in page
     assert 'window.addEventListener("load"' in page
 

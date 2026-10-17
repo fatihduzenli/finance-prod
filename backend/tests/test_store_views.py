@@ -438,7 +438,14 @@ def test_the_nav_links_to_the_store_list(admin: Client) -> None:
 #: Models whose permissions ledger migration 0013 gives the admin group (PLAN-010b D12).
 #: Models whose admin permissions later migrations grant (PLAN-010b ledger 0013; PLAN-011b
 #: ledger 0024: the collections ladder's steps and templates).
-PLAN_010B_ADMIN_MODELS = ("feetype", "insurancepremium", "collectionstep", "messagetemplate")
+#: PLAN-012c D2: ledger 0045, the company settings row.
+PLAN_010B_ADMIN_MODELS = (
+    "feetype",
+    "insurancepremium",
+    "collectionstep",
+    "messagetemplate",
+    "companysettings",
+)
 
 
 def _grant_view_permissions() -> None:

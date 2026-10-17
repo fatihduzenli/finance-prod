@@ -1435,7 +1435,7 @@ def test_the_add_buttons_and_the_form_say_add_entry(today: date) -> None:
         assert '<a class="btn" id="add-contact"' in page and ">Add entry</a>" in page, path
         assert "Add contact" not in page, path
     form = form_page(client, operator)
-    assert "Add entry: Acme | Finance</title>" in form and "<h1>Add entry: Acme</h1>" in form
+    assert "Monvera · Add entry: Acme</title>" in form and "<h1>Add entry: Acme</h1>" in form
 
 
 def test_the_outcome_route_is_registered_for_billing() -> None:

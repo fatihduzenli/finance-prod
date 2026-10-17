@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
 {% block title %}Deposits versus transactions{% endblock %}
-{% block head %}<style>tr.unmatched{background:#fdecee;}</style>{% endblock %}
+{% block head %}<style>tr.unmatched{background:var(--danger-bg);}</style>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
   <h1>Deposits versus transactions</h1>

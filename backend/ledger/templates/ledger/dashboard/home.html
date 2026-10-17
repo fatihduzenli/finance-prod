@@ -4,10 +4,10 @@
 {% block title %}Dashboard{% endblock %}
 {% block head %}<style>
   .figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.75rem;margin:1rem 0;}
-  .figure{border:1px solid #ddd;border-radius:6px;padding:.75rem;}
+  .figure{border:1px solid var(--line);border-radius:6px;padding:.75rem;}
   .figure a{color:inherit;text-decoration:none;display:block;}
   .figure .value{font-size:1.4rem;font-weight:700;display:block;margin-top:.25rem;}
-  .alert-list{border-left:4px solid #b00020;padding-left:.75rem;}
+  .alert-list{border-left:4px solid var(--danger);padding-left:.75rem;}
 </style>{% endblock %}
 {% block content %}
   <h1>Dashboard</h1>

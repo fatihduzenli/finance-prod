@@ -84,13 +84,14 @@ def every_status_store() -> dict[str, RentCharge]:
 
 # --- Cells, colours, marker, click-through --------------------------------------------------
 
+#: PLAN-012c D1: each status's fill token (unpaid is a navy outline on paper).
 COLOURS = {
-    "paid": "#d8f0dc",  # green
-    "unpaid": "#f8d4d8",  # red
-    "pending": "#fde9b8",  # amber
-    "partial": "#fbd3a8",  # orange
-    "due": "#dbe6f3",  # grey-blue
-    "waived": "#e6e6e6",  # grey
+    "paid": "var(--status-paid-bg)",
+    "unpaid": "var(--status-unpaid-bg)",
+    "pending": "var(--status-pending-bg)",
+    "partial": "var(--status-partial-bg)",
+    "due": "var(--status-due-bg)",
+    "waived": "var(--status-waived-bg)",
 }
 
 

@@ -1,32 +1,58 @@
-/* Staff screens (docs/qa/PLAN-011-dashboard-reports-mobile.md D9).
-   Breakpoints: under 720px a phone (tables as cards, one form column), under 1024px a
-   tablet (the menu folds behind a "Menu" toggle). Touch targets are at least 44px high
-   under 1024px and on any coarse pointer. No external asset. */
+/* Staff screens (docs/qa/PLAN-011-dashboard-reports-mobile.md D9; the shell and tokens of
+   docs/qa/PLAN-012c-design-pass.md D1, D3). Every colour, size and radius comes from
+   tokens.css (linked first): no literal colour here. Breakpoints: under 720px a phone
+   (tables as cards, one form column), under 900px the left navigation folds behind a
+   "Menu" toggle, under 1024px and on any coarse pointer touch targets are at least 44px
+   high. No external asset. */
 
-:root { --ink: #1a1a1a; --line: #e5e5e5; --paper: #fff; --page: #f6f6f6; --muted: #666; --tap: 44px; }
-body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: var(--ink); background: var(--page); -webkit-text-size-adjust: 100%; }
+:root { --page: var(--paper-2); --muted: var(--ink-2); --tap: 44px; }
+body { margin: 0; font-family: var(--font); color: var(--ink); background: var(--page); -webkit-text-size-adjust: 100%; }
+a { color: var(--link); }
+:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-/* --- Navigation ------------------------------------------------------------------- */
-body > nav { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: center; padding: .5rem 1.5rem; background: var(--ink); }
-body > nav a { color: #fff; text-decoration: none; font-weight: 600; }
-body > nav form { margin: 0; }
-body > nav button { background: none; border: 1px solid #fff; color: #fff; border-radius: 4px; padding: .25rem .75rem; cursor: pointer; font: inherit; }
-.nav-links { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: center; flex: 1 1 auto; }
-.nav-links form { margin-left: auto; }
-/* The top-bar search (PLAN-012d D17): pushed right with Settings and Sign out after it. */
-.nav-search ~ form { margin-left: 0; }
-body > nav .nav-search input { width: 14rem; padding: .3rem .5rem; font-size: .95rem; border: 1px solid #fff; border-radius: 4px; }
+/* --- Top bar (PLAN-012c D3) -------------------------------------------------------- */
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); min-height: var(--topbar-h); padding: var(--s-2) var(--s-6); box-sizing: border-box; background: var(--navy); color: var(--on-navy); }
+.topbar a, .topbar summary, .topbar button { color: var(--on-navy); }
+.topbar :focus-visible { box-shadow: 0 0 0 2px var(--navy), 0 0 0 4px var(--focus-on-navy); }
+.topbar-brand { display: inline-flex; align-items: center; gap: var(--s-3); text-decoration: none; min-width: 0; }
+.topbar-logo { height: 28px; width: auto; display: block; }
+.topbar-company { font-weight: 700; font-size: var(--t-lg); }
+.topbar-product { color: var(--on-navy-2); font-size: var(--t-sm); padding-left: var(--s-3); border-left: 1px solid var(--navy-2); }
+/* The top-bar search (PLAN-012d D17). */
+.topbar .nav-search { margin: 0 0 0 auto; }
+.topbar .nav-search input { width: 16rem; padding: var(--s-1) var(--s-2); font-size: var(--t-sm); border: 1px solid var(--control-border); border-radius: var(--r-1); background: var(--paper); color: var(--ink); }
+/* The user menu: a details element, no script. */
+.user-menu { position: relative; }
+.user-menu summary { cursor: pointer; font-weight: 600; list-style: none; padding: var(--s-1) var(--s-2); border: 1px solid var(--navy-2); border-radius: var(--r-1); }
+.user-menu summary::-webkit-details-marker { display: none; }
+.user-menu summary::after { content: " \25BE"; }
+.user-menu-items { position: absolute; right: 0; top: calc(100% + var(--s-1)); z-index: 10; min-width: 11rem; display: flex; flex-direction: column; gap: var(--s-1); padding: var(--s-2); background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-2); box-shadow: var(--shadow-2); }
+.topbar .user-menu-items a, .topbar .user-menu-items button { color: var(--ink); }
+.user-menu-items a { text-decoration: none; padding: var(--s-1) var(--s-2); }
+.user-menu-items form { margin: 0; }
+.user-menu-items button { background: none; border: 0; padding: var(--s-1) var(--s-2); font: inherit; cursor: pointer; text-align: left; width: 100%; }
+.user-menu-items a[aria-current="page"] { font-weight: 700; text-decoration: underline; }
+
+/* --- Shell and left navigation (PLAN-012c D3) ------------------------------------------- */
+.shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); align-items: stretch; min-height: calc(100vh - var(--topbar-h)); }
+.shell > nav { box-sizing: border-box; padding: var(--s-4) 0; background: var(--paper); border-right: 1px solid var(--line); }
+.shell > main { align-self: start; }
 /* The "Menu" toggle: a checkbox and its label; no script. Hidden on wide screens. */
 .nav-toggle { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
-.nav-toggle-label { display: none; color: #fff; font-weight: 600; cursor: pointer; border: 1px solid #fff; border-radius: 4px; padding: 0 .9rem; line-height: calc(var(--tap) - 2px); min-height: var(--tap); box-sizing: border-box; user-select: none; }
-.nav-toggle:focus-visible + .nav-toggle-label { outline: 2px solid #ffd400; outline-offset: 2px; }
-/* The current section, and the Admin menu (PLAN-012d D5). */
-body > nav a[aria-current="page"] { text-decoration: underline; text-underline-offset: 4px; }
-.nav-menu { position: relative; color: #fff; font-weight: 600; }
-.nav-menu summary { cursor: pointer; }
-.nav-menu[open] { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: center; }
+.nav-toggle-label { display: none; color: var(--ink); font-weight: 600; cursor: pointer; border: 1px solid var(--control-border); border-radius: var(--r-1); padding: 0 .9rem; line-height: calc(var(--tap) - 2px); min-height: var(--tap); box-sizing: border-box; user-select: none; background: var(--paper); }
+.nav-toggle:focus-visible + .nav-toggle-label { box-shadow: var(--focus-ring); }
+.nav-list, .nav-list ul { list-style: none; margin: 0; padding: 0; }
+.nav-list a, .nav-group-heading { display: block; padding: var(--s-2) var(--s-4); color: var(--ink); text-decoration: none; font-weight: 600; border-left: 4px solid transparent; }
+.nav-list ul a { padding-left: var(--s-7); font-weight: 400; }
+.nav-group { margin-top: var(--s-2); }
+span.nav-group-heading { color: var(--ink-2); font-size: var(--t-sm); text-transform: uppercase; letter-spacing: .04em; }
+.nav-list a:hover { background: var(--paper-2); }
+/* The current page and its group (PLAN-012d D5, PLAN-012c D3). */
+.nav-list a[aria-current="page"] { border-left-color: var(--teal); background: var(--info-bg); color: var(--navy); }
+.nav-group-heading[aria-current="true"] { color: var(--navy); }
+
 /* The store page's tabs (PLAN-012d D3): the open one is marked. */
-.store-tabs a[aria-current="page"], #charge-filters a[aria-current="page"], #invoice-filters a[aria-current="page"] { background: var(--ink); color: #fff; }
+.store-tabs a[aria-current="page"], #charge-filters a[aria-current="page"], #invoice-filters a[aria-current="page"] { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
 .header-card { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
 .header-card dt { font-weight: 600; } .header-card dd { margin: 0; }
 /* The invoice builder's lines (PLAN-012d D10): the Item box takes its cell's full width so
@@ -41,22 +67,22 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .table-total { font-weight: 600; text-align: right; margin: .5rem 0 1rem; }
 
 /* --- Page --------------------------------------------------------------------------- */
-main { max-width: 64rem; margin: 1.5rem auto; padding: 1.5rem 2rem; background: var(--paper); border: 1px solid #ddd; border-radius: 6px; }
-main.wide { max-width: none; margin: 1.5rem 1rem; }
+main { max-width: 64rem; margin: 1.5rem auto; box-sizing: border-box; width: calc(100% - 2rem); padding: 1.5rem 2rem; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-2); box-shadow: var(--shadow-1); }
+main.wide { max-width: none; margin: 1.5rem 1rem; width: auto; }
 h1 { font-size: 1.5rem; margin-top: 0; } h2 { font-size: 1.15rem; margin-top: 2rem; }
 table { border-collapse: collapse; width: 100%; }
 th, td { padding: .4rem .5rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 label { display: block; margin: .75rem 0 .25rem; font-weight: 600; }
 input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], select, textarea { padding: .5rem; box-sizing: border-box; font-size: 1rem; max-width: 100%; }
 input[type=text], input[type=email], input[type=search], textarea { width: 100%; }
-.btn { display: inline-block; padding: .45rem .9rem; border: 1px solid #333; border-radius: 4px; background: #fff; color: var(--ink); font-size: .95rem; cursor: pointer; text-decoration: none; box-sizing: border-box; }
-.btn-primary { background: var(--ink); color: #fff; } .btn-danger { border-color: #b00020; color: #b00020; }
+.btn { display: inline-block; padding: .45rem .9rem; border: 1px solid var(--control-border); border-radius: var(--r-1); background: var(--paper); color: var(--ink); font-size: .95rem; cursor: pointer; text-decoration: none; box-sizing: border-box; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); } .btn-danger { border-color: var(--danger); color: var(--danger); }
 .btn:disabled { opacity: .5; cursor: default; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: 1rem 0; } .actions form { margin: 0; }
-.messages { list-style: none; padding: 0; } .messages li { padding: .6rem .8rem; margin-bottom: .5rem; border-radius: 4px; background: #eef4ff; }
-.messages .error { background: #fdecee; color: #8a0016; } .messages .warning { background: #fff6dd; } .messages .success { background: #e9f7ec; }
-.errorlist { color: #b00020; padding-left: 1rem; }
-.muted { color: var(--muted); } .badge { display: inline-block; padding: .1rem .45rem; border-radius: 3px; background: #eee; font-size: .85rem; }
+.messages { list-style: none; padding: 0; } .messages li { padding: .6rem .8rem; margin-bottom: .5rem; border-radius: var(--r-1); background: var(--info-bg); color: var(--info-ink); }
+.messages .error { background: var(--danger-bg); color: var(--danger-ink); } .messages .warning { background: var(--warning-bg); color: var(--warning-ink); } .messages .success { background: var(--success-bg); color: var(--success-ink); }
+.errorlist { color: var(--danger); padding-left: 1rem; }
+.muted { color: var(--muted); } .badge { display: inline-block; padding: .1rem .45rem; border-radius: var(--r-1); background: var(--paper-3); color: var(--ink); font-size: var(--t-sm); }
 dl { display: grid; grid-template-columns: 12rem 1fr; gap: .35rem 1rem; } dt { font-weight: 600; } dd { margin: 0; }
 img, iframe { max-width: 100%; }
 
@@ -66,40 +92,55 @@ img, iframe { max-width: 100%; }
 .table-scroll > table th:first-child, .table-scroll > table td:first-child { position: sticky; left: 0; background: var(--paper); z-index: 1; }
 
 /* --- Attention list (PLAN-011b D6) ------------------------------------------------------- */
-.attention { border-left: 4px solid #b26a00; padding-left: .75rem; margin: 1rem 0; }
+.attention { border-left: 4px solid var(--warning); padding-left: .75rem; margin: 1rem 0; }
 .attention h2 { margin-top: 0; }
 .attention-list { list-style: none; padding: 0; margin: 0; }
-.attention-item { padding: .3rem .5rem; margin-bottom: .25rem; border-radius: 4px; background: #fff6dd; }
-.attention-item.severity-high { background: #fdecee; }
-.attention-item.severity-low { background: #f2f2f2; }
+.attention-item { padding: .3rem .5rem; margin-bottom: .25rem; border-radius: var(--r-1); background: var(--warning-bg); }
+.attention-item.severity-high { background: var(--danger-bg); }
+.attention-item.severity-low { background: var(--paper-2); }
 .attention-item a { color: inherit; }
 
 /* --- Calendar (PLAN-011b D8) ------------------------------------------------------------- */
 .calendar-kinds { border: 0; padding: 0; margin: .5rem 0; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
 .calendar-kinds legend { font-weight: 600; padding: 0; }
 label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0; font-weight: 400; }
-.calendar-month { border: 1px solid #ddd; }
+.calendar-month { border: 1px solid var(--line); }
 .calendar-head, .calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.calendar-head span { font-weight: 600; padding: .3rem .4rem; border-bottom: 1px solid #ddd; }
-.calendar-day { min-height: 6rem; border-right: 1px solid #eee; border-bottom: 1px solid #eee; padding: .25rem .35rem; font-size: .85rem; overflow-wrap: anywhere; }
-.calendar-day.other-month { background: #fafafa; color: var(--muted); }
-.calendar-day.today { outline: 2px solid var(--ink); outline-offset: -2px; }
+.calendar-head span { font-weight: 600; padding: .3rem .4rem; border-bottom: 1px solid var(--line); }
+.calendar-day { min-height: 6rem; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: .25rem .35rem; font-size: .85rem; overflow-wrap: anywhere; }
+.calendar-day.other-month { background: var(--paper-2); color: var(--muted); }
+.calendar-day.today { outline: 2px solid var(--navy); outline-offset: -2px; }
 .calendar-date { font-weight: 600; }
 .calendar-day ul { list-style: none; padding: 0; margin: .2rem 0 0; }
-.calendar-item { margin-bottom: .15rem; padding: .1rem .25rem; border-radius: 3px; background: #eef4ff; }
+.calendar-item { margin-bottom: .15rem; padding: .1rem .25rem; border-radius: var(--r-1); background: var(--info-bg); }
 .calendar-item a { color: inherit; text-decoration: none; }
-.calendar-item.kind-reminder { background: #fff6dd; } .calendar-item.kind-debit { background: #e9f7ec; }
-.calendar-item.kind-insurance { background: #f3e9f7; } .calendar-item.kind-lease_end { background: #fdecee; }
-.feed-new { border: 1px solid #ddd; border-radius: 6px; padding: .75rem; background: #e9f7ec; }
+.calendar-item.kind-reminder { background: var(--warning-bg); } .calendar-item.kind-debit { background: var(--success-bg); }
+.calendar-item.kind-insurance { background: var(--kind-insurance-bg); } .calendar-item.kind-lease_end { background: var(--danger-bg); }
+.feed-new { border: 1px solid var(--line); border-radius: var(--r-2); padding: .75rem; background: var(--success-bg); }
 
-/* --- Tablet and phone: menu toggle, touch targets ---------------------------------------- */
-@media (max-width: 1023.98px) {
-  body > nav { padding: .5rem 1rem; }
+/* A page that needs the whole width (the grid, PLAN-011b D2) keeps the folded menu. */
+.shell-folded { display: block; min-height: 0; }
+.shell-folded > nav { padding: var(--s-2) var(--s-4); border-right: 0; border-bottom: 1px solid var(--line); }
+.shell-folded .nav-toggle-label { display: inline-block; }
+.shell-folded .nav-links { display: none; padding: var(--s-2) 0; }
+.shell-folded .nav-toggle:checked ~ .nav-links { display: block; }
+
+/* --- Under 900px: the left navigation folds behind "Menu" (PLAN-012c D3) ------------------- */
+@media (max-width: 899.98px) {
+  .topbar { padding: var(--s-2) var(--s-4); }
+  .shell { display: block; min-height: 0; }
+  .shell > nav { padding: var(--s-2) var(--s-4); border-right: 0; border-bottom: 1px solid var(--line); }
   .nav-toggle-label { display: inline-block; }
-  .nav-links { display: none; flex-basis: 100%; padding: .25rem 0 .5rem; }
-  .nav-toggle:checked ~ .nav-links { display: flex; }
-  .nav-links a, .nav-links button { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 .5rem; box-sizing: border-box; }
-  .nav-links form { margin-left: 0; }
+  .nav-links { display: none; padding: var(--s-2) 0; }
+  .nav-toggle:checked ~ .nav-links { display: block; }
+  .nav-list a, .nav-group-heading { display: flex; align-items: center; min-height: var(--tap); padding-top: 0; padding-bottom: 0; box-sizing: border-box; }
+  main { width: auto; margin: 1rem; }
+}
+
+/* --- Tablet and phone: touch targets ---------------------------------------------------- */
+@media (max-width: 1023.98px) {
+  .topbar .nav-search input { width: 12rem; }
+  .user-menu summary, .user-menu-items a, .user-menu-items button { display: flex; align-items: center; min-height: var(--tap); box-sizing: border-box; }
 }
 @media (max-width: 1023.98px), (pointer: coarse) {
   .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=file] { min-height: var(--tap); }
@@ -119,15 +160,18 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
   form .actions label { margin: .5rem 0 0; }
   form input:not([type=checkbox]):not([type=radio]):not([type=hidden]), form select, form textarea { width: 100% !important; }
   form .btn, form button { width: 100%; }
-  body > nav form button { width: auto; }
+  .topbar form button { width: auto; }
+  .topbar-product { display: none; }
+  .topbar .nav-search { order: 3; flex: 1 1 100%; margin: 0; }
+  .topbar .nav-search input { width: 100%; }
   /* Tables become cards: one bordered block per row, a "label: value" line per cell. */
   .table-cards > table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .table-cards > table, .table-cards > table tbody, .table-cards > table tfoot, .table-cards > table tr, .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { display: block; width: 100%; box-sizing: border-box; }
-  .table-cards > table tr { border: 1px solid #ddd; border-radius: 6px; margin: 0 0 .75rem; padding: .25rem .75rem; background: var(--paper); }
+  .table-cards > table tr { border: 1px solid var(--line); border-radius: var(--r-2); margin: 0 0 .75rem; padding: .25rem .75rem; background: var(--paper); }
   .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { border: 0; padding: .35rem 0; }
   /* The label sits in a left column; the cell's own content (a link and its badges) keeps flowing inline. */
   .table-cards > table td[data-label] { position: relative; padding-left: calc(40% + .75rem); min-height: 1.4em; }
-  .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 600; color: #444; overflow-wrap: anywhere; }
+  .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
   .table-cards > table td:empty { display: none; }
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
   /* The phone keeps the sideways scroll and the fixed store column, narrower. */
@@ -142,8 +186,9 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
 /* --- Print ---------------------------------------------------------------------------------- */
 @media print {
   /* The sandbox banner is left as it is: it prints too (docs/CLAUDE.md Rule 6). */
-  body > nav, .nav-toggle, .nav-toggle-label { display: none !important; }
-  body { background: #fff; }
-  main, main.wide { margin: 0; padding: 0; border: 0; max-width: none; }
+  .topbar, .shell > nav, .nav-toggle, .nav-toggle-label { display: none !important; }
+  .shell { display: block; }
+  body { background: var(--paper); }
+  main, main.wide { margin: 0; padding: 0; border: 0; max-width: none; width: auto; box-shadow: none; }
   .table-scroll { overflow: visible; }
 }

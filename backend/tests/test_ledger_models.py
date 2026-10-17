@@ -490,6 +490,26 @@ def new_lease_credit(**fields: Any) -> ledger.LeaseCredit:
     return ledger.LeaseCredit(**{**values, **fields})
 
 
+#: A stored document's blob path, the shape a logo override must have (PLAN-012c D2).
+LOGO_PATH = (
+    "documents/store/00000000-0000-0000-0000-000000000001/00000000-0000-0000-0000-000000000002"
+)
+
+
+def new_company_settings(**fields: Any) -> ledger.CompanySettings:
+    """The one company settings row (PLAN-012c D2). The seeded row is removed first, so
+    the new row may take ``id = 1``."""
+    ledger.CompanySettings.objects.all().delete()
+    values = {
+        "id": 1,
+        "name": "Monvera",
+        "short_name": "Monvera",
+        "time_zone": "America/New_York",
+        "processor_name": "Processor",
+    }
+    return ledger.CompanySettings(**{**values, **fields})
+
+
 LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.Operator: new_operator,
     ledger.Store: new_store,
@@ -530,6 +550,7 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.LeaseTransfer: new_lease_transfer,
     ledger.InstallmentPlan: new_installment_plan,
     ledger.LeaseCredit: new_lease_credit,
+    ledger.CompanySettings: new_company_settings,
 }
 
 
@@ -1949,6 +1970,33 @@ LEDGER_CASES: list[ConstraintCase] = [
             resolution_note="Done.",
             resolution_kind="bogus",
         ),
+    ),
+    # PLAN-012c D2: the company settings row is the only one, its names are not blank and
+    # a logo override is a stored document's path.
+    ConstraintCase(
+        "company_settings_singleton",
+        new_company_settings,
+        lambda: new_company_settings(id=2),
+    ),
+    ConstraintCase(
+        "company_settings_name_not_blank",
+        new_company_settings,
+        lambda: new_company_settings(name=" "),
+    ),
+    ConstraintCase(
+        "company_settings_short_name_not_blank",
+        new_company_settings,
+        lambda: new_company_settings(short_name=""),
+    ),
+    ConstraintCase(
+        "company_settings_processor_name_not_blank",
+        new_company_settings,
+        lambda: new_company_settings(processor_name="\t"),
+    ),
+    ConstraintCase(
+        "company_settings_logo_path",
+        lambda: new_company_settings(logo=LOGO_PATH),
+        lambda: new_company_settings(logo="https://example.com/logo.svg"),
     ),
     *(
         case

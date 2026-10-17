@@ -19,6 +19,10 @@ The collections ladder's steps and e-mail templates (docs/qa/PLAN-011b D4, D10) 
 edited here the same way, by an admin only, add and change, never delete (a step no
 longer used is made inactive). A template whose subject or text uses anything but the
 whitelisted merge fields is refused on save (``MessageTemplate.clean``, :mod:`ledger.merge`).
+
+The company settings row (docs/qa/PLAN-012c D2) is edited here by an admin only: change,
+never add or delete (the one row is seeded by ledger migration 0045, which gives the
+``admin`` group view and change). Every save is audited as ``company_settings.updated``.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from ledger import merge
 from ledger.models import (
     AuditLog,
     CollectionStep,
+    CompanySettings,
     FeeType,
     InsurancePremium,
     Lease,
@@ -130,6 +135,9 @@ class AuditedAdmin(_ModelAdminBase):
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
 
+    def audit_action(self, change: bool) -> str:
+        return f"{self.entity_type}.{'changed' if change else 'created'}_in_admin"
+
     def save_model(
         self, request: HttpRequest, obj: Any, form: forms.ModelForm[Any], change: bool
     ) -> None:
@@ -140,7 +148,7 @@ class AuditedAdmin(_ModelAdminBase):
         super().save_model(request, obj, form, change)
         AuditLog.objects.create(
             actor=request.user if isinstance(request.user, User) else None,
-            action=f"{self.entity_type}.{'changed' if change else 'created'}_in_admin",
+            action=self.audit_action(change),
             entity_type=self.entity_type,
             entity_id=str(obj.pk),
             before=before,
@@ -211,3 +219,19 @@ class CollectionStepAdmin(AuditedAdmin):
     list_select_related = ("template",)
     audited_fields = ("day_offset", "template_id", "active", "position")
     entity_type = "collection_step"
+
+
+@admin.register(CompanySettings)
+class CompanySettingsAdmin(AuditedAdmin):
+    """The one row: changed, never added or deleted (PLAN-012c D2)."""
+
+    list_display = ("name", "short_name", "processor_name", "time_zone", "updated_at")
+    fields = ("name", "short_name", "support_email", "time_zone", "logo", "processor_name")
+    audited_fields = fields
+    entity_type = "company_settings"
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def audit_action(self, change: bool) -> str:
+        return f"{self.entity_type}.updated"

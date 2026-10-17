@@ -714,7 +714,7 @@ def test_the_breakdown_lists_the_rows_and_highlights_cost_only_ones() -> None:
     assert detailed.count('class="pnl-row"') == 1
     assert detailed.count('class="pnl-row cost-only"') == 1
     assert "Store 1796 · No operator · 2026-08" in detailed
-    assert "background:#fff6dd" in detailed
+    assert "background:var(--warning-bg)" in detailed
 
 
 def test_unknown_amounts_read_unknown_on_the_page() -> None:
@@ -813,9 +813,11 @@ def test_the_export_is_a_streamed_csv_attachment() -> None:
 
 def test_the_nav_links_to_the_report_next_to_payments() -> None:
     page = get("/payments/").content.decode()
-    # PLAN-012d D5: the current section's link carries aria-current="page".
+    # PLAN-012d D5: the current section's link carries aria-current="page"; PLAN-012c D3:
+    # both sit in the Reports group, Profit and loss just before Payments.
     payments_at = page.index('href="/payments/" aria-current="page">Payments</a>')
-    assert page.index('href="/reports/pnl/">Profit and loss</a>') > payments_at
+    pnl_at = page.index('href="/reports/pnl/">Profit and loss</a>')
+    assert page.index('id="nav-reports"') < pnl_at < payments_at
 
 
 # --- Roles (D12) ------------------------------------------------------------------------------

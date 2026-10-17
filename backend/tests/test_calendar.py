@@ -233,7 +233,9 @@ def test_the_author_edits_and_deletes_their_own_an_admin_any_another_billing_non
     author, author_user = client_for(Role.BILLING)
     other, _ = client_for(Role.BILLING)
     admin, _ = client_for(Role.ADMIN)
-    author.post("/calendar/new/", entry_post())
+    created = author.post("/calendar/new/", entry_post())
+    # Failed once in a full PostgreSQL run (2026-10-17) with nothing created; name the refusal.
+    assert created.status_code == 302, created.content.decode()[:600]
     entry = CalendarEntry.objects.get()
     assert entry.author == author_user
     # Another billing user: refused, nothing changes.

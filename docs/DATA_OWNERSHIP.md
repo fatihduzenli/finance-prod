@@ -348,6 +348,11 @@ scans are covered by the stated policy, not by a check.
 | `installment_plans.note` | App | The admin's cancel note; guarded text (PostgreSQL trigger) |
 | `one_off_charges.plan_id`, `installment_no` | System | Set exactly for category `installment` (CHECK); an installment's description, price and due date come from the confirmed preview; its payments are its own, counted under the parent in reports |
 
+### company_settings (PLAN-012c)
+| Field | Owner | Note |
+|---|---|---|
+| `company_settings.name`, `short_name`, `support_email`, `time_zone`, `logo`, `provider_name` | App | One row (CHECK `id = 1`), seeded by migration 0045 ("Monvera", "Monvera", blank, America/New_York, blank, "Stax"); edited in the Django admin by an admin, audited; the text fields are guarded; `logo` is a path inside the documents storage or blank |
+
 ### fee_types.show_in_setup, invoice_draft_lines.existing_charge_id (PLAN-012d)
 | Field | Owner | Note |
 |---|---|---|

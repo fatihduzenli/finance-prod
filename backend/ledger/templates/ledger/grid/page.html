@@ -1,6 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}Grid{% endblock %}
 {% block main_class %}wide grid-page{% endblock %}
+{% comment %}PLAN-012c D3: the left navigation folds behind "Menu" here at every width, so the twelve
+months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_class %} shell-folded{% endblock %}
 {% block head %}<style>
   /* PLAN-011b D2: a horizontal scrollbar that is always there (scroll, not auto; styled so
      WebKit's overlay scrollbars stay visible), a mirrored one above the table when it is
@@ -9,28 +11,30 @@
      narrows the store column in app.css and keeps the sideways scroll. */
   main.grid-page{margin:1rem .5rem;padding:1rem;}
   @media (max-width:719.98px){main.grid-page{margin:0;}}
-  .grid-scroll{overflow-x:scroll;overflow-y:auto;scrollbar-gutter:stable;max-height:75vh;border:1px solid #ddd;scrollbar-width:auto;scrollbar-color:#8a8a8a #ececec;-webkit-overflow-scrolling:touch;}
-  .grid-scroll-top{overflow-x:scroll;overflow-y:hidden;height:14px;border:1px solid #ddd;border-bottom:0;scrollbar-width:auto;scrollbar-color:#8a8a8a #ececec;}
+  .grid-scroll{overflow-x:scroll;overflow-y:auto;scrollbar-gutter:stable;max-height:75vh;border:1px solid var(--line);scrollbar-width:auto;scrollbar-color:var(--control-border) var(--paper-3);-webkit-overflow-scrolling:touch;}
+  .grid-scroll-top{overflow-x:scroll;overflow-y:hidden;height:14px;border:1px solid var(--line);border-bottom:0;scrollbar-width:auto;scrollbar-color:var(--control-border) var(--paper-3);}
   .grid-scroll-top[hidden]{display:none;}
   .grid-scroll-top>div{height:1px;}
   .grid-scroll::-webkit-scrollbar,.grid-scroll-top::-webkit-scrollbar{-webkit-appearance:none;height:12px;width:12px;}
-  .grid-scroll::-webkit-scrollbar-track,.grid-scroll-top::-webkit-scrollbar-track{background:#ececec;}
-  .grid-scroll::-webkit-scrollbar-thumb,.grid-scroll-top::-webkit-scrollbar-thumb{background:#8a8a8a;border-radius:6px;border:2px solid #ececec;}
+  .grid-scroll::-webkit-scrollbar-track,.grid-scroll-top::-webkit-scrollbar-track{background:var(--paper-3);}
+  .grid-scroll::-webkit-scrollbar-thumb,.grid-scroll-top::-webkit-scrollbar-thumb{background:var(--control-border);border-radius:6px;border:2px solid var(--paper-3);}
   table.grid{border-collapse:separate;border-spacing:0;width:max-content;font-size:.85rem;}
-  table.grid th,table.grid td{white-space:nowrap;padding:.3rem .35rem;border-bottom:1px solid #e5e5e5;border-right:1px solid #eee;box-sizing:border-box;}
-  table.grid thead th{position:sticky;top:0;background:#fff;z-index:2;}
-  table.grid th.store-col{position:sticky;left:0;background:#fff;z-index:1;width:220px;min-width:220px;max-width:220px;white-space:normal;overflow-wrap:anywhere;}
+  table.grid th,table.grid td{white-space:nowrap;padding:.3rem .35rem;border-bottom:1px solid var(--line);border-right:1px solid var(--line);box-sizing:border-box;}
+  table.grid thead th{position:sticky;top:0;background:var(--paper);z-index:2;}
+  table.grid th.store-col{position:sticky;left:0;background:var(--paper);z-index:1;width:220px;min-width:220px;max-width:220px;white-space:normal;overflow-wrap:anywhere;}
   table.grid thead th.store-col{z-index:3;}
   table.grid .month-col,table.grid td{width:80px;min-width:80px;max-width:80px;}
   /* A cell's text wraps inside its 80 px ("partial 0.00 of 3,500.00"); a word that does not fit breaks. */
   table.grid td{white-space:normal;overflow-wrap:break-word;}
-  table.grid tfoot th,table.grid tfoot td{background:#fafafa;font-weight:600;}
+  table.grid tfoot th,table.grid tfoot td{background:var(--paper-2);font-weight:600;}
   table.grid td a{color:inherit;text-decoration:none;display:block;}
-  table.grid td a:focus{outline:2px solid #1a1a1a;outline-offset:-2px;}
-  .cell-paid{background:#d8f0dc;} .cell-unpaid{background:#f8d4d8;} .cell-pending{background:#fde9b8;}
-  .cell-partial{background:#fbd3a8;} .cell-due{background:#dbe6f3;} .cell-waived{background:#e6e6e6;color:#555;}
-  .cell-not_due{color:#888;font-style:italic;}
-  .note-marker{color:#1a1a1a;margin-left:.2rem;}
+  table.grid td a:focus{outline:2px solid var(--focus);outline-offset:-2px;}
+  /* PLAN-012c D1: the status tokens. Unpaid is a navy outline on paper. */
+  .cell-paid{background:var(--status-paid-bg);color:var(--status-paid-ink);} .cell-unpaid{background:var(--status-unpaid-bg);color:var(--status-unpaid-ink);box-shadow:inset 0 0 0 2px var(--status-unpaid-border);}
+  .cell-pending{background:var(--status-pending-bg);color:var(--status-pending-ink);} .cell-partial{background:var(--status-partial-bg);color:var(--status-partial-ink);}
+  .cell-due{background:var(--status-due-bg);color:var(--status-due-ink);} .cell-waived{background:var(--status-waived-bg);color:var(--status-waived-ink);}
+  .cell-not_due{color:var(--status-not-due-ink);font-style:italic;}
+  .note-marker{color:inherit;margin-left:.2rem;}
   .legend span{display:inline-block;padding:.1rem .45rem;margin-right:.25rem;border-radius:3px;}
 </style>{% endblock %}
 {% block content %}

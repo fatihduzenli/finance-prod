@@ -19,6 +19,10 @@ comes from the static file finders rather than a ``staticfiles.json`` manifest.
 Both routes need a signed-in, verified user like every staff page (``accounts.registry``
 lists them as read-only); the page asks for the manifest with its credentials
 (``crossorigin="use-credentials"``). Neither carries a setting or a host name.
+
+The manifest's name is the company's (``company_settings``, PLAN-012c D2), as data in the
+JSON; its icons are the brand's (192 and 512 px PNGs and the SVG, PLAN-012c D4), on the
+navy theme and background colour, so the splash is the icon on navy.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from functools import cache
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.contrib.staticfiles import finders
@@ -35,6 +40,9 @@ from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.views.decorators.http import require_safe
 
+if TYPE_CHECKING:
+    from ledger.models import CompanySettings
+
 #: The static path prefixes the worker may keep: the app's own files, not the admin's.
 PRECACHE_PREFIXES: tuple[str, ...] = ("finance/", "ledger/")
 #: collectstatic's default ignore patterns (dot files such as .DS_Store, editor backups).
@@ -42,12 +50,14 @@ IGNORE_PATTERNS = ["CVS", ".*", "*~"]
 MANIFEST_CONTENT_TYPE = "application/manifest+json"
 WORKER_CONTENT_TYPE = "application/javascript"
 WORKER_TEMPLATE = "finance/sw.js"
-APP_NAME = "Finance"
-THEME_COLOR = "#1a1a1a"
-BACKGROUND_COLOR = "#f6f6f6"
-ICONS: tuple[tuple[str, str], ...] = (
-    ("finance/icons/icon-192.png", "192x192"),
-    ("finance/icons/icon-512.png", "512x512"),
+#: The brand navy (``--navy`` in finance/static/finance/tokens.css).
+THEME_COLOR = "#0b2545"
+BACKGROUND_COLOR = THEME_COLOR
+#: (static path, sizes, type) of each icon in the manifest.
+ICONS: tuple[tuple[str, str, str], ...] = (
+    ("finance/brand/monvera_icon_192.png", "192x192", "image/png"),
+    ("finance/brand/monvera_icon_512.png", "512x512", "image/png"),
+    ("finance/brand/monvera_icon.svg", "any", "image/svg+xml"),
 )
 
 
@@ -96,18 +106,19 @@ def worker_source() -> str:
     )
 
 
-def manifest_data() -> dict[str, object]:
+def manifest_data(company: CompanySettings) -> dict[str, object]:
+    """The manifest of the company settings row ``company``."""
     return {
-        "name": APP_NAME,
-        "short_name": APP_NAME,
+        "name": str(company.name),
+        "short_name": str(company.short_name),
         "start_url": "/",
         "scope": "/",
         "display": "standalone",
         "background_color": BACKGROUND_COLOR,
         "theme_color": THEME_COLOR,
         "icons": [
-            {"src": static(path), "sizes": sizes, "type": "image/png", "purpose": "any"}
-            for path, sizes in ICONS
+            {"src": static(path), "sizes": sizes, "type": kind, "purpose": "any"}
+            for path, sizes, kind in ICONS
         ],
     }
 
@@ -115,7 +126,11 @@ def manifest_data() -> dict[str, object]:
 @require_safe
 def manifest(request: HttpRequest) -> HttpResponse:
     """``finance:manifest``."""
-    return HttpResponse(json.dumps(manifest_data()), content_type=MANIFEST_CONTENT_TYPE)
+    from finance.context_processors import company_settings
+
+    return HttpResponse(
+        json.dumps(manifest_data(company_settings(request))), content_type=MANIFEST_CONTENT_TYPE
+    )
 
 
 @require_safe

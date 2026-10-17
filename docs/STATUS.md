@@ -1365,3 +1365,23 @@ account check" (not "Bank deposits": deposit means the security deposit elsewher
 "Needs review" stays; "NSF fee" → "Returned payment (NSF) fee". Everything else as written,
 including the left nav, the Admin group, the autopay labels and the money filter. Batch A
 (tokens, company settings, the shell, the brand files, PWA, titles) assigned.
+
+## Update, 2026-10-17, PLAN-012c Batch A built and gated (not pushed)
+
+Batch A of the design pass: design tokens in `tokens.css` (brand colours, AA neutrals, status
+tokens, spacing, type, radii, shadows, focus ring; no literal colour anywhere else, tested); the
+`company_settings` singleton (migration 0045: name, short name, support e-mail, time zone, logo
+override, processor display name "Stax"; admin-edited, audited) read once per request and shown
+in the bar, the titles ("Monvera · <page>"), the sign-in app name and the job banner; the shell
+(navy top bar with the dark logo, the search box and a user menu; the sandbox banner kept; a
+left navigation on laptops with Dashboard, Stores, Operators, Monthly rent overview, Reports and
+Admin groups, the Prompt 11 phone menu below 900 px); the brand files committed (originals in
+`static/brand/`, served copies with 192 and 512 px icons), PWA icons, splash and favicon from
+them. One MAJOR in the gate (three queries per page from the company processor) resolved. Gate:
+ruff, format, mypy (412 files), lock, migrations clean; sqlite 5,450 passed; PostgreSQL 28 +
+6,072 passed (one unreproduced calendar failure in the first run, re-run green, probe 10/10, a
+diagnostic added to the test); e2e 7; secret scans clean; Fable's adversarial file 8 cases green
+on both engines. **For the owner at the checkpoint:** the dark logo carries the wordmark, so the
+bar read "Monvera Monvera"; Batch B shows the company name as text only with a logo override;
+the grid page keeps the folded menu at every width (twelve months must fit at 1,280 px). Batch B
+assigned.

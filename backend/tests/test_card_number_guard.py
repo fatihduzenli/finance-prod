@@ -34,7 +34,13 @@ from ledger.validators import (
     validate_no_payment_data,
 )
 from payments.sync_writer import provider_write
-from tests.test_ledger_models import LEDGER_FACTORIES, make_user, requires_postgresql, saved
+from tests.test_ledger_models import (
+    LEDGER_FACTORIES,
+    LOGO_PATH,
+    make_user,
+    requires_postgresql,
+    saved,
+)
 from tests.test_payments_models import PAYMENTS_FACTORIES
 
 TEST_CARD = "4111 1111 1111 1111"
@@ -356,6 +362,7 @@ def test_guarded_columns_match_the_database_triggers() -> None:
         "ledger.migrations.0042_payment_allocation_and_credits",
         "ledger.migrations.0043_fee_type_show_in_setup",
         "ledger.migrations.0044_draft_existing_charge",
+        "ledger.migrations.0045_company_settings",
         "payments.migrations.0002_postgresql_guards",
         "payments.migrations.0003_webhook_event_processing",
         "payments.migrations.0005_jobs",
@@ -588,6 +595,16 @@ def _accepted_samples(model: type[models.Model], field: models.Field[Any, Any]) 
     # PLAN-012e D14: a debt-override reason is not blank (CHECK).
     if column in {"contact_entries.delete_reason", "lease_transfers.debt_override_reason"}:
         return [text for text in samples if re.search(r"\S", text)]
+    # PLAN-012c D2: the company's names are not blank, and a logo override is a stored
+    # document's path (CHECKs); the guard reads each UUID as one letter, so a path passes.
+    if column in {
+        "company_settings.name",
+        "company_settings.short_name",
+        "company_settings.processor_name",
+    }:
+        return [text for text in samples if re.search(r"\S", text)]
+    if column == "company_settings.logo":
+        return [LOGO_PATH, LOGO_PATH.replace("store", "operator")]
     return samples
 
 

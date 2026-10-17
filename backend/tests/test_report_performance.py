@@ -274,3 +274,28 @@ def test_every_page_answers_under_two_seconds_on_volume(monkeypatch: pytest.Monk
         assert measured[name][1] <= query_bound, (name, measured[name])
     slow = {name: value for name, value in measured.items() if value[0] >= LIMIT_SECONDS}
     assert not slow, slow
+
+
+def test_the_company_settings_add_one_query_to_a_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PLAN-012c D2: the shell's company settings cost one query a page, the row read once
+    (no create, no savepoint) and no logo lookup while the row names none. Each total is
+    this file's figure before the shell read the row, plus one."""
+    monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: TODAY)
+    operator = build_volume()
+    span = {"from": f"{FIRST_MONTH:%Y-%m}", "to": f"{TODAY:%Y-%m}"}
+    pages: dict[str, tuple[str, dict[str, str], int]] = {
+        "grid (500 x 24)": ("/grid/", span, 18 + 1),
+        "revenue": ("/reports/revenue/", span, 29 + 1),
+        "arrears": ("/arrears/", {}, 18 + 1),
+        "statement": (f"/operators/{operator.pk}/statement/", span, 19 + 1),
+    }
+    client, _ = client_for(Role.VIEWER)
+    client.get("/reports/")  # warm the session and the template loaders
+    measured: dict[str, int] = {}
+    for name, (path, params, _) in pages.items():
+        with CaptureQueriesContext(connection) as captured:
+            response = client.get(path, params)
+        assert response.status_code == 200, name
+        measured[name] = len(captured.captured_queries)
+        print(f"PLAN-012c D2 {name}: {measured[name]} queries")  # noqa: T201
+    assert measured == {name: expected for name, (_, _, expected) in pages.items()}

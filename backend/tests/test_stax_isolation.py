@@ -37,6 +37,10 @@ ALLOWED: dict[str, str] = {
     "ledger/templates/ledger/documents/_notice.html": (
         "the upload notice says bank forms stay in Stax (PLAN-010c D6, verbatim)"
     ),
+    # PLAN-012c D2: the processor's display name is data in the company settings row; these
+    # two hold its first value (the seed, and the fallback when the row is missing).
+    "ledger/company_defaults.py": "the company settings row's seed values (PLAN-012c D2)",
+    "ledger/migrations/0045_company_settings.py": "seeds the company settings row (PLAN-012c D2)",
 }
 #: In these files the only permitted mention is the quoted payment_channel value.
 CHANNEL_VALUE_ONLY = {"ledger/models.py", "ledger/migrations/0001_initial.py"}

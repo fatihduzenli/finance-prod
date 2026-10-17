@@ -7,7 +7,7 @@ undoes the record.
 {% if document_form %}
   {% include "ledger/documents/_notice.html" %}
   <p class="muted">The file is uploaded after the record is saved. If the file is refused, the record is still saved and the page says why. If the form has to be corrected, choose the file again.</p>
-  <div class="js-document-drop" style="border:1px dashed #999;border-radius:4px;padding:.25rem .75rem .75rem;">
+  <div class="js-document-drop" style="border:1px dashed var(--control-border);border-radius:4px;padding:.25rem .75rem .75rem;">
     <label for="{{ document_form.file.id_for_label }}">File (PDF, Word .docx, JPEG, PNG or HEIC; at most 25 MB)</label>
     {{ document_form.file }}
     <label for="{{ document_form.photo.id_for_label }}">Take photo</label>

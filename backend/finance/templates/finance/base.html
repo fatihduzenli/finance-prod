@@ -1,13 +1,24 @@
 {% comment %}
-Layout of the staff screens (docs/qa/PLAN-006-operators.md). Self-contained: no external
-asset; the style sheet, the manifest and the service worker are the app's own
-(docs/qa/PLAN-011-dashboard-reports-mobile.md D9). Renders no setting. Under 1024 px the
-links fold behind "Menu", a checkbox and its label: no script. The Admin item is a
-details menu (Django admin; Rent run for billing and admin; Audit for admins; PLAN-012d
-D5), and the current section's link carries aria-current="page"
-(finance.context_processors.navigation). The search box (PLAN-012d D17) is a GET form to
-ledger:search. The SANDBOX banner and the
-title prefix are injected by finance.middleware.SandboxBannerMiddleware. The sign-in pages keep their own base,
+Layout of the staff screens (docs/qa/PLAN-006-operators.md; the shell of
+docs/qa/PLAN-012c-design-pass.md D3). Self-contained: no external asset; the style sheets
+(tokens.css, then app.css), the manifest, the icons and the service worker are the app's
+own (PLAN-011 D9, PLAN-012c D4).
+
+The navy top bar carries the logo (company.logo_url: the brand's dark logo, or a stored
+document the company settings row names), the company name, the product name, the search
+box (PLAN-012d D17, a GET form to ledger:search) and the user menu (Settings, Sign out). The
+left navigation (900 px and wider) lists Dashboard, Stores, Operators, Monthly rent overview,
+Reports and Admin with their pages, each page only for the roles that may open it (Disputes,
+Daily charges and Nightly check billing and admin; Activity log and System settings admin;
+Messages from the processor every role, as its list is read-only); under 900 px it
+folds behind "Menu", a checkbox and its label: no script. A page that needs the whole width
+(the grid: twelve months at 1,280 px, PLAN-011b D2) sets the shell_class block to
+" shell-folded" and keeps the folded menu at every width. The current page's link carries
+aria-current="page" and its group's heading aria-current="true"
+(finance.context_processors.navigation). The tab title is "<short name> · <page>"
+(finance.context_processors.company): each page's title block holds the page part only.
+The SANDBOX banner and the title prefix are injected by
+finance.middleware.SandboxBannerMiddleware. The sign-in pages keep their own base,
 two_factor/_base.html.
 {% endcomment %}{% load roles static %}<!DOCTYPE html>
 <html lang="en">
@@ -15,40 +26,65 @@ two_factor/_base.html.
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   {% if job_refresh %}<meta http-equiv="refresh" content="5">{% endif %}
-  <title>{% block title %}{% endblock %} | Finance</title>
-  <meta name="theme-color" content="#1a1a1a">
+  <title>{{ company.short_name }} · {% block title %}{% endblock %}</title>
+  <meta name="theme-color" content="{{ theme_color }}">
+  <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'finance/app.css' %}">
+  <link rel="icon" href="{% static 'finance/brand/monvera_icon_192.png' %}" type="image/png" sizes="192x192">
+  <link rel="icon" href="{% static 'finance/brand/monvera_icon.svg' %}" type="image/svg+xml">
   <link rel="manifest" href="{% url 'finance:manifest' %}" crossorigin="use-credentials">
-  <link rel="apple-touch-icon" href="{% static 'finance/icons/icon-192.png' %}">
+  <link rel="apple-touch-icon" href="{% static 'finance/brand/monvera_icon_192.png' %}">
   {% block head %}{% endblock %}
 </head>
 <body>
+  <header class="topbar" id="topbar">
+    <a class="topbar-brand" id="topbar-brand" href="{% url 'ledger:home' %}">
+      <img class="topbar-logo" id="topbar-logo" src="{{ company.logo_url }}" alt="" height="28">
+      <span class="topbar-company" id="topbar-company">{{ company.name }}</span>
+      <span class="topbar-product" id="topbar-product">Rent ledger</span>
+    </a>
+    <form method="get" action="{% url 'ledger:search' %}" class="nav-search" id="nav-search" role="search"><input type="search" name="q" id="nav-search-q" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators"></form>
+    <details class="user-menu" id="user-menu">
+      <summary id="user-menu-name"{% if nav_section == "settings" %} aria-current="true"{% endif %}>{{ request.user.get_full_name|default:request.user.get_username }}</summary>
+      <div class="user-menu-items">
+        <a href="{% url 'finance:settings' %}" id="nav-settings"{% if nav_section == "settings" %} aria-current="page"{% endif %}>Settings</a>
+        <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" id="nav-sign-out">Sign out</button></form>
+      </div>
+    </details>
+  </header>
+  <div class="shell{% block shell_class %}{% endblock %}">
   <nav aria-label="Main">
     <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-controls="nav-links">
     <label for="nav-toggle" class="nav-toggle-label" id="nav-menu">Menu</label>
     <div class="nav-links" id="nav-links">
-    <a href="{% url 'ledger:grid:page' %}" id="nav-grid"{% if nav_section == "grid" %} aria-current="page"{% endif %}>Grid</a>
-    <a href="{% url 'ledger:home' %}" id="nav-home"{% if nav_section == "home" %} aria-current="page"{% endif %}>Dashboard</a>
-    <a href="{% url 'ledger:arrears:page' %}" id="nav-arrears"{% if nav_section == "arrears" %} aria-current="page"{% endif %}>Arrears</a>
-    <a href="{% url 'ledger:calendar:page' %}" id="nav-calendar"{% if nav_section == "calendar" %} aria-current="page"{% endif %}>Calendar</a>
-    <a href="{% url 'ledger:stores:list' %}"{% if nav_section == "stores" %} aria-current="page"{% endif %}>Stores</a>
-    <a href="{% url 'ledger:operators:list' %}"{% if nav_section == "operators" %} aria-current="page"{% endif %}>Operators</a>
-    <a href="{% url 'ledger:leases:list' %}"{% if nav_section == "leases" %} aria-current="page"{% endif %}>Leases</a>
-    <a href="{% url 'ledger:payments:list' %}"{% if nav_section == "payments" %} aria-current="page"{% endif %}>Payments</a>
-    <a href="{% url 'ledger:disputes:page' %}" id="nav-disputes"{% if nav_section == "disputes" %} aria-current="page"{% endif %}>Disputes</a>
-    <a href="{% url 'ledger:reports:index' %}" id="nav-reports"{% if nav_section == "reports" %} aria-current="page"{% endif %}>Reports</a>
-    <a href="{% url 'ledger:reports:pnl' %}"{% if nav_section == "pnl" %} aria-current="page"{% endif %}>Profit and loss</a>
-    <a href="{% url 'ledger:returns:list' %}"{% if nav_section == "returns" %} aria-current="page"{% endif %}>Returns</a>
-    <a href="{% url 'ledger:webhooks:list' %}"{% if nav_section == "webhooks" %} aria-current="page"{% endif %}>Webhooks</a>
-    <a href="{% url 'ledger:reconciliation:page' %}"{% if nav_section == "reconciliation" %} aria-current="page"{% endif %}>Reconciliation</a>
-    <details class="nav-menu" id="nav-admin-menu"><summary>Admin</summary>
-      <a href="{% url 'admin:index' %}" id="nav-django-admin"{% if nav_section == "django_admin" %} aria-current="page"{% endif %}>Django admin</a>
-      {% if request.user|is_billing %}<a href="{% url 'ledger:run:today' %}" id="nav-run"{% if nav_section == "run" %} aria-current="page"{% endif %}>Rent run</a>{% endif %}
-      {% if request.user|is_admin %}<a href="{% url 'ledger:audit:page' %}" id="nav-audit"{% if nav_section == "audit" %} aria-current="page"{% endif %}>Audit</a>{% endif %}
-    </details>
-    <form method="get" action="{% url 'ledger:search' %}" class="nav-search" id="nav-search" role="search"><input type="search" name="q" id="nav-search-q" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators"></form>
-    <a href="{% url 'finance:settings' %}" id="nav-settings"{% if nav_section == "settings" %} aria-current="page"{% endif %}>Settings</a>
-    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form>
+      <ul class="nav-list">
+        <li><a href="{% url 'ledger:home' %}" id="nav-home"{% if nav_section == "home" %} aria-current="page"{% endif %}>Dashboard</a></li>
+        <li><a href="{% url 'ledger:stores:list' %}"{% if nav_section == "stores" %} aria-current="page"{% endif %}>Stores</a></li>
+        <li><a href="{% url 'ledger:operators:list' %}"{% if nav_section == "operators" %} aria-current="page"{% endif %}>Operators</a></li>
+        <li><a href="{% url 'ledger:grid:page' %}" id="nav-grid"{% if nav_section == "grid" %} aria-current="page"{% endif %}>Monthly rent overview</a></li>
+        <li class="nav-group" id="nav-reports-menu">
+          <a class="nav-group-heading" href="{% url 'ledger:reports:index' %}" id="nav-reports"{% if nav_section == "reports" %} aria-current="page"{% elif nav_group == "reports" %} aria-current="true"{% endif %}>Reports</a>
+          <ul>
+            <li><a href="{% url 'ledger:arrears:page' %}" id="nav-arrears"{% if nav_section == "arrears" %} aria-current="page"{% endif %}>Unpaid balances</a></li>
+            <li><a href="{% url 'ledger:reports:pnl' %}"{% if nav_section == "pnl" %} aria-current="page"{% endif %}>Profit and loss</a></li>
+            <li><a href="{% url 'ledger:payments:list' %}"{% if nav_section == "payments" %} aria-current="page"{% endif %}>Payments</a></li>
+            <li><a href="{% url 'ledger:returns:list' %}"{% if nav_section == "returns" %} aria-current="page"{% endif %}>Returned payments</a></li>
+            <li><a href="{% url 'ledger:calendar:page' %}" id="nav-calendar"{% if nav_section == "calendar" %} aria-current="page"{% endif %}>Calendar</a></li>
+            <li><a href="{% url 'ledger:leases:list' %}"{% if nav_section == "leases" %} aria-current="page"{% endif %}>Leases</a></li>
+            {% if request.user|is_billing %}<li><a href="{% url 'ledger:disputes:page' %}" id="nav-disputes"{% if nav_section == "disputes" %} aria-current="page"{% endif %}>Disputes</a></li>{% endif %}
+          </ul>
+        </li>
+        <li class="nav-group" id="nav-admin-menu">
+          <span class="nav-group-heading" id="nav-admin"{% if nav_group == "admin" %} aria-current="true"{% endif %}>Admin</span>
+          <ul>
+            {% if request.user|is_billing %}<li><a href="{% url 'ledger:run:today' %}" id="nav-run"{% if nav_section == "run" %} aria-current="page"{% endif %}>Daily charges</a></li>{% endif %}
+            {% if request.user|is_admin %}<li><a href="{% url 'ledger:audit:page' %}" id="nav-audit"{% if nav_section == "audit" %} aria-current="page"{% endif %}>Activity log</a></li>{% endif %}
+            <li><a href="{% url 'ledger:webhooks:list' %}"{% if nav_section == "webhooks" %} aria-current="page"{% endif %}>Messages from {{ company.provider_name }}</a></li>
+            {% if request.user|is_billing %}<li><a href="{% url 'ledger:reconciliation:page' %}"{% if nav_section == "reconciliation" %} aria-current="page"{% endif %}>Nightly check</a></li>{% endif %}
+            {% if request.user|is_admin %}<li><a href="{% url 'admin:index' %}" id="nav-django-admin"{% if nav_section == "django_admin" %} aria-current="page"{% endif %}>System settings</a></li>{% endif %}
+          </ul>
+        </li>
+      </ul>
     </div>
   </nav>
   <main class="{% block main_class %}{% endblock %}">
@@ -59,6 +95,7 @@ two_factor/_base.html.
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  </div>
   {% block scripts %}{% endblock %}
   <script>
     // Static files only; see finance/pwa.py. A failed registration leaves the page as is.
