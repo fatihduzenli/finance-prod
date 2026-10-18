@@ -1427,3 +1427,20 @@ cases green on the pre-C worktree and on the C tree. One MINOR (the transfer ste
 day lacks the tick) deferred to Batch D as a carry-over. **For the owner at the checkpoint:** the
 operator page's "provider fields" and the lease page's "autopay controls" were read as the pages'
 blocks (the forms have none). Batch D (the approved copy list) assigned.
+
+## Update, 2026-10-18, PLAN-012c Batch D blocked: the implementation sessions stall
+
+Batch D (the approved copy list, the money filter, the banner wording, two carry-overs) is half
+built in the **uncommitted** working tree: the first Opus session renamed the copy across about
+133 files, added `finance/templatetags/money.py`, `ledger/wording.py`, the twice-monthly partial
+and `tests/test_copy_pass.py`, and ran the unit suite once (176 failures, almost all existing
+tests asserting the old wording, plus the Rule 8 fence: two files outside `payments/` named the
+processor). It then stalled three times while updating those tests; a fresh session stalled
+twice more without a single edit (2026-10-17 22:09 is the last change). Fable does not write
+production code (root `CLAUDE.md` §1.1), so the batch waits for a working implementation
+session. The committed state is sound: Batches A, B and C (`4843c1d`, `23428eb`, `aa16490`)
+each passed the full gate; nothing is pushed; staging still runs `aded787`. Fable's Batch D
+adversarial file is ready (`tests/test_plan012c_design_d_adversarial.py`: frozen choice values
+and route names, the money filter under hostile input, the provider name escaped, user data
+shown as typed, the banner on every page). Next: resume Batch D when a session holds, gate it,
+then Batch E (contrast and visual regression) and the checkpoint report with the Publish Request.
