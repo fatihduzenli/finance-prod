@@ -493,7 +493,7 @@ def test_an_arrears_email_charge_is_created_sent_and_shown_linked(
     assert calls(fake, "send_invoice_email") == [(ref, ())]
     assert (invoice.internal_status, invoice.provider_status) == (InvoiceStatus.SENT, "SENT")
     assert invoice.sent_at is not None
-    assert "sent by email" in job.result
+    assert "sent by e-mail" in job.result
     client, _ = client_for(Role.VIEWER)
     page = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
     assert invoice.invoice_number in page and "Sent" in page and ">SENT<" in page
@@ -592,7 +592,13 @@ def test_a_422_on_create_fails_once_and_the_retry_is_a_new_job(
     fake.fail_next("create_invoice", ProviderRejected(422, error_fields=("customer_id",)))
     [job] = run_queued_jobs()
     assert job.status == JobStatus.FAILED
-    assert "ProviderRejected (fields: customer_id)" in job.result
+    # The failure in words (copy list §4.1); the class and the key names in the audit row.
+    number = invoice_of(charge).invoice_number
+    assert job.result == (
+        f"{provider_name()} did not create invoice {number}: Rejected. Retry from the charge page."
+    )
+    failed = AuditLog.objects.get(action="one_off_charge.provider_invoice_failed")
+    assert failed.after == {"failure": "ProviderRejected", "fields": "customer_id"}
     assert len(calls(fake, "create_invoice")) == 1
     assert invoice_of(charge).internal_status == InvoiceStatus.DRAFT
     assert service.retry_kind(charge) == JobKind.INVOICE_CREATE
@@ -623,7 +629,7 @@ def test_a_create_timeout_is_followed_by_a_lookup_that_finds_the_invoice_by_refe
 
     fake.create_invoice = created_then_lost  # type: ignore[method-assign,assignment]
     [job] = run_queued_jobs()
-    assert job.status == JobStatus.FAILED and "ProviderUnavailable" in job.result
+    assert job.status == JobStatus.FAILED and ": Unavailable. Retry" in job.result
     [made] = fake.invoices.values()
     assert made.reference == invoice.invoice_number
     fake.create_invoice = original  # type: ignore[method-assign]
@@ -694,7 +700,7 @@ def test_a_failed_send_leaves_the_invoice_linked_and_the_retry_sends_only(
     fake.fail_next("send_invoice_email", ProviderUnavailable(503, "unavailable"))
     [job] = run_queued_jobs()
     assert job.status == JobStatus.FAILED
-    assert "sending it failed" in job.result and "ProviderUnavailable" in job.result
+    assert "sending it failed: Unavailable." in job.result
     invoice = invoice_of(charge)
     assert provider_ref(invoice) and invoice.internal_status == InvoiceStatus.READY
     assert service.retry_kind(charge) == JobKind.INVOICE_SEND
@@ -902,7 +908,7 @@ def test_a_failed_delete_leaves_the_charge_owed_with_the_retry(
     fake.fail_next("delete_invoice", ProviderUnavailable(503, "unavailable"))
     assert service.cancel_charge(charge.pk, note="Duplicate.", actor=None).ok
     [job] = run_queued_jobs()
-    assert job.status == JobStatus.FAILED and "ProviderUnavailable" in job.result
+    assert job.status == JobStatus.FAILED and ": Unavailable. Retry" in job.result
     assert fresh(charge).status == OneOffChargeStatus.OWED
     assert service.retry_kind(fresh(charge)) == JobKind.INVOICE_DELETE
     jobs.enqueue(JobKind.INVOICE_DELETE, charge, None, None)

@@ -310,7 +310,7 @@ def test_the_page_reads_a_bounded_number_of_queries() -> None:
 # --- What a row shows -----------------------------------------------------------------------
 
 
-def test_a_row_shows_both_times_masks_identifiers_and_keeps_money_as_text() -> None:
+def test_a_row_shows_the_new_york_time_masks_identifiers_and_keeps_money_as_text() -> None:
     operator = Operator.objects.create(display_name="Northwind Stores")
     _, user = admin()
     log(
@@ -331,7 +331,8 @@ def test_a_row_shows_both_times_masks_identifiers_and_keeps_money_as_text() -> N
     )
     client, _ = admin()
     body = page(client)
-    assert "2026-10-07 16:30:00" in body
+    # One time, New York's (copy list §4.6: "Time (UTC)" → "Time"); the export keeps both.
+    assert "2026-10-07 16:30:00" not in body
     assert "2026-10-07 12:30:00 EDT" in body
     assert user.get_username() in body
     assert str(operator.pk) not in body.replace(f"/operators/{operator.pk}/", "")

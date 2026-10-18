@@ -270,7 +270,7 @@ def test_a_failed_delete_leaves_the_invoice_live_and_the_remedy_offered(
     fake.fail_next("delete_invoice", ProviderUnavailable(503, "unavailable"))
     assert service.delete_waived_invoice(charge.pk, actor=None).ok
     [job] = run_queued_jobs()
-    assert job.status == JobStatus.FAILED and "ProviderUnavailable" in job.result
+    assert job.status == JobStatus.FAILED and ": Unavailable. Retry" in job.result
     assert invoice_of(charge).internal_status != InvoiceStatus.VOID
     assert [row.pk for row in service.waived_with_live_invoice()] == [charge.pk]
     assert service.retry_kind(fresh(charge)) is None  # no cancel retry on a waived charge

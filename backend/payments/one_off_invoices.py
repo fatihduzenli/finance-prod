@@ -105,6 +105,7 @@ from ledger.models import (
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
+    SyncFailure,
     format_quantity,
 )
 from ledger.services import installments, leases, numbering, one_off_charges, rent_run
@@ -163,65 +164,68 @@ ADOPTED = provider_sentence(
     "Invoice {number} found in {provider} and attached; nothing was created."
 )
 ALREADY_CREATED = provider_sentence("Invoice {number} is already in {provider}.")
-CREATE_FAILED = "The payment provider did not create invoice {number}"
-LINK_CONFLICT = (
-    "The payment provider's invoice is already linked to another record. Nothing was changed."
+CREATE_FAILED = provider_sentence("{provider} did not create invoice {number}")
+LINK_CONFLICT = provider_sentence(
+    "The {provider} invoice is already attached to another record. Nothing was changed."
 )
-SENT = "Invoice {number} sent by email."
-SEND_REQUESTED = (
-    "Invoice {number} was sent by email; the payment provider does not show it sent yet."
+SENT = "Invoice {number} sent by e-mail."
+SEND_REQUESTED = provider_sentence(
+    "Invoice {number} was sent by e-mail; {provider} does not show it sent yet."
 )
-SEND_FAILED = "Invoice {number} is at the payment provider, but sending it failed"
+SEND_FAILED = provider_sentence("Invoice {number} is in {provider}, but sending it failed")
 ALREADY_SENT = "Invoice {number} was already sent."
-NOT_LINKED = "The charge's invoice is not at the payment provider yet. Nothing was sent."
-DELETE_PAID = "The payment provider shows the invoice paid. Nothing was deleted."
-DELETE_NOT_CONFIRMED = (
-    "The payment provider did not confirm the delete. The charge stays open; retry later."
+NOT_LINKED = provider_sentence("The charge's invoice is not in {provider} yet. Nothing was sent.")
+DELETE_PAID = provider_sentence("{provider} shows the invoice paid. Nothing was deleted.")
+DELETE_NOT_CONFIRMED = provider_sentence(
+    "{provider} did not confirm the delete. The charge stays open; retry later."
 )
-DELETE_FAILED = "The payment provider did not delete the invoice"
-WAIVED_DELETE_NOT_CONFIRMED = (
-    "The payment provider did not confirm the delete. The invoice may still be live; retry "
-    "from the charge page."
+DELETE_FAILED = provider_sentence("{provider} did not delete the invoice")
+WAIVED_DELETE_NOT_CONFIRMED = provider_sentence(
+    "{provider} did not confirm the delete. The invoice may still be open in {provider}; "
+    "retry from the charge page."
 )
-SCHEDULED = "Autopay scheduled for {date}."
-ALREADY_SCHEDULED = "Autopay is already scheduled for this charge."
-SCHEDULE_ADOPTED = "The schedule was found at the payment provider and linked; none was created."
-SCHEDULE_FAILED = "The payment provider did not create the schedule"
-DUE_PASSED = "The due date has passed. Nothing was scheduled; cancel the charge."
+SCHEDULED = "Autopay set up for {date}."
+ALREADY_SCHEDULED = "Autopay is already set up for this charge."
+SCHEDULE_ADOPTED = provider_sentence(
+    "The autopay was found in {provider} and attached; none was created."
+)
+SCHEDULE_FAILED = provider_sentence("{provider} did not set up the autopay")
+DUE_PASSED = "The due date has passed. Autopay was not set up; cancel the charge."
 NOT_AUTOPAY = "This charge is not collected by autopay on its due date."
 SCHEDULE_FIRED = (
-    "The schedule already generated its invoice. Nothing was voided; cancel again to delete "
+    "Autopay already made its invoice. Nothing was voided; cancel again to delete "
     "the invoice once it shows on this page."
 )
-SCHEDULE_DELETE_FAILED = "The payment provider did not delete the schedule"
-SCHEDULE_NOT_CONFIRMED = (
-    "The payment provider still lists the schedule. The charge stays open; retry later."
+SCHEDULE_DELETE_FAILED = provider_sentence("{provider} did not cancel the autopay")
+SCHEDULE_NOT_CONFIRMED = provider_sentence(
+    "{provider} still lists the autopay. The charge stays open; retry later."
 )
 RETRY_HINT = " Retry from the charge page."
 CHARGED = "Charged: the payment is pending until the bank settles it."
-CHARGED_NOT_SHOWN = (
-    "The payment provider accepted the charge; the payment appears here when the provider "
-    "reports it."
+CHARGED_NOT_SHOWN = provider_sentence(
+    "{provider} accepted the charge; the payment appears here when {provider} reports it."
 )
-CHARGE_FAILED = "The payment provider did not charge the invoice"
+CHARGE_FAILED = provider_sentence("{provider} did not charge the invoice")
 CHARGE_STAYS_OPEN = " The charge stays open; Charge now is possible again in one minute."
-CHARGE_PAID_AT_PROVIDER = "The payment provider shows the invoice paid. Nothing was charged."
-CHARGE_DELETED = "The payment provider shows the invoice deleted. Nothing was charged."
+CHARGE_PAID_AT_PROVIDER = provider_sentence(
+    "{provider} shows the invoice paid. Nothing was charged."
+)
+CHARGE_DELETED = provider_sentence("{provider} shows the invoice deleted. Nothing was charged.")
 CHARGE_NOW_NO_KEY = "The charge has no Charge now identifier. Nothing was charged."
 MOVED_SCHEDULE = "Autopay moved to {date}."
-MOVE_SCHEDULE_FIRED = "The schedule already generated its invoice. Its date was not changed."
-MOVE_SCHEDULE_FAILED = "The payment provider did not move the schedule"
-MOVED_INVOICE = "Invoice {number} at the payment provider is now due {date}."
-MOVE_INVOICE_CLOSED = (
-    "The payment provider shows the invoice paid or deleted. Its due date was not changed."
+MOVE_SCHEDULE_FIRED = "Autopay already made its invoice. Its date was not changed."
+MOVE_SCHEDULE_FAILED = provider_sentence("{provider} did not move the autopay")
+MOVED_INVOICE = provider_sentence("Invoice {number} in {provider} is now due {date}.")
+MOVE_INVOICE_CLOSED = provider_sentence(
+    "{provider} shows the invoice paid or deleted. Its due date was not changed."
 )
-MOVE_INVOICE_FAILED = "The payment provider did not change the invoice's due date"
+MOVE_INVOICE_FAILED = provider_sentence("{provider} did not change the invoice's due date")
 RELEASE_SHARED = (
     "The invoice bills other charges too; it is not released for one of them. Nothing was deleted."
 )
 AUTOPAY_MOVE_FAILED = "The rent autopay was not moved past this month; the charge stays open"
 RELEASE_SCHEDULE_FIRED = (
-    "The schedule already generated its invoice. The charge stays open; cancel the "
+    "Autopay already made its invoice. The charge stays open; cancel the "
     "installment plan, then collect or cancel that invoice."
 )
 
@@ -272,10 +276,9 @@ def _attempted(charge: OneOffCharge, action: str) -> bool:
 
 
 def _failure(error: ProviderError) -> str:
-    """The error class and the field names it rejected, as the pages show them."""
-    name = operator_sync.failure_name(error)
-    fields = operator_sync.failure_fields(error)
-    return f"{name} (fields: {fields.replace(',', ', ')})" if fields else name
+    """The failure in words, as the pages show it (copy list §4.1: codes are never shown);
+    the class and the rejected key names stay in the audit row."""
+    return SyncFailure(operator_sync.failure_name(error)).label
 
 
 def _fetch(call: Callable[[str], Any], external_id: str) -> Any:
@@ -549,7 +552,7 @@ def create_provider_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
                 CREATE_FAILED.format(number=number),
             )
         if not _link(invoice, record, actor, action):
-            return False, LINK_CONFLICT
+            return False, str(LINK_CONFLICT)
         text = text.format(number=number)
         ref = record.external_id
     invoice.refresh_from_db()
@@ -621,7 +624,7 @@ def send(charge_id: uuid.UUID, actor: User | None) -> Result:
     invoice = _invoice(charge)
     ref = _ref(invoice) if invoice is not None else ""
     if invoice is None or not ref:
-        return False, NOT_LINKED
+        return False, str(NOT_LINKED)
     if invoice.internal_status == InvoiceStatus.SENT:
         return True, ALREADY_SENT.format(number=invoice.invoice_number)
     return _send(charge, invoice, ref, actor)
@@ -706,7 +709,7 @@ def create_rent_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
                 CREATE_FAILED.format(number=number),
             )
         if not _link(invoice, record, actor, action):
-            return False, LINK_CONFLICT
+            return False, str(LINK_CONFLICT)
         text = text.format(number=number)
         ref = record.external_id
     invoice.refresh_from_db()
@@ -721,10 +724,10 @@ def send_rent(charge_id: uuid.UUID, actor: User | None) -> Result:
     charge = _rent_charge(charge_id)
     invoice = _rent_invoice(charge) if charge is not None else None
     if charge is None or invoice is None:
-        return False, NOT_LINKED
+        return False, str(NOT_LINKED)
     ref = _ref(invoice)
     if not ref:
-        return False, NOT_LINKED
+        return False, str(NOT_LINKED)
     if invoice.internal_status == InvoiceStatus.SENT:
         return True, ALREADY_SENT.format(number=invoice.invoice_number)
     return _send(charge, invoice, ref, actor)
@@ -788,13 +791,13 @@ def delete(charge_id: uuid.UUID, actor: User | None) -> Result:
                 return False, one_off_charges.SEVERAL_PROVIDER_INVOICES
             if found:
                 if not _link(invoice, found[0], actor, "invoice.provider_adopted"):
-                    return False, LINK_CONFLICT
+                    return False, str(LINK_CONFLICT)
                 ref = found[0].external_id
         if not ref:
             return _void(charge, actor, {"provider_invoice": None})
         record = _fetch(provider.get_invoice, ref)
         if record is not None and invoice_sync.shows_paid(record):
-            return False, DELETE_PAID
+            return False, str(DELETE_PAID)
         if record is not None and not invoice_sync.shows_deleted(record):
             try:
                 provider.delete_invoice(ref)
@@ -805,7 +808,7 @@ def delete(charge_id: uuid.UUID, actor: User | None) -> Result:
     except ProviderError as error:
         return _failed(charge, actor, "one_off_charge.invoice_delete_failed", error, DELETE_FAILED)
     if record is not None and not invoice_sync.shows_deleted(record):
-        return False, DELETE_NOT_CONFIRMED
+        return False, str(DELETE_NOT_CONFIRMED)
     if record is not None and invoice is not None:
         invoice_sync.record_provider_state(invoice.pk, record)
     return _void(
@@ -834,7 +837,7 @@ def delete_waived(charge_id: uuid.UUID, actor: User | None) -> Result:
     try:
         record = _fetch(provider.get_invoice, ref)
         if record is not None and invoice_sync.shows_paid(record):
-            return False, DELETE_PAID
+            return False, str(DELETE_PAID)
         if record is not None and not invoice_sync.shows_deleted(record):
             try:
                 provider.delete_invoice(ref)
@@ -847,7 +850,7 @@ def delete_waived(charge_id: uuid.UUID, actor: User | None) -> Result:
             charge, actor, "one_off_charge.waived_invoice_delete_failed", error, DELETE_FAILED
         )
     if record is not None and not invoice_sync.shows_deleted(record):
-        return False, WAIVED_DELETE_NOT_CONFIRMED
+        return False, str(WAIVED_DELETE_NOT_CONFIRMED)
     if record is not None:
         invoice_sync.record_provider_state(invoice.pk, record)
     outcome = one_off_charges.mark_waived_invoice_deleted(
@@ -931,7 +934,7 @@ def release_invoice(
     try:
         record = _fetch(provider.get_invoice, ref)
         if record is not None and invoice_sync.shows_paid(record):
-            return False, DELETE_PAID
+            return False, str(DELETE_PAID)
         if record is not None and not invoice_sync.shows_deleted(record):
             try:
                 provider.delete_invoice(ref)
@@ -942,7 +945,7 @@ def release_invoice(
     except ProviderError as error:
         return _release_failed(charge, actor, error, DELETE_FAILED)
     if record is not None and not invoice_sync.shows_deleted(record):
-        return False, DELETE_NOT_CONFIRMED
+        return False, str(DELETE_NOT_CONFIRMED)
 
     def mark(parent: Parent) -> dict[str, Any]:
         context = {
@@ -1005,7 +1008,7 @@ def release_schedule(
     if generated:
         return False, RELEASE_SCHEDULE_FIRED
     if still is not None:
-        return False, SCHEDULE_NOT_CONFIRMED
+        return False, str(SCHEDULE_NOT_CONFIRMED)
 
     def mark(parent: Parent) -> dict[str, Any]:
         context = {"schedule": mask_identifier(ref)}
@@ -1036,9 +1039,9 @@ def release_rent_autopay(charge_id: uuid.UUID, actor: User | None) -> Result:
             charge.lease_id, seq=charge.seq, skipped=charge.due_on, plan_id=plan.pk, actor=actor
         )
         if not outcome.ok:
-            if outcome.failure:
-                fields = f" (fields: {', '.join(outcome.fields)})" if outcome.fields else ""
-                return False, f"{AUTOPAY_MOVE_FAILED}: {outcome.failure}{fields}.{RETRY_HINT}"
+            if outcome.failure in SyncFailure.values:
+                words = SyncFailure(outcome.failure).label
+                return False, f"{AUTOPAY_MOVE_FAILED}: {words}.{RETRY_HINT}"
             return False, f"{AUTOPAY_MOVE_FAILED}. {outcome.message}{RETRY_HINT}"
         context = {"autopay": outcome.message}
     return _released(charge, actor, lambda parent: context)
@@ -1166,7 +1169,7 @@ def schedule(charge_id: uuid.UUID, actor: User | None, *, now: datetime | None =
                 "email_notification": request.email_notification,
             },
         )
-    return True, text
+    return True, str(text)
 
 
 def delete_schedule(charge_id: uuid.UUID, actor: User | None) -> Result:
@@ -1219,7 +1222,7 @@ def delete_schedule(charge_id: uuid.UUID, actor: User | None) -> Result:
     if generated:
         return False, SCHEDULE_FIRED
     if still is not None:
-        return False, SCHEDULE_NOT_CONFIRMED
+        return False, str(SCHEDULE_NOT_CONFIRMED)
     ok, text = _void(charge, actor, {"schedule": mask_identifier(ref)})
     if ok:
         ExternalRef.objects.filter(
@@ -1291,7 +1294,7 @@ def move_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
     try:
         record = _fetch(provider.get_invoice, ref)
         if record is None or invoice_sync.shows_paid(record) or invoice_sync.shows_deleted(record):
-            return False, MOVE_INVOICE_CLOSED
+            return False, str(MOVE_INVOICE_CLOSED)
         record = provider.update_invoice(ref, InvoiceUpdate(due_on=invoice.due_date))
     except ProviderError as error:
         return _failed(
@@ -1360,7 +1363,7 @@ def pay(charge_id: uuid.UUID, actor: User | None, *, confirmed: bool) -> Result:
         )
     invoice_sync.record_provider_state(invoice.pk, record)
     if invoice_sync.shows_paid(record) or invoice_sync.shows_deleted(record):
-        text = CHARGE_PAID_AT_PROVIDER if invoice_sync.shows_paid(record) else CHARGE_DELETED
+        text = str(CHARGE_PAID_AT_PROVIDER if invoice_sync.shows_paid(record) else CHARGE_DELETED)
         return _pay_failed(
             charge, actor, {"refused": text, "provider_status": record.raw_status}, text
         )
@@ -1401,7 +1404,7 @@ def pay(charge_id: uuid.UUID, actor: User | None, *, confirmed: bool) -> Result:
             "outcome": outcome,
         },
     )
-    return True, CHARGED if payment is not None else CHARGED_NOT_SHOWN
+    return True, CHARGED if payment is not None else str(CHARGED_NOT_SHOWN)
 
 
 # --- Webhook linking (D5) -------------------------------------------------------------

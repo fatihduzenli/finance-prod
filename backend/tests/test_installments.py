@@ -1571,7 +1571,7 @@ def test_a_failed_release_waits_and_the_retry_reruns_it_with_its_flag(
     fake.fail_next("delete_invoice", ProviderUnavailable(503, "unavailable"))
     plan = plan_for(parent)
     [failed] = [job for job in run_queued_jobs() if job.kind == JobKind.INVOICE_DELETE]
-    assert failed.status == "failed" and "ProviderUnavailable" in failed.result
+    assert failed.status == "failed" and ": Unavailable. Retry" in failed.result
     assert installment_jobs(plan) == []
     assert owed_at_price(parent)
     invoice.refresh_from_db()
@@ -1586,7 +1586,8 @@ def test_a_failed_release_waits_and_the_retry_reruns_it_with_its_flag(
     )
     client, _ = client_for(Role.BILLING)
     page = client.get(f"/one-off-charges/{parent.pk}/").content.decode()
-    assert 'id="retry-provider"' in page and "ProviderUnavailable" in page
+    assert 'id="retry-provider"' in page and failed.result in page
+    assert "ProviderUnavailable" not in page
     client.post(f"/one-off-charges/{parent.pk}/retry/")
     retried = Job.objects.filter(entity_id=parent.pk, kind=JobKind.INVOICE_DELETE).latest(
         "created_at", "id"
@@ -1978,7 +1979,7 @@ def test_a_failure_between_the_delete_and_the_create_fails_the_job_and_retry_com
     [failed] = run_queued_jobs()
     assert failed.status == "failed"
     assert failed.result.startswith(one_off_invoices.AUTOPAY_MOVE_FAILED)
-    assert "ProviderUnavailable" in failed.result and "Retry from the charge page." in failed.result
+    assert failed.result.endswith(": Unavailable. Retry from the charge page.")
     old.refresh_from_db()
     assert old.state == ScheduleState.ENDED
     [left] = leases.live_schedules(lease)
@@ -1994,7 +1995,8 @@ def test_a_failure_between_the_delete_and_the_create_fails_the_job_and_retry_com
     assert viewer.post(f"/charges/{rent.pk}/retry-release/").status_code == 403
     client, _ = client_for(Role.BILLING)
     page = client.get(f"/charges/{rent.pk}/").content.decode()
-    assert 'id="retry-provider"' in page and "ProviderUnavailable" in page
+    assert 'id="retry-provider"' in page and failed.result in page
+    assert "ProviderUnavailable" not in page
     client.post(f"/charges/{rent.pk}/retry-release/")
     retried = Job.objects.filter(entity_id=rent.pk).latest("created_at", "id")
     assert retried.pk != failed.pk and retried.kind == JobKind.SCHEDULE_DELETE

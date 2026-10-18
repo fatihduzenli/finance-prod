@@ -999,7 +999,7 @@ def test_run_now_is_admin_only_queued_once_and_run_by_the_worker(fake: FakeProvi
     with override_settings(STAX_CALLER="worker"):
         [done] = run_queued_jobs()
     assert done.status == JobStatus.DONE
-    assert done.result.startswith("Reconciliation done:")
+    assert done.result.startswith("Nightly check done:")
     [run] = ReconciliationRun.objects.all()
     assert (run.trigger, run.requested_by) == (ReconciliationTrigger.MANUAL, user)
     page = admin.get("/reconciliation/").content.decode()

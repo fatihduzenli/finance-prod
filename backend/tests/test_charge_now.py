@@ -475,8 +475,8 @@ def test_a_503_is_one_call_shown_once_and_the_button_returns_after_a_minute(
     key = fresh(charge).charge_now_key
     [job] = run_queued_jobs()
     assert job.status == JobStatus.FAILED
-    assert job.result.startswith(one_off_invoices.CHARGE_FAILED)
-    assert "ProviderUnavailable" in job.result
+    assert job.result.startswith(str(one_off_invoices.CHARGE_FAILED))
+    assert ": Unavailable." in job.result and "ProviderUnavailable" not in job.result
     assert len(pays(fake)) == 1
     charge = fresh(charge)
     assert (charge.status, charge.charge_now_key) == (OneOffChargeStatus.OWED, key)
@@ -485,7 +485,7 @@ def test_a_503_is_one_call_shown_once_and_the_button_returns_after_a_minute(
     assert failed.after is not None and failed.after["failure"] == "ProviderUnavailable"
     client, _ = admin()
     page = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
-    assert "ProviderUnavailable" in page
+    assert job.result in page and "ProviderUnavailable" not in page
     assert 'id="charge-now"' not in page and 'id="charge-now-wait"' in page
     waited = confirm(charge)
     assert not waited.ok and "possible again in" in waited.message
@@ -497,12 +497,16 @@ def test_a_503_is_one_call_shown_once_and_the_button_returns_after_a_minute(
     assert len(pays(fake)) == 1  # nothing was repeated by itself
 
 
-def test_a_rejected_pay_names_the_class_and_fields_only(fake: FakeProvider, enabled: None) -> None:
+def test_a_rejected_pay_shows_the_failure_in_words_and_audits_the_class_and_fields(
+    fake: FakeProvider, enabled: None
+) -> None:
     charge = ready(fake)
     fake.fail_next("pay_invoice", ProviderRejected(422, error_fields=("payment_method_id",)))
     confirm(charge)
     [job] = run_queued_jobs()
-    assert "ProviderRejected (fields: payment_method_id)" in job.result
+    assert job.result == (
+        f"{one_off_invoices.CHARGE_FAILED}: Rejected.{one_off_invoices.CHARGE_STAYS_OPEN}"
+    )
     failed = AuditLog.objects.filter(action=service.CHARGE_FAILED_ACTION).get()
     assert failed.after == {
         "failure": "ProviderRejected",

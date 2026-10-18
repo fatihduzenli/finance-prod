@@ -53,7 +53,7 @@ Result = tuple[bool, str]
 #: The sentence of a sync that had nothing to send.
 NO_CALL = "Nothing to send: the operator needs no sync now."
 #: The sentence of a marking that had nothing to do.
-NO_INVOICE = "The charge has no payment provider invoice to mark."
+NO_INVOICE = provider_sentence("The charge has no {provider} invoice to mark.")
 
 _SYNC_FAILED = (Action.FAILED, Action.UPDATE_FAILED, Action.LINK_REFUSED, Action.RETRY_TOO_SOON)
 _MARK_FAILED = (MarkAction.FAILED, MarkAction.RETRY_TOO_SOON, MarkAction.NOTHING_TO_RETRY)
@@ -105,7 +105,7 @@ def _autopay(outcome: AutopayOutcome) -> Result:
 
 
 def _mark(result: MarkResult) -> Result:
-    return result.action not in _MARK_FAILED, result.message or NO_INVOICE
+    return result.action not in _MARK_FAILED, result.message or str(NO_INVOICE)
 
 
 def _refund(outcome: refunds.Outcome) -> Result:
@@ -323,10 +323,11 @@ def match_report_text(report: MatchReport) -> str:
     if report.refused:
         return "\n".join(_line(text) for text in report.refused)
     lines = [
-        f"Schedules read: {report.schedules}. Linked: {report.count(MatchAction.LINKED)}. "
+        f"Autopay invoices read: {report.schedules}. "
+        f"Attached: {report.count(MatchAction.LINKED)}. "
         f"Attached, but the amounts differ: {report.count(MatchAction.MISMATCH)}. "
-        f"Already linked: {report.count(MatchAction.ALREADY)}. "
-        f"Not linked: {report.count(MatchAction.REPORTED)}."
+        f"Already attached: {report.count(MatchAction.ALREADY)}. "
+        f"Not attached: {report.count(MatchAction.REPORTED)}."
     ]
     shown = [line for line in report.lines if line.action is not MatchAction.ALREADY]
     lines += [_line(f"Invoice {line.invoice}: {line.message}") for line in shown[:MATCH_MAX_LINES]]
@@ -362,8 +363,8 @@ def reconcile_text(run: ReconciliationRun) -> str:
     if run.status == ReconciliationStatus.FAILED:
         return f"Reconciliation failed at step {run.step_reached or '-'}: {run.error}."
     found = sum(int(step.get("mismatched", 0)) for step in run.counts.values())
-    return (
-        f"Reconciliation done: {found} mismatches found, {run.requests} provider requests, "
+    return with_provider(
+        f"Nightly check done: {found} findings, {run.requests} {{provider}} requests, "
         f"{run.duration_ms or 0} ms."
     )
 

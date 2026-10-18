@@ -285,7 +285,7 @@ def test_the_aging_page_and_csv(today: date) -> None:
     response = client.get("/reports/aging/")
     page = response.content.decode()
     assert response.status_code == 200
-    assert 'id="aging-grand-total">4840.00<' in page
+    assert 'id="aging-grand-total">$4,840.00<' in page
     assert "by due date" in page and "revenue is by settled month" in page
     records = dicts_of(client.get("/reports/aging/export.csv"))
     assert [record["Operator"] for record in records] == ["North", "South", "No operator", "Total"]
@@ -762,7 +762,7 @@ def test_a_settlement_at_2359_new_york_on_the_last_day() -> None:
 def test_the_revenue_page_says_settled_month_and_due_date(today: date) -> None:
     page = viewer().get("/reports/revenue/").content.decode()
     assert 'id="revenue-basis"' in page
-    assert "by settled month" in page and "aging is by due date" in page
+    assert "by settled month" in page and "Unpaid by age is by due date" in page
 
 
 # --- Payments by method -----------------------------------------------------------------

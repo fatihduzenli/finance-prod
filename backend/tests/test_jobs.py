@@ -1145,7 +1145,7 @@ def test_match_is_queued_once_and_its_report_is_shown_masked_and_cut(
     [job] = run_queued_jobs()
     assert job.status == JobStatus.DONE
     lines = job.result.splitlines()
-    assert lines[0].startswith("Schedules read: 3. ") and "Already linked: 1." in lines[0]
+    assert lines[0].startswith("Autopay invoices read: 3. ") and "Already attached: 1." in lines[0]
     assert len(lines) == 1 + runners.MATCH_MAX_LINES + 1
     assert lines[-1] == "5 more lines not shown."
     page = billing.get("/run/").content.decode()

@@ -620,7 +620,7 @@ def test_a_thousand_year_range_is_capped_to_36_months() -> None:
     far = parse(**{"from": "1026-01", "to": "2026-01"})
     assert (far.from_month, far.to_month) == (date(2026, 7, 1), date(2026, 10, 1))
     assert far.messages == (
-        "The months could not be read (use YYYY-MM); showing 2026-07 to 2026-10.",
+        "The months could not be read (choose a month); showing 2026-07 to 2026-10.",
     )
 
 
@@ -697,10 +697,10 @@ def test_the_page_shows_the_known_store_with_its_margin() -> None:
     response = get(PAGE, {"from": "2026-07", "to": "2026-07"})
     assert response.status_code == 200
     page = response.content.decode()
-    assert "Store 1796" in page and "1500.00" in page
+    assert "Store 1796" in page and "$1,500.00" in page
     [group] = response.context["groups"]
     assert (group.label, group.margin_billed) == ("Store 1796", D("1500.00"))
-    assert 'id="deposits-held-amount">0.00<' in page
+    assert 'id="deposits-held-amount">$0.00<' in page
 
 
 def test_the_breakdown_lists_the_rows_and_highlights_cost_only_ones() -> None:

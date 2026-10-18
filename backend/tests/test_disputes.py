@@ -43,6 +43,7 @@ from ledger.models import (
     RentChargeStatus,
 )
 from ledger.services import disputes
+from ledger.wording import provider_name
 from payments.errors import ProviderRejected, ProviderUnavailable, ValidationFailed
 from payments.fake import RESPOND_BY_PASSED, FakeProvider
 from payments.models import ExternalRef, Job, JobKind, JobStatus, SyncState
@@ -452,7 +453,7 @@ def test_the_provider_down_keeps_the_last_fetch_and_its_time(fake: FakeProvider)
         action=disputes.ACTION_SYNC_FAILED, after={"error": "ProviderUnavailable"}
     ).exists()
     page = client_for(Role.BILLING)[0].get(PAGE).content.decode()
-    assert "Last synced 2026-10-06 16:00 UTC." in page and ">OPEN<" in page
+    assert f"Last updated from {provider_name()} 2026-10-06 12:00." in page and ">OPEN<" in page
 
 
 # --- Queueing the sync: Refresh, the daily tick, the webhooks ----------------------------
@@ -522,7 +523,7 @@ def test_the_page_and_its_export_are_billing_and_above(
 
 def test_the_empty_page_says_so_and_the_nav_links_it(fake: FakeProvider) -> None:
     page = client_for(Role.BILLING)[0].get(PAGE).content.decode()
-    assert 'id="no-disputes"' in page and "Not synced yet." in page
+    assert 'id="no-disputes"' in page and "Not updated yet." in page
     assert 'id="nav-disputes"' in page
 
 
