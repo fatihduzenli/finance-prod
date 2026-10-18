@@ -294,3 +294,59 @@ def test_the_banner_wording_is_on_the_sign_in_the_error_and_the_admin_pages() ->
         assert BANNER in body, path
         assert body.count("sandbox-banner") == 1, path  # once, never twice
         assert "<title>[SANDBOX]" in body, path
+
+
+# --- lazy provider sentences never reach a stored row as proxies ------------------------------
+
+
+def test_an_insurance_payment_whose_invoice_stays_open_writes_a_plain_text_reason() -> None:
+    """The audit row of an insurance payment that Stax still has to mark (slice D2b fix) holds
+    the sentence as text: a lazy proxy would raise on JSON and lose the payment's audit."""
+    import uuid as _uuid
+
+    from ledger.models import (
+        AuditLog,
+        InsuranceCharge,
+        Invoice,
+        InvoiceStatus,
+        PaymentMethod,
+    )
+    from ledger.services import insurance
+    from tests.test_lease_end import provider_ref
+
+    row = CompanySettings.current()
+    row.processor_name = f"PayCo {MARKUP}"
+    row.save()
+    lease = a_lease(a_store("2505"), an_operator("Insured Co"), channel=PaymentChannel.WIRE)
+    assert lease.operator is not None
+    charge = InsuranceCharge.objects.create(
+        lease=lease, policy_year=2026, due_on=date(2026, 10, 1), amount=Decimal("120.00")
+    )
+    invoice = Invoice.objects.create(
+        invoice_number="INV-2026-9101",
+        operator=lease.operator,
+        insurance_charge=charge,
+        issue_date=date(2026, 10, 1),
+        due_date=date(2026, 10, 1),
+        subtotal=Decimal("120.00"),
+        total=Decimal("120.00"),
+        internal_status=InvoiceStatus.SENT,
+    )
+    provider_ref("invoice", invoice.pk, "invoice")
+    outcome = insurance.record_manual_payment(
+        charge.pk,
+        method=PaymentMethod.ZELLE,
+        amount=Decimal("120.00"),
+        paid_on=date(2026, 10, 2),
+        note="Zelle received.",
+        actor=None,
+        creation_key=_uuid.uuid4(),
+        today=date(2026, 10, 2),
+    )
+    assert outcome.ok, outcome.message
+    entry = AuditLog.objects.get(action=insurance.NOT_UPDATED_ACTION)
+    reason = entry.after["reason"]
+    assert type(reason) is str and reason == str(insurance.NOT_MARKED)
+    assert "PayCo" in reason and MARKUP in reason  # the name as data in the row, never markup
+    # The message shown to staff is escaped on the page, the name resolved at render time.
+    assert str(outcome.provider.message) == reason if outcome.provider else True

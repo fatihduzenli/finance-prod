@@ -320,7 +320,7 @@ def test_the_detail_shows_the_leases_of_the_store(admin: Client) -> None:
     assert f"/leases/{other.pk}/" not in page
     assert "Northwind Stores" in page and "2026-01-01" in page
     empty = admin.get(f"/stores/{make_store().pk}/").content.decode()
-    assert "No leases." in empty
+    assert "No lease yet. New lease from the action bar." in empty
 
 
 # --- Row 3: roles, CSRF, registry ----------------------------------------------------------------

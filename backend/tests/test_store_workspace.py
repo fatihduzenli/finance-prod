@@ -164,14 +164,14 @@ def test_the_header_shows_the_lease_balance_credit_next_payment_and_open_promise
     header = space.header
     assert header.lease == lease and header.operator == lease.operator
     assert header.rent is not None and header.rent.amount == D("3500.00")
-    assert header.autopay == "Active"
+    assert header.autopay == "On"
     assert header.open_balance == D("1945.00")
     assert header.credit == D("0.00")
     # The one-off autopay on 25 October comes before the rent debit on 5 November.
     assert header.next_payment == workspace.NextPayment(date(2026, 10, 25), "Broken shelf")
     assert header.open_promise is not None and header.open_promise.promised_amount == D("500")
     html = page(client_for(Role.VIEWER)[0], store_page(lease.store_id))
-    assert 'id="header-open-balance">$1945.00<' in html
+    assert 'id="header-open-balance">$1,945.00<' in html
     # The credit line shows only when a credit is held (QA-012d finding 5, "if any").
     assert 'id="header-credit"' not in html and "<dt>Credit</dt>" not in html
     assert "2026-10-25: Broken shelf" in html
@@ -454,8 +454,8 @@ def test_the_charges_tab_lists_every_kind_and_filters_open_paid_all() -> None:
     assert "Rent 2026-10" in opened and "Broken shelf" in opened
     assert "Insurance, policy year 2026" in opened
     assert "Rent 2026-09" not in opened and "$777.00" not in opened
-    assert 'id="charges-balance">$1945.00<' in opened
-    assert "Record payment" not in opened  # billing only
+    assert 'id="charges-balance">$1,945.00<' in opened
+    assert "Add payment" not in opened  # billing only
     paid = page(viewer, store_page(lease.store_id, tab="charges", filter="paid"))
     assert "Rent 2026-09" in paid and "Rent 2026-10" not in paid
     every = page(viewer, store_page(lease.store_id, tab="charges", filter="all"))

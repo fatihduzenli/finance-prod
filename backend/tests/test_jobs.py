@@ -779,14 +779,14 @@ def test_the_page_shows_queued_then_running_then_done_and_refreshes_only_meanwhi
     page = response.content.decode()
     operator = Operator.objects.get()
     assert '<meta http-equiv="refresh" content="5">' in page
-    assert 'id="job-state">Queued<' in page
+    assert 'id="job-state">Waiting<' in page
     assert fake.calls == []
     job = only_job()
     assert job.requested_by == user
 
     assert jobs.claim_next() is not None
     page = billing.get(detail(operator)).content.decode()
-    assert 'id="job-state">Running<' in page and 'http-equiv="refresh"' in page
+    assert 'id="job-state">In progress<' in page and 'http-equiv="refresh"' in page
 
     jobs.run(Job.objects.get())
     page = billing.get(detail(operator)).content.decode()
@@ -811,12 +811,12 @@ def test_the_retry_button_waits_for_a_queued_job_and_a_second_post_queues_nothin
         sync_failure="ProviderUnavailable",
         sync_attempted_at=timezone.now() - timedelta(minutes=5),
     )
-    assert "Retry sync" in billing.get(detail(operator)).content.decode()
+    assert ">Try again</button>" in billing.get(detail(operator)).content.decode()
     billing.post(f"{detail(operator)}retry-sync/")
     page = billing.get(detail(operator)).content.decode()
-    assert "Retry sync" not in page
+    assert ">Try again</button>" not in page
     second = billing.post(f"{detail(operator)}retry-sync/", follow=True)
-    assert BUSY in second.content.decode()
+    assert str(BUSY) in second.content.decode()
     assert Job.objects.count() == 1
     assert fake.calls == []
 
@@ -840,11 +840,13 @@ def test_a_double_click_on_a_lease_action_queues_one_job_and_says_busy(
     first = admin.post(f"/leases/{lease.pk}/{action}/", data)
     assert first.status_code == 302
     second = admin.post(f"/leases/{lease.pk}/{action}/", data, follow=True)
-    assert BUSY in second.content.decode()
+    assert str(BUSY) in second.content.decode()
     assert [(job.kind, job.status) for job in Job.objects.all()] == [(kind, JobStatus.QUEUED)]
     # Running counts as busy too; once it finished, the next request is queued.
     Job.objects.update(status=JobStatus.RUNNING)
-    assert BUSY in admin.post(f"/leases/{lease.pk}/{action}/", data, follow=True).content.decode()
+    assert (
+        str(BUSY) in admin.post(f"/leases/{lease.pk}/{action}/", data, follow=True).content.decode()
+    )
     Job.objects.update(status=JobStatus.DONE)
     admin.post(f"/leases/{lease.pk}/{action}/", data)
     assert Job.objects.count() == 2
@@ -856,7 +858,7 @@ def test_a_queued_pause_also_blocks_a_resume_of_the_same_lease(fake: FakeProvide
     lease = make_lease()
     admin.post(f"/leases/{lease.pk}/pause/")
     response = admin.post(f"/leases/{lease.pk}/resume/", follow=True)
-    assert BUSY in response.content.decode()
+    assert str(BUSY) in response.content.decode()
     assert list(Job.objects.values_list("kind", flat=True)) == [JobKind.AUTOPAY_PAUSE]
 
 
@@ -998,7 +1000,7 @@ def test_the_three_pages_read_nothing_from_the_provider_whatever_their_state(
     admin.post(f"/webhooks/{event.pk}/replay/")
     for path in pages:  # each with a queued job
         page = admin.get(path).content.decode()
-        assert 'id="job-state">Queued<' in page and 'http-equiv="refresh"' in page, path
+        assert 'id="job-state">Waiting<' in page and 'http-equiv="refresh"' in page, path
     monkeypatch.setattr("payments.get_provider", lambda: fake)
     run_queued_jobs()
     used = refuse_provider(monkeypatch)
@@ -1036,7 +1038,7 @@ def test_the_enrolment_page_without_a_snapshot_offers_the_refresh_then_lists_the
     assert (job.status, job.result) == (JobStatus.DONE, leases.METHODS_READ.format(count=1))
     fake.calls.clear()
     page = admin.get(enrol_page(lease)).content.decode()
-    assert "Methods as of " in page and 'type="submit" id="enable-autopay"' in page
+    assert "Bank methods as of " in page and 'type="submit" id="enable-autopay"' in page
     assert 'id="refresh-methods"' in page and 'id="refresh-methods" disabled' not in page
     assert fake.calls == []
 
@@ -1046,7 +1048,7 @@ def test_a_second_refresh_while_one_waits_queues_nothing(fake: FakeProvider) -> 
     lease = make_lease()
     admin.post(enrol_page(lease), {"refresh_methods": "1"})
     response = admin.post(enrol_page(lease), {"refresh_methods": "1"}, follow=True)
-    assert BUSY in response.content.decode()
+    assert str(BUSY) in response.content.decode()
     assert Job.objects.count() == 1
 
 
@@ -1056,7 +1058,7 @@ def test_a_refresh_for_an_operator_without_a_customer_is_refused_before_queueing
     admin, _ = client_for(Role.ADMIN)
     lease = make_lease(operator=lease_operator(customer=None))
     response = admin.post(enrol_page(lease), {"refresh_methods": "1"}, follow=True)
-    assert leases.NO_PROVIDER_CUSTOMER in response.content.decode()
+    assert str(leases.NO_PROVIDER_CUSTOMER) in response.content.decode()
     assert not Job.objects.exists()
 
 
@@ -1119,9 +1121,9 @@ def test_match_is_queued_once_and_its_report_is_shown_masked_and_cut(
 ) -> None:
     billing, user = client_for(Role.BILLING)
     response = billing.post("/run/match/", follow=True)
-    assert MATCH_QUEUED in response.content.decode()
+    assert str(MATCH_QUEUED) in response.content.decode()
     second = billing.post("/run/match/", follow=True)
-    assert BUSY in second.content.decode()
+    assert str(BUSY) in second.content.decode()
     job = only_job()
     assert (job.kind, job.entity_type, job.entity_id, job.requested_by) == (
         JobKind.RUN_MATCH,
@@ -1199,7 +1201,7 @@ def test_a_replay_is_queued_once_and_shows_its_outcome(
     event = _stored_event()
     billing.post(f"/webhooks/{event.pk}/replay/")
     second = billing.post(f"/webhooks/{event.pk}/replay/", follow=True)
-    assert BUSY in second.content.decode()
+    assert str(BUSY) in second.content.decode()
     page = second.content.decode()
     assert 'id="replay" disabled' in page
     [job] = run_queued_jobs()

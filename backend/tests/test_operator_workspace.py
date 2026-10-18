@@ -102,8 +102,8 @@ def test_the_default_store_is_the_first_by_label_and_the_selector_lists_the_oper
     assert str(other.store_id) not in html and "3001" not in options
     header = section(html, "workspace-header")
     assert "1001" in header and "1002" not in header
-    assert re.search(r'id="header-open-balance">\$1000\.00<', header)
-    assert re.search(r'id="header-operator-balance">\$1250\.00<', header)
+    assert re.search(r'id="header-open-balance">\$1,000\.00<', header)
+    assert re.search(r'id="header-operator-balance">\$1,250\.00<', header)
     actions = bar(html)
     assert f"lease={first.pk}" in actions and f"lease={second.pk}" not in actions
     assert reverse("ledger:stores:record_payment", kwargs={"pk": first.store_id}) in actions
@@ -125,7 +125,7 @@ def test_the_store_parameter_switches_the_store_and_the_bar() -> None:
     assert f'value="{second.store_id}" selected' in html
     header = section(html, "workspace-header")
     assert "1002" in header and re.search(r'id="header-open-balance">\$250\.00<', header)
-    assert re.search(r'id="header-operator-balance">\$1250\.00<', header)
+    assert re.search(r'id="header-operator-balance">\$1,250\.00<', header)
     actions = bar(html)
     assert f"lease={second.pk}" in actions and f"lease={first.pk}" not in actions
     assert str(first.store_id) not in actions
@@ -141,7 +141,7 @@ def test_another_operators_store_or_a_bad_value_falls_back_to_the_default(raw: s
     value = str(theirs.store_id) if raw == "another" else raw
     html = page(client_for(Role.ADMIN)[0], operator_page(operator, store=value, tab="history"))
     assert f'value="{first.store_id}" selected' in html
-    assert "9009" not in html and "4321.00" not in html and str(theirs.pk) not in html
+    assert "9009" not in html and "4,321.00" not in html and str(theirs.pk) not in html
 
 
 def test_a_store_now_leased_to_another_operator_shows_no_lease_and_no_bar() -> None:
@@ -185,8 +185,8 @@ def test_the_charges_tab_lists_every_store_of_the_operator_with_a_store_column()
     html = section(page(client_for(Role.BILLING)[0], operator_page(operator)), "tab-charges")
     assert "<th>Store</th>" in html
     assert "1001" in html and "1002" in html and "Broken shelf" in html
-    assert "9009" not in html and "4321.00" not in html
-    assert 'id="charges-balance">$1325.00<' in html
+    assert "9009" not in html and "4,321.00" not in html
+    assert 'id="charges-balance">$1,325.00<' in html
     assert f"?operator={operator.pk}" in html
     # The payment forms come back to the operator page.
     assert "next=%2Foperators%2F" in html

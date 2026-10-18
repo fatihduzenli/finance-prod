@@ -200,7 +200,7 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
     assert operator_sync.MESSAGES[name].replace("'", "&#x27;") in page
     assert name in page
     # PLAN-006a §3.3: the retry button waits a minute after the attempt.
-    assert "Retry sync" not in page
+    assert ">Try again</button>" not in page
     assert "Retry available in " in page
     assert "CANARY" not in page
     assert len(fake.calls) == 1
@@ -211,7 +211,7 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
     assert len(fake.calls) == 1
 
     backdate_attempt(operator)
-    assert "Retry sync" in billing.get(detail(operator)).content.decode()
+    assert ">Try again</button>" in billing.get(detail(operator)).content.decode()
 
     retried = billing.post(f"{detail(operator)}retry-sync/", follow=True)
     assert retried.status_code == 200
@@ -224,7 +224,7 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
     ]
     operator.refresh_from_db()
     assert operator.sync_status == SyncStatus.LINKED
-    assert "Retry sync" not in retried.content.decode()
+    assert ">Try again</button>" not in retried.content.decode()
 
 
 # --- Row 4: malformed e-mail ------------------------------------------------------------------
@@ -277,7 +277,7 @@ def test_no_email_saves_awaiting_link_with_no_call(billing: Client, fake: FakePr
     assert operator.email is None
     assert operator.sync_status == SyncStatus.AWAITING_LINK
     assert fake.calls == []
-    assert "link the payment provider customer by hand" in response.content.decode()
+    assert "connect the Stax customer by hand" in response.content.decode()
 
 
 def test_the_link_form_stores_both_ids_after_one_read(billing: Client, fake: FakeProvider) -> None:
@@ -324,7 +324,7 @@ def test_a_bad_customer_id_shows_a_clear_message_and_stores_nothing(
     )
     # PLAN-010 D3: the link is a job; its outcome is shown on the detail page.
     assert response.redirect_chain == [(detail(operator), 302)]
-    assert operator_sync.LINK_REJECTED_MESSAGE in response.content.decode()
+    assert str(operator_sync.LINK_REJECTED_MESSAGE) in response.content.decode()
     assert call_names(fake) == ["get_customer"]
     assert operator_sync.current_refs(operator) == {}
 
@@ -386,7 +386,7 @@ def test_viewer_sees_no_write_controls(fake: FakeProvider) -> None:
     operator = new_operator(email=None)
     assert "New operator" not in client.get(LIST).content.decode()
     page = client.get(detail(operator)).content.decode()
-    for control in ("Edit</a>", "Link provider IDs", ">Archive<", "Retry sync"):
+    for control in ("Edit</a>", ">Connect to Stax</a>", ">Archive<", ">Try again</button>"):
         assert control not in page
 
 
@@ -615,7 +615,7 @@ def test_the_detail_page_shows_balance_leases_and_masked_ids(
     customer = operator_sync.current_refs(operator)["customer"]
 
     page = billing.get(detail(operator)).content.decode()
-    assert "$2450.00" in page
+    assert "$2,450.00" in page
     assert "Store 900 Testville" in page
     # PLAN-012d D14: the invoices are on the Invoices tab.
     invoices = billing.get(detail(operator) + "?tab=invoices").content.decode()
@@ -771,13 +771,13 @@ def test_the_detail_page_shows_the_rejected_field_names(
     fake.fail_next("create_customer", ProviderRejected(422, error_fields=("email", "lastname")))
     response = billing.post(NEW, form_data(), follow=True)
     page = response.content.decode()
-    assert "Fields the provider rejected: email, lastname" in page
+    assert "Fields Stax rejected: email, lastname" in page
 
     operator = Operator.objects.get()
     backdate_attempt(operator)
     billing.post(f"{detail(operator)}retry-sync/")
     page = billing.get(detail(operator)).content.decode()
-    assert "Fields the provider rejected" not in page
+    assert "Fields Stax rejected" not in page
 
 
 def test_the_detail_page_hides_the_retry_button_while_locked(
@@ -788,7 +788,7 @@ def test_the_detail_page_hides_the_retry_button_while_locked(
     for seconds, button in [(1, False), (59, False), (60, True), (600, True)]:
         backdate_attempt(operator, seconds)
         page = billing.get(detail(operator)).content.decode()
-        assert ("Retry sync" in page) is button, seconds
+        assert (">Try again</button>" in page) is button, seconds
         assert ("Retry available in " in page) is (not button), seconds
 
 
@@ -799,7 +799,7 @@ def test_a_viewer_sees_neither_the_button_nor_the_wait(fake: FakeProvider) -> No
         sync_status=SyncStatus.FAILED, sync_attempted_at=timezone.now()
     )
     page = client.get(detail(operator)).content.decode()
-    assert "Retry sync" not in page and "Retry available" not in page
+    assert ">Try again</button>" not in page and "Retry available" not in page
 
 
 def test_two_quick_retry_posts_make_one_provider_call(billing: Client, fake: FakeProvider) -> None:
@@ -870,7 +870,7 @@ def test_a_bad_stored_phone_blocks_edit_and_retry_until_it_is_fixed(
     # The detail page offers the fix sentence, not the retry button.
     page = billing.get(detail(operator)).content.decode()
     assert "Fix the phone number first." in page
-    assert "Retry sync" not in page
+    assert ">Try again</button>" not in page
     assert "Retry available in" not in page
 
     # An edit that keeps the bad phone is refused; a direct retry POST makes no call.
@@ -890,7 +890,7 @@ def test_a_bad_stored_phone_blocks_edit_and_retry_until_it_is_fixed(
     page = billing.get(detail(operator)).content.decode()
     # The last request's outcome still names the phone (PLAN-010 D3); the prompt is gone.
     assert 'id="fix-phone"' not in page
-    assert "Retry sync" in page
+    assert ">Try again</button>" in page
     billing.post(retry)
     operator.refresh_from_db()
     assert operator.sync_status == SyncStatus.LINKED
@@ -933,7 +933,7 @@ def test_006c_a_phone_edit_updates_the_customer_and_the_page_says_when(
 ) -> None:
     operator = linked_through_the_form(billing, fake)
     page = billing.get(detail(operator)).content.decode()
-    assert "Provider customer updated" not in page
+    assert "Updated from Stax" not in page
 
     response = billing.post(
         f"{detail(operator)}edit/", form_data(phone="(415) 555-0132"), follow=True
@@ -945,7 +945,7 @@ def test_006c_a_phone_edit_updates_the_customer_and_the_page_says_when(
     [(_, (_, sent)), _] = fake.calls
     assert sent.phone == "4155550132"  # type: ignore[attr-defined]
     assert "Updated the customer at the payment provider." in page
-    assert 'id="provider-updated"' in page and "Provider customer updated " in page
+    assert 'id="provider-updated"' in page and "Updated from Stax " in page
     operator.refresh_from_db()
     assert operator.sync_status == SyncStatus.LINKED
 
@@ -967,21 +967,21 @@ def test_006c_a_rejected_update_shows_the_failure_and_the_retry_updates(
         "Saved here. The payment provider did not accept the update: ProviderRejected "
         "(fields phone). Retry when ready."
     ) in page
-    assert 'id="sync-failure"' in page and "Fields the provider rejected: phone" in page
-    assert "Retry available in " in page and "Retry sync" not in page
-    assert "Provider customer updated" not in page
+    assert 'id="sync-failure"' in page and "Fields Stax rejected: phone" in page
+    assert "Retry available in " in page and ">Try again</button>" not in page
+    assert "Updated from Stax" not in page
     assert "CANARY" not in page
     operator.refresh_from_db()
     assert (operator.phone, operator.sync_status) == ("4155550132", SyncStatus.FAILED)
 
     backdate_attempt(operator)
-    assert "Retry sync" in billing.get(detail(operator)).content.decode()
+    assert ">Try again</button>" in billing.get(detail(operator)).content.decode()
     retried = billing.post(f"{detail(operator)}retry-sync/", follow=True)
 
     page = retried.content.decode()
     assert call_names(fake) == ["update_customer", "update_customer", "list_payment_methods"]
     assert "Updated the customer at the payment provider." in page
-    assert "Provider customer updated " in page and "Retry sync" not in page
+    assert "Updated from Stax " in page and ">Try again</button>" not in page
     operator.refresh_from_db()
     assert operator.sync_status == SyncStatus.LINKED
 
@@ -1025,8 +1025,8 @@ def _local_input(moment: datetime) -> str:
 def test_the_form_shows_the_sms_phone_and_consent_fields(billing: Client) -> None:
     page = billing.get(NEW).content.decode()
     for label in (
-        "SMS phone (international, +1…)",
-        "SMS consent given on",
+        "Text-message phone (international, +1…)",
+        "Text-message consent given on",
         "E-mail consent given on",
     ):
         assert label in page

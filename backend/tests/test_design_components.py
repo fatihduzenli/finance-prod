@@ -184,8 +184,8 @@ def test_the_amount_cells_of_the_charge_tables_are_money_cells() -> None:
     a_rent_charge(lease, OCTOBER)
     html = body(client_for(Role.BILLING)[0].get(f"/stores/{lease.store_id}/"))
     table = html[html.index('<table id="store-charges">') :].split("</table>", 1)[0]
-    assert '<td class="money" data-label="Billed">$3500.00</td>' in table
-    assert '<td class="money" data-label="Balance">$3500.00</td>' in table
+    assert '<td class="money" data-label="Billed">$3,500.00</td>' in table
+    assert '<td class="money" data-label="Balance">$3,500.00</td>' in table
     assert '<th class="money">Balance</th>' in table
 
 
@@ -281,14 +281,14 @@ def test_the_grid_legend_is_a_badge_per_status() -> None:
         ("paid", "Paid"),
         ("unpaid", "Unpaid"),
         ("pending", "Pending"),
-        ("partial", "Partially paid"),
+        ("partial", "Partly paid"),
         ("due", "Due"),
         ("waived", "Waived"),
     ):
         badge = f'<span class="badge badge-{status}">{GLYPH}{GLYPHS[status]}</span> {label}</span>'
         assert badge in legend, status
-    # "Not due" holds no charge: a plain badge, text only.
-    assert '<span class="badge not-due">Not due</span>' in legend
+    # "Not yet due" holds no charge: a plain badge, text only.
+    assert '<span class="badge not-due">Not yet due</span>' in legend
     # The grid's own thead stays the first on the page (the month headers).
     assert html.index("<thead") > html.index('<p class="legend muted">')
 
@@ -391,7 +391,10 @@ def test_an_empty_list_says_so_and_offers_the_next_step() -> None:
         in searched
     )
     leases = body(admin.get("/leases/"))
-    assert 'class="muted empty">No leases. <a class="btn empty-next"' in leases
+    assert (
+        'class="muted empty">No lease yet. New lease from the action bar. <a class="btn empty-next"'
+        in leases
+    )
     # One primary per page: the header's "New store", never a second in the empty state.
     assert stores.count("btn-primary") == 1 and leases.count("btn-primary") == 1
     # A viewer cannot create: the sentence stays, with no next step.
@@ -409,10 +412,14 @@ def test_an_empty_store_tab_offers_its_action_bar_step() -> None:
         and ">Create invoice</a>" in row
     )
     payments = body(client.get(f"/stores/{lease.store_id}/?tab=payments"))
-    row = payments[payments.index('class="muted empty">No payments.') :].split("</td>", 1)[0]
+    row = payments[
+        payments.index('class="muted empty">No payments yet. Add one from the action bar.') :
+    ].split("</td>", 1)[0]
     assert f'href="/stores/{lease.store_id}/payments/new/"' in row
     contacts = body(client.get(f"/stores/{lease.store_id}/?tab=contacts"))
-    row = contacts[contacts.index('class="muted empty">No contact entries.') :].split("</td>", 1)[0]
+    row = contacts[contacts.index('class="muted empty">No entries yet. Add one.') :].split(
+        "</td>", 1
+    )[0]
     assert ">Add entry</a>" in row
     # A viewer has no action bar: the empty tab names no step.
     viewer = body(client_for(Role.VIEWER)[0].get(f"/stores/{lease.store_id}/?tab=charges"))

@@ -56,14 +56,18 @@ from ledger.views.operators import (
     _role,
     role_required,
 )
-from ledger.wording import format_amount
+from ledger.wording import format_amount, provider_sentence
 from payments import operator_sync
 
 #: (key, label, route) of each step; ``lease_ends`` routes take the lease end's id.
 STEPS: tuple[tuple[str, str, str], ...] = (
     ("operator", "Incoming operator", "ledger:transfers:operator"),
     ("terms", "End date", "ledger:lease_ends:terms"),
-    ("blockers", "Live items and balances", "ledger:transfers:blockers"),
+    (
+        "blockers",
+        provider_sentence("Still open at {provider}, and balances"),
+        "ledger:transfers:blockers",
+    ),
     ("statement", "Statement and deductions", "ledger:lease_ends:statement"),
     ("settlement", "Settlement", "ledger:lease_ends:settlement"),
     ("incoming", "Incoming lease", "ledger:transfers:incoming"),

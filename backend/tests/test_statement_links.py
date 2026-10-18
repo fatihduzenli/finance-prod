@@ -282,5 +282,5 @@ def test_the_staff_statement_is_unchanged(operator: Operator) -> None:
     body = page.content.decode()
     assert f'href="/operators/{operator.pk}/"' in body
     assert "Export CSV" in body or "export" in body
-    assert 'id="open-total">1970.00<' in body
+    assert 'id="open-total">$1,970.00<' in body
     assert Lease.objects.filter(operator=operator).exists()

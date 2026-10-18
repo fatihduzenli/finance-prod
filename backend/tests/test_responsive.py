@@ -148,7 +148,8 @@ def test_every_table_in_the_ledger_templates_is_responsive() -> None:
             continue
         assert text.count("<table") == text.count("{% responsive_table"), relative
         assert text.count("</table>") == text.count("{% endresponsive_table %}"), relative
-        assert "{% load responsive %}" in text, relative
+        # The library may be loaded with others ({% load money responsive %}, PLAN-012c D9).
+        assert re.search(r"\{% load [^%]*\bresponsive\b[^%]*%\}", text), relative
         mode = (
             '{% responsive_table "scroll" %}'
             if relative in SCROLL_TEMPLATES

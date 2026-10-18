@@ -53,12 +53,13 @@ from ledger.services import documents, statements, transfer
 from ledger.services import lease_end as service
 from ledger.views.operators import _actor, _held, _hold, _role, role_required
 from ledger.views.transfers import OPERATOR_FIRST, transfer_steps
+from ledger.wording import provider_sentence
 from payments import jobs
 from payments.models import JobKind
 
 STEPS: tuple[tuple[str, str], ...] = (
     ("terms", "End date and reason"),
-    ("blockers", "Live items"),
+    ("blockers", provider_sentence("Still open at {provider}")),
     ("statement", "Statement and deductions"),
     ("settlement", "Settlement"),
     ("confirm", "Confirm"),
@@ -142,7 +143,7 @@ def _needs_clear(request: HttpRequest, end: LeaseEnd) -> HttpResponse | None:
             return redirect("ledger:transfers:blockers", pk=held_by.pk)
         return None
     if service.blockers(end.lease):
-        messages.error(request, "Clear the live items first.")
+        messages.error(request, "Clear the listed items first.")
         return redirect("ledger:lease_ends:blockers", pk=end.pk)
     return None
 

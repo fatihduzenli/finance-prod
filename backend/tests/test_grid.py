@@ -106,12 +106,12 @@ def test_every_status_has_its_colour_text_and_link(today: date, viewer: Client) 
     result = built(**{"from": "2026-05", "to": "2026-10"})
     texts = [item.text for item in row_of(result, "2922 TUCSON").cells]
     assert texts == [
-        "paid 3,500.00",
-        "unpaid 3,500.00",
-        "pending 3,500.00 (from 2026-07-05)",
-        "partial 1,200.00 of 3,500.00",
-        "due 3,500.00",
-        "waived",
+        "Paid $3,500.00",
+        "Unpaid $3,500.00",
+        "Pending $3,500.00 (from 2026-07-05)",
+        "Partly paid $1,200.00 of $3,500.00",
+        "Due $3,500.00",
+        "Waived",
     ]
 
 
@@ -123,7 +123,7 @@ def test_the_note_marker_shows_only_on_a_charge_with_a_note(today: date, viewer:
     assert marked == [date(2026, 6, 1)]
     html = page(viewer, "?from=2026-05&to=2026-10")
     assert html.count('<span class="note-marker" title="Has a note">●</span>') == 1
-    assert 'aria-label="2026-06: unpaid 3,500.00, has a note"' in html
+    assert 'aria-label="2026-06: Unpaid $3,500.00, has a note"' in html
 
 
 def test_not_due_before_the_lease_started_and_blank_after(today: date) -> None:
@@ -133,8 +133,8 @@ def test_not_due_before_the_lease_started_and_blank_after(today: date) -> None:
     statuses = [item.status for item in row_of(result, "1083 JACKSONVILLE").cells]
     assert statuses == ["not_due", "not_due", "", "paid", ""]  # August: started mid-month
     assert [item.text for item in row_of(result, "1083 JACKSONVILLE").cells][:2] == [
-        "not due",
-        "not due",
+        "Not yet due",
+        "Not yet due",
     ]
 
 
@@ -161,8 +161,8 @@ def test_two_charges_of_one_month_make_one_cell_with_their_sums(today: date) -> 
     a_rent_charge(lease, SEP, RentChargeStatus.PAID, "1850.00", "1850.00", seq=1, day=1)
     a_rent_charge(lease, SEP, RentChargeStatus.PAID, "1850.00", "1850.00", seq=2, day=15)
     result = built(**{"from": "2026-08", "to": "2026-09"})
-    assert cell(result, "3409 LEICESTER", AUG).text == "partial 1,850.00 of 3,700.00"
-    assert cell(result, "3409 LEICESTER", SEP).text == "paid 3,700.00"
+    assert cell(result, "3409 LEICESTER", AUG).text == "Partly paid $1,850.00 of $3,700.00"
+    assert cell(result, "3409 LEICESTER", SEP).text == "Paid $3,700.00"
 
 
 @pytest.mark.parametrize(
@@ -364,13 +364,13 @@ def test_the_csv_is_in_the_sheets_column_order(today: date, viewer: Client) -> N
         "2922 TUCSON",
         "AZ",
         "Halid",
-        "ACH debit through the payment provider",
-        "paid 3,500.00",
-        "unpaid 3,500.00",
-        "pending 3,500.00 (from 2026-07-05)",
-        "partial 1,200.00 of 3,500.00",
-        "due 3,500.00",
-        "waived",
+        "Bank debit",
+        "Paid $3,500.00",
+        "Unpaid $3,500.00",
+        "Pending $3,500.00 (from 2026-07-05)",
+        "Partly paid $1,200.00 of $3,500.00",
+        "Due $3,500.00",
+        "Waived",
     ]
 
 
@@ -382,8 +382,8 @@ def test_the_csv_applies_the_filters_and_writes_not_due_and_blanks(
     a_rent_charge(late, SEP, RentChargeStatus.PAID, "9.99", "9.99")
     rows = read_csv(viewer, "?from=2026-07&to=2026-09&state=FL")
     assert [row[1] for row in rows[1:]] == ["200", "500"]
-    assert rows[2][5:] == ["not due", "not due", "paid 9.99"]
-    assert rows[1][5:] == ["", "unpaid 3,500.00", ""]
+    assert rows[2][5:] == ["Not yet due", "Not yet due", "Paid $9.99"]
+    assert rows[1][5:] == ["", "Unpaid $3,500.00", ""]
 
 
 def test_csv_text_cells_are_formula_safe(today: date, viewer: Client) -> None:

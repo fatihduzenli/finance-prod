@@ -171,7 +171,7 @@ def test_a_run_row_with_unreadable_values_is_read_safely() -> None:
 def test_the_dashboard_line_sums_todays_runs_and_links_the_run_page() -> None:
     viewer, _ = client_for(Role.VIEWER)
     html = body(viewer, "/")
-    assert 'id="run-line"' in html and "Today's rent run: no run yet today" in html
+    assert 'id="run-line"' in html and "Daily charges today: not created yet today" in html
     line = html.split('id="run-line"')[1].split("</p>")[0]
     assert f'href="{reverse("ledger:run:today")}"' in line
     paused = wire_lease(date(2026, 9, 1), label="9000", debit_day=15)
@@ -183,7 +183,7 @@ def test_the_dashboard_line_sums_todays_runs_and_links_the_run_page() -> None:
     billing, _ = client_for(Role.BILLING)
     billing.post(reverse("ledger:run:create_charges"), {})  # creates nothing more
     html = body(viewer, "/")
-    assert "Today's rent run: 2 created, 1 skipped" in html
+    assert "Daily charges today: 2 created, 1 skipped" in html
 
 
 # --- D13: Create missing charges ----------------------------------------------------------------
@@ -337,7 +337,7 @@ def test_a_future_month_billed_in_advance_shows_it_with_the_invoice_number() -> 
     viewer, _ = client_for(Role.VIEWER)
     html = body(viewer, "/grid/")
     november = html.split('data-month="2026-11"')[1].split("</td>")[0]
-    assert "paid 3,500.00 INV-2026-0042" in november
+    assert "Paid $3,500.00 INV-2026-0042" in november
     assert reverse("ledger:charges:detail", kwargs={"pk": advance.pk}) in november
     built = grid.build(grid.parse_query({}, TODAY), TODAY)
     [row] = [row for row in built.rows if row.store.pk == lease.store_id]

@@ -205,7 +205,7 @@ def test_the_page_shows_every_figure_with_its_link(today: date) -> None:
     assert 'href="/arrears/"' in page
     assert "/payments/?date_from=2026-10-01&amp;date_to=2026-10-31&amp;status=settled" in page
     assert 'href="/run/"' in page and 'href="/returns/"' in page
-    assert '<p id="last-reconciliation" class="muted">No reconciliation has run yet.</p>' in page
+    assert '<p id="last-reconciliation" class="muted">No nightly check has run yet.</p>' in page
 
 
 def test_invoices_not_sent_need_a_provider_reference(today: date) -> None:
@@ -240,7 +240,7 @@ def test_failed_attempts_list_attempted_invoices_with_operator_and_store(today: 
     page = client.get("/").content.decode()
     assert "Failed payment attempts: 1" in page
     assert "INV-2026-0007" in page and "Delta Retail" in page and "1444 JACKSONVILLE" in page
-    assert "$3740.00" in page
+    assert "$3,740.00" in page
     assert f'href="/charges/{charge.pk}/"' in page
     assert page.index("Failed payment attempts") < page.index("Total outstanding")
 
@@ -278,7 +278,7 @@ def test_the_last_reconciliation_is_the_latest_run_that_was_not_skipped(today: d
     assert data.last_reconciliation.status == ReconciliationStatus.DONE
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
-    assert "Done, started 2026-10-05 06:00 UTC" in page and 'href="/reconciliation/"' in page
+    assert "Done, started 2026-10-05 02:00" in page and 'href="/reconciliation/"' in page
 
 
 def test_an_empty_database_shows_zeroes(today: date) -> None:

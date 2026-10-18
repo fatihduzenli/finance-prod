@@ -200,7 +200,7 @@ def test_the_run_page_lists_due_and_skipped_leases_and_a_double_run_creates_noth
     due = lease()
     lease(collection_status="paused")
     page = billing.get(RUN).content.decode()
-    assert "Rent run 2026-10-15" in page
+    assert "Daily charges, 2026-10-15" in page
     assert "Not created" in page and rent_run.SKIP_PAUSED in page
     first = billing.post(CREATE)
     assert (first.status_code, first["Location"]) == (302, RUN)
@@ -237,7 +237,7 @@ def test_match_links_and_reports_through_the_page(billing: Client, fake: FakePro
     # PLAN-010 Batch A follow-up: matching is a job; the page shows it queued, then the
     # report once the worker ran it.
     page = billing.get(RUN).content.decode()
-    assert 'id="job-state">Queued<' in page and "Linked with a total mismatch" not in page
+    assert 'id="job-state">Waiting<' in page and "Linked with a total mismatch" not in page
     assert fake.calls == []
     run_queued_jobs()
     page = billing.get(RUN).content.decode()
@@ -246,7 +246,7 @@ def test_match_links_and_reports_through_the_page(billing: Client, fake: FakePro
     assert "Needs review" in page
     charge = RentCharge.objects.get()
     detail = billing.get(charge_paths(charge)[0]).content.decode()
-    assert rent_run.TOTAL_MISMATCH in detail
+    assert str(rent_run.TOTAL_MISMATCH) in detail
     assert "INV-2026-0001" in detail and "FAKE-SENT" in detail
     assert ref not in page and ref not in detail
 
@@ -285,7 +285,7 @@ def test_the_large_debit_warning_starts_above_the_threshold(
     with override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00")):
         page = billing.get(RUN).content.decode()
     assert ('class="large-debit"' in page) is large
-    assert "placeholder until the payment provider states its per-transaction limit" in page
+    assert "placeholder until Stax states its per-transaction limit" in page
 
 
 @pytest.mark.parametrize(
@@ -433,9 +433,9 @@ def test_the_link_list_shows_only_the_operators_unlinked_invoices(billing: Clien
     assert mine.invoice_number in page
     assert linked.invoice_number not in page and foreign.invoice_number not in page
     assert "dashboard-invoice-0001" not in page and "dash…0001" in page
-    assert "2026-10-14" in page and "$1500.00" in page and "DRAFT" in page
+    assert "2026-10-14" in page and "$1,500.00" in page and "DRAFT" in page
     assert f'value="{mine.pk}"' in page
-    assert 'id="balance">$1500.00<' in page
+    assert 'id="balance">$1,500.00<' in page
 
 
 def test_the_charge_page_offers_the_link_to_billing_only_while_it_has_no_invoice(
@@ -621,8 +621,8 @@ def test_the_link_route_enforces_csrf_and_404s_bad_charge_ids() -> None:
 def test_the_run_page_says_matching_reads_schedules_only(billing: Client) -> None:
     page = billing.get(RUN).content.decode()
     assert 'id="match-scope"' in page
-    assert "reads the invoices of the provider's schedules only" in page.replace("&#x27;", "'")
-    assert "Link invoice" in page
+    assert "reads Stax's autopay invoices only" in page.replace("&#x27;", "'")
+    assert '"Attach Stax invoice"' in page.replace("&quot;", '"')
 
 
 def a_charge_of(operator: Operator | None) -> RentCharge:
