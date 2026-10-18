@@ -838,11 +838,11 @@ def test_the_store_page_shows_unknown_until_a_cost_is_set_then_the_margin() -> N
     shown = page(client, lease.store)
     assert '<dd id="landlord-rent">unknown</dd>' in shown
     assert '<dd id="store-margin">unknown</dd>' in shown
-    assert '<dd id="operator-rent">$3500.00 a month</dd>' in shown
+    assert '<dd id="operator-rent">$3,500.00 a month</dd>' in shown
     response = client.post(f"/stores/{lease.store_id}/cost/", cost_form())
     assert response.status_code == 302 and response["Location"] == f"/stores/{lease.store_id}/"
     shown = page(client, lease.store)
-    assert '<dd id="landlord-rent">$2500.00 a month from 2026-01-01</dd>' in shown
+    assert '<dd id="landlord-rent">$2,500.00 a month from 2026-01-01</dd>' in shown
     assert '<dd id="other-cost">$50.00 (dumpster)</dd>' in shown
     assert '<dd id="landlord-lease-end">2030-12-31</dd>' in shown
     assert '<dd id="store-margin">$950.00 a month</dd>' in shown
@@ -889,7 +889,7 @@ def test_the_form_starts_from_the_open_row() -> None:
     client, _ = client_for(Role.BILLING)
     shown = client.get(f"/stores/{target.pk}/cost/").content.decode()
     assert 'value="2500.00"' in shown and 'value="parking"' in shown
-    assert "Current row: $2500.00 a month from 2026-01-01." in shown
+    assert "Current row: $2,500.00 a month from 2026-01-01." in shown
 
 
 def test_the_same_values_on_the_form_change_nothing() -> None:

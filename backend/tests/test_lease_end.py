@@ -408,7 +408,7 @@ def test_a_live_invoice_blocks_with_a_link_to_its_charge() -> None:
     [found] = lease_end.blockers(lease)
     assert found.kind == lease_end.LIVE_INVOICE
     assert found.url == f"/one-off-charges/{charge.pk}/"
-    assert "is live at the payment provider" in found.text
+    assert "is still open in Stax" in found.text
 
 
 def test_a_voided_invoice_or_a_paid_charge_does_not_block() -> None:
@@ -447,7 +447,9 @@ def test_a_rent_charge_with_a_live_invoice_blocks_with_a_link_to_its_charge() ->
     [found] = lease_end.blockers(lease)
     assert found.kind == lease_end.LIVE_INVOICE
     assert found.url == f"/charges/{charge.pk}/"
-    assert found.text.startswith(f"Rent 2026-10: invoice {invoice.invoice_number} is live")
+    assert found.text.startswith(
+        f"Rent 2026-10: invoice {invoice.invoice_number} is still open in Stax"
+    )
 
 
 def test_a_rent_charge_with_a_live_invoice_refuses_the_confirm() -> None:
@@ -486,7 +488,9 @@ def test_an_insurance_charge_with_a_live_invoice_blocks_until_it_is_paid() -> No
     provider_ref("invoice", invoice.pk, "invoice")
     [found] = lease_end.blockers(lease)
     assert found.kind == lease_end.LIVE_INVOICE and found.url == f"/leases/{lease.pk}/"
-    assert found.text.startswith("Insurance, policy year 2026: invoice INV-2026-9001 is live")
+    assert found.text.startswith(
+        "Insurance, policy year 2026: invoice INV-2026-9001 is still open in Stax"
+    )
     Payment.objects.create(
         insurance_charge=insurance,
         kind=PaymentKind.INSURANCE,
@@ -523,7 +527,7 @@ def test_an_active_or_paused_schedule_with_a_reference_blocks(kind: str, state: 
     a_schedule(lease, kind, state)
     [found] = lease_end.blockers(lease)
     assert found.kind == lease_end.AUTOPAY and found.url == f"/leases/{lease.pk}/stop-autopay/"
-    assert ("paused" if state == ScheduleState.PAUSED else "active") in found.text
+    assert ("is paused in Stax" if state == ScheduleState.PAUSED else "is on in Stax") in found.text
 
 
 def test_a_schedule_without_a_reference_or_ended_does_not_block() -> None:
@@ -1255,9 +1259,9 @@ def test_an_admin_walks_the_wizard_from_the_store_page(admin: Any, pinned: None)
     )
     assert response["Location"] == f"{base}/confirm/"
     confirm_page = client.get(f"{base}/confirm/").content.decode()
-    assert "Are you sure?" in confirm_page and "$1624.19 is recorded as refunded" in confirm_page
+    assert "Are you sure?" in confirm_page and "$1,624.19 is recorded as refunded" in confirm_page
     assert client.post(f"{base}/confirm/", {})["Location"] == f"{base}/confirm/"
-    assert "Tick the box to confirm." in client.get(f"{base}/confirm/").content.decode()
+    assert "Check the box to confirm." in client.get(f"{base}/confirm/").content.decode()
     assert fresh(lease).ended_on is None
     client.post(f"{base}/confirm/", {"confirmed": "on"})
     assert fresh(lease).ended_on == ENDED
@@ -1400,7 +1404,9 @@ def test_stop_autopay_deletes_the_schedule_at_the_provider_through_the_job(
     page = client.get(f"/leases/{lease.pk}/").content.decode()
     assert 'id="stop-autopay"' in page and stop_path(lease) in page
     confirm_page = client.get(stop_path(lease)).content.decode()
-    assert "Stop autopay: the provider schedule is deleted; re-enrol to start again" in confirm_page
+    assert (
+        "Turn off autopay: autopay is cancelled in Stax; set it up again to restart"
+    ) in confirm_page
     assert deletes(fake) == []
 
     response = client.post(stop_path(lease))

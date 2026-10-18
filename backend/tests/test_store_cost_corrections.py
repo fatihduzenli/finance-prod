@@ -497,14 +497,14 @@ def test_an_admin_corrects_from_the_page_and_the_history_shows_who_when_why() ->
     assert service.CORRECTED in page
     assert f'id="cost-row-{old.pk}" class="cost-superseded"' in page
     old_row = page.split(f'id="cost-row-{old.pk}"')[1].split("</tr>")[0]
-    assert "<s>$2500.00</s>" in old_row
+    assert "<s>$2,500.00</s>" in old_row
     assert "Superseded" in old_row and user.username in old_row
     assert "The lease says 2,600." in old_row
     old.refresh_from_db()
     assert old.superseded_at is not None
     # The page shows the time in the project's zone, New York (PLAN-011b D1).
     assert timezone.localtime(old.superseded_at).strftime("%Y-%m-%d %H:%M") in old_row
-    assert "$2600.00 a month from 2026-01-01" in page
+    assert "$2,600.00 a month from 2026-01-01" in page
     assert 'months after a closed row have no cost row and read "unknown"' in page.lower()
     assert 'reads "no cost"' in page
 

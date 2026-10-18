@@ -205,7 +205,7 @@ def test_the_tick_queues_the_step_and_the_worker_sends_to_the_catch_all(
     )
 
     [done] = run_queued_jobs()
-    assert done.status == "done" and done.result == "Sent to the catch-all address."
+    assert done.status == "done" and done.result == "Sent to the test inbox."
     [sent] = memory.sent
     assert sent.to == CATCH_ALL
     assert (
@@ -750,7 +750,7 @@ def test_the_operator_page_lists_the_log_newest_first_with_masked_addresses(
     log = log[: log.index("</table>")]
     assert "c***@example.com" in log and "collections.person@example.com" not in log
     assert log.index("Day 10") < log.index("Day 3")
-    assert "Sent to the catch-all address" in log
+    assert "Sent to the test inbox" in log
     assert 'id="handled-personally-form"' not in page  # viewer: no switch
     charge_page = client.get(f"/charges/{charge.pk}/").content.decode()
     assert "c***@example.com" in charge_page and 'id="send-step"' not in charge_page

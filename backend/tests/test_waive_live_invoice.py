@@ -91,8 +91,8 @@ def actions(charge: OneOffCharge) -> list[str]:
 
 def test_the_d0_sentence_is_the_owners() -> None:
     assert service.WAIVE_LIVE_INVOICE == (
-        "This charge has a live Stax invoice. Cancel it first (Stax deletes the invoice), "
-        "then waive if anything is still owed."
+        "This charge has an invoice still open in Stax. Cancel it first (Stax deletes the "
+        "invoice), then waive if anything is still owed."
     )
     assert service.CANCEL_MEANING == (
         "removes the Stax invoice and closes the charge, nothing owed"
@@ -173,16 +173,19 @@ def test_the_charge_page_explains_both_actions_and_the_refusal(
     page = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
     assert f"<strong>Cancel</strong> {service.CANCEL_MEANING}." in page
     assert f"<strong>Waive</strong> {service.WAIVE_MEANING}." in page
-    assert 'id="waive-refusal"' in page and "This charge has a live Stax invoice." in page
+    assert 'id="waive-refusal"' in page and "This charge has an invoice still open in Stax." in page
     waive_page = client.get(f"/one-off-charges/{charge.pk}/waive/").content.decode()
-    assert "This charge has a live Stax invoice." in waive_page
+    assert "This charge has an invoice still open in Stax." in waive_page
 
 
 def test_a_posted_waive_is_refused_with_the_sentence(fake: FakeProvider, worker: None) -> None:
     charge = live_charge(fake)
     client, _ = client_for(Role.ADMIN)
     response = client.post(f"/one-off-charges/{charge.pk}/waive/", {"note": NOTE}, follow=True)
-    assert "This charge has a live Stax invoice. Cancel it first" in response.content.decode()
+    assert (
+        "This charge has an invoice still open in Stax. Cancel it first"
+        in response.content.decode()
+    )
     assert fresh(charge).status == OneOffChargeStatus.OWED
 
 
@@ -199,7 +202,10 @@ def test_the_remedy_deletes_the_invoice_through_the_worker_and_keeps_the_waive(
     page = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
     assert 'id="delete-invoice"' in page
     home = client.get("/").content.decode()
-    assert "Waived with a live Stax invoice: 1" in home and f"/one-off-charges/{charge.pk}/" in home
+    assert (
+        "Waived with an invoice still open in Stax: 1" in home
+        and f"/one-off-charges/{charge.pk}/" in home
+    )
 
     response = client.post(f"/one-off-charges/{charge.pk}/delete-invoice/")
     assert response.status_code == 302
@@ -227,7 +233,7 @@ def test_the_remedy_deletes_the_invoice_through_the_worker_and_keeps_the_waive(
     assert deleted.after["invoice_number"] == invoice.invoice_number
     assert ref not in str(deleted.after)  # masked
     assert service.waived_with_live_invoice() == []
-    assert "Waived with a live" not in client.get("/").content.decode()
+    assert "Waived with an invoice still open" not in client.get("/").content.decode()
     assert (
         'id="delete-invoice"' not in client.get(f"/one-off-charges/{charge.pk}/").content.decode()
     )

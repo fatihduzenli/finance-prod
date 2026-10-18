@@ -909,7 +909,10 @@ def enable_autopay(
                 "lease.autopay_refused",
                 lease,
                 None,
-                {"payment_method": mask_identifier(payment_method_external_id), "reason": refusal},
+                {
+                    "payment_method": mask_identifier(payment_method_external_id),
+                    "reason": str(refusal),
+                },
             )
             return AutopayOutcome(AutopayAction.REFUSED, refusal)
         if large is not None:

@@ -496,8 +496,8 @@ def test_a_charge_with_a_live_provider_invoice_or_schedule_is_split_with_a_relea
     run_queued_jobs()
     assert installments.split_refusal(emailed) == ""
     assert installments.release_notice(emailed) == (
-        "Invoice INV-2026-9001 at the payment provider will be deleted (the charge stays open "
-        "here) and each installment is collected on its own."
+        "Invoice INV-2026-9001 will be cancelled in Stax (the charge stays open here) and each "
+        "installment is collected on its own."
     )
     autopay = a_one_off(operator, collection=CollectionMethod.AUTOPAY_DUE, due=FIRST)
     jobs.enqueue(JobKind.SCHEDULE_CREATE, autopay, None, None)
@@ -575,7 +575,7 @@ def test_the_collection_needs_the_provider_customer_and_the_bank_method(
 ) -> None:
     no_customer = an_operator(customer=None)
     parent = a_one_off(no_customer, collection=CollectionMethod.EMAIL)
-    assert "no payment provider customer" in installments.split_refusal(parent)
+    assert "not connected to Stax" in installments.split_refusal(parent)
     no_bank = an_operator(fake, bank=None)
     autopay = a_one_off(no_bank, collection=CollectionMethod.AUTOPAY_DUE)
     assert installments.split_refusal(autopay) == installments.NO_BANK_METHOD
@@ -1155,13 +1155,13 @@ def test_the_grid_cell_of_a_split_rent_charge_shows_the_plans_progress(
     assert pay(rows_of(plan)[0], "333.33").ok
     built = grid.build(grid.parse_query({"from": "2026-10", "to": "2026-10"}, today=TODAY), TODAY)
     [cell] = [row.cells[0] for row in built.rows if row.store.pk == parent.lease.store_id]
-    assert cell.text == "plan 1 of 3 paid, 333.33 of 1,000.00"
+    assert cell.text == "Plan 1 of 3 paid, $333.33 of $1,000.00"
     assert (cell.status, cell.amount_paid) == ("partial", D("333.33"))
     for row, amount in zip(rows_of(plan)[1:], ("333.33", "333.34"), strict=True):
         assert pay(row, amount).ok
     built = grid.build(grid.parse_query({"from": "2026-10", "to": "2026-10"}, today=TODAY), TODAY)
     [cell] = [row.cells[0] for row in built.rows if row.store.pk == parent.lease.store_id]
-    assert (cell.text, cell.amount_paid) == ("paid 1,000.00", D("1000.00"))
+    assert (cell.text, cell.amount_paid) == ("Paid $1,000.00", D("1000.00"))
 
 
 # --- The pages (D10, D11) -------------------------------------------------------------
@@ -1382,7 +1382,10 @@ def test_a_live_invoice_is_released_and_each_installment_gets_its_own(
         f"/one-off-charges/{parent.pk}/split/",
         {"count": "3", "first_due": FIRST.isoformat(), "cadence": "monthly"},
     ).content.decode()
-    assert 'id="release-notice"' in split and "Invoice INV-2026-9001 at the payment" in split
+    assert (
+        'id="release-notice"' in split
+        and "Invoice INV-2026-9001 will be cancelled in Stax" in split
+    )
     before = len(calls(fake, "create_invoice"))
     plan = plan_for(parent)
     # The confirm queues the release alone; no installment job yet.
@@ -1396,7 +1399,7 @@ def test_a_live_invoice_is_released_and_each_installment_gets_its_own(
     assert requested.after["provider_invoice"] == mask_identifier(ref) != ref
     page = client.get(f"/plans/{plan.pk}/").content.decode()
     assert (
-        '<p id="release-pending"><strong>Waiting for the payment provider to release invoice '
+        '<p id="release-pending"><strong>Waiting for Stax to cancel invoice '
         "INV-2026-9001.</strong></p>"
     ) in page
     run_queued_jobs()
@@ -1421,8 +1424,8 @@ def test_a_live_invoice_is_released_and_each_installment_gets_its_own(
     assert 'id="release-pending"' not in page
     charge_page = client.get(f"/one-off-charges/{parent.pk}/").content.decode()
     assert (
-        '<p class="invoice-released" id="invoice-released">Invoice INV-2026-9001 was released '
-        "at the payment provider for the installment plan.</p>"
+        '<p class="invoice-released" id="invoice-released">Invoice INV-2026-9001 was cancelled '
+        "in Stax for the installment plan.</p>"
     ) in charge_page
     plan.refresh_from_db()
     assert plan.status == InstallmentPlanStatus.ACTIVE
@@ -1527,7 +1530,7 @@ def test_a_schedule_that_generated_its_invoice_is_not_released(
         total=D("1000.00"),
     )
     assert installments.split_refusal(parent) == (
-        "The schedule already generated its invoice; collect or cancel it first."
+        "Autopay already made this month's invoice; collect or cancel it first."
     )
     assert installments.release_kind(parent) == ""
 
@@ -1577,7 +1580,7 @@ def test_a_failed_release_waits_and_the_retry_reruns_it_with_its_flag(
     assert one_off_charges.retry_params(parent) == {installments.RELEASE_PARAM: True}
     viewer, _ = client_for(Role.VIEWER)
     plan_page = viewer.get(f"/plans/{plan.pk}/").content.decode()
-    assert "Waiting for the payment provider to release invoice INV-2026-9001." in plan_page
+    assert "Waiting for Stax to cancel invoice INV-2026-9001." in plan_page
     assert (
         'id="retry-provider"' not in viewer.get(f"/one-off-charges/{parent.pk}/").content.decode()
     )
@@ -1781,8 +1784,8 @@ def test_the_invoice_page_says_the_split_releases_a_live_single_charge_invoice(
     client, _ = client_for(Role.BILLING)
     page = client.get(f"/invoices/drafts/{draft.pk}/").content.decode()
     assert (
-        "Split into installments from the charge page; the invoice is released at the payment "
-        "provider when the plan is confirmed."
+        "Split into installments from the charge page; the invoice is cancelled in Stax when the "
+        "plan is confirmed."
     ) in page
     assert f'href="/one-off-charges/{parent.pk}/split/"' in page
 
@@ -2039,9 +2042,7 @@ def test_the_lease_end_sees_the_moved_schedule_as_live_until_autopay_is_stopped(
     run_queued_jobs()
     found = lease_end.blockers(lease, TODAY)
     [autopay] = [blocker for blocker in found if blocker.kind == lease_end.AUTOPAY]
-    assert autopay.text == (
-        "Rent autopay (debit 1) is active at the payment provider. It must be stopped first."
-    )
+    assert autopay.text == ("Rent autopay (debit 1) is on in Stax. It must be turned off first.")
     assert lease_end.INSTALLMENT_PLAN in [blocker.kind for blocker in found]
     [new] = leases.live_schedules(lease)
     new_ref = leases.schedule_ref(new)

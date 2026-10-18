@@ -515,9 +515,7 @@ def test_a_provider_rejection_leaves_the_lease_unchanged_and_names_the_fields(
     outcome = enable(lease)
     assert outcome.action is AutopayAction.FAILED
     assert outcome.fields == ("payment_method_id",)
-    assert outcome.text == (
-        "The payment provider refused the request. Fields the provider rejected: payment_method_id."
-    )
+    assert outcome.text == ("Stax refused the request. Fields Stax rejected: payment_method_id.")
     assert "CANARY" not in outcome.text
     assert Lease.objects.filter(pk=lease.pk).values().get() == before
     [row] = CollectionSchedule.objects.filter(lease=lease)
@@ -1234,9 +1232,7 @@ def test_a_debit_above_the_confirmed_limit_is_refused_even_when_confirmed(
     lease = make_lease(D("5000.01"))
     outcome = enable_confirmed(lease, confirmed=confirmed)
     assert outcome.action is AutopayAction.REFUSED
-    assert outcome.text == (
-        "Exceeds the confirmed provider limit of $5,000.00. Autopay cannot be enabled."
-    )
+    assert outcome.text == ("Exceeds the Stax debit limit of $5,000.00. Autopay cannot be enabled.")
     assert fake.calls == []
     assert "lease.autopay_large_debit_confirmed" not in actions(lease)
 
@@ -1301,9 +1297,7 @@ def test_twice_monthly_with_a_half_above_the_limit_is_refused(fake: FakeProvider
     fake.add_payment_method(CUSTOMER, method())
     lease = make_lease(D("6000.02"), debit_day=5, second_debit_day=20)
     outcome = enable_confirmed(lease, confirmed=True)
-    assert outcome.text == (
-        "Exceeds the confirmed provider limit of $3,000.00. Autopay cannot be enabled."
-    )
+    assert outcome.text == ("Exceeds the Stax debit limit of $3,000.00. Autopay cannot be enabled.")
     assert fake.calls == []
 
 

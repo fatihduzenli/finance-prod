@@ -263,14 +263,14 @@ def test_quantity_half_and_three_are_totalled_and_named_on_the_charge(
     assert (half.quantity_text, three.quantity_text) == ("0.5", "3")
     sent(draft)
     first, second = charges_of(draft)
-    assert (first.price, first.description) == (D("0.13"), "Cleaning hours (0.5 × 0.25)")
-    assert (second.price, second.description) == (D("99.99"), "Poster (3 × 33.33)")
+    assert (first.price, first.description) == (D("0.13"), "Cleaning hours (0.5 × $0.25)")
+    assert (second.price, second.description) == (D("99.99"), "Poster (3 × $33.33)")
     run_queued_jobs()
     [request] = created_invoices(fake)
     lines = request.amounts.line_items
     # A quantity whose product is not the cent total goes as 1 at the total, named.
     assert (lines[0].description, lines[0].quantity, lines[0].unit_price) == (
-        "Cleaning hours (0.5 × 0.25)",
+        "Cleaning hours (0.5 × $0.25)",
         D(1),
         D("0.13"),
     )
@@ -525,7 +525,7 @@ def test_a_typed_item_with_a_detail_is_an_other_charge_with_the_detail_as_line_d
     assert [(item.description, item.details) for item in request.amounts.line_items] == [
         ("Storm repair", detail),
         # The fallback for a total that is not the product keeps its rule.
-        ("Poster (0.5 × 0.25)", ""),
+        ("Poster (0.5 × $0.25)", ""),
     ]
     validation.amounts(request.amounts)
 
@@ -538,7 +538,7 @@ def test_the_fallback_line_keeps_the_detail(fake: FakeProvider, worker: None) ->
     [request] = created_invoices(fake)
     [item] = request.amounts.line_items
     assert (item.description, item.quantity, item.unit_price, item.details) == (
-        "Cleaning hours (0.5 × 0.25)",
+        "Cleaning hours (0.5 × $0.25)",
         D(1),
         D("0.13"),
         "Lobby",
@@ -701,7 +701,7 @@ def test_an_item_of_200_characters_and_a_detail_of_120_are_accepted(fake: FakePr
     sent(draft)
     [charge] = charges_of(draft)
     # The charge's description is cut to fit, the quantity kept.
-    assert charge.description == "i" * (120 - len(" (2 × 10.00)")) + " (2 × 10.00)"
+    assert charge.description == "i" * (120 - len(" (2 × $10.00)")) + " (2 × $10.00)"
     assert InvoiceLineItem.objects.get().description == item
 
 
@@ -1671,7 +1671,7 @@ def test_waive_on_a_later_line_is_refused_while_the_invoice_is_live(
     page = admin.get(f"/one-off-charges/{late_fee.pk}/").content.decode()
     assert 'id="waive-refusal"' in page and invoice.invoice_number in page
     waive_page = admin.get(f"/one-off-charges/{late_fee.pk}/waive/").content.decode()
-    assert one_off_service.WAIVE_LIVE_INVOICE in waive_page
+    assert str(one_off_service.WAIVE_LIVE_INVOICE) in waive_page
     admin.post(f"/one-off-charges/{late_fee.pk}/waive/", {"note": "Goodwill."})
     assert fresh(late_fee).status == OneOffChargeStatus.OWED
     for charge in (repair, late_fee):
@@ -2127,12 +2127,12 @@ def test_the_grid_names_the_invoice_and_shows_rent_paid_in_advance(
     built = grid.build(grid.parse_query({"from": "2026-10", "to": "2026-10"}, TODAY), TODAY)
     [row] = [row for row in built.rows if row.store.pk == lease.store_id]
     [cell] = row.cells
-    assert cell.text == f"due {FIRST_MONTH:,.2f} {invoice.invoice_number}"
+    assert cell.text == f"Due ${FIRST_MONTH:,.2f} {invoice.invoice_number}"
     pay(fake, fresh(invoice), str(fresh(invoice).total))
     built = grid.build(grid.parse_query({"from": "2026-10", "to": "2026-10"}, TODAY), TODAY)
     [row] = [row for row in built.rows if row.store.pk == lease.store_id]
     assert row.cells[0].status == "paid"
-    assert row.cells[0].text == f"paid {FIRST_MONTH:,.2f} {invoice.invoice_number}"
+    assert row.cells[0].text == f"Paid ${FIRST_MONTH:,.2f} {invoice.invoice_number}"
 
 
 def test_the_pnl_counts_the_rent_line_as_rent_and_the_deposit_nowhere(

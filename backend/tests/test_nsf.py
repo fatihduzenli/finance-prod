@@ -641,7 +641,7 @@ def test_the_amount_is_owed_once_and_nothing_once_paid(fake: FakeProvider, worke
     assert receivables.total(after) == D("1600.00")
     assert {row.description for row in after} == {
         "Re-debit: Re-debit of Rent 2026-09",
-        "NSF fee: NSF fee, first return: returned debit of Rent 2026-09",
+        "Returned payment (NSF) fee: NSF fee, first return: returned debit of Rent 2026-09",
     }
     run_queued_jobs()
     redebit, _ = charges_of(payment)
@@ -664,8 +664,8 @@ def test_the_statement_shows_both_lines(fake: FakeProvider) -> None:
     # Both due on the re-debit date; their order within the day follows their ids.
     descriptions = sorted(item.description for item in report.open_charges)
     assert descriptions == [
-        "NSF fee: NSF fee, first return: returned debit of Rent 2026-09",
         "Re-debit: Re-debit of Rent 2026-09",
+        "Returned payment (NSF) fee: NSF fee, first return: returned debit of Rent 2026-09",
     ]
     assert report.open_total == D("1600.00")
 

@@ -198,7 +198,7 @@ def test_viewer_and_billing_read_and_change_nothing(fake: FakeProvider, role: Ro
     assert CollectionSchedule.objects.count() == 0
     assert fake.calls == []
     page = client.get(route["detail"]).content.decode()
-    for control in ("Edit</a>", "Enable autopay", "Pause autopay", "Resume autopay"):
+    for control in ("Edit</a>", "Set up autopay", "Pause autopay", "Resume autopay"):
         assert control not in page
     assert "New lease" not in client.get(LIST).content.decode()
 
@@ -246,7 +246,7 @@ def test_admin_creates_a_lease_and_a_replay_saves_nothing(admin: Client) -> None
     [row] = LeaseRentHistory.objects.filter(lease=lease)
     assert row.amount == D("1500.00")
     page = admin.get(f"/leases/{lease.pk}/").content.decode()
-    assert "$1500.00 from 2026-01-01" in page
+    assert "$1,500.00 from 2026-01-01" in page
 
 
 @pytest.mark.parametrize(
@@ -293,8 +293,8 @@ def test_a_rent_edit_writes_history_and_a_too_early_date_is_refused(
     assert (saved.status_code, saved["Location"]) == (302, route["detail"])
     page = admin.get(route["detail"]).content.decode()
     # Future-dated: today's rent stays current and the change is shown as upcoming.
-    assert "$1500.00 from 2026-01-01" in page
-    assert "Rent changes to $1650.00 on 2026-11-01" in page
+    assert "$1,500.00 from 2026-01-01" in page
+    assert "Rent changes to $1,650.00 on 2026-11-01" in page
     assert "2026-10-31" in page  # the closed row
 
 
@@ -320,13 +320,13 @@ def test_the_enrolment_page_lists_bank_methods_and_shows_cards_as_not_allowed(
     fake.add_payment_method(CUSTOMER, method(CARD_ID, kind="card"))
     lease = read_methods(make_lease(D("1000.01"), debit_day=5, second_debit_day=20), fake)
     page = admin.get(paths(lease)["enrol"]).content.decode()
-    assert 'id="methods-as-of"' in page and "Methods as of 2026-10-01 15:00 UTC" in page
+    assert 'id="methods-as-of"' in page and "Bank methods as of 2026-10-01 11:00" in page
     assert f'name="payment_method_id" value="{BANK}"' in page
     assert f'value="{CARD_ID}"' not in page
     assert "Card, not allowed" in page
     assert "6789" in page and "checking" in page and "Operating" in page
     assert "$500.01" in page and "$500.00" in page
-    assert "UTC" in page and "Enable autopay" in page
+    assert "UTC" not in page and "Set up autopay" in page
     assert fake.calls == []
 
 
@@ -335,7 +335,7 @@ def test_the_enrolment_page_with_a_blocker_makes_no_provider_call(
 ) -> None:
     lease = make_lease(payment_channel=PaymentChannel.WIRE)
     page = admin.get(paths(lease)["enrol"]).content.decode()
-    assert service.NOT_PROVIDER_CHANNEL in page
+    assert str(service.NOT_PROVIDER_CHANNEL) in page
     assert 'id="enable-autopay"' not in page
     assert fake.calls == []
 
@@ -359,7 +359,7 @@ def test_the_enrolment_page_shows_a_list_failure_by_field_names_only(
     # The worker runs the queued read after the POST (``worker_between_requests``).
     admin.post(route, {"refresh_methods": "1"})
     page = admin.get(route).content.decode()
-    assert service.PROVIDER_REJECTED in page and "customer_id" in page
+    assert str(service.PROVIDER_REJECTED) in page and "customer_id" in page
     assert "ProviderRejected" in page and 'id="job-state">Failed: ' in page
     assert "CANARY" not in page
     assert 'id="methods-not-read"' in page
@@ -397,7 +397,7 @@ def test_enable_through_the_screen_then_a_second_click_creates_nothing(
     now = timezone.now()
     for day in (5, 20):
         assert service.next_debit_at(day, now).date().isoformat() in page
-    assert "Active" in page
+    assert '<td data-label="State">On</td>' in page
     for ref in ExternalRef.objects.filter(external_kind="schedule"):
         assert ref.external_id not in page  # masked: first four and last four only
 
@@ -439,7 +439,7 @@ def test_a_provider_rejection_on_enrol_shows_the_field_names(
     response = admin.post(route["enrol"], {"payment_method_id": BANK})
     assert (response.status_code, response["Location"]) == (302, route["detail"])
     page = admin.get(route["detail"]).content.decode()
-    assert "Fields the provider rejected: payment_method_id, rule." in page
+    assert "Fields Stax rejected: payment_method_id, rule." in page
     assert "CANARY" not in page
 
 
@@ -449,7 +449,7 @@ CONFIRM_2100 = (
     "I confirm this debit of $2,100.00 exceeds the warning threshold of $2,000.00 "
     "and may be enabled."
 )
-LIMIT_5000 = "Exceeds the confirmed provider limit of $5,000.00. Autopay cannot be enabled."
+LIMIT_5000 = "Exceeds the Stax debit limit of $5,000.00. Autopay cannot be enabled."
 
 
 def _creates(fake: FakeProvider) -> int:
@@ -633,14 +633,14 @@ def test_a_future_rent_change_shows_the_dated_review_message_on_the_lease(
     page = admin.get(route["detail"]).content.decode()
     assert service.RENT_CHANGES.format(date="2026-11-01") in page
     assert service.SCHEDULE_DIFFERS not in page
-    assert "Rent changes to $1650.00 on 2026-11-01" in page
+    assert "Rent changes to $1,650.00 on 2026-11-01" in page
 
 
 def test_the_detail_page_lists_blockers_and_information(admin: Client, fake: FakeProvider) -> None:
     operator = make_operator(email=None, customer=None)
     lease = make_lease(operator=operator)
     page = admin.get(paths(lease)["detail"]).content.decode()
-    assert service.NO_PROVIDER_CUSTOMER in page
+    assert str(service.NO_PROVIDER_CUSTOMER) in page
     assert service.NO_BANK_METHOD in page
     assert service.NO_EMAIL in page
     assert fake.calls == []

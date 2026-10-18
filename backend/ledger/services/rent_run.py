@@ -1180,7 +1180,8 @@ def charge_review_message(charge: RentCharge) -> str:
         parts.append(LINKED_TOTAL_DIFFERS)
     if charge.review_message:
         parts.append(f"{offline_marking.shown(charge.review_message)}.")
-    return " ".join(parts) or SECOND_INVOICE
+    # A sentence naming the processor is lazy (wording.provider_sentence): str() it.
+    return " ".join(str(part) for part in parts) or str(SECOND_INVOICE)
 
 
 def _invoice_linked(external_id: str) -> bool:

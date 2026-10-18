@@ -281,17 +281,21 @@ def test_a_lease_not_ended_is_refused() -> None:
 
 
 @pytest.mark.parametrize(
-    ("paid", "amount"),
-    [("2500.00", "2500.01"), ("1000.00", "2500.00"), ("0", "0.01")],
+    ("paid", "amount", "shown"),
+    [
+        ("2500.00", "2500.01", "$2,500.00"),
+        ("1000.00", "2500.00", "$1,000.00"),
+        ("0", "0.01", "$0.00"),
+    ],
     ids=["a cent above", "partly paid", "nothing paid"],
 )
-def test_an_amount_above_what_was_paid_is_refused(paid: str, amount: str) -> None:
+def test_an_amount_above_what_was_paid_is_refused(paid: str, amount: str, shown: str) -> None:
     charge = held_deposit(paid=paid)
     for kind in DepositResolutionKind.values:
         target = sibling(charge) if kind == DepositResolutionKind.TRANSFERRED else None
         outcome = resolve(charge, kind, amount, to_lease=target)
         assert (outcome.ok, outcome.field) == (False, "amount"), kind
-        assert outcome.message == service.ABOVE_PAID.format(paid=D(paid).quantize(D("0.01")))
+        assert outcome.message == service.ABOVE_PAID.format(paid=shown)
     nothing_written(charge, payments=1 if D(paid) else 0)
 
 
@@ -299,7 +303,7 @@ def test_a_returned_payment_does_not_count_as_paid() -> None:
     charge = held_deposit()
     Payment.objects.filter(one_off_charge=charge).update(status=PaymentStatus.RETURNED)
     outcome = resolve(charge, DepositResolutionKind.REFUNDED, "2500.00")
-    assert outcome.message == service.ABOVE_PAID.format(paid="0.00")
+    assert outcome.message == service.ABOVE_PAID.format(paid="$0.00")
 
 
 @pytest.mark.parametrize(
@@ -461,7 +465,7 @@ def test_an_admin_resolves_through_the_page_and_the_deposit_page_shows_it() -> N
     charge = held_deposit()
     client, user = client_for(Role.ADMIN)
     page = client.get(resolve_path(charge)).content.decode()
-    assert 'id="deposit-paid">$2500.00<' in page
+    assert 'id="deposit-paid">$2,500.00<' in page
     response = client.post(
         resolve_path(charge), form(amount="2000.00", note="Kept 500 for repairs.")
     )
@@ -474,7 +478,7 @@ def test_an_admin_resolves_through_the_page_and_the_deposit_page_shows_it() -> N
     assert "Kept 500 for repairs." in detail
     store = lease_of(charge).store_id
     lease_page = client.get(f"/stores/{store}/?tab=charges&filter=all").content.decode()
-    assert "Refunded $2000.00" in lease_page and resolve_path(charge) not in lease_page
+    assert "Refunded $2,000.00" in lease_page and resolve_path(charge) not in lease_page
 
 
 def test_an_admin_transfers_to_a_lease_chosen_from_the_operators_open_leases() -> None:
@@ -499,7 +503,7 @@ def test_a_refusal_is_held_on_the_form_and_a_card_number_is_never_held() -> None
     response = client.post(resolve_path(charge), form(amount="2600.00"))
     assert response["Location"] == resolve_path(charge)
     assert (
-        "more than was paid on the deposit ($2500.00)"
+        "more than was paid on the deposit ($2,500.00)"
         in client.get(resolve_path(charge)).content.decode()
     )
     client.post(resolve_path(charge), form(note=f"Sent to {CARD}"))

@@ -349,7 +349,7 @@ def record_manual_payment(
                 **_state(charge),
                 "payment": str(payment.pk),
                 "invoice_number": invoice.invoice_number,
-                "reason": NOT_MARKED,
+                "reason": str(NOT_MARKED),
             },
         )
     return outcome(

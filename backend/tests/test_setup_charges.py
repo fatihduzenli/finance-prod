@@ -735,7 +735,7 @@ def test_a_failed_mark_keeps_the_payment_and_flags_the_charge(
     assert done.status == JobStatus.FAILED
     charge = fresh(charge)
     assert (charge.status, charge.needs_review) == (OneOffChargeStatus.PAID, True)
-    assert "Provider invoice not marked paid: ProviderUnavailable" in service.review_message(charge)
+    assert "Not marked paid in Stax: Unavailable" in service.review_message(charge)
 
 
 def later(monkeypatch: pytest.MonkeyPatch, seconds: int) -> None:
@@ -842,7 +842,7 @@ def test_a_partial_payment_on_an_invoiced_charge_makes_no_call_and_flags_it(
     assert fake.calls == []
     charge = fresh(charge)
     assert charge.review_message == offline_marking.PARTIAL_AMOUNT
-    assert "Provider invoice not updated: partial amount" in service.review_message(charge)
+    assert "Not marked paid in Stax: part of the amount" in service.review_message(charge)
     assert "one_off_charge.provider_not_updated" in actions(charge.pk)
 
 
