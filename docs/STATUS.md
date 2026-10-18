@@ -1460,3 +1460,19 @@ sentence around them instead ("Bank debit through Stax" on the lease page; "Stax
 progress: Updating the operator" in the job banner); the approved §4.5 wording is otherwise kept.
 D2b (ledger leases, installments, deposits, builder; the lazy-sentence audit defect) in progress;
 then D2c, D3, D4, D5, and the D6 gate.
+
+## Update, 2026-10-18, PLAN-012c Batch D closed (D6 gate PASS, not pushed)
+
+The copy pass is complete in eight slices (D1, D2a, D2b, D2c, D3, D4, D5, D5b; see QA-012c). The
+approved §4 list is applied; the processor is named from company settings everywhere and never
+as a literal outside `payments/`; the status labels live in the TextChoices classes (choices-only
+migrations ledger 0046, payments 0018); amounts read `$2,000.00` through one filter; the banner
+reads "SANDBOX — test system, no real money"; job results show failures in words with the class
+and the fields kept in the audit rows. D6 gate: ruff, format, mypy (424 files), lock, migrations
+clean; sqlite 5,860 passed; PostgreSQL 28 + 6,482 passed; e2e 12 passed in four runs on
+PostgreSQL; secret scans clean; Fable's adversarial file (25 cases, frozen stored values and
+route names) green. **Decisions for the owner at the checkpoint:** labels that named the
+processor carry the name through the sentence around them; the "Returned payment (NSF) fee"
+label reaches the public statement line; invoice line descriptions sent to Stax carry the dollar
+sign; three admin-page diagnostic codes deferred (QA-012c, Batch D). Batch E (contrast and
+label tests, visual regression baselines and the CI compare) assigned.

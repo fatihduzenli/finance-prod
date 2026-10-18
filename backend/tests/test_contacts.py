@@ -547,7 +547,7 @@ def test_billing_adds_from_the_operator_page_and_the_page_lists_newest_first(tod
     table = page.split('id="contact-entries"')[1].split("</table>")[0]
     assert table.index("Promised the full balance.") < table.index("Called; will pay Friday.")
     assert table.index("Called; will pay Friday.") < table.index("First visit.")
-    assert "$1500.00 by 2026-10-09" in table
+    assert "$1,500.00 by 2026-10-09" in table  # PLAN-012c §4.8 money
     full = client.get(f"/operators/{operator.pk}/contacts/").content.decode()
     assert "First visit." in full
 

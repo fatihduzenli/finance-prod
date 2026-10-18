@@ -58,8 +58,9 @@ def test_double_click_on_save_creates_one_operator_and_one_customer(
     assert methods_job.kind == JobKind.OPERATOR_METHODS_REFRESH
     assert methods_job.status == JobStatus.DONE
     # The meta refresh reloads the page; no click is needed.
+    # The link status reads "Connected" (PLAN-012c §4.5 label).
     page.wait_for_function(
-        "document.querySelector('#sync-status').innerText.startsWith('Linked')", timeout=15_000
+        "document.querySelector('#sync-status').innerText.startsWith('Connected')", timeout=15_000
     )
     assert page.locator("#job-state").inner_text().startswith("Done: ")
     assert page.locator("#sandbox-banner").is_visible()

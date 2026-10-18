@@ -241,3 +241,94 @@ five e2e cases on sqlite and PostgreSQL; the owner's checkpoint click on the lea
 forms is the check in a real browser on staging.
 
 **Verdict (C):** PASS (one MINOR deferred to Batch D by written decision; no rework cycle).
+
+### Batch D — the copy pass (D9), built in slices
+
+**How it was built.** The first implementation session renamed the copy across the app and
+then stalled three times; a fresh session stalled twice more without an edit. On the owner's
+decision (2026-10-18) the renames were kept and the rest was split into slices, each a separate
+session with a narrow brief and its own intermediate commit, the full gate once at the end:
+D1 `1439f02` (the renames of the first session; the Rule 8 fence; the money filter hardened; the
+banner wording), D2a `7fa6881` (the §4.5 labels moved into the `TextChoices` classes; the
+parallel label table and seventeen `get_<field>_display` overrides removed; choices-only
+migrations ledger 0046 and payments 0018, `sqlmigrate` prints no-op for every operation),
+D2b `97c9278`, D2c `10c1287`, D3 `ee8cd57`, D4 `778de0f`, D5 `a2129d5`, D5b `02cc3df` (the
+tests of each area moved to the approved wording; defects of the copy pass fixed on the way).
+Scope: 190 files against the Batch C commit.
+
+**What the copy pass is.** Every §4.2–§4.7 pair applied in templates, view messages, form
+labels, help texts, choice labels, e-mail lines and error strings; the §4.1 rules (the
+processor named from company settings and never as a literal outside `payments/`; no machinery
+words; autopay, not schedules; check, not tick; marked Needs review; connected and updated from
+the processor, not synced; nightly check, not reconciliation; messages from the processor, not
+webhooks; from the spreadsheet, not legacy; New York time without a suffix; codes never shown;
+e-mail with a hyphen); the `money` filter and `format_amount` (`$2,000.00`, a leading minus,
+never `$-`, `""` for anything that is not a finite number) everywhere an amount is shown, CSV
+exports and the public statement keeping plain numbers; the banner "SANDBOX — test system, no
+real money"; the carry-overs (the transfer step's twice-monthly tick; the Batch B and C texts
+reviewed). Stored values, choice keys, URL names, ids, audit action names and CSV column keys
+unchanged: Fable's adversarial file freezes every choice value and all 255 route names.
+
+**Defects of the copy pass found and fixed in the slices.** Lazy provider sentences (resolved
+at render so the name follows company settings) were stored as proxies in audit JSON
+(`enable_autopay`, the insurance manual payment), joined without `str()` (the rent and one-off
+review messages, the operator sync message), and compared on the left of `in` in tests; each
+fixed at the point of storage or joining, and swept across the 72 constants. The dashboard said
+"today" twice; the leases list named an action bar it does not have; the run page showed a
+command name; the match report said "Linked with a total mismatch"; job results showed failure
+classes and field names ("ProviderRejected (fields: …)"), now words ("(Rejected)") with the
+class and the fields kept in the operator row, the audit rows and the message row.
+
+**Gate 1.** ruff, `ruff format --check` (520 files), mypy strict (424 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16: all clean, exit 0.
+
+**Gate 2.**
+
+| Suite | Engine | Exit | Result |
+|---|---|---|---|
+| Unit, full | sqlite | 0 | 5,860 passed, 653 skipped; 9:25 wall (the first full run: 2 failed, both old-wording assertions in test files no slice listed, fixed by Fable as test edits, then the whole gate re-run) |
+| CI "Migration tests" selection | PostgreSQL 16 | 0 | 28 passed; 8:07 wall |
+| CI "Unit tests" selection | PostgreSQL 16 | 0 | 6,482 passed, 3 skipped; 11:50 wall (first run: the same 2) |
+| e2e (12), four runs | PostgreSQL 16 | 0 | 12 passed in each of four runs (31 s) (first run: the operator e2e waited for the old "Linked" status text, four of four; fixed as a test edit) |
+| Fable adversarial D (25) | both | green inside the runs above; the frozen values and routes passed before and after every slice |
+
+**Gate 3.** Read: `finance/templatetags/money.py`, `ledger/wording.py`, the
+`ProviderNameMiddleware` (the request's sentences read the same company row as the shell, so no
+extra query), the migrations 0046 and 0018, `payments/one_off_invoices.py`, `payments/jobs/runners.py`,
+`payments/operator_sync.py`, a sample of templates. No bare `${{` in any template and no
+hand-formatted amount in Python (the copy tests grep for both). The lazy sentence is a Django
+idiom (as `gettext_lazy`); its hazard (storage and joins) is now handled at every known site and
+the test files exercise them. **Gate 4.** Secret scans clean (the script; a pattern scan over the
+whole Batch D diff). Fable's cases: the money filter under hostile input (`NaN`, `Infinity`,
+`1E+400`, strings, lists, markup) never raises and never prints a broken amount; the provider
+name with markup is escaped on every page that names it and stored as data in the audit row;
+user data containing forbidden words is shown as typed; the banner on the sign-in, error and
+admin pages, once, with the title prefix kept.
+
+**Findings.** None open from the gate. Three MINOR items deferred by written decision, each a
+diagnostic code on an admin page rather than a sentence for staff: the webhook detail page shows
+the handler's failure class in its error row; the nightly-check result shows the run's error
+class; "Fields <processor> rejected: <names>" stays in the autopay and bank-method results (the
+field names are the processor's, and staff fix them by name). Two paths no longer keep the
+failure class in the database (a link refused by a processor error; the bank-method refresh):
+the adapter's log line keeps it; a future audit row is a Step 13 item.
+
+**Decisions for the owner at the checkpoint (departures from the approved list, each
+reversible).**
+1. A `TextChoices` label is fixed at import and cannot read company settings, so the labels
+   that named the processor (six SyncFailure labels, most JobKind labels, PaymentChannel) carry
+   the name through the sentence around them instead: "Bank debit through Stax" on the lease
+   page, "Stax request in progress: Updating the operator" in the job banner, "Stax did not
+   refund the payment: Rejected." The §4.5 wording is otherwise kept.
+2. The owner's change 3 ("Returned payment (NSF) fee") reaches the public statement line for
+   that category, where §3.6 says the public wording stays; the label is the category's.
+3. Invoice line descriptions sent to the processor now carry the dollar sign ("Poster (0.5 ×
+   $0.25)") per §4.8; this changes what the operator sees on the processor's invoice.
+4. The three deferred MINOR items above.
+
+**Residual risk (D).** The copy walk is asserted template by template and on rendered main pages;
+the e-mail lines and the PDF text are asserted where tests render them. A sentence no test
+renders may still carry an old word: the owner's checkpoint click list covers the main pages;
+the forbidden-word grep covers them in CI.
+
+**Verdict (D):** PASS (no open finding; three MINOR deferred by written decision; four decisions listed for the owner at the checkpoint).

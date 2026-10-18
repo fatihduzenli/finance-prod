@@ -72,11 +72,12 @@ def test_the_grid_page_and_csv_show_the_same_column(baseline: Baseline) -> None:
     response = client.get("/grid/export.csv?from=2026-08&to=2026-08")
     rows = list(csv.reader(io.StringIO(b"".join(response.streaming_content).decode())))  # type: ignore[attr-defined]
     cells = [row[5] for row in rows[1:]]
-    paid = [cell for cell in cells if cell.startswith("paid ")]
+    # PLAN-012c §4.8: the cell text reads "Paid $3,500.00".
+    paid = [cell for cell in cells if cell.startswith("Paid $")]
     assert len(paid) == COLLECTED_COUNT
-    assert sum((D(cell[5:].replace(",", "")) for cell in paid), D("0.00")) == COLLECTED_TOTAL
-    assert sum(1 for cell in cells if cell.startswith("unpaid ")) == UNPAID_COUNT
-    pending = [cell for cell in cells if cell.startswith("pending ")]
+    assert sum((D(cell[6:].replace(",", "")) for cell in paid), D("0.00")) == COLLECTED_TOTAL
+    assert sum(1 for cell in cells if cell.startswith("Unpaid $")) == UNPAID_COUNT
+    pending = [cell for cell in cells if cell.startswith("Pending $")]
     assert len(pending) == PENDING_COUNT
     assert all(cell.endswith("(from 2026-08-09)") for cell in pending)
 
