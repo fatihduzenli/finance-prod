@@ -10,6 +10,9 @@
   <form method="post" id="lease-end-deductions" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
+    {% comment %}PLAN-012c D8: with no deduction (none saved, suggested or typed) the rows are behind the "Add deduction" control; a native disclosure, so it works without JavaScript.{% endcomment %}
+    {% with has_rows=form.has_rows %}
+    {% if not has_rows %}<details id="add-deduction"><summary class="btn" id="add-deduction-control">Add deduction</summary>{% endif %}
     {% responsive_table %}
     <table id="deduction-rows" class="js-table-total">
       <thead><tr><th>#</th><th>Kind</th><th>Description</th><th>Amount</th></tr></thead>
@@ -21,6 +24,8 @@
     </table>
     {% endresponsive_table %}
     <p class="table-total" id="deductions-typed-total">Deductions: <span class="js-total-out" data-total-for="deduction-rows">${{ form.total|floatformat:"2g" }}</span></p>
+    {% if not has_rows %}</details>{% endif %}
+    {% endwith %}
     <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
   </form>
   {% include "ledger/lease_ends/_cancel.html" %}

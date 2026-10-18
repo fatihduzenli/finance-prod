@@ -50,6 +50,7 @@ from ledger.models import (
     Note,
     NoteEntityType,
     Operator,
+    PaymentChannel,
     ScheduleState,
     Store,
 )
@@ -198,6 +199,7 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
     payments are on the store page, which the page links."""
     lease = _load(pk)
     admin = meets(_role(request), Role.ADMIN)
+    provider_ach = lease.payment_channel == PaymentChannel.PROVIDER_ACH
     now = timezone.now()
     today = timezone.localdate()
     schedules = []
@@ -241,7 +243,12 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
             ).order_by("-created_at"),
             "can_edit": admin,
             "can_end": admin and lease.ended_on is None,
-            "can_enrol": admin,
+            # PLAN-012c D8: autopay is set up only on a provider-ACH lease; the enrol
+            # page and the service keep their own refusal. Pause, resume and stop follow
+            # the live schedules, so a schedule left after a channel change stays
+            # stoppable.
+            "provider_ach": provider_ach,
+            "can_enrol": admin and provider_ach,
             "can_pause": admin and ScheduleState.ACTIVE in linked_states,
             "can_resume": admin and ScheduleState.PAUSED in linked_states,
             "can_stop": admin and bool(service.stoppable_schedules(lease)),

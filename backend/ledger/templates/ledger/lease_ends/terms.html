@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load static %}
 {% block title %}End lease {{ store.external_label }}: end date{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
@@ -13,4 +14,4 @@
   </form>
   {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% endblock %}

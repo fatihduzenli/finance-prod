@@ -45,9 +45,10 @@
     {% elif operator.sync_attempted_at %}
       <dt>Last attempt</dt><dd>{{ operator.sync_attempted_at|utc|date:"Y-m-d H:i" }} UTC</dd>
     {% endif %}
-    <dt>Customer ID</dt><dd>{{ customer_masked|default:"—" }}</dd>
-    <dt>Payment method ID</dt><dd>{{ payment_method_masked|default:"—" }}</dd>
-    <dt>Enrolment</dt><dd>{{ operator.get_enrolment_status_display }}</dd>
+    {% comment %}PLAN-012c D8: the provider's identifiers and the enrolment only for an operator with a provider customer; the link status above says when there is none.{% endcomment %}
+    {% if customer_masked %}<dt>Customer ID</dt><dd id="provider-customer">{{ customer_masked }}</dd>
+    <dt>Payment method ID</dt><dd id="provider-method">{{ payment_method_masked|default:"—" }}</dd>
+    <dt>Enrolment</dt><dd id="provider-enrolment">{{ operator.get_enrolment_status_display }}</dd>{% endif %}
   </dl>
   {% if can_retry %}
     <form method="post" action="{% url 'ledger:operators:retry_sync' pk=operator.pk %}" class="actions js-single-submit">

@@ -1405,3 +1405,25 @@ runs on PostgreSQL and four on a clean worktree of Batch A; secret scans clean; 
 adversarial file 18 cases green on both engines. Two MAJOR (`.confirm` and `.field` coverage) and
 three MINOR (statement page breaks, the due glyph, one primary per page) resolved in one rework
 cycle. Batch C (forms show only what applies) assigned.
+
+## Update, 2026-10-17, PLAN-012c Batch C built and gated (not pushed)
+
+Batch C of the design pass: forms show only what applies (D8). The lease-end settlement shows the
+refund fields only when a refund is due (else the amount owed and "Save and continue"); the
+deductions rows sit behind "Add deduction" until one exists; the reason note shows while the
+reason is Other; the transfer's incoming step shows the deposit field only when the catalogue
+offers a deposit and the setup section only with checklist items; the lease form's second debit
+day sits behind a "Debited twice a month" tick (never posted) and the lease page offers autopay
+only on a provider-ACH lease; the operator form's consents follow the phone and the e-mail and the
+operator page shows the provider identifiers only with a provider customer; the keep-credit tick
+only while something is unallocated; the transfer-to-lease field only when another lease exists;
+Reschedule only on a returned ACH debit. Hiding never relaxes validation: hidden fields stay on
+the forms, dependent fields are disabled by a small script and stay visible without it. Items the
+plan marked "already" each gained a pinning test. Gate: ruff, format, mypy (418 files), lock,
+migrations clean (no migration); sqlite 5,636 passed; PostgreSQL 28 + 6,258 passed; e2e 12 passed
+in four runs on PostgreSQL (Opus saw the sqlite live server lock one test per full local run: a
+sqlite-only limit, CI runs e2e on PostgreSQL); secret scans clean; Fable's adversarial file 20
+cases green on the pre-C worktree and on the C tree. One MINOR (the transfer step's second debit
+day lacks the tick) deferred to Batch D as a carry-over. **For the owner at the checkpoint:** the
+operator page's "provider fields" and the lease page's "autopay controls" were read as the pages'
+blocks (the forms have none). Batch D (the approved copy list) assigned.

@@ -24,7 +24,15 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from ledger.models import AuditLog, Operator, Payment, PaymentStatus, ResolutionKind, Store
+from ledger.models import (
+    AuditLog,
+    Operator,
+    Payment,
+    PaymentMethod,
+    PaymentStatus,
+    ResolutionKind,
+    Store,
+)
 from ledger.services import one_off_charges
 from ledger.services.payments_ledger import charge_lease
 from ledger.validators import visible_text
@@ -47,6 +55,9 @@ class ReturnRow:
     code: str
     reason: str
     returned_at: datetime | None
+    #: An ACH debit (not a refund): only these can be rescheduled from the queue
+    #: (PLAN-012c D8); the reschedule service's own checks are unchanged.
+    debit: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +100,7 @@ def row(payment: Payment) -> ReturnRow:
         code=payment.return_code,
         reason=payment.return_reason,
         returned_at=payment.returned_at,
+        debit=payment.method == PaymentMethod.ACH and not payment.is_refund,
     )
 
 

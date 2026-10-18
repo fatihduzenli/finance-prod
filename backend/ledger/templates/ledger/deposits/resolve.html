@@ -9,8 +9,9 @@
   <form method="post" id="resolve-deposit-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
+    {% comment %}PLAN-012c D8: the transfer-to-lease field only when another lease can receive the deposit (or the server refused the one posted); the view and the service check a posted lease as before.{% endcomment %}
     {% for field in form.visible_fields %}
-      {% include "ledger/stores/_form_field.html" %}
+      {% if field.name != "to_lease" or form.has_targets or field.errors %}{% include "ledger/stores/_form_field.html" %}{% endif %}
     {% endfor %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="resolve-deposit-submit">Resolve deposit</button></p>
   </form>

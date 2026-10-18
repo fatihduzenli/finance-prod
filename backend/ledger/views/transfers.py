@@ -313,8 +313,9 @@ def _incoming_form(
     transfer: LeaseTransfer, data: dict[str, Any] | None = None
 ) -> TransferIncomingForm:
     fee_types = service.setup_types()
+    offered = service.deposit_type() is not None
     if data is not None:
-        return TransferIncomingForm(data, fee_types=fee_types)
+        return TransferIncomingForm(data, fee_types=fee_types, deposit_offered=offered)
     initial: dict[str, Any]
     if service.incoming_set(transfer):
         initial = {
@@ -346,7 +347,7 @@ def _incoming_form(
             "prorate_first_month": True,
             "deposit_amount": service.default_deposit(transfer),
         }
-    return TransferIncomingForm(initial=initial, fee_types=fee_types)
+    return TransferIncomingForm(initial=initial, fee_types=fee_types, deposit_offered=offered)
 
 
 @role_required

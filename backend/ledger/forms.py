@@ -60,6 +60,11 @@ else:  # ModelForm is only generic in the type stubs.
     _LeaseFormBase = forms.ModelForm
     _StoreFormBase = forms.ModelForm
 
+#: The attribute of a dependent field (PLAN-012c D8): the field is shown while one of the
+#: ``|``-separated conditions holds, each ``<control id>`` (a ticked box or a filled input)
+#: or ``<control id>=<value>``; ``ledger/shown_when.js`` hides it otherwise and does not
+#: send it. Without the script the field stays visible; the server's rules never change.
+SHOWN_WHEN = "data-shown-when"
 #: What a ``datetime-local`` input sends and shows, to the second (PLAN-012a D3).
 CONSENT_INPUT_FORMAT = "%Y-%m-%dT%H:%M:%S"
 #: Fixed and value-free (PLAN-006b §1).
@@ -71,6 +76,10 @@ IDENTIFIER_VALIDATOR = RegexValidator(
     message="Use letters, digits, hyphens and underscores only.",
     code="identifier",
 )
+
+
+#: The contact detail each consent needs on the operator form (PLAN-012c D8).
+CONSENT_SHOWN_WHEN = {"sms_consent_at": "id_sms_phone|id_phone", "email_consent_at": "id_email"}
 
 
 class OperatorForm(_OperatorFormBase):
@@ -105,9 +114,11 @@ class OperatorForm(_OperatorFormBase):
             "sms_consent_at": "SMS consent given on",
             "email_consent_at": "E-mail consent given on",
         }
+        # PLAN-012c D8: a consent is shown only with a phone (SMS) or an e-mail on the form.
         widgets = {
             name: forms.DateTimeInput(
-                attrs={"type": "datetime-local", "step": "1"}, format=CONSENT_INPUT_FORMAT
+                attrs={"type": "datetime-local", "step": "1", SHOWN_WHEN: CONSENT_SHOWN_WHEN[name]},
+                format=CONSENT_INPUT_FORMAT,
             )
             for name in CONSENT_FIELDS
         }
@@ -162,6 +173,9 @@ class LinkForm(forms.Form):
 
 #: Largest rent the money column holds (numeric(12,2)).
 RENT_MAX = Decimal("9999999999.99")
+#: The lease form's "Debited twice a month" tick (PLAN-012c D8): a control of the page,
+#: without a name, so it is never posted.
+TWICE_MONTHLY_ID = "twice-monthly"
 
 
 class LeaseForm(_LeaseFormBase):
@@ -173,6 +187,9 @@ class LeaseForm(_LeaseFormBase):
         max_value=31,
         required=False,
         help_text="Only for a lease debited twice a month.",
+        # PLAN-012c D8: shown while "Debited twice a month" is ticked; the tick is the
+        # page's only (never posted), and the form's rules for this field are unchanged.
+        widget=forms.NumberInput(attrs={SHOWN_WHEN: TWICE_MONTHLY_ID}),
     )
     rent = forms.DecimalField(
         label="Monthly rent",
@@ -226,6 +243,12 @@ class LeaseForm(_LeaseFormBase):
             ).order_by("display_name", "id")
         if not self.instance.pk:
             del self.fields["rent_effective_from"]
+
+    def twice_monthly(self) -> bool:
+        """Whether the page's "Debited twice a month" tick starts ticked (PLAN-012c D8): a
+        second debit day is set, typed or refused."""
+        bound = self["second_debit_day"]
+        return bool(str(bound.value() or "").strip()) or bool(bound.errors)
 
     def lease_fields(self) -> list[forms.BoundField]:
         """The visible fields of the lease itself (the create form adds a checklist)."""
@@ -1230,6 +1253,9 @@ class DepositResolutionForm(forms.Form):
         self, *args: Any, targets: list[tuple[str, str]] | None = None, **kwargs: Any
     ) -> None:
         super().__init__(*args, **kwargs)
+        #: Another lease can receive the deposit: without one the page leaves the
+        #: transfer-to-lease field out (PLAN-012c D8); a posted one is checked as before.
+        self.has_targets = bool(targets)
         widget = self.fields["to_lease"].widget
         if isinstance(widget, forms.Select):
             widget.choices = [("", "—"), *(targets or [])]
@@ -1266,7 +1292,15 @@ class LeaseEndTermsForm(forms.Form):
         label="Reason in words",
         required=False,
         strip=False,
-        widget=forms.Textarea(attrs={"rows": 2, "maxlength": PAYMENT_NOTE_MAX_LENGTH}),
+        # PLAN-012c D8: shown while the reason is Other (ledger/shown_when.js); without
+        # the script it stays on the page, and the service's rule is the same either way.
+        widget=forms.Textarea(
+            attrs={
+                "rows": 2,
+                "maxlength": PAYMENT_NOTE_MAX_LENGTH,
+                SHOWN_WHEN: f"id_reason={LeaseEndReason.OTHER.value}",
+            }
+        ),
         help_text="Optional, except for Other; never a card or account number.",
     )
     prorate_last_month = forms.BooleanField(
@@ -1318,6 +1352,15 @@ class LeaseEndDeductionsForm(forms.Form):
             }
             for index in range(1, DEDUCTION_ROWS + 1)
         ]
+
+    def has_rows(self) -> bool:
+        """Whether any row holds a value (saved, suggested or typed): without one, the page
+        shows the "Add deduction" control only (PLAN-012c D8)."""
+        return any(
+            str(self[f"{part}_{index}"].value() or "").strip()
+            for index in range(1, DEDUCTION_ROWS + 1)
+            for part in ("kind", "description", "amount")
+        )
 
     def total(self) -> Decimal:
         """The sum of the amounts the form holds; an invalid amount counts as nothing."""
@@ -1451,14 +1494,29 @@ class TransferIncomingForm(forms.Form):
         "move-in invoice draft.",
     )
 
-    def __init__(self, *args: Any, fee_types: Iterable[FeeType] = (), **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        fee_types: Iterable[FeeType] = (),
+        deposit_offered: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        """``deposit_offered``: the catalogue offers a security deposit. Without one the
+        deposit field is not shown (PLAN-012c D8) but stays on the form, so a posted
+        amount is refused by the service as before."""
         super().__init__(*args, **kwargs)
         self.fee_types = list(fee_types)
+        self.deposit_offered = deposit_offered
         for fee_type in self.fee_types:
             self.fields[f"{_setup_name(fee_type)}_price"] = _setup_price_field(fee_type)
 
     def lease_fields(self) -> list[forms.BoundField]:
-        return [field for field in self.visible_fields() if not field.name.startswith(SETUP)]
+        return [
+            field
+            for field in self.visible_fields()
+            if not field.name.startswith(SETUP)
+            and (field.name != "deposit_amount" or self.deposit_offered or field.errors)
+        ]
 
     def setup_rows(self) -> list[dict[str, Any]]:
         return [

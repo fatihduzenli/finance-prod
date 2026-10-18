@@ -348,10 +348,13 @@ def settlement(request: HttpRequest, pk: str) -> HttpResponse:
             "note": end.settlement_note,
         }
     )
+    figures = statements.final(end)
     return render(
         request,
         "ledger/lease_ends/settlement.html",
-        _context(end, "settlement", form=form, figures=statements.final(end)),
+        # PLAN-012c D8: the refund's method, date and reference only when a refund is due;
+        # the form and the service keep every rule for them whatever the page shows.
+        _context(end, "settlement", form=form, figures=figures, refund=figures.refund_due > 0),
     )
 
 

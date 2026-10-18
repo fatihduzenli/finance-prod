@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load static %}
 {% block title %}{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}{% endblock %}
 {% block content %}
   <p>{% if operator %}<a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a>{% else %}<a href="{% url 'ledger:operators:list' %}">&larr; Operators</a>{% endif %}</p>
@@ -14,4 +15,4 @@
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-operator">Save</button></p>
   </form>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% endblock %}

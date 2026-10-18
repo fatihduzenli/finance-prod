@@ -11,6 +11,7 @@
     {{ form.non_field_errors }}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
     {% for field in form.lease_fields %}
+      {% if field.name == "second_debit_day" %}{% comment %}PLAN-012c D8: the second debit day only for a lease debited twice a month. The tick has no name (never posted) and shows with the script only (ledger/shown_when.js); without it the field stays visible.{% endcomment %}<div class="field" id="twice-monthly-field" hidden data-reveal><label class="inline" for="twice-monthly"><input type="checkbox" id="twice-monthly"{% if form.twice_monthly %} checked{% endif %}> Debited twice a month</label></div>{% endif %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
     {% if not lease %}
@@ -40,4 +41,4 @@
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-lease">Save</button></p>
   </form>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if not lease %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endif %}{% if document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% if not lease %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endif %}{% if document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

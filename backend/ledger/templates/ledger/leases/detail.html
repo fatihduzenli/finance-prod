@@ -53,11 +53,12 @@
   <h2>Autopay</h2>
   {% include "ledger/_job_status.html" %}
   {% if autopay_moved %}<p id="autopay-moved"><strong>{{ autopay_moved }}</strong></p>{% endif %}
-  {% if blockers %}
+  {% comment %}PLAN-012c D8: what blocks or notes enrolment only on a provider-ACH lease, where autopay can be set up.{% endcomment %}
+  {% if blockers and provider_ach %}
     <p><strong>Enrolment blockers</strong></p>
     <ul id="enrolment-blockers">{% for text in blockers %}<li>{{ text }}</li>{% endfor %}</ul>
   {% endif %}
-  {% if notes_info %}
+  {% if notes_info and provider_ach %}
     <ul id="enrolment-notes" class="muted">{% for text in notes_info %}<li>{{ text }}</li>{% endfor %}</ul>
   {% endif %}
   {% responsive_table %}

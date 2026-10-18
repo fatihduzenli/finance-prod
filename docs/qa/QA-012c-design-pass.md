@@ -155,3 +155,89 @@ that fails will carry the diagnostic added in Batch A. Not a Batch B defect; not
 
 **Verdict (B):** PASS (two MAJOR and three MINOR, all resolved in one rework cycle; the
 calendar flake recorded above).
+
+### Batch C — forms show only what applies (D8)
+
+**Scope.** `ledger/forms.py` (the `data-shown-when` attribute on dependent fields: the consents,
+the second debit day, the reason note; `LeaseForm.twice_monthly`, `LeaseEndDeductionsForm.has_rows`,
+`DepositResolutionForm.has_targets`, `TransferIncomingForm(deposit_offered=)`),
+`ledger/services/returns.py` (`ReturnRow.debit`), `ledger/views/{lease_ends,leases,transfers}.py`
+(the `refund` flag, `provider_ach`, the deposit offer), `ledger/static/ledger/shown_when.js`
+(new, no dependency) and `payment_allocation.js`, eleven templates. No migration, no URL change,
+no dependency; two new on-screen texts ("Debited twice a month", "Add deduction") for Batch D's
+review. Tests: `tests/test_forms_show_what_applies.py` (29), `tests/e2e/test_dependent_fields.py`
+(5, one with JavaScript off). Fable's adversarial file: `tests/test_plan012c_design_c_adversarial.py`
+(20 cases), run first on a clean worktree of the Batch B commit (20 passed) so that it records
+the server behaviour before the batch, then on the Batch C tree.
+
+**How fields are hidden.** State known on the server: the field is not rendered but stays on
+the form, so a posted value meets the same form and service rules; a refused hidden field is
+rendered with its error. Dependent fields (another control on the same page): a small script
+hides the `.field` and disables the control, so what is saved is what is shown; a field with a
+server error stays shown; without the script every field stays visible and a tick that only
+drives the script (`data-reveal`) stays hidden. Checked in the review: the script reads ids and
+values only, writes `hidden` and `disabled`, no markup is built from data.
+
+**The walk (plan §3.5), verified against the diff and the tests.** Settlement: refund method,
+date and reference only when the refund due is above zero, else the amount owed and "Save and
+continue". Deductions: no row with a value → the rows behind a native `<details>` "Add
+deduction" (works without JavaScript). Terms: the reason note while the reason is Other. Transfer
+incoming: the deposit field only when the catalogue offers a deposit (a posted amount still
+refused), the setup section only with checklist items, the override form only with a debt
+(already). Lease form: the second debit day behind a "Debited twice a month" tick that is never
+posted; the lease page shows Enable autopay and the enrolment blockers and notes only on a
+provider-ACH lease (pause, resume and stop follow the live schedules so a schedule left after a
+channel change stays stoppable). Operator form: the consents follow the phone and the e-mail; the
+operator page shows the provider identifiers and the enrolment only with a provider customer
+(the form has no provider field: Opus's reading, accepted, noted for the owner). Store page
+(already), builder (already), Record a payment: credit inputs (already), the keep-credit tick
+only while something is unallocated. Deposit resolution: the transfer-to-lease field only when a
+target lease exists (a posted one refused as before). Return queue: Reschedule only on a returned
+ACH debit. Installments: Retry only on a failed release (already). Document upload: the owner's
+kinds only (already).
+
+**Gate 1.** ruff, `ruff format --check` (514 files), mypy strict (418 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16: all clean, exit 0.
+
+**Gate 2.**
+
+| Suite | Engine | Exit | Result |
+|---|---|---|---|
+| Unit, full | sqlite | 0 | 5,636 passed, 653 skipped; 14:50 wall |
+| CI "Migration tests" selection | PostgreSQL 16 | 0 | 28 passed; 11:47 wall |
+| CI "Unit tests" selection | PostgreSQL 16 | 0 | 6,258 passed, 3 skipped; 17:20 wall |
+| e2e (12), four runs | PostgreSQL 16 | 0 | 12 passed in each of four runs (38–40 s) |
+| Fable adversarial C (20) | both | green inside the runs above; 20 passed on the pre-C worktree |
+
+Opus reported the local e2e suite on **sqlite** failing one test per full run with "database
+table is locked" (a different test each time; each green alone; also seen once in four runs on
+the pre-batch tree). CI and Fable's gate run the e2e suite on PostgreSQL, where the twelve cases passed four of four runs. The
+sqlite lock is the known limit of the threaded live server on sqlite, not a Batch C defect.
+
+**Gate 3.** Diff read in full (the script, the forms, the services, the views, every template).
+Hiding is in templates and form helpers; no rule moved or weakened; the "already" items each
+gained a test that pins today's behaviour. **Gate 4.** Secret scans clean (script and pattern
+scan over the diff and every new file). Fable's cases: a hostile second debit day on a monthly
+lease, hostile consents and contact details on an operator without any, a refund method posted
+while the operator owes (nothing becomes refundable; what is owed is unchanged), a transfer to a
+missing or another operator's lease, a kind outside the owner's list on an upload, the keep-credit
+tick on a fully allocated payment, anonymous posts: all refused or ignored as before, no markup
+echoed raw.
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| 1 | MINOR | transfers/incoming.html, `TransferIncomingForm` | The incoming step's second debit day has the same twice-monthly dependency as the lease form but no tick | Deferred by written decision to Batch D as a carry-over (the plan's list names the lease form only; the fix is the same tick and script; a re-gate for it alone is not worth a cycle) |
+
+Design choices accepted: the dependent-field script over CSS `:has()`, because disabling the
+hidden control keeps a stale value from being saved; with the script, removing the phone or the
+e-mail clears that consent on save, and moving the reason away from Other clears the note
+(without the script nothing is cleared); the service still saves a refund method posted while
+the operator owes (as before: it has no effect on the figures).
+
+**Residual risk (C).** The dependent fields are verified by unit tests on the markup and by
+five e2e cases on sqlite and PostgreSQL; the owner's checkpoint click on the lease and operator
+forms is the check in a real browser on staging.
+
+**Verdict (C):** PASS (one MINOR deferred to Batch D by written decision; no rework cycle).

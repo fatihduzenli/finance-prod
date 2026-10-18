@@ -2,13 +2,17 @@
 // live (the amount received less the allocations) and names it on the keep-credit tick.
 // With exactly one open charge, typing the amount fills that charge's allocation with
 // the smaller of the amount and its balance, until the allocation is typed by hand. The
-// server checks everything again; the form works without this script.
+// keep-credit tick is shown only while something is unallocated (PLAN-012c D8): hidden,
+// it is disabled and not sent; a tick the server refused stays shown. The server checks
+// everything again; the form works without this script, with the tick always shown.
 (function () {
   "use strict";
   document.querySelectorAll("form.js-allocation").forEach(function (form) {
     var amount = form.querySelector("input[name=amount]");
     var out = form.querySelector("#unallocated");
     var keep = form.querySelector("#keep-credit-amount");
+    var keepField = form.querySelector("#keep-credit-field");
+    var keepTick = keepField ? keepField.querySelector("input[type=checkbox]") : null;
     var allocations = Array.prototype.slice.call(form.querySelectorAll("input.js-alloc"));
     var prefill = allocations.length === 1 && allocations[0].dataset.prefill ? allocations[0] : null;
     var touched = prefill !== null && prefill.value !== "";
@@ -32,6 +36,10 @@
       out.textContent = money(left);
       if (keep) {
         keep.textContent = left > 0 ? money(left) : "the unallocated amount";
+      }
+      if (keepField && keepTick) {
+        keepField.hidden = left <= 0 && !keepField.classList.contains("has-error");
+        keepTick.disabled = keepField.hidden;
       }
     }
     if (prefill !== null) {

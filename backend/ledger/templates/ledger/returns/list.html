@@ -21,6 +21,8 @@
           <td>{{ item.returned_at|date:"Y-m-d H:i"|default:"—" }}</td>
           {% if can_resolve %}
             <td>
+              {% comment %}PLAN-012c D8: Reschedule only on a returned ACH debit; Resolve with a note on every return.{% endcomment %}
+              {% if item.debit %}
               <form method="post" action="{% url 'ledger:returns:reschedule' pk=item.payment.pk %}" class="js-single-submit reschedule-form" id="reschedule-{{ item.payment.pk }}">
                 {% csrf_token %}
                 <label for="redebit-date-{{ item.payment.pk }}">Re-debit date (New York) *</label>
@@ -31,6 +33,7 @@
                 <textarea name="note" id="reschedule-note-{{ item.payment.pk }}" rows="2" maxlength="2000"></textarea>
                 <button class="btn" type="submit">Reschedule</button>
               </form>
+              {% endif %}
               <form method="post" action="{% url 'ledger:returns:resolve' pk=item.payment.pk %}" class="js-single-submit">
                 {% csrf_token %}
                 <label for="note-{{ item.payment.pk }}">Note *</label>

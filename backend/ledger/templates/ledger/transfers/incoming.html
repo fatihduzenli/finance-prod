@@ -11,6 +11,8 @@
     {% for field in form.lease_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
+    {% comment %}PLAN-012c D8: the setup charges only when the checklist has an item; the deposit field (in the fields above) only when the catalogue offers a deposit.{% endcomment %}
+    {% if form.fee_types %}
     <h2>Setup charges</h2>
     <p class="muted">Type the price of each catalogue item the incoming operator pays at move-in; a row without a price is not charged (the grey amount is the catalogue's usual price, shown as a hint only).</p>
     {% responsive_table %}
@@ -19,13 +21,12 @@
       <tbody>
         {% for row in form.setup_rows %}
           <tr id="setup-{{ row.fee_type.code }}"><td><label for="{{ row.price.id_for_label }}">{{ row.fee_type.name }}</label></td><td>{{ row.price.errors }}{{ row.price }}</td></tr>
-        {% empty %}
-          <tr><td colspan="2" class="muted empty">The setup checklist has no item.</td></tr>
         {% endfor %}
       </tbody>
     </table>
     {% endresponsive_table %}
     <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-rows">${{ form.setup_total|floatformat:"2g" }}</span></p>
+    {% endif %}
     <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
   </form>
   {% include "ledger/lease_ends/_cancel.html" %}
