@@ -92,7 +92,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
-from ledger import wording
 from ledger.models import (
     DESCRIPTION_MAX_LENGTH,
     INSTALLMENTS_MAX,
@@ -621,7 +620,7 @@ def _collection_refusal(collection: str, operator: Operator) -> str:
     if collection == InstallmentCollection.MANUAL:
         return ""
     if not leases.customer_ref(operator):
-        label = wording.label(InstallmentCollection, collection)
+        label = InstallmentCollection(collection).label
         return NO_CUSTOMER.format(collection=str(label).lower())
     if collection == InstallmentCollection.AUTOPAY_DUE and not leases.linked_payment_method(
         operator

@@ -13,7 +13,6 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import F, Q
 
-from ledger import wording
 from ledger.models import (
     HALF_CENT,
     GuardedModel,
@@ -132,7 +131,7 @@ class WebhookOutcome(models.TextChoices):
     PROCESSED = "processed", "Processed"
     IGNORED = "ignored", "Ignored"
     FAILED = "failed", "Failed"
-    DEAD_LETTER = "dead_letter", "Dead letter"
+    DEAD_LETTER = "dead_letter", "Gave up"
 
 
 class WebhookEvent(GuardedModel):
@@ -166,11 +165,13 @@ class WebhookEvent(GuardedModel):
     #: Byte-identical redeliveries received after the first (PLAN-008 D7).
     duplicate_count = models.PositiveIntegerField(default=0)
 
-    def get_outcome_display(self) -> str:
-        """On screen: the outcome's label (copy list §4.5); an ignored or processed event
-        keeps the words after its outcome (``ignored: <reason>``)."""
+    @property
+    def outcome_words(self) -> str:
+        """On screen: the outcome's label (copy list §4.5), or the outcome as stored when
+        no label has it; an ignored or processed event keeps the words after its outcome
+        (``ignored: <reason>``)."""
         outcome, colon, rest = str(self.outcome).partition(": ")
-        shown = wording.label(WebhookOutcome, outcome) if outcome else ""
+        shown = str(dict(WebhookOutcome.choices).get(outcome, outcome))
         return f"{shown}: {rest}" if colon else shown
 
     @property
@@ -204,54 +205,54 @@ class SyncState(GuardedModel):
 class JobKind(models.TextChoices):
     """What a job does; a closed list (docs/qa/PLAN-010 D1). Each maps to one service."""
 
-    OPERATOR_SYNC = "operator_sync", "Operator sync"
-    OPERATOR_RETRY = "operator_retry", "Operator sync retry"
-    OPERATOR_LINK = "operator_link", "Operator link"
-    AUTOPAY_ENABLE = "autopay_enable", "Enable autopay"
-    AUTOPAY_PAUSE = "autopay_pause", "Pause autopay"
-    AUTOPAY_RESUME = "autopay_resume", "Resume autopay"
-    PAYMENT_MARK = "payment_mark", "Mark the provider invoice paid"
-    PAYMENT_RETRY_MARK = "payment_retry_mark", "Retry marking the provider invoice"
-    PAYMENT_REFUND = "payment_refund", "Refund"
-    PAYMENT_VOID = "payment_void", "Void"
+    OPERATOR_SYNC = "operator_sync", "Updating the operator"
+    OPERATOR_RETRY = "operator_retry", "Updating the operator again"
+    OPERATOR_LINK = "operator_link", "Connecting the operator"
+    AUTOPAY_ENABLE = "autopay_enable", "Setting up autopay"
+    AUTOPAY_PAUSE = "autopay_pause", "Pausing autopay"
+    AUTOPAY_RESUME = "autopay_resume", "Resuming autopay"
+    PAYMENT_MARK = "payment_mark", "Marking the invoice paid"
+    PAYMENT_RETRY_MARK = "payment_retry_mark", "Marking the invoice paid again"
+    PAYMENT_REFUND = "payment_refund", "Refunding the payment"
+    PAYMENT_VOID = "payment_void", "Voiding the payment"
     #: PLAN-010 Batch A follow-up: the reads the enrolment, run and event pages needed.
-    OPERATOR_METHODS_REFRESH = "operator_methods_refresh", "Refresh payment methods"
-    RUN_MATCH = "run_match", "Match invoices"
-    WEBHOOK_REPLAY = "webhook_replay", "Replay webhook event"
+    OPERATOR_METHODS_REFRESH = "operator_methods_refresh", "Updating bank methods"
+    RUN_MATCH = "run_match", "Updating invoices"
+    WEBHOOK_REPLAY = "webhook_replay", "Processing a message again"
     #: PLAN-010 Batch B: "Run now" on the reconciliation page.
-    RECONCILE_RUN = "reconcile_run", "Run reconciliation"
+    RECONCILE_RUN = "reconcile_run", "Running the nightly check"
     #: PLAN-010b D6 (``setup_payment_mark`` before PLAN-010d D1): a manual payment on a
     #: one-off charge whose invoice is to be marked paid.
     ONE_OFF_PAYMENT_MARK = (
         "one_off_payment_mark",
-        "Mark the provider invoice of a one-off charge paid",
+        "Marking the one-off charge's invoice paid",
     )
     #: PLAN-010b Batch B: "Retry marking" on a one-off charge's page.
     ONE_OFF_PAYMENT_RETRY_MARK = (
         "one_off_payment_retry_mark",
-        "Retry marking the provider invoice of a one-off charge",
+        "Marking the one-off charge's invoice paid again",
     )
     #: PLAN-010d D3, D6: the provider invoice of a one-off charge: create (with the
     #: e-mail when the charge says so), the e-mail alone, delete.
-    INVOICE_CREATE = "invoice_create", "Create the provider invoice"
-    INVOICE_SEND = "invoice_send", "Send the provider invoice by email"
-    INVOICE_DELETE = "invoice_delete", "Delete the provider invoice"
+    INVOICE_CREATE = "invoice_create", "Creating the invoice"
+    INVOICE_SEND = "invoice_send", "Sending the invoice by e-mail"
+    INVOICE_DELETE = "invoice_delete", "Cancelling the invoice"
     #: PLAN-010d D2, D6: the one-occurrence provider schedule of an ``autopay_due`` charge.
-    SCHEDULE_CREATE = "schedule_create", "Create the provider schedule"
-    SCHEDULE_DELETE = "schedule_delete", "Delete the provider schedule"
+    SCHEDULE_CREATE = "schedule_create", "Setting up autopay"
+    SCHEDULE_DELETE = "schedule_delete", "Cancelling autopay"
     #: PLAN-010d D4: "Charge now", the single pay-an-invoice attempt of a one-off charge.
-    INVOICE_PAY = "invoice_pay", "Charge the provider invoice now"
+    INVOICE_PAY = "invoice_pay", "Charging the invoice"
     #: PLAN-011b D4, D8: a collection e-mail to an operator, and a staff user's morning
     #: e-mail (a calendar entry, or a promise to pay due that day).
-    MESSAGE_SEND = "message_send", "Send a collection e-mail"
-    CALENDAR_EMAIL = "calendar_email", "Send a morning e-mail"
+    MESSAGE_SEND = "message_send", "Sending a collection e-mail"
+    CALENDAR_EMAIL = "calendar_email", "Sending a morning e-mail"
     #: PLAN-012 D8: read the provider's disputes; send one evidence file.
-    DISPUTES_SYNC = "disputes_sync", "Read the disputes"
-    DISPUTE_EVIDENCE_UPLOAD = "dispute_evidence_upload", "Send dispute evidence"
+    DISPUTES_SYNC = "disputes_sync", "Updating disputes"
+    DISPUTE_EVIDENCE_UPLOAD = "dispute_evidence_upload", "Sending dispute evidence"
     #: PLAN-012e §4: the final statement PDF of a lease end, stored, and its e-mail queued.
-    LEASE_END_DOCUMENTS = "lease_end_documents", "Make the final statement and its e-mail"
+    LEASE_END_DOCUMENTS = "lease_end_documents", "Making the final statement and its e-mail"
     #: PLAN-012e D5 amendment: delete the lease's rent and insurance schedules.
-    AUTOPAY_STOP = "autopay_stop", "Stop autopay"
+    AUTOPAY_STOP = "autopay_stop", "Turning off autopay"
 
 
 class JobEntity(models.TextChoices):
@@ -280,12 +281,12 @@ class JobEntity(models.TextChoices):
 
 
 class JobStatus(models.TextChoices):
-    QUEUED = "queued", "Queued"
-    RUNNING = "running", "Running"
+    QUEUED = "queued", "Waiting"
+    RUNNING = "running", "In progress"
     DONE = "done", "Done"
     FAILED = "failed", "Failed"
     #: Its worker stopped mid-run twice (PLAN-010 D1); never run again.
-    DEAD = "dead", "Dead"
+    DEAD = "dead", "Gave up"
 
 
 class Job(GuardedModel):
@@ -335,14 +336,6 @@ class Job(GuardedModel):
     def __str__(self) -> str:
         return f"{self.kind} {self.status}"
 
-    def get_kind_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(JobKind, self.kind)
-
-    def get_status_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(JobStatus, self.status)
-
 
 class ReconciliationTrigger(models.TextChoices):
     """How a reconciliation run started (docs/qa/PLAN-010 D5, D10)."""
@@ -376,9 +369,9 @@ class MismatchKind(models.TextChoices):
 
     INVOICE_STATUS_DIFFERS = "invoice_status_differs", "Invoice status differed"
     PAYMENT_RESTORED = "payment_restored", "Payment restored"
-    DEPOSIT_UNMATCHED = "deposit_unmatched", "Deposit row unmatched"
+    DEPOSIT_UNMATCHED = "deposit_unmatched", "Bank deposit not matched"
     SETTLED_PAYMENT_UNDEPOSITED = "settled_payment_undeposited", "Settled payment not deposited"
-    RETURN_MISSED_BY_WEBHOOK = "return_missed_by_webhook", "Return missed by webhook"
+    RETURN_MISSED_BY_WEBHOOK = "return_missed_by_webhook", "Return not received"
     PENDING_TOO_OLD = "pending_too_old", "Pending too long"
 
 
@@ -482,7 +475,3 @@ class ReconciliationMismatch(GuardedModel):
 
     def __str__(self) -> str:
         return f"{self.kind} {self.entity_type}"
-
-    def get_kind_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(MismatchKind, self.kind)

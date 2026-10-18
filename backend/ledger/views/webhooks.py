@@ -24,7 +24,6 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST, require_safe
 
 from accounts.roles import Role, meets
-from ledger import wording
 from ledger.services import csv_export
 from ledger.services.csv_export import CsvWriter
 from ledger.views.jobs import busy, job_context, submit
@@ -121,7 +120,7 @@ def webhook_list(request: HttpRequest) -> HttpResponse:
                     if value
                 }
             ),
-            "outcomes": wording.choices(WebhookOutcome),
+            "outcomes": WebhookOutcome.choices,
             "event_types": WebhookEvent.objects.order_by("event_type")
             .values_list("event_type", flat=True)
             .distinct(),

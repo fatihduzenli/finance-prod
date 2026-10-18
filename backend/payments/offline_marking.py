@@ -101,6 +101,6 @@ def shown(stored: str) -> str:
     for start, text in _SHOWN:
         if stored.startswith(start):
             failure = stored[len(start) :].split(" ", 1)[0]
-            named = wording.label(SyncFailure, failure) if failure else ""
+            named = str(dict(SyncFailure.choices).get(failure, failure))
             return wording.with_provider(text) + named
     return _TODO_MARK.sub("", stored).replace("Stax", wording.provider_name())

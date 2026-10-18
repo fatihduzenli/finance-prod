@@ -37,6 +37,7 @@ from ledger.models import (
 )
 from ledger.services import leases as service
 from ledger.services.leases import AutopayAction, LeaseRefused
+from ledger.wording import format_amount
 from payments.errors import CircuitOpen, ProviderError, ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
 from payments.models import ExternalRef, ProviderSnapshot
@@ -1328,7 +1329,7 @@ def test_a_confirmation_with_a_refused_method_writes_no_confirmation_row(
     ],
 )
 def test_amounts_in_messages_are_formatted_with_separators(amount: Decimal, text: str) -> None:
-    assert service.format_amount(amount) == text
+    assert format_amount(amount) == text
 
 
 # --- Autopay moved past a split month (PLAN-012b-b D13) ------------------------------------------

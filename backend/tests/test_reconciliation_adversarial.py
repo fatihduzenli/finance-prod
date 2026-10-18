@@ -230,7 +230,7 @@ def test_run_now_while_the_scheduled_job_waits_is_busy_and_queues_nothing(
     assert response.status_code == 302
     assert Job.objects.count() == 1
     page = admin.get("/reconciliation/").content.decode()
-    assert "already waiting" in page
+    assert "still in progress" in page  # PLAN-012c §4.1: no "request waiting"
     assert fake.calls == []
 
 

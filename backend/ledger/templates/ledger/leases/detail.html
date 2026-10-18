@@ -26,7 +26,7 @@
     <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
     <dt>Operator</dt><dd>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</dd>
     <dt>Status</dt><dd>{{ lease.get_collection_status_display }}</dd>
-    <dt>Channel</dt><dd>{{ lease.get_payment_channel_display }}</dd>
+    <dt>Channel</dt><dd>{{ lease.get_payment_channel_display }}{% if provider_ach %} through {{ company.provider_name }}{% endif %}</dd>
     <dt>Debit days</dt><dd>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</dd>
     <dt>Start date</dt><dd>{{ lease.started_on|date:"Y-m-d"|default:"—" }}</dd>
     <dt>Prorate first month</dt><dd id="prorate-first-month">{{ lease.prorate_first_month|yesno:"Yes,No" }}</dd>

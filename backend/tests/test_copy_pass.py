@@ -117,7 +117,7 @@ def test_format_amount_is_the_filter_and_never_writes_dollar_minus() -> None:
     assert wording.format_amount(Decimal("-0.00")) == "$0.00"
     assert wording.format_amount(Decimal("999999.99")) == "$999,999.99"
     # The old helpers are the one function now.
-    assert leases.format_amount is wording.format_amount
+    assert vars(leases)["format_amount"] is wording.format_amount
 
 
 _LOAD = re.compile(r"\{%\s*load\s+([^%]+)%\}")
@@ -202,7 +202,7 @@ def test_the_morning_e_mail_writes_the_promised_amount_with_its_separator() -> N
 
     operator = an_operator("Morning Co")
     row = promise(operator, by=date(2026, 10, 1), amount="2000.00")
-    message = calendar._promise_message(row, "staff@example.com")  # type: ignore[arg-type]
+    message = calendar._promise_message(row, "staff@example.com")
     assert "promised to pay $2,000.00 by 2026-10-01." in message.text
     assert message.subject == "Promise to pay due today: Morning Co"
 
@@ -223,21 +223,21 @@ def test_the_morning_e_mail_writes_the_promised_amount_with_its_separator() -> N
         (SyncStatus, SyncStatus.PENDING, "In progress"),
         (SyncStatus, SyncStatus.LINKED, "Connected"),
         (SyncStatus, SyncStatus.FAILED, "Failed"),
-        (SyncFailure, SyncFailure.PROVIDER_ERROR, "Stax error"),
+        (SyncFailure, SyncFailure.PROVIDER_ERROR, "Error"),
         (SyncFailure, SyncFailure.VALIDATION_FAILED, "Not sent"),
         (SyncFailure, SyncFailure.NOT_PERMITTED_HERE, "Not allowed here"),
         (SyncFailure, SyncFailure.FEATURE_DISABLED, "Turned off"),
         (SyncFailure, SyncFailure.CIRCUIT_OPEN, "Paused after repeated errors"),
         (SyncFailure, SyncFailure.FAILURE_BUDGET_EXHAUSTED, "Too many errors today"),
-        (SyncFailure, SyncFailure.RATE_LIMIT_WAIT_EXCEEDED, "Stax is busy, try later"),
-        (SyncFailure, SyncFailure.PROVIDER_REJECTED, "Rejected by Stax"),
-        (SyncFailure, SyncFailure.PROVIDER_UNAVAILABLE, "Stax unavailable"),
-        (SyncFailure, SyncFailure.TRANSPORT_ERROR, "Cannot reach Stax"),
-        (SyncFailure, SyncFailure.IDENTITY_MISMATCH, "Wrong Stax account"),
+        (SyncFailure, SyncFailure.RATE_LIMIT_WAIT_EXCEEDED, "Busy, try later"),
+        (SyncFailure, SyncFailure.PROVIDER_REJECTED, "Rejected"),
+        (SyncFailure, SyncFailure.PROVIDER_UNAVAILABLE, "Unavailable"),
+        (SyncFailure, SyncFailure.TRANSPORT_ERROR, "Could not be reached"),
+        (SyncFailure, SyncFailure.IDENTITY_MISMATCH, "Wrong account"),
         (SyncFailure, SyncFailure.ALREADY_LINKED_ELSEWHERE, "Connected to another operator"),
         (PaymentMethod, PaymentMethod.ACH, "Bank debit (ACH)"),
         (MoneyMethod, MoneyMethod.ACH, "Bank debit (ACH)"),
-        (PaymentChannel, PaymentChannel.PROVIDER_ACH, "Bank debit through Stax"),
+        (PaymentChannel, PaymentChannel.PROVIDER_ACH, "Bank debit"),
         (OneOffCategory, OneOffCategory.NSF_FEE, "Returned payment (NSF) fee"),
         (InstallmentCollection, InstallmentCollection.EMAIL, "Send by e-mail"),
         (CollectionMethod, CollectionMethod.EMAIL, "Send by e-mail"),
@@ -257,52 +257,54 @@ def test_the_morning_e_mail_writes_the_promised_amount_with_its_separator() -> N
         (RentSource, RentSource.SHEET_CURRENT, "From the spreadsheet"),
         (RentSource, RentSource.SHEET_INFERRED, "From the spreadsheet (inferred)"),
         (RentSource, RentSource.STAFF, "Entered by staff"),
-        (JobKind, JobKind.OPERATOR_SYNC, "Updating the operator in Stax"),
-        (JobKind, JobKind.PAYMENT_MARK, "Marking the invoice paid in Stax"),
-        (JobKind, JobKind.INVOICE_CREATE, "Creating the invoice in Stax"),
-        (JobKind, JobKind.SCHEDULE_CREATE, "Setting up autopay in Stax"),
-        (JobKind, JobKind.WEBHOOK_REPLAY, "Processing a message from Stax again"),
+        (JobKind, JobKind.OPERATOR_SYNC, "Updating the operator"),
+        (JobKind, JobKind.PAYMENT_MARK, "Marking the invoice paid"),
+        (JobKind, JobKind.INVOICE_CREATE, "Creating the invoice"),
+        (JobKind, JobKind.SCHEDULE_CREATE, "Setting up autopay"),
+        (JobKind, JobKind.WEBHOOK_REPLAY, "Processing a message again"),
         (JobKind, JobKind.RECONCILE_RUN, "Running the nightly check"),
     ],
 )
 def test_the_label_shown_for_each_stored_value(choice_set: type, value: str, shown: str) -> None:
-    assert wording.label(choice_set, value) == shown
+    assert choice_set(value).label == shown
 
 
 def test_no_job_kind_label_names_the_machinery() -> None:
     for value in JobKind.values:
-        shown = wording.label(JobKind, value)
+        shown = str(JobKind(value).label)
         assert not re.search(r"provider|sync|webhook|reconcil|schedule", shown, re.I), shown
 
 
 def test_the_models_show_the_labels_and_store_the_values() -> None:
     lease = a_lease(a_store("D9-4"), an_operator("Label Co"))
     assert lease.payment_channel == "stax"
-    assert lease.get_payment_channel_display() == "Bank debit through Stax"
+    assert lease.get_payment_channel_display() == "Bank debit"
     schedule = CollectionSchedule(lease=lease, kind=ScheduleKind.RENT, seq=1)
     assert schedule.state == "none" and schedule.get_state_display() == "Not set up"
     job = Job(kind=JobKind.OPERATOR_SYNC, status=JobStatus.QUEUED)
     assert (job.get_kind_display(), job.get_status_display()) == (
-        "Updating the operator in Stax",
+        "Updating the operator",
         "Waiting",
     )
     event = WebhookEvent(outcome="ignored: no handler")
-    assert event.get_outcome_display() == "Ignored: no handler"
-    assert WebhookEvent(outcome="dead_letter").get_outcome_display() == "Gave up"
-    assert WebhookEvent(outcome="").get_outcome_display() == ""
+    assert event.outcome_words == "Ignored: no handler"
+    assert WebhookEvent(outcome="dead_letter").outcome_words == "Gave up"
+    assert WebhookEvent(outcome="").outcome_words == ""
+    assert WebhookEvent(outcome="something_new: x").outcome_words == "something_new: x"
     assert lease.operator is not None
     assert lease.operator.get_sync_failure_display() == ""
     # An unknown stored value is shown as stored, never an error.
-    assert wording.label(SyncFailure, "SomethingNew") == "SomethingNew"
+    lease.operator.sync_failure = "SomethingNew"
+    assert lease.operator.get_sync_failure_display() == "SomethingNew"
 
 
 def test_the_forms_offer_the_labels_shown() -> None:
     from ledger.forms import LeaseForm
 
     channels = dict(LeaseForm().fields["payment_channel"].choices)  # type: ignore[attr-defined]
-    assert channels["stax"] == "Bank debit through Stax"
+    assert channels["stax"] == "Bank debit"
     incoming = dict(TransferIncomingForm().fields["payment_channel"].choices)  # type: ignore[attr-defined]
-    assert incoming["stax"] == "Bank debit through Stax" and "unknown" not in incoming
+    assert incoming["stax"] == "Bank debit" and "unknown" not in incoming
     form = LinkForm()
     assert str(form.fields["customer_id"].label) == "Stax customer ID"
     assert str(form.fields["payment_method_id"].label) == "Stax bank method ID"
@@ -320,7 +322,9 @@ def _rename(name: str) -> None:
 def test_the_sentences_follow_the_company_settings_row() -> None:
     _rename("PayCo")
     assert str(leases.NO_PROVIDER_CUSTOMER) == "The operator is not connected to PayCo."
-    assert wording.label(PaymentChannel, "stax") == "Bank debit through PayCo"
+    lease = a_lease(a_store("D9-6"), an_operator("PayCo Label Co"))
+    admin, _ = client_for(Role.ADMIN)
+    assert "Bank debit through PayCo" in page(admin, f"/leases/{lease.pk}/")
     from ledger.services import installments
 
     assert installments.RELEASE_PENDING_INVOICE.format(number="I-7") == (

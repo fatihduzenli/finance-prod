@@ -50,7 +50,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets
-from ledger import wording
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -209,7 +208,7 @@ class Header:
     lease: Lease | None
     operator: Operator | None
     rent: LeaseRentHistory | None
-    #: "Active", "Paused", "Failed", "Not created" or :data:`AUTOPAY_NONE`.
+    #: "On", "Paused", "Failed", "Not set up" or :data:`AUTOPAY_NONE`.
     autopay: str
     #: Why autopay starts later (a split month), or ``""``.
     autopay_moved: str
@@ -223,8 +222,8 @@ def _autopay_state(schedules: list[CollectionSchedule]) -> str:
     states = {row.state for row in schedules}
     for state in (ScheduleState.ACTIVE, ScheduleState.PAUSED, ScheduleState.FAILED):
         if state in states:
-            return wording.label(ScheduleState, state)
-    return wording.label(ScheduleState, ScheduleState.NONE) if schedules else AUTOPAY_NONE
+            return str(state.label)
+    return str(ScheduleState.NONE.label) if schedules else AUTOPAY_NONE
 
 
 def _next_rent(

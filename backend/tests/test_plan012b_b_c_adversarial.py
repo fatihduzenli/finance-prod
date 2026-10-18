@@ -196,7 +196,7 @@ def test_a_lease_end_after_the_move_sees_only_the_new_schedule_and_stop_autopay_
     plan_for(charge)
     run_queued_jobs()
     autopay = [b for b in lease_end.blockers(lease, TODAY) if b.kind == lease_end.AUTOPAY]
-    assert len(autopay) == 1 and "active" in autopay[0].text
+    assert len(autopay) == 1 and "is on" in autopay[0].text  # PLAN-012c §4: "autopay … is on"
     new_ref = leases.schedule_ref(leases.live_schedules(lease)[0])
     assert new_ref != old_ref
     assert old_ref not in str(lease_end.blockers(lease, TODAY))

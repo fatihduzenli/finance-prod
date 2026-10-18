@@ -57,7 +57,6 @@ from decimal import Decimal
 from django.db.models import Count, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce, TruncMonth
 
-from ledger import wording
 from ledger.models import (
     ZERO,
     MoneyMethod,
@@ -413,7 +412,7 @@ def deposits_vs_transactions(selected: ReportRange) -> DepositsReport:
 
 def unmatched_items() -> list[UnmatchedItem]:
     """The unresolved step (c) findings, oldest first."""
-    labels = dict(wording.choices(MismatchKind))
+    labels = dict(MismatchKind.choices)
     return [
         UnmatchedItem(
             found_on=row.created_at.date(),
@@ -567,7 +566,7 @@ def _charge_description(payment: Payment) -> str:
         return f"Insurance, policy year {payment.insurance_charge.policy_year}"
     if payment.one_off_charge is not None:
         one_off = payment.one_off_charge
-        label = wording.label(OneOffCategory, one_off.category)
+        label = OneOffCategory(one_off.category).label
         detail = one_off.fee_type.name if one_off.fee_type is not None else one_off.description
         return f"{label}: {detail}" if detail else str(label)
     return ""

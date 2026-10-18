@@ -56,7 +56,6 @@ from django.utils import timezone
 import payments
 from accounts.roles import Role, meets, role_of
 from documents_storage import StorageUnavailable
-from ledger import wording
 from ledger.models import (
     EVIDENCE_NAME_MAX_LENGTH,
     AuditLog,
@@ -603,7 +602,7 @@ def upload_evidence(
                 row,
                 actor,
                 name,
-                error.reason or REFUSED.format(error=wording.label(SyncFailure, name)),
+                error.reason or REFUSED.format(error=dict(SyncFailure.choices).get(name, name)),
             )
         except ProviderError as error:
             name = type(error).__name__

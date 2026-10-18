@@ -25,7 +25,6 @@ from django.utils.safestring import SafeString
 from django.views.decorators.http import require_safe
 
 from accounts.roles import Role, meets, role_of
-from ledger import wording
 from ledger.models import PaymentChannel, PaymentStatus
 from ledger.services import attention, grid, one_off_charges, receivables, rent_run
 from ledger.views.operators import csv_response, role_required
@@ -135,7 +134,7 @@ def _grid_page(
                 {name: value for name, value in query.as_query().items() if name != "q"}
             ),
             "operators": receivables.arrears_operators(),
-            "channels": wording.choices(PaymentChannel),
+            "channels": PaymentChannel.choices,
             "statuses": grid.CELL_STATUSES,
             "note_marker": grid.NOTE_MARKER,
         },

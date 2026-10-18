@@ -326,7 +326,7 @@ class GridRow:
 
     @property
     def channel_label(self) -> str:
-        return wording.label(PaymentChannel, self.channel) if self.channel else ""
+        return str(dict(PaymentChannel.choices).get(self.channel, self.channel))
 
 
 @dataclass(slots=True)

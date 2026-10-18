@@ -27,7 +27,7 @@ from django.db.models.functions import Length, Lower, Trim
 from django.db.models.lookups import Exact
 from django.utils import timezone
 
-from ledger import merge, wording
+from ledger import merge
 from ledger.validators import validate_json_has_no_payment_data, validate_no_payment_data
 
 MONEY_MAX_DIGITS = 12
@@ -196,10 +196,10 @@ class EnrolmentStatus(models.TextChoices):
 class SyncStatus(models.TextChoices):
     """Where an operator stands with the payment provider (PLAN-006 D7)."""
 
-    NOT_APPLICABLE = "not_applicable", "Not applicable"
-    AWAITING_LINK = "awaiting_link", "Awaiting link"
-    PENDING = "pending", "Pending"
-    LINKED = "linked", "Linked"
+    NOT_APPLICABLE = "not_applicable", "Not needed"
+    AWAITING_LINK = "awaiting_link", "Waiting to connect"
+    PENDING = "pending", "In progress"
+    LINKED = "linked", "Connected"
     FAILED = "failed", "Failed"
 
 
@@ -210,18 +210,18 @@ class SyncFailure(models.TextChoices):
     classes (``payments.errors``), plus the one local refusal the sync can meet.
     """
 
-    PROVIDER_ERROR = "ProviderError", "Provider error"
-    VALIDATION_FAILED = "ValidationFailed", "Refused before sending"
-    NOT_PERMITTED_HERE = "ProviderNotPermittedHere", "Not permitted from this process"
-    FEATURE_DISABLED = "FeatureDisabled", "Feature disabled"
-    CIRCUIT_OPEN = "CircuitOpen", "Calls paused after repeated failures"
-    FAILURE_BUDGET_EXHAUSTED = "FailureBudgetExhausted", "Failure budget exhausted"
-    RATE_LIMIT_WAIT_EXCEEDED = "RateLimitWaitExceeded", "Rate limit wait exceeded"
-    PROVIDER_REJECTED = "ProviderRejected", "Rejected by the provider"
-    PROVIDER_UNAVAILABLE = "ProviderUnavailable", "Provider unavailable"
-    TRANSPORT_ERROR = "TransportError", "Provider unreachable"
-    IDENTITY_MISMATCH = "IdentityMismatch", "Wrong merchant"
-    ALREADY_LINKED_ELSEWHERE = "AlreadyLinkedElsewhere", "Linked to another operator"
+    PROVIDER_ERROR = "ProviderError", "Error"
+    VALIDATION_FAILED = "ValidationFailed", "Not sent"
+    NOT_PERMITTED_HERE = "ProviderNotPermittedHere", "Not allowed here"
+    FEATURE_DISABLED = "FeatureDisabled", "Turned off"
+    CIRCUIT_OPEN = "CircuitOpen", "Paused after repeated errors"
+    FAILURE_BUDGET_EXHAUSTED = "FailureBudgetExhausted", "Too many errors today"
+    RATE_LIMIT_WAIT_EXCEEDED = "RateLimitWaitExceeded", "Busy, try later"
+    PROVIDER_REJECTED = "ProviderRejected", "Rejected"
+    PROVIDER_UNAVAILABLE = "ProviderUnavailable", "Unavailable"
+    TRANSPORT_ERROR = "TransportError", "Could not be reached"
+    IDENTITY_MISMATCH = "IdentityMismatch", "Wrong account"
+    ALREADY_LINKED_ELSEWHERE = "AlreadyLinkedElsewhere", "Connected to another operator"
 
 
 #: E.164: a plus sign, a country code that does not start with 0, at most 15 digits in all
@@ -332,14 +332,6 @@ class Operator(GuardedModel):
             self.email = self.email.strip().lower() or None
         super().save(*args, **kwargs)
 
-    def get_sync_status_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(SyncStatus, self.sync_status)
-
-    def get_sync_failure_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(SyncFailure, self.sync_failure)
-
 
 class StoreStatus(models.TextChoices):
     PROSPECTIVE = "prospective", "Prospective"
@@ -399,7 +391,7 @@ class ReviewReason(models.TextChoices):
 
 
 class PaymentChannel(models.TextChoices):
-    PROVIDER_ACH = "stax", "ACH debit through the payment provider"
+    PROVIDER_ACH = "stax", "Bank debit"
     WIRE = "wire", "Wire"
     ZELLE = "zelle", "Zelle"
     UNKNOWN = "unknown", "Unknown"
@@ -459,15 +451,11 @@ class Lease(GuardedModel):
     def __str__(self) -> str:
         return f"Lease {self.pk}"
 
-    def get_payment_channel_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(PaymentChannel, self.payment_channel)
-
 
 class RentSource(models.TextChoices):
-    SHEET_CURRENT = "sheet_current", "Sheet, current rent"
-    SHEET_INFERRED = "sheet_inferred", "Sheet, inferred"
-    STAFF = "staff", "Staff"
+    SHEET_CURRENT = "sheet_current", "From the spreadsheet"
+    SHEET_INFERRED = "sheet_inferred", "From the spreadsheet (inferred)"
+    STAFF = "staff", "Entered by staff"
 
 
 class LeaseRentHistory(GuardedModel):
@@ -497,10 +485,6 @@ class LeaseRentHistory(GuardedModel):
             _valid_choice("lease_rent_history", "source", RentSource),
         ]
 
-    def get_source_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(RentSource, self.source)
-
 
 class ScheduleKind(models.TextChoices):
     RENT = "rent", "Rent"
@@ -508,11 +492,11 @@ class ScheduleKind(models.TextChoices):
 
 
 class ScheduleState(models.TextChoices):
-    NONE = "none", "Not created"
-    ACTIVE = "active", "Active"
+    NONE = "none", "Not set up"
+    ACTIVE = "active", "On"
     PAUSED = "paused", "Paused"
     FAILED = "failed", "Failed"
-    ENDED = "ended", "Ended"
+    ENDED = "ended", "Off"
 
 
 class CollectionSchedule(GuardedModel):
@@ -546,10 +530,6 @@ class CollectionSchedule(GuardedModel):
             _valid_choice("collection_schedules", "kind", ScheduleKind),
             _valid_choice("collection_schedules", "state", ScheduleState),
         ]
-
-    def get_state_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(ScheduleState, self.state)
 
 
 # --- Charges -----------------------------------------------------------------------
@@ -885,7 +865,7 @@ class OneOffCategory(models.TextChoices):
     #: The re-collection of a returned debit (PLAN-011b D5); ``source_payment`` names it.
     REDEBIT = "redebit", "Re-debit"
     #: The fee for a returned debit, made with its re-debit (``companion_of``).
-    NSF_FEE = "nsf_fee", "NSF fee"
+    NSF_FEE = "nsf_fee", "Returned payment (NSF) fee"
     #: One installment of a plan (PLAN-012e D9); ``plan`` and ``installment_no`` name it.
     INSTALLMENT = "installment", "Installment"
 
@@ -896,7 +876,7 @@ class CollectionMethod(models.TextChoices):
 
     NONE = "none", "None"
     AUTOPAY_DUE = "autopay_due", "Autopay on the due date"
-    EMAIL = "email", "Send by email"
+    EMAIL = "email", "Send by e-mail"
     MANUAL = "manual", "Manual payment"
     CHARGE_NOW = "charge_now", "Charge now"
 
@@ -1118,14 +1098,6 @@ class OneOffCharge(GuardedModel):
             return self.description
         return self.fee_type.name if self.fee_type is not None else ""
 
-    def get_category_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(OneOffCategory, self.category)
-
-    def get_collection_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(CollectionMethod, self.collection)
-
 
 # --- Installment plans (PLAN-012e D9 to D11) ----------------------------------------
 
@@ -1158,7 +1130,7 @@ class InstallmentCollection(models.TextChoices):
     """How each installment is collected: as its parent was (D9)."""
 
     AUTOPAY_DUE = "autopay_due", "Autopay on the due date"
-    EMAIL = "email", "Send by email"
+    EMAIL = "email", "Send by e-mail"
     MANUAL = "manual", "Manual payment"
 
 
@@ -1248,10 +1220,6 @@ class InstallmentPlan(GuardedModel):
         if self.one_off_charge is None:
             raise ValueError("An installment plan has a parent.")
         return self.one_off_charge
-
-    def get_collection_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(InstallmentCollection, self.collection)
 
 
 # --- Store costs (PLAN-010b D8) ------------------------------------------------------
@@ -1692,7 +1660,7 @@ MANUAL_PAYMENT_METHODS: list[str] = ["zelle", "wire", "other"]
 
 
 class PaymentMethod(models.TextChoices):
-    ACH = "ach", "ACH"
+    ACH = "ach", "Bank debit (ACH)"
     ZELLE = "zelle", "Zelle"
     WIRE = "wire", "Wire"
     OTHER = "other", "Other"
@@ -1705,7 +1673,7 @@ class MoneyMethod(models.TextChoices):
     """The methods money moves by: :class:`PaymentMethod` without ``credit`` (a deposit
     resolution's method, PLAN-010b D7)."""
 
-    ACH = "ach", "ACH"
+    ACH = "ach", "Bank debit (ACH)"
     ZELLE = "zelle", "Zelle"
     WIRE = "wire", "Wire"
     OTHER = "other", "Other"
@@ -1767,10 +1735,6 @@ class LeaseCredit(GuardedModel):
 
     def __str__(self) -> str:
         return f"Lease credit {self.pk}"
-
-    def get_method_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(MoneyMethod, self.method)
 
 
 class Payment(GuardedModel):
@@ -1923,10 +1887,6 @@ class Payment(GuardedModel):
             _valid_choice("payments", "status", PaymentStatus),
         ]
 
-    def get_method_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(PaymentMethod, self.method)
-
 
 # --- Deposit resolution (PLAN-010b D7) ---------------------------------------------
 
@@ -2003,10 +1963,6 @@ class DepositResolution(GuardedModel):
             _valid_choice("deposit_resolutions", "kind", DepositResolutionKind),
             _valid_choice("deposit_resolutions", "method", MoneyMethod, blank=True),
         ]
-
-    def get_method_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(MoneyMethod, self.method)
 
 
 # --- Documents (PLAN-010c D4) --------------------------------------------------------
@@ -2205,7 +2161,7 @@ class Dispute(GuardedModel):
 
 
 class DisputeEvidenceStatus(models.TextChoices):
-    QUEUED = "queued", "Queued"
+    QUEUED = "queued", "Waiting"
     SENT = "sent", "Sent"
     FAILED = "failed", "Failed"
 
@@ -2244,10 +2200,6 @@ class DisputeEvidence(GuardedModel):
 
     def __str__(self) -> str:
         return self.name
-
-    def get_status_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(DisputeEvidenceStatus, self.status)
 
 
 # --- Collections ladder and outbound e-mail (PLAN-011b D4) ---------------------------
@@ -2338,11 +2290,11 @@ class CollectionStep(GuardedModel):
 class MessageStatus(models.TextChoices):
     """What became of an outbound message (PLAN-011b D4); a closed list."""
 
-    QUEUED = "queued", "Queued"
+    QUEUED = "queued", "Waiting"
     SENT = "sent", "Sent"
     FAILED = "failed", "Failed"
     SUPPRESSED = "suppressed", "Suppressed"
-    CATCH_ALL = "catch_all", "Sent to the catch-all address"
+    CATCH_ALL = "catch_all", "Sent to the test inbox"
 
 
 class ChargeEntityType(models.TextChoices):
@@ -2469,10 +2421,6 @@ class OutboundMessage(GuardedModel):
                 name="outbound_messages_one_final_statement",
             ),
         ]
-
-    def get_status_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(MessageStatus, self.status)
 
 
 # --- Contact log and calendar (PLAN-011b D7, D8) ------------------------------------
@@ -2934,10 +2882,6 @@ class LeaseTransfer(GuardedModel):
 
     def __str__(self) -> str:
         return f"Lease transfer {self.pk}"
-
-    def get_incoming_channel_display(self) -> str:
-        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
-        return wording.label(PaymentChannel, self.incoming_channel)
 
 
 # --- Audit and import --------------------------------------------------------------

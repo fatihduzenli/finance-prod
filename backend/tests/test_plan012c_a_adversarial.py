@@ -171,7 +171,7 @@ def test_the_partial_flag_sits_only_on_the_paying_line_and_the_other_still_shows
     assert f"/one-off-charges/{late_fee.pk}/payments/new/" in page
     assert "link-invoice" not in page and "Link invoice" not in page
     admin_page = client_for(Role.ADMIN)[0].get(f"/one-off-charges/{late_fee.pk}/").content.decode()
-    assert service.WAIVE_LIVE_INVOICE in admin_page
+    assert str(service.WAIVE_LIVE_INVOICE) in admin_page  # a lazy sentence since PLAN-012c D9
 
 
 # --- the check command never writes ---------------------------------------------------------

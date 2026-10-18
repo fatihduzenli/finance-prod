@@ -29,7 +29,7 @@
           <td>{{ event.event_type }}</td>
           <td>{{ event.get_event_source_display }}</td>
           <td>{{ object_id|default:"—" }}</td>
-          <td>{{ event.get_outcome_display|default:"—" }}</td>
+          <td>{{ event.outcome_words|default:"—" }}</td>
           <td>{{ event.attempts }}</td>
           <td>{{ event.duplicate_count }}</td>
         </tr>

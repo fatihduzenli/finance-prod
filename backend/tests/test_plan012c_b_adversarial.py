@@ -217,7 +217,7 @@ def test_the_closing_entry_names_the_promise_for_viewers_too_and_its_link_stays_
         actor=None,
     )
     assert outcome.ok and outcome.entry is not None, outcome.message
-    sentence = "Closed $2000.00 by 2026-10-01 as Broken"
+    sentence = "Closed $2,000.00 by 2026-10-01 as Broken"  # PLAN-012c §4.8 money
     viewer, _ = client_for(Role.VIEWER)
     for path in (
         f"/operators/{operator.pk}/",

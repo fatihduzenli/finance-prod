@@ -51,7 +51,6 @@ from django.db import transaction
 from django.db.models import Sum
 
 import payments
-from ledger import wording
 from ledger.models import (
     ZERO,
     AuditLog,
@@ -458,7 +457,7 @@ def _failed(
         before,
         {**before, **context, "failure": failure, "fields": fields},
     )
-    message = CALL_FAILED.format(verb=verb, failure=wording.label(SyncFailure, failure))
+    message = CALL_FAILED.format(verb=verb, failure=SyncFailure(failure).label)
     if isinstance(error, ProviderUnavailable):
         message += OUTCOME_UNKNOWN.format(noun=noun)
     return Outcome(False, message)

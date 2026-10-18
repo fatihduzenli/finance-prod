@@ -74,7 +74,6 @@ from decimal import Decimal
 from django.db.models import Exists, F, Max, OuterRef, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce
 
-from ledger import wording
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -310,7 +309,7 @@ def _one_off_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
         charges = charges.filter(
             Q(operator=operator) | Q(operator__isnull=True, lease__operator=operator)
         )
-    categories = dict(wording.choices(OneOffCategory))
+    categories = dict(OneOffCategory.choices)
     rows = charges.values(
         "pk",
         "due_date",
@@ -600,7 +599,7 @@ class ArrearsRow:
 
     @property
     def channel_labels(self) -> list[str]:
-        labels = dict(wording.choices(PaymentChannel))
+        labels = dict(PaymentChannel.choices)
         return [str(labels.get(channel, channel)) for channel in sorted(self.channels)]
 
 

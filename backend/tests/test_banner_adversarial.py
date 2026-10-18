@@ -10,7 +10,7 @@ from django.conf import settings as dj_settings
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.test import Client, override_settings
 
-BANNER_TEXT = "SANDBOX — NO REAL MONEY"
+BANNER_TEXT = "SANDBOX — test system, no real money"  # PLAN-012c §4.1 wording
 
 
 @pytest.mark.django_db

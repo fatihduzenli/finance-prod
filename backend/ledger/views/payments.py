@@ -33,7 +33,6 @@ from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
-from ledger import wording
 from ledger.forms import RefundForm, VoidForm
 from ledger.models import AuditLog, Operator, Payment, PaymentMethod, Store
 from ledger.services import one_off_charges, refunds
@@ -71,7 +70,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
             "selected": selected,
             "query": query,
             "date_by_choices": ledger.DATE_BY_CHOICES,
-            "method_choices": wording.choices(PaymentMethod),
+            "method_choices": PaymentMethod.choices,
             "status_choices": ledger.STATUS_CHOICES,
             "operators": Operator.objects.order_by(Lower("display_name"), "id"),
             "stores": Store.objects.order_by("external_label", "id"),

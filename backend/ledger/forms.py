@@ -18,7 +18,6 @@ from django import forms
 from django.core.validators import RegexValidator
 from django.db.models import Q
 
-from ledger import wording
 from ledger.models import (
     CALENDAR_TITLE_MAX_LENGTH,
     CONSENT_FIELDS,
@@ -186,14 +185,6 @@ def _twice_monthly(second_debit_day: forms.BoundField) -> bool:
     return bool(str(second_debit_day.value() or "").strip()) or bool(second_debit_day.errors)
 
 
-def _channel_choices(found: Iterable[tuple[Any, Any]]) -> list[tuple[Any, Any]]:
-    """A payment channel list with the on-screen labels (copy list §4.5); a blank choice
-    keeps its text."""
-    return [
-        (value, wording.label(PaymentChannel, value) if value else text) for value, text in found
-    ]
-
-
 class LeaseForm(_LeaseFormBase):
     """Create and edit a lease. Rent is a separate field: a change writes history (D5)."""
 
@@ -259,9 +250,6 @@ class LeaseForm(_LeaseFormBase):
             ).order_by("display_name", "id")
         if not self.instance.pk:
             del self.fields["rent_effective_from"]
-        channel = self.fields["payment_channel"]
-        if isinstance(channel, forms.ChoiceField):
-            channel.choices = _channel_choices(channel.choices)
 
     def twice_monthly(self) -> bool:
         """Whether the page's "Debited twice a month" tick starts ticked (PLAN-012c D8)."""
@@ -1490,14 +1478,12 @@ class TransferIncomingForm(forms.Form):
     )
     payment_channel = forms.ChoiceField(
         label="Payment channel",
-        choices=lambda: _channel_choices(
-            [("", "—")]
-            + [
-                (value, label)
-                for value, label in PaymentChannel.choices
-                if value != PaymentChannel.UNKNOWN
-            ]
-        ),
+        choices=[("", "—")]
+        + [
+            (value, label)
+            for value, label in PaymentChannel.choices
+            if value != PaymentChannel.UNKNOWN
+        ],
         help_text="How the incoming operator pays the rent.",
     )
     prorate_first_month = forms.BooleanField(
