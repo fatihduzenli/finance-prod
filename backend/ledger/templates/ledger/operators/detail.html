@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load components responsive %}
 {% load static %}
 {% load tz %}
 {% block title %}{{ operator.display_name }}{% endblock %}
@@ -36,7 +36,7 @@
   <h2>{{ company.provider_name }}</h2>
   {% include "ledger/_job_status.html" %}
   <dl>
-    <dt>Connection to {{ company.provider_name }}</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</dd>
+    <dt>Connection to {{ company.provider_name }}</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} {% status_badge "Needs review" %}{% endif %}</dd>
     {% if failure_message %}
       <dt>Last failure</dt>
       <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.get_sync_failure_display }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|date:"Y-m-d H:i" }}{% endif %}</span>{% if failure_fields %}<br><span id="sync-failure-fields">Fields {{ company.provider_name }} rejected: {{ failure_fields }}</span>{% endif %}</dd>

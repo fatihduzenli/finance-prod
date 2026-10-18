@@ -72,7 +72,7 @@
           <td>{{ item.lease.get_payment_channel_display }}</td>
           <td class="money">{{ item.amount|money }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}{% if item.over_limit %} <strong class="over-limit">exceeds confirmed limit</strong>{% endif %}</td>
           <td class="money carried-balance">{% if item.carried_balance %}{{ item.carried_balance|money }}{% else %}<span class="muted">$0.00</span>{% endif %}</td>
-          <td>{% if item.charge %}<a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{% status_badge item.charge.get_status_display item.charge.status %}</a>{% if item.charge.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}{% else %}<span class="muted">Not created</span>{% endif %}</td>
+          <td>{% if item.charge %}<a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{% status_badge item.charge.get_status_display item.charge.status %}</a>{% if item.charge.needs_review %} {% status_badge "Needs review" %}{% endif %}{% else %}<span class="muted">Not created</span>{% endif %}</td>
           <td>{% if item.last_month %}<a href="{% url 'ledger:charges:detail' pk=item.last_month.pk %}">{{ item.last_month.get_status_display }}</a>, balance {{ item.last_month.balance|money }}{% else %}<span class="muted">No charge</span>{% endif %}</td>
         </tr>
       {% empty %}

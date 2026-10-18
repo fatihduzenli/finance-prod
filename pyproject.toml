@@ -78,5 +78,6 @@ addopts = "-ra --strict-markers"
 markers = [
     "e2e: end-to-end browser test; needs chromium (uv run playwright install chromium)",
     "sandbox: real call to the Stax sandbox; deselected unless -m names it, skipped without STAX_SANDBOX_TESTS=1",
+    "visual: visual regression screenshots (backend/tests/visual); deselected unless -m names it, skipped without chromium",
 ]
 filterwarnings = ["error"]

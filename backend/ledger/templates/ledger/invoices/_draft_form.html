@@ -4,7 +4,8 @@ items; a Rent line shows its lease and month selects, filled from the rent-amoun
 script). Without script the form shows its rows, every field, a Save box and a Remove box per row;
 ledger/invoice_lines.js adds rows, removes a row with its trash button (DELETE set, the row hidden),
 numbers the visible rows, keeps the total live, shows the Save box only on a typed item and the
-lease and month only on a Rent line.{% endcomment %}
+lease and month only on a Rent line. Each control has a visually hidden label naming its line and
+column (_line_label.html).{% endcomment %}
 {% load responsive money %}
 {% if errors %}<ul class="errorlist" id="draft-errors">{% for error in errors %}<li>{{ error.text }}{% if error.url %}<a href="{{ error.url }}" class="draft-link">{{ error.number }}</a>{{ error.after }}{% endif %}</li>{% endfor %}</ul>{% endif %}
 {{ form.creation_key }}
@@ -30,14 +31,14 @@ lease and month only on a Rent line.{% endcomment %}
     {% for row in line_rows %}
       <tr class="draft-line"{% if row.removed %} hidden{% endif %}>
         <td class="line-number">{{ row.number|default_if_none:"" }}</td>
-        <td class="line-item">{{ row.form.item }}{{ row.form.existing_charge }}<span class="muted rent-text"></span></td>
-        <td class="rent-field">{{ row.form.rent_lease }}</td>
-        <td class="rent-field">{{ row.form.rent_month }}</td>
-        <td>{{ row.form.description }}</td>
-        <td>{{ row.form.quantity }}</td>
-        <td>{{ row.form.unit_amount }}</td>
-        <td class="save-item">{{ row.form.save_item }}</td>
-        <td class="line-remove"><span class="no-js-remove">{{ row.form.DELETE }}</span><button class="btn line-trash js-only" type="button" aria-label="Remove line" title="Remove line" hidden><svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M6 1h4l1 1h3v2H2V2h3l1-1zM3 5h10l-1 10H4L3 5zm3 2v6h1V7H6zm3 0v6h1V7H9z"/></svg></button></td>
+        <td class="line-item">{% include "ledger/invoices/_line_label.html" with field=row.form.item column="item" %}{{ row.form.item }}{{ row.form.existing_charge }}<span class="muted rent-text"></span></td>
+        <td class="rent-field">{% include "ledger/invoices/_line_label.html" with field=row.form.rent_lease column="rent lease" %}{{ row.form.rent_lease }}</td>
+        <td class="rent-field">{% include "ledger/invoices/_line_label.html" with field=row.form.rent_month column="rent month" %}{{ row.form.rent_month }}</td>
+        <td>{% include "ledger/invoices/_line_label.html" with field=row.form.description column="description" %}{{ row.form.description }}</td>
+        <td>{% include "ledger/invoices/_line_label.html" with field=row.form.quantity column="quantity" %}{{ row.form.quantity }}</td>
+        <td>{% include "ledger/invoices/_line_label.html" with field=row.form.unit_amount column="unit amount" %}{{ row.form.unit_amount }}</td>
+        <td class="save-item">{% include "ledger/invoices/_line_label.html" with field=row.form.save_item column="save as catalogue item" %}{{ row.form.save_item }}</td>
+        <td class="line-remove"><span class="no-js-remove">{% include "ledger/invoices/_line_label.html" with field=row.form.DELETE column="remove" %}{{ row.form.DELETE }}</span><button class="btn line-trash js-only" type="button" aria-label="Remove line" title="Remove line" hidden><svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M6 1h4l1 1h3v2H2V2h3l1-1zM3 5h10l-1 10H4L3 5zm3 2v6h1V7H6zm3 0v6h1V7H9z"/></svg></button></td>
       </tr>
     {% endfor %}
   </tbody>

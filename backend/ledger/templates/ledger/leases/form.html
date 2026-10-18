@@ -24,10 +24,10 @@
           {% for row in form.setup_rows %}
             <tr id="setup-{{ row.fee_type.code }}">
               <td><label for="{{ row.price.id_for_label }}">{{ row.fee_type.name }}</label>{% if row.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}</td>
-              <td>{{ row.cost.errors }}{{ row.cost }}</td>
+              <td>{{ row.cost.errors }}<label class="visually-hidden" for="{{ row.cost.id_for_label }}">{{ row.fee_type.name }}, cost</label>{{ row.cost }}</td>
               <td>{{ row.price.errors }}{{ row.price }}</td>
-              <td>{{ row.vendor.errors }}{{ row.vendor }}</td>
-              <td>{{ row.due_date.errors }}{{ row.due_date }}</td>
+              <td>{{ row.vendor.errors }}<label class="visually-hidden" for="{{ row.vendor.id_for_label }}">{{ row.fee_type.name }}, vendor</label>{{ row.vendor }}</td>
+              <td>{{ row.due_date.errors }}<label class="visually-hidden" for="{{ row.due_date.id_for_label }}">{{ row.fee_type.name }}, due date</label>{{ row.due_date }}</td>
             </tr>
           {% empty %}
             <tr><td colspan="5" class="muted empty">No item is shown in the setup checklist.</td></tr>

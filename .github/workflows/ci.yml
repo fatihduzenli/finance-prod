@@ -118,10 +118,73 @@ jobs:
       - name: Secret scan of browser-served assets
         run: bash scripts/check-no-secrets.sh
 
+  visual:
+    # PLAN-012c D10: the ten pages at two widths against the committed baselines
+    # (backend/tests/visual/baseline/). The job runs inside the Playwright image of the
+    # installed Playwright version, the same image Fable generates the baselines in, so the
+    # fonts and the Chromium build match pixel for pixel. A difference fails the job and the
+    # diff images are kept as an artifact for review.
+    name: Visual regression
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.63.0-noble
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: finance_ci
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd "pg_isready --username postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      APP_ENV: local
+      STAX_ENV: sandbox
+      STAX_API_BASE_URL: https://apiprod.fattlabs.com
+      APP_BASE_URL: http://localhost:8000
+      # Inside a job container the service is reached by its name.
+      DATABASE_URL: postgresql://postgres@postgres:5432/finance_ci
+      DJANGO_SECRET_KEY: ci-only-not-secret
+      STAX_API_KEY: FAKE-CI-KEY-XYZ123
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        run: uv sync --all-groups
+
+      - name: Compare the pages with the baselines
+        run: uv run pytest backend/tests/visual -m visual -q -o faulthandler_timeout=300
+
+      - name: Keep the diff images
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diffs
+          path: backend/tests/visual/out/
+          if-no-files-found: ignore
+
   deploy-staging:
     name: Deploy staging
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: test
+    needs: [test, visual]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: staging

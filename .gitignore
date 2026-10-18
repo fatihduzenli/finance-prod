@@ -1,0 +1,63 @@
+# Secrets and local config — never commit (root CLAUDE.md §5)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+credentials
+credentials.*
+service-account*.json
+*.tfvars
+*.tfstate
+*.tfstate.*
+.netrc
+.npmrc
+.pypirc
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+# The visual suite's failure images (PLAN-012c D10); the baselines are committed
+backend/tests/visual/out/
+coverage.xml
+htmlcov/
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+local_settings.py
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs and dumps — may contain Stax response bodies
+*.log
+*.dump
+*.sql
+!backend/**/migrations/*.sql
+
+# Personal data inputs (Stax customer export etc.) — never commit
+docs/inputs/private/

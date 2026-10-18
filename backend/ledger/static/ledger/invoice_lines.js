@@ -13,9 +13,10 @@
 // - the Save box shows only on a typed item that is not on the list (case and surrounding
 //   spaces ignored); the server ignores it on a listed name either way;
 // - the trash button ticks the row's Remove box and hides the row; the visible rows are
-//   numbered 1, 2, ... and the invoice total under the table is kept live;
+//   numbered 1, 2, ... (each control's hidden label says its line: "Line 2, quantity",
+//   "Removed line, quantity") and the invoice total under the table is kept live;
 // - "Add line" copies the last row, blank, under the next index of the management form
-//   (at most its MAX_NUM_FORMS).
+//   (at most its MAX_NUM_FORMS), its labels' for renamed with its controls' ids.
 // Nothing is sent from here but the read of the rent amount.
 (function () {
   "use strict";
@@ -58,6 +59,12 @@
     return Array.prototype.slice.call(body.querySelectorAll("tr.draft-line"));
   }
 
+  function name(row, text) {
+    row.querySelectorAll(".line-name").forEach(function (span) {
+      span.textContent = text;
+    });
+  }
+
   function refresh() {
     var number = 0;
     var sum = 0;
@@ -67,12 +74,14 @@
         if (cell) {
           cell.textContent = "";
         }
+        name(row, "Removed line");
         return;
       }
       number += 1;
       if (cell) {
         cell.textContent = String(number);
       }
+      name(row, "Line " + number);
       var unit = cents((row.querySelector("input[name$='-unit_amount']") || {}).value);
       var quantityInput = row.querySelector("input[name$='-quantity']");
       var quantity = quantityInput && quantityInput.value.trim() !== "" ? cents(quantityInput.value) : 1;
@@ -225,6 +234,9 @@
         input.value = "";
         input.readOnly = false;
       }
+    });
+    row.querySelectorAll("label[for]").forEach(function (label) {
+      label.setAttribute("for", label.getAttribute("for").replace(/lines-\d+-/, "lines-" + count + "-"));
     });
     var note = row.querySelector(".rent-text");
     if (note) {

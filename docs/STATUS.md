@@ -1476,3 +1476,19 @@ processor carry the name through the sentence around them; the "Returned payment
 label reaches the public statement line; invoice line descriptions sent to Stax carry the dollar
 sign; three admin-page diagnostic codes deferred (QA-012c, Batch D). Batch E (contrast and
 label tests, visual regression baselines and the CI compare) assigned.
+
+## Update, 2026-10-18, PLAN-012c Batch E closed; Step 12c complete locally; checkpoint
+
+Batch E: the accessibility tests (AA contrast of every documented pair, computed by a test; a
+label on every control of every form and 33 rendered pages; the focus ring; status never by
+colour alone), which found and fixed three undocumented colour pairs and 74 table-cell controls
+without a name (now visually-hidden labels naming the row and the column, kept in step by the
+builder's script); the visual regression suite (fifteen pages at 1280 and 390 px, frozen clocks,
+a fixed data set, a 0.5 % budget) with its thirty baselines generated inside the Playwright Linux
+image, and the CI job "Visual regression" in that image, which the staging deploy now waits for.
+Gate: ruff, format, mypy (429 files), lock, migrations clean; sqlite 5,872 passed; PostgreSQL
+28 + 6,494 passed; e2e 12 passed in four runs; the visual suite 34 passed in the image on both
+engines; secret scans clean. One MAJOR in the suite (a connection left open at teardown on
+PostgreSQL) resolved. Repository finding: the project's `.gitignore` was never tracked (the
+owner's global `~/.gitignore` ignores `.gitignore`); force-added in this commit. **Step 12c is
+complete locally: Batches D and E await the owner's checkpoint and a Publish Request.**

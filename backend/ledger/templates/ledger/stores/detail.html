@@ -5,7 +5,7 @@
 {% block title %}Store {{ store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:stores:list' %}">&larr; Stores</a></p>
-  <div class="page-header"><h1>Store {{ store.external_label }}{% if store.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</h1></div>
+  <div class="page-header"><h1>Store {{ store.external_label }}{% if store.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>
   {% if end_in_progress %}
     <ul class="messages" id="lease-end-in-progress">
       <li class="warning" role="status">{% if end_in_progress_transfer %}A transfer is in progress (statement step).{% else %}A lease end is in progress (statement step).{% endif %}{% if can_edit %}
@@ -100,7 +100,7 @@
     <tbody>
       {% for lease in leases %}
         <tr>
-          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if lease.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</td>
+          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
           <td>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</td>
           <td>{{ lease.started_on|date:"Y-m-d"|default:"—" }}</td>
           <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>

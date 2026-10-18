@@ -4,7 +4,7 @@
 {% block title %}{{ charge.label }}{% if lease %} {{ lease.store.external_label }}{% endif %}{% endblock %}
 {% block content %}
   {% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif operator %}<p><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>{% endif %}
-  <div class="page-header"><h1>{{ charge.label }}{% if charge.status == "voided" %} <span class="badge badge-voided" id="voided-badge"><span class="badge-glyph" aria-hidden="true">&#x2715;</span> Voided</span>{% endif %}{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">From the spreadsheet</span>{% endif %}{% if charge.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</h1></div>
+  <div class="page-header"><h1>{{ charge.label }}{% if charge.status == "voided" %} {% status_badge "Voided" %}{% endif %}{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">From the spreadsheet</span>{% endif %}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
 
   {% if charge_now_shown %}

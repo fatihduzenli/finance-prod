@@ -18,7 +18,7 @@
       <thead><tr><th>#</th><th>Kind</th><th>Description</th><th>Amount</th></tr></thead>
       <tbody>
         {% for row in form.rows %}
-          <tr><td class="line-number">{{ row.number }}</td><td>{{ row.kind.errors }}{{ row.kind }}</td><td>{{ row.description.errors }}{{ row.description }}</td><td>{{ row.amount.errors }}{{ row.amount }}</td></tr>
+          <tr><td class="line-number">{{ row.number }}</td><td>{{ row.kind.errors }}<label class="visually-hidden" for="{{ row.kind.id_for_label }}">Deduction {{ row.number }}, kind</label>{{ row.kind }}</td><td>{{ row.description.errors }}<label class="visually-hidden" for="{{ row.description.id_for_label }}">Deduction {{ row.number }}, description</label>{{ row.description }}</td><td>{{ row.amount.errors }}<label class="visually-hidden" for="{{ row.amount.id_for_label }}">Deduction {{ row.number }}, amount</label>{{ row.amount }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load components responsive %}
 {% block title %}Stores{% endblock %}
 {% block content %}
   <div class="page-header"><h1>Stores</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">New store</a></div>{% endif %}</div>
@@ -17,7 +17,7 @@
     <tbody>
       {% for store in page %}
         <tr>
-          <td><a href="{% url 'ledger:stores:detail' pk=store.pk %}">{{ store.external_label }}</a>{% if store.needs_open_date %} <span class="badge">Needs open date</span>{% endif %}{% if store.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</td>
+          <td><a href="{% url 'ledger:stores:detail' pk=store.pk %}">{{ store.external_label }}</a>{% if store.needs_open_date %} <span class="badge">Needs open date</span>{% endif %}{% if store.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
           <td>{{ store.store_number|default_if_none:"—" }}</td>
           <td>{{ store.city }}</td>
           <td>{{ store.state }}</td>
