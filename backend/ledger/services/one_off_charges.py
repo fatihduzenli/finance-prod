@@ -197,6 +197,7 @@ from ledger.services.rent_run import (
     PaymentOutcome,
 )
 from ledger.validators import validate_no_payment_data, visible_text
+from ledger.wording import provider_sentence
 from payments import invoice_sync, jobs, offline_marking
 from payments.models import ExternalRef, Job, JobKind, JobStatus
 
@@ -245,8 +246,8 @@ SAVED = "Charge saved."
 UNCHANGED = "Nothing was changed."
 EDIT_WAIVED = "A waived charge cannot be edited. Nothing was saved."
 EDIT_VOIDED = "A voided charge cannot be edited. Nothing was saved."
-EDIT_ONE_OFF = (
-    "Only a setup charge is edited here: its invoice is at the payment provider. Cancel the "
+EDIT_ONE_OFF = provider_sentence(
+    "Only a setup charge is edited here: its invoice is already in {provider}. Cancel the "
     "charge and create a new one. Nothing was saved."
 )
 PRICE_LOCKED = "The price cannot change once a payment is recorded. Nothing was saved."
@@ -255,57 +256,59 @@ WAIVE_SETTLED = "A charge with a settled payment cannot be waived. Nothing was c
 WAIVE_ALREADY = "This charge is already waived. Nothing was changed."
 WAIVE_VOIDED = "This charge is voided. Nothing was changed."
 WAIVED = "Charge waived."
-#: The sentences of PLAN-011 D0 name the provider as staff know it (``PROVIDER_LABEL``).
-WAIVE_LIVE_INVOICE = (
-    f"This charge has a live {payments.PROVIDER_LABEL} invoice. Cancel it first "
-    f"({payments.PROVIDER_LABEL} deletes the invoice), then waive if anything is still owed."
+#: The sentences of PLAN-011 D0 name the processor as staff know it (the company settings
+#: row's display name, PLAN-012c D9).
+WAIVE_LIVE_INVOICE = provider_sentence(
+    "This charge has an invoice still open in {provider}. Cancel it first ({provider} "
+    "deletes the invoice), then waive if anything is still owed."
 )
 #: What each closing action does, shown beside it on the charge page (PLAN-011 D0).
-CANCEL_MEANING = (
-    f"removes the {payments.PROVIDER_LABEL} invoice and closes the charge, nothing owed"
+CANCEL_MEANING = provider_sentence(
+    "removes the {provider} invoice and closes the charge, nothing owed"
 )
-WAIVE_MEANING = (
-    f"closes a charge that has no {payments.PROVIDER_LABEL} invoice without collecting it"
+WAIVE_MEANING = provider_sentence(
+    "closes a charge that has no {provider} invoice without collecting it"
 )
 #: The dashboard's heading over :func:`waived_with_live_invoice` (D0).
-WAIVED_LIVE_HEADING = f"Waived with a live {payments.PROVIDER_LABEL} invoice"
-#: The line beside "Delete provider invoice" on the charge page (D0).
-DELETE_INVOICE_HINT = (
-    f"This charge is waived but its {payments.PROVIDER_LABEL} invoice is still live. The "
-    "charge stays waived."
+WAIVED_LIVE_HEADING = provider_sentence("Waived with an invoice still open in {provider}")
+#: The line beside the charge page's "Cancel in {provider}" button (D0).
+DELETE_INVOICE_HINT = provider_sentence(
+    "This charge is waived but its invoice is still open in {provider}. The charge stays waived."
 )
 DELETE_INVOICE_NOT_WAIVED = (
     "Only a waived charge's invoice is deleted here; cancel the charge instead. Nothing was "
     "changed."
 )
-DELETE_INVOICE_NONE = (
-    f"This charge has no live {payments.PROVIDER_LABEL} invoice. Nothing was changed."
+DELETE_INVOICE_NONE = provider_sentence(
+    "This charge has no invoice still open in {provider}. Nothing was changed."
 )
-DELETE_INVOICE_SHARED = (
-    f"This {payments.PROVIDER_LABEL} invoice also bills charges that are not waived: cancel "
-    "it from its first line's charge. Nothing was changed."
+DELETE_INVOICE_SHARED = provider_sentence(
+    "This {provider} invoice also bills charges that are not waived: cancel it from its "
+    "first line's charge. Nothing was changed."
 )
-DELETE_INVOICE_REQUESTED = (
-    "Delete requested. The invoice is marked void once the payment provider confirms the "
-    "delete; the charge stays waived."
+DELETE_INVOICE_REQUESTED = provider_sentence(
+    "Cancelling in {provider}. The invoice is void once {provider} confirms; the charge "
+    "stays waived."
 )
-WAIVED_INVOICE_DELETED = "The provider invoice was deleted. The charge stays waived."
+WAIVED_INVOICE_DELETED = provider_sentence(
+    "The invoice was cancelled in {provider}. The charge stays waived."
+)
 RETURNED = "An ACH payment on this charge was returned."
 DISPUTED = "A payment on this charge is disputed."
-TOTAL_MISMATCH = (
-    "The invoice total at the payment provider differs from the price. The price was not changed."
+TOTAL_MISMATCH = provider_sentence(
+    "The invoice total in {provider} differs from the price. The price was not changed."
 )
-SEVERAL_PROVIDER_INVOICES = (
-    "Several invoices at the payment provider could be this charge's. Nothing was created; "
-    "review them on the payment provider's dashboard."
+SEVERAL_PROVIDER_INVOICES = provider_sentence(
+    "Several invoices in {provider} could be this charge's. Nothing was created; review them "
+    "on the {provider} dashboard."
 )
-OTHER_OPERATOR_REFERENCE = (
-    "An invoice at the payment provider names this charge's invoice number but another "
-    "operator's customer. It was not linked."
+OTHER_OPERATOR_REFERENCE = provider_sentence(
+    "An invoice in {provider} names this charge's invoice number but another operator's "
+    "customer. It was not linked."
 )
-SECOND_PROVIDER_INVOICE = (
-    "More than one invoice at the payment provider names this charge. Only the first is "
-    "linked; review the others at the payment provider."
+SECOND_PROVIDER_INVOICE = provider_sentence(
+    "More than one invoice in {provider} names this charge. Only the first is linked; "
+    "review the others in {provider}."
 )
 
 # One-off creation (PLAN-010d D2).
@@ -321,17 +324,17 @@ LEASE_OTHER_OPERATOR = "Choose one of this operator's leases. Nothing was saved.
 NO_OPERATOR = "Choose an operator. Nothing was saved."
 LEASE_NO_OPERATOR = "This lease has no operator: a one-off charge needs one."
 OPERATOR_ARCHIVED = "The operator is archived. Nothing was saved."
-NO_PROVIDER_CUSTOMER = (
-    "The operator has no payment provider customer: only a manual payment is possible."
+NO_PROVIDER_CUSTOMER = provider_sentence(
+    "The operator is not connected to {provider}: only a manual payment is possible."
 )
 NO_BANK_METHOD = "The operator has no linked bank method: this collection is not possible."
 CHARGE_NOW_ADMIN = "Only an admin can choose Charge now."
 CREATED = "Charge created as {number}."
-CREATED_NO_INVOICE = "Charge created. The payment provider schedules the invoice for {date}."
+CREATED_NO_INVOICE = provider_sentence("Charge created. {provider} will debit it on {date}.")
 ALREADY_CREATED = "This charge was already created. Nothing was changed."
-CREATED_MANUAL_LOCAL = (
-    "Charge created as {number}. The operator has no payment provider customer, so no "
-    "invoice is made there; record the payment when it arrives."
+CREATED_MANUAL_LOCAL = provider_sentence(
+    "Charge created as {number}. The operator is not connected to {provider}, so no invoice "
+    "is made there; record the payment when it arrives."
 )
 
 # Cancel (PLAN-010d D6).
@@ -357,11 +360,12 @@ LINK_LINE = (
     "This charge is a later line of a multi-line invoice: it is billed on its first line's "
     "invoice. Nothing was linked."
 )
-CANCEL_BUSY = (
-    "A request to the payment provider is already waiting for this charge. Nothing was changed."
+CANCEL_BUSY = provider_sentence(
+    "A change is still in progress in {provider} for this charge: try again in a minute. "
+    "Nothing was changed."
 )
-CANCEL_REQUESTED = (
-    "Cancel requested. The charge is voided once the payment provider confirms the delete."
+CANCEL_REQUESTED = provider_sentence(
+    "Cancel requested. The charge is voided once {provider} confirms."
 )
 VOIDED = "Charge voided."
 WAIVE_INSTALLMENT = (
@@ -391,9 +395,8 @@ CHARGE_NOW_HAS_PAYMENT = "A payment on this charge is pending or settled. Nothin
 CHARGE_NOW_RETURNED = (
     "A payment on this charge was returned: Charge now does not debit again. Nothing was charged."
 )
-CHARGE_NOW_NOT_LINKED = (
-    "The charge's invoice is not at the payment provider yet. Charge now is possible once it "
-    "is linked."
+CHARGE_NOW_NOT_LINKED = provider_sentence(
+    "The invoice is not in {provider} yet. Charge now works once it is."
 )
 CHARGE_NOW_TOTAL_DIFFERS = (
     "The invoice total differs from the price. Nothing was charged; review the invoice."
@@ -404,8 +407,9 @@ CHARGE_NOW_METHOD_NOT_STORED = (
     "as a usable bank account. Refresh the payment methods on the operator's page first. "
     "Nothing was charged."
 )
-CHARGE_NOW_BUSY = (
-    "A request to the payment provider is already waiting for this charge. Nothing was charged."
+CHARGE_NOW_BUSY = provider_sentence(
+    "A change is still in progress in {provider} for this charge: try again in a minute. "
+    "Nothing was charged."
 )
 CHARGE_NOW_WAIT = "The last attempt failed. Charge now is possible again in {seconds} seconds."
 CHARGE_NOW_ONE_ATTEMPT = "One attempt. If it fails you will see why and can try again later."
@@ -428,7 +432,9 @@ INVOICE_RELEASED_ACTION = "invoice.released_for_installments"
 #: The audit action of a split parent's schedule released at the provider (D3).
 SCHEDULE_RELEASED_ACTION = "one_off_charge.schedule_released_for_installments"
 #: What the charge page says of a released invoice (D5).
-INVOICE_RELEASED = "Invoice {number} was released at the payment provider for the installment plan."
+INVOICE_RELEASED = provider_sentence(
+    "Invoice {number} was cancelled in {provider} for the installment plan."
+)
 #: The ``invoice_create`` job parameter of an invoice builder invoice charged now
 #: (PLAN-012 D6): once the invoice is at the provider, the worker queues the single
 #: ``invoice_pay`` attempt.
@@ -635,7 +641,8 @@ def review_message(charge: OneOffCharge) -> str:
     ):
         if _flagged_by(charge, action):
             parts.append(text)
-    return " ".join(parts)
+    # A sentence naming the processor is lazy (wording.provider_sentence): str() it.
+    return " ".join(str(part) for part in parts)
 
 
 # --- Validation -----------------------------------------------------------------------

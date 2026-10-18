@@ -11,7 +11,7 @@ from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
 
-BANNER_TEXT = "SANDBOX — NO REAL MONEY"
+BANNER_TEXT = "SANDBOX — test system, no real money"
 
 
 def test_password_and_totp_lead_to_admin_index(live_server: LiveServer, page: Page) -> None:

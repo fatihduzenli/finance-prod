@@ -82,6 +82,7 @@ from ledger.models import (
 from ledger.services import insurance
 from ledger.services.rent_run import falls_on
 from ledger.validators import contains_bank_routing_pattern, contains_card_number, visible_text
+from ledger.wording import format_amount
 from mail.base import SUBJECT_MAX_LENGTH, is_address
 from payments import jobs
 from payments.models import Job, JobEntity, JobKind
@@ -746,7 +747,7 @@ def _entry_message(entry: CalendarEntry, address: str) -> mail.Message:
 def _promise_message(promise: ContactEntry, address: str) -> mail.Message:
     operator = promise.operator
     path = reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
-    amount = f"${promise.promised_amount:,.2f}" if promise.promised_amount is not None else ""
+    amount = format_amount(promise.promised_amount) if promise.promised_amount is not None else ""
     text = (
         f"{operator.display_name} promised to pay {amount} by "
         f"{promise.promised_date:%Y-%m-%d}.\n\n{promise.body}\n\n"

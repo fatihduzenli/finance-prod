@@ -2,12 +2,12 @@
 {% block title %}Reports{% endblock %}
 {% block content %}
   <div class="page-header"><h1>Reports</h1></div>
-  <p class="muted">Every report reads stored exact amounts in US dollars and exports CSV with the rows it shows.</p>
+  <p class="muted">Every report reads stored exact amounts in US dollars and downloads as a spreadsheet with the rows it shows.</p>
   <ul id="reports">
-    <li><a href="{% url 'ledger:reports:aging' %}" id="report-aging">A/R aging</a>: open balances by operator and days past due, as of today. Its total is the dashboard's total outstanding.</li>
+    <li><a href="{% url 'ledger:reports:aging' %}" id="report-aging">Unpaid by age</a>: open balances by operator and days past due, as of today. Its total is the dashboard's total outstanding.</li>
     <li><a href="{% url 'ledger:reports:revenue' %}" id="report-revenue">Revenue by month</a>: billed and collected, rent, insurance and other fees; collected by settled month.</li>
     <li><a href="{% url 'ledger:reports:payments_by_method' %}" id="report-payments-by-method">Payments by method</a>: settled payments per month by ACH, Zelle, wire and other.</li>
-    <li><a href="{% url 'ledger:reports:deposits' %}" id="report-deposits">Deposits versus transactions</a>: bank deposits against settled ACH payments, with unmatched items.</li>
+    <li><a href="{% url 'ledger:reports:deposits' %}" id="report-deposits">Bank account check</a>: bank deposits against settled ACH payments, with unmatched items.</li>
     <li><a href="{% url 'ledger:reports:pnl' %}" id="report-pnl">Profit and loss</a>: by store, operator or month, with store costs and margins.</li>
     <li>Customer statement: open an operator from the <a href="{% url 'ledger:operators:list' %}" id="report-statement">operator list</a> and choose <em>Statement</em>.</li>
   </ul>

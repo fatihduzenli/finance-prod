@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load money responsive %}
 {% block title %}Payments by method{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
@@ -20,16 +20,16 @@
       {% for item in report.months %}
         <tr class="method-month" data-month="{{ item.month|date:'Y-m' }}">
           <th scope="row">{{ item.month|date:"Y-m" }}</th>
-          {% for amount in item.ordered %}<td class="money">{{ amount }}</td>{% endfor %}
-          <td class="money month-total">{{ item.total }}</td><td>{{ item.count }}</td>
+          {% for amount in item.ordered %}<td class="money">{{ amount|money }}</td>{% endfor %}
+          <td class="money month-total">{{ item.total|money }}</td><td>{{ item.count }}</td>
         </tr>
       {% endfor %}
     </tbody>
     <tfoot>
       <tr id="method-total">
         <th scope="row">Total</th>
-        {% for amount in report.total.ordered %}<td class="money">{{ amount }}</td>{% endfor %}
-        <td class="money">{{ report.total.total }}</td><td>{{ report.total.count }}</td>
+        {% for amount in report.total.ordered %}<td class="money">{{ amount|money }}</td>{% endfor %}
+        <td class="money">{{ report.total.total|money }}</td><td>{{ report.total.count }}</td>
       </tr>
     </tfoot>
   </table>

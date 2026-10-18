@@ -71,6 +71,7 @@ from ledger.views.operators import (
     export_name,
     role_required,
 )
+from ledger.wording import format_amount
 from payments import jobs
 from payments.models import JobKind
 from payments.provider import mask_identifier
@@ -486,7 +487,7 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
             "notes_info": service.enrolment_notes(lease),
             "debits": debits,
             "any_large": any(item["large"] for item in debits),
-            "threshold": service.format_amount(settings.LARGE_DEBIT_WARNING_AMOUNT),
+            "threshold": format_amount(settings.LARGE_DEBIT_WARNING_AMOUNT),
             "limit_refusal": service.provider_limit_refusal(amounts),
             "confirmation": service.large_debit_confirmation(amounts),
             "choices": choices,

@@ -143,6 +143,7 @@ from ledger.services.leases import (
     schedule_ref,
 )
 from ledger.validators import validate_no_payment_data, visible_text
+from ledger.wording import format_amount, provider_sentence
 from payments import invoice_sync, offline_marking, operator_sync
 from payments.errors import ProviderError
 from payments.health import provider_health
@@ -178,30 +179,29 @@ _STATUS_SKIPS: dict[str, str] = {
 }
 
 MATCH_ALREADY_LINKED = "Already linked to a charge."
-MATCH_OTHER_SCHEDULE = "The invoice does not name this schedule as its source; not linked."
+MATCH_OTHER_SCHEDULE = "The invoice does not come from this autopay; not linked."
 MATCH_NO_DATE = "The invoice date cannot be determined; not linked."
 MATCH_NO_TOTAL = "The invoice has no usable total; not linked."
 MATCH_NO_CHARGE = "No rent charge exists for {period} debit {seq}; create the charges first."
 MATCH_CHARGE_INVOICED = (
     "The charge for {period} debit {seq} already has an invoice; not linked. "
-    "The charge is flagged for review."
+    "The charge is marked Needs review."
 )
 MATCH_NO_OPERATOR = "The lease has no operator; not linked."
 MATCH_OTHER_OPERATOR = "The invoice names another operator's customer; not linked."
 MATCH_LINKED = "Linked to the charge for {period} debit {seq} as {number}."
-MATCH_MISMATCH = (
-    "Linked to the charge for {period} debit {seq} as {number}. The invoice total at the payment "
-    "provider differs from the amount due; collection on this charge stops until staff resolve "
-    "it."
+MATCH_MISMATCH = provider_sentence(
+    "Linked to the charge for {period} debit {seq} as {number}. The invoice total in {provider} "
+    "differs from the amount due; collection on this charge stops until staff resolve it."
 )
-MATCH_FAILED = "The payment provider could not list the invoices of a schedule. Matching stopped."
-TOTAL_MISMATCH = (
-    "The invoice total at the payment provider differs from the amount due. Collection on this "
-    "charge stops until staff resolve it; the amount due was not changed."
+MATCH_FAILED = provider_sentence("{provider} did not answer. The update stopped.")
+TOTAL_MISMATCH = provider_sentence(
+    "The invoice total in {provider} differs from the amount due. Collection on this charge "
+    "stops until staff resolve it; the amount due was not changed."
 )
-SECOND_INVOICE = (
-    "The payment provider generated more than one invoice for this charge. Only the first is "
-    "linked; review the others at the payment provider."
+SECOND_INVOICE = provider_sentence(
+    "{provider} generated more than one invoice for this charge. Only the first is linked; "
+    "review the others in {provider}."
 )
 
 PAY_METHOD = "Choose Zelle, wire or other."
@@ -234,7 +234,7 @@ STAGE_CHECK = "check"
 STAGE_MARK = "mark"
 STAGE_REREAD = "reread"
 
-MARK_DONE = "The invoice at the payment provider is marked paid."
+MARK_DONE = provider_sentence("The invoice is marked paid in {provider}.")
 MARK_RETRY_HINT = " The payment is recorded; retry from the charge page."
 MARK_NOTHING_TO_RETRY = "Nothing to retry on this charge."
 
@@ -248,7 +248,7 @@ LINKED_TOTAL_DIFFERS = "Linked invoice total differs from the balance."
 LINK_CHOOSE = "Choose an unlinked invoice of this charge's operator. Nothing was linked."
 LINK_CHARGE_HAS_INVOICE = "This charge already has an invoice. Nothing was linked."
 LINK_CONFIRM = (
-    "The invoice total differs from the balance: tick the confirmation to link it anyway. "
+    "The invoice total differs from the balance: check the box to link it anyway. "
     "Nothing was linked."
 )
 LINK_NOTE_REQUIRED = (
@@ -258,7 +258,7 @@ LINK_SAME = "This invoice is already linked to this charge. Nothing was changed.
 LINK_DONE = "Invoice {number} linked to this charge."
 LINK_DONE_DIFFERS = (
     "Invoice {number} linked to this charge. Its total differs from the balance; the charge "
-    "is flagged for review."
+    "is marked Needs review."
 )
 
 
@@ -984,7 +984,7 @@ def created_message(report: ChargeRunReport) -> str:
     parts = [
         f"Rent {charge.period_month:%Y-%m}"
         + (f" (debit {charge.seq})" if charge.seq > 1 else "")
-        + f" ${charge.amount_due:,.2f} ({when})"
+        + f" {format_amount(charge.amount_due)} ({when})"
         for charge, when in made[:MESSAGE_LIST_MAX]
     ]
     more = len(made) - MESSAGE_LIST_MAX

@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components %}
+{% load components money %}
 {% load responsive %}
 {% block title %}Payments{% endblock %}
 {% block content %}
@@ -37,7 +37,7 @@
         {% for store in stores %}<option value="{{ store.pk }}"{% if store.pk == selected.store %} selected{% endif %}>{{ store.external_label }}</option>{% endfor %}
       </select>
       <button class="btn" type="submit">Filter</button>
-      <a class="btn" id="export-csv" href="{% url 'ledger:payments:export' %}{% if query %}?{{ query }}{% endif %}">Export CSV</a>
+      <a class="btn" id="export-csv" href="{% url 'ledger:payments:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a>
     </div>
   </form>
 
@@ -47,11 +47,11 @@
     <thead><tr><th>Settled (collected)</th><th>Pending (not collected yet)</th><th>Returned</th><th>Refunded</th><th>Deposits held</th></tr></thead>
     <tbody>
       <tr>
-        <td id="total-settled" class="money">${{ totals.settled }}</td>
-        <td id="total-pending" class="money">${{ totals.pending }}</td>
-        <td id="total-returned" class="money">${{ totals.returned }}</td>
-        <td id="total-refunded" class="money">${{ totals.refunded }}</td>
-        <td id="total-deposits-held" class="money">${{ totals.deposits_held }}</td>
+        <td id="total-settled" class="money">{{ totals.settled|money }}</td>
+        <td id="total-pending" class="money">{{ totals.pending|money }}</td>
+        <td id="total-returned" class="money">{{ totals.returned|money }}</td>
+        <td id="total-refunded" class="money">{{ totals.refunded|money }}</td>
+        <td id="total-deposits-held" class="money">{{ totals.deposits_held|money }}</td>
       </tr>
     </tbody>
   </table>
@@ -72,7 +72,7 @@
           <td>{{ row.store.external_label|default:"—" }}</td>
           <td>{% include "ledger/payments/_charge.html" with payment=row.payment %}</td>
           <td>{{ row.payment.get_method_display }}</td>
-          <td class="money">{% if row.payment.is_refund %}&minus;{% endif %}${{ row.payment.amount }}</td>
+          <td class="money">{% if row.payment.is_refund %}&minus;{% endif %}{{ row.payment.amount|money }}</td>
           <td>{% if row.payment.is_refund %}<span class="badge">Refund</span> {% endif %}{% status_badge row.payment.get_status_display row.payment.status %}</td>
           <td>{{ row.payment.reference|default:"—" }}</td>
           <td>{{ row.transaction|default:"—" }}</td>

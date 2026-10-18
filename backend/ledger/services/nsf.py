@@ -66,6 +66,7 @@ from ledger.models import (
 from ledger.services import leases, numbering, one_off_charges, returns
 from ledger.services.payments_ledger import charge_lease
 from ledger.validators import validate_no_payment_data, visible_text
+from ledger.wording import format_amount, provider_sentence
 from payments import jobs
 from payments.models import Job, JobKind
 
@@ -81,9 +82,9 @@ NOT_RETURNED = returns.RESOLVE_NOT_RETURNED
 ALREADY = returns.RESOLVE_ALREADY
 NO_OPERATOR = "The operator of this payment is unknown. Nothing was changed."
 OPERATOR_ARCHIVED = "The operator is archived. Nothing was changed."
-NO_PROVIDER_CUSTOMER = (
-    "The operator is not linked to the payment provider: nothing can be re-debited or "
-    "invoiced. Nothing was changed."
+NO_PROVIDER_CUSTOMER = provider_sentence(
+    "The operator is not connected to {provider}: nothing can be re-debited or invoiced. "
+    "Nothing was changed."
 )
 FEE_TYPE_MISSING = "The NSF fee types are missing or have no amount. Nothing was changed."
 PAYMENT_DATA = "This text may not contain card or account numbers."
@@ -136,7 +137,7 @@ def fee_type_for(operator: Operator) -> FeeType | None:
 
 
 def _money(amount: Decimal) -> str:
-    return leases.format_amount(amount)
+    return format_amount(amount)
 
 
 def _text_refused(text: str) -> bool:

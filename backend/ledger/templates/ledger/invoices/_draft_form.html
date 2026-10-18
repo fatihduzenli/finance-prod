@@ -5,7 +5,7 @@ script). Without script the form shows its rows, every field, a Save box and a R
 ledger/invoice_lines.js adds rows, removes a row with its trash button (DELETE set, the row hidden),
 numbers the visible rows, keeps the total live, shows the Save box only on a typed item and the
 lease and month only on a Rent line.{% endcomment %}
-{% load responsive %}
+{% load responsive money %}
 {% if errors %}<ul class="errorlist" id="draft-errors">{% for error in errors %}<li>{{ error.text }}{% if error.url %}<a href="{{ error.url }}" class="draft-link">{{ error.number }}</a>{{ error.after }}{% endif %}</li>{% endfor %}</ul>{% endif %}
 {{ form.creation_key }}
 {% if form.lease.is_hidden %}{{ form.lease }}{% else %}
@@ -43,5 +43,5 @@ lease and month only on a Rent line.{% endcomment %}
   </tbody>
 </table>
 {% endresponsive_table %}
-<p class="table-total" id="lines-total">Invoice total: <span id="lines-total-value">${{ lines_total|floatformat:"2g" }}</span></p>
+<p class="table-total" id="lines-total">Invoice total: <span id="lines-total-value">{{ lines_total|money }}</span></p>
 <p class="actions"><button class="btn js-only" type="button" id="add-line" hidden>Add line</button></p>

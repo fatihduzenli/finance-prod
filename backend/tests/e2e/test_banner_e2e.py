@@ -8,7 +8,7 @@ from pytest_django.live_server_helper import LiveServer
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db]
 
-BANNER_TEXT = "SANDBOX — NO REAL MONEY"
+BANNER_TEXT = "SANDBOX — test system, no real money"
 
 
 def test_banner_is_visible_and_cannot_be_dismissed(live_server: LiveServer, page: Page) -> None:

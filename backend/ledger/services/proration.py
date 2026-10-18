@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
+from ledger.wording import format_amount
+
 CENT = Decimal("0.01")
 EN_DASH = "–"
 MONTH_NOT_FIRST = "The month must be given as its first day."
@@ -48,8 +50,8 @@ def last_day(month: date) -> date:
 
 
 def money(amount: Decimal) -> str:
-    """``$1,234.56``."""
-    return f"${amount:,.2f}"
+    """``$1,234.56`` (:func:`ledger.wording.format_amount`)."""
+    return format_amount(amount)
 
 
 def span_text(month: date, first_day: int, last: int) -> str:

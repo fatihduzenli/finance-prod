@@ -26,7 +26,7 @@
     </ul>
   {% endif %}
   <h2>New operator</h2>
-  <p class="muted">With an e-mail address, saving also links or creates the operator's customer at the payment provider, as on the operator form.</p>
+  <p class="muted">With an e-mail address, saving also connects or creates the operator's customer in {{ company.provider_name }}, as on the operator form.</p>
   <form method="post" id="operator-create" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     <input type="hidden" name="action" value="create">

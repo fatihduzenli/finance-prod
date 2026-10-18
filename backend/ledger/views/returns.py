@@ -28,7 +28,6 @@ from ledger.forms import RescheduleReturnForm, ResolveReturnForm
 from ledger.models import NSF_FEE_FIRST, NSF_FEE_LATER, FeeType, Payment
 from ledger.services import csv_export, nsf, returns
 from ledger.services.csv_export import CsvWriter
-from ledger.services.leases import format_amount
 from ledger.views.operators import (
     PAGE_SIZE,
     _actor,
@@ -38,6 +37,7 @@ from ledger.views.operators import (
     role_required,
 )
 from ledger.views.run import _billing_only
+from ledger.wording import format_amount
 
 
 def _fee_label(code: str) -> str:

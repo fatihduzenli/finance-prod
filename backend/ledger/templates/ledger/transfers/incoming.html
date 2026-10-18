@@ -1,14 +1,15 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load money responsive %}
 {% load static %}
 {% block title %}Transfer store {{ store.external_label }}: incoming lease{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
-  <p class="muted" id="step-help">Set the lease of {{ transfer.incoming_operator.display_name }}: it starts the day after the outgoing lease ends ({{ end.ended_on|date:"Y-m-d" }}) or later, so that the store never has two leases on one day. The deposit and the setup items with a price go on one invoice draft for you to review and send; nothing reaches the payment provider until it is sent.</p>
+  <p class="muted" id="step-help">Set the lease of {{ transfer.incoming_operator.display_name }}: it starts the day after the outgoing lease ends ({{ end.ended_on|date:"Y-m-d" }}) or later, so that the store never has two leases on one day. The deposit and the setup items with a price go on one invoice draft for you to review and send; nothing reaches {{ company.provider_name }} until it is sent.</p>
   <form method="post" id="transfer-incoming" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form.lease_fields %}
+      {% if field.name == "second_debit_day" %}{% include "ledger/leases/_twice_monthly.html" %}{% endif %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
     {% comment %}PLAN-012c D8: the setup charges only when the checklist has an item; the deposit field (in the fields above) only when the catalogue offers a deposit.{% endcomment %}
@@ -25,10 +26,10 @@
       </tbody>
     </table>
     {% endresponsive_table %}
-    <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-rows">${{ form.setup_total|floatformat:"2g" }}</span></p>
+    <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-rows">{{ form.setup_total|money }}</span></p>
     {% endif %}
     <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
   </form>
   {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}

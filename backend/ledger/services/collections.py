@@ -64,8 +64,8 @@ from ledger.models import (
     RentChargeStatus,
 )
 from ledger.services import messages, receivables, statement_links
-from ledger.services.leases import format_amount
 from ledger.validators import contains_bank_routing_pattern, contains_card_number, visible_text
+from ledger.wording import format_amount
 from mail.base import SUBJECT_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
@@ -97,15 +97,15 @@ GONE = "The message no longer exists."
 NOT_QUEUED = "Nothing sent: the message is already {status}."
 SENT_TEXT = {
     MessageStatus.SENT: "Sent.",
-    MessageStatus.CATCH_ALL: "Sent to the catch-all address.",
+    MessageStatus.CATCH_ALL: "Sent to the test inbox.",
     MessageStatus.SUPPRESSED: "Not sent: mail is off.",
 }
 SUPPRESSED_TEXT = "Not sent ({cause})."
 FAILED_TEXT = "Failed: {cause}."
 
-HAND_QUEUED = "The e-mail is queued; the log on the operator's page shows when it is sent."
+HAND_QUEUED = "The e-mail will be sent; the log on the operator's page shows when it is sent."
 HAND_NEEDS_CONFIRM = (
-    "This step was already sent for this charge. Tick the confirmation to send it again; "
+    "This step was already sent for this charge. Check the box to send it again; "
     "it is recorded as a manual send."
 )
 HAND_NOT_OVERDUE = "Only an overdue charge with a balance can be chased."

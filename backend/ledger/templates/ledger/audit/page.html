@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
-{% block title %}Audit log{% endblock %}
+{% block title %}Activity log{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Audit log</h1></div>
+  <div class="page-header"><h1>Activity log</h1></div>
   <form method="get" action="{% url 'ledger:audit:page' %}" id="audit-filters" role="search">
     <div class="actions">
       <label for="audit-action" style="margin:0;">Action</label>
@@ -20,7 +20,7 @@
       {% if query.documents_of %}<input type="hidden" name="documents_of" value="{{ query.documents_of.0 }}:{{ query.documents_of.1 }}">{% endif %}
       {% if query.store_of %}<input type="hidden" name="store_of" value="{{ query.store_of }}">{% endif %}
       <button class="btn" type="submit">Show</button>
-      <a class="btn" id="audit-export" href="{% url 'ledger:audit:export' %}?{{ export_query }}">Export CSV</a>
+      <a class="btn" id="audit-export" href="{% url 'ledger:audit:export' %}?{{ export_query }}">Download spreadsheet</a>
     </div>
   </form>
   <p class="muted">Newest first, {{ page_size }} rows a page. Dates are New York calendar days, at most {{ max_days }} days. An action or entity id ending in * matches every value that starts with the text before it. Identifiers are masked; amounts are shown as they were recorded.{% if query.documents_of %} Showing the document activity of one {{ query.documents_of.0 }}.{% endif %}{% if query.store_of %} Showing the rows of one store and its records.{% endif %}</p>
@@ -33,11 +33,10 @@
   {% else %}
   {% responsive_table "scroll" %}
   <table id="audit-rows">
-    <thead><tr><th>Time (UTC)</th><th>Time (New York)</th><th>Action</th><th>User</th><th>Entity</th><th>Before</th><th>After</th></tr></thead>
+    <thead><tr><th>Time</th><th>Action</th><th>User</th><th>Entity</th><th>Before</th><th>After</th></tr></thead>
     <tbody>
       {% for row, link in rows %}
         <tr class="audit-row" id="audit-{{ row.id }}">
-          <td class="audit-utc">{{ row.at_utc }}</td>
           <td class="audit-new-york">{{ row.at_new_york }}</td>
           <td class="audit-action">{{ row.action }}</td>
           <td class="audit-user">{{ row.user|default:"—" }}</td>
@@ -46,7 +45,7 @@
           <td class="audit-after">{% for key, value in row.after %}<div>{% if key %}<strong>{{ key }}</strong>: {% endif %}<span style="white-space:pre-wrap;">{{ value }}</span></div>{% empty %}—{% endfor %}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="7" class="muted empty">No audit rows match.</td></tr>
+        <tr><td colspan="6" class="muted empty">No audit rows match.</td></tr>
       {% endfor %}
     </tbody>
   </table>

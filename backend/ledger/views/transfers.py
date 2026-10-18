@@ -56,6 +56,7 @@ from ledger.views.operators import (
     _role,
     role_required,
 )
+from ledger.wording import format_amount
 from payments import operator_sync
 
 #: (key, label, route) of each step; ``lease_ends`` routes take the lease end's id.
@@ -456,7 +457,7 @@ def confirm(request: HttpRequest, pk: str) -> HttpResponse:
             deposit_type=service.deposit_type(),
             settlement_missing=figures.refund_due > 0 and not end_row.refund_method,
             debt=figures.debt,
-            debt_amount=leases.format_amount(figures.debt),
+            debt_amount=format_amount(figures.debt),
             debt_allowed=_debt_allowed(transfer, figures.debt),
             override_form=TransferDebtOverrideForm(),
         ),

@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load responsive money %}
 {% block title %}Leases{% endblock %}
 {% block content %}
   <div class="page-header"><h1>Leases</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">New lease</a></div>{% endif %}</div>
@@ -10,7 +10,7 @@
       {% for item in operators %}<option value="{{ item.pk }}"{% if item.pk == operator %} selected{% endif %}>{{ item.display_name }}</option>{% endfor %}
     </select>
     <button class="btn" type="submit">Filter</button>
-    <a class="btn" id="export-csv" href="{% url 'ledger:leases:export' %}{% if query %}?{{ query }}{% endif %}">Export CSV</a>
+    <a class="btn" id="export-csv" href="{% url 'ledger:leases:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a>
   </form>
   {% responsive_table %}
   <table>
@@ -22,13 +22,13 @@
         <tr>
           <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">{{ lease.store.external_label }}</a>{% if lease.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}{% if lease.has_charge_note %} <span class="badge note-indicator" title="A charge of this lease has a note">Note</span>{% endif %}</td>
           <td>{{ lease.operator.display_name|default:"—" }}</td>
-          <td class="money">{% with row=lease.rent_now|first %}{% if row %}${{ row.amount }}{% else %}—{% endif %}{% endwith %}</td>
+          <td class="money">{% with row=lease.rent_now|first %}{% if row %}{{ row.amount|money }}{% else %}—{% endif %}{% endwith %}</td>
           <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>
           <td>{{ lease.get_payment_channel_display }}</td>
           <td>{{ lease.get_collection_status_display }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="6" class="muted empty">No leases.{% if can_create %} <a class="btn empty-next" href="{% url 'ledger:leases:create' %}">New lease</a>{% endif %}</td></tr>
+        <tr><td colspan="6" class="muted empty">No lease yet. New lease from the action bar.{% if can_create %} <a class="btn empty-next" href="{% url 'ledger:leases:create' %}">New lease</a>{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>

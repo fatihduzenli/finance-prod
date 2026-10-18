@@ -162,6 +162,7 @@ from ledger.services.one_off_charges import (
 )
 from ledger.services.rent_run import CENT
 from ledger.validators import validate_no_payment_data, visible_text
+from ledger.wording import format_amount, provider_sentence
 from payments import jobs
 from payments.models import Job, JobKind
 
@@ -259,7 +260,7 @@ LINE_RENT_AMOUNT = (
 LINE_EXISTING_INVALID = "Line {line}: a line bills either rent or an existing charge."
 LINE_EXISTING_OTHER = "Line {line}: choose an open charge of this draft's lease."
 LINE_EXISTING_NOT_OPEN = (
-    "Line {line}: {charge} is no longer open (paid, pending, billed, scheduled or on an "
+    "Line {line}: {charge} is no longer open (paid, pending, invoiced, on autopay or on an "
     "installment plan)."
 )
 LINE_EXISTING_QUANTITY = "Line {line}: an existing charge's quantity is 1."
@@ -297,21 +298,19 @@ MEMO_PAYMENT_DATA = one_off_charges.TEXT_PAYMENT_DATA
 DUE_IN_PAST = "The due date cannot be in the past (New York time)."
 LEASE_OTHER_OPERATOR = one_off_charges.LEASE_OTHER_OPERATOR
 OPERATOR_ARCHIVED = one_off_charges.OPERATOR_ARCHIVED
-NO_PROVIDER_CUSTOMER = (
-    "The operator has no payment provider customer: the invoice cannot be sent. Nothing was sent."
+NO_PROVIDER_CUSTOMER = provider_sentence(
+    "The operator is not connected to {provider}: the invoice cannot be sent. Nothing was sent."
 )
 NOT_A_DRAFT = "This invoice is no longer a draft. Nothing was changed."
 ALREADY_SENT = "This draft was already sent as invoice {number}. Nothing was changed."
 ALREADY_CANCELLED = "This draft is cancelled. Nothing was changed."
 CREATED = "Draft {number} saved."
 SAVED = "Draft saved."
-SENT = (
-    "Invoice {number} created. The payment provider e-mails it once it has the invoice; "
-    "this page shows the outcome."
+SENT = provider_sentence(
+    "Invoice {number} created. {provider} e-mails it shortly; this page shows the outcome."
 )
 CHARGE_REQUESTED = (
-    "Invoice {number} created. The single debit is made once the payment provider has the "
-    "invoice; this page shows the outcome."
+    "Invoice {number} created. The debit is made shortly; this page shows the outcome."
 )
 CANCELLED = "Draft cancelled. Nothing was sent."
 DELETED = "Draft {number} deleted. Nothing was sent."
@@ -695,7 +694,7 @@ def _clean_rent_line(index: int, line: LineInput, operator: Operator | None) -> 
         default, text = prorated.amount, prorated.text
     unit = default if line.unit_amount is None else _unit_amount(index, line.unit_amount)
     if existing is not None and unit != default:
-        amount = leases.format_amount(default)
+        amount = format_amount(default)
         raise _line_refusal(index, LINE_RENT_AMOUNT, "unit_amount", amount=amount, **words)
     description = visible_text(line.description or "")
     if len(description) > DESCRIPTION_MAX_LENGTH:
@@ -766,7 +765,7 @@ def charge_label(charge: OneOffCharge) -> str:
 def existing_label(charge: OneOffCharge) -> str:
     """``Existing open charge: Security deposit ($500.00)``, the Item box's text."""
     return EXISTING_LABEL.format(
-        charge=charge_label(charge), balance=leases.format_amount(Decimal(charge.balance))
+        charge=charge_label(charge), balance=format_amount(Decimal(charge.balance))
     )
 
 
@@ -849,7 +848,7 @@ def _clean_existing_line(
             LINE_EXISTING_AMOUNT if unit > balance else LINE_EXISTING_BELOW,
             "unit_amount",
             charge=label,
-            balance=leases.format_amount(balance),
+            balance=format_amount(balance),
         )
     description = visible_text(line.description or "")
     if len(description) > DESCRIPTION_MAX_LENGTH:
@@ -1254,7 +1253,9 @@ def charge_description(line: InvoiceDraftLine | CleanLine) -> str:
     :data:`~ledger.models.DESCRIPTION_MAX_LENGTH`."""
     quantity = Decimal(line.quantity)
     suffix = (
-        "" if quantity == 1 else f" ({format_quantity(quantity)} × {Decimal(line.unit_amount)})"
+        ""
+        if quantity == 1
+        else f" ({format_quantity(quantity)} × {format_amount(Decimal(line.unit_amount))})"
     )
     return line.item[: DESCRIPTION_MAX_LENGTH - len(suffix)].rstrip() + suffix
 
@@ -1555,7 +1556,7 @@ def _rent_charge(
     if refusal:
         raise _line_refusal(position, refusal, "rent_month", **words)
     if charge.amount_due != line.line_total:
-        amount = leases.format_amount(Decimal(charge.amount_due))
+        amount = format_amount(Decimal(charge.amount_due))
         raise _line_refusal(position, LINE_RENT_AMOUNT, "unit_amount", amount=amount, **words)
     return charge
 
@@ -1606,7 +1607,7 @@ def _attach_existing(
             LINE_EXISTING_CHANGED,
             "unit_amount",
             charge=label,
-            balance=leases.format_amount(balance),
+            balance=format_amount(balance),
         )
     before = one_off_charges.charge_state(charge)
     charge.collection = collection

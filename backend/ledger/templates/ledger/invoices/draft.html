@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components %}
+{% load components money %}
 {% load responsive %}
 {% load static %}
 {% block title %}{{ preview.number }}{% endblock %}
@@ -11,7 +11,7 @@
   <dl id="draft-summary">
     <dt>Operator</dt><dd>{{ draft.operator.display_name }}</dd>
     <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
-    <dt>Total</dt><dd id="draft-total">${{ preview.total }}</dd>
+    <dt>Total</dt><dd id="draft-total">{{ preview.total|money }}</dd>
     <dt>Due date</dt><dd id="draft-due">{% if preview.invoice or draft.due_date %}{{ preview.due_date|date:"Y-m-d" }}{% else %}{{ due_days }} days after sending{% endif %}</dd>
   </dl>
   <p class="actions"><a class="btn" href="{% url 'ledger:invoices:preview' pk=draft.pk %}" id="draft-preview">Preview</a> <a class="btn" href="{% url 'ledger:invoices:print' pk=draft.pk %}" id="draft-print">Print view</a></p>
@@ -23,17 +23,17 @@
       <p class="actions"><button class="btn" type="submit" id="save-draft">Save draft</button></p>
     </form>
     <h2>Send</h2>
-    <p class="muted">Send and Charge now use the saved draft: save your changes first. Each line becomes a charge on {% if draft.lease %}the lease of store {{ draft.lease.store.external_label }}{% else %}the operator{% endif %} (an existing open charge's line bills that charge); one invoice with every line goes to the payment provider.</p>
+    <p class="muted">Send and Charge now use the saved draft: save your changes first. Each line becomes a charge on {% if draft.lease %}the lease of store {{ draft.lease.store.external_label }}{% else %}the operator{% endif %} (an existing open charge's line bills that charge); one invoice with every line goes to {{ company.provider_name }}.</p>
     <form method="post" action="{% url 'ledger:invoices:send' pk=draft.pk %}{{ context_query }}" id="send-form" class="js-single-submit">
       {% csrf_token %}
-      <p class="actions"><button class="btn btn-primary" type="submit" id="send-draft">Send ${{ preview.total }} by e-mail</button>{% if can_charge_now %} <a class="btn" href="{% url 'ledger:invoices:charge_now' pk=draft.pk %}" id="draft-charge-now">Charge now</a>{% endif %}</p>
+      <p class="actions"><button class="btn btn-primary" type="submit" id="send-draft">Send {{ preview.total|money }} by e-mail</button>{% if can_charge_now %} <a class="btn" href="{% url 'ledger:invoices:charge_now' pk=draft.pk %}" id="draft-charge-now">Charge now</a>{% endif %}</p>
     </form>
   {% elif first_charge or rent_charges %}
     <h2>Invoice</h2>
     <dl id="sent-invoice">
       <dt>Number</dt><dd id="sent-number">{{ preview.invoice.invoice_number }}</dd>
       <dt>Here</dt><dd id="sent-internal-status">{{ preview.invoice.get_internal_status_display }}</dd>
-      <dt>At the payment provider</dt><dd id="sent-provider-status">{{ preview.invoice.provider_status|default:"not yet" }}</dd>
+      <dt>In {{ company.provider_name }}</dt><dd id="sent-provider-status">{{ preview.invoice.provider_status|default:"not yet" }}</dd>
     </dl>
     {% include "ledger/_job_status.html" %}
     {% responsive_table %}
@@ -41,10 +41,10 @@
       <thead><tr><th>Line</th><th>Charge</th><th>Category</th><th class="money">Amount</th><th class="money">Paid</th><th>Status</th></tr></thead>
       <tbody>
         {% for charge in charges %}
-          <tr class="sent-charge"><td>{{ forloop.counter }}</td><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge.get_category_display }}</td><td class="money">${{ charge.price }}</td><td class="money">${{ charge.amount_paid }}</td><td>{% status_badge charge.get_status_display charge.status %}</td></tr>
+          <tr class="sent-charge"><td>{{ forloop.counter }}</td><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge.get_category_display }}</td><td class="money">{{ charge.price|money }}</td><td class="money">{{ charge.amount_paid|money }}</td><td>{% status_badge charge.get_status_display charge.status %}</td></tr>
         {% endfor %}
         {% for rent in rent_charges %}
-          <tr class="sent-rent-charge"><td>Rent</td><td><a href="{% url 'ledger:charges:detail' pk=rent.pk %}">Rent {{ rent.period_month|date:"F Y" }}, store {{ rent.lease.store.external_label }}</a></td><td>Rent</td><td class="money">${{ rent.amount_due }}</td><td class="money">${{ rent.amount_paid }}</td><td>{% status_badge rent.get_status_display rent.status %}</td></tr>
+          <tr class="sent-rent-charge"><td>Rent</td><td><a href="{% url 'ledger:charges:detail' pk=rent.pk %}">Rent {{ rent.period_month|date:"F Y" }}, store {{ rent.lease.store.external_label }}</a></td><td>Rent</td><td class="money">{{ rent.amount_due|money }}</td><td class="money">{{ rent.amount_paid|money }}</td><td>{% status_badge rent.get_status_display rent.status %}</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -53,7 +53,7 @@
     {% if not first_charge %}
       <p class="muted" id="invoice-rent-alone">This invoice bills rent alone; the rent charge's page shows its payments.</p>
     {% elif charges|length == 1 and not rent_charges %}
-      <p class="actions"><a class="btn" href="{% url 'ledger:one_off_charges:split' pk=first_charge.pk %}" id="invoice-split">Split into installments</a> <span class="muted">{% if invoice_live %}Split into installments from the charge page; the invoice is released at the payment provider when the plan is confirmed.{% else %}from the invoice's charge.{% endif %}</span></p>
+      <p class="actions"><a class="btn" href="{% url 'ledger:one_off_charges:split' pk=first_charge.pk %}" id="invoice-split">Split into installments</a> <span class="muted">{% if invoice_live %}Split into installments from the charge page; the invoice is cancelled in {{ company.provider_name }} when the plan is confirmed.{% else %}from the invoice's charge.{% endif %}</span></p>
     {% else %}
       <p class="muted" id="invoice-split-lines">To pay in installments, split each line from its charge page.</p>
     {% endif %}

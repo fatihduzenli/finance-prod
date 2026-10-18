@@ -93,6 +93,7 @@ from ledger.services import (
     workspace,
 )
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
+from ledger.wording import format_amount
 
 ENTITY = "lease_transfer"
 #: Most operators the search lists.
@@ -136,11 +137,11 @@ NO_DEPOSIT_TYPE = (
     "make the item active."
 )
 SETUP_NOT_OFFERED = "{name} is not in the setup catalogue."
-SETUP_TWICE = "{name} is ticked twice."
+SETUP_TWICE = "{name} appears twice."
 SETUP_PRICE = "{name}: enter a price above zero, in cents, at most {max}."
 INCOMING_SAVED = "Incoming lease saved."
 INCOMING_REQUIRED = "Set the incoming lease first."
-CONFIRM_REQUIRED = "Tick the box to confirm the transfer with these effects."
+CONFIRM_REQUIRED = "Check the box to confirm the transfer with these effects."
 BLOCKED = "The store cannot be transferred yet: {count} item(s) are listed. Nothing was changed."
 OTHER_LEASE = (
     "Another lease of this store is in effect on or after {start}; two leases cannot be in "
@@ -393,7 +394,7 @@ def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list
             # statement step opens (lease_end.open_statement); it blocks once it exists.
             continue
         text = (
-            f"{description}: {leases.format_amount(balance)} is still owed by the outgoing "
+            f"{description}: {format_amount(balance)} is still owed by the outgoing "
             "operator. It must be paid before the store is transferred."
         )
         found.append(lease_end.Blocker(OPEN_BALANCE, text, _balance_url(kind, charge_id, lease)))
@@ -402,7 +403,7 @@ def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list
         found.append(
             lease_end.Blocker(
                 CREDIT_HELD,
-                CREDIT_REMAINS.format(amount=leases.format_amount(held)),
+                CREDIT_REMAINS.format(amount=format_amount(held)),
                 workspace.tab_url(lease.store_id, workspace.TAB_PAYMENTS),
             )
         )
@@ -549,7 +550,7 @@ def _clean_setup(items: Sequence[SetupInput]) -> list[dict[str, str]]:
         seen.add(item.fee_type.pk)
         if not _money(item.price, one_off_charges.AMOUNT_MAX) or item.price <= 0:
             raise _Abort(
-                SETUP_PRICE.format(name=name, max=leases.format_amount(one_off_charges.AMOUNT_MAX)),
+                SETUP_PRICE.format(name=name, max=format_amount(one_off_charges.AMOUNT_MAX)),
                 "setup",
             )
         lines.append({"fee_type": str(item.fee_type.pk), "price": str(item.price)})
@@ -594,7 +595,7 @@ def set_incoming(
                 deposit_amount, one_off_charges.AMOUNT_MAX
             ):
                 raise _Abort(
-                    DEPOSIT_INVALID.format(max=leases.format_amount(one_off_charges.AMOUNT_MAX)),
+                    DEPOSIT_INVALID.format(max=format_amount(one_off_charges.AMOUNT_MAX)),
                     "deposit_amount",
                 )
             if deposit_amount and deposit_type() is None:
@@ -700,7 +701,7 @@ def override_debt(
         return _refused(abort.message, abort.field)
     except LeaseTransfer.DoesNotExist:
         return _refused(GONE)
-    return Outcome(True, DEBT_ALLOWED.format(amount=leases.format_amount(debt)), transfer=row)
+    return Outcome(True, DEBT_ALLOWED.format(amount=format_amount(debt)), transfer=row)
 
 
 # --- Confirm -------------------------------------------------------------------------------
@@ -776,12 +777,10 @@ def confirm(
             debt = debt_of(row, day)
             allowed = row.debt_override_amount
             if debt > 0 and (row.debt_override_at is None or allowed is None):
-                raise _Abort(DEBT_BLOCKS.format(amount=leases.format_amount(debt)))
+                raise _Abort(DEBT_BLOCKS.format(amount=format_amount(debt)))
             if allowed is not None and debt > allowed:
                 raise _Abort(
-                    DEBT_GREW.format(
-                        now=leases.format_amount(debt), allowed=leases.format_amount(allowed)
-                    )
+                    DEBT_GREW.format(now=format_amount(debt), allowed=format_amount(allowed))
                 )
             if _other_lease(row.store, row.outgoing_lease, start):
                 raise _Abort(OTHER_LEASE.format(start=start.isoformat()))

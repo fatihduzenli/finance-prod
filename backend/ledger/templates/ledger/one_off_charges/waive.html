@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load money %}
 {% block title %}Waive {{ charge.label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
@@ -7,7 +8,7 @@
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
   <div class="confirm-what">
   <h3>What will happen</h3>
-  <ul><li>Price ${{ charge.price }}, balance ${{ charge.balance }}. <strong>Waive</strong> {{ waive_meaning }}. A waived charge is no longer owed and cannot be edited or paid here. A charge with a settled payment cannot be waived. Nothing is sent to the payment provider.</li></ul>
+  <ul><li>Price {{ charge.price|money }}, balance {{ charge.balance|money }}. <strong>Waive</strong> {{ waive_meaning }}. A waived charge is no longer owed and cannot be edited or paid here. A charge with a settled payment cannot be waived. Nothing is sent to {{ company.provider_name }}.</li></ul>
   </div>
   {% if refusal %}<p id="waive-refusal"><strong>{{ refusal }}</strong></p>{% endif %}
   <form method="post" id="waive-form" class="js-single-submit" autocomplete="off">

@@ -57,12 +57,15 @@ from ledger.models import (
 )
 from ledger.services import contacts, rent_run
 from ledger.validators import visible_text
+from ledger.wording import provider_sentence
 
 ENTITY_INSURANCE = "insurance_charge"
 PAYMENT_ACTION = "insurance_charge.payment_recorded"
 NOT_UPDATED_ACTION = "insurance_charge.provider_not_updated"
 #: Why a manual payment on an insurance charge with a provider invoice did not mark it.
-NOT_MARKED = "Provider invoice not updated: an insurance invoice is marked paid by hand"
+NOT_MARKED = provider_sentence(
+    "Not marked paid in {provider}: an insurance invoice is marked paid by hand"
+)
 PAY_NEEDS_PREMIUM = "This insurance charge has no premium yet. Nothing was recorded."
 #: The run screen lists insurance due within this many days (owner's algorithm).
 DUE_SOON_DAYS = 7

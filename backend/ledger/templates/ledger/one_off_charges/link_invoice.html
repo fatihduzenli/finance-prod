@@ -1,11 +1,11 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
-{% block title %}Link an invoice{% endblock %}
+{% load responsive money %}
+{% block title %}Attach {{ company.provider_name }} invoice{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
-  <div class="page-header"><h1>Link an invoice</h1></div>
-  <p>Price: <strong id="price">${{ charge.price }}</strong>. Balance: <strong id="balance">${{ charge.balance }}</strong>.</p>
-  <p class="muted">The invoices of this lease's operator that are not linked to any charge, such as a one-off invoice created on the payment provider's dashboard. A charge has at most one invoice, and a link cannot be undone here. When the invoice total differs from the balance, tick the confirmation and say why in the note; the charge is then flagged for review.</p>
+  <div class="page-header"><h1>Attach {{ company.provider_name }} invoice</h1></div>
+  <p>Price: <strong id="price">{{ charge.price|money }}</strong>. Balance: <strong id="balance">{{ charge.balance|money }}</strong>.</p>
+  <p class="muted">The invoices of this lease's operator that are not linked to any charge, such as a one-off invoice created on the {{ company.provider_name }} dashboard. A charge has at most one invoice, and a link cannot be undone here. When the invoice total differs from the balance, check the box and say why in the note; the charge is then marked Needs review.</p>
   {{ form.non_field_errors }}
   {{ form.invoice.errors }}
   {% if has_invoice %}
@@ -17,14 +17,14 @@
       {% csrf_token %}
       {% responsive_table %}
       <table id="unlinked-invoices">
-        <thead><tr><th></th><th>Number</th><th>Provider date</th><th class="money">Total</th><th>Provider status</th><th>Provider ID</th></tr></thead>
+        <thead><tr><th></th><th>Number</th><th>{{ company.provider_name }} date</th><th class="money">Total</th><th>{{ company.provider_name }} status</th><th>{{ company.provider_name }} ID</th></tr></thead>
         <tbody>
           {% for row in rows %}
             <tr>
               <td><input type="radio" name="invoice" value="{{ row.invoice.pk }}" id="invoice-{{ forloop.counter }}"{% if form.invoice.value|stringformat:"s" == row.invoice.pk|stringformat:"s" %} checked{% endif %} required></td>
               <td><label for="invoice-{{ forloop.counter }}">{{ row.invoice.invoice_number }}</label></td>
               <td>{{ row.invoice.issue_date|date:"Y-m-d" }}</td>
-              <td class="money">${{ row.invoice.total }}{% if row.invoice.total != charge.balance %} <span class="badge">Differs from the balance</span>{% endif %}</td>
+              <td class="money">{{ row.invoice.total|money }}{% if row.invoice.total != charge.balance %} <span class="badge">Differs from the balance</span>{% endif %}</td>
               <td>{{ row.invoice.provider_status|default:"—" }}</td>
               <td><code>{{ row.provider_invoice|default:"—" }}</code></td>
             </tr>
@@ -37,7 +37,7 @@
         <label for="{{ form.confirm.id_for_label }}">{{ form.confirm }} I confirm linking an invoice whose total differs from the balance.</label>
       </p>
       {% include "ledger/stores/_form_field.html" with field=form.note label="Note" no_mark=True %}
-      <p class="actions"><button class="btn btn-primary" type="submit" id="link-invoice-submit">Link invoice</button></p>
+      <p class="actions"><button class="btn btn-primary" type="submit" id="link-invoice-submit">Attach {{ company.provider_name }} invoice</button></p>
     </form>
   {% endif %}
 {% endblock %}

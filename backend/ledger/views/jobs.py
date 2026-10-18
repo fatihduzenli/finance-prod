@@ -16,11 +16,12 @@ from typing import Any
 from django.contrib import messages
 from django.http import HttpRequest
 
+from ledger.wording import provider_sentence
 from payments import jobs
 from payments.models import Job
 
 REPLAY_REFUSED = "This form was already used for another request. Nothing was sent."
-BUSY = "A request to the payment provider is already waiting for this record. Nothing was sent."
+BUSY = provider_sentence("A change is still in progress in {provider}: try again in a minute.")
 
 
 def submit(

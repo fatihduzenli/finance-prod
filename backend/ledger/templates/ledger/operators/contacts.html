@@ -5,7 +5,7 @@
   <div class="page-header"><h1>Contact log: {{ title }}</h1></div>
   <p class="actions">
     {% if add_url %}<a class="btn" id="add-contact" href="{{ add_url }}">Add entry</a>{% endif %}
-    {% if export_url %}<a class="btn" id="export-contacts" href="{{ export_url }}">Export CSV</a>{% endif %}
+    {% if export_url %}<a class="btn" id="export-contacts" href="{{ export_url }}">Download spreadsheet</a>{% endif %}
   </p>
   <p class="actions" id="contact-status-filter">Promises:
     {% if status %}<a href="?">All entries</a>{% else %}<strong>All entries</strong>{% endif %}

@@ -1,35 +1,34 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
-{% load tz %}
-{% block title %}Webhook event {{ event.event_type }}{% endblock %}
+{% block title %}Message from {{ company.provider_name }}: {{ event.event_type_words }}{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:webhooks:list' %}">&larr; Webhook events</a></p>
-  <div class="page-header"><h1>Webhook event: {{ event.event_type }}</h1></div>
+  <p><a href="{% url 'ledger:webhooks:list' %}">&larr; Messages from {{ company.provider_name }}</a></p>
+  <div class="page-header"><h1>Message from {{ company.provider_name }}: {{ event.event_type_words }}</h1></div>
   {% if can_replay %}
     <div class="actions">
       <form method="post" action="{% url 'ledger:webhooks:replay' pk=event.pk %}" class="js-single-submit">
-        {% csrf_token %}<button class="btn btn-primary" type="submit" id="replay"{% if job_refresh %} disabled{% endif %}>Replay</button>
+        {% csrf_token %}<button class="btn btn-primary" type="submit" id="replay"{% if job_refresh %} disabled{% endif %}>Process again</button>
       </form>
-      <span class="muted">Runs the handler for this event again. Handlers re-read the object from the payment provider; a replay of a processed event changes nothing.</span>
+      <span class="muted">Runs the handler for this event again. Handlers re-read the object from {{ company.provider_name }}; processing a processed event again changes nothing.</span>
     </div>
   {% endif %}
   {% include "ledger/_job_status.html" %}
 
   <dl id="webhook-event">
-    <dt>Received</dt><dd>{{ event.received_at|utc|date:"Y-m-d H:i:s" }} UTC</dd>
+    <dt>Received</dt><dd>{{ event.received_at|date:"Y-m-d H:i:s" }}</dd>
     <dt>Type</dt><dd>{{ event.event_type }}</dd>
     <dt>Name from</dt><dd>{{ event.get_event_source_display }}</dd>
     <dt>Object ID</dt><dd>{{ object_id_masked|default:"—" }}</dd>
     <dt>Object ID from</dt><dd id="object-id-source">{% if event.object_id_source %}<code>{{ event.object_id_source }}</code>{% else %}—{% endif %}</dd>
-    <dt>Outcome</dt><dd id="outcome">{{ event.outcome|default:"—" }}</dd>
-    <dt>Processed</dt><dd>{% if event.processed_at %}{{ event.processed_at|utc|date:"Y-m-d H:i:s" }} UTC{% else %}<span class="muted">Not processed</span>{% endif %}</dd>
+    <dt>Outcome</dt><dd id="outcome">{{ event.get_outcome_display|default:"—" }}</dd>
+    <dt>Processed</dt><dd>{% if event.processed_at %}{{ event.processed_at|date:"Y-m-d H:i:s" }}{% else %}<span class="muted">Not processed</span>{% endif %}</dd>
     <dt>Failed attempts</dt><dd id="attempts">{{ event.attempts }}</dd>
-    <dt>Last attempt</dt><dd>{% if event.last_attempt_at %}{{ event.last_attempt_at|utc|date:"Y-m-d H:i:s" }} UTC{% else %}—{% endif %}</dd>
+    <dt>Last attempt</dt><dd>{% if event.last_attempt_at %}{{ event.last_attempt_at|date:"Y-m-d H:i:s" }}{% else %}—{% endif %}</dd>
     <dt>Last error</dt><dd id="error">{{ event.error|default:"—" }}</dd>
     <dt>Duplicate deliveries</dt><dd id="duplicates">{{ event.duplicate_count }}</dd>
   </dl>
 
-  <h2>Payload (redacted)</h2>
+  <h2>Content (without account data)</h2>
   {% if payload_rows %}
     {% responsive_table %}
     <table id="payload">
@@ -41,7 +40,7 @@
     {% endresponsive_table %}
     {% if payload_rows_hidden %}<p class="muted">{{ payload_rows_hidden }} more fields not shown.</p>{% endif %}
   {% else %}
-    <p class="muted" id="no-payload">No payload stored: the body was not JSON, or nothing of it could be kept without card or account data.</p>
+    <p class="muted" id="no-payload">No content stored: the message could not be read, or nothing of it could be kept without card or account data.</p>
   {% endif %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

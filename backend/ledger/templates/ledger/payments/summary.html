@@ -1,3 +1,4 @@
+{% load money %}
 <dl id="payment-summary">
   <dt>Operator</dt><dd id="summary-operator">{{ row.operator.display_name|default:"—" }}</dd>
   <dt>Store</dt><dd id="summary-store">{{ row.store.external_label|default:"—" }}</dd>
@@ -6,9 +7,9 @@
   <dt>Method</dt><dd>{{ payment.get_method_display }}</dd>
   <dt>Status</dt><dd id="summary-status">{% if payment.is_refund %}<span class="badge">Refund</span> {% endif %}{{ payment.get_status_display }}</dd>
   <dt>Transaction</dt><dd id="summary-transaction">{{ row.transaction|default:"—" }}</dd>
-  <dt>Original amount</dt><dd id="summary-amount">${{ payment.amount }}</dd>
+  <dt>Original amount</dt><dd id="summary-amount">{{ payment.amount|money }}</dd>
   {% if not payment.is_refund %}
-    <dt>Already refunded</dt><dd id="summary-refunded">${{ facts.refunded }} <span class="muted">pending and settled refunds</span></dd>
-    <dt>Remaining refundable</dt><dd id="summary-refundable">${{ facts.refundable }}</dd>
+    <dt>Already refunded</dt><dd id="summary-refunded">{{ facts.refunded|money }} <span class="muted">pending and settled refunds</span></dd>
+    <dt>Remaining refundable</dt><dd id="summary-refundable">{{ facts.refundable|money }}</dd>
   {% endif %}
 </dl>

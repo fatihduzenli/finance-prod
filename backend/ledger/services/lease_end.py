@@ -131,6 +131,7 @@ from ledger.services import (
     statements,
 )
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
+from ledger.wording import format_amount, provider_name
 from mail.base import SUBJECT_MAX_LENGTH
 from payments import jobs
 from payments.models import ExternalRef, JobKind
@@ -193,7 +194,7 @@ REFUND_DATE_FUTURE = "The refund date cannot be in the future."
 REFERENCE_TOO_LONG = "The reference may be at most 100 characters."
 SETTLEMENT_SAVED = "Settlement saved."
 SETTLEMENT_REQUIRED = "A refund is due: choose how and when it is paid on the settlement step."
-CONFIRM_REQUIRED = "Tick the box to confirm that the lease ends with these effects."
+CONFIRM_REQUIRED = "Check the box to confirm that the lease ends with these effects."
 BLOCKED = "The lease cannot end yet: {count} item(s) are still live. Nothing was changed."
 NO_OPERATOR_FOR_DEBT = "The lease has no operator to charge the lease-end balance to."
 CHANGED_MEANWHILE = (
@@ -216,7 +217,7 @@ DEPOSIT_NOT_COLLECTED = "{label} {amount} not collected: collect it, or waive or
 NOT_CONFIRMED = "The lease end is not confirmed."
 NO_UPLOADER = "NoUploader"
 NO_TEMPLATE = "The final statement e-mail template is missing."
-DOCUMENTS_DONE = "Final statement stored; the e-mail to the operator is queued."
+DOCUMENTS_DONE = "Final statement stored; the e-mail to the operator will be sent."
 DOCUMENTS_NO_OPERATOR = "Final statement stored; the lease has no operator to e-mail."
 STATEMENT_REFUSED = "The final statement was not stored: {reason}"
 
@@ -361,8 +362,8 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
             found.append(
                 Blocker(
                     LIVE_INVOICE,
-                    f"{charge.label}: invoice {live[0].invoice_number} is live at the payment "
-                    "provider. Collect it or cancel it first.",
+                    f"{charge.label}: invoice {live[0].invoice_number} is still open in "
+                    f"{provider_name()}. Collect it or cancel it first.",
                     url,
                 )
             )
@@ -370,8 +371,8 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
             found.append(
                 Blocker(
                     ONE_OFF_SCHEDULE,
-                    f"{charge.label}: a payment provider schedule will collect it. Collect "
-                    "it or cancel the charge first.",
+                    f"{charge.label}: autopay will collect it. Collect it or cancel the "
+                    "charge first.",
                     url,
                 )
             )
@@ -385,9 +386,7 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
             found.append(
                 Blocker(
                     DEPOSIT_UNPAID,
-                    DEPOSIT_NOT_COLLECTED.format(
-                        label=charge.label, amount=leases.format_amount(unpaid)
-                    ),
+                    DEPOSIT_NOT_COLLECTED.format(label=charge.label, amount=format_amount(unpaid)),
                     url,
                 )
             )
@@ -406,8 +405,8 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
             found.append(
                 Blocker(
                     LIVE_INVOICE,
-                    f"{what}: invoice {invoice.invoice_number} is live at the payment "
-                    "provider. Collect it or cancel it first.",
+                    f"{what}: invoice {invoice.invoice_number} is still open in "
+                    f"{provider_name()}. Collect it or cancel it first.",
                     reverse("ledger:charges:detail", kwargs={"pk": rent.pk}),
                 )
             )
@@ -420,20 +419,20 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
                 Blocker(
                     LIVE_INVOICE,
                     f"Insurance, policy year {insurance.policy_year}: invoice "
-                    f"{invoice.invoice_number} is live at the payment provider. Collect it or "
-                    "cancel it first.",
+                    f"{invoice.invoice_number} is still open in {provider_name()}. Collect it "
+                    "or cancel it first.",
                     reverse("ledger:leases:detail", kwargs={"pk": lease.pk}),
                 )
             )
     stop_url = reverse("ledger:leases:stop_autopay", kwargs={"pk": lease.pk})
     for row, _ref in leases.stoppable_schedules(lease):
         what = "Rent" if row.kind == ScheduleKind.RENT else "Insurance"
-        state = "active" if row.state == ScheduleState.ACTIVE else "paused"
+        state = "on" if row.state == ScheduleState.ACTIVE else "paused"
         found.append(
             Blocker(
                 AUTOPAY,
-                f"{what} autopay (debit {row.seq}) is {state} at the payment provider. "
-                "It must be stopped first.",
+                f"{what} autopay (debit {row.seq}) is {state} in {provider_name()}. "
+                "It must be turned off first.",
                 stop_url,
             )
         )
@@ -468,7 +467,7 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
         found.append(
             Blocker(
                 PENDING_PAYMENT,
-                f"A payment of {leases.format_amount(payment.amount)} started on {started} is "
+                f"A payment of {format_amount(payment.amount)} started on {started} is "
                 "pending. Wait until it settles or is returned.",
                 reverse("ledger:payments:detail", kwargs={"pk": payment.pk}),
             )
@@ -772,7 +771,7 @@ def _clean_deduction(item: DeductionInput) -> DeductionInput:
 
 def _offset_refusal(figures: statements.Final) -> str:
     if figures.offset_total > figures.open_total:
-        return OFFSET_ABOVE_OPEN.format(open=leases.format_amount(figures.open_total))
+        return OFFSET_ABOVE_OPEN.format(open=format_amount(figures.open_total))
     return ""
 
 
@@ -1459,8 +1458,8 @@ def merge_values(figures: statements.Final) -> dict[str, str]:
         "operator": figures.operator,
         "store": figures.store,
         "company": figures.company,
-        "refund_due": leases.format_amount(figures.refund_due),
-        "amount_owed": leases.format_amount(figures.amount_owed),
+        "refund_due": format_amount(figures.refund_due),
+        "amount_owed": format_amount(figures.amount_owed),
         "end_date": statements.long_date(figures.ended_on),
     }
 

@@ -4,7 +4,7 @@
 {% block content %}
   <p>{% if operator %}<a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a>{% else %}<a href="{% url 'ledger:operators:list' %}">&larr; Operators</a>{% endif %}</p>
   <div class="page-header"><h1>{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}</h1></div>
-  <p class="muted">With an e-mail address, saving also links or creates the operator's customer at the payment provider. Without one, link the customer by hand afterwards.</p>
+  <p class="muted">With an e-mail address, saving also connects or creates the operator's customer in {{ company.provider_name }}. Without one, connect the customer by hand afterwards.</p>
   <form method="post" id="operator-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}

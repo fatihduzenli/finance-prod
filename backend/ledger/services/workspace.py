@@ -50,6 +50,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets
+from ledger import wording
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -88,6 +89,7 @@ from ledger.services import (
     payments_ledger,
     receivables,
 )
+from ledger.wording import format_amount
 from payments.provider import mask_identifier
 
 TAB_CHARGES = "charges"
@@ -102,10 +104,10 @@ TABS: tuple[tuple[str, str], ...] = (
     (TAB_CHARGES, "Charges"),
     (TAB_INVOICES, "Invoices"),
     (TAB_PAYMENTS, "Payments"),
-    (TAB_SCHEDULES, "Schedules"),
+    (TAB_SCHEDULES, "Autopay"),
     (TAB_DOCUMENTS, "Documents"),
     (TAB_CONTACTS, "Contact log"),
-    (TAB_HISTORY, "History"),
+    (TAB_HISTORY, "Activity"),
 )
 #: The tabs only an admin sees.
 ADMIN_TABS: frozenset[str] = frozenset({TAB_HISTORY})
@@ -123,7 +125,6 @@ INVOICE_FILTERS: tuple[tuple[str, str], ...] = ((FILTER_UNPAID, "Unpaid"), (FILT
 #: The newest payments the Payments tab lists; the payments ledger has every one.
 PAYMENTS_LIMIT = 100
 
-CENT = Decimal("0.01")
 KIND_RENT = "rent"
 KIND_ONE_OFF = "one_off"
 KIND_INSURANCE = "insurance"
@@ -222,8 +223,8 @@ def _autopay_state(schedules: list[CollectionSchedule]) -> str:
     states = {row.state for row in schedules}
     for state in (ScheduleState.ACTIVE, ScheduleState.PAUSED, ScheduleState.FAILED):
         if state in states:
-            return str(ScheduleState(state).label)
-    return str(ScheduleState.NONE.label) if schedules else AUTOPAY_NONE
+            return wording.label(ScheduleState, state)
+    return wording.label(ScheduleState, ScheduleState.NONE) if schedules else AUTOPAY_NONE
 
 
 def _next_rent(
@@ -416,7 +417,7 @@ def _actions(
         found.append(
             Action(
                 "record_payment",
-                "Record a payment",
+                "Add payment",
                 reverse("ledger:stores:record_payment", kwargs={"pk": store.pk}),
                 "bar-record-payment",
             )
@@ -469,7 +470,7 @@ def _actions(
         found.append(
             Action(
                 "add_contact",
-                "Add contact entry",
+                "Add entry",
                 _with(
                     reverse("ledger:stores:contacts_add", kwargs={"pk": store.pk}),
                     store=str(store.pk),
@@ -745,7 +746,7 @@ def _one_off_row(charge: OneOffCharge, role: Role | None, back: str) -> ChargeRo
     kind = getattr(charge, "resolution_kind", None)
     resolution = (
         f"{DepositResolutionKind(kind).label} "
-        f"${_money(getattr(charge, 'resolution_amount', None)).quantize(CENT)}"
+        f"{format_amount(_money(getattr(charge, 'resolution_amount', None)))}"
         if kind
         else ""
     )

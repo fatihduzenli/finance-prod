@@ -11,7 +11,7 @@
   <div class="actions">
     <a class="btn" id="statement" href="{% url 'ledger:operators:statement' pk=operator.pk %}">Statement</a>
     {% if can_edit %}<a class="btn" href="{% url 'ledger:operators:edit' pk=operator.pk %}">Edit</a>{% endif %}
-    {% if can_link %}<a class="btn" href="{% url 'ledger:operators:link' pk=operator.pk %}">Link provider IDs</a>{% endif %}
+    {% if can_link %}<a class="btn" href="{% url 'ledger:operators:link' pk=operator.pk %}">Connect to {{ company.provider_name }}</a>{% endif %}
     {% if can_new_invoice %}<a class="btn" href="{% url 'ledger:invoices:new_operator' pk=operator.pk %}" id="new-invoice">New invoice</a>{% endif %}
     {% if can_archive %}
       <form method="post" action="{% url 'ledger:operators:archive' pk=operator.pk %}" onsubmit="return window.confirm('Archive this operator? It is hidden from the list but never deleted.');">
@@ -26,34 +26,34 @@
     <dt>Company</dt><dd>{{ operator.company|default:"—" }}</dd>
     <dt>E-mail</dt><dd>{{ operator.email|default:"—" }}</dd>
     <dt>Phone</dt><dd>{{ operator.phone|default:"—" }}</dd>
-    <dt>SMS phone</dt><dd id="sms-phone">{{ operator.sms_phone|default:"—" }}</dd>
-    <dt>SMS consent given on</dt><dd id="sms-consent">{{ operator.sms_consent_at|date:"Y-m-d H:i"|default:"—" }}</dd>
+    <dt>Text-message phone</dt><dd id="sms-phone">{{ operator.sms_phone|default:"—" }}</dd>
+    <dt>Text-message consent given on</dt><dd id="sms-consent">{{ operator.sms_consent_at|date:"Y-m-d H:i"|default:"—" }}</dd>
     <dt>E-mail consent given on</dt><dd id="email-consent">{{ operator.email_consent_at|date:"Y-m-d H:i"|default:"—" }}</dd>
     <dt>Address</dt>
     <dd>{% if operator.address_line1 %}{{ operator.address_line1 }}<br>{% endif %}{% if operator.address_line2 %}{{ operator.address_line2 }}<br>{% endif %}{{ operator.city }}{% if operator.city and operator.state %}, {% endif %}{{ operator.state }} {{ operator.postal_code }}{% if not operator.address_line1 and not operator.city %}—{% endif %}</dd>
   </dl>
 
-  <h2>Payment provider</h2>
+  <h2>{{ company.provider_name }}</h2>
   {% include "ledger/_job_status.html" %}
   <dl>
-    <dt>Link status</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</dd>
+    <dt>Connection to {{ company.provider_name }}</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</dd>
     {% if failure_message %}
       <dt>Last failure</dt>
-      <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.sync_failure }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|utc|date:"Y-m-d H:i" }} UTC{% endif %}</span>{% if failure_fields %}<br><span id="sync-failure-fields">Fields the provider rejected: {{ failure_fields }}</span>{% endif %}</dd>
+      <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.get_sync_failure_display }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|date:"Y-m-d H:i" }}{% endif %}</span>{% if failure_fields %}<br><span id="sync-failure-fields">Fields {{ company.provider_name }} rejected: {{ failure_fields }}</span>{% endif %}</dd>
     {% elif provider_updated_at %}
-      <dt>Last update</dt><dd id="provider-updated">Provider customer updated {{ provider_updated_at|utc|date:"Y-m-d H:i" }} UTC</dd>
+      <dt>Last update</dt><dd id="provider-updated">Updated from {{ company.provider_name }} {{ provider_updated_at|date:"Y-m-d H:i" }}</dd>
     {% elif operator.sync_attempted_at %}
-      <dt>Last attempt</dt><dd>{{ operator.sync_attempted_at|utc|date:"Y-m-d H:i" }} UTC</dd>
+      <dt>Last attempt</dt><dd>{{ operator.sync_attempted_at|date:"Y-m-d H:i" }}</dd>
     {% endif %}
     {% comment %}PLAN-012c D8: the provider's identifiers and the enrolment only for an operator with a provider customer; the link status above says when there is none.{% endcomment %}
-    {% if customer_masked %}<dt>Customer ID</dt><dd id="provider-customer">{{ customer_masked }}</dd>
-    <dt>Payment method ID</dt><dd id="provider-method">{{ payment_method_masked|default:"—" }}</dd>
+    {% if customer_masked %}<dt>{{ company.provider_name }} customer ID</dt><dd id="provider-customer">{{ customer_masked }}</dd>
+    <dt>{{ company.provider_name }} bank method ID</dt><dd id="provider-method">{{ payment_method_masked|default:"—" }}</dd>
     <dt>Enrolment</dt><dd id="provider-enrolment">{{ operator.get_enrolment_status_display }}</dd>{% endif %}
   </dl>
   {% if can_retry %}
     <form method="post" action="{% url 'ledger:operators:retry_sync' pk=operator.pk %}" class="actions js-single-submit">
-      {% csrf_token %}<button class="btn btn-primary" type="submit">Retry sync</button>
-      <span class="muted">Makes one new call to the payment provider.</span>
+      {% csrf_token %}<button class="btn btn-primary" type="submit">Try again</button>
+      <span class="muted">Makes one new call to {{ company.provider_name }}.</span>
     </form>
   {% elif fix_phone_message %}
     <p id="fix-phone"><strong>{{ fix_phone_message }}</strong></p>
@@ -76,7 +76,7 @@
   {% if can_revoke_links %}
     <form method="post" action="{% url 'ledger:operators:statement_links_revoke' pk=operator.pk %}" class="js-single-submit" id="statement-links-revoke-form">
       {% csrf_token %}
-      <p class="actions"><button class="btn" type="submit">Revoke every statement link sent</button></p>
+      <p class="actions"><button class="btn" type="submit">Cancel every statement link sent</button></p>
     </form>
   {% endif %}
   {% include "ledger/collections/_log.html" with log=collection_log show_charge=True %}
@@ -86,7 +86,7 @@
   <p class="actions">
     {% if can_add_contact %}<a class="btn" id="add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Add entry</a>{% endif %}
     <a class="btn" id="all-contacts" href="{% url 'ledger:operators:contacts' pk=operator.pk %}">All entries</a>
-    <a class="btn" id="export-contacts" href="{% url 'ledger:operators:contacts_export' pk=operator.pk %}">Export CSV</a>
+    <a class="btn" id="export-contacts" href="{% url 'ledger:operators:contacts_export' pk=operator.pk %}">Download spreadsheet</a>
   </p>
   {% if can_add_contact %}{% url 'ledger:operators:contacts_add' pk=operator.pk as contact_add_next %}{% endif %}
   {% include "ledger/operators/_contacts_table.html" with rows=contact_rows|slice:contact_limit empty_next_url=contact_add_next %}

@@ -1,25 +1,25 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
-{% block title %}Stop autopay: lease {{ lease.store.external_label }}{% endblock %}
+{% load responsive money %}
+{% block title %}Turn off autopay: lease {{ lease.store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a></p>
-  <div class="page-header"><h1>Stop autopay</h1></div>
+  <div class="page-header"><h1>Turn off autopay</h1></div>
   {% include "ledger/_job_status.html" %}
   <section class="confirm" aria-labelledby="confirm-what-heading">
   <div class="confirm-what">
   <h2 id="confirm-what-heading">What will happen</h2>
-  <p id="stop-warning"><strong>Stop autopay: the provider schedule is deleted; re-enrol to start again.</strong></p>
+  <p id="stop-warning"><strong>Turn off autopay: autopay is cancelled in {{ company.provider_name }}; set it up again to restart.</strong></p>
   {% if schedules %}
     {% responsive_table %}
     <table id="stop-schedules">
-      <thead><tr><th>Kind</th><th>Debit</th><th>Day</th><th class="money">Amount</th><th>State</th><th>Provider schedule</th></tr></thead>
+      <thead><tr><th>Kind</th><th>Debit</th><th>Day</th><th class="money">Amount</th><th>State</th><th>Autopay in {{ company.provider_name }}</th></tr></thead>
       <tbody>
         {% for item in schedules %}
           <tr>
             <td>{{ item.row.get_kind_display }}</td>
             <td>{{ item.row.seq }}</td>
             <td>{{ item.row.debit_day|default:"—" }}</td>
-            <td class="money">${{ item.row.amount }}</td>
+            <td class="money">{{ item.row.amount|money }}</td>
             <td>{{ item.row.get_state_display }}</td>
             <td>{{ item.schedule_masked }}</td>
           </tr>
@@ -32,7 +32,7 @@
   {% if schedules %}
     <form method="post" class="js-single-submit">
       {% csrf_token %}
-      <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-stop-autopay">Stop autopay</button> <a class="btn" href="{% url 'ledger:leases:detail' pk=lease.pk %}">Back</a></p>
+      <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-stop-autopay">Turn off autopay</button> <a class="btn" href="{% url 'ledger:leases:detail' pk=lease.pk %}">Back</a></p>
     </form>
   {% else %}
     <p id="nothing-to-stop" class="muted">{{ nothing_to_stop }}</p>

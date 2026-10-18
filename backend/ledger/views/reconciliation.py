@@ -54,7 +54,9 @@ from payments.reconciliation import mismatches, schedule
 
 #: Recent runs listed under the last one.
 RECENT_RUNS = 10
-RUN_QUEUED = "Reconciliation queued. Its state appears below; the report follows when it is done."
+RUN_QUEUED = (
+    "The nightly check is starting; its progress shows below; the report follows when it is done."
+)
 
 
 def _local(moment: datetime | None) -> str:

@@ -33,6 +33,7 @@ from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from ledger import wording
 from ledger.forms import RefundForm, VoidForm
 from ledger.models import AuditLog, Operator, Payment, PaymentMethod, Store
 from ledger.services import one_off_charges, refunds
@@ -47,6 +48,7 @@ from ledger.views.operators import (
     csv_response,
     role_required,
 )
+from ledger.wording import format_amount
 from payments.models import JobKind
 from payments.provider import mask_identifier
 from payments.webhooks.handlers.common import ENTITY_PAYMENT
@@ -69,7 +71,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
             "selected": selected,
             "query": query,
             "date_by_choices": ledger.DATE_BY_CHOICES,
-            "method_choices": PaymentMethod.choices,
+            "method_choices": wording.choices(PaymentMethod),
             "status_choices": ledger.STATUS_CHOICES,
             "operators": Operator.objects.order_by(Lower("display_name"), "id"),
             "stores": Store.objects.order_by("external_label", "id"),
@@ -191,7 +193,9 @@ def payment_refund(request: HttpRequest, pk: str) -> HttpResponse:
             if data["confirm"] is not True:
                 form.add_error("confirm", refunds.CONFIRM_REQUIRED)
             elif data["amount"] > facts.refundable:
-                form.add_error("amount", refunds.AMOUNT_OVER.format(refundable=facts.refundable))
+                form.add_error(
+                    "amount", refunds.AMOUNT_OVER.format(refundable=format_amount(facts.refundable))
+                )
             else:
                 submit(
                     request,

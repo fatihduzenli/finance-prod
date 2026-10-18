@@ -66,6 +66,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from ledger import wording
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -88,8 +89,8 @@ from ledger.services import (
     receivables,
     rent_run,
 )
-from ledger.services.leases import format_amount
 from ledger.validators import validate_no_payment_data, visible_text
+from ledger.wording import format_amount
 from payments import jobs
 from payments.models import JobKind
 
@@ -213,7 +214,7 @@ def _deposits(lease: Lease) -> list[OpenCharge]:
             receivables.KIND_ONE_OFF,
             pk,
             _KIND_LABELS[KIND_DEPOSIT],
-            f"{OneOffCategory.SETUP.label}: {name}",
+            f"{wording.label(OneOffCategory, OneOffCategory.SETUP)}: {name}",
             due,
             Decimal(str(balance)),
         )

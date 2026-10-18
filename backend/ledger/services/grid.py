@@ -70,6 +70,7 @@ from typing import Protocol
 from django.db.models import Exists, Min, OuterRef, Prefetch
 from django.utils import timezone
 
+from ledger import wording
 from ledger.models import (
     ZERO,
     ChargeNote,
@@ -117,10 +118,10 @@ CELL_STATUSES: tuple[tuple[str, str], ...] = (
     (STATUS_PAID, "Paid"),
     (STATUS_UNPAID, "Unpaid"),
     (STATUS_PENDING, "Pending"),
-    (STATUS_PARTIAL, "Partially paid"),
+    (STATUS_PARTIAL, "Partly paid"),
     (STATUS_DUE, "Due"),
     (STATUS_WAIVED, "Waived"),
-    (STATUS_NOT_DUE, "Not due"),
+    (STATUS_NOT_DUE, "Not yet due"),
 )
 NOTE_MARKER = "●"
 
@@ -267,7 +268,7 @@ class Cell:
 
 
 def _amount(value: Decimal) -> str:
-    return f"{value:,.2f}"
+    return wording.format_amount(value)
 
 
 def cell_text(cell: Cell) -> str:
@@ -283,20 +284,20 @@ def _status_text(cell: Cell) -> str:
     if cell.plan_text:
         return cell.plan_text
     if cell.status == STATUS_PAID:
-        return f"paid {_amount(cell.amount_paid)}"
+        return f"Paid {_amount(cell.amount_paid)}"
     if cell.status == STATUS_UNPAID:
-        return f"unpaid {_amount(cell.amount_due)}"
+        return f"Unpaid {_amount(cell.amount_due)}"
     if cell.status == STATUS_PENDING:
         since = f" (from {cell.pending_from.isoformat()})" if cell.pending_from else ""
-        return f"pending {_amount(cell.amount_due)}{since}"
+        return f"Pending {_amount(cell.amount_due)}{since}"
     if cell.status == STATUS_PARTIAL:
-        return f"partial {_amount(cell.amount_paid)} of {_amount(cell.amount_due)}"
+        return f"Partly paid {_amount(cell.amount_paid)} of {_amount(cell.amount_due)}"
     if cell.status == STATUS_DUE:
-        return f"due {_amount(cell.amount_due)}"
+        return f"Due {_amount(cell.amount_due)}"
     if cell.status == STATUS_WAIVED:
-        return "waived"
+        return "Waived"
     if cell.status == STATUS_NOT_DUE:
-        return "not due"
+        return "Not yet due"
     return ""
 
 
@@ -325,7 +326,7 @@ class GridRow:
 
     @property
     def channel_label(self) -> str:
-        return str(dict(PaymentChannel.choices).get(self.channel, "")) if self.channel else ""
+        return wording.label(PaymentChannel, self.channel) if self.channel else ""
 
 
 @dataclass(slots=True)

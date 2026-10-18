@@ -1,10 +1,10 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
-{% block title %}A/R aging{% endblock %}
+{% load money responsive %}
+{% block title %}Unpaid by age{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
-  <div class="page-header"><h1>A/R aging</h1></div>
-  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}">Export CSV</a></p>
+  <div class="page-header"><h1>Unpaid by age</h1></div>
+  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}">Download spreadsheet</a></p>
   {% if too_slow %}
     <p class="warning" id="aging-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
@@ -12,14 +12,14 @@
   {% responsive_table "scroll" %}
   <table id="aging">
     <thead>
-      <tr><th>Operator</th>{% for bucket, label in buckets %}<th class="money">{{ label }}</th>{% endfor %}<th class="money">Total</th><th>Open charges</th></tr>
+      <tr><th>Operator</th>{% for bucket, label in buckets %}<th class="money">{{ label|money }}</th>{% endfor %}<th class="money">Total</th><th>Open charges</th></tr>
     </thead>
     <tbody>
       {% for row in report.rows %}
         <tr class="aging-row">
           <td>{% if row.operator_id %}<a href="{% url 'ledger:operators:statement' pk=row.operator_id %}">{{ row.operator_name }}</a>{% else %}No operator{% endif %}</td>
-          {% for amount in row.amounts %}<td class="money">{{ amount }}</td>{% endfor %}
-          <td class="money row-total">{{ row.total }}</td>
+          {% for amount in row.amounts %}<td class="money">{{ amount|money }}</td>{% endfor %}
+          <td class="money row-total">{{ row.total|money }}</td>
           <td>{{ row.count }}</td>
         </tr>
       {% empty %}
@@ -29,8 +29,8 @@
     <tfoot>
       <tr id="aging-total">
         <th scope="row">Total</th>
-        {% for amount in report.totals.amounts %}<th class="money bucket-total">{{ amount }}</th>{% endfor %}
-        <th class="money" id="aging-grand-total">{{ report.totals.total }}</th>
+        {% for amount in report.totals.amounts %}<th class="money bucket-total">{{ amount|money }}</th>{% endfor %}
+        <th class="money" id="aging-grand-total">{{ report.totals.total|money }}</th>
         <th id="aging-count">{{ report.totals.count }}</th>
       </tr>
     </tfoot>

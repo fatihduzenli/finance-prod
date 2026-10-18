@@ -19,6 +19,8 @@ import re
 from datetime import date
 from decimal import Decimal
 
+from ledger import wording
+from ledger.models import SyncFailure
 from payments.provider import OfflinePayment
 from payments.stax.validation import CHECK_NUMBER_MAX_LENGTH, PAYMENT_NOTE_MAX_LENGTH
 
@@ -76,6 +78,29 @@ def failure_text(template: str, failure: str, fields: str) -> str:
     return f"{text} (fields: {fields})" if fields else text
 
 
+#: A stored review text's start, and what staff read for it (PLAN-012c §4.6); a failure's
+#: class name that follows is shown in words, its rejected key names are not.
+_SHOWN: tuple[tuple[str, str], ...] = (
+    (PARTIAL_AMOUNT, f"Not marked paid in {wording.PROVIDER}: part of the amount"),
+    (
+        TOTAL_DIFFERS,
+        f"Not marked paid in {wording.PROVIDER}: the payment differs from the invoice total",
+    ),
+    (
+        ALREADY_PAID,
+        f"Invoice already paid in {wording.PROVIDER}; not marked again. Check for a double payment",
+    ),
+    (MARK_FAILED.format(failure=""), f"Not marked paid in {wording.PROVIDER}: "),
+    (REREAD_FAILED.format(failure=""), f"Marked paid in {wording.PROVIDER} but not confirmed: "),
+)
+
+
 def shown(stored: str) -> str:
-    """A stored review text as staff see it: the provider is not named, nor the TODO."""
-    return _TODO_MARK.sub("", stored).replace("Stax", "Provider")
+    """A stored review text as staff see it: in plain words, with the processor's display
+    name, without the TODO mark or a class name."""
+    for start, text in _SHOWN:
+        if stored.startswith(start):
+            failure = stored[len(start) :].split(" ", 1)[0]
+            named = wording.label(SyncFailure, failure) if failure else ""
+            return wording.with_provider(text) + named
+    return _TODO_MARK.sub("", stored).replace("Stax", wording.provider_name())

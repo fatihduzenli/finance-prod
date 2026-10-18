@@ -85,8 +85,8 @@ from ledger.models import (
     Store,
 )
 from ledger.services.csv_export import CsvWriter
-from ledger.services.leases import format_amount
 from ledger.validators import contains_bank_routing_pattern, contains_card_number, visible_text
+from ledger.wording import format_amount
 
 ENTITY_CONTACT = "contact_entry"
 #: The most entries the operator and store pages list; the CSV holds every one.
@@ -229,11 +229,11 @@ def closed_promise(entry: ContactEntry) -> ContactEntry | None:
 
 
 def closes_sentence(promise: ContactEntry) -> str:
-    """PLAN-012c-b D5: "Closed $2000.00 by 2026-10-01 as Broken", the closed promise's
+    """PLAN-012c-b D5: "Closed $2,000.00 by 2026-10-01 as Broken", the closed promise's
     amount, date and outcome."""
     return (
-        f"Closed ${promise.promised_amount} by {promise.promised_date:%Y-%m-%d} "
-        f"as {promise.get_status_display()}"
+        f"Closed {format_amount(promise.promised_amount or Decimal(0))} by "
+        f"{promise.promised_date:%Y-%m-%d} as {promise.get_status_display()}"
     )
 
 

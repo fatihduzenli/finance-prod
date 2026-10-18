@@ -7,12 +7,12 @@
     <input type="search" name="q" value="{{ query }}" maxlength="200" placeholder="Name, company or e-mail" aria-label="Search operators" style="max-width:24rem;">
     <label style="margin:0;font-weight:normal;"><input type="checkbox" name="archived" value="1"{% if include_archived %} checked{% endif %}> Include archived</label>
     <button class="btn" type="submit">Search</button>
-    <a class="btn" id="export-csv" href="{% url 'ledger:operators:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Export CSV</a>
+    <a class="btn" id="export-csv" href="{% url 'ledger:operators:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>
   </form>
   {% responsive_table %}
   <table>
     <thead>
-      <tr><th>Display name</th><th>Legal name</th><th>E-mail</th><th>Provider link</th><th>Enrolment</th></tr>
+      <tr><th>Display name</th><th>Legal name</th><th>E-mail</th><th>{{ company.provider_name }} connection</th><th>Enrolment</th></tr>
     </thead>
     <tbody>
       {% for operator in page %}

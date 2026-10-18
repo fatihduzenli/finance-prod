@@ -91,7 +91,7 @@ DRAFT_NUMBER = re.compile(r"DRAFT-[0-9A-F]{8}")
 LINE_NUMBER = re.compile(r"^Line (\d+): ")
 #: The month of the rent-amount endpoint (PLAN-012d D10).
 MONTH = re.compile(r"^(\d{4})-(\d{2})$")
-BAD_MONTH = "The month must be YYYY-MM."
+BAD_MONTH = "Choose a month."
 
 
 # --- Loading --------------------------------------------------------------------------

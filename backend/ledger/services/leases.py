@@ -106,6 +106,7 @@ from ledger.models import (
     Store,
 )
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
+from ledger.wording import format_amount, provider_name, provider_sentence
 from payments import operator_sync
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef, ProviderSnapshot
@@ -154,48 +155,53 @@ _RULE_DAY = re.compile(r"\ADTSTART=(\d{4})(\d{2})(\d{2})T")
 NO_OPERATOR = "The lease has no operator."
 OPERATOR_ARCHIVED = "The operator is archived."
 NOT_ACTIVE = "Only an active lease can be enrolled in autopay."
-NOT_PROVIDER_CHANNEL = "The payment channel is not ACH debit through the payment provider."
-NO_DEBIT_DAY = "The lease has no debit day."
-DAY_NOT_SCHEDULABLE = (
-    "Debit days 29 to 31 cannot be scheduled yet (TODO-VERIFY-036). Choose a day from 1 to 28."
+NOT_PROVIDER_CHANNEL = provider_sentence(
+    "The payment channel is not bank debit through {provider}."
 )
+NO_DEBIT_DAY = "The lease has no debit day."
+DAY_NOT_SCHEDULABLE = "Autopay cannot use the 29th, 30th or 31st. Choose a day from 1 to 28."
 NO_RENT = "The lease has no rent."
-NO_PROVIDER_CUSTOMER = "Operator has no payment provider customer."
+NO_PROVIDER_CUSTOMER = provider_sentence("The operator is not connected to {provider}.")
 NO_BANK_METHOD = "No bank method linked."
 METHODS_NOT_READ = "The operator's payment methods have not been read yet."
 METHODS_READ = "Payment methods read: {count}."
-NO_EMAIL = "No email: operator will not receive receipts."
-SCHEDULE_DIFFERS = "Schedule amount differs from rent; pause and re-enable autopay."
+NO_EMAIL = "No e-mail: operator will not receive receipts."
+SCHEDULE_DIFFERS = "The autopay amount differs from the rent: pause autopay and set it up again."
 RENT_CHANGES = "Rent changes on {date}; pause and re-enable autopay on or after that date."
 RENT_NOT_STARTED = "No rent is in effect on the first debit date ({date}). Nothing was created."
-PAUSE_FIRST = "A schedule no longer matches the lease. Pause autopay first, then enable it again."
+PAUSE_FIRST = "The autopay no longer matches the lease. Pause autopay first, then enable it again."
 RESUME_REFUSED = (
-    "A schedule no longer matches the lease, so it cannot be resumed. Enable autopay again."
+    "The autopay no longer matches the lease, so it cannot be resumed. Enable autopay again."
 )
 ALREADY_ENABLED = "Autopay is already set up for every debit day. Nothing was created."
-NOTHING_TO_PAUSE = "No active schedule to pause."
-NOTHING_TO_RESUME = "No paused schedule to resume."
+NOTHING_TO_PAUSE = "Autopay is not on."
+NOTHING_TO_RESUME = "Autopay is not paused."
 #: PLAN-012e D5 amendment: stopping autopay.
-NOTHING_TO_STOP = "No active or paused schedule to stop."
-NOTHING_TO_MOVE = "No active rent autopay to move: nothing was changed at the payment provider."
+NOTHING_TO_STOP = "Autopay is already off."
+NOTHING_TO_MOVE = provider_sentence(
+    "No active rent autopay to move: nothing was changed in {provider}."
+)
 AUTOPAY_MOVED = "Autopay moved: it resumes {date}; this month is collected in installments."
 AUTOPAY_RESUMES = "Autopay resumes {date} (this month is collected in installments)"
-AUTOPAY_STOPPED = "Autopay stopped: the provider schedules are deleted."
+AUTOPAY_STOPPED = provider_sentence("Autopay is off: it was cancelled in {provider}.")
 CHOOSE_METHOD = "Choose a bank payment method."
-METHOD_NOT_FOUND = (
-    "That payment method is not one of this operator's methods at the payment provider. "
-    "Nothing was created."
+METHOD_NOT_FOUND = provider_sentence(
+    "That payment method is not one of this operator's methods in {provider}. Nothing was created."
 )
 CARD_REFUSED = "Card payment methods are not allowed. Choose a bank method. Nothing was created."
-METHOD_DELETED = "That payment method is deleted at the payment provider. Nothing was created."
-SEVERAL_MATCHES = (
-    "Several schedules at the payment provider match a debit whose last create failed. "
-    "Nothing was created; review them in the provider's dashboard."
+METHOD_DELETED = provider_sentence(
+    "That payment method is deleted in {provider}. Nothing was created."
 )
-PROVIDER_REJECTED = "The payment provider refused the request."
-PROVIDER_FAILED = "The payment provider could not be reached or did not answer. Try again later."
+SEVERAL_MATCHES = provider_sentence(
+    "Several autopays in {provider} match a debit whose last create failed. Nothing was "
+    "created; review them in the {provider} dashboard."
+)
+PROVIDER_REJECTED = provider_sentence("{provider} refused the request.")
+PROVIDER_FAILED = provider_sentence("{provider} could not be reached. Try again later.")
 #: PLAN-007c §1. Amounts are formatted by :func:`format_amount`.
-LIMIT_EXCEEDED = "Exceeds the confirmed provider limit of {limit}. Autopay cannot be enabled."
+LIMIT_EXCEEDED = provider_sentence(
+    "Exceeds the {provider} debit limit of {limit}. Autopay cannot be enabled."
+)
 CONFIRM_LARGE_DEBIT = (
     "I confirm this debit of {amount} exceeds the warning threshold of {threshold} "
     "and may be enabled."
@@ -249,7 +255,7 @@ class AutopayOutcome:
     def text(self) -> str:
         """The message, with the rejected field names when there are any."""
         if self.fields:
-            return f"{self.message} Fields the provider rejected: {', '.join(self.fields)}."
+            return f"{self.message} Fields {provider_name()} rejected: {', '.join(self.fields)}."
         return self.message
 
 
@@ -346,11 +352,6 @@ def exceeds_provider_limit(amount: Decimal) -> bool:
     """Above ``PROVIDER_MAX_TXN_AMOUNT``; never when the limit is unknown (PLAN-007c §1)."""
     limit: Decimal | None = settings.PROVIDER_MAX_TXN_AMOUNT
     return limit is not None and amount > limit
-
-
-def format_amount(amount: Decimal) -> str:
-    """``$1,234.56``."""
-    return f"${amount:,.2f}"
 
 
 def provider_limit_refusal(amounts: Iterable[Decimal]) -> str:

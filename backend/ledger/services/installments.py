@@ -92,6 +92,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
+from ledger import wording
 from ledger.models import (
     DESCRIPTION_MAX_LENGTH,
     INSTALLMENTS_MAX,
@@ -118,9 +119,9 @@ from ledger.models import (
     ScheduleState,
 )
 from ledger.services import leases, numbering, one_off_charges, rent_run
-from ledger.services.leases import format_amount
 from ledger.services.one_off_charges import ENTITY_PLAN, plan_state
 from ledger.validators import validate_no_payment_data, visible_text
+from ledger.wording import format_amount, provider_sentence
 from payments import jobs
 from payments.models import Job, JobEntity, JobKind, JobStatus
 from payments.provider import mask_identifier
@@ -161,66 +162,65 @@ HAS_PLAN = "This charge already has an installment plan."
 NOT_SPLITTABLE = "A re-debit, an NSF fee or an installment is not split into installments."
 DEPOSIT = "A deposit is not split into installments."
 PENDING = "A payment on this charge is pending: wait until it settles or is returned."
-LIVE_SCHEDULE = (
-    "A payment provider schedule will collect this charge: collect it or cancel the charge first."
-)
+LIVE_SCHEDULE = "Autopay will collect this charge: collect it or cancel the charge first."
 LIVE_INVOICE_SHARED = (
     "Invoice {number} has other lines; it cannot be released for one of them. Collect it or "
     "cancel it first."
 )
-SCHEDULE_FIRED = "The schedule already generated its invoice; collect or cancel it first."
+SCHEDULE_FIRED = "Autopay already made this month's invoice; collect or cancel it first."
 #: What the split page says when the parent's provider object is released (D2).
-RELEASE_NOTICE_INVOICE = (
-    "Invoice {number} at the payment provider will be deleted (the charge stays open here) "
-    "and each installment is collected on its own."
+RELEASE_NOTICE_INVOICE = provider_sentence(
+    "Invoice {number} will be cancelled in {provider} (the charge stays open here) and each "
+    "installment is collected on its own."
 )
 RELEASE_NOTICE_SCHEDULE = (
-    "The payment provider schedule of this charge will be deleted (the charge stays open "
-    "here) and each installment is collected on its own."
+    "The autopay of this charge will be cancelled (the charge stays open here) and each "
+    "installment is collected on its own."
 )
 RELEASE_NOTICE_AUTOPAY = (
-    "Rent autopay of this lease will skip this month's debit: its payment provider "
-    "schedule is deleted and created again from next month's debit (the charge stays open "
-    "here), and each installment is collected on its own."
+    "Rent autopay of this lease will skip this month's debit: its autopay is moved to next "
+    "month's debit (the charge stays open here), and each installment is collected on its "
+    "own."
 )
 #: What the plan page says while the release job waits or failed (D3).
-RELEASE_PENDING_INVOICE = "Waiting for the payment provider to release invoice {number}."
-RELEASE_PENDING_SCHEDULE = (
-    "Waiting for the payment provider to release the schedule of this charge."
+RELEASE_PENDING_INVOICE = provider_sentence("Waiting for {provider} to cancel invoice {number}.")
+RELEASE_PENDING_SCHEDULE = provider_sentence(
+    "Waiting for {provider} to cancel the autopay of this charge."
 )
-RELEASE_PENDING_AUTOPAY = (
-    "Waiting for the payment provider to move the lease's rent autopay past this month."
+RELEASE_PENDING_AUTOPAY = provider_sentence(
+    "Waiting for {provider} to move the lease's rent autopay past this month."
 )
 #: The release job's outcomes (D3).
-RELEASED = "Released at the payment provider; {count} installment requests queued."
-RELEASED_PLAN_CLOSED = (
-    "Released at the payment provider. The plan is cancelled or completed: nothing more was queued."
+RELEASED = provider_sentence("Cancelled in {provider}; the {count} installments are being set up.")
+RELEASED_PLAN_CLOSED = provider_sentence(
+    "Cancelled in {provider}. The plan is cancelled or completed: nothing more to do."
 )
-RELEASED_PARENT_PAID = (
-    "Released at the payment provider. A payment on the charge landed first: the plan needs "
-    "attention and no installment was queued."
+RELEASED_PARENT_PAID = provider_sentence(
+    "Cancelled in {provider}. A payment on the charge landed first: the plan needs attention "
+    "and no installment was set up."
 )
-RELEASE_ALREADY = "Already released at the payment provider. Nothing was changed."
+RELEASE_ALREADY = provider_sentence("Already cancelled in {provider}. Nothing was changed.")
 RELEASE_NO_PLAN = "This charge has no installment plan. Nothing was released."
 #: A rent charge with a live invoice that the lease's rent autopay would debit too: one
 #: release cannot free both (D13).
 AUTOPAY_WILL_DEBIT = (
     "Rent autopay will debit this charge on its due date: stop or pause autopay first."
 )
-REQUEST_WAITING = "A payment provider request of this charge is waiting: try again when it is done."
+REQUEST_WAITING = provider_sentence(
+    "A change is still in progress in {provider}: try again in a minute."
+)
 NO_OPERATOR = "This charge has no operator."
 OPERATOR_ARCHIVED = "The operator is archived."
-NO_CUSTOMER = (
-    "The operator has no payment provider customer: installments collected by "
-    "{collection} are not possible."
+NO_CUSTOMER = provider_sentence(
+    "The operator is not connected to {provider}: installments collected by {collection} are "
+    "not possible."
 )
 NO_BANK_METHOD = "The operator has no linked bank method: autopay installments are not possible."
 CREATED = "Installment plan created: {count} installments."
 NOT_LIVE = "This plan is completed or cancelled. Nothing was changed."
 NOTHING_TO_SHIFT = "No installment can be moved: each is paid, has a payment or was debited."
-SHIFT_BUSY = (
-    "A payment provider request of an installment is waiting: try again when it is done. "
-    "Nothing was changed."
+SHIFT_BUSY = provider_sentence(
+    "A change is still in progress in {provider}: try again in a minute. Nothing was changed."
 )
 RESCHEDULED = "{count} installments moved; the first is now due {date}."
 NOTE_REQUIRED = "A note is required: say why the plan is cancelled."
@@ -235,9 +235,9 @@ CANCEL_REDEBIT = (
     "A returned installment is being collected again: wait for the re-debit or cancel it "
     "first. Nothing was changed."
 )
-CANCELLED = (
-    "Plan cancelled. The unpaid installments are cancelled at the payment provider by the "
-    "worker; the charge is open again for {balance}."
+CANCELLED = provider_sentence(
+    "Plan cancelled. The unpaid installments are cancelled in {provider}; the charge is open "
+    "again for {balance}."
 )
 
 #: The help text of each page (D10, D11).
@@ -252,18 +252,17 @@ PREVIEW_HELP = (
 )
 PLAN_HELP = (
     "Each installment is collected on its own date. A returned installment puts the plan "
-    "on the attention list until it is resolved from the returns queue. Reschedule moves "
+    "on the attention list until it is dealt with on the Returned payments page. Reschedule moves "
     "the installments not yet paid; Cancel (admin) stops the plan and leaves the charge "
     "open for what was not paid."
 )
-RESCHEDULE_HELP = (
-    "Only installments with no payment move; paid ones keep their dates. Autopay schedules "
-    "and e-mailed invoices at the payment provider are updated by the worker."
+RESCHEDULE_HELP = provider_sentence(
+    "Only installments with no payment move; paid ones keep their dates. Autopay and "
+    "e-mailed invoices are updated in {provider} automatically."
 )
-CANCEL_HELP = (
-    "The unpaid installments are cancelled (their invoices or schedules are deleted at the "
-    "payment provider by the worker) and the charge becomes one open charge for what they "
-    "did not collect."
+CANCEL_HELP = provider_sentence(
+    "The unpaid installments are cancelled (their invoices and autopay are cancelled in "
+    "{provider}) and the charge becomes one open charge for what they did not collect."
 )
 
 
@@ -307,8 +306,11 @@ class Progress:
 
     @property
     def short_text(self) -> str:
-        """The month grid's cell text: ``plan 1 of 3 paid, 333.33 of 1,000.00``."""
-        return f"plan {self.paid_count} of {self.count} paid, {self.paid:,.2f} of {self.total:,.2f}"
+        """The month grid's cell text: ``Plan 1 of 3 paid, $333.33 of $1,000.00``."""
+        return (
+            f"Plan {self.paid_count} of {self.count} paid, "
+            f"{format_amount(self.paid)} of {format_amount(self.total)}"
+        )
 
 
 Parent = RentCharge | OneOffCharge
@@ -619,7 +621,7 @@ def _collection_refusal(collection: str, operator: Operator) -> str:
     if collection == InstallmentCollection.MANUAL:
         return ""
     if not leases.customer_ref(operator):
-        label = InstallmentCollection(collection).label
+        label = wording.label(InstallmentCollection, collection)
         return NO_CUSTOMER.format(collection=str(label).lower())
     if collection == InstallmentCollection.AUTOPAY_DUE and not leases.linked_payment_method(
         operator

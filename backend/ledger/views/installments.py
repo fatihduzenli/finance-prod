@@ -32,6 +32,7 @@ from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from ledger import wording
 from ledger.forms import PlanCancelForm, PlanRescheduleForm, SplitForm
 from ledger.models import (
     INSTALLMENTS_MAX,
@@ -124,7 +125,7 @@ def _split_page(request: HttpRequest, parent: service.Parent, url: str) -> HttpR
         "parent_label": service.parent_label(parent),
         "parent_url": service.parent_url(parent),
         "balance": service.balance_of(parent),
-        "collection": InstallmentCollection(service.collection_of(parent)).label,
+        "collection": wording.label(InstallmentCollection, service.collection_of(parent)),
         "refusal": refusal,
         # PLAN-012b-a D2: the parent's live provider object the confirm releases.
         "release_notice": "" if refusal else service.release_notice(parent),

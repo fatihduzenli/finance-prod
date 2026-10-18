@@ -1,5 +1,5 @@
 {% comment %}The invoice as the operator reads it (PLAN-012 D7): the preview and the print view.{% endcomment %}
-{% load responsive %}
+{% load responsive money %}
 <section class="invoice-document" id="invoice-document">
   <header class="invoice-header">
     <p class="invoice-company" id="invoice-company"><strong>{{ preview.company }}</strong></p>
@@ -27,10 +27,10 @@
     <thead><tr><th>Item</th><th class="money">Quantity</th><th class="money">Unit amount</th><th class="money">Amount</th></tr></thead>
     <tbody>
       {% for line in preview.lines %}
-        <tr class="invoice-line"><td><span class="line-item">{{ line.item }}</span>{% if line.description %}<br><span class="muted line-detail">{{ line.description }}</span>{% endif %}</td><td class="money">{{ line.quantity_text }}</td><td class="money">${{ line.unit_amount }}</td><td class="money">${{ line.line_total }}</td></tr>
+        <tr class="invoice-line"><td><span class="line-item">{{ line.item }}</span>{% if line.description %}<br><span class="muted line-detail">{{ line.description }}</span>{% endif %}</td><td class="money">{{ line.quantity_text }}</td><td class="money">{{ line.unit_amount|money }}</td><td class="money">{{ line.line_total|money }}</td></tr>
       {% endfor %}
     </tbody>
-    <tfoot><tr><th scope="row" colspan="3">Total due (US dollars)</th><th class="money" id="invoice-total">${{ preview.total }}</th></tr></tfoot>
+    <tfoot><tr><th scope="row" colspan="3">Total due (US dollars)</th><th class="money" id="invoice-total">{{ preview.total|money }}</th></tr></tfoot>
   </table>
   {% endresponsive_table %}
   {% if preview.memo %}<p class="invoice-memo" id="invoice-memo" style="white-space:pre-wrap;">{{ preview.memo }}</p>{% endif %}

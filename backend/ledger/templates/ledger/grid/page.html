@@ -1,6 +1,6 @@
 {% extends "finance/base.html" %}
-{% load components %}
-{% block title %}Grid{% endblock %}
+{% load components money %}
+{% block title %}Monthly rent overview{% endblock %}
 {% block main_class %}wide grid-page{% endblock %}
 {% comment %}PLAN-012c D3: the left navigation folds behind "Menu" here at every width, so the twelve
 months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_class %} shell-folded{% endblock %}
@@ -25,7 +25,7 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
   table.grid th.store-col{position:sticky;left:0;background:var(--paper);z-index:1;width:220px;min-width:220px;max-width:220px;white-space:normal;overflow-wrap:anywhere;}
   table.grid thead th.store-col{z-index:3;}
   table.grid .month-col,table.grid td{width:80px;min-width:80px;max-width:80px;}
-  /* A cell's text wraps inside its 80 px ("partial 0.00 of 3,500.00"); a word that does not fit breaks. */
+  /* A cell's text wraps inside its 80 px ("Partly paid $0.00 of $3,500.00"); a word that does not fit breaks. */
   table.grid td{white-space:normal;overflow-wrap:break-word;}
   table.grid tfoot th,table.grid tfoot td{background:var(--paper-2);font-weight:600;}
   table.grid td a{color:inherit;text-decoration:none;display:block;}
@@ -39,7 +39,7 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
   .legend span{display:inline-block;padding:.1rem .45rem;margin-right:.25rem;border-radius:var(--r-1);}
 </style>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Grid</h1></div>
+  <div class="page-header"><h1>Monthly rent overview</h1></div>
   {% comment %}PLAN-012d D16: the words filter, its own box; it keeps the range and the other filters, and the
   filters' form below keeps it (hidden).{% endcomment %}
   <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-search" class="actions" role="search">
@@ -73,7 +73,7 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
         {% for value, label in statuses %}<option value="{{ value }}"{% if value == query.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
       <button class="btn" type="submit">Show</button>
-      <a class="btn" id="export-csv" href="{% url 'ledger:grid:export' %}?{{ export_query }}">Export CSV</a>
+      <a class="btn" id="export-csv" href="{% url 'ledger:grid:export' %}?{{ export_query }}">Download spreadsheet</a>
     </div>
   </form>
   {% if query.messages %}
@@ -107,7 +107,7 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
       <tfoot>
         <tr>
           <th scope="row" class="store-col">Collected</th>
-          {% for column in grid.columns %}<td class="column-total" data-month="{{ column.month|date:'Y-m' }}">${{ column.collected|floatformat:"2g" }}<br><span class="muted">{{ column.counts.paid|default:0 }} paid · {{ column.counts.unpaid|default:0 }} unpaid · {{ column.counts.pending|default:0 }} pending</span></td>{% endfor %}
+          {% for column in grid.columns %}<td class="column-total" data-month="{{ column.month|date:'Y-m' }}">{{ column.collected|money }}<br><span class="muted">{{ column.counts.paid|default:0 }} paid · {{ column.counts.unpaid|default:0 }} unpaid · {{ column.counts.pending|default:0 }} pending</span></td>{% endfor %}
         </tr>
       </tfoot>
     </table>

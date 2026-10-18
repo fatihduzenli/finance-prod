@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load money %}
 {% block title %}Refund a payment{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">&larr; Payment</a></p>
@@ -19,13 +20,13 @@
       <div class="field{% if form.amount.errors %} has-error{% endif %}">
         <label for="{{ form.amount.id_for_label }}">Refund amount</label>
         <input type="number" name="amount" id="{{ form.amount.id_for_label }}" step="0.01" min="0.01" max="{{ facts.refundable }}" value="{{ form.amount.value|default_if_none:'' }}" required>
-        <span class="help muted">Between $0.01 and ${{ facts.refundable }}, two decimals at most.</span>
+        <span class="help muted">Between $0.01 and {{ facts.refundable|money }}, two decimals at most.</span>
         {% for error in form.amount.errors %}<strong class="field-error">{{ error }}</strong>{% endfor %}
       </div>
       <p id="refund-confirmation"><label style="font-weight:normal;"><input type="checkbox" name="confirm" value="true" id="confirm-refund"> {{ confirmation }}</label>
         {% for error in form.confirm.errors %}<br><strong class="field-error">{{ error }}</strong>{% endfor %}
       </p>
-      <p class="actions"><button class="btn btn-primary" type="submit" id="confirm-refund-button">Refund at the payment provider</button> <a class="btn" href="{% url 'ledger:payments:detail' pk=payment.pk %}">Back</a></p>
+      <p class="actions"><button class="btn btn-primary" type="submit" id="confirm-refund-button">Refund through {{ company.provider_name }}</button> <a class="btn" href="{% url 'ledger:payments:detail' pk=payment.pk %}">Back</a></p>
     </form>
   {% endif %}
   </section>

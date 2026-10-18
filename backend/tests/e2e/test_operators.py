@@ -49,7 +49,7 @@ def test_double_click_on_save_creates_one_operator_and_one_customer(
 
     page.wait_for_url(re.compile(r".*/operators/[0-9a-f-]{36}/$"))
     page.locator("#job-state").wait_for(state="visible")
-    assert page.locator("#job-state").inner_text() == "Queued"
+    assert page.locator("#job-state").inner_text() == "Waiting"
     assert provider.calls == []
 
     # The sync, then the methods read the sync queues for the enrolment page.

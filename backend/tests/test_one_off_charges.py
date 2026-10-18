@@ -45,6 +45,7 @@ from ledger.models import (
 from ledger.services import one_off_charges as service
 from ledger.services import pnl
 from ledger.services.one_off_charges import ChargeInput
+from ledger.wording import provider_name
 from payments import jobs, offline_marking, one_off_invoices
 from payments.errors import ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
@@ -276,7 +277,7 @@ def test_manual_without_a_customer_keeps_a_local_invoice_and_queues_nothing(
     operator = an_operator(fake, customer=None)
     outcome = create(operator, item(CollectionMethod.MANUAL))
     assert outcome.ok and outcome.charge is not None
-    assert "no payment provider customer" in outcome.message
+    assert f"not connected to {provider_name()}" in outcome.message
     assert invoice_of(outcome.charge).internal_status == InvoiceStatus.DRAFT
     assert not Job.objects.exists()
 
@@ -682,9 +683,8 @@ def test_two_candidates_flag_the_charge_and_create_nothing(
     assert job.result == service.SEVERAL_PROVIDER_INVOICES
     assert calls(fake, "create_invoice") == []
     flagged = fresh(charge)
-    assert flagged.needs_review and service.SEVERAL_PROVIDER_INVOICES in service.review_message(
-        flagged
-    )
+    assert flagged.needs_review
+    assert str(service.SEVERAL_PROVIDER_INVOICES) in service.review_message(flagged)
 
 
 def test_a_failed_send_leaves_the_invoice_linked_and_the_retry_sends_only(
@@ -800,7 +800,7 @@ def test_a_reference_naming_another_operators_invoice_is_not_linked_and_flags(
     assert not Invoice.objects.filter(operator=stranger).exists()
     flagged = fresh(charge)
     assert flagged.needs_review
-    assert service.OTHER_OPERATOR_REFERENCE in service.review_message(flagged)
+    assert str(service.OTHER_OPERATOR_REFERENCE) in service.review_message(flagged)
 
 
 def test_a_second_provider_invoice_with_a_linked_number_links_nothing(

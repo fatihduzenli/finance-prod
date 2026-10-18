@@ -62,6 +62,7 @@ from ledger.models import (
 from ledger.services import one_off_charges
 from ledger.services.rent_run import CENT, MONEY_MAX
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
+from ledger.wording import format_amount
 
 DEPOSIT_FEE_CODE = "security_deposit"
 TRANSFER_NOTE = "Deposit transferred from {store} lease"
@@ -83,7 +84,7 @@ NOT_REFUNDABLE = (
 )
 LEASE_NOT_ENDED = "The lease has not ended: set its end date first. Nothing was saved."
 ALREADY_RESOLVED = "This deposit is already resolved. Nothing was saved."
-ABOVE_PAID = "The amount is more than was paid on the deposit (${paid}). Nothing was saved."
+ABOVE_PAID = "The amount is more than was paid on the deposit ({paid}). Nothing was saved."
 WITHHELD_PART = (
     "To keep part of the deposit, choose refunded or transferred with the amount given back; "
     "the rest is recorded as withheld. Nothing was saved."
@@ -92,7 +93,7 @@ TARGET_OTHER_OPERATOR = "A deposit moves only to a lease of the same operator. N
 TARGET_ENDED = "A deposit cannot move to a lease that has ended. Nothing was saved."
 TARGET_HAS_DEPOSIT = "That lease already has a security deposit charge. Nothing was saved."
 SPLIT_NOT_WHOLE = (
-    "The refunded and withheld parts must add up to what was paid on the deposit (${paid}). "
+    "The refunded and withheld parts must add up to what was paid on the deposit ({paid}). "
     "Nothing was saved."
 )
 SPLIT_NEGATIVE = "The refunded and withheld parts cannot be negative. Nothing was saved."
@@ -334,7 +335,7 @@ def resolve_deposit_split(
                 return _refused(ALREADY_RESOLVED)
             paid = one_off_charges.settled(charge)
             if refunded + withheld != paid:
-                return _refused(SPLIT_NOT_WHOLE.format(paid=paid), "amount")
+                return _refused(SPLIT_NOT_WHOLE.format(paid=format_amount(paid)), "amount")
             resolution = DepositResolution.objects.create(
                 setup_charge=charge,
                 kind=kind,
@@ -388,7 +389,7 @@ def _charge_refusal(charge: OneOffCharge, kind: str, amount: Decimal) -> Outcome
         return _refused(ALREADY_RESOLVED)
     paid = one_off_charges.settled(charge)
     if amount > paid:
-        return _refused(ABOVE_PAID.format(paid=paid), "amount")
+        return _refused(ABOVE_PAID.format(paid=format_amount(paid)), "amount")
     if kind == DepositResolutionKind.WITHHELD and amount != paid:
         return _refused(WITHHELD_PART, "amount")
     return None

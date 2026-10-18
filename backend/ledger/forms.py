@@ -18,6 +18,7 @@ from django import forms
 from django.core.validators import RegexValidator
 from django.db.models import Q
 
+from ledger import wording
 from ledger.models import (
     CALENDAR_TITLE_MAX_LENGTH,
     CONSENT_FIELDS,
@@ -49,6 +50,7 @@ from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import END_DATE_REQUIRED
 from ledger.services.one_off_charges import ChargeInput
 from ledger.validators import validate_no_payment_data, visible_text
+from ledger.wording import provider_sentence
 from payments.operator_sync import normalise_phone
 
 if TYPE_CHECKING:
@@ -110,8 +112,8 @@ class OperatorForm(_OperatorFormBase):
             "email_consent_at",
         )
         labels = {
-            "sms_phone": "SMS phone (international, +1…)",
-            "sms_consent_at": "SMS consent given on",
+            "sms_phone": "Text-message phone (international, +1…)",
+            "sms_consent_at": "Text-message consent given on",
             "email_consent_at": "E-mail consent given on",
         }
         # PLAN-012c D8: a consent is shown only with a phone (SMS) or an e-mail on the form.
@@ -158,12 +160,12 @@ class LinkForm(forms.Form):
     """Exactly two identifiers copied from the payment provider's dashboard (D4)."""
 
     customer_id = forms.CharField(
-        label="Customer ID",
+        label=provider_sentence("{provider} customer ID"),
         max_length=IDENTIFIER_MAX_LENGTH,
         validators=[IDENTIFIER_VALIDATOR],
     )
     payment_method_id = forms.CharField(
-        label="Payment method ID",
+        label=provider_sentence("{provider} bank method ID"),
         max_length=IDENTIFIER_MAX_LENGTH,
         validators=[IDENTIFIER_VALIDATOR],
     )
@@ -176,6 +178,20 @@ RENT_MAX = Decimal("9999999999.99")
 #: The lease form's "Debited twice a month" tick (PLAN-012c D8): a control of the page,
 #: without a name, so it is never posted.
 TWICE_MONTHLY_ID = "twice-monthly"
+
+
+def _twice_monthly(second_debit_day: forms.BoundField) -> bool:
+    """The "Debited twice a month" tick starts ticked when a second debit day is set,
+    typed or refused (PLAN-012c D8)."""
+    return bool(str(second_debit_day.value() or "").strip()) or bool(second_debit_day.errors)
+
+
+def _channel_choices(found: Iterable[tuple[Any, Any]]) -> list[tuple[Any, Any]]:
+    """A payment channel list with the on-screen labels (copy list §4.5); a blank choice
+    keeps its text."""
+    return [
+        (value, wording.label(PaymentChannel, value) if value else text) for value, text in found
+    ]
 
 
 class LeaseForm(_LeaseFormBase):
@@ -243,12 +259,13 @@ class LeaseForm(_LeaseFormBase):
             ).order_by("display_name", "id")
         if not self.instance.pk:
             del self.fields["rent_effective_from"]
+        channel = self.fields["payment_channel"]
+        if isinstance(channel, forms.ChoiceField):
+            channel.choices = _channel_choices(channel.choices)
 
     def twice_monthly(self) -> bool:
-        """Whether the page's "Debited twice a month" tick starts ticked (PLAN-012c D8): a
-        second debit day is set, typed or refused."""
-        bound = self["second_debit_day"]
-        return bool(str(bound.value() or "").strip()) or bool(bound.errors)
+        """Whether the page's "Debited twice a month" tick starts ticked (PLAN-012c D8)."""
+        return _twice_monthly(self["second_debit_day"])
 
     def lease_fields(self) -> list[forms.BoundField]:
         """The visible fields of the lease itself (the create form adds a checklist)."""
@@ -547,9 +564,9 @@ class ManualPaymentForm(forms.Form):
         required=False,
         max_length=PAYMENT_REFERENCE_MAX_LENGTH,
         validators=[validate_no_payment_data],
-        help_text=(
+        help_text=provider_sentence(
             "Optional: the bank or Zelle reference. Letters, digits and hyphens of it (up to "
-            "25) are sent with the invoice when it is marked paid."
+            "25) are sent to {provider} when the invoice is marked paid."
         ),
     )
     note = forms.CharField(
@@ -1395,7 +1412,9 @@ class LeaseEndSettlementForm(forms.Form):
         label="Refund method",
         required=False,
         choices=[("", "—"), *RefundMethod.choices],
-        help_text="How the refund is paid: Zelle, wire or check, never the payment provider.",
+        help_text=provider_sentence(
+            "How the refund is paid: Zelle, wire or check, never through {provider}."
+        ),
     )
     refund_on = forms.DateField(
         label="Refund date",
@@ -1423,7 +1442,7 @@ class LeaseEndConfirmForm(forms.Form):
         label="I have read the effects above and want to end the lease",
         required=True,
         widget=_ExactCheckboxInput,
-        error_messages={"required": "Tick the box to confirm."},
+        error_messages={"required": "Check the box to confirm."},
     )
 
 
@@ -1465,15 +1484,20 @@ class TransferIncomingForm(forms.Form):
         max_value=31,
         required=False,
         help_text="Only for a lease debited twice a month.",
+        # PLAN-012c D8 (Batch D carry-over): shown while "Debited twice a month" is ticked,
+        # as on the lease form; the tick is the page's only, the rules are unchanged.
+        widget=forms.NumberInput(attrs={SHOWN_WHEN: TWICE_MONTHLY_ID}),
     )
     payment_channel = forms.ChoiceField(
         label="Payment channel",
-        choices=[("", "—")]
-        + [
-            (value, label)
-            for value, label in PaymentChannel.choices
-            if value != PaymentChannel.UNKNOWN
-        ],
+        choices=lambda: _channel_choices(
+            [("", "—")]
+            + [
+                (value, label)
+                for value, label in PaymentChannel.choices
+                if value != PaymentChannel.UNKNOWN
+            ]
+        ),
         help_text="How the incoming operator pays the rent.",
     )
     prorate_first_month = forms.BooleanField(
@@ -1518,6 +1542,10 @@ class TransferIncomingForm(forms.Form):
             and (field.name != "deposit_amount" or self.deposit_offered or field.errors)
         ]
 
+    def twice_monthly(self) -> bool:
+        """Whether the page's "Debited twice a month" tick starts ticked (PLAN-012c D8)."""
+        return _twice_monthly(self["second_debit_day"])
+
     def setup_rows(self) -> list[dict[str, Any]]:
         return [
             {"fee_type": fee_type, "price": self[f"{_setup_name(fee_type)}_price"]}
@@ -1544,7 +1572,7 @@ class TransferConfirmForm(forms.Form):
         label="I have read the effects above and want to transfer the store",
         required=True,
         widget=_ExactCheckboxInput,
-        error_messages={"required": "Tick the box to confirm."},
+        error_messages={"required": "Check the box to confirm."},
     )
 
 

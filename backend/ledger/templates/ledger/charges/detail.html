@@ -1,28 +1,28 @@
 {% extends "finance/base.html" %}
-{% load components %}
+{% load components money %}
 {% load responsive %}
-{% block title %}Charge {{ lease.store.external_label }} {{ charge.period_month|date:"Y-m" }}{% endblock %}
+{% block title %}Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% endblock %}
 {% block content %}
   {% include "ledger/_store_crumb.html" %}
-  <p class="muted"><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Rent run</a></p>
-  <div class="page-header"><h1>Rent {{ charge.period_month|date:"Y-m" }}, debit {{ charge.seq }}{% if charge.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</h1></div>
+  <p class="muted"><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Daily charges</a></p>
+  <div class="page-header"><h1>Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% if charge.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</h1></div>
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
 
   {% if can_record or can_link_invoice %}
     <p class="actions">
-      {% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Record a payment</a>{% endif %}
-      {% if can_link_invoice %}<a class="btn" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Link invoice</a>{% endif %}
+      {% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}
+      {% if can_link_invoice %}<a class="btn" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}
     </p>
   {% endif %}
   {% include "ledger/_job_status.html" %}
   {% if can_retry_release %}
     <form method="post" action="{% url 'ledger:charges:retry_release' pk=charge.pk %}" class="actions js-single-submit">
-      {% csrf_token %}<button class="btn btn-primary" type="submit" id="retry-provider">Retry</button>
+      {% csrf_token %}<button class="btn btn-primary" type="submit" id="retry-provider">Try again</button>
     </form>
   {% endif %}
   {% if can_retry_mark %}
     <form method="post" action="{% url 'ledger:charges:retry_mark' pk=charge.pk %}" class="actions js-single-submit">
-      {% csrf_token %}<button class="btn btn-primary" type="submit" id="retry-mark">Retry marking the invoice paid</button>
+      {% csrf_token %}<button class="btn btn-primary" type="submit" id="retry-mark">Mark paid in {{ company.provider_name }} again</button>
     </form>
   {% elif retry_wait_message %}
     <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
@@ -31,11 +31,11 @@
   <dl>
     <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
     <dt>Due</dt><dd>{{ charge.due_on|date:"Y-m-d" }}</dd>
-    <dt>Amount due</dt><dd id="amount-due">${{ charge.amount_due }}</dd>
+    <dt>Amount due</dt><dd id="amount-due">{{ charge.amount_due|money }}</dd>
     {% if charge.proration_text %}<dt>Prorated</dt><dd id="proration-text">{{ charge.proration_text }}</dd>{% endif %}
-    <dt>Paid</dt><dd id="amount-paid">${{ charge.amount_paid }}</dd>
-    <dt>Balance</dt><dd id="balance">${{ charge.balance }}</dd>
-    <dt>Carried balance</dt><dd id="carried-balance">${{ carried_balance }} <span class="muted">from earlier charges, not part of this charge</span></dd>
+    <dt>Paid</dt><dd id="amount-paid">{{ charge.amount_paid|money }}</dd>
+    <dt>Balance</dt><dd id="balance">{{ charge.balance|money }}</dd>
+    <dt>Carried balance</dt><dd id="carried-balance">{{ carried_balance|money }} <span class="muted">from earlier charges, not part of this charge</span></dd>
     <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
   </dl>
 
@@ -44,17 +44,17 @@
   <h2>Invoices</h2>
   {% responsive_table %}
   <table id="invoices">
-    <thead><tr><th>Number</th><th>Date</th><th class="money">Total</th><th>Provider status</th></tr></thead>
+    <thead><tr><th>Number</th><th>Date</th><th class="money">Total</th><th>{{ company.provider_name }} status</th></tr></thead>
     <tbody>
       {% for invoice in invoices %}
-        <tr><td>{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|date:"Y-m-d" }}</td><td class="money">${{ invoice.total }}</td><td>{{ invoice.provider_status|default:"—" }}</td></tr>
+        <tr><td>{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|date:"Y-m-d" }}</td><td class="money">{{ invoice.total|money }}</td><td>{{ invoice.provider_status|default:"—" }}</td></tr>
       {% empty %}
-        <tr><td colspan="4" class="muted empty">No invoice linked yet.{% if can_link_invoice %} An invoice made on the payment provider's dashboard can be linked with "Link invoice".{% endif %}</td></tr>
+        <tr><td colspan="4" class="muted empty">No invoice linked yet.{% if can_link_invoice %} An invoice made on the {{ company.provider_name }} dashboard can be attached with "Attach {{ company.provider_name }} invoice".{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endresponsive_table %}
-  <p class="muted">Provider status is copied from the payment provider as it is.</p>
+  <p class="muted">The {{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>
 
   <h2>Payments</h2>
   {% responsive_table %}
@@ -65,14 +65,14 @@
         <tr>
           <td><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">{{ payment.settled_on|date:"Y-m-d"|default:"—" }}</a></td>
           <td>{{ payment.get_method_display }}</td>
-          <td class="money">{% if payment.is_refund %}&minus;{% endif %}${{ payment.amount }}</td>
+          <td class="money">{% if payment.is_refund %}&minus;{% endif %}{{ payment.amount|money }}</td>
           <td>{% if payment.is_refund %}<span class="badge">Refund</span> {% endif %}{% status_badge payment.get_status_display payment.status %}</td>
           <td>{{ payment.reference|default:"—" }}</td>
           <td style="white-space:pre-wrap;">{{ payment.note }}</td>
           <td>{{ payment.recorded_by|default:"—" }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="7" class="muted empty">No payments.</td></tr>
+        <tr><td colspan="7" class="muted empty">No payments yet. Add one from the action bar.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -5,7 +5,7 @@
       <label for="to" style="margin:0;">To</label>
       {% include "ledger/_month_select.html" with name="to" months=picker_months selected=selected.to_month %}
       <button class="btn" type="submit">Show</button>
-      <a class="btn" id="export-csv" href="{{ export }}?{{ export_query }}">Export CSV</a>
+      <a class="btn" id="export-csv" href="{{ export }}?{{ export_query }}">Download spreadsheet</a>
     </div>
   </form>
   {% if selected.messages %}

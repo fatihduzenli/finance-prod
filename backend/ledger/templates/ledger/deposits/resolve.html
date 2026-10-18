@@ -1,10 +1,11 @@
 {% extends "finance/base.html" %}
-{% block title %}Resolve deposit {{ lease.store.external_label }}{% endblock %}
+{% load money %}
+{% block title %}Return deposit{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a></p>
-  <div class="page-header"><h1>Resolve {{ charge.fee_type.name|lower }}</h1></div>
-  <p>Paid on this deposit: <strong id="deposit-paid">${{ paid }}</strong>. Lease ended {{ lease.ended_on|date:"Y-m-d"|default:"— (not ended)" }}.</p>
-  <p class="muted">A deposit is resolved once. <strong>Refunded</strong>: the amount paid back by Zelle, wire or other (recorded as a deposit refund, money out). <strong>Withheld</strong>: the business keeps the whole paid deposit. <strong>Transferred</strong>: the amount becomes the deposit of another lease of the same operator. For a refund or a transfer below the paid amount, the rest is recorded as withheld; say why in the note. Nothing is sent to the payment provider.</p>
+  <div class="page-header"><h1>Return deposit</h1></div>
+  <p>Paid on this deposit: <strong id="deposit-paid">{{ paid|money }}</strong>. Lease ended {{ lease.ended_on|date:"Y-m-d"|default:"— (not ended)" }}.</p>
+  <p class="muted">A deposit is resolved once. <strong>Refunded</strong>: the amount paid back by Zelle, wire or other (recorded as a deposit refund, money out). <strong>Withheld</strong>: the business keeps the whole paid deposit. <strong>Transferred</strong>: the amount becomes the deposit of another lease of the same operator. For a refund or a transfer below the paid amount, the rest is recorded as withheld; say why in the note. Nothing is sent to {{ company.provider_name }}.</p>
   {% if not can_resolve %}<p id="cannot-resolve"><strong>This deposit cannot be resolved now: it is resolved already, or its lease has not ended.</strong></p>{% endif %}
   <form method="post" id="resolve-deposit-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
@@ -13,7 +14,7 @@
     {% for field in form.visible_fields %}
       {% if field.name != "to_lease" or form.has_targets or field.errors %}{% include "ledger/stores/_form_field.html" %}{% endif %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="resolve-deposit-submit">Resolve deposit</button></p>
+    <p class="actions"><button class="btn btn-primary" type="submit" id="resolve-deposit-submit">Return deposit</button></p>
   </form>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

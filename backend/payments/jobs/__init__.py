@@ -50,7 +50,7 @@ LOCK_SECONDS = 600
 #: The result stored when a job's worker stopped mid-run.
 WORKER_LOST = "WorkerLost"
 #: What the page shows for a dead job.
-DEAD_TEXT = "Stopped: the worker stopped twice while running this request. Nothing more is tried."
+DEAD_TEXT = "Gave up: the request stopped twice while running. Nothing more is tried."
 #: The result stored when the outcome could not be stored as it was.
 RESULT_NOT_STORED = "ResultNotStored"
 
@@ -347,11 +347,12 @@ def is_active(job: Job | None) -> bool:
 
 
 def describe(job: Job) -> str:
-    """What the page shows: "Queued", "Running", "Done: <outcome>", "Failed: <outcome>"."""
+    """What the page shows: "Waiting", "In progress", "Done: <outcome>", "Failed: <outcome>"
+    (the copy list's words, PLAN-012c §4.5)."""
     if job.status == JobStatus.QUEUED:
-        return "Queued"
+        return "Waiting"
     if job.status == JobStatus.RUNNING:
-        return "Running"
+        return "In progress"
     if job.status == JobStatus.DEAD:
         return DEAD_TEXT
     label = "Done" if job.status == JobStatus.DONE else "Failed"

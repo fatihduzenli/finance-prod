@@ -177,7 +177,7 @@ FEE_COSTS = "fee costs"
 
 # --- Fixed sentences ------------------------------------------------------------------
 
-UNREADABLE = "The months could not be read (use YYYY-MM); showing {start} to {end}."
+UNREADABLE = "The months could not be read (choose a month); showing {start} to {end}."
 SWAPPED = "The end month was before the start month; showing {start} to {end}."
 CAPPED = "At most {limit} months are shown; showing {start} to {end}."
 BAD_GROUP = "Unknown grouping; grouped by store."

@@ -626,9 +626,7 @@ NOTES_MAX_LENGTH = 2000
 FILE_TYPE = "Only .csv and .xlsx files can be imported. Nothing was imported."
 FILE_UNREADABLE = "The file could not be read. Nothing was imported."
 FILE_TOO_LARGE = "The file is larger than 20 MB. Nothing was imported."
-NOT_CSV = (
-    'The file is not a CSV in UTF-8 text: save it as "CSV UTF-8" or as .xlsx. Nothing was imported.'
-)
+NOT_CSV = "The file could not be read: save it as CSV UTF-8 or as .xlsx. Nothing was imported."
 NOT_WORKBOOK = "The file is not a valid .xlsx workbook. Nothing was imported."
 NO_SHEET = f'The workbook has no sheet named "{SHEET_NAME}". Nothing was imported.'
 NO_HEADER = "The file has no header row. Nothing was imported."
@@ -837,7 +835,7 @@ ROW_AMOUNT = (
     "no $, commas or minus sign)"
 )
 ROW_DECIMALS = "{column} has more than two decimals"
-ROW_DATE = "{column} is not a date (MM/DD/YYYY or YYYY-MM-DD)"
+ROW_DATE = "{column} is not a date (month/day/year)"
 ROW_TOO_LONG = "{column} is longer than {limit} characters"
 ROW_UNKNOWN_STORE = "no store has number {number}"
 ROW_MANY_STORES = "more than one store has number {number}"
@@ -893,9 +891,9 @@ def read_row(row: ParsedRow) -> RowReading:
     description = visible_text(cells["other_cost_description"])
     notes = visible_text(cells["notes"])
     if not refusal and len(description) > NAME_MAX_LENGTH:
-        refusal = ROW_TOO_LONG.format(column="other_cost_description", limit=NAME_MAX_LENGTH)
+        refusal = ROW_TOO_LONG.format(column="Other cost description", limit=NAME_MAX_LENGTH)
     if not refusal and len(notes) > NOTES_MAX_LENGTH:
-        refusal = ROW_TOO_LONG.format(column="notes", limit=NOTES_MAX_LENGTH)
+        refusal = ROW_TOO_LONG.format(column="Notes", limit=NOTES_MAX_LENGTH)
     if refusal or rent is None:
         return RowReading(refusal=refusal, store_number=store_number)
     return RowReading(

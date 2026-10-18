@@ -57,6 +57,7 @@ from decimal import Decimal
 from django.db.models import Count, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce, TruncMonth
 
+from ledger import wording
 from ledger.models import (
     ZERO,
     MoneyMethod,
@@ -70,6 +71,7 @@ from ledger.models import (
 from ledger.services import pnl, receivables
 from ledger.services.csv_export import CsvWriter
 from ledger.services.payments_ledger import charge_lease, invoice_line_parts
+from ledger.wording import provider_sentence
 from payments.models import Deposit, MismatchKind, ReconciliationMismatch
 from payments.provider import mask_identifier
 from payments.webhooks.handlers.common import ENTITY_PAYMENT
@@ -215,8 +217,8 @@ def revenue_csv_lines(report: Revenue) -> Iterator[str]:
 
 #: The methods money is received by: a credit applied (PLAN-012d D6a) moves no money.
 METHODS: tuple[str, ...] = tuple(MoneyMethod.values)
-CARDS_NOTE = (
-    "Cards do not exist in this app. A manual payment marked at the payment provider as "
+CARDS_NOTE = provider_sentence(
+    "Cards do not exist in this app. A payment recorded by hand and marked in {provider} as "
     "cash or check is recorded here as Zelle, wire or other, with a note."
 )
 
@@ -411,7 +413,7 @@ def deposits_vs_transactions(selected: ReportRange) -> DepositsReport:
 
 def unmatched_items() -> list[UnmatchedItem]:
     """The unresolved step (c) findings, oldest first."""
-    labels = dict(MismatchKind.choices)
+    labels = dict(wording.choices(MismatchKind))
     return [
         UnmatchedItem(
             found_on=row.created_at.date(),
@@ -565,7 +567,7 @@ def _charge_description(payment: Payment) -> str:
         return f"Insurance, policy year {payment.insurance_charge.policy_year}"
     if payment.one_off_charge is not None:
         one_off = payment.one_off_charge
-        label = OneOffCategory(one_off.category).label
+        label = wording.label(OneOffCategory, one_off.category)
         detail = one_off.fee_type.name if one_off.fee_type is not None else one_off.description
         return f"{label}: {detail}" if detail else str(label)
     return ""

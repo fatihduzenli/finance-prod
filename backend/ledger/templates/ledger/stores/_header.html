@@ -1,13 +1,14 @@
+{% load money %}
 {% comment %}The store page's header card (docs/qa/PLAN-012d D1): ledger.services.workspace.Header. On the operator page (D14, "ows"), the selected store in place of the operator, and the open balance of all the operator's stores.{% endcomment %}
 <section id="workspace-header" class="workspace-header" aria-label="Store summary">
   <dl class="header-card">
     {% if ows %}<dt>Store</dt><dd id="header-store"><a href="{% url 'ledger:stores:detail' pk=store.pk %}">{{ store.external_label }}</a></dd>{% else %}<dt>Operator</dt><dd id="header-operator">{% if header.operator %}<a href="{% url 'ledger:operators:detail' pk=header.operator.pk %}">{{ header.operator.display_name }}</a>{% else %}—{% endif %}</dd>{% endif %}
-    <dt>Lease</dt><dd id="header-lease">{% if header.lease %}<a href="{% url 'ledger:leases:detail' pk=header.lease.pk %}">From {{ header.lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if header.lease.ended_on %} to {{ header.lease.ended_on|date:"Y-m-d" }}{% endif %}{% if header.rent %}, rent ${{ header.rent.amount }} a month{% endif %}{% else %}No current lease{% if ows %} of this operator{% endif %}{% if vacant_since %}, vacant since {{ vacant_since|date:"Y-m-d" }}{% endif %}{% endif %}</dd>
+    <dt>Lease</dt><dd id="header-lease">{% if header.lease %}<a href="{% url 'ledger:leases:detail' pk=header.lease.pk %}">From {{ header.lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if header.lease.ended_on %} to {{ header.lease.ended_on|date:"Y-m-d" }}{% endif %}{% if header.rent %}, rent {{ header.rent.amount|money }} a month{% endif %}{% else %}No current lease{% if ows %} of this operator{% endif %}{% if vacant_since %}, vacant since {{ vacant_since|date:"Y-m-d" }}{% endif %}{% endif %}</dd>
     <dt>Autopay</dt><dd id="header-autopay">{{ header.autopay }}{% if header.autopay_moved %}; {{ header.autopay_moved }}{% endif %}</dd>
-    <dt>Open balance</dt><dd id="header-open-balance">${{ header.open_balance }}</dd>
-    {% if ows %}<dt>Open balance, all stores</dt><dd id="header-operator-balance">${{ ows.open_balance }}</dd>{% endif %}
-    {% if header.credit > 0 %}<dt>Credit</dt><dd id="header-credit">${{ header.credit }}</dd>{% endif %}
+    <dt>Open balance</dt><dd id="header-open-balance">{{ header.open_balance|money }}</dd>
+    {% if ows %}<dt>Open balance, all stores</dt><dd id="header-operator-balance">{{ ows.open_balance|money }}</dd>{% endif %}
+    {% if header.credit > 0 %}<dt>Credit</dt><dd id="header-credit">{{ header.credit|money }}</dd>{% endif %}
     <dt>Next scheduled payment</dt><dd id="header-next-payment">{% if header.next_payment %}{{ header.next_payment.on|date:"Y-m-d" }}: {{ header.next_payment.what }}{% else %}None scheduled{% endif %}</dd>
-    <dt>Open promise</dt><dd id="header-open-promise">{% if header.open_promise %}${{ header.open_promise.promised_amount }} by {{ header.open_promise.promised_date|date:"Y-m-d" }}{% else %}None{% endif %}</dd>
+    <dt>Open promise</dt><dd id="header-open-promise">{% if header.open_promise %}{{ header.open_promise.promised_amount|money }} by {{ header.open_promise.promised_date|date:"Y-m-d" }}{% else %}None{% endif %}</dd>
   </dl>
 </section>

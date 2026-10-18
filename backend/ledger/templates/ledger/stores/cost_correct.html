@@ -1,9 +1,10 @@
 {% extends "finance/base.html" %}
+{% load money %}
 {% block title %}Correct cost row {{ store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}#store-costs">&larr; Store {{ store.external_label }}</a></p>
   <div class="page-header"><h1>Correct a cost row</h1></div>
-  <p id="corrected-row">Row being corrected: ${{ cost.landlord_rent }} a month from {{ cost.effective_from|date:"Y-m-d" }} to {{ cost.effective_to|date:"Y-m-d"|default:"open" }}.</p>
+  <p id="corrected-row">Row being corrected: {{ cost.landlord_rent|money }} a month from {{ cost.effective_from|date:"Y-m-d" }} to {{ cost.effective_to|date:"Y-m-d"|default:"open" }}.</p>
   <p class="muted">Saving writes a new row with these values and dates and keeps this one in the history, struck through, with your note. The dates may not overlap another current row of this store.</p>
   <form method="post" id="store-cost-correct-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}

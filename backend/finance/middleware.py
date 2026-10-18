@@ -1,4 +1,5 @@
-"""Response middleware: the sandbox banner, and no shared or stored copy of a page.
+"""Response middleware: the sandbox banner, and no shared or stored copy of a page; the
+processor's name for the request's sentences.
 
 docs/CLAUDE.md Rule 6: when ``STAX_ENV=sandbox`` every rendered page, Django admin
 included, carries a fixed yellow bar that cannot be dismissed, and the page title is
@@ -16,6 +17,9 @@ from django.conf import settings
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHttpResponse
 from django.template.loader import render_to_string
 from django.utils.cache import patch_cache_control
+
+from finance.context_processors import company_settings
+from ledger import wording
 
 BANNER_TEMPLATE = "finance/banner.html"
 SANDBOX_STAX_ENV = "sandbox"
@@ -88,3 +92,17 @@ class PrivateNoStoreMiddleware:
         if not request.path_info.startswith(self.static_prefix):
             patch_cache_control(response, private=True, no_store=True)
         return response
+
+
+class ProviderNameMiddleware:
+    """The processor's name in the app's sentences comes from this request's company
+    settings row (docs/qa/PLAN-012c-design-pass.md D9): the row the shell reads
+    (:func:`finance.context_processors.company_settings`), so a page that names the
+    processor reads the row once, and not at all when nothing on it does."""
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponseBase]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponseBase:
+        with wording.reading_from(lambda: str(company_settings(request).provider_name)):
+            return self.get_response(request)

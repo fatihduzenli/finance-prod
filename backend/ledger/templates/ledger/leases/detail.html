@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load responsive money %}
 {% load static %}
 {% block title %}Lease {{ lease.store.external_label }}{% endblock %}
 {% block content %}
@@ -7,7 +7,7 @@
   <div class="page-header"><h1>Lease {{ lease.store.external_label }}{% if lease.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</h1></div>
   <div class="actions">
     {% if can_edit %}<a class="btn" href="{% url 'ledger:leases:edit' pk=lease.pk %}">Edit</a>{% endif %}
-    {% if can_enrol %}<a class="btn" href="{% url 'ledger:leases:enrol' pk=lease.pk %}">Enable autopay</a>{% endif %}
+    {% if can_enrol %}<a class="btn" href="{% url 'ledger:leases:enrol' pk=lease.pk %}">Set up autopay</a>{% endif %}
     {% if can_end %}<a class="btn btn-danger" id="end-lease" href="{% url 'ledger:leases:end' pk=lease.pk %}">End lease</a>{% endif %}
     {% if can_pause %}
       <form method="post" action="{% url 'ledger:leases:pause' pk=lease.pk %}" class="js-single-submit">
@@ -19,7 +19,7 @@
         {% csrf_token %}<button class="btn" type="submit" id="resume-autopay">Resume autopay</button>
       </form>
     {% endif %}
-    {% if can_stop %}<a class="btn btn-danger" id="stop-autopay" href="{% url 'ledger:leases:stop_autopay' pk=lease.pk %}">Stop autopay</a>{% endif %}
+    {% if can_stop %}<a class="btn btn-danger" id="stop-autopay" href="{% url 'ledger:leases:stop_autopay' pk=lease.pk %}">Turn off autopay</a>{% endif %}
   </div>
 
   <dl>
@@ -32,8 +32,8 @@
     <dt>Prorate first month</dt><dd id="prorate-first-month">{{ lease.prorate_first_month|yesno:"Yes,No" }}</dd>
     {% if lease.ended_on %}<dt>End date</dt><dd id="lease-ended-on">{{ lease.ended_on|date:"Y-m-d" }}</dd>
     <dt>End reason</dt><dd id="lease-end-reason">{{ lease.end_reason|default:"—" }}</dd>{% endif %}
-    <dt>Current rent</dt><dd id="current-rent">{% if rent %}${{ rent.amount }} from {{ rent.effective_from|date:"Y-m-d" }}{% else %}—{% endif %}</dd>
-    {% if upcoming %}<dt>Upcoming rent</dt><dd id="upcoming-rent">Rent changes to ${{ upcoming.amount }} on {{ upcoming.effective_from|date:"Y-m-d" }}</dd>{% endif %}
+    <dt>Current rent</dt><dd id="current-rent">{% if rent %}{{ rent.amount|money }} from {{ rent.effective_from|date:"Y-m-d" }}{% else %}—{% endif %}</dd>
+    {% if upcoming %}<dt>Upcoming rent</dt><dd id="upcoming-rent">Rent changes to {{ upcoming.amount|money }} on {{ upcoming.effective_from|date:"Y-m-d" }}</dd>{% endif %}
   </dl>
 
   <h2>Rent history</h2>
@@ -42,7 +42,7 @@
     <thead><tr><th class="money">Amount</th><th>From</th><th>To</th><th>Source</th></tr></thead>
     <tbody>
       {% for row in history %}
-        <tr><td class="money">${{ row.amount }}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.get_source_display }}</td></tr>
+        <tr><td class="money">{{ row.amount|money }}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.get_source_display }}</td></tr>
       {% empty %}
         <tr><td colspan="4" class="muted empty">No rent recorded.</td></tr>
       {% endfor %}
@@ -63,13 +63,13 @@
   {% endif %}
   {% responsive_table %}
   <table id="schedules">
-    <thead><tr><th>Debit</th><th>Day</th><th class="money">Amount</th><th>State</th><th>Next debit</th><th>Provider schedule</th></tr></thead>
+    <thead><tr><th>Debit</th><th>Day</th><th class="money">Amount</th><th>State</th><th>Next debit</th><th>Autopay in {{ company.provider_name }}</th></tr></thead>
     <tbody>
       {% for item in schedules %}
         <tr>
           <td>{{ item.row.seq }}</td>
           <td>{{ item.row.debit_day|default:"—" }}</td>
-          <td class="money">${{ item.row.amount }}</td>
+          <td class="money">{{ item.row.amount|money }}</td>
           <td>{{ item.row.get_state_display }}{% if item.review_message %}<br><strong class="schedule-review">{{ item.review_message }}</strong>{% endif %}</td>
           <td>{% if item.next_run %}{{ item.next_run|date:"Y-m-d" }}{% else %}—{% endif %}</td>
           <td>{{ item.schedule_masked|default:"—" }}</td>
@@ -80,7 +80,7 @@
     </tbody>
   </table>
   {% endresponsive_table %}
-  <p class="muted">Next debit is computed here from the debit day; the provider runs the schedule.</p>
+  <p class="muted">Next debit is computed here from the debit day; {{ company.provider_name }} runs the autopay.</p>
 
   <h2 id="lease-charges">Charges, invoices and payments</h2>
   <p id="charges-moved">Charges, invoices and payments are on the store page: <a href="{% url 'ledger:stores:detail' pk=lease.store.pk %}?tab=charges#tab-charges" id="store-charges-link">Store {{ lease.store.external_label }}, Charges</a>.</p>

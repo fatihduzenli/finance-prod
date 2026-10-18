@@ -56,6 +56,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from ledger.models import AuditLog, EnrolmentStatus, Operator, SyncFailure, SyncStatus
+from ledger.wording import provider_sentence
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef
 from payments.provider import (
@@ -116,38 +117,46 @@ ARCHIVED = "Archived"
 PHONE_INVALID = "PhoneInvalid"
 
 #: Fixed sentences shown to staff, keyed by failure class name or local refusal.
+#: The sentences name the processor by the company settings row's display name (PLAN-012c
+#: D9, copy list §4.1).
 MESSAGES: dict[str, str] = {
-    SyncFailure.PROVIDER_REJECTED: (
-        "The payment provider refused the request. Check the operator's details, then retry."
+    SyncFailure.PROVIDER_REJECTED: provider_sentence(
+        "{provider} refused the request. Check the operator's details, then try again."
     ),
-    SyncFailure.PROVIDER_UNAVAILABLE: (
-        "The payment provider is not answering. The operator is saved; retry later."
+    SyncFailure.PROVIDER_UNAVAILABLE: provider_sentence(
+        "{provider} is not answering. The operator is saved; try again later."
     ),
-    SyncFailure.TRANSPORT_ERROR: (
-        "The payment provider could not be reached. The operator is saved; retry later."
+    SyncFailure.TRANSPORT_ERROR: provider_sentence(
+        "{provider} could not be reached. The operator is saved; try again later."
     ),
-    SyncFailure.CIRCUIT_OPEN: (
-        "Calls to the payment provider are paused after repeated failures. Retry in a few minutes."
+    SyncFailure.CIRCUIT_OPEN: provider_sentence(
+        "Calls to {provider} are paused after repeated errors. Try again in a few minutes."
     ),
-    SyncFailure.RATE_LIMIT_WAIT_EXCEEDED: "The payment provider is busy. Retry in a minute.",
+    SyncFailure.RATE_LIMIT_WAIT_EXCEEDED: provider_sentence(
+        "{provider} is busy. Try again in a minute."
+    ),
     SyncFailure.VALIDATION_FAILED: (
         "The details were refused before anything was sent. Check the e-mail address."
     ),
-    SyncFailure.NOT_PERMITTED_HERE: "This server is not allowed to call the payment provider.",
-    SyncFailure.ALREADY_LINKED_ELSEWHERE: (
-        "That payment provider record is already linked to another operator. Nothing was changed."
+    SyncFailure.NOT_PERMITTED_HERE: provider_sentence(
+        "This server is not allowed to call {provider}."
     ),
-    ALREADY_LINKED: (
-        "This operator is already linked to a different payment provider customer. "
+    SyncFailure.ALREADY_LINKED_ELSEWHERE: provider_sentence(
+        "That {provider} record is already connected to another operator. Nothing was changed."
+    ),
+    ALREADY_LINKED: provider_sentence(
+        "This operator is already connected to a different {provider} customer. "
         "Nothing was changed."
     ),
     ARCHIVED: "This operator is archived.",
     PHONE_INVALID: "Fix the phone number first.",
 }
-DEFAULT_MESSAGE = "The payment provider call failed. The operator is saved."
-AWAITING_LINK_MESSAGE = "No e-mail address: link the payment provider customer by hand."
-LINK_REJECTED_MESSAGE = (
-    "The payment provider did not recognise that customer ID. Nothing was saved."
+DEFAULT_MESSAGE = provider_sentence("The call to {provider} failed. The operator is saved.")
+AWAITING_LINK_MESSAGE = provider_sentence(
+    "No e-mail address: connect the {provider} customer by hand."
+)
+LINK_REJECTED_MESSAGE = provider_sentence(
+    "{provider} did not recognise that customer ID. Nothing was saved."
 )
 
 

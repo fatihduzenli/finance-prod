@@ -113,6 +113,9 @@ MIDDLEWARE = [
     # Refuses an oversized body before CsrfViewMiddleware reads it (PLAN-010c D3).
     "finance.uploads.RequestSizeLimitMiddleware",
     "finance.middleware.SandboxBannerMiddleware",
+    # The processor's name in sentences, read from the request's company settings row
+    # (PLAN-012c D9); outside MessageMiddleware, which writes the flash messages out.
+    "finance.middleware.ProviderNameMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

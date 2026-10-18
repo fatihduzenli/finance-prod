@@ -27,7 +27,7 @@ from django.db.models.functions import Length, Lower, Trim
 from django.db.models.lookups import Exact
 from django.utils import timezone
 
-from ledger import merge
+from ledger import merge, wording
 from ledger.validators import validate_json_has_no_payment_data, validate_no_payment_data
 
 MONEY_MAX_DIGITS = 12
@@ -332,6 +332,14 @@ class Operator(GuardedModel):
             self.email = self.email.strip().lower() or None
         super().save(*args, **kwargs)
 
+    def get_sync_status_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(SyncStatus, self.sync_status)
+
+    def get_sync_failure_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(SyncFailure, self.sync_failure)
+
 
 class StoreStatus(models.TextChoices):
     PROSPECTIVE = "prospective", "Prospective"
@@ -451,6 +459,10 @@ class Lease(GuardedModel):
     def __str__(self) -> str:
         return f"Lease {self.pk}"
 
+    def get_payment_channel_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(PaymentChannel, self.payment_channel)
+
 
 class RentSource(models.TextChoices):
     SHEET_CURRENT = "sheet_current", "Sheet, current rent"
@@ -484,6 +496,10 @@ class LeaseRentHistory(GuardedModel):
             ),
             _valid_choice("lease_rent_history", "source", RentSource),
         ]
+
+    def get_source_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(RentSource, self.source)
 
 
 class ScheduleKind(models.TextChoices):
@@ -530,6 +546,10 @@ class CollectionSchedule(GuardedModel):
             _valid_choice("collection_schedules", "kind", ScheduleKind),
             _valid_choice("collection_schedules", "state", ScheduleState),
         ]
+
+    def get_state_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(ScheduleState, self.state)
 
 
 # --- Charges -----------------------------------------------------------------------
@@ -1098,6 +1118,14 @@ class OneOffCharge(GuardedModel):
             return self.description
         return self.fee_type.name if self.fee_type is not None else ""
 
+    def get_category_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(OneOffCategory, self.category)
+
+    def get_collection_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(CollectionMethod, self.collection)
+
 
 # --- Installment plans (PLAN-012e D9 to D11) ----------------------------------------
 
@@ -1220,6 +1248,10 @@ class InstallmentPlan(GuardedModel):
         if self.one_off_charge is None:
             raise ValueError("An installment plan has a parent.")
         return self.one_off_charge
+
+    def get_collection_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(InstallmentCollection, self.collection)
 
 
 # --- Store costs (PLAN-010b D8) ------------------------------------------------------
@@ -1736,6 +1768,10 @@ class LeaseCredit(GuardedModel):
     def __str__(self) -> str:
         return f"Lease credit {self.pk}"
 
+    def get_method_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(MoneyMethod, self.method)
+
 
 class Payment(GuardedModel):
     invoice = models.ForeignKey(
@@ -1887,6 +1923,10 @@ class Payment(GuardedModel):
             _valid_choice("payments", "status", PaymentStatus),
         ]
 
+    def get_method_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(PaymentMethod, self.method)
+
 
 # --- Deposit resolution (PLAN-010b D7) ---------------------------------------------
 
@@ -1963,6 +2003,10 @@ class DepositResolution(GuardedModel):
             _valid_choice("deposit_resolutions", "kind", DepositResolutionKind),
             _valid_choice("deposit_resolutions", "method", MoneyMethod, blank=True),
         ]
+
+    def get_method_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(MoneyMethod, self.method)
 
 
 # --- Documents (PLAN-010c D4) --------------------------------------------------------
@@ -2201,6 +2245,10 @@ class DisputeEvidence(GuardedModel):
     def __str__(self) -> str:
         return self.name
 
+    def get_status_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(DisputeEvidenceStatus, self.status)
+
 
 # --- Collections ladder and outbound e-mail (PLAN-011b D4) ---------------------------
 
@@ -2421,6 +2469,10 @@ class OutboundMessage(GuardedModel):
                 name="outbound_messages_one_final_statement",
             ),
         ]
+
+    def get_status_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(MessageStatus, self.status)
 
 
 # --- Contact log and calendar (PLAN-011b D7, D8) ------------------------------------
@@ -2882,6 +2934,10 @@ class LeaseTransfer(GuardedModel):
 
     def __str__(self) -> str:
         return f"Lease transfer {self.pk}"
+
+    def get_incoming_channel_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(PaymentChannel, self.incoming_channel)
 
 
 # --- Audit and import --------------------------------------------------------------

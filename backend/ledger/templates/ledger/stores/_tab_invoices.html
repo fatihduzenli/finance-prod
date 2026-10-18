@@ -1,5 +1,5 @@
 {% comment %}The Invoices tab (docs/qa/PLAN-012d D3, finding 12d-1): ledger.services.workspace.invoices_tab. A never-sent draft has Edit, Send (single submit) and Delete (no note, no confirmation page); a sent invoice keeps its cancel form. On the operator page (D14) the operator's drafts and invoices, with a Store column; Send and Delete come back to it.{% endcomment %}
-{% load components %}
+{% load components money %}
 {% load responsive %}
 <h2>Drafts</h2>
 {% responsive_table %}
@@ -10,7 +10,7 @@
       <tr class="store-draft" id="draft-{{ draft.pk }}">
         <td><a href="{% if billing %}{% url 'ledger:invoices:draft' pk=draft.pk %}{% else %}{% url 'ledger:invoices:preview' pk=draft.pk %}{% endif %}">{{ draft.number }}</a></td>
         <td>{% if by_store %}{{ draft.lease.store.external_label|default:"No store (the operator)" }}{% else %}{{ draft.operator.display_name }}{% endif %}</td>
-        <td class="money">${{ draft.total|default:"0.00" }}</td>
+        <td class="money">{{ draft.total|default:"0.00"|money }}</td>
         <td>{{ draft.created_at|date:"Y-m-d" }}</td>
         <td>{% if billing %}<div class="actions" style="margin:0;">
           <a class="btn draft-edit" href="{% url 'ledger:invoices:draft' pk=draft.pk %}{{ draft_edit_query }}">Edit</a>
@@ -24,13 +24,13 @@
   </tbody>
 </table>
 {% endresponsive_table %}
-{% if billing %}<p class="muted">Send e-mails the saved draft through the payment provider; Delete removes a draft that was never sent.</p>{% endif %}
+{% if billing %}<p class="muted">Send e-mails the saved draft through {{ company.provider_name }}; Delete removes a draft that was never sent.</p>{% endif %}
 
 <h2>Invoices</h2>
 <p class="actions tabs" id="invoice-filters">{% for value, label in invoice_filters %}<a class="btn" href="?{{ keep_store }}tab=invoices&amp;filter={{ value }}#tab-invoices"{% if value == invoice_filter %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</p>
 {% responsive_table %}
 <table id="store-invoices">
-  <thead><tr><th>Number</th><th>{% if by_store %}Store{% else %}Operator{% endif %}</th><th>Issued</th><th>Due</th><th class="money">Total</th><th class="money">Paid</th><th>Status</th><th>Provider status</th><th></th></tr></thead>
+  <thead><tr><th>Number</th><th>{% if by_store %}Store{% else %}Operator{% endif %}</th><th>Issued</th><th>Due</th><th class="money">Total</th><th class="money">Paid</th><th>Status</th><th>{{ company.provider_name }} status</th><th></th></tr></thead>
   <tbody>
     {% for item in invoice_rows %}{% with invoice=item.invoice %}
       <tr class="store-invoice">
@@ -38,8 +38,8 @@
         <td>{% if by_store %}{{ item.stores|default:"—" }}{% else %}{{ invoice.operator.display_name }}{% endif %}</td>
         <td>{{ invoice.issue_date|date:"Y-m-d" }}</td>
         <td>{{ invoice.due_date|date:"Y-m-d" }}</td>
-        <td class="money">${{ invoice.total }}</td>
-        <td class="money">${{ invoice.amount_paid }}</td>
+        <td class="money">{{ invoice.total|money }}</td>
+        <td class="money">{{ invoice.amount_paid|money }}</td>
         <td>{{ invoice.get_internal_status_display }}</td>
         <td>{{ invoice.provider_status|default:"—" }}</td>
         <td>{% if item.cancel_url %}<a class="btn invoice-cancel" href="{{ item.cancel_url }}">Cancel</a>{% endif %}</td>
@@ -50,4 +50,4 @@
   </tbody>
 </table>
 {% endresponsive_table %}
-<p class="muted">Provider status is copied from the payment provider as it is.</p>
+<p class="muted">{{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>

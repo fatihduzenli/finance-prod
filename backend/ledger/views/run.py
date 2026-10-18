@@ -35,13 +35,16 @@ from ledger.services import insurance, rent_run
 from ledger.services.csv_export import CsvWriter
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import _actor, _role, csv_response, export_name, role_required
+from ledger.wording import provider_sentence
 from payments import jobs
 from payments.health import provider_health
 from payments.models import JobKind, JobStatus, WebhookEvent, WebhookOutcome
 
 #: Most report lines shown after a run; the rest are counted.
 MAX_LINES = 20
-MATCH_QUEUED = "Matching queued. The report appears below when it is done."
+MATCH_QUEUED = provider_sentence(
+    "Updating from {provider}; the report appears below when it is done."
+)
 
 
 def _match_context() -> dict[str, Any]:

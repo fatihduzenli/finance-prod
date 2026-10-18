@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load responsive money %}
 {% load static %}
 {% block title %}End lease {{ store.external_label }}: statement{% endblock %}
 {% block content %}
@@ -23,7 +23,7 @@
       </tbody>
     </table>
     {% endresponsive_table %}
-    <p class="table-total" id="deductions-typed-total">Deductions: <span class="js-total-out" data-total-for="deduction-rows">${{ form.total|floatformat:"2g" }}</span></p>
+    <p class="table-total" id="deductions-typed-total">Deductions: <span class="js-total-out" data-total-for="deduction-rows">{{ form.total|money }}</span></p>
     {% if not has_rows %}</details>{% endif %}
     {% endwith %}
     <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>

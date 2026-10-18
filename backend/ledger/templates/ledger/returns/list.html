@@ -1,10 +1,10 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load responsive money %}
 {% block title %}Returned payments{% endblock %}
 {% block content %}
   <div class="page-header"><h1>Returned payments</h1></div>
-  <p class="muted">ACH debits the payment provider reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing debits again unless staff reschedule it: <strong>Reschedule</strong> takes the date the operator agreed and makes one invoice for the returned amount plus the NSF fee ({{ nsf_first }} on an operator's first return, {{ nsf_later }} afterwards), debited from the linked bank account on that date, or sent by e-mail when the operator has none.</p>
-  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Export CSV</a></p>
+  <p class="muted">ACH debits {{ company.provider_name }} reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing debits again unless staff reschedule it: <strong>Debit again</strong> takes the date the operator agreed and makes one invoice for the returned amount plus the NSF fee ({{ nsf_first }} on an operator's first return, {{ nsf_later }} afterwards), debited from the linked bank account on that date, or sent by e-mail when the operator has none.</p>
+  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Download spreadsheet</a></p>
   {% responsive_table %}
   <table id="returns">
     <thead>
@@ -15,7 +15,7 @@
         <tr id="return-{{ item.payment.pk }}">
           <td>{% if item.operator %}<a href="{% url 'ledger:operators:detail' pk=item.operator.pk %}">{{ item.operator.display_name }}</a>{% else %}<span class="muted">Unknown</span>{% endif %}</td>
           <td>{% if item.store %}{{ item.store.external_label }}{% else %}<span class="muted">—</span>{% endif %}</td>
-          <td class="money">${{ item.amount }}{% if item.payment.rent_charge_id %} <a href="{% url 'ledger:charges:detail' pk=item.payment.rent_charge_id %}">charge</a>{% elif item.payment.one_off_charge_id %} <a href="{% url 'ledger:one_off_charges:detail' pk=item.payment.one_off_charge_id %}">one-off charge</a>{% endif %}</td>
+          <td class="money">{{ item.amount|money }}{% if item.payment.rent_charge_id %} <a href="{% url 'ledger:charges:detail' pk=item.payment.rent_charge_id %}">charge</a>{% elif item.payment.one_off_charge_id %} <a href="{% url 'ledger:one_off_charges:detail' pk=item.payment.one_off_charge_id %}">one-off charge</a>{% endif %}</td>
           <td>{{ item.code|default:"—" }}</td>
           <td>{{ item.reason|default:"—" }}</td>
           <td>{{ item.returned_at|date:"Y-m-d H:i"|default:"—" }}</td>
@@ -31,14 +31,14 @@
                 <label class="inline"><input type="checkbox" name="confirm" id="confirm-{{ item.payment.pk }}"> I confirm a debit above the large-debit threshold</label>
                 <label for="reschedule-note-{{ item.payment.pk }}">Note</label>
                 <textarea name="note" id="reschedule-note-{{ item.payment.pk }}" rows="2" maxlength="2000"></textarea>
-                <button class="btn" type="submit">Reschedule</button>
+                <button class="btn" type="submit">Debit again</button>
               </form>
               {% endif %}
               <form method="post" action="{% url 'ledger:returns:resolve' pk=item.payment.pk %}" class="js-single-submit">
                 {% csrf_token %}
                 <label for="note-{{ item.payment.pk }}">Note *</label>
                 <textarea name="note" id="note-{{ item.payment.pk }}" rows="2" maxlength="2000" required></textarea>
-                <button class="btn" type="submit">Resolve with a note</button>
+                <button class="btn" type="submit">Close with a note</button>
               </form>
             </td>
           {% endif %}

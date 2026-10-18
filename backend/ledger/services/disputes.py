@@ -56,6 +56,7 @@ from django.utils import timezone
 import payments
 from accounts.roles import Role, meets, role_of
 from documents_storage import StorageUnavailable
+from ledger import wording
 from ledger.models import (
     EVIDENCE_NAME_MAX_LENGTH,
     AuditLog,
@@ -64,9 +65,11 @@ from ledger.models import (
     DisputeEvidenceStatus,
     DocumentKind,
     Payment,
+    SyncFailure,
 )
 from ledger.services import documents, returns
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
+from ledger.wording import provider_sentence
 from payments import jobs
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import Job, JobKind, SyncState
@@ -131,9 +134,9 @@ ACTION_EVIDENCE_RETRY = "dispute.evidence_retry"
 #: The notice an image needs acknowledged (D8): an image cannot be checked for numbers.
 NOTICE = "This is a receipt, lease page or correspondence, not a bank form"
 
-REFRESH_QUEUED = "Refresh queued. The list updates when the payment provider has answered."
-BUSY = "A refresh is already waiting for the payment provider. Nothing was sent."
-EVIDENCE_QUEUED = "Evidence stored. It is sent to the payment provider in the background."
+REFRESH_QUEUED = provider_sentence("Updating from {provider}; the list refreshes when it answers.")
+BUSY = provider_sentence("An update from {provider} is already in progress.")
+EVIDENCE_QUEUED = provider_sentence("Evidence stored. It is being sent to {provider}.")
 NOT_BILLING = "Only billing staff may refresh the dispute list."
 NOT_ADMIN = "Only an admin may add or resend dispute evidence."
 NAME_REQUIRED = "Give the evidence a name."
@@ -142,26 +145,26 @@ NO_OPERATOR = (
     "This dispute is not linked to one of our operators, so the evidence has nowhere to be "
     "kept. Nothing was saved."
 )
-PAST_RESPOND_BY = (
-    "The respond-by date of this dispute has passed: the payment provider no longer takes "
-    "evidence. Nothing was saved."
+PAST_RESPOND_BY = provider_sentence(
+    "The respond-by date of this dispute has passed: {provider} no longer takes evidence. "
+    "Nothing was saved."
 )
 TOO_LARGE = "Dispute evidence must be smaller than 10 MB. Nothing was saved."
 NOTICE_REQUIRED = (
-    "An image cannot be checked for account numbers. Tick the box to confirm it is a "
+    "An image cannot be checked for account numbers. Check the box to confirm it is a "
     "receipt, lease page or correspondence, not a bank form. Nothing was saved."
 )
 NOT_FAILED = "Only evidence that failed to send can be sent again."
-NO_PROVIDER_DISPUTE = "The dispute has no payment provider reference."
-SENT = "Evidence sent to the payment provider."
+NO_PROVIDER_DISPUTE = provider_sentence("This dispute is not in {provider}.")
+SENT = provider_sentence("Evidence sent to {provider}.")
 ALREADY_SENT = "This evidence was already sent."
-REFUSED = "The payment provider refused the evidence ({error})."
+REFUSED = provider_sentence("{provider} refused the evidence: {error}.")
 FAILED = "The evidence could not be sent ({error}). Use Send again to retry."
 READ_FAILED = "The stored file could not be read back ({error}). Use Send again to retry."
 SYNC_DONE = (
     "Disputes read: {read}. New: {created}. Changed: {changed}. Linked to a payment: {linked}."
 )
-SYNC_MORE = " More pages than read in one sync; the rest is read next time."
+SYNC_MORE = " More disputes than fit in one update; the rest come next time."
 SYNC_FAILED = "The disputes could not be read ({error}). The list shows the last read."
 
 Actor = User | AnonymousUser | None
@@ -596,7 +599,12 @@ def upload_evidence(
             )
         except ProviderRejected as error:
             name = type(error).__name__
-            return _fail(row, actor, name, error.reason or REFUSED.format(error=name))
+            return _fail(
+                row,
+                actor,
+                name,
+                error.reason or REFUSED.format(error=wording.label(SyncFailure, name)),
+            )
         except ProviderError as error:
             name = type(error).__name__
             return _fail(row, actor, name, FAILED.format(error=name))

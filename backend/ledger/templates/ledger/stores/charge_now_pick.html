@@ -1,16 +1,16 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load responsive money %}
 {% block title %}Charge now: store {{ store.external_label }}{% endblock %}
 {% block content %}
   <p class="crumb" id="store-crumb"><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
   <div class="page-header"><h1>Charge now: store {{ store.external_label }}</h1></div>
-  <p class="muted">The store's charges with an invoice at the payment provider that can be debited now from the operator's bank account. Each opens its confirmation page; nothing is charged from this page.</p>
+  <p class="muted">The store's charges with an invoice in {{ company.provider_name }} that can be debited now from the operator's bank account. Each opens its confirmation page; nothing is charged from this page.</p>
   {% responsive_table %}
   <table id="charge-now-eligible">
     <thead><tr><th>Charge</th><th>Due</th><th class="money">Balance</th><th></th></tr></thead>
     <tbody>
       {% for row in eligible %}
-        <tr><td><a href="{% url 'ledger:one_off_charges:detail' pk=row.charge.pk %}">{{ row.charge.label }}</a></td><td>{{ row.charge.due_date|date:"Y-m-d" }}</td><td class="money">${{ row.charge.balance }}</td><td><a class="btn btn-primary charge-now-confirm" href="{% url 'ledger:one_off_charges:charge_now' pk=row.charge.pk %}">Charge now</a></td></tr>
+        <tr><td><a href="{% url 'ledger:one_off_charges:detail' pk=row.charge.pk %}">{{ row.charge.label }}</a></td><td>{{ row.charge.due_date|date:"Y-m-d" }}</td><td class="money">{{ row.charge.balance|money }}</td><td><a class="btn btn-primary charge-now-confirm" href="{% url 'ledger:one_off_charges:charge_now' pk=row.charge.pk %}">Charge now</a></td></tr>
       {% empty %}
         <tr><td colspan="4" class="muted empty">No charge of this store can be charged now.</td></tr>
       {% endfor %}

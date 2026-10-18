@@ -65,7 +65,6 @@ from ledger.models import (
     Store,
 )
 from ledger.services import contacts, workspace
-from ledger.services.leases import format_amount
 from ledger.validators import contains_bank_routing_pattern, contains_card_number
 from ledger.views import store_context
 from ledger.views.contact_log import include_deleted, log_rows, store_add_url
@@ -79,6 +78,7 @@ from ledger.views.operators import (
 )
 from ledger.views.run import _billing_only
 from ledger.views.store_context import StoreContext, local_next
+from ledger.wording import format_amount
 
 NO_STORE_LEASE = "This store has no lease in effect today; add the entry on the operator's page."
 

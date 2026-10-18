@@ -1,8 +1,9 @@
 {% extends "finance/base.html" %}
+{% load money %}
 {% block title %}Transfer store {{ store.external_label }}: confirm{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
-  <p class="muted" id="step-help">Read both effects and tick the box: the outgoing lease ends and the incoming lease starts in one step, or nothing changes. This cannot be undone from here.</p>
+  <p class="muted" id="step-help">Read both effects and check the box: the outgoing lease ends and the incoming lease starts in one step, or nothing changes. This cannot be undone from here.</p>
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
   <div class="confirm-what">
@@ -13,19 +14,19 @@
   </ul>
   <h4>The incoming lease ({{ transfer.incoming_operator.display_name }})</h4>
   <ul id="incoming-effects">
-    <li>A lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_started_on|date:"Y-m-d" }} at ${{ transfer.incoming_rent }} a month, debited on day {{ transfer.incoming_debit_day }}{% if transfer.incoming_second_debit_day %} and day {{ transfer.incoming_second_debit_day }}{% endif %} ({{ transfer.get_incoming_channel_display }}){% if transfer.incoming_prorate_first_month %}, the first month prorated{% endif %}.</li>
+    <li>A lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_started_on|date:"Y-m-d" }} at {{ transfer.incoming_rent|money }} a month, debited on day {{ transfer.incoming_debit_day }}{% if transfer.incoming_second_debit_day %} and day {{ transfer.incoming_second_debit_day }}{% endif %} ({{ transfer.get_incoming_channel_display }}){% if transfer.incoming_prorate_first_month %}, the first month prorated{% endif %}.</li>
     {% if transfer.deposit_amount or setup %}
       <li>One invoice draft "Move-in charges for store {{ store.external_label }}" is saved for review, with:
         <ul id="draft-lines">
-          {% if transfer.deposit_amount %}<li>{{ deposit_type.name|default:"Security deposit" }}: ${{ transfer.deposit_amount }}</li>{% endif %}
-          {% for line in setup %}<li>{{ line.fee_type.name }}: ${{ line.price }}</li>{% endfor %}
+          {% if transfer.deposit_amount %}<li>{{ deposit_type.name|default:"Security deposit" }}: {{ transfer.deposit_amount|money }}</li>{% endif %}
+          {% for line in setup %}<li>{{ line.fee_type.name }}: {{ line.price|money }}</li>{% endfor %}
         </ul>
-        No charge exists and nothing reaches the payment provider until the draft is sent.</li>
+        No charge exists and nothing reaches {{ company.provider_name }} until the draft is sent.</li>
     {% else %}
       <li>No deposit and no setup charge: no invoice draft is made.</li>
     {% endif %}
   </ul>
-  <p>Nothing is sent to the payment provider.</p>
+  <p>Nothing is sent to {{ company.provider_name }}.</p>
   </div>
   {% if settlement_missing %}<p id="settlement-missing"><strong>A refund is due: set its method and date on the settlement step first.</strong></p>{% endif %}
   {% include "ledger/lease_ends/_figures.html" %}
@@ -33,7 +34,7 @@
     <p id="transfer-debt"><strong>The outgoing operator would still owe {{ debt_amount }} after the deposit.</strong> A balance left after a transfer blocks it; an admin may allow it with a written reason. The "Lease-end balance" charge then stays on the outgoing operator and on the attention list until it is paid.</p>
     {% if transfer.debt_override_at %}{% include "ledger/transfers/_debt_allowed.html" %}{% endif %}
     {% if not debt_allowed %}
-      {% if transfer.debt_override_at %}<p id="debt-grew">The balance grew since it was allowed (${{ transfer.debt_override_amount }}): allow it again to confirm.</p>{% endif %}
+      {% if transfer.debt_override_at %}<p id="debt-grew">The balance grew since it was allowed ({{ transfer.debt_override_amount|money }}): allow it again to confirm.</p>{% endif %}
       <form method="post" action="{% url 'ledger:transfers:override_debt' pk=transfer.pk %}" id="debt-override-form" class="js-single-submit" autocomplete="off">
         {% csrf_token %}
         {{ override_form.non_field_errors }}

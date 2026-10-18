@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components %}
+{% load money components %}
 {% load responsive %}
 {% block title %}Statement: {{ operator.display_name }}{% endblock %}
 {% block head %}{% comment %}print.css (base.html) does the print layout (PLAN-012c D6): the header and footer, a heading row per month of the payment history (tr.print-month), no forced page break; the rules below stay for the page itself.{% endcomment %}<style>
@@ -29,14 +29,14 @@
     <thead><tr><th>Store</th><th>Charge</th><th>Due date</th><th>Status</th><th class="money">Balance</th></tr></thead>
     <tbody>
       {% for item in report.open_charges %}
-        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|date:"Y-m-d" }}</td><td>{% if item.status %}{% status_badge item.status %}{% else %}—{% endif %}</td><td class="money">{{ item.balance }}</td></tr>
+        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|date:"Y-m-d" }}</td><td>{% if item.status %}{% status_badge item.status %}{% else %}—{% endif %}</td><td class="money">{{ item.balance|money }}</td></tr>
       {% empty %}
         <tr><td colspan="5" class="muted empty">Nothing is owed.</td></tr>
       {% endfor %}
     </tbody>
     <tfoot>
-      <tr><th scope="row" colspan="4">Open balance</th><th class="money" id="open-total">{{ report.open_total }}</th></tr>
-      <tr><th scope="row" colspan="4">of which overdue</th><th class="money" id="overdue-total">{{ report.overdue_total }}</th></tr>
+      <tr><th scope="row" colspan="4">Open balance</th><th class="money" id="open-total">{{ report.open_total|money }}</th></tr>
+      <tr><th scope="row" colspan="4">of which overdue</th><th class="money" id="overdue-total">{{ report.overdue_total|money }}</th></tr>
     </tfoot>
   </table>
   {% endresponsive_table %}
@@ -48,7 +48,7 @@
     <tbody>
       {% for line in report.history %}
         {% ifchanged line.on|date:"Y-m" %}<tr class="print-month"><th colspan="7" scope="colgroup">{{ line.on|date:"F Y"|default:"No date" }}</th></tr>{% endifchanged %}
-        <tr class="history-line"><td>{{ line.on|date:"Y-m-d"|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_method_display }}</td><td>{% status_badge line.payment.get_status_display line.payment.status %}</td><td class="money">{{ line.payment.amount }}</td></tr>
+        <tr class="history-line"><td>{{ line.on|date:"Y-m-d"|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_method_display }}</td><td>{% status_badge line.payment.get_status_display line.payment.status %}</td><td class="money">{{ line.payment.amount|money }}</td></tr>
       {% empty %}
         <tr><td colspan="7" class="muted empty">No payment in these months.</td></tr>
       {% endfor %}
@@ -58,10 +58,10 @@
   {% responsive_table "scroll" %}
   <table id="statement-totals">
     <tbody>
-      <tr><th scope="row">Paid in the range</th><td class="money" id="paid-total">{{ report.paid }}</td></tr>
-      <tr><th scope="row">Refunded in the range</th><td class="money" id="refunded-total">{{ report.refunded }}</td></tr>
-      <tr><th scope="row">Deposits held from the range</th><td class="money" id="deposits-held">{{ report.deposits_held }}</td></tr>
-      <tr><th scope="row">Pending in the range</th><td class="money" id="pending-total">{{ report.pending }}</td></tr>
+      <tr><th scope="row">Paid in the range</th><td class="money" id="paid-total">{{ report.paid|money }}</td></tr>
+      <tr><th scope="row">Refunded in the range</th><td class="money" id="refunded-total">{{ report.refunded|money }}</td></tr>
+      <tr><th scope="row">Deposits held from the range</th><td class="money" id="deposits-held">{{ report.deposits_held|money }}</td></tr>
+      <tr><th scope="row">Pending in the range</th><td class="money" id="pending-total">{{ report.pending|money }}</td></tr>
     </tbody>
   </table>
   {% endresponsive_table %}

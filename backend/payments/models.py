@@ -13,6 +13,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import F, Q
 
+from ledger import wording
 from ledger.models import (
     HALF_CENT,
     GuardedModel,
@@ -164,6 +165,18 @@ class WebhookEvent(GuardedModel):
     last_attempt_at = models.DateTimeField(null=True, blank=True)
     #: Byte-identical redeliveries received after the first (PLAN-008 D7).
     duplicate_count = models.PositiveIntegerField(default=0)
+
+    def get_outcome_display(self) -> str:
+        """On screen: the outcome's label (copy list §4.5); an ignored or processed event
+        keeps the words after its outcome (``ignored: <reason>``)."""
+        outcome, colon, rest = str(self.outcome).partition(": ")
+        shown = wording.label(WebhookOutcome, outcome) if outcome else ""
+        return f"{shown}: {rest}" if colon else shown
+
+    @property
+    def event_type_words(self) -> str:
+        """The processor's event name in words (``update_invoice`` reads "update invoice")."""
+        return str(self.event_type).replace("_", " ").replace(".", " ")
 
     class Meta:
         db_table = "webhook_events"
@@ -322,6 +335,14 @@ class Job(GuardedModel):
     def __str__(self) -> str:
         return f"{self.kind} {self.status}"
 
+    def get_kind_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(JobKind, self.kind)
+
+    def get_status_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(JobStatus, self.status)
+
 
 class ReconciliationTrigger(models.TextChoices):
     """How a reconciliation run started (docs/qa/PLAN-010 D5, D10)."""
@@ -461,3 +482,7 @@ class ReconciliationMismatch(GuardedModel):
 
     def __str__(self) -> str:
         return f"{self.kind} {self.entity_type}"
+
+    def get_kind_display(self) -> str:
+        """On screen: the copy list's label (:func:`ledger.wording.label`)."""
+        return wording.label(MismatchKind, self.kind)

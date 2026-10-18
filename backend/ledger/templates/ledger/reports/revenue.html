@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load money responsive %}
 {% block title %}Revenue by month{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
@@ -9,7 +9,7 @@
   {% if too_slow %}
     <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted" id="revenue-basis">Revenue is by settled month: collected amounts count in the month their payment settled, less refunds settled that month. The A/R aging is by due date. Billed: rent by rent month (waived charges left out), insurance and other fees by due date (waived and voided charges left out). Deposits held are not revenue and are not here; the part of a deposit withheld at the end of a lease counts as other fees collected in the month it was withheld. Amounts in US dollars.</p>
+  <p class="muted" id="revenue-basis">Revenue is by settled month: collected amounts count in the month their payment settled, less refunds settled that month. Unpaid by age is by due date. Billed: rent by rent month (waived charges left out), insurance and other fees by due date (waived and voided charges left out). Deposits held are not revenue and are not here; the part of a deposit withheld at the end of a lease counts as other fees collected in the month it was withheld. Amounts in US dollars.</p>
   {% responsive_table "scroll" %}
   <table id="revenue">
     <thead>
@@ -19,10 +19,10 @@
       {% for item in report.months %}
         <tr class="revenue-month" data-month="{{ item.month|date:'Y-m' }}">
           <th scope="row">{{ item.month|date:"Y-m" }}</th>
-          <td class="money">{{ item.rent_billed }}</td><td class="money">{{ item.rent_collected }}</td>
-          <td class="money">{{ item.insurance_billed }}</td><td class="money">{{ item.insurance_collected }}</td>
-          <td class="money">{{ item.fees_billed }}</td><td class="money">{{ item.fees_collected }}{% if item.withheld_deposits %}<br><span class="muted">incl. {{ item.withheld_deposits }} withheld deposit</span>{% endif %}</td>
-          <td class="money">{{ item.total_billed }}</td><td class="money">{{ item.total_collected }}</td>
+          <td class="money">{{ item.rent_billed|money }}</td><td class="money">{{ item.rent_collected|money }}</td>
+          <td class="money">{{ item.insurance_billed|money }}</td><td class="money">{{ item.insurance_collected|money }}</td>
+          <td class="money">{{ item.fees_billed|money }}</td><td class="money">{{ item.fees_collected|money }}{% if item.withheld_deposits %}<br><span class="muted">incl. {{ item.withheld_deposits|money }} withheld deposit</span>{% endif %}</td>
+          <td class="money">{{ item.total_billed|money }}</td><td class="money">{{ item.total_collected|money }}</td>
         </tr>
       {% endfor %}
     </tbody>
@@ -30,10 +30,10 @@
       {% with item=report.total %}
       <tr id="revenue-total">
         <th scope="row">Total</th>
-        <td class="money">{{ item.rent_billed }}</td><td class="money">{{ item.rent_collected }}</td>
-        <td class="money">{{ item.insurance_billed }}</td><td class="money">{{ item.insurance_collected }}</td>
-        <td class="money">{{ item.fees_billed }}</td><td class="money">{{ item.fees_collected }}</td>
-        <td class="money">{{ item.total_billed }}</td><td class="money" id="revenue-total-collected">{{ item.total_collected }}</td>
+        <td class="money">{{ item.rent_billed|money }}</td><td class="money">{{ item.rent_collected|money }}</td>
+        <td class="money">{{ item.insurance_billed|money }}</td><td class="money">{{ item.insurance_collected|money }}</td>
+        <td class="money">{{ item.fees_billed|money }}</td><td class="money">{{ item.fees_collected|money }}</td>
+        <td class="money">{{ item.total_billed|money }}</td><td class="money" id="revenue-total-collected">{{ item.total_collected|money }}</td>
       </tr>
       {% endwith %}
     </tfoot>

@@ -4,7 +4,7 @@
 {% block content %}
   {% if store_context %}{% include "ledger/_store_context.html" %}{% else %}<p><a href="{{ back }}">&larr; Back</a></p>{% endif %}
   <div class="page-header"><h1>{{ heading }}</h1></div>
-  <p class="muted">A draft stays here until it is sent: nothing reaches the payment provider before Send or Charge now.</p>
+  <p class="muted">A draft stays here until it is sent: nothing reaches {{ company.provider_name }} before Send or Charge now.</p>
   <form method="post" id="draft-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {% include "ledger/invoices/_draft_form.html" %}

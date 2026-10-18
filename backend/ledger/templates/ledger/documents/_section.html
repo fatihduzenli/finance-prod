@@ -34,7 +34,7 @@ other input when one is chosen.
     </div>
   {% endif %}
 
-  <p class="actions"><a class="btn" id="export-documents" href="{{ documents_export_url }}">Export CSV</a></p>
+  <p class="actions"><a class="btn" id="export-documents" href="{{ documents_export_url }}">Download spreadsheet</a></p>
   {% responsive_table %}
   <table id="documents-list">
     <thead><tr><th>Kind</th><th>File</th><th>Size</th><th>Uploaded by</th><th>Date</th><th>Note</th><th></th></tr></thead>
@@ -63,7 +63,7 @@ other input when one is chosen.
           </td>
         </tr>
       {% endwith %}{% empty %}
-        <tr><td colspan="7" class="muted empty">No documents.{% if documents_feature_on and documents_can_upload %} <a class="empty-next" href="#document-upload">Upload</a>{% endif %}</td></tr>
+        <tr><td colspan="7" class="muted empty">No documents yet. Upload one below.{% if documents_feature_on and documents_can_upload %} <a class="empty-next" href="#document-upload">Upload</a>{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -88,5 +88,5 @@ other input when one is chosen.
     </tbody>
   </table>
   {% endresponsive_table %}
-  {% if documents_activity_url %}<p><a href="{{ documents_activity_url }}" id="documents-activity-link">All document activity in the audit log</a></p>{% endif %}
+  {% if documents_activity_url %}<p><a href="{{ documents_activity_url }}" id="documents-activity-link">All document activity in the activity log</a></p>{% endif %}
 </section>

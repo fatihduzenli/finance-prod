@@ -51,6 +51,7 @@ from django.db import transaction
 from django.db.models import Sum
 
 import payments
+from ledger import wording
 from ledger.models import (
     ZERO,
     AuditLog,
@@ -60,8 +61,10 @@ from ledger.models import (
     PaymentMethod,
     PaymentStatus,
     RentCharge,
+    SyncFailure,
 )
 from ledger.services import one_off_charges, rent_run
+from ledger.wording import format_amount, provider_sentence
 from payments import invoice_sync, operator_sync
 from payments.errors import ProviderError, ProviderUnavailable
 from payments.provider import TRANSACTION_REFUND, TransactionRecord, mask_identifier
@@ -87,13 +90,13 @@ _VOID_ACTIONS = (VOIDED_ACTION, VOID_FAILED_ACTION)
 #: Statuses of a refund that count against the refundable amount.
 _OPEN_REFUND = (PaymentStatus.PENDING, PaymentStatus.SETTLED)
 
-NOT_ACH = (
-    "Only an ACH payment made through the payment provider can be refunded or voided here. "
-    "A wire, Zelle or other payment was never a provider transaction."
+NOT_ACH = provider_sentence(
+    "Only a bank debit made through {provider} can be refunded or voided here. A wire, Zelle "
+    "or other payment never went through {provider}."
 )
 IS_REFUND = "A refund cannot itself be refunded or voided."
 IS_DEPOSIT_REFUND = "A deposit refund was paid back by hand; it cannot be refunded or voided."
-NO_REFERENCE = "The payment has no payment provider transaction on record."
+NO_REFERENCE = provider_sentence("This payment is not in {provider}.")
 REFUND_NOT_SETTLED = "Only a settled payment can be refunded."
 NOTHING_REFUNDABLE = "Nothing is left to refund on this payment."
 VOID_NOT_OPEN = "Only a pending or settled payment can be voided; this one is {status}."
@@ -101,37 +104,36 @@ VOID_HAS_REFUNDS = "A payment that has refunds cannot be voided."
 AMOUNT_TOO_SMALL = "The refund amount must be at least $0.01. Nothing was sent."
 AMOUNT_NOT_CENTS = "The refund amount must have at most two decimals. Nothing was sent."
 AMOUNT_OVER = (
-    "The refund amount is more than the remaining refundable amount of ${refundable}. "
+    "The refund amount is more than the remaining refundable amount of {refundable}. "
     "Nothing was sent."
 )
-CONFIRM_REQUIRED = "Tick the confirmation to continue. Nothing was sent."
+CONFIRM_REQUIRED = "Check the box to continue. Nothing was sent."
 ALREADY_SUBMITTED = "This confirmation was already submitted. Nothing was sent again."
-REFUNDED = "Refund of ${amount} made at the payment provider and recorded."
-REFUND_PENDING = " It stays pending until the provider settles it."
-VOIDED = "Payment voided at the payment provider and recorded."
-CALL_FAILED = (
-    "The payment provider did not {verb} the payment ({failure}{fields}). Nothing was changed."
+REFUNDED = provider_sentence("Refund of {amount} made through {provider} and recorded.")
+REFUND_PENDING = provider_sentence(" It stays pending until {provider} settles it.")
+VOIDED = provider_sentence("Payment voided through {provider} and recorded.")
+CALL_FAILED = provider_sentence(
+    "{provider} did not {verb} the payment: {failure}. Nothing was changed."
 )
-OUTCOME_UNKNOWN = (
-    " The provider could not be reached, so the {noun} may have been made: check the "
-    "payment provider before trying again."
+OUTCOME_UNKNOWN = provider_sentence(
+    " {provider} could not be reached, so the {noun} may have been made: check {provider} "
+    "before trying again."
 )
-REFETCH_FAILED = (
-    " The payment provider could not be read back afterwards ({failure}); the record is "
-    "completed when its event arrives."
+REFETCH_FAILED = provider_sentence(
+    " {provider} could not be read back afterwards; the record is completed when its event arrives."
 )
 
 #: The sentences shown on the confirmation pages.
-REFUND_SENTENCE = (
-    "A refund is sent to the payment provider at once, returns the money to the operator "
-    "through the payment provider and cannot be undone here."
+REFUND_SENTENCE = provider_sentence(
+    "A refund is sent to {provider} at once, returns the money to the operator through "
+    "{provider} and cannot be undone here."
 )
-VOID_SENTENCE = (
-    "A void cancels the whole payment at the payment provider before it moves money and "
-    "cannot be undone here."
+VOID_SENTENCE = provider_sentence(
+    "A void cancels the whole payment in {provider} before it moves money and cannot be "
+    "undone here."
 )
 REFUND_CONFIRMATION = "I confirm this refund of the amount entered above."
-VOID_CONFIRMATION = "I confirm the void of this whole payment of ${amount}."
+VOID_CONFIRMATION = "I confirm the void of this whole payment of {amount}."
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,7 +228,7 @@ def payment_facts(payment: Payment) -> PaymentFacts:
 
 
 def void_confirmation(payment: Payment) -> str:
-    return VOID_CONFIRMATION.format(amount=payment.amount)
+    return VOID_CONFIRMATION.format(amount=format_amount(payment.amount))
 
 
 # --- Refund ----------------------------------------------------------------------------
@@ -256,7 +258,9 @@ def refund_payment(
         if facts.refund_refusal:
             return Outcome(False, facts.refund_refusal)
         if amount > facts.refundable:
-            return Outcome(False, AMOUNT_OVER.format(refundable=facts.refundable), "amount")
+            return Outcome(
+                False, AMOUNT_OVER.format(refundable=format_amount(facts.refundable)), "amount"
+            )
         reference = facts.reference
         before = {
             **_payment_state(payment),
@@ -306,11 +310,11 @@ def refund_payment(
             "refetch_failure": refetch_failure or None,
         }
         _audit(actor, REFUNDED_ACTION, payment.pk, before, after)
-    message = REFUNDED.format(amount=amount)
+    message = REFUNDED.format(amount=format_amount(amount))
     if refund.status == PaymentStatus.PENDING:
         message += REFUND_PENDING
     if refetch_failure:
-        message += REFETCH_FAILED.format(failure=refetch_failure)
+        message += REFETCH_FAILED
     return Outcome(True, message, incomplete=bool(refetch_failure), refund=refund)
 
 
@@ -382,7 +386,7 @@ def void_payment(
         _audit(actor, VOIDED_ACTION, payment.pk, before, after)
     message = VOIDED
     if refetch_failure:
-        message += REFETCH_FAILED.format(failure=refetch_failure)
+        message += REFETCH_FAILED
     return Outcome(True, message, incomplete=bool(refetch_failure))
 
 
@@ -454,9 +458,7 @@ def _failed(
         before,
         {**before, **context, "failure": failure, "fields": fields},
     )
-    message = CALL_FAILED.format(
-        verb=verb, failure=failure, fields=f"; fields: {fields}" if fields else ""
-    )
+    message = CALL_FAILED.format(verb=verb, failure=wording.label(SyncFailure, failure))
     if isinstance(error, ProviderUnavailable):
         message += OUTCOME_UNKNOWN.format(noun=noun)
     return Outcome(False, message)

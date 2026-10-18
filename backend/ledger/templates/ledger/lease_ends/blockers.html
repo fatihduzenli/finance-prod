@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
-{% block title %}End lease {{ store.external_label }}: live items{% endblock %}
+{% block title %}End lease {{ store.external_label }}: still open at {{ company.provider_name }}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
-  <p class="muted" id="step-help">Anything still live at the payment provider must be collected or cancelled from its own page before the lease can end; this wizard never contacts the payment provider.</p>
+  <p class="muted" id="step-help">Anything still open in {{ company.provider_name }} must be collected or cancelled from its own page before the lease can end; this wizard never contacts {{ company.provider_name }}.</p>
   {% if blockers %}
     <ul id="blocker-list">
       {% for blocker in blockers %}
@@ -11,7 +11,7 @@
     </ul>
     <p id="blocked"><strong>The lease cannot end while anything above is listed.</strong></p>
   {% else %}
-    <p id="no-blockers">Nothing is live at the payment provider for this lease.</p>
+    <p id="no-blockers">Nothing is still open in {{ company.provider_name }} for this lease.</p>
     <p class="actions"><a class="btn btn-primary" href="{% url 'ledger:lease_ends:statement' pk=end.pk %}" id="continue">Continue</a></p>
   {% endif %}
   {% include "ledger/lease_ends/_cancel.html" %}

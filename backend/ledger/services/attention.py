@@ -106,7 +106,7 @@ from ledger.services import (
     returns,
     workspace,
 )
-from ledger.services.leases import format_amount
+from ledger.wording import format_amount, provider_name, provider_sentence
 from payments.models import ReconciliationMismatch, WebhookEvent, WebhookOutcome
 
 HIGH = "high"
@@ -162,9 +162,9 @@ KIND_LABELS: dict[str, str] = {
     INSURANCE_DUE: "insurance due soon",
     LEASE_ENDING: "leases ending",
     LANDLORD_LEASE_ENDING: "landlord leases ending",
-    SCHEDULE_REVIEW: "schedules to review",
-    DEAD_LETTERS: "dead-letter webhooks",
-    RECONCILIATION_MISMATCHES: "reconciliation mismatches",
+    SCHEDULE_REVIEW: "autopay to check",
+    DEAD_LETTERS: provider_sentence("messages from {provider} given up"),
+    RECONCILIATION_MISMATCHES: "nightly check findings",
     VACANT_STORE: "vacant stores",
     STORE_NO_OPEN_DATE: "stores without an open date",
     OPERATOR_NO_EMAIL: "operators without an e-mail",
@@ -592,7 +592,7 @@ def _schedules(operator: uuid.UUID | None) -> list[Item]:
             kind=SCHEDULE_REVIEW,
             severity=MEDIUM,
             text=(
-                f"{schedule.get_kind_display()} schedule to review after a lease change: "
+                f"{schedule.get_kind_display()} autopay to check after a lease change: "
                 f"{_where(schedule.lease)}"
             ),
             url=_lease_url(schedule.lease, workspace.TAB_SCHEDULES),
@@ -715,7 +715,7 @@ def _system_counts() -> list[Item]:
             Item(
                 kind=DEAD_LETTERS,
                 severity=HIGH,
-                text=f"Dead-letter webhook events: {dead['count']}",
+                text=f"Messages from {provider_name()} given up: {dead['count']}",
                 url=f"{reverse('ledger:webhooks:list')}?outcome={WebhookOutcome.DEAD_LETTER}",
                 since=timezone.localdate(dead["first"]),
             )
@@ -728,7 +728,7 @@ def _system_counts() -> list[Item]:
             Item(
                 kind=RECONCILIATION_MISMATCHES,
                 severity=MEDIUM,
-                text=f"Unresolved reconciliation mismatches: {open_mismatches['count']}",
+                text=f"Open nightly check findings: {open_mismatches['count']}",
                 url=reverse("ledger:reconciliation:page"),
                 since=timezone.localdate(open_mismatches["first"]),
             )

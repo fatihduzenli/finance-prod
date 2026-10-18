@@ -10,7 +10,7 @@ from django.test import Client, override_settings
 # The two-factor login page keeps its wizard state in the database-backed session.
 pytestmark = pytest.mark.django_db
 
-BANNER_TEXT = "SANDBOX — NO REAL MONEY"
+BANNER_TEXT = "SANDBOX — test system, no real money"
 BANNER_ID = 'id="sandbox-banner"'
 
 _BANNER_ELEMENT_RE = re.compile(r"<div id=\"sandbox-banner\".*?</div>", re.DOTALL)

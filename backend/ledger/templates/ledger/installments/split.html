@@ -1,12 +1,12 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load responsive money %}
 {% block title %}Split {{ parent_label }} into installments{% endblock %}
 {% block content %}
   <p><a href="{{ parent_url }}">&larr; {{ parent_label }}</a></p>
   <div class="page-header"><h1>Split {{ parent_label }} into installments</h1></div>
   <p class="muted" id="page-help">{{ split_help }}</p>
   <dl id="split-summary">
-    <dt>Balance to split</dt><dd id="split-balance">${{ balance }}</dd>
+    <dt>Balance to split</dt><dd id="split-balance">{{ balance|money }}</dd>
     <dt>Each installment collected by</dt><dd id="split-collection">{{ collection }}</dd>
   </dl>
   {% if refusal %}
