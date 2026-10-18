@@ -963,10 +963,8 @@ def test_006c_a_rejected_update_shows_the_failure_and_the_retry_updates(
     )
 
     page = response.content.decode()
-    assert (
-        "Saved here. Stax did not accept the update: ProviderRejected "
-        "(fields phone). Retry when ready."
-    ) in page
+    assert "Saved here. Stax did not accept the update: Rejected. Retry when ready." in page
+    assert "ProviderRejected" not in page
     assert 'id="sync-failure"' in page and "Fields Stax rejected: phone" in page
     assert "Retry available in " in page and ">Try again</button>" not in page
     assert "Updated from Stax" not in page

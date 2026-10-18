@@ -392,9 +392,11 @@ def test_an_empty_list_says_so_and_offers_the_next_step() -> None:
     )
     leases = body(admin.get("/leases/"))
     assert (
-        'class="muted empty">No lease yet. New lease from the action bar. <a class="btn empty-next"'
-        in leases
+        'class="muted empty">No lease yet. '
+        '<a class="btn empty-next" href="/leases/new/">New lease</a>' in leases
     )
+    # The leases list has no action bar, so its empty state does not point to one.
+    assert "from the action bar" not in leases
     # One primary per page: the header's "New store", never a second in the empty state.
     assert stores.count("btn-primary") == 1 and leases.count("btn-primary") == 1
     # A viewer cannot create: the sentence stays, with no next step.

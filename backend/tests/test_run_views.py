@@ -237,11 +237,12 @@ def test_match_links_and_reports_through_the_page(billing: Client, fake: FakePro
     # PLAN-010 Batch A follow-up: matching is a job; the page shows it queued, then the
     # report once the worker ran it.
     page = billing.get(RUN).content.decode()
-    assert 'id="job-state">Waiting<' in page and "Linked with a total mismatch" not in page
+    assert 'id="job-state">Waiting<' in page and "Attached, but the amounts differ" not in page
     assert fake.calls == []
     run_queued_jobs()
     page = billing.get(RUN).content.decode()
-    assert "Linked with a total mismatch: 1." in page
+    assert "Attached, but the amounts differ: 1." in page
+    assert "total mismatch" not in page
     assert 'id="match-report"' in page and "differs from the amount due" in page
     assert "Needs review" in page
     charge = RentCharge.objects.get()
@@ -259,11 +260,15 @@ def test_the_breaker_banner_shows_and_matching_makes_no_call(
     for _ in range(3):
         breaker.record(Outcome.CLIENT_ERROR)
     page = billing.get(RUN).content.decode()
-    assert 'id="provider-banner"' in page and BREAKER_OPEN in page
+    assert 'id="provider-banner"' in page and str(BREAKER_OPEN) in page
+    assert str(BREAKER_OPEN) == (
+        "Calls to Stax are paused after repeated errors. "
+        "Update from Stax is unavailable for a few minutes."
+    )
     fake.calls.clear()
     billing.post(MATCH)
     assert fake.calls == []
-    assert BREAKER_OPEN in billing.get(RUN).content.decode()
+    assert str(BREAKER_OPEN) in billing.get(RUN).content.decode()
 
 
 def test_the_budget_banner_shows_when_a_debit_would_be_refused(
@@ -274,7 +279,11 @@ def test_the_budget_banner_shows_when_a_debit_would_be_refused(
     for _ in range(5):
         budget.record_http_failure()
     page = billing.get(RUN).content.decode()
-    assert BUDGET_EXHAUSTED in page
+    assert str(BUDGET_EXHAUSTED) in page
+    assert str(BUDGET_EXHAUSTED) == (
+        "Too many recent errors from Stax: a debit would be refused now. "
+        "Update from Stax is unavailable until the error count drops."
+    )
 
 
 @pytest.mark.parametrize(("rent", "large"), [("2000.00", False), ("2000.01", True)])

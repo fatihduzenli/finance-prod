@@ -984,7 +984,9 @@ def test_run_now_is_admin_only_queued_once_and_run_by_the_worker(fake: FakeProvi
     assert 'id="run-now"' in admin.get("/reconciliation/").content.decode()
     admin.post("/reconciliation/run/")
     second = admin.post("/reconciliation/run/", follow=True)
-    assert "already waiting" in second.content.decode()
+    assert "A change is still in progress in Stax: try again in a minute." in (
+        second.content.decode()
+    )
     [job] = Job.objects.all()
     assert (job.kind, job.entity_type, job.entity_id) == (
         JobKind.RECONCILE_RUN,
@@ -992,7 +994,7 @@ def test_run_now_is_admin_only_queued_once_and_run_by_the_worker(fake: FakeProvi
         jobs.RECONCILIATION.pk,
     )
     page = admin.get("/reconciliation/").content.decode()
-    assert 'http-equiv="refresh"' in page and "Queued" in page
+    assert 'http-equiv="refresh"' in page and 'id="job-state">Waiting<' in page
     assert fake.calls == []
     with override_settings(STAX_CALLER="worker"):
         [done] = run_queued_jobs()

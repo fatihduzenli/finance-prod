@@ -1185,7 +1185,7 @@ def test_with_the_breaker_open_match_queues_nothing_and_says_why(
         breaker.record(Outcome.CLIENT_ERROR)
     billing, _ = client_for(Role.BILLING)
     response = billing.post("/run/match/", follow=True)
-    assert BREAKER_OPEN in response.content.decode()
+    assert str(BREAKER_OPEN) in response.content.decode()
     assert not Job.objects.exists()
 
 
@@ -1219,7 +1219,7 @@ def test_a_replay_of_a_deleted_event_fails_with_a_sentence() -> None:
     jobs.enqueue(JobKind.WEBHOOK_REPLAY, event, None, None)
     WebhookEvent.objects.filter(pk=event.pk).delete()
     [job] = run_queued_jobs()
-    assert (job.status, job.result) == (JobStatus.FAILED, runners.NO_EVENT)
+    assert (job.status, job.result) == (JobStatus.FAILED, "The message from Stax no longer exists.")
 
 
 def test_the_worker_event_pass_still_skips_an_event_a_failed_replay_attempted(

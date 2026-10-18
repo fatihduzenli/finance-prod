@@ -108,6 +108,7 @@ from ledger.models import (
     format_quantity,
 )
 from ledger.services import installments, leases, numbering, one_off_charges, rent_run
+from ledger.wording import provider_sentence
 from payments import invoice_sync, operator_sync
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef, JobEntity, WebhookOutcome
@@ -154,12 +155,14 @@ SCHEDULE_ATTEMPT_ACTION = "one_off_charge.provider_schedule_attempted"
 
 NO_CHARGE = "The charge no longer exists."
 VOIDED_NOTHING = "The charge is voided. Nothing was sent."
-NO_LOCAL_INVOICE = "The charge has no invoice to create at the payment provider."
-NO_CUSTOMER = "The operator has no payment provider customer. Nothing was sent."
+NO_LOCAL_INVOICE = provider_sentence("The charge has no invoice to create in {provider}.")
+NO_CUSTOMER = provider_sentence("The operator is not connected to {provider}. Nothing was sent.")
 NO_BANK_METHOD = "The operator has no linked bank method. Nothing was scheduled."
-CREATED = "Invoice {number} created at the payment provider."
-ADOPTED = "Invoice {number} found at the payment provider and linked; nothing was created."
-ALREADY_CREATED = "Invoice {number} is already at the payment provider."
+CREATED = provider_sentence("Invoice {number} created in {provider}.")
+ADOPTED = provider_sentence(
+    "Invoice {number} found in {provider} and attached; nothing was created."
+)
+ALREADY_CREATED = provider_sentence("Invoice {number} is already in {provider}.")
 CREATE_FAILED = "The payment provider did not create invoice {number}"
 LINK_CONFLICT = (
     "The payment provider's invoice is already linked to another record. Nothing was changed."
@@ -510,7 +513,7 @@ def create_provider_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
         return True, VOIDED_NOTHING
     invoice = _invoice(charge)
     if invoice is None:
-        return False, NO_LOCAL_INVOICE
+        return False, str(NO_LOCAL_INVOICE)
     number = invoice.invoice_number
     ref = _ref(invoice)
     text = ALREADY_CREATED.format(number=number)
@@ -518,7 +521,7 @@ def create_provider_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
         operator = _operator(charge)
         customer = leases.customer_ref(operator)
         if operator is None or not customer:
-            return False, NO_CUSTOMER
+            return False, str(NO_CUSTOMER)
         provider = payments.get_provider()
         try:
             found: list[InvoiceRecord] = []
@@ -650,7 +653,7 @@ def create_rent_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
         return False, NO_CHARGE
     invoice = _rent_invoice(charge)
     if invoice is None:
-        return False, NO_LOCAL_INVOICE
+        return False, str(NO_LOCAL_INVOICE)
     if invoice.internal_status == InvoiceStatus.VOID:
         return True, VOIDED_NOTHING
     number = invoice.invoice_number
@@ -660,7 +663,7 @@ def create_rent_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
         operator = charge.lease.operator
         customer = leases.customer_ref(operator)
         if operator is None or not customer:
-            return False, NO_CUSTOMER
+            return False, str(NO_CUSTOMER)
         provider = payments.get_provider()
         try:
             found: list[InvoiceRecord] = []
@@ -1116,7 +1119,7 @@ def schedule(charge_id: uuid.UUID, actor: User | None, *, now: datetime | None =
     operator = _operator(charge)
     customer = leases.customer_ref(operator)
     if operator is None or not customer:
-        return False, NO_CUSTOMER
+        return False, str(NO_CUSTOMER)
     method = leases.linked_payment_method(operator)
     if not method:
         return False, NO_BANK_METHOD

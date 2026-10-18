@@ -482,13 +482,21 @@ PAIRS: list[tuple[str, str, str]] = [
         "The payment provider's schedules generate the invoices",
         f"{P}'s autopay makes the invoices",
     ),
+    (
+        "run/today.html",
+        "<code>generate_insurance_charges</code>",
+        "the yearly insurance charges run",
+    ),
     ("webhooks/detail.html", "Payload (redacted)", "Content (without account data)"),
     ("webhooks/detail.html", "the body was not JSON", "the message could not be read"),
     ("audit/page.html", "Time (UTC)", "<th>Time</th>"),
     # §4.7 empty states
     ("operators/_contacts_table.html", "No contact entries.", "No entries yet. Add one."),
     ("documents/_section.html", "No documents.", "No documents yet. Upload one below."),
-    ("leases/list.html", "No leases.", "No lease yet. New lease from the action bar."),
+    ("leases/list.html", "No leases.", "No lease yet."),
+    # The leases list has no action bar: the header's "New lease" is the next step there.
+    ("leases/list.html", "from the action bar", "No lease yet.{% if can_create %}"),
+    ("stores/detail.html", "No leases.", "No lease yet. New lease from the action bar."),
     ("stores/_tab_payments.html", "No payments.<", "No payments yet. Add one from the action bar."),
     ("reconciliation/page.html", "No reconciliation has run yet.", "No nightly check has run yet."),
     ("dashboard/home.html", "No reconciliation has run yet.", "No nightly check has run yet."),

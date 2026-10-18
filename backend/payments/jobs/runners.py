@@ -33,7 +33,7 @@ from ledger.services import (
 )
 from ledger.services.leases import AutopayOutcome, MethodsRefresh
 from ledger.services.rent_run import MarkAction, MarkResult, MatchAction, MatchReport
-from ledger.wording import with_provider
+from ledger.wording import provider_sentence, with_provider
 from payments import jobs, one_off_invoices, operator_sync, reconciliation
 from payments.models import (
     Job,
@@ -63,7 +63,7 @@ MATCH_MAX_LINES = 20
 #: Most characters of any one stored report line.
 MATCH_LINE_LENGTH = 300
 #: The sentence of a replay whose event row no longer exists.
-NO_EVENT = "The webhook event no longer exists."
+NO_EVENT = provider_sentence("The message from {provider} no longer exists.")
 
 
 def _with_class(text: str, failure: str, fields: str = "") -> str:
@@ -79,6 +79,10 @@ def _sync(job: Job, outcome: SyncOutcome) -> Result:
     text = outcome.message or NO_CALL
     if ok:
         _refresh_methods_after(job)
+        return ok, text
+    if outcome.action is Action.UPDATE_FAILED:
+        # The message names the failure in words; the class and the rejected key names are
+        # on the operator row and in the audit row, never shown to staff (copy list §4.1).
         return ok, text
     fields = outcome.fields
     if not fields and outcome.action is Action.FAILED:
@@ -320,7 +324,7 @@ def match_report_text(report: MatchReport) -> str:
         return "\n".join(_line(text) for text in report.refused)
     lines = [
         f"Schedules read: {report.schedules}. Linked: {report.count(MatchAction.LINKED)}. "
-        f"Linked with a total mismatch: {report.count(MatchAction.MISMATCH)}. "
+        f"Attached, but the amounts differ: {report.count(MatchAction.MISMATCH)}. "
         f"Already linked: {report.count(MatchAction.ALREADY)}. "
         f"Not linked: {report.count(MatchAction.REPORTED)}."
     ]
@@ -341,7 +345,7 @@ def run_match_job(job: Job) -> Result:
 def webhook_replay_job(job: Job) -> Result:
     outcome = processor.process_event(job.entity_id, replay=True)
     if outcome is None:
-        return False, NO_EVENT
+        return False, str(NO_EVENT)
     if outcome in (WebhookOutcome.FAILED, WebhookOutcome.DEAD_LETTER):
         error = (
             WebhookEvent.objects.filter(pk=job.entity_id).values_list("error", flat=True).first()

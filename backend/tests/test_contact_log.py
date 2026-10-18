@@ -547,7 +547,7 @@ def test_a_store_without_a_lease_in_effect_offers_no_add_entry() -> None:
     store: Store = a_store("3000")
     client, _ = client_for(Role.BILLING)
     page = page_of(client, f"/stores/{store.pk}/?tab=contacts")
-    assert "No contact entries." in page and f"/stores/{store.pk}/contacts/new/" not in page
+    assert "No entries yet. Add one." in page and f"/stores/{store.pk}/contacts/new/" not in page
     response = client.get(f"/stores/{store.pk}/contacts/new/")
     assert (
         response.status_code == 302
@@ -1510,7 +1510,7 @@ def three_closings(
         body="New date.",
     )
     return {
-        "Closed $2000.00 by 2026-10-01 as Kept": (kept, kept_by),
+        "Closed $2,000.00 by 2026-10-01 as Kept": (kept, kept_by),
         "Closed $300.00 by 2026-10-03 as Broken": (broken, broken_by),
         "Closed $400.00 by 2026-10-04 as Rescheduled": (moved, moved_by),
     }
@@ -1548,7 +1548,7 @@ def test_the_closing_entries_name_their_promise_on_every_page_and_in_the_csv(
     assert own < cell.index('<div class="contact-closes">') < cell.index("as Rescheduled")
     assert 'promise-status promise-open">Open<' in cell
     # The call closings show the sentence alone, without "—".
-    _, kept_by = closings["Closed $2000.00 by 2026-10-01 as Kept"]
+    _, kept_by = closings["Closed $2,000.00 by 2026-10-01 as Kept"]
     kept_cell = promise_cell(table_of(page_of(client, f"/operators/{operator.pk}/")), kept_by)
     assert kept_cell.startswith('<div class="contact-closes">') and "—" not in kept_cell
     # The CSV column reads the same sentence without the link.
@@ -1559,7 +1559,7 @@ def test_the_closing_entries_name_their_promise_on_every_page_and_in_the_csv(
     column = header.index("Closes promise")
     assert header[column - 1] == "Promise status"
     by_note = {record[3]: record[column] for record in records}
-    assert by_note["Paid in the office."] == "Closed $2000.00 by 2026-10-01 as Kept"
+    assert by_note["Paid in the office."] == "Closed $2,000.00 by 2026-10-01 as Kept"
     assert by_note["Will not pay."] == "Closed $300.00 by 2026-10-03 as Broken"
     assert by_note["New date."] == "Closed $400.00 by 2026-10-04 as Rescheduled"
     assert by_note["Just a call."] == "" and "href" not in body
@@ -1583,7 +1583,7 @@ def test_the_store_page_links_to_the_operator_page_for_a_promise_not_on_that_sto
         log = table_of(page_of(client, path))
         assert closes_link(promise_cell(log, moved)) == (
             f"{operator_page}#contact-{on_there.pk}",
-            "Closed $2000.00 by 2026-10-01 as Broken",
+            "Closed $2,000.00 by 2026-10-01 as Broken",
         )
         assert closes_link(promise_cell(log, kept)) == (
             f"{operator_page}#contact-{no_store.pk}",
@@ -1628,7 +1628,7 @@ def test_a_deleted_promise_or_closing_entry_keeps_the_sentence(today: date) -> N
     lease = a_lease(operator=operator)
     original = promise(operator, lease=lease, by=date(2026, 10, 1), amount="2000.00")
     closer = closing(operator, original, "broken", lease=lease, body="Will not pay.")
-    sentence = "Closed $2000.00 by 2026-10-01 as Broken"
+    sentence = "Closed $2,000.00 by 2026-10-01 as Broken"
     deleted(original, "Entered twice.")
     path = f"/operators/{operator.pk}/"
     for role in (Role.BILLING, Role.VIEWER):

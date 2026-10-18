@@ -422,6 +422,7 @@ def test_link_stores_both_ids_after_one_read_and_enrols(actor: User, fake: FakeP
     )
 
     assert outcome.action is Action.LINK_SET
+    assert outcome.message == "Connected to Stax. Autopay can be set up."
     assert fake.calls == [("get_customer", ("cus_manual_0001",))]
     refs = operator_sync.current_refs(operator)
     assert refs == {"customer": "cus_manual_0001", "payment_method": "pm_bank-0001"}
@@ -1045,8 +1046,7 @@ def test_006c_row2_a_rejected_update_keeps_the_edit_and_the_retry_updates_once(
     operator.refresh_from_db()
     assert outcome.action is Action.UPDATE_FAILED
     assert outcome.message == (
-        "Saved here. Stax did not accept the update: ProviderRejected "
-        "(fields phone, email). Retry when ready."
+        "Saved here. Stax did not accept the update: Rejected. Retry when ready."
     )
     assert operator.phone == "4155550132"
     assert (operator.sync_status, operator.sync_failure, operator.sync_failure_fields) == (
@@ -1093,16 +1093,16 @@ def test_006c_row2_a_rejected_update_keeps_the_edit_and_the_retry_updates_once(
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    ("error", "name"),
+    ("error", "name", "words"),
     [
-        (ProviderUnavailable(503), "ProviderUnavailable"),
-        (TransportError(), "TransportError"),
-        (CircuitOpen("open"), "CircuitOpen"),
+        (ProviderUnavailable(503), "ProviderUnavailable", "Unavailable"),
+        (TransportError(), "TransportError", "Could not be reached"),
+        (CircuitOpen("open"), "CircuitOpen", "Paused after repeated errors"),
     ],
     ids=["unavailable", "transport", "circuit-open"],
 )
-def test_006c_row2_other_failures_name_the_class_and_no_fields(
-    actor: User, fake: FakeProvider, error: ProviderError, name: str
+def test_006c_row2_other_failures_name_the_failure_in_words_and_no_fields(
+    actor: User, fake: FakeProvider, error: ProviderError, name: str, words: str
 ) -> None:
     operator = linked(actor, fake)
     fake.fail_next("update_customer", error)
@@ -1111,8 +1111,9 @@ def test_006c_row2_other_failures_name_the_class_and_no_fields(
 
     operator.refresh_from_db()
     assert outcome.message == (
-        f"Saved here. Stax did not accept the update: {name}. Retry when ready."
+        f"Saved here. Stax did not accept the update: {words}. Retry when ready."
     )
+    assert name not in outcome.message
     assert (operator.phone, operator.sync_status, operator.sync_failure) == (
         "4155550132",
         SyncStatus.FAILED,

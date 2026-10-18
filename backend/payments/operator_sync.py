@@ -205,15 +205,17 @@ class SyncOutcome:
         if self.action is Action.UPDATED:
             return with_provider("Updated the customer in {provider}.")
         if self.action is Action.UPDATE_FAILED:
-            named = f" (fields {', '.join(self.fields.split(','))})" if self.fields else ""
+            # The failure in words (copy list §4.1: codes are never shown); the class and
+            # the rejected key names stay on the operator row and in the audit row.
+            words = SyncFailure(self.failure).label if self.failure in SyncFailure.values else ""
+            failure = f": {words}" if words else ""
             return with_provider(
-                "Saved here. {provider} did not accept the update: "
-                f"{self.failure}{named}. Retry when ready."
+                f"Saved here. {{provider}} did not accept the update{failure}. Retry when ready."
             )
         if self.action is Action.AWAITING_LINK:
             return str(AWAITING_LINK_MESSAGE)
         if self.action is Action.LINK_SET:
-            return "Linked. The operator is enrolled."
+            return with_provider("Connected to {provider}. Autopay can be set up.")
         if self.action is Action.LINK_REFUSED and self.failure == SyncFailure.PROVIDER_REJECTED:
             return str(LINK_REJECTED_MESSAGE)
         if self.action in (Action.FAILED, Action.LINK_REFUSED):

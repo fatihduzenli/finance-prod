@@ -388,7 +388,7 @@ def test_a_schedule_flagged_after_a_rent_change(today: date) -> None:
         state=ScheduleState.ENDED,
     )
     [item] = of_kind(attention.SCHEDULE_REVIEW)
-    assert item.text == "Rent schedule to review after a lease change: Flagged (A)"
+    assert item.text == "Rent autopay to check after a lease change: Flagged (A)"
     assert item.url == f"/stores/{lease.store_id}/?tab=schedules#tab-schedules"
 
 
@@ -411,10 +411,10 @@ def test_dead_letters_and_open_mismatches_are_counted(today: date) -> None:
         detail="Pending for 9 business days.",
     )
     [dead] = of_kind(attention.DEAD_LETTERS)
-    assert dead.text == "Dead-letter webhook events: 2" and dead.severity == attention.HIGH
+    assert dead.text == "Messages from Stax given up: 2" and dead.severity == attention.HIGH
     assert dead.url == "/webhooks/?outcome=dead_letter"
     [mismatch] = of_kind(attention.RECONCILIATION_MISMATCHES)
-    assert mismatch.text == "Unresolved reconciliation mismatches: 1"
+    assert mismatch.text == "Open nightly check findings: 1"
     assert mismatch.url == "/reconciliation/"
 
 

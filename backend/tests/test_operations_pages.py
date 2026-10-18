@@ -171,7 +171,7 @@ def test_a_run_row_with_unreadable_values_is_read_safely() -> None:
 def test_the_dashboard_line_sums_todays_runs_and_links_the_run_page() -> None:
     viewer, _ = client_for(Role.VIEWER)
     html = body(viewer, "/")
-    assert 'id="run-line"' in html and "Daily charges today: not created yet today" in html
+    assert 'id="run-line"' in html and "Daily charges today: not created yet<" in html
     line = html.split('id="run-line"')[1].split("</p>")[0]
     assert f'href="{reverse("ledger:run:today")}"' in line
     paused = wire_lease(date(2026, 9, 1), label="9000", debit_day=15)

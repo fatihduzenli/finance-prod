@@ -395,7 +395,7 @@ def test_above_the_hard_limit_is_refused_and_at_it_is_allowed(
     above = ready(fake, "100.01", operator=operator_of(at))
     with override_settings(PROVIDER_MAX_TXN_AMOUNT=D("100.00")):
         refused = confirm(above)
-        assert not refused.ok and "Exceeds the confirmed provider limit" in refused.message
+        assert not refused.ok and "Exceeds the Stax debit limit of $100.00." in refused.message
         assert confirm(at).ok
     assert Job.objects.filter(kind=JobKind.INVOICE_PAY).count() == 1
 

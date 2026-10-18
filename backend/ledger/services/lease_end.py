@@ -1577,7 +1577,7 @@ def send_statement(message_id: uuid.UUID) -> messages.Sent:
         _finish(message, status, receipt=receipt)
         texts = {
             MessageStatus.SENT: "Sent.",
-            MessageStatus.CATCH_ALL: "Sent to the catch-all address.",
+            MessageStatus.CATCH_ALL: "Sent to the test inbox.",
             MessageStatus.SUPPRESSED: "Not sent: mail is off.",
         }
         return messages.Sent(True, texts[status])

@@ -505,7 +505,7 @@ def test_matching_is_refused_without_a_call_while_the_breaker_is_open(
     assert breaker.is_open()
     fake.calls.clear()
     report = rent_run.match_schedule_invoices(actor=None)
-    assert report.refused and "paused after repeated failures" in report.refused[0]
+    assert report.refused and "paused after repeated errors" in report.refused[0]
     assert fake.calls == []
     assert breaker.is_open()  # reading the state did not move it to half-open
 

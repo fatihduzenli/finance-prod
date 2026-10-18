@@ -28,7 +28,7 @@
           <td>{{ lease.get_collection_status_display }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="6" class="muted empty">No lease yet. New lease from the action bar.{% if can_create %} <a class="btn empty-next" href="{% url 'ledger:leases:create' %}">New lease</a>{% endif %}</td></tr>
+        <tr><td colspan="6" class="muted empty">No lease yet.{% if can_create %} <a class="btn empty-next" href="{% url 'ledger:leases:create' %}">New lease</a>{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>

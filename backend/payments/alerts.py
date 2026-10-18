@@ -29,9 +29,10 @@ BREAKER_MESSAGE = "Payment provider circuit breaker opened"
 DEAD_LETTER_FINGERPRINT = "webhook-dead-letter"
 DEAD_LETTER_MESSAGE = "Webhook event moved to dead letter"
 MISMATCH_FINGERPRINT = "reconciliation-mismatch"
-MISMATCH_MESSAGE = "Reconciliation found new mismatches"
+#: Plain text, not lazy: written to the log and to Sentry, never shown on a page.
+MISMATCH_MESSAGE = "Nightly check found new findings"
 FAILED_FINGERPRINT = "reconciliation-failed"
-FAILED_MESSAGE = "Reconciliation run failed"
+FAILED_MESSAGE = "Nightly check failed"
 
 logger = logging.getLogger(__name__)
 

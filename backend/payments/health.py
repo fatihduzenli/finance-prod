@@ -9,15 +9,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ledger.wording import provider_sentence
 from payments.errors import FailureBudgetExhausted
 
-BREAKER_OPEN = (
-    "Calls to the payment provider are paused after repeated failures. "
-    "Matching is unavailable for a few minutes."
+#: Shown to staff on the run page, so the processor is named from company settings
+#: (copy list §4.1).
+BREAKER_OPEN = provider_sentence(
+    "Calls to {provider} are paused after repeated errors. "
+    "Update from {provider} is unavailable for a few minutes."
 )
-BUDGET_EXHAUSTED = (
-    "Too many recent payment provider failures: a debit would be refused now. "
-    "Matching is unavailable until the failure count drops."
+BUDGET_EXHAUSTED = provider_sentence(
+    "Too many recent errors from {provider}: a debit would be refused now. "
+    "Update from {provider} is unavailable until the error count drops."
 )
 
 
@@ -33,7 +36,9 @@ class ProviderHealth:
     @property
     def messages(self) -> tuple[str, ...]:
         """Fixed sentences for a banner, one per problem."""
-        return (BREAKER_OPEN,) * self.breaker_open + (BUDGET_EXHAUSTED,) * self.budget_exhausted
+        return (str(BREAKER_OPEN),) * self.breaker_open + (
+            str(BUDGET_EXHAUSTED),
+        ) * self.budget_exhausted
 
 
 def provider_health() -> ProviderHealth:
