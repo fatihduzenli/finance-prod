@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load components %}
 {% block title %}Grid{% endblock %}
 {% block main_class %}wide grid-page{% endblock %}
 {% comment %}PLAN-012c D3: the left navigation folds behind "Menu" here at every width, so the twelve
@@ -17,7 +18,7 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
   .grid-scroll-top>div{height:1px;}
   .grid-scroll::-webkit-scrollbar,.grid-scroll-top::-webkit-scrollbar{-webkit-appearance:none;height:12px;width:12px;}
   .grid-scroll::-webkit-scrollbar-track,.grid-scroll-top::-webkit-scrollbar-track{background:var(--paper-3);}
-  .grid-scroll::-webkit-scrollbar-thumb,.grid-scroll-top::-webkit-scrollbar-thumb{background:var(--control-border);border-radius:6px;border:2px solid var(--paper-3);}
+  .grid-scroll::-webkit-scrollbar-thumb,.grid-scroll-top::-webkit-scrollbar-thumb{background:var(--control-border);border-radius:var(--r-2);border:2px solid var(--paper-3);}
   table.grid{border-collapse:separate;border-spacing:0;width:max-content;font-size:.85rem;}
   table.grid th,table.grid td{white-space:nowrap;padding:.3rem .35rem;border-bottom:1px solid var(--line);border-right:1px solid var(--line);box-sizing:border-box;}
   table.grid thead th{position:sticky;top:0;background:var(--paper);z-index:2;}
@@ -35,10 +36,10 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
   .cell-due{background:var(--status-due-bg);color:var(--status-due-ink);} .cell-waived{background:var(--status-waived-bg);color:var(--status-waived-ink);}
   .cell-not_due{color:var(--status-not-due-ink);font-style:italic;}
   .note-marker{color:inherit;margin-left:.2rem;}
-  .legend span{display:inline-block;padding:.1rem .45rem;margin-right:.25rem;border-radius:3px;}
+  .legend span{display:inline-block;padding:.1rem .45rem;margin-right:.25rem;border-radius:var(--r-1);}
 </style>{% endblock %}
 {% block content %}
-  <h1>Grid</h1>
+  <div class="page-header"><h1>Grid</h1></div>
   {% comment %}PLAN-012d D16: the words filter, its own box; it keeps the range and the other filters, and the
   filters' form below keeps it (hidden).{% endcomment %}
   <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-search" class="actions" role="search">
@@ -78,7 +79,7 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
   {% if query.messages %}
     <ul class="messages" id="grid-messages">{% for text in query.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}
-  <p class="legend muted">{% for value, label in statuses %}<span class="cell-{{ value }}">{{ label }}</span>{% endfor %} <span>{{ note_marker }} has a note</span> Amounts in US dollars. A cell sums the store's rent charges of the month.</p>
+  <p class="legend muted">{% for value, label in statuses %}{% status_badge label value %}{% endfor %} <span>{{ note_marker }} has a note</span> Amounts in US dollars. A cell sums the store's rent charges of the month.</p>
 
   {% if too_slow %}
     <p class="warning" id="grid-too-slow" role="status">{{ too_slow }}</p>
@@ -100,7 +101,7 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
             {{ cells }}
           </tr>
         {% empty %}
-          <tr><td colspan="{{ grid.months|length|add:1 }}" class="muted">No store matches.</td></tr>
+          <tr><td colspan="{{ grid.months|length|add:1 }}" class="muted empty">No store matches.</td></tr>
         {% endfor %}
       </tbody>
       <tfoot>

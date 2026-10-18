@@ -3,7 +3,7 @@
 {% block title %}Split {{ parent_label }} into installments{% endblock %}
 {% block content %}
   <p><a href="{{ parent_url }}">&larr; {{ parent_label }}</a></p>
-  <h1>Split {{ parent_label }} into installments</h1>
+  <div class="page-header"><h1>Split {{ parent_label }} into installments</h1></div>
   <p class="muted" id="page-help">{{ split_help }}</p>
   <dl id="split-summary">
     <dt>Balance to split</dt><dd id="split-balance">${{ balance }}</dd>
@@ -16,7 +16,7 @@
     <form method="get" action="{{ action }}" id="split-form" autocomplete="off">
       {{ form.non_field_errors }}
       {% for field in form %}
-        <p><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field.errors }}<br>{{ field }}</p>
+        {% include "ledger/stores/_form_field.html" with field=field no_mark=True hide_help=True %}
       {% endfor %}
       <p class="actions"><button class="btn" type="submit" id="split-preview">Preview</button></p>
     </form>

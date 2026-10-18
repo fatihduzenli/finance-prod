@@ -1,8 +1,9 @@
 {% extends "finance/base.html" %}
+{% load components %}
 {% load responsive %}
 {% block title %}Payments{% endblock %}
 {% block content %}
-  <h1>Payments</h1>
+  <div class="page-header"><h1>Payments</h1></div>
   <form method="get" action="{% url 'ledger:payments:list' %}" id="payment-filters" role="search">
     <div class="actions">
       <label for="date_by" style="margin:0;">Date</label>
@@ -46,11 +47,11 @@
     <thead><tr><th>Settled (collected)</th><th>Pending (not collected yet)</th><th>Returned</th><th>Refunded</th><th>Deposits held</th></tr></thead>
     <tbody>
       <tr>
-        <td id="total-settled">${{ totals.settled }}</td>
-        <td id="total-pending">${{ totals.pending }}</td>
-        <td id="total-returned">${{ totals.returned }}</td>
-        <td id="total-refunded">${{ totals.refunded }}</td>
-        <td id="total-deposits-held">${{ totals.deposits_held }}</td>
+        <td id="total-settled" class="money">${{ totals.settled }}</td>
+        <td id="total-pending" class="money">${{ totals.pending }}</td>
+        <td id="total-returned" class="money">${{ totals.returned }}</td>
+        <td id="total-refunded" class="money">${{ totals.refunded }}</td>
+        <td id="total-deposits-held" class="money">${{ totals.deposits_held }}</td>
       </tr>
     </tbody>
   </table>
@@ -60,7 +61,7 @@
   {% responsive_table %}
   <table id="payments">
     <thead>
-      <tr><th>Paid on</th><th>Initiated</th><th>Operator</th><th>Store</th><th>Charge</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Transaction</th><th>Note</th></tr>
+      <tr><th>Paid on</th><th>Initiated</th><th>Operator</th><th>Store</th><th>Charge</th><th>Method</th><th class="money">Amount</th><th>Status</th><th>Reference</th><th>Transaction</th><th>Note</th></tr>
     </thead>
     <tbody>
       {% for row in rows %}
@@ -71,23 +72,23 @@
           <td>{{ row.store.external_label|default:"—" }}</td>
           <td>{% include "ledger/payments/_charge.html" with payment=row.payment %}</td>
           <td>{{ row.payment.get_method_display }}</td>
-          <td>{% if row.payment.is_refund %}&minus;{% endif %}${{ row.payment.amount }}</td>
-          <td>{% if row.payment.is_refund %}<span class="badge">Refund</span> {% endif %}{{ row.payment.get_status_display }}</td>
+          <td class="money">{% if row.payment.is_refund %}&minus;{% endif %}${{ row.payment.amount }}</td>
+          <td>{% if row.payment.is_refund %}<span class="badge">Refund</span> {% endif %}{% status_badge row.payment.get_status_display row.payment.status %}</td>
           <td>{{ row.payment.reference|default:"—" }}</td>
           <td>{{ row.transaction|default:"—" }}</td>
           <td>{% if row.has_note %}<span class="badge note-indicator" title="The charge has a note">Note</span>{% endif %}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="11" class="muted">No payments match.</td></tr>
+        <tr><td colspan="11" class="muted empty">No payments match.</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endresponsive_table %}
   {% if page.paginator.num_pages > 1 %}
-    <p class="actions">
+    <div class="pager" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
-      <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} payments)</span>
+      <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} payments)</span>
       {% if page.has_next %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
-    </p>
+    </div>
   {% endif %}
 {% endblock %}

@@ -2,16 +2,20 @@
 {% block title %}Delete contact entry{% endblock %}
 {% block content %}
   <p><a href="{{ back_url }}">&larr; Contact log</a></p>
-  <h1>Delete contact entry</h1>
+  <div class="page-header"><h1>Delete contact entry</h1></div>
+  <section class="confirm" aria-labelledby="confirm-question">
+  <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
   {% include "ledger/contacts/_entry.html" %}
-  <p class="muted">The entry stays in the log, struck through with your reason, for billing and admin; viewers no longer see it. A deleted promise no longer counts as open, kept or broken.</p>
+  <div class="confirm-what">
+  <h3>What will happen</h3>
+  <ul><li class="muted">The entry stays in the log, struck through with your reason, for billing and admin; viewers no longer see it. A deleted promise no longer counts as open, kept or broken.</li></ul>
+  </div>
   <form method="post" id="contact-delete-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}
-    <label for="{{ form.reason.id_for_label }}">{{ form.reason.label }} *</label>
-    {{ form.reason.errors }}
-    {{ form.reason }}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="confirm-delete-contact">Delete</button></p>
+    {% include "ledger/stores/_form_field.html" with field=form.reason mark=True %}
+    <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-delete-contact">Delete</button> <a class="btn" href="{{ back_url }}">Back</a></p>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

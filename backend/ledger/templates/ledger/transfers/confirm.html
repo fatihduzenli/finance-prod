@@ -3,12 +3,15 @@
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
   <p class="muted" id="step-help">Read both effects and tick the box: the outgoing lease ends and the incoming lease starts in one step, or nothing changes. This cannot be undone from here.</p>
-  <h2>Are you sure?</h2>
-  <h3>The outgoing lease ({{ lease.operator.display_name }})</h3>
+  <section class="confirm" aria-labelledby="confirm-question">
+  <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <div class="confirm-what">
+  <h3>What will happen</h3>
+  <h4>The outgoing lease ({{ lease.operator.display_name }})</h4>
   <ul id="effects">
     {% include "ledger/lease_ends/_effects.html" %}
   </ul>
-  <h3>The incoming lease ({{ transfer.incoming_operator.display_name }})</h3>
+  <h4>The incoming lease ({{ transfer.incoming_operator.display_name }})</h4>
   <ul id="incoming-effects">
     <li>A lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_started_on|date:"Y-m-d" }} at ${{ transfer.incoming_rent }} a month, debited on day {{ transfer.incoming_debit_day }}{% if transfer.incoming_second_debit_day %} and day {{ transfer.incoming_second_debit_day }}{% endif %} ({{ transfer.get_incoming_channel_display }}){% if transfer.incoming_prorate_first_month %}, the first month prorated{% endif %}.</li>
     {% if transfer.deposit_amount or setup %}
@@ -23,6 +26,7 @@
     {% endif %}
   </ul>
   <p>Nothing is sent to the payment provider.</p>
+  </div>
   {% if settlement_missing %}<p id="settlement-missing"><strong>A refund is due: set its method and date on the settlement step first.</strong></p>{% endif %}
   {% include "ledger/lease_ends/_figures.html" %}
   {% if debt > 0 %}
@@ -33,10 +37,7 @@
       <form method="post" action="{% url 'ledger:transfers:override_debt' pk=transfer.pk %}" id="debt-override-form" class="js-single-submit" autocomplete="off">
         {% csrf_token %}
         {{ override_form.non_field_errors }}
-        {{ override_form.reason.errors }}
-        <label for="{{ override_form.reason.id_for_label }}">Reason</label>
-        {{ override_form.reason }}
-        <p class="muted">{{ override_form.reason.help_text }}</p>
+        {% include "ledger/stores/_form_field.html" with field=override_form.reason label="Reason" no_mark=True %}
         <p class="actions"><button class="btn" type="submit" id="allow-balance">Allow the balance to remain</button></p>
       </form>
     {% endif %}
@@ -53,5 +54,6 @@
     {{ form.non_field_errors }}
   {% endif %}
   {% include "ledger/lease_ends/_cancel.html" %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

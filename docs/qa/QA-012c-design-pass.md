@@ -71,3 +71,87 @@ border `#7B8794`; every text pairing at 4.5 or better (teal and green are fills,
 white); the measured ratios are in the report of the batch and in `tokens.css`.
 
 **Verdict (A):** PASS (one MAJOR, the per-page queries, resolved in one rework cycle; one unreproduced single failure recorded as residual risk with a diagnostic added).
+
+### Batch B — components, dashboard cards, grid polish, print; the bar name shown once
+
+**Scope.** `finance/static/finance/app.css` (one documented section per component: page header,
+workspace, table, forms, badges, empty state, confirmation, toast, pager, steps, cards; tokens
+only), `tokens.css` (two further status pairs, voided and attention), `print.css` (new, linked
+with `media="print"`), `finance/templatetags/components.py` (new: `status_badge`, `with_done`,
+`action_named`; no query), `finance/context_processors.py` (`logo_is_override`),
+`finance/templates/finance/base.html` (the name as the logo's text alternative, shown as text
+only beside an override logo; toasts; print header and footer), `ledger/views/transfers.py`
+(the Confirm step linked only once it can be opened), about ninety templates under
+`ledger/templates/ledger/` (classes and wrappers only; no id, field name or URL changed),
+`stores/_form_field.html` (the `.field`), tests `tests/test_design_components.py` (new, 44
+cases) and small updates of three test files. No migration. Fable's adversarial file:
+`tests/test_plan012c_design_b_adversarial.py` (18 cases).
+
+**Gate 1.** ruff, `ruff format --check` (511 files), mypy strict (415 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16: all clean, exit 0.
+
+**Gate 2.**
+
+| Suite | Engine | Exit | Result |
+|---|---|---|---|
+| Unit, full | sqlite | 0 | 5,587 passed, 653 skipped; 14:39 wall |
+| CI "Migration tests" selection | PostgreSQL 16 | 0 | 28 passed; 11:43 wall |
+| CI "Unit tests" selection | PostgreSQL 16 | 1 then 0 | first run 6,208 passed, 1 failed (`test_nsf::test_the_re_debit_date_is_a_calendar_item_without_an_amount`, passed alone at once); full re-run 6,209 passed; 16:57 and 17:14 wall |
+| e2e (7), four runs | PostgreSQL 16 | 0 | 7 passed in each of four runs (30–32 s) |
+| Fable adversarial B (18) | both | green inside the runs above |
+
+Query budgets (`test_report_performance`, PostgreSQL) unchanged: no component adds a query (the
+helpers work on what the view passed). The e2e grid test failed once for Opus during its first
+cycle ("0 == 12" month headers, during a concurrent full-suite run); it passed four of four
+runs on a clean worktree of the Batch A commit and four of four runs on the Batch B tree on PostgreSQL; the one failure Opus saw happened while its full unit suite ran on the same machine.
+
+**Gate 3.** Diff read in full for the CSS, the template tags, the context processor, the base
+template, the transfer view, the print stylesheet and a sample of twelve templates. Classes and
+wrappers only; the responsive-table regions carry the table look so no `<table>` tag changed;
+the badge glyph is in the markup (hidden from screen readers) so it prints and reads without
+the style sheet; "Not due" is a plain badge (no status colour, no glyph).
+
+**Gate 4.** Secret scans clean (`scripts/check-no-secrets.sh`; pattern scan over the diff and
+every new file). A flash message and a company name with markup are escaped in the toast and
+the print header; a hostile sort or page parameter answers 200 with `aria-sort` only on the
+sorted column; the toast's fade is opacity only and never removes the text (warnings and errors
+do not fade; no fade under reduced motion); every step link of the wizards answers (the
+transfer's "end" step hands over to the lease-end wizard by design).
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| 1 | MAJOR | installments/cancel, invoices/cancel, one_off_charges/{cancel,waive}, contacts/delete | Confirmation pages without `.confirm` (no "What will happen", no secondary button) while the others had them | Resolved: `.confirm` with the question, the list, a `.btn-danger` primary and a Back link; ids and field names unchanged |
+| 2 | MAJOR | fourteen hand-laid forms | Controls outside `.field`: the error above the control in the old style | Resolved through the field partial (label override and `mark` flag keep each page's exact label text); left out with reasons: radio and deduction tables, confirmation checkboxes, the upload drop box, the builder's line table, the grid filter row |
+| 3 | MINOR | print.css, reports/statement.html | A forced page break before every month of the payment history (a two-year statement printed 24 pages); Fable's instruction said "each month", the plan says store groups | Resolved: no forced break in the statement (month rows kept, `break-inside: avoid`); the P&L keeps its break per store group |
+| 4 | MINOR | components.py, app.css | The due glyph ● was the grid's note marker ● | Resolved: due is ○ |
+| 5 | MINOR | stores, operators, leases lists | Two `.btn-primary` on an empty list page | Resolved: the empty state's next step is a plain `.btn`; a test asserts one primary per page |
+
+One disputed case was Fable's: the adversarial test expected the transfer's "end" step to
+answer 200; it is a redirector to the lease-end terms by design, so the test now accepts a
+redirect to the lease-end wizard and refuses one back to an earlier transfer step. Opus's fix
+behind that case stays: the Confirm step was linked before it could be opened.
+
+Design choices accepted: the dashboard's card order attention, today's run, failed attempts,
+figures, waived (when any), not sent, last reconciliation (an existing test wants the failed
+attempts before the figures); only success and information toasts fade; dismissing removes the
+message (the reader chose to); the question heading "Are you sure?" and the "What will happen"
+label follow the lease-end pages' wording until Batch D; the statement keeps its inline print
+rules (`test_reports` asserts them) and shares `print.css`; the `.badge-glyph` is `aria-hidden`
+with the label as the text.
+
+**Residual risk (B).** The print layout is asserted on the style sheet and the markup, not on a
+rendered PDF: the owner's checkpoint click "print a statement" is the verification. The
+component classes are applied where the templates render today; a template no test renders
+could carry an unstyled corner (the visual suite of Batch E covers the ten main pages).
+
+**Residual risk (B), continued.** Two single, unreproduced failures in the calendar area in
+the full PostgreSQL unit runs of two consecutive batches (A: a calendar entry POST that created
+nothing; B: the re-debit calendar item), each green on its re-run and alone, neither in code
+either batch touched. The pattern is recorded here for the owner; a plain cause (an
+order-dependent leak between tests, or a clock edge) has not been found, and the next full run
+that fails will carry the diagnostic added in Batch A. Not a Batch B defect; not fixed here.
+
+**Verdict (B):** PASS (two MAJOR and three MINOR, all resolved in one rework cycle; the
+calendar flake recorded above).

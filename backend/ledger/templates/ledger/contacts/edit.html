@@ -2,16 +2,13 @@
 {% block title %}Edit contact entry{% endblock %}
 {% block content %}
   <p><a href="{{ back_url }}">&larr; Contact log</a></p>
-  <h1>Edit contact entry</h1>
+  <div class="page-header"><h1>Edit contact entry</h1></div>
   <p id="edit-window">You recorded this entry; you can change it until {{ edit_until|date:"Y-m-d H:i" }} (New York). After that, add a correction instead.</p>
   <form method="post" id="contact-edit-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form.visible_fields %}
-      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
-      {{ field.errors }}
-      {{ field }}
-      {% if field.help_text %}<span class="muted">{{ field.help_text }}</span>{% endif %}
+      {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-contact-edit">Save</button></p>
   </form>

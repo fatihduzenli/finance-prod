@@ -1,7 +1,8 @@
 {% extends "finance/base.html" %}
+{% load components %}
 {% load responsive %}
 {% block title %}Statement: {{ operator.display_name }}{% endblock %}
-{% block head %}<style>
+{% block head %}{% comment %}print.css (base.html) does the print layout (PLAN-012c D6): the header and footer, a heading row per month of the payment history (tr.print-month), no forced page break; the rules below stay for the page itself.{% endcomment %}<style>
   @media print {
     nav, .no-print, form#report-filters, #report-messages { display: none !important; }
     body { background: var(--paper); }
@@ -12,7 +13,7 @@
 </style>{% endblock %}
 {% block content %}
   <p class="no-print"><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>
-  <h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1>
+  <div class="page-header"><h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div>
   {% if operator.legal_name or operator.company %}<p>{{ operator.legal_name }}{% if operator.legal_name and operator.company %} · {% endif %}{{ operator.company }}</p>{% endif %}
   {% url 'ledger:operators:statement' pk=operator.pk as action %}{% url 'ledger:operators:statement_export' pk=operator.pk as export %}
   <div class="no-print">{% include "ledger/reports/_range.html" with action=action export=export %}</div>
@@ -25,12 +26,12 @@
   <h2>Open charges</h2>
   {% responsive_table "scroll" %}
   <table id="open-charges">
-    <thead><tr><th>Store</th><th>Charge</th><th>Due date</th><th>Status</th><th>Balance</th></tr></thead>
+    <thead><tr><th>Store</th><th>Charge</th><th>Due date</th><th>Status</th><th class="money">Balance</th></tr></thead>
     <tbody>
       {% for item in report.open_charges %}
-        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|date:"Y-m-d" }}</td><td>{{ item.status|default:"—" }}</td><td class="money">{{ item.balance }}</td></tr>
+        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|date:"Y-m-d" }}</td><td>{% if item.status %}{% status_badge item.status %}{% else %}—{% endif %}</td><td class="money">{{ item.balance }}</td></tr>
       {% empty %}
-        <tr><td colspan="5" class="muted">Nothing is owed.</td></tr>
+        <tr><td colspan="5" class="muted empty">Nothing is owed.</td></tr>
       {% endfor %}
     </tbody>
     <tfoot>
@@ -43,12 +44,13 @@
   <h2>Payment history</h2>
   {% responsive_table "scroll" %}
   <table id="payment-history">
-    <thead><tr><th>Date</th><th>Store</th><th>Charge</th><th>Kind</th><th>Method</th><th>Status</th><th>Amount</th></tr></thead>
+    <thead><tr><th>Date</th><th>Store</th><th>Charge</th><th>Kind</th><th>Method</th><th>Status</th><th class="money">Amount</th></tr></thead>
     <tbody>
       {% for line in report.history %}
-        <tr class="history-line"><td>{{ line.on|date:"Y-m-d"|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_method_display }}</td><td>{{ line.payment.get_status_display }}</td><td class="money">{{ line.payment.amount }}</td></tr>
+        {% ifchanged line.on|date:"Y-m" %}<tr class="print-month"><th colspan="7" scope="colgroup">{{ line.on|date:"F Y"|default:"No date" }}</th></tr>{% endifchanged %}
+        <tr class="history-line"><td>{{ line.on|date:"Y-m-d"|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_method_display }}</td><td>{% status_badge line.payment.get_status_display line.payment.status %}</td><td class="money">{{ line.payment.amount }}</td></tr>
       {% empty %}
-        <tr><td colspan="7" class="muted">No payment in these months.</td></tr>
+        <tr><td colspan="7" class="muted empty">No payment in these months.</td></tr>
       {% endfor %}
     </tbody>
   </table>

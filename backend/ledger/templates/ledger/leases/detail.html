@@ -4,8 +4,7 @@
 {% block title %}Lease {{ lease.store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:leases:list' %}">&larr; Leases</a></p>
-  <h1>Lease {{ lease.store.external_label }}{% if lease.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
-
+  <div class="page-header"><h1>Lease {{ lease.store.external_label }}{% if lease.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</h1></div>
   <div class="actions">
     {% if can_edit %}<a class="btn" href="{% url 'ledger:leases:edit' pk=lease.pk %}">Edit</a>{% endif %}
     {% if can_enrol %}<a class="btn" href="{% url 'ledger:leases:enrol' pk=lease.pk %}">Enable autopay</a>{% endif %}
@@ -40,12 +39,12 @@
   <h2>Rent history</h2>
   {% responsive_table %}
   <table id="rent-history">
-    <thead><tr><th>Amount</th><th>From</th><th>To</th><th>Source</th></tr></thead>
+    <thead><tr><th class="money">Amount</th><th>From</th><th>To</th><th>Source</th></tr></thead>
     <tbody>
       {% for row in history %}
-        <tr><td>${{ row.amount }}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.get_source_display }}</td></tr>
+        <tr><td class="money">${{ row.amount }}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.get_source_display }}</td></tr>
       {% empty %}
-        <tr><td colspan="4" class="muted">No rent recorded.</td></tr>
+        <tr><td colspan="4" class="muted empty">No rent recorded.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -63,19 +62,19 @@
   {% endif %}
   {% responsive_table %}
   <table id="schedules">
-    <thead><tr><th>Debit</th><th>Day</th><th>Amount</th><th>State</th><th>Next debit</th><th>Provider schedule</th></tr></thead>
+    <thead><tr><th>Debit</th><th>Day</th><th class="money">Amount</th><th>State</th><th>Next debit</th><th>Provider schedule</th></tr></thead>
     <tbody>
       {% for item in schedules %}
         <tr>
           <td>{{ item.row.seq }}</td>
           <td>{{ item.row.debit_day|default:"—" }}</td>
-          <td>${{ item.row.amount }}</td>
+          <td class="money">${{ item.row.amount }}</td>
           <td>{{ item.row.get_state_display }}{% if item.review_message %}<br><strong class="schedule-review">{{ item.review_message }}</strong>{% endif %}</td>
           <td>{% if item.next_run %}{{ item.next_run|date:"Y-m-d" }}{% else %}—{% endif %}</td>
           <td>{{ item.schedule_masked|default:"—" }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="6" class="muted">Autopay is not set up.</td></tr>
+        <tr><td colspan="6" class="muted empty">Autopay is not set up.</td></tr>
       {% endfor %}
     </tbody>
   </table>

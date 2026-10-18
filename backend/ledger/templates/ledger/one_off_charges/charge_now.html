@@ -2,7 +2,10 @@
 {% block title %}Charge now {{ charge.label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
-  <h1>Charge now</h1>
+  <div class="page-header"><h1>Charge now</h1></div>
+  <section class="confirm" aria-labelledby="confirm-what-heading">
+  <div class="confirm-what">
+  <h2 id="confirm-what-heading">What will happen</h2>
   <dl id="charge-now-details">
     <dt>Operator</dt><dd id="charge-now-operator">{{ details.operator.display_name|default:"—" }}</dd>
     <dt>Store</dt><dd id="charge-now-store">{{ details.store_label|default:"Operator-level" }}</dd>
@@ -11,6 +14,7 @@
     <dt>Bank method</dt><dd id="charge-now-method">{% if details.last_four %}ending {{ details.last_four }}{% if details.nickname %} ({{ details.nickname }}){% endif %}{% else %}—{% endif %}</dd>
   </dl>
   <p class="muted">The bank method is read from the operator's stored list of payment methods, not from the payment provider.</p>
+  </div>
   {% if details.refusal %}
     <p id="charge-now-refusal"><strong>{{ details.refusal }}</strong></p>
   {% elif busy %}
@@ -27,8 +31,9 @@
           {% for error in form.confirm.errors %}<br><strong class="field-error">{{ error }}</strong>{% endfor %}
         </p>
       {% endif %}
-      <p class="actions"><button class="btn btn-primary" type="submit" id="charge-now-submit">Charge ${{ details.amount }} now</button></p>
+      <p class="actions"><button class="btn btn-primary" type="submit" id="charge-now-submit">Charge ${{ details.amount }} now</button> <a class="btn" href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">Back</a></p>
     </form>
   {% endif %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

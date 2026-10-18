@@ -1,14 +1,15 @@
 {% comment %}The Charges tab (docs/qa/PLAN-012d D3): ledger.services.workspace.charges_tab. On the operator page (D14) the rows are the operator's, with a Store column; "keep_store" keeps the selected store in the filter links.{% endcomment %}
+{% load components %}
 {% load responsive %}
 <h2>Charges</h2>
-<p class="actions" id="charge-filters">
+<p class="actions tabs" id="charge-filters">
   {% for value, label in charge_filters %}<a class="btn" href="?{{ keep_store }}tab=charges&amp;filter={{ value }}#tab-charges"{% if value == charge_filter %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
   <a class="btn" id="export-charges" href="{% url 'ledger:charges:export' %}?{{ export_query }}">Export rent charges CSV</a>
   <a class="btn" id="export-one-off-charges" href="{% url 'ledger:one_off_charges:export' %}?{{ export_query }}">Export one-off charges CSV</a>
 </p>
 {% responsive_table %}
 <table id="store-charges">
-  <thead><tr>{% if by_store %}<th>Store</th>{% endif %}<th>Kind</th><th>Charge</th><th>Due</th><th>Billed</th><th>Paid</th><th>Balance</th><th>Status</th><th>Invoice</th><th></th></tr></thead>
+  <thead><tr>{% if by_store %}<th>Store</th>{% endif %}<th>Kind</th><th>Charge</th><th>Due</th><th class="money">Billed</th><th class="money">Paid</th><th class="money">Balance</th><th>Status</th><th>Invoice</th><th></th></tr></thead>
   <tbody>
     {% for row in charge_rows %}
       <tr class="store-charge store-charge-{{ row.kind }}">
@@ -19,12 +20,12 @@
         <td class="money">{% if row.billed is not None %}${{ row.billed }}{% else %}—{% endif %}</td>
         <td class="money">${{ row.paid }}</td>
         <td class="money">${{ row.balance }}</td>
-        <td>{{ row.status }}{% if row.resolution %}<br><span class="deposit-resolved">{{ row.resolution }}</span>{% endif %}</td>
+        <td>{% status_badge row.status %}{% if row.resolution %}<br><span class="deposit-resolved">{{ row.resolution }}</span>{% endif %}</td>
         <td>{% for invoice in row.invoices %}{% if not forloop.first %}, {% endif %}{% if invoice.url %}<a href="{{ invoice.url }}">{{ invoice.number }}</a>{% else %}{{ invoice.number }}{% endif %}{% empty %}—{% endfor %}</td>
         <td>{% if row.payment_url %}<a class="btn record-payment" href="{{ row.payment_url }}">Record payment</a>{% endif %}{% if row.resolve_url %} <a class="btn resolve-deposit" href="{{ row.resolve_url }}">Resolve deposit</a>{% endif %}</td>
       </tr>
     {% empty %}
-      <tr><td colspan="{% if by_store %}10{% else %}9{% endif %}" class="muted">{% if charge_filter == "open" %}No open charges.{% elif charge_filter == "paid" %}No paid charges.{% else %}No charges.{% endif %}</td></tr>
+      <tr><td colspan="{% if by_store %}10{% else %}9{% endif %}" class="muted empty">{% if charge_filter == "open" %}No open charges.{% elif charge_filter == "paid" %}No paid charges.{% else %}No charges.{% endif %}{% with next=space.actions|action_named:"create_invoice" %}{% if next %} <a class="btn empty-next" href="{{ next.url }}">{{ next.label }}</a>{% endif %}{% endwith %}</td></tr>
     {% endfor %}
   </tbody>
 </table>

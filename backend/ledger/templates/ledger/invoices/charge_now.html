@@ -2,7 +2,10 @@
 {% block title %}Charge now {{ draft.number }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">&larr; {{ draft.number }}</a></p>
-  <h1>Charge now</h1>
+  <div class="page-header"><h1>Charge now</h1></div>
+  <section class="confirm" aria-labelledby="confirm-what-heading">
+  <div class="confirm-what">
+  <h2 id="confirm-what-heading">What will happen</h2>
   <dl id="charge-now-details">
     <dt>Operator</dt><dd id="charge-now-operator">{{ draft.operator.display_name }}</dd>
     <dt>Store</dt><dd id="charge-now-store">{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
@@ -10,6 +13,7 @@
     <dt>Bank method</dt><dd id="charge-now-method">{% if details.last_four %}ending {{ details.last_four }}{% if details.nickname %} ({{ details.nickname }}){% endif %}{% else %}—{% endif %}</dd>
   </dl>
   <p class="muted">The bank method is read from the operator's stored list of payment methods, not from the payment provider. The invoice is created at the payment provider first; the single debit of the whole invoice is made as soon as the provider has it.</p>
+  </div>
   {% if details.refusal %}
     <p id="charge-now-refusal"><strong>{{ details.refusal }}</strong></p>
   {% else %}
@@ -19,8 +23,9 @@
       {% if details.large_debit %}
         <p id="charge-now-large-debit"><label style="font-weight:normal;"><input type="checkbox" name="confirm" value="true" id="confirm-large-debit"> {{ details.large_debit }}</label></p>
       {% endif %}
-      <p class="actions"><button class="btn btn-primary" type="submit" id="charge-now-submit">Charge ${{ details.total }} now</button></p>
+      <p class="actions"><button class="btn btn-primary" type="submit" id="charge-now-submit">Charge ${{ details.total }} now</button> <a class="btn" href="{% url 'ledger:invoices:draft' pk=draft.pk %}">Back</a></p>
     </form>
   {% endif %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

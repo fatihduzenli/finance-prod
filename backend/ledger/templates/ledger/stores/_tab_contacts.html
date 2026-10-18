@@ -5,5 +5,5 @@
   <a class="btn" id="all-store-contacts" href="{% url 'ledger:stores:contacts' pk=store.pk %}">All entries</a>
 </p>
 <p class="muted">Entries about a lease of this store. Dates are New York days.</p>
-{% include "ledger/operators/_contacts_table.html" with rows=contact_rows|slice:contact_limit %}
+{% include "ledger/operators/_contacts_table.html" with rows=contact_rows|slice:contact_limit empty_next_url=contact_add_url %}
 {% if contact_rows|length > contact_limit %}<p class="muted">The {{ contact_limit }} latest are shown; <a href="{% url 'ledger:stores:contacts' pk=store.pk %}">see every entry</a>.</p>{% endif %}

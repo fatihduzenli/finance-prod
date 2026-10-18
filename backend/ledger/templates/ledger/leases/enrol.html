@@ -4,7 +4,7 @@
 {% block title %}Autopay for {{ lease.store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a></p>
-  <h1>Enable autopay</h1>
+  <div class="page-header"><h1>Enable autopay</h1></div>
   <p>One payment provider schedule is created per debit day. It debits the chosen bank method every month, starting on the date below. Card methods are never used.</p>
 
   {% if blockers %}
@@ -20,11 +20,11 @@
           <tr>
             <td>{{ item.debit.seq }}</td>
             <td>{{ item.debit.debit_day }}</td>
-            <td>${{ item.debit.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}</td>
+            <td class="money">${{ item.debit.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}</td>
             <td>{{ item.starts|utc|date:"Y-m-d H:i" }} UTC{% if item.changes_message %}<br><strong class="schedule-review">{{ item.changes_message }}</strong>{% endif %}</td>
           </tr>
         {% empty %}
-          <tr><td colspan="4" class="muted">No rent is in effect on the first debit date.</td></tr>
+          <tr><td colspan="4" class="muted empty">No rent is in effect on the first debit date.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -2,7 +2,7 @@
 {% block title %}Contact log: {{ title }}{% endblock %}
 {% block content %}
   <p><a href="{{ back_url }}">&larr; {{ back_label }}</a></p>
-  <h1>Contact log: {{ title }}</h1>
+  <div class="page-header"><h1>Contact log: {{ title }}</h1></div>
   <p class="actions">
     {% if add_url %}<a class="btn" id="add-contact" href="{{ add_url }}">Add entry</a>{% endif %}
     {% if export_url %}<a class="btn" id="export-contacts" href="{{ export_url }}">Export CSV</a>{% endif %}
@@ -16,10 +16,10 @@
   <p class="muted">Newest first. Dates are New York days.</p>
   {% include "ledger/operators/_contacts_table.html" with rows=rows %}
   {% if page.paginator.num_pages > 1 %}
-    <p class="actions pagination">
+    <div class="pager pagination" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?{% if status %}status={{ status }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
-      <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+      <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
       {% if page.has_next %}<a class="btn" href="?{% if status %}status={{ status }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
-    </p>
+    </div>
   {% endif %}
 {% endblock %}

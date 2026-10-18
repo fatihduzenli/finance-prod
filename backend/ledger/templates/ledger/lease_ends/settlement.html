@@ -11,10 +11,7 @@
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form.visible_fields %}
-      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
-      {{ field.errors }}
-      {{ field }}
-      {% if field.help_text %}<br><span class="muted">{{ field.help_text }}</span>{% endif %}
+      {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
     <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
   </form>

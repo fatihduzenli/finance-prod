@@ -4,7 +4,7 @@
 {% block head %}<style>tr.unmatched{background:var(--danger-bg);}</style>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
-  <h1>Deposits versus transactions</h1>
+  <div class="page-header"><h1>Deposits versus transactions</h1></div>
   {% url 'ledger:reports:deposits' as action %}{% url 'ledger:reports:deposits_export' as export %}
   {% include "ledger/reports/_range.html" with action=action export=export %}
   {% if too_slow %}
@@ -26,7 +26,7 @@
           <td>{{ item.detail }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="4" class="muted">No open finding.</td></tr>
+        <tr><td colspan="4" class="muted empty">No open finding.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -35,7 +35,7 @@
   <h2>By month</h2>
   {% responsive_table "scroll" %}
   <table id="deposit-months">
-    <thead><tr><th>Month</th><th>Deposits</th><th>Gross</th><th>Fees</th><th>Net</th><th>Settled ACH payments</th><th>Settled ACH refunds</th><th>Difference</th></tr></thead>
+    <thead><tr><th>Month</th><th>Deposits</th><th class="money">Gross</th><th class="money">Fees</th><th class="money">Net</th><th class="money">Settled ACH payments</th><th class="money">Settled ACH refunds</th><th class="money">Difference</th></tr></thead>
     <tbody>
       {% for item in report.months %}
         <tr class="deposit-month" data-month="{{ item.month|date:'Y-m' }}">
@@ -61,12 +61,12 @@
   <h2>Deposits received</h2>
   {% responsive_table "scroll" %}
   <table id="deposits">
-    <thead><tr><th>Date</th><th>Deposit</th><th>Status</th><th>Gross</th><th>Fees</th><th>Net</th></tr></thead>
+    <thead><tr><th>Date</th><th>Deposit</th><th>Status</th><th class="money">Gross</th><th class="money">Fees</th><th class="money">Net</th></tr></thead>
     <tbody>
       {% for line in report.deposits %}
         <tr class="deposit"><td>{{ line.deposit_date|date:"Y-m-d" }}</td><td>{{ line.reference }}</td><td>{{ line.status }}</td><td class="money">{{ line.gross }}</td><td class="money">{{ line.fees }}</td><td class="money">{{ line.net }}</td></tr>
       {% empty %}
-        <tr><td colspan="6" class="muted">No deposit in these months.</td></tr>
+        <tr><td colspan="6" class="muted empty">No deposit in these months.</td></tr>
       {% endfor %}
     </tbody>
   </table>

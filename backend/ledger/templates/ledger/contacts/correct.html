@@ -2,15 +2,13 @@
 {% block title %}Add a correction{% endblock %}
 {% block content %}
   <p><a href="{{ back_url }}">&larr; Contact log</a></p>
-  <h1>Add a correction</h1>
+  <div class="page-header"><h1>Add a correction</h1></div>
   {% include "ledger/contacts/_entry.html" %}
   <p class="muted">The entry stays as it was recorded; the correction is listed under it with your name and the time. Never write card or account numbers.</p>
   <form method="post" id="contact-correct-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}
-    <label for="{{ form.body.id_for_label }}">{{ form.body.label }} *</label>
-    {{ form.body.errors }}
-    {{ form.body }}
+    {% include "ledger/stores/_form_field.html" with field=form.body mark=True hide_help=True %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-correction">Add correction</button></p>
   </form>
 {% endblock %}

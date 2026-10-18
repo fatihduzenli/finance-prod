@@ -21,10 +21,8 @@ other input when one is chosen.
         {{ documents_form.photo }}
         <p class="muted js-document-drop-hint" hidden>Or drop one file here.</p>
       </div>
-      <label for="{{ documents_form.kind.id_for_label }}">Kind</label>
-      {{ documents_form.kind }}
-      <label for="{{ documents_form.note.id_for_label }}">Note</label>
-      {{ documents_form.note }}
+      {% include "ledger/stores/_form_field.html" with field=documents_form.kind label="Kind" no_mark=True hide_help=True %}
+      {% include "ledger/stores/_form_field.html" with field=documents_form.note label="Note" no_mark=True hide_help=True %}
       <p class="actions"><button class="btn btn-primary" type="submit" id="upload-document">Upload</button></p>
     </form>
   {% endif %}
@@ -65,7 +63,7 @@ other input when one is chosen.
           </td>
         </tr>
       {% endwith %}{% empty %}
-        <tr><td colspan="7" class="muted">No documents.</td></tr>
+        <tr><td colspan="7" class="muted empty">No documents.{% if documents_feature_on and documents_can_upload %} <a class="empty-next" href="#document-upload">Upload</a>{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -85,7 +83,7 @@ other input when one is chosen.
           <td class="activity-outcome">{{ entry.outcome|default:"—" }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="5" class="muted">No document activity yet.</td></tr>
+        <tr><td colspan="5" class="muted empty">No document activity yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -633,7 +633,7 @@ def test_the_run_and_charge_pages_show_the_carried_balance(billing: Client) -> N
         amount_paid=D("1000.00"), status=RentChargeStatus.PARTIAL
     )
     page = billing.get("/run/").content.decode()
-    assert '<td class="carried-balance" data-label="Carried balance">$500.00</td>' in page
+    assert '<td class="money carried-balance" data-label="Carried balance">$500.00</td>' in page
     rent_run.create_charges(DAY, actor=None)
     detail = billing.get(f"/charges/{charge_of(row).pk}/").content.decode()
     assert '<dd id="carried-balance">$500.00' in detail

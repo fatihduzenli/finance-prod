@@ -2,21 +2,25 @@
 {% block title %}Cancel {{ draft.number }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">&larr; {{ draft.number }}</a></p>
-  <h1>Cancel {% if sent %}invoice {{ draft.sent_invoice.invoice_number }}{% else %}{{ draft.number }}{% endif %}</h1>
+  <div class="page-header"><h1>Cancel {% if sent %}invoice {{ draft.sent_invoice.invoice_number }}{% else %}{{ draft.number }}{% endif %}</h1></div>
+  <section class="confirm" aria-labelledby="confirm-question">
+  <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <div class="confirm-what">
+  <h3>What will happen</h3>
   {% if sent %}
-    <p>The payment provider's invoice is deleted; every line's charge is voided here only once the provider confirms. An invoice with money received follows the refund path and cannot be cancelled.</p>
+    <ul><li>The payment provider's invoice is deleted; every line's charge is voided here only once the provider confirms. An invoice with money received follows the refund path and cannot be cancelled.</li></ul>
     {% if refusal %}<p id="cancel-refusal"><strong>{{ refusal }}</strong></p>{% endif %}
   {% else %}
-    <p>The draft is closed. Nothing was sent, so nothing reaches the payment provider.</p>
+    <ul><li>The draft is closed. Nothing was sent, so nothing reaches the payment provider.</li></ul>
   {% endif %}
+  </div>
   <form method="post" id="cancel-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {% if sent %}
-      <label for="{{ form.note.id_for_label }}">Note *</label>
-      {{ form.note }}
-      <br><span class="muted">{{ form.note.help_text }}</span>
+      {% include "ledger/stores/_form_field.html" with field=form.note label="Note" mark=True %}
     {% endif %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="cancel-submit">{% if sent %}Cancel invoice{% else %}Cancel draft{% endif %}</button></p>
+    <p class="actions"><button class="btn btn-danger" type="submit" id="cancel-submit">{% if sent %}Cancel invoice{% else %}Cancel draft{% endif %}</button> <a class="btn" href="{% url 'ledger:invoices:draft' pk=draft.pk %}">Back</a></p>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

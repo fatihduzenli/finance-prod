@@ -1,0 +1,48 @@
+/* Print (docs/qa/PLAN-012c-design-pass.md D6). Linked from finance/base.html with
+   media="print" after app.css, so nothing here reaches the screen; the rules sit in
+   @media print as well, should the file ever be linked without it. Tokens only.
+
+   No top bar, no navigation, no flash message, no button or filter form; black on white;
+   tables with borders; the company name and the date in a print header (.print-header) and
+   "Printed <date>" in a print footer (.print-footer), both from base.html. The statement
+   keeps a heading row per month of its payment history (.print-month) without a forced page
+   break; the P&L breaks the page before each store group when its rows are shown
+   (.pnl-detail .pnl-group). The sandbox banner
+   prints as it is (docs/CLAUDE.md Rule 6). The invoice print page keeps its own styles. */
+
+@media print {
+  @page { margin: 14mm 12mm; }
+
+  .topbar, .shell > nav, .nav-toggle, .nav-toggle-label, .toasts, .toast, .no-print,
+  .action-bar, .tabs, .pager, .page-actions, .grid-scroll-top, form[role="search"],
+  #report-filters, #report-messages, button, .btn { display: none !important; }
+
+  html, body { background: var(--paper) !important; color: var(--ink); }
+  body, main, .card, .figure, .workspace-header, .confirm { box-shadow: none !important; }
+  .shell, .shell-folded { display: block; min-height: 0; }
+  main, main.wide { margin: 0; padding: 0; border: 0; max-width: none; width: auto; background: var(--paper); }
+  main, main * { color: var(--ink) !important; background: transparent !important; }
+  a { text-decoration: none; }
+  .badge { border: 1px solid var(--ink); }
+
+  .print-only { display: block; }
+  .print-header { display: flex; justify-content: space-between; gap: var(--s-4); margin: 0 0 var(--s-4); padding-bottom: var(--s-2); border-bottom: 2px solid var(--ink); font-size: var(--t-sm); }
+  .print-header .print-company { font-weight: 700; }
+  .print-footer { margin-top: var(--s-6); padding-top: var(--s-2); border-top: 1px solid var(--ink); font-size: var(--t-xs); }
+
+  .table-scroll, .table-cards, .grid-scroll { overflow: visible !important; max-height: none !important; }
+  table { border-collapse: collapse !important; width: 100% !important; }
+  th, td { border: 1px solid var(--ink) !important; padding: var(--s-1) var(--s-2); position: static !important; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  h1, h2, h3 { break-after: avoid; page-break-after: avoid; }
+
+  /* The statement: a heading row per month of the payment history, kept with its rows;
+     no forced page break (a long statement stays a few pages). */
+  tr.print-month { break-inside: avoid; break-after: avoid; page-break-after: avoid; }
+  tr.print-month th { text-align: left; font-size: var(--t-md); }
+  /* The P&L with its rows shown: each store group on a new page (not the first). */
+  .pnl-detail tr.pnl-group { break-before: page; page-break-before: always; }
+  .pnl-detail tr.pnl-group:first-child { break-before: auto; page-break-before: auto; }
+}

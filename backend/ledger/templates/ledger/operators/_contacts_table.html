@@ -39,7 +39,7 @@ entry is struck through with its reason; only billing and admin are ever given o
         </td>
       </tr>
     {% endwith %}{% empty %}
-      <tr><td colspan="7" class="muted">No contact entries.</td></tr>
+      <tr><td colspan="7" class="muted empty">No contact entries.{% if empty_next_url %} <a class="btn empty-next" href="{{ empty_next_url }}">Add entry</a>{% endif %}</td></tr>
     {% endfor %}
   </tbody>
 </table>

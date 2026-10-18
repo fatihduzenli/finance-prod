@@ -1,13 +1,14 @@
+{% load components %}
 <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
 {% if transfer %}
-<h1>Transfer store {{ store.external_label }}</h1>
+<div class="page-header"><h1>Transfer store {{ store.external_label }}</h1></div>
 <p class="muted" id="transfer-banner">Ending the lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}, so that {{ transfer.incoming_operator.display_name|default:"the incoming operator" }} can take the store over.</p>
 {% else %}
-<h1>End lease {{ store.external_label }}</h1>
+<div class="page-header"><h1>End lease {{ store.external_label }}</h1></div>
 <p class="muted">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}.</p>
 {% endif %}
-<ol class="wizard-steps" id="wizard-steps">
-  {% for label, url, is_current in step_links %}
-    <li>{% if is_current %}<strong>{{ label }}</strong>{% elif url %}<a href="{{ url }}">{{ label }}</a>{% else %}{{ label }}{% endif %}</li>
+<ol class="wizard-steps steps" id="wizard-steps" aria-label="Steps">
+  {% for label, url, is_current, done in step_links|with_done %}
+    <li{% if done %} class="step-done"{% endif %}{% if is_current %} aria-current="step"{% endif %}>{% if is_current %}<strong>{{ label }}</strong>{% elif url %}<a href="{{ url }}">{{ label }}</a>{% else %}{{ label }}{% endif %}{% if done %}<span class="visually-hidden"> (done)</span>{% endif %}</li>
   {% endfor %}
 </ol>

@@ -16,12 +16,12 @@
   <h2>Open balance</h2>
   {% responsive_table %}
   <table id="open-lines">
-    <thead><tr><th>Charge</th><th>Due</th><th>Balance</th></tr></thead>
+    <thead><tr><th>Charge</th><th>Due</th><th class="money">Balance</th></tr></thead>
     <tbody>
       {% for line in figures.open_lines %}
-        <tr><td>{% if line.url %}<a href="{{ line.url }}">{{ line.description }}</a>{% else %}{{ line.description }}{% endif %}</td><td>{{ line.due_on|date:"Y-m-d" }}</td><td>${{ line.balance }}</td></tr>
+        <tr><td>{% if line.url %}<a href="{{ line.url }}">{{ line.description }}</a>{% else %}{{ line.description }}{% endif %}</td><td>{{ line.due_on|date:"Y-m-d" }}</td><td class="money">${{ line.balance }}</td></tr>
       {% empty %}
-        <tr><td colspan="3" class="muted">Nothing is open.</td></tr>
+        <tr><td colspan="3" class="muted empty">Nothing is open.</td></tr>
       {% endfor %}
     </tbody>
     <tfoot><tr><th colspan="2">Open balance</th><th id="open-total">${{ figures.open_total }}</th></tr></tfoot>

@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
+{% load components %}
 {% load responsive %}
 {% block title %}Rent run {{ run.day|date:"Y-m-d" }}{% endblock %}
 {% block content %}
-  <h1>Rent run {{ run.day|date:"Y-m-d" }}</h1>
-
+  <div class="page-header"><h1>Rent run {{ run.day|date:"Y-m-d" }}</h1></div>
   {% if not health.ok %}
     <ul class="messages" id="provider-banner">
       {% for text in health.messages %}<li class="error" role="alert">{{ text }}</li>{% endfor %}
@@ -35,18 +35,18 @@
     <p id="last-run">{{ last_run.day|date:"Y-m-d" }}, {% if last_run.actor %}by {{ last_run.actor.get_username }}{% else %}by the daily run{% endif %}: {{ last_run.created }} created today, {{ last_run.caught_up }} by the catch-up, {{ last_run.already }} already created, {{ last_run.skipped }} skipped.</p>
     {% responsive_table %}
     <table id="created-charges">
-      <thead><tr><th>Store</th><th>Month</th><th>Amount</th><th>Created</th><th>Charge</th></tr></thead>
+      <thead><tr><th>Store</th><th>Month</th><th class="money">Amount</th><th>Created</th><th>Charge</th></tr></thead>
       <tbody>
         {% for item in last_run.charges %}
           <tr>
             <td><a href="{% url 'ledger:stores:detail' pk=item.charge.lease.store.pk %}">{{ item.charge.lease.store.external_label }}</a></td>
             <td>{{ item.charge.period_month|date:"Y-m" }}{% if item.charge.seq > 1 %} (debit {{ item.charge.seq }}){% endif %}</td>
-            <td>${{ item.charge.amount_due }}</td>
+            <td class="money">${{ item.charge.amount_due }}</td>
             <td>{{ item.when }}</td>
-            <td><a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{{ item.charge.get_status_display }}</a></td>
+            <td><a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{% status_badge item.charge.get_status_display item.charge.status %}</a></td>
           </tr>
         {% empty %}
-          <tr><td colspan="5" class="muted">This run created no charge.</td></tr>
+          <tr><td colspan="5" class="muted empty">This run created no charge.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -62,7 +62,7 @@
   <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:run:export' %}">Export CSV</a></p>
   {% responsive_table %}
   <table id="due-today">
-    <thead><tr><th>Store</th><th>Operator</th><th>Debit</th><th>Channel</th><th>Amount</th><th>Carried balance</th><th>This month</th><th>Last month</th></tr></thead>
+    <thead><tr><th>Store</th><th>Operator</th><th>Debit</th><th>Channel</th><th class="money">Amount</th><th>Carried balance</th><th>This month</th><th>Last month</th></tr></thead>
     <tbody>
       {% for item in run.due %}
         <tr>
@@ -70,13 +70,13 @@
           <td>{{ item.lease.operator.display_name|default:"—" }}</td>
           <td>{{ item.seq }} (day {{ item.debit_day }})</td>
           <td>{{ item.lease.get_payment_channel_display }}</td>
-          <td>${{ item.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}{% if item.over_limit %} <strong class="over-limit">exceeds confirmed limit</strong>{% endif %}</td>
-          <td class="carried-balance">{% if item.carried_balance %}${{ item.carried_balance }}{% else %}<span class="muted">$0.00</span>{% endif %}</td>
-          <td>{% if item.charge %}<a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{{ item.charge.get_status_display }}</a>{% if item.charge.needs_review %} <span class="badge">Needs review</span>{% endif %}{% else %}<span class="muted">Not created</span>{% endif %}</td>
+          <td class="money">${{ item.amount }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}{% if item.over_limit %} <strong class="over-limit">exceeds confirmed limit</strong>{% endif %}</td>
+          <td class="money carried-balance">{% if item.carried_balance %}${{ item.carried_balance }}{% else %}<span class="muted">$0.00</span>{% endif %}</td>
+          <td>{% if item.charge %}<a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{% status_badge item.charge.get_status_display item.charge.status %}</a>{% if item.charge.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}{% else %}<span class="muted">Not created</span>{% endif %}</td>
           <td>{% if item.last_month %}<a href="{% url 'ledger:charges:detail' pk=item.last_month.pk %}">{{ item.last_month.get_status_display }}</a>, balance ${{ item.last_month.balance }}{% else %}<span class="muted">No charge</span>{% endif %}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="8" class="muted">No debit is due today.</td></tr>
+        <tr><td colspan="8" class="muted empty">No debit is due today.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -97,7 +97,7 @@
           <td>{{ item.reason }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="4" class="muted">None.</td></tr>
+        <tr><td colspan="4" class="muted empty">None.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -113,11 +113,11 @@
           <td>{{ item.due_on|date:"Y-m-d" }}</td>
           <td><a href="{% url 'ledger:stores:detail' pk=item.lease.store.pk %}">{{ item.lease.store.external_label }}</a></td>
           <td>{{ item.policy_year }}</td>
-          <td>{% if item.amount is not None %}${{ item.amount }}{% else %}<strong>Premium missing</strong>{% endif %}</td>
+          <td class="money">{% if item.amount is not None %}${{ item.amount }}{% else %}<strong>Premium missing</strong>{% endif %}</td>
           <td>{% if item.charge %}Created{% if item.charge.needs_premium %}, needs premium{% endif %}{% else %}<span class="muted">Not yet created</span>{% endif %}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="5" class="muted">No insurance is due in the next {{ insurance_days }} days.</td></tr>
+        <tr><td colspan="5" class="muted empty">No insurance is due in the next {{ insurance_days }} days.</td></tr>
       {% endfor %}
     </tbody>
   </table>

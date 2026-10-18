@@ -4,8 +4,7 @@
 {% block title %}Webhook event {{ event.event_type }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:webhooks:list' %}">&larr; Webhook events</a></p>
-  <h1>Webhook event: {{ event.event_type }}</h1>
-
+  <div class="page-header"><h1>Webhook event: {{ event.event_type }}</h1></div>
   {% if can_replay %}
     <div class="actions">
       <form method="post" action="{% url 'ledger:webhooks:replay' pk=event.pk %}" class="js-single-submit">

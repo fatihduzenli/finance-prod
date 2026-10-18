@@ -5,7 +5,7 @@
 {% block content %}
   <p class="crumb" id="store-crumb"><a href="{% url 'ledger:stores:detail' pk=store.pk %}?tab=payments#tab-payments">&larr; Store {{ store.external_label }}</a></p>
   <p class="muted" id="known-fields">Store {{ store.external_label }} · {% if lease.started_on %}Lease from {{ lease.started_on|date:"Y-m-d" }}{% else %}Lease{% endif %}{% if lease.operator %} · Operator {{ lease.operator.display_name }}{% endif %}</p>
-  <h1>Record a payment</h1>
+  <div class="page-header"><h1>Record a payment</h1></div>
   <p class="muted">A payment received by Zelle, wire or another way outside the payment provider. Enter what was received once, then type how much of it pays each open charge below. The allocations must add up to the amount received, or the rest is kept as a credit on the lease. Each charge's invoice at the payment provider is marked paid once its charge is fully covered; a partial payment is flagged for review.</p>
   <form method="post" id="allocation-form" class="js-single-submit js-allocation" autocomplete="off">
     {% csrf_token %}
@@ -20,7 +20,7 @@
     {% if credit_held %}<p id="credit-held">Credit on the lease: <strong>${{ credit_held }}</strong>. Type in "From credit" how much of it pays a charge; it is applied as a payment of method credit.</p>{% endif %}
     {% responsive_table %}
     <table id="allocation-lines">
-      <thead><tr><th>Kind</th><th>Charge</th><th>Due</th><th>Balance</th><th>Allocate</th>{% if credit_held %}<th>From credit</th>{% endif %}</tr></thead>
+      <thead><tr><th>Kind</th><th>Charge</th><th>Due</th><th class="money">Balance</th><th>Allocate</th>{% if credit_held %}<th>From credit</th>{% endif %}</tr></thead>
       <tbody>
         {% for row in rows %}
           <tr class="allocation-line" data-balance="{{ row.charge.balance }}">
@@ -32,7 +32,7 @@
             {% if credit_held %}<td>{{ row.credit.errors }}<input type="number" step="0.01" min="0" inputmode="decimal" class="js-credit" name="{{ row.credit.html_name }}" id="{{ row.credit.auto_id }}" value="{{ row.credit.value|default_if_none:'' }}" aria-label="Apply credit to {{ row.charge.description }}"></td>{% endif %}
           </tr>
         {% empty %}
-          <tr><td colspan="{% if credit_held %}6{% else %}5{% endif %}" class="muted">No open charge: the whole amount can be kept as a credit on the lease.</td></tr>
+          <tr><td colspan="{% if credit_held %}6{% else %}5{% endif %}" class="muted empty">No open charge: the whole amount can be kept as a credit on the lease.</td></tr>
         {% endfor %}
       </tbody>
     </table>

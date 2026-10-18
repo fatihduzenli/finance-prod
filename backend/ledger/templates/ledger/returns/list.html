@@ -2,20 +2,20 @@
 {% load responsive %}
 {% block title %}Returned payments{% endblock %}
 {% block content %}
-  <h1>Returned payments</h1>
+  <div class="page-header"><h1>Returned payments</h1></div>
   <p class="muted">ACH debits the payment provider reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing debits again unless staff reschedule it: <strong>Reschedule</strong> takes the date the operator agreed and makes one invoice for the returned amount plus the NSF fee ({{ nsf_first }} on an operator's first return, {{ nsf_later }} afterwards), debited from the linked bank account on that date, or sent by e-mail when the operator has none.</p>
   <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Export CSV</a></p>
   {% responsive_table %}
   <table id="returns">
     <thead>
-      <tr><th>Operator</th><th>Store</th><th>Amount</th><th>Code</th><th>Reason</th><th>Returned at</th>{% if can_resolve %}<th>Resolve or reschedule</th>{% endif %}</tr>
+      <tr><th>Operator</th><th>Store</th><th class="money">Amount</th><th>Code</th><th>Reason</th><th>Returned at</th>{% if can_resolve %}<th>Resolve or reschedule</th>{% endif %}</tr>
     </thead>
     <tbody>
       {% for item in rows %}
         <tr id="return-{{ item.payment.pk }}">
           <td>{% if item.operator %}<a href="{% url 'ledger:operators:detail' pk=item.operator.pk %}">{{ item.operator.display_name }}</a>{% else %}<span class="muted">Unknown</span>{% endif %}</td>
           <td>{% if item.store %}{{ item.store.external_label }}{% else %}<span class="muted">—</span>{% endif %}</td>
-          <td>${{ item.amount }}{% if item.payment.rent_charge_id %} <a href="{% url 'ledger:charges:detail' pk=item.payment.rent_charge_id %}">charge</a>{% elif item.payment.one_off_charge_id %} <a href="{% url 'ledger:one_off_charges:detail' pk=item.payment.one_off_charge_id %}">one-off charge</a>{% endif %}</td>
+          <td class="money">${{ item.amount }}{% if item.payment.rent_charge_id %} <a href="{% url 'ledger:charges:detail' pk=item.payment.rent_charge_id %}">charge</a>{% elif item.payment.one_off_charge_id %} <a href="{% url 'ledger:one_off_charges:detail' pk=item.payment.one_off_charge_id %}">one-off charge</a>{% endif %}</td>
           <td>{{ item.code|default:"—" }}</td>
           <td>{{ item.reason|default:"—" }}</td>
           <td>{{ item.returned_at|date:"Y-m-d H:i"|default:"—" }}</td>
@@ -41,17 +41,17 @@
           {% endif %}
         </tr>
       {% empty %}
-        <tr><td colspan="{% if can_resolve %}7{% else %}6{% endif %}" class="muted">No unresolved returns.</td></tr>
+        <tr><td colspan="{% if can_resolve %}7{% else %}6{% endif %}" class="muted empty">No unresolved returns.</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endresponsive_table %}
   {% if page.paginator.num_pages > 1 %}
-    <p class="actions">
+    <div class="pager" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
-      <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} returns)</span>
+      <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} returns)</span>
       {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
-    </p>
+    </div>
   {% endif %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

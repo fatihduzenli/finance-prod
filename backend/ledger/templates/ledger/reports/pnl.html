@@ -2,7 +2,8 @@
 {% load responsive %}
 {% block title %}Profit and loss{% endblock %}
 {% block content %}
-  <h1>Profit and loss</h1>
+  <div class="page-header"><h1>Profit and loss</h1></div>
+  {% comment %}print.css (base.html, PLAN-012c D6): with the rows shown (.pnl-detail), each store group starts a new page.{% endcomment %}
   <form method="get" action="{% url 'ledger:reports:pnl' %}" id="pnl-filters" role="search">
     <div class="actions">
       <label for="from" style="margin:0;">From</label>
@@ -28,10 +29,11 @@
   {% else %}
   <p class="muted">{{ query.from_month|date:"Y-m" }} to {{ query.to_month|date:"Y-m" }}, by {{ group_label|lower }}; {{ row_count }} store, operator and month row{{ row_count|pluralize }}{% if cost_only_count %}, {{ cost_only_count }} cost-only{% endif %}. Amounts in US dollars. Billed: rent charges by rent month (waived ones left out), setup fees by due date and insurance by due date. Collected: settled payments by settled date, less their settled refunds, plus withheld deposits by resolution date. Landlord rent and other costs are the store's cost row in effect on the first of the month, counted once per store and month. A margin is "unknown" when a cost is not known. A cost-only row is a month in which the store is held and no lease is active.</p>
 
+  <div class="pnl-print{% if query.detail %} pnl-detail{% endif %}">
   {% responsive_table "scroll" %}
   <table id="pnl">
     <thead>
-      <tr><th>{{ group_label }}</th><th>Rent billed</th><th>Rent collected</th><th>Fees billed</th><th>Fees collected</th><th>Landlord rent</th><th>Other costs</th><th>Fee costs</th><th>Margin (billed)</th><th>Margin (collected)</th><th>Flags</th></tr>
+      <tr><th>{{ group_label }}</th><th class="money">Rent billed</th><th class="money">Rent collected</th><th class="money">Fees billed</th><th class="money">Fees collected</th><th class="money">Landlord rent</th><th class="money">Other costs</th><th class="money">Fee costs</th><th class="money">Margin (billed)</th><th class="money">Margin (collected)</th><th>Flags</th></tr>
     </thead>
     <tbody>
       {% for group in groups %}
@@ -50,7 +52,7 @@
           {% endfor %}
         {% endif %}
       {% empty %}
-        <tr><td colspan="11" class="muted">Nothing billed, collected or held in these months.</td></tr>
+        <tr><td colspan="11" class="muted empty">Nothing billed, collected or held in these months.</td></tr>
       {% endfor %}
     </tbody>
     <tfoot>
@@ -62,6 +64,7 @@
     </tfoot>
   </table>
   {% endresponsive_table %}
+  </div>
 
   <p id="deposits-held"><strong>Deposits held</strong> at {{ query.end|date:"Y-m-d" }}: <span id="deposits-held-amount">{{ deposits_held }}</span>. <span class="muted">Deposits are money held for operators, not revenue: they are in no figure above except the part withheld at the end of a lease.</span></p>
   <p id="credits-held"><strong>Credits held</strong> at {{ query.end|date:"Y-m-d" }}: <span id="credits-held-amount">{{ credits_held }}</span>. <span class="muted">Credits are money received and not yet applied to a charge, held for operators, not revenue: a credit counts as collected only when it is applied to a charge, in the month applied.</span></p>

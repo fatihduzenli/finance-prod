@@ -3,7 +3,7 @@
 {% block title %}A/R aging{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
-  <h1>A/R aging</h1>
+  <div class="page-header"><h1>A/R aging</h1></div>
   <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}">Export CSV</a></p>
   {% if too_slow %}
     <p class="warning" id="aging-too-slow" role="status">{{ too_slow }}</p>
@@ -12,7 +12,7 @@
   {% responsive_table "scroll" %}
   <table id="aging">
     <thead>
-      <tr><th>Operator</th>{% for bucket, label in buckets %}<th>{{ label }}</th>{% endfor %}<th>Total</th><th>Open charges</th></tr>
+      <tr><th>Operator</th>{% for bucket, label in buckets %}<th class="money">{{ label }}</th>{% endfor %}<th class="money">Total</th><th>Open charges</th></tr>
     </thead>
     <tbody>
       {% for row in report.rows %}
@@ -23,7 +23,7 @@
           <td>{{ row.count }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="8" class="muted">Nothing is owed.</td></tr>
+        <tr><td colspan="8" class="muted empty">Nothing is owed.</td></tr>
       {% endfor %}
     </tbody>
     <tfoot>

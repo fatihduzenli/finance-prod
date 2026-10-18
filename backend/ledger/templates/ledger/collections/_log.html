@@ -12,7 +12,7 @@
         <td>{% if row.manual %}<span class="badge">Manual</span> {% endif %}{{ row.sent_by|default:"Ladder" }}</td>
       </tr>
     {% empty %}
-      <tr><td colspan="{% if show_charge %}6{% else %}5{% endif %}" class="muted">No collection e-mails.</td></tr>
+      <tr><td colspan="{% if show_charge %}6{% else %}5{% endif %}" class="muted empty">No collection e-mails.</td></tr>
     {% endfor %}
   </tbody>
 </table>

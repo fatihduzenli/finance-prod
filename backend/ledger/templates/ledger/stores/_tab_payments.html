@@ -1,10 +1,11 @@
 {% comment %}The Payments tab (docs/qa/PLAN-012d D3, D6b): the payments ledger's rows for this store, and the credits held on its leases with what used them. On the operator page (D14) the operator's, with a Store column.{% endcomment %}
+{% load components %}
 {% load responsive %}
 <h2>Payments</h2>
 <p class="actions"><a class="btn" id="store-payments-ledger" href="{{ payments_ledger_url }}">Open in the payments ledger</a></p>
 {% responsive_table %}
 <table id="store-payments">
-  <thead><tr>{% if by_store %}<th>Store</th>{% endif %}<th>Paid on</th><th>Initiated</th><th>Charge</th><th>Method</th><th>Amount</th><th>Status</th><th>Reference</th><th>Transaction</th></tr></thead>
+  <thead><tr>{% if by_store %}<th>Store</th>{% endif %}<th>Paid on</th><th>Initiated</th><th>Charge</th><th>Method</th><th class="money">Amount</th><th>Status</th><th>Reference</th><th>Transaction</th></tr></thead>
   <tbody>
     {% for row in payment_rows %}
       <tr class="store-payment">
@@ -14,12 +15,12 @@
         <td>{% include "ledger/payments/_charge.html" with payment=row.payment %}</td>
         <td>{{ row.payment.get_method_display }}</td>
         <td class="money">{% if row.payment.is_refund %}&minus;{% endif %}${{ row.payment.amount }}</td>
-        <td>{% if row.payment.is_refund %}<span class="badge">Refund</span> {% endif %}{{ row.payment.get_status_display }}</td>
+        <td>{% if row.payment.is_refund %}<span class="badge">Refund</span> {% endif %}{% status_badge row.payment.get_status_display row.payment.status %}</td>
         <td>{{ row.payment.reference|default:"—" }}</td>
         <td>{{ row.transaction|default:"—" }}</td>
       </tr>
     {% empty %}
-      <tr><td colspan="{% if by_store %}9{% else %}8{% endif %}" class="muted">No payments.</td></tr>
+      <tr><td colspan="{% if by_store %}9{% else %}8{% endif %}" class="muted empty">No payments.{% with next=space.actions|action_named:"record_payment" %}{% if next %} <a class="btn empty-next" href="{{ next.url }}">{{ next.label }}</a>{% endif %}{% endwith %}</td></tr>
     {% endfor %}
   </tbody>
 </table>
@@ -29,7 +30,7 @@
 <p class="muted">Money received and not applied to a charge, held for the operator (never revenue). A credit pays a charge from Record a payment ("From credit"), or is refunded at the lease end.</p>
 {% responsive_table %}
 <table id="store-credits">
-  <thead><tr>{% if by_store %}<th>Store</th>{% endif %}<th>Received on</th><th>Method</th><th>Amount</th><th>Remaining</th><th>Applied or refunded</th><th>Note</th></tr></thead>
+  <thead><tr>{% if by_store %}<th>Store</th>{% endif %}<th>Received on</th><th>Method</th><th class="money">Amount</th><th class="money">Remaining</th><th>Applied or refunded</th><th>Note</th></tr></thead>
   <tbody>
     {% for row in credit_rows %}
       <tr class="store-credit">
@@ -42,7 +43,7 @@
         <td>{{ row.credit.note }}</td>
       </tr>
     {% empty %}
-      <tr><td colspan="{% if by_store %}7{% else %}6{% endif %}" class="muted">No credit held or used.</td></tr>
+      <tr><td colspan="{% if by_store %}7{% else %}6{% endif %}" class="muted empty">No credit held or used.</td></tr>
     {% endfor %}
   </tbody>
 </table>

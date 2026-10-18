@@ -1,10 +1,11 @@
 {% extends "finance/base.html" %}
+{% load components %}
 {% load responsive %}
 {% load static %}
 {% block title %}Store {{ store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:stores:list' %}">&larr; Stores</a></p>
-  <h1>Store {{ store.external_label }}{% if store.needs_review %} <span class="badge">Needs review</span>{% endif %}</h1>
+  <div class="page-header"><h1>Store {{ store.external_label }}{% if store.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</h1></div>
   {% if end_in_progress %}
     <ul class="messages" id="lease-end-in-progress">
       <li class="warning" role="status">{% if end_in_progress_transfer %}A transfer is in progress (statement step).{% else %}A lease end is in progress (statement step).{% endif %}{% if can_edit %}
@@ -17,12 +18,12 @@
   {% include "ledger/stores/_header.html" %}
 
   {% if space.actions %}
-    <nav aria-label="Store actions" id="action-bar" class="actions">
+    <nav aria-label="Store actions" id="action-bar" class="actions action-bar">
       {% for action in space.actions %}{% if action.post %}<form method="post" action="{{ action.url }}" class="js-single-submit" style="display:inline;">{% csrf_token %}<button class="btn{% if action.danger %} btn-danger{% endif %}" type="submit" id="{{ action.element_id }}">{{ action.label }}</button></form>{% else %}<a class="btn{% if action.danger %} btn-danger{% endif %}" id="{{ action.element_id }}" href="{{ action.url }}">{{ action.label }}</a>{% endif %}{% endfor %}
     </nav>
   {% endif %}
 
-  <nav aria-label="Store tabs" class="actions store-tabs" id="store-tabs">
+  <nav aria-label="Store tabs" class="actions store-tabs tabs" id="store-tabs">
     {% for name, label in space.tabs %}<a class="btn" id="tab-link-{{ name }}" href="?tab={{ name }}#tab-{{ name }}"{% if name == space.tab %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
   </nav>
   <section id="tab-{{ space.tab }}" class="store-tab">
@@ -72,16 +73,16 @@
   {% if cost_history %}
     {% responsive_table %}
     <table id="cost-history">
-      <thead><tr><th>Landlord rent</th><th>Other cost</th><th>From</th><th>To</th><th>Lease end</th><th>Source</th><th>Notes</th><th></th></tr></thead>
+      <thead><tr><th class="money">Landlord rent</th><th class="money">Other cost</th><th>From</th><th>To</th><th>Lease end</th><th>Source</th><th>Notes</th><th></th></tr></thead>
       <tbody>
         {% for entry in cost_history %}{% with row=entry.row %}
           <tr id="cost-row-{{ row.pk }}"{% if row.superseded_at %} class="cost-superseded"{% endif %}>
             {% if row.superseded_at %}
-              <td><s>${{ row.landlord_rent }}</s></td><td><s>{% if row.other_monthly_cost is not None %}${{ row.other_monthly_cost }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</s></td><td><s>{{ row.effective_from|date:"Y-m-d" }}</s></td><td><s>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</s></td><td><s>{{ row.landlord_lease_end|date:"Y-m-d"|default:"—" }}</s></td><td><s>{{ row.get_source_display }}</s></td>
+              <td class="money"><s>${{ row.landlord_rent }}</s></td><td class="money"><s>{% if row.other_monthly_cost is not None %}${{ row.other_monthly_cost }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</s></td><td><s>{{ row.effective_from|date:"Y-m-d" }}</s></td><td><s>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</s></td><td><s>{{ row.landlord_lease_end|date:"Y-m-d"|default:"—" }}</s></td><td><s>{{ row.get_source_display }}</s></td>
               <td style="white-space:pre-wrap;"><s>{{ row.notes }}</s>{% if row.notes %}<br>{% endif %}<span class="badge">Superseded</span> {{ row.superseded_at|date:"Y-m-d H:i" }} by {{ entry.superseded_by_user|default:"—" }}: {{ row.change_note }}</td>
               <td></td>
             {% else %}
-              <td>${{ row.landlord_rent }}</td><td>{% if row.other_monthly_cost is not None %}${{ row.other_monthly_cost }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.landlord_lease_end|date:"Y-m-d"|default:"—" }}</td><td>{{ row.get_source_display }}</td>
+              <td class="money">${{ row.landlord_rent }}</td><td class="money">{% if row.other_monthly_cost is not None %}${{ row.other_monthly_cost }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.landlord_lease_end|date:"Y-m-d"|default:"—" }}</td><td>{{ row.get_source_display }}</td>
               <td style="white-space:pre-wrap;">{{ row.notes }}{% if row.change_note %}{% if row.notes %}<br>{% endif %}<span class="badge">{% if entry.closed_by_user %}Closed{% else %}Correction{% endif %}</span>{% if entry.closed_by_user %} by {{ entry.closed_by_user }}{% endif %}: {{ row.change_note }}{% endif %}</td>
               <td>{% if can_correct_cost %}<a class="btn cost-correct" href="{% url 'ledger:stores:correct_cost' pk=store.pk row=row.pk %}">Correct</a>{% endif %}</td>
             {% endif %}
@@ -99,14 +100,14 @@
     <tbody>
       {% for lease in leases %}
         <tr>
-          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if lease.needs_review %} <span class="badge">Needs review</span>{% endif %}</td>
+          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if lease.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</td>
           <td>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</td>
           <td>{{ lease.started_on|date:"Y-m-d"|default:"—" }}</td>
           <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>
           <td>{{ lease.get_collection_status_display }}{% if lease.lease_end and lease.lease_end.status == "confirmed" and can_edit %} <a href="{% url 'ledger:lease_ends:confirm' pk=lease.lease_end.pk %}">Final statement</a>{% endif %}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="5" class="muted">No leases.</td></tr>
+        <tr><td colspan="5" class="muted empty">No leases.{% with next=space.actions|action_named:"new_lease" %}{% if next %} <a class="btn empty-next" href="{{ next.url }}">{{ next.label }}</a>{% endif %}{% endwith %}</td></tr>
       {% endfor %}
     </tbody>
   </table>

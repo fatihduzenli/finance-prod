@@ -3,7 +3,7 @@
 {% load tz %}
 {% block title %}Disputes{% endblock %}
 {% block content %}
-  <h1>Disputes</h1>
+  <div class="page-header"><h1>Disputes</h1></div>
   <p class="muted">The disputes the payment provider reports for the last 90 days, read in the background each day, on a dispute event and when you press Refresh. Statuses and reasons are the provider's own words. Transaction identifiers are masked. Fewer than {{ highlight_days }} days left to respond is highlighted.</p>
 
   <div class="actions">
@@ -18,7 +18,7 @@
   {% responsive_table %}
   <table id="disputes">
     <thead>
-      <tr><th>Respond by</th><th>Days left</th><th>Status</th><th>Reason</th><th>Amount</th><th>Operator</th><th>Store</th><th>Payment</th><th>Transaction</th></tr>
+      <tr><th>Respond by</th><th>Days left</th><th>Status</th><th>Reason</th><th class="money">Amount</th><th>Operator</th><th>Store</th><th>Payment</th><th>Transaction</th></tr>
     </thead>
     <tbody>
       {% for item in rows %}{% with dispute=item.dispute %}
@@ -27,7 +27,7 @@
           <td class="days-left">{% if item.past %}<strong>Past</strong>{% elif item.days_left is not None %}{% if item.soon %}<strong>{{ item.days_left }}</strong>{% else %}{{ item.days_left }}{% endif %}{% else %}—{% endif %}</td>
           <td class="dispute-status">{{ dispute.status|default:"—" }}</td>
           <td>{{ dispute.reason|default:"—" }}</td>
-          <td>{% if dispute.amount is not None %}${{ dispute.amount }}{% else %}—{% endif %}</td>
+          <td class="money">{% if dispute.amount is not None %}${{ dispute.amount }}{% else %}—{% endif %}</td>
           <td>{% if dispute.operator %}<a href="{% url 'ledger:operators:detail' pk=dispute.operator.pk %}">{{ dispute.operator.display_name }}</a>{% else %}<span class="muted">Not linked</span>{% endif %}</td>
           <td>{% if dispute.store %}<a href="{% url 'ledger:stores:detail' pk=dispute.store.pk %}">{{ dispute.store.external_label }}</a>{% else %}—{% endif %}</td>
           <td>{% if dispute.payment_id %}<a href="{% url 'ledger:payments:detail' pk=dispute.payment_id %}">Payment</a>{% else %}<span class="muted">Not ours</span>{% endif %}</td>
@@ -78,7 +78,7 @@
           </td>
         </tr>
       {% endwith %}{% empty %}
-        <tr><td colspan="9" class="muted" id="no-disputes">No disputes{% if not last_synced %} read yet. Press Refresh to read the payment provider's list{% endif %}.</td></tr>
+        <tr><td colspan="9" class="muted empty" id="no-disputes">No disputes{% if not last_synced %} read yet. Press Refresh to read the payment provider's list{% endif %}.</td></tr>
       {% endfor %}
     </tbody>
   </table>

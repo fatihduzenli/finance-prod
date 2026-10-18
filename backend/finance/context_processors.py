@@ -8,13 +8,15 @@ it sits in (Reports or Admin), so ``finance/base.html`` marks that link with
 the request only; no query, no setting.
 
 :func:`company` exposes the company settings row's display values (``company.name``,
-``short_name``, ``provider_name``, ``logo_url``) and the shell's theme colour to every
-template. ``logo_url`` is the brand's dark logo unless the row names a live PNG or JPEG
-document, then that document's preview route: always a path of this app, never a URL
-taken from the row. No setting reaches the page. The row is read once per request, with
-one plain query (and the logo's document with one more, only when the row names one), and
-kept on the request (:func:`company_settings`), so the shell and the manifest of the same
-request share it.
+``short_name``, ``provider_name``, ``logo_url``, ``logo_is_override``) and the shell's
+theme colour to every template. ``logo_url`` is the brand's dark logo unless the row names
+a live PNG or JPEG document, then that document's preview route: always a path of this
+app, never a URL taken from the row. ``logo_is_override`` is true for such a document: the
+bar then shows the company name as text beside it (the brand logo carries the wordmark
+already, so the bar shows the name once, as the image's text alternative). No setting
+reaches the page. The row is read once per request, with one plain query (and the
+logo's document with one more, only when the row names one), and kept on the request
+(:func:`company_settings`), so the shell and the manifest of the same request share it.
 """
 
 from __future__ import annotations
@@ -98,6 +100,8 @@ class Company:
     short_name: str
     provider_name: str
     logo_url: str
+    #: The logo is the row's own document, not the brand logo (PLAN-012c D3).
+    logo_is_override: bool = False
 
 
 def logo_url(row: CompanySettings) -> str:
@@ -131,11 +135,13 @@ def company(request: HttpRequest) -> dict[str, object]:
     shown: Company | None = getattr(request, _COMPANY_ATTRIBUTE, None)
     if shown is None:
         row = company_settings(request)
+        url = logo_url(row)
         shown = Company(
             name=str(row.name),
             short_name=str(row.short_name),
             provider_name=str(row.processor_name),
-            logo_url=logo_url(row),
+            logo_url=url,
+            logo_is_override=url != static(BRAND_LOGO),
         )
         setattr(request, _COMPANY_ATTRIBUTE, shown)
     return {"company": shown, "theme_color": pwa.THEME_COLOR}

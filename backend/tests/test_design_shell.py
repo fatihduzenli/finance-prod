@@ -124,10 +124,13 @@ def test_every_main_page_renders_in_the_shell(
         return
     html = body(client_for(role).get(path))
     bar = bar_of(html)
+    # The brand logo carries the "Monvera" wordmark: the name is its text alternative and
+    # is not repeated as text (PLAN-012c Batch B, carry-over a).
     assert (
-        f'<img class="topbar-logo" id="topbar-logo" src="{BRAND_LOGO}" alt="" height="28">' in bar
+        f'<img class="topbar-logo" id="topbar-logo" src="{BRAND_LOGO}" alt="Monvera" height="28">'
+        in bar
     )
-    assert '<span class="topbar-company" id="topbar-company">Monvera</span>' in bar
+    assert 'id="topbar-company"' not in bar
     assert '<span class="topbar-product" id="topbar-product">Rent ledger</span>' in bar
     assert 'id="nav-search"' in bar and 'id="user-menu"' in bar
     assert ">Settings</a>" in bar and ">Sign out</button>" in bar
@@ -429,11 +432,14 @@ def test_a_live_image_document_named_by_the_row_becomes_the_logo() -> None:
     preview = reverse("ledger:documents:preview", kwargs={"pk": document.pk})
     bar = bar_of(body(client_for(Role.VIEWER).get("/")))
     assert f'src="{preview}"' in bar
+    # An override logo has no wordmark: the name shows as text beside it.
+    assert '<span class="topbar-company" id="topbar-company">Monvera</span>' in bar
     # A deleted document falls back to the brand logo.
     Document.objects.filter(pk=document.pk).update(
         deleted_at="2026-10-16T12:00:00Z", delete_note="Replaced."
     )
-    assert f'src="{BRAND_LOGO}"' in bar_of(body(client_for(Role.VIEWER).get("/")))
+    fallback = bar_of(body(client_for(Role.VIEWER).get("/")))
+    assert f'src="{BRAND_LOGO}"' in fallback and 'id="topbar-company"' not in fallback
 
 
 def test_the_processor_reads_the_row_once_a_request() -> None:
@@ -570,7 +576,10 @@ def test_the_names_reach_the_bar_and_the_nav() -> None:
     row.name, row.provider_name = "Acme Rentals", "PayCo"
     row.save()
     html = body(client_for(Role.VIEWER).get("/"))
-    assert '<span class="topbar-company" id="topbar-company">Acme Rentals</span>' in html
+    assert (
+        'id="topbar-logo" src="/static/finance/brand/monvera_logo_dark.svg" alt="Acme Rentals"'
+        in html
+    )
     assert ">Messages from PayCo</a>" in nav_of(html)
 
 
@@ -592,3 +601,35 @@ def test_the_provider_name_is_substituted_in_the_job_banner() -> None:
     ]
     assert "<strong>PayCo request</strong>" in banner
     assert "Payment provider request" not in html
+
+
+# --- The company name once in the bar (PLAN-012c Batch B, carry-over a) ------------------------
+
+
+def test_without_an_override_the_name_is_the_logos_text_only() -> None:
+    bar = bar_of(body(client_for(Role.VIEWER).get("/")))
+    assert bar.count("Monvera") == 1  # the alt text; the wordmark is in the image
+    assert 'alt="Monvera"' in bar and 'id="topbar-company"' not in bar
+    shown = context_processors.company(RequestFactory().get("/"))["company"]
+    assert isinstance(shown, context_processors.Company) and shown.logo_is_override is False
+
+
+def test_with_an_override_the_name_is_shown_as_text_too() -> None:
+    store = a_store("0104 LOGO", 104, "GA")
+    document = Document.objects.create(
+        store=store,
+        kind="other",
+        original_filename="logo.png",
+        content_type="image/png",
+        size_bytes=10,
+        blob_path=f"documents/store/{store.pk}/{uuid.uuid4()}",
+        sha256="0" * 64,
+    )
+    row = CompanySettings.current()
+    row.name, row.logo = "Acme Rentals", document.blob_path
+    row.save()
+    bar = bar_of(body(client_for(Role.VIEWER).get("/")))
+    assert 'alt="Acme Rentals"' in bar
+    assert '<span class="topbar-company" id="topbar-company">Acme Rentals</span>' in bar
+    shown = context_processors.company(RequestFactory().get("/"))["company"]
+    assert isinstance(shown, context_processors.Company) and shown.logo_is_override is True

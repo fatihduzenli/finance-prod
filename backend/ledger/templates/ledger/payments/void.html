@@ -2,8 +2,12 @@
 {% block title %}Void a payment{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">&larr; Payment</a></p>
-  <h1>Void a payment</h1>
+  <div class="page-header"><h1>Void a payment</h1></div>
+  <section class="confirm" aria-labelledby="confirm-what-heading">
+  <div class="confirm-what">
+  <h2 id="confirm-what-heading">What will happen</h2>
   {% include "ledger/payments/summary.html" %}
+  </div>
   {% if facts.void_refusal %}
     <p id="void-refusal"><strong>{{ facts.void_refusal }}</strong></p>
   {% else %}
@@ -15,8 +19,9 @@
       <p id="void-confirmation"><label style="font-weight:normal;"><input type="checkbox" name="confirm" value="true" id="confirm-void"> {{ confirmation }}</label>
         {% for error in form.confirm.errors %}<br><strong class="field-error">{{ error }}</strong>{% endfor %}
       </p>
-      <p class="actions"><button class="btn btn-primary" type="submit" id="confirm-void-button">Void at the payment provider</button></p>
+      <p class="actions"><button class="btn btn-primary" type="submit" id="confirm-void-button">Void at the payment provider</button> <a class="btn" href="{% url 'ledger:payments:detail' pk=payment.pk %}">Back</a></p>
     </form>
   {% endif %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

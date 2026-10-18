@@ -2,17 +2,20 @@
 {% block title %}Cancel {{ charge.label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
-  <h1>Cancel {{ charge.label }}</h1>
-  <p>Amount ${{ charge.price }}. The payment provider's invoice (or, for autopay on the due date, its schedule) is deleted; the provider then shows the invoice as deleted, as it has no "void". The charge is voided here only once the provider confirms. A charge with money received follows the refund path and cannot be cancelled.</p>
+  <div class="page-header"><h1>Cancel {{ charge.label }}</h1></div>
+  <section class="confirm" aria-labelledby="confirm-question">
+  <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <div class="confirm-what">
+  <h3>What will happen</h3>
+  <ul><li>Amount ${{ charge.price }}. The payment provider's invoice (or, for autopay on the due date, its schedule) is deleted; the provider then shows the invoice as deleted, as it has no "void". The charge is voided here only once the provider confirms. A charge with money received follows the refund path and cannot be cancelled.</li></ul>
+  </div>
   {% if refusal %}<p id="cancel-refusal"><strong>{{ refusal }}</strong></p>{% endif %}
   <form method="post" id="cancel-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
-    <label for="{{ form.note.id_for_label }}">Note *</label>
-    {{ form.note.errors }}
-    {{ form.note }}
-    <br><span class="muted">{{ form.note.help_text }}</span>
-    <p class="actions"><button class="btn btn-primary" type="submit" id="cancel-submit">Cancel charge</button></p>
+    {% include "ledger/stores/_form_field.html" with field=form.note label="Note" mark=True %}
+    <p class="actions"><button class="btn btn-danger" type="submit" id="cancel-submit">Cancel charge</button> <a class="btn" href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">Back</a></p>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

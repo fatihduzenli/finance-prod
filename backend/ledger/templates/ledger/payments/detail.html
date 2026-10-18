@@ -4,7 +4,7 @@
 {% block content %}
   {% include "ledger/_store_crumb.html" %}
   <p><a href="{% url 'ledger:payments:list' %}">&larr; Payments</a>{% if charge %} · <a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Charge</a>{% elif one_off_charge %} · <a href="{% url 'ledger:one_off_charges:detail' pk=one_off_charge.pk %}">One-off charge</a>{% endif %}</p>
-  <h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of ${{ payment.amount }}</h1>
+  <div class="page-header"><h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of ${{ payment.amount }}</h1></div>
   {% if can_refund or can_void %}
     <p class="actions">
       {% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}
@@ -32,17 +32,17 @@
     <h2>Refunds</h2>
     {% responsive_table %}
     <table id="refunds">
-      <thead><tr><th>Initiated</th><th>Paid on</th><th>Amount</th><th>Status</th></tr></thead>
+      <thead><tr><th>Initiated</th><th>Paid on</th><th class="money">Amount</th><th>Status</th></tr></thead>
       <tbody>
         {% for refund in refunds %}
           <tr>
             <td><a href="{% url 'ledger:payments:detail' pk=refund.pk %}">{{ refund.initiated_on|date:"Y-m-d"|default:"—" }}</a></td>
             <td>{{ refund.settled_on|date:"Y-m-d"|default:"—" }}</td>
-            <td>&minus;${{ refund.amount }}</td>
+            <td class="money">&minus;${{ refund.amount }}</td>
             <td>{{ refund.get_status_display }}</td>
           </tr>
         {% empty %}
-          <tr><td colspan="4" class="muted">No refunds.</td></tr>
+          <tr><td colspan="4" class="muted empty">No refunds.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -95,7 +95,7 @@
       {% for entry in audit_rows %}
         <tr><td>{{ entry.at|date:"Y-m-d H:i" }}</td><td>{{ entry.action }}</td><td>{{ entry.actor|default:"payment provider or system" }}</td></tr>
       {% empty %}
-        <tr><td colspan="3" class="muted">No audit rows.</td></tr>
+        <tr><td colspan="3" class="muted empty">No audit rows.</td></tr>
       {% endfor %}
     </tbody>
   </table>

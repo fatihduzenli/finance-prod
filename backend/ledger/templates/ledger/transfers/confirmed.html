@@ -2,7 +2,7 @@
 {% block title %}Transfer of store {{ store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
-  <h1>Transfer of store {{ store.external_label }}</h1>
+  <div class="page-header"><h1>Transfer of store {{ store.external_label }}</h1></div>
   <p id="transfer-done">Confirmed {{ transfer.confirmed_at|date:"Y-m-d H:i" }}: the lease of {{ transfer.outgoing_lease.operator.display_name }} ended on {{ end.ended_on|date:"Y-m-d" }} and the lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_lease.started_on|date:"Y-m-d" }}.</p>
   <ul>
     <li><a href="{% url 'ledger:lease_ends:confirm' pk=end.pk %}" id="outgoing-statement">Final statement of the outgoing lease</a></li>

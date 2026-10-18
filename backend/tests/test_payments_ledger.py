@@ -217,10 +217,16 @@ def test_unusable_filter_values_are_ignored(book: dict[str, Any], params: dict[s
 def test_every_role_reads_the_ledger_and_the_totals(book: dict[str, Any], role: Role) -> None:
     client, _ = client_for(role)
     page = client.get(LIST).content.decode()
-    assert '<td id="total-settled" data-label="Settled (collected)">$1900.00</td>' in page
-    assert '<td id="total-pending" data-label="Pending (not collected yet)">$700.00</td>' in page
-    assert '<td id="total-returned" data-label="Returned">$300.00</td>' in page
-    assert '<td id="total-refunded" data-label="Refunded">$200.00</td>' in page
+    assert (
+        '<td id="total-settled" class="money" data-label="Settled (collected)">$1900.00</td>'
+        in page
+    )
+    assert (
+        '<td id="total-pending" class="money" data-label="Pending (not collected yet)">'
+        "$700.00</td>" in page
+    )
+    assert '<td id="total-returned" class="money" data-label="Returned">$300.00</td>' in page
+    assert '<td id="total-refunded" class="money" data-label="Refunded">$200.00</td>' in page
     assert "txn-…5678" in page and TRANSACTION not in page
 
 

@@ -2,16 +2,14 @@
 {% block title %}{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}{% endblock %}
 {% block content %}
   <p>{% if operator %}<a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a>{% else %}<a href="{% url 'ledger:operators:list' %}">&larr; Operators</a>{% endif %}</p>
-  <h1>{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}</h1>
+  <div class="page-header"><h1>{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}</h1></div>
   <p class="muted">With an e-mail address, saving also links or creates the operator's customer at the payment provider. Without one, link the customer by hand afterwards.</p>
   <form method="post" id="operator-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
     {% for field in form.visible_fields %}
-      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
-      {{ field.errors }}
-      {{ field }}
+      {% include "ledger/stores/_form_field.html" with hide_help=True %}
     {% endfor %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-operator">Save</button></p>
   </form>

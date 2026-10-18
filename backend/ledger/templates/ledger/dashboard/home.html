@@ -2,32 +2,37 @@
 {% load responsive %}
 {% load tz %}
 {% block title %}Dashboard{% endblock %}
-{% block head %}<style>
-  .figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.75rem;margin:1rem 0;}
-  .figure{border:1px solid var(--line);border-radius:6px;padding:.75rem;}
-  .figure a{color:inherit;text-decoration:none;display:block;}
-  .figure .value{font-size:1.4rem;font-weight:700;display:block;margin-top:.25rem;}
-  .alert-list{border-left:4px solid var(--danger);padding-left:.75rem;}
-</style>{% endblock %}
+{% comment %}The dashboard as cards (docs/qa/PLAN-012c-design-pass.md D6): the attention list
+(PLAN-011b D6) first, then today's run (the PLAN-012d line), the failed payment attempts, the
+figures, then the recent lists. The cards' styles are app.css's (.card, .figures).{% endcomment %}
 {% block content %}
-  <h1>Dashboard</h1>
+  <div class="page-header"><h1>Dashboard</h1></div>
   <p class="muted">As of {{ data.today|date:"Y-m-d" }}. Amounts in US dollars.</p>
 
   {% include "ledger/_attention.html" with banners=False %}
 
-  <section aria-labelledby="failed-heading" class="alert-list" id="failed-attempts">
-    <h2 id="failed-heading" style="margin-top:0;">Failed payment attempts: {{ data.failed_attempts_count }}</h2>
+  <section class="card" id="today-run" aria-label="Today's run">
+  <h2>Today's run</h2>
+  <p id="run-line"><a href="{% url 'ledger:run:today' %}">Today's rent run: {% if run_line %}{{ run_line.created }} created, {{ run_line.skipped }} skipped{% else %}no run yet today{% endif %}</a></p>
+  <ul id="run-summary">
+    <li><a href="{% url 'ledger:run:today' %}">Debits due today: <strong id="run-due">{{ data.run.due }}</strong></a></li>
+    <li><a href="{% url 'ledger:run:today' %}">Pending: <strong id="run-pending">{{ data.run.pending }}</strong></a></li>
+    <li><a href="{% url 'ledger:returns:list' %}">Returned, not resolved: <strong id="run-returned">{{ data.run.returned }}</strong></a></li>
+  </ul>
+  </section>
+  <section aria-labelledby="failed-heading" class="card alert-list" id="failed-attempts">
+    <h2 id="failed-heading">Failed payment attempts: {{ data.failed_attempts_count }}</h2>
     {% if failed_attempts %}
       {% responsive_table %}
       <table>
-        <thead><tr><th>Invoice</th><th>Operator</th><th>Store</th><th>Amount</th><th>Date</th></tr></thead>
+        <thead><tr><th>Invoice</th><th>Operator</th><th>Store</th><th class="money">Amount</th><th>Date</th></tr></thead>
         <tbody>
           {% for invoice, store in failed_attempts %}
             <tr class="failed-attempt">
               <td>{% if invoice.rent_charge_id %}<a href="{% url 'ledger:charges:detail' pk=invoice.rent_charge_id %}">{{ invoice.invoice_number }}</a>{% elif invoice.one_off_charge_id %}<a href="{% url 'ledger:one_off_charges:detail' pk=invoice.one_off_charge_id %}">{{ invoice.invoice_number }}</a>{% else %}{{ invoice.invoice_number }}{% endif %}</td>
               <td><a href="{% url 'ledger:operators:detail' pk=invoice.operator_id %}">{{ invoice.operator.display_name }}</a></td>
               <td>{{ store|default:"—" }}</td>
-              <td>${{ invoice.total }}</td>
+              <td class="money">${{ invoice.total }}</td>
               <td>{{ invoice.updated_at|date:"Y-m-d" }}</td>
             </tr>
           {% endfor %}
@@ -39,7 +44,7 @@
       <p class="muted">None. An invoice whose last provider status is ATTEMPTED is listed here.</p>
     {% endif %}
   </section>
-
+  <section class="card" id="figures-card" aria-label="Figures">
   <div class="figures">
     <div class="figure" id="figure-outstanding"><a href="{% url 'ledger:arrears:page' %}">Total outstanding<span class="value">${{ data.outstanding|floatformat:"2g" }}</span><span class="muted">{{ data.outstanding_count }} open charge{{ data.outstanding_count|pluralize }}</span></a></div>
     <div class="figure" id="figure-overdue"><a href="{% url 'ledger:arrears:page' %}">Overdue<span class="value">${{ data.overdue|floatformat:"2g" }}</span><span class="muted">{{ data.overdue_count }} charge{{ data.overdue_count|pluralize }} past due</span></a></div>
@@ -47,24 +52,9 @@
     <div class="figure" id="figure-not-sent"><a href="#not-sent">Invoices not sent<span class="value">{{ data.not_sent_count }}</span><span class="muted">At the provider, not sent yet</span></a></div>
   </div>
   <p class="muted">Outstanding: rent, insurance and one-off charges with a balance, not waived or voided, deposits left out. Overdue: due before today.</p>
-
-  <h2>Today's run</h2>
-  <p id="run-line"><a href="{% url 'ledger:run:today' %}">Today's rent run: {% if run_line %}{{ run_line.created }} created, {{ run_line.skipped }} skipped{% else %}no run yet today{% endif %}</a></p>
-  <ul id="run-summary">
-    <li><a href="{% url 'ledger:run:today' %}">Debits due today: <strong id="run-due">{{ data.run.due }}</strong></a></li>
-    <li><a href="{% url 'ledger:run:today' %}">Pending: <strong id="run-pending">{{ data.run.pending }}</strong></a></li>
-    <li><a href="{% url 'ledger:returns:list' %}">Returned, not resolved: <strong id="run-returned">{{ data.run.returned }}</strong></a></li>
-  </ul>
-
-  <h2>Last reconciliation</h2>
-  {% if data.last_reconciliation %}
-    <p id="last-reconciliation"><a href="{% url 'ledger:reconciliation:page' %}">{{ data.last_reconciliation.get_status_display }}, started {{ data.last_reconciliation.started_at|utc|date:"Y-m-d H:i" }} UTC</a></p>
-  {% else %}
-    <p id="last-reconciliation" class="muted">No reconciliation has run yet.</p>
-  {% endif %}
-
+  </section>
   {% if data.waived_live %}
-    <section class="alert-list" id="waived-live">
+    <section class="card alert-list" id="waived-live">
       <h2>{{ waived_live_heading }}: {{ data.waived_live|length }}</h2>
       <p class="muted">An admin clears each with "Delete provider invoice" on the charge page.</p>
       <ul>
@@ -74,19 +64,19 @@
       </ul>
     </section>
   {% endif %}
-
+  <section class="card" id="not-sent-card" aria-labelledby="not-sent">
   <h2 id="not-sent">Invoices created but not sent: {{ data.not_sent_count }}</h2>
   {% if not_sent %}
     {% responsive_table %}
     <table>
-      <thead><tr><th>Invoice</th><th>Operator</th><th>Store</th><th>Amount</th><th>Issued</th><th>Status</th></tr></thead>
+      <thead><tr><th>Invoice</th><th>Operator</th><th>Store</th><th class="money">Amount</th><th>Issued</th><th>Status</th></tr></thead>
       <tbody>
         {% for invoice, store in not_sent %}
           <tr class="not-sent">
             <td>{% if invoice.rent_charge_id %}<a href="{% url 'ledger:charges:detail' pk=invoice.rent_charge_id %}">{{ invoice.invoice_number }}</a>{% elif invoice.one_off_charge_id %}<a href="{% url 'ledger:one_off_charges:detail' pk=invoice.one_off_charge_id %}">{{ invoice.invoice_number }}</a>{% else %}{{ invoice.invoice_number }}{% endif %}</td>
             <td><a href="{% url 'ledger:operators:detail' pk=invoice.operator_id %}">{{ invoice.operator.display_name }}</a></td>
             <td>{{ store|default:"—" }}</td>
-            <td>${{ invoice.total }}</td>
+            <td class="money">${{ invoice.total }}</td>
             <td>{{ invoice.issue_date|date:"Y-m-d" }}</td>
             <td>{{ invoice.get_internal_status_display }}</td>
           </tr>
@@ -97,4 +87,13 @@
   {% else %}
     <p class="muted">None.</p>
   {% endif %}
+  </section>
+  <section class="card" id="last-reconciliation-card" aria-label="Last reconciliation">
+  <h2>Last reconciliation</h2>
+  {% if data.last_reconciliation %}
+    <p id="last-reconciliation"><a href="{% url 'ledger:reconciliation:page' %}">{{ data.last_reconciliation.get_status_display }}, started {{ data.last_reconciliation.started_at|utc|date:"Y-m-d H:i" }} UTC</a></p>
+  {% else %}
+    <p id="last-reconciliation" class="muted">No reconciliation has run yet.</p>
+  {% endif %}
+  </section>
 {% endblock %}

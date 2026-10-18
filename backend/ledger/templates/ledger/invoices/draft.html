@@ -1,4 +1,5 @@
 {% extends "finance/base.html" %}
+{% load components %}
 {% load responsive %}
 {% load static %}
 {% block title %}{{ preview.number }}{% endblock %}
@@ -6,7 +7,7 @@
   {% include "ledger/_store_crumb.html" %}
   <p><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">&larr; {{ draft.operator.display_name }}</a></p>
   {% if store_context %}<p class="muted" id="known-fields">{{ store_context.line }}</p>{% endif %}
-  <h1>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1>
+  <div class="page-header"><h1>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1></div>
   <dl id="draft-summary">
     <dt>Operator</dt><dd>{{ draft.operator.display_name }}</dd>
     <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
@@ -37,13 +38,13 @@
     {% include "ledger/_job_status.html" %}
     {% responsive_table %}
     <table id="sent-charges">
-      <thead><tr><th>Line</th><th>Charge</th><th>Category</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead>
+      <thead><tr><th>Line</th><th>Charge</th><th>Category</th><th class="money">Amount</th><th class="money">Paid</th><th>Status</th></tr></thead>
       <tbody>
         {% for charge in charges %}
-          <tr class="sent-charge"><td>{{ forloop.counter }}</td><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge.get_category_display }}</td><td class="money">${{ charge.price }}</td><td class="money">${{ charge.amount_paid }}</td><td>{{ charge.get_status_display }}</td></tr>
+          <tr class="sent-charge"><td>{{ forloop.counter }}</td><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge.get_category_display }}</td><td class="money">${{ charge.price }}</td><td class="money">${{ charge.amount_paid }}</td><td>{% status_badge charge.get_status_display charge.status %}</td></tr>
         {% endfor %}
         {% for rent in rent_charges %}
-          <tr class="sent-rent-charge"><td>Rent</td><td><a href="{% url 'ledger:charges:detail' pk=rent.pk %}">Rent {{ rent.period_month|date:"F Y" }}, store {{ rent.lease.store.external_label }}</a></td><td>Rent</td><td class="money">${{ rent.amount_due }}</td><td class="money">${{ rent.amount_paid }}</td><td>{{ rent.get_status_display }}</td></tr>
+          <tr class="sent-rent-charge"><td>Rent</td><td><a href="{% url 'ledger:charges:detail' pk=rent.pk %}">Rent {{ rent.period_month|date:"F Y" }}, store {{ rent.lease.store.external_label }}</a></td><td>Rent</td><td class="money">${{ rent.amount_due }}</td><td class="money">${{ rent.amount_paid }}</td><td>{% status_badge rent.get_status_display rent.status %}</td></tr>
         {% endfor %}
       </tbody>
     </table>

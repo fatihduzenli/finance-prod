@@ -51,10 +51,6 @@ span.nav-group-heading { color: var(--ink-2); font-size: var(--t-sm); text-trans
 .nav-list a[aria-current="page"] { border-left-color: var(--teal); background: var(--info-bg); color: var(--navy); }
 .nav-group-heading[aria-current="true"] { color: var(--navy); }
 
-/* The store page's tabs (PLAN-012d D3): the open one is marked. */
-.store-tabs a[aria-current="page"], #charge-filters a[aria-current="page"], #invoice-filters a[aria-current="page"] { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
-.header-card { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
-.header-card dt { font-weight: 600; } .header-card dd { margin: 0; }
 /* The invoice builder's lines (PLAN-012d D10): the Item box takes its cell's full width so
    the chosen value (a long "Existing open charge: ..." included) shows; the trash button;
    the visible line numbers; the total line under a table of amounts. */
@@ -79,12 +75,153 @@ input[type=text], input[type=email], input[type=search], textarea { width: 100%;
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); } .btn-danger { border-color: var(--danger); color: var(--danger); }
 .btn:disabled { opacity: .5; cursor: default; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: 1rem 0; } .actions form { margin: 0; }
+/* A page's own message list (the flash messages are .toast, below). */
 .messages { list-style: none; padding: 0; } .messages li { padding: .6rem .8rem; margin-bottom: .5rem; border-radius: var(--r-1); background: var(--info-bg); color: var(--info-ink); }
 .messages .error { background: var(--danger-bg); color: var(--danger-ink); } .messages .warning { background: var(--warning-bg); color: var(--warning-ink); } .messages .success { background: var(--success-bg); color: var(--success-ink); }
 .errorlist { color: var(--danger); padding-left: 1rem; }
-.muted { color: var(--muted); } .badge { display: inline-block; padding: .1rem .45rem; border-radius: var(--r-1); background: var(--paper-3); color: var(--ink); font-size: var(--t-sm); }
+.muted { color: var(--muted); }
 dl { display: grid; grid-template-columns: 12rem 1fr; gap: .35rem 1rem; } dt { font-weight: 600; } dd { margin: 0; }
 img, iframe { max-width: 100%; }
+
+/* === Components (PLAN-012c D5) ==============================================================
+   One section per component, tokens only. Each class is named in its section's comment.
+   Templates adopt them with classes and wrappers: no id, field name or URL changes. */
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* --- Page header ------------------------------------------------------------------------
+   .page-header: wraps the page's <h1> (title on the left) and, in .page-actions, its one
+   primary action (.btn-primary) and any secondary ones (.btn) on the right. The back link
+   above it stays a plain paragraph. */
+.page-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-4); margin: 0 0 var(--s-4); padding-bottom: var(--s-3); border-bottom: 1px solid var(--line); }
+.page-header h1 { margin: 0; }
+.page-header .page-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+.page-header .page-actions form { margin: 0; }
+
+/* --- Workspace (the 12d store and operator pages: the reference layout) -------------------
+   .workspace-header: the header card (a dl.header-card of label and value) on a tinted card;
+   .action-bar: the page's actions in one wrapping row of buttons;
+   .tabs: the tab links, each a .btn; the open one carries aria-current="page" (they are links
+   to pages; a role="tab" control would carry aria-selected="true", styled the same). The
+   charge and invoice filters (#charge-filters, #invoice-filters) are tabs too. */
+.workspace-header { margin: var(--s-4) 0; padding: var(--s-4); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); }
+.header-card { display: grid; grid-template-columns: max-content 1fr; gap: var(--s-1) var(--s-4); margin: 0; }
+.header-card dt { font-weight: 600; color: var(--ink-2); } .header-card dd { margin: 0; }
+.action-bar { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; margin: var(--s-4) 0; padding: 0 0 var(--s-4); border-bottom: 1px solid var(--line); }
+.action-bar form { margin: 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: var(--s-1); margin: var(--s-4) 0; }
+.tabs a[aria-current="page"], .tabs [aria-selected="true"] { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+
+/* --- Table -------------------------------------------------------------------------------
+   .table: a list. The regions of {% responsive_table %} (.table-cards and .table-scroll)
+   give their table the same look, so no table tag changes. td.money and th.money: an amount,
+   right-aligned in tabular figures. Zebra rows and a head row that stays at the top of the
+   page while the list scrolls (wide screens; the phone shows cards). A sortable header (only
+   where the view sorts: the arrears list) is a link in a th with aria-sort on the sorted
+   column; its arrow is drawn here, so the cells' data-label stays the header's text. */
+.table th, .table-cards > table th, .table-scroll > table th { font-weight: 600; }
+.table thead th, .table-cards > table > thead th, .table-scroll > table > thead th { background: var(--paper-2); border-bottom: 2px solid var(--line); vertical-align: bottom; }
+.table-scroll > table > thead th:first-child { background: var(--paper-2); z-index: 2; }
+td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+th[aria-sort] a, th.sortable a { color: inherit; }
+th[aria-sort="ascending"] a::after { content: " \25B2"; }
+th[aria-sort="descending"] a::after { content: " \25BC"; }
+
+/* --- Forms -------------------------------------------------------------------------------
+   .field: one control with its label, the control, its help text (.help) and its error
+   list (.errorlist) under the control; .has-error on a field with an error. A required
+   field's label ends in " *" with .required (and "required" for screen readers): marked in
+   text, not in colour alone. One .btn-primary per form; the others are .btn. */
+.field { margin: 0 0 var(--s-3); }
+.field > label { margin: var(--s-3) 0 var(--s-1); }
+.field .help { display: block; color: var(--ink-2); font-size: var(--t-sm); margin-top: var(--s-1); }
+.field .errorlist { list-style: none; margin: var(--s-1) 0 0; padding: 0; font-weight: 600; }
+.field .field-error { display: block; margin-top: var(--s-1); color: var(--danger); }
+.field.has-error input, .field.has-error select, .field.has-error textarea { border: 2px solid var(--danger); }
+.required { font-weight: 700; }
+
+/* --- Badges ------------------------------------------------------------------------------
+   .badge: a short label. .badge-<status> for paid, unpaid, pending, partial, waived, due,
+   voided, attention: each takes its status tokens; its leading glyph (.badge-glyph: paid ✓,
+   unpaid ◻, pending ◐, partial ◑, waived –, due ○, voided ✕, attention !) is in the markup
+   (finance.templatetags.components), hidden from screen readers, so colour is never the
+   only signal. .badge.not-due: the grid legend's "Not due", text only. */
+.badge { display: inline-block; padding: .1rem .45rem; border: 1px solid transparent; border-radius: var(--r-1); background: var(--paper-3); color: var(--ink); font-size: var(--t-sm); line-height: 1.4; white-space: nowrap; }
+.badge-paid { background: var(--status-paid-bg); color: var(--status-paid-ink); }
+.badge-unpaid { background: var(--status-unpaid-bg); color: var(--status-unpaid-ink); border-color: var(--status-unpaid-border); }
+.badge-pending { background: var(--status-pending-bg); color: var(--status-pending-ink); }
+.badge-partial { background: var(--status-partial-bg); color: var(--status-partial-ink); }
+.badge-waived { background: var(--status-waived-bg); color: var(--status-waived-ink); }
+.badge-due { background: var(--status-due-bg); color: var(--status-due-ink); }
+.badge-voided { background: var(--status-voided-bg); color: var(--status-voided-ink); }
+.badge-attention { background: var(--status-attention-bg); color: var(--status-attention-ink); font-weight: 600; }
+.badge.not-due { background: var(--paper); color: var(--status-not-due-ink); border-color: var(--line); font-style: italic; }
+
+/* --- Empty state -------------------------------------------------------------------------
+   .empty: what shows instead of a list: a sentence, then the next step (.empty-next) as a
+   link or a button where one exists. A table's "No rows" cell carries it too. */
+.empty { color: var(--muted); }
+.empty .empty-next { margin-left: var(--s-2); }
+p.empty, div.empty { padding: var(--s-4); border: 1px dashed var(--line); border-radius: var(--r-2); background: var(--paper-2); }
+
+/* --- Confirmation page ---------------------------------------------------------------------
+   .confirm: a page that asks before an action that cannot be taken back. The question is its
+   heading (.confirm-question), "What will happen" a list (.confirm-what), then one primary
+   button (the action: .btn-primary, or .btn-danger when it ends or removes something) and one
+   secondary (.btn: back, or cancel). */
+.confirm { margin: var(--s-4) 0; padding: var(--s-4) var(--s-5); border: 1px solid var(--line); border-left: 4px solid var(--navy); border-radius: var(--r-2); background: var(--paper); }
+.confirm .confirm-question { margin-top: 0; }
+.confirm-what h2, .confirm-what h3 { font-size: var(--t-md); margin: var(--s-4) 0 var(--s-2); }
+.confirm-what ul { margin: 0 0 var(--s-3); padding-left: var(--s-6); }
+.confirm .btn-danger { background: var(--danger); border-color: var(--danger); color: var(--on-accent); }
+
+/* --- Flash messages ----------------------------------------------------------------------
+   .toasts: the list of flash messages; .toast: one message (role "status" in an
+   aria-live="polite" region), with its kind (.success, .info, .warning, .error) and a dismiss
+   button (.toast-dismiss). A success or information message fades after 8 s (CSS only,
+   opacity alone): its text stays in the page for screen readers; a warning or an error (a
+   refusal) stays until it is dismissed. Dismissing removes it (the script in base.html):
+   the reader chose to. */
+.toasts { list-style: none; margin: 0 0 var(--s-4); padding: 0; }
+.toast { display: flex; align-items: flex-start; gap: var(--s-3); padding: var(--s-3) var(--s-4); margin-bottom: var(--s-2); border-radius: var(--r-2); border-left: 4px solid var(--teal); background: var(--info-bg); color: var(--info-ink); box-shadow: var(--shadow-1); overflow: hidden; }
+.toast-text { flex: 1 1 auto; }
+.toast.success { background: var(--success-bg); color: var(--success-ink); border-left-color: var(--green); }
+.toast.warning { background: var(--warning-bg); color: var(--warning-ink); border-left-color: var(--warning); }
+.toast.error { background: var(--danger-bg); color: var(--danger-ink); border-left-color: var(--danger); }
+.toast-dismiss { flex: 0 0 auto; background: none; border: 0; padding: 0 var(--s-1); font: inherit; font-size: var(--t-lg); line-height: 1; color: inherit; cursor: pointer; }
+.toast:not(.warning):not(.error) { animation: toast-fade 600ms ease-in 8s forwards; }
+@keyframes toast-fade { to { opacity: 0; } }
+
+/* --- Pager -------------------------------------------------------------------------------
+   .pager: a paged list's Previous and Next links (.btn) around the page count. */
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); margin: var(--s-4) 0; }
+.pager .pager-count { color: var(--muted); }
+
+/* --- Wizard steps ------------------------------------------------------------------------
+   .steps: the wizard's step list (an ol). A step that can be opened is a link; the current
+   one carries aria-current="step"; a step before it is done (.step-done, a ✓ and "done" for
+   screen readers). */
+.steps { display: flex; flex-wrap: wrap; gap: var(--s-2); list-style: none; margin: var(--s-4) 0; padding: 0; counter-reset: step; }
+.steps li { counter-increment: step; display: inline-flex; align-items: center; gap: var(--s-1); padding: var(--s-1) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--paper); font-size: var(--t-sm); }
+.steps li::before { content: counter(step) "."; color: var(--ink-2); }
+.steps li.step-done::before { content: "\2713"; content: "\2713" / ""; color: var(--status-paid-ink); font-weight: 700; }
+.steps li[aria-current="step"] { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+.steps li[aria-current="step"]::before { color: var(--on-navy-2); }
+
+/* --- Cards (the dashboard, PLAN-012c D6) ----------------------------------------------------
+   .card: one block of the dashboard, a heading and its content; .cards: the figures' row of
+   small cards (.figure, each a link with its .value). The attention list is the first card. */
+.card { margin: 0 0 var(--s-4); padding: var(--s-4) var(--s-5); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--paper); box-shadow: var(--shadow-1); }
+.card > h2:first-child, .card > section > h2:first-child { margin-top: 0; }
+.card.attention { border-left: 4px solid var(--warning); padding: var(--s-4) var(--s-5); margin: 0 0 var(--s-4); }
+.card.alert-list { border-left: 4px solid var(--danger); }
+.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--s-3); margin: var(--s-2) 0; }
+.figure { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--s-3); background: var(--paper-2); }
+.figure a { color: inherit; text-decoration: none; display: block; }
+.figure .value { font-size: var(--t-xl); font-weight: 700; display: block; margin-top: var(--s-1); color: var(--navy); font-variant-numeric: tabular-nums; }
+
+/* --- Print header and footer (print.css shows them; never on screen) ------------------------ */
+.print-only { display: none; }
 
 /* Tables that scroll sideways (the grid, the audit page, the reports): first column sticky. */
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
@@ -125,6 +262,14 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
 .shell-folded .nav-links { display: none; padding: var(--s-2) 0; }
 .shell-folded .nav-toggle:checked ~ .nav-links { display: block; }
 
+/* --- 720px and wider: the tables' zebra rows and sticky head row (PLAN-012c D5) ------------- */
+@media (min-width: 720px) {
+  .table thead th, .table-cards > table > thead th { position: sticky; top: 0; z-index: 2; }
+  .table > tbody > tr:nth-child(even) > *, .table-cards > table > tbody > tr:nth-child(even) > *, .table-scroll > table > tbody > tr:nth-child(even) > * { background: var(--paper-2); }
+}
+/* No fade for a reader who asked for less motion: the message stays until dismissed. */
+@media (prefers-reduced-motion: reduce) { .toast { animation: none !important; } }
+
 /* --- Under 900px: the left navigation folds behind "Menu" (PLAN-012c D3) ------------------- */
 @media (max-width: 899.98px) {
   .topbar { padding: var(--s-2) var(--s-4); }
@@ -146,7 +291,7 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
   .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=file] { min-height: var(--tap); }
   .btn { display: inline-flex; align-items: center; justify-content: center; }
   input[type=checkbox], input[type=radio] { min-width: 24px; min-height: 24px; }
-  td a, li a, .pagination a { display: inline-flex; align-items: center; min-height: var(--tap); }
+  td a, li a, .pagination a, .pager a { display: inline-flex; align-items: center; min-height: var(--tap); }
   table.grid td a { min-height: var(--tap); display: flex; align-items: center; justify-content: flex-end; }
 }
 
@@ -173,6 +318,7 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
   .table-cards > table td[data-label] { position: relative; padding-left: calc(40% + .75rem); min-height: 1.4em; }
   .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
   .table-cards > table td:empty { display: none; }
+  .table-cards > table td.money { text-align: left; } /* a card line reads "label: value" */
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
   /* The phone keeps the sideways scroll and the fixed store column, narrower. */
   table.grid th.store-col { width: 8rem !important; min-width: 8rem !important; max-width: 9rem !important; white-space: normal !important; }

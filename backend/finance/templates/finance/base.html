@@ -5,7 +5,9 @@ docs/qa/PLAN-012c-design-pass.md D3). Self-contained: no external asset; the sty
 own (PLAN-011 D9, PLAN-012c D4).
 
 The navy top bar carries the logo (company.logo_url: the brand's dark logo, or a stored
-document the company settings row names), the company name, the product name, the search
+document the company settings row names) with the company name as its text alternative,
+the company name as text only beside an override logo (the brand logo carries the
+wordmark), the product name, the search
 box (PLAN-012d D17, a GET form to ledger:search) and the user menu (Settings, Sign out). The
 left navigation (900 px and wider) lists Dashboard, Stores, Operators, Monthly rent overview,
 Reports and Admin with their pages, each page only for the roles that may open it (Disputes,
@@ -17,6 +19,10 @@ folds behind "Menu", a checkbox and its label: no script. A page that needs the 
 aria-current="page" and its group's heading aria-current="true"
 (finance.context_processors.navigation). The tab title is "<short name> · <page>"
 (finance.context_processors.company): each page's title block holds the page part only.
+Flash messages are .toast items (PLAN-012c D5): a dismiss button (the one script below
+removes the message), a CSS fade (opacity) after 8 s for success and information, the text
+kept in the page. print.css (media="print") drops the bar, the navigation and the messages and shows the
+print header (the company name and the date) and footer ("Printed <date>") (D6).
 The SANDBOX banner and the title prefix are injected by
 finance.middleware.SandboxBannerMiddleware. The sign-in pages keep their own base,
 two_factor/_base.html.
@@ -30,6 +36,7 @@ two_factor/_base.html.
   <meta name="theme-color" content="{{ theme_color }}">
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'finance/app.css' %}">
+  <link rel="stylesheet" href="{% static 'finance/print.css' %}" media="print">
   <link rel="icon" href="{% static 'finance/brand/monvera_icon_192.png' %}" type="image/png" sizes="192x192">
   <link rel="icon" href="{% static 'finance/brand/monvera_icon.svg' %}" type="image/svg+xml">
   <link rel="manifest" href="{% url 'finance:manifest' %}" crossorigin="use-credentials">
@@ -39,8 +46,8 @@ two_factor/_base.html.
 <body>
   <header class="topbar" id="topbar">
     <a class="topbar-brand" id="topbar-brand" href="{% url 'ledger:home' %}">
-      <img class="topbar-logo" id="topbar-logo" src="{{ company.logo_url }}" alt="" height="28">
-      <span class="topbar-company" id="topbar-company">{{ company.name }}</span>
+      <img class="topbar-logo" id="topbar-logo" src="{{ company.logo_url }}" alt="{{ company.name }}" height="28">
+      {% if company.logo_is_override %}<span class="topbar-company" id="topbar-company">{{ company.name }}</span>{% endif %}
       <span class="topbar-product" id="topbar-product">Rent ledger</span>
     </a>
     <form method="get" action="{% url 'ledger:search' %}" class="nav-search" id="nav-search" role="search"><input type="search" name="q" id="nav-search-q" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators"></form>
@@ -88,15 +95,23 @@ two_factor/_base.html.
     </div>
   </nav>
   <main class="{% block main_class %}{% endblock %}">
+    {% now "Y-m-d" as printed_on %}<div class="print-only print-header" id="print-header"><span class="print-company">{{ company.name }}</span> <span class="print-date">{{ printed_on }}</span></div>
     {% if messages %}
-      <ul class="messages">
-        {% for message in messages %}<li class="{{ message.tags }}" role="status">{{ message }}</li>{% endfor %}
+      <ul class="toasts" id="toasts" aria-live="polite">
+        {% for message in messages %}<li class="toast {{ message.tags }}" role="status"><span class="toast-text">{{ message }}</span><button type="button" class="toast-dismiss" aria-label="Dismiss this message">&times;</button></li>{% endfor %}
       </ul>
     {% endif %}
     {% block content %}{% endblock %}
+    <div class="print-only print-footer" id="print-footer">Printed {{ printed_on }}</div>
   </main>
   </div>
   {% block scripts %}{% endblock %}
+  {% if messages %}<script>
+    // A flash message's dismiss button removes its message (PLAN-012c D5).
+    document.querySelectorAll(".toast-dismiss").forEach(function (button) {
+      button.addEventListener("click", function () { button.closest(".toast").remove(); });
+    });
+  </script>{% endif %}
   <script>
     // Static files only; see finance/pwa.py. A failed registration leaves the page as is.
     if ("serviceWorker" in navigator) {

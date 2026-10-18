@@ -3,7 +3,7 @@
 {% block title %}Payments by method{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
-  <h1>Payments by method</h1>
+  <div class="page-header"><h1>Payments by method</h1></div>
   {% url 'ledger:reports:payments_by_method' as action %}{% url 'ledger:reports:payments_by_method_export' as export %}
   {% include "ledger/reports/_range.html" with action=action export=export %}
   {% if too_slow %}
@@ -14,7 +14,7 @@
   {% responsive_table "scroll" %}
   <table id="payments-by-method">
     <thead>
-      <tr><th>Month</th><th>ACH</th><th>Zelle</th><th>Wire</th><th>Other</th><th>Total</th><th>Payments</th></tr>
+      <tr><th>Month</th><th class="money">ACH</th><th class="money">Zelle</th><th class="money">Wire</th><th class="money">Other</th><th class="money">Total</th><th>Payments</th></tr>
     </thead>
     <tbody>
       {% for item in report.months %}

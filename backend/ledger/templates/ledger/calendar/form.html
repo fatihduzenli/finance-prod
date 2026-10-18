@@ -2,16 +2,13 @@
 {% block title %}{% if entry %}Edit {{ entry.title }}{% else %}New calendar entry{% endif %}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:calendar:page' %}">&larr; Calendar</a></p>
-  <h1>{% if entry %}Edit calendar entry{% else %}New calendar entry{% endif %}</h1>
+  <div class="page-header"><h1>{% if entry %}Edit calendar entry{% else %}New calendar entry{% endif %}</h1></div>
   <p class="muted">Calendar entries are shared with all staff and appear in every staff member's calendar feed. Never write card or account numbers.</p>
   <form method="post" id="calendar-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form.visible_fields %}
-      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
-      {{ field.errors }}
-      {{ field }}
-      {% if field.help_text %}<span class="muted">{{ field.help_text }}</span>{% endif %}
+      {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-calendar-entry">Save</button></p>
   </form>

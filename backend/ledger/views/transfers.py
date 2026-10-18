@@ -75,13 +75,16 @@ INCOMING_FIRST = "Set the incoming lease first."
 
 def transfer_steps(transfer: LeaseTransfer, current: str) -> list[tuple[str, str, bool]]:
     """(label, link or "", current) per step of a transfer in progress: the operator and
-    the end date are always linked, the later steps once the end date is set."""
+    the end date are always linked, the later steps once the end date is set, the confirm
+    once the incoming lease is set (before that it sends back to the incoming step, so it
+    is not offered as a link: PLAN-012c D5, a step is a link where it can be opened)."""
     end = transfer.lease_end
     open_steps = end is not None and lease_end.terms_set(end)
     found = []
     for name, label, route in STEPS:
         url = ""
-        if name != current and (open_steps or name in ("operator", "terms")):
+        reachable = name != "confirm" or service.incoming_set(transfer)
+        if name != current and reachable and (open_steps or name in ("operator", "terms")):
             pk = end.pk if route.startswith("ledger:lease_ends:") and end is not None else None
             url = reverse(route, kwargs={"pk": pk if pk is not None else transfer.pk})
         found.append((label, url, name == current))

@@ -33,9 +33,7 @@
     {{ create_form.non_field_errors }}
     {% for field in create_form.hidden_fields %}{{ field }}{% endfor %}
     {% for field in create_form.visible_fields %}
-      <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
-      {{ field.errors }}
-      {{ field }}
+      {% include "ledger/stores/_form_field.html" with hide_help=True %}
     {% endfor %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="create-operator">Save and choose</button></p>
   </form>

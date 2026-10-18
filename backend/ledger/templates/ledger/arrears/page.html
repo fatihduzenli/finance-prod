@@ -2,7 +2,7 @@
 {% load responsive %}
 {% block title %}Arrears{% endblock %}
 {% block content %}
-  <h1>Arrears</h1>
+  <div class="page-header"><h1>Arrears</h1></div>
   <form method="get" action="{% url 'ledger:arrears:page' %}" id="arrears-filters" role="search">
     <div class="actions">
       <label for="operator" style="margin:0;">Operator</label>
@@ -33,10 +33,10 @@
   <p class="muted">Operators behind today: a rent charge unpaid or partly paid, or an insurance or one-off balance, due before today. Months behind counts the rent months unpaid or partly paid. Total owed is every open balance of the operator, overdue or not (rent, insurance and one-off charges not waived or voided, deposits left out). Amounts in US dollars.</p>
   {% responsive_table %}
   <table id="bucket-totals">
-    <thead><tr><th>Months behind</th><th>Operators</th><th>Total owed</th></tr></thead>
+    <thead><tr><th>Months behind</th><th>Operators</th><th class="money">Total owed</th></tr></thead>
     <tbody>
       {% for bucket, label, count, owed in report.bucket_totals %}
-        <tr class="bucket-total" data-bucket="{{ bucket }}"><td>{{ label }}</td><td class="bucket-count">{{ count }}</td><td class="bucket-owed">${{ owed|floatformat:"2g" }}</td></tr>
+        <tr class="bucket-total" data-bucket="{{ bucket }}"><td>{{ label }}</td><td class="bucket-count">{{ count }}</td><td class="money bucket-owed">${{ owed|floatformat:"2g" }}</td></tr>
       {% endfor %}
       <tr id="overall-total"><th>All</th><th id="arrears-count">{{ report.count }}</th><th id="arrears-owed">${{ report.total_owed|floatformat:"2g" }}</th></tr>
     </tbody>
@@ -48,11 +48,11 @@
   <table id="arrears">
     <thead>
       <tr>
-        <th><a href="?{{ sort_links.operator }}">Operator</a></th>
-        <th><a href="?{{ sort_links.months }}">Months behind</a></th>
-        <th><a href="?{{ sort_links.owed }}">Total owed</a></th>
-        <th>Overdue</th>
-        <th><a href="?{{ sort_links.last_payment }}">Last payment</a></th>
+        <th class="sortable"{% if selected.sort == "operator" %} aria-sort="{% if selected.descending %}descending{% else %}ascending{% endif %}"{% endif %}><a href="?{{ sort_links.operator }}">Operator</a></th>
+        <th class="sortable"{% if selected.sort == "months" %} aria-sort="{% if selected.descending %}descending{% else %}ascending{% endif %}"{% endif %}><a href="?{{ sort_links.months }}">Months behind</a></th>
+        <th class="sortable money"{% if selected.sort == "owed" %} aria-sort="{% if selected.descending %}descending{% else %}ascending{% endif %}"{% endif %}><a href="?{{ sort_links.owed }}">Total owed</a></th>
+        <th class="money">Overdue</th>
+        <th class="sortable"{% if selected.sort == "last_payment" %} aria-sort="{% if selected.descending %}descending{% else %}ascending{% endif %}"{% endif %}><a href="?{{ sort_links.last_payment }}">Last payment</a></th>
         <th>Channel</th>
         <th>Stores</th>
       </tr>
@@ -62,14 +62,14 @@
         <tr class="arrears-row" data-bucket="{{ row.bucket }}">
           <td>{% if row.operator_id %}<a href="{% url 'ledger:operators:detail' pk=row.operator_id %}">{{ row.operator_name }}</a>{% else %}No operator{% endif %}</td>
           <td class="months-behind">{{ row.months_behind }}</td>
-          <td class="total-owed">${{ row.total_owed|floatformat:"2g" }}</td>
-          <td>${{ row.overdue|floatformat:"2g" }}</td>
+          <td class="money total-owed">${{ row.total_owed|floatformat:"2g" }}</td>
+          <td class="money">${{ row.overdue|floatformat:"2g" }}</td>
           <td>{{ row.last_payment|date:"Y-m-d"|default:"—" }}</td>
           <td>{{ row.channel_labels|join:", "|default:"—" }}</td>
           <td>{{ row.store_labels|join:", "|default:"—" }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="7" class="muted">No operator is behind.</td></tr>
+        <tr><td colspan="7" class="muted empty">No operator is behind.</td></tr>
       {% endfor %}
     </tbody>
   </table>

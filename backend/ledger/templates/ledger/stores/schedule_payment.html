@@ -3,7 +3,7 @@
 {% block content %}
   <p class="crumb" id="store-crumb"><a href="{% url 'ledger:stores:detail' pk=store.pk %}?tab=charges#tab-charges">&larr; Store {{ store.external_label }}</a></p>
   <p class="muted" id="known-fields">Store {{ store.external_label }} · {% if lease.started_on %}Lease from {{ lease.started_on|date:"Y-m-d" }}{% else %}Lease{% endif %}{% if lease.operator %} · Operator {{ lease.operator.display_name }}{% endif %}</p>
-  <h1>Schedule a payment</h1>
+  <div class="page-header"><h1>Schedule a payment</h1></div>
   <p class="muted">One debit of the operator's linked bank account on the date chosen: a one-off charge collected by autopay on its due date. The payment provider makes the invoice on that date. The operator needs a linked bank method.</p>
   <form method="post" id="schedule-payment-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}

@@ -1385,3 +1385,23 @@ on both engines. **For the owner at the checkpoint:** the dark logo carries the 
 bar read "Monvera Monvera"; Batch B shows the company name as text only with a logo override;
 the grid page keeps the folded menu at every width (twelve months must fit at 1,280 px). Batch B
 assigned.
+
+## Update, 2026-10-17, PLAN-012c Batch B built and gated (not pushed)
+
+Batch B of the design pass: the component set in `app.css` (one documented section each: page
+header, the 12d workspace classes as the reference, tables with right-aligned money cells, zebra
+rows, a sticky head row and `aria-sort` where a view sorts, `.field` forms with the error under
+the control, status badges with a leading glyph so colour is never the only signal, empty states
+with a next step, `.confirm` pages with "What will happen" and one primary and one secondary
+button, flash messages as dismissable toasts that keep their text, pagers, wizard steps with
+`aria-current="step"`); the dashboard as cards with the attention list first; the grid legend as
+badges; `print.css` for the statement and the P&L (no bar or navigation, black on white, bordered
+tables, the company name and the date in the header, "Printed <date>" in the footer, a page per
+store group of the P&L); the bar shows the company name once (as the logo's text alternative, as
+text only beside an override logo). Gate: ruff, format, mypy, lock, migrations clean (no
+migration); sqlite 5,587 passed; PostgreSQL 28 + 6,209 passed (one unreproduced single failure in
+`test_nsf`'s calendar case on the first run; see QA-012c, residual risk); e2e 7 passed in four
+runs on PostgreSQL and four on a clean worktree of Batch A; secret scans clean; Fable's
+adversarial file 18 cases green on both engines. Two MAJOR (`.confirm` and `.field` coverage) and
+three MINOR (statement page breaks, the due glyph, one primary per page) resolved in one rework
+cycle. Batch C (forms show only what applies) assigned.

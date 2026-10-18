@@ -3,11 +3,15 @@
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
   <p class="muted" id="step-help">Read what will happen and tick the box; this cannot be undone from here.</p>
-  <h2>Are you sure?</h2>
+  <section class="confirm" aria-labelledby="confirm-question">
+  <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <div class="confirm-what">
+  <h3>What will happen</h3>
   <ul id="effects">
     {% include "ledger/lease_ends/_effects.html" %}
     <li>Nothing is sent to the payment provider.</li>
   </ul>
+  </div>
   {% if settlement_missing %}<p id="settlement-missing"><strong>A refund is due: set its method and date on the settlement step first.</strong></p>{% endif %}
   {% include "ledger/lease_ends/_figures.html" %}
   <form method="post" id="lease-end-confirm" class="js-single-submit" autocomplete="off">
@@ -18,5 +22,6 @@
     <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-lease-end">End the lease</button></p>
   </form>
   {% include "ledger/lease_ends/_cancel.html" %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

@@ -5,7 +5,7 @@
 {% block title %}{{ operator.display_name }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:operators:list' %}">&larr; Operators</a></p>
-  <h1>{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1>
+  <div class="page-header"><h1>{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div>
   {% include "ledger/_attention.html" with banners=True %}
 
   <div class="actions">
@@ -36,7 +36,7 @@
   <h2>Payment provider</h2>
   {% include "ledger/_job_status.html" %}
   <dl>
-    <dt>Link status</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} <span class="badge">Needs review</span>{% endif %}</dd>
+    <dt>Link status</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} <span class="badge badge-attention"><span class="badge-glyph" aria-hidden="true">!</span> Needs review</span>{% endif %}</dd>
     {% if failure_message %}
       <dt>Last failure</dt>
       <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.sync_failure }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|utc|date:"Y-m-d H:i" }} UTC{% endif %}</span>{% if failure_fields %}<br><span id="sync-failure-fields">Fields the provider rejected: {{ failure_fields }}</span>{% endif %}</dd>
@@ -87,7 +87,8 @@
     <a class="btn" id="all-contacts" href="{% url 'ledger:operators:contacts' pk=operator.pk %}">All entries</a>
     <a class="btn" id="export-contacts" href="{% url 'ledger:operators:contacts_export' pk=operator.pk %}">Export CSV</a>
   </p>
-  {% include "ledger/operators/_contacts_table.html" with rows=contact_rows|slice:contact_limit %}
+  {% if can_add_contact %}{% url 'ledger:operators:contacts_add' pk=operator.pk as contact_add_next %}{% endif %}
+  {% include "ledger/operators/_contacts_table.html" with rows=contact_rows|slice:contact_limit empty_next_url=contact_add_next %}
   {% if contact_rows|length > contact_limit %}<p class="muted">The {{ contact_limit }} latest are shown; <a href="{% url 'ledger:operators:contacts' pk=operator.pk %}">see every entry</a>.</p>{% endif %}
 
   <h2>Notes</h2>
@@ -112,17 +113,17 @@
     </form>
     {% include "ledger/stores/_header.html" %}
     {% if space.actions %}
-      <nav aria-label="Store actions" id="action-bar" class="actions">
+      <nav aria-label="Store actions" id="action-bar" class="actions action-bar">
         {% for action in space.actions %}{% if action.post %}<form method="post" action="{{ action.url }}" class="js-single-submit" style="display:inline;">{% csrf_token %}<button class="btn{% if action.danger %} btn-danger{% endif %}" type="submit" id="{{ action.element_id }}">{{ action.label }}</button></form>{% else %}<a class="btn{% if action.danger %} btn-danger{% endif %}" id="{{ action.element_id }}" href="{{ action.url }}">{{ action.label }}</a>{% endif %}{% endfor %}
       </nav>
     {% elif billing and not header.lease %}
       <p class="muted" id="no-operator-lease">Store {{ store.external_label }} has no current lease of this operator; its page has the store's actions.</p>
     {% endif %}
   {% else %}
-    <p class="muted" id="no-stores">No store has a lease of this operator.</p>
+    <p class="muted empty" id="no-stores">No store has a lease of this operator.</p>
   {% endif %}
 
-  <nav aria-label="Operator tabs" class="actions store-tabs" id="store-tabs">
+  <nav aria-label="Operator tabs" class="actions store-tabs tabs" id="store-tabs">
     {% for name, label in ows.tabs %}{% if name == "contacts" %}<a class="btn" id="tab-link-contacts" href="#contacts">{{ label }}</a>{% else %}<a class="btn" id="tab-link-{{ name }}" href="?{{ keep_store }}tab={{ name }}#tab-{{ name }}"{% if name == ows.tab %} aria-current="page"{% endif %}>{{ label }}</a>{% endif %}{% endfor %}
   </nav>
   <section id="tab-{{ ows.tab }}" class="store-tab">

@@ -15,7 +15,7 @@
         <td>{% for name, value in row.after %}{{ name }}: {{ value }}{% if not forloop.last %}; {% endif %}{% endfor %}</td>
       </tr>
     {% empty %}
-      <tr><td colspan="5" class="muted">No history yet.</td></tr>
+      <tr><td colspan="5" class="muted empty">No history yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -2,17 +2,20 @@
 {% block title %}Waive {{ charge.label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
-  <h1>Waive {{ charge.label }}</h1>
-  <p>Price ${{ charge.price }}, balance ${{ charge.balance }}. <strong>Waive</strong> {{ waive_meaning }}. A waived charge is no longer owed and cannot be edited or paid here. A charge with a settled payment cannot be waived. Nothing is sent to the payment provider.</p>
+  <div class="page-header"><h1>Waive {{ charge.label }}</h1></div>
+  <section class="confirm" aria-labelledby="confirm-question">
+  <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <div class="confirm-what">
+  <h3>What will happen</h3>
+  <ul><li>Price ${{ charge.price }}, balance ${{ charge.balance }}. <strong>Waive</strong> {{ waive_meaning }}. A waived charge is no longer owed and cannot be edited or paid here. A charge with a settled payment cannot be waived. Nothing is sent to the payment provider.</li></ul>
+  </div>
   {% if refusal %}<p id="waive-refusal"><strong>{{ refusal }}</strong></p>{% endif %}
   <form method="post" id="waive-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
-    <label for="{{ form.note.id_for_label }}">Note *</label>
-    {{ form.note.errors }}
-    {{ form.note }}
-    <br><span class="muted">{{ form.note.help_text }}</span>
-    <p class="actions"><button class="btn btn-primary" type="submit" id="waive-submit">Waive</button></p>
+    {% include "ledger/stores/_form_field.html" with field=form.note label="Note" mark=True %}
+    <p class="actions"><button class="btn btn-danger" type="submit" id="waive-submit">Waive</button> <a class="btn" href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">Back</a></p>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

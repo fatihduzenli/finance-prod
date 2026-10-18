@@ -2,7 +2,7 @@
 {% block title %}Transfer store {{ store.external_label }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
-  <h1>Transfer store {{ store.external_label }}</h1>
+  <div class="page-header"><h1>Transfer store {{ store.external_label }}</h1></div>
   <p class="muted" id="step-help">The wizard hands the store to another operator: you choose the incoming operator, end the current lease (its end date, anything still live at the payment provider or still owed, the final statement and the deposit settlement), set the incoming lease with its deposit and setup charges, and confirm both at once. You can leave it and come back.</p>
   {% if lease and end_in_progress %}
     <p id="lease-to-transfer">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}.</p>

@@ -3,7 +3,7 @@
 {% load tz %}
 {% block title %}Reconciliation{% endblock %}
 {% block content %}
-  <h1>Reconciliation</h1>
+  <div class="page-header"><h1>Reconciliation</h1></div>
   <p class="muted">Each night the reconciliation re-reads open invoices, recent transactions, deposits and ACH rejections from the payment provider, and flags pending payments that are too old. Times are shown in {{ timezone }}. Identifiers are masked.</p>
 
   {% if can_run %}
@@ -34,13 +34,13 @@
         {% for step in last.steps %}
           <tr><td>{{ step.letter }}. {{ step.label }}</td><td>{% for name, number in step.counts %}{{ name }}: {{ number }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="muted">nothing</span>{% endfor %}</td></tr>
         {% empty %}
-          <tr><td colspan="2" class="muted">No step completed.</td></tr>
+          <tr><td colspan="2" class="muted empty">No step completed.</td></tr>
         {% endfor %}
       </tbody>
     </table>
     {% endresponsive_table %}
   {% else %}
-    <p class="muted" id="no-run">No reconciliation has run yet.</p>
+    <p class="muted empty" id="no-run">No reconciliation has run yet.</p>
   {% endif %}
 
   <h2>Mismatches</h2>
@@ -71,17 +71,17 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="6" class="muted">No mismatches.</td></tr>
+        <tr><td colspan="6" class="muted empty">No mismatches.</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endresponsive_table %}
   {% if page.paginator.num_pages > 1 %}
-    <p class="actions">
+    <div class="pager" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
-      <span class="muted">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} mismatches)</span>
+      <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} mismatches)</span>
       {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
-    </p>
+    </div>
   {% endif %}
 
   <h2>Recent runs</h2>
@@ -100,7 +100,7 @@
           <td>{{ item.run.error|default:"" }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="7" class="muted">No runs yet.</td></tr>
+        <tr><td colspan="7" class="muted empty">No runs yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

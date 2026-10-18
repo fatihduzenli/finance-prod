@@ -2,7 +2,7 @@
 {% block title %}{{ entry.title }}{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:calendar:page' %}?month={{ entry.on|date:'Y-m' }}">&larr; Calendar {{ entry.on|date:"Y-m" }}</a></p>
-  <h1>{{ entry.title }}</h1>
+  <div class="page-header"><h1>{{ entry.title }}</h1></div>
   <dl>
     <dt>Kind</dt><dd>{{ entry.get_kind_display }}</dd>
     <dt>Date</dt><dd>{{ entry.on|date:"Y-m-d" }}</dd>
