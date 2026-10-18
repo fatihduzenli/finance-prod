@@ -31,6 +31,7 @@ from ledger.models import (
     AuditLog,
     EnrolmentStatus,
     Operator,
+    SyncFailure,
     SyncStatus,
 )
 from ledger.views.operators import HELD_FORM_KEY
@@ -198,7 +199,7 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
     assert (operator.sync_status, operator.sync_failure) == (SyncStatus.FAILED, name)
     page = response.content.decode()
     assert operator_sync.MESSAGES[name].replace("'", "&#x27;") in page
-    assert name in page
+    assert f"({SyncFailure(name).label})" in page and name not in page
     # PLAN-006a §3.3: the retry button waits a minute after the attempt.
     assert ">Try again</button>" not in page
     assert "Retry available in " in page

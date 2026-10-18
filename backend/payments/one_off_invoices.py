@@ -158,7 +158,9 @@ NO_CHARGE = "The charge no longer exists."
 VOIDED_NOTHING = "The charge is voided. Nothing was sent."
 NO_LOCAL_INVOICE = provider_sentence("The charge has no invoice to create in {provider}.")
 NO_CUSTOMER = provider_sentence("The operator is not connected to {provider}. Nothing was sent.")
-NO_BANK_METHOD = "The operator has no linked bank method. Nothing was scheduled."
+NO_BANK_METHOD = provider_sentence(
+    "The operator has no bank method connected in {provider}. Autopay was not set up."
+)
 CREATED = provider_sentence("Invoice {number} created in {provider}.")
 ADOPTED = provider_sentence(
     "Invoice {number} found in {provider} and attached; nothing was created."
@@ -175,13 +177,13 @@ SEND_REQUESTED = provider_sentence(
 SEND_FAILED = provider_sentence("Invoice {number} is in {provider}, but sending it failed")
 ALREADY_SENT = "Invoice {number} was already sent."
 NOT_LINKED = provider_sentence("The charge's invoice is not in {provider} yet. Nothing was sent.")
-DELETE_PAID = provider_sentence("{provider} shows the invoice paid. Nothing was deleted.")
+DELETE_PAID = provider_sentence("{provider} shows the invoice paid. Nothing was cancelled.")
 DELETE_NOT_CONFIRMED = provider_sentence(
-    "{provider} did not confirm the delete. The charge stays open; retry later."
+    "{provider} did not confirm the cancellation. The charge stays open; retry later."
 )
-DELETE_FAILED = provider_sentence("{provider} did not delete the invoice")
+DELETE_FAILED = provider_sentence("{provider} did not cancel the invoice")
 WAIVED_DELETE_NOT_CONFIRMED = provider_sentence(
-    "{provider} did not confirm the delete. The invoice may still be open in {provider}; "
+    "{provider} did not confirm the cancellation. The invoice may still be open in {provider}; "
     "retry from the charge page."
 )
 SCHEDULED = "Autopay set up for {date}."
@@ -210,14 +212,14 @@ CHARGE_STAYS_OPEN = " The charge stays open; Charge now is possible again in one
 CHARGE_PAID_AT_PROVIDER = provider_sentence(
     "{provider} shows the invoice paid. Nothing was charged."
 )
-CHARGE_DELETED = provider_sentence("{provider} shows the invoice deleted. Nothing was charged.")
+CHARGE_DELETED = provider_sentence("{provider} shows the invoice cancelled. Nothing was charged.")
 CHARGE_NOW_NO_KEY = "The charge has no Charge now identifier. Nothing was charged."
 MOVED_SCHEDULE = "Autopay moved to {date}."
 MOVE_SCHEDULE_FIRED = "Autopay already made its invoice. Its date was not changed."
 MOVE_SCHEDULE_FAILED = provider_sentence("{provider} did not move the autopay")
 MOVED_INVOICE = provider_sentence("Invoice {number} in {provider} is now due {date}.")
 MOVE_INVOICE_CLOSED = provider_sentence(
-    "{provider} shows the invoice paid or deleted. Its due date was not changed."
+    "{provider} shows the invoice paid or cancelled. Its due date was not changed."
 )
 MOVE_INVOICE_FAILED = provider_sentence("{provider} did not change the invoice's due date")
 RELEASE_SHARED = (
@@ -1125,7 +1127,7 @@ def schedule(charge_id: uuid.UUID, actor: User | None, *, now: datetime | None =
         return False, str(NO_CUSTOMER)
     method = leases.linked_payment_method(operator)
     if not method:
-        return False, NO_BANK_METHOD
+        return False, str(NO_BANK_METHOD)
     provider = payments.get_provider()
     rule = schedule_rule(charge.due_date, moment)
     request = ScheduleInput(

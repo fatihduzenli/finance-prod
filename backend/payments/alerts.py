@@ -25,9 +25,9 @@ from datetime import datetime
 import sentry_sdk
 
 BREAKER_FINGERPRINT = "stax-breaker-open"
-BREAKER_MESSAGE = "Payment provider circuit breaker opened"
+BREAKER_MESSAGE = "Calls to the processor paused after repeated errors"
 DEAD_LETTER_FINGERPRINT = "webhook-dead-letter"
-DEAD_LETTER_MESSAGE = "Webhook event moved to dead letter"
+DEAD_LETTER_MESSAGE = "Message from the processor given up"
 MISMATCH_FINGERPRINT = "reconciliation-mismatch"
 #: Plain text, not lazy: written to the log and to Sentry, never shown on a page.
 MISMATCH_MESSAGE = "Nightly check found new findings"

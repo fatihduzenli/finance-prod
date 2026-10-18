@@ -234,14 +234,23 @@ def test_run_records_done_with_the_service_sentence(fake: FakeProvider) -> None:
     assert operator.sync_status == SyncStatus.LINKED
 
 
-def test_run_records_a_refusal_as_failed_with_the_class_and_fields(fake: FakeProvider) -> None:
+def test_run_records_a_refusal_as_failed_in_words_with_the_class_in_the_audit_row(
+    fake: FakeProvider,
+) -> None:
     operator = new_operator()
     fake.fail_next("find_customers", ProviderRejected(422, "CANARY text", error_fields=("email",)))
     jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None)
     [job] = run_queued_jobs()
     assert job.status == JobStatus.FAILED
-    assert "ProviderRejected" in job.result and "email" in job.result
+    assert job.result.endswith(" (Rejected)")
+    assert "ProviderRejected" not in job.result and "email" not in job.result
     assert "CANARY" not in job.result
+    [audit] = AuditLog.objects.filter(action="operator.sync_failed", entity_id=str(operator.pk))
+    assert audit.after is not None
+    assert (audit.after["sync_failure"], audit.after["sync_failure_fields"]) == (
+        "ProviderRejected",
+        "email",
+    )
     assert jobs.describe(job).startswith("Failed: ")
 
 
@@ -440,11 +449,16 @@ def test_the_worker_runs_jobs_with_the_real_adapter_only_as_the_caller(
 
     monkeypatch.setattr("httpx.Client.send", no_network)
     monkeypatch.setattr("payments._providers", {})
-    jobs.enqueue(JobKind.OPERATOR_SYNC, new_operator(), None, None)
+    operator = new_operator()
+    jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None)
     with override_settings(STAX_CALLER="none", STAX_PROVIDER="stax"):
         [job] = run_queued_jobs()
     assert job.status == JobStatus.FAILED
-    assert "ProviderNotPermittedHere" in job.result
+    assert job.result.endswith(" (Not allowed here)")
+    assert "ProviderNotPermittedHere" not in job.result
+    [audit] = AuditLog.objects.filter(action="operator.sync_failed", entity_id=str(operator.pk))
+    assert audit.after is not None
+    assert audit.after["sync_failure"] == "ProviderNotPermittedHere"
 
 
 # --- D3: the screens queue and show; they never call ----------------------------------------
@@ -1237,10 +1251,11 @@ def test_the_worker_event_pass_still_skips_an_event_a_failed_replay_attempted(
     jobs.enqueue(JobKind.WEBHOOK_REPLAY, event, None, None)
     [job] = run_queued_jobs()
     assert job.status == JobStatus.FAILED
-    assert job.result == (
-        "Replayed. The handler failed again; outcome: failed. (ProviderRejected (fields: id))"
-    )
-    assert "CANARY" not in job.result
+    assert job.result == "Replayed. The handler failed again; outcome: failed. (Rejected)"
+    assert "ProviderRejected" not in job.result and "CANARY" not in job.result
+    # The class and the field names stay on the event row for diagnosis.
+    event.refresh_from_db()
+    assert event.error == "ProviderRejected (fields: id)"
     assert worker.next_event_id() is None
 
 
@@ -1316,7 +1331,8 @@ def test_a_refused_methods_read_keeps_the_previous_snapshot(
     with as_none_with_the_real_adapter(monkeypatch):
         [job] = run_queued_jobs()
     assert job.pk == queued.pk
-    assert job.status == JobStatus.FAILED and "ProviderNotPermittedHere" in job.result
+    assert job.status == JobStatus.FAILED and job.result.endswith(" (Not allowed here)")
+    assert "ProviderNotPermittedHere" not in job.result
     assert _state() == before
     assert leases.payment_method_choices(lease).fetched_at is not None
 
@@ -1348,7 +1364,8 @@ def test_a_refused_replay_rolls_its_handler_back_and_counts_one_attempt(
     with as_none_with_the_real_adapter(monkeypatch):
         [job] = run_queued_jobs()
     assert job.status == JobStatus.FAILED
-    assert job.result.endswith("(ProviderNotPermittedHere)")
+    assert job.result.endswith(" (Not allowed here)")
+    assert "ProviderNotPermittedHere" not in job.result
     assert _state() == before
     event.refresh_from_db()
     assert (event.processed_at, event.attempts, event.error) == (

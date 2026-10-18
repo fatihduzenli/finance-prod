@@ -3,8 +3,9 @@
 Every runner calls the existing service function with its existing signature, as the
 web view called it before, with the job's requester as the actor, and returns
 ``(ok, text)``: whether the job is ``done`` or ``failed``, and the service's fixed
-sentence (with the error class and field names when the service names them). Nothing
-from a provider response reaches ``text``.
+sentence (with the failure in words; copy list §4.1: codes are never shown, so the error
+class and the rejected key names stay in the failure's audit row, on the operator row or
+on the event row). Nothing from a provider response reaches ``text``.
 
 A successful operator sync or link queues a read of the operator's payment methods
 (:func:`payments.jobs.refresh_methods`) when the operator has a customer reference, so
@@ -19,7 +20,7 @@ from datetime import date
 from decimal import Decimal
 
 import payments
-from ledger.models import OneOffCharge, Operator
+from ledger.models import OneOffCharge, Operator, SyncFailure
 from ledger.services import (
     calendar,
     disputes,
@@ -66,12 +67,14 @@ MATCH_LINE_LENGTH = 300
 NO_EVENT = provider_sentence("The message from {provider} no longer exists.")
 
 
-def _with_class(text: str, failure: str, fields: str = "") -> str:
-    """The sentence, plus the failure class and field names when it does not name them."""
-    if not failure or failure in text:
+def _in_words(text: str, failure: str) -> str:
+    """The sentence, plus the failure in words (``SyncFailure`` label) when it does not
+    name them. The class and the field names are never added (copy list §4.1); a local
+    refusal code that is not a ``SyncFailure`` adds nothing (the sentence explains it)."""
+    if failure not in SyncFailure.values:
         return text
-    named = f"; fields: {fields}" if fields and fields not in text else ""
-    return f"{text} ({failure}{named})"
+    words = SyncFailure(failure).label
+    return text if words in text else f"{text} ({words})"
 
 
 def _sync(job: Job, outcome: SyncOutcome) -> Result:
@@ -80,16 +83,9 @@ def _sync(job: Job, outcome: SyncOutcome) -> Result:
     if ok:
         _refresh_methods_after(job)
         return ok, text
-    if outcome.action is Action.UPDATE_FAILED:
-        # The message names the failure in words; the class and the rejected key names are
-        # on the operator row and in the audit row, never shown to staff (copy list §4.1).
-        return ok, text
-    fields = outcome.fields
-    if not fields and outcome.action is Action.FAILED:
-        # A failed create or link stores the rejected key names on the row only.
-        stored = Operator.objects.filter(pk=job.entity_id, sync_failure=outcome.failure)
-        fields = stored.values_list("sync_failure_fields", flat=True).first() or ""
-    return ok, _with_class(text, outcome.failure, fields)
+    # A failed create, link or update keeps the class and the rejected key names on the
+    # operator row and in its ``operator.sync_failed`` / update audit row.
+    return ok, _in_words(text, outcome.failure)
 
 
 def _refresh_methods_after(job: Job) -> None:
@@ -101,7 +97,7 @@ def _refresh_methods_after(job: Job) -> None:
 
 
 def _autopay(outcome: AutopayOutcome) -> Result:
-    return outcome.ok, _with_class(outcome.text, outcome.failure)
+    return outcome.ok, _in_words(outcome.text, outcome.failure)
 
 
 def _mark(result: MarkResult) -> Result:
@@ -303,7 +299,7 @@ def _methods(outcome: MethodsRefresh) -> Result:
     if outcome.fields:
         rejected = with_provider("Fields {provider} rejected")
         text = f"{text} {rejected}: {', '.join(outcome.fields)}."
-    return outcome.ok, _with_class(text, outcome.failure)
+    return outcome.ok, _in_words(text, outcome.failure)
 
 
 def operator_methods_refresh_job(job: Job) -> Result:
@@ -352,7 +348,9 @@ def webhook_replay_job(job: Job) -> Result:
             WebhookEvent.objects.filter(pk=job.entity_id).values_list("error", flat=True).first()
         )
         failed = f"Replayed. The handler failed again; outcome: {outcome}."
-        return False, f"{failed} ({error})" if error else failed
+        # The class and the field names stay on the event row (``error``); the result
+        # names the failure in words only.
+        return False, _in_words(failed, (error or "").split(" ", 1)[0])
     return True, f"Replayed. Outcome: {outcome}."
 
 
@@ -361,7 +359,7 @@ def reconcile_text(run: ReconciliationRun) -> str:
     if run.status == ReconciliationStatus.SKIPPED:
         return str(run.error)
     if run.status == ReconciliationStatus.FAILED:
-        return f"Reconciliation failed at step {run.step_reached or '-'}: {run.error}."
+        return f"Nightly check failed at step {run.step_reached or '-'}: {run.error}."
     found = sum(int(step.get("mismatched", 0)) for step in run.counts.values())
     return with_provider(
         f"Nightly check done: {found} findings, {run.requests} {{provider}} requests, "

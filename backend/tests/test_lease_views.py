@@ -360,7 +360,8 @@ def test_the_enrolment_page_shows_a_list_failure_by_field_names_only(
     admin.post(route, {"refresh_methods": "1"})
     page = admin.get(route).content.decode()
     assert str(service.PROVIDER_REJECTED) in page and "customer_id" in page
-    assert "ProviderRejected" in page and 'id="job-state">Failed: ' in page
+    assert "ProviderRejected" not in page and 'id="job-state">Failed: ' in page
+    assert "(Rejected)" in page
     assert "CANARY" not in page
     assert 'id="methods-not-read"' in page
 

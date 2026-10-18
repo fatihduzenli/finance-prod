@@ -987,9 +987,10 @@ def test_a_failed_replay_reports_the_failure(monkeypatch: pytest.MonkeyPatch) ->
     run_queued_jobs()
     page = billing.get(f"/webhooks/{event.pk}/").content.decode()
     assert (
-        'id="job-state">Failed: Replayed. The handler failed again; outcome: failed. '
-        "(ProviderUnavailable)<"
+        'id="job-state">Failed: Replayed. The handler failed again; outcome: failed. (Unavailable)<'
     ) in page
+    state = page.split('id="job-state">', 1)[1].split("<", 1)[0]
+    assert "ProviderUnavailable" not in state
 
 
 @pytest.mark.django_db
