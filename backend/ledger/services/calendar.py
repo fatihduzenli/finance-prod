@@ -684,7 +684,7 @@ MORNING_NOT_DUE = "Nothing sent: the item no longer asks for a morning e-mail th
 MORNING_NO_ADDRESS = "Not sent: the author has no e-mail address."
 MORNING_SENT = {
     mail.SENT: "Sent.",
-    mail.CATCH_ALL: "Sent to the catch-all address.",
+    mail.CATCH_ALL: "Sent to the test inbox.",
     mail.SUPPRESSED: "Not sent: mail is off.",
 }
 MORNING_FAILED = "Failed: {cause}."

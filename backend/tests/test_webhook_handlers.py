@@ -1296,7 +1296,7 @@ def test_the_queue_lists_unresolved_returns_with_their_details(fake: FakeProvide
     viewer, _ = client_for(Role.VIEWER)
     page = viewer.get("/returns/").content.decode()
     assert f'id="return-{payment.pk}"' in page
-    for text in (world.operator.display_name, "Store 0101", "$1500.00", "R01", "Insufficient"):
+    for text in (world.operator.display_name, "Store 0101", "$1,500.00", "R01", "Insufficient"):
         assert text in page
     assert "Resolve" not in page.split('id="returns"')[1]  # a viewer sees no form
 

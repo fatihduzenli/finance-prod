@@ -944,7 +944,7 @@ def test_006c_a_phone_edit_updates_the_customer_and_the_page_says_when(
     assert call_names(fake) == ["update_customer", "list_payment_methods"]
     [(_, (_, sent)), _] = fake.calls
     assert sent.phone == "4155550132"  # type: ignore[attr-defined]
-    assert "Updated the customer at the payment provider." in page
+    assert "Updated the customer in Stax." in page
     assert 'id="provider-updated"' in page and "Updated from Stax " in page
     operator.refresh_from_db()
     assert operator.sync_status == SyncStatus.LINKED
@@ -964,7 +964,7 @@ def test_006c_a_rejected_update_shows_the_failure_and_the_retry_updates(
 
     page = response.content.decode()
     assert (
-        "Saved here. The payment provider did not accept the update: ProviderRejected "
+        "Saved here. Stax did not accept the update: ProviderRejected "
         "(fields phone). Retry when ready."
     ) in page
     assert 'id="sync-failure"' in page and "Fields Stax rejected: phone" in page
@@ -980,7 +980,7 @@ def test_006c_a_rejected_update_shows_the_failure_and_the_retry_updates(
 
     page = retried.content.decode()
     assert call_names(fake) == ["update_customer", "update_customer", "list_payment_methods"]
-    assert "Updated the customer at the payment provider." in page
+    assert "Updated the customer in Stax." in page
     assert "Updated from Stax " in page and ">Try again</button>" not in page
     operator.refresh_from_db()
     assert operator.sync_status == SyncStatus.LINKED
@@ -1009,7 +1009,7 @@ def test_006c_removing_the_email_of_a_linked_operator_updates_and_stays_linked(
     assert call_names(fake) == ["update_customer", "list_payment_methods"]
     [(_, (_, sent)), _] = fake.calls
     assert sent.operator_email == ""  # type: ignore[attr-defined]
-    assert "Updated the customer at the payment provider." in response.content.decode()
+    assert "Updated the customer in Stax." in response.content.decode()
     operator.refresh_from_db()
     assert (operator.email, operator.sync_status) == (None, SyncStatus.LINKED)
 

@@ -225,7 +225,7 @@ def test_run_records_done_with_the_service_sentence(fake: FakeProvider) -> None:
     jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None)
     [job, refresh] = run_queued_jobs()
     assert job.status == JobStatus.DONE
-    assert job.result == "Created the customer at the payment provider."
+    assert job.result == "Created the customer in Stax."
     # The successful sync queued the methods read the enrolment page shows.
     assert (refresh.kind, refresh.status) == (JobKind.OPERATOR_METHODS_REFRESH, JobStatus.DONE)
     assert job.finished_at is not None and job.locked_until is None
@@ -790,7 +790,7 @@ def test_the_page_shows_queued_then_running_then_done_and_refreshes_only_meanwhi
 
     jobs.run(Job.objects.get())
     page = billing.get(detail(operator)).content.decode()
-    assert 'id="job-state">Done: Created the customer at the payment provider.<' in page
+    assert 'id="job-state">Done: Created the customer in Stax.<' in page
     assert 'http-equiv="refresh"' not in page
 
 
@@ -1102,7 +1102,7 @@ def test_the_automatic_read_is_not_the_operator_page_state(fake: FakeProvider) -
     jobs.run(jobs.claim_next())  # type: ignore[arg-type]
     assert Job.objects.filter(kind=JobKind.OPERATOR_METHODS_REFRESH, status="queued").exists()
     page = billing.get(detail(operator)).content.decode()
-    assert 'id="job-state">Done: Created the customer at the payment provider.<' in page
+    assert 'id="job-state">Done: Created the customer in Stax.<' in page
     assert 'http-equiv="refresh"' not in page
     latest = jobs.latest_for(operator, [JobKind.OPERATOR_METHODS_REFRESH])
     assert latest is not None and latest.status == JobStatus.QUEUED

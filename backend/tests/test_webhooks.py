@@ -946,7 +946,7 @@ def test_billing_replays_a_dead_letter_and_it_is_processed(
     assert response.redirect_chain[-1][0] == f"/webhooks/{event.pk}/"
     # PLAN-010 Batch A follow-up: the replay is a job the worker runs.
     page = response.content.decode()
-    assert 'id="job-state">Queued<' in page and 'http-equiv="refresh"' in page
+    assert 'id="job-state">Waiting<' in page and 'http-equiv="refresh"' in page
     event.refresh_from_db()
     assert event.outcome == WebhookOutcome.DEAD_LETTER
     run_queued_jobs()
@@ -1009,10 +1009,10 @@ def test_the_run_page_shows_a_banner_while_events_are_dead_lettered() -> None:
     WebhookEvent.objects.filter(pk=first.pk).update(outcome=WebhookOutcome.DEAD_LETTER)
     page = viewer.get("/run/").content.decode()
     assert 'id="webhook-banner"' in page
-    assert "1 webhook event is dead-lettered" in page
+    assert "1 message from Stax was given up" in page
     assert 'href="/webhooks/?outcome=dead_letter"' in page
     WebhookEvent.objects.filter(pk=second.pk).update(outcome=WebhookOutcome.DEAD_LETTER)
-    assert "2 webhook events are dead-lettered" in viewer.get("/run/").content.decode()
+    assert "2 messages from Stax were given up" in viewer.get("/run/").content.decode()
 
 
 @pytest.mark.django_db

@@ -21,6 +21,7 @@ from django.test import Client, override_settings
 from django.utils import timezone
 
 from accounts.roles import Role
+from ledger import wording
 from ledger.models import (
     AuditLog,
     Invoice,
@@ -228,7 +229,7 @@ def test_row2_a_partial_payment_makes_no_call_and_flags_the_charge(fake: FakePro
     assert outcome.ok and outcome.provider is not None
     assert (outcome.provider.action, outcome.provider.message) == (
         MarkAction.NOT_UPDATED,
-        "Provider invoice not updated: partial amount",
+        "Not marked paid in Stax: part of the amount",
     )
     assert fake.calls == []
     charge.refresh_from_db()
@@ -236,7 +237,7 @@ def test_row2_a_partial_payment_makes_no_call_and_flags_the_charge(fake: FakePro
     assert charge.needs_review is True
     assert charge.review_message == "Stax invoice not updated: partial amount (TODO-VERIFY-028)"
     assert rent_run.charge_review_message(charge) == (
-        "Provider invoice not updated: partial amount."
+        "Not marked paid in Stax: part of the amount."
     )
     entry = AuditLog.objects.get(action=rent_run.NOT_UPDATED_ACTION)
     assert entry.after is not None and entry.after["reason"] == offline_marking.PARTIAL_AMOUNT
@@ -289,7 +290,9 @@ def test_row7_an_invoice_already_paid_is_not_marked_again_and_the_mismatch_is_au
     outcome = pay(charge, "1500.00")
     assert outcome.ok and outcome.provider is not None
     assert outcome.provider.action is MarkAction.ALREADY_PAID
-    assert "Stax" not in outcome.provider.message
+    assert outcome.provider.message == (
+        "Invoice already paid in Stax; not marked again. Check for a double payment"
+    )
     assert call_names(fake) == ["get_invoice"]
     payment = Payment.objects.get()
     charge.refresh_from_db()
@@ -320,8 +323,7 @@ def test_a_rejected_mark_keeps_the_payment_and_flags_class_and_fields(fake: Fake
     assert outcome.ok and outcome.provider is not None
     assert outcome.provider.action is MarkAction.FAILED
     assert outcome.provider.message == (
-        "Provider invoice not marked paid: ProviderRejected (fields: payment_note). "
-        "The payment is recorded; retry from the charge page."
+        "Not marked paid in Stax: Rejected. The payment is recorded; retry from the charge page."
     )
     charge.refresh_from_db()
     assert (charge.status, charge.needs_review) == (RentChargeStatus.PAID, True)
@@ -383,7 +385,7 @@ def test_a_failed_reread_after_a_good_mark_is_confirmed_on_retry_without_a_secon
     outcome = pay(charge, "1500.00")
     assert outcome.provider is not None and outcome.provider.action is MarkAction.FAILED
     assert outcome.provider.message.startswith(
-        "Provider invoice marked paid but not re-read: ProviderUnavailable."
+        "Marked paid in Stax but not confirmed: Unavailable."
     )
     charge.refresh_from_db()
     assert charge.review_message == (
@@ -438,7 +440,7 @@ def test_a_payment_that_differs_from_the_invoice_total_is_not_sent(fake: FakePro
     assert charge.review_message == offline_marking.TOTAL_DIFFERS
     assert rent_run.charge_review_message(charge) == (
         f"{rent_run.TOTAL_MISMATCH} "
-        "Provider invoice not updated: the payment differs from the invoice total."
+        "Not marked paid in Stax: the payment differs from the invoice total."
     )
 
 
@@ -478,7 +480,7 @@ def test_the_screens_show_the_partial_flag_without_naming_the_provider(
     assert (response.status_code, response["Location"]) == (302, detail)
     page = billing.get(detail).content.decode()
     assert "Payment recorded." in page
-    assert "Provider invoice not updated: partial amount" in page
+    assert "Not marked paid in Stax: part of the amount" in page
     assert "Stax invoice" not in page and "TODO-VERIFY" not in page
     assert 'id="retry-mark"' not in page
     assert "REF-9" in page
@@ -493,7 +495,7 @@ def test_the_retry_button_appears_after_the_lock_and_retries(
     fake.fail_next("mark_invoice_paid_cash_or_check", ProviderUnavailable(503))
     billing.post(f"{detail}payments/new/", form())
     page = billing.get(detail).content.decode()
-    assert "Provider invoice not marked paid: ProviderUnavailable" in page
+    assert "Not marked paid in Stax: Unavailable" in page
     assert 'id="retry-mark"' not in page and 'id="retry-wait"' in page
     viewer, _ = client_for(Role.VIEWER)
     later(monkeypatch, 61)
@@ -505,7 +507,7 @@ def test_the_retry_button_appears_after_the_lock_and_retries(
     assert (response.status_code, response["Location"]) == (302, detail)
     assert len(marks(fake)) == 1
     after = billing.get(detail).content.decode()
-    assert rent_run.MARK_DONE in after and "Needs review" not in after
+    assert str(rent_run.MARK_DONE) in after and "Needs review" not in after
 
 
 def test_the_retry_route_refuses_get_and_csrf_less_posts(fake: FakeProvider) -> None:
@@ -570,17 +572,21 @@ def test_the_limits_themselves_are_accepted() -> None:
     assert len(request.url.params["payment_note"]) == 255
 
 
-def test_the_screen_text_never_names_the_provider() -> None:
-    for stored in (
-        offline_marking.PARTIAL_AMOUNT,
-        offline_marking.TOTAL_DIFFERS,
-        offline_marking.ALREADY_PAID,
-        offline_marking.failure_text(offline_marking.MARK_FAILED, "ProviderRejected", "a,b"),
-        offline_marking.failure_text(offline_marking.REREAD_FAILED, "TransportError", ""),
-    ):
-        assert "Stax" in stored
-        shown = offline_marking.shown(stored)
-        assert "stax" not in shown.lower() and "TODO" not in shown
+def test_the_screen_text_names_the_processor_only_by_its_display_name() -> None:
+    with wording.reading_from(lambda: "PayCo"):
+        for stored in (
+            offline_marking.PARTIAL_AMOUNT,
+            offline_marking.TOTAL_DIFFERS,
+            offline_marking.ALREADY_PAID,
+            offline_marking.failure_text(offline_marking.MARK_FAILED, "ProviderRejected", "a,b"),
+            offline_marking.failure_text(offline_marking.REREAD_FAILED, "TransportError", ""),
+        ):
+            assert "Stax" in stored
+            shown = offline_marking.shown(stored)
+            assert "PayCo" in shown
+            assert "stax" not in shown.lower() and "TODO" not in shown
+            assert "ProviderRejected" not in shown and "TransportError" not in shown
+            assert "fields" not in shown
 
 
 # --- D5: carried balance -----------------------------------------------------------------------
@@ -637,4 +643,4 @@ def test_the_run_and_charge_pages_show_the_carried_balance(billing: Client) -> N
     rent_run.create_charges(DAY, actor=None)
     detail = billing.get(f"/charges/{charge_of(row).pk}/").content.decode()
     assert '<dd id="carried-balance">$500.00' in detail
-    assert '<dd id="amount-due">$1500.00</dd>' in detail
+    assert '<dd id="amount-due">$1,500.00</dd>' in detail

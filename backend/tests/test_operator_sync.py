@@ -989,7 +989,7 @@ def test_006c_row1_a_phone_edit_updates_the_customer_with_the_digits(
 
     operator.refresh_from_db()
     assert outcome.action is Action.UPDATED
-    assert outcome.message == "Updated the customer at the payment provider."
+    assert outcome.message == "Updated the customer in Stax."
     assert call_names(fake) == ["update_customer"]
     [(customer_id, sent)] = update_calls(fake)
     assert customer_id == ref.external_id
@@ -1045,7 +1045,7 @@ def test_006c_row2_a_rejected_update_keeps_the_edit_and_the_retry_updates_once(
     operator.refresh_from_db()
     assert outcome.action is Action.UPDATE_FAILED
     assert outcome.message == (
-        "Saved here. The payment provider did not accept the update: ProviderRejected "
+        "Saved here. Stax did not accept the update: ProviderRejected "
         "(fields phone, email). Retry when ready."
     )
     assert operator.phone == "4155550132"
@@ -1111,7 +1111,7 @@ def test_006c_row2_other_failures_name_the_class_and_no_fields(
 
     operator.refresh_from_db()
     assert outcome.message == (
-        f"Saved here. The payment provider did not accept the update: {name}. Retry when ready."
+        f"Saved here. Stax did not accept the update: {name}. Retry when ready."
     )
     assert (operator.phone, operator.sync_status, operator.sync_failure) == (
         "4155550132",

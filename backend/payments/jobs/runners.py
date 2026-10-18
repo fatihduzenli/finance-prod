@@ -33,6 +33,7 @@ from ledger.services import (
 )
 from ledger.services.leases import AutopayOutcome, MethodsRefresh
 from ledger.services.rent_run import MarkAction, MarkResult, MatchAction, MatchReport
+from ledger.wording import with_provider
 from payments import jobs, one_off_invoices, operator_sync, reconciliation
 from payments.models import (
     Job,
@@ -296,7 +297,8 @@ def payment_void_job(job: Job) -> Result:
 def _methods(outcome: MethodsRefresh) -> Result:
     text = outcome.message
     if outcome.fields:
-        text = f"{text} Fields the provider rejected: {', '.join(outcome.fields)}."
+        rejected = with_provider("Fields {provider} rejected")
+        text = f"{text} {rejected}: {', '.join(outcome.fields)}."
     return outcome.ok, _with_class(text, outcome.failure)
 
 

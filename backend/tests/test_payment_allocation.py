@@ -705,7 +705,7 @@ def test_a_catalogue_item_keeps_its_fee_type() -> None:
 
 @pytest.mark.parametrize(
     ("customer", "bank", "sentence"),
-    [(False, False, "provider customer"), (True, False, "no linked bank method")],
+    [(False, False, "not connected to Stax"), (True, False, "no linked bank method")],
 )
 def test_schedule_a_payment_is_refused_without_a_customer_or_a_bank_method(
     customer: bool, bank: bool, sentence: str

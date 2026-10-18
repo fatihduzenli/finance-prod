@@ -218,7 +218,7 @@ def test_every_role_reads_the_ledger_and_the_totals(book: dict[str, Any], role: 
     client, _ = client_for(role)
     page = client.get(LIST).content.decode()
     assert (
-        '<td id="total-settled" class="money" data-label="Settled (collected)">$1900.00</td>'
+        '<td id="total-settled" class="money" data-label="Settled (collected)">$1,900.00</td>'
         in page
     )
     assert (

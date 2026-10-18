@@ -801,7 +801,7 @@ def test_the_morning_email_goes_to_the_author_through_the_catch_all(
         {"on": "2026-10-20"},
     )
     [done] = run_queued_jobs()
-    assert done.result == "Sent to the catch-all address."
+    assert done.result == "Sent to the test inbox."
     [sent] = memory.sent
     assert sent.to == CATCH_ALL
     assert sent.subject == "[to: morning-author@example.com] Reminder: Call the landlord"

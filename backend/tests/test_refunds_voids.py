@@ -401,7 +401,7 @@ def test_row9_over_refund_after_an_earlier_refund(settling: FakeProvider) -> Non
     assert refund(payment, "1000.00").ok
     settling.calls.clear()
     outcome = refund(payment, "500.01")
-    assert outcome.message == refunds.AMOUNT_OVER.format(refundable=D("500.00"))
+    assert outcome.message == refunds.AMOUNT_OVER.format(refundable="$500.00")
     assert settling.calls == []
 
 
@@ -678,7 +678,7 @@ def test_a_refused_refund_changes_nothing_but_the_audit_row(fake: FakeProvider) 
     actor = admin_user()
     outcome = refund(payment, "100.00", actor=actor)
     assert not outcome.ok
-    assert "ProviderRejected" in outcome.message and "total" in outcome.message
+    assert outcome.message == "Stax did not refund the payment: Rejected. Nothing was changed."
     assert refund_rows(payment) == []
     assert charge_state(world) == (RENT, RentChargeStatus.PAID)
     assert [name for name, _ in fake.calls if name != "get_invoice"][-1] == "refund_transaction"
@@ -692,7 +692,8 @@ def test_a_refused_void_changes_nothing_but_the_audit_row(fake: FakeProvider) ->
     payment = ach(fake, "1500.00", settled=False)
     fake.fail_next("void_transaction", ProviderRejected(422, error_fields=("id",)))
     outcome = void(payment)
-    assert not outcome.ok and "ProviderRejected" in outcome.message
+    assert not outcome.ok
+    assert outcome.message == "Stax did not void the payment: Rejected. Nothing was changed."
     payment.refresh_from_db()
     assert payment.status == PaymentStatus.PENDING
     assert charge_state(world) == (D("0.00"), RentChargeStatus.PENDING)
@@ -708,7 +709,7 @@ def test_an_unreachable_provider_says_the_refund_may_have_been_made(fake: FakePr
     assert not outcome.ok and "may have been made" in outcome.message
 
 
-def test_the_page_shows_the_failure_class_and_fields(fake: FakeProvider) -> None:
+def test_the_page_shows_the_failure_in_words(fake: FakeProvider) -> None:
     make_world(fake)
     payment = ach(fake, "1500.00")
     fake.fail_next("refund_transaction", ProviderRejected(422, error_fields=("total",)))
@@ -719,7 +720,8 @@ def test_the_page_shows_the_failure_class_and_fields(fake: FakeProvider) -> None
         follow=True,
     )
     html = response.content.decode()
-    assert "ProviderRejected" in html and "fields: total" in html
+    assert "Stax did not refund the payment: Rejected. Nothing was changed." in html
+    assert "ProviderRejected" not in html
     # PLAN-010 D3: the outcome is shown on the payment page, with the refund button
     # leading to a fresh form to try again.
     assert response.redirect_chain == [(f"/payments/{payment.pk}/", 302)]
@@ -764,16 +766,16 @@ def test_the_refund_page_shows_what_the_admin_confirms(settling: FakeProvider) -
         world.lease.store.external_label,
         world.invoice.invoice_number,
         "debit 1",
-        'id="summary-amount">$1500.00',
+        'id="summary-amount">$1,500.00',
         'id="summary-refunded">$200.00',
-        'id="summary-refundable">$1300.00',
+        'id="summary-refundable">$1,300.00',
         'value="1300.00"',
         refunds.REFUND_SENTENCE,
         refunds.REFUND_CONFIRMATION,
         'name="confirm" value="true"',
         "csrfmiddlewaretoken",
     ):
-        assert text in html, text
+        assert str(text) in html, text
     assert TXN not in html
 
 
@@ -788,7 +790,7 @@ def test_the_void_page_shows_what_the_admin_confirms(fake: FakeProvider) -> None
         refunds.VOID_SENTENCE,
         refunds.void_confirmation(payment),
     ):
-        assert text in html, text
+        assert str(text) in html, text
     assert 'name="amount"' not in html
 
 
@@ -804,8 +806,8 @@ def test_the_payment_page_shows_the_chain(settling: FakeProvider) -> None:
         "&minus;$300.00",
         world.invoice.invoice_number,
         'id="invoice-provider-status"',
-        'id="charge-due">$1500.00',
-        'id="charge-paid">$1200.00',
+        'id="charge-due">$1,500.00',
+        'id="charge-paid">$1,200.00',
         'id="charge-balance">$300.00',
         refunds.REFUNDED_ACTION,
         "payment.created_from_provider",

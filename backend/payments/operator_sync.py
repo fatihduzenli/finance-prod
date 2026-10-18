@@ -56,7 +56,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from ledger.models import AuditLog, EnrolmentStatus, Operator, SyncFailure, SyncStatus
-from ledger.wording import provider_sentence
+from ledger.wording import provider_sentence, with_provider
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef
 from payments.provider import (
@@ -195,29 +195,29 @@ class SyncOutcome:
             return retry_wait_message(self.retry_in)
         if self.action is Action.LINKED_EXISTING:
             if self.needs_review:
-                return (
-                    "Linked to the oldest of several payment provider customers with this "
-                    "e-mail. The operator is flagged for review."
+                return with_provider(
+                    "Connected to the oldest of several {provider} customers with this "
+                    "e-mail. The operator is marked Needs review."
                 )
-            return "Linked to the existing payment provider customer with this e-mail."
+            return with_provider("Connected to the existing {provider} customer with this e-mail.")
         if self.action is Action.CREATED:
-            return "Created the customer at the payment provider."
+            return with_provider("Created the customer in {provider}.")
         if self.action is Action.UPDATED:
-            return "Updated the customer at the payment provider."
+            return with_provider("Updated the customer in {provider}.")
         if self.action is Action.UPDATE_FAILED:
             named = f" (fields {', '.join(self.fields.split(','))})" if self.fields else ""
-            return (
-                "Saved here. The payment provider did not accept the update: "
+            return with_provider(
+                "Saved here. {provider} did not accept the update: "
                 f"{self.failure}{named}. Retry when ready."
             )
         if self.action is Action.AWAITING_LINK:
-            return AWAITING_LINK_MESSAGE
+            return str(AWAITING_LINK_MESSAGE)
         if self.action is Action.LINK_SET:
             return "Linked. The operator is enrolled."
         if self.action is Action.LINK_REFUSED and self.failure == SyncFailure.PROVIDER_REJECTED:
-            return LINK_REJECTED_MESSAGE
+            return str(LINK_REJECTED_MESSAGE)
         if self.action in (Action.FAILED, Action.LINK_REFUSED):
-            return MESSAGES.get(self.failure, DEFAULT_MESSAGE)
+            return str(MESSAGES.get(self.failure, DEFAULT_MESSAGE))
         return ""
 
 
