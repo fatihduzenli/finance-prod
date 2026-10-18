@@ -1444,3 +1444,19 @@ adversarial file is ready (`tests/test_plan012c_design_d_adversarial.py`: frozen
 and route names, the money filter under hostile input, the provider name escaped, user data
 shown as typed, the banner on every page). Next: resume Batch D when a session holds, gate it,
 then Batch E (contrast and visual regression) and the checkpoint report with the Publish Request.
+
+## Update, 2026-10-18, 12c Batches A–C deployed to staging; Batch D in slices
+
+Pushed `aded787..e12d8f9` on the owner's "push" (Publish Request of 2026-10-18); CI green (tests
+25:23, deploy 3:29); staging runs the shell, the tokens, the components and the hidden-field
+rules of Batches A–C. The owner's decision on Batch D: keep the renames, finish in small slices,
+each its own session and commit, the full gate at D6. Done so far: D1 (the Rule 8 fence, the money
+filter hardened, the banner wording) as `1439f02`; D2a (the §4.5 labels moved into the TextChoices
+classes with choices-only migrations ledger 0046 and payments 0018; the parallel label table and
+the display overrides removed) as `7fa6881`. **Decision for the owner at the checkpoint:** a
+TextChoices label cannot read company settings, so the labels that named the processor (six
+SyncFailure labels, most JobKind labels, PaymentChannel "Bank debit") carry the name through the
+sentence around them instead ("Bank debit through Stax" on the lease page; "Stax request in
+progress: Updating the operator" in the job banner); the approved §4.5 wording is otherwise kept.
+D2b (ledger leases, installments, deposits, builder; the lazy-sentence audit defect) in progress;
+then D2c, D3, D4, D5, and the D6 gate.
