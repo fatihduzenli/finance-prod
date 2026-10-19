@@ -1503,3 +1503,14 @@ visual and deploy jobs were skipped; staging still runs `e12d8f9`. Fix (CI verif
 Fable): the migration round trips run as their own job "Migration tests" (30-minute limit) in
 parallel with the test job; the staging deploy needs the test, migration and visual jobs. A new
 Publish Request follows for that commit.
+
+## Update, 2026-10-19, Step 12c deployed to staging
+
+Pushed `f9755ab..fc6f348` on the owner's "push". CI green with the new layout: "Migration tests"
+17:04 and the test job 18:15 in parallel, "Visual regression" 2:05 (its first run on CI: the
+thirty baselines generated in the Playwright image matched), "Deploy staging" 3:25. Staging runs
+`fc6f348`: the whole of Step 12c (tokens, company settings, the shell, the components, the
+dashboard cards, print, the hidden-field rules, the copy pass, the money format, the banner
+wording, the accessibility fixes). The sign-in page answers with the title "Monvera · Login" and
+the banner "SANDBOX — test system, no real money". Next: the owner's checkpoint clicks on
+staging; then Step 13.
