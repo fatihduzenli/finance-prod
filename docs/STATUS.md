@@ -1492,3 +1492,14 @@ engines; secret scans clean. One MAJOR in the suite (a connection left open at t
 PostgreSQL) resolved. Repository finding: the project's `.gitignore` was never tracked (the
 owner's global `~/.gitignore` ignores `.gitignore`); force-added in this commit. **Step 12c is
 complete locally: Batches D and E await the owner's checkpoint and a Publish Request.**
+
+## Update, 2026-10-19, 12c push: CI's migration step timed out; the round trips become their own job
+
+Pushed `e12d8f9..f9755ab` on the owner's "push" (Checkpoint 12c decisions 1–5 accepted). CI
+failed in the test job's "Migration tests" step: the step hit its 15-minute limit on a runner
+about 1.5 times slower than the day before (the type check took 23 s against 15 s; the step had
+taken 11:38 on 2026-10-18 and prints nothing in quiet mode until a line of dots is full). The
+visual and deploy jobs were skipped; staging still runs `e12d8f9`. Fix (CI verification config,
+Fable): the migration round trips run as their own job "Migration tests" (30-minute limit) in
+parallel with the test job; the staging deploy needs the test, migration and visual jobs. A new
+Publish Request follows for that commit.
