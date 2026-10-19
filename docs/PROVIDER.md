@@ -69,6 +69,17 @@ of `provider`, never a column.
   equivalents must be verified in their specs before the method is implemented.
 - Webhook security differs per provider (Stax: URL token only). The receiver's "store, then
   re-fetch by id" rule stays whatever the provider offers.
+- **Stored values that name the processor need a data migration** (owner's decision at
+  Checkpoint 12c, 2026-10-19). Since PLAN-012c the screens never name the processor from code:
+  every sentence takes the display name from the company settings row (`processor_name`,
+  shown as `company.provider_name`), and the `TextChoices` labels carry no name (the sentence
+  around a label adds it). What still names Stax is stored data, not copy: the payment channel
+  value `stax` (`PaymentChannel.PROVIDER_ACH`, on leases and transfers) and the `provider`
+  column of `external_refs` and `provider_snapshots` (`stax_pay`, `payments.operator_sync.PROVIDER_KEY`).
+  A change of processor therefore needs one data migration for those rows (or a new channel
+  value and provider key beside the old ones, with the old rows kept as history), and nothing
+  in the templates. The value freeze in `tests/test_plan012c_design_d_adversarial.py` names
+  every stored choice value, so that migration is written against a known list.
 
 ## 3. Nothing here is started before Step 17
 
