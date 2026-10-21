@@ -1514,3 +1514,16 @@ dashboard cards, print, the hidden-field rules, the copy pass, the money format,
 wording, the accessibility fixes). The sign-in page answers with the title "Monvera · Login" and
 the banner "SANDBOX — test system, no real money". Next: the owner's checkpoint clicks on
 staging; then Step 13.
+
+## Update, 2026-10-21, Checkpoint 12c closed; Step 12e received; PLAN-012e-2 written
+
+The owner closed Checkpoint 12c (shell, navigation, wording, amounts, print and phone layout
+checked on staging) and sent Step 12e: three actions on the store page instead of eleven, the
+builder's "How to collect" absorbing Add setup charge, Charge now and Schedule a payment, a Lease
+menu, the tab moves, facts-only store details with an address line and a status badge, a Store
+cost block instead of Costs and margin, cost fields on the New store form, help text moved to
+help pages, visual baselines regenerated. Plan: `docs/qa/PLAN-012e2-fewer-actions.md` (the file
+name avoids the earlier PLAN-012e of Step 12b). Pending the owner, built under the stated
+assumptions: help pages as small signed-in static pages under /help/; landlord rent required on a
+new store; address columns on stores (migration 0047); one autopay per scheduled invoice for the
+invoice total. Batch A (the builder's collection paths) assigned.
