@@ -52,7 +52,7 @@ job), the collection ladder, the public statement, Step 13.
   `autopay_due`, one Stax invoice with every line, and **one one-off autopay on `due_date`** for
   the invoice total carried by the first charge, as `payments_entry.schedule` does for a single
   debit today; `due_date` must be after today and within the existing scheduling horizon;
-  billing), `record` (new: `payment` is `{method: wire|zelle|check, paid_on, reference, note}`;
+  billing), `record` (new: `payment` is `{method, paid_on, reference, note}` with `method` one of the manual methods the app records today (`rent_run.MANUAL_METHODS`: Zelle, wire, other; a check is "other" with its reference, as "Add payment" does; no new stored value);
   the draft is converted with collection `manual`, the Stax invoice created but not sent, each
   charge paid by the payment in line order through the existing allocation
   (`one_off_charges.record_payment` with one `allocation_group`), and the invoice marked paid
@@ -145,7 +145,8 @@ job), the collection ladder, the public statement, Step 13.
 ledger.services.invoice_builder
   class CollectChoice(StrEnum): DRAFT="draft" EMAIL="email" CHARGE_NOW="charge_now"
                                 SCHEDULE="schedule" RECORD="record"
-  @dataclass(frozen=True) PaymentInput: method: str; paid_on: date; reference: str = ""; note: str = ""
+  @dataclass(frozen=True) PaymentInput: method: str  # one of rent_run.MANUAL_METHODS
+                                        paid_on: date; reference: str = ""; note: str = ""
   def collect(draft_id: UUID, choice: CollectChoice | str, *, actor, today=None,
               confirmed: bool = False, due_date: date | None = None,
               payment: PaymentInput | None = None) -> Outcome
@@ -218,7 +219,7 @@ on a deliberate second paragraph (a mutation of a template copy).
 - **Help pages** are new surface: static, signed-in, no data, no form; the smallest thing that
   meets "the help pages".
 - **Visual baselines** move for four page groups; Fable regenerates in the image.
-- **Security:** `record` keeps the payment method whitelist and the reference guard (no card or
+- **Security:** `record` keeps the manual-method whitelist (Zelle, wire, other) and the reference guard (no card or
   account number, the existing validator); `schedule` keeps the horizon and the autopay role;
   the redirects do not interpolate user text beyond a whitelisted choice and a catalogue code
   validated against the lease's catalogue.
