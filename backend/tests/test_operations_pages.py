@@ -231,16 +231,19 @@ def test_create_missing_charges_names_what_it_created_and_then_says_nothing_miss
     assert AuditLog.objects.filter(action="rent_charge.created").count() == 11
 
 
-def test_create_missing_charges_names_a_paused_lease_and_is_on_the_bar_for_billing() -> None:
+def test_create_missing_charges_names_a_paused_lease_and_is_on_the_charges_tab() -> None:
+    # PLAN-012e-2 D5: a text link (a POST button styled .link-action) on the Charges tab.
     lease = wire_lease(date(2026, 8, 13), label="2477")
     store_page = reverse("ledger:stores:detail", kwargs={"pk": lease.store_id})
     url = reverse("ledger:stores:create_charges", kwargs={"pk": lease.store_id})
     billing, _ = client_for(Role.BILLING)
-    bar = body(billing, store_page).split('id="action-bar"')[1].split("</nav>")[0]
-    assert f'<form method="post" action="{url}"' in bar
-    assert 'id="bar-create-charges">Create missing charges</button>' in bar
-    assert "csrfmiddlewaretoken" in bar
-    assert "bar-create-charges" not in body(client_for(Role.VIEWER)[0], store_page)
+    html = body(billing, store_page)
+    tab = html.split('id="tab-charges"')[1].split("</section>")[0]
+    form = tab[tab.index(f'<form method="post" action="{url}"') :].split("</form>")[0]
+    assert 'id="create-missing-charges">Create missing charges</button>' in form
+    assert 'class="link-action"' in form and "csrfmiddlewaretoken" in form
+    assert url not in html.split('id="action-bar"')[1].split("</nav>")[0]
+    assert "create-missing-charges" not in body(client_for(Role.VIEWER)[0], store_page)
     Lease.objects.filter(pk=lease.pk).update(collection_status=CollectionStatus.PAUSED)
     html = billing.post(url, {}, follow=True).content.decode()
     assert "Nothing missing" in html and "Skipped 2477: Collection is paused." in html

@@ -169,7 +169,7 @@ def test_the_store_workspace_carries_the_reference_classes() -> None:
     lease = a_lease(a_store("2202 WORK", 2202), an_operator("Work Ops"))
     html = body(client_for(Role.BILLING)[0].get(f"/stores/{lease.store_id}/"))
     assert '<section id="workspace-header" class="workspace-header"' in html
-    assert 'id="action-bar" class="actions action-bar"' in html
+    assert 'id="action-bar" class="action-bar"' in html
     assert 'class="actions store-tabs tabs" id="store-tabs"' in html
     assert 'class="actions tabs" id="charge-filters"' in html
     css = APP_CSS.read_text()

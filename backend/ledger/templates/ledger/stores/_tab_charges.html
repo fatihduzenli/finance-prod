@@ -7,6 +7,7 @@
   <a class="btn" id="export-charges" href="{% url 'ledger:charges:export' %}?{{ export_query }}">Download rent charges</a>
   <a class="btn" id="export-one-off-charges" href="{% url 'ledger:one_off_charges:export' %}?{{ export_query }}">Download one-off charges</a>
 </p>
+{% if space.create_charges_url %}<form method="post" action="{{ space.create_charges_url }}" class="js-single-submit" id="create-missing-charges-form">{% csrf_token %}<button class="link-action" type="submit" id="create-missing-charges">Create missing charges</button></form>{% endif %}
 {% responsive_table %}
 <table id="store-charges">
   <thead><tr>{% if by_store %}<th>Store</th>{% endif %}<th>Kind</th><th>Charge</th><th>Due</th><th class="money">Billed</th><th class="money">Paid</th><th class="money">Balance</th><th>Status</th><th>Invoice</th><th></th></tr></thead>

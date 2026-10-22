@@ -335,11 +335,77 @@ def test_a_viewer_sees_no_bar_and_no_history_and_billing_no_admin_actions() -> N
     assert bar(viewer) == "" and "tab=history" not in viewer
     assert 'id="store-select"' in viewer
     billing = bar(page(client_for(Role.BILLING)[0], operator_page(operator)))
-    assert "/payments/new/" in billing and "/schedule-payment/" in billing
+    # PLAN-012e-2 D5: Create invoice and Add payment; no Lease menu for billing.
+    assert re.findall(r'id="([^"]+)"', billing) == [
+        "action-bar",
+        "bar-new-invoice",
+        "record-payment",
+    ]
+    assert "/payments/new/" in billing and "/schedule-payment/" not in billing
     assert "/end-lease/" not in billing and "/transfer/" not in billing
     admin = page(client_for(Role.ADMIN)[0], operator_page(operator))
     assert "/end-lease/" in bar(admin) and "/transfer/" in bar(admin)
+    assert 'id="lease-menu"' in bar(admin)
     assert "tab=history" in admin
+
+
+# --- The operator page's bar (PLAN-012e-2 D6) --------------------------------------------------
+
+
+def operator_bar(html: str) -> str:
+    found = re.search(r'<div class="actions" id="operator-actions">.*?\n  </div>', html, re.S)
+    assert found is not None
+    return found.group(0)
+
+
+def test_the_operator_bar_is_statement_new_invoice_edit_connect_and_more() -> None:
+    operator, _, _ = two_stores()
+    html = page(client_for(Role.ADMIN)[0], operator_page(operator))
+    top = operator_bar(html)
+    labels = re.findall(r'<a class="btn[^"]*"[^>]*>([^<]+)</a>', top)
+    assert labels == ["Statement", "New invoice", "Edit", "Connect to Stax"]
+    new = reverse("ledger:invoices:new_operator", kwargs={"pk": operator.pk})
+    assert f'<a class="btn btn-primary" href="{new}" id="new-invoice">New invoice</a>' in top
+    assert top.count("btn-primary") == 1
+    assert top.index("Connect to Stax") < top.index('id="more-menu"')
+    menu = top[top.index('<details class="menu" id="more-menu">') : top.index("</details>")]
+    assert '<summary class="btn">More ▾</summary>' in menu
+    archive = reverse("ledger:operators:archive", kwargs={"pk": operator.pk})
+    assert f'<form method="post" action="{archive}"' in menu and "csrfmiddlewaretoken" in menu
+    assert (
+        '<button class="menu-danger" type="submit" id="archive-operator">Archive</button>' in menu
+    )
+    assert "window.confirm(" in menu
+    # Add entry stays in the contact section's header, not in the bar.
+    assert "Add entry" not in top and 'id="add-contact"' in html
+    # The selected store's bar keeps one primary on the page: New invoice.
+    assert "btn-primary" not in bar(html)
+    assert 'document.querySelectorAll("details.menu")' in html
+
+
+def test_billing_has_no_more_menu_and_an_archived_operator_neither() -> None:
+    operator, _, _ = two_stores()
+    billing = operator_bar(page(client_for(Role.BILLING)[0], operator_page(operator)))
+    assert 'id="more-menu"' not in billing and "Archive" not in billing
+    assert re.findall(r'<a class="btn[^"]*"[^>]*>([^<]+)</a>', billing) == [
+        "Statement",
+        "New invoice",
+        "Edit",
+        "Connect to Stax",
+    ]
+    Operator.objects.filter(pk=operator.pk).update(archived_at=NOW)
+    admin = operator_bar(page(client_for(Role.ADMIN)[0], operator_page(operator)))
+    assert 'id="more-menu"' not in admin and 'id="new-invoice"' not in admin
+
+
+def test_create_missing_charges_on_the_operator_page_is_the_selected_store_link() -> None:
+    operator, first, second = two_stores()
+    html = page(client_for(Role.BILLING)[0], operator_page(operator, store=str(second.store_id)))
+    url = reverse("ledger:stores:create_charges", kwargs={"pk": second.store_id})
+    assert f'<form method="post" action="{url}"' in html
+    assert 'id="create-missing-charges"' in html and url not in bar(html)
+    viewer = page(client_for(Role.VIEWER)[0], operator_page(operator))
+    assert "/create-charges/" not in viewer
 
 
 # --- The query budget ------------------------------------------------------------------------

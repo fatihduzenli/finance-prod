@@ -463,10 +463,12 @@ def test_a_vacant_store_offers_no_lease_action_already() -> None:
     vacant = a_store("D8-7")
     leased_html = page(billing, f"/stores/{lease.store_id}/")
     vacant_html = page(billing, f"/stores/{vacant.pk}/")
-    for marker in ('id="bar-record-payment"', 'id="bar-schedule-payment"', 'id="new-invoice"'):
+    # PLAN-012e-2 D5: the bar is Create invoice and Add payment for billing; a vacant
+    # store gives billing no bar (Upload is on the Documents tab).
+    for marker in ('id="record-payment"', 'id="create-invoice"', 'id="action-bar"'):
         assert marker in leased_html, marker
         assert marker not in vacant_html, marker
-    assert 'id="bar-upload-document"' in vacant_html
+    assert "/schedule-payment/" not in leased_html and "/schedule-payment/" not in vacant_html
     response = billing.post(f"/stores/{vacant.pk}/payments/new/", {"amount": "10.00"})
     assert response.status_code == 302 and not Payment.objects.exists()
 

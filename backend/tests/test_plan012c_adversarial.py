@@ -39,7 +39,8 @@ def test_store_as_route_cannot_record_against_store_bs_lease_or_operator() -> No
     lease_a = _ended(store_a, operator_a)
     lease_b = a_lease(store_b, operator_b)
     billing, _ = client_for(Role.BILLING)
-    page = page_of(billing, f"/stores/{store_a.pk}/")
+    # PLAN-012e-2 D5: Add entry lives on the Contact log tab, not on the bar.
+    page = page_of(billing, f"/stores/{store_a.pk}/?tab=contacts")
     assert f"/stores/{store_a.pk}/contacts/new/" in page
     for forged in (
         {"lease": str(lease_b.pk)},
@@ -61,7 +62,7 @@ def test_an_archived_operators_lease_offers_no_button_and_the_route_writes_nothi
     Operator.objects.filter(pk=operator.pk).update(archived_at=timezone.now())
     assert contacts.store_contact_lease(store, TODAY) is None
     billing, _ = client_for(Role.BILLING)
-    page = page_of(billing, f"/stores/{store.pk}/")
+    page = page_of(billing, f"/stores/{store.pk}/?tab=contacts")
     assert f"/stores/{store.pk}/contacts/new/" not in page
     response = billing.post(
         f"/stores/{store.pk}/contacts/new/", contact_post(lease=str(lease.pk), body="Late.")
@@ -90,7 +91,7 @@ def test_a_viewer_sees_no_button_on_a_non_current_lease_and_gets_403() -> None:
     lease = a_lease(store, an_operator("Soon"), started=TODAY + timedelta(days=10))
     Lease.objects.filter(pk=lease.pk).update(collection_status=CollectionStatus.PROSPECTIVE)
     viewer, _ = client_for(Role.VIEWER)
-    page = page_of(viewer, f"/stores/{store.pk}/")
+    page = page_of(viewer, f"/stores/{store.pk}/?tab=contacts")
     assert f"/stores/{store.pk}/contacts/new/" not in page
     assert viewer.get(f"/stores/{store.pk}/contacts/new/").status_code == 403
     assert (
@@ -99,4 +100,6 @@ def test_a_viewer_sees_no_button_on_a_non_current_lease_and_gets_403() -> None:
     )
     assert not ContactEntry.objects.exists()
     billing, _ = client_for(Role.BILLING)
-    assert f"/stores/{store.pk}/contacts/new/" in page_of(billing, f"/stores/{store.pk}/")
+    assert f"/stores/{store.pk}/contacts/new/" in page_of(
+        billing, f"/stores/{store.pk}/?tab=contacts"
+    )

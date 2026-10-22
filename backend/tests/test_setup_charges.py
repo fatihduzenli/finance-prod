@@ -1245,9 +1245,11 @@ def test_billing_links_edits_and_adds_through_the_pages() -> None:
     page = client.get(duplicate["Location"]).content.decode()
     assert "already has a charge for Access fee" in page
     assert OneOffCharge.objects.filter(lease=lease, fee_type=access).count() == 1
-    # PLAN-012d D2 to D4: the charges and Add setup charge are on the store page.
+    # PLAN-012d D2 to D4: the charges are on the store page; PLAN-012e-2 D5: a setup
+    # charge is made from Create invoice (the bar's Add setup charge is gone).
     store_page = client.get(f"/stores/{lease.store_id}/?tab=charges&filter=all").content.decode()
-    assert 'id="store-charges"' in store_page and 'id="bar-add-setup-charge"' in store_page
+    assert 'id="store-charges"' in store_page and 'id="create-invoice"' in store_page
+    assert "bar-add-setup-charge" not in store_page and "/setup-charges/new/" not in store_page
     assert f"/one-off-charges/{new.pk}/" in store_page
     lease_page = client.get(f"/leases/{charge.lease_id}/").content.decode()
     assert 'id="setup-charges"' not in lease_page and 'id="store-charges-link"' in lease_page

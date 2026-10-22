@@ -78,3 +78,47 @@ customer, several provider invoices) is refused before the record path starts or
 existing paths, not by the new flag.
 
 **Verdict (A):** PASS (two MAJOR and one MINOR, resolved in one rework cycle; two decisions for the owner's checkpoint).
+
+### Batch B — the action bar and the Lease menu (D5, D6)
+
+**Scope.** `ledger/services/workspace.py` (`Action` with `items` and `element_id`; `actions`
+returns Create invoice, Add payment and the Lease menu, or New lease on a vacant store, nothing
+for a viewer; `create_charges_url`), `stores/_action_bar.html` (new, shared with the operator
+page's selected store), `_menu_script.html` (new: closes an open menu on a click outside or on
+Escape; a convenience, the menu is a native `<details>`), `stores/detail.html`, `stores/_tab_charges.html`
+(Create missing charges as a text-link POST under the filters), `operators/detail.html`
+(Statement · New invoice · Edit · Connect to Stax · More ▾ with Archive), `app.css` (the menu
+and `.link-action`, tokens only). No route, registry or migration change. Tests: nine files
+updated (ids and shapes), new cases in the workspace, operator and operations files. Fable's:
+`tests/test_plan012e2_b_adversarial.py` (7 cases); four assertions in `tests/test_plan012c_adversarial.py`
+moved to the Contact log tab where Add entry now lives.
+
+**Ids.** Removed: `bar-charge-now`, `bar-add-setup-charge`, `bar-schedule-payment`,
+`bar-upload-document`, `bar-add-contact`. Renamed: `new-invoice` → `create-invoice` (store page),
+`bar-record-payment` → `record-payment`, `bar-new-lease` → `new-lease`, `bar-create-charges` →
+`create-missing-charges` (Charges tab). New: `lease-menu`, `more-menu`, `archive-operator`,
+`operator-actions`, `create-missing-charges-form`.
+
+**Findings.** None open. Design choices accepted: Create missing charges on the operator page's
+Charges tab acts on the selected store (the old bar's scope); the operator page keeps New invoice
+as its only primary; with the Documents tab open the store page shows the Upload form's own
+primary beside Create invoice (a form's button, not a header action); the menu's click-outside
+and Escape behaviour is asserted on the script text and the markup, the owner's phone click is
+the browser check.
+
+**Gate 1.** ruff, `ruff format --check` (531 files), mypy strict (433 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16: all clean, exit 0. **Gate 2.** sqlite
+5,963 passed, 653 skipped (16:14; its one failure was Fable's own PLAN-012c-b case still fetching
+the default tab, fixed before the PostgreSQL selection started and green alone: 4 passed);
+PostgreSQL "Migration tests" 28 passed (12:48), "Unit tests" 6,586 passed, 3 skipped (18:15);
+e2e 14 passed in each of four runs on PostgreSQL. **Gate 3.** Diff read: the service, the partial, the
+script, the styles, the two pages. The bar is one `<nav>` with links only (no form in the menu,
+so no click posts by accident); the destructive item is styled, not primary. **Gate 4.** Secret
+scans clean. Fable's cases: a viewer sees no bar and no menu; billing sees the two actions, no
+Lease menu and no End lease link; the menu is a `<details>` with three links in order and End
+lease marked; a vacant store offers New lease to an admin only; Create missing charges is a link
+inside a POST form on the Charges tab, not on the bar, with its gate (viewer 403); the operator
+More menu holds Archive as the danger item and a viewer sees none; a store name with markup is
+escaped in the bar and the menu.
+
+**Verdict (B):** PASS (no finding; three design choices accepted).

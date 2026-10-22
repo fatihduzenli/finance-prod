@@ -112,6 +112,20 @@ img, iframe { max-width: 100%; }
 .tabs { display: flex; flex-wrap: wrap; gap: var(--s-1); margin: var(--s-4) 0; }
 .tabs a[aria-current="page"], .tabs [aria-selected="true"] { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
 
+/* --- Menu (PLAN-012e-2 D5, D6) -----------------------------------------------------------
+   .menu: a bar's menu (Lease, More), a native <details> whose <summary class="btn"> opens a
+   list of links or one-button forms; it works without script. .menu-danger: the destructive
+   item (End lease, Archive). .link-action: a POST button that reads as a text link (Create
+   missing charges on the Charges tab). */
+.menu { position: relative; display: inline-block; }
+.menu summary { list-style: none; }
+.menu summary::-webkit-details-marker { display: none; }
+.menu ul { position: absolute; left: 0; top: calc(100% + var(--s-1)); z-index: 10; min-width: 14rem; margin: 0; padding: var(--s-2); list-style: none; display: flex; flex-direction: column; gap: var(--s-1); background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-2); box-shadow: var(--shadow-2); }
+.menu li form { margin: 0; }
+.menu li a, .menu li button { display: block; width: 100%; box-sizing: border-box; padding: var(--s-1) var(--s-2); background: none; border: 0; color: var(--ink); font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.menu .menu-danger { color: var(--danger); }
+.link-action { background: none; border: 0; padding: 0; color: var(--link); font: inherit; text-decoration: underline; cursor: pointer; }
+
 /* --- Table -------------------------------------------------------------------------------
    .table: a list. The regions of {% responsive_table %} (.table-cards and .table-scroll)
    give their table the same look, so no table tag changes. td.money and th.money: an amount,
@@ -309,6 +323,9 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
   form .actions label { margin: .5rem 0 0; }
   form input:not([type=checkbox]):not([type=radio]):not([type=hidden]), form select, form textarea { width: 100% !important; }
   form .btn, form button { width: 100%; }
+  form button.link-action { width: auto; }
+  /* An open bar menu opens in the flow: nothing hangs past the screen's edge. */
+  .menu ul { position: static; margin-top: var(--s-1); box-shadow: none; }
   .topbar form button { width: auto; }
   .topbar-product { display: none; }
   .topbar .nav-search { order: 3; flex: 1 1 100%; margin: 0; }

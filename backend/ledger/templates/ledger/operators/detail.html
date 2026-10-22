@@ -8,15 +8,18 @@
   <div class="page-header"><h1>{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div>
   {% include "ledger/_attention.html" with banners=True %}
 
-  <div class="actions">
+  {% comment %}PLAN-012e-2 D6: Statement, New invoice (primary), Edit, Connect when it applies; Archive in the More menu (ledger/_menu_script.html).{% endcomment %}
+  <div class="actions" id="operator-actions">
     <a class="btn" id="statement" href="{% url 'ledger:operators:statement' pk=operator.pk %}">Statement</a>
+    {% if can_new_invoice %}<a class="btn btn-primary" href="{% url 'ledger:invoices:new_operator' pk=operator.pk %}" id="new-invoice">New invoice</a>{% endif %}
     {% if can_edit %}<a class="btn" href="{% url 'ledger:operators:edit' pk=operator.pk %}">Edit</a>{% endif %}
     {% if can_link %}<a class="btn" href="{% url 'ledger:operators:link' pk=operator.pk %}">Connect to {{ company.provider_name }}</a>{% endif %}
-    {% if can_new_invoice %}<a class="btn" href="{% url 'ledger:invoices:new_operator' pk=operator.pk %}" id="new-invoice">New invoice</a>{% endif %}
     {% if can_archive %}
-      <form method="post" action="{% url 'ledger:operators:archive' pk=operator.pk %}" onsubmit="return window.confirm('Archive this operator? It is hidden from the list but never deleted.');">
-        {% csrf_token %}<button class="btn btn-danger" type="submit">Archive</button>
-      </form>
+      <details class="menu" id="more-menu"><summary class="btn">More ▾</summary><ul>
+        <li><form method="post" action="{% url 'ledger:operators:archive' pk=operator.pk %}" onsubmit="return window.confirm('Archive this operator? It is hidden from the list but never deleted.');">
+          {% csrf_token %}<button class="menu-danger" type="submit" id="archive-operator">Archive</button>
+        </form></li>
+      </ul></details>
     {% endif %}
   </div>
 
@@ -114,9 +117,7 @@
     </form>
     {% include "ledger/stores/_header.html" %}
     {% if space.actions %}
-      <nav aria-label="Store actions" id="action-bar" class="actions action-bar">
-        {% for action in space.actions %}{% if action.post %}<form method="post" action="{{ action.url }}" class="js-single-submit" style="display:inline;">{% csrf_token %}<button class="btn{% if action.danger %} btn-danger{% endif %}" type="submit" id="{{ action.element_id }}">{{ action.label }}</button></form>{% else %}<a class="btn{% if action.danger %} btn-danger{% endif %}" id="{{ action.element_id }}" href="{{ action.url }}">{{ action.label }}</a>{% endif %}{% endfor %}
-      </nav>
+      {% include "ledger/stores/_action_bar.html" %}
     {% elif billing and not header.lease %}
       <p class="muted" id="no-operator-lease">Store {{ store.external_label }} has no current lease of this operator; its page has the store's actions.</p>
     {% endif %}
@@ -137,4 +138,4 @@
     {% elif ows.tab == "history" %}{% if store %}{% include "ledger/stores/_tab_history.html" %}{% else %}<p class="muted">No store.</p>{% endif %}{% endif %}
   </section>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if ows.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}{% if ows.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

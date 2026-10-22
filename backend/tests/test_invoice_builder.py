@@ -1073,7 +1073,8 @@ def test_new_invoice_on_the_store_page_preselects_the_lease_and_saves_a_draft(
     operator, lease = a_world(fake)
     client, _ = client_for(Role.BILLING)
     store_page = client.get(f"/stores/{lease.store_id}/").content.decode()
-    assert 'id="new-invoice"' in store_page
+    # PLAN-012e-2 D5: the store bar's Create invoice carries id="create-invoice".
+    assert 'id="create-invoice"' in store_page
     path = f"/invoices/new/store/{lease.store_id}/"
     blank = client.get(path).content.decode()
     assert f'<option value="{lease.pk}" selected>' in blank
@@ -1103,7 +1104,8 @@ def test_new_invoice_on_the_store_page_preselects_the_lease_and_saves_a_draft(
 def test_a_store_without_a_lease_today_offers_no_new_invoice(fake: FakeProvider) -> None:
     store = Store.objects.create(external_label="Store 0999", status=StoreStatus.ACTIVE)
     client, _ = client_for(Role.BILLING)
-    assert 'id="new-invoice"' not in client.get(f"/stores/{store.pk}/").content.decode()
+    html = client.get(f"/stores/{store.pk}/").content.decode()
+    assert 'id="create-invoice"' not in html and 'id="new-invoice"' not in html
     response = client.get(f"/invoices/new/store/{store.pk}/")
     assert response.status_code == 302 and response["Location"] == f"/stores/{store.pk}/"
 

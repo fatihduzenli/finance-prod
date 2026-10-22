@@ -10,6 +10,7 @@ draft" link. The adversarial cases are the QA owner's (test_plan012d_a_adversari
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -22,7 +23,9 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
+import documents_storage
 from accounts.roles import Role
+from documents_storage.memory import MemoryDocumentStorage
 from ledger.models import (
     AuditLog,
     CollectionSchedule,
@@ -201,10 +204,15 @@ def test_a_vacant_store_offers_new_lease_and_hides_the_lease_actions() -> None:
     admin, _ = client_for(Role.ADMIN)
     html = page(admin, store_page(lease.store_id))
     assert f'href="/leases/new/?store={lease.store_id}"' in html
-    assert 'id="bar-new-lease"' in html and 'id="bar-upload-document"' in html
-    for hidden in ("new-invoice", "bar-record-payment", "bar-charge-now", "bar-edit-lease"):
+    # PLAN-012e-2 D5: New lease only (Upload document is on the Documents tab).
+    bar = html.split('id="action-bar"')[1].split("</nav>")[0]
+    assert re.findall(r'id="([^"]+)"', bar) == ["new-lease"]
+    for hidden in ("create-invoice", "record-payment", "lease-menu", "bar-edit-lease"):
         assert f'id="{hidden}"' not in html, hidden
     assert 'id="store-end-lease"' not in html and 'id="store-transfer"' not in html
+    assert [
+        a.key for a in workspace.store_workspace(lease.store, TODAY, Role.BILLING).actions
+    ] == []
     header = workspace.store_workspace(lease.store, TODAY, Role.ADMIN).header
     assert header.lease is None and header.next_payment is None
 
@@ -213,42 +221,126 @@ def test_a_vacant_store_offers_new_lease_and_hides_the_lease_actions() -> None:
 
 
 def test_the_bar_by_role() -> None:
+    # PLAN-012e-2 D5: Create invoice (primary), Add payment and, for an admin, the Lease
+    # menu (Edit lease, Transfer to another operator, End lease as the danger item).
     lease = a_world()
     store = lease.store
 
-    def keys(role: Role) -> list[str]:
-        return [action.key for action in workspace.store_workspace(store, TODAY, role).actions]
+    def actions(role: Role) -> list[workspace.Action]:
+        return workspace.store_workspace(store, TODAY, role).actions
 
-    billing = [
-        "create_invoice",
-        "record_payment",
-        "add_setup_charge",
-        "schedule_payment",
-        "create_charges",
-        "upload_document",
-        "add_contact",
+    assert actions(Role.VIEWER) == []
+    assert [a.key for a in actions(Role.BILLING)] == ["create_invoice", "record_payment"]
+    found = actions(Role.ADMIN)
+    assert [(a.key, a.label, a.primary) for a in found] == [
+        ("create_invoice", "Create invoice", True),
+        ("record_payment", "Add payment", False),
+        ("lease", "Lease", False),
     ]
-    assert keys(Role.VIEWER) == []
-    assert keys(Role.BILLING) == billing
-    assert keys(Role.ADMIN) == [
-        "create_invoice",
-        "record_payment",
-        "charge_now",
-        *billing[2:],
-        "edit_lease",
-        "transfer",
-        "end_lease",
+    menu = found[2]
+    assert menu.url == ""
+    assert [(i.key, i.label, i.danger) for i in menu.items] == [
+        ("edit_lease", "Edit lease", False),
+        ("transfer", "Transfer to another operator", False),
+        ("end_lease", "End lease", True),
     ]
+    assert not any(item.items for item in menu.items)
     html = page(client_for(Role.ADMIN)[0], store_page(store.pk))
-    assert f'href="/invoices/new/store/{store.pk}/?store={store.pk}&amp;lease={lease.pk}"' in html
-    setup = f"/leases/{lease.pk}/setup-charges/new/"
-    assert f'href="{setup}?store={store.pk}&amp;lease={lease.pk}"' in html
-    # Batch B: "Schedule a payment" opens ``ledger:stores:schedule_payment``.
-    assert f'href="/stores/{store.pk}/schedule-payment/"' in html
-    assert f'href="/stores/{store.pk}/payments/new/"' in html
-    assert f'href="/stores/{store.pk}/charge-now/"' in html
-    assert f'href="/leases/{lease.pk}/edit/?store={store.pk}&amp;lease={lease.pk}"' in html
+    bar = html.split('id="action-bar"')[1].split("</nav>")[0]
+    assert re.findall(r'id="([^"]+)"', bar) == [
+        "create-invoice",
+        "record-payment",
+        "lease-menu",
+        "bar-edit-lease",
+        "store-transfer",
+        "store-end-lease",
+    ]
+    invoice = f"/invoices/new/store/{store.pk}/?store={store.pk}&amp;lease={lease.pk}"
+    assert f'<a class="btn btn-primary" id="create-invoice" href="{invoice}">' in bar
+    assert f'<a class="btn" id="record-payment" href="/stores/{store.pk}/payments/new/">' in bar
+    assert '<details class="menu" id="lease-menu"><summary class="btn">Lease ▾</summary><ul>' in bar
+    edit = f"/leases/{lease.pk}/edit/?store={store.pk}&amp;lease={lease.pk}"
+    assert f'<li><a id="bar-edit-lease" href="{edit}">Edit lease</a></li>' in bar
+    end = f'<a id="store-end-lease" href="/stores/{store.pk}/end-lease/" class="menu-danger">'
+    assert end in bar and bar.count("menu-danger") == 1
+    # The removed actions are gone from the bar (their URLs redirect, PLAN-012e-2 D4).
+    for gone in (
+        "/charge-now/",
+        "/setup-charges/new/",
+        "/schedule-payment/",
+        "/create-charges/",
+        "tab=documents",
+        "/contacts/new/",
+        "<form",
+    ):
+        assert gone not in bar, gone
+    billing = page(client_for(Role.BILLING)[0], store_page(store.pk))
+    billing_bar = billing.split('id="action-bar"')[1].split("</nav>")[0]
+    assert re.findall(r'id="([^"]+)"', billing_bar) == ["create-invoice", "record-payment"]
     assert 'id="action-bar"' not in page(client_for(Role.VIEWER)[0], store_page(store.pk))
+
+
+def test_the_lease_menu_closes_by_script_and_the_viewer_gets_no_script() -> None:
+    lease = a_world()
+    admin = page(client_for(Role.ADMIN)[0], store_page(lease.store_id))
+    assert 'document.querySelectorAll("details.menu")' in admin
+    assert 'event.key !== "Escape"' in admin
+    viewer = page(client_for(Role.VIEWER)[0], store_page(lease.store_id))
+    assert "details.menu" not in viewer and 'class="menu"' not in viewer
+
+
+def test_an_archived_operator_gets_no_create_invoice_but_keeps_the_lease_menu() -> None:
+    lease = a_world()
+    assert lease.operator is not None
+    Operator.objects.filter(pk=lease.operator.pk).update(archived_at=timezone.now())
+    keys = [a.key for a in workspace.store_workspace(lease.store, TODAY, Role.ADMIN).actions]
+    assert keys == ["record_payment", "lease"]
+
+
+# --- The tabs carry the controls that left the bar (PLAN-012e-2 D5) ---------------------------
+
+
+def test_create_missing_charges_is_a_link_under_the_charges_filters_for_billing() -> None:
+    lease = a_world()
+    url = reverse("ledger:stores:create_charges", kwargs={"pk": lease.store_id})
+    billing = page(client_for(Role.BILLING)[0], store_page(lease.store_id, tab="charges"))
+    filters_end = billing.index("</p>", billing.index('id="charge-filters"'))
+    form_at = billing.index(f'<form method="post" action="{url}"')
+    assert filters_end < form_at < billing.index('id="store-charges"')
+    form = billing[form_at : billing.index("</form>", form_at)]
+    assert 'class="js-single-submit" id="create-missing-charges-form"' in form
+    assert "csrfmiddlewaretoken" in form
+    assert (
+        '<button class="link-action" type="submit" id="create-missing-charges">'
+        "Create missing charges</button>"
+    ) in form
+    assert "btn" not in form
+    viewer = page(client_for(Role.VIEWER)[0], store_page(lease.store_id, tab="charges"))
+    assert url not in viewer and "Create missing charges" not in viewer
+    vacant = a_store("3101")
+    admin = page(client_for(Role.ADMIN)[0], store_page(vacant.pk, tab="charges"))
+    assert "/create-charges/" not in admin
+    assert workspace.store_workspace(lease.store, TODAY, Role.VIEWER).create_charges_url == ""
+
+
+def test_upload_is_on_the_documents_tab_and_add_entry_on_the_contact_log_tab(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(documents_storage, "get_storage", lambda: MemoryDocumentStorage())
+    lease = a_world()
+    billing, _ = client_for(Role.BILLING)
+    documents = page(billing, store_page(lease.store_id, tab="documents"))
+    tab_section = documents[documents.index('id="tab-documents"') :]
+    assert 'id="document-upload"' in tab_section and 'id="upload-document"' in tab_section
+    assert "Upload document" not in documents
+    contacts = page(billing, store_page(lease.store_id, tab="contacts"))
+    add = reverse("ledger:stores:contacts_add", kwargs={"pk": lease.store_id})
+    entry = contacts[contacts.index('id="add-store-contact"') :].split("</a>", 1)[0]
+    assert add in entry and entry.endswith(">Add entry")
+    # On the tab (and its empty state's next step): the bar's duplicate is gone.
+    assert contacts.count('id="add-store-contact"') == 1 and 'id="bar-add-contact"' not in contacts
+    bar = contacts.split('id="action-bar"')[1].split("</nav>")[0]
+    assert add not in bar
 
 
 def test_record_a_payment_opens_the_allocation_form() -> None:

@@ -1540,3 +1540,14 @@ sqlite 5,950 passed; PostgreSQL 28 + 6,572 passed; e2e 14 passed in four runs; F
 adversarial file 25 cases green and the PLAN-012 no-debit rule restated as behaviour. **For the
 owner at the checkpoint:** a setup charge now exists once its invoice is sent or recorded; a
 scheduled draft becomes its charge and the draft row goes. Batch B (the action bar) assigned.
+
+## Update, 2026-10-21, PLAN-012e-2 Batch B built and gated (not pushed)
+
+The store page's bar is Create invoice · Add payment · Lease ▾ (Edit lease, Transfer to
+another operator, End lease as the destructive item), New lease only on a vacant store, nothing
+for a viewer; Upload stays on the Documents tab, Add entry on the Contact log tab, Create
+missing charges is a text link under the Charges tab's filters; the operator page's bar is
+Statement · New invoice · Edit · Connect to Stax · More ▾ (Archive). The menu is a native
+disclosure that works without script. Gate: sqlite 5,963 passed; PostgreSQL 28 + 6,586 passed;
+e2e 14 passed in four runs; Fable's adversarial file 7 cases green. Batch C (store details, the
+Store cost block, the New store form, the help pages) assigned.

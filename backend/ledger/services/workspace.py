@@ -11,10 +11,11 @@
   scheduled payment** (the earliest of the next rent debit, the next one-off autopay due
   date, the next installment due and the next re-debit of a returned payment) and the
   **open promise** (:func:`ledger.services.contacts.open_promise`);
-- the **action bar** (D2): which actions the role may take on this store, each pointing at
-  an existing form with the store and its lease in the query string (``?store=``,
-  ``?lease=``); a store without a current lease offers New lease instead of the lease's
-  actions; a viewer gets none; Create missing charges posts (PLAN-012d D13);
+- the **action bar** (D2, PLAN-012e-2 D5): at most Create invoice, Add payment and the
+  Lease menu (admin), each pointing at an existing form with the store and its lease in
+  the query string (``?store=``, ``?lease=``); a store without a current lease offers New
+  lease instead (admin); a viewer gets none; Create missing charges (PLAN-012d D13) is a
+  link on the Charges tab;
 - the **open tab** only (D3, ``?tab=``, Charges by default): Charges, Invoices, Payments,
   Schedules and History are built here; Documents and Contact log are built by their own
   view helpers (:mod:`ledger.views.documents`, :mod:`ledger.views.contact_log`). History
@@ -366,156 +367,109 @@ def _header(lease: Lease | None, today: date, now: datetime, balance: Decimal) -
     )
 
 
-# --- The action bar (D2) -----------------------------------------------------------------
+# --- The action bar (D2, PLAN-012e-2 D5) ---------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
 class Action:
+    """One control of the bar: a link to ``url``, or a menu (``items``, no url of its own)
+    rendered as a native disclosure. ``element_id`` is the control's id on the page."""
+
     key: str
     label: str
     url: str
-    element_id: str
+    primary: bool = False
     danger: bool = False
-    #: A button posting to ``url`` (with the CSRF token) instead of a link.
-    post: bool = False
+    items: tuple[Action, ...] = ()
+    element_id: str = ""
 
 
 def _with(url: str, **params: str) -> str:
     return f"{url}?{urlencode(params)}"
 
 
-def _actions(
-    store: Store,
-    header: Header,
-    role: Role | None,
-    contact_lease: Lease | None,
-    documents_url: str,
-) -> list[Action]:
-    """The bar's actions ``role`` may take (D2), in bar order; none for a viewer. Add
-    contact entry is about ``contact_lease`` (none without one); Upload document opens
-    ``documents_url`` (the page's Documents tab)."""
+def _actions(store: Store, header: Header, role: Role | None) -> list[Action]:
+    """The bar's actions ``role`` may take (PLAN-012e-2 D5), in bar order: Create invoice
+    (primary; the operator not archived), Add payment and, for an admin, the Lease menu
+    (Edit lease, Transfer to another operator, End lease); a store without a current
+    lease offers New lease to an admin; a viewer gets none. Upload, Add entry and Create
+    missing charges are on their tabs."""
     billing = meets(role, Role.BILLING)
     admin = meets(role, Role.ADMIN)
     if not billing:
         return []
-    found: list[Action] = []
     lease = header.lease
-    known = {"store": str(store.pk)}
-    if lease is not None:
-        known["lease"] = str(lease.pk)
-        operator = header.operator
-        if operator is not None and operator.archived_at is None:
-            found.append(
-                Action(
-                    "create_invoice",
-                    "Create invoice",
-                    _with(reverse("ledger:invoices:new_store", kwargs={"pk": store.pk}), **known),
-                    "new-invoice",
-                )
-            )
-        found.append(
-            Action(
-                "record_payment",
-                "Add payment",
-                reverse("ledger:stores:record_payment", kwargs={"pk": store.pk}),
-                "bar-record-payment",
-            )
-        )
-        if admin:
-            found.append(
-                Action(
-                    "charge_now",
-                    "Charge now",
-                    reverse("ledger:stores:charge_now_pick", kwargs={"pk": store.pk}),
-                    "bar-charge-now",
-                )
-            )
-        setup = reverse("ledger:leases:add_setup_charge", kwargs={"pk": lease.pk})
-        found.append(
-            Action(
-                "add_setup_charge",
-                "Add setup charge",
-                _with(setup, **known),
-                "bar-add-setup-charge",
-            )
-        )
-        found.append(
-            Action(
-                "schedule_payment",
-                "Schedule a payment",
-                reverse("ledger:stores:schedule_payment", kwargs={"pk": store.pk}),
-                "bar-schedule-payment",
-            )
-        )
-        # PLAN-012d D13: the run's charges for this store only.
-        found.append(
-            Action(
-                "create_charges",
-                "Create missing charges",
-                reverse("ledger:stores:create_charges", kwargs={"pk": store.pk}),
-                "bar-create-charges",
-                post=True,
-            )
-        )
-    found.append(
-        Action(
-            "upload_document",
-            "Upload document",
-            documents_url,
-            "bar-upload-document",
-        )
-    )
-    if contact_lease is not None:
-        found.append(
-            Action(
-                "add_contact",
-                "Add entry",
-                _with(
-                    reverse("ledger:stores:contacts_add", kwargs={"pk": store.pk}),
-                    store=str(store.pk),
-                    lease=str(contact_lease.pk),
-                ),
-                "bar-add-contact",
-            )
-        )
-    if not admin:
-        return found
     if lease is None:
-        found.append(
+        if not admin:
+            return []
+        return [
             Action(
                 "new_lease",
                 "New lease",
                 _with(reverse("ledger:leases:create"), store=str(store.pk)),
-                "bar-new-lease",
+                element_id="new-lease",
+            )
+        ]
+    known = {"store": str(store.pk), "lease": str(lease.pk)}
+    found: list[Action] = []
+    operator = header.operator
+    if operator is not None and operator.archived_at is None:
+        found.append(
+            Action(
+                "create_invoice",
+                "Create invoice",
+                _with(reverse("ledger:invoices:new_store", kwargs={"pk": store.pk}), **known),
+                primary=True,
+                element_id="create-invoice",
             )
         )
-        return found
     found.append(
         Action(
-            "edit_lease",
-            "Edit lease",
-            _with(reverse("ledger:leases:edit", kwargs={"pk": lease.pk}), **known),
-            "bar-edit-lease",
+            "record_payment",
+            "Add payment",
+            reverse("ledger:stores:record_payment", kwargs={"pk": store.pk}),
+            element_id="record-payment",
         )
     )
-    found.append(
-        Action(
-            "transfer",
-            "Transfer to another operator",
-            reverse("ledger:stores:transfer", kwargs={"pk": store.pk}),
-            "store-transfer",
+    if admin:
+        found.append(
+            Action(
+                "lease",
+                "Lease",
+                "",
+                items=(
+                    Action(
+                        "edit_lease",
+                        "Edit lease",
+                        _with(reverse("ledger:leases:edit", kwargs={"pk": lease.pk}), **known),
+                        element_id="bar-edit-lease",
+                    ),
+                    Action(
+                        "transfer",
+                        "Transfer to another operator",
+                        reverse("ledger:stores:transfer", kwargs={"pk": store.pk}),
+                        element_id="store-transfer",
+                    ),
+                    Action(
+                        "end_lease",
+                        "End lease",
+                        reverse("ledger:stores:end_lease", kwargs={"pk": store.pk}),
+                        danger=True,
+                        element_id="store-end-lease",
+                    ),
+                ),
+                element_id="lease-menu",
+            )
         )
-    )
-    found.append(
-        Action(
-            "end_lease",
-            "End lease",
-            reverse("ledger:stores:end_lease", kwargs={"pk": store.pk}),
-            "store-end-lease",
-            danger=True,
-        )
-    )
     return found
+
+
+def _create_charges_url(store: Store, header: Header, role: Role | None) -> str:
+    """Create missing charges (PLAN-012d D13; a link on the Charges tab since PLAN-012e-2
+    D5): billing, on a store with a current lease; ``""`` otherwise."""
+    if header.lease is None or not meets(role, Role.BILLING):
+        return ""
+    return reverse("ledger:stores:create_charges", kwargs={"pk": store.pk})
 
 
 # --- Charges tab ---------------------------------------------------------------------------
@@ -1080,6 +1034,8 @@ class Workspace:
     tab: str
     #: The open tab's data (empty for Documents and Contact log, built by their views).
     data: dict[str, Any]
+    #: The Charges tab's Create missing charges (a POST), or "" (:func:`_create_charges_url`).
+    create_charges_url: str = ""
 
 
 def _tab_data(
@@ -1121,13 +1077,7 @@ def store_workspace(
     return Workspace(
         store=store,
         header=header,
-        actions=_actions(
-            store,
-            header,
-            role,
-            contacts.store_contact_lease(store, today),
-            tab_url(store.pk, TAB_DOCUMENTS),
-        ),
+        actions=_actions(store, header, role),
         tabs=tabs_for(role),
         tab=tab,
         data=(
@@ -1135,6 +1085,7 @@ def store_workspace(
             if tab == TAB_HISTORY and meets(role, Role.ADMIN)
             else _tab_data(store, tab, chosen, role, balances, today, moment)
         ),
+        create_charges_url=_create_charges_url(store, header, role),
     )
 
 
@@ -1188,20 +1139,15 @@ def _operator_actions(
 ) -> list[Action]:
     """The bar of the selected store on the operator page: the store page's actions on
     the operator's current lease of it (none when the store's current lease is not the
-    operator's); Upload document opens the operator page's Documents tab of the store.
-    Create invoice gets its own element id (the page's New invoice is operator-level)."""
+    operator's). Create invoice gets its own element id and is not the primary: the
+    page's New invoice is (operator-level, PLAN-012e-2 D6)."""
     if header.lease is None:
         return []
-    found = _actions(
-        store,
-        header,
-        role,
-        header.lease,
-        operator_tab_url(operator.pk, TAB_DOCUMENTS, store.pk) + f"#tab-{TAB_DOCUMENTS}",
-    )
     return [
-        replace(action, element_id="bar-new-invoice") if action.key == "create_invoice" else action
-        for action in found
+        replace(action, element_id="bar-new-invoice", primary=False)
+        if action.key == "create_invoice"
+        else action
+        for action in _actions(store, header, role)
     ]
 
 
@@ -1238,6 +1184,7 @@ def operator_workspace(
             tabs=tabs_for(role),
             tab=tab,
             data={},
+            create_charges_url=_create_charges_url(selected, header, role),
         )
     if tab == TAB_HISTORY:
         data = (

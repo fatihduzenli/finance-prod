@@ -17,11 +17,7 @@
 
   {% include "ledger/stores/_header.html" %}
 
-  {% if space.actions %}
-    <nav aria-label="Store actions" id="action-bar" class="actions action-bar">
-      {% for action in space.actions %}{% if action.post %}<form method="post" action="{{ action.url }}" class="js-single-submit" style="display:inline;">{% csrf_token %}<button class="btn{% if action.danger %} btn-danger{% endif %}" type="submit" id="{{ action.element_id }}">{{ action.label }}</button></form>{% else %}<a class="btn{% if action.danger %} btn-danger{% endif %}" id="{{ action.element_id }}" href="{{ action.url }}">{{ action.label }}</a>{% endif %}{% endfor %}
-    </nav>
-  {% endif %}
+  {% if space.actions %}{% include "ledger/stores/_action_bar.html" %}{% endif %}
 
   <nav aria-label="Store tabs" class="actions store-tabs tabs" id="store-tabs">
     {% for name, label in space.tabs %}<a class="btn" id="tab-link-{{ name }}" href="?tab={{ name }}#tab-{{ name }}"{% if name == space.tab %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
@@ -114,4 +110,4 @@
   {% endresponsive_table %}
 
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if space.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if space.actions %}{% include "ledger/_menu_script.html" %}{% endif %}{% if space.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
