@@ -1648,3 +1648,16 @@ Staging runs `990f480`: the grid's colour families, the blank cells outside the 
 12e-3, F3); Step 13 on the owner's prompt. Note for later: the migration round trips grow with
 every migration (20:39 on CI); before they near 30 minutes they need their own split or a
 squash, a decision for Step 13's planning.
+
+## Update, 2026-10-22, Step 12f received; PLAN-012f written
+
+The owner's approved design (`docs/design/DESIGN-SPEC.md`, four reference screenshots, the
+transparent dark logo; all tracked since `990f480`) is to be applied before Step 13 in four
+batches: A tokens, Inter self-hosted, the gradient sidebar, the page header, the phone top bar
+and bottom tab bar; B the component set; C the dashboard, the store and operator workspaces and
+the monthly rent overview per the screenshots; D every other page and the baselines, with the
+three laptop pages and the phone store page shown beside the references. Plan:
+`docs/qa/PLAN-012f-approved-design.md`. Pending the owner (built per the screenshots): the
+sidebar label "Monthly rent", the store tab "Activity", the dashboard card titles, the phone
+banner "SANDBOX — TEST SYSTEM". Approved network read for this step: the Inter font release.
+Batch A assigned.
