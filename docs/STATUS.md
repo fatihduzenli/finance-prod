@@ -1636,3 +1636,15 @@ future month inside the lease; the store column reads "#1991 Istanbul" then the 
 sqlite 6,262 passed; PostgreSQL 34 + 6,889 passed; e2e 17 passed in four runs; the visual suite
 34 passed in the image with the grid and store-tab baselines regenerated; Fable's adversarial
 file 7 cases green. Publish Request to the owner together with the CI layout (`2c3e15b`).
+
+## Update, 2026-10-22, F3 and the CI layout deployed to staging
+
+Pushed `82de92d..990f480` on the owner's "push". The first CI run in the new layout was green:
+checks 0:40; Unit tests A 7:24 and B 7:25 in parallel; end-to-end 2:27 inside the Playwright
+image (no Chromium download); visual 2:24; Migration tests 20:39 (now the longest job, against
+its 30-minute limit); deploy 3:33; 24 minutes from push to staging against 39 the run before.
+Staging runs `990f480`: the grid's colour families, the blank cells outside the lease, the
+"#number name" store column, and the badges on the same tokens. Next: the owner's clicks (12e,
+12e-3, F3); Step 13 on the owner's prompt. Note for later: the migration round trips grow with
+every migration (20:39 on CI); before they near 30 minutes they need their own split or a
+squash, a decision for Step 13's planning.
