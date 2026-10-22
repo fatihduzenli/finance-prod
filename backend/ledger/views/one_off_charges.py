@@ -1,12 +1,14 @@
 """One-off charge screens: detail, manual payment, the marking retry, link an invoice,
-edit, waive, cancel, the provider retry and adding a setup charge from the lease page
-(docs/qa/PLAN-010b D5, D6, D12; PLAN-010d D6, D9). Creating a one-off charge from the
-operator or lease page was replaced by the invoice builder (PLAN-012 D6,
-:mod:`ledger.views.invoices`); its URLs answer 410 Gone (:func:`create_form_gone`).
+edit, waive, cancel and the provider retry (docs/qa/PLAN-010b D5, D6, D12; PLAN-010d D6,
+D9). Adding a setup charge from the lease page moved into the invoice builder
+(PLAN-012e-2 D4): its URL redirects there (:func:`lease_add_setup_charge`). Creating a
+one-off charge from the operator or lease page was replaced by the invoice builder
+(PLAN-012 D6, :mod:`ledger.views.invoices`); its URLs answer 410 Gone
+(:func:`create_form_gone`).
 
 The detail page is read by any role. Recording a payment, retrying the marking of the
 provider invoice or a failed provider request, linking an invoice, editing, cancelling
-and adding a setup charge (GET of the forms and POST) need ``billing``; waiving needs
+(GET of the forms and POST) need ``billing``; waiving needs
 ``admin``, and so does deleting the live provider invoice of a waived charge (PLAN-011
 D0; POST only, queued as ``invoice_delete`` with the waived flag), and so does the Charge
 now confirmation page and its POST (D4), which queues the single ``invoice_pay``
@@ -34,7 +36,6 @@ from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from accounts.roles import Role, meets
@@ -44,7 +45,6 @@ from ledger.forms import (
     ChargeNowForm,
     LinkInvoiceForm,
     ManualPaymentForm,
-    SetupChargeAddForm,
     SetupChargeEditForm,
     WaiveForm,
 )
@@ -58,10 +58,10 @@ from ledger.models import (
     OneOffChargeStatus,
     Operator,
 )
-from ledger.services import collections, csv_export, rent_run, workspace
+from ledger.services import collections, csv_export, invoice_builder, rent_run, workspace
 from ledger.services import one_off_charges as service
 from ledger.services.csv_export import CsvWriter
-from ledger.views import store_context
+from ledger.views import store_context, stores
 from ledger.views.charges import _report
 from ledger.views.installments import parent_context
 from ledger.views.jobs import already_submitted, busy, job_context, submit
@@ -603,38 +603,46 @@ def _load_lease(pk: str) -> Lease:
     return get_object_or_404(Lease.objects.select_related("store", "operator"), pk=key)
 
 
+def setup_item_code(request: HttpRequest, lease: Lease) -> str:
+    """The catalogue item the builder pre-fills on line 1 (PLAN-012e-2 D4): ``?item=``
+    when it names an offered catalogue item, else the first setup-checklist item the lease
+    has no charge of yet, else none (``""``). Always a code of the catalogue, never the
+    request's text."""
+    offered = {fee_type.code: fee_type for fee_type in service.offered_types()}
+    wanted = request.GET.get("item") or ""
+    if wanted in offered:
+        return wanted
+    taken = set(
+        OneOffCharge.objects.filter(lease=lease, legacy=False, fee_type__isnull=False).values_list(
+            "fee_type_id", flat=True
+        )
+    )
+    first = next(
+        (fee_type for fee_type in service.checklist_types() if fee_type.pk not in taken), None
+    )
+    return first.code if first is not None else ""
+
+
 @role_required
-@require_http_methods(["GET", "HEAD", "POST"])
+@require_safe
 def lease_add_setup_charge(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:leases:add_setup_charge``: one setup charge on an existing lease (D5).
-    Opened from the store page (``?store=&lease=``, PLAN-012d D2) it shows the read-only
-    line and returns to the store's Charges tab."""
+    """``ledger:leases:add_setup_charge`` (billing; PLAN-012e-2 D4): "Add setup charge"
+    moved into the invoice builder; this route redirects to the lease's store's New
+    invoice page with the lease, Save draft chosen and the setup item on line 1
+    (:func:`setup_item_code`). A ``?store=``/``?lease=`` other than the lease's answers
+    404, as the form did."""
     refused = _refuse_below(request, Role.BILLING)
     if refused is not None:
         return refused
     lease = _load_lease(pk)
-    context = store_context.for_lease(request, lease)
-    target = f"lease-add-setup-charge:{lease.pk}"
-    if request.method == "POST":
-        form = SetupChargeAddForm(request.POST)
-        if form.is_valid():
-            outcome = service.add_charge(lease.pk, form.item(), actor=_actor(request))
-            if outcome.ok and outcome.charge is not None:
-                messages.success(request, outcome.message)
-                detail = reverse("ledger:one_off_charges:detail", kwargs={"pk": outcome.charge.pk})
-                return redirect(
-                    store_context.return_url(request, context, workspace.TAB_CHARGES, detail)
-                )
-            _error(form, outcome.field, outcome.message)
-        _hold(request, target, form)
-        return redirect(request.get_full_path())
-    form = _held(request, target, SetupChargeAddForm) or SetupChargeAddForm(
-        initial={"due_date": lease.started_on or timezone.localdate()}
-    )
-    return render(
-        request,
-        "ledger/one_off_charges/form.html",
-        {"form": form, "charge": None, "lease": lease, "store_context": context},
+    store_context.for_lease(request, lease)
+    return redirect(
+        stores.builder_url(
+            lease.store,
+            lease.pk,
+            invoice_builder.CollectChoice.DRAFT,
+            setup_item_code(request, lease) or None,
+        )
     )
 
 

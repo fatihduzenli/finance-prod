@@ -37,17 +37,6 @@ more than the amount); credit applied beyond the credit held on the date; nothin
 record; any refusal of a charge's own service. A replayed entry key returns the first
 result and writes nothing.
 
-**Schedule a payment** (:func:`schedule`, PLAN-012d D2 as amended for Batch B): an item
-(a catalogue name, matched as the invoice builder's Item box matches it, or a typed one),
-an optional description, an amount and a debit date make one one-off charge on the
-store's current lease collected by "Autopay on the due date", through
-:func:`ledger.services.one_off_charges.add_charge`: the existing ``schedule_create`` job
-makes the one-occurrence provider schedule. The category follows the item as on a
-builder line (:func:`ledger.services.invoice_builder.category_for`); the description is
-the item and, when given, the detail after it. Every rule of a one-off charge applies
-(a provider customer and a linked bank method, the date today or later, the provider
-limit, the large-debit confirmation); the form's key makes a resubmission create nothing.
-
 Money is ``Decimal`` throughout; nothing here calls the payment provider.
 """
 
@@ -70,7 +59,6 @@ from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
     AuditLog,
-    CollectionMethod,
     Lease,
     OneOffCategory,
     OneOffCharge,
@@ -82,7 +70,6 @@ from ledger.models import (
 from ledger.services import (
     credits,
     insurance,
-    invoice_builder,
     lease_end,
     one_off_charges,
     receivables,
@@ -569,52 +556,3 @@ def _message(
     if applied_total > 0:
         text += APPLIED.format(applied=format_amount(applied_total))
     return text
-
-
-# --- Schedule a payment ------------------------------------------------------------------
-
-SCHEDULE_NOTE = "Scheduled from the store page: {item}."
-
-
-def schedule(
-    store: Store,
-    *,
-    item: str,
-    description: str,
-    amount: Decimal,
-    due_date: date,
-    confirmed: bool,
-    creation_key: uuid.UUID,
-    actor: User | None,
-    today: date | None = None,
-) -> one_off_charges.Outcome:
-    """Schedule one debit of ``amount`` on ``due_date`` for the store's current lease (see
-    the module docstring)."""
-    day = today or timezone.localdate()
-    lease = current_lease(store, day)
-    if lease is None:
-        return one_off_charges.Outcome(False, NO_LEASE)
-    name = visible_text(item or "")
-    offered = {
-        invoice_builder.catalogue_key(fee_type.name): fee_type
-        for fee_type in reversed(invoice_builder.offered_fee_types())
-    }
-    fee_type = offered.get(invoice_builder.catalogue_key(name))
-    if fee_type is not None:
-        name = visible_text(fee_type.name)
-    category = invoice_builder.category_for(fee_type)
-    detail = visible_text(description or "")
-    charge = one_off_charges.ChargeInput(
-        fee_type=fee_type if category == OneOffCategory.SETUP else None,
-        price=amount,
-        cost=None,
-        vendor="",
-        due_date=due_date,
-        note=SCHEDULE_NOTE.format(item=name),
-        category=category,
-        collection=CollectionMethod.AUTOPAY_DUE,
-        description=f"{name}: {detail}" if detail else name,
-        confirmed=confirmed,
-        creation_key=creation_key,
-    )
-    return one_off_charges.add_charge(lease.pk, charge, actor=actor)

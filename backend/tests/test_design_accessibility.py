@@ -240,6 +240,9 @@ def form_classes() -> list[type[forms.BaseForm]]:
 #: Forms whose constructor needs a record or the page's state: they are checked rendered on
 #: their page (``PAGES`` below) instead. Each name says which page.
 NEEDS_ARGUMENTS = {
+    # PLAN-012e-2 D3: the "How to collect" form takes the caller's choices; rendered on the
+    # new-invoice and draft pages below.
+    "CollectForm": "the new-invoice and draft pages",
     "InvoiceDraftForm": "the invoice builder",
     "ContactEntryForm": "the store and operator workspaces, contacts tab",
     "ContactOutcomeForm": "the store and operator workspaces, contacts tab",

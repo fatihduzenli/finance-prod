@@ -170,12 +170,11 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:disputes:refresh": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:disputes:evidence": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:disputes:evidence_retry": RouteRule(min_role=Role.ADMIN, methods=POST),
-    # One-off charges (PLAN-010b D12 as setup charges; PLAN-010d D9): adding a setup
-    # charge, creating a one-off charge (Charge now: admin, checked by the service too),
-    # editing, recording a payment, retrying the marking or the provider request, linking
-    # an invoice and cancelling need billing; waiving needs admin. The views refuse the
-    # forms' GET below the same role.
-    "ledger:leases:add_setup_charge": RouteRule(min_role=Role.BILLING, methods=POST),
+    # One-off charges (PLAN-010b D12 as setup charges; PLAN-010d D9): creating a one-off
+    # charge (Charge now: admin, checked by the service too), editing, recording a
+    # payment, retrying the marking or the provider request, linking an invoice and
+    # cancelling need billing; waiving needs admin. The views refuse the forms' GET below
+    # the same role. Adding a setup charge is a read-only redirect (PLAN-012e-2 D4).
     # The removed "Create one-off charge" form answers 410 Gone (PLAN-012 D6); a POST below
     # billing is still refused here first.
     "ledger:leases:new_charge": RouteRule(min_role=Role.BILLING, methods=POST),
@@ -226,10 +225,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # below those roles too.
     "ledger:stores:contacts_add": RouteRule(min_role=Role.BILLING, methods=POST),
     # PLAN-012d D2, D6: the store page's Record a payment (one payment allocated over
-    # the open charges) and Schedule a payment (one debit on a date) need billing. The
-    # views refuse the forms' GET below billing too.
+    # the open charges) needs billing. The view refuses the form's GET below billing too.
     "ledger:stores:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:stores:schedule_payment": RouteRule(min_role=Role.BILLING, methods=POST),
     # PLAN-012d D13: the store page's Create missing charges (the rent run for one store)
     # needs billing, as the run page's button does; POST only.
     "ledger:stores:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
@@ -395,8 +392,12 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:operators:contacts_export",
         # PLAN-012 D3: the store's contact log.
         "ledger:stores:contacts",
-        # PLAN-012d D2: the store's charges that can be charged now, each linking to its
-        # confirmation page; the view itself requires admin.
+        # PLAN-012e-2 D4: the removed forms' routes redirect to the invoice builder with
+        # the "How to collect" choice pre-selected, GET only (an unsafe method has no rule
+        # and is refused here); each view refuses the GET below the old form's role: Add
+        # setup charge and Schedule a payment billing, Charge now admin.
+        "ledger:leases:add_setup_charge",
+        "ledger:stores:schedule_payment",
         "ledger:stores:charge_now_pick",
         # PLAN-012 D6, D7: an invoice draft's page (billing, checked by the view), its
         # preview and its print view (any role).

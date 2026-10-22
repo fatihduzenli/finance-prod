@@ -1,8 +1,9 @@
 // Dependent fields (docs/qa/PLAN-012c-design-pass.md D8): a control carrying
 // data-shown-when is shown, with its .field wrapper, only while one of its "|"-separated
-// conditions holds: "<id>" (a ticked box, or an input with a value) or "<id>=<value>" (a
-// select or input with that value). Hidden, it is also disabled, so it is not sent: what
-// is saved is what the page shows. A field with an error from the server stays shown.
+// conditions holds: "<id>" (a ticked box or a chosen radio, or an input with a value) or
+// "<id>=<value>" (a select or input with that value). Hidden, it is also disabled, so it
+// is not sent: what is saved is what the page shows. A field with an error from the
+// server stays shown.
 // Controls marked data-reveal (a tick that only drives this script) appear only when the
 // script runs. Without the script every field stays visible and nothing is hidden; the
 // server checks every rule either way.
@@ -13,7 +14,7 @@
     var control = document.getElementById(parts[0]);
     if (!control) { return true; }
     if (parts.length > 1) { return control.value === parts.slice(1).join("="); }
-    if (control.type === "checkbox") { return control.checked; }
+    if (control.type === "checkbox" || control.type === "radio") { return control.checked; }
     return String(control.value || "").trim() !== "";
   }
   var dependents = Array.prototype.slice.call(document.querySelectorAll("[data-shown-when]"));

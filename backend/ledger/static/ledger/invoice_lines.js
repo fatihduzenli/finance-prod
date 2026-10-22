@@ -16,7 +16,9 @@
 //   numbered 1, 2, ... (each control's hidden label says its line: "Line 2, quantity",
 //   "Removed line, quantity") and the invoice total under the table is kept live;
 // - "Add line" copies the last row, blank, under the next index of the management form
-//   (at most its MAX_NUM_FORMS), its labels' for renamed with its controls' ids.
+//   (at most its MAX_NUM_FORMS), its labels' for renamed with its controls' ids;
+// - the "How to collect" buttons name the live total (.collect-amount) and the Schedule
+//   button the debit date (.collect-date; PLAN-012e-2 D3).
 // Nothing is sent from here but the read of the rent amount.
 (function () {
   "use strict";
@@ -90,6 +92,9 @@
     if (totalOut) {
       totalOut.textContent = money(sum);
     }
+    document.querySelectorAll(".collect-amount").forEach(function (span) {
+      span.textContent = money(sum);
+    });
   }
 
   function field(row, suffix) {
@@ -202,6 +207,15 @@
       });
     }
     update(false);
+  }
+
+  var debitOn = document.getElementById("id_schedule_on");
+  if (debitOn) {
+    debitOn.addEventListener("input", function () {
+      document.querySelectorAll(".collect-date").forEach(function (span) {
+        span.textContent = debitOn.value || span.dataset.empty || "";
+      });
+    });
   }
 
   rows().forEach(watch);

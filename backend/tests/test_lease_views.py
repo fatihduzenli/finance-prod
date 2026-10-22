@@ -141,9 +141,10 @@ def read_methods(lease: Lease, fake: FakeProvider) -> Lease:
 
 def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     names = {name for name, _, _ in iter_routes() if name and name.startswith("ledger:leases:")}
-    # PLAN-010b D5, D7, D12: adding one setup charge from the lease page needs billing;
-    # resolving a deposit needs admin, as the lease routes do. Batch C: ending a lease
-    # needs admin. PLAN-012e D5 amendment: so does stopping autopay.
+    # PLAN-010b D5, D7, D12: adding one setup charge from the lease page (a redirect to
+    # the invoice builder since PLAN-012e-2 D4); resolving a deposit needs admin, as the
+    # lease routes do. Batch C: ending a lease needs admin. PLAN-012e D5 amendment: so
+    # does stopping autopay.
     assert names == {
         f"ledger:leases:{short}"
         for short in (
@@ -166,8 +167,10 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     for short in POST_ROUTES:
         rule = registry.rule_for(f"ledger:leases:{short}")
         assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
-    rule = registry.rule_for("ledger:leases:add_setup_charge")
-    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-012e-2 D4: Add setup charge moved into the invoice builder; its route is a
+    # read-only redirect there.
+    assert "ledger:leases:add_setup_charge" in registry.READ_ONLY_ROUTE_NAMES
+    assert registry.rule_for("ledger:leases:add_setup_charge") is None
     # PLAN-010d D9: creating a one-off charge from the lease page needs billing.
     rule = registry.rule_for("ledger:leases:new_charge")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}

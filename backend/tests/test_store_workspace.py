@@ -13,6 +13,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from django.db import connection
@@ -38,7 +39,6 @@ from ledger.models import (
     InvoiceStatus,
     Lease,
     OneOffCategory,
-    OneOffCharge,
     OneOffChargeStatus,
     Operator,
     Payment,
@@ -259,45 +259,60 @@ def test_record_a_payment_opens_the_allocation_form() -> None:
     assert 'id="allocation-form"' in html and 'id="unallocated"' in html
 
 
-def test_charge_now_lists_the_stores_chargeable_charges_for_admins() -> None:
+def test_charge_now_opens_the_builder_with_charge_now_chosen_for_admins(
+    settings: Any,
+) -> None:
+    # PLAN-012e-2 D4: the store's Charge now list moved into the invoice builder.
+    settings.STAX_PAY_INVOICE_ENABLED = True
     lease = a_world()
-    assert lease.operator is not None
-    charge = a_one_off_charge(lease.operator, "120.00", TODAY, lease=lease, collection="charge_now")
-    a_one_off_charge(lease.operator, "80.00", TODAY, lease=lease, description="Manual one")
     url = reverse("ledger:stores:charge_now_pick", kwargs={"pk": lease.store_id})
     assert client_for(Role.BILLING)[0].get(url).status_code == 403
-    html = page(client_for(Role.ADMIN)[0], url)
-    # Not chargeable here (no provider invoice, the flag off): listed with its reason.
-    assert charge.label in html and "Manual one" not in html
-    assert 'id="charge-now-refused"' in html
+    admin = client_for(Role.ADMIN)[0]
+    response = admin.get(url)
+    builder = (
+        reverse("ledger:invoices:new_store", kwargs={"pk": lease.store_id})
+        + f"?store={lease.store_id}&lease={lease.pk}&collect=charge_now"
+    )
+    assert (response.status_code, response["Location"]) == (302, builder)
+    html = page(admin, builder)
+    assert 'id="collect-charge_now" checked' in html and 'id="draft-charge-now"' in html
 
 
 # --- Forms opened from the store (D2, D8) -------------------------------------------------------
 
 
-def test_add_setup_charge_from_the_store_shows_the_line_and_returns_to_the_charges_tab() -> None:
+def test_add_setup_charge_from_the_store_opens_the_builder_with_the_line_and_the_item() -> None:
+    # PLAN-012e-2 D4: Add setup charge moved into the invoice builder: the store, the
+    # lease, Save draft and the setup item on line 1.
     lease = a_world()
-    fee = FeeType.objects.create(code=f"sign-{uuid.uuid4().hex[:6]}", name="Sign", active=True)
+    fee = FeeType.objects.create(
+        code=f"sign-{uuid.uuid4().hex[:6]}",
+        name="Sign",
+        active=True,
+        show_in_setup=True,
+        default_price=D("75.00"),
+    )
     billing, _ = client_for(Role.BILLING)
     url = reverse("ledger:leases:add_setup_charge", kwargs={"pk": lease.pk}) + known(lease)
-    html = page(billing, url)
-    assert "Store 2477 · Lease from 2026-09-01 · Operator Acme Ops" in html
-    assert 'id="store-crumb"' in html
-    response = billing.post(
-        url,
-        {
-            "fee_type": str(fee.pk),
-            "price": "75.00",
-            "cost": "",
-            "vendor": "",
-            "due_date": "2026-10-20",
-        },
+    response = billing.get(url)
+    builder = (
+        reverse("ledger:invoices:new_store", kwargs={"pk": lease.store_id})
+        + f"{known(lease)}&collect=draft&item={fee.code}"
     )
-    assert (response.status_code, response["Location"]) == (302, tab(lease.store_id, "charges"))
-    assert OneOffCharge.objects.get(lease=lease, fee_type=fee).price == D("75.00")
+    assert (response.status_code, response["Location"]) == (302, builder)
+    html = page(billing, builder)
+    assert "Store 2477 · Lease from 2026-09-01 · Operator Acme Ops" in html
+    assert 'value="Sign"' in html and 'value="75.00"' in html
+    assert 'id="collect-draft" checked' in html
+    saved = billing.post(
+        builder,
+        page_data([{"item": "Sign", "unit_amount": "75.00"}], lease=str(lease.pk), collect="draft"),
+    )
+    draft = InvoiceDraft.objects.get()
+    assert saved["Location"] == f"/invoices/drafts/{draft.pk}/{known(lease)}"
     # A refusal keeps the context on the form.
-    again = billing.post(url, {"fee_type": str(fee.pk), "price": "", "due_date": "2026-10-20"})
-    assert again["Location"] == url
+    again = billing.post(builder, page_data([{"item": "Sign", "unit_amount": "-1"}]))
+    assert again["Location"] == builder
 
 
 def test_edit_lease_from_the_store_hides_store_and_operator_and_returns_to_the_store() -> None:
@@ -432,7 +447,8 @@ def test_a_new_invoice_from_the_store_keeps_the_context_to_the_draft() -> None:
     draft = InvoiceDraft.objects.get()
     assert response["Location"] == f"/invoices/drafts/{draft.pk}/{known(lease)}"
     draft_page = page(billing, response["Location"])
-    assert f'action="/invoices/drafts/{draft.pk}/send/?store={lease.store_id}' in draft_page
+    # PLAN-012e-2 D3: the draft form saves and collects; it keeps the context.
+    assert f'action="/invoices/drafts/{draft.pk}/edit/?store={lease.store_id}' in draft_page
     assert 'id="store-crumb"' in draft_page
 
 
@@ -853,18 +869,25 @@ def test_the_already_on_draft_refusal_links_the_other_draft() -> None:
 
 
 def test_a_form_opened_elsewhere_returns_to_a_local_next_only() -> None:
+    # PLAN-012e-2 D4: the setup form this drove is the invoice builder now; its Send by
+    # e-mail (the draft's, opened from the operator page) returns to a local next only.
     lease = a_world()
-    fee = FeeType.objects.create(code=f"sign-{uuid.uuid4().hex[:6]}", name="Sign", active=True)
-    billing, _ = client_for(Role.BILLING)
-    url = reverse("ledger:leases:add_setup_charge", kwargs={"pk": lease.pk})
-    data = {"fee_type": str(fee.pk), "price": "75.00", "due_date": "2026-10-20"}
+    assert lease.operator is not None
+    with_customer(lease.operator)
+    billing, billing_user = client_for(Role.BILLING)
     back = f"/operators/{lease.operator_id}/"
-    response = billing.post(f"{url}?next={back}", data)
-    assert response["Location"] == back
-    OneOffCharge.objects.filter(fee_type=fee).delete()
-    response = billing.post(f"{url}?next=https://evil.example/", data)
-    charge = OneOffCharge.objects.get(fee_type=fee)
-    assert response["Location"] == f"/one-off-charges/{charge.pk}/"
+    for target, expected in ((back, back), ("https://evil.example/", None)):
+        made = invoice_builder.create_draft(
+            lease.operator,
+            lease,
+            "",
+            None,
+            [LineInput("Sign repair", "", None, D("75.00"))],
+            billing_user,
+        )
+        assert made.draft is not None
+        response = billing.post(f"/invoices/drafts/{made.draft.pk}/send/?next={target}")
+        assert response["Location"] == (expected or f"/invoices/drafts/{made.draft.pk}/")
 
 
 def test_a_store_or_lease_of_another_store_answers_404() -> None:

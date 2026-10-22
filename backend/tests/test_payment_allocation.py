@@ -32,6 +32,7 @@ from ledger.models import (
     FeeType,
     InsuranceCharge,
     Invoice,
+    InvoiceDraft,
     InvoiceLineItem,
     Lease,
     LeaseCredit,
@@ -638,20 +639,38 @@ def test_cash_reports_leave_credits_out() -> None:
     }
 
 
-# --- Schedule a payment (D2, Batch B) -------------------------------------------------------
+# --- Schedule a payment (D2, Batch B; the invoice builder's since PLAN-012e-2 D4) ----------
 
 
 def schedule_url(lease: Lease) -> str:
     return reverse("ledger:stores:schedule_payment", kwargs={"pk": lease.store_id})
 
 
-def schedule_form(item: str = "Sign repair", **extra: str) -> dict[str, str]:
+def builder_url(lease: Lease) -> str:
+    """Where Schedule a payment goes: the store's New invoice page, Schedule for a date
+    chosen (PLAN-012e-2 D4)."""
+    return (
+        reverse("ledger:invoices:new_store", kwargs={"pk": lease.store_id})
+        + f"?store={lease.store_id}&lease={lease.pk}&collect=schedule"
+    )
+
+
+def schedule_form(lease: Lease, item: str = "Sign repair", **extra: str) -> dict[str, str]:
+    """The builder's form with one line and Schedule for a date (PLAN-012e-2 D3)."""
     data = {
         "creation_key": str(uuid.uuid4()),
-        "item": item,
-        "description": "",
-        "amount": "150.00",
-        "due_date": "2026-10-20",
+        "lease": str(lease.pk),
+        "memo": "",
+        "due_date": "",
+        "lines-TOTAL_FORMS": "1",
+        "lines-INITIAL_FORMS": "0",
+        "lines-MIN_NUM_FORMS": "0",
+        "lines-MAX_NUM_FORMS": "50",
+        "lines-0-item": item,
+        "lines-0-description": extra.pop("description", ""),
+        "lines-0-unit_amount": extra.pop("amount", "150.00"),
+        "collect": "schedule",
+        "schedule_on": "2026-10-20",
     }
     data.update(extra)
     return data
@@ -661,10 +680,12 @@ def test_schedule_a_payment_creates_an_autopay_charge_and_queues_its_schedule() 
     lease = a_world()
     linked(operator_of(lease))
     client = billing()
-    html = client.get(schedule_url(lease)).content.decode()
-    assert 'list="schedule-items"' in html and 'id="schedule-payment-form"' in html
-    data = schedule_form(description="North wall")
-    response = client.post(schedule_url(lease), data)
+    opened = client.get(schedule_url(lease))
+    assert (opened.status_code, opened["Location"]) == (302, builder_url(lease))
+    html = client.get(builder_url(lease)).content.decode()
+    assert 'id="collect-schedule" checked' in html and 'id="id_schedule_on"' in html
+    data = schedule_form(lease, description="North wall")
+    response = client.post(builder_url(lease), data)
     tab = workspace.tab_url(lease.store_id, workspace.TAB_CHARGES)
     assert (response.status_code, response["Location"]) == (302, tab)
     charge = OneOffCharge.objects.get()
@@ -686,7 +707,7 @@ def test_schedule_a_payment_creates_an_autopay_charge_and_queues_its_schedule() 
     job = Job.objects.get()
     assert (job.kind, job.entity_id) == (JobKind.SCHEDULE_CREATE, charge.pk)
     # The same key again creates nothing.
-    assert client.post(schedule_url(lease), data)["Location"] == tab
+    client.post(builder_url(lease), data)
     assert (OneOffCharge.objects.count(), Job.objects.count()) == (1, 1)
 
 
@@ -694,7 +715,7 @@ def test_a_catalogue_item_keeps_its_fee_type() -> None:
     lease = a_world()
     linked(operator_of(lease))
     fee = FeeType.objects.create(code=f"sign-{uuid.uuid4().hex[:6]}", name="Sign", active=True)
-    assert billing().post(schedule_url(lease), schedule_form("  sign "))
+    assert billing().post(builder_url(lease), schedule_form(lease, "  sign "))
     charge = OneOffCharge.objects.get()
     assert (charge.category, charge.fee_type_id, charge.description) == (
         OneOffCategory.SETUP,
@@ -714,26 +735,30 @@ def test_schedule_a_payment_is_refused_without_a_customer_or_a_bank_method(
     if customer:
         linked(operator_of(lease), bank=bank)
     client = billing()
-    response = client.post(schedule_url(lease), schedule_form())
-    assert response["Location"] == schedule_url(lease)
+    response = client.post(builder_url(lease), schedule_form(lease))
+    # The draft is kept, with the sentence on its page.
+    draft = InvoiceDraft.objects.get()
+    assert response["Location"].startswith(f"/invoices/drafts/{draft.pk}/")
     assert not OneOffCharge.objects.exists() and not Job.objects.exists()
-    assert sentence in client.get(schedule_url(lease)).content.decode()
+    assert sentence in client.get(response["Location"]).content.decode()
 
 
-def test_schedule_a_payment_refuses_a_past_date_and_needs_the_large_debit_tick(
-    settings: Any,
-) -> None:
+def test_schedule_a_payment_refuses_today_and_needs_the_large_debit_tick(settings: Any) -> None:
     settings.LARGE_DEBIT_WARNING_AMOUNT = D("1000.00")
     lease = a_world()
     linked(operator_of(lease))
     client = billing()
-    past = client.post(schedule_url(lease), schedule_form(due_date="2026-10-14"))
-    assert past["Location"] == schedule_url(lease)
-    large = client.post(schedule_url(lease), schedule_form(amount="1500.00"))
-    assert large["Location"] == schedule_url(lease)
+    for day in ("2026-10-14", TODAY.isoformat()):
+        past = client.post(builder_url(lease), schedule_form(lease, schedule_on=day))
+        assert past["Location"] == builder_url(lease)
+    assert not InvoiceDraft.objects.exists()
+    large = client.post(builder_url(lease), schedule_form(lease, amount="1500.00"))
+    draft = InvoiceDraft.objects.get()
+    assert large["Location"].startswith(f"/invoices/drafts/{draft.pk}/")
     assert not OneOffCharge.objects.exists()
     ticked = client.post(
-        schedule_url(lease), schedule_form(amount="1500.00", confirm_large_debit="on")
+        f"/invoices/drafts/{draft.pk}/edit/",
+        schedule_form(lease, amount="1500.00", confirm_large_debit="on"),
     )
     assert ticked["Location"] == workspace.tab_url(lease.store_id, workspace.TAB_CHARGES)
     assert OneOffCharge.objects.get().price == D("1500.00")

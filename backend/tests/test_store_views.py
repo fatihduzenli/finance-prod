@@ -340,6 +340,9 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     # PLAN-012d Batch B: the action bar's Schedule a payment (billing). Batch D (D13):
     # Create missing charges (billing, POST only).
     schedule = ("schedule_payment", "create_charges")
+    # PLAN-012e-2 D4: Charge now and Schedule a payment moved into the invoice builder;
+    # their routes are read-only redirects there.
+    redirects = ("charge_now_pick", "schedule_payment")
     assert names == {
         f"ledger:stores:{short}"
         for short in (
@@ -355,8 +358,10 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
             *schedule,
         )
     }
-    assert "ledger:stores:charge_now_pick" in registry.READ_ONLY_ROUTE_NAMES
-    for short in ("record_payment", *schedule):
+    for short in redirects:
+        assert f"ledger:stores:{short}" in registry.READ_ONLY_ROUTE_NAMES
+        assert registry.rule_for(f"ledger:stores:{short}") is None
+    for short in ("record_payment", "create_charges"):
         rule = registry.rule_for(f"ledger:stores:{short}")
         assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     assert {

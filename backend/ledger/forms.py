@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from django import forms
 from django.core.validators import RegexValidator
 from django.db.models import Q
+from django.utils import timezone
 
 from ledger.models import (
     CALENDAR_TITLE_MAX_LENGTH,
@@ -44,7 +45,7 @@ from ledger.models import (
     RefundMethod,
     Store,
 )
-from ledger.services import invoice_builder, one_off_charges
+from ledger.services import invoice_builder, one_off_charges, rent_run
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import END_DATE_REQUIRED
 from ledger.services.one_off_charges import ChargeInput
@@ -431,32 +432,6 @@ class SetupChargeEditForm(forms.Form):
         self.fields["cost"].help_text = COST_HELP
 
 
-class SetupChargeAddForm(SetupChargeEditForm):
-    """One setup charge added from the lease page (D5): an active fee type, then the edit
-    fields."""
-
-    fee_type = forms.ModelChoiceField(
-        queryset=FeeType.objects.none(), error_messages={"required": "Choose a fee type."}
-    )
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        field = self.fields["fee_type"]
-        if isinstance(field, forms.ModelChoiceField):
-            field.queryset = FeeType.objects.filter(active=True).order_by("sort_order", "name")
-        self.order_fields(["fee_type", "cost", "price", "vendor", "due_date"])
-
-    def item(self) -> ChargeInput:
-        data = self.cleaned_data
-        return ChargeInput(
-            fee_type=data["fee_type"],
-            price=data["price"],
-            cost=data.get("cost"),
-            vendor=data.get("vendor") or "",
-            due_date=data["due_date"],
-        )
-
-
 class _ExactCheckboxInput(forms.CheckboxInput):
     """A checkbox that is ticked only by the exact value a rendered checkbox posts ("on")
     or the literal "true". Django's CheckboxInput treats any other non-empty string,
@@ -626,44 +601,6 @@ class AllocationPaymentForm(forms.Form):
             or Decimal("0.00")
             for charge in self.charges
         }
-
-
-class SchedulePaymentForm(forms.Form):
-    """Schedule a payment from the store page (PLAN-012d D2, Batch B): an item (a catalogue
-    name or a typed one), an optional description, the amount and the debit date. The
-    service (:func:`ledger.services.one_off_charges.add_charge`) checks every rule."""
-
-    creation_key = forms.UUIDField(widget=forms.HiddenInput)
-    item = forms.CharField(
-        max_length=NAME_MAX_LENGTH,
-        validators=[validate_no_payment_data],
-        help_text="Pick a catalogue item from the list or type a name.",
-        error_messages={"required": "Enter the item: a catalogue name or a typed one."},
-    )
-    description = forms.CharField(
-        required=False,
-        max_length=DESCRIPTION_MAX_LENGTH,
-        validators=[validate_no_payment_data],
-        help_text="Optional: a detail shown after the item.",
-    )
-    amount = forms.DecimalField(
-        min_value=Decimal("0.01"), max_value=RENT_MAX, max_digits=12, decimal_places=2
-    )
-    due_date = forms.DateField(
-        label="Debit on",
-        widget=forms.DateInput(attrs={"type": "date"}),
-        help_text="Today or later: the operator's bank account is debited on this date.",
-    )
-    confirm_large_debit = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
-
-    def clean_item(self) -> str:
-        item = visible_text(self.cleaned_data["item"])
-        if not item:
-            raise forms.ValidationError(self.fields["item"].error_messages["required"])
-        return item
-
-    def clean_description(self) -> str:
-        return visible_text(self.cleaned_data["description"])
 
 
 class LinkInvoiceForm(forms.Form):
@@ -1085,6 +1022,159 @@ class ChargeNowForm(forms.Form):
     large-debit box; the service re-checks every rule under the charge's row lock."""
 
     confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
+
+
+#: The draft form's "How to collect" choices and their labels (PLAN-012e-2 D3).
+COLLECT_CHOICES: tuple[tuple[str, str], ...] = (
+    (invoice_builder.CollectChoice.DRAFT.value, "Save draft"),
+    (invoice_builder.CollectChoice.EMAIL.value, "Send by e-mail"),
+    (invoice_builder.CollectChoice.CHARGE_NOW.value, "Charge now"),
+    (invoice_builder.CollectChoice.SCHEDULE.value, "Schedule for a date"),
+    (invoice_builder.CollectChoice.RECORD.value, "Record payment now"),
+)
+#: The name of the submit buttons, one per choice: without the page's script each button
+#: says which choice it submits; with it the one shown matches the chosen radio.
+COLLECT_SUBMIT = "submit_collect"
+
+
+def collect_choices(*, can_charge_now: bool, can_schedule: bool = True) -> list[tuple[str, str]]:
+    """The choices one may take (PLAN-012e-2 D3): Charge now for an admin only, Schedule
+    for a date only where :func:`ledger.services.invoice_builder.can_schedule` allows."""
+    return [
+        (value, label)
+        for value, label in COLLECT_CHOICES
+        if (can_charge_now or value != invoice_builder.CollectChoice.CHARGE_NOW)
+        and (can_schedule or value != invoice_builder.CollectChoice.SCHEDULE)
+    ]
+
+
+def initial_choice(value: object, *, can_charge_now: bool, can_schedule: bool = True) -> str:
+    """The radio ``?collect=`` pre-selects: one of the choices one may take, else
+    Save draft (no error)."""
+    allowed = {
+        key for key, _ in collect_choices(can_charge_now=can_charge_now, can_schedule=can_schedule)
+    }
+    text = str(value or "")
+    return text if text in allowed else invoice_builder.CollectChoice.DRAFT.value
+
+
+class CollectForm(forms.Form):
+    """The draft form's last step, "How to collect" (PLAN-012e-2 D1, D3): the choice, the
+    debit date of Schedule for a date (with the large-debit tick) and the received payment
+    of Record payment now (method, date, reference, note). Each choice's fields carry
+    ``data-shown-when`` (``ledger/shown_when.js``): shown, and sent, only while their radio
+    is chosen; without the script every field shows. The pressed button's
+    :data:`COLLECT_SUBMIT` wins over the radio (a page without the script). The form checks
+    shape and the fields a choice needs; :func:`ledger.services.invoice_builder.collect`
+    checks every rule."""
+
+    collect = forms.ChoiceField(required=False, label="How to collect")
+    schedule_on = forms.DateField(
+        required=False,
+        label="Debit on",
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    confirm_large_debit = forms.BooleanField(
+        required=False, widget=_ExactCheckboxInput, label="I confirm this large debit"
+    )
+    method = forms.ChoiceField(
+        required=False, choices=(("", "—"), *MANUAL_METHOD_CHOICES), label="Received by"
+    )
+    paid_on = forms.DateField(
+        required=False, label="Received on", widget=forms.DateInput(attrs={"type": "date"})
+    )
+    reference = forms.CharField(
+        required=False,
+        max_length=PAYMENT_REFERENCE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        label="Reference",
+    )
+    payment_note = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=PAYMENT_NOTE_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        label="Note",
+    )
+
+    SHOWN_WHEN: dict[str, str] = {
+        "schedule_on": "collect-schedule",
+        "confirm_large_debit": "collect-schedule",
+        "method": "collect-record",
+        "paid_on": "collect-record",
+        "reference": "collect-record",
+        "payment_note": "collect-record",
+    }
+
+    def __init__(
+        self,
+        data: Any = None,
+        *args: Any,
+        can_charge_now: bool,
+        can_schedule: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        if data is not None and data.get(COLLECT_SUBMIT):
+            data = data.copy()
+            data["collect"] = data.get(COLLECT_SUBMIT)
+        super().__init__(data, *args, **kwargs)
+        self.can_charge_now = can_charge_now
+        self.can_schedule = can_schedule
+        self.schedule_note = "" if can_schedule else invoice_builder.SCHEDULE_NOT_OFFERED
+        field = self.fields["collect"]
+        if isinstance(field, forms.ChoiceField):
+            field.choices = collect_choices(
+                can_charge_now=can_charge_now, can_schedule=can_schedule
+            )
+        for name, radio in self.SHOWN_WHEN.items():
+            self.fields[name].widget.attrs["data-shown-when"] = radio
+
+    def choice(self) -> invoice_builder.CollectChoice:
+        return invoice_builder.CollectChoice(
+            self.cleaned_data.get("collect") or invoice_builder.CollectChoice.DRAFT.value
+        )
+
+    def clean_payment_note(self) -> str:
+        return visible_text(self.cleaned_data["payment_note"])
+
+    def clean(self) -> dict[str, Any]:
+        data = super().clean() or {}
+        chosen = data.get("collect") or invoice_builder.CollectChoice.DRAFT.value
+        if chosen == invoice_builder.CollectChoice.SCHEDULE and "schedule_on" not in self.errors:
+            refused = invoice_builder.schedule_refusal(
+                data.get("schedule_on"), timezone.localdate()
+            )
+            if refused is not None:
+                self.add_error("schedule_on", refused.message)
+        if chosen == invoice_builder.CollectChoice.RECORD:
+            if not data.get("method"):
+                self.add_error("method", rent_run.PAY_METHOD)
+            if not data.get("paid_on") and "paid_on" not in self.errors:
+                self.add_error("paid_on", "Enter the date the payment was received.")
+            if not data.get("payment_note") and "payment_note" not in self.errors:
+                self.add_error("payment_note", rent_run.PAY_NOTE_REQUIRED)
+        return data
+
+    def options(self) -> list[dict[str, Any]]:
+        """The radios as the fieldset renders them, with their ids (``collect-<value>``)."""
+        chosen = self["collect"].value() or invoice_builder.CollectChoice.DRAFT.value
+        return [
+            {"value": value, "label": label, "id": f"collect-{value}", "checked": value == chosen}
+            for value, label in collect_choices(
+                can_charge_now=self.can_charge_now, can_schedule=self.can_schedule
+            )
+        ]
+
+    def payment(self) -> invoice_builder.PaymentInput | None:
+        data = self.cleaned_data
+        if not data.get("method") or data.get("paid_on") is None:
+            return None
+        return invoice_builder.PaymentInput(
+            method=data["method"],
+            paid_on=data["paid_on"],
+            reference=(data.get("reference") or "").strip(),
+            note=data.get("payment_note") or "",
+        )
 
 
 # --- Refunds and voids (PLAN-009 D6, D7) ---------------------------------------------------

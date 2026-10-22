@@ -91,7 +91,8 @@ Rules kept here, not in the views:
   each line of a builder invoice is a charge of its own, created here with
   ``with_invoice=False`` (no invoice and no job of its own); a line with a fee type that
   is not a category is a ``setup`` charge with that fee type and the invoice's collection
-  (``email`` or ``charge_now``). The invoice is linked to the **first** line's charge and
+  (``email``, ``charge_now`` or, recorded as received, ``manual``; PLAN-012e-2 D1). The
+  invoice is linked to the **first** line's charge and
   its line items name every line's charge (``invoice_line_items.one_off_charge``); the
   later lines are billed with the first exactly as a companion fee is billed with its
   re-debit (:func:`billed_with`, :func:`billed_companions`): a payment on the invoice at
@@ -758,14 +759,20 @@ def one_off_refusal(
 
 def _billed_setup(item: ChargeInput) -> bool:
     """A setup item billed on an invoice (a builder line with a fee type that is not a
-    category, PLAN-012 D6), or debited on its due date (the store page's "Schedule a
-    payment" of a catalogue item, PLAN-012d D2): it has its fee type and is sent by
-    e-mail, charged now or collected by autopay on the due date."""
+    category, PLAN-012 D6), debited on its due date (the invoice builder's "Schedule for
+    a date" of a catalogue item, PLAN-012d D2, PLAN-012e-2 D1) or recorded as received
+    (its "Record payment now", PLAN-012e-2 D1): it has its fee type and is sent by
+    e-mail, charged now, collected by autopay on the due date or by hand."""
     return (
         item.category == OneOffCategory.SETUP
         and item.fee_type is not None
         and item.collection
-        in (CollectionMethod.EMAIL, CollectionMethod.CHARGE_NOW, CollectionMethod.AUTOPAY_DUE)
+        in (
+            CollectionMethod.EMAIL,
+            CollectionMethod.CHARGE_NOW,
+            CollectionMethod.AUTOPAY_DUE,
+            CollectionMethod.MANUAL,
+        )
     )
 
 
@@ -1787,6 +1794,66 @@ def mark_provider_invoice(
     """Mark the one-off charge's provider invoice paid for this manual payment (the worker's
     ``one_off_payment_mark`` job)."""
     return rent_run.mark_charge_invoice(ONE_OFF, charge_id, payment_id, actor=actor)
+
+
+def payment_to_mark(charge: OneOffCharge) -> Payment | None:
+    """The payment that marks the charge's provider invoice paid once that invoice
+    exists (PLAN-012e-2 D1, Record payment now): for a charge collected by hand whose
+    local invoice is covered by its lines' settled payments (:func:`invoice_covered`) and
+    that has no ``one_off_payment_mark`` job yet, the latest settled manual payment on the
+    charge; else ``None``. A payment recorded before the provider invoice existed was
+    never marked by :func:`record_payment` (nothing to mark then)."""
+    if charge.collection != CollectionMethod.MANUAL:
+        return None
+    invoice = (
+        Invoice.objects.filter(one_off_charge=charge)
+        .exclude(internal_status=InvoiceStatus.VOID)
+        .order_by("issue_date", "invoice_number")
+        .first()
+    )
+    if invoice is None or not invoice_covered(invoice):
+        return None
+    if jobs.latest_for(charge, [JobKind.ONE_OFF_PAYMENT_MARK]) is not None:
+        return None
+    return (
+        Payment.objects.filter(
+            one_off_charge=charge,
+            kind=PaymentKind.ONE_OFF,
+            status=PaymentStatus.SETTLED,
+            is_refund=False,
+            method__in=rent_run.MANUAL_METHODS,
+        )
+        .order_by("-created_at", "-id")
+        .first()
+    )
+
+
+def flag_not_marked(charge_id: uuid.UUID, *, failure: str, fields: str, actor: User | None) -> None:
+    """The provider invoice of a charge paid by hand (:func:`payment_to_mark`) could not be
+    created: the charge needs review with the not-marked text of
+    :data:`payments.offline_marking.MARK_FAILED` (shown "Not marked paid in <provider>:
+    <failure>"), audited. A later successful create queues the mark, which clears it."""
+    with transaction.atomic():
+        charge = OneOffCharge.objects.select_for_update().get(pk=charge_id)
+        if payment_to_mark(charge) is None:
+            return
+        before = {**charge_state(charge), "review_message": charge.review_message}
+        charge.needs_review = True
+        charge.review_message = offline_marking.failure_text(
+            offline_marking.MARK_FAILED, failure, fields
+        )
+        charge.save(update_fields=["needs_review", "review_message", "updated_at"])
+        _audit(
+            actor,
+            ONE_OFF.action("provider_not_updated"),
+            charge,
+            before,
+            {
+                **charge_state(charge),
+                "review_message": charge.review_message,
+                "reason": "invoice_not_created",
+            },
+        )
 
 
 def retry_provider_mark(charge_id: uuid.UUID, *, actor: User | None) -> MarkResult:

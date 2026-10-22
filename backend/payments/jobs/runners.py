@@ -55,6 +55,8 @@ Result = tuple[bool, str]
 NO_CALL = "Nothing to send: the operator needs no sync now."
 #: The sentence of a marking that had nothing to do.
 NO_INVOICE = provider_sentence("The charge has no {provider} invoice to mark.")
+#: The name space of the replay key of a mark queued by a successful create (PLAN-012e-2).
+MARK_AFTER_CREATE = "mark-after-create"
 
 _SYNC_FAILED = (Action.FAILED, Action.UPDATE_FAILED, Action.LINK_REFUSED, Action.RETRY_TOO_SOON)
 _MARK_FAILED = (MarkAction.FAILED, MarkAction.RETRY_TOO_SOON, MarkAction.NOTHING_TO_RETRY)
@@ -194,13 +196,17 @@ def invoice_create_job(job: Job) -> Result:
     with :data:`ledger.services.one_off_charges.CHARGE_NOW_PARAM`, a successful create
     queues the ``invoice_pay`` job (the single attempt of 10d, its confirmation carried
     over). PLAN-012e D11: with :data:`ledger.services.installments.RESCHEDULE_PARAM`, the
-    provider invoice of a moved installment gets its new due date."""
+    provider invoice of a moved installment gets its new due date. PLAN-012e-2 D1: a
+    successful create of a charge already paid by hand queues its mark
+    (:func:`_mark_recorded`)."""
     if job.entity_type == JobEntity.RENT_CHARGE:
         # PLAN-012b-b D5: an invoice builder invoice of one Rent line alone.
         return one_off_invoices.create_rent_invoice(job.entity_id, job.requested_by)
     if job.params.get(installments.RESCHEDULE_PARAM) is True:
         return one_off_invoices.move_invoice(job.entity_id, job.requested_by)
     ok, text = one_off_invoices.create_provider_invoice(job.entity_id, job.requested_by)
+    if ok:
+        _mark_recorded(job)
     if ok and job.params.get(one_off_charges.CHARGE_NOW_PARAM) is True:
         charge = OneOffCharge.objects.get(pk=job.entity_id)
         # A create run twice (a lost worker) queues the attempt once.
@@ -212,6 +218,23 @@ def invoice_create_job(job: Job) -> Result:
                 job.requested_by,
             )
     return ok, text
+
+
+def _mark_recorded(job: Job) -> None:
+    """PLAN-012e-2 D1 (Record payment now): once the provider invoice exists, a charge
+    already paid by hand gets its ``one_off_payment_mark`` job, queued by this successful
+    create (never by time); a create run twice queues it once (the replay key)."""
+    charge = OneOffCharge.objects.get(pk=job.entity_id)
+    payment = one_off_charges.payment_to_mark(charge)
+    if payment is None:
+        return
+    jobs.enqueue(
+        JobKind.ONE_OFF_PAYMENT_MARK,
+        charge,
+        {"payment": payment.pk},
+        job.requested_by,
+        replay_key=uuid.uuid5(payment.pk, MARK_AFTER_CREATE),
+    )
 
 
 def invoice_send_job(job: Job) -> Result:

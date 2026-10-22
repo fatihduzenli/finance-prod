@@ -240,6 +240,10 @@ p.empty, div.empty { padding: var(--s-4); border: 1px dashed var(--line); border
 /* --- Calendar (PLAN-011b D8) ------------------------------------------------------------- */
 .calendar-kinds { border: 0; padding: 0; margin: .5rem 0; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
 .calendar-kinds legend { font-weight: 600; padding: 0; }
+/* The invoice builder's "How to collect" (PLAN-012e-2 D3): the calendar's row of choices. */
+.collect-choices { border: 0; padding: 0; margin: 1rem 0 .5rem; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.collect-choices legend { font-weight: 600; padding: 0; }
+#collect-actions .btn[hidden] { display: none; }
 label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0; font-weight: 400; }
 .calendar-month { border: 1px solid var(--line); }
 .calendar-head, .calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }

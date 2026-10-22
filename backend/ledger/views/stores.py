@@ -26,12 +26,13 @@ and tabs rendered one at a time (``?tab=``): Charges, Invoices (with the store's
 Payments, Schedules, Documents, Contact log (the entries about a lease of the store, with
 **Add entry** for billing; PLAN-012 D3) and History (admin). ``stores:record_payment``
 (billing; one payment allocated over the open charges, PLAN-012d D6),
-``stores:schedule_payment`` (billing; one debit on a date) and ``stores:charge_now_pick``
-(admin) are the bar's Record a payment, Schedule a payment and Charge now; their GET is
-refused below those roles. ``stores:create_charges`` (POST, billing) is the bar's Create
-missing charges: the rent run for this store only
-(:func:`ledger.services.rent_run.catch_up_store`, PLAN-012d D13), on the server's today,
-with what it created as the message, back to the Charges tab.
+``stores:schedule_payment`` (billing) and ``stores:charge_now_pick`` (admin) are the bar's
+Record a payment, Schedule a payment and Charge now; the last two moved into the invoice
+builder's "How to collect" (PLAN-012e-2 D4) and redirect to the store's New invoice page
+with the choice pre-selected (GET only; refused below those roles).
+``stores:create_charges`` (POST, billing) is the bar's Create missing charges: the rent
+run for this store only (:func:`ledger.services.rent_run.catch_up_store`, PLAN-012d D13),
+on the server's today, with what it created as the message, back to the Charges tab.
 """
 
 from __future__ import annotations
@@ -41,7 +42,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlencode
 
-from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import QuerySet
@@ -58,7 +58,6 @@ from ledger.forms import (
     ALLOCATION_PREFIX,
     CREDIT_PREFIX,
     AllocationPaymentForm,
-    SchedulePaymentForm,
     StoreCostCloseForm,
     StoreCostCorrectForm,
     StoreCostForm,
@@ -66,10 +65,7 @@ from ledger.forms import (
     StoreForm,
 )
 from ledger.models import (
-    CollectionMethod,
     DocumentKind,
-    OneOffCharge,
-    OneOffChargeStatus,
     Store,
     StoreCost,
     StoreCostSource,
@@ -80,7 +76,6 @@ from ledger.services import (
     csv_export,
     invoice_builder,
     lease_end,
-    one_off_charges,
     payments_entry,
     rent_run,
     search,
@@ -390,94 +385,52 @@ def store_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
     )
 
 
-SCHEDULE_FORM = "ledger/stores/schedule_payment.html"
+def builder_url(
+    store: Store, lease_id: uuid.UUID | None, choice: str, item: str | None = None
+) -> str:
+    """The store's New invoice page with the "How to collect" choice pre-selected
+    (PLAN-012e-2 D4): the store and lease (both checked already), the choice (one of
+    :class:`~ledger.services.invoice_builder.CollectChoice`) and a catalogue code; nothing
+    the request typed."""
+    values = {"store": str(store.pk)}
+    if lease_id is not None:
+        values["lease"] = str(lease_id)
+    values["collect"] = invoice_builder.CollectChoice(choice).value
+    if item:
+        values["item"] = item
+    return reverse("ledger:invoices:new_store", kwargs={"pk": store.pk}) + "?" + urlencode(values)
 
 
 @role_required
-@require_http_methods(["GET", "HEAD", "POST"])
+@require_safe
 def store_schedule_payment(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:stores:schedule_payment`` (billing; PLAN-012d D2, Batch B): one debit of
-    the operator's bank account on a date, as a one-off charge collected by autopay on its
-    due date (:func:`ledger.services.payments_entry.schedule`). Returns to the Charges tab."""
+    """``ledger:stores:schedule_payment`` (billing; PLAN-012e-2 D4): "Schedule a payment"
+    moved into the invoice builder; this route redirects to the store's New invoice page
+    with Schedule for a date chosen. A store with no current lease goes to its Charges tab
+    as before."""
     if not meets(_role(request), Role.BILLING):
         return forbidden(request)
     store = _load(pk)
-    today = timezone.localdate()
-    lease = payments_entry.current_lease(store, today)
+    lease = payments_entry.current_lease(store, timezone.localdate())
     if lease is None:
         return _no_lease(request, store)
-    target = f"store-schedule:{store.pk}"
-    here = reverse("ledger:stores:schedule_payment", kwargs={"pk": store.pk})
-    if request.method == "POST":
-        form = SchedulePaymentForm(request.POST)
-        if form.is_valid():
-            data = form.cleaned_data
-            outcome = payments_entry.schedule(
-                store,
-                item=data["item"],
-                description=data["description"],
-                amount=data["amount"],
-                due_date=data["due_date"],
-                confirmed=data["confirm_large_debit"],
-                creation_key=data["creation_key"],
-                actor=_actor(request),
-                today=today,
-            )
-            if outcome.ok:
-                if outcome.message == one_off_charges.ALREADY_CREATED:
-                    messages.info(request, outcome.message)
-                else:
-                    messages.success(request, outcome.message)
-                return redirect(workspace.tab_url(store.pk, workspace.TAB_CHARGES))
-            field = {"price": "amount", "due_date": "due_date", "confirm": "confirm_large_debit"}
-            form.add_error(field.get(outcome.field or "", None), outcome.message)
-        _hold(request, target, form)
-        return redirect(here)
-    form = _held(request, target, SchedulePaymentForm) or SchedulePaymentForm(
-        initial={"creation_key": uuid.uuid4(), "due_date": today}
-    )
-    return render(
-        request,
-        SCHEDULE_FORM,
-        {
-            "store": store,
-            "lease": lease,
-            "form": form,
-            "item_names": [fee_type.name for fee_type in invoice_builder.offered_fee_types()],
-            "large_debit": settings.LARGE_DEBIT_WARNING_AMOUNT,
-        },
-    )
+    return redirect(builder_url(store, lease.pk, invoice_builder.CollectChoice.SCHEDULE))
 
 
 @role_required
 @require_safe
 def store_charge_now_pick(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:stores:charge_now_pick`` (admin; PLAN-012d D2): the store's one-off
-    charges collected by Charge now that are still owed, each with the sentence that
-    stops it or a button to its existing confirmation page. Local data only."""
+    """``ledger:stores:charge_now_pick`` (admin; PLAN-012e-2 D4): "Charge now" moved into
+    the invoice builder; this route redirects to the store's New invoice page with Charge
+    now chosen. A charge's own Charge now stays on its page."""
     if not meets(_role(request), Role.ADMIN):
         return forbidden(request)
     store = _load(pk)
-    candidates = (
-        OneOffCharge.objects.filter(
-            lease__store=store, collection=CollectionMethod.CHARGE_NOW, balance__gt=0
+    lease = payments_entry.current_lease(store, timezone.localdate())
+    return redirect(
+        builder_url(
+            store, lease.pk if lease is not None else None, invoice_builder.CollectChoice.CHARGE_NOW
         )
-        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
-        .select_related("operator", "lease__operator", "lease__store", "fee_type")
-        .order_by("due_date", "created_at", "id")
-    )
-    rows = [
-        {"charge": charge, "refusal": one_off_charges.charge_now_refusal(charge)}
-        for charge in candidates
-    ]
-    return render(
-        request,
-        "ledger/stores/charge_now_pick.html",
-        {
-            "store": store,
-            "eligible": [row for row in rows if not row["refusal"]],
-            "refused": [row for row in rows if row["refusal"]],
-        },
     )
 
 

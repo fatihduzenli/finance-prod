@@ -4,8 +4,9 @@
 does not send it while hidden: the operator form's consents (a phone or an e-mail), the
 lease form's second debit day ("Debited twice a month") and the lease-end reason note
 (reason Other). ``ledger/payment_allocation.js`` shows the keep-credit tick only while
-something is unallocated. Without JavaScript every field stays visible and the tick that
-only drives the script stays hidden.
+something is unallocated. The invoice builder's How to collect (PLAN-012e-2 D3) shows each
+choice's fields and button only while its radio is chosen. Without JavaScript every field
+stays visible and the tick that only drives the script stays hidden.
 """
 
 from __future__ import annotations
@@ -142,3 +143,52 @@ def test_without_javascript_every_dependent_field_stays_visible(
     assert page.locator("#id_reason_note").is_visible()
     page.goto(f"{live_server.url}/stores/{lease.store_id}/payments/new/")
     assert page.locator("#keep-credit-field").is_visible()
+
+
+def test_how_to_collect_shows_the_chosen_choices_fields_and_button(
+    live_server: LiveServer, page: Page
+) -> None:
+    """PLAN-012e-2 D3: the builder's How to collect shows the debit date only for
+    Schedule for a date, the received payment only for Record payment now, and the one
+    button of the chosen choice, which names the live total."""
+    lease = a_lease(a_store("E2E-12E2-1"), an_operator("Collect Co"), started=date(2026, 1, 1))
+    _sign_in(page, live_server, "e2e-12e2-collect")
+    page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/")
+    date_field, method = page.locator("#id_schedule_on"), page.locator("#id_method")
+    save, send = page.locator("#save-draft"), page.locator("#send-draft")
+    schedule, record = page.locator("#schedule-draft"), page.locator("#record-draft")
+    assert page.locator("#collect-draft").is_checked()
+    assert not date_field.is_visible() and date_field.is_disabled()
+    assert not method.is_visible() and method.is_disabled()
+    assert save.is_visible() and not send.is_visible() and not record.is_visible()
+    page.fill("#id_lines-0-item", "Sign repair")
+    page.fill("#id_lines-0-unit_amount", "125.50")
+    page.check("#collect-schedule")
+    assert date_field.is_visible() and date_field.is_enabled()
+    assert not method.is_visible()
+    assert schedule.is_visible() and not save.is_visible()
+    assert "Schedule $125.50 for" in schedule.inner_text()
+    page.fill("#id_schedule_on", "2026-12-01")
+    assert schedule.inner_text() == "Schedule $125.50 for 2026-12-01"
+    page.check("#collect-record")
+    assert method.is_visible() and page.locator("#id_payment_note").is_visible()
+    assert not date_field.is_visible() and date_field.is_disabled()
+    assert record.inner_text() == "Record $125.50 received"
+    page.check("#collect-email")
+    assert send.inner_text() == "Send $125.50 by e-mail" and not record.is_visible()
+
+
+def test_without_javascript_how_to_collect_shows_every_field_and_button(
+    live_server: LiveServer, no_script: BrowserContext
+) -> None:
+    lease = a_lease(
+        a_store("E2E-12E2-2"), an_operator("No Script Collect"), started=date(2026, 1, 1)
+    )
+    page = no_script.new_page()
+    _sign_in(page, live_server, "e2e-12e2-noscript")
+    page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/?collect=schedule")
+    assert page.locator("#collect-schedule").is_checked()
+    for control in ("#id_schedule_on", "#id_method", "#id_paid_on", "#id_payment_note"):
+        assert page.locator(control).is_visible(), control
+    for button in ("#save-draft", "#send-draft", "#schedule-draft", "#record-draft"):
+        assert page.locator(button).is_visible(), button

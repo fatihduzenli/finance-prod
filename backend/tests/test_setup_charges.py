@@ -1037,7 +1037,6 @@ def test_the_ledger_and_payment_pages_name_the_kind_and_the_setup_charge() -> No
 # --- Screens and roles (D5, D6, D12) ----------------------------------------------------------
 
 WRITE_ROUTES = {
-    "ledger:leases:add_setup_charge": Role.BILLING,
     "ledger:one_off_charges:payment": Role.BILLING,
     "ledger:one_off_charges:retry_mark": Role.BILLING,
     "ledger:one_off_charges:link": Role.BILLING,
@@ -1058,6 +1057,10 @@ WRITE_ROUTES = {
     # PLAN-012e D10: Split into installments, billing.
     "ledger:one_off_charges:split": Role.BILLING,
 }
+
+#: PLAN-012e-2 D4: Add setup charge moved into the invoice builder; its route is a read-only
+#: redirect there (GET only), refused below billing.
+REDIRECT_ROUTES = {"ledger:leases:add_setup_charge": Role.BILLING}
 
 POST_ONLY_ROUTES = {
     "ledger:one_off_charges:retry_mark",
@@ -1098,8 +1101,10 @@ def test_every_setup_route_is_classified_with_its_role() -> None:
         or name.endswith(":new_charge")
     }
     read_only = {"ledger:one_off_charges:detail", "ledger:one_off_charges:export"}
-    assert names == {*read_only, *WRITE_ROUTES}
-    assert read_only <= registry.READ_ONLY_ROUTE_NAMES
+    assert names == {*read_only, *WRITE_ROUTES, *REDIRECT_ROUTES}
+    assert read_only | set(REDIRECT_ROUTES) <= registry.READ_ONLY_ROUTE_NAMES
+    for name in REDIRECT_ROUTES:
+        assert registry.rule_for(name) is None, name
     for name, role in WRITE_ROUTES.items():
         rule = registry.rule_for(name)
         assert rule is not None and rule.min_role is role and rule.methods == {"POST"}, name
@@ -1116,7 +1121,7 @@ def test_a_viewer_reads_the_page_and_every_write_route_refuses_it() -> None:
     assert (
         "Sign fee" in page and 'id="record-payment"' not in page and 'id="waive-charge"' not in page
     )
-    for name in WRITE_ROUTES:
+    for name in [*WRITE_ROUTES, *REDIRECT_ROUTES]:
         # The retry is a button only: it takes no GET (405), whatever the role.
         expected = 405 if name in POST_ONLY_ROUTES else 403
         assert client.get(paths[name]).status_code == expected, name
@@ -1213,34 +1218,34 @@ def test_billing_links_edits_and_adds_through_the_pages() -> None:
         {"cost": "", "price": "1100.00", "vendor": "V", "due_date": "2026-11-01"},
     )
     assert (fresh(charge).price, fresh(charge).cost) == (D("1100.00"), None)
+    # PLAN-012e-2 D4: Add setup charge opens the invoice builder with the item on line 1;
+    # sent by e-mail, the line is the setup charge.
     access = fee("access_fee")
-    added = client.post(
-        paths["ledger:leases:add_setup_charge"],
-        {
-            "fee_type": str(access.pk),
-            "cost": "",
-            "price": "250.00",
-            "vendor": "",
-            "due_date": "2026-10-01",
-        },
+    operator_id = lease_of(charge).operator_id
+    assert operator_id is not None
+    ExternalRef.objects.create(
+        entity_type="operator",
+        entity_id=operator_id,
+        provider="stax_pay",
+        external_kind="customer",
+        external_id="cus-setup-builder",
     )
+    opened = client.get(paths["ledger:leases:add_setup_charge"] + "?item=access_fee")
+    builder = opened["Location"]
+    assert "collect=draft" in builder and "item=access_fee" in builder
+    assert 'value="Access fee"' in client.get(builder).content.decode()
+    data = builder_form(lease_of(charge), "Access fee", "250.00", collect="email")
+    added = client.post(builder, data)
     new = OneOffCharge.objects.get(lease=lease_of(charge), fee_type=access)
-    assert added["Location"] == f"/one-off-charges/{new.pk}/"
-    duplicate = client.post(
-        paths["ledger:leases:add_setup_charge"],
-        {
-            "fee_type": str(access.pk),
-            "cost": "",
-            "price": "250.00",
-            "vendor": "",
-            "due_date": "2026-10-01",
-        },
-    )
-    assert duplicate["Location"] == paths["ledger:leases:add_setup_charge"]
-    page = client.get(paths["ledger:leases:add_setup_charge"]).content.decode()
-    assert "already has a charge for Access fee" in page
-    # PLAN-012d D2 to D4: the charges and Add setup charge are on the store page.
+    assert (new.price, new.collection) == (D("250.00"), "email")
     lease = lease_of(charge)
+    assert added["Location"] == f"/stores/{lease.store_id}/?tab=invoices#tab-invoices"
+    duplicate = client.post(builder, {**data, "creation_key": str(uuid.uuid4())})
+    assert duplicate["Location"].startswith("/invoices/drafts/")
+    page = client.get(duplicate["Location"]).content.decode()
+    assert "already has a charge for Access fee" in page
+    assert OneOffCharge.objects.filter(lease=lease, fee_type=access).count() == 1
+    # PLAN-012d D2 to D4: the charges and Add setup charge are on the store page.
     store_page = client.get(f"/stores/{lease.store_id}/?tab=charges&filter=all").content.decode()
     assert 'id="store-charges"' in store_page and 'id="bar-add-setup-charge"' in store_page
     assert f"/one-off-charges/{new.pk}/" in store_page
@@ -1248,24 +1253,39 @@ def test_billing_links_edits_and_adds_through_the_pages() -> None:
     assert 'id="setup-charges"' not in lease_page and 'id="store-charges-link"' in lease_page
 
 
-def test_the_vendor_with_a_card_number_is_refused_on_the_add_form_and_never_held() -> None:
+def test_a_card_number_is_refused_on_the_builder_the_add_form_opens_and_never_held() -> None:
+    # PLAN-012e-2 D4: the add form is the invoice builder now; its line detail is the
+    # free text the vendor was.
     charge = a_charge()
     client, _ = client_for(Role.BILLING)
-    path = routes(charge)["ledger:leases:add_setup_charge"]
-    client.post(
-        path,
-        {
-            "fee_type": str(fee("access_fee").pk),
-            "price": "250.00",
-            "vendor": f"V {CARD}",
-            "due_date": "2026-10-01",
-        },
-    )
+    path = client.get(routes(charge)["ledger:leases:add_setup_charge"])["Location"]
+    data = builder_form(lease_of(charge), "Access fee", "250.00", description=f"V {CARD}")
+    client.post(path, data)
     page = client.get(path).content.decode()
     assert "may not contain card or account numbers" in page
     # The whole number, not a fragment: a random identifier on the page may hold "4111".
     assert CARD not in page and CARD.replace(" ", "") not in page
     assert OneOffCharge.objects.count() == 1
+
+
+def builder_form(
+    lease: Lease, item: str, amount: str, *, description: str = "", **fields: str
+) -> dict[str, str]:
+    """The invoice builder's New invoice form with one line (PLAN-012e-2 D3)."""
+    return {
+        "creation_key": str(uuid.uuid4()),
+        "lease": str(lease.pk),
+        "memo": "",
+        "due_date": "",
+        "lines-TOTAL_FORMS": "1",
+        "lines-INITIAL_FORMS": "0",
+        "lines-MIN_NUM_FORMS": "0",
+        "lines-MAX_NUM_FORMS": "50",
+        "lines-0-item": item,
+        "lines-0-description": description,
+        "lines-0-unit_amount": amount,
+        **fields,
+    }
 
 
 # --- The lease checklist screen (D5) ----------------------------------------------------------

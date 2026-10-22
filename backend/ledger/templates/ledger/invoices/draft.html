@@ -20,13 +20,7 @@
     <form method="post" action="{% url 'ledger:invoices:edit' pk=draft.pk %}{{ context_query }}" id="draft-form" class="js-single-submit" autocomplete="off">
       {% csrf_token %}
       {% include "ledger/invoices/_draft_form.html" %}
-      <p class="actions"><button class="btn" type="submit" id="save-draft">Save draft</button></p>
-    </form>
-    <h2>Send</h2>
-    <p class="muted">Send and Charge now use the saved draft: save your changes first. Each line becomes a charge on {% if draft.lease %}the lease of store {{ draft.lease.store.external_label }}{% else %}the operator{% endif %} (an existing open charge's line bills that charge); one invoice with every line goes to {{ company.provider_name }}.</p>
-    <form method="post" action="{% url 'ledger:invoices:send' pk=draft.pk %}{{ context_query }}" id="send-form" class="js-single-submit">
-      {% csrf_token %}
-      <p class="actions"><button class="btn btn-primary" type="submit" id="send-draft">Send {{ preview.total|money }} by e-mail</button>{% if can_charge_now %} <a class="btn" href="{% url 'ledger:invoices:charge_now' pk=draft.pk %}" id="draft-charge-now">Charge now</a>{% endif %}</p>
+      {% include "ledger/invoices/_collect.html" %}
     </form>
   {% elif first_charge or rent_charges %}
     <h2>Invoice</h2>
@@ -34,6 +28,7 @@
       <dt>Number</dt><dd id="sent-number">{{ preview.invoice.invoice_number }}</dd>
       <dt>Here</dt><dd id="sent-internal-status">{{ preview.invoice.get_internal_status_display }}</dd>
       <dt>In {{ company.provider_name }}</dt><dd id="sent-provider-status">{{ preview.invoice.provider_status|default:"not yet" }}</dd>
+      <dt>Collection</dt><dd id="sent-collection">{{ collection_label }}</dd>
     </dl>
     {% include "ledger/_job_status.html" %}
     {% responsive_table %}
@@ -60,4 +55,4 @@
   {% endif %}
   {% if can_cancel %}<p class="actions"><a class="btn" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel</a></p>{% endif %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if editable %}<script src="{% static 'ledger/invoice_lines.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if editable %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/invoice_lines.js' %}" defer></script>{% endif %}{% endblock %}

@@ -216,10 +216,30 @@ def test_an_ended_lease_takes_arrears_by_email_and_the_builder_never_debits_on_a
     run_queued_jobs()
     assert len(calls(fake, "create_invoice")) == 1
     assert calls(fake, "create_schedule") == [] and calls(fake, "pay_invoice") == []
-    # The builder offers no debit-on-the-due-date collection at all: the only ways out of a
-    # draft are the e-mailed invoice and the admin's Charge now (D6).
-    source = (BACKEND / "ledger" / "services" / "invoice_builder.py").read_text(encoding="utf-8")
-    assert "AUTOPAY_DUE" not in source and "autopay_due" not in source
+    # D6, restated for PLAN-012e-2 (the builder now offers "Schedule for a date"): a debit on
+    # a due date is never made for an ended lease, nor for a draft without a lease.
+    second = a_draft(
+        operator, Lease.objects.get(pk=lease.pk), [line("Arrears after move-out, again")]
+    )
+    scheduled = invoice_builder.collect(
+        second.pk,
+        "schedule",
+        actor=user(Role.BILLING),
+        today=TODAY,
+        due_date=TODAY + timedelta(days=7),
+    )
+    assert not scheduled.ok and "Stax" not in scheduled.message
+    no_lease = a_draft(operator, None, [line("Operator-level arrears")])
+    unleased = invoice_builder.collect(
+        no_lease.pk,
+        "schedule",
+        actor=user(Role.BILLING),
+        today=TODAY,
+        due_date=TODAY + timedelta(days=7),
+    )
+    assert not unleased.ok
+    run_queued_jobs()
+    assert calls(fake, "create_schedule") == []
     assert not OneOffCharge.objects.filter(collection=CollectionMethod.AUTOPAY_DUE).exists()
 
 

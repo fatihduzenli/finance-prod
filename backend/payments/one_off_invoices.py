@@ -546,13 +546,22 @@ def create_provider_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
                 record = provider.create_invoice(_invoice_input(charge, invoice, customer))
                 action, text = "invoice.provider_created", CREATED
         except ProviderError as error:
-            return _failed(
+            failed = _failed(
                 charge,
                 actor,
                 "one_off_charge.provider_invoice_failed",
                 error,
                 CREATE_FAILED.format(number=number),
             )
+            # PLAN-012e-2 D1: a charge already paid by hand is flagged until a later
+            # create succeeds and its mark runs.
+            one_off_charges.flag_not_marked(
+                charge.pk,
+                failure=operator_sync.failure_name(error),
+                fields=operator_sync.failure_fields(error),
+                actor=actor,
+            )
+            return failed
         if not _link(invoice, record, actor, action):
             return False, str(LINK_CONFLICT)
         text = text.format(number=number)

@@ -104,6 +104,46 @@ invoice's (its price never changes), the invoice line names it, audited
 :func:`ledger.services.rent_run.first_month`'s, with the proration text; or why the
 month cannot be billed.
 
+**How to collect** (docs/qa/PLAN-012e2-fewer-actions.md D1, D2): :func:`collect` is the
+one entry point of the draft form's last step, with a :class:`CollectChoice`:
+
+- ``draft``: nothing more (the draft was saved by :func:`create_draft` or
+  :func:`update_draft`); refused once it is no longer a draft.
+- ``email`` and ``charge_now``: :func:`send` and :func:`charge_now` above (they are thin
+  wrappers of :func:`collect`).
+- ``schedule`` (billing): one debit of the operator's bank account on ``due_date`` (after
+  today, at most :data:`SCHEDULE_HORIZON_DAYS` days ahead), made as the store page's
+  "Schedule a payment" made it: one one-off charge collected by "Autopay on the due date"
+  through :func:`ledger.services.one_off_charges.create_charge` (the large-debit
+  confirmation, the provider customer and linked bank method, the provider limit), no
+  local invoice, and the ``schedule_create`` job, which makes the one-occurrence provider
+  schedule; the provider generates the invoice on that date and the invoice webhook links
+  it to the charge. The draft must be on an active lease (not an operator's draft, not a
+  lease that ended or is not active: PLAN-012 D6's guards) and have exactly one line, an
+  item (not rent, not an existing charge): the provider's schedule-made invoice is linked
+  to a charge that has no invoice of its own
+  (:func:`payments.one_off_invoices.link_from_provider`), so a schedule cannot carry a
+  builder invoice's several lines. The charge's description is the line's (the item, with
+  the quantity and unit amount when the quantity is not 1), then its detail after a colon.
+  The draft becomes that charge: ``invoice_draft.sent`` is audited with the choice and the
+  charge, and the draft row is removed (a sent draft holds an invoice, and this one has
+  none). A second submit finds no draft.
+- ``record`` (billing): a wire, Zelle or other payment already received
+  (:class:`PaymentInput`; a check is "other" with its number as the reference). The
+  draft is converted as by :func:`send` with collection ``manual`` (the provider invoice
+  is created, never e-mailed), then, in the same transaction, every line's charge is paid
+  in line order at its line total by
+  :func:`ledger.services.one_off_charges.record_payment` (one ``allocation_group``, the
+  creation key of each ``uuid5`` of the draft), so the amount is always the invoice
+  total, never typed. Only the ``invoice_create`` job is queued: its success queues the
+  ``one_off_payment_mark`` job of the first charge (:func:`payments.jobs.runners`,
+  :func:`ledger.services.one_off_charges.payment_to_mark`), which marks the provider
+  invoice paid as cash; a create that fails flags the charge for review
+  (:func:`ledger.services.one_off_charges.flag_not_marked`) until a retry succeeds. Refused, with
+  nothing written: a method other than Zelle, wire or other, a date in the future, no
+  note, a card or account number in the reference or the note, a Rent line (record a
+  rent payment with "Add payment"), and every refusal of :func:`send`.
+
 Every write is audited (entity ``invoice_draft``; the charges as one-off charges).
 Money is ``Decimal`` throughout.
 """
@@ -115,6 +155,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from enum import StrEnum
 from typing import Any
 
 from django.conf import settings
@@ -133,6 +174,7 @@ from ledger.models import (
     ZERO,
     AuditLog,
     CollectionMethod,
+    CollectionStatus,
     FeeType,
     Invoice,
     InvoiceDraft,
@@ -147,6 +189,7 @@ from ledger.models import (
     OneOffCharge,
     OneOffChargeStatus,
     Operator,
+    Payment,
     RentCharge,
     RentChargeStatus,
     ScheduleKind,
@@ -320,6 +363,44 @@ DELETE_SENT = (
 DELETE_TRANSFER = (
     "This draft belongs to a transfer; cancel it from its page instead. Nothing was changed."
 )
+#: How to collect (docs/qa/PLAN-012e2-fewer-actions.md D1).
+CHOICE_UNKNOWN = "Choose how the invoice is collected. Nothing was changed."
+ALREADY_SUBMITTED = "This form was already submitted. Nothing was changed."
+#: The latest debit date of Schedule for a date, in days after today (New York).
+SCHEDULE_HORIZON_DAYS = 365
+SCHEDULE_DATE_REQUIRED = "Choose the date of the debit. Nothing was scheduled."
+SCHEDULE_NOT_AFTER_TODAY = "The debit date must be after today. Nothing was scheduled."
+SCHEDULE_TOO_FAR = (
+    f"The debit date can be at most {SCHEDULE_HORIZON_DAYS} days from today. Nothing was scheduled."
+)
+SCHEDULE_ONE_LINE = (
+    "Schedule for a date takes one line, an item (not rent or an existing charge): send "
+    "an invoice of several lines by e-mail instead. Nothing was scheduled."
+)
+SCHEDULE_NO_LEASE = (
+    "Schedule for a date needs the draft's lease: an operator's invoice is sent by e-mail. "
+    "Nothing was scheduled."
+)
+SCHEDULE_LEASE_NOT_ACTIVE = (
+    "Schedule for a date needs an active lease; this lease has ended or is not active. "
+    "Nothing was scheduled."
+)
+#: The one line under How to collect when Schedule for a date is not offered (D3).
+SCHEDULE_NOT_OFFERED = "Schedule needs an active lease with one line."
+SCHEDULE_TRANSFER = (
+    "This draft belongs to a transfer; send it from its page instead. Nothing was scheduled."
+)
+#: The internal note of a scheduled debit's charge.
+SCHEDULE_NOTE = "Scheduled with the invoice builder from {draft}: {item}."
+RECORD_PAYMENT_REQUIRED = "Enter how and when the payment was received. Nothing was recorded."
+RECORD_RENT = (
+    "Record payment now takes lines other than rent: record a rent payment with Add "
+    "payment. Nothing was recorded."
+)
+RECORDED = provider_sentence(
+    "Invoice {number} created and recorded as paid. {provider} marks it paid shortly; "
+    "this page shows the outcome."
+)
 #: The internal note of each line's charge.
 LINE_NOTE = "Line {line} of invoice {number}, made with the invoice builder from {draft}."
 #: Appended to that note when the line has a detail (D3).
@@ -379,6 +460,28 @@ class CleanLine:
         return self.existing_charge is not None
 
 
+class CollectChoice(StrEnum):
+    """How a draft is collected: the draft form's last step (PLAN-012e-2 D1)."""
+
+    DRAFT = "draft"
+    EMAIL = "email"
+    CHARGE_NOW = "charge_now"
+    SCHEDULE = "schedule"
+    RECORD = "record"
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentInput:
+    """A payment already received, for :data:`CollectChoice.RECORD`: the method (one of
+    :data:`ledger.services.rent_run.MANUAL_METHODS`), the day it was received, the bank,
+    Zelle or check reference and the staff note."""
+
+    method: str
+    paid_on: date
+    reference: str = ""
+    note: str = ""
+
+
 @dataclass(frozen=True, slots=True)
 class Outcome:
     ok: bool
@@ -388,6 +491,12 @@ class Outcome:
     draft: InvoiceDraft | None = None
     invoice: Invoice | None = None
     job: Job | None = None
+    #: The one-off charges the draft became, in line order.
+    charges: tuple[OneOffCharge, ...] = ()
+    #: The first line's payment of :data:`CollectChoice.RECORD`.
+    payment: Payment | None = None
+    #: The ``schedule_create`` job of :data:`CollectChoice.SCHEDULE`.
+    schedule: Job | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1030,6 +1139,10 @@ def create_draft(
             earlier = _draft_for_key(creation_key)
             if earlier is not None:
                 return Outcome(True, CREATED.format(number=earlier.number), draft=earlier)
+            if _key_used(creation_key):
+                # The draft this form made is gone (scheduled or deleted): a resubmitted
+                # form makes nothing again (PLAN-012e-2 D1).
+                return Outcome(False, ALREADY_SUBMITTED)
             draft = InvoiceDraft.objects.create(
                 operator=operator,
                 lease=lease,
@@ -1054,13 +1167,21 @@ def create_draft(
     return Outcome(True, CREATED.format(number=draft.number), draft=draft)
 
 
-def _draft_for_key(creation_key: uuid.UUID | None) -> InvoiceDraft | None:
+def _key_row(creation_key: uuid.UUID | None) -> AuditLog | None:
     if creation_key is None:
         return None
-    row = AuditLog.objects.filter(
+    return AuditLog.objects.filter(
         action=CREATED_ACTION, entity_type=ENTITY_DRAFT, after__creation_key=str(creation_key)
     ).first()
+
+
+def _draft_for_key(creation_key: uuid.UUID | None) -> InvoiceDraft | None:
+    row = _key_row(creation_key)
     return InvoiceDraft.objects.filter(pk=row.entity_id).first() if row is not None else None
+
+
+def _key_used(creation_key: uuid.UUID | None) -> bool:
+    return _key_row(creation_key) is not None
 
 
 def update_draft(
@@ -1303,20 +1424,295 @@ def charge_now_details(draft: InvoiceDraft, actor: User | None) -> ChargeNowDeta
 
 
 def send(draft_id: uuid.UUID, actor: User | None, *, today: date | None = None) -> Outcome:
-    """Send the draft by e-mail (billing): see the module docstring."""
-    if not _is_billing(actor):
-        return Outcome(False, BILLING_ONLY)
-    return _convert(draft_id, actor, CollectionMethod.EMAIL, confirmed=False, today=today)
+    """Send the draft by e-mail (billing): :func:`collect` with :data:`CollectChoice.EMAIL`."""
+    return collect(draft_id, CollectChoice.EMAIL, actor=actor, today=today)
 
 
 def charge_now(
     draft_id: uuid.UUID, actor: User | None, *, confirmed: bool, today: date | None = None
 ) -> Outcome:
-    """Charge the draft now (admin, the 10d confirmation): see the module docstring."""
-    if not _is_admin(actor):
-        return Outcome(False, CHARGE_NOW_ADMIN)
-    return _convert(
-        draft_id, actor, CollectionMethod.CHARGE_NOW, confirmed=confirmed is True, today=today
+    """Charge the draft now (admin, the 10d confirmation): :func:`collect` with
+    :data:`CollectChoice.CHARGE_NOW`."""
+    return collect(
+        draft_id, CollectChoice.CHARGE_NOW, actor=actor, today=today, confirmed=confirmed
+    )
+
+
+def collect(
+    draft_id: uuid.UUID,
+    choice: CollectChoice | str,
+    *,
+    actor: User | None,
+    today: date | None = None,
+    confirmed: bool = False,
+    due_date: date | None = None,
+    payment: PaymentInput | None = None,
+) -> Outcome:
+    """Collect the draft as ``choice`` says (PLAN-012e-2 D1; see the module docstring).
+    Never calls the provider: the provider work is queued."""
+    try:
+        chosen = CollectChoice(choice)
+    except ValueError:
+        return Outcome(False, CHOICE_UNKNOWN, "collect")
+    if chosen == CollectChoice.CHARGE_NOW:
+        if not _is_admin(actor):
+            return Outcome(False, CHARGE_NOW_ADMIN)
+    elif not _is_billing(actor):
+        return Outcome(False, BILLING_ONLY)
+    day = today or timezone.localdate()
+    if chosen == CollectChoice.DRAFT:
+        return _kept(draft_id)
+    if chosen == CollectChoice.EMAIL:
+        return _convert(
+            draft_id, actor, CollectionMethod.EMAIL, confirmed=False, today=day, choice=chosen
+        )
+    if chosen == CollectChoice.CHARGE_NOW:
+        return _convert(
+            draft_id,
+            actor,
+            CollectionMethod.CHARGE_NOW,
+            confirmed=confirmed is True,
+            today=day,
+            choice=chosen,
+        )
+    if chosen == CollectChoice.SCHEDULE:
+        refused = schedule_refusal(due_date, day)
+        if refused is not None or due_date is None:
+            return refused or Outcome(False, SCHEDULE_DATE_REQUIRED, "due_date")
+        return _schedule(draft_id, actor, due_date, confirmed=confirmed is True, today=day)
+    refused = _payment_refusal(payment, day)
+    if refused is not None or payment is None:
+        return refused or Outcome(False, RECORD_PAYMENT_REQUIRED, "method")
+    return _record(draft_id, actor, payment, today=day)
+
+
+def _kept(draft_id: uuid.UUID) -> Outcome:
+    """:data:`CollectChoice.DRAFT`: the saved draft as it is, while it is a draft."""
+    draft = InvoiceDraft.objects.select_related("sent_invoice").filter(pk=draft_id).first()
+    if draft is None:
+        return Outcome(False, NOT_A_DRAFT)
+    if draft.status == InvoiceDraftStatus.SENT and draft.sent_invoice is not None:
+        number = draft.sent_invoice.invoice_number
+        return Outcome(False, ALREADY_SENT.format(number=number), draft=draft)
+    if draft.status != InvoiceDraftStatus.DRAFT:
+        return Outcome(False, ALREADY_CANCELLED, draft=draft)
+    return Outcome(True, SAVED, draft=draft)
+
+
+def schedule_lease_refusal(lease: Lease | None) -> str:
+    """Why a draft on ``lease`` cannot be scheduled (PLAN-012 D6's guards, kept for
+    Schedule for a date: no debit on a date without an active lease), or ``""``."""
+    if lease is None:
+        return SCHEDULE_NO_LEASE
+    if lease.ended_on is not None or lease.collection_status != CollectionStatus.ACTIVE:
+        return SCHEDULE_LEASE_NOT_ACTIVE
+    return ""
+
+
+def can_schedule(lease: Lease | None, lines: Sequence[InvoiceDraftLine] | None = None) -> bool:
+    """Whether the page offers Schedule for a date (D3): an active lease and, for a saved
+    draft, exactly one line that is an item (not rent, not an existing charge). A new
+    draft opens with one line; the service checks the lines again either way."""
+    if schedule_lease_refusal(lease):
+        return False
+    if lines is None:
+        return True
+    return (
+        len(lines) == 1 and lines[0].rent_lease_id is None and lines[0].existing_charge_id is None
+    )
+
+
+def schedule_refusal(due_date: date | None, today: date) -> Outcome | None:
+    """Why ``due_date`` cannot be the debit date of Schedule for a date, or ``None``."""
+    if due_date is None:
+        return Outcome(False, SCHEDULE_DATE_REQUIRED, "due_date")
+    if due_date <= today:
+        return Outcome(False, SCHEDULE_NOT_AFTER_TODAY, "due_date")
+    if due_date > today + timedelta(days=SCHEDULE_HORIZON_DAYS):
+        return Outcome(False, SCHEDULE_TOO_FAR, "due_date")
+    return None
+
+
+def _payment_refusal(payment: PaymentInput | None, today: date) -> Outcome | None:
+    """The first rule the received payment breaks before anything is read (the rules of
+    :func:`ledger.services.rent_run.payment_refusal` but the amount, which is the
+    invoice total), or ``None``."""
+    if payment is None:
+        return Outcome(False, RECORD_PAYMENT_REQUIRED, "method")
+    if payment.method not in rent_run.MANUAL_METHODS:
+        return Outcome(False, rent_run.PAY_METHOD, "method")
+    if payment.paid_on > today:
+        return Outcome(False, rent_run.PAY_FUTURE, "paid_on")
+    note = visible_text(payment.note or "")
+    if not note:
+        return Outcome(False, rent_run.PAY_NOTE_REQUIRED, "note")
+    if not _guarded(note):
+        return Outcome(False, rent_run.PAY_NOTE_PAYMENT_DATA, "note")
+    if not _guarded(payment.reference or ""):
+        return Outcome(False, rent_run.PAY_NOTE_PAYMENT_DATA, "reference")
+    return None
+
+
+def _locked_draft(draft_id: uuid.UUID) -> tuple[InvoiceDraft | None, Outcome | None]:
+    """The draft under its row lock while it is a draft, else why not. Runs in the
+    caller's transaction."""
+    draft = (
+        InvoiceDraft.objects.select_for_update(of=("self",))
+        .select_related("operator", "lease", "sent_invoice")
+        .filter(pk=draft_id)
+        .first()
+    )
+    if draft is None:
+        return None, Outcome(False, NOT_A_DRAFT)
+    if draft.status == InvoiceDraftStatus.SENT and draft.sent_invoice is not None:
+        number = draft.sent_invoice.invoice_number
+        return None, Outcome(False, ALREADY_SENT.format(number=number), draft=draft)
+    if draft.status == InvoiceDraftStatus.CANCELLED:
+        return None, Outcome(False, ALREADY_CANCELLED, draft=draft)
+    return draft, None
+
+
+def _stored_lines(draft: InvoiceDraft, operator: Operator) -> list[CleanLine]:
+    """The draft's saved lines checked again (:func:`clean_lines`); :class:`_Refused`."""
+    return clean_lines(
+        [
+            LineInput(
+                line.item,
+                line.description,
+                line.quantity,
+                line.unit_amount,
+                rent_lease=line.rent_lease_id,
+                rent_month=line.rent_month,
+                existing_charge=line.existing_charge_id,
+            )
+            for line in lines_of(draft)
+        ],
+        lease=draft.lease,
+        operator=operator,
+        draft=draft.pk,
+    )
+
+
+def _schedule(
+    draft_id: uuid.UUID, actor: User | None, due: date, *, confirmed: bool, today: date
+) -> Outcome:
+    """:data:`CollectChoice.SCHEDULE` (see the module docstring), in one transaction."""
+    with transaction.atomic():
+        draft, refused = _locked_draft(draft_id)
+        if draft is None:
+            return refused or Outcome(False, NOT_A_DRAFT)
+        if LeaseTransfer.objects.filter(draft=draft).exists():
+            return Outcome(False, SCHEDULE_TRANSFER, draft=draft)
+        operator = Operator.objects.select_for_update().get(pk=draft.operator_id)
+        lease = draft.lease
+        refused_lease = schedule_lease_refusal(lease)
+        if refused_lease:
+            return Outcome(False, refused_lease, draft=draft)
+        header = _header_refusal(operator, lease, draft.memo, draft.due_date, today)
+        if header is not None:
+            return Outcome(False, header.message, header.field, draft=draft)
+        try:
+            lines = _stored_lines(draft, operator)
+        except _Refused as error:
+            return Outcome(False, error.outcome.message, error.outcome.field, draft=draft)
+        if len(lines) != 1 or lines[0].is_rent or lines[0].is_existing:
+            return Outcome(False, SCHEDULE_ONE_LINE, draft=draft)
+        [line] = lines
+        category = category_for(line.fee_type)
+        name = charge_description(line)
+        item = ChargeInput(
+            fee_type=line.fee_type if category == OneOffCategory.SETUP else None,
+            price=line.line_total,
+            cost=None,
+            vendor="",
+            due_date=due,
+            note=SCHEDULE_NOTE.format(draft=draft.number, item=line.item),
+            category=category,
+            collection=CollectionMethod.AUTOPAY_DUE,
+            description=f"{name}: {line.description}" if line.description else name,
+            confirmed=confirmed,
+            creation_key=uuid.uuid5(draft.pk, CollectChoice.SCHEDULE.value),
+        )
+        made = one_off_charges.create_charge(operator, lease, item, actor, today=today)
+        if not made.ok or made.charge is None:
+            transaction.set_rollback(True)
+            return Outcome(False, made.message, _schedule_field(made.field), draft=draft)
+        before = draft_state(draft)
+        _audit(
+            actor,
+            SENT_ACTION,
+            draft,
+            before,
+            {
+                **before,
+                "status": InvoiceDraftStatus.SENT.value,
+                "invoice_number": None,
+                "collection": CollectionMethod.AUTOPAY_DUE.value,
+                "choice": CollectChoice.SCHEDULE.value,
+                "charges": [str(made.charge.pk)],
+                "rent_charges": [],
+                "due_date": due.isoformat(),
+            },
+        )
+        draft.delete()
+    return Outcome(True, made.message, charges=(made.charge,), job=made.job, schedule=made.job)
+
+
+def _schedule_field(field: str | None) -> str | None:
+    """The draft form's field of a one-off charge's refusal: the debit date and the
+    large-debit confirmation are the schedule's; the price is the lines' total."""
+    return {"due_date": "due_date", "confirm": "confirm", "price": None}.get(field or "", None)
+
+
+def _record(
+    draft_id: uuid.UUID, actor: User | None, payment: PaymentInput, *, today: date
+) -> Outcome:
+    """:data:`CollectChoice.RECORD` (see the module docstring), in one transaction."""
+    with transaction.atomic():
+        converted = _convert(
+            draft_id,
+            actor,
+            CollectionMethod.MANUAL,
+            confirmed=False,
+            today=today,
+            choice=CollectChoice.RECORD,
+        )
+        if not converted.ok or converted.invoice is None or converted.draft is None:
+            return converted
+        key = uuid.uuid5(converted.draft.pk, CollectChoice.RECORD.value)
+        group = uuid.uuid4()
+        note = visible_text(payment.note or "")
+        payments: list[Payment] = []
+        items = (
+            InvoiceLineItem.objects.filter(invoice=converted.invoice, one_off_charge__isnull=False)
+            .select_related("one_off_charge")
+            .order_by("position")
+        )
+        for item in items:
+            charge = item.one_off_charge
+            if charge is None:  # pragma: no cover (filtered above)
+                continue
+            paid = one_off_charges.record_payment(
+                charge.pk,
+                method=payment.method,
+                amount=Decimal(item.line_total),
+                paid_on=payment.paid_on,
+                note=note,
+                actor=actor,
+                creation_key=uuid.uuid5(key, str(charge.pk)),
+                today=today,
+                reference=payment.reference,
+                allocation_group=group,
+            )
+            if not paid.ok or paid.payment is None:
+                transaction.set_rollback(True)
+                prefix = LINE_PREFIX.format(line=item.position)
+                return Outcome(False, prefix + paid.message, paid.field, draft=converted.draft)
+            payments.append(paid.payment)
+    return replace(
+        converted,
+        message=RECORDED.format(number=converted.invoice.invoice_number),
+        payment=payments[0],
     )
 
 
@@ -1327,45 +1723,24 @@ def _convert(
     *,
     confirmed: bool,
     today: date | None,
+    choice: CollectChoice,
 ) -> Outcome:
     day = today or timezone.localdate()
     with transaction.atomic():
-        draft = (
-            InvoiceDraft.objects.select_for_update(of=("self",))
-            .select_related("operator", "lease", "sent_invoice")
-            .get(pk=draft_id)
-        )
-        if draft.status == InvoiceDraftStatus.SENT and draft.sent_invoice is not None:
-            number = draft.sent_invoice.invoice_number
-            return Outcome(False, ALREADY_SENT.format(number=number), draft=draft)
-        if draft.status == InvoiceDraftStatus.CANCELLED:
-            return Outcome(False, ALREADY_CANCELLED, draft=draft)
+        draft, refused_draft = _locked_draft(draft_id)
+        if draft is None:
+            return refused_draft or Outcome(False, NOT_A_DRAFT)
         operator = Operator.objects.select_for_update().get(pk=draft.operator_id)
         lease = draft.lease
         refused = _header_refusal(operator, lease, draft.memo, draft.due_date, day)
         if refused is not None:
             return Outcome(False, refused.message, refused.field, draft=draft)
-        stored = lines_of(draft)
         try:
-            lines = clean_lines(
-                [
-                    LineInput(
-                        line.item,
-                        line.description,
-                        line.quantity,
-                        line.unit_amount,
-                        rent_lease=line.rent_lease_id,
-                        rent_month=line.rent_month,
-                        existing_charge=line.existing_charge_id,
-                    )
-                    for line in stored
-                ],
-                lease=lease,
-                operator=operator,
-                draft=draft.pk,
-            )
+            lines = _stored_lines(draft, operator)
         except _Refused as error:
             return Outcome(False, error.outcome.message, error.outcome.field, draft=draft)
+        if collection == CollectionMethod.MANUAL and any(line.is_rent for line in lines):
+            return Outcome(False, RECORD_RENT, draft=draft)
         total = total_of(lines)
         if not leases.customer_ref(operator):
             return Outcome(False, NO_PROVIDER_CUSTOMER, draft=draft)
@@ -1468,7 +1843,7 @@ def _convert(
         if not one_offs:
             # One rent line alone: the provider invoice is its rent charge's.
             job = jobs.enqueue(JobKind.INVOICE_CREATE, rents[0], params, actor)
-            _sent(draft, invoice, actor, number, collection, charges, due)
+            _sent(draft, invoice, actor, number, collection, charges, due, choice)
             return Outcome(True, SENT.format(number=number), draft=draft, invoice=invoice, job=job)
         first = one_offs[0]
         if collection == CollectionMethod.CHARGE_NOW:
@@ -1493,9 +1868,16 @@ def _convert(
                 )
             params = {CHARGE_NOW_PARAM: True, "confirmed": confirmed}
         job = jobs.enqueue(JobKind.INVOICE_CREATE, first, params, actor)
-        _sent(draft, invoice, actor, number, collection, charges, due)
+        _sent(draft, invoice, actor, number, collection, charges, due, choice)
     template = CHARGE_REQUESTED if collection == CollectionMethod.CHARGE_NOW else SENT
-    return Outcome(True, template.format(number=number), draft=draft, invoice=invoice, job=job)
+    return Outcome(
+        True,
+        template.format(number=number),
+        draft=draft,
+        invoice=invoice,
+        job=job,
+        charges=tuple(one_offs),
+    )
 
 
 def _sent(
@@ -1506,8 +1888,10 @@ def _sent(
     collection: CollectionMethod,
     charges: Sequence[OneOffCharge | RentCharge],
     due: date,
+    choice: CollectChoice,
 ) -> None:
-    """The draft becomes ``sent`` with its invoice, audited with every line's charge."""
+    """The draft becomes ``sent`` with its invoice, audited with every line's charge and
+    the collection chosen (PLAN-012e-2 D2)."""
     before = draft_state(draft)
     draft.status = InvoiceDraftStatus.SENT
     draft.sent_invoice = invoice
@@ -1521,6 +1905,7 @@ def _sent(
             **draft_state(draft),
             "invoice_number": number,
             "collection": collection.value,
+            "choice": choice.value,
             "charges": [str(row.pk) for row in charges if isinstance(row, OneOffCharge)],
             "rent_charges": [str(row.pk) for row in charges if isinstance(row, RentCharge)],
             "due_date": due.isoformat(),

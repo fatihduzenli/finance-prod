@@ -1527,3 +1527,16 @@ name avoids the earlier PLAN-012e of Step 12b). Pending the owner, built under t
 assumptions: help pages as small signed-in static pages under /help/; landlord rent required on a
 new store; address columns on stores (migration 0047); one autopay per scheduled invoice for the
 invoice total. Batch A (the builder's collection paths) assigned.
+
+## Update, 2026-10-21, PLAN-012e-2 Batch A built and gated (not pushed)
+
+The builder's "How to collect": one service entry point `collect` with five choices (Save
+draft, Send by e-mail, Charge now, Schedule for a date, Record payment now), the row sets of the
+removed forms recorded as literals before their removal and asserted through the new paths; the
+three old URLs redirect into the builder with the choice pre-selected; the mark-paid job of a
+recorded payment is queued by the create job's success (a failed create flags the charge Needs
+review until the retry); Schedule for a date only on an active lease with one item line. Gate:
+sqlite 5,950 passed; PostgreSQL 28 + 6,572 passed; e2e 14 passed in four runs; Fable's
+adversarial file 25 cases green and the PLAN-012 no-debit rule restated as behaviour. **For the
+owner at the checkpoint:** a setup charge now exists once its invoice is sent or recorded; a
+scheduled draft becomes its charge and the draft row goes. Batch B (the action bar) assigned.
