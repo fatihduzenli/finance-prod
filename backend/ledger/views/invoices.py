@@ -196,6 +196,16 @@ def _line_rows(formset: Any) -> list[dict[str, Any]]:
     ]
 
 
+def _lines_have_rent(formset: Any) -> bool:
+    """Whether a kept row's Item is Rent: the table then starts with its Rent columns
+    shown (PLAN-012e-3; ``ledger/invoice_lines.js`` keeps them in step afterwards)."""
+    rent = invoice_builder.catalogue_key(RENT_ITEM)
+    return any(
+        invoice_builder.catalogue_key(str(form["item"].value() or "")) == rent
+        for _, form in kept_rows(formset)
+    )
+
+
 def _renumber(message: str, numbers: list[int]) -> str:
     """A service refusal names the line by its place among the filled lines; the form
     names it by the visible line (PLAN-012d D10)."""
@@ -554,6 +564,7 @@ def _new(
             "items_list_id": ITEMS_LIST_ID,
             "lines_total": _lines_total(formset),
             "line_rows": _line_rows(formset),
+            "lines_have_rent": _lines_have_rent(formset),
             "rent_amount_url": _rent_amount_url(operators),
             "errors": _error_items(errors, operators),
             "store_context": context,
@@ -720,6 +731,7 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
             "items_list_id": ITEMS_LIST_ID,
             "lines_total": _lines_total(formset) if formset is not None else None,
             "line_rows": _line_rows(formset) if formset is not None else [],
+            "lines_have_rent": formset is not None and _lines_have_rent(formset),
             "rent_amount_url": _rent_amount_url([draft.operator], draft),
             "errors": _error_items(errors, [draft.operator]),
             "editable": editable,

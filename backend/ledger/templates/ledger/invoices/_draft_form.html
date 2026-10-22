@@ -5,7 +5,10 @@ script). Without script the form shows its rows, every field, a Save box and a R
 ledger/invoice_lines.js adds rows, removes a row with its trash button (DELETE set, the row hidden),
 numbers the visible rows, keeps the total live, shows the Save box only on a typed item and the
 lease and month only on a Rent line. Each control has a visually hidden label naming its line and
-column (_line_label.html).{% endcomment %}
+column (_line_label.html). The table sits in the scroll region (PLAN-012e-3 D5), so a wide table
+scrolls inside it and the page stays within the viewport. The two Rent columns (.rent-col) are
+collapsed by the script while no line is Rent (the table's has-rent class, set here too when a
+saved line is Rent); without the script they stay visible.{% endcomment %}
 {% load responsive money %}
 {% if errors %}<ul class="errorlist" id="draft-errors">{% for error in errors %}<li>{{ error.text }}{% if error.url %}<a href="{{ error.url }}" class="draft-link">{{ error.number }}</a>{{ error.after }}{% endif %}</li>{% endfor %}</ul>{% endif %}
 {{ form.creation_key }}
@@ -22,16 +25,16 @@ column (_line_label.html).{% endcomment %}
 <p class="help" id="lines-help">Item: Rent, an open charge of the lease, a catalogue item or a new name; the line total is the quantity (empty: 1) times the unit amount. Learn more: <a href="{% url 'finance:help_topic' slug='invoice-lines' %}">The lines of an invoice</a></p>
 {{ formset.management_form }}
 <datalist id="{{ items_list_id }}">{% for option in item_options %}<option value="{{ option.value }}"{% if option.kind != "item" %} data-kind="{{ option.kind }}"{% endif %}{% if option.charge %} data-charge="{{ option.charge }}" data-balance="{{ option.balance }}"{% endif %}></option>{% endfor %}</datalist>
-{% responsive_table %}
-<table id="draft-lines" data-rent-amount-url="{{ rent_amount_url }}">
-  <thead><tr><th>Line</th><th>Item</th><th>Rent: lease</th><th>Rent: month</th><th>Description</th><th>Quantity</th><th>Unit amount</th><th>Save as catalogue item</th><th>Remove</th></tr></thead>
+{% responsive_table "scroll" %}
+<table id="draft-lines" data-rent-amount-url="{{ rent_amount_url }}"{% if lines_have_rent %} class="has-rent"{% endif %}>
+  <thead><tr><th>Line</th><th>Item</th><th class="rent-col">Rent: lease</th><th class="rent-col">Rent: month</th><th>Description</th><th>Quantity</th><th>Unit amount</th><th>Save as catalogue item</th><th>Remove</th></tr></thead>
   <tbody>
     {% for row in line_rows %}
       <tr class="draft-line"{% if row.removed %} hidden{% endif %}>
         <td class="line-number">{{ row.number|default_if_none:"" }}</td>
         <td class="line-item">{% include "ledger/invoices/_line_label.html" with field=row.form.item column="item" %}{{ row.form.item }}{{ row.form.existing_charge }}<span class="muted rent-text"></span></td>
-        <td class="rent-field">{% include "ledger/invoices/_line_label.html" with field=row.form.rent_lease column="rent lease" %}{{ row.form.rent_lease }}</td>
-        <td class="rent-field">{% include "ledger/invoices/_line_label.html" with field=row.form.rent_month column="rent month" %}{{ row.form.rent_month }}</td>
+        <td class="rent-field rent-col">{% include "ledger/invoices/_line_label.html" with field=row.form.rent_lease column="rent lease" %}{{ row.form.rent_lease }}</td>
+        <td class="rent-field rent-col">{% include "ledger/invoices/_line_label.html" with field=row.form.rent_month column="rent month" %}{{ row.form.rent_month }}</td>
         <td>{% include "ledger/invoices/_line_label.html" with field=row.form.description column="description" %}{{ row.form.description }}</td>
         <td>{% include "ledger/invoices/_line_label.html" with field=row.form.quantity column="quantity" %}{{ row.form.quantity }}</td>
         <td>{% include "ledger/invoices/_line_label.html" with field=row.form.unit_amount column="unit amount" %}{{ row.form.unit_amount }}</td>

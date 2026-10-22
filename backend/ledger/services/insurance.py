@@ -267,7 +267,7 @@ def record_manual_payment(
     allocation_group: uuid.UUID | None = None,
     credit_id: uuid.UUID | None = None,
 ) -> rent_run.PaymentOutcome:
-    """Record a Zelle, wire or other payment (or, with ``credit_id``, a credit applied)
+    """Record a Zelle, wire, check or other payment (or, with ``credit_id``, a credit applied)
     against an insurance charge (see the module docstring). Never calls the provider."""
     outcome = rent_run.PaymentOutcome
     text = visible_text(note or "")

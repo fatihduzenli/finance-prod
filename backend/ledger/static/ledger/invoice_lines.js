@@ -17,6 +17,9 @@
 //   "Removed line, quantity") and the invoice total under the table is kept live;
 // - "Add line" copies the last row, blank, under the next index of the management form
 //   (at most its MAX_NUM_FORMS), its labels' for renamed with its controls' ids;
+// - the two Rent columns (.rent-col) are collapsed while no visible line is Rent and shown
+//   as soon as one is (the table's has-rent class; PLAN-012e-3), so the amount columns fit
+//   a laptop screen; without this script they stay visible;
 // - the "How to collect" buttons name the live total (.collect-amount) and the Schedule
 //   button the debit date (.collect-date; PLAN-012e-2 D3).
 // Nothing is sent from here but the read of the rent amount.
@@ -67,7 +70,18 @@
     });
   }
 
+  function rentColumns() {
+    var shown = rows().some(function (row) {
+      return !row.hidden && row.dataset.kind === "rent";
+    });
+    table.classList.toggle("has-rent", shown);
+    table.querySelectorAll(".rent-col").forEach(function (cell) {
+      cell.hidden = !shown;
+    });
+  }
+
   function refresh() {
+    rentColumns();
     var number = 0;
     var sum = 0;
     rows().forEach(function (row) {
@@ -142,6 +156,7 @@
     function update(fromTyping) {
       var chosen = input ? option(input) : null;
       var kind = chosen ? chosen.dataset.kind || "item" : (input && key(input.value) !== "" ? "typed" : "");
+      row.dataset.kind = kind;
       row.querySelectorAll("td.rent-field").forEach(function (cell) {
         cell.style.visibility = kind === "rent" ? "" : "hidden";
       });

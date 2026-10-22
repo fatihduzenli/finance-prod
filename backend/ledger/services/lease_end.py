@@ -150,11 +150,11 @@ STALE_DRAFT_DAYS = 7
 OFFSET_REFERENCE = statements.OFFSET_REFERENCE
 #: D3 amendment: the note of a rent charge after the end month, waived at confirm.
 AFTER_END_NOTE = "After lease end (wizard)"
-#: Payment method of each refund method; a check is recorded as ``other``.
+#: Payment method of each refund method (PLAN-012e-3: a check is recorded as ``check``).
 PAYMENT_METHODS: dict[str, str] = {
     RefundMethod.ZELLE: PaymentMethod.ZELLE,
     RefundMethod.WIRE: PaymentMethod.WIRE,
-    RefundMethod.CHECK: PaymentMethod.OTHER,
+    RefundMethod.CHECK: PaymentMethod.CHECK,
 }
 
 # --- Blocker kinds -----------------------------------------------------------------------

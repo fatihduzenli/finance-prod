@@ -480,7 +480,7 @@ def test_the_builder_marks_the_rent_fields_and_the_save_tick_for_its_script_alre
     billing, _ = client_for(Role.BILLING)
     lease = a_lease(a_store("D8-8"), an_operator())
     html = page(billing, f"/invoices/new/operator/{lease.operator_id}/")
-    assert html.count('class="rent-field"') == 2 and 'class="save-item"' in html
+    assert html.count('class="rent-field rent-col"') == 2 and 'class="save-item"' in html
     assert "ledger/invoice_lines.js" in html
     from django.contrib.staticfiles import finders
 

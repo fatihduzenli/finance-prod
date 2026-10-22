@@ -28,7 +28,7 @@ the lease's row lock:
   kept and applied, the entry's key), beside each service's and each credit's own rows.
 
 Refused, with nothing written (one sentence): no current lease; a method other than
-Zelle, wire or other; an amount of zero, negative, not in cents or too large; a date in
+Zelle, wire, check or other; an amount of zero, negative, not in cents or too large; a date in
 the future; a note missing or holding a card or account number (the reference too); an
 allocation or credit application for a charge that is not an open charge of the lease
 (a forged id); one negative or not in cents; a charge given more than its balance;

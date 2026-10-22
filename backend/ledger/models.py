@@ -1659,13 +1659,15 @@ class PaymentKind(models.TextChoices):
 #: The payment kinds that belong to a one-off charge.
 ONE_OFF_PAYMENT_KINDS: list[str] = [PaymentKind.ONE_OFF.value, PaymentKind.REFUND_DEPOSIT.value]
 #: Methods recorded by hand, not through the payment provider.
-MANUAL_PAYMENT_METHODS: list[str] = ["zelle", "wire", "other"]
+MANUAL_PAYMENT_METHODS: list[str] = ["zelle", "wire", "check", "other"]
 
 
 class PaymentMethod(models.TextChoices):
     ACH = "ach", "Bank debit (ACH)"
     ZELLE = "zelle", "Zelle"
     WIRE = "wire", "Wire"
+    #: A paper check received by hand (PLAN-012e-3 D1); its reference is the check number.
+    CHECK = "check", "Check"
     OTHER = "other", "Other"
     #: A credit held on the lease applied to a charge (PLAN-012d D6a, ADR-0013): no money
     #: moves and no provider is involved.
@@ -1679,6 +1681,8 @@ class MoneyMethod(models.TextChoices):
     ACH = "ach", "Bank debit (ACH)"
     ZELLE = "zelle", "Zelle"
     WIRE = "wire", "Wire"
+    #: A paper check received by hand (PLAN-012e-3 D1); its reference is the check number.
+    CHECK = "check", "Check"
     OTHER = "other", "Other"
 
 
@@ -1728,7 +1732,7 @@ class LeaseCredit(GuardedModel):
                 name="lease_credits_remaining_at_most_amount",
             ),
             models.CheckConstraint(
-                # With ``lease_credits_method_valid``: Zelle, wire or other, never ACH.
+                # With ``lease_credits_method_valid``: Zelle, wire, check or other, never ACH.
                 condition=~Q(method=MoneyMethod.ACH.value),
                 name="lease_credits_method_manual",
             ),
@@ -1816,9 +1820,10 @@ class Payment(GuardedModel):
                 | (~Q(kind="insurance") & Q(policy_year__isnull=True)),
                 name="payments_policy_year_iff_insurance",
             ),
-            # Zelle, wire and other are recorded by hand; the note says what was received.
+            # Zelle, wire, check and other are recorded by hand; the note says what was
+            # received.
             models.CheckConstraint(
-                condition=~Q(method__in=["zelle", "wire", "other"]) | Q(note__regex=_NOT_BLANK),
+                condition=~Q(method__in=MANUAL_PAYMENT_METHODS) | Q(note__regex=_NOT_BLANK),
                 name="payments_manual_method_has_note",
             ),
             # PLAN-010b D4: a one-off charge is paid only by kind one_off (or paid back

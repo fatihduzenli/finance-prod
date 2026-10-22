@@ -671,7 +671,7 @@ def test_a_future_date_is_refused_and_today_is_allowed() -> None:
 
 
 @pytest.mark.parametrize("method_value", [PaymentMethod.ACH, "cash", "card", ""])
-def test_only_zelle_wire_and_other_are_accepted(method_value: str) -> None:
+def test_only_zelle_wire_check_and_other_are_accepted(method_value: str) -> None:
     charge = charged()
     assert pay(charge, "1.00", method=method_value).message == rent_run.PAY_METHOD
     assert not Payment.objects.exists()

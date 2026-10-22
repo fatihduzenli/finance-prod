@@ -1587,3 +1587,17 @@ staging" 4:05. Staging runs `f315ca2`: the three-action bar and the Lease menu, 
 "How to collect", the facts-only store details with the Store cost block, the New store cost
 fields, the help pages. Next: the owner's checkpoint clicks; PLAN-012e-3 (F1 Check as a manual
 payment method, F2 the builder's lines table in a scroll region) assigned; then Step 13.
+
+## Update, 2026-10-22, PLAN-012e-3 built and gated (not pushed)
+
+"Check" is a manual payment method (label "Check"; the reference reads "Check number" while
+Check is chosen; "Check" on the payment page, the ledger, the statement and the store tab; a
+"Check (USD)" column in payments by method; the offline mark's memo "Paid by check on …"; a
+lease-end refund by check recorded as a check), with migration 0048 (choices and six constraints
+recreated). The builder's lines table sits in a scroll region and the page stays within 1,280 px,
+the Rent columns collapsing until a line chooses Rent. Gate: sqlite 6,241 passed; PostgreSQL 34 +
+6,868 passed; e2e 17 passed in four runs; the visual suite 34 passed in the image with the builder
+and Record a payment baselines regenerated; Fable's adversarial file 12 cases green; the frozen
+stored-value list updated for the new value. One BLOCKER (the mark memo had no word for a check,
+fixed in `payments/offline_marking.py` with Fable's written approval), one MAJOR (the off-screen
+amount columns), one MINOR (the refund by check) resolved. Publish Request to the owner.

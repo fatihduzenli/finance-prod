@@ -7,18 +7,29 @@
 // Controls marked data-reveal (a tick that only drives this script) appear only when the
 // script runs. Without the script every field stays visible and nothing is hidden; the
 // server checks every rule either way.
+// Dependent labels (docs/qa/PLAN-012e3-check-method.md D3): a control carrying
+// data-label-when="<id>=<value>" and data-label="<text>" has its <label for> read that
+// text while the condition holds, and its own text otherwise (a payment's reference reads
+// "Check number" while Check is chosen). Without the script the label keeps its own text.
 (function () {
   "use strict";
-  function holds(condition) {
+  function holds(condition, missing) {
     var parts = condition.split("=");
     var control = document.getElementById(parts[0]);
-    if (!control) { return true; }
+    if (!control) { return missing; }
     if (parts.length > 1) { return control.value === parts.slice(1).join("="); }
     if (control.type === "checkbox" || control.type === "radio") { return control.checked; }
     return String(control.value || "").trim() !== "";
   }
   var dependents = Array.prototype.slice.call(document.querySelectorAll("[data-shown-when]"));
-  if (!dependents.length) { return; }
+  var labelled = [];
+  document.querySelectorAll("[data-label-when]").forEach(function (control) {
+    var label = control.id ? document.querySelector('label[for="' + control.id + '"]') : null;
+    var text = label && label.firstChild;
+    if (!text || text.nodeType !== Node.TEXT_NODE) { return; }
+    labelled.push({ control: control, text: text, own: text.nodeValue });
+  });
+  if (!dependents.length && !labelled.length) { return; }
   document.querySelectorAll("[data-reveal]").forEach(function (element) {
     element.hidden = false;
   });
@@ -26,9 +37,15 @@
     dependents.forEach(function (control) {
       var wrapper = control.closest(".field") || control;
       var shown = wrapper.classList.contains("has-error") ||
-        control.getAttribute("data-shown-when").split("|").some(holds);
+        control.getAttribute("data-shown-when").split("|").some(function (condition) {
+          return holds(condition, true);
+        });
       wrapper.hidden = !shown;
       control.disabled = !shown;
+    });
+    labelled.forEach(function (entry) {
+      var switched = holds(entry.control.getAttribute("data-label-when"), false);
+      entry.text.nodeValue = switched ? entry.control.getAttribute("data-label") : entry.own;
     });
   }
   document.addEventListener("input", update);

@@ -724,7 +724,7 @@ def test_a_deposit_above_the_deductions_refunds_the_rest_by_the_chosen_method() 
         D("1850.00"),
         D("150.00"),
     )
-    assert resolution.method == PaymentMethod.OTHER  # a check is recorded as other
+    assert resolution.method == PaymentMethod.CHECK  # PLAN-012e-3: a check is a check
     refund = Payment.objects.get(one_off_charge=held, kind=PaymentKind.REFUND_DEPOSIT)
     assert (refund.amount, refund.reference) == (D("1850.00"), "Check 1043")
     assert "Paid by check." in refund.note
@@ -852,7 +852,7 @@ def test_the_settlement_refuses_a_bad_method_a_future_date_and_payment_data() ->
     [
         (RefundMethod.ZELLE, PaymentMethod.ZELLE),
         (RefundMethod.WIRE, PaymentMethod.WIRE),
-        (RefundMethod.CHECK, PaymentMethod.OTHER),
+        (RefundMethod.CHECK, PaymentMethod.CHECK),
     ],
 )
 def test_a_refund_by_each_method(method: str, payment_method: str) -> None:

@@ -2052,6 +2052,12 @@ EXTRA_REJECTIONS: list[ConstraintCase] = [
         new_payment,
         lambda: new_payment(method="other", note=""),
     ),
+    # PLAN-012e-3 D1: a check is recorded by hand, so it has a note too.
+    ConstraintCase(
+        "payments_manual_method_has_note",
+        lambda: new_payment(method="check", note="Check 1043 received."),
+        lambda: new_payment(method="check", note=" "),
+    ),
     ConstraintCase(
         "invoices_at_most_one_source",
         new_invoice,
@@ -2406,3 +2412,35 @@ def test_a_consent_time_in_the_future_is_refused(field: str) -> None:
 def test_a_consent_time_now_or_earlier_is_accepted(field: str) -> None:
     for moment in (timezone.now(), datetime(2026, 1, 1, tzinfo=UTC)):
         new_operator(**{field: moment}).full_clean()
+
+
+# --- PLAN-012e-3 D1: Check as a manual payment method ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        lambda: new_payment(method="check", note="Check 1043 received."),
+        lambda: new_payment(
+            kind="refund_deposit",
+            method="check",
+            note="Deposit returned by check 1043.",
+            one_off_charge=saved(new_setup_charge()),
+        ),
+        lambda: new_payment(
+            kind="credit_refund",
+            method="check",
+            note="Paid back by check 1043.",
+            credit=saved(new_lease_credit()),
+        ),
+        lambda: new_lease_credit(method="check", reference="1043"),
+        lambda: new_deposit_resolution(method="check", note="Paid back by check 1043."),
+    ],
+    ids=["payment", "refund_deposit", "credit_refund", "lease_credit", "deposit_resolution"],
+)
+def test_a_check_is_accepted_wherever_a_manual_method_is(
+    row: Callable[[], models.Model],
+) -> None:
+    instance = row()
+    insert(instance)
+    assert type(instance)._default_manager.filter(pk=instance.pk, method="check").exists()

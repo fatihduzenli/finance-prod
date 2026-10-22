@@ -1910,6 +1910,206 @@ def test_the_store_address_migration_over_existing_rows_on_postgresql(
     assert _rows(url, "SELECT city FROM stores") == [("Shelbyville",)]
 
 
+# --- PLAN-012e-3 D1: ledger 0048, Check as a manual payment method ------------------------
+# Seeds a Zelle payment at ``ledger.0047``, migrates forward, back and forward again on both
+# engines with plain SQL: after 0048 a payment and a lease credit may store ``check``; the
+# reverse refuses while a row stores it and, once none does, restores the CHECKs without it.
+# The ``method`` columns themselves change only their choices: no SQL.
+
+STATE_BEFORE_CHECK = (("ledger", "0047_store_address"),)
+CHECK_MIGRATION = ("ledger", "0048_check_method")
+#: The CHECK constraints 0048 recreates with ``check`` among the methods.
+CHECK_CONSTRAINTS = {
+    "payments_method_valid",
+    "payments_manual_method_has_note",
+    "payments_refund_deposit_manual",
+    "payments_credit_refund_shape",
+    "lease_credits_method_valid",
+    "deposit_resolutions_method_valid",
+}
+TO_CHECK = "UPDATE payments SET method = 'check'"
+
+
+def seed_before_check() -> None:
+    """Seed a lease, a rent charge and a Zelle payment on it with the models of
+    ``STATE_BEFORE_CHECK``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_CHECK)).apps
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Eastwind")
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 1048", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store,
+        operator=operator,
+        debit_day=1,
+        collection_status="active",
+        payment_channel="wire",
+    )
+    charge = apps.get_model("ledger", "RentCharge").objects.create(
+        lease=lease,
+        period_month=date(2026, 10, 1),
+        due_on=date(2026, 10, 1),
+        amount_due=Decimal("1000.00"),
+        status="due",
+    )
+    apps.get_model("ledger", "Payment").objects.create(
+        rent_charge=charge,
+        kind="rent",
+        method="zelle",
+        amount=Decimal("400.00"),
+        status="settled",
+        settled_on=date(2026, 10, 2),
+        note="Check 1043 received.",
+    )
+
+
+def _accepted(url: str, statement: str) -> bool:
+    """Run one write; ``False`` when a CHECK constraint refuses it (nothing written)."""
+    if url.startswith("sqlite:///"):
+        import sqlite3
+
+        with closing(sqlite3.connect(url.removeprefix("sqlite:///"))) as scratch:
+            # The CHECKs that read a note use REGEXP, which Django registers on its own
+            # connections only.
+            scratch.create_function(
+                "REGEXP", 2, lambda pattern, value: bool(re.search(pattern, value or ""))
+            )
+            try:
+                scratch.execute(statement)
+            except sqlite3.IntegrityError as error:
+                assert "CHECK constraint failed" in str(error), error
+                return False
+            scratch.commit()
+        return True
+    import psycopg
+
+    try:
+        with psycopg.connect(url) as scratch:
+            scratch.execute(statement)
+    except psycopg.errors.CheckViolation:
+        return False
+    return True
+
+
+def _check_round_trip(repo_root: Path, url: str) -> None:
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_CHECK)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_check as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    # Before 0048 a check is not a method.
+    assert not _accepted(url, TO_CHECK)
+    for _ in range(2):
+        result = _manage(repo_root, url, "migrate", "--noinput")
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        # The existing row is untouched: a Zelle payment stays Zelle.
+        assert _rows(url, "SELECT method, note FROM payments") == [
+            ("zelle", "Check 1043 received.")
+        ]
+        assert _accepted(url, TO_CHECK)
+        # Still refused: a method that is not one, and a check without a note.
+        assert not _accepted(url, "UPDATE payments SET method = 'cheque'")
+        assert not _accepted(url, "UPDATE payments SET note = ' '")
+        # The reverse refuses while a row stores ``check`` and leaves the row as it was.
+        back = _manage(repo_root, url, "migrate", *STATE_BEFORE_CHECK[0], "--noinput")
+        assert back.returncode != 0
+        assert _rows(url, "SELECT method FROM payments") == [("check",)]
+        assert _accepted(url, "UPDATE payments SET method = 'zelle'")
+        _migrate_to(repo_root, url, *STATE_BEFORE_CHECK)
+        assert not _accepted(url, TO_CHECK)
+        assert _rows(url, "SELECT method FROM payments") == [("zelle",)]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+
+
+def test_the_check_method_migration_over_existing_rows_on_sqlite(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    _check_round_trip(repo_root, f"sqlite:///{tmp_path / 'check.sqlite3'}")
+
+
+@requires_postgresql
+def test_the_check_method_migration_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    _check_round_trip(repo_root, url)
+    # A lease credit may name ``check`` too, never ``credit``.
+    credit = (
+        "INSERT INTO lease_credits (id, lease_id, amount, remaining, method, received_on, "
+        "reference, note, allocation_group, created_at, updated_at) VALUES "
+        "(%s, (SELECT id FROM leases), 50.00, 50.00, %s, '2026-10-02', '1043', 'Kept', %s, "
+        "now(), now())"
+    )
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute(credit, (uuid.uuid4(), "credit", uuid.uuid4()))
+    with psycopg.connect(url) as scratch:
+        scratch.execute(credit, (uuid.uuid4(), "check", uuid.uuid4()))
+    assert _rows(url, "SELECT method, reference FROM lease_credits") == [("check", "1043")]
+
+
+@requires_postgresql
+def test_sqlmigrate_of_the_check_method_migration_touches_only_its_checks(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    result = _manage(repo_root, scratch_postgresql_url, "sqlmigrate", *CHECK_MIGRATION)
+    assert result.returncode == 0, result.stderr
+    statements = [
+        line
+        for line in result.stdout.splitlines()
+        if line.strip() and not line.startswith("--") and line not in ("BEGIN;", "COMMIT;")
+    ]
+    # The three AlterField steps print a comment and no SQL: only the CHECKs change.
+    assert result.stdout.count("-- Alter field method on") == 3
+    assert len(statements) == 2 * len(CHECK_CONSTRAINTS)
+    for statement in statements:
+        assert re.match(r'ALTER TABLE "\w+" (DROP|ADD) CONSTRAINT "(\w+)"', statement), statement
+        name = re.search(r'CONSTRAINT "(\w+)"', statement)
+        assert name is not None and name.group(1) in CHECK_CONSTRAINTS, statement
+    assert "ALTER COLUMN" not in result.stdout and "TYPE" not in result.stdout
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_check_method_migration_alters_choices_only() -> None:
+    from django.db.migrations.loader import MigrationLoader
+    from django.db.migrations.operations import AddConstraint, AlterField, RemoveConstraint
+
+    loader = MigrationLoader(connection)
+    migration = loader.get_migration(*CHECK_MIGRATION)
+    state = loader.project_state(STATE_BEFORE_CHECK[0])
+    altered: list[str] = []
+    for operation in migration.operations:
+        after = state.clone()
+        operation.state_forwards("ledger", after)
+        if isinstance(operation, AlterField):
+            with connection.schema_editor(collect_sql=True, atomic=False) as editor:
+                operation.database_forwards("ledger", editor, state, after)
+            assert editor.collected_sql == [], (operation.model_name, editor.collected_sql)
+            altered.append(f"{operation.model_name}.{operation.name}")
+        state = after
+    assert sorted(altered) == ["depositresolution.method", "leasecredit.method", "payment.method"]
+    removed = {op.name for op in migration.operations if isinstance(op, RemoveConstraint)}
+    added = {op.constraint.name for op in migration.operations if isinstance(op, AddConstraint)}
+    assert removed == added == CHECK_CONSTRAINTS
+
+
 # --- Row 2 --------------------------------------------------------------------------
 
 

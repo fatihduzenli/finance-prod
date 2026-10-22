@@ -801,6 +801,7 @@ def test_payments_by_method_per_month_net_of_refunds_without_deposits(today: dat
         "ach": D("900.00"),
         "zelle": D("500.00"),
         "wire": ZERO,
+        "check": ZERO,
         "other": ZERO,
     }
     assert (august.total, august.count) == (D("1400.00"), 2)

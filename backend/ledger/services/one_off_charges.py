@@ -1647,7 +1647,7 @@ def record_payment(
     allocation_group: uuid.UUID | None = None,
     credit_id: uuid.UUID | None = None,
 ) -> PaymentOutcome:
-    """Record a Zelle, wire or other payment against a one-off charge (kind ``one_off``).
+    """Record a Zelle, wire, check or other payment against a one-off charge (kind ``one_off``).
 
     Never calls the provider: when the charge has a provider invoice and the payment
     covers the whole price at its total, the outcome has ``mark_due=True`` and the

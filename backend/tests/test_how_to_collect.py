@@ -126,7 +126,7 @@ def collect(draft: InvoiceDraft, choice: str, role: Role = Role.BILLING, **kwarg
 @pytest.mark.parametrize(
     ("payment", "message"),
     [
-        (PaymentInput("check", TODAY, "1234", "Check received."), rent_run.PAY_METHOD),
+        (PaymentInput("cash", TODAY, "1234", "Cash received."), rent_run.PAY_METHOD),
         (PaymentInput("credit", TODAY, "", "Credit."), rent_run.PAY_METHOD),
         (
             PaymentInput("wire", TODAY + timedelta(days=1), "", "Wire received."),
@@ -492,8 +492,13 @@ def test_each_choices_fields_depend_on_its_radio_and_show_without_script(
     block = html[html.index('id="collect-schedule-fields"') : html.index('id="collect-actions"')]
     assert " hidden" not in block
     assert "ledger/shown_when.js" in html
-    # The methods are the ones "Add payment" records: a check is "other".
-    assert [value for value, _ in ledger_forms.MANUAL_METHOD_CHOICES] == ["zelle", "wire", "other"]
+    # The methods are the ones "Add payment" records (PLAN-012e-3 D2: a check is a check).
+    assert [value for value, _ in ledger_forms.MANUAL_METHOD_CHOICES] == [
+        "zelle",
+        "wire",
+        "check",
+        "other",
+    ]
 
 
 @pytest.mark.parametrize("value", ["<script>alert(1)</script>", "bogus", "", "charge_now"])

@@ -163,6 +163,40 @@ def test_a_rent_line_posted_from_the_item_box_takes_the_typed_amount(fake: FakeP
     assert '<option value="2026-10" selected>October 2026</option>' in page
 
 
+def test_the_rent_columns_start_collapsible_and_open_when_a_saved_line_is_rent(
+    fake: FakeProvider,
+) -> None:
+    """PLAN-012e-3: the two Rent columns carry ``rent-col`` (the script collapses them
+    while no line is Rent); the table starts with ``has-rent`` only when a saved line is
+    Rent."""
+    operator = an_operator(fake)
+    lease = a_rent_lease(operator)
+    draft = a_draft(operator, lease, [line()])
+    billing, _ = client_for(Role.BILLING)
+    page = html(billing, f"/invoices/drafts/{draft.pk}/")
+    table = page[page.index('<table id="draft-lines"') : page.index("</table>")]
+    head = table[: table.index("</thead>")]
+    assert '<th class="rent-col">Rent: lease</th><th class="rent-col">Rent: month</th>' in head
+    # Two Rent cells on every row (the saved line and the blank one the page adds).
+    rows = table.count('class="draft-line"')
+    assert rows >= 1 and table.count('<td class="rent-field rent-col"') == 2 * rows
+    assert "has-rent" not in table[: table.index(">")]
+    data = page_data(
+        [
+            {"item": "Sign repair", "unit_amount": "100.00"},
+            {"item": "Rent", "rent_lease": str(lease.pk), "rent_month": "2026-10"},
+        ],
+        lease=str(lease.pk),
+    )
+    data["lines-1-unit_amount"] = "500.00"
+    billing.post(f"/invoices/drafts/{draft.pk}/edit/", data)
+    page = html(billing, f"/invoices/drafts/{draft.pk}/")
+    opening = page[page.index('<table id="draft-lines"') :]
+    assert 'class="has-rent"' in opening[: opening.index(">")]
+    script = (REPO / "ledger" / "static" / "ledger" / "invoice_lines.js").read_text()
+    assert '"has-rent"' in script and ".rent-col" in script and "cell.hidden" in script
+
+
 # --- The rent-amount endpoint ------------------------------------------------------------------
 
 

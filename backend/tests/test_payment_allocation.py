@@ -635,6 +635,7 @@ def test_cash_reports_leave_credits_out() -> None:
         "ach": ZERO,
         "zelle": D("100.00"),
         "wire": ZERO,
+        "check": ZERO,
         "other": ZERO,
     }
 

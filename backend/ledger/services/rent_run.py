@@ -21,7 +21,7 @@ Rules kept here:
   linked is skipped; one whose date or schedule cannot be read is reported, never
   guessed. Matching is refused, with no provider call, while the breaker is open or the
   failure budget is exhausted.
-- **Manual payments** (D8): Zelle, wire or other; amount above zero and at most the
+- **Manual payments** (D8): Zelle, wire, check or other; amount above zero and at most the
   balance; date not in the future; a note; an optional reference. The payment is
   written first, in its own transaction, and ``amount_paid`` is recomputed from settled
   payments with the status following. The operator's open promises it keeps are closed
@@ -157,7 +157,12 @@ KIND_INVOICE = "invoice"
 CENT = Decimal("0.01")
 #: Largest amount ``numeric(12,2)`` holds.
 MONEY_MAX = Decimal("9999999999.99")
-MANUAL_METHODS: tuple[str, ...] = (PaymentMethod.ZELLE, PaymentMethod.WIRE, PaymentMethod.OTHER)
+MANUAL_METHODS: tuple[str, ...] = (
+    PaymentMethod.ZELLE,
+    PaymentMethod.WIRE,
+    PaymentMethod.CHECK,
+    PaymentMethod.OTHER,
+)
 #: A credit held on the lease applied to a charge (PLAN-012d D6a): never chosen on a form.
 CREDIT_METHODS: tuple[str, ...] = (PaymentMethod.CREDIT,)
 
@@ -204,7 +209,7 @@ SECOND_INVOICE = provider_sentence(
     "review the others in {provider}."
 )
 
-PAY_METHOD = "Choose Zelle, wire or other."
+PAY_METHOD = "Choose Zelle, wire, check or other."
 PAY_NOT_POSITIVE = "The amount must be more than zero."
 PAY_NOT_CENTS = "The amount must have at most two decimals."
 PAY_OVER_BALANCE = "The amount is more than the balance due. Nothing was recorded."
@@ -1451,7 +1456,7 @@ def record_manual_payment(
     allocation_group: uuid.UUID | None = None,
     credit_id: uuid.UUID | None = None,
 ) -> PaymentOutcome:
-    """Record a Zelle, wire or other payment against a rent charge (D8), then update the
+    """Record a Zelle, wire, check or other payment against a rent charge (D8), then update the
     provider invoice as the module docstring says (PLAN-009 D1 to D3).
 
     ``creation_key`` is the one-time key of the form; it is kept in the audit row and

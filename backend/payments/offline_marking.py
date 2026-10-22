@@ -1,6 +1,6 @@
 """What is sent when a manual payment is marked paid at the provider (PLAN-009 D1 to D3).
 
-The ledger records a wire, Zelle or other payment locally first. When it covers the
+The ledger records a wire, Zelle, check or other payment locally first. When it covers the
 charge's whole amount and the charge has a provider invoice, the rent run marks that
 invoice paid through ``mark_invoice_paid_cash_or_check`` with :func:`offline_payment`:
 method ``cash`` (the provider has no wire or Zelle method; this is what staff do by hand
@@ -29,6 +29,8 @@ from payments.stax.validation import CHECK_NUMBER_MAX_LENGTH, PAYMENT_NOTE_MAX_L
 METHOD_WORDS: dict[str, str] = {
     "wire": "wire",
     "zelle": "Zelle",
+    #: A paper check received by hand (PLAN-012e-3 D1).
+    "check": "check",
     "other": "other",
     "credit": "credit",
 }
@@ -48,7 +50,7 @@ REREAD_FAILED = "Stax invoice marked paid but not re-read: {failure}"
 
 
 def memo(method: str, paid_on: date, note: str) -> str:
-    """``Paid by <wire|Zelle|other> on <MM/DD/YYYY>. <staff note>``, on one line, cut to
+    """``Paid by <wire|Zelle|check|other> on <MM/DD/YYYY>. <staff note>``, on one line, cut to
     the provider's 255 characters."""
     text = f"Paid by {METHOD_WORDS[method]} on {paid_on:%m/%d/%Y}. {note}"
     return _WHITESPACE.sub(" ", text).strip()[:PAYMENT_NOTE_MAX_LENGTH]

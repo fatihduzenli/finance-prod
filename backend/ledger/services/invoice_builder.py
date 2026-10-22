@@ -140,7 +140,7 @@ one entry point of the draft form's last step, with a :class:`CollectChoice`:
   :func:`ledger.services.one_off_charges.payment_to_mark`), which marks the provider
   invoice paid as cash; a create that fails flags the charge for review
   (:func:`ledger.services.one_off_charges.flag_not_marked`) until a retry succeeds. Refused, with
-  nothing written: a method other than Zelle, wire or other, a date in the future, no
+  nothing written: a method other than Zelle, wire, check or other, a date in the future, no
   note, a card or account number in the reference or the note, a Rent line (record a
   rent payment with "Add payment"), and every refusal of :func:`send`.
 

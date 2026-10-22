@@ -549,11 +549,24 @@ class StoreCreateForm(StoreForm):
 #: Longest note accepted on a manual payment.
 PAYMENT_NOTE_MAX_LENGTH = 2000
 PAYMENT_REFERENCE_MAX_LENGTH = 100
-MANUAL_METHOD_CHOICES = (
-    (PaymentMethod.ZELLE.value, PaymentMethod.ZELLE.label),
-    (PaymentMethod.WIRE.value, PaymentMethod.WIRE.label),
-    (PaymentMethod.OTHER.value, PaymentMethod.OTHER.label),
+MANUAL_METHOD_CHOICES = tuple(
+    (PaymentMethod(method).value, PaymentMethod(method).label) for method in rent_run.MANUAL_METHODS
 )
+#: The reference's help on every manual payment form (PLAN-012e-3 D3).
+REFERENCE_HELP = (
+    "A Zelle confirmation, a wire reference or a check number; never an account number."
+)
+#: The reference's label while Check is the method chosen (PLAN-012e-3 D3).
+REFERENCE_LABEL_CHECK = "Check number"
+
+
+def _label_check_number(form: forms.Form) -> None:
+    """While Check is chosen in ``method``, the ``reference`` label reads "Check number"
+    (``data-label-when`` on the control, applied by ``ledger/shown_when.js``); without the
+    script it stays "Reference" and the help names the check number (PLAN-012e-3 D3)."""
+    attrs = form.fields["reference"].widget.attrs
+    attrs["data-label-when"] = f"{form['method'].auto_id}={PaymentMethod.CHECK.value}"
+    attrs["data-label"] = REFERENCE_LABEL_CHECK
 
 
 class ManualPaymentForm(forms.Form):
@@ -571,8 +584,8 @@ class ManualPaymentForm(forms.Form):
         max_length=PAYMENT_REFERENCE_MAX_LENGTH,
         validators=[validate_no_payment_data],
         help_text=provider_sentence(
-            "Optional: the bank or Zelle reference. Letters, digits and hyphens of it (up to "
-            "25) are sent to {provider} when the invoice is marked paid."
+            f"{REFERENCE_HELP} Optional: letters, digits and hyphens of it (up to 25) are sent "
+            "to {provider} when the invoice is marked paid."
         ),
     )
     note = forms.CharField(
@@ -582,6 +595,10 @@ class ManualPaymentForm(forms.Form):
         help_text="Required: what was received, and any reference staff need.",
         error_messages={"required": "A note is required: say what was received."},
     )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        _label_check_number(self)
 
     def clean_note(self) -> str:
         # Invisible format characters and Unicode whitespace alone are not a note
@@ -624,6 +641,7 @@ class AllocationPaymentForm(forms.Form):
 
     def __init__(self, *args: Any, charges: Iterable[Any] = (), **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        _label_check_number(self)
         self.charges = list(charges)
         for charge in self.charges:
             for prefix in (ALLOCATION_PREFIX, CREDIT_PREFIX):
@@ -1131,6 +1149,7 @@ class CollectForm(forms.Form):
         max_length=PAYMENT_REFERENCE_MAX_LENGTH,
         validators=[validate_no_payment_data],
         label="Reference",
+        help_text=REFERENCE_HELP,
     )
     payment_note = forms.CharField(
         required=False,
@@ -1171,6 +1190,7 @@ class CollectForm(forms.Form):
             )
         for name, radio in self.SHOWN_WHEN.items():
             self.fields[name].widget.attrs["data-shown-when"] = radio
+        _label_check_number(self)
 
     def choice(self) -> invoice_builder.CollectChoice:
         return invoice_builder.CollectChoice(

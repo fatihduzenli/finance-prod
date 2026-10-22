@@ -6,7 +6,7 @@
   <p class="crumb" id="store-crumb"><a href="{% url 'ledger:stores:detail' pk=store.pk %}?tab=payments#tab-payments">&larr; Store {{ store.external_label }}</a></p>
   <p class="muted" id="known-fields">Store {{ store.external_label }} · {% if lease.started_on %}Lease from {{ lease.started_on|date:"Y-m-d" }}{% else %}Lease{% endif %}{% if lease.operator %} · Operator {{ lease.operator.display_name }}{% endif %}</p>
   <div class="page-header"><h1>Add payment</h1></div>
-  <p class="muted">A payment received by Zelle, wire or another way outside {{ company.provider_name }}. Enter what was received once, then type how much of it pays each open charge below. The allocations must add up to the amount received, or the rest is kept as a credit on the lease. Each charge's invoice is marked paid in {{ company.provider_name }} once its charge is fully covered; a partial payment is marked Needs review.</p>
+  <p class="muted">A payment received by Zelle, wire, check or another way outside {{ company.provider_name }}. Enter what was received once, then type how much of it pays each open charge below. The allocations must add up to the amount received, or the rest is kept as a credit on the lease. Each charge's invoice is marked paid in {{ company.provider_name }} once its charge is fully covered; a partial payment is marked Needs review.</p>
   <form method="post" id="allocation-form" class="js-single-submit js-allocation" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
@@ -46,4 +46,4 @@
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-payment">Add payment</button></p>
   </form>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/payment_allocation.js' %}" defer></script>{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/payment_allocation.js' %}" defer></script>{% endblock %}

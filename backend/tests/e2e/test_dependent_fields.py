@@ -7,12 +7,17 @@ lease form's second debit day ("Debited twice a month") and the lease-end reason
 something is unallocated. The invoice builder's How to collect (PLAN-012e-2 D3) shows each
 choice's fields and button only while its radio is chosen. Without JavaScript every field
 stays visible and the tick that only drives the script stays hidden.
+
+PLAN-012e-3 D3: a manual payment's reference is labelled "Check number" while Check is the
+method chosen, and "Reference" otherwise and without JavaScript. D5: the builder's lines
+table scrolls inside its region, so the draft page is no wider than a 1,280 px viewport.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page
@@ -20,7 +25,8 @@ from pytest_django.live_server_helper import LiveServer
 
 from accounts.roles import Role
 from ledger.models import PaymentChannel
-from ledger.services import lease_end
+from ledger.services import invoice_builder, lease_end
+from ledger.services.invoice_builder import LineInput
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.receivables_helpers import a_lease, a_one_off_charge, a_store, an_operator
 
@@ -192,3 +198,96 @@ def test_without_javascript_how_to_collect_shows_every_field_and_button(
         assert page.locator(control).is_visible(), control
     for button in ("#save-draft", "#send-draft", "#schedule-draft", "#record-draft"):
         assert page.locator(button).is_visible(), button
+    # PLAN-012e-3: without the script the Rent columns stay visible (the region scrolls).
+    assert page.locator("#draft-lines th.rent-col").first.is_visible()
+    assert page.locator("#id_lines-0-rent_lease").is_visible()
+
+
+def _reference_label(page: Page) -> str:
+    return page.locator('label[for="id_reference"]').inner_text().strip()
+
+
+def test_the_reference_label_reads_check_number_while_check_is_chosen(
+    live_server: LiveServer, page: Page
+) -> None:
+    lease = a_lease(a_store("E2E-12E3-1"), an_operator("Check Co"), channel=PaymentChannel.WIRE)
+    assert lease.operator is not None
+    charge = a_one_off_charge(lease.operator, "250.00", date(2026, 9, 20), lease=lease)
+    _sign_in(page, live_server, "e2e-12e3-check")
+    page.goto(f"{live_server.url}/one-off-charges/{charge.pk}/payments/new/")
+    assert _reference_label(page) == "Reference"
+    page.select_option("#id_method", "check")
+    assert _reference_label(page) == "Check number"
+    page.select_option("#id_method", "wire")
+    assert _reference_label(page) == "Reference"
+    # The store's Add payment, with its allocation script on the same page.
+    page.goto(f"{live_server.url}/stores/{lease.store_id}/payments/new/")
+    page.select_option("#id_method", "check")
+    assert _reference_label(page) == "Check number"
+    # The builder's Record payment now.
+    page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/")
+    page.check("#collect-record")
+    assert _reference_label(page) == "Reference"
+    page.select_option("#id_method", "check")
+    assert _reference_label(page) == "Check number"
+    page.select_option("#id_method", "zelle")
+    assert _reference_label(page) == "Reference"
+
+
+def test_without_javascript_the_reference_stays_reference_and_its_help_names_the_check(
+    live_server: LiveServer, no_script: BrowserContext
+) -> None:
+    lease = a_lease(a_store("E2E-12E3-2"), an_operator("No Script Check"))
+    assert lease.operator is not None
+    charge = a_one_off_charge(lease.operator, "250.00", date(2026, 9, 20), lease=lease)
+    page = no_script.new_page()
+    _sign_in(page, live_server, "e2e-12e3-noscript")
+    page.goto(f"{live_server.url}/one-off-charges/{charge.pk}/payments/new/")
+    page.select_option("#id_method", "check")
+    assert _reference_label(page) == "Reference"
+    assert "a check number" in page.locator("#id_reference + .help").inner_text()
+
+
+def test_the_draft_page_is_no_wider_than_a_laptop_viewport(
+    live_server: LiveServer, browser: Browser
+) -> None:
+    lease = a_lease(a_store("E2E-12E3-3"), an_operator("Wide Lines Co"), started=date(2026, 1, 1))
+    assert lease.operator is not None
+    user, _ = make_user("e2e-12e3-draft-owner", Role.BILLING)
+    lines = [
+        LineInput(f"Sign repair on the north wall, panel {number}", "", None, Decimal("75.00"))
+        for number in range(1, 4)
+    ]
+    outcome = invoice_builder.create_draft(lease.operator, lease, "", None, lines, user)
+    assert outcome.ok and outcome.draft is not None, outcome.message
+    context = browser.new_context(viewport={"width": 1280, "height": 800})
+    try:
+        page = context.new_page()
+        _sign_in(page, live_server, "e2e-12e3-draft")
+        page.goto(f"{live_server.url}/invoices/drafts/{outcome.draft.pk}/")
+        region = page.locator(".table-scroll:has(> #draft-lines)")
+        assert region.count() == 1
+        assert page.evaluate("document.documentElement.scrollWidth") == 1280
+        # No line is Rent: the Rent columns are collapsed and line 1's amount is on screen.
+        rent_header = page.locator("#draft-lines th.rent-col").first
+        assert not rent_header.is_visible()
+        assert page.locator("#draft-lines").get_attribute("class") in (None, "")
+        unit_right = page.evaluate(
+            "document.getElementById('id_lines-0-unit_amount').getBoundingClientRect().right"
+        )
+        assert 0 < unit_right <= 1280
+        # Choosing Rent on a line opens the columns; another item closes them again.
+        page.fill("#id_lines-0-item", "Rent")
+        assert rent_header.is_visible()
+        assert page.locator("#id_lines-0-rent_month").is_visible()
+        assert page.evaluate("document.documentElement.scrollWidth") == 1280
+        page.fill("#id_lines-0-item", "Sign repair")
+        assert not rent_header.is_visible()
+        # The builder's script still runs on the table inside the region.
+        assert page.locator("#add-line").is_visible()
+        rows = page.locator("#draft-lines tr.draft-line:visible").count()
+        page.locator("#add-line").click()
+        assert page.locator("#draft-lines tr.draft-line:visible").count() == rows + 1
+        assert page.evaluate("document.documentElement.scrollWidth") == 1280
+    finally:
+        context.close()

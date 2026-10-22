@@ -30,7 +30,8 @@ APP_CSS = BACKEND / "finance" / "static" / "finance" / "app.css"
 #: Tables that keep their own sideways scroll region (the grid builds 12,000 cells in
 #: Python; labelling them would cost the page's 2 s and the grid is never shown as cards).
 OWN_SCROLL = {"grid/page.html"}
-SCROLL_TEMPLATES = {"audit/page.html"} | {
+#: PLAN-012e-3 D5: the builder's lines table scrolls in its region as the reports do.
+SCROLL_TEMPLATES = {"audit/page.html", "invoices/_draft_form.html"} | {
     f"reports/{path.name}" for path in (TEMPLATES / "reports").glob("*.html")
 }
 

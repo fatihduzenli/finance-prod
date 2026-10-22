@@ -5,7 +5,7 @@ A deposit is a setup charge whose fee type is refundable: money held, never reve
 Once its lease has ended, an admin resolves it once (:func:`resolve_deposit`, one
 ``deposit_resolutions`` row per deposit):
 
-- ``refunded``: the amount is paid back by Zelle, wire or other; a ``refund_deposit``
+- ``refunded``: the amount is paid back by Zelle, wire, check or other; a ``refund_deposit``
   payment (money out, never a provider refund) is written with the mandatory note.
 - ``withheld``: the business keeps the whole paid deposit; nothing is written to
   payments. To keep only part of it, the admin picks ``refunded`` or ``transferred`` with
@@ -22,7 +22,7 @@ deposit's settled ``one_off`` payments less their settled refunds.
 
 **At a lease end** (PLAN-012e D5(d)) the wizard resolves each deposit with
 :func:`resolve_deposit_split`: one row whose ``amount`` is the part refunded (kind
-``refunded``, by Zelle, wire or other) and whose ``withheld_amount`` is the part kept for
+``refunded``, by Zelle, wire, check or other) and whose ``withheld_amount`` is the part kept for
 the deductions, or, when nothing is refunded, kind ``withheld`` for the whole deposit.
 ``offset_amount`` is the part of the withheld amount the wizard applies to the lease's
 open charges as "deposit offset" payments. Every rule is checked
@@ -75,7 +75,7 @@ NOT_CENTS = "The amount must have at most two decimals."
 TOO_LARGE = "The amount is too large."
 NOTE_REQUIRED = "A note is required: say what happened to the deposit."
 DATE_FUTURE = "The date cannot be in the future."
-METHOD_REQUIRED = "Choose Zelle, wire or other: how the deposit was paid back."
+METHOD_REQUIRED = "Choose Zelle, wire, check or other: how the deposit was paid back."
 METHOD_NOT_REFUND = "A method is given for a refund only. Nothing was saved."
 TARGET_REQUIRED = "Choose the lease the deposit moves to."
 TARGET_NOT_TRANSFER = "A lease to move the deposit to is given for a transfer only."
