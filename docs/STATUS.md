@@ -1563,3 +1563,11 @@ under /help/ (seven topics, signed in, every role) take the paragraphs the one-l
 the pages, and a test holds every template to one line of help per block. Gate: sqlite 6,197
 passed; PostgreSQL 30 + 6,826 passed; e2e 14 passed in four runs; Fable's adversarial file 27
 cases green. Batch D (the visual data set and baselines, Fable) next; then the checkpoint.
+
+## Update, 2026-10-22, PLAN-012e-2 Batch D closed; Step 12e complete locally; checkpoint
+
+The visual data set shows the address and the Store cost block; the thirty baselines regenerated
+in the Playwright image and compared twice there (34 passed); the movers were the expected pages
+only. One pre-existing MINOR deferred: the builder's lines table is wider than 1,280 px. **Step
+12e is complete locally** (four batches, each gated PASS; QA-012e2-fewer-actions.md); the
+checkpoint report and the Publish Request go to the owner.

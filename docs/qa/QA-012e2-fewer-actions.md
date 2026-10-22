@@ -179,3 +179,40 @@ badge with its words; the help pages need a sign-in, carry no form of their own 
 data; hostile slugs answer 404 or echo nothing.
 
 **Verdict (C):** PASS (one MINOR resolved; three decisions for the owner's checkpoint).
+
+### Batch D — the visual data set and baselines (D11)
+
+**Scope (Fable).** `tests/visual/world.py`: the first store gets an address (101 Maple Avenue,
+Savannah, GA 31401) and a cost row ($2,400.00 from 2025-01-01, lease end 2030-12-31, other cost
+$150.00 "Bins"), so the Address line and the Store cost block have something to show; the draft
+keeps its two lines, so the builder page shows the "How to collect" choices without Schedule and
+with its one-line note. Baselines regenerated inside `mcr.microsoft.com/playwright/python:v1.63.0-noble`
+(the image CI compares in) and compared twice there: 34 passed. Before regeneration the compare
+named the expected movers and nothing else: the stores list (the first store's city), the six
+store tabs, the operator page, the invoice builder and Daily charges, each shorter (fewer buttons,
+no paragraphs); the dashboard, grid, P&L, Record a payment and the lease-end step unchanged.
+Checked by eye: the store page (the two-action bar for billing, the facts-only details with the
+badge, the Store cost block with Change and one Learn more line, the History disclosure) and the
+builder (the lines, the three choices for billing, the Schedule note, one primary button).
+
+**Finding carried over (not of this step).** The invoice builder's lines table is wider than
+the 1,280 px viewport (the page is 2,031 px wide at that width, as it was in the 12c baseline):
+the table sits outside a scroll region. MINOR, pre-existing, deferred to the next layout slice
+by written decision: wrap the lines table in the `.table-scroll` region the other wide tables use.
+
+**Verdict (D):** PASS.
+
+## Step 12e, summary for the checkpoint
+
+Verdicts: A PASS, B PASS, C PASS, D PASS. Commits: Batch A `0311735`, Batch B `9260d8c`, Batch C
+`8755658`, Batch D with this report. Secret scans clean on every batch; no secret-store read by
+either model; no new dependency; one migration (ledger 0047, additive, reversible, guarded).
+Decisions for the owner at the checkpoint: a setup charge exists once its invoice is sent or
+recorded (no owed charge with no invoice any more); a scheduled draft becomes its charge and the
+draft row goes; Schedule for a date on one-line drafts only, within 365 days, never on an ended
+or inactive lease or without a lease; the record path uses the manual methods the app records
+(Zelle, wire, other); three help topics beyond the plan's four; the Needs review topic's wording;
+the builder's wide lines table deferred. Residual risk: the record path's Stax side (create then
+mark paid as cash) is exercised through the fake provider; the owner's click on staging is the
+check; the menu's close-on-click-outside behaviour is asserted on the script text, the phone
+click is the browser check.

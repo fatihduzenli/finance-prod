@@ -44,7 +44,7 @@ from ledger.models import (
     RentChargeStatus,
     Store,
 )
-from ledger.services import contacts, installments, invoice_builder, lease_end
+from ledger.services import contacts, installments, invoice_builder, lease_end, store_costs
 from ledger.services.invoice_builder import LineInput
 from ledger.services.lease_end import DeductionInput
 from tests.auth_helpers import make_user
@@ -173,6 +173,21 @@ def _build() -> World:
     operator = make_operator(email="northwind@example.com", customer="cus-visual-1")
 
     store = a_store("0101 MAPLE AVENUE", 101, "GA")
+    # PLAN-012e-2 D7 and D8: the address line and the Store cost block have something to show.
+    Store.objects.filter(pk=store.pk).update(
+        address_line1="101 Maple Avenue", city="Savannah", postal_code="31401"
+    )
+    store.refresh_from_db()
+    cost = store_costs.set_cost(
+        store,
+        D("2400.00"),
+        date(2025, 1, 1),
+        other_monthly_cost=D("150.00"),
+        other_cost_description="Bins",
+        landlord_lease_end=date(2030, 12, 31),
+        actor=user,
+    )
+    assert cost.ok, cost.message
     lease = a_lease(store, operator, started=date(2025, 1, 1), rent="3500.00")
     _rent_year(lease)
 
