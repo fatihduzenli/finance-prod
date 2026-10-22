@@ -1578,3 +1578,12 @@ The owner accepted decisions 1–5 of the 12e checkpoint report and added a smal
 right after this push: "Check" as its own manual payment method (label "Check", reference "Check
 number") beside Zelle and wire, together with the builder's lines-table width (BACKLOG §3, F1
 and F2). Neither is needed before the push; the Publish Request for `2400f83` stands.
+
+## Update, 2026-10-22, Step 12e deployed to staging
+
+Pushed `fc6f348..f315ca2` on the owner's "push". CI green: "Migration tests" 18:58 and the test
+job 13:59 in parallel, "Visual regression" 2:30 against the regenerated baselines, "Deploy
+staging" 4:05. Staging runs `f315ca2`: the three-action bar and the Lease menu, the builder's
+"How to collect", the facts-only store details with the Store cost block, the New store cost
+fields, the help pages. Next: the owner's checkpoint clicks; PLAN-012e-3 (F1 Check as a manual
+payment method, F2 the builder's lines table in a scroll region) assigned; then Step 13.
