@@ -57,3 +57,10 @@ tests of `test_one_off_charges.py`, the concurrent-migrate test of
 own CI step, "Migration tests", limit 15; the unit step runs the complement (limit 20, measured
 about 14 minutes locally). Still open: reuse of the migrated database and `--reuse-db`, if the
 unit step grows past 15 again.
+
+## 3. Follow-ups queued right after the Step 12e push (owner, 2026-10-22), before Step 13
+
+| # | Item | What it does | Notes |
+|---|---|---|---|
+| F1 | **"Check" as its own manual payment method** | A `PaymentMethod` value `check` with the label "Check", offered beside Zelle and wire wherever a manual payment is recorded (Add payment, the builder's Record payment now, the insurance and one-off payment forms, the statement and ledger labels); its reference field reads "Check number". | A new stored value: a choices migration, the frozen-value list in `tests/test_plan012c_design_d_adversarial.py` updated by Fable, `rent_run.MANUAL_METHODS` extended, the refund method already has `check`. Decided with Step 12e decision 3 (until then a check is "other" with its reference). |
+| F2 | **The invoice builder's lines table in a scroll region** | At 1,280 px the lines table makes the page 2,031 px wide; it goes into the `.table-scroll` region the other wide tables use, so the page stays within the viewport and the visual baseline of the builder page is regenerated. | Pre-existing since PLAN-012d; recorded in QA-012e-2 Batch D as a deferred MINOR. |

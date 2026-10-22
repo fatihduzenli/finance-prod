@@ -1571,3 +1571,10 @@ in the Playwright image and compared twice there (34 passed); the movers were th
 only. One pre-existing MINOR deferred: the builder's lines table is wider than 1,280 px. **Step
 12e is complete locally** (four batches, each gated PASS; QA-012e2-fewer-actions.md); the
 checkpoint report and the Publish Request go to the owner.
+
+## Update, 2026-10-22, Checkpoint 12e decisions accepted; one follow-up queued
+
+The owner accepted decisions 1–5 of the 12e checkpoint report and added a small follow-up for
+right after this push: "Check" as its own manual payment method (label "Check", reference "Check
+number") beside Zelle and wire, together with the builder's lines-table width (BACKLOG §3, F1
+and F2). Neither is needed before the push; the Publish Request for `2400f83` stands.
