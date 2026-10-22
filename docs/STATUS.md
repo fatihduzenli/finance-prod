@@ -1601,3 +1601,15 @@ and Record a payment baselines regenerated; Fable's adversarial file 12 cases gr
 stored-value list updated for the new value. One BLOCKER (the mark memo had no word for a check,
 fixed in `payments/offline_marking.py` with Fable's written approval), one MAJOR (the off-screen
 amount columns), one MINOR (the refund by check) resolved. Publish Request to the owner.
+
+## Update, 2026-10-22, PLAN-012e-3 deployed to staging; CI timing note
+
+Pushed `f315ca2..82de92d` on the owner's "push". CI green: "Migration tests" 17:43, the test job
+33:18 on a slow runner (the unit step 18:46 against its 20-minute limit, 12:01 the run before;
+"Install Playwright chromium" 12:35, 0:22 the run before), "Visual regression" 2:18, "Deploy
+staging" 3:28. Staging runs `82de92d`: Check as a manual payment
+method and the builder's table within the laptop width. Next: the owner's clicks (12e and the
+follow-up); before Step 13 Fable proposes two CI verification-config changes for the owner's
+word: the unit step split into two parallel jobs, and the Playwright browsers cached between
+runs (or the e2e step run in the Playwright image as the visual job is), so a slow runner cannot
+take a step past its limit as happened to the migration step on 2026-10-19.
