@@ -29,7 +29,12 @@ column keys, Step 13.
   `tests/test_plan012c_design_d_adversarial.py` is updated by Fable in the same batch); a
   choices-only migration (`ledger/0048_check_method`, `AlterField` on every field that uses
   `PaymentMethod.choices`: `payments.method`, `lease_credits.method`, `deposit_resolutions.method`
-  and any other the autodetector names; `sqlmigrate` prints no-op). No data migration: payments
+  and any other the autodetector names) **and the six CHECK constraints that list the methods
+  recreated with the value** (`deposit_resolutions_method_valid`, `lease_credits_method_valid`,
+  `payments_method_valid`, `payments_manual_method_has_note`, `payments_refund_deposit_manual`,
+  `payments_credit_refund_shape`; the `AlterField` steps themselves print no SQL; the reverse
+  refuses while a row stores `check`). `MoneyMethod` (lease credits, deposit resolutions) gains
+  `CHECK` too. No data migration: payments
   recorded as "other" before stay "other" (their note or reference says "check" where staff wrote
   it).
 - **D2.** `rent_run.MANUAL_METHODS = (ZELLE, WIRE, CHECK, OTHER)` in that order;
@@ -46,7 +51,11 @@ column keys, Step 13.
   today.
 - **D4.** Labels: "Check" wherever `get_method_display` renders (the payment page, the ledger, the
   statement, the store tabs, the e-mail lines that name a method, the PDF statement); the CSV
-  exports write the label in their method column as they do for the others (keys unchanged).
+  exports write the stored key `check` in their method column, as they write the other methods
+  (keys unchanged); the payments-by-method report gains a "Check (USD)" column. The offline
+  mark's memo (`payments/offline_marking.METHOD_WORDS`) names the check ("Paid by check on …"):
+  the one change in `payments/`, approved. A lease-end refund by check is recorded as a `check`
+  payment (it was "other").
 - **D5.** The builder's lines table is wrapped in the `{% responsive_table "scroll" %}` region (or
   the `.table-scroll` wrapper it renders), so the page stays within 1,280 px; the builder's
   script keeps working on the table inside the region (`invoice_lines.js` selects by id); the
@@ -58,7 +67,7 @@ column keys, Step 13.
 ledger.models.PaymentMethod: + CHECK = "check", "Check"
 ledger.services.rent_run.MANUAL_METHODS = (PaymentMethod.ZELLE, PaymentMethod.WIRE, PaymentMethod.CHECK, PaymentMethod.OTHER)
 ledger.forms.MANUAL_METHOD_CHOICES: the same four, labels Zelle, Wire, Check, Other
-Migration: ledger 0048_check_method (AlterField choices only)
+Migration: ledger 0048_check_method (AlterField choices; six CHECK constraints recreated)
 Templates: the reference field's label switches to "Check number" while method == check (script), help names the check number (no script)
 invoices/_draft_form.html: the lines table inside the scroll region
 ```
