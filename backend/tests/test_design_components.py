@@ -277,18 +277,20 @@ def test_the_charge_table_shows_the_status_as_a_badge() -> None:
 def test_the_grid_legend_is_a_badge_per_status() -> None:
     html = body(client_for(Role.VIEWER)[0].get("/grid/"))
     legend = html[html.index('<p class="legend muted">') :].split("</p>", 1)[0]
+    # PLAN-012e-4 D2: the owner's order, "Unpaid" in its two shades, no "Due" item.
     for status, label in (
         ("paid", "Paid"),
-        ("unpaid", "Unpaid"),
+        ("due", "Unpaid, not yet overdue"),
+        ("unpaid", "Unpaid, overdue"),
         ("pending", "Pending"),
         ("partial", "Partly paid"),
-        ("due", "Due"),
         ("waived", "Waived"),
     ):
         badge = f'<span class="badge badge-{status}">{GLYPH}{GLYPHS[status]}</span> {label}</span>'
         assert badge in legend, status
     # "Not yet due" holds no charge: a plain badge, text only.
     assert '<span class="badge not-due">Not yet due</span>' in legend
+    assert "</span> Due</span>" not in legend
     # The grid's own thead stays the first on the page (the month headers).
     assert html.index("<thead") > html.index('<p class="legend muted">')
 
@@ -346,7 +348,9 @@ def test_every_badge_status_names_its_status_tokens_and_has_its_glyph() -> None:
     for status in BADGE_STATUSES:
         rule = css.split(f".badge-{status} {{", 1)[1].split("}", 1)[0]
         used = re.findall(r"var\((--[a-z0-9-]+)\)", rule)
-        assert any(name.startswith(f"--status-{status}") for name in used), status
+        # PLAN-012e-4 D2: due (unpaid, not yet overdue) is on the soft unpaid pair.
+        family = "unpaid-soft" if status == "due" else status
+        assert any(name.startswith(f"--status-{family}") for name in used), status
         assert all(name in defined for name in used), (status, used)
         # The glyph is in the markup, hidden from screen readers (the label is the text).
         assert status_badge("x", status).startswith(
@@ -372,6 +376,27 @@ def test_the_new_status_tokens_are_documented_pairs() -> None:
     tokens = TOKENS_CSS.read_text()
     assert "pair: --status-voided-ink on --status-voided-bg" in tokens
     assert "pair: --status-attention-ink on --status-attention-bg" in tokens
+
+
+def test_the_badges_take_the_grid_colour_families() -> None:
+    """PLAN-012e-4 D1, D2: unpaid dark red with white text (no outline), due on the soft
+    unpaid pair, pending, partly paid and waived on their own pairs, each a documented pair."""
+    css = APP_CSS.read_text()
+    tokens = TOKENS_CSS.read_text()
+    expected = {
+        "unpaid": ("--status-unpaid-bg", "--status-unpaid-ink"),
+        "due": ("--status-unpaid-soft-bg", "--status-unpaid-soft-ink"),
+        "pending": ("--status-pending-bg", "--status-pending-ink"),
+        "partial": ("--status-partial-bg", "--status-partial-ink"),
+        "waived": ("--status-waived-bg", "--status-waived-ink"),
+        "paid": ("--status-paid-bg", "--status-paid-ink"),
+    }
+    for status, (background, ink) in expected.items():
+        rule = css.split(f".badge-{status} {{", 1)[1].split("}", 1)[0]
+        assert rule.strip() == f"background: var({background}); color: var({ink});", status
+        assert f"pair: {ink} on {background}\n" in tokens, status
+    assert "--status-unpaid-ink: #FFFFFF;" in tokens
+    assert "--status-unpaid-border" not in tokens and "--status-unpaid-border" not in css
 
 
 # --- Empty states ------------------------------------------------------------------------------

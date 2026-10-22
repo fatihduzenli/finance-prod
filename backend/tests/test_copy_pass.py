@@ -161,7 +161,7 @@ def test_the_grid_cells_and_the_column_totals_carry_the_dollar_and_the_separator
     assert "Partly paid $1,200.00 of $3,500.00" in html
     assert "$2,000.00<br>" in html  # the September column's collected total
     assert "paid 2,000.00" not in html and "partial 1,200.00" not in html
-    assert grid.CELL_STATUSES[3] == ("partial", "Partly paid")
+    assert grid.CELL_STATUSES[4] == ("partial", "Partly paid")
     assert grid.CELL_STATUSES[6] == ("not_due", "Not yet due")
     assert ">Monthly rent overview</h1>" in html
 

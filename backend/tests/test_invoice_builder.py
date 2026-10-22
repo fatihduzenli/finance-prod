@@ -2129,7 +2129,8 @@ def test_the_grid_names_the_invoice_and_shows_rent_paid_in_advance(
     built = grid.build(grid.parse_query({"from": "2026-10", "to": "2026-10"}, TODAY), TODAY)
     [row] = [row for row in built.rows if row.store.pk == lease.store_id]
     [cell] = row.cells
-    assert cell.text == f"Due ${FIRST_MONTH:,.2f} {invoice.invoice_number}"
+    # PLAN-012e-4 D2: a due (not yet overdue) charge reads "Unpaid", its colour the soft shade.
+    assert cell.text == f"Unpaid ${FIRST_MONTH:,.2f} {invoice.invoice_number}"
     pay(fake, fresh(invoice), str(fresh(invoice).total))
     built = grid.build(grid.parse_query({"from": "2026-10", "to": "2026-10"}, TODAY), TODAY)
     [row] = [row for row in built.rows if row.store.pk == lease.store_id]

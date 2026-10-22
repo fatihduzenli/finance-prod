@@ -345,8 +345,10 @@ def test_a_future_month_billed_in_advance_shows_it_with_the_invoice_number() -> 
     built = grid.build(grid.parse_query({}, TODAY), TODAY)
     [row] = [row for row in built.rows if row.store.pk == lease.store_id]
     states = {cell.month: cell.status for cell in row.cells}
-    # Before the lease started: not due; a month with no charge after: blank.
-    assert states[date(2026, 8, 1)] == grid.STATUS_NOT_DUE
+    # PLAN-012e-4 D3: before the lease started, blank (outside the lease); a past or current
+    # month inside it with no charge, blank; the future month billed in advance shows it.
+    assert states[date(2026, 8, 1)] == ""
+    assert next(cell for cell in row.cells if cell.month == date(2026, 8, 1)).label == "2026-08"
     assert states[OCT] == "" and states[NOV] == grid.STATUS_PAID
 
 

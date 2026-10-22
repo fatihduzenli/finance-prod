@@ -546,7 +546,7 @@ GRID_WORDS = {
     "partial": "Partly paid ",
     "pending": "Pending ",
     "waived": "Waived",
-    "due": "Due ",
+    "due": "Unpaid ",  # PLAN-012e-4 D2: not yet overdue, the soft shade, the same words
     "not_due": "Not yet due",
 }
 GRID_CELL = re.compile(r'<td class="cell cell-([a-z_]+)"[^>]*>(.*?)</td>', re.S)

@@ -20,7 +20,9 @@ empty, no filter.
 
 **Rows** are stores, in store-number order (stores without a number after, by label):
 label, number, state, and the operator and channel of the store's *current* lease (the
-lease active today, else the latest started). Every store is a row, with or without a
+lease active today, else the latest started). The page's store cell (PLAN-012e-4 D4) reads
+:attr:`GridRow.store_title` ("#1991 Istanbul") over the operator's name; the state and the
+channel stay in the CSV and the filters. Every store is a row, with or without a
 lease. The operator and channel filters apply to those current values; the status filter
 keeps a row with at least one cell of that status in the range.
 
@@ -29,8 +31,13 @@ twice-monthly lease's two charges, or the charges of two leases of one month aft
 transfer, make one cell with their sums. The cell's status, from its charges' statuses
 leaving out waived ones (all waived: ``waived``): all ``paid`` is ``paid``; any
 ``pending`` is ``pending``; something paid but not all is ``partial``; any ``unpaid`` is
-``unpaid``; otherwise ``due``. A month with no charge before the month the store's first
-lease started is ``not due``; any other month with no charge is blank. A charge split
+``unpaid``; otherwise ``due`` (unpaid, not yet overdue: its text reads "Unpaid" as
+``unpaid``'s does, its colour and glyph tell them apart; PLAN-012e-4 D2). A month with no
+charge (PLAN-012e-4 D3) is blank, its label the month only, when it is outside the store's
+leases: before the month the first lease started or after the month the last lease ended
+(a lease without a start or an end is open on that side; a store without a lease is outside
+in every month). Inside them it is ``not due`` ("Not yet due") when it is after today's
+month, else blank. A cell with a charge is never blank. A charge split
 into a live installment plan (PLAN-012e D12) counts what its installments were paid as
 paid (``partial`` once any is paid, else ``due``) and the cell shows the plan's progress
 (``plan 1 of 3 paid, 333.33 of 1,000.00``); a completed plan's charge is ``paid``. A cell links to
@@ -59,6 +66,7 @@ with their installments. Money is ``Decimal``.
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
@@ -113,13 +121,14 @@ STATUS_PARTIAL = RentChargeStatus.PARTIAL.value
 STATUS_DUE = RentChargeStatus.DUE.value
 STATUS_WAIVED = RentChargeStatus.WAIVED.value
 STATUS_NOT_DUE = "not_due"
-#: The statuses the filter offers, in the legend's order.
+#: The statuses the filter offers, in the legend's order (PLAN-012e-4 D2: the owner's order,
+#: "Unpaid" in its two shades in place of "Due" and "Unpaid").
 CELL_STATUSES: tuple[tuple[str, str], ...] = (
     (STATUS_PAID, "Paid"),
-    (STATUS_UNPAID, "Unpaid"),
+    (STATUS_DUE, "Unpaid, not yet overdue"),
+    (STATUS_UNPAID, "Unpaid, overdue"),
     (STATUS_PENDING, "Pending"),
     (STATUS_PARTIAL, "Partly paid"),
-    (STATUS_DUE, "Due"),
     (STATUS_WAIVED, "Waived"),
     (STATUS_NOT_DUE, "Not yet due"),
 )
@@ -255,6 +264,8 @@ class Cell:
     #: The numbers of the invoices whose Rent line billed the cell's charges (PLAN-012b-b
     #: D6), in charge order.
     invoice_numbers: str = ""
+    #: A month with no charge outside the store's leases (PLAN-012e-4 D3).
+    outside_lease: bool = False
 
     @property
     def text(self) -> str:
@@ -262,7 +273,9 @@ class Cell:
 
     @property
     def label(self) -> str:
-        """What a screen reader says for the cell."""
+        """What a screen reader says for the cell: the month only outside the leases."""
+        if self.outside_lease:
+            return f"{self.month:%Y-%m}"
         text = self.text or "no charge"
         return f"{self.month:%Y-%m}: {text}{', has a note' if self.has_note else ''}"
 
@@ -285,15 +298,13 @@ def _status_text(cell: Cell) -> str:
         return cell.plan_text
     if cell.status == STATUS_PAID:
         return f"Paid {_amount(cell.amount_paid)}"
-    if cell.status == STATUS_UNPAID:
+    if cell.status in (STATUS_UNPAID, STATUS_DUE):
         return f"Unpaid {_amount(cell.amount_due)}"
     if cell.status == STATUS_PENDING:
         since = f" (from {cell.pending_from.isoformat()})" if cell.pending_from else ""
         return f"Pending {_amount(cell.amount_due)}{since}"
     if cell.status == STATUS_PARTIAL:
         return f"Partly paid {_amount(cell.amount_paid)} of {_amount(cell.amount_due)}"
-    if cell.status == STATUS_DUE:
-        return f"Due {_amount(cell.amount_due)}"
     if cell.status == STATUS_WAIVED:
         return "Waived"
     if cell.status == STATUS_NOT_DUE:
@@ -327,6 +338,22 @@ class GridRow:
     @property
     def channel_label(self) -> str:
         return str(dict(PaymentChannel.choices).get(self.channel, self.channel))
+
+    @property
+    def store_title(self) -> str:
+        """The store cell's first line (PLAN-012e-4 D4): "#1991 Istanbul". A name that starts
+        with the number (then a space or a hyphen, or nothing) shows the rest once ("2922
+        TUCSON" is "#2922 TUCSON"); a name that is only the number (the sheet's imported
+        stores) shows the city after it, if any ("#2475 CONYERS", else "#2475"); a store
+        without a number shows its name only."""
+        number = self.store.store_number
+        name = self.store.external_label
+        if number is None:
+            return name
+        rest = re.match(rf"{number}(?!\d)[ -]?(.*)\Z", name, re.S)
+        if rest is not None:
+            name = rest.group(1).strip() or self.store.city.strip()
+        return f"#{number} {name}" if name else f"#{number}"
 
 
 @dataclass(slots=True)
@@ -365,9 +392,32 @@ def current_lease(leases: list[Lease], today: date) -> Lease | None:
     return max(pool, key=started) if pool else None
 
 
-def _first_start(leases: list[Lease]) -> date | None:
-    starts = [lease.started_on for lease in leases if lease.started_on is not None]
-    return min(starts) if starts else None
+@dataclass(frozen=True, slots=True)
+class _LeaseSpan:
+    """The months of a store's leases (PLAN-012e-4 D3): from the month the first started to
+    the month the last ended; ``None`` is open on that side."""
+
+    first: date | None
+    last: date | None
+
+    def holds(self, month: date) -> bool:
+        return (self.first is None or month >= self.first) and (
+            self.last is None or month <= self.last
+        )
+
+
+def _lease_span(leases: list[Lease]) -> _LeaseSpan | None:
+    """The span of ``leases``, or ``None`` without a lease (every month is outside)."""
+    if not leases:
+        return None
+    starts = [lease.started_on for lease in leases]
+    ends = [lease.ended_on for lease in leases]
+    first = None if None in starts else min(s for s in starts if s is not None)
+    last = None if None in ends else max(e for e in ends if e is not None)
+    return _LeaseSpan(
+        first.replace(day=1) if first is not None else None,
+        last.replace(day=1) if last is not None else None,
+    )
 
 
 def _stores(q: str, today: date) -> list[Store]:
@@ -479,9 +529,10 @@ def build(query: GridQuery, today: date | None = None) -> Grid:
             continue
         if query.channel and channel != query.channel:
             continue
-        first_start = _first_start(leases)
+        span = _lease_span(leases)
+        this_month = day.replace(day=1)
         cells = [
-            _cell(month, by_cell.get((store.pk, month), []), pending, store.pk, first_start)
+            _cell(month, by_cell.get((store.pk, month), []), pending, store.pk, span, this_month)
             for month in months
         ]
         if query.status and not any(cell.status == query.status for cell in cells):
@@ -500,11 +551,13 @@ def _cell(
     charges: list[_Charge],
     pending: dict[tuple[uuid.UUID, date], date],
     store_id: uuid.UUID,
-    first_start: date | None,
+    span: _LeaseSpan | None,
+    this_month: date,
 ) -> Cell:
     if not charges:
-        not_due = first_start is not None and month < first_start.replace(day=1)
-        return Cell(month, STATUS_NOT_DUE if not_due else "")
+        if span is None or not span.holds(month):
+            return Cell(month, outside_lease=True)
+        return Cell(month, STATUS_NOT_DUE if month > this_month else "")
     due = sum((charge.amount_due for charge in charges), ZERO)
     paid = sum((charge.amount_paid for charge in charges), ZERO)
     status = combined_status([charge.status for charge in charges], paid)

@@ -30,10 +30,11 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
   table.grid tfoot th,table.grid tfoot td{background:var(--paper-2);font-weight:600;}
   table.grid td a{color:inherit;text-decoration:none;display:block;}
   table.grid td a:focus{outline:2px solid var(--focus);outline-offset:-2px;}
-  /* PLAN-012c D1: the status tokens. Unpaid is a navy outline on paper. */
-  .cell-paid{background:var(--status-paid-bg);color:var(--status-paid-ink);} .cell-unpaid{background:var(--status-unpaid-bg);color:var(--status-unpaid-ink);box-shadow:inset 0 0 0 2px var(--status-unpaid-border);}
+  /* PLAN-012c D1, PLAN-012e-4 D2: the status tokens. Unpaid is light red while not yet
+     overdue (due, the soft pair) and dark red with white text once overdue. */
+  .cell-paid{background:var(--status-paid-bg);color:var(--status-paid-ink);} .cell-unpaid{background:var(--status-unpaid-bg);color:var(--status-unpaid-ink);}
   .cell-pending{background:var(--status-pending-bg);color:var(--status-pending-ink);} .cell-partial{background:var(--status-partial-bg);color:var(--status-partial-ink);}
-  .cell-due{background:var(--status-due-bg);color:var(--status-due-ink);} .cell-waived{background:var(--status-waived-bg);color:var(--status-waived-ink);}
+  .cell-due{background:var(--status-unpaid-soft-bg);color:var(--status-unpaid-soft-ink);} .cell-waived{background:var(--status-waived-bg);color:var(--status-waived-ink);}
   .cell-not_due{color:var(--status-not-due-ink);font-style:italic;}
   .note-marker{color:inherit;margin-left:.2rem;}
   .legend span{display:inline-block;padding:.1rem .45rem;margin-right:.25rem;border-radius:var(--r-1);}
@@ -97,7 +98,7 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
       <tbody>
         {% for row, cells in rows %}
           <tr class="grid-row" data-store="{{ row.store.pk }}">
-            <th scope="row" class="store-col"><a href="{% url 'ledger:stores:detail' pk=row.store.pk %}">{{ row.store.external_label }}</a>{% if row.store.store_number is not None and row.store.external_label != row.store.store_number|stringformat:"s" %} <span class="muted">#{{ row.store.store_number }}</span>{% endif %}<br><span class="muted">{{ row.operator.display_name|default:"No operator" }}{% if row.store.state %} · {{ row.store.state }}{% endif %}{% if row.channel_label %} · {{ row.channel_label }}{% endif %}</span></th>
+            <th scope="row" class="store-col"><a href="{% url 'ledger:stores:detail' pk=row.store.pk %}">{{ row.store_title }}</a><br><span class="muted">{{ row.operator.display_name|default:"No operator" }}</span></th>
             {{ cells }}
           </tr>
         {% empty %}

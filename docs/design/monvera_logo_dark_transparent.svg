@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 470 160" width="470" height="160" xmlns:c2pa="http://c2pa.org/manifest">
+<defs><linearGradient id="mv" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#13A89E"/><stop offset="1" stop-color="#2EC4A6"/></linearGradient></defs>
+
+<path d="M36 128 L36 44 L80 90 L124 44 L124 128" fill="none" stroke="url(#mv)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="80" cy="118" r="9" fill="#2EC4A6"/>
+<text x="160" y="110" font-family='Inter, Helvetica Neue, Arial, sans-serif' font-size="72" font-weight="700" fill="white" letter-spacing="-2">Mon<tspan fill="#2EC4A6">vera</tspan></text>
+</svg>

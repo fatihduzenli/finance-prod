@@ -1,12 +1,14 @@
 """The month grid (docs/qa/PLAN-011-dashboard-reports-mobile.md D2, D10; SCOPE Flow 3 and 4):
 rows, cells, colours, the note marker, the click-through, each filter, the range and its
-cap, "not due" before the lease start, the CSV in the sheet's column order, roles and a
+cap, blank cells outside the lease and "Not yet due" for a future month inside it
+(PLAN-012e-4 D3), the store cell (D4), the CSV in the sheet's column order, roles and a
 bounded number of queries."""
 
 from __future__ import annotations
 
 import csv
 import io
+import re
 from datetime import date
 from decimal import Decimal
 
@@ -84,22 +86,23 @@ def every_status_store() -> dict[str, RentCharge]:
 
 # --- Cells, colours, marker, click-through --------------------------------------------------
 
-#: PLAN-012c D1: each status's fill token (unpaid is a navy outline on paper).
+#: PLAN-012c D1, PLAN-012e-4 D2: each status's fill and ink tokens (unpaid dark red with
+#: white ink; due, not yet overdue, the soft unpaid pair).
 COLOURS = {
-    "paid": "var(--status-paid-bg)",
-    "unpaid": "var(--status-unpaid-bg)",
-    "pending": "var(--status-pending-bg)",
-    "partial": "var(--status-partial-bg)",
-    "due": "var(--status-due-bg)",
-    "waived": "var(--status-waived-bg)",
+    "paid": ("var(--status-paid-bg)", "var(--status-paid-ink)"),
+    "unpaid": ("var(--status-unpaid-bg)", "var(--status-unpaid-ink)"),
+    "pending": ("var(--status-pending-bg)", "var(--status-pending-ink)"),
+    "partial": ("var(--status-partial-bg)", "var(--status-partial-ink)"),
+    "due": ("var(--status-unpaid-soft-bg)", "var(--status-unpaid-soft-ink)"),
+    "waived": ("var(--status-waived-bg)", "var(--status-waived-ink)"),
 }
 
 
 def test_every_status_has_its_colour_text_and_link(today: date, viewer: Client) -> None:
     charges = every_status_store()
     html = page(viewer, "?from=2026-05&to=2026-10")
-    for status, colour in COLOURS.items():
-        assert f".cell-{status}{{background:{colour};" in html, status
+    for status, (colour, ink) in COLOURS.items():
+        assert f".cell-{status}{{background:{colour};color:{ink};}}" in html, status
         charge = charges[status]
         assert f'<td class="cell cell-{status}" data-month=' in html, status
         assert f'href="/charges/{charge.pk}/"' in html, status
@@ -110,9 +113,15 @@ def test_every_status_has_its_colour_text_and_link(today: date, viewer: Client) 
         "Unpaid $3,500.00",
         "Pending $3,500.00 (from 2026-07-05)",
         "Partly paid $1,200.00 of $3,500.00",
-        "Due $3,500.00",
+        "Unpaid $3,500.00",
         "Waived",
     ]
+    # Overdue (unpaid) and not yet overdue (due) read alike; colour and glyph tell them apart.
+    assert "Due $" not in html
+    assert ".cell-unpaid{background:var(--status-unpaid-bg);color:var(--status-unpaid-ink);}" in (
+        html
+    )  # no inset border any more
+    assert "status-unpaid-border" not in html and "--status-due-" not in html
 
 
 def test_the_note_marker_shows_only_on_a_charge_with_a_note(today: date, viewer: Client) -> None:
@@ -126,16 +135,81 @@ def test_the_note_marker_shows_only_on_a_charge_with_a_note(today: date, viewer:
     assert 'aria-label="2026-06: Unpaid $3,500.00, has a note"' in html
 
 
-def test_not_due_before_the_lease_started_and_blank_after(today: date) -> None:
+def test_blank_before_the_lease_started_and_not_yet_due_only_in_a_future_month(
+    today: date,
+) -> None:
+    # PLAN-012e-4 D3: June and July are before the lease's start month (blank, the label the
+    # month only); August (started mid-month) and October (today's month) are inside the
+    # lease without a charge (blank, "no charge"); November is in the future: "Not yet due".
     lease = a_lease(a_store("1083 JACKSONVILLE", 1083), started=date(2026, 8, 15))
     a_rent_charge(lease, SEP, RentChargeStatus.PAID, "3740.00", "3740.00")
-    result = built(**{"from": "2026-06", "to": "2026-10"})
-    statuses = [item.status for item in row_of(result, "1083 JACKSONVILLE").cells]
-    assert statuses == ["not_due", "not_due", "", "paid", ""]  # August: started mid-month
-    assert [item.text for item in row_of(result, "1083 JACKSONVILLE").cells][:2] == [
-        "Not yet due",
-        "Not yet due",
+    result = built(**{"from": "2026-06", "to": "2026-11"})
+    cells = row_of(result, "1083 JACKSONVILLE").cells
+    assert [item.status for item in cells] == ["", "", "", "paid", "", "not_due"]
+    assert [item.text for item in cells] == ["", "", "", "Paid $3,740.00", "", "Not yet due"]
+    assert [item.label for item in cells] == [
+        "2026-06",
+        "2026-07",
+        "2026-08: no charge",
+        "2026-09: Paid $3,740.00",
+        "2026-10: no charge",
+        "2026-11: Not yet due",
     ]
+
+
+def test_blank_after_the_last_lease_ended_and_no_not_yet_due_there(today: date) -> None:
+    lease = a_lease(a_store("1084 OCALA", 1084), started=date(2026, 1, 1))
+    lease.ended_on = date(2026, 9, 10)
+    lease.save(update_fields=["ended_on"])
+    a_rent_charge(lease, AUG, RentChargeStatus.PAID, "10.00", "10.00")
+    result = built(**{"from": "2026-08", "to": "2026-12"})
+    cells = row_of(result, "1084 OCALA").cells
+    # September is the end month: inside, past, no charge (blank, "no charge"); October to
+    # December are after it: blank with the month only, never "Not yet due".
+    assert [item.status for item in cells] == ["paid", "", "", "", ""]
+    assert [item.text for item in cells] == ["Paid $10.00", "", "", "", ""]
+    assert [item.label for item in cells] == [
+        "2026-08: Paid $10.00",
+        "2026-09: no charge",
+        "2026-10",
+        "2026-11",
+        "2026-12",
+    ]
+
+
+def test_a_lease_without_an_end_says_not_yet_due_in_every_future_month(today: date) -> None:
+    a_lease(a_store("1085", 1085), started=date(2026, 1, 1))
+    cells = row_of(built(**{"from": "2026-09", "to": "2026-12"}), "1085").cells
+    assert [item.text for item in cells] == ["", "", "Not yet due", "Not yet due"]
+
+
+def test_a_cell_with_a_charge_is_never_blank_outside_the_lease(today: date) -> None:
+    # A charge before the start month and one after the end month still show (D3, pinned).
+    lease = a_lease(a_store("1086", 1086), started=date(2026, 9, 1))
+    lease.ended_on = date(2026, 9, 30)
+    lease.save(update_fields=["ended_on"])
+    a_rent_charge(lease, AUG, RentChargeStatus.UNPAID)
+    a_rent_charge(lease, date(2026, 11, 1), RentChargeStatus.DUE)
+    cells = row_of(built(**{"from": "2026-08", "to": "2026-11"}), "1086").cells
+    assert [item.status for item in cells] == ["unpaid", "", "", "due"]
+    assert [item.text for item in cells] == ["Unpaid $3,500.00", "", "", "Unpaid $3,500.00"]
+
+
+def test_two_leases_on_one_store_leave_no_gap_in_the_hand_over_month(today: date) -> None:
+    store = a_store("1087", 1087)
+    old = a_lease(store, an_operator("Out Co"), started=date(2026, 1, 1))
+    old.collection_status = "ended"
+    old.ended_on = date(2026, 8, 20)
+    old.save()
+    a_lease(store, an_operator("In Co"), started=date(2026, 8, 21))
+    # Neither lease has an August charge: the hand-over month is inside, not outside.
+    cells = row_of(built(**{"from": "2026-07", "to": "2026-11"}), "1087").cells
+    assert [item.label for item in cells][:3] == [
+        "2026-07: no charge",
+        "2026-08: no charge",
+        "2026-09: no charge",
+    ]
+    assert cells[-1].text == "Not yet due"
 
 
 def test_a_store_without_a_lease_is_a_row_of_blank_cells(today: date) -> None:
@@ -143,6 +217,9 @@ def test_a_store_without_a_lease_is_a_row_of_blank_cells(today: date) -> None:
     row = row_of(built(), "PLAZA")
     assert row.operator is None and row.channel == ""
     assert {item.text for item in row.cells} == {""}
+    # Outside any lease, the future months too: no "Not yet due", the label the month only.
+    assert {item.status for item in row.cells} == {""}
+    assert [item.label for item in row.cells][-1] == "2026-11"
 
 
 def test_a_month_without_any_charge_is_blank_in_every_row(today: date) -> None:
@@ -239,7 +316,9 @@ def test_each_filter(today: date) -> None:
     assert labels(built(channel=PaymentChannel.WIRE)) == ["200"]
     assert labels(built(status="pending")) == ["300"]
     assert labels(built(status="paid", operator=acme)) == ["100"]
-    assert labels(built(status="not_due")) == []
+    # The default range ends next month (November): inside every open lease, "Not yet due".
+    assert labels(built(status="not_due")) == ["100", "200", "300"]
+    assert labels(built(status="not_due", to="2026-10")) == []
 
 
 def test_the_status_filter_keeps_a_row_with_at_least_one_matching_cell(today: date) -> None:
@@ -248,7 +327,11 @@ def test_the_status_filter_keeps_a_row_with_at_least_one_matching_cell(today: da
     a_rent_charge(lease, SEP, RentChargeStatus.UNPAID)
     result = built(status="unpaid")
     assert labels(result) == ["400"]
-    assert [item.status for item in result.rows[0].cells if item.status] == ["paid", "unpaid"]
+    assert [item.status for item in result.rows[0].cells if item.status] == [
+        "paid",
+        "unpaid",
+        "not_due",  # November, the default range's next month
+    ]
 
 
 @pytest.mark.parametrize(
@@ -369,7 +452,7 @@ def test_the_csv_is_in_the_sheets_column_order(today: date, viewer: Client) -> N
         "Unpaid $3,500.00",
         "Pending $3,500.00 (from 2026-07-05)",
         "Partly paid $1,200.00 of $3,500.00",
-        "Due $3,500.00",
+        "Unpaid $3,500.00",
         "Waived",
     ]
 
@@ -380,10 +463,13 @@ def test_the_csv_applies_the_filters_and_writes_not_due_and_blanks(
     three_stores()
     late = a_lease(a_store("500", 500, "FL"), started=date(2026, 9, 1))
     a_rent_charge(late, SEP, RentChargeStatus.PAID, "9.99", "9.99")
-    rows = read_csv(viewer, "?from=2026-07&to=2026-09&state=FL")
+    rows = read_csv(viewer, "?from=2026-07&to=2026-11&state=FL")
     assert [row[1] for row in rows[1:]] == ["200", "500"]
-    assert rows[2][5:] == ["Not yet due", "Not yet due", "Paid $9.99"]
-    assert rows[1][5:] == ["", "Unpaid $3,500.00", ""]
+    # PLAN-012e-4 D3: before the lease, blank; a future month inside it, "Not yet due".
+    assert rows[2][5:] == ["", "", "Paid $9.99", "", "Not yet due"]
+    assert rows[1][5:] == ["", "Unpaid $3,500.00", "", "", "Not yet due"]
+    # The channel column is unchanged (PLAN-012e-4 D4: it leaves the page's store cell only).
+    assert [row[4] for row in rows[1:]] == ["Wire", "Bank debit"]
 
 
 def test_csv_text_cells_are_formula_safe(today: date, viewer: Client) -> None:
@@ -420,6 +506,79 @@ def test_the_page_is_keyboard_reachable_with_sticky_header_and_first_column(
     assert "table.grid thead th{position:sticky;top:0;" in html
     assert "table.grid th.store-col{position:sticky;left:0;" in html
     assert '<th scope="row" class="store-col">' in html
+
+
+# --- The store cell (PLAN-012e-4 D4) and the legend (D2) -------------------------------------
+
+
+def store_cell(html: str, store_pk: object) -> str:
+    row = html.split(f'data-store="{store_pk}">', 1)[1]
+    return row.split('<th scope="row" class="store-col">', 1)[1].split("</th>", 1)[0]
+
+
+def test_the_store_cell_is_the_numbered_name_over_the_operator(today: date, viewer: Client) -> None:
+    numbered = a_store("Istanbul", 1991, "GA")
+    numbered.city = "Kadikoy"
+    numbered.save(update_fields=["city"])
+    a_lease(numbered, an_operator("Bosphorus Co"), channel=PaymentChannel.WIRE)
+    unnumbered = a_lease(a_store("PEACHTREE MALL", None, "GA"), an_operator("Mall Co")).store
+    only_number = a_store("2475", 2475, "GA")  # the sheet's label is the number alone
+    html = page(viewer)
+    cell = store_cell(html, numbered.pk)
+    assert cell == (
+        f'<a href="/stores/{numbered.pk}/">#1991 Istanbul</a><br>'
+        '<span class="muted">Bosphorus Co</span>'
+    )
+    # The state, the city and the channel left the cell.
+    assert "GA" not in cell and "Kadikoy" not in cell and "Wire" not in cell
+    assert store_cell(html, unnumbered.pk) == (
+        f'<a href="/stores/{unnumbered.pk}/">PEACHTREE MALL</a><br>'
+        '<span class="muted">Mall Co</span>'
+    )
+    assert store_cell(html, only_number.pk) == (
+        f'<a href="/stores/{only_number.pk}/">#2475</a><br><span class="muted">No operator</span>'
+    )
+    # The words filter still matches the city, and the channel filter still applies.
+    assert labels(built(q="kadikoy")) == ["Istanbul"]
+    assert labels(built(channel=PaymentChannel.WIRE)) == ["Istanbul"]
+
+
+@pytest.mark.parametrize(
+    ("label", "number", "city", "title"),
+    [
+        ("2922 TUCSON", 2922, "", "#2922 TUCSON"),  # the name starts with the number
+        ("2922-TUCSON", 2922, "", "#2922 TUCSON"),  # then a hyphen
+        ("29220 TUCSON", 2922, "", "#2922 29220 TUCSON"),  # a longer number is not a prefix
+        ("2475", 2475, "CONYERS", "#2475 CONYERS"),  # only the number: the city after it
+        ("2475", 2475, "", "#2475"),  # only the number and no city
+        ("Istanbul", 1991, "Kadikoy", "#1991 Istanbul"),  # the name as it is
+        ("PEACHTREE MALL", None, "ATLANTA", "PEACHTREE MALL"),  # no number: the name only
+    ],
+)
+def test_the_store_title(label: str, number: int | None, city: str, title: str) -> None:
+    store = a_store(label, number)
+    store.city = city
+    row = grid.GridRow(store, None, "", [])
+    assert row.store_title == title
+
+
+def test_the_legend_is_the_owners_order_with_the_two_unpaid_shades(
+    today: date, viewer: Client
+) -> None:
+    assert grid.CELL_STATUSES == (
+        ("paid", "Paid"),
+        ("due", "Unpaid, not yet overdue"),
+        ("unpaid", "Unpaid, overdue"),
+        ("pending", "Pending"),
+        ("partial", "Partly paid"),
+        ("waived", "Waived"),
+        ("not_due", "Not yet due"),
+    )
+    html = page(viewer)
+    legend = html[html.index('<p class="legend muted">') :].split("</p>", 1)[0]
+    shown = re.findall(r'<span class="badge(?: badge-([a-z]+)| not-due)">', legend)
+    assert shown == ["paid", "due", "unpaid", "pending", "partial", "waived", ""]
+    assert "> Due</span>" not in legend
 
 
 def _stores(start: int, count: int) -> None:

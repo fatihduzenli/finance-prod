@@ -1625,3 +1625,14 @@ together the whole unit set; the e2e suite in the image against PostgreSQL 17 pa
 The owner's F3 (the Monthly rent overview's colour families, blank cells outside the lease, the
 store column "#1991 Istanbul" plus operator) is planned in `docs/qa/PLAN-012e4-grid-colours.md`
 and assigned; it goes with the CI changes in the next push.
+
+## Update, 2026-10-22, PLAN-012e-4 (F3) built and gated (not pushed)
+
+The Monthly rent overview reads by colour family: Paid green, Unpaid light red while not yet
+overdue and dark red with white text once overdue (the "Due" legend item gone, the glyphs kept),
+Pending yellow, Partly paid light orange, Waived grey; the badges everywhere take the same
+tokens; months before a lease starts or after it ends are blank and "Not yet due" is only a
+future month inside the lease; the store column reads "#1991 Istanbul" then the operator. Gate:
+sqlite 6,262 passed; PostgreSQL 34 + 6,889 passed; e2e 17 passed in four runs; the visual suite
+34 passed in the image with the grid and store-tab baselines regenerated; Fable's adversarial
+file 7 cases green. Publish Request to the owner together with the CI layout (`2c3e15b`).

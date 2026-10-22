@@ -158,17 +158,18 @@ th[aria-sort="descending"] a::after { content: " \25BC"; }
 
 /* --- Badges ------------------------------------------------------------------------------
    .badge: a short label. .badge-<status> for paid, unpaid, pending, partial, waived, due,
-   voided, attention: each takes its status tokens; its leading glyph (.badge-glyph: paid ✓,
+   voided, attention: each takes its status tokens (due, not yet overdue, takes the soft
+   unpaid pair; PLAN-012e-4 D2); its leading glyph (.badge-glyph: paid ✓,
    unpaid ◻, pending ◐, partial ◑, waived –, due ○, voided ✕, attention !) is in the markup
    (finance.templatetags.components), hidden from screen readers, so colour is never the
    only signal. .badge.not-due: the grid legend's "Not due", text only. */
 .badge { display: inline-block; padding: .1rem .45rem; border: 1px solid transparent; border-radius: var(--r-1); background: var(--paper-3); color: var(--ink); font-size: var(--t-sm); line-height: 1.4; white-space: nowrap; }
 .badge-paid { background: var(--status-paid-bg); color: var(--status-paid-ink); }
-.badge-unpaid { background: var(--status-unpaid-bg); color: var(--status-unpaid-ink); border-color: var(--status-unpaid-border); }
+.badge-unpaid { background: var(--status-unpaid-bg); color: var(--status-unpaid-ink); }
 .badge-pending { background: var(--status-pending-bg); color: var(--status-pending-ink); }
 .badge-partial { background: var(--status-partial-bg); color: var(--status-partial-ink); }
 .badge-waived { background: var(--status-waived-bg); color: var(--status-waived-ink); }
-.badge-due { background: var(--status-due-bg); color: var(--status-due-ink); }
+.badge-due { background: var(--status-unpaid-soft-bg); color: var(--status-unpaid-soft-ink); }
 .badge-voided { background: var(--status-voided-bg); color: var(--status-voided-ink); }
 .badge-attention { background: var(--status-attention-bg); color: var(--status-attention-ink); font-weight: 600; }
 .badge.not-due { background: var(--paper); color: var(--status-not-due-ink); border-color: var(--line); font-style: italic; }

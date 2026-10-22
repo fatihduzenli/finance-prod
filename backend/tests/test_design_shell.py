@@ -268,8 +268,11 @@ def test_the_tokens_hold_the_brand_colours_and_the_named_scales() -> None:
     assert "--green: #2EC4A6;" in css
     for name in ("--ink", "--ink-2", "--line", "--paper", "--paper-2", "--danger", "--focus-ring"):
         assert f"{name}:" in css, name
-    for status in ("paid", "unpaid", "pending", "partial", "waived", "due"):
+    for status in ("paid", "unpaid", "pending", "partial", "waived"):
         assert f"--status-{status}:" in css, status
+    # PLAN-012e-4 D1: "due" (unpaid, not yet overdue) takes the soft unpaid pair; no due token.
+    assert "--status-unpaid-soft-bg:" in css and "--status-unpaid-soft-ink:" in css
+    assert "--status-due" not in css
     for step in range(1, 9):
         assert f"--s-{step}: {4 * (step if step <= 6 else (8 if step == 7 else 12))}px;" in css
     for size in ("xs", "sm", "md", "lg", "xl", "2xl"):

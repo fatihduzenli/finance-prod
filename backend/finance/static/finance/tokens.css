@@ -21,11 +21,10 @@
    pair: --danger on --paper
    pair: --status-paid-ink on --status-paid-bg
    pair: --status-unpaid-ink on --status-unpaid-bg
-   pair: --status-unpaid-border on --paper (ui)
+   pair: --status-unpaid-soft-ink on --status-unpaid-soft-bg
    pair: --status-pending-ink on --status-pending-bg
    pair: --status-partial-ink on --status-partial-bg
    pair: --status-waived-ink on --status-waived-bg
-   pair: --status-due-ink on --status-due-bg
    pair: --status-not-due-ink on --paper
    pair: --status-voided-ink on --status-voided-bg
    pair: --status-attention-ink on --status-attention-bg
@@ -41,9 +40,9 @@
    Measured ratios (sRGB, WCAG 2.x): ink/paper 15.6, ink/paper-2 14.3, ink-2/paper 7.5,
    ink-2/paper-2 6.9, link/paper 6.1, link/paper-2 5.6, on-navy/navy 15.4, on-navy-2/navy
    8.7, focus-on-navy/navy 10.0, navy/teal 5.2, navy/green 7.0, on-accent/accent 6.1,
-   control-border/paper 3.7, focus/paper 4.9, danger/paper 6.6, paid 7.1, unpaid 15.4,
-   pending 6.9, partial 6.4, waived 6.4, due 4.9, not-due 5.4, voided 6.4, attention 7.9, danger 7.9, warning 6.7,
-   info 13.4, success 7.1, highlight 13.3, insurance 13.1, navy/info-bg 13.2 (the current
+   control-border/paper 3.7, focus/paper 4.9, danger/paper 6.6, paid 7.1, unpaid 6.6
+   (white on the dark red), unpaid-soft 7.1, pending 8.0, partial 6.0, waived 6.4, not-due
+   5.4, voided 6.4, attention 7.9, danger 7.9, warning 6.7, info 13.4, success 7.1, highlight 13.3, insurance 13.1, navy/info-bg 13.2 (the current
    page link), ink/paper-3 13.2 (the plain badge), on-accent/danger 6.6 (the confirm
    button). The brand teal and green are fills and accents only: on white they are under
    3:1, so no text sits on white in them. */
@@ -71,26 +70,27 @@
   --on-accent: #FFFFFF;
   --link: #0B6E66;
 
-  /* Status (the single source for grid cells, badges, figures and report rows). */
+  /* Status (the single source for grid cells, badges, figures and report rows; PLAN-012e-4
+     D1, five colour families): paid green; unpaid red, light while the charge is not yet
+     overdue (the stored status "due": the soft pair) and dark with white text once overdue;
+     pending yellow; partly paid light orange; waived grey. */
   --status-paid: var(--green);
   --status-paid-bg: #DCF3E3;
   --status-paid-ink: #145A32;
-  --status-unpaid: var(--navy);
-  --status-unpaid-bg: #FFFFFF;
-  --status-unpaid-ink: var(--navy);
-  --status-unpaid-border: var(--navy);
-  --status-pending: var(--teal);
-  --status-pending-bg: #D3EDF1;
-  --status-pending-ink: #0B5560;
-  --status-partial: #E0A100;
-  --status-partial-bg: #FDECC8;
-  --status-partial-ink: #7A4A00;
+  --status-unpaid: #B42318;
+  --status-unpaid-bg: #B42318;
+  --status-unpaid-ink: #FFFFFF;
+  --status-unpaid-soft-bg: #FCD9D6;
+  --status-unpaid-soft-ink: #8A1C12;
+  --status-pending: #E5B800;
+  --status-pending-bg: #FFF1B8;
+  --status-pending-ink: #5C4500;
+  --status-partial: #F08A24;
+  --status-partial-bg: #FFDCC0;
+  --status-partial-ink: #8A3B00;
   --status-waived: #8A94A3;
   --status-waived-bg: #E9ECF0;
   --status-waived-ink: #4A5568;
-  --status-due: var(--teal);
-  --status-due-bg: #0F7F77;
-  --status-due-ink: #FFFFFF;
   --status-not-due-ink: #5F6B7A;
   /* The badges' two further statuses (PLAN-012c D5): a voided charge, and an item that
      needs attention (the dashboard list, Needs review). */
