@@ -18,33 +18,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Lint, types, unit and e2e tests
+  # The checks that need no database: lint, format, strict types and the secret scan of the
+  # browser-served assets. About a minute; every other job runs beside it.
+  checks:
+    name: Lint, types and secret scan
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: finance_ci
-          POSTGRES_USER: postgres
-          # Trust auth on a throwaway CI database, deliberately, so that no
-          # password literal and no credential-bearing connection string
-          # appears anywhere in this workflow (root CLAUDE.md 5.2).
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready --username postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
+    timeout-minutes: 10
     env:
       # Placeholder values only. STAX_API_KEY is a fake string that the secret
       # scan looks for in browser-served assets; it is not a credential and
-      # reaches no Stax endpoint (no Stax call exists yet).
+      # reaches no Stax endpoint.
       APP_ENV: local
       STAX_ENV: sandbox
       STAX_API_BASE_URL: https://apiprod.fattlabs.com
@@ -78,34 +61,198 @@ jobs:
       - name: Type check
         run: uv run mypy
 
-      # A test that runs longer than five minutes dumps every thread's stack and the
-      # step ends at its limit, so a hang names its test instead of using the whole
-      # job timeout (CI run of 2026-10-05, QA-010b addendum).
-      #
-      # PLAN-012b-a part 1 (2026-10-14): the seeded migration tests run apart from the
-      # unit tests, so the unit step stays under 15 minutes. Since 2026-10-19 they are
-      # the "Migration tests" job below, in parallel with this one: on 2026-10-19 a slower
-      # runner took them past the 15-minute step limit (11:38 the day before). The two
-      # selections are complements: every test in the "not e2e" set runs in exactly one
-      # of them (the deselected node ids here are the node ids the migration job names).
-      - name: Unit tests
+      - name: Secret scan of browser-served assets
+        run: bash scripts/check-no-secrets.sh
+
+  # The unit tests on PostgreSQL in two parallel halves (2026-10-22: one step of 12 to 19
+  # minutes depending on the runner, against a 20-minute limit). Half A is the test files
+  # named test_a… to test_l… (3,688 tests on 2026-10-22); half B is everything else under
+  # backend/tests (3,186), through --ignore-glob of half A's files, so the subfolders
+  # (sandbox, visual: deselected by their markers) stay covered. Both halves leave out the
+  # seeded migration tests, which are the "Migration tests" job: every test in the
+  # "not e2e" set runs in exactly one of the three jobs.
+  #
+  # A test that runs longer than five minutes dumps every thread's stack and the step ends
+  # at its limit, so a hang names its test instead of using the whole job timeout (CI run
+  # of 2026-10-05, QA-010b addendum).
+  unit-a:
+    name: Unit tests A (test_a to test_l)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: finance_ci
+          POSTGRES_USER: postgres
+          # Trust auth on a throwaway CI database, deliberately, so that no
+          # password literal and no credential-bearing connection string
+          # appears anywhere in this workflow (root CLAUDE.md 5.2).
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Placeholder values only. STAX_API_KEY is a fake string that the secret
+      # scan looks for in browser-served assets; it is not a credential and
+      # reaches no Stax endpoint.
+      APP_ENV: local
+      STAX_ENV: sandbox
+      STAX_API_BASE_URL: https://apiprod.fattlabs.com
+      APP_BASE_URL: http://localhost:8000
+      DATABASE_URL: postgresql://postgres@localhost:5432/finance_ci
+      DJANGO_SECRET_KEY: ci-only-not-secret
+      STAX_API_KEY: FAKE-CI-KEY-XYZ123
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        run: uv sync --all-groups
+
+      - name: Unit tests, half A
         timeout-minutes: 20
         run: >-
           uv run pytest -m "not e2e" -q -o faulthandler_timeout=300
+          backend/tests/test_[a-l]*.py
           --ignore=backend/tests/test_migrations_roundtrip.py
           --ignore=backend/tests/test_report_indexes.py
           --deselect "backend/tests/test_one_off_charges.py::test_the_rename_migration_rewrites_rows_and_reverses"
           --deselect "backend/tests/test_one_off_charges.py::test_the_rename_migration_refuses_to_reverse_over_a_one_off_charge"
           --deselect "backend/tests/test_staging_defects_adversarial.py::test_two_concurrent_runs_both_succeed_and_migrate_once"
 
-      - name: Install Playwright chromium
-        run: uv run playwright install --with-deps chromium
+  unit-b:
+    name: Unit tests B (the rest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: finance_ci
+          POSTGRES_USER: postgres
+          # Trust auth on a throwaway CI database, deliberately, so that no
+          # password literal and no credential-bearing connection string
+          # appears anywhere in this workflow (root CLAUDE.md 5.2).
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Placeholder values only. STAX_API_KEY is a fake string that the secret
+      # scan looks for in browser-served assets; it is not a credential and
+      # reaches no Stax endpoint.
+      APP_ENV: local
+      STAX_ENV: sandbox
+      STAX_API_BASE_URL: https://apiprod.fattlabs.com
+      APP_BASE_URL: http://localhost:8000
+      DATABASE_URL: postgresql://postgres@localhost:5432/finance_ci
+      DJANGO_SECRET_KEY: ci-only-not-secret
+      STAX_API_KEY: FAKE-CI-KEY-XYZ123
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        run: uv sync --all-groups
+
+      - name: Unit tests, half B
+        timeout-minutes: 20
+        run: >-
+          uv run pytest -m "not e2e" -q -o faulthandler_timeout=300
+          backend/tests
+          --ignore-glob="backend/tests/test_[a-l]*.py"
+          --ignore=backend/tests/test_migrations_roundtrip.py
+          --ignore=backend/tests/test_report_indexes.py
+          --deselect "backend/tests/test_one_off_charges.py::test_the_rename_migration_rewrites_rows_and_reverses"
+          --deselect "backend/tests/test_one_off_charges.py::test_the_rename_migration_refuses_to_reverse_over_a_one_off_charge"
+          --deselect "backend/tests/test_staging_defects_adversarial.py::test_two_concurrent_runs_both_succeed_and_migrate_once"
+
+  # The end-to-end tests inside the Playwright image of the installed Playwright version:
+  # Chromium and its system packages are in the image, so nothing is downloaded per run
+  # (2026-10-22: "playwright install --with-deps" took 12 minutes on a slow runner, 22
+  # seconds on a normal one). The same image the visual job compares in.
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.63.0-noble
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: finance_ci
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd "pg_isready --username postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Placeholder values only. STAX_API_KEY is a fake string that the secret
+      # scan looks for in browser-served assets; it is not a credential and
+      # reaches no Stax endpoint.
+      APP_ENV: local
+      STAX_ENV: sandbox
+      STAX_API_BASE_URL: https://apiprod.fattlabs.com
+      APP_BASE_URL: http://localhost:8000
+      # Inside a job container the service is reached by its name.
+      DATABASE_URL: postgresql://postgres@postgres:5432/finance_ci
+      DJANGO_SECRET_KEY: ci-only-not-secret
+      STAX_API_KEY: FAKE-CI-KEY-XYZ123
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        run: uv sync --all-groups
 
       - name: End-to-end tests
-        run: uv run pytest -m e2e -q
-
-      - name: Secret scan of browser-served assets
-        run: bash scripts/check-no-secrets.sh
+        run: uv run pytest -m e2e -q -o faulthandler_timeout=300
 
   migrations:
     # The seeded migration round trips (PLAN-012b-a part 1): every migration applied and
@@ -171,7 +318,7 @@ jobs:
     # fonts and the Chromium build match pixel for pixel. A difference fails the job and the
     # diff images are kept as an artifact for review.
     name: Visual regression
-    needs: test
+    needs: checks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     container:
@@ -230,7 +377,7 @@ jobs:
   deploy-staging:
     name: Deploy staging
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [test, migrations, visual]
+    needs: [checks, unit-a, unit-b, migrations, e2e, visual]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: staging
