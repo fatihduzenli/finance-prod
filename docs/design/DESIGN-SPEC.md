@@ -1,5 +1,12 @@
 # Monvera — design specification (owner-approved, 2026-10-22)
 
+**Change of 2026-10-22 (owner's decision, PLAN-012f Batch A):** four §1 values were nudged so
+that every text pair meets WCAG AA, which §5 requires: `--muted` `#6B7A90` → `#5F6E85`, `--link`
+`#0E8F86` → `#0B7C74`, `--paid-text` `#1B7F3B` → `#176B33`; the primary button is `#0E8F86` with a
+1px `#0B7C74` border (`--btn-primary-bg`, `--btn-primary-border`) while `--teal` stays `#13A89E`
+for the logo, the active tab and the bottom bar; `--faint` is decoration only, never for text
+that must be read. The values below are the ones built.
+
 Reference screenshots in this folder are the source of truth for the look. Where this file and a screenshot differ, the screenshot wins.
 
 - `dashboard-laptop.png`, `store-workspace-laptop.png`, `monthly-rent-overview-laptop.png` — laptop (1440)
@@ -20,11 +27,12 @@ Reference screenshots in this folder are the source of truth for the look. Where
   --border: #E3E8EF;  --border-soft: #EEF1F5;  --input-border: #D5DCE6;
 
   /* text */
-  --text: #0B2545;  --text-2: #3D4B60;  --muted: #6B7A90;  --faint: #9AA7B8;
-  --link: #0E8F86;
+  --text: #0B2545;  --text-2: #3D4B60;  --muted: #5F6E85;  --faint: #9AA7B8;  /* faint: decoration only */
+  --link: #0B7C74;
+  --btn-primary-bg: #0E8F86;  --btn-primary-border: #0B7C74;  /* the primary button; --teal stays the brand accent */
 
   /* status (bg / text) — always paired with an icon or word, never colour alone */
-  --paid-bg: #E3F5E8;      --paid-text: #1B7F3B;
+  --paid-bg: #E3F5E8;      --paid-text: #176B33;
   --unpaid-bg: #FDE8E6;    --unpaid-text: #B42318;
   --overdue-bg: #B42318;   --overdue-text: #FFFFFF;
   --pending-bg: #FFF3C4;   --pending-text: #6B4E00;
@@ -56,7 +64,7 @@ Sandbox banner: `#FFF3C4` background, `#6B4E00` text, 12px, 600, letter-spacing 
 
 - **Card**: `--surface`, 1px `--border`, radius 12px, padding 18px 20px; header row 15px/600 with an optional count pill and a right-aligned link ("All payments →").
 - **Section label inside right-column cards**: 13px, 600, `--muted`, uppercase, letter-spacing .04em (LEASE, NEXT, STORE COST, DOCUMENTS).
-- **Buttons**: primary teal `#13A89E` white text, 10px 16px, radius 8px, 600; secondary white with `--input-border`, same size; small row buttons 6px 12px, 12px text; destructive text `#B42318`. Drop-down buttons end with "▾".
+- **Buttons**: primary `--btn-primary-bg` (#0E8F86) with a 1px `--btn-primary-border` and white text, 10px 16px, radius 8px, 600; secondary white with `--input-border`, same size; small row buttons 6px 12px, 12px text; destructive text `#B42318`. Drop-down buttons end with "▾".
 - **Inputs/selects**: 9px 12px, `--input-border`, radius 8px, `--surface-2` background for search fields.
 - **Segmented filter** (Open / Paid / All): grey track `--bg` radius 8px, active segment white with a 1px shadow.
 - **Tabs**: 13px, 10px 14px, 2px bottom border teal on the active tab, muted text otherwise, horizontal scroll on phones.
@@ -79,6 +87,9 @@ Header: breadcrumb, "#1991 Istanbul" + green Active badge, one address line + op
 
 ### Monthly rent overview (`monthly-rent-overview-*.png`)
 Header: title + "Download spreadsheet". Filter card: search, From/To, Status, Channel, Show. Legend pills. Grid card: sticky store column ("#no Name" bold link, operator below), month columns with the current month tinted `#EEF6F5`, each cell a rounded status block (amount + status line), totals row "Collected" with paid · unpaid · pending counts.
+
+### Login (`login-laptop.png`)
+Two panels. Left: the sidebar gradient at 160°, two soft teal circles (12% and 10% alpha) as decoration, logo 52 px, a 34px/700 headline ("Rent collection for every store, in one place."), one muted sentence, three check-marked lines; company name at the bottom. Right: on `--bg`, a 400 px form card area — sandbox banner as a rounded strip, "Sign in" 26px/700, muted sub-line, E-mail and Password fields (12px 14px padding, radius 10px, autocomplete attributes), full-width primary Sign in button (13px padding, radius 10px), a muted "Access is by invitation" line. On phones the left panel collapses to a short gradient header with the logo and the headline; the form takes the full width. **Owner's decision of 2026-10-22 (PLAN-012f D13):** the first field is labelled "Username" (accounts are not e-mail addresses); "Forgot password?" and "Keep me signed in" are left out (no reset flow, no session change); the layout is otherwise as the screenshot shows.
 
 ## 5. Rules
 - No gradients except the sidebar; no drop shadows; no emoji; icons are inline stroke SVG (Lucide-style, 16–18px).

@@ -159,6 +159,19 @@ for the badge families, the KPI, progress, date-chip and avatar helpers), `backe
   payments", "All unpaid balances →", "All payments →"); the section labels LEASE, NEXT, STORE
   COST, DOCUMENTS; the phone banner "SANDBOX — TEST SYSTEM"; the bottom bar "More". Every other
   word is the approved list's.
+- **D13. Login** (Batch D; the owner's spec section added on 2026-10-22 and the decisions of the
+  same day): the two-panel layout of `login-laptop.png` (the gradient panel at 160° with the two
+  soft circles, the logo at 52 px, the headline, one muted sentence, the three check-marked lines,
+  the company name at the bottom; the form on `--bg` in a 400 px area with the banner as a
+  rounded strip, "Sign in" 26/700, the muted sub-line, the fields at 12/14 padding and radius 10,
+  the full-width primary button, the "Access is by invitation" line) on the two-factor sign-in
+  pages; the first field labelled "Username"; no "Forgot password?" and no "Keep me signed in";
+  on phones the panel collapses to a short gradient header and the form takes the width. No
+  behaviour change: the same form, fields and flow.
+- **Owner's decisions of 2026-10-22 on Batch A:** the nudged AA values (spec §1 updated with a
+  note); "Settings" in the user card beside Help and in the More sheet; the grid scrolls at
+  1,280 px (PLAN-011b D2's twelve-months rule retired); "Monthly rent" in the sidebar and the
+  bottom bar.
 - **D12. Baselines and the report** (Batch D): the visual suite's thirty baselines regenerated
   in the Playwright image at 1,280 and 390; in addition the three pages at 1,440 and the store
   page at 390 captured from the final tree and placed beside the references in the QA report
