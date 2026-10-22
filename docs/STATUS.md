@@ -1613,3 +1613,15 @@ follow-up); before Step 13 Fable proposes two CI verification-config changes for
 word: the unit step split into two parallel jobs, and the Playwright browsers cached between
 runs (or the e2e step run in the Playwright image as the visual job is), so a slow runner cannot
 take a step past its limit as happened to the migration step on 2026-10-19.
+
+## Update, 2026-10-22, the CI layout for the next push (owner's "yes"); F3 received
+
+CI (verification config, `2c3e15b`, not pushed): the lint, type and secret checks in their own
+job; the unit tests in two parallel jobs (files `test_a…`–`test_l…`, and the rest through
+`--ignore-glob`), each with a 20-minute step limit; the end-to-end tests inside the Playwright
+image so Chromium is not downloaded per run; the staging deploy needs every job. Verified
+locally as CI will run it: half A 3,688 passed (9:39), half B 3,180 passed, 3 skipped (9:39),
+together the whole unit set; the e2e suite in the image against PostgreSQL 17 passed (1:00).
+The owner's F3 (the Monthly rent overview's colour families, blank cells outside the lease, the
+store column "#1991 Istanbul" plus operator) is planned in `docs/qa/PLAN-012e4-grid-colours.md`
+and assigned; it goes with the CI changes in the next push.
