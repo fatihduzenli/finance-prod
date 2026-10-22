@@ -22,7 +22,7 @@
       </form>
     </div>
   {% else %}
-    <p id="feed-status" class="muted">You have no calendar feed.</p>
+    <p id="feed-status">You have no calendar feed.</p>
     <form method="post" action="{% url 'finance:feed_create' %}" class="actions">
       {% csrf_token %}<button class="btn btn-primary" type="submit" id="feed-create">Create a calendar address</button>
     </form>

@@ -2177,7 +2177,8 @@ def test_the_draft_page_offers_rent_in_the_item_box_and_saves_a_rent_line(
         assert f'id="id_lines-0-{field}"' in page
     # PLAN-012d D10: no kind select and no month input; Rent is the list's first entry.
     assert 'id="id_lines-0-kind"' not in page and 'type="month"' not in page
-    assert 'id="rent-line-help"' in page
+    # PLAN-012e-2 D10: the Rent paragraph moved to the help page the one line links.
+    assert 'id="lines-help"' in page and 'href="/help/invoice-lines/"' in page
     assert '<datalist id="draft-items"><option value="Rent" data-kind="rent">' in page
     data = {
         "lease": str(lease.pk),

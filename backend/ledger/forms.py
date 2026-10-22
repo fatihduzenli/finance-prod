@@ -477,14 +477,24 @@ class StoreForm(_StoreFormBase):
         fields = (
             "store_number",
             "external_label",
+            "address_line1",
             "city",
             "state",
+            "postal_code",
             "open_date",
             "closed_at",
             "status",
         )
         widgets = {"closed_at": forms.DateInput(attrs={"type": "date"})}
-        labels = {"external_label": "Name", "closed_at": "Closed date"}
+        labels = {
+            "external_label": "Name",
+            "address_line1": "Street",
+            "postal_code": "ZIP",
+            "closed_at": "Closed date",
+        }
+
+    #: The fields of the store's first cost row, shown under "Store cost" (create only).
+    COST_FIELDS: tuple[str, ...] = ()
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
@@ -494,11 +504,44 @@ class StoreForm(_StoreFormBase):
             self.add_error("closed_at", CLOSED_BEFORE_OPEN)
         return data
 
+    def store_fields(self) -> list[forms.BoundField]:
+        return [field for field in self.visible_fields() if field.name not in self.COST_FIELDS]
+
+    def cost_fields(self) -> list[forms.BoundField]:
+        return [field for field in self.visible_fields() if field.name in self.COST_FIELDS]
+
 
 class StoreCreateForm(StoreForm):
-    """Adds the one-time key rendered with the form, so a resubmission saves nothing."""
+    """Adds the one-time key rendered with the form, so a resubmission saves nothing, and
+    the store's first cost row (PLAN-012e-2 D9): the landlord rent is required (``0.00``
+    is a known "no cost"); the Edit form has none of these, "Change" sets them."""
+
+    COST_FIELDS = (
+        "landlord_rent",
+        "landlord_lease_end",
+        "other_monthly_cost",
+        "other_cost_description",
+    )
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
+    landlord_rent = _money_field("Landlord rent (monthly)", minimum=Decimal("0.00"), required=True)
+    landlord_lease_end = forms.DateField(
+        label="Landlord lease end",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    other_monthly_cost = _money_field("Other monthly cost", minimum=Decimal("0.00"))
+    other_cost_description = forms.CharField(
+        label="Other cost description",
+        required=False,
+        max_length=NAME_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["landlord_rent"].help_text = "0.00 means the store costs nothing."
+        self.fields["other_monthly_cost"].help_text = "Empty means no other monthly cost."
 
 
 # --- Manual payments (PLAN-007 D8) -------------------------------------------------------

@@ -11,8 +11,9 @@ closing the open one (POST) need ``admin``. Every POST is checked again by
 
 Every change goes through :mod:`ledger.services.stores` or
 :mod:`ledger.services.store_costs`, which write the audit log. The detail page shows the
-landlord rent in effect today, the operator rent of the lease active today and the
-margin, or "unknown" when any of them is unknown (never zero).
+store's facts (PLAN-012e-2 D7: the address on one line, the status as a badge) and its
+Store cost block (D8: the landlord rent in effect today, or "unknown"; the margin is in
+the P&L only); the New store form also saves the first cost row (D9).
 Every POST ends in a redirect, whatever the outcome; a form with errors is held in the
 session for the next GET, as on the operator and lease screens.
 
@@ -204,9 +205,9 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
         ),
         "can_edit": admin,
         "can_set_cost": meets(role, Role.BILLING),
+        "address_line": service.address_line(store),
+        "status_value": service.status_badge(store),
         "cost": store_costs.current_cost(store, today),
-        "operator_rent": store_costs.operator_rent(store, today),
-        "margin": store_costs.margin(store, today),
         "cost_history": store_costs.history_entries(store),
         "can_correct_cost": admin,
         "open_cost": store_costs.open_cost(store),
@@ -450,17 +451,24 @@ def store_create(request: HttpRequest) -> HttpResponse:
             return redirect("ledger:stores:detail", pk=existing.pk)
         form = StoreCreateForm(request.POST)
         if form.is_valid():
-            store, created = service.create_store(
-                form.cleaned_data,
-                creation_key=form.cleaned_data["creation_key"],
-                actor=_actor(request),
-            )
-            if created:
-                messages.success(request, "Store saved.")
-                documents.upload_after_create(request, store, "store")
+            try:
+                store, created = service.create_store(
+                    form.cleaned_data,
+                    creation_key=form.cleaned_data["creation_key"],
+                    actor=_actor(request),
+                )
+            except service.CostRefused as cost_refused:
+                field = cost_refused.outcome.field
+                form.add_error(
+                    field if field in form.fields else None, cost_refused.outcome.message
+                )
             else:
-                messages.info(request, ALREADY_SAVED)
-            return redirect("ledger:stores:detail", pk=store.pk)
+                if created:
+                    messages.success(request, "Store saved.")
+                    documents.upload_after_create(request, store, "store")
+                else:
+                    messages.info(request, ALREADY_SAVED)
+                return redirect("ledger:stores:detail", pk=store.pk)
         _hold(request, "store-create", form)
         return redirect("ledger:stores:create")
     form = _held(request, "store-create", StoreCreateForm) or StoreCreateForm(
@@ -543,7 +551,7 @@ def store_set_cost(request: HttpRequest, pk: str) -> HttpResponse:
     )
 
 
-COSTS_ANCHOR = "#store-costs"
+COSTS_ANCHOR = "#store-cost"
 
 
 def _cost_row(store: Store, row: str) -> StoreCost:

@@ -135,8 +135,10 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     ],
     "SyncStatus": ["awaiting_link", "failed", "linked", "not_applicable", "pending"],
 }
-#: The 255 route names before Batch D, as one digest (sorted, newline-joined, sha256).
-FROZEN_ROUTES = (255, "6fc2581b3e9966585bbb77e100f34bedadaaf75501db1bf29de55eddb74c545b")
+#: The route names as one digest (sorted, newline-joined, sha256): 255 before Batch D of
+#: PLAN-012c; 257 since PLAN-012e-2 Batch C added finance:help and finance:help_topic (the
+#: only change, checked by hand on 2026-10-21).
+FROZEN_ROUTES = (257, "24592c0cf746cd991b6ed9b6b2e474747f1420c315ea6c2f6d7c338597f61672")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

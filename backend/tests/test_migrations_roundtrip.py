@@ -65,6 +65,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0043_fee_type_show_in_setup",
             "ledger.migrations.0044_draft_existing_charge",
             "ledger.migrations.0045_company_settings",
+            "ledger.migrations.0047_store_address",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -1816,6 +1817,97 @@ def test_the_company_settings_migration_over_existing_rows_on_postgresql(
                 f"UPDATE company_settings SET {column} = '4111 1111 1111 1111'"  # noqa: S608
             )
     assert _rows(url, COMPANY_ROW) == SEEDED_COMPANY
+
+
+# --- PLAN-012e-2 D7: ledger 0047, the store's street and ZIP --------------------------------
+# Seeds a store at ``ledger.0046``, migrates forward, back and forward again on both engines
+# and reads the rows with plain SQL: 0047 adds the two columns blank on the existing row; the
+# reverse drops them and keeps the row. On PostgreSQL the stores trigger guards both columns
+# after the forward step, and the old columns are still guarded after the reverse.
+
+STATE_BEFORE_ADDRESS = (("ledger", "0046_copy_labels"),)
+ADDRESS_COLUMNS = (
+    "SELECT count(*) FROM information_schema.columns WHERE table_name = 'stores' "
+    "AND column_name IN ('address_line1', 'postal_code')"
+)
+
+
+def seed_before_address() -> None:
+    """Seed a store with the models of ``STATE_BEFORE_ADDRESS``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_ADDRESS)).apps
+    apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 2610", city="Springfield", state="IL", status="active"
+    )
+
+
+def _address_columns(url: str) -> list[tuple[str, ...]]:
+    if url.startswith("sqlite:///"):
+        return _rows(
+            url,
+            "SELECT count(*) FROM pragma_table_info('stores') "
+            "WHERE name IN ('address_line1', 'postal_code')",
+        )
+    return _rows(url, ADDRESS_COLUMNS)
+
+
+def _address_round_trip(repo_root: Path, url: str) -> None:
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_ADDRESS)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_address as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    for _ in range(2):
+        result = _manage(repo_root, url, "migrate", "--noinput")
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert _address_columns(url) == [("2",)]
+        assert _rows(
+            url, "SELECT external_label, address_line1, city, state, postal_code FROM stores"
+        ) == [("Store 2610", "", "Springfield", "IL", "")]
+        _migrate_to(repo_root, url, *STATE_BEFORE_ADDRESS)
+        assert _address_columns(url) == [("0",)]
+        assert _rows(url, "SELECT external_label, city FROM stores") == [
+            ("Store 2610", "Springfield")
+        ]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+
+
+def test_the_store_address_migration_over_existing_rows_on_sqlite(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    _address_round_trip(repo_root, f"sqlite:///{tmp_path / 'address.sqlite3'}")
+
+
+@requires_postgresql
+def test_the_store_address_migration_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    _address_round_trip(repo_root, url)
+    for column in ("address_line1", "postal_code", "city"):
+        with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+            scratch.execute(f"UPDATE stores SET {column} = '4111 1111 1111 1111'")  # noqa: S608
+    # Back at 0046, the trigger guards the columns of 0002 again.
+    _migrate_to(repo_root, url, *STATE_BEFORE_ADDRESS)
+    with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+        scratch.execute("UPDATE stores SET city = '4111 1111 1111 1111'")
+    with psycopg.connect(url) as scratch:
+        scratch.execute("UPDATE stores SET city = 'Shelbyville'")
+    assert _rows(url, "SELECT city FROM stores") == [("Shelbyville",)]
 
 
 # --- Row 2 --------------------------------------------------------------------------

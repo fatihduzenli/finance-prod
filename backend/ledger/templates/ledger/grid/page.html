@@ -84,7 +84,7 @@ months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_cl
   {% if too_slow %}
     <p class="warning" id="grid-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted" id="grid-count">{{ grid.rows|length }} store{{ grid.rows|length|pluralize }}.</p>
+  <p id="grid-count">{{ grid.rows|length }} store{{ grid.rows|length|pluralize }}.</p>
   <div class="grid-scroll-top" id="grid-scroll-top" aria-hidden="true" hidden><div></div></div>
   <div class="grid-scroll" tabindex="0" id="grid-scroll" aria-label="Month grid, scrolls both ways">
     <table class="grid" id="grid">

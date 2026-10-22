@@ -1,0 +1,6 @@
+{% load money %}
+{% comment %}Autopay and the daily charges: the paragraphs the Daily charges and Returned payments pages lost (PLAN-012e-2 D10).{% endcomment %}
+<p id="help-catch-up">Creating charges also catches up: every debit date from a lease's start to today that has no charge gets one, due on that date (or on the start date when the first month's debit day is before it), the first month prorated. It looks back at most {{ catch_up_months }} months, this month included.</p>
+<p id="help-match-scope">"Update from {{ company.provider_name }}" reads {{ company.provider_name }}'s autopay invoices only. An invoice made on the {{ company.provider_name }} dashboard is not matched here: attach it from its charge's page with "Attach {{ company.provider_name }} invoice".</p>
+<p id="help-large-debit">"Large debit" marks an amount above {{ large_debit_threshold|money }}. That amount is a placeholder until {{ company.provider_name }} states its per-transaction limit.</p>
+<p id="help-debit-again">Nothing debits again unless staff reschedule it: Debit again takes the date the operator agreed and makes one invoice for the returned amount plus the NSF fee (one amount on an operator's first return, another afterwards), debited from the linked bank account on that date, or sent by e-mail when the operator has none.</p>

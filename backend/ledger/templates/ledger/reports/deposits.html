@@ -10,7 +10,7 @@
   {% if too_slow %}
     <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted">Bank deposits {{ company.provider_name }} reported, by deposit date, against the ACH payments and refunds settled in the same months (security deposits paid by ACH included: they reach the bank like rent). The difference is gross deposits less net settled ACH; a payment settled at the end of a month may be deposited in the next. Amounts in US dollars.</p>
+  <p class="muted">Bank deposits {{ company.provider_name }} reported, by deposit date, against the ACH payments and refunds settled in the same months. Security deposits paid by ACH are included: they reach the bank like rent. The difference is gross deposits less net settled ACH; a payment settled at the end of a month may be deposited in the next. Amounts in US dollars.</p>
 
   <h2>Unmatched items</h2>
   <p class="muted">Open findings of the nightly check's bank-deposit step, whatever their date. Resolve them on the <a href="{% url 'ledger:reconciliation:page' %}" id="reconciliation-link">nightly check page</a>.</p>

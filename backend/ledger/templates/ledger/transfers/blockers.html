@@ -2,7 +2,7 @@
 {% block title %}Transfer store {{ store.external_label }}: still open at {{ company.provider_name }}, and balances{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
-  <p class="muted" id="step-help">The outgoing operator settles everything before the store changes hands: anything still open in {{ company.provider_name }} must be collected or cancelled, and every charge still owed must be paid, each from its own page. A deposit held is settled on the next steps and does not block. This wizard never contacts {{ company.provider_name }}.</p>
+  <p class="muted" id="step-help">The outgoing operator settles everything before the store changes hands. Anything still open in {{ company.provider_name }} must be collected or cancelled, and every charge still owed must be paid, each from its own page. A deposit held is settled on the next steps and does not block. This wizard never contacts {{ company.provider_name }}.</p>
   {% if blockers %}
     <ul id="blocker-list">
       {% for blocker in blockers %}

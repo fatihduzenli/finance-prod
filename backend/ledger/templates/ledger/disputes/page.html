@@ -55,9 +55,9 @@
             {% endif %}
             {% if can_add_evidence %}
               {% if item.past %}
-                <p class="muted">The respond-by date has passed: {{ company.provider_name }} no longer takes evidence.</p>
+                <span class="muted">The respond-by date has passed: {{ company.provider_name }} no longer takes evidence.</span>
               {% elif not dispute.operator %}
-                <p class="muted">Evidence needs the dispute linked to one of our operators.</p>
+                <span class="muted">Evidence needs the dispute linked to one of our operators.</span>
               {% else %}
                 <details>
                   <summary>Add evidence</summary>
@@ -65,9 +65,11 @@
                     {% csrf_token %}
                     <label for="evidence-name-{{ dispute.pk }}">Name *</label>
                     <input type="text" name="name" id="evidence-name-{{ dispute.pk }}" maxlength="150" required>
-                    <label for="evidence-file-{{ dispute.pk }}">File (PDF, JPEG, PNG or TIFF; smaller than 10 MB) *</label>
-                    <input type="file" name="file" id="evidence-file-{{ dispute.pk }}" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff" required>
-                    <p class="muted">A PDF is checked for card and account numbers before it is stored. An image cannot be checked: send only a receipt, a signed lease page or correspondence, never a bank form.</p>
+                    <div class="field">
+                      <label for="evidence-file-{{ dispute.pk }}">File (PDF, JPEG, PNG or TIFF; smaller than 10 MB) *</label>
+                      <input type="file" name="file" id="evidence-file-{{ dispute.pk }}" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff" required>
+                      <span class="help muted">A PDF is checked for card and account numbers before it is stored. An image cannot be checked: send only a receipt, a signed lease page or correspondence, never a bank form.</span>
+                    </div>
                     <label style="font-weight:normal;"><input type="checkbox" name="acknowledged" value="on"> {{ notice }} (required for an image)</label>
                     <p class="actions"><button class="btn btn-primary" type="submit">Save and send to {{ company.provider_name }}</button></p>
                   </form>

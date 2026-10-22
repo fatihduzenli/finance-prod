@@ -14,6 +14,7 @@ from django.http import HttpRequest, JsonResponse
 from django.urls import include, path
 from two_factor.urls import urlpatterns as two_factor_urlpatterns
 
+from finance import help as help_pages
 from finance import pwa
 from ledger.views import calendar as calendar_views
 
@@ -53,6 +54,9 @@ urlpatterns = [
                         calendar_views.feed_revoke,
                         name="feed_revoke",
                     ),
+                    # The help pages (PLAN-012e-2 D10): static, signed in, every role.
+                    path("help/", help_pages.index, name="help"),
+                    path("help/<slug:slug>/", help_pages.topic, name="help_topic"),
                 ],
                 "finance",
             )

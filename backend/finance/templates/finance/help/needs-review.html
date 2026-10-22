@@ -1,0 +1,8 @@
+{% comment %}Needs review: what the badge means and where it comes from (PLAN-012e-2 D10).{% endcomment %}
+<p id="help-needs-review">The Needs review badge marks a row that staff should look at before relying on it.</p>
+<ul id="help-needs-review-cases">
+  <li>A rent charge, when an invoice from {{ company.provider_name }} cannot be linked to it cleanly: the charge already has an invoice, or the linked invoice's total differs from its balance.</li>
+  <li>A charge paid only in part by a payment recorded from the store page.</li>
+  <li>An operator, when {{ company.provider_name }} holds several customers with its e-mail: the app connects the oldest.</li>
+  <li>An autopay, when its lease changed under it (rent, debit day or operator): autopay is never edited for an amount; pause it and turn it on again.</li>
+</ul>

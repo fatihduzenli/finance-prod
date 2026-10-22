@@ -242,7 +242,9 @@ def test_the_run_page_reports_the_catch_up_and_states_the_bound(
     built(date(2026, 9, 13))
     client, _ = client_for(Role.BILLING)
     page = client.get("/run/").content.decode()
-    assert "at most 24 months" in page
+    # PLAN-012e-2 D10: the bound moved to the help page; the run page links it.
+    assert "/help/autopay-and-daily-charges/" in page
+    assert "at most 24 months" in client.get("/help/autopay-and-daily-charges/").content.decode()
     response = client.post("/run/create-charges/", follow=True)
     text = response.content.decode()
     assert "Charges created: 0. Created (catch-up): 2. Already created: 0." in text

@@ -832,32 +832,33 @@ def cost_form(**overrides: str) -> dict[str, str]:
     return {**values, **overrides}
 
 
-def test_the_store_page_shows_unknown_until_a_cost_is_set_then_the_margin() -> None:
+def test_the_store_page_shows_unknown_until_a_cost_is_set_then_the_cost() -> None:
     lease = leased("3500.00")
     client, user = client_for(Role.BILLING)
     shown = page(client, lease.store)
     assert '<dd id="landlord-rent">unknown</dd>' in shown
-    assert '<dd id="store-margin">unknown</dd>' in shown
-    assert '<dd id="operator-rent">$3,500.00 a month</dd>' in shown
+    # PLAN-012e-2 D8: the Store cost block shows no margin and no operator rent (the P&L
+    # has the margin).
+    assert 'id="store-margin"' not in shown and 'id="operator-rent"' not in shown
     response = client.post(f"/stores/{lease.store_id}/cost/", cost_form())
     assert response.status_code == 302 and response["Location"] == f"/stores/{lease.store_id}/"
     shown = page(client, lease.store)
     assert '<dd id="landlord-rent">$2,500.00 a month from 2026-01-01</dd>' in shown
     assert '<dd id="other-cost">$50.00 (dumpster)</dd>' in shown
     assert '<dd id="landlord-lease-end">2030-12-31</dd>' in shown
-    assert '<dd id="store-margin">$950.00 a month</dd>' in shown
+    assert "Margin" not in shown and "$950.00" not in shown
     assert 'id="cost-history"' in shown
     entry = AuditLog.objects.get(action="store_cost.created")
     assert entry.actor == user
 
 
-def test_the_margin_is_unknown_on_the_page_without_a_lease() -> None:
+def test_the_margin_is_unknown_without_a_lease_and_never_on_the_page() -> None:
     target = store()
     set_cost(target, "2500.00")
+    assert service.margin(target, date(2026, 6, 1)) is None
     client, _ = client_for(Role.VIEWER)
     shown = page(client, target)
-    assert '<dd id="operator-rent">unknown</dd>' in shown
-    assert '<dd id="store-margin">unknown</dd>' in shown
+    assert 'id="operator-rent"' not in shown and 'id="store-margin"' not in shown
 
 
 def test_an_earlier_date_on_the_form_is_held_as_an_error_and_saves_nothing() -> None:
@@ -908,10 +909,10 @@ def test_set_cost_is_billing_and_a_viewer_is_refused() -> None:
     path = f"/stores/{target.pk}/cost/"
     assert viewer.get(path).status_code == 403
     assert viewer.post(path, cost_form()).status_code == 403
-    assert 'id="set-landlord-rent"' not in page(viewer, target)
+    assert 'id="change-cost"' not in page(viewer, target)
     assert not StoreCost.objects.exists()
     admin, _ = client_for(Role.ADMIN)
-    assert 'id="set-landlord-rent"' in page(admin, target)
+    assert 'id="change-cost"' in page(admin, target)
     assert admin.post(path, cost_form()).status_code == 302
     assert StoreCost.objects.count() == 1
 

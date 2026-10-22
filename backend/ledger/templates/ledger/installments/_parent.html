@@ -7,5 +7,5 @@
 {% if can_split %}
   <p class="actions"><a class="btn" href="{{ split_url }}" id="split-installments">Split into installments</a> <span class="muted">{{ split_help }}</span></p>
 {% elif split_refusal %}
-  <p class="muted" id="split-refusal">Split into installments is not possible now: {{ split_refusal }}</p>
+  <p id="split-refusal">Split into installments is not possible now: {{ split_refusal }}</p>
 {% endif %}

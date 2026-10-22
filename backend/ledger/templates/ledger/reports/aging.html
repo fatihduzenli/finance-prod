@@ -8,7 +8,7 @@
   {% if too_slow %}
     <p class="warning" id="aging-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted">Open balances on {{ today|date:"Y-m-d" }} by operator and days past due: rent, insurance and one-off charges not waived or voided, deposits left out; the same charges as the dashboard's total outstanding. Current is not yet due or due today. Aging is by due date; revenue is by settled month. Amounts in US dollars.</p>
+  <p class="muted">Open balances on {{ today|date:"Y-m-d" }} by operator and days past due: rent, insurance and one-off charges not waived or voided, deposits left out. These are the same charges as the dashboard's total outstanding. Current is not yet due or due today. Aging is by due date; revenue is by settled month. Amounts in US dollars.</p>
   {% responsive_table "scroll" %}
   <table id="aging">
     <thead>

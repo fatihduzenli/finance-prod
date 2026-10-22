@@ -16,7 +16,7 @@
     {% endfor %}
     {% if not lease %}
       <h2>Setup checklist</h2>
-      <p class="muted">Type the price of each one-time item the operator is charged; a row without a price is not charged (the grey amount is the catalogue's usual price, shown as a hint only). Saving creates the lease and those setup charges together. The cost is what the item costs the business (empty: unknown); the price is what the operator pays. An empty due date is the lease's start date. More items can be added from the lease page later.</p>
+      <p class="muted">Type the price of each one-time item the operator is charged; a row without a price is not charged. The grey amount is the catalogue's usual price, shown as a hint only. Saving creates the lease and those setup charges together. The cost is what the item costs the business (empty: unknown); the price is what the operator pays. An empty due date is the lease's start date. More items can be added from the lease page later.</p>
       {% responsive_table %}
       <table id="setup-checklist" class="js-table-total">
         <thead><tr><th>Charge</th><th>Cost</th><th>Price</th><th>Vendor</th><th>Due date</th></tr></thead>

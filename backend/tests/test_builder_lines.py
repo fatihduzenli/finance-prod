@@ -312,8 +312,11 @@ def test_the_existing_lines_amount_is_read_only_on_the_page() -> None:
     assert "unit.value = chosen.dataset.balance;\n            unit.readOnly = true;" in script
     assert "unit.readOnly = false;" in script and "input.readOnly = false;" in script
     assert "unit.max" not in script
+    # PLAN-012e-2 D10: the sentence moved from the draft form to the help page it links.
     form = (REPO / "ledger" / "templates" / "ledger" / "invoices" / "_draft_form.html").read_text()
-    assert "the amount is its balance and cannot be changed here" in form
+    assert "slug='invoice-lines'" in form
+    help_page = REPO / "finance" / "templates" / "finance" / "help" / "invoice-lines.html"
+    assert "the amount is its balance and cannot be changed here" in help_page.read_text()
 
 
 def test_a_charge_on_a_live_invoice_or_a_plan_is_neither_offered_nor_attached(

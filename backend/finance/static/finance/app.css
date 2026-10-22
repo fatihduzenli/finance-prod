@@ -80,6 +80,8 @@ input[type=text], input[type=email], input[type=search], textarea { width: 100%;
 .messages .error { background: var(--danger-bg); color: var(--danger-ink); } .messages .warning { background: var(--warning-bg); color: var(--warning-ink); } .messages .success { background: var(--success-bg); color: var(--success-ink); }
 .errorlist { color: var(--danger); padding-left: 1rem; }
 .muted { color: var(--muted); }
+/* A block's one line of help, "Learn more" (PLAN-012e-2 D10). */
+p.help { color: var(--muted); }
 dl { display: grid; grid-template-columns: 12rem 1fr; gap: .35rem 1rem; } dt { font-weight: 600; } dd { margin: 0; }
 img, iframe { max-width: 100%; }
 

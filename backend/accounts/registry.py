@@ -412,6 +412,9 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:calendar:detail",
         # One's own settings page (PLAN-011b D8): any verified role.
         "finance:settings",
+        # The help pages (PLAN-012e-2 D10): static, any verified role.
+        "finance:help",
+        "finance:help_topic",
     }
 )
 

@@ -122,3 +122,60 @@ More menu holds Archive as the danger item and a viewer sees none; a store name 
 escaped in the bar and the menu.
 
 **Verdict (B):** PASS (no finding; three design choices accepted).
+
+### Batch C — store details, the Store cost block, the New store form, the help pages (D7–D10)
+
+**Scope.** Migration `ledger/migrations/0047_store_address.py` (`address_line1`, `postal_code`;
+guarded text; the PostgreSQL trigger of 0002 recreated with the two columns, restored on
+reverse; the `SET CONSTRAINTS ALL IMMEDIATE` lesson of 0018 applied), `ledger/models.py`,
+`ledger/services/stores.py` (`address_line`, `status_badge`, `STATUS_BADGES`, the first cost row
+on create through `store_costs.set_cost` in the store's transaction, `CostRefused` rolling the
+store back), `ledger/forms.py` (`StoreCreateForm` with landlord rent required, lease end and
+other cost optional; `StoreForm` with the four address parts), `ledger/views/stores.py`,
+`stores/detail.html` (facts only: Address, Store number, Open date, Closed date when set, Status
+as a badge; the Store cost block with Change and one Learn more line; the cost history behind
+"History"), `stores/form.html`, `finance/help.py` and `finance/templates/finance/help/` (the
+index and seven topics; signed-in, every role, read-only, no form, no row), `finance/urls.py`,
+`accounts/registry.py`, `base.html` (Help in the user menu), `app.css` (`p.help`), the templates
+that lost a paragraph to the one-line rule (eleven moved, ten shortened, seven markup-only).
+Tests: `tests/test_store_details_and_help.py` (56), `tests/test_one_line_help.py` (148: every
+block of every template, at most one line of help, no sentence over 160 characters, a mutated
+copy caught), the round-trip and guard lists with 0047, updates in seven test files. Fable's:
+`tests/test_plan012e2_c_adversarial.py` (27 cases), `tests/test_stores_adversarial.py` (the
+required rent), the route freeze of PLAN-012c refreshed for the two help routes.
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| 1 | MINOR | stores/detail.html | The Store cost block's Change link showed for admin only while the route and the old button were billing | Resolved: the link follows `can_set_cost` (billing and admin) as the old button did; a viewer sees none |
+
+**Decisions taken (Fable) and for the owner.** `create_store` keeps its replay-idempotent
+signature; the help page titles read "Help"; the badge mapping is local to stores (Active green,
+Closed and Terminated red, Prospective plain; no "Inactive" status exists); the one-line scanner
+exempts a line made only of links and values (a breadcrumb) and a line of facts joined by "·";
+**for the owner:** three help topics beyond the plan's four (invoice lines, promises to pay,
+lease ends and transfers) hold the paragraphs the rule moved off the builder, the contact form
+and the wizards; the Needs review topic's wording is Opus's, built from the app's messages.
+
+**Gate 1.** ruff, `ruff format --check` (536 files), mypy strict (438 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16: all clean, exit 0. **Gate 2.** sqlite
+6,197 passed, 662 skipped (16:35); PostgreSQL "Migration tests" 30 passed (13:22, with the 0047
+round trip), "Unit tests" 6,826 passed, 3 skipped (18:43); e2e 14 passed in each of four runs on
+PostgreSQL. One test failed on both engines, `test_rent_catch_up::test_the_run_page_reports_the_catch_up_and_states_the_bound`:
+it asserted the catch-up bound sentence on the run page, which the one-line rule moved to the
+help page; Fable re-pointed it (the run page links the topic, the topic states the bound; a
+test edit, no production change; the file passes alone: 16) and did not re-run the whole gate for
+it. **Gate 3.** Diff read: the migration, the service,
+the forms, the view, the templates, the help module. The address parts are guarded text (a card
+number is refused by the validator and, on PostgreSQL, the trigger); the help pages read no row
+and take no input but the slug, matched against a fixed table. **Gate 4.** Secret scans clean.
+Fable's cases: an address with markup escaped in the line, the title and the list; a ZIP too
+long, a street with a card number or 2,000 characters refused with no store; a hostile landlord
+rent (negative, text, `1e400`, `NaN`, markup, empty, a comma) refuses the whole new store, no
+store and no cost row; `0.00` creates a "no cost" row and no Margin line; billing and a viewer
+cannot create a store; a resubmitted form makes one store and one row; every status renders a
+badge with its words; the help pages need a sign-in, carry no form of their own and no user
+data; hostile slugs answer 404 or echo nothing.
+
+**Verdict (C):** PASS (one MINOR resolved; three decisions for the owner's checkpoint).

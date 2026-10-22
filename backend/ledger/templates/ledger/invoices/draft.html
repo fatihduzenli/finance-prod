@@ -44,7 +44,6 @@
       </tbody>
     </table>
     {% endresponsive_table %}
-    <p class="muted">A payment on this invoice pays the lines in order; a refund or a return takes it back from the last line first.</p>
     {% if not first_charge %}
       <p class="muted" id="invoice-rent-alone">This invoice bills rent alone; the rent charge's page shows its payments.</p>
     {% elif charges|length == 1 and not rent_charges %}

@@ -492,7 +492,7 @@ def test_an_admin_corrects_from_the_page_and_the_history_shows_who_when_why() ->
     assert 'value="2500.00"' in form.content.decode()
     response = client.post(correct_url(target, old), correct_form())
     assert response.status_code == 302
-    assert response["Location"] == detail(target) + "#store-costs"
+    assert response["Location"] == detail(target) + "#store-cost"
     page = client.get(detail(target)).content.decode()
     assert service.CORRECTED in page
     assert f'id="cost-row-{old.pk}" class="cost-superseded"' in page
@@ -505,8 +505,12 @@ def test_an_admin_corrects_from_the_page_and_the_history_shows_who_when_why() ->
     # The page shows the time in the project's zone, New York (PLAN-011b D1).
     assert timezone.localtime(old.superseded_at).strftime("%Y-%m-%d %H:%M") in old_row
     assert "$2,600.00 a month from 2026-01-01" in page
-    assert 'months after a closed row have no cost row and read "unknown"' in page.lower()
-    assert 'reads "no cost"' in page
+    # PLAN-012e-2 D8, D10: the rule paragraphs moved to the help page, linked once.
+    assert 'months after a closed row have no cost row and read "unknown"' not in page.lower()
+    assert 'href="/help/store-costs/"' in page
+    help_page = client.get("/help/store-costs/").content.decode().replace("&quot;", '"')
+    assert 'months after a closed row have no cost row and read "unknown"' in help_page.lower()
+    assert 'reads "no cost"' in help_page
 
 
 def test_a_refused_correction_is_held_with_its_sentence() -> None:
@@ -531,7 +535,7 @@ def test_an_admin_closes_from_the_page() -> None:
         close_url(target), {"effective_to": "2026-03-31", "change_note": "Landlord ended it."}
     )
     assert response.status_code == 302
-    assert response["Location"] == detail(target) + "#store-costs"
+    assert response["Location"] == detail(target) + "#store-cost"
     page = client.get(detail(target)).content.decode()
     assert service.CLOSED.format(end="2026-03-31") in page
     assert "Landlord ended it." in page

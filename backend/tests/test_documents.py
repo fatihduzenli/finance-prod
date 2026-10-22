@@ -1068,6 +1068,8 @@ def store_create_data(**overrides: Any) -> dict[str, Any]:
         "open_date": "2025-03-01",
         "closed_at": "",
         "status": "active",
+        # PLAN-012e-2 D9: the New store form's first cost row (the rent is required).
+        "landlord_rent": "0.00",
         **overrides,
     }
 

@@ -3,8 +3,7 @@
 {% block content %}
   {% if store_context %}{% include "ledger/_store_context.html" %}{% else %}<p><a href="{{ back_url }}">&larr; Back</a></p>{% endif %}
   <div class="page-header"><h1>Add entry: {{ title }}</h1></div>
-  <p class="muted">A call, an e-mail, a visit or a promise to pay. A promise needs its date and amount; nothing else has them. Never write card or account numbers.</p>
-  {% if form.outcome %}<p class="muted" id="previous-promise-help">This operator has an open promise to pay. Still open records this entry and leaves the promise as it is; Kept closes it as kept; Rescheduled closes it and this entry is the new promise (its date and amount start from the old one); Broken closes it as broken.</p>{% endif %}
+  <p class="muted">A call, an e-mail, a visit or a promise to pay. A promise needs its date and amount; nothing else has them. Never write card or account numbers. Learn more: <a href="{% url 'finance:help_topic' slug='promises-to-pay' %}">Promises to pay</a></p>
   <form method="post" id="contact-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}

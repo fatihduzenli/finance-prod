@@ -293,8 +293,13 @@ def test_the_large_debit_warning_starts_above_the_threshold(
     lease(rent=D(rent))
     with override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("2000.00")):
         page = billing.get(RUN).content.decode()
+        # PLAN-012e-2 D10: the note moved to the help page the run page links.
+        help_page = billing.get("/help/autopay-and-daily-charges/").content.decode()
     assert ('class="large-debit"' in page) is large
-    assert "placeholder until Stax states its per-transaction limit" in page
+    assert 'href="/help/autopay-and-daily-charges/"' in page
+    assert "placeholder until Stax states its per-transaction limit" not in page
+    assert '"Large debit" marks an amount above $2,000.00.' in help_page.replace("&quot;", '"')
+    assert "placeholder until Stax states its per-transaction limit" in help_page
 
 
 @pytest.mark.parametrize(
@@ -628,10 +633,14 @@ def test_the_link_route_enforces_csrf_and_404s_bad_charge_ids() -> None:
 
 
 def test_the_run_page_says_matching_reads_schedules_only(billing: Client) -> None:
+    # PLAN-012e-2 D10: the paragraph moved to the help page the run page links.
     page = billing.get(RUN).content.decode()
-    assert 'id="match-scope"' in page
-    assert "reads Stax's autopay invoices only" in page.replace("&#x27;", "'")
-    assert '"Attach Stax invoice"' in page.replace("&quot;", '"')
+    assert 'id="match-scope"' not in page
+    assert 'href="/help/autopay-and-daily-charges/"' in page
+    help_page = billing.get("/help/autopay-and-daily-charges/").content.decode()
+    assert 'id="help-match-scope"' in help_page
+    assert "reads Stax's autopay invoices only" in help_page.replace("&#x27;", "'")
+    assert '"Attach Stax invoice"' in help_page.replace("&quot;", '"')
 
 
 def a_charge_of(operator: Operator | None) -> RentCharge:

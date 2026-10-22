@@ -42,6 +42,8 @@ _VIEW_SECTIONS: dict[str, str] = {
     "ledger:reports:pnl": "pnl",
     "ledger:reports:pnl_export": "pnl",
     "finance:settings": "settings",
+    "finance:help": "help",
+    "finance:help_topic": "help",
 }
 #: Sections named by a namespace (the last one of the resolved route).
 _NAMESPACE_SECTIONS: dict[str, str] = {

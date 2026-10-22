@@ -60,11 +60,18 @@ def form_data(**overrides: Any) -> dict[str, Any]:
         "creation_key": str(uuid.uuid4()),
         "store_number": "202",
         "external_label": "Store 0202",
+        "address_line1": "",
         "city": "Springfield",
         "state": "IL",
+        "postal_code": "",
         "open_date": "2025-03-01",
         "closed_at": "",
         "status": StoreStatus.ACTIVE,
+        # PLAN-012e-2 D9: the New store form's first cost row (the rent is required).
+        "landlord_rent": "0.00",
+        "landlord_lease_end": "",
+        "other_monthly_cost": "",
+        "other_cost_description": "",
     }
     return {**data, **overrides}
 
@@ -73,8 +80,10 @@ def edit_data(store: Store, **overrides: Any) -> dict[str, Any]:
     data = {
         "store_number": "" if store.store_number is None else str(store.store_number),
         "external_label": store.external_label,
+        "address_line1": store.address_line1,
         "city": store.city,
         "state": store.state,
+        "postal_code": store.postal_code,
         "open_date": store.open_date.isoformat() if store.open_date else "",
         "closed_at": store.closed_at.isoformat() if store.closed_at else "",
         "status": store.status,

@@ -16,9 +16,7 @@
     </ul>
   {% endif %}
 
-  <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. {{ company.provider_name }}'s autopay makes the invoices; "Update from {{ company.provider_name }}" links them to these charges. Nothing here debits anyone.</p>
-  <p class="muted" id="catch-up-scope">Creating charges also catches up: every debit date from a lease's start to today that has no charge gets one, due on that date (or on the start date when the first month's debit day is before it), the first month prorated. It looks back at most {{ catch_up_months }} months, this month included.</p>
-  <p class="muted" id="match-scope">"Update from {{ company.provider_name }}" reads {{ company.provider_name }}'s autopay invoices only. An invoice made on the {{ company.provider_name }} dashboard is not matched here: attach it from its charge's page with "Attach {{ company.provider_name }} invoice".</p>
+  <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. {{ company.provider_name }}'s autopay makes the invoices; "Update from {{ company.provider_name }}" links them to these charges. Nothing here debits anyone. Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
 
   {% if can_run %}
     <div class="actions">
@@ -82,7 +80,6 @@
   </table>
   {% endresponsive_table %}
   <p class="muted" id="carried-balance-note">"Carried balance" is what earlier charges of the lease still owe. It is not added to today's amount.</p>
-  <p class="muted" id="large-debit-note">"Large debit" marks an amount above {{ threshold|money }}. That amount is a placeholder until {{ company.provider_name }} states its per-transaction limit.</p>
 
   <h2>Skipped today</h2>
   {% responsive_table %}

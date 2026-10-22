@@ -1551,3 +1551,15 @@ Statement · New invoice · Edit · Connect to Stax · More ▾ (Archive). The m
 disclosure that works without script. Gate: sqlite 5,963 passed; PostgreSQL 28 + 6,586 passed;
 e2e 14 passed in four runs; Fable's adversarial file 7 cases green. Batch C (store details, the
 Store cost block, the New store form, the help pages) assigned.
+
+## Update, 2026-10-22, PLAN-012e-2 Batch C built and gated (not pushed)
+
+Store details show facts only (one Address line from the new street and ZIP columns, migration
+0047; Store number; Open date; Closed date when set; Status as a badge); the Store cost block
+(landlord rent "from <date>", lease end, other cost when set, one Change link) replaces "Costs and
+margin", the history behind a disclosure, margin in the P&L only; the New store form asks the
+landlord rent, lease end and other cost and writes the first cost row with the store; help pages
+under /help/ (seven topics, signed in, every role) take the paragraphs the one-line rule moved off
+the pages, and a test holds every template to one line of help per block. Gate: sqlite 6,197
+passed; PostgreSQL 30 + 6,826 passed; e2e 14 passed in four runs; Fable's adversarial file 27
+cases green. Batch D (the visual data set and baselines, Fable) next; then the checkpoint.

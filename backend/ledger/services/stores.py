@@ -8,6 +8,16 @@ recorded in the ``store.created`` audit row, as for leases. Store creation has n
 row to lock while that row is looked up, so it takes a lock on one ``sync_state`` row
 (:data:`CREATION_LOCK`) for the length of the transaction: two submissions of one form
 make one store.
+
+The New store form also carries the store's first cost row (PLAN-012e-2 D9): the landlord
+rent (``0.00`` is a known "no cost"), the landlord lease end and the other monthly cost
+with its description. :func:`create_store` writes that row through
+:func:`ledger.services.store_costs.set_cost`, in the store's transaction and with the same
+``store_cost.created`` audit row as "Change" writes, effective from the open date (today
+without one); a row the cost service refuses saves no store either (:class:`CostRefused`).
+
+:func:`address_line` is the store's address on one line and :func:`status_badge` the
+badge status of its status (D7).
 """
 
 from __future__ import annotations
@@ -18,8 +28,10 @@ from typing import Any
 
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.utils import timezone
 
-from ledger.models import AuditLog, Store
+from ledger.models import AuditLog, Store, StoreCostSource, StoreStatus
+from ledger.services import store_costs
 from payments.models import SyncState
 
 ENTITY_STORE = "store"
@@ -29,12 +41,47 @@ CREATION_LOCK = "store_creation_lock"
 STORE_FIELDS: tuple[str, ...] = (
     "store_number",
     "external_label",
+    "address_line1",
     "city",
     "state",
+    "postal_code",
     "open_date",
     "closed_at",
     "status",
 )
+#: What :func:`address_line` shows when the store has no address part at all.
+NO_ADDRESS = "\u2014"
+#: The badge status (``finance.templatetags.components``) of each store status; a status
+#: not named here (Prospective) is a plain badge.
+STATUS_BADGES: dict[str, str] = {
+    StoreStatus.ACTIVE: "paid",
+    StoreStatus.CLOSED: "attention",
+    StoreStatus.TERMINATED: "attention",
+}
+
+
+class CostRefused(Exception):  # noqa: N818 (reads as an outcome, like FileRefused)
+    """The cost service refused the New store form's first cost row; nothing was saved."""
+
+    def __init__(self, outcome: store_costs.CostOutcome) -> None:
+        super().__init__(outcome.message)
+        self.outcome = outcome
+
+
+def address_line(store: Store) -> str:
+    """Street, city and "state ZIP" joined with ", "; missing parts are left out, and
+    "\u2014" stands for an address with no part at all."""
+    street, city, state, postal = (
+        " ".join(str(part or "").split())
+        for part in (store.address_line1, store.city, store.state, store.postal_code)
+    )
+    region = " ".join(part for part in (state, postal) if part)
+    return ", ".join(part for part in (street, city, region) if part) or NO_ADDRESS
+
+
+def status_badge(store: Store) -> str:
+    """The badge status of the store's status ("" for a plain badge)."""
+    return STATUS_BADGES.get(store.status, "")
 
 
 def store_for_creation_key(raw: object) -> Store | None:
@@ -69,7 +116,26 @@ def create_store(
             None,
             {**_snapshot(store), "creation_key": str(creation_key)},
         )
+        if fields.get("landlord_rent") is not None:
+            _first_cost(store, fields, actor)
     return store, True
+
+
+def _first_cost(store: Store, fields: Mapping[str, Any], actor: User | None) -> None:
+    """The store's first cost row, from its open date (today without one); raises
+    :class:`CostRefused`, which rolls the store back, when the cost service refuses it."""
+    outcome = store_costs.set_cost(
+        store,
+        fields["landlord_rent"],
+        store.open_date or timezone.localdate(),
+        other_monthly_cost=fields.get("other_monthly_cost"),
+        other_cost_description=fields.get("other_cost_description") or "",
+        landlord_lease_end=fields.get("landlord_lease_end"),
+        source=StoreCostSource.STAFF,
+        actor=actor,
+    )
+    if not outcome.ok:
+        raise CostRefused(outcome)
 
 
 def update_store(store_id: uuid.UUID, fields: Mapping[str, Any], *, actor: User | None) -> Store:
@@ -105,8 +171,10 @@ def _snapshot(store: Store) -> dict[str, Any]:
     return {
         "store_number": store.store_number,
         "external_label": store.external_label,
+        "address_line1": store.address_line1,
         "city": store.city,
         "state": store.state,
+        "postal_code": store.postal_code,
         "open_date": store.open_date.isoformat() if store.open_date else None,
         "closed_at": store.closed_at.isoformat() if store.closed_at else None,
         "status": store.status,

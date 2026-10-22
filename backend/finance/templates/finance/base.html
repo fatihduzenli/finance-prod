@@ -8,7 +8,7 @@ The navy top bar carries the logo (company.logo_url: the brand's dark logo, or a
 document the company settings row names) with the company name as its text alternative,
 the company name as text only beside an override logo (the brand logo carries the
 wordmark), the product name, the search
-box (PLAN-012d D17, a GET form to ledger:search) and the user menu (Settings, Sign out). The
+box (PLAN-012d D17, a GET form to ledger:search) and the user menu (Settings, Help, Sign out). The
 left navigation (900 px and wider) lists Dashboard, Stores, Operators, Monthly rent overview,
 Reports and Admin with their pages, each page only for the roles that may open it (Disputes,
 Daily charges and Nightly check billing and admin; Activity log and System settings admin;
@@ -52,9 +52,10 @@ two_factor/_base.html.
     </a>
     <form method="get" action="{% url 'ledger:search' %}" class="nav-search" id="nav-search" role="search"><input type="search" name="q" id="nav-search-q" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators"></form>
     <details class="user-menu" id="user-menu">
-      <summary id="user-menu-name"{% if nav_section == "settings" %} aria-current="true"{% endif %}>{{ request.user.get_full_name|default:request.user.get_username }}</summary>
+      <summary id="user-menu-name"{% if nav_section == "settings" or nav_section == "help" %} aria-current="true"{% endif %}>{{ request.user.get_full_name|default:request.user.get_username }}</summary>
       <div class="user-menu-items">
         <a href="{% url 'finance:settings' %}" id="nav-settings"{% if nav_section == "settings" %} aria-current="page"{% endif %}>Settings</a>
+        <a href="{% url 'finance:help' %}" id="nav-help"{% if nav_section == "help" %} aria-current="page"{% endif %}>Help</a>
         <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" id="nav-sign-out">Sign out</button></form>
       </div>
     </details>

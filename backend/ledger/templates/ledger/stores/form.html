@@ -8,9 +8,17 @@
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
-    {% for field in form.visible_fields %}
+    {% for field in form.store_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
+    {% if form.cost_fields %}
+      <fieldset id="store-cost-fields">
+        <legend>Store cost</legend>
+        {% for field in form.cost_fields %}
+          {% include "ledger/stores/_form_field.html" %}
+        {% endfor %}
+      </fieldset>
+    {% endif %}
     {% if not store %}{% include "ledger/documents/_create_upload.html" %}{% endif %}
     <p class="actions"><button class="btn btn-primary" type="submit" id="save-store">Save</button></p>
   </form>

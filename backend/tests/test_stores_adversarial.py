@@ -33,6 +33,7 @@ def _store_data(**overrides: object) -> dict[str, object]:
         "open_date": "2024-11-01",
         "closed_at": "",
         "status": "active",
+        "landlord_rent": "0.00",  # required on a new store since PLAN-012e-2 D9
     }
     data.update(overrides)
     return data

@@ -83,7 +83,7 @@
     </form>
   {% endif %}
   {% include "ledger/collections/_log.html" with log=collection_log show_charge=True %}
-  {% if collection_log|length >= collection_log_limit %}<p class="muted">The {{ collection_log_limit }} latest are shown.</p>{% endif %}
+  {% if collection_log|length >= collection_log_limit %}<p>The {{ collection_log_limit }} latest are shown.</p>{% endif %}
 
   <h2 id="contacts">Contact log</h2>
   <p class="actions">

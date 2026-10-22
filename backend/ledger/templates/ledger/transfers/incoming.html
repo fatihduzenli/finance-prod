@@ -15,7 +15,7 @@
     {% comment %}PLAN-012c D8: the setup charges only when the checklist has an item; the deposit field (in the fields above) only when the catalogue offers a deposit.{% endcomment %}
     {% if form.fee_types %}
     <h2>Setup charges</h2>
-    <p class="muted">Type the price of each catalogue item the incoming operator pays at move-in; a row without a price is not charged (the grey amount is the catalogue's usual price, shown as a hint only).</p>
+    <p class="muted">Type the price of each catalogue item the incoming operator pays at move-in; a row without a price is not charged. The grey amount is the catalogue's usual price, shown as a hint only.</p>
     {% responsive_table %}
     <table id="setup-rows" class="js-table-total">
       <thead><tr><th>Item</th><th>Price</th></tr></thead>

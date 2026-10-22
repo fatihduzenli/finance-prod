@@ -343,8 +343,11 @@ class StoreStatus(models.TextChoices):
 class Store(GuardedModel):
     external_label = guarded_char(NAME_MAX_LENGTH, db_index=True)
     store_number = models.IntegerField(null=True, blank=True, db_index=True)
+    #: The street and the ZIP (PLAN-012e-2 D7), guarded as the operator's address is.
+    address_line1 = guarded_char(NAME_MAX_LENGTH, blank=True)
     city = guarded_char(100, blank=True)
     state = guarded_char(50, blank=True)
+    postal_code = guarded_char(20, blank=True)
     open_date = models.DateField(null=True, blank=True)
     open_date_note = free_text()
     needs_open_date = models.BooleanField(default=True)
