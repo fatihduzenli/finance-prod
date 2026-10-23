@@ -1744,3 +1744,17 @@ the test. Fix in the visual data set: the statement step is opened at build with
 so the charge exists before any shot on either engine; a world test pins it; the baselines and
 the report shots regenerated against PostgreSQL and checked pixel-identical on SQLite. A second
 Publish Request goes to the owner.
+
+## Update, 2026-10-23, Step 12f deployed to staging
+
+Pushed `80bbe28..6219723` on the owner's second "push". CI run 40010487294 green: checks 0:37;
+Unit tests A 10:29 and B 11:16 in parallel; end-to-end 2:40 in the Playwright image; visual 2:00
+(the regenerated baselines matched on CI's PostgreSQL); Migration tests 19:54 (the longest job,
+against its 30-minute limit); deploy 3:25; 23 minutes from push to staging. The deploy job's own
+check: web, worker, the reconcile and daily jobs on `6219723`, Healthy and Running; `/healthz`
+200 and reporting the sandbox environment; the sign-in page serves the two-panel layout. Staging
+runs `6219723`: the approved design on every page (Step 12f, Batches A–D and slice D-2). Open for
+the owner: the four decisions of the checkpoint ("Open" on the attention rows, "Next" on the
+sign-in button, the two-line phone card beyond the Charges table, ISO dates and month labels).
+Next: the owner's clicks on staging; Step 13 on the owner's prompt (the migration round trips at
+19:54 on CI need their split or squash decided in its planning).
