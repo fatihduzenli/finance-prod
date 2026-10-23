@@ -2,10 +2,10 @@
 {% load components money %}
 {% load responsive %}
 {% block title %}Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% endblock %}
+{% block header %}<div class="page-header"><h1>Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% endblock %}
 {% block content %}
   {% include "ledger/_store_crumb.html" %}
   <p class="muted"><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Daily charges</a></p>
-  <div class="page-header"><h1>Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
 
   {% if can_record or can_link_invoice %}

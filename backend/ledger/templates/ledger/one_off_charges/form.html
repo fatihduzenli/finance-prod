@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}Edit {{ charge.label }}{% endblock %}
+{% block header %}<div class="page-header"><h1>Edit {{ charge.label }}</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if lease %}, {{ lease.store.external_label }}{% endif %}</a></p>
-  <div class="page-header"><h1>Edit {{ charge.label }}</h1></div>
   {% if price_locked %}<p id="price-locked" class="muted">A payment is recorded on this charge, so its price cannot change.</p>{% endif %}
   <form method="post" id="setup-charge-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}

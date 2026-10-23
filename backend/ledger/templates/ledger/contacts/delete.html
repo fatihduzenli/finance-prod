@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}Delete contact entry{% endblock %}
+{% block header %}<div class="page-header"><h1>Delete contact entry</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{{ back_url }}">&larr; Contact log</a></p>
-  <div class="page-header"><h1>Delete contact entry</h1></div>
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
   {% include "ledger/contacts/_entry.html" %}

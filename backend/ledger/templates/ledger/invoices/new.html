@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load static %}
 {% block title %}{{ heading }}{% endblock %}
+{% block header %}<div class="page-header"><h1>{{ heading }}</h1></div>{% endblock %}
 {% block content %}
   {% if store_context %}{% include "ledger/_store_context.html" %}{% else %}<p><a href="{{ back }}">&larr; Back</a></p>{% endif %}
-  <div class="page-header"><h1>{{ heading }}</h1></div>
   <p class="muted">A draft stays here until it is sent: nothing reaches {{ company.provider_name }} before it is collected.</p>
   <form method="post" id="draft-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}

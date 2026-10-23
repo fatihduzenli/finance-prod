@@ -6,7 +6,7 @@
   <title>Invoice {{ preview.number }}</title>
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <style>
-    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--paper); margin: 2rem auto; max-width: 52rem; padding: 0 1rem; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); background: var(--surface); margin: 2rem auto; max-width: 52rem; padding: 0 1rem; }
     .invoice-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
     .invoice-dates { display: grid; grid-template-columns: auto auto; gap: 0.25rem 1rem; margin: 0; }
     .invoice-dates dd { margin: 0; }
@@ -14,11 +14,11 @@
     .invoice-parties h2 { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.25rem; }
     .invoice-parties p { margin: 0; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--line); }
+    th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
     .money { text-align: right; white-space: nowrap; }
-    tfoot th { border-top: 2px solid var(--ink); border-bottom: 0; }
-    .muted { color: var(--ink-2); }
-    .save-as-pdf { border: 1px solid var(--line); padding: 0.5rem 1rem; }
+    tfoot th { border-top: 2px solid var(--text); border-bottom: 0; }
+    .muted { color: var(--text-2); }
+    .save-as-pdf { border: 1px solid var(--border); padding: 0.5rem 1rem; }
     @media print {
       .no-print { display: none !important; }
       body { margin: 0; max-width: none; }

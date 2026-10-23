@@ -443,7 +443,12 @@ def test_every_post_route_enforces_csrf() -> None:
 
 def test_the_nav_links_to_the_store_list(admin: Client) -> None:
     page = admin.get(LIST).content.decode()
-    assert '<a href="/stores/" aria-current="page">Stores</a>' in page
+    # PLAN-012f D3: the sidebar item, with its icon.
+    assert re.search(
+        r'<a class="nav-item" href="/stores/" id="nav-stores" aria-current="page">'
+        r"<svg [^>]*>.*?</svg><span>Stores</span></a>",
+        page,
+    )
 
 
 # --- Row 4: the admin lists stores, operators and leases read-only --------------------------------

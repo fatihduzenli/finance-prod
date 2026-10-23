@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% comment %}The help index (docs/qa/PLAN-012e2-fewer-actions.md D10): the topics of finance.help.TOPICS, static.{% endcomment %}
 {% block title %}Help{% endblock %}
+{% block header %}<div class="page-header"><h1>Help</h1></div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Help</h1></div>
   <ul id="help-topics">
     {% for topic in topics %}<li><a href="{% url 'finance:help_topic' slug=topic.slug %}" id="help-{{ topic.slug }}">{{ topic.title }}</a></li>{% endfor %}
   </ul>

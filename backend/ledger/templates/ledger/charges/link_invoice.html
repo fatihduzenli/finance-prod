@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load responsive money %}
 {% block title %}Attach {{ company.provider_name }} invoice{% endblock %}
+{% block header %}<div class="page-header"><h1>Attach {{ company.provider_name }} invoice</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:charges:detail' pk=charge.pk %}">&larr; Rent {{ charge.period_month|date:"Y-m" }}, {{ charge.lease.store.external_label }}</a></p>
-  <div class="page-header"><h1>Attach {{ company.provider_name }} invoice</h1></div>
   <p>Amount due: <strong id="amount-due">{{ charge.amount_due|money }}</strong>. Balance: <strong id="balance">{{ charge.balance|money }}</strong>.</p>
   <p class="muted">The invoices of this lease's operator that are not linked to any charge, such as one created on the {{ company.provider_name }} dashboard. A charge has at most one invoice, and a link cannot be undone here. When the invoice total differs from the balance, check the box and say why in the note; the charge is then marked Needs review.</p>
   {{ form.non_field_errors }}

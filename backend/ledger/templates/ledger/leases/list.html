@@ -2,8 +2,8 @@
 {% load components money %}
 {% load responsive %}
 {% block title %}Leases{% endblock %}
+{% block header %}<div class="page-header"><h1>Leases</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">New lease</a></div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Leases</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">New lease</a></div>{% endif %}</div>
   <form method="get" action="{% url 'ledger:leases:list' %}" class="actions" role="search" id="lease-filters">
     <label for="operator" style="margin:0;">Operator</label>
     <select name="operator" id="operator">

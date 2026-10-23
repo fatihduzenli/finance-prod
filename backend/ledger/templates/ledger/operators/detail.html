@@ -3,9 +3,9 @@
 {% load static %}
 {% load tz %}
 {% block title %}{{ operator.display_name }}{% endblock %}
+{% block header %}<div class="page-header"><h1>{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:operators:list' %}">&larr; Operators</a></p>
-  <div class="page-header"><h1>{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div>
   {% include "ledger/_attention.html" with banners=True %}
 
   {% comment %}PLAN-012e-2 D6: Statement, New invoice (primary), Edit, Connect when it applies; Archive in the More menu (ledger/_menu_script.html).{% endcomment %}

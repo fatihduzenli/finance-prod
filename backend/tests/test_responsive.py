@@ -250,14 +250,17 @@ def test_the_style_sheet_has_both_breakpoints_touch_targets_and_print() -> None:
 
 
 def test_the_menu_folds_behind_a_toggle_without_script() -> None:
+    # PLAN-012f D4: the phone bar's menu button is the label of the checkbox that shows the
+    # sidebar as a sheet; no script.
     page = client_for(Role.VIEWER).get("/").content.decode()
-    nav = page[page.index('<nav aria-label="Main">') : page.index("</nav>")]
     assert (
-        '<input type="checkbox" id="nav-toggle" class="nav-toggle" aria-controls="nav-links">'
-        in nav
+        '<input type="checkbox" id="nav-toggle" class="sheet-toggle" aria-controls="sidebar">'
+        in page
     )
-    assert '<label for="nav-toggle" class="nav-toggle-label" id="nav-menu">Menu</label>' in nav
-    assert "<script" not in nav
+    bar = page[page.index('<header class="phone-bar" id="phone-bar">') : page.index("</header>")]
+    assert '<label for="nav-toggle" class="phone-bar-button" id="nav-menu">' in bar
+    assert '<span class="visually-hidden">Menu</span></label>' in bar
+    assert "<script" not in bar
     assert '<meta name="viewport" content="width=device-width, initial-scale=1.0">' in page
     assert '<link rel="stylesheet" href="/static/finance/app.css">' in page
 

@@ -4,8 +4,9 @@ PLAN-012c-design-pass.md D2, D3).
 :func:`navigation` names the main navigation's section of the page from the resolved
 URL (its namespace, or its view name for the few sections that share one), and the group
 it sits in (Reports or Admin), so ``finance/base.html`` marks that link with
-``aria-current="page"`` and its group's heading with ``aria-current="true"``. It reads
-the request only; no query, no setting.
+``aria-current="page"`` and its group's heading with ``aria-current="true"``, and the phone's
+bottom bar marks the item that holds it (PLAN-012f D4). It reads the request only; no query,
+no setting.
 
 :func:`company` exposes the company settings row's display values (``company.name``,
 ``short_name``, ``provider_name``, ``logo_url``, ``logo_is_override``) and the shell's
@@ -30,8 +31,10 @@ from django.urls import reverse
 from finance import pwa
 from ledger.models import LOGO_CONTENT_TYPES, CompanySettings, Document
 
-#: The bar's logo when the row has no override (PLAN-012c D3).
-BRAND_LOGO = "finance/brand/monvera_logo_dark.svg"
+#: The sidebar's and the phone bar's logo when the row has no override: the transparent
+#: variant for dark backgrounds (PLAN-012f D3; the opaque monvera_logo_dark has a navy
+#: rectangle that must not sit on the gradient).
+BRAND_LOGO = "finance/brand/monvera_logo_dark_transparent.svg"
 #: Where a request keeps its company settings row and its :class:`Company`.
 _ROW_ATTRIBUTE = "_company_settings"
 _COMPANY_ATTRIBUTE = "_company"
@@ -81,17 +84,26 @@ _SECTION_GROUPS: dict[str, str] = {
 }
 
 
+#: The phone's bottom bar (PLAN-012f D4): the item of the sections it names; every other
+#: section of the navigation (Settings included) is under More. The search page marks none.
+_SECTION_TABS: dict[str, str] = {"home": "dashboard", "stores": "stores", "grid": "grid"}
+_UNTABBED_SECTIONS = frozenset({""})
+
+
 def navigation(request: HttpRequest) -> dict[str, str]:
     """``nav_section``: the section of the current page, or ``""``; ``nav_group``: the
-    group of that section, or ``""``."""
+    group of that section, or ``""``; ``nav_tab``: the bottom bar's item of that section
+    (``dashboard``, ``stores``, ``grid``, ``more``), or ``""``."""
     match = getattr(request, "resolver_match", None)
     if match is None:
-        return {"nav_section": "", "nav_group": ""}
+        return {"nav_section": "", "nav_group": "", "nav_tab": ""}
     section = _VIEW_SECTIONS.get(str(match.view_name))
     if section is None and match.namespaces:
         section = _NAMESPACE_SECTIONS.get(match.namespaces[-1])
     section = section or ""
-    return {"nav_section": section, "nav_group": _SECTION_GROUPS.get(section, "")}
+    tab = _SECTION_TABS.get(section, "" if section in _UNTABBED_SECTIONS else "more")
+    group = _SECTION_GROUPS.get(section, "")
+    return {"nav_section": section, "nav_group": group, "nav_tab": tab}
 
 
 @dataclass(frozen=True, slots=True)

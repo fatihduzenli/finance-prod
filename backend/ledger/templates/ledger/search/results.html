@@ -1,10 +1,10 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
 {% block title %}Search{% endblock %}
+{% block header %}<div class="page-header"><h1>Search</h1></div>{% endblock %}
 {% block content %}
   {% comment %}The top-bar search's results (PLAN-012d D17): the stores and the operators matching every word;
   an archived operator is listed and marked, never jumped to.{% endcomment %}
-  <div class="page-header"><h1>Search</h1></div>
   <form method="get" action="{% url 'ledger:search' %}" class="actions" role="search" id="search-form">
     <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators" style="max-width:24rem;">
     <button class="btn" type="submit">Search</button>

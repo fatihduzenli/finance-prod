@@ -1,6 +1,7 @@
 {% extends "finance/base.html" %}
 {% load static %}
 {% block title %}End lease {{ store.external_label }}: end date{% endblock %}
+{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
   <p class="muted" id="step-help">Say on which day the lease ended and why; nothing changes until you confirm on the last step.</p>

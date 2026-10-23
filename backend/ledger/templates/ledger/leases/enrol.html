@@ -2,9 +2,9 @@
 {% load responsive money %}
 {% load tz %}
 {% block title %}Set up autopay: lease {{ lease.store.external_label }}{% endblock %}
+{% block header %}<div class="page-header"><h1>Set up autopay</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a></p>
-  <div class="page-header"><h1>Set up autopay</h1></div>
   <p>One autopay is set up in {{ company.provider_name }} per debit day. It debits the chosen bank method every month, starting on the date below. Card methods are never used.</p>
 
   {% if blockers %}

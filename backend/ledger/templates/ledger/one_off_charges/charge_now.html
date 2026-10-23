@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load money %}
 {% block title %}Charge now {{ charge.label }}{% endblock %}
+{% block header %}<div class="page-header"><h1>Charge now</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
-  <div class="page-header"><h1>Charge now</h1></div>
   <section class="confirm" aria-labelledby="confirm-what-heading">
   <div class="confirm-what">
   <h2 id="confirm-what-heading">What will happen</h2>

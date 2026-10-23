@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}Add a correction{% endblock %}
+{% block header %}<div class="page-header"><h1>Add a correction</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{{ back_url }}">&larr; Contact log</a></p>
-  <div class="page-header"><h1>Add a correction</h1></div>
   {% include "ledger/contacts/_entry.html" %}
   <p class="muted">The entry stays as it was recorded; the correction is listed under it with your name and the time. Never write card or account numbers.</p>
   <form method="post" id="contact-correct-form" class="js-single-submit">

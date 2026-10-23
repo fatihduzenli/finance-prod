@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% load responsive money %}
 {% block title %}Returned payments{% endblock %}
+{% block header %}<div class="page-header"><h1>Returned payments</h1></div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Returned payments</h1></div>
   <p class="muted">ACH debits {{ company.provider_name }} reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing debits again unless staff reschedule it: <strong>Debit again</strong> adds the NSF fee ({{ nsf_first }} on an operator's first return, {{ nsf_later }} afterwards). Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
   <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Download spreadsheet</a></p>
   {% responsive_table %}

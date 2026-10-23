@@ -366,14 +366,17 @@ def test_outside_a_request_the_reader_can_be_given() -> None:
 #: template that holds it.
 PAIRS: list[tuple[str, str, str]] = [
     # §4.2 navigation and shell
-    ("finance/base.html", ">Grid</a>", ">Monthly rent overview</a>"),
+    # PLAN-012f D11 (pending the owner): the sidebar item reads "Monthly rent", as the
+    # screenshots write it; the page title stays "Monthly rent overview".
+    ("finance/base.html", ">Grid</a>", "<span>Monthly rent</span></a>"),
     ("finance/base.html", ">Arrears</a>", ">Unpaid balances</a>"),
     ("finance/base.html", ">Returns</a>", ">Returned payments</a>"),
-    ("finance/base.html", ">Rent run</a>", ">Daily charges</a>"),
-    ("finance/base.html", ">Audit</a>", ">Activity log</a>"),
-    ("finance/base.html", ">Webhooks</a>", f">Messages from {P}</a>"),
-    ("finance/base.html", ">Reconciliation</a>", ">Nightly check</a>"),
-    ("finance/base.html", ">Django admin</a>", ">System settings</a>"),
+    # PLAN-012f D3: the Admin group's links are one partial, in the sidebar and the More sheet.
+    ("finance/_admin_links.html", ">Rent run</a>", ">Daily charges</a>"),
+    ("finance/_admin_links.html", ">Audit</a>", ">Activity log</a>"),
+    ("finance/_admin_links.html", ">Webhooks</a>", f">Messages from {P}</a>"),
+    ("finance/_admin_links.html", ">Reconciliation</a>", ">Nightly check</a>"),
+    ("finance/_admin_links.html", ">Django admin</a>", ">System settings</a>"),
     ("finance/banner.html", "SANDBOX — NO REAL MONEY", BANNER),
     # §4.3 page titles
     ("charges/payment_form.html", "Record a payment", "Add payment"),

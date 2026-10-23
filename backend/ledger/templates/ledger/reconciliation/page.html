@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
 {% block title %}Nightly check{% endblock %}
+{% block header %}<div class="page-header"><h1>Nightly check</h1></div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Nightly check</h1></div>
   <p class="muted">Each night the check re-reads open invoices, recent transactions, bank deposits and ACH rejections from {{ company.provider_name }}, and marks pending payments that are too old. Times are shown in {{ timezone }}. Identifiers are masked.</p>
 
   {% if can_run %}

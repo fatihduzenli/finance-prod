@@ -2,6 +2,7 @@
 {% load responsive money %}
 {% load static %}
 {% block title %}End lease {{ store.external_label }}: statement{% endblock %}
+{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
   <p class="muted" id="step-help">Check the figures and list what is kept from the deposit. The unpaid balance offset pays the open charges from the deposit; it can be lowered, never raised above the open balance.</p>

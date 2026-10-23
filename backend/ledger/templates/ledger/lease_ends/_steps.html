@@ -1,10 +1,8 @@
 {% load components %}
 <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
 {% if transfer %}
-<div class="page-header"><h1>Transfer store {{ store.external_label }}</h1></div>
 <p class="muted" id="transfer-banner">Ending the lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}, so that {{ transfer.incoming_operator.display_name|default:"the incoming operator" }} can take the store over.</p>
 {% else %}
-<div class="page-header"><h1>End lease {{ store.external_label }}</h1></div>
 <p class="muted">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}.</p>
 {% endif %}
 <ol class="wizard-steps steps" id="wizard-steps" aria-label="Steps">

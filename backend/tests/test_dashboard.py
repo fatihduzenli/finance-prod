@@ -4,6 +4,7 @@ number of queries."""
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -296,17 +297,25 @@ def test_every_role_reads_the_dashboard_and_none_may_post(today: date, role: Rol
     client, _ = client_for(role)
     response = client.get("/")
     assert response.status_code == 200
-    assert '<a href="/grid/" id="nav-grid">Monthly rent overview</a>' in response.content.decode()
+    # PLAN-012f D3, D11: the sidebar item, with its icon, reads "Monthly rent".
+    assert re.search(
+        r'<a class="nav-item" href="/grid/" id="nav-grid"><svg [^>]*>.*?</svg><span>Monthly '
+        r"rent</span></a>",
+        response.content.decode(),
+    )
     assert client.post("/").status_code == 403
 
 
 def test_the_nav_lists_dashboard_stores_operators_and_the_overview_first() -> None:
-    # PLAN-012c D3: Dashboard, Stores, Operators, Monthly rent overview, then the groups;
+    # PLAN-012c D3, PLAN-012f D3: Dashboard, Stores, Operators, Monthly rent, then the groups;
     # System settings (the Django admin) is listed for an admin only.
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
-    nav = page[page.index('<nav aria-label="Main">') : page.index("</nav>")]
-    order = [nav.index(f">{label}</a>") for label in ("Dashboard", "Stores", "Operators")]
+    start = page.index('<nav aria-label="Main" id="phone-menu">')
+    nav = page[start : page.index("</nav>", start)]
+    order = [
+        nav.index(f"<span>{label}</span></a>") for label in ("Dashboard", "Stores", "Operators")
+    ]
     order += [nav.index('id="nav-grid"'), nav.index('id="nav-reports"'), nav.index(">Admin<")]
     assert order == sorted(order)
     assert 'href="/admin/"' not in nav

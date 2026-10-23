@@ -5,7 +5,8 @@ that every text pair meets WCAG AA, which §5 requires: `--muted` `#6B7A90` → 
 `#0E8F86` → `#0B7C74`, `--paid-text` `#1B7F3B` → `#176B33`; the primary button is `#0E8F86` with a
 1px `#0B7C74` border (`--btn-primary-bg`, `--btn-primary-border`) while `--teal` stays `#13A89E`
 for the logo, the active tab and the bottom bar; `--faint` is decoration only, never for text
-that must be read. The values below are the ones built.
+that must be read. White on the primary button measures 3.97:1, the one pair under AA, accepted
+by the owner for the button's fill; the contrast test pins it. The values below are the ones built.
 
 Reference screenshots in this folder are the source of truth for the look. Where this file and a screenshot differ, the screenshot wins.
 

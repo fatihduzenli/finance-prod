@@ -1,8 +1,9 @@
 {% extends "finance/base.html" %}
 {% load components responsive %}
 {% block title %}Stores{% endblock %}
+{% block header %}<div class="page-header"><h1>Stores</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">New store</a></div>{% endif %}</div>{% endblock %}
+{% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Stores</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">New store</a></div>{% endif %}</div>
   <form method="get" action="{% url 'ledger:stores:list' %}" class="actions" role="search">
     <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Search stores" style="max-width:24rem;">
     <button class="btn" type="submit">Search</button>

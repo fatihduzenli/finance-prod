@@ -5,7 +5,7 @@ asset is loaded on the login or enrolment pages. The accounts/ pages extend it t
 The SANDBOX banner is injected by finance.middleware.SandboxBannerMiddleware. The staff
 screens' style sheets (finance/tokens.css, finance/app.css) give the colours, the phone
 layout and the 44 px touch targets (docs/qa/PLAN-011-dashboard-reports-mobile.md D9,
-PLAN-012c D1); the forms and their flow are the package's own. The tab title is
+PLAN-012c D1, the tokens of PLAN-012f D1); the forms and their flow are the package's own. The tab title is
 "<short name> · <page>" from the company settings (PLAN-012c D2).
 {% endcomment %}{% load static %}<!DOCTYPE html>
 <html lang="en">
@@ -19,14 +19,14 @@ PLAN-012c D1); the forms and their flow are the package's own. The tab title is
   <link rel="icon" href="{% static 'finance/brand/monvera_icon_192.png' %}" type="image/png" sizes="192x192">
   <link rel="icon" href="{% static 'finance/brand/monvera_icon.svg' %}" type="image/svg+xml">
   <style>
-    body{margin:0;font-family:var(--font);color:var(--ink);background:var(--paper-2);}
-    .container{max-width:32rem;margin:3rem auto;padding:1.5rem 2rem;background:var(--paper);border:1px solid var(--line);border-radius:var(--r-2);box-shadow:var(--shadow-1);}
+    body{margin:0;font-family:var(--font);color:var(--text);background:var(--bg);}
+    .container{max-width:32rem;margin:3rem auto;padding:1.5rem 2rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);}
     h1{font-size:1.5rem;margin-top:0;}
     label{display:block;margin:.75rem 0 .25rem;font-weight:600;}
     input[type=text],input[type=password],input[type=number],input[type=email]{width:100%;padding:.5rem;box-sizing:border-box;font-size:1rem;}
-    .btn{display:inline-block;margin-top:1rem;padding:.5rem 1rem;border:1px solid var(--control-border);border-radius:var(--r-1);background:var(--paper);color:var(--ink);font-size:1rem;cursor:pointer;text-decoration:none;}
-    .btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);}
-    .errorlist{color:var(--danger);padding-left:1rem;}
+    .btn{display:inline-block;margin-top:1rem;padding:.5rem 1rem;border:1px solid var(--input-border);border-radius:var(--radius-ctl);background:var(--surface);color:var(--text);font-size:1rem;cursor:pointer;text-decoration:none;}
+    .btn-primary{background:var(--btn-primary-bg);border-color:var(--btn-primary-border);color:var(--surface);font-weight:600;}
+    .errorlist{color:var(--unpaid-text);padding-left:1rem;}
     table{border-collapse:collapse;width:auto;} td,th{padding:.25rem .5rem;border:0;}
     @media (max-width:719.98px){
       .container{margin:0;padding:1rem;border:0;border-radius:0;max-width:none;}

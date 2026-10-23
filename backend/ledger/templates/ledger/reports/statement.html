@@ -5,15 +5,15 @@
 {% block head %}{% comment %}print.css (base.html) does the print layout (PLAN-012c D6): the header and footer, a heading row per month of the payment history (tr.print-month), no forced page break; the rules below stay for the page itself.{% endcomment %}<style>
   @media print {
     nav, .no-print, form#report-filters, #report-messages { display: none !important; }
-    body { background: var(--paper); }
+    body { background: var(--surface); }
     main { max-width: none; margin: 0; padding: 0; border: 0; }
     a { color: inherit; text-decoration: none; }
     table { page-break-inside: auto; } tr { page-break-inside: avoid; }
   }
 </style>{% endblock %}
+{% block header %}<div class="page-header"><h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div>{% endblock %}
 {% block content %}
   <p class="no-print"><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>
-  <div class="page-header"><h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div>
   {% if operator.legal_name or operator.company %}<p>{{ operator.legal_name }}{% if operator.legal_name and operator.company %} · {% endif %}{{ operator.company }}</p>{% endif %}
   {% url 'ledger:operators:statement' pk=operator.pk as action %}{% url 'ledger:operators:statement_export' pk=operator.pk as export %}
   <div class="no-print">{% include "ledger/reports/_range.html" with action=action export=export %}</div>

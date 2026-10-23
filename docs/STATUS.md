@@ -1661,3 +1661,17 @@ three laptop pages and the phone store page shown beside the references. Plan:
 sidebar label "Monthly rent", the store tab "Activity", the dashboard card titles, the phone
 banner "SANDBOX — TEST SYSTEM". Approved network read for this step: the Inter font release.
 Batch A assigned.
+
+## Update, 2026-10-22, PLAN-012f Batch A built and gated (not pushed)
+
+The spec's tokens in one file (the owner's AA nudges applied and recorded in the spec; the
+primary button's pair accepted by the owner and pinned by the contrast test); Inter v4.1
+self-hosted (the variable woff2, OFL beside it, the hash pinned, no external font); the 232 px
+gradient sidebar with the transparent logo, the user card (role · Settings · Help · Sign out),
+the banner above a surface page header, the content column; the phone shell (the 64 px top bar
+with the menu sheet and the search toggle, the four-item bottom bar with the More sheet, 90 px
+bottom padding, 44 px targets); the inline icon tag; the PWA colours on the tokens. Gate:
+sqlite 6,350 passed; PostgreSQL 34 + 6,977 passed; e2e 21 passed in four runs; Fable's
+adversarial file 10 cases and the font-host e2e case green. The grid scrolls at 1,280 px by the
+owner's decision (PLAN-011b D2 retired). Batch B (the components) assigned. The visual baselines
+are regenerated at the end of the step (Batch D); nothing is pushed before the checkpoint.

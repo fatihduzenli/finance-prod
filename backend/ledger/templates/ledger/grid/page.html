@@ -2,45 +2,45 @@
 {% load components money %}
 {% block title %}Monthly rent overview{% endblock %}
 {% block main_class %}wide grid-page{% endblock %}
-{% comment %}PLAN-012c D3: the left navigation folds behind "Menu" here at every width, so the twelve
-months keep fitting at 1,280 px (PLAN-011b D2).{% endcomment %}{% block shell_class %} shell-folded{% endblock %}
 {% block head %}<style>
   /* PLAN-011b D2: a horizontal scrollbar that is always there (scroll, not auto; styled so
      WebKit's overlay scrollbars stay visible), a mirrored one above the table when it is
      wider than its region (sized by the script below), the store column and the header row
-     fixed, 220 px for the store column and 80 px per month (12 months: 1,180 px, so all 12 fit at 1,280 px). The phone
-     narrows the store column in app.css and keeps the sideways scroll. */
-  main.grid-page{margin:1rem .5rem;padding:1rem;}
-  @media (max-width:719.98px){main.grid-page{margin:0;}}
-  .grid-scroll{overflow-x:scroll;overflow-y:auto;scrollbar-gutter:stable;max-height:75vh;border:1px solid var(--line);scrollbar-width:auto;scrollbar-color:var(--control-border) var(--paper-3);-webkit-overflow-scrolling:touch;}
-  .grid-scroll-top{overflow-x:scroll;overflow-y:hidden;height:14px;border:1px solid var(--line);border-bottom:0;scrollbar-width:auto;scrollbar-color:var(--control-border) var(--paper-3);}
+     fixed, 220 px for the store column and 80 px per month (12 months: 1,180 px). Beside the
+     232 px sidebar (PLAN-012f D3) the region is about 984 px wide at 1,280 px, so the later
+     months are reached by scrolling the region, never the page. The phone narrows the store
+     column in app.css and keeps the sideways scroll. */
+  .grid-scroll{overflow-x:scroll;overflow-y:auto;scrollbar-gutter:stable;max-height:75vh;border:1px solid var(--border);scrollbar-width:auto;scrollbar-color:var(--input-border) var(--neutral-bg);-webkit-overflow-scrolling:touch;}
+  .grid-scroll-top{overflow-x:scroll;overflow-y:hidden;height:14px;border:1px solid var(--border);border-bottom:0;scrollbar-width:auto;scrollbar-color:var(--input-border) var(--neutral-bg);}
   .grid-scroll-top[hidden]{display:none;}
   .grid-scroll-top>div{height:1px;}
   .grid-scroll::-webkit-scrollbar,.grid-scroll-top::-webkit-scrollbar{-webkit-appearance:none;height:12px;width:12px;}
-  .grid-scroll::-webkit-scrollbar-track,.grid-scroll-top::-webkit-scrollbar-track{background:var(--paper-3);}
-  .grid-scroll::-webkit-scrollbar-thumb,.grid-scroll-top::-webkit-scrollbar-thumb{background:var(--control-border);border-radius:var(--r-2);border:2px solid var(--paper-3);}
+  .grid-scroll::-webkit-scrollbar-track,.grid-scroll-top::-webkit-scrollbar-track{background:var(--neutral-bg);}
+  .grid-scroll::-webkit-scrollbar-thumb,.grid-scroll-top::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:var(--radius-ctl);border:2px solid var(--neutral-bg);}
   table.grid{border-collapse:separate;border-spacing:0;width:max-content;font-size:.85rem;}
-  table.grid th,table.grid td{white-space:nowrap;padding:.3rem .35rem;border-bottom:1px solid var(--line);border-right:1px solid var(--line);box-sizing:border-box;}
-  table.grid thead th{position:sticky;top:0;background:var(--paper);z-index:2;}
-  table.grid th.store-col{position:sticky;left:0;background:var(--paper);z-index:1;width:220px;min-width:220px;max-width:220px;white-space:normal;overflow-wrap:anywhere;}
+  table.grid th,table.grid td{white-space:nowrap;padding:.3rem .35rem;border-bottom:1px solid var(--border);border-right:1px solid var(--border);box-sizing:border-box;}
+  table.grid thead th{position:sticky;top:0;background:var(--surface);z-index:2;}
+  table.grid th.store-col{position:sticky;left:0;background:var(--surface);z-index:1;width:220px;min-width:220px;max-width:220px;white-space:normal;overflow-wrap:anywhere;}
   table.grid thead th.store-col{z-index:3;}
   table.grid .month-col,table.grid td{width:80px;min-width:80px;max-width:80px;}
   /* A cell's text wraps inside its 80 px ("Partly paid $0.00 of $3,500.00"); a word that does not fit breaks. */
   table.grid td{white-space:normal;overflow-wrap:break-word;}
-  table.grid tfoot th,table.grid tfoot td{background:var(--paper-2);font-weight:600;}
+  table.grid tfoot th,table.grid tfoot td{background:var(--surface-2);font-weight:600;}
   table.grid td a{color:inherit;text-decoration:none;display:block;}
-  table.grid td a:focus{outline:2px solid var(--focus);outline-offset:-2px;}
-  /* PLAN-012c D1, PLAN-012e-4 D2: the status tokens. Unpaid is light red while not yet
-     overdue (due, the soft pair) and dark red with white text once overdue. */
-  .cell-paid{background:var(--status-paid-bg);color:var(--status-paid-ink);} .cell-unpaid{background:var(--status-unpaid-bg);color:var(--status-unpaid-ink);}
-  .cell-pending{background:var(--status-pending-bg);color:var(--status-pending-ink);} .cell-partial{background:var(--status-partial-bg);color:var(--status-partial-ink);}
-  .cell-due{background:var(--status-unpaid-soft-bg);color:var(--status-unpaid-soft-ink);} .cell-waived{background:var(--status-waived-bg);color:var(--status-waived-ink);}
-  .cell-not_due{color:var(--status-not-due-ink);font-style:italic;}
+  table.grid td a:focus{outline:2px solid var(--link);outline-offset:-2px;}
+  /* PLAN-012c D1, PLAN-012e-4 D2, the tokens of PLAN-012f D1: unpaid is light red while not
+     yet overdue (due: the unpaid pair) and dark red with white text once overdue (the overdue
+     pair). */
+  .cell-paid{background:var(--paid-bg);color:var(--paid-text);} .cell-unpaid{background:var(--overdue-bg);color:var(--overdue-text);}
+  .cell-pending{background:var(--pending-bg);color:var(--pending-text);} .cell-partial{background:var(--partial-bg);color:var(--partial-text);}
+  .cell-due{background:var(--unpaid-bg);color:var(--unpaid-text);} .cell-waived{background:var(--waived-bg);color:var(--waived-text);}
+  .cell-not_due{color:var(--muted);font-style:italic;}
   .note-marker{color:inherit;margin-left:.2rem;}
-  .legend span{display:inline-block;padding:.1rem .45rem;margin-right:.25rem;border-radius:var(--r-1);}
+  .legend span{display:inline-block;padding:.1rem .45rem;margin-right:.25rem;border-radius:var(--radius-ctl);}
 </style>{% endblock %}
+{% block header %}<div class="page-header"><h1>Monthly rent overview</h1></div>{% endblock %}
+{% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Monthly rent overview</h1></div>
   {% comment %}PLAN-012d D16: the words filter, its own box; it keeps the range and the other filters, and the
   filters' form below keeps it (hidden).{% endcomment %}
   <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-search" class="actions" role="search">

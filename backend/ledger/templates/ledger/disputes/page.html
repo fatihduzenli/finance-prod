@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% load money responsive %}
 {% block title %}Disputes{% endblock %}
+{% block header %}<div class="page-header"><h1>Disputes</h1></div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Disputes</h1></div>
   <p class="muted">The disputes {{ company.provider_name }} reports for the last 90 days, read in the background each day, on a dispute event and when you press Update from {{ company.provider_name }}. Statuses and reasons are {{ company.provider_name }}'s own words. Transaction identifiers are masked. Fewer than {{ highlight_days }} days left to respond is highlighted.</p>
 
   <div class="actions">
@@ -21,7 +21,7 @@
     </thead>
     <tbody>
       {% for item in rows %}{% with dispute=item.dispute %}
-        <tr id="dispute-{{ dispute.pk }}" class="{% if item.past %}dispute-past{% elif item.soon %}dispute-soon{% endif %}"{% if item.past %} style="background:var(--danger-bg);"{% elif item.soon %} style="background:var(--warning-bg);"{% endif %}>
+        <tr id="dispute-{{ dispute.pk }}" class="{% if item.past %}dispute-past{% elif item.soon %}dispute-soon{% endif %}"{% if item.past %} style="background:var(--unpaid-bg);"{% elif item.soon %} style="background:var(--pending-bg);"{% endif %}>
           <td>{% if dispute.respond_by %}{{ dispute.respond_by|date:"Y-m-d H:i" }}{% else %}—{% endif %}</td>
           <td class="days-left">{% if item.past %}<strong>Past</strong>{% elif item.days_left is not None %}{% if item.soon %}<strong>{{ item.days_left }}</strong>{% else %}{{ item.days_left }}{% endif %}{% else %}—{% endif %}</td>
           <td class="dispute-status">{{ dispute.status|default:"—" }}</td>

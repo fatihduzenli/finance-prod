@@ -1,6 +1,7 @@
 {% extends "finance/base.html" %}
 {% load money %}
 {% block title %}End lease {{ store.external_label }}: settlement{% endblock %}
+{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
   <p class="muted" id="step-help">Say how and when the refund is paid back by Zelle, wire or check; leave the method empty when nothing is refunded.</p>

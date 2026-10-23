@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load static %}
 {% block title %}{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}{% endblock %}
+{% block header %}<div class="page-header"><h1>{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}</h1></div>{% endblock %}
 {% block content %}
   <p>{% if store %}<a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; {{ store.external_label }}</a>{% else %}<a href="{% url 'ledger:stores:list' %}">&larr; Stores</a>{% endif %}</p>
-  <div class="page-header"><h1>{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}</h1></div>
   <form method="post" id="store-form" class="js-single-submit"{% if not store %} enctype="multipart/form-data"{% endif %}>
     {% csrf_token %}
     {{ form.non_field_errors }}

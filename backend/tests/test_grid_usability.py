@@ -75,4 +75,8 @@ def test_the_phone_keeps_the_fixed_column_narrower_and_the_sideways_scroll() -> 
         "max-width: 9rem !important;" in phone
     )
     page = grid_page()
-    assert "@media (max-width:719.98px){main.grid-page{margin:0;}}" in page
+    # PLAN-012f D4: the phone shell pads every page alike (16 px); the grid has no margin rule
+    # of its own any more, and keeps its own sideways scroll region.
+    assert "main.grid-page{" not in page
+    assert '<div class="grid-scroll" tabindex="0" id="grid-scroll"' in page
+    assert "main, main.wide { padding: var(--space-4); }" in css

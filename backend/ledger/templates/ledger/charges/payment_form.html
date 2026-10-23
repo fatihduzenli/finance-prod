@@ -1,10 +1,10 @@
 {% extends "finance/base.html" %}
 {% load static money %}
 {% block title %}Add payment{% endblock %}
+{% block header %}<div class="page-header"><h1>Add payment</h1></div>{% endblock %}
 {% block content %}
   {% include "ledger/_store_context.html" %}
   <p><a href="{% url 'ledger:charges:detail' pk=charge.pk %}">{% if not store_context %}&larr; {% endif %}Rent {{ charge.period_month|date:"Y-m" }}, {{ charge.lease.store.external_label }}</a></p>
-  <div class="page-header"><h1>Add payment</h1></div>
   <p>Balance due: <strong id="balance">{{ charge.balance|money }}</strong>. A payment received by Zelle, wire, check or another way outside {{ company.provider_name }}. The amount may not be more than the balance. When the charge has an invoice in {{ company.provider_name }} and this payment covers the whole charge, that invoice is then marked paid in {{ company.provider_name }}; a partial payment is recorded here only.</p>
   <form method="post" id="payment-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}

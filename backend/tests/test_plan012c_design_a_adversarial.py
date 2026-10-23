@@ -108,7 +108,8 @@ def test_the_phone_menu_works_without_javascript_and_the_banner_stays() -> None:
     assert 'id="nav-toggle"' in body and 'type="checkbox"' in body
     assert 'for="nav-toggle"' in body  # the label toggles it: no script needed
     assert "SANDBOX" in body
-    for label in ("Dashboard", "Stores", "Operators", "Monthly rent overview", "Reports", "Admin"):
+    # PLAN-012f D11: the sidebar item reads "Monthly rent" (the page title keeps "overview").
+    for label in ("Dashboard", "Stores", "Operators", "Monthly rent", "Reports", "Admin"):
         assert label in body, label
     assert "Rent run" not in body and ">Grid<" not in body
     anonymous = Client().get("/account/login/").content.decode()

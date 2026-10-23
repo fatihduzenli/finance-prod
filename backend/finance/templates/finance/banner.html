@@ -2,6 +2,11 @@
 Sandbox banner, injected by finance.middleware.SandboxBannerMiddleware immediately
 after the <body> tag. No variables: nothing from settings may reach the page.
 There is deliberately no dismiss control (docs/CLAUDE.md Rule 6).
+The approved design's banner (docs/design/DESIGN-SPEC.md §1, PLAN-012f D3, D4): #6B4E00 on
+#FFF3C4 (the pending pair of tokens.css, written here because the Django admin never loads
+that file), 12 px, 600, letter-spacing .04em, upper case, centred, full width. At 768 px and
+under it reads "SANDBOX — test system" (the second span). On the staff pages app.css moves it
+above the page header, in the content column, and under the phone's top bar.
 {% endcomment %}
-<style>body{padding-top:44px !important;}</style>
-<div id="sandbox-banner" role="status" style="position:fixed;top:0;left:0;right:0;width:100%;height:44px;line-height:44px;z-index:2147483647;background:#ffd400;color:#000;text-align:center;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;letter-spacing:0.08em;">SANDBOX — test system, no real money</div>
+<style>body{padding-top:26px !important;}.sandbox-short{display:none;}@media (max-width:768px){.sandbox-long{display:none;}.sandbox-short{display:inline;}}</style>
+<div id="sandbox-banner" role="status" style="position:fixed;top:0;left:0;right:0;width:100%;height:26px;line-height:26px;z-index:2147483647;background:#FFF3C4;color:#6B4E00;text-align:center;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;overflow:hidden;"><span class="sandbox-long">SANDBOX — test system, no real money</span><span class="sandbox-short">SANDBOX — test system</span></div>

@@ -3,9 +3,9 @@
 {% load responsive %}
 {% load static %}
 {% block title %}Store {{ store.external_label }}{% endblock %}
+{% block header %}<div class="page-header"><h1>Store {{ store.external_label }}{% if store.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:stores:list' %}">&larr; Stores</a></p>
-  <div class="page-header"><h1>Store {{ store.external_label }}{% if store.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>
   {% if end_in_progress %}
     <ul class="messages" id="lease-end-in-progress">
       <li class="warning" role="status">{% if end_in_progress_transfer %}A transfer is in progress (statement step).{% else %}A lease end is in progress (statement step).{% endif %}{% if can_edit %}

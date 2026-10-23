@@ -1,55 +1,72 @@
-/* Staff screens (docs/qa/PLAN-011-dashboard-reports-mobile.md D9; the shell and tokens of
-   docs/qa/PLAN-012c-design-pass.md D1, D3). Every colour, size and radius comes from
-   tokens.css (linked first): no literal colour here. Breakpoints: under 720px a phone
-   (tables as cards, one form column), under 900px the left navigation folds behind a
-   "Menu" toggle, under 1024px and on any coarse pointer touch targets are at least 44px
-   high. No external asset. */
+/* Staff screens (docs/qa/PLAN-011-dashboard-reports-mobile.md D9; the components of
+   docs/qa/PLAN-012c-design-pass.md D5; the approved design's tokens and shell,
+   docs/qa/PLAN-012f-approved-design.md D1, D3, D4 and docs/design/DESIGN-SPEC.md §2, §6). Every
+   colour comes from tokens.css (linked first): no literal colour here. On a laptop the 232 px
+   sidebar and the content column (the sandbox banner, the page header, the page on --bg with
+   28/32 px padding, at most 1,240 px wide); at 768 px and under the phone shell (a 64 px top
+   bar with the menu and search buttons, the banner under it, the bottom tab bar with its More
+   sheet, one column, 90 px of bottom padding). Under 720px tables become cards and forms one
+   column; under 1024px and on any coarse pointer touch targets are at least 44px high. No
+   external asset. */
 
-:root { --page: var(--paper-2); --muted: var(--ink-2); --tap: 44px; }
-body { margin: 0; font-family: var(--font); color: var(--ink); background: var(--page); -webkit-text-size-adjust: 100%; }
+:root { --tap: 44px; --sidebar-w: 232px; --phone-bar-h: 64px; --tab-bar-h: 64px; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; font-family: var(--font); font-size: var(--fs-md); color: var(--text); background: var(--bg); }
 a { color: var(--link); }
-:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* The focus ring: a surface gap and a --link ring on light surfaces; --green on the gradient. */
+:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--link); }
 
-/* --- Top bar (PLAN-012c D3) -------------------------------------------------------- */
-.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); min-height: var(--topbar-h); padding: var(--s-2) var(--s-6); box-sizing: border-box; background: var(--navy); color: var(--on-navy); }
-.topbar a, .topbar summary, .topbar button { color: var(--on-navy); }
-.topbar :focus-visible { box-shadow: 0 0 0 2px var(--navy), 0 0 0 4px var(--focus-on-navy); }
-.topbar-brand { display: inline-flex; align-items: center; gap: var(--s-3); text-decoration: none; min-width: 0; }
-.topbar-logo { height: 28px; width: auto; display: block; }
-.topbar-company { font-weight: 700; font-size: var(--t-lg); }
-.topbar-product { color: var(--on-navy-2); font-size: var(--t-sm); padding-left: var(--s-3); border-left: 1px solid var(--navy-2); }
-/* The top-bar search (PLAN-012d D17). */
-.topbar .nav-search { margin: 0 0 0 auto; }
-.topbar .nav-search input { width: 16rem; padding: var(--s-1) var(--s-2); font-size: var(--t-sm); border: 1px solid var(--control-border); border-radius: var(--r-1); background: var(--paper); color: var(--ink); }
-/* The user menu: a details element, no script. */
-.user-menu { position: relative; }
-.user-menu summary { cursor: pointer; font-weight: 600; list-style: none; padding: var(--s-1) var(--s-2); border: 1px solid var(--navy-2); border-radius: var(--r-1); }
-.user-menu summary::-webkit-details-marker { display: none; }
-.user-menu summary::after { content: " \25BE"; }
-.user-menu-items { position: absolute; right: 0; top: calc(100% + var(--s-1)); z-index: 10; min-width: 11rem; display: flex; flex-direction: column; gap: var(--s-1); padding: var(--s-2); background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-2); box-shadow: var(--shadow-2); }
-.topbar .user-menu-items a, .topbar .user-menu-items button { color: var(--ink); }
-.user-menu-items a { text-decoration: none; padding: var(--s-1) var(--s-2); }
-.user-menu-items form { margin: 0; }
-.user-menu-items button { background: none; border: 0; padding: var(--s-1) var(--s-2); font: inherit; cursor: pointer; text-align: left; width: 100%; }
-.user-menu-items a[aria-current="page"] { font-weight: 700; text-decoration: underline; }
+/* --- The shell (PLAN-012f D3) -------------------------------------------------------------
+   body.app is a grid: the sidebar in the first column over both rows; the sandbox banner
+   (injected first in the body, finance.middleware) over the content column, kept at the top
+   while the page scrolls; the content column (#page-header, then main) under it. The banner's
+   own style keeps the admin and sign-in pages as they were; here it moves into the column. */
+body.app { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); grid-template-rows: auto 1fr; min-height: 100vh; padding-top: 0 !important; }
+body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !important; top: 0 !important; left: auto !important; right: auto !important; width: auto !important; }
+/* The phone's two toggles (checkboxes driven by their labels: no script needed), its bar,
+   its search field, the sheet's close button and the bottom bar: hidden on a laptop. */
+.sheet-toggle { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+.phone-bar, .phone-search, .sheet-close, .tab-bar { display: none; }
 
-/* --- Shell and left navigation (PLAN-012c D3) ------------------------------------------- */
-.shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); align-items: stretch; min-height: calc(100vh - var(--topbar-h)); }
-.shell > nav { box-sizing: border-box; padding: var(--s-4) 0; background: var(--paper); border-right: 1px solid var(--line); }
-.shell > main { align-self: start; }
-/* The "Menu" toggle: a checkbox and its label; no script. Hidden on wide screens. */
-.nav-toggle { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
-.nav-toggle-label { display: none; color: var(--ink); font-weight: 600; cursor: pointer; border: 1px solid var(--control-border); border-radius: var(--r-1); padding: 0 .9rem; line-height: calc(var(--tap) - 2px); min-height: var(--tap); box-sizing: border-box; user-select: none; background: var(--paper); }
-.nav-toggle:focus-visible + .nav-toggle-label { box-shadow: var(--focus-ring); }
-.nav-list, .nav-list ul { list-style: none; margin: 0; padding: 0; }
-.nav-list a, .nav-group-heading { display: block; padding: var(--s-2) var(--s-4); color: var(--ink); text-decoration: none; font-weight: 600; border-left: 4px solid transparent; }
-.nav-list ul a { padding-left: var(--s-7); font-weight: 400; }
-.nav-group { margin-top: var(--s-2); }
-span.nav-group-heading { color: var(--ink-2); font-size: var(--t-sm); text-transform: uppercase; letter-spacing: .04em; }
-.nav-list a:hover { background: var(--paper-2); }
-/* The current page and its group (PLAN-012d D5, PLAN-012c D3). */
-.nav-list a[aria-current="page"] { border-left-color: var(--teal); background: var(--info-bg); color: var(--navy); }
-.nav-group-heading[aria-current="true"] { color: var(--navy); }
+/* --- Sidebar: the logo, the navigation, the user card ------------------------------------- */
+.sidebar { grid-column: 1; grid-row: 1 / span 2; position: sticky; top: 0; height: 100vh; box-sizing: border-box; overflow-y: auto; display: flex; flex-direction: column; padding: 20px 14px; background: var(--sidebar-gradient); color: var(--sidebar-text); }
+.sidebar :focus-visible, .phone-bar :focus-visible { box-shadow: 0 0 0 2px var(--navy), 0 0 0 4px var(--green); }
+.sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); margin: 0 0 26px; }
+.sidebar-logo { display: inline-flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); color: var(--sidebar-active-text); text-decoration: none; font-weight: 600; font-size: var(--fs-md); }
+.sidebar-logo img { height: 48px; width: auto; max-width: 100%; display: block; }
+.nav-list, .nav-sublist, .more-list { list-style: none; margin: 0; padding: 0; }
+.nav-list > li + li { margin-top: 2px; }
+.nav-item { display: flex; align-items: center; gap: var(--space-3); box-sizing: border-box; width: 100%; padding: 10px 12px; border-radius: var(--radius-ctl); color: var(--sidebar-text); font-size: var(--fs-md); font-weight: 500; text-decoration: none; cursor: pointer; }
+.nav-item:hover, .nav-sublist a:hover { background: color-mix(in srgb, var(--surface) 8%, transparent); }
+.nav-item[aria-current="page"], .nav-sublist a[aria-current="page"] { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); font-weight: 600; }
+.nav-item[aria-current="true"] { color: var(--sidebar-active-text); font-weight: 600; }
+/* Reports and Admin: their pages in a nested list, open under the active group (Reports on its
+   own pages; Admin, which has no page of its own, is a <details> the reader opens too). */
+.nav-sublist { display: none; margin: 2px 0 6px; padding-left: 30px; }
+.nav-group.is-open > .nav-sublist, .nav-disclosure > .nav-sublist { display: block; }
+.nav-sublist a { display: block; padding: 6px 12px; border-radius: var(--radius-ctl); color: var(--sidebar-text); font-size: var(--fs-base); text-decoration: none; }
+.nav-disclosure > summary { list-style: none; }
+.nav-disclosure > summary::-webkit-details-marker { display: none; }
+.nav-disclosure > summary .icon-chevron-down { margin-left: auto; transition: transform 120ms; }
+.nav-disclosure[open] > summary .icon-chevron-down { transform: rotate(180deg); }
+/* The user card: name, then role · Settings · Help · Sign out (a POST form). */
+.user-card { margin-top: auto; padding: 12px; border-radius: var(--radius-ctl); background: color-mix(in srgb, var(--surface) 8%, transparent); color: var(--sidebar-text); font-size: var(--fs-sm); }
+.user-name { display: block; margin-bottom: 2px; color: var(--sidebar-active-text); font-size: var(--fs-base); font-weight: 600; overflow-wrap: anywhere; }
+.user-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-1); }
+.user-meta form { margin: 0; display: inline; }
+.user-meta a, .user-meta .link-button { color: var(--sidebar-text); }
+.link-button { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
+
+/* --- Content column: the page header, then the page --------------------------------------- */
+.content { grid-column: 2; grid-row: 2; min-width: 0; }
+.page-header-bar { background: var(--surface); border-bottom: 1px solid var(--border); }
+.page-header-inner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-4); box-sizing: border-box; min-height: 64px; padding: var(--space-3) var(--space-8); }
+.page-header-bar h1 { margin: 0; color: var(--text); font-size: var(--fs-h1); font-weight: 600; }
+/* The header's search box (the dashboard, the stores list and the grid; PLAN-012d D17): a GET
+   form to the search page on --surface-2 with its icon. */
+.nav-search { position: relative; margin: 0; flex: 0 1 320px; }
+.nav-search input[type=search] { width: 100%; box-sizing: border-box; padding: 9px 12px 9px 36px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--fs-base); }
+.nav-search .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 
 /* The invoice builder's lines (PLAN-012d D10): the Item box takes its cell's full width so
    the chosen value (a long "Existing open charge: ..." included) shows; the trash button;
@@ -63,22 +80,22 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 .table-total { font-weight: 600; text-align: right; margin: .5rem 0 1rem; }
 
 /* --- Page --------------------------------------------------------------------------- */
-main { max-width: 64rem; margin: 1.5rem auto; box-sizing: border-box; width: calc(100% - 2rem); padding: 1.5rem 2rem; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-2); box-shadow: var(--shadow-1); }
-main.wide { max-width: none; margin: 1.5rem 1rem; width: auto; }
+main { box-sizing: border-box; width: 100%; max-width: 1240px; padding: 28px 32px; }
+main.wide { max-width: none; }
 h1 { font-size: 1.5rem; margin-top: 0; } h2 { font-size: 1.15rem; margin-top: 2rem; }
 table { border-collapse: collapse; width: 100%; }
-th, td { padding: .4rem .5rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th, td { padding: .4rem .5rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 label { display: block; margin: .75rem 0 .25rem; font-weight: 600; }
 input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], select, textarea { padding: .5rem; box-sizing: border-box; font-size: 1rem; max-width: 100%; }
 input[type=text], input[type=email], input[type=search], textarea { width: 100%; }
-.btn { display: inline-block; padding: .45rem .9rem; border: 1px solid var(--control-border); border-radius: var(--r-1); background: var(--paper); color: var(--ink); font-size: .95rem; cursor: pointer; text-decoration: none; box-sizing: border-box; }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); } .btn-danger { border-color: var(--danger); color: var(--danger); }
+.btn { display: inline-block; padding: .45rem .9rem; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface); color: var(--text); font-size: .95rem; cursor: pointer; text-decoration: none; box-sizing: border-box; }
+.btn-primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-border); color: var(--surface); font-weight: 600; } .btn-danger { border-color: var(--unpaid-text); color: var(--unpaid-text); }
 .btn:disabled { opacity: .5; cursor: default; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: 1rem 0; } .actions form { margin: 0; }
 /* A page's own message list (the flash messages are .toast, below). */
-.messages { list-style: none; padding: 0; } .messages li { padding: .6rem .8rem; margin-bottom: .5rem; border-radius: var(--r-1); background: var(--info-bg); color: var(--info-ink); }
-.messages .error { background: var(--danger-bg); color: var(--danger-ink); } .messages .warning { background: var(--warning-bg); color: var(--warning-ink); } .messages .success { background: var(--success-bg); color: var(--success-ink); }
-.errorlist { color: var(--danger); padding-left: 1rem; }
+.messages { list-style: none; padding: 0; } .messages li { padding: .6rem .8rem; margin-bottom: .5rem; border-radius: var(--radius-ctl); background: var(--neutral-bg); color: var(--neutral-text); }
+.messages .error { background: var(--unpaid-bg); color: var(--unpaid-text); } .messages .warning { background: var(--pending-bg); color: var(--pending-text); } .messages .success { background: var(--paid-bg); color: var(--paid-text); }
+.errorlist { color: var(--unpaid-text); padding-left: 1rem; }
 .muted { color: var(--muted); }
 /* A block's one line of help, "Learn more" (PLAN-012e-2 D10). */
 p.help { color: var(--muted); }
@@ -92,12 +109,13 @@ img, iframe { max-width: 100%; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* --- Page header ------------------------------------------------------------------------
-   .page-header: wraps the page's <h1> (title on the left) and, in .page-actions, its one
-   primary action (.btn-primary) and any secondary ones (.btn) on the right. The back link
-   above it stays a plain paragraph. */
-.page-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-4); margin: 0 0 var(--s-4); padding-bottom: var(--s-3); border-bottom: 1px solid var(--line); }
+   .page-header: in the page header bar ({% block header %} of finance/base.html, PLAN-012f
+   D3), the page's <h1> (title on the left) and, in .page-actions, its one primary action
+   (.btn-primary) and any secondary ones (.btn) on the right. The back link stays a plain
+   paragraph at the top of the page. */
+.page-header { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); margin: 0; }
 .page-header h1 { margin: 0; }
-.page-header .page-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+.page-header .page-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .page-header .page-actions form { margin: 0; }
 
 /* --- Workspace (the 12d store and operator pages: the reference layout) -------------------
@@ -106,13 +124,13 @@ img, iframe { max-width: 100%; }
    .tabs: the tab links, each a .btn; the open one carries aria-current="page" (they are links
    to pages; a role="tab" control would carry aria-selected="true", styled the same). The
    charge and invoice filters (#charge-filters, #invoice-filters) are tabs too. */
-.workspace-header { margin: var(--s-4) 0; padding: var(--s-4); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); }
-.header-card { display: grid; grid-template-columns: max-content 1fr; gap: var(--s-1) var(--s-4); margin: 0; }
-.header-card dt { font-weight: 600; color: var(--ink-2); } .header-card dd { margin: 0; }
-.action-bar { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; margin: var(--s-4) 0; padding: 0 0 var(--s-4); border-bottom: 1px solid var(--line); }
+.workspace-header { margin: var(--space-4) 0; padding: var(--space-4); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-ctl); }
+.header-card { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-4); margin: 0; }
+.header-card dt { font-weight: 600; color: var(--text-2); } .header-card dd { margin: 0; }
+.action-bar { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-4) 0; padding: 0 0 var(--space-4); border-bottom: 1px solid var(--border); }
 .action-bar form { margin: 0; }
-.tabs { display: flex; flex-wrap: wrap; gap: var(--s-1); margin: var(--s-4) 0; }
-.tabs a[aria-current="page"], .tabs [aria-selected="true"] { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+.tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: var(--space-4) 0; }
+.tabs a[aria-current="page"], .tabs [aria-selected="true"] { background: var(--navy); border-color: var(--navy); color: var(--surface); }
 
 /* --- Menu (PLAN-012e-2 D5, D6) -----------------------------------------------------------
    .menu: a bar's menu (Lease, More), a native <details> whose <summary class="btn"> opens a
@@ -122,10 +140,10 @@ img, iframe { max-width: 100%; }
 .menu { position: relative; display: inline-block; }
 .menu summary { list-style: none; }
 .menu summary::-webkit-details-marker { display: none; }
-.menu ul { position: absolute; left: 0; top: calc(100% + var(--s-1)); z-index: 10; min-width: 14rem; margin: 0; padding: var(--s-2); list-style: none; display: flex; flex-direction: column; gap: var(--s-1); background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-2); box-shadow: var(--shadow-2); }
+.menu ul { position: absolute; left: 0; top: calc(100% + var(--space-1)); z-index: 10; min-width: 14rem; margin: 0; padding: var(--space-2); list-style: none; display: flex; flex-direction: column; gap: var(--space-1); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-ctl); }
 .menu li form { margin: 0; }
-.menu li a, .menu li button { display: block; width: 100%; box-sizing: border-box; padding: var(--s-1) var(--s-2); background: none; border: 0; color: var(--ink); font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
-.menu .menu-danger { color: var(--danger); }
+.menu li a, .menu li button { display: block; width: 100%; box-sizing: border-box; padding: var(--space-1) var(--space-2); background: none; border: 0; color: var(--text); font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.menu .menu-danger { color: var(--unpaid-text); }
 .link-action { background: none; border: 0; padding: 0; color: var(--link); font: inherit; text-decoration: underline; cursor: pointer; }
 
 /* --- Table -------------------------------------------------------------------------------
@@ -136,8 +154,8 @@ img, iframe { max-width: 100%; }
    where the view sorts: the arrears list) is a link in a th with aria-sort on the sorted
    column; its arrow is drawn here, so the cells' data-label stays the header's text. */
 .table th, .table-cards > table th, .table-scroll > table th { font-weight: 600; }
-.table thead th, .table-cards > table > thead th, .table-scroll > table > thead th { background: var(--paper-2); border-bottom: 2px solid var(--line); vertical-align: bottom; }
-.table-scroll > table > thead th:first-child { background: var(--paper-2); z-index: 2; }
+.table thead th, .table-cards > table > thead th, .table-scroll > table > thead th { background: var(--surface-2); border-bottom: 2px solid var(--border); vertical-align: bottom; }
+.table-scroll > table > thead th:first-child { background: var(--surface-2); z-index: 2; }
 td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 th[aria-sort] a, th.sortable a { color: inherit; }
 th[aria-sort="ascending"] a::after { content: " \25B2"; }
@@ -148,12 +166,12 @@ th[aria-sort="descending"] a::after { content: " \25BC"; }
    list (.errorlist) under the control; .has-error on a field with an error. A required
    field's label ends in " *" with .required (and "required" for screen readers): marked in
    text, not in colour alone. One .btn-primary per form; the others are .btn. */
-.field { margin: 0 0 var(--s-3); }
-.field > label { margin: var(--s-3) 0 var(--s-1); }
-.field .help { display: block; color: var(--ink-2); font-size: var(--t-sm); margin-top: var(--s-1); }
-.field .errorlist { list-style: none; margin: var(--s-1) 0 0; padding: 0; font-weight: 600; }
-.field .field-error { display: block; margin-top: var(--s-1); color: var(--danger); }
-.field.has-error input, .field.has-error select, .field.has-error textarea { border: 2px solid var(--danger); }
+.field { margin: 0 0 var(--space-3); }
+.field > label { margin: var(--space-3) 0 var(--space-1); }
+.field .help { display: block; color: var(--text-2); font-size: var(--fs-md); margin-top: var(--space-1); }
+.field .errorlist { list-style: none; margin: var(--space-1) 0 0; padding: 0; font-weight: 600; }
+.field .field-error { display: block; margin-top: var(--space-1); color: var(--unpaid-text); }
+.field.has-error input, .field.has-error select, .field.has-error textarea { border: 2px solid var(--unpaid-text); }
 .required { font-weight: 700; }
 
 /* --- Badges ------------------------------------------------------------------------------
@@ -163,34 +181,34 @@ th[aria-sort="descending"] a::after { content: " \25BC"; }
    unpaid ◻, pending ◐, partial ◑, waived –, due ○, voided ✕, attention !) is in the markup
    (finance.templatetags.components), hidden from screen readers, so colour is never the
    only signal. .badge.not-due: the grid legend's "Not due", text only. */
-.badge { display: inline-block; padding: .1rem .45rem; border: 1px solid transparent; border-radius: var(--r-1); background: var(--paper-3); color: var(--ink); font-size: var(--t-sm); line-height: 1.4; white-space: nowrap; }
-.badge-paid { background: var(--status-paid-bg); color: var(--status-paid-ink); }
-.badge-unpaid { background: var(--status-unpaid-bg); color: var(--status-unpaid-ink); }
-.badge-pending { background: var(--status-pending-bg); color: var(--status-pending-ink); }
-.badge-partial { background: var(--status-partial-bg); color: var(--status-partial-ink); }
-.badge-waived { background: var(--status-waived-bg); color: var(--status-waived-ink); }
-.badge-due { background: var(--status-unpaid-soft-bg); color: var(--status-unpaid-soft-ink); }
-.badge-voided { background: var(--status-voided-bg); color: var(--status-voided-ink); }
-.badge-attention { background: var(--status-attention-bg); color: var(--status-attention-ink); font-weight: 600; }
-.badge.not-due { background: var(--paper); color: var(--status-not-due-ink); border-color: var(--line); font-style: italic; }
+.badge { display: inline-block; padding: .1rem .45rem; border: 1px solid transparent; border-radius: var(--radius-ctl); background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-md); line-height: 1.4; white-space: nowrap; }
+.badge-paid { background: var(--paid-bg); color: var(--paid-text); }
+.badge-unpaid { background: var(--overdue-bg); color: var(--overdue-text); }
+.badge-pending { background: var(--pending-bg); color: var(--pending-text); }
+.badge-partial { background: var(--partial-bg); color: var(--partial-text); }
+.badge-waived { background: var(--waived-bg); color: var(--waived-text); }
+.badge-due { background: var(--unpaid-bg); color: var(--unpaid-text); }
+.badge-voided { background: var(--neutral-bg); color: var(--neutral-text); }
+.badge-attention { background: var(--unpaid-bg); color: var(--unpaid-text); font-weight: 600; }
+.badge.not-due { background: var(--surface); color: var(--muted); border-color: var(--border); font-style: italic; }
 
 /* --- Empty state -------------------------------------------------------------------------
    .empty: what shows instead of a list: a sentence, then the next step (.empty-next) as a
    link or a button where one exists. A table's "No rows" cell carries it too. */
 .empty { color: var(--muted); }
-.empty .empty-next { margin-left: var(--s-2); }
-p.empty, div.empty { padding: var(--s-4); border: 1px dashed var(--line); border-radius: var(--r-2); background: var(--paper-2); }
+.empty .empty-next { margin-left: var(--space-2); }
+p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius-ctl); background: var(--surface-2); }
 
 /* --- Confirmation page ---------------------------------------------------------------------
    .confirm: a page that asks before an action that cannot be taken back. The question is its
    heading (.confirm-question), "What will happen" a list (.confirm-what), then one primary
    button (the action: .btn-primary, or .btn-danger when it ends or removes something) and one
    secondary (.btn: back, or cancel). */
-.confirm { margin: var(--s-4) 0; padding: var(--s-4) var(--s-5); border: 1px solid var(--line); border-left: 4px solid var(--navy); border-radius: var(--r-2); background: var(--paper); }
+.confirm { margin: var(--space-4) 0; padding: var(--space-4) var(--space-5); border: 1px solid var(--border); border-left: 4px solid var(--navy); border-radius: var(--radius-ctl); background: var(--surface); }
 .confirm .confirm-question { margin-top: 0; }
-.confirm-what h2, .confirm-what h3 { font-size: var(--t-md); margin: var(--s-4) 0 var(--s-2); }
-.confirm-what ul { margin: 0 0 var(--s-3); padding-left: var(--s-6); }
-.confirm .btn-danger { background: var(--danger); border-color: var(--danger); color: var(--on-accent); }
+.confirm-what h2, .confirm-what h3 { font-size: var(--fs-lg); margin: var(--space-4) 0 var(--space-2); }
+.confirm-what ul { margin: 0 0 var(--space-3); padding-left: var(--space-6); }
+.confirm .btn-danger { background: var(--unpaid-text); border-color: var(--unpaid-text); color: var(--surface); }
 
 /* --- Flash messages ----------------------------------------------------------------------
    .toasts: the list of flash messages; .toast: one message (role "status" in an
@@ -199,43 +217,43 @@ p.empty, div.empty { padding: var(--s-4); border: 1px dashed var(--line); border
    opacity alone): its text stays in the page for screen readers; a warning or an error (a
    refusal) stays until it is dismissed. Dismissing removes it (the script in base.html):
    the reader chose to. */
-.toasts { list-style: none; margin: 0 0 var(--s-4); padding: 0; }
-.toast { display: flex; align-items: flex-start; gap: var(--s-3); padding: var(--s-3) var(--s-4); margin-bottom: var(--s-2); border-radius: var(--r-2); border-left: 4px solid var(--teal); background: var(--info-bg); color: var(--info-ink); box-shadow: var(--shadow-1); overflow: hidden; }
+.toasts { list-style: none; margin: 0 0 var(--space-4); padding: 0; }
+.toast { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); border-radius: var(--radius-ctl); border-left: 4px solid var(--teal); background: var(--neutral-bg); color: var(--neutral-text); overflow: hidden; }
 .toast-text { flex: 1 1 auto; }
-.toast.success { background: var(--success-bg); color: var(--success-ink); border-left-color: var(--green); }
-.toast.warning { background: var(--warning-bg); color: var(--warning-ink); border-left-color: var(--warning); }
-.toast.error { background: var(--danger-bg); color: var(--danger-ink); border-left-color: var(--danger); }
-.toast-dismiss { flex: 0 0 auto; background: none; border: 0; padding: 0 var(--s-1); font: inherit; font-size: var(--t-lg); line-height: 1; color: inherit; cursor: pointer; }
+.toast.success { background: var(--paid-bg); color: var(--paid-text); border-left-color: var(--green); }
+.toast.warning { background: var(--pending-bg); color: var(--pending-text); border-left-color: var(--pending-text); }
+.toast.error { background: var(--unpaid-bg); color: var(--unpaid-text); border-left-color: var(--unpaid-text); }
+.toast-dismiss { flex: 0 0 auto; background: none; border: 0; padding: 0 var(--space-1); font: inherit; font-size: var(--fs-lg); line-height: 1; color: inherit; cursor: pointer; }
 .toast:not(.warning):not(.error) { animation: toast-fade 600ms ease-in 8s forwards; }
 @keyframes toast-fade { to { opacity: 0; } }
 
 /* --- Pager -------------------------------------------------------------------------------
    .pager: a paged list's Previous and Next links (.btn) around the page count. */
-.pager { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); margin: var(--s-4) 0; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: var(--space-4) 0; }
 .pager .pager-count { color: var(--muted); }
 
 /* --- Wizard steps ------------------------------------------------------------------------
    .steps: the wizard's step list (an ol). A step that can be opened is a link; the current
    one carries aria-current="step"; a step before it is done (.step-done, a ✓ and "done" for
    screen readers). */
-.steps { display: flex; flex-wrap: wrap; gap: var(--s-2); list-style: none; margin: var(--s-4) 0; padding: 0; counter-reset: step; }
-.steps li { counter-increment: step; display: inline-flex; align-items: center; gap: var(--s-1); padding: var(--s-1) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--paper); font-size: var(--t-sm); }
-.steps li::before { content: counter(step) "."; color: var(--ink-2); }
-.steps li.step-done::before { content: "\2713"; content: "\2713" / ""; color: var(--status-paid-ink); font-weight: 700; }
-.steps li[aria-current="step"] { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
-.steps li[aria-current="step"]::before { color: var(--on-navy-2); }
+.steps { display: flex; flex-wrap: wrap; gap: var(--space-2); list-style: none; margin: var(--space-4) 0; padding: 0; counter-reset: step; }
+.steps li { counter-increment: step; display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); font-size: var(--fs-md); }
+.steps li::before { content: counter(step) "."; color: var(--text-2); }
+.steps li.step-done::before { content: "\2713"; content: "\2713" / ""; color: var(--paid-text); font-weight: 700; }
+.steps li[aria-current="step"] { background: var(--navy); border-color: var(--navy); color: var(--surface); }
+.steps li[aria-current="step"]::before { color: var(--sidebar-text); }
 
 /* --- Cards (the dashboard, PLAN-012c D6) ----------------------------------------------------
    .card: one block of the dashboard, a heading and its content; .cards: the figures' row of
    small cards (.figure, each a link with its .value). The attention list is the first card. */
-.card { margin: 0 0 var(--s-4); padding: var(--s-4) var(--s-5); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--paper); box-shadow: var(--shadow-1); }
+.card { margin: 0 0 var(--space-4); padding: var(--space-4) var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); }
 .card > h2:first-child, .card > section > h2:first-child { margin-top: 0; }
-.card.attention { border-left: 4px solid var(--warning); padding: var(--s-4) var(--s-5); margin: 0 0 var(--s-4); }
-.card.alert-list { border-left: 4px solid var(--danger); }
-.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--s-3); margin: var(--s-2) 0; }
-.figure { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--s-3); background: var(--paper-2); }
+.card.attention { border-left: 4px solid var(--pending-text); padding: var(--space-4) var(--space-5); margin: 0 0 var(--space-4); }
+.card.alert-list { border-left: 4px solid var(--unpaid-text); }
+.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-3); margin: var(--space-2) 0; }
+.figure { border: 1px solid var(--border); border-radius: var(--radius-ctl); padding: var(--space-3); background: var(--surface-2); }
 .figure a { color: inherit; text-decoration: none; display: block; }
-.figure .value { font-size: var(--t-xl); font-weight: 700; display: block; margin-top: var(--s-1); color: var(--navy); font-variant-numeric: tabular-nums; }
+.figure .value { font-size: var(--fs-h1); font-weight: 700; display: block; margin-top: var(--space-1); color: var(--navy); font-variant-numeric: tabular-nums; }
 
 /* --- Print header and footer (print.css shows them; never on screen) ------------------------ */
 .print-only { display: none; }
@@ -245,15 +263,15 @@ p.empty, div.empty { padding: var(--s-4); border: 1px dashed var(--line); border
    (the builder's visually hidden line labels), so nothing escapes it and widens the page. */
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; position: relative; }
 .table-scroll > table { width: auto; min-width: 100%; border-collapse: separate; border-spacing: 0; }
-.table-scroll > table th:first-child, .table-scroll > table td:first-child { position: sticky; left: 0; background: var(--paper); z-index: 1; }
+.table-scroll > table th:first-child, .table-scroll > table td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
 
 /* --- Attention list (PLAN-011b D6) ------------------------------------------------------- */
-.attention { border-left: 4px solid var(--warning); padding-left: .75rem; margin: 1rem 0; }
+.attention { border-left: 4px solid var(--pending-text); padding-left: .75rem; margin: 1rem 0; }
 .attention h2 { margin-top: 0; }
 .attention-list { list-style: none; padding: 0; margin: 0; }
-.attention-item { padding: .3rem .5rem; margin-bottom: .25rem; border-radius: var(--r-1); background: var(--warning-bg); }
-.attention-item.severity-high { background: var(--danger-bg); }
-.attention-item.severity-low { background: var(--paper-2); }
+.attention-item { padding: .3rem .5rem; margin-bottom: .25rem; border-radius: var(--radius-ctl); background: var(--pending-bg); }
+.attention-item.severity-high { background: var(--unpaid-bg); }
+.attention-item.severity-low { background: var(--surface-2); }
 .attention-item a { color: inherit; }
 
 /* --- Calendar (PLAN-011b D8) ------------------------------------------------------------- */
@@ -264,52 +282,73 @@ p.empty, div.empty { padding: var(--s-4); border: 1px dashed var(--line); border
 .collect-choices legend { font-weight: 600; padding: 0; }
 #collect-actions .btn[hidden] { display: none; }
 label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0; font-weight: 400; }
-.calendar-month { border: 1px solid var(--line); }
+.calendar-month { border: 1px solid var(--border); }
 .calendar-head, .calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.calendar-head span { font-weight: 600; padding: .3rem .4rem; border-bottom: 1px solid var(--line); }
-.calendar-day { min-height: 6rem; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: .25rem .35rem; font-size: .85rem; overflow-wrap: anywhere; }
-.calendar-day.other-month { background: var(--paper-2); color: var(--muted); }
+.calendar-head span { font-weight: 600; padding: .3rem .4rem; border-bottom: 1px solid var(--border); }
+.calendar-day { min-height: 6rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: .25rem .35rem; font-size: .85rem; overflow-wrap: anywhere; }
+.calendar-day.other-month { background: var(--surface-2); color: var(--text-2); }
 .calendar-day.today { outline: 2px solid var(--navy); outline-offset: -2px; }
 .calendar-date { font-weight: 600; }
 .calendar-day ul { list-style: none; padding: 0; margin: .2rem 0 0; }
-.calendar-item { margin-bottom: .15rem; padding: .1rem .25rem; border-radius: var(--r-1); background: var(--info-bg); }
+.calendar-item { margin-bottom: .15rem; padding: .1rem .25rem; border-radius: var(--radius-ctl); background: var(--neutral-bg); }
 .calendar-item a { color: inherit; text-decoration: none; }
-.calendar-item.kind-reminder { background: var(--warning-bg); } .calendar-item.kind-debit { background: var(--success-bg); }
-.calendar-item.kind-insurance { background: var(--kind-insurance-bg); } .calendar-item.kind-lease_end { background: var(--danger-bg); }
-.feed-new { border: 1px solid var(--line); border-radius: var(--r-2); padding: .75rem; background: var(--success-bg); }
-
-/* A page that needs the whole width (the grid, PLAN-011b D2) keeps the folded menu. */
-.shell-folded { display: block; min-height: 0; }
-.shell-folded > nav { padding: var(--s-2) var(--s-4); border-right: 0; border-bottom: 1px solid var(--line); }
-.shell-folded .nav-toggle-label { display: inline-block; }
-.shell-folded .nav-links { display: none; padding: var(--s-2) 0; }
-.shell-folded .nav-toggle:checked ~ .nav-links { display: block; }
+.calendar-item.kind-reminder { background: var(--pending-bg); } .calendar-item.kind-debit { background: var(--paid-bg); }
+.calendar-item.kind-insurance { background: var(--partial-bg); } .calendar-item.kind-lease_end { background: var(--unpaid-bg); }
+.feed-new { border: 1px solid var(--border); border-radius: var(--radius-ctl); padding: .75rem; background: var(--paid-bg); }
 
 /* --- 720px and wider: the tables' zebra rows and sticky head row (PLAN-012c D5) ------------- */
 @media (min-width: 720px) {
   .table thead th, .table-cards > table > thead th { position: sticky; top: 0; z-index: 2; }
-  .table > tbody > tr:nth-child(even) > *, .table-cards > table > tbody > tr:nth-child(even) > *, .table-scroll > table > tbody > tr:nth-child(even) > * { background: var(--paper-2); }
+  .table > tbody > tr:nth-child(even) > *, .table-cards > table > tbody > tr:nth-child(even) > *, .table-scroll > table > tbody > tr:nth-child(even) > * { background: var(--surface-2); }
 }
 /* No fade for a reader who asked for less motion: the message stays until dismissed. */
 @media (prefers-reduced-motion: reduce) { .toast { animation: none !important; } }
-
-/* --- Under 900px: the left navigation folds behind "Menu" (PLAN-012c D3) ------------------- */
-@media (max-width: 899.98px) {
-  .topbar { padding: var(--s-2) var(--s-4); }
-  .shell { display: block; min-height: 0; }
-  .shell > nav { padding: var(--s-2) var(--s-4); border-right: 0; border-bottom: 1px solid var(--line); }
-  .nav-toggle-label { display: inline-block; }
-  .nav-links { display: none; padding: var(--s-2) 0; }
-  .nav-toggle:checked ~ .nav-links { display: block; }
-  .nav-list a, .nav-group-heading { display: flex; align-items: center; min-height: var(--tap); padding-top: 0; padding-bottom: 0; box-sizing: border-box; }
-  main { width: auto; margin: 1rem; }
+/* --- 768px and under: the phone shell (PLAN-012f D4, docs/design/DESIGN-SPEC.md §6) --------
+   The body is one column: the 64 px top bar and the banner under it stay at the top; the
+   sidebar becomes the menu sheet (#nav-toggle), the search field opens under the banner
+   (#search-toggle); the bottom tab bar stays at the bottom, its More item a <details> sheet.
+   The content keeps 90 px free at the bottom so nothing hides behind the bar. */
+@media (max-width: 768px) {
+  body.app { display: flex; flex-direction: column; }
+  body.app > #sandbox-banner { order: -2; top: var(--phone-bar-h) !important; }
+  .phone-bar { order: -3; display: flex; align-items: center; gap: var(--space-3); position: sticky; top: 0; z-index: 30; box-sizing: border-box; height: var(--phone-bar-h); padding: 0 var(--space-4); background: var(--sidebar-gradient); color: var(--sidebar-active-text); }
+  .phone-bar-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: var(--tap); height: var(--tap); border-radius: var(--radius-ctl); background: color-mix(in srgb, var(--surface) 10%, transparent); cursor: pointer; }
+  .phone-bar-logo { margin-right: auto; display: inline-flex; align-items: center; }
+  .phone-bar-logo img { height: 30px; width: auto; display: block; }
+  #nav-toggle:focus-visible ~ .phone-bar #nav-menu, #search-toggle:focus-visible ~ .phone-bar #phone-search-button { box-shadow: 0 0 0 2px var(--navy), 0 0 0 4px var(--green); }
+  .phone-search { order: -1; }
+  #search-toggle:checked ~ .phone-search { display: block; padding: var(--space-2) var(--space-4); background: var(--surface); border-bottom: 1px solid var(--border); }
+  .phone-search input[type=search] { width: 100%; box-sizing: border-box; min-height: var(--tap); padding: 9px 12px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text); font: inherit; font-size: 16px; }
+  .content { padding-bottom: 90px; }
+  .page-header-inner { min-height: 0; padding: var(--space-3) var(--space-4); }
+  .page-header-bar .nav-search { display: none; } /* the phone bar's search button opens the same search */
+  main, main.wide { padding: var(--space-4); }
+  /* The menu sheet: the sidebar, from the left, over the page and under the bar and the
+     banner (26 px high, banner.html), which stay in view. */
+  .sidebar { display: none; }
+  #nav-toggle:checked ~ .sidebar { display: flex; position: fixed; top: var(--phone-bar-h); bottom: 0; left: 0; z-index: 40; width: min(320px, 86vw); height: auto; }
+  body.app:has(> #sandbox-banner) #nav-toggle:checked ~ .sidebar { top: calc(var(--phone-bar-h) + 26px); }
+  .sheet-close { display: inline-flex; align-items: center; justify-content: center; width: var(--tap); height: var(--tap); color: var(--sidebar-active-text); cursor: pointer; }
+  .sidebar-logo img { height: 30px; }
+  .sidebar-head { align-items: center; margin-bottom: var(--space-4); }
+  .nav-item, .nav-sublist a { display: flex; align-items: center; min-height: var(--tap); box-sizing: border-box; }
+  .nav-sublist { display: block; }
+  .user-meta a, .user-meta .link-button { display: inline-flex; align-items: center; min-height: var(--tap); }
+  /* The bottom tab bar: four items, 22 px icons over 11 px labels, the current one teal. */
+  .tab-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; box-sizing: border-box; height: var(--tab-bar-h); background: var(--surface); border-top: 1px solid var(--border); }
+  .tab-item { display: flex; flex: 1 1 0; flex-direction: column; align-items: center; justify-content: center; gap: 3px; box-sizing: border-box; min-width: var(--tap); min-height: var(--tap); height: 100%; color: var(--muted); font-size: var(--fs-xs); font-weight: 500; text-decoration: none; cursor: pointer; }
+  .tab-item[aria-current="page"] { color: var(--teal); font-weight: 600; }
+  .more-sheet { display: flex; flex: 1 1 0; }
+  .more-sheet > summary { list-style: none; }
+  .more-sheet > summary::-webkit-details-marker { display: none; }
+  .more-sheet-panel { position: fixed; left: 0; right: 0; bottom: var(--tab-bar-h); z-index: 35; max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: var(--space-2) var(--space-4); background: var(--surface); border-top: 1px solid var(--border); border-radius: var(--radius-card) var(--radius-card) 0 0; }
+  .more-list a, .more-list button { display: flex; align-items: center; gap: var(--space-3); box-sizing: border-box; width: 100%; min-height: var(--tap); padding: 0 var(--space-2); background: none; border: 0; color: var(--text); font: inherit; font-size: var(--fs-md); text-align: left; text-decoration: none; cursor: pointer; }
+  .more-list form { margin: 0; }
+  .more-list .more-group { padding: var(--space-2) var(--space-2) 0; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .more-list .more-sublist { list-style: none; margin: 0; padding: 0 0 0 var(--space-6); }
 }
 
 /* --- Tablet and phone: touch targets ---------------------------------------------------- */
-@media (max-width: 1023.98px) {
-  .topbar .nav-search input { width: 12rem; }
-  .user-menu summary, .user-menu-items a, .user-menu-items button { display: flex; align-items: center; min-height: var(--tap); box-sizing: border-box; }
-}
 @media (max-width: 1023.98px), (pointer: coarse) {
   .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=file] { min-height: var(--tap); }
   .btn { display: inline-flex; align-items: center; justify-content: center; }
@@ -330,19 +369,15 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
   form .btn, form button { width: 100%; }
   form button.link-action { width: auto; }
   /* An open bar menu opens in the flow: nothing hangs past the screen's edge. */
-  .menu ul { position: static; margin-top: var(--s-1); box-shadow: none; }
-  .topbar form button { width: auto; }
-  .topbar-product { display: none; }
-  .topbar .nav-search { order: 3; flex: 1 1 100%; margin: 0; }
-  .topbar .nav-search input { width: 100%; }
+  .menu ul { position: static; margin-top: var(--space-1); box-shadow: none; }
   /* Tables become cards: one bordered block per row, a "label: value" line per cell. */
   .table-cards > table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .table-cards > table, .table-cards > table tbody, .table-cards > table tfoot, .table-cards > table tr, .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { display: block; width: 100%; box-sizing: border-box; }
-  .table-cards > table tr { border: 1px solid var(--line); border-radius: var(--r-2); margin: 0 0 .75rem; padding: .25rem .75rem; background: var(--paper); }
+  .table-cards > table tr { border: 1px solid var(--border); border-radius: var(--radius-ctl); margin: 0 0 .75rem; padding: .25rem .75rem; background: var(--surface); }
   .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { border: 0; padding: .35rem 0; }
   /* The label sits in a left column; the cell's own content (a link and its badges) keeps flowing inline. */
   .table-cards > table td[data-label] { position: relative; padding-left: calc(40% + .75rem); min-height: 1.4em; }
-  .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
+  .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 600; color: var(--text-2); overflow-wrap: anywhere; }
   .table-cards > table td:empty { display: none; }
   .table-cards > table td.money { text-align: left; } /* a card line reads "label: value" */
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
@@ -358,9 +393,9 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
 /* --- Print ---------------------------------------------------------------------------------- */
 @media print {
   /* The sandbox banner is left as it is: it prints too (docs/CLAUDE.md Rule 6). */
-  .topbar, .shell > nav, .nav-toggle, .nav-toggle-label { display: none !important; }
-  .shell { display: block; }
-  body { background: var(--paper); }
+  #sidebar, #phone-bar, #phone-search, #tab-bar, .sheet-toggle { display: none !important; }
+  body.app { display: block; }
+  body { background: var(--surface); }
   main, main.wide { margin: 0; padding: 0; border: 0; max-width: none; width: auto; box-shadow: none; }
   .table-scroll { overflow: visible; }
 }

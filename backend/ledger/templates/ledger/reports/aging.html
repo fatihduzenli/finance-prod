@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load money responsive %}
 {% block title %}Unpaid by age{% endblock %}
+{% block header %}<div class="page-header"><h1>Unpaid by age</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
-  <div class="page-header"><h1>Unpaid by age</h1></div>
   <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}">Download spreadsheet</a></p>
   {% if too_slow %}
     <p class="warning" id="aging-too-slow" role="status">{{ too_slow }}</p>

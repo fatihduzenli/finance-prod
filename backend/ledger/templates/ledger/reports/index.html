@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% block title %}Reports{% endblock %}
+{% block header %}<div class="page-header"><h1>Reports</h1></div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Reports</h1></div>
   <p class="muted">Every report reads stored exact amounts in US dollars and downloads as a spreadsheet with the rows it shows.</p>
   <ul id="reports">
     <li><a href="{% url 'ledger:reports:aging' %}" id="report-aging">Unpaid by age</a>: open balances by operator and days past due, as of today. Its total is the dashboard's total outstanding.</li>

@@ -306,12 +306,18 @@ def test_the_route_is_read_only_and_the_box_is_in_the_nav(viewer: Client) -> Non
     assert "ledger:search" in registry.READ_ONLY_ROUTE_NAMES
     assert registry.rule_for("ledger:search") is None
     page = text(viewer.get("/"))
-    # PLAN-012c D3: the box sits in the top bar.
-    nav = page[page.index('<header class="topbar"') : page.index("</header>")]
+    # PLAN-012f D3: the box sits in the dashboard's page header (and the stores list's and
+    # the grid's); the phone bar's search opens the same GET form on every page.
+    start = page.index('<header class="page-header-bar" id="page-header">')
+    nav = page[start : page.index("</header>", start)]
     assert (
         '<form method="get" action="/search/" class="nav-search" id="nav-search" role="search">'
         '<input type="search" name="q" id="nav-search-q" maxlength="100" '
         'placeholder="Store, city or operator"'
     ) in nav
+    assert (
+        '<form method="get" action="/search/" class="phone-search" id="phone-search" role="search">'
+        '<input type="search" name="q" id="phone-search-q" maxlength="100" '
+    ) in page
     template = (REPO / "ledger" / "templates" / "ledger" / "search" / "results.html").read_text()
     assert "\n{% load responsive %}\n" in template

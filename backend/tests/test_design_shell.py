@@ -1,11 +1,14 @@
 """PLAN-012c Batch A (docs/qa/PLAN-012c-design-pass.md D1 to D4, §6 A): the design tokens, the
-company settings row, the shell and the PWA icons.
+company settings row, the shell and the PWA icons; the shell as PLAN-012f D3 changed it (the
+sidebar replaced the 12c top bar and left navigation).
 
-The shell is checked on every main page as each role: the navy bar with the logo, the company
-name and the product name, the navigation's items and groups with ``aria-current``, the tab
-title "Monvera · <page>". No literal colour outside ``tokens.css`` (app.css and every template,
+The shell is checked on every main page as each role: the sidebar with the logo, the
+navigation's items and groups with ``aria-current``, the user card, the tab title
+"Monvera · <page>". No literal colour outside ``tokens.css`` (app.css and every template,
 except the two named below). The company settings row is seeded, single, edited in the admin
-by an admin only and audited; its provider name reaches the job banner.
+by an admin only and audited; its provider name reaches the job banner. The 12f shell's own
+cases (the page header, the phone shell, the icons, the tokens against the spec) are in
+``tests/test_plan012f_shell.py``.
 """
 
 from __future__ import annotations
@@ -37,7 +40,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 STATIC = BACKEND / "finance" / "static" / "finance"
 TOKENS_CSS = STATIC / "tokens.css"
 APP_CSS = STATIC / "app.css"
-BRAND_LOGO = "/static/finance/brand/monvera_logo_dark.svg"
+BRAND_LOGO = "/static/finance/brand/monvera_logo_dark_transparent.svg"
 LITERAL_COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(")
 #: Templates allowed a literal colour, and why.
 COLOUR_EXEMPT = {
@@ -66,11 +69,20 @@ def title(html: str) -> str:
 
 
 def nav_of(html: str) -> str:
-    return html[html.index('<nav aria-label="Main">') : html.index("</nav>")]
+    start = html.index('<nav aria-label="Main" id="phone-menu">')
+    return html[start : html.index("</nav>", start)]
 
 
 def bar_of(html: str) -> str:
-    return html[html.index('<header class="topbar"') : html.index("</header>")]
+    """The sidebar (PLAN-012f D3; the 12c top bar's logo and user menu moved into it)."""
+    start = html.index('<aside class="sidebar" id="sidebar">')
+    return html[start : html.index("</aside>", start)]
+
+
+def current_labels(fragment: str) -> list[str]:
+    """The text of each link or summary marked ``aria-current="page"`` (icons dropped)."""
+    found = re.findall(r'<(a|summary)\b[^>]*aria-current="page"[^>]*>(.*?)</\1>', fragment, re.S)
+    return [re.sub(r"<[^>]+>", "", inner).strip() for _, inner in found]
 
 
 # --- The shell on every main page ------------------------------------------------------------
@@ -80,7 +92,7 @@ MAIN_PAGES: list[tuple[str, str, str | None, str | None]] = [
     ("/", "Dashboard", "Dashboard", None),
     ("/stores/", "Stores", "Stores", None),
     ("/operators/", "Operators", "Operators", None),
-    ("/grid/", "Monthly rent overview", "Monthly rent overview", None),
+    ("/grid/", "Monthly rent overview", "Monthly rent", None),
     ("/reports/", "Reports", "Reports", None),
     ("/arrears/", "Unpaid balances", "Unpaid balances", "nav-reports"),
     ("/reports/pnl/", "Profit and loss", "Profit and loss", "nav-reports"),
@@ -98,7 +110,7 @@ NAV_ITEMS = (
     "Dashboard",
     "Stores",
     "Operators",
-    "Monthly rent overview",
+    "Monthly rent",
     "Reports",
     "Unpaid balances",
     "Profit and loss",
@@ -125,15 +137,16 @@ def test_every_main_page_renders_in_the_shell(
     html = body(client_for(role).get(path))
     bar = bar_of(html)
     # The brand logo carries the "Monvera" wordmark: the name is its text alternative and
-    # is not repeated as text (PLAN-012c Batch B, carry-over a).
-    assert (
-        f'<img class="topbar-logo" id="topbar-logo" src="{BRAND_LOGO}" alt="Monvera" height="28">'
-        in bar
-    )
-    assert 'id="topbar-company"' not in bar
-    assert '<span class="topbar-product" id="topbar-product">Rent ledger</span>' in bar
-    assert 'id="nav-search"' in bar and 'id="user-menu"' in bar
-    assert ">Settings</a>" in bar and ">Sign out</button>" in bar
+    # is not repeated as text (PLAN-012c Batch B, carry-over a); the transparent variant on
+    # the gradient (PLAN-012f D3).
+    assert f'<img src="{BRAND_LOGO}" alt="Monvera" height="48">' in bar
+    assert 'id="sidebar-company"' not in bar
+    assert 'id="user-card"' in bar and ">Help</a>" in bar and ">Sign out</button>" in bar
+    # The search box is in the page header of the pages that have one (PLAN-012f D3).
+    header = html[
+        html.index('id="page-header"') : html.index("</header>", html.index('id="page-header"'))
+    ]
+    assert ('id="nav-search"' in header) is (path in ("/", "/stores/", "/grid/")), path
     nav = nav_of(html)
     for label in NAV_ITEMS:
         assert f">{label}<" in nav, label
@@ -141,7 +154,7 @@ def test_every_main_page_renders_in_the_shell(
         assert (f">{label}<" in nav) is (role != Role.VIEWER), label
     assert title(html).startswith(f"[SANDBOX] Monvera · {page}"), title(html)
     assert "| Finance" not in html
-    marked = re.findall(r'aria-current="page">([^<]+)<', html)
+    marked = current_labels(bar)
     assert marked == ([current] if current else []), marked
     groups = re.findall(r'id="([a-z-]+)"[^>]* aria-current="true"', html)
     assert groups == ([group] if group else []), groups
@@ -196,7 +209,7 @@ def test_the_admin_pages_mark_their_item_and_group(
     role: Role, path: str, current: str, group: str
 ) -> None:
     html = body(client_for(role).get(path))
-    assert re.findall(r'aria-current="page">([^<]+)<', html) == [current]
+    assert current_labels(bar_of(html)) == [current]
     assert re.findall(r'id="([a-z-]+)"[^>]* aria-current="true"', html) == [group]
 
 
@@ -204,6 +217,8 @@ def test_the_existing_link_ids_are_kept() -> None:
     nav = nav_of(body(client_for(Role.ADMIN).get("/")))
     for link_id in (
         "nav-home",
+        "nav-stores",
+        "nav-operators",
         "nav-grid",
         "nav-reports",
         "nav-arrears",
@@ -217,80 +232,79 @@ def test_the_existing_link_ids_are_kept() -> None:
         assert f'id="{link_id}"' in nav, link_id
 
 
-def test_the_user_menu_names_the_user() -> None:
+def test_the_user_card_names_the_user() -> None:
     user, device = make_user(f"shell-{uuid.uuid4().hex[:8]}", Role.VIEWER)
     user.first_name, user.last_name = "Ada", "Lovelace"
     user.save()
     assert device is not None
     bar = bar_of(body(verified_client(user, device).get("/")))
-    assert '<summary id="user-menu-name">Ada Lovelace</summary>' in bar
+    assert '<span class="user-name" id="user-menu-name">Ada Lovelace</span>' in bar
 
 
 # --- The phone menu ---------------------------------------------------------------------------
 
 
-def test_the_phone_menu_folds_the_nav_under_900px_without_script() -> None:
-    nav = nav_of(body(client_for(Role.VIEWER).get("/")))
-    toggle = '<input type="checkbox" id="nav-toggle" class="nav-toggle" aria-controls="nav-links">'
-    label = '<label for="nav-toggle" class="nav-toggle-label" id="nav-menu">Menu</label>'
-    assert nav.index(toggle) < nav.index(label) < nav.index('id="nav-links"')
-    assert "<script" not in nav
+def test_the_phone_menu_opens_the_sidebar_as_a_sheet_without_script() -> None:
+    # PLAN-012f D4: the 11c checkbox and its labels; at 768 px and under the sidebar is the
+    # sheet the checkbox shows. The checkbox comes before the sidebar so ``~`` reaches it.
+    html = body(client_for(Role.VIEWER).get("/"))
+    toggle = '<input type="checkbox" id="nav-toggle" class="sheet-toggle" aria-controls="sidebar">'
+    assert html.index(toggle) < html.index('id="nav-menu"') < html.index('id="sidebar"')
+    assert '<label for="nav-toggle" class="phone-bar-button" id="nav-menu">' in html
+    assert "<script" not in bar_of(html)
     css = APP_CSS.read_text()
-    folded = css.split("@media (max-width: 899.98px) {", 1)[1].split("\n}\n", 1)[0]
-    assert ".nav-toggle-label { display: inline-block; }" in folded
-    assert ".nav-links { display: none;" in folded
-    assert ".nav-toggle:checked ~ .nav-links { display: block; }" in folded
-    # On a wide screen the toggle is hidden and the left column shows.
+    phone = css.split("@media (max-width: 768px) {", 1)[1].split("\n}\n", 1)[0]
+    assert ".sidebar { display: none; }" in phone
+    assert "#nav-toggle:checked ~ .sidebar { display: flex; position: fixed;" in phone
+    # On a laptop the bar and the toggles are hidden and the sidebar is the first column.
     wide = css.split("@media", 1)[0]
-    assert ".nav-toggle-label { display: none;" in wide
-    assert ".shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr);" in wide
+    assert ".phone-bar, .phone-search, .sheet-close, .tab-bar { display: none; }" in wide
+    assert "grid-template-columns: var(--sidebar-w) minmax(0, 1fr);" in wide
 
 
-def test_the_grid_keeps_the_folded_menu_at_every_width() -> None:
-    # Twelve 80 px months and the 220 px store column fit at 1,280 px only without the left
-    # column (PLAN-011b D2), so the grid folds the navigation behind "Menu" (PLAN-012c D3).
-    assert '<div class="shell shell-folded">' in body(client_for(Role.VIEWER).get("/grid/"))
-    assert '<div class="shell">' in body(client_for(Role.VIEWER).get("/"))
-    wide = APP_CSS.read_text().split("@media", 1)[0]
-    assert ".shell-folded { display: block;" in wide
-    assert ".shell-folded .nav-toggle-label { display: inline-block; }" in wide
-    assert ".shell-folded .nav-links { display: none;" in wide
-    assert ".shell-folded .nav-toggle:checked ~ .nav-links { display: block; }" in wide
+def test_the_grid_has_the_sidebar_like_every_page() -> None:
+    # PLAN-012f D3: the sidebar replaces the 12c folded menu; the grid scrolls in its region.
+    grid = body(client_for(Role.VIEWER).get("/grid/"))
+    assert '<aside class="sidebar" id="sidebar">' in grid and "shell-folded" not in grid
+    assert "shell-folded" not in APP_CSS.read_text()
 
 
 # --- Tokens ----------------------------------------------------------------------------------
 
 
 def test_the_tokens_hold_the_brand_colours_and_the_named_scales() -> None:
+    # PLAN-012f D1: the spec's names (the whole block is compared in test_plan012f_shell).
     css = TOKENS_CSS.read_text()
     assert "--navy: #0B2545;" in css
     assert "--teal: #13A89E;" in css
     assert "--green: #2EC4A6;" in css
-    for name in ("--ink", "--ink-2", "--line", "--paper", "--paper-2", "--danger", "--focus-ring"):
+    for name in ("--text", "--text-2", "--border", "--surface", "--surface-2", "--bg", "--link"):
         assert f"{name}:" in css, name
-    for status in ("paid", "unpaid", "pending", "partial", "waived"):
-        assert f"--status-{status}:" in css, status
-    # PLAN-012e-4 D1: "due" (unpaid, not yet overdue) takes the soft unpaid pair; no due token.
-    assert "--status-unpaid-soft-bg:" in css and "--status-unpaid-soft-ink:" in css
+    for status in ("paid", "unpaid", "overdue", "pending", "partial", "waived", "neutral"):
+        assert f"--{status}-bg:" in css and f"--{status}-text:" in css, status
     assert "--status-due" not in css
-    for step in range(1, 9):
-        assert f"--s-{step}: {4 * (step if step <= 6 else (8 if step == 7 else 12))}px;" in css
-    for size in ("xs", "sm", "md", "lg", "xl", "2xl"):
-        assert f"--t-{size}:" in css, size
-    assert (
-        '--font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, '
-        "sans-serif;" in css
-    )
-    assert "url(" not in css and "@import" not in css
+    for step in (1, 2, 3, 4, 5, 6, 8):
+        assert f"--space-{step}: {4 * step}px;" in css
+    for size in ("xs", "sm", "base", "md", "lg", "h1", "h1-store", "kpi"):
+        assert f"--fs-{size}:" in css, size
+    assert '--font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;' in css
+    # The one url() is the self-hosted font, relative to the sheet (PLAN-012f D2).
+    assert re.findall(r"url\(([^)]*)\)", css) == ['"fonts/InterVariable.woff2"']
+    assert "@import" not in css
 
 
 def test_every_documented_pair_names_defined_tokens() -> None:
     css = TOKENS_CSS.read_text()
-    pairs = re.findall(r"pair: (--[a-z0-9-]+) on (--[a-z0-9-]+)", css)
+    # A background may be a gradient's stop ("[start]", "[end]") and a translucent one names
+    # the colour it sits over (PLAN-012f D1): every name is a defined token.
+    pairs = re.findall(
+        r"pair: (--[a-z0-9-]+) on (--[a-z0-9-]+)(?:\[(?:start|end)\])?(?: over (--[a-z0-9-]+))?",
+        css,
+    )
     assert len(pairs) >= 20
-    defined = set(re.findall(r"^\s*(--[a-z0-9-]+):", css, re.MULTILINE))
-    for foreground, background in pairs:
-        assert foreground in defined and background in defined, (foreground, background)
+    defined = set(re.findall(r"(--[a-z0-9-]+):", css.split(":root", 1)[1]))
+    for names in pairs:
+        assert all(name in defined for name in names if name), names
 
 
 def _template_files() -> list[Path]:
@@ -365,7 +379,8 @@ def test_the_authenticator_app_name_drops_the_sandbox_mark_when_live() -> None:
         ("/static/finance/brand/monvera_icon_192.png", "image/png"),
         ("/static/finance/brand/monvera_icon_512.png", "image/png"),
         ("/static/finance/brand/monvera_icon.svg", "image/svg+xml"),
-        ("/static/finance/brand/monvera_logo_dark.svg", "image/svg+xml"),
+        ("/static/finance/brand/monvera_logo_dark_transparent.svg", "image/svg+xml"),
+        ("/static/finance/fonts/InterVariable.woff2", "font/woff2"),
         ("/static/finance/tokens.css", "text/css"),
     ],
 )
@@ -383,13 +398,14 @@ def test_the_manifest_answers_with_its_type_and_the_brand_icons() -> None:
     assert response.status_code == 200
     assert response["Content-Type"] == "application/manifest+json"
     data = response.json()
-    assert data["theme_color"] == data["background_color"] == "#0b2545"
+    # PLAN-012f D4: the theme is --navy, the background --bg.
+    assert (data["theme_color"], data["background_color"]) == ("#0b2545", "#f4f6f9")
     assert all(icon["src"].startswith("/static/finance/brand/") for icon in data["icons"])
 
 
 def test_the_brand_files_are_copies_of_the_repository_originals() -> None:
     originals = BACKEND.parent / "static" / "brand"
-    for name in ("monvera_logo_dark.svg", "monvera_icon.svg"):
+    for name in ("monvera_logo_dark.svg", "monvera_logo_dark_transparent.svg", "monvera_icon.svg"):
         assert (STATIC / "brand" / name).read_bytes() == (originals / name).read_bytes(), name
 
 
@@ -436,13 +452,13 @@ def test_a_live_image_document_named_by_the_row_becomes_the_logo() -> None:
     bar = bar_of(body(client_for(Role.VIEWER).get("/")))
     assert f'src="{preview}"' in bar
     # An override logo has no wordmark: the name shows as text beside it.
-    assert '<span class="topbar-company" id="topbar-company">Monvera</span>' in bar
+    assert '<span class="sidebar-company" id="sidebar-company">Monvera</span>' in bar
     # A deleted document falls back to the brand logo.
     Document.objects.filter(pk=document.pk).update(
         deleted_at="2026-10-16T12:00:00Z", delete_note="Replaced."
     )
     fallback = bar_of(body(client_for(Role.VIEWER).get("/")))
-    assert f'src="{BRAND_LOGO}"' in fallback and 'id="topbar-company"' not in fallback
+    assert f'src="{BRAND_LOGO}"' in fallback and 'id="sidebar-company"' not in fallback
 
 
 def test_the_processor_reads_the_row_once_a_request() -> None:
@@ -579,10 +595,7 @@ def test_the_names_reach_the_bar_and_the_nav() -> None:
     row.name, row.provider_name = "Acme Rentals", "PayCo"
     row.save()
     html = body(client_for(Role.VIEWER).get("/"))
-    assert (
-        'id="topbar-logo" src="/static/finance/brand/monvera_logo_dark.svg" alt="Acme Rentals"'
-        in html
-    )
+    assert f'<img src="{BRAND_LOGO}" alt="Acme Rentals" height="48">' in bar_of(html)
     assert ">Messages from PayCo</a>" in nav_of(html)
 
 
@@ -612,7 +625,7 @@ def test_the_provider_name_is_substituted_in_the_job_banner() -> None:
 def test_without_an_override_the_name_is_the_logos_text_only() -> None:
     bar = bar_of(body(client_for(Role.VIEWER).get("/")))
     assert bar.count("Monvera") == 1  # the alt text; the wordmark is in the image
-    assert 'alt="Monvera"' in bar and 'id="topbar-company"' not in bar
+    assert 'alt="Monvera"' in bar and 'id="sidebar-company"' not in bar
     shown = context_processors.company(RequestFactory().get("/"))["company"]
     assert isinstance(shown, context_processors.Company) and shown.logo_is_override is False
 
@@ -633,6 +646,6 @@ def test_with_an_override_the_name_is_shown_as_text_too() -> None:
     row.save()
     bar = bar_of(body(client_for(Role.VIEWER).get("/")))
     assert 'alt="Acme Rentals"' in bar
-    assert '<span class="topbar-company" id="topbar-company">Acme Rentals</span>' in bar
+    assert '<span class="sidebar-company" id="sidebar-company">Acme Rentals</span>' in bar
     shown = context_processors.company(RequestFactory().get("/"))["company"]
     assert isinstance(shown, context_processors.Company) and shown.logo_is_override is True

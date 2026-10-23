@@ -1,148 +1,106 @@
-/* Design tokens (docs/qa/PLAN-012c-design-pass.md D1). The only file with literal colours:
-   app.css, print styles and every template use these custom properties.
+/* Design tokens (docs/design/DESIGN-SPEC.md §1; docs/qa/PLAN-012f-approved-design.md D1, D2).
+   The only file with literal colours: app.css, print.css and every template use these custom
+   properties. The :root block is the spec's, name for name and value for value (a test compares
+   the two), with the owner's decisions of 2026-10-22 on Batch A (PLAN-012f D1): --muted
+   #5F6E85, --link #0B7C74 and --paid-text #176B33 (the spec's #6B7A90, #0E8F86 and #1B7F3B were
+   under AA), and two tokens for the primary button, --btn-primary-bg #0E8F86 with a
+   --btn-primary-border #0B7C74 (dark teal) and white text. --teal stays #13A89E for the logo,
+   the active tab's border and the bottom bar's active item.
 
-   Text pairings, each checked for WCAG AA (4.5:1 for text, 3:1 for large text and UI
-   borders) by the contrast test (PLAN-012c D7). One pairing per line, foreground on
-   background; "large" or "ui" marks the 3:1 threshold.
-   pair: --ink on --paper
-   pair: --ink on --paper-2
-   pair: --ink-2 on --paper
-   pair: --ink-2 on --paper-2
-   pair: --link on --paper
-   pair: --link on --paper-2
-   pair: --on-navy on --navy
-   pair: --on-navy-2 on --navy
-   pair: --focus-on-navy on --navy (ui)
-   pair: --navy on --teal (large)
-   pair: --navy on --green
-   pair: --on-accent on --accent
-   pair: --control-border on --paper (ui)
-   pair: --focus on --paper (ui)
-   pair: --danger on --paper
-   pair: --status-paid-ink on --status-paid-bg
-   pair: --status-unpaid-ink on --status-unpaid-bg
-   pair: --status-unpaid-soft-ink on --status-unpaid-soft-bg
-   pair: --status-pending-ink on --status-pending-bg
-   pair: --status-partial-ink on --status-partial-bg
-   pair: --status-waived-ink on --status-waived-bg
-   pair: --status-not-due-ink on --paper
-   pair: --status-voided-ink on --status-voided-bg
-   pair: --status-attention-ink on --status-attention-bg
-   pair: --danger-ink on --danger-bg
-   pair: --warning-ink on --warning-bg
-   pair: --info-ink on --info-bg
-   pair: --success-ink on --success-bg
-   pair: --ink on --highlight-bg
-   pair: --ink on --kind-insurance-bg
-   pair: --navy on --info-bg
-   pair: --ink on --paper-3
-   pair: --on-accent on --danger
-   Measured ratios (sRGB, WCAG 2.x): ink/paper 15.6, ink/paper-2 14.3, ink-2/paper 7.5,
-   ink-2/paper-2 6.9, link/paper 6.1, link/paper-2 5.6, on-navy/navy 15.4, on-navy-2/navy
-   8.7, focus-on-navy/navy 10.0, navy/teal 5.2, navy/green 7.0, on-accent/accent 6.1,
-   control-border/paper 3.7, focus/paper 4.9, danger/paper 6.6, paid 7.1, unpaid 6.6
-   (white on the dark red), unpaid-soft 7.1, pending 8.0, partial 6.0, waived 6.4, not-due
-   5.4, voided 6.4, attention 7.9, danger 7.9, warning 6.7, info 13.4, success 7.1, highlight 13.3, insurance 13.1, navy/info-bg 13.2 (the current
-   page link), ink/paper-3 13.2 (the plain badge), on-accent/danger 6.6 (the confirm
-   button). The brand teal and green are fills and accents only: on white they are under
-   3:1, so no text sits on white in them. */
+   Inter is self-hosted (D2): the variable font of the official release v4.1
+   (fonts/InterVariable.woff2, weights 100 to 900, SIL Open Font License 1.1 in
+   fonts/Inter-OFL.txt); nothing is loaded from another origin.
+
+   Text pairings, each checked for WCAG AA (4.5:1 for text, 3:1 for large text and UI) by the
+   contrast test. One pairing per line, foreground on background; "large" or "ui" marks the
+   3:1 threshold. A background may be a gradient's first or last stop ("[start]", "[end]"), and
+   a translucent background is composed over the colour named after "over".
+   pair: --text on --bg
+   pair: --text on --surface
+   pair: --text on --surface-2
+   pair: --text-2 on --surface
+   pair: --text-2 on --surface-2
+   pair: --muted on --surface
+   pair: --link on --surface
+   pair: --sidebar-text on --sidebar-gradient[start]
+   pair: --sidebar-text on --sidebar-gradient[end]
+   pair: --sidebar-text on --navy
+   pair: --sidebar-active-text on --sidebar-gradient[start]
+   pair: --sidebar-active-text on --sidebar-gradient[end]
+   pair: --sidebar-active-text on --sidebar-active-bg over --sidebar-gradient[start]
+   pair: --sidebar-active-text on --sidebar-active-bg over --sidebar-gradient[end]
+   pair: --green on --sidebar-gradient[start] (ui)
+   pair: --green on --sidebar-gradient[end] (ui)
+   pair: --paid-text on --paid-bg
+   pair: --unpaid-text on --unpaid-bg
+   pair: --overdue-text on --overdue-bg
+   pair: --pending-text on --pending-bg
+   pair: --partial-text on --partial-bg
+   pair: --waived-text on --waived-bg
+   pair: --neutral-text on --neutral-bg
+   pair: --surface on --btn-primary-bg
+   pair: --surface on --unpaid-text
+   pair: --surface on --navy
+   The sandbox banner (finance/templates/finance/banner.html) carries #6B4E00 on #FFF3C4 as
+   literals, the pending pair's values: it is injected into the Django admin too, which never
+   loads this file. White on --btn-primary-bg is the primary button's label, white on #B42318 the confirming
+   button of a destructive action, white on the navy the open tab and the current wizard step
+   (until the components of PLAN-012f D6); --green is the focus ring on the sidebar and the phone bar,
+   --link the focus ring on light surfaces. --faint is decoration only (rules, placeholder
+   marks), never for text that must be read: no template or rule in app.css sets text in it.
+   Measured ratios (sRGB, WCAG 2.x): text/bg 14.2, text/surface 15.4, text/surface-2 14.7,
+   text-2/surface 8.9, text-2/surface-2 8.5, muted/surface 5.18, link/surface 5.06,
+   sidebar-text/navy and gradient start 11.5, sidebar-text/gradient end 7.3, white (the phone
+   bar's buttons, the sidebar's current group) on the gradient start 15.4 and end 9.8, active text over the
+   gradient start 9.3 and end 6.5, green/start 7.0, green/end 4.4, paid 5.80, unpaid 5.6,
+   overdue 6.6, pending 7.0, partial 6.6, waived 7.5, neutral 7.5, white/button 3.97,
+   white/#B42318 6.6, white/navy 15.4, faint/surface 2.44. The sidebar's user card (white at 8 %
+   over the gradient, color-mix in app.css) carries --sidebar-text at 9.2 (start) and 5.9 (end).
+   One finding remains (reported, not hidden): white on --btn-primary-bg is 3.97:1, under 4.5;
+   the button's 14 px / 600 label is not large text (18.66 px bold), so the pair is a text
+   pair and the contrast test fails on it until the owner decides. --faint has no pair: it is
+   decoration only (2.44:1 on --surface), and no text and no control uses it (a test checks). */
+
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("fonts/InterVariable.woff2") format("woff2");
+}
 
 :root {
-  /* Brand. */
-  --navy: #0B2545;
-  --teal: #13A89E;
-  --green: #2EC4A6;
+  /* brand */
+  --navy: #0B2545;  --teal: #13A89E;  --green: #2EC4A6;
+  --sidebar-gradient: linear-gradient(180deg, #0B2545 0%, #0E4A5C 100%);
+  --sidebar-text: #D6E0EE;  --sidebar-active-bg: rgba(46,196,166,.25);  --sidebar-active-text: #FFFFFF;
 
-  /* Neutrals. */
-  --ink: #1A2433;
-  --ink-2: #4A5568;
-  --line: #DDE2E8;
-  --control-border: #7B8794;
-  --paper: #FFFFFF;
-  --paper-2: #F3F5F8;
-  --paper-3: #E9ECF0;
+  /* surfaces */
+  --bg: #F4F6F9;  --surface: #FFFFFF;  --surface-2: #F9FAFC;
+  --border: #E3E8EF;  --border-soft: #EEF1F5;  --input-border: #D5DCE6;
 
-  /* Text and controls on the brand colours. */
-  --on-navy: #FFFFFF;
-  --on-navy-2: #B8C4D6;
-  --navy-2: #163A63;
-  --accent: #0B6E66;
-  --on-accent: #FFFFFF;
-  --link: #0B6E66;
+  /* text */
+  --text: #0B2545;  --text-2: #3D4B60;  --muted: #5F6E85;  --faint: #9AA7B8;
+  --link: #0B7C74;
 
-  /* Status (the single source for grid cells, badges, figures and report rows; PLAN-012e-4
-     D1, five colour families): paid green; unpaid red, light while the charge is not yet
-     overdue (the stored status "due": the soft pair) and dark with white text once overdue;
-     pending yellow; partly paid light orange; waived grey. */
-  --status-paid: var(--green);
-  --status-paid-bg: #DCF3E3;
-  --status-paid-ink: #145A32;
-  --status-unpaid: #B42318;
-  --status-unpaid-bg: #B42318;
-  --status-unpaid-ink: #FFFFFF;
-  --status-unpaid-soft-bg: #FCD9D6;
-  --status-unpaid-soft-ink: #8A1C12;
-  --status-pending: #E5B800;
-  --status-pending-bg: #FFF1B8;
-  --status-pending-ink: #5C4500;
-  --status-partial: #F08A24;
-  --status-partial-bg: #FFDCC0;
-  --status-partial-ink: #8A3B00;
-  --status-waived: #8A94A3;
-  --status-waived-bg: #E9ECF0;
-  --status-waived-ink: #4A5568;
-  --status-not-due-ink: #5F6B7A;
-  /* The badges' two further statuses (PLAN-012c D5): a voided charge, and an item that
-     needs attention (the dashboard list, Needs review). */
-  --status-voided-bg: #E9ECF0;
-  --status-voided-ink: #4A5568;
-  --status-attention-bg: #FDE8E6;
-  --status-attention-ink: #8A1C12;
-  --danger: #B42318;
-  --danger-bg: #FDE8E6;
-  --danger-ink: #8A1C12;
-  --warning: #E0A100;
-  --warning-bg: #FDF1D6;
-  --warning-ink: #7A4A00;
-  --info-bg: #E6EEF8;
-  --info-ink: #1A2433;
-  --success-bg: #DDF5EF;
-  --success-ink: #0A5A4B;
-  --highlight-bg: #FDE8E6;
-  --kind-insurance-bg: #F1E8F7;
+  /* status (bg / text) — always paired with an icon or word, never colour alone */
+  --paid-bg: #E3F5E8;      --paid-text: #176B33;
+  --unpaid-bg: #FDE8E6;    --unpaid-text: #B42318;
+  --overdue-bg: #B42318;   --overdue-text: #FFFFFF;
+  --pending-bg: #FFF3C4;   --pending-text: #6B4E00;
+  --partial-bg: #FFE8D6;   --partial-text: #8A3B00;
+  --waived-bg: #E8ECF2;    --waived-text: #3D4B60;
+  --neutral-bg: #E8ECF2;   --neutral-text: #3D4B60;
 
-  /* Focus ring: a paper gap and a blue ring on light surfaces; amber on the navy bar. */
-  --focus: #1D6FD6;
-  --focus-on-navy: #FFC93C;
-  --focus-ring: 0 0 0 2px var(--paper), 0 0 0 4px var(--focus);
+  /* the primary button (owner, 2026-10-22): white text, a dark teal border */
+  --btn-primary-bg: #0E8F86;  --btn-primary-border: #0B7C74;
 
-  /* Spacing on a 4 px base. */
-  --s-1: 4px;
-  --s-2: 8px;
-  --s-3: 12px;
-  --s-4: 16px;
-  --s-5: 20px;
-  --s-6: 24px;
-  --s-7: 32px;
-  --s-8: 48px;
+  /* type */
+  --font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;  /* self-host Inter woff2; no external font loading at runtime */
+  --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-md: 14px; --fs-lg: 15px; --fs-h1: 20px; --fs-h1-store: 24px; --fs-kpi: 28px;
 
-  /* Type: the system stack, no external font. */
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --t-xs: 0.75rem;
-  --t-sm: 0.875rem;
-  --t-md: 1rem;
-  --t-lg: 1.125rem;
-  --t-xl: 1.375rem;
-  --t-2xl: 1.75rem;
-
-  /* Radii and shadows. */
-  --r-1: 3px;
-  --r-2: 6px;
-  --r-3: 10px;
-  --shadow-1: 0 1px 2px rgba(11, 37, 69, 0.08);
-  --shadow-2: 0 4px 12px rgba(11, 37, 69, 0.12);
-
-  /* Shell. */
-  --topbar-h: 56px;
-  --nav-w: 15rem;
+  /* shape & space */
+  --radius-card: 12px; --radius-ctl: 8px; --radius-pill: 99px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-8: 32px;
+  --shadow-none: none;  /* no drop shadows; borders carry the hierarchy */
 }

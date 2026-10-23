@@ -87,14 +87,14 @@ def every_status_store() -> dict[str, RentCharge]:
 # --- Cells, colours, marker, click-through --------------------------------------------------
 
 #: PLAN-012c D1, PLAN-012e-4 D2: each status's fill and ink tokens (unpaid dark red with
-#: white ink; due, not yet overdue, the soft unpaid pair).
+#: white ink; due, not yet overdue, the light unpaid pair), by PLAN-012f D1's names.
 COLOURS = {
-    "paid": ("var(--status-paid-bg)", "var(--status-paid-ink)"),
-    "unpaid": ("var(--status-unpaid-bg)", "var(--status-unpaid-ink)"),
-    "pending": ("var(--status-pending-bg)", "var(--status-pending-ink)"),
-    "partial": ("var(--status-partial-bg)", "var(--status-partial-ink)"),
-    "due": ("var(--status-unpaid-soft-bg)", "var(--status-unpaid-soft-ink)"),
-    "waived": ("var(--status-waived-bg)", "var(--status-waived-ink)"),
+    "paid": ("var(--paid-bg)", "var(--paid-text)"),
+    "unpaid": ("var(--overdue-bg)", "var(--overdue-text)"),
+    "pending": ("var(--pending-bg)", "var(--pending-text)"),
+    "partial": ("var(--partial-bg)", "var(--partial-text)"),
+    "due": ("var(--unpaid-bg)", "var(--unpaid-text)"),
+    "waived": ("var(--waived-bg)", "var(--waived-text)"),
 }
 
 
@@ -118,7 +118,7 @@ def test_every_status_has_its_colour_text_and_link(today: date, viewer: Client) 
     ]
     # Overdue (unpaid) and not yet overdue (due) read alike; colour and glyph tell them apart.
     assert "Due $" not in html
-    assert ".cell-unpaid{background:var(--status-unpaid-bg);color:var(--status-unpaid-ink);}" in (
+    assert ".cell-unpaid{background:var(--overdue-bg);color:var(--overdue-text);}" in (
         html
     )  # no inset border any more
     assert "status-unpaid-border" not in html and "--status-due-" not in html

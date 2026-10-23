@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% load money responsive %}
 {% block title %}Profit and loss{% endblock %}
+{% block header %}<div class="page-header"><h1>Profit and loss</h1></div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Profit and loss</h1></div>
   {% comment %}print.css (base.html, PLAN-012c D6): with the rows shown (.pnl-detail), each store group starts a new page.{% endcomment %}
   <form method="get" action="{% url 'ledger:reports:pnl' %}" id="pnl-filters" role="search">
     <div class="actions">
@@ -44,7 +44,7 @@
         </tr>
         {% if query.detail %}
           {% for row in group.rows %}
-            <tr class="pnl-row{% if row.cost_only %} cost-only{% endif %}"{% if row.cost_only %} style="background:var(--warning-bg);"{% endif %}>
+            <tr class="pnl-row{% if row.cost_only %} cost-only{% endif %}"{% if row.cost_only %} style="background:var(--pending-bg);"{% endif %}>
               <td style="padding-left:1.5rem;">{{ row.store }} · {{ row.operator }} · {{ row.month|date:"Y-m" }}</td>
               {% include "ledger/reports/_figures.html" with item=row %}
               <td>{% if row.cost_only %}<span class="badge">Cost only</span> {% endif %}{% if row.unknown %}<span class="badge">Unknown: {{ row.unknown|join:", " }}</span>{% endif %}</td>

@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% load money responsive %}
 {% block title %}Unpaid balances{% endblock %}
+{% block header %}<div class="page-header"><h1>Unpaid balances</h1></div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Unpaid balances</h1></div>
   <form method="get" action="{% url 'ledger:arrears:page' %}" id="arrears-filters" role="search">
     <div class="actions">
       <label for="operator" style="margin:0;">Operator</label>

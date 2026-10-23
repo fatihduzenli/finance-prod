@@ -48,6 +48,18 @@ from tests.test_transfer import ready as a_ready_transfer
 
 pytestmark = pytest.mark.django_db
 
+#: The token family of each badge status (PLAN-012e-4 D2, PLAN-012f D1).
+BADGE_FAMILIES = {
+    "paid": "paid",
+    "unpaid": "overdue",
+    "due": "unpaid",
+    "pending": "pending",
+    "partial": "partial",
+    "waived": "waived",
+    "voided": "neutral",
+    "attention": "unpaid",
+}
+
 BACKEND = Path(settings.BASE_DIR)
 TEMPLATES = BACKEND / "ledger" / "templates" / "ledger"
 STATIC = BACKEND / "finance" / "static" / "finance"
@@ -343,14 +355,16 @@ def test_every_badge_status_names_its_status_tokens_and_has_its_glyph() -> None:
 
     css = APP_CSS.read_text()
     tokens = TOKENS_CSS.read_text()
-    defined = set(re.findall(r"^\s*(--[a-z0-9-]+):", tokens, re.MULTILINE))
+    # PLAN-012f D1: the spec's block writes several tokens a line.
+    defined = set(re.findall(r"(--[a-z0-9-]+):", tokens.split(":root", 1)[1]))
     assert set(BADGE_STATUSES) == set(GLYPHS)
     for status in BADGE_STATUSES:
         rule = css.split(f".badge-{status} {{", 1)[1].split("}", 1)[0]
         used = re.findall(r"var\((--[a-z0-9-]+)\)", rule)
-        # PLAN-012e-4 D2: due (unpaid, not yet overdue) is on the soft unpaid pair.
-        family = "unpaid-soft" if status == "due" else status
-        assert any(name.startswith(f"--status-{family}") for name in used), status
+        # PLAN-012e-4 D2: due (unpaid, not yet overdue) is on the light unpaid pair; PLAN-012f
+        # D1: the spec's families (unpaid, once overdue, is the overdue pair).
+        family = BADGE_FAMILIES[status]
+        assert f"--{family}-bg" in used and f"--{family}-text" in used, status
         assert all(name in defined for name in used), (status, used)
         # The glyph is in the markup, hidden from screen readers (the label is the text).
         assert status_badge("x", status).startswith(
@@ -374,8 +388,9 @@ def test_app_css_has_no_literal_colour_and_print_css_neither() -> None:
 
 def test_the_new_status_tokens_are_documented_pairs() -> None:
     tokens = TOKENS_CSS.read_text()
-    assert "pair: --status-voided-ink on --status-voided-bg" in tokens
-    assert "pair: --status-attention-ink on --status-attention-bg" in tokens
+    # PLAN-012f D1: voided takes the neutral pair, attention the unpaid one.
+    assert "pair: --neutral-text on --neutral-bg" in tokens
+    assert "pair: --unpaid-text on --unpaid-bg" in tokens
 
 
 def test_the_badges_take_the_grid_colour_families() -> None:
@@ -384,18 +399,18 @@ def test_the_badges_take_the_grid_colour_families() -> None:
     css = APP_CSS.read_text()
     tokens = TOKENS_CSS.read_text()
     expected = {
-        "unpaid": ("--status-unpaid-bg", "--status-unpaid-ink"),
-        "due": ("--status-unpaid-soft-bg", "--status-unpaid-soft-ink"),
-        "pending": ("--status-pending-bg", "--status-pending-ink"),
-        "partial": ("--status-partial-bg", "--status-partial-ink"),
-        "waived": ("--status-waived-bg", "--status-waived-ink"),
-        "paid": ("--status-paid-bg", "--status-paid-ink"),
+        "unpaid": ("--overdue-bg", "--overdue-text"),
+        "due": ("--unpaid-bg", "--unpaid-text"),
+        "pending": ("--pending-bg", "--pending-text"),
+        "partial": ("--partial-bg", "--partial-text"),
+        "waived": ("--waived-bg", "--waived-text"),
+        "paid": ("--paid-bg", "--paid-text"),
     }
     for status, (background, ink) in expected.items():
         rule = css.split(f".badge-{status} {{", 1)[1].split("}", 1)[0]
         assert rule.strip() == f"background: var({background}); color: var({ink});", status
         assert f"pair: {ink} on {background}\n" in tokens, status
-    assert "--status-unpaid-ink: #FFFFFF;" in tokens
+    assert "--overdue-text: #FFFFFF;" in tokens
     assert "--status-unpaid-border" not in tokens and "--status-unpaid-border" not in css
 
 
@@ -774,12 +789,21 @@ def test_print_css_hides_the_shell_and_breaks_the_pages() -> None:
     css = PRINT_CSS.read_text()
     assert "@media print {" in css
     hidden = css.split("{ display: none !important; }", 1)[0]
-    for selector in (".topbar", ".shell > nav", ".nav-toggle-label", ".toasts", ".action-bar"):
+    # PLAN-012f D3, D4: the sidebar, the phone bars and their toggles.
+    for selector in (
+        "#sidebar",
+        "#phone-bar",
+        "#tab-bar",
+        ".sheet-toggle",
+        ".toasts",
+        ".action-bar",
+    ):
         assert selector in hidden, selector
     assert (
-        "main, main * { color: var(--ink) !important; background: transparent !important; }" in css
+        "main, main *, #page-header * { color: var(--text) !important; "
+        "background: transparent !important; }" in css
     )
-    assert "th, td { border: 1px solid var(--ink) !important;" in css
+    assert "th, td { border: 1px solid var(--text) !important;" in css
     # The statement keeps its month heading rows but forces no page break (plan D6: store
     # groups only, on the P&L).
     assert "tr.print-month { break-inside: avoid;" in css

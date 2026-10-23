@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% load components responsive %}
 {% block title %}Operators{% endblock %}
+{% block header %}<div class="page-header"><h1>Operators</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:operators:create' %}">New operator</a></div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Operators</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:operators:create' %}">New operator</a></div>{% endif %}</div>
   <form method="get" action="{% url 'ledger:operators:list' %}" class="actions" role="search">
     <input type="search" name="q" value="{{ query }}" maxlength="200" placeholder="Name, company or e-mail" aria-label="Search operators" style="max-width:24rem;">
     <label style="margin:0;font-weight:normal;"><input type="checkbox" name="archived" value="1"{% if include_archived %} checked{% endif %}> Include archived</label>

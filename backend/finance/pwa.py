@@ -21,8 +21,9 @@ lists them as read-only); the page asks for the manifest with its credentials
 (``crossorigin="use-credentials"``). Neither carries a setting or a host name.
 
 The manifest's name is the company's (``company_settings``, PLAN-012c D2), as data in the
-JSON; its icons are the brand's (192 and 512 px PNGs and the SVG, PLAN-012c D4), on the
-navy theme and background colour, so the splash is the icon on navy.
+JSON; its icons are the brand's (192 and 512 px PNGs and the SVG, PLAN-012c D4). Its colours
+follow the tokens (PLAN-012f D4): the theme is ``--navy``, the top of the phone bar's gradient,
+and the background ``--bg``, the content's, so the splash is the icon on the page colour.
 """
 
 from __future__ import annotations
@@ -50,9 +51,10 @@ IGNORE_PATTERNS = ["CVS", ".*", "*~"]
 MANIFEST_CONTENT_TYPE = "application/manifest+json"
 WORKER_CONTENT_TYPE = "application/javascript"
 WORKER_TEMPLATE = "finance/sw.js"
-#: The brand navy (``--navy`` in finance/static/finance/tokens.css).
+#: ``--navy`` in finance/static/finance/tokens.css: the phone bar's gradient starts on it.
 THEME_COLOR = "#0b2545"
-BACKGROUND_COLOR = THEME_COLOR
+#: ``--bg`` in finance/static/finance/tokens.css: the content's background.
+BACKGROUND_COLOR = "#f4f6f9"
 #: (static path, sizes, type) of each icon in the manifest.
 ICONS: tuple[tuple[str, str, str], ...] = (
     ("finance/brand/monvera_icon_192.png", "192x192", "image/png"),

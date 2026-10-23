@@ -893,18 +893,24 @@ def test_the_nav_moves_rent_run_under_admin_and_marks_the_current_section() -> N
     # System settings (admin), Messages from Stax and Nightly check (every role, as before).
     def nav(client: Client, url: str) -> str:
         html = page(client, url)
-        return html[html.index('<nav aria-label="Main">') : html.index("</nav>")]
+        start = html.index('<nav aria-label="Main" id="phone-menu">')
+        return html[start : html.index("</nav>", start)]
 
     viewer, billing, admin = (
         client_for(role)[0] for role in (Role.VIEWER, Role.BILLING, Role.ADMIN)
     )
     for client in (viewer, billing, admin):
         text = nav(client, "/stores/")
-        heading = '<span class="nav-group-heading" id="nav-admin">Admin</span>'
+        # PLAN-012f D3: the Admin heading opens its list (a <details>; there is no Admin page).
+        heading = '<summary class="nav-item nav-group-heading" id="nav-admin">'
         assert heading in text
         assert text.index('id="nav-admin-menu"') < text.index(heading)
         assert text.index(heading) < text.index('href="/webhooks/"')
-        assert '<a href="/stores/" aria-current="page">Stores</a>' in text
+        assert re.search(
+            r'<a class="nav-item" href="/stores/" id="nav-stores" aria-current="page">'
+            r"<svg [^>]*>.*?</svg><span>Stores</span></a>",
+            text,
+        )
         assert text.count('aria-current="page"') == 1
         assert 'aria-current="true"' not in text
     assert 'id="nav-run"' not in nav(viewer, "/stores/")
@@ -915,7 +921,9 @@ def test_the_nav_moves_rent_run_under_admin_and_marks_the_current_section() -> N
     assert 'id="nav-django-admin"' in nav(admin, "/stores/")
     run = nav(billing, "/run/")
     assert '<a href="/run/" id="nav-run" aria-current="page">Daily charges</a>' in run
-    assert '<span class="nav-group-heading" id="nav-admin" aria-current="true">Admin</span>' in run
+    # The open Admin group (a <details> open on its pages, PLAN-012f D3) marks its heading.
+    assert '<details class="nav-disclosure" open>' in run
+    assert '<summary class="nav-item nav-group-heading" id="nav-admin" aria-current="true">' in run
     assert run.index('id="nav-admin"') < run.index('href="/run/"')
     assert 'aria-current="page"' not in nav(
         billing, f"/charges/{a_rent_charge(a_world(), OCTOBER).pk}/"

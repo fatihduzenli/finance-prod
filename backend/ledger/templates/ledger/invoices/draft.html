@@ -3,11 +3,11 @@
 {% load responsive %}
 {% load static %}
 {% block title %}{{ preview.number }}{% endblock %}
+{% block header %}<div class="page-header"><h1>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1></div>{% endblock %}
 {% block content %}
   {% include "ledger/_store_crumb.html" %}
   <p><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">&larr; {{ draft.operator.display_name }}</a></p>
   {% if store_context %}<p class="muted" id="known-fields">{{ store_context.line }}</p>{% endif %}
-  <div class="page-header"><h1>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1></div>
   <dl id="draft-summary">
     <dt>Operator</dt><dd>{{ draft.operator.display_name }}</dd>
     <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>

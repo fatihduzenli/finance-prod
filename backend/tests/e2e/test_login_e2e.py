@@ -36,5 +36,6 @@ def test_password_and_totp_lead_to_admin_index(live_server: LiveServer, page: Pa
     assert page.locator("#site-name").is_visible()
     banner = page.locator("#sandbox-banner")
     assert banner.is_visible()
-    assert banner.inner_text().strip() == BANNER_TEXT
+    # The approved design sets the banner in upper case (PLAN-012f D3); the text is the same.
+    assert banner.inner_text().strip() == BANNER_TEXT.upper()
     assert page.title().startswith("[SANDBOX] ")

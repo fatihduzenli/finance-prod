@@ -73,11 +73,12 @@ def test_the_manifest_is_served_as_a_web_app_manifest() -> None:
     assert response.status_code == 200
     assert response["Content-Type"] == "application/manifest+json"
     data = json.loads(response.content)
-    # PLAN-012c D2, D4: the company's names, the navy theme and splash, the brand icons.
+    # PLAN-012c D2, D4: the company's names, the brand icons; PLAN-012f D4: the theme is
+    # --navy and the splash background --bg, from the tokens.
     assert data["name"] == "Monvera" and data["short_name"] == "Monvera"
     assert data["start_url"] == "/" and data["scope"] == "/"
     assert data["display"] == "standalone"
-    assert data["background_color"] == data["theme_color"] == "#0b2545"
+    assert (data["theme_color"], data["background_color"]) == ("#0b2545", "#f4f6f9")
     assert [(icon["src"], icon["sizes"], icon["type"]) for icon in data["icons"]] == [
         ("/static/finance/brand/monvera_icon_192.png", "192x192", "image/png"),
         ("/static/finance/brand/monvera_icon_512.png", "512x512", "image/png"),

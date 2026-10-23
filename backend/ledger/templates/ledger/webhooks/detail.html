@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
 {% block title %}Message from {{ company.provider_name }}: {{ event.event_type_words }}{% endblock %}
+{% block header %}<div class="page-header"><h1>Message from {{ company.provider_name }}: {{ event.event_type_words }}</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:webhooks:list' %}">&larr; Messages from {{ company.provider_name }}</a></p>
-  <div class="page-header"><h1>Message from {{ company.provider_name }}: {{ event.event_type_words }}</h1></div>
   {% if can_replay %}
     <div class="actions">
       <form method="post" action="{% url 'ledger:webhooks:replay' pk=event.pk %}" class="js-single-submit">

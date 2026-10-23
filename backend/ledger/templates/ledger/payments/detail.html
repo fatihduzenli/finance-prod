@@ -1,10 +1,10 @@
 {% extends "finance/base.html" %}
 {% load responsive money %}
 {% block title %}Payment{% endblock %}
+{% block header %}<div class="page-header"><h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</h1></div>{% endblock %}
 {% block content %}
   {% include "ledger/_store_crumb.html" %}
   <p><a href="{% url 'ledger:payments:list' %}">&larr; Payments</a>{% if charge %} · <a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Charge</a>{% elif one_off_charge %} · <a href="{% url 'ledger:one_off_charges:detail' pk=one_off_charge.pk %}">One-off charge</a>{% endif %}</p>
-  <div class="page-header"><h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</h1></div>
   {% if can_refund or can_void %}
     <p class="actions">
       {% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}

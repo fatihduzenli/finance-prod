@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
 {% block title %}Messages from {{ company.provider_name }}{% endblock %}
+{% block header %}<div class="page-header"><h1>Messages from {{ company.provider_name }}</h1></div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Messages from {{ company.provider_name }}</h1></div>
   <form method="get" action="{% url 'ledger:webhooks:list' %}" class="actions" role="search">
     <label for="outcome" style="margin:0;">Outcome</label>
     <select name="outcome" id="outcome">

@@ -714,7 +714,7 @@ def test_the_breakdown_lists_the_rows_and_highlights_cost_only_ones() -> None:
     assert detailed.count('class="pnl-row"') == 1
     assert detailed.count('class="pnl-row cost-only"') == 1
     assert "Store 1796 · No operator · 2026-08" in detailed
-    assert "background:var(--warning-bg)" in detailed
+    assert "background:var(--pending-bg)" in detailed  # PLAN-012f D1 token names
 
 
 def test_unknown_amounts_read_unknown_on_the_page() -> None:

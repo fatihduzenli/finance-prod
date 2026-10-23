@@ -9,6 +9,8 @@ from pytest_django.live_server_helper import LiveServer
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db]
 
 BANNER_TEXT = "SANDBOX — test system, no real money"
+#: What a browser reads: the approved design sets the banner in upper case (PLAN-012f D3).
+SHOWN_TEXT = BANNER_TEXT.upper()
 
 
 def test_banner_is_visible_and_cannot_be_dismissed(live_server: LiveServer, page: Page) -> None:
@@ -18,7 +20,7 @@ def test_banner_is_visible_and_cannot_be_dismissed(live_server: LiveServer, page
     banner = page.locator("#sandbox-banner")
     banner.wait_for(state="visible")
     assert banner.count() == 1
-    assert banner.inner_text().strip() == BANNER_TEXT
+    assert banner.inner_text().strip() == SHOWN_TEXT
     assert page.title().startswith("[SANDBOX] ")
 
     viewport = page.viewport_size
@@ -39,5 +41,5 @@ def test_banner_is_visible_and_cannot_be_dismissed(live_server: LiveServer, page
     page.mouse.click(5, viewport["height"] - 5)
     page.keyboard.press("Escape")
     assert banner.is_visible()
-    assert banner.inner_text().strip() == BANNER_TEXT
+    assert banner.inner_text().strip() == SHOWN_TEXT
     assert page.title().startswith("[SANDBOX] ")

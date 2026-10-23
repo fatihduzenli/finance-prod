@@ -408,7 +408,10 @@ def test_the_help_index_and_every_topic_answer_every_role(role: Role) -> None:
         assert response.status_code == 200, path
         text = response.content.decode()
         assert "Monvera · Help</title>" in text, path
-        assert 'method="post"' not in text.split('id="help-topic"', 1)[1], path
+        # The topic itself has no form (the shell's Sign out, after the page since PLAN-012f
+        # D4's bottom bar, is not the topic's).
+        article = text.split('id="help-topic"', 1)[1].split("</article>", 1)[0]
+        assert 'method="post"' not in article, path
 
 
 @pytest.mark.parametrize("path", ["/help/", *TOPIC_PATHS])
@@ -437,14 +440,17 @@ def test_the_routes_are_read_only_in_the_registry() -> None:
 
 
 def test_the_user_menu_links_help() -> None:
+    # PLAN-012f D3: the sidebar's user card (name, role, Help, Sign out); D4: the More sheet.
     html = client_for(Role.VIEWER)[0].get("/").content.decode()
-    menu = block(html, 'id="user-menu"', "</details>")
+    menu = block(html, 'id="user-card"', "</form>")
     assert '<a href="/help/" id="nav-help">Help</a>' in menu
     assert (
-        menu.index('id="nav-settings"')
+        menu.index('id="user-menu-name"')
         < menu.index('id="nav-help"')
-        < menu.index('id="nav-sign-out"')
+        < menu.index('action="/account/logout/"')
     )
+    more = block(html, 'id="more-sheet"', "</details>")
+    assert 'href="/help/"' in more
     on_help = client_for(Role.VIEWER)[0].get("/help/store-costs/").content.decode()
     assert '<a href="/help/" id="nav-help" aria-current="page">Help</a>' in on_help
 

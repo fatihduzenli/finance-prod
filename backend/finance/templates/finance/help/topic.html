@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% comment %}One help topic (docs/qa/PLAN-012e2-fewer-actions.md D10): its title and its own template, static.{% endcomment %}
 {% block title %}Help{% endblock %}
+{% block header %}<div class="page-header"><h1>{{ topic.title }}</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'finance:help' %}">&larr; Help</a></p>
-  <div class="page-header"><h1>{{ topic.title }}</h1></div>
   <article id="help-topic" class="help-topic">
     {% include topic.template %}
   </article>

@@ -1,7 +1,9 @@
-"""The month grid on a laptop (docs/qa/PLAN-011b D2, §7): at 1,280 x 800 the twelve month
-columns (80 px each) and the store column (220 px) fit, so the 12th month is fully visible
-before any scrolling; the grid's scrollbar never hides, the mirrored bar above it moves with
-it when it shows, and the store column stays where it was when the grid is scrolled."""
+"""The month grid on a laptop (docs/qa/PLAN-011b D2, §7; PLAN-012f D3): at 1,280 x 800 the
+twelve month columns (80 px each) and the store column (220 px) are 1,180 px wide; beside the
+232 px sidebar the grid's region is 984 px wide (1,280 - 232 - 2 x 32), so the first months
+show and the later ones are reached by scrolling the region, never the page. The grid's
+scrollbar never hides, the mirrored bar above it shows and moves with it, and the store column
+stays where it was when the grid is scrolled."""
 
 from __future__ import annotations
 
@@ -55,10 +57,13 @@ def test_twelve_months_are_reachable_with_the_store_column_fixed(
     assert header_box is not None and round(header_box["width"]) == 220
     month_box = months.first.bounding_box()
     assert month_box is not None and round(month_box["width"]) == 80
-    # Twelve months and the store column are 1,180 px wide: the table fits in the region.
+    # Twelve months and the store column are 1,180 px wide; the region beside the sidebar is
+    # 984 px (PLAN-012f D3): the table is wider than its region, which scrolls.
     table_width = page.locator("table.grid").evaluate("el => el.getBoundingClientRect().width")
     assert table_width <= 220 + 12 * 80 + 2
-    assert table_width <= region.evaluate("el => el.clientWidth")
+    region_width = region.evaluate("el => el.getBoundingClientRect().width")
+    assert region_width == pytest.approx(1280 - 232 - 2 * 32, abs=1)
+    assert table_width > region.evaluate("el => el.clientWidth")
     # The bar never hides: overflow-x is "scroll" (headless Chromium draws no scrollbar,
     # so its height cannot be measured here).
     assert region.evaluate("el => getComputedStyle(el).overflowX") == "scroll"
@@ -68,20 +73,22 @@ def test_twelve_months_are_reachable_with_the_store_column_fixed(
     before = store_cell.bounding_box()
     assert before is not None and label in store_cell.inner_text()
 
-    # Before any scrolling, the 12th month column is wholly inside the visible region.
+    # Before any scrolling, the first month column is wholly inside the visible region and the
+    # 12th is past its right edge.
     assert region.evaluate("el => el.scrollLeft") == 0
     region_box = region.bounding_box()
-    twelfth = months.nth(11).bounding_box()
-    assert region_box is not None and twelfth is not None
-    assert twelfth["x"] >= before["x"] + before["width"] - 1
-    assert twelfth["x"] + twelfth["width"] <= region_box["x"] + region_box["width"] + 1
-    assert twelfth["x"] + twelfth["width"] <= WIDTH
+    first, twelfth = months.nth(0).bounding_box(), months.nth(11).bounding_box()
+    assert region_box is not None and first is not None and twelfth is not None
+    assert first["x"] >= before["x"] + before["width"] - 1
+    assert first["x"] + first["width"] <= region_box["x"] + region_box["width"] + 1
+    assert twelfth["x"] + twelfth["width"] > region_box["x"] + region_box["width"]
 
-    # Scroll to the last month column through the mirrored bar when it shows, else the grid.
+    # Scroll to the last month column through the mirrored bar, which shows as the table is
+    # wider than its region.
     top = page.locator("#grid-scroll-top")
-    if top.is_visible():
-        top.evaluate("el => { el.scrollLeft = el.scrollWidth; }")
-        page.wait_for_function("() => document.getElementById('grid-scroll').scrollLeft > 0")
+    assert top.is_visible()
+    top.evaluate("el => { el.scrollLeft = el.scrollWidth; }")
+    page.wait_for_function("() => document.getElementById('grid-scroll').scrollLeft > 0")
     region.evaluate("el => { el.scrollLeft = el.scrollWidth; }")
     last_month = f"{timezone.localdate():%Y-%m}"
     last = page.locator(f'tr.grid-row td[data-month="{last_month}"]')
@@ -92,7 +99,4 @@ def test_twelve_months_are_reachable_with_the_store_column_fixed(
     assert last_box["x"] >= before["x"] + before["width"] - 1  # not under the store column
     after = store_cell.bounding_box()
     assert after is not None and abs(after["x"] - before["x"]) < 1
-    if top.is_visible():
-        assert (
-            abs(top.evaluate("el => el.scrollLeft") - region.evaluate("el => el.scrollLeft")) <= 1
-        )
+    assert abs(top.evaluate("el => el.scrollLeft") - region.evaluate("el => el.scrollLeft")) <= 1

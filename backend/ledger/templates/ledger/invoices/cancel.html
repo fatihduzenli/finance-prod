@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}{% if sent %}Cancel {{ draft.number }}{% else %}Delete draft {{ draft.number }}{% endif %}{% endblock %}
+{% block header %}<div class="page-header"><h1>{% if sent %}Cancel invoice {{ draft.sent_invoice.invoice_number }}{% else %}Delete draft {{ draft.number }}{% endif %}</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">&larr; {{ draft.number }}</a></p>
-  <div class="page-header"><h1>{% if sent %}Cancel invoice {{ draft.sent_invoice.invoice_number }}{% else %}Delete draft {{ draft.number }}{% endif %}</h1></div>
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
   <div class="confirm-what">

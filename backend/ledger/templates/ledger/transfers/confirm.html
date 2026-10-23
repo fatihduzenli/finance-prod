@@ -1,6 +1,7 @@
 {% extends "finance/base.html" %}
 {% load money %}
 {% block title %}Transfer store {{ store.external_label }}: confirm{% endblock %}
+{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
   <p class="muted" id="step-help">Read both effects and check the box: the outgoing lease ends and the incoming lease starts in one step, or nothing changes. This cannot be undone from here.</p>

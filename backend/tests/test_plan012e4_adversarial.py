@@ -195,8 +195,8 @@ def test_the_badges_and_the_cells_share_their_tokens_and_no_due_token_remains() 
     grid = (BACKEND / "ledger" / "templates" / "ledger" / "grid" / "page.html").read_text(
         encoding="utf-8"
     )
-    assert "--status-due-" not in tokens and "--status-due-" not in app
-    assert "--status-due-" not in grid
+    for text in (tokens, app, grid):
+        assert "--status-due-" not in text and "--status-" not in text  # the 12c names are gone
     for status in ("unpaid", "pending", "partial", "waived", "paid"):
         badge = re.search(rf"\.badge-{status}\s*\{{([^}}]*)\}}", app)
         cell = re.search(rf"\.cell-{status}\s*\{{([^}}]*)\}}", grid)
@@ -207,6 +207,8 @@ def test_the_badges_and_the_cells_share_their_tokens_and_no_due_token_remains() 
     due_badge = re.search(r"\.badge-due\s*\{([^}]*)\}", app)
     due_cell = re.search(r"\.cell-due\s*\{([^}]*)\}", grid)
     assert due_badge and due_cell
-    assert "--status-unpaid-soft-bg" in due_badge.group(
-        1
-    ) and "--status-unpaid-soft-bg" in due_cell.group(1)
+    # PLAN-012f tokens: a charge not yet overdue is the "unpaid" family (light red), the
+    # overdue one the "overdue" family; the badge and the cell read the same token.
+    badge_bg = re.search(r"background:\s*var\((--[a-z-]+)\)", due_badge.group(1))
+    cell_bg = re.search(r"background:\s*var\((--[a-z-]+)\)", due_cell.group(1))
+    assert badge_bg and cell_bg and badge_bg.group(1) == cell_bg.group(1) == "--unpaid-bg"

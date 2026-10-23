@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load money responsive %}
 {% block title %}Payments by method{% endblock %}
+{% block header %}<div class="page-header"><h1>Payments by method</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
-  <div class="page-header"><h1>Payments by method</h1></div>
   {% url 'ledger:reports:payments_by_method' as action %}{% url 'ledger:reports:payments_by_method_export' as export %}
   {% include "ledger/reports/_range.html" with action=action export=export %}
   {% if too_slow %}

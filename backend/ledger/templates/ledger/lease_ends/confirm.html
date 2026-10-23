@@ -1,5 +1,6 @@
 {% extends "finance/base.html" %}
 {% block title %}End lease {{ store.external_label }}: confirm{% endblock %}
+{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
   <p class="muted" id="step-help">Read what will happen and check the box; this cannot be undone from here.</p>

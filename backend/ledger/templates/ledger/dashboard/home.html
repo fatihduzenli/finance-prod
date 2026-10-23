@@ -5,8 +5,9 @@
 {% comment %}The dashboard as cards (docs/qa/PLAN-012c-design-pass.md D6): the attention list
 (PLAN-011b D6) first, then today's run (the PLAN-012d line), the failed payment attempts, the
 figures, then the recent lists. The cards' styles are app.css's (.card, .figures).{% endcomment %}
+{% block header %}<div class="page-header"><h1>Dashboard</h1></div>{% endblock %}
+{% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Dashboard</h1></div>
   <p class="muted">As of {{ data.today|date:"Y-m-d" }}. Amounts in US dollars.</p>
 
   {% include "ledger/_attention.html" with banners=False %}

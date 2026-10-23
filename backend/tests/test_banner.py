@@ -35,7 +35,11 @@ def test_banner_text_is_exact(client: Client) -> None:
     match = _BANNER_ELEMENT_RE.search(_admin_login_html(client))
     assert match is not None
     element = match.group(0)
-    assert f">{BANNER_TEXT}</div>" in element
+    # PLAN-012f D4: the full text, then the phone's shorter one (shown at 768 px and under).
+    assert (
+        f'><span class="sandbox-long">{BANNER_TEXT}</span>'
+        '<span class="sandbox-short">SANDBOX — test system</span></div>'
+    ) in element
 
 
 def test_banner_sits_after_the_body_tag(client: Client) -> None:
@@ -53,12 +57,27 @@ def test_banner_is_fixed_full_width_and_yellow(client: Client) -> None:
     assert "position:fixed" in element
     assert "top:0" in element
     assert "width:100%" in element
-    assert "#ffd400" in element
+    # The approved design (docs/design/DESIGN-SPEC.md §1, PLAN-012f D3): #6B4E00 on #FFF3C4,
+    # 12 px, 600, letter-spacing .04em, upper case.
+    assert "background:#FFF3C4;color:#6B4E00;" in element
+    assert "font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;" in (
+        element
+    )
     assert 'role="status"' in element
 
 
+def test_the_phone_reads_the_short_text(client: Client) -> None:
+    html = _admin_login_html(client)
+    after_body = html[html.index("<body") :]
+    style = after_body[after_body.index("<style>") : after_body.index("</style>")]
+    assert ".sandbox-short{display:none;}" in style
+    assert (
+        "@media (max-width:768px){.sandbox-long{display:none;}.sandbox-short{display:inline;}}"
+    ) in style
+
+
 def test_banner_pushes_content_down(client: Client) -> None:
-    assert "body{padding-top:44px !important;}" in _admin_login_html(client)
+    assert "body{padding-top:26px !important;}" in _admin_login_html(client)
 
 
 def test_banner_has_no_dismiss_control(client: Client) -> None:

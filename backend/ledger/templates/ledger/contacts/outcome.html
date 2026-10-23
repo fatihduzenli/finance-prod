@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}{{ action }}: promise of {{ entry.operator.display_name }}{% endblock %}
+{% block header %}<div class="page-header"><h1>{{ action }}: promise of {{ entry.operator.display_name }}</h1></div>{% endblock %}
 {% block content %}
   <p><a href="{{ back_url }}">&larr; Back</a></p>
-  <div class="page-header"><h1>{{ action }}: promise of {{ entry.operator.display_name }}</h1></div>
   {% include "ledger/contacts/_entry.html" %}
   <p class="muted" id="outcome-help">{% if outcome == "rescheduled" %}Saving records a new promise to pay and closes this one as Rescheduled.{% elif outcome == "kept" %}Saving records how you learned it and closes this promise as Kept.{% else %}Saving records how you learned it and closes this promise as Broken.{% endif %} Never write card or account numbers.</p>
   <form method="post" id="contact-outcome-form" class="js-single-submit">

@@ -2,8 +2,8 @@
 {% load components money %}
 {% load responsive %}
 {% block title %}Daily charges, {{ run.day|date:"Y-m-d" }}{% endblock %}
+{% block header %}<div class="page-header"><h1>Daily charges, {{ run.day|date:"Y-m-d" }}</h1></div>{% endblock %}
 {% block content %}
-  <div class="page-header"><h1>Daily charges, {{ run.day|date:"Y-m-d" }}</h1></div>
   {% if not health.ok %}
     <ul class="messages" id="provider-banner">
       {% for text in health.messages %}<li class="error" role="alert">{{ text }}</li>{% endfor %}
