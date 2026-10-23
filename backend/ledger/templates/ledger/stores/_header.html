@@ -1,14 +1,44 @@
-{% load money %}
-{% comment %}The store page's header card (docs/qa/PLAN-012d D1): ledger.services.workspace.Header. On the operator page (D14, "ows"), the selected store in place of the operator, and the open balance of all the operator's stores.{% endcomment %}
+{% load components icons money %}
+{% comment %}The workspace's side cards (docs/qa/PLAN-012d D1; the approved design's right column, docs/qa/PLAN-012f-approved-design.md D8): ledger.services.workspace.Header and ledger.views.workspace_cards.side_cards. LEASE: the operator (on the operator page, "ows", the selected store), the lease, the rent, since when, the debit days, autopay (with "Set up" while none), the deposit, the open balance (and, on the operator page, that of all the operator's stores) and any credit. NEXT: the next scheduled payment, the next rent debit when that is something else, the open promise and the next insurance renewal. STORE COST: the cost in effect, with Change (billing). DOCUMENTS: the newest documents, with Upload (billing). The ids are the header card's (PLAN-012d D1).{% endcomment %}
 <section id="workspace-header" class="workspace-header" aria-label="Store summary">
-  <dl class="header-card">
-    {% if ows %}<dt>Store</dt><dd id="header-store"><a href="{% url 'ledger:stores:detail' pk=store.pk %}">{{ store.external_label }}</a></dd>{% else %}<dt>Operator</dt><dd id="header-operator">{% if header.operator %}<a href="{% url 'ledger:operators:detail' pk=header.operator.pk %}">{{ header.operator.display_name }}</a>{% else %}—{% endif %}</dd>{% endif %}
-    <dt>Lease</dt><dd id="header-lease">{% if header.lease %}<a href="{% url 'ledger:leases:detail' pk=header.lease.pk %}">From {{ header.lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if header.lease.ended_on %} to {{ header.lease.ended_on|date:"Y-m-d" }}{% endif %}{% if header.rent %}, rent {{ header.rent.amount|money }} a month{% endif %}{% else %}No current lease{% if ows %} of this operator{% endif %}{% if vacant_since %}, vacant since {{ vacant_since|date:"Y-m-d" }}{% endif %}{% endif %}</dd>
-    <dt>Autopay</dt><dd id="header-autopay">{{ header.autopay }}{% if header.autopay_moved %}; {{ header.autopay_moved }}{% endif %}</dd>
-    <dt>Open balance</dt><dd id="header-open-balance">{{ header.open_balance|money }}</dd>
-    {% if ows %}<dt>Open balance, all stores</dt><dd id="header-operator-balance">{{ ows.open_balance|money }}</dd>{% endif %}
-    {% if header.credit > 0 %}<dt>Credit</dt><dd id="header-credit">{{ header.credit|money }}</dd>{% endif %}
-    <dt>Next scheduled payment</dt><dd id="header-next-payment">{% if header.next_payment %}{{ header.next_payment.on|date:"Y-m-d" }}: {{ header.next_payment.what }}{% else %}None scheduled{% endif %}</dd>
-    <dt>Open promise</dt><dd id="header-open-promise">{% if header.open_promise %}{{ header.open_promise.promised_amount|money }} by {{ header.open_promise.promised_date|date:"Y-m-d" }}{% else %}None{% endif %}</dd>
-  </dl>
+  <div class="card" id="lease-card">
+    <h2 class="section-label">Lease</h2>
+    <dl class="side-list">
+      {% if ows %}<dt>Store</dt><dd id="header-store"><a href="{% url 'ledger:stores:detail' pk=store.pk %}">{{ store.external_label }}</a></dd>{% else %}<dt>Operator</dt><dd id="header-operator">{% if header.operator %}<a class="side-strong" href="{% url 'ledger:operators:detail' pk=header.operator.pk %}">{{ header.operator.display_name }}</a>{% else %}—{% endif %}</dd>{% endif %}
+      <dt>Lease</dt><dd id="header-lease">{% if header.lease %}<a href="{% url 'ledger:leases:detail' pk=header.lease.pk %}">From {{ header.lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if header.lease.ended_on %} to {{ header.lease.ended_on|date:"Y-m-d" }}{% endif %}{% else %}No current lease{% if ows %} of this operator{% endif %}{% if vacant_since %}, vacant since {{ vacant_since|date:"Y-m-d" }}{% endif %}{% endif %}</dd>
+      {% if header.rent %}<dt>Rent</dt><dd id="header-rent"><strong>{{ header.rent.amount|money }}</strong> / month</dd>{% endif %}
+      {% if header.lease_since %}<dt>Since</dt><dd id="header-since">{{ header.lease_since|date:"Y-m-d" }}</dd>{% endif %}
+      {% if header.debit_day_text %}<dt>Debit day</dt><dd id="header-debit-day">{{ header.debit_day_text }}</dd>{% endif %}
+      <dt>Autopay</dt><dd id="header-autopay">{% status_badge header.autopay %}{% if header.autopay_moved %} {{ header.autopay_moved }}{% endif %}{% if header.lease and header.autopay == "Not set up" %} <a href="{{ side_autopay_url }}" id="autopay-set-up">Set up</a>{% endif %}</dd>
+      {% if header.deposit_text %}<dt>Deposit</dt><dd id="header-deposit">{{ header.deposit_text }}</dd>{% endif %}
+      <dt>Open balance</dt><dd id="header-open-balance">{{ header.open_balance|money }}</dd>
+      {% if ows %}<dt>Open balance, all stores</dt><dd id="header-operator-balance">{{ ows.open_balance|money }}</dd>{% endif %}
+      {% if header.credit > 0 %}<dt>Credit</dt><dd id="header-credit">{{ header.credit|money }}</dd>{% endif %}
+    </dl>
+  </div>
+  <div class="card" id="next-card">
+    <h2 class="section-label">Next</h2>
+    <dl class="side-list side-list-dates">
+      {% if header.next_payment %}<dt>{{ header.next_payment.what }}</dt><dd id="header-next-payment">{{ header.next_payment.on|date:"Y-m-d" }}</dd>{% else %}<dt>Next scheduled payment</dt><dd id="header-next-payment">None scheduled</dd>{% endif %}
+      {% if header.next_rent and header.next_rent != header.next_payment.on %}<dt>Rent debit</dt><dd id="header-next-rent">{{ header.next_rent|date:"Y-m-d" }}</dd>{% endif %}
+      <dt>Promise due</dt><dd id="header-open-promise"{% if header.open_promise %} class="side-promise"{% endif %}>{% if header.open_promise %}{{ header.open_promise.promised_amount|money }} by {{ header.open_promise.promised_date|date:"Y-m-d" }}{% else %}None{% endif %}</dd>
+      {% if header.next_insurance %}<dt>Insurance renewal</dt><dd id="header-insurance">{{ header.next_insurance|date:"Y-m-d" }}</dd>{% endif %}
+    </dl>
+  </div>
+  <section class="card" id="store-cost" aria-labelledby="store-cost-heading">
+    <div class="card-header"><h2 class="section-label" id="store-cost-heading">Store cost</h2>{% if can_set_cost %}<a class="card-link" href="{% url 'ledger:stores:set_cost' pk=store.pk %}" id="change-cost">Change</a>{% endif %}</div>
+    <dl class="side-list">
+      <dt>Landlord rent</dt><dd id="landlord-rent">{% if cost %}{{ cost.landlord_rent|money }} a month{% if cost.landlord_rent == 0 %} (no cost){% endif %} from {{ cost.effective_from|date:"Y-m-d" }}{% else %}unknown{% endif %}</dd>
+      <dt>Landlord lease end</dt><dd id="landlord-lease-end">{% if cost %}{{ cost.landlord_lease_end|date:"Y-m-d"|default:"—" }}{% else %}unknown{% endif %}</dd>
+      {% if cost and cost.other_monthly_cost is not None %}<dt>Other monthly cost</dt><dd id="other-cost">{{ cost.other_monthly_cost|money }}{% if cost.other_cost_description %} ({{ cost.other_cost_description }}){% endif %}</dd>{% endif %}
+    </dl>
+    <p class="help">Learn more: <a href="{% url 'finance:help_topic' slug='store-costs' %}">Store costs and margin</a></p>
+  </section>
+  {% if cost_history or can_correct_cost and open_cost %}{% include "ledger/stores/_cost_history.html" %}{% endif %}
+  <div class="card" id="documents-card">
+    <div class="card-header"><h2 class="section-label">Documents</h2>{% if side_upload_url %}<a class="card-link" id="documents-upload" href="{{ side_upload_url }}">Upload</a>{% endif %}</div>
+    <ul class="doc-list" id="side-documents">
+      {% for document, image in side_documents %}<li>{% if image %}{% icon "image" 16 %}{% else %}{% icon "file" 16 %}{% endif %}<a href="{% url 'ledger:documents:download' pk=document.pk %}">{{ document.original_filename }}</a></li>{% empty %}<li class="muted">No documents yet.</li>{% endfor %}
+    </ul>
+  </div>
 </section>

@@ -1,0 +1,5 @@
+{% load money %}{% comment %}The phone's summary strip (docs/qa/PLAN-012f-approved-design.md D8, DESIGN-SPEC §6: Open balance, Rent, Autopay), under the store's title at 768 px and narrower; hidden on wider screens, where the LEASE card says the same.{% endcomment %}<dl class="summary-strip" id="summary-strip">
+  <div class="summary-cell"><dt>Open balance</dt><dd class="summary-value{% if header.open_balance > 0 %} tone-unpaid{% endif %}">{{ header.open_balance|money }}</dd></div>
+  <div class="summary-cell"><dt>Rent</dt><dd class="summary-value">{% if header.rent %}{{ header.rent.amount|money }}{% else %}—{% endif %}</dd></div>
+  <div class="summary-cell"><dt>Autopay</dt><dd class="summary-value">{{ header.autopay }}</dd></div>
+</dl>

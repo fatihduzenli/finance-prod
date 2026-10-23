@@ -72,7 +72,6 @@ with their installments. Money is ``Decimal``.
 
 from __future__ import annotations
 
-import re
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
@@ -99,7 +98,7 @@ from ledger.models import (
     RentChargeStatus,
     Store,
 )
-from ledger.services import installments, search
+from ledger.services import installments, search, stores
 from ledger.services.csv_export import CsvWriter
 from ledger.services.pnl import (
     CAPPED,
@@ -390,19 +389,9 @@ class GridRow:
 
     @property
     def store_title(self) -> str:
-        """The store cell's first line (PLAN-012e-4 D4): "#1991 Istanbul". A name that starts
-        with the number (then a space or a hyphen, or nothing) shows the rest once ("2922
-        TUCSON" is "#2922 TUCSON"); a name that is only the number (the sheet's imported
-        stores) shows the city after it, if any ("#2475 CONYERS", else "#2475"); a store
-        without a number shows its name only."""
-        number = self.store.store_number
-        name = self.store.external_label
-        if number is None:
-            return name
-        rest = re.match(rf"{number}(?!\d)[ -]?(.*)\Z", name, re.S)
-        if rest is not None:
-            name = rest.group(1).strip() or self.store.city.strip()
-        return f"#{number} {name}" if name else f"#{number}"
+        """The store cell's first line (PLAN-012e-4 D4): "#1991 Istanbul"
+        (:func:`ledger.services.stores.title`)."""
+        return stores.title(self.store)
 
 
 @dataclass(slots=True)

@@ -114,12 +114,14 @@ OWNER_TOKENS = {
 #: The token Batch B adds beside the spec's block (PLAN-012f D6): the grid's current-month
 #: tint, the value DESIGN-SPEC §4 writes.
 BATCH_B_TOKENS = {"--month-current": "#EEF6F5"}
+#: The two tokens Batch C adds beside it (the dashboard's progress fills, decoration only).
+BATCH_C_TOKENS = {"--progress-pending": "#E5B800", "--progress-partial": "#F08A24"}
 
 
 def test_the_tokens_file_holds_the_spec_block_name_for_name_and_value_for_value() -> None:
     spec = declarations(spec_block())
     assert len(spec) >= 50  # the parse found the spec's block
-    expected = {**spec, **OWNER_TOKENS, **BATCH_B_TOKENS}
+    expected = {**spec, **OWNER_TOKENS, **BATCH_B_TOKENS, **BATCH_C_TOKENS}
     assert spec["--teal"] == "#13A89E" and expected["--teal"] == "#13A89E"  # --teal unchanged
     assert "#EEF6F5" in SPEC.read_text(encoding="utf-8")  # the spec's value for the tint
     tokens_css = TOKENS_CSS.read_text(encoding="utf-8")
@@ -148,7 +150,7 @@ def test_the_primary_button_takes_its_tokens() -> None:
 def test_the_comparison_sees_a_changed_value() -> None:
     root = TOKENS_CSS.read_text(encoding="utf-8").split(":root {", 1)[1]
     changed = root.replace("--teal: #13A89E;", "--teal: #13A89F;")
-    expected = {**declarations(spec_block()), **OWNER_TOKENS, **BATCH_B_TOKENS}
+    expected = {**declarations(spec_block()), **OWNER_TOKENS, **BATCH_B_TOKENS, **BATCH_C_TOKENS}
     assert declarations(root) == expected
     assert changed != root and declarations(changed) != expected
 

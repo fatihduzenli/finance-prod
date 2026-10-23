@@ -231,9 +231,10 @@ def test_unknown_without_a_row_and_no_cost_at_zero() -> None:
 def test_change_is_one_link_to_the_cost_form_for_billing_and_admin(role: Role, shown: bool) -> None:
     store = a_store()
     cost = block(page(client_for(role)[0], store), 'id="store-cost"')
-    link = f'<a class="btn" href="/stores/{store.pk}/cost/" id="change-cost">Change</a>'
+    # PLAN-012f D8: Change is the STORE COST card's right link.
+    link = f'<a class="card-link" href="/stores/{store.pk}/cost/" id="change-cost">Change</a>'
     assert (link in cost) is shown
-    assert cost.count('<a class="btn"') == (1 if shown else 0)
+    assert cost.count("<a class=") == (1 if shown else 0)
 
 
 def test_the_history_is_behind_a_details_below_the_block() -> None:

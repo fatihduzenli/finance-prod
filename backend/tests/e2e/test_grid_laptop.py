@@ -1,6 +1,7 @@
 """The month grid on a laptop (docs/qa/PLAN-011b D2, §7; PLAN-012f D3): at 1,280 x 800 the
-twelve month columns (80 px each) and the store column (220 px) are 1,180 px wide; beside the
-232 px sidebar the grid's region is 984 px wide (1,280 - 232 - 2 x 32), so the first months
+twelve month columns (116 px each, PLAN-012f D9) and the store column (220 px) are 1,612 px wide;
+beside the 232 px sidebar the grid's region, filling its card, is 982 px wide (1,280 - 232 - 2 x
+32 - the card's two 1 px borders), so the first months
 show and the later ones are reached by scrolling the region, never the page. The grid's
 scrollbar never hides, the mirrored bar above it shows and moves with it, and the store column
 stays where it was when the grid is scrolled."""
@@ -56,13 +57,14 @@ def test_twelve_months_are_reachable_with_the_store_column_fixed(
     header_box = store_header.bounding_box()
     assert header_box is not None and round(header_box["width"]) == 220
     month_box = months.first.bounding_box()
-    assert month_box is not None and round(month_box["width"]) == 80
-    # Twelve months and the store column are 1,180 px wide; the region beside the sidebar is
-    # 984 px (PLAN-012f D3): the table is wider than its region, which scrolls.
+    assert month_box is not None and round(month_box["width"]) == 116
+    # Twelve months and the store column are 1,612 px wide; the region beside the sidebar is
+    # 982 px (PLAN-012f D3, D9: inside the grid card's 1 px borders): the table is wider than
+    # its region, which scrolls.
     table_width = page.locator("table.grid").evaluate("el => el.getBoundingClientRect().width")
-    assert table_width <= 220 + 12 * 80 + 2
+    assert table_width <= 220 + 12 * 116 + 2
     region_width = region.evaluate("el => el.getBoundingClientRect().width")
-    assert region_width == pytest.approx(1280 - 232 - 2 * 32, abs=1)
+    assert region_width == pytest.approx(1280 - 232 - 2 * 32 - 2, abs=1)
     assert table_width > region.evaluate("el => el.clientWidth")
     # The bar never hides: overflow-x is "scroll" (headless Chromium draws no scrollbar,
     # so its height cannot be measured here).

@@ -177,7 +177,8 @@ def test_the_header_shows_the_lease_balance_credit_next_payment_and_open_promise
     assert 'id="header-open-balance">$1,945.00<' in html
     # The credit line shows only when a credit is held (QA-012d finding 5, "if any").
     assert 'id="header-credit"' not in html and "<dt>Credit</dt>" not in html
-    assert "2026-10-25: Broken shelf" in html
+    # PLAN-012f D8: the NEXT card names the next scheduled payment beside its date.
+    assert '<dt>Broken shelf</dt><dd id="header-next-payment">2026-10-25</dd>' in html
     assert "$500.00 by 2026-10-20" in html
     assert "Acme Ops" in html and "From 2026-09-01" in html
 
@@ -307,7 +308,8 @@ def test_create_missing_charges_is_a_link_under_the_charges_filters_for_billing(
     lease = a_world()
     url = reverse("ledger:stores:create_charges", kwargs={"pk": lease.store_id})
     billing = page(client_for(Role.BILLING)[0], store_page(lease.store_id, tab="charges"))
-    filters_end = billing.index("</p>", billing.index('id="charge-filters"'))
+    # PLAN-012f D8: in the Charges card's header, after the segmented filter.
+    filters_end = billing.index("</span>", billing.index('id="charge-filters"'))
     form_at = billing.index(f'<form method="post" action="{url}"')
     assert filters_end < form_at < billing.index('id="store-charges"')
     form = billing[form_at : billing.index("</form>", form_at)]

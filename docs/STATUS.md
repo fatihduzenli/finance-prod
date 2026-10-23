@@ -1687,3 +1687,19 @@ block with the dashed "Not yet due" and the tinted current month; the help line.
 6,396 passed; PostgreSQL 34 + 7,037 passed; e2e 21 passed in three runs after one test-only
 correction; Fable's adversarial file 14 cases green. Batch C (the dashboard, the store and
 operator workspaces, the monthly rent overview) assigned.
+
+## Update, 2026-10-23, PLAN-012f Batch C built and gated (not pushed)
+
+The dashboard per the design (four KPI cards; Needs attention over two thirds with one action a
+row; the month's collection card with the stacked bar; Coming up with date chips; Recent
+payments; the earlier blocks below as cards), the store workspace (breadcrumb, "#1991 Istanbul"
+with its badge and the address line, the Charges card with the segmented filter and the totals
+row, the Contact log card, the LEASE, NEXT, STORE COST and DOCUMENTS cards; the phone summary
+strip) and the operator workspace with its store selector, the monthly rent overview (the filter
+card, the legend pills, the grid card with 116 px months, the Collected row with its counts).
+Query budgets held (the dashboard at about 50 against 25 + 3 × due). Gate: sqlite 6,441 passed;
+PostgreSQL 34 + 7,068 passed; e2e 21 passed in four runs; Fable's adversarial file 7 cases green.
+Checked at 1,440 against the references: the store page and the dashboard read like them. **For
+the owner:** the attention row's button reads "Open" for every kind (the screenshot's per-kind
+labels would misname where the links lead). Batch D (every other page, the login layout, the
+baselines, the side-by-side report) assigned.

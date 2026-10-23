@@ -348,9 +348,10 @@ def test_a_comment_is_not_read() -> None:
 
 
 def test_a_deliberate_second_paragraph_in_a_copy_of_the_store_page_fails() -> None:
-    page = (BACKEND / "ledger/templates/ledger/stores/detail.html").read_text(encoding="utf-8")
+    # PLAN-012f D8: the store cost block is the STORE COST side card (stores/_header.html).
+    page = (BACKEND / "ledger/templates/ledger/stores/_header.html").read_text(encoding="utf-8")
     assert scan(page) == []
-    heading = '<h2 id="store-cost-heading">Store cost</h2>'
+    heading = '<h2 class="section-label" id="store-cost-heading">Store cost</h2>'
     mutated = page.replace(heading, heading + '<p class="muted">A second line of help.</p>')
     assert mutated != page
     assert any(finding.reason == "a second line of help" for finding in scan(mutated))

@@ -179,7 +179,11 @@ def test_the_totals_row_is_on_surface_2_with_a_2px_top_border() -> None:
     assert "background: var(--surface-2);" in totals
     assert "border-top: 2px solid var(--border);" in totals
     grid = page(client_for(Role.VIEWER)[0], "/grid/")
-    assert '<tr class="totals">\n          <th scope="row" class="store-col">Collected</th>' in grid
+    # PLAN-012f D9: "Collected" over the order of the counts each month's total shows.
+    assert (
+        '<tr class="totals">\n          <th scope="row" class="store-col">Collected'
+        '<span class="cell-subline">paid · unpaid · pending</span></th>'
+    ) in grid
 
 
 def test_a_wide_table_sits_in_the_scroll_region() -> None:
@@ -230,9 +234,11 @@ def test_the_dashboard_figures_are_kpi_cards() -> None:
     html = page(client_for(Role.VIEWER)[0], "/")
     figures = section(html, 'id="figures-card"', "</section>")
     assert figures.count('<div class="kpi">') == 4
-    assert '<span class="kpi-label">Overdue</span><span class="kpi-value tone-unpaid">' in figures
-    assert '<span class="kpi-note">1 charge past due</span>' in figures
-    assert '<span class="kpi-note">1 open charge</span>' in figures
+    # PLAN-012f D7: Unpaid balances (red), with its stores and those overdue.
+    assert (
+        '<span class="kpi-label">Unpaid balances</span><span class="kpi-value tone-unpaid">'
+    ) in figures
+    assert '<span class="kpi-note">1 store · 1 overdue</span>' in figures
     assert '<a class="kpi-link" id="figure-outstanding" href="/arrears/">' in figures
 
 

@@ -293,13 +293,12 @@ def test_the_dashboard_shows_the_owners_two_broken_promises(today: date, role: R
     client, _ = client_for(role)
     page = client.get("/").content.decode()
     assert 'id="attention-none"' not in page
-    first = page.index(
-        "Promise to pay $1,500.00 by 2026-10-01: Sena on store S1: owes $0.00, not kept"
-    )
-    fifth = page.index(
-        "Promise to pay $1,500.00 by 2026-10-05: Sena on store S5: owes $0.00, not kept"
-    )
+    # PLAN-012f D7: the why badge (the text before its first ": "), then the rest, linked.
+    first = page.index("</span> Promise to pay $1,500.00 by 2026-10-01</span>")
+    fifth = page.index("</span> Promise to pay $1,500.00 by 2026-10-05</span>")
     assert first < fifth
+    assert page.index(">Sena on store S1: owes $0.00, not kept</a>") < fifth
+    assert ">Sena on store S5: owes $0.00, not kept</a>" in page
     assert "by 2026-10-07" not in page
     assert page.count(f'href="/operators/{operator.pk}/#contacts"') == 2
 

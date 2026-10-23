@@ -145,6 +145,42 @@ def test_the_page_looks_as_its_baseline(
         pytest.fail(reason)
 
 
+# --- The report shots (PLAN-012f D12): beside the references, not baselines ------------------
+
+REPORT_VIEWPORTS: dict[int, ViewportSize] = {**VIEWPORTS, 1440: {"width": 1440, "height": 900}}
+#: (page, width) → the reference file name under docs/design/.
+REPORT_SHOTS: dict[tuple[str, int], str] = {
+    ("dashboard", 1440): "dashboard-laptop",
+    ("store-charges", 1440): "store-workspace-laptop",
+    ("grid", 1440): "monthly-rent-overview-laptop",
+    ("store-charges", 390): "store-workspace-phone",
+}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(("page_name", "width"), sorted(REPORT_SHOTS))
+def test_the_report_shot_is_written_when_asked(
+    page_name: str,
+    width: int,
+    visual_site: Site,
+    visual_pages: Callable[[str], Page],
+    request: pytest.FixtureRequest,
+) -> None:
+    """With ``--report-dir``, the page at the reference's width goes into that folder as
+    ``<reference>-built.png`` (the owner compares it with ``docs/design/<reference>.png``)."""
+    folder = request.config.getoption("--report-dir")
+    if not folder:
+        pytest.skip("report shots are written only with --report-dir")
+    page = visual_pages("admin" if page_name in AS_ADMIN else "billing")
+    page.set_viewport_size(REPORT_VIEWPORTS[width])
+    open_still(page, visual_site.url + PAGES[page_name](visual_site))
+    shot = page.screenshot(full_page=True, animations="disabled", caret="hide")
+    target = Path(folder) / f"{REPORT_SHOTS[(page_name, width)]}-built.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(shot)
+    assert target.stat().st_size > 10_000
+
+
 # --- The comparison itself (no browser) ----------------------------------------------------
 
 

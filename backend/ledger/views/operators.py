@@ -64,7 +64,7 @@ from ledger.services import (
 )
 from ledger.services.csv_export import CsvWriter
 from ledger.validators import contains_card_number
-from ledger.views import contact_log
+from ledger.views import contact_log, workspace_cards
 from ledger.views.jobs import busy, job_context, submit
 from payments import operator_sync
 from payments.models import JobKind
@@ -313,11 +313,14 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
     )
     selected = space.space.store if space.space is not None else None
     tab_context: dict[str, Any] = {}
+    if selected is not None:
+        # PLAN-012f D8: the selected store's side cards (STORE COST, DOCUMENTS).
+        tab_context.update(workspace_cards.side_cards(request, selected, today))
     if tab == workspace.TAB_DOCUMENTS and selected is not None:
         # Imported here: ledger.views.documents imports this module's helpers.
         from ledger.views import documents
 
-        tab_context = documents.section_context(request, selected)
+        tab_context.update(documents.section_context(request, selected))
     active = operator.archived_at is None
     billing = meets(role, Role.BILLING)
     failed = operator.sync_status == SyncStatus.FAILED

@@ -6,39 +6,43 @@
   /* PLAN-011b D2: a horizontal scrollbar that is always there (scroll, not auto; styled so
      WebKit's overlay scrollbars stay visible), a mirrored one above the table when it is
      wider than its region (sized by the script below), the store column and the header row
-     fixed, 220 px for the store column and 80 px per month (12 months: 1,180 px). Beside the
-     232 px sidebar (PLAN-012f D3) the region is about 984 px wide at 1,280 px, so the later
-     months are reached by scrolling the region, never the page. The phone narrows the store
-     column in app.css and keeps the sideways scroll. */
-  .grid-scroll{overflow-x:scroll;overflow-y:auto;scrollbar-gutter:stable;max-height:75vh;border:1px solid var(--border);scrollbar-width:auto;scrollbar-color:var(--input-border) var(--neutral-bg);-webkit-overflow-scrolling:touch;}
-  .grid-scroll-top{overflow-x:scroll;overflow-y:hidden;height:14px;border:1px solid var(--border);border-bottom:0;scrollbar-width:auto;scrollbar-color:var(--input-border) var(--neutral-bg);}
+     fixed, 220 px for the store column and 116 px per month so that a cell block's two lines
+     fit without wrapping (PLAN-012f D9; 12 months: 1,612 px). The region fills the grid card
+     (its border is the card's): about 982 px wide beside the 232 px sidebar at 1,280 px, so
+     the later months are reached by scrolling the region, never the page. The phone narrows
+     the store column in app.css and keeps the sideways scroll. */
+  .grid-scroll{overflow-x:scroll;overflow-y:auto;scrollbar-gutter:stable;max-height:75vh;border:0;scrollbar-width:auto;scrollbar-color:var(--input-border) var(--neutral-bg);-webkit-overflow-scrolling:touch;}
+  .grid-scroll-top{overflow-x:scroll;overflow-y:hidden;height:14px;border:0;border-bottom:1px solid var(--border-soft);scrollbar-width:auto;scrollbar-color:var(--input-border) var(--neutral-bg);}
   .grid-scroll-top[hidden]{display:none;}
   .grid-scroll-top>div{height:1px;}
   .grid-scroll::-webkit-scrollbar,.grid-scroll-top::-webkit-scrollbar{-webkit-appearance:none;height:12px;width:12px;}
   .grid-scroll::-webkit-scrollbar-track,.grid-scroll-top::-webkit-scrollbar-track{background:var(--neutral-bg);}
   .grid-scroll::-webkit-scrollbar-thumb,.grid-scroll-top::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:var(--radius-ctl);border:2px solid var(--neutral-bg);}
-  table.grid{border-collapse:separate;border-spacing:0;width:max-content;font-size:.85rem;}
-  table.grid th,table.grid td{white-space:nowrap;padding:.3rem .35rem;border-bottom:1px solid var(--border);border-right:1px solid var(--border);box-sizing:border-box;}
-  table.grid thead th{position:sticky;top:0;background:var(--surface);z-index:2;}
-  table.grid th.store-col{position:sticky;left:0;background:var(--surface);z-index:1;width:220px;min-width:220px;max-width:220px;white-space:normal;overflow-wrap:anywhere;}
+  table.grid{border-collapse:separate;border-spacing:0;width:max-content;font-size:var(--fs-base);}
+  table.grid th,table.grid td{white-space:nowrap;padding:8px 10px;border-bottom:1px solid var(--border-soft);box-sizing:border-box;}
+  table.grid thead th{position:sticky;top:0;background:var(--surface-2);color:var(--muted);font-size:var(--fs-sm);font-weight:600;z-index:2;border-bottom:1px solid var(--border);}
+  table.grid thead th.month-col{text-align:right;}
+  table.grid th.store-col{position:sticky;left:0;background:var(--surface);z-index:1;width:220px;min-width:220px;max-width:220px;white-space:normal;overflow-wrap:anywhere;text-align:left;border-right:1px solid var(--border);}
   table.grid thead th.store-col{z-index:3;}
-  table.grid .month-col,table.grid td{width:80px;min-width:80px;max-width:80px;}
-  /* A cell's text wraps inside its 80 px ("Partly paid $0.00 of $3,500.00"); a word that does not fit breaks. */
+  table.grid .month-col,table.grid td{width:116px;min-width:116px;max-width:116px;}
+  /* A cell's block keeps its two lines; a longer amount ("$1,200.00 of $3,500.00") wraps inside its 116 px. */
   table.grid td{white-space:normal;overflow-wrap:break-word;}
-  table.grid tfoot th,table.grid tfoot td{background:var(--surface-2);font-weight:600;}
-  table.grid td{padding:3px;}
+  table.grid td{padding:5px 3px;}
+  table.grid tfoot th,table.grid tfoot td{background:var(--surface-2);font-weight:600;border-top:2px solid var(--border);border-bottom:0;}
+  table.grid tfoot td{text-align:right;}
+  table.grid thead th.store-col,table.grid tfoot th.store-col{background:var(--surface-2);}
   table.grid td a:focus{outline:2px solid var(--link);outline-offset:-2px;}
   /* The cells' blocks, their colours and the current month's tint are the grid cell block
      component of app.css (PLAN-012f D6). */
-  .legend{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);}
+  .legend{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin:0 0 var(--space-3);}
 </style>{% endblock %}
-{% block header %}<div class="page-header"><h1>Monthly rent overview</h1></div>{% endblock %}
-{% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
+{% block header %}<div class="page-header"><h1>Monthly rent overview</h1><div class="page-actions">{% include "finance/_header_search.html" %}<a class="btn" id="export-csv" href="{% url 'ledger:grid:export' %}?{{ export_query }}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
   {% comment %}PLAN-012d D16: the words filter, its own box; it keeps the range and the other filters, and the
   filters' form below keeps it (hidden).{% endcomment %}
+  <section class="card filter-card" id="grid-filter-card" aria-label="Filters">
   <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-search" class="actions" role="search">
-    <input type="search" name="q" id="grid-q" value="{{ query.q }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Filter stores" style="max-width:24rem;">
+    <input type="search" name="q" id="grid-q" value="{{ query.q }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Filter stores">
     {% for name, value in query.as_query.items %}{% if name != "q" %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
     <button class="btn" type="submit">Filter</button>
   </form>
@@ -46,40 +50,40 @@
   <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-filters" role="search">
     {% if query.q %}<input type="hidden" name="q" value="{{ query.q }}">{% endif %}
     <div class="actions">
-      <label for="from" style="margin:0;">From</label>
-      {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}
-      <label for="to" style="margin:0;">To</label>
-      {% include "ledger/_month_select.html" with name="to" months=picker_months selected=query.to_month %}
-      <label for="operator" style="margin:0;">Operator</label>
+      <span class="filter-field"><label for="from" style="margin:0;">From</label>
+      {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}</span>
+      <span class="filter-field"><label for="to" style="margin:0;">To</label>
+      {% include "ledger/_month_select.html" with name="to" months=picker_months selected=query.to_month %}</span>
+      <span class="filter-field"><label for="operator" style="margin:0;">Operator</label>
       <select name="operator" id="operator">
         <option value="">All</option>
         {% for operator in operators %}<option value="{{ operator.pk }}"{% if operator.pk == query.operator %} selected{% endif %}>{{ operator.display_name }}</option>{% endfor %}
-      </select>
-      <label for="state" style="margin:0;">State</label>
-      <input type="text" name="state" id="state" value="{{ query.state }}" maxlength="50" style="width:5rem;">
-      <label for="channel" style="margin:0;">Channel</label>
+      </select></span>
+      <span class="filter-field"><label for="state" style="margin:0;">State</label>
+      <input type="text" name="state" id="state" value="{{ query.state }}" maxlength="50" style="width:5rem;"></span>
+      <span class="filter-field"><label for="channel" style="margin:0;">Channel</label>
       <select name="channel" id="channel">
         <option value="">All</option>
         {% for value, label in channels %}<option value="{{ value }}"{% if value == query.channel %} selected{% endif %}>{{ label }}</option>{% endfor %}
-      </select>
-      <label for="status" style="margin:0;">Status</label>
+      </select></span>
+      <span class="filter-field"><label for="status" style="margin:0;">Status</label>
       <select name="status" id="status">
         <option value="">All</option>
         {% for value, label in statuses %}<option value="{{ value }}"{% if value == query.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
-      <button class="btn" type="submit">Show</button>
-      <a class="btn" id="export-csv" href="{% url 'ledger:grid:export' %}?{{ export_query }}">Download spreadsheet</a>
+      <button class="btn" type="submit">Show</button></span>
     </div>
   </form>
+  </section>
   {% if query.messages %}
     <ul class="messages" id="grid-messages">{% for text in query.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}
-  <p class="legend muted">{% for value, label in statuses %}{% if value == "not_due" %}<span class="cell-not-due">{{ label }}</span>{% else %}{% status_badge label value %}{% endif %}{% endfor %} <span>{{ note_marker }} has a note</span> Amounts in US dollars. A cell sums the store's rent charges of the month.</p>
+  <p class="legend muted">{% for value, label in statuses %}{% if value == "not_due" %}<span class="cell-not-due">{{ label }}</span>{% else %}{% status_badge label value %}{% endif %}{% endfor %} <span>{{ note_marker }} has a note</span> {% if not too_slow %}<span id="grid-count">{{ grid.rows|length }} store{{ grid.rows|length|pluralize }}.</span> {% endif %}Amounts in US dollars. A cell sums the store's rent charges of the month.</p>
 
   {% if too_slow %}
     <p class="warning" id="grid-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p id="grid-count">{{ grid.rows|length }} store{{ grid.rows|length|pluralize }}.</p>
+  <section class="card grid-card" id="grid-card" aria-label="Month grid">
   <div class="grid-scroll-top" id="grid-scroll-top" aria-hidden="true" hidden><div></div></div>
   <div class="grid-scroll" tabindex="0" id="grid-scroll" aria-label="Month grid, scrolls both ways">
     <table class="grid" id="grid">
@@ -102,12 +106,13 @@
       </tbody>
       <tfoot>
         <tr class="totals">
-          <th scope="row" class="store-col">Collected</th>
-          {% for column in grid.columns %}<td class="column-total{% if column.month == this_month %} month-current{% endif %}" data-month="{{ column.month|date:'Y-m' }}">{{ column.collected|money }}<br><span class="muted">{{ column.counts.paid|default:0 }} paid · {{ column.counts.unpaid|default:0 }} unpaid · {{ column.counts.pending|default:0 }} pending</span></td>{% endfor %}
+          <th scope="row" class="store-col">Collected<span class="cell-subline">paid · unpaid · pending</span></th>
+          {% for column in grid.columns %}<td class="column-total{% if column.month == this_month %} month-current{% endif %}" data-month="{{ column.month|date:'Y-m' }}">{{ column.collected|money }}<span class="cell-subline column-counts">{{ column.counts.paid|default:0 }} · {{ column.counts.unpaid|default:0 }} · {{ column.counts.pending|default:0 }}</span></td>{% endfor %}
         </tr>
       </tfoot>
     </table>
   </div>
+  </section>
   {% endif %}
 {% endblock %}
 {% block scripts %}

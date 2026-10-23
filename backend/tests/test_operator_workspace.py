@@ -305,11 +305,17 @@ def test_send_without_a_store_follows_a_local_next_only(monkeypatch: pytest.Monk
 # --- The operator-level items and the roles -----------------------------------------------
 
 
-def test_the_operator_level_items_stay_above_the_tabs_and_the_old_lists_are_gone() -> None:
+def test_the_operator_level_items_follow_the_open_tab_and_the_old_lists_are_gone() -> None:
+    # PLAN-012f D8 (the store page's layout): the header (New invoice, the store selector),
+    # the open tab in the two-thirds column, then the operator-level items as cards in that
+    # column, before the side column (the selected store's bar and cards).
     operator, first, _ = two_stores()
     Operator.objects.filter(pk=operator.pk).update(notes="Prefers calls after noon")
     html = page(client_for(Role.BILLING)[0], operator_page(operator))
-    workspace_at = html.index('id="workspace"')
+    workspace_at = html.index('<h2 id="workspace"')
+    side_at = html.index('<aside class="workspace-side"')
+    assert html.index('id="new-invoice"') < html.index('id="store-selector"') < workspace_at
+    assert workspace_at < html.index('id="tab-charges"') < html.index('id="sms-phone"')
     for marker in (
         'id="sms-phone"',
         'id="sms-consent"',
@@ -320,9 +326,9 @@ def test_the_operator_level_items_stay_above_the_tabs_and_the_old_lists_are_gone
         'id="contacts"',
         'id="add-contact"',
         "Prefers calls after noon",
-        'id="new-invoice"',
     ):
-        assert marker in html and html.index(marker) < workspace_at, marker
+        assert marker in html and workspace_at < html.index(marker) < side_at, marker
+    assert side_at < html.index('id="action-bar"') < html.index('id="workspace-header"')
     for gone in ('id="invoice-drafts-table"', 'id="one-off-charges"', 'id="outstanding"'):
         assert gone not in html, gone
     # The bar's Create invoice has its own id beside the page's New invoice.
@@ -353,7 +359,8 @@ def test_a_viewer_sees_no_bar_and_no_history_and_billing_no_admin_actions() -> N
 
 
 def operator_bar(html: str) -> str:
-    found = re.search(r'<div class="actions" id="operator-actions">.*?\n  </div>', html, re.S)
+    # PLAN-012f D8: the operator's actions are the page header's.
+    found = re.search(r'<div class="page-actions" id="operator-actions">.*?\n  </div>', html, re.S)
     assert found is not None
     return found.group(0)
 

@@ -161,7 +161,8 @@ def test_the_grid_cells_and_the_column_totals_carry_the_dollar_and_the_separator
     assert '<span class="cell-amount">$2,000.00</span>' in html
     assert '<span class="cell-amount">$1,200.00 of $3,500.00</span>' in html
     assert "</span> Partly paid</span>" in html
-    assert "$2,000.00<br>" in html  # the September column's collected total
+    # The September column's collected total over its counts (PLAN-012f D9).
+    assert '$2,000.00<span class="cell-subline column-counts">' in html
     assert "paid 2,000.00" not in html and "partial 1,200.00" not in html
     assert grid.CELL_STATUSES[4] == ("partial", "Partly paid")
     assert grid.CELL_STATUSES[6] == ("not_due", "Not yet due")
@@ -174,7 +175,8 @@ def test_the_dashboard_figures_are_formatted() -> None:
     viewer, _ = client_for(Role.VIEWER)
     figures = page(viewer, "/").split('id="figures-card"')[1].split("</section>")[0]
     # PLAN-012f D6: the figures are KPI cards ({% kpi %}).
-    assert '<span class="kpi-value">$12,345.60</span>' in figures
+    # PLAN-012f D7: Unpaid balances in the unpaid red.
+    assert '<span class="kpi-value tone-unpaid">$12,345.60</span>' in figures
     assert '<span class="kpi-value">$0.00</span>' in figures  # paid this month
 
 
@@ -196,7 +198,7 @@ def test_the_promise_cells_and_the_closed_sentence_are_formatted() -> None:
     header = page(client, f"/stores/{store.pk}/").split('id="workspace-header"')[1]
     header = header.split("</section>")[0]
     assert "$12,500.00 by 2026-10-20" in header  # the open promise
-    assert "rent $3,500.00 a month" in header
+    assert '<dd id="header-rent"><strong>$3,500.00</strong> / month</dd>' in header  # 12f D8
     assert closer.pk and open_one.pk
 
 

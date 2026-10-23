@@ -22,6 +22,7 @@ badge status of its status (D7).
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Mapping
 from typing import Any
@@ -77,6 +78,27 @@ def address_line(store: Store) -> str:
     )
     region = " ".join(part for part in (state, postal) if part)
     return ", ".join(part for part in (street, city, region) if part) or NO_ADDRESS
+
+
+def title(store: Store) -> str:
+    """The store's title (PLAN-012e-4 D4, the grid's store cell; the store page's heading,
+    PLAN-012f D8): "#1991 Istanbul". A name that starts with the number (then a space or a
+    hyphen, or nothing) shows the rest once ("2922 TUCSON" is "#2922 TUCSON"); a name that is
+    only the number (the sheet's imported stores) shows the city after it, if any ("#2475
+    CONYERS", else "#2475"); a store without a number shows its name only."""
+    number = store.store_number
+    name = store.external_label
+    if number is None:
+        return name
+    rest = re.match(rf"{number}(?!\d)[ -]?(.*)\Z", name, re.S)
+    if rest is not None:
+        name = rest.group(1).strip() or store.city.strip()
+    return f"#{number} {name}" if name else f"#{number}"
+
+
+def crumb(store: Store) -> str:
+    """The store in a breadcrumb (PLAN-012f D8): "#1991", or its name without a number."""
+    return f"#{store.store_number}" if store.store_number is not None else store.external_label
 
 
 def status_badge(store: Store) -> str:

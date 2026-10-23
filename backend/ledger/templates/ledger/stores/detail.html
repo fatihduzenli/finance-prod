@@ -1,11 +1,23 @@
 {% extends "finance/base.html" %}
-{% load components money %}
+{% load components icons money %}
 {% load responsive %}
 {% load static %}
 {% block title %}Store {{ store.external_label }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Store {{ store.external_label }}{% if store.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% endblock %}
+{% comment %}The store workspace (docs/qa/PLAN-012d D1 to D3; the approved design's layout, docs/qa/PLAN-012f-approved-design.md D8 and store-workspace-laptop.png / -phone.png). The header: the breadcrumb, the title with the status badge, one line (the address and the open date), the phone's line (the operator and the city), the action bar, the phone's summary strip (Open balance, Rent, Autopay) and the tabs, Charges with its count of open charges. The body: the open tab in the two-thirds column (the Charges tab with the contact log under it), then the store's details, its cost history and its leases; the side cards in the one-third column (ledger/stores/_header.html). On a phone the columns stack.{% endcomment %}
+{% block header %}<div class="page-header workspace-head">
+  <div class="page-title-block">
+    <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:stores:list' %}">Stores</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:stores:detail' pk=store.pk %}" aria-current="page">{{ store_crumb }}</a></nav>
+    <h1 class="store-title" id="store-title">{{ store_title }} {% status_badge store.get_status_display status_value %}{% if store.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>
+    {% if store_line %}<p class="store-line" id="store-line">{{ store_line }}</p>{% endif %}
+    {% if phone_line %}<p class="store-line-phone" id="store-line-phone">{{ phone_line }}</p>{% endif %}
+  </div>
+  {% if space.actions %}{% include "ledger/stores/_action_bar.html" %}{% endif %}
+</div>
+{% include "ledger/stores/_summary_strip.html" %}
+<nav aria-label="Store tabs" class="tabs store-tabs" id="store-tabs">
+  {% for name, label in space.tabs %}<a class="tab" id="tab-link-{{ name }}" href="?tab={{ name }}#tab-{{ name }}"{% if name == space.tab %} aria-current="page"{% endif %}>{{ label }}{% if name == "charges" and header.open_count %} <span class="count-pill" id="open-charges-count">{{ header.open_count }}</span>{% endif %}</a>{% endfor %}
+</nav>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:stores:list' %}">&larr; Stores</a></p>
   {% if end_in_progress %}
     <ul class="messages" id="lease-end-in-progress">
       <li class="warning" role="status">{% if end_in_progress_transfer %}A transfer is in progress (statement step).{% else %}A lease end is in progress (statement step).{% endif %}{% if can_edit %}
@@ -15,14 +27,9 @@
     </ul>
   {% endif %}
 
-  {% include "ledger/stores/_header.html" %}
-
-  {% if space.actions %}{% include "ledger/stores/_action_bar.html" %}{% endif %}
-
-  <nav aria-label="Store tabs" class="tabs store-tabs" id="store-tabs">
-    {% for name, label in space.tabs %}<a class="tab" id="tab-link-{{ name }}" href="?tab={{ name }}#tab-{{ name }}"{% if name == space.tab %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
-  </nav>
-  <section id="tab-{{ space.tab }}" class="store-tab">
+  <div class="workspace-grid">
+  <div class="workspace-main">
+  <section id="tab-{{ space.tab }}" class="store-tab card">
     {% if space.tab == "charges" %}{% include "ledger/stores/_tab_charges.html" %}
     {% elif space.tab == "invoices" %}{% include "ledger/stores/_tab_invoices.html" %}
     {% elif space.tab == "payments" %}{% include "ledger/stores/_tab_payments.html" %}
@@ -32,9 +39,15 @@
     {% elif space.tab == "history" %}{% include "ledger/stores/_tab_history.html" %}{% endif %}
   </section>
 
+  {% if space.tab == "charges" %}
+  <section class="card" id="contact-card" aria-labelledby="contact-card-heading">
+    <div class="card-header"><h2 id="contact-card-heading">Contact log</h2><span class="card-link">{% if contact_add_url %}<a class="btn btn-sm" id="card-add-contact" href="{{ contact_add_url }}">{% icon "plus" 14 %}Add entry</a>{% endif %} <a class="btn btn-sm" href="?tab=contacts#tab-contacts" id="card-all-contacts">All entries</a></span></div>
+    {% include "ledger/contacts/_log.html" with rows=contact_rows|slice:":3" empty_next_url=contact_add_url %}
+  </section>
+  {% endif %}
+
   <section class="card" id="store-details-card" aria-labelledby="store-details">
-    <h2 id="store-details">Store details</h2>
-    {% if can_edit %}<div class="actions"><a class="btn" href="{% url 'ledger:stores:edit' pk=store.pk %}">Edit</a></div>{% endif %}
+    <div class="card-header"><h2 id="store-details">Store details</h2>{% if can_edit %}<a class="btn btn-sm card-link" href="{% url 'ledger:stores:edit' pk=store.pk %}">Edit</a>{% endif %}</div>
     <dl>
       <dt>Address</dt><dd id="store-address">{{ address_line }}</dd>
       <dt>Store number</dt><dd>{{ store.store_number|default_if_none:"—" }}</dd>
@@ -44,57 +57,8 @@
     </dl>
   </section>
 
-  <section class="card" id="store-cost" aria-labelledby="store-cost-heading">
-    <h2 id="store-cost-heading">Store cost</h2>
-    {% if can_set_cost %}<div class="actions"><a class="btn" href="{% url 'ledger:stores:set_cost' pk=store.pk %}" id="change-cost">Change</a></div>{% endif %}
-    <dl>
-      <dt>Landlord rent</dt><dd id="landlord-rent">{% if cost %}{{ cost.landlord_rent|money }} a month{% if cost.landlord_rent == 0 %} (no cost){% endif %} from {{ cost.effective_from|date:"Y-m-d" }}{% else %}unknown{% endif %}</dd>
-      <dt>Landlord lease end</dt><dd id="landlord-lease-end">{% if cost %}{{ cost.landlord_lease_end|date:"Y-m-d"|default:"—" }}{% else %}unknown{% endif %}</dd>
-      {% if cost and cost.other_monthly_cost is not None %}<dt>Other monthly cost</dt><dd id="other-cost">{{ cost.other_monthly_cost|money }}{% if cost.other_cost_description %} ({{ cost.other_cost_description }}){% endif %}</dd>{% endif %}
-    </dl>
-    <p class="help">Learn more: <a href="{% url 'finance:help_topic' slug='store-costs' %}">Store costs and margin</a></p>
-  </section>
-
-  {% if cost_history or can_correct_cost and open_cost %}
-  <details id="cost-history">
-    <summary>History</summary>
-  {% if can_correct_cost and open_cost %}
-    <form method="post" action="{% url 'ledger:stores:close_cost' pk=store.pk %}" id="close-cost-form" class="js-single-submit" autocomplete="off">
-      {% csrf_token %}
-      <p><strong>Close the current row</strong> ({{ open_cost.landlord_rent|money }} a month from {{ open_cost.effective_from|date:"Y-m-d" }})</p>
-      <label for="{{ close_form.effective_to.id_for_label }}">{{ close_form.effective_to.label }} *</label>
-      {{ close_form.effective_to }}
-      <label for="{{ close_form.change_note.id_for_label }}">{{ close_form.change_note.label }} *</label>
-      {{ close_form.change_note }}
-      <p class="actions"><button class="btn" type="submit" id="close-cost">Close</button></p>
-    </form>
-  {% endif %}
-  {% if cost_history %}
-    {% responsive_table %}
-    <table id="cost-history-table">
-      <thead><tr><th class="money">Landlord rent</th><th class="money">Other cost</th><th>From</th><th>To</th><th>Lease end</th><th>Source</th><th>Notes</th><th></th></tr></thead>
-      <tbody>
-        {% for entry in cost_history %}{% with row=entry.row %}
-          <tr id="cost-row-{{ row.pk }}"{% if row.superseded_at %} class="cost-superseded"{% endif %}>
-            {% if row.superseded_at %}
-              <td class="money"><s>{{ row.landlord_rent|money }}</s></td><td class="money"><s>{% if row.other_monthly_cost is not None %}{{ row.other_monthly_cost|money }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</s></td><td><s>{{ row.effective_from|date:"Y-m-d" }}</s></td><td><s>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</s></td><td><s>{{ row.landlord_lease_end|date:"Y-m-d"|default:"—" }}</s></td><td><s>{{ row.get_source_display }}</s></td>
-              <td style="white-space:pre-wrap;"><s>{{ row.notes }}</s>{% if row.notes %}<br>{% endif %}<span class="badge">Superseded</span> {{ row.superseded_at|date:"Y-m-d H:i" }} by {{ entry.superseded_by_user|default:"—" }}: {{ row.change_note }}</td>
-              <td></td>
-            {% else %}
-              <td class="money">{{ row.landlord_rent|money }}</td><td class="money">{% if row.other_monthly_cost is not None %}{{ row.other_monthly_cost|money }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.landlord_lease_end|date:"Y-m-d"|default:"—" }}</td><td>{{ row.get_source_display }}</td>
-              <td style="white-space:pre-wrap;">{{ row.notes }}{% if row.change_note %}{% if row.notes %}<br>{% endif %}<span class="badge">{% if entry.closed_by_user %}Closed{% else %}Correction{% endif %}</span>{% if entry.closed_by_user %} by {{ entry.closed_by_user }}{% endif %}: {{ row.change_note }}{% endif %}</td>
-              <td>{% if can_correct_cost %}<a class="btn btn-sm cost-correct" href="{% url 'ledger:stores:correct_cost' pk=store.pk row=row.pk %}">Correct</a>{% endif %}</td>
-            {% endif %}
-          </tr>
-        {% endwith %}{% endfor %}
-      </tbody>
-    </table>
-    {% endresponsive_table %}
-  {% endif %}
-  </details>
-  {% endif %}
-
-  <h2>Leases</h2>
+  <section class="card" id="leases-card" aria-labelledby="leases-heading">
+  <h2 id="leases-heading">Leases</h2>
   {% responsive_table %}
   <table id="store-leases">
     <thead><tr><th>Lease</th><th>Operator</th><th>Start date</th><th>Debit days</th><th>Status</th></tr></thead>
@@ -113,6 +77,11 @@
     </tbody>
   </table>
   {% endresponsive_table %}
-
+  </section>
+  </div>
+  <aside class="workspace-side" aria-label="Lease, next, store cost and documents">
+    {% include "ledger/stores/_header.html" %}
+  </aside>
+  </div>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if space.actions %}{% include "ledger/_menu_script.html" %}{% endif %}{% if space.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

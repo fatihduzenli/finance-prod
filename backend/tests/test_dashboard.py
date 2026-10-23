@@ -201,7 +201,9 @@ def test_the_page_shows_every_figure_with_its_link(today: date) -> None:
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
     assert "$10,890.00" in page  # outstanding
-    assert "$7,190.00" in page  # overdue
+    # PLAN-012f D7: the overdue charges are counted by store under Unpaid balances (2204 has
+    # overdue charges; 3409's are due today or later).
+    assert '<span class="kpi-note">2 stores · 1 overdue</span>' in page
     assert "$4,100.00" in page  # paid this month
     assert 'href="/arrears/"' in page
     assert "/payments/?date_from=2026-10-01&amp;date_to=2026-10-31&amp;status=settled" in page
@@ -243,7 +245,8 @@ def test_failed_attempts_list_attempted_invoices_with_operator_and_store(today: 
     assert "INV-2026-0007" in page and "Delta Retail" in page and "1444 JACKSONVILLE" in page
     assert "$3,740.00" in page
     assert f'href="/charges/{charge.pk}/"' in page
-    assert page.index("Failed payment attempts") < page.index("Total outstanding")
+    # PLAN-012f D7: the failed attempts are a card below the figures.
+    assert page.index("Unpaid balances") < page.index("Failed payment attempts")
 
 
 def test_the_run_summary_uses_the_run_and_returns_functions(today: date) -> None:

@@ -151,9 +151,10 @@ def test_the_sidebar_the_content_column_and_the_grid_on_a_laptop(
     region = page.locator("#grid-scroll")
     months = page.locator("thead th.month-col")
     assert months.count() == 12
-    # The region is the content column less its 32 px paddings (and its 1 px borders).
+    # The region is the content column less its 32 px paddings and the grid card's 1 px
+    # borders (PLAN-012f D9: the region fills the grid card, whose border it is).
     width = region.evaluate("el => el.getBoundingClientRect().width")
-    assert width == pytest.approx(1048 - 64, abs=1)
+    assert width == pytest.approx(1048 - 64 - 2, abs=1)
     assert page.evaluate("document.documentElement.scrollWidth") <= 1280  # no page scroll
     store_cell = page.locator("tr.grid-row th.store-col").first
     before = store_cell.bounding_box()

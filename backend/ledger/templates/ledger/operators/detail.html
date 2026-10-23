@@ -1,15 +1,15 @@
 {% extends "finance/base.html" %}
-{% load components responsive %}
+{% load components icons responsive %}
 {% load static %}
 {% load tz %}
 {% block title %}{{ operator.display_name }}{% endblock %}
-{% block header %}<div class="page-header"><h1>{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div>{% endblock %}
-{% block content %}
-  <p><a href="{% url 'ledger:operators:list' %}">&larr; Operators</a></p>
-  {% include "ledger/_attention.html" with banners=True %}
-
+{% block header %}<div class="page-header workspace-head">
+  <div class="page-title-block">
+    <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}" aria-current="page">{{ operator.display_name }}</a></nav>
+    <h1 class="store-title">{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1>
+  </div>
   {% comment %}PLAN-012e-2 D6: Statement, New invoice (primary), Edit, Connect when it applies; Archive in the More menu (ledger/_menu_script.html).{% endcomment %}
-  <div class="actions" id="operator-actions">
+  <div class="page-actions" id="operator-actions">
     <a class="btn" id="statement" href="{% url 'ledger:operators:statement' pk=operator.pk %}">Statement</a>
     {% if can_new_invoice %}<a class="btn btn-primary" href="{% url 'ledger:invoices:new_operator' pk=operator.pk %}" id="new-invoice">New invoice</a>{% endif %}
     {% if can_edit %}<a class="btn" href="{% url 'ledger:operators:edit' pk=operator.pk %}">Edit</a>{% endif %}
@@ -22,7 +22,39 @@
       </ul></details>
     {% endif %}
   </div>
+</div>
+{% if space %}<form method="get" action="{% url 'ledger:operators:detail' pk=operator.pk %}" id="store-selector" class="store-selector">
+  <label for="store-select">Store</label>
+  <select name="store" id="store-select">
+    {% for item in ows.stores %}<option value="{{ item.pk }}"{% if item.pk == store.pk %} selected{% endif %}>{{ item.external_label }}</option>{% endfor %}
+  </select>
+  <input type="hidden" name="tab" value="{{ ows.tab }}">
+  <button class="btn btn-sm" type="submit">Show</button>
+  <a class="btn btn-sm" id="selected-store-page" href="{% url 'ledger:stores:detail' pk=store.pk %}">Store page</a>
+</form>
+{% include "ledger/stores/_summary_strip.html" %}{% endif %}
+<nav aria-label="Operator tabs" class="tabs store-tabs" id="store-tabs">
+  {% for name, label in ows.tabs %}{% if name == "contacts" %}<a class="tab" id="tab-link-contacts" href="#contacts">{{ label }}</a>{% else %}<a class="tab" id="tab-link-{{ name }}" href="?{{ keep_store }}tab={{ name }}#tab-{{ name }}"{% if name == ows.tab %} aria-current="page"{% endif %}>{{ label }}{% if name == "charges" and ows.open_count %} <span class="count-pill" id="open-charges-count">{{ ows.open_count }}</span>{% endif %}</a>{% endif %}{% endfor %}
+</nav>{% endblock %}
+{% block content %}
+  {% include "ledger/_attention.html" with banners=True %}
 
+  {% comment %}PLAN-012d D14, the approved design's layout (PLAN-012f D8): the open tab across the operator's stores in the two-thirds column, then the operator-level items as cards; the selected store's action bar and its side cards (on the operator's lease of it) in the one-third column.{% endcomment %}
+  <div class="workspace-grid">
+  <div class="workspace-main">
+  <h2 id="workspace" class="visually-hidden">Stores</h2>
+  {% if not space %}<p class="muted empty" id="no-stores">No store has a lease of this operator.</p>{% endif %}
+  <section id="tab-{{ ows.tab }}" class="store-tab card">
+    {% if ows.tab == "charges" %}{% include "ledger/stores/_tab_charges.html" %}
+    {% elif ows.tab == "invoices" %}{% include "ledger/stores/_tab_invoices.html" %}
+    {% elif ows.tab == "payments" %}{% include "ledger/stores/_tab_payments.html" %}
+    {% elif ows.tab == "schedules" %}{% include "ledger/stores/_tab_schedules.html" %}
+    {% elif ows.tab == "documents" %}{% if store %}{% include "ledger/documents/_section.html" %}{% else %}<p class="muted">No store.</p>{% endif %}
+    {% elif ows.tab == "contacts" %}<p class="muted">The operator's contact log, with the store of each entry, is <a href="#contacts">below</a>.</p>
+    {% elif ows.tab == "history" %}{% if store %}{% include "ledger/stores/_tab_history.html" %}{% else %}<p class="muted">No store.</p>{% endif %}{% endif %}
+  </section>
+
+  <section class="card" id="operator-contact-card">
   <h2>Contact</h2>
   <dl>
     <dt>Legal name</dt><dd>{{ operator.legal_name|default:"—" }}</dd>
@@ -36,6 +68,8 @@
     <dd>{% if operator.address_line1 %}{{ operator.address_line1 }}<br>{% endif %}{% if operator.address_line2 %}{{ operator.address_line2 }}<br>{% endif %}{{ operator.city }}{% if operator.city and operator.state %}, {% endif %}{{ operator.state }} {{ operator.postal_code }}{% if not operator.address_line1 and not operator.city %}—{% endif %}</dd>
   </dl>
 
+  </section>
+  <section class="card" id="operator-provider-card">
   <h2>{{ company.provider_name }}</h2>
   {% include "ledger/_job_status.html" %}
   <dl>
@@ -64,6 +98,8 @@
     <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
   {% endif %}
 
+  </section>
+  <section class="card" id="operator-collections-card">
   <h2 id="collections">Collection e-mails</h2>
   <p id="handled-personally">{% if operator.handled_personally %}<strong>Handled personally:</strong> the collection e-mails skip this operator.{% if operator.handled_personally_note %} <span style="white-space:pre-wrap;">{{ operator.handled_personally_note }}</span>{% endif %}{% else %}The collection e-mails go to this operator when a charge is overdue{% if not operator.email %} (none can be sent: no e-mail address){% endif %}.{% endif %}</p>
   {% if can_set_handled %}
@@ -85,6 +121,8 @@
   {% include "ledger/collections/_log.html" with log=collection_log show_charge=True %}
   {% if collection_log|length >= collection_log_limit %}<p>The {{ collection_log_limit }} latest are shown.</p>{% endif %}
 
+  </section>
+  <section class="card" id="operator-contacts-card">
   <h2 id="contacts">Contact log</h2>
   <p class="actions">
     {% if can_add_contact %}<a class="btn" id="add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Add entry</a>{% endif %}
@@ -95,6 +133,8 @@
   {% include "ledger/contacts/_log.html" with rows=contact_rows|slice:contact_limit empty_next_url=contact_add_next %}
   {% if contact_rows|length > contact_limit %}<p class="muted">The {{ contact_limit }} latest are shown; <a href="{% url 'ledger:operators:contacts' pk=operator.pk %}">see every entry</a>.</p>{% endif %}
 
+  </section>
+  <section class="card" id="operator-notes-card">
   <h2>Notes</h2>
   {% if operator.notes %}<p style="white-space:pre-wrap;">{{ operator.notes }}</p>{% endif %}
   {% for note in notes %}
@@ -102,40 +142,18 @@
   {% empty %}
     {% if not operator.notes %}<p class="muted">No notes.</p>{% endif %}
   {% endfor %}
-
-  {% comment %}PLAN-012d D14: the workspace of the operator's stores. The selected store's header card and action bar (on the operator's lease of it), then the open tab across the operator's stores.{% endcomment %}
-  <h2 id="workspace">Stores</h2>
-  {% if space %}
-    <form method="get" action="{% url 'ledger:operators:detail' pk=operator.pk %}" id="store-selector" class="actions">
-      <label for="store-select" style="margin:0;">Store</label>
-      <select name="store" id="store-select">
-        {% for item in ows.stores %}<option value="{{ item.pk }}"{% if item.pk == store.pk %} selected{% endif %}>{{ item.external_label }}</option>{% endfor %}
-      </select>
-      <input type="hidden" name="tab" value="{{ ows.tab }}">
-      <button class="btn" type="submit">Show</button>
-      <a class="btn" id="selected-store-page" href="{% url 'ledger:stores:detail' pk=store.pk %}">Store page</a>
-    </form>
-    {% include "ledger/stores/_header.html" %}
+  </section>
+  </div>
+  <aside class="workspace-side" aria-label="The selected store">
+    {% if space %}
     {% if space.actions %}
       {% include "ledger/stores/_action_bar.html" %}
     {% elif billing and not header.lease %}
       <p class="muted" id="no-operator-lease">Store {{ store.external_label }} has no current lease of this operator; its page has the store's actions.</p>
     {% endif %}
-  {% else %}
-    <p class="muted empty" id="no-stores">No store has a lease of this operator.</p>
-  {% endif %}
-
-  <nav aria-label="Operator tabs" class="tabs store-tabs" id="store-tabs">
-    {% for name, label in ows.tabs %}{% if name == "contacts" %}<a class="tab" id="tab-link-contacts" href="#contacts">{{ label }}</a>{% else %}<a class="tab" id="tab-link-{{ name }}" href="?{{ keep_store }}tab={{ name }}#tab-{{ name }}"{% if name == ows.tab %} aria-current="page"{% endif %}>{{ label }}</a>{% endif %}{% endfor %}
-  </nav>
-  <section id="tab-{{ ows.tab }}" class="store-tab">
-    {% if ows.tab == "charges" %}{% include "ledger/stores/_tab_charges.html" %}
-    {% elif ows.tab == "invoices" %}{% include "ledger/stores/_tab_invoices.html" %}
-    {% elif ows.tab == "payments" %}{% include "ledger/stores/_tab_payments.html" %}
-    {% elif ows.tab == "schedules" %}{% include "ledger/stores/_tab_schedules.html" %}
-    {% elif ows.tab == "documents" %}{% if store %}{% include "ledger/documents/_section.html" %}{% else %}<p class="muted">No store.</p>{% endif %}
-    {% elif ows.tab == "contacts" %}<p class="muted">The operator's contact log, with the store of each entry, is <a href="#contacts">above</a>.</p>
-    {% elif ows.tab == "history" %}{% if store %}{% include "ledger/stores/_tab_history.html" %}{% else %}<p class="muted">No store.</p>{% endif %}{% endif %}
-  </section>
+    {% include "ledger/stores/_header.html" %}
+    {% endif %}
+  </aside>
+  </div>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}{% if ows.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

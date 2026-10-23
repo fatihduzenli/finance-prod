@@ -17,7 +17,8 @@ pytestmark = pytest.mark.django_db
 
 APP_CSS = Path(__file__).resolve().parents[1] / "finance" / "static" / "finance" / "app.css"
 STORE_WIDTH = 220
-MONTH_WIDTH = 80
+#: PLAN-012f D9: 110 to 120 px, so that a cell block's two lines fit without wrapping.
+MONTH_WIDTH = 116
 
 
 def grid_page() -> str:
@@ -63,8 +64,9 @@ def test_the_store_column_and_header_are_fixed_with_the_planned_widths() -> None
     )
     # A cell's text and the column totals wrap instead of widening a month.
     assert "table.grid td{white-space:normal;overflow-wrap:break-word;}" in page
-    # Twelve months and the store column: 1,180 px, inside a 1,280 px laptop screen.
-    assert STORE_WIDTH + 12 * MONTH_WIDTH == 1180
+    # Twelve months and the store column: 1,612 px, reached by scrolling the grid's region
+    # (the owner's decision of 2026-10-22: the grid scrolls at 1,280 px).
+    assert STORE_WIDTH + 12 * MONTH_WIDTH == 1612
 
 
 def test_the_phone_keeps_the_fixed_column_narrower_and_the_sideways_scroll() -> None:

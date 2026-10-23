@@ -85,7 +85,7 @@ from ledger.services import (
 )
 from ledger.services import stores as service
 from ledger.services.csv_export import CsvWriter
-from ledger.views import contact_log, documents
+from ledger.views import contact_log, documents, workspace_cards
 from ledger.views.leases import _admin_only
 from ledger.views.operators import (
     PAGE_SIZE,
@@ -204,17 +204,18 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
             lease_end.draft_transfer(in_progress) if in_progress is not None else None
         ),
         "can_edit": admin,
-        "can_set_cost": meets(role, Role.BILLING),
         "address_line": service.address_line(store),
         "status_value": service.status_badge(store),
-        "cost": store_costs.current_cost(store, today),
         "cost_history": store_costs.history_entries(store),
         "can_correct_cost": admin,
         "open_cost": store_costs.open_cost(store),
         "close_form": StoreCostCloseForm(),
         "billing": meets(role, Role.BILLING),
+        # PLAN-012f D8: the header's lines and the side cards.
+        **workspace_cards.header_lines(store, space.header.operator),
+        **workspace_cards.side_cards(request, store, today),
     }
-    if tab == workspace.TAB_CONTACTS:
+    if tab in (workspace.TAB_CONTACTS, workspace.TAB_CHARGES):
         # PLAN-012 D3: the entries about a lease of this store, and Add entry.
         context.update(
             {

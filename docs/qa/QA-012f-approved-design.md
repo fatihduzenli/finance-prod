@@ -120,3 +120,58 @@ letter comes from the kind; the segmented filter keeps the tab's query; the grid
 the formatted amount and never a raw one.
 
 **Verdict (B):** PASS (no finding; three decisions deferred to Batch C where their elements appear).
+
+### Batch C — the dashboard, the store and operator workspaces, the monthly rent overview (D7–D9, D11)
+
+**Scope.** `ledger/services/dashboard.py` (new: the KPI notes, the pending debits with the
+five-business-day settle date, the month's collection percentage and segments on the rent
+charges, the coming-up items from the leases the attention list already reads, the last five
+settled payments), `ledger/views/dashboard.py`, `dashboard/home.html`, `_attention.html` (the
+item's store, operator, amount and why badge from rows already read), `ledger/services/workspace.py`
+(`Header.open_count`, `debit_day_text`, `deposit_text`, `next_rent`, `next_insurance`,
+`lease_since`), `ledger/views/workspace_cards.py` (new), `stores/detail.html`, `_header.html`
+(the side column: LEASE, NEXT, STORE COST, DOCUMENTS), `_summary_strip.html`, `_cost_history.html`,
+`_tab_charges.html` (the Charges card with the segmented filter, the title and subline, the
+totals row), `operators/detail.html` (the same layout with the store selector), `grid/page.html`
+(the header with Download spreadsheet, the filter card, the legend, the grid card with 116 px
+months and the Collected row with its counts), `ledger/services/stores.py` (`title`),
+`tokens.css` (`--progress-pending`, `--progress-partial`). Query budgets: the dashboard 46 → 49
+(one query each for the pending debits, the collection and the recent payments; the bound 25 +
+3 × due unchanged), the grid 19, the workspace ≤ 25 and constant. Tests: `tests/test_plan012f_pages.py`
+(19), twelve test files moved with the layouts, Fable's `tests/test_plan012f_c_adversarial.py`
+(7) and two earlier adversarial expectations scoped to the new cards.
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| 1 | MINOR | grid/page.html | The filter card split the Status label from its select when the row wrapped at 1,440 px | Resolved: each label and control wrap as one `.filter-field`; the Show button stays with the last pair; a markup test |
+| 2 | MINOR | dashboard | The attention rows and Recent payments named the store without its number while the store page and the grid read "#101 …" | Resolved: the same `stores.title` helper (one query for the attention stores, the dashboard at about 50 against its bound) |
+
+**Decisions taken (Fable) and for the owner.** The attention row's action button reads "Open"
+for every kind (the screenshot's "Add payment", "Kept", "New lease", "Debit again" would misname
+where the existing links lead; *for the owner*: keep "Open", or name the button by the item's
+kind where the link matches); a broken-promise row keeps its three existing actions; the pending
+cell keeps "Pending · from <date>" (copy) where the screenshot shows "· ACH"; "+ New invoice" on
+the dashboard leads to the stores list (no store-less builder exists); "Today HH:MM" in Recent
+payments comes from the payment row's last change on the settlement day (no settled-at
+timestamp exists); the collection percentage is on the month's rent charges, floored and capped
+at 100; the overdue sum and the not-sent count are no longer KPI figures (the arrears page and
+the not-sent card carry them). Checked by eye at 1,440 on Opus's shots: the store page and the
+dashboard read like the references; the grid's filter card split a label from its select (a
+MINOR, below).
+
+**Gate 1.** ruff, `ruff format --check` (559 files), mypy strict (454 files), `makemigrations
+--check`: all clean. **Gate 2.** sqlite 6,441 passed, 664 skipped (18:26); PostgreSQL "Migration
+tests" 34 passed (16:03), "Unit tests" 7,068 passed, 3 skipped (19:46, the query budgets among
+them); e2e 21 passed in each of four runs on PostgreSQL. Run on the final tree after the two
+MINORs (an earlier run was stopped). **Gate 3.** Diff read: the dashboard service (read
+queries, no write, the settle date by business days), the workspace fields, the templates, the
+grid page. **Gate 4.** Secret scans clean. Fable's cases: an empty dashboard renders every card
+with a sentence and no broken number for every role; more collected than billed never shows
+over 100 %; markup in a store, an operator and an address is escaped on the dashboard, the store
+page, the contacts tab, the operator page, the grid and the arrears page; a viewer sees the
+attention rows but no action button while billing sees one; a store without a number or an
+address keeps a sensible header; a viewer's dashboard carries no link to a form.
+
+**Verdict (C):** PASS (two MINOR resolved; one label question for the owner).

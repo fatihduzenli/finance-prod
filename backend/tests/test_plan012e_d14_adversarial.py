@@ -250,4 +250,9 @@ def test_the_lease_end_balance_stays_on_the_attention_list_until_paid(pinned: No
         today=TODAY,
     ).ok
     assert items() == []
-    assert "Lease-end balance" not in viewer.get("/").content.decode()
+    # PLAN-012f: the dashboard's Recent payments card may name the paid charge; the attention
+    # card must not. The item itself is gone (asserted above).
+    home = viewer.get("/").content.decode()
+    start = home.index('id="attention')
+    attention_card = home[start : home.index("</section>", start)]
+    assert "Lease-end balance" not in attention_card

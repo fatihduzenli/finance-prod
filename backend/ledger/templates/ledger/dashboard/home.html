@@ -1,17 +1,71 @@
 {% extends "finance/base.html" %}
-{% load components money responsive %}
+{% load components icons money responsive %}
 {% load tz %}
 {% block title %}Dashboard{% endblock %}
-{% comment %}The dashboard as cards (docs/qa/PLAN-012c-design-pass.md D6): the attention list
-(PLAN-011b D6) first, then today's run (the PLAN-012d line), the failed payment attempts, the
-figures as KPI cards ({% kpi %}, PLAN-012f D6), then the recent lists. The cards' styles are
-app.css's (.card, .kpi-row).{% endcomment %}
-{% block header %}<div class="page-header"><h1>Dashboard</h1></div>{% endblock %}
-{% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
+{% comment %}The dashboard (docs/qa/PLAN-012f-approved-design.md D7; docs/design/DESIGN-SPEC.md §4 and
+dashboard-laptop.png). The header: the title with the long date, the search box and "+ New
+invoice" (billing: the stores list, where a store's Create invoice opens the builder; no
+store-less builder route exists). Row 1: the four figures as KPI cards (ledger.views.dashboard
+._kpis). Row 2: what needs attention (PLAN-011b D6; ledger/_attention.html) over two thirds,
+beside the month's collection (ledger.services.dashboard.collection_progress) and what is coming
+up. Row 3: the recent payments. Then today's run, the failed payment attempts, the waived charges
+with a live invoice, the invoices not sent and the last nightly check, each a card.{% endcomment %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Dashboard</h1><span class="page-date" id="dashboard-date">{{ data.today|date:"l, F j, Y" }}</span></div><div class="page-actions">{% include "finance/_header_search.html" %}{% if can_act %}<a class="btn btn-primary" id="new-invoice" href="{% url 'ledger:stores:list' %}">{% icon "plus" 16 %}New invoice</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
-  <p class="muted">As of {{ data.today|date:"Y-m-d" }}. Amounts in US dollars.</p>
+  <section class="kpi-row" id="figures-card" aria-label="Figures">
+    {% for item in kpis %}{% if item.url %}<a class="kpi-link" id="{{ item.element_id }}" href="{{ item.url }}">{% kpi item.label item.value item.note item.tone %}</a>{% else %}<div class="kpi-link" id="{{ item.element_id }}">{% kpi item.label item.value item.note item.tone %}</div>{% endif %}{% endfor %}
+  </section>
 
-  {% include "ledger/_attention.html" with banners=False %}
+  <div class="dashboard-grid">
+    <div class="dashboard-main">
+      {% include "ledger/_attention.html" with banners=False %}
+    </div>
+    <div class="dashboard-side">
+      <section class="card" id="collection-card" aria-labelledby="collection-heading">
+        <h2 id="collection-heading">{{ collection.month|date:"F" }} collection</h2>
+        {% if collection.percent is not None %}
+          <p class="collection-total"><span class="collection-percent" id="collection-percent">{{ collection.percent }}%</span> <span class="muted" id="collection-billed">of {{ collection.billed|money }}</span></p>
+          {% progress collection.segments %}
+        {% else %}
+          <p class="muted" id="collection-none">No rent billed for {{ collection.month|date:"F" }} yet.</p>
+        {% endif %}
+      </section>
+      <section class="card" id="coming-up" aria-labelledby="coming-up-heading">
+        <h2 id="coming-up-heading">Coming up</h2>
+        {% if coming_up %}
+          <ul class="coming-list">
+            {% for item in coming_up %}<li class="coming-item">{% date_chip item.on %}<span class="coming-text"><span class="coming-title">{{ item.title }}</span><span class="coming-note">{{ item.note }}</span></span></li>{% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted" id="coming-up-none">Nothing scheduled.</p>
+        {% endif %}
+      </section>
+    </div>
+  </div>
+
+  <section class="card" id="recent-payments" aria-labelledby="recent-payments-heading">
+    <div class="card-header"><h2 id="recent-payments-heading">Recent payments</h2><a class="card-link" id="all-payments" href="{% url 'ledger:payments:list' %}">All payments →</a></div>
+    {% if recent_payments %}
+      {% responsive_table %}
+      <table class="table" id="recent-payments-table">
+        <thead><tr><th>When</th><th>Store</th><th>For</th><th>Method</th><th class="money">Amount</th></tr></thead>
+        <tbody>
+          {% for row in recent_payments %}
+            <tr class="recent-payment">
+              <td><a class="recent-when" href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.when }}</a></td>
+              <td>{{ row.store|default:"—" }}</td>
+              <td>{{ row.paid_for|default:"—" }}</td>
+              <td>{{ row.method }}</td>
+              <td class="money"><strong>{{ row.amount|money }}</strong></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endresponsive_table %}
+    {% else %}
+      <p class="muted" id="recent-payments-none">No settled payments yet.</p>
+    {% endif %}
+  </section>
 
   <section class="card" id="today-run" aria-label="Today's run">
   <h2>Today's run</h2>
@@ -45,15 +99,6 @@ app.css's (.card, .kpi-row).{% endcomment %}
     {% else %}
       <p class="muted">None. Invoices {{ company.provider_name }} could not collect are listed here.</p>
     {% endif %}
-  </section>
-  <section class="card" id="figures-card" aria-label="Figures">
-  <div class="kpi-row">
-    {% with count=data.outstanding_count|stringformat:"d" plural=data.outstanding_count|pluralize %}{% with note=count|add:" open charge"|add:plural %}<a class="kpi-link" id="figure-outstanding" href="{% url 'ledger:arrears:page' %}">{% kpi "Total outstanding" data.outstanding|money note %}</a>{% endwith %}{% endwith %}
-    {% with count=data.overdue_count|stringformat:"d" plural=data.overdue_count|pluralize %}{% with note=count|add:" charge"|add:plural|add:" past due" %}<a class="kpi-link" id="figure-overdue" href="{% url 'ledger:arrears:page' %}">{% kpi "Overdue" data.overdue|money note "unpaid" %}</a>{% endwith %}{% endwith %}
-    {% with start=data.month_start|date:"Y-m-d" end=data.month_end|date:"Y-m-d" %}{% with note="Settled "|add:start|add:" to "|add:end|add:", net of refunds, deposits left out" %}<a class="kpi-link" id="figure-paid" href="{% url 'ledger:payments:list' %}?{{ payments_query }}">{% kpi "Paid this month" data.paid_this_month|money note %}</a>{% endwith %}{% endwith %}
-    {% with note="In "|add:company.provider_name|add:", not sent yet" %}<a class="kpi-link" id="figure-not-sent" href="#not-sent">{% kpi "Invoices not sent" data.not_sent_count note %}</a>{% endwith %}
-  </div>
-  <p class="muted">Outstanding: rent, insurance and one-off charges with a balance, not waived or voided, deposits left out. Overdue: due before today.</p>
   </section>
   {% if data.waived_live %}
     <section class="card" id="waived-live">

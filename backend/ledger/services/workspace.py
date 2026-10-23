@@ -38,10 +38,11 @@ identifiers are masked.
 
 from __future__ import annotations
 
+import calendar
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
@@ -89,6 +90,7 @@ from ledger.services import (
     payments_ledger,
     receivables,
 )
+from ledger.services import insurance as insurance_years
 from ledger.wording import format_amount
 from payments.provider import mask_identifier
 
@@ -217,6 +219,20 @@ class Header:
     credit: Decimal
     next_payment: NextPayment | None
     open_promise: ContactEntry | None
+    #: The side cards' lines (PLAN-012f D8), from rows already read, but the deposit (one
+    #: query): the open charges counted in the balance (the Charges tab's pill), the debit
+    #: days in words ("1st", "1st and 15th"), the deposit ("$3,000.00 · not collected"), the
+    #: next rent debit (autopay's, else the lease's debit day) and the store's next
+    #: insurance renewal (its open-date anniversary, the lease holding the store that day).
+    open_count: int = 0
+    debit_day_text: str = ""
+    deposit_text: str = ""
+    next_rent: date | None = None
+    next_insurance: date | None = None
+
+    @property
+    def lease_since(self) -> date | None:
+        return self.lease.started_on if self.lease is not None else None
 
 
 def _autopay_state(schedules: list[CollectionSchedule]) -> str:
@@ -337,9 +353,73 @@ def store_balances(store: Store, store_leases: Iterable[Lease], today: date) -> 
     return _balances_of(rows, carried, store.pk)
 
 
-def _header(lease: Lease | None, today: date, now: datetime, balance: Decimal) -> Header:
+def ordinal(day: int) -> str:
+    """``1st``, ``2nd``, ``3rd``, ``4th``, ``11th``, ``21st``."""
+    if 10 <= day % 100 <= 20:
+        return f"{day}th"
+    suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def _debit_day_text(lease: Lease) -> str:
+    days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+    return " and ".join(ordinal(day) for day in days)
+
+
+def _deposit_text(lease: Lease) -> str:
+    """The lease's deposit (its refundable one-off charges, not waived or voided; one
+    query): ``$3,000.00 · not collected``, ``· collected``, or what was collected so far."""
+    found = (
+        OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True)
+        .exclude(status__in=_CLOSED_ONE_OFF)
+        .aggregate(price=Sum("price"), paid=Sum("amount_paid"))
+    )
+    if found["price"] is None:
+        return ""
+    price, paid = _money(found["price"]), _money(found["paid"])
+    if paid >= price:
+        state = "collected"
+    elif paid <= 0:
+        state = "not collected"
+    else:
+        state = f"{format_amount(paid)} collected"
+    return f"{format_amount(price)} · {state}"
+
+
+def _next_debit_day(lease: Lease, today: date) -> date | None:
+    """The next day after ``today`` a debit day of ``lease`` falls on (29 to 31: a short
+    month's last day, as the rent run counts them)."""
+    days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+    if not days:
+        return None
+    found: list[date] = []
+    for months_ahead in (0, 1):
+        first = (today.replace(day=1) + timedelta(days=32 * months_ahead)).replace(day=1)
+        last = calendar.monthrange(first.year, first.month)[1]
+        found += [first.replace(day=min(day, last)) for day in days]
+    later = [day for day in found if day > today]
+    return min(later) if later else None
+
+
+def _next_insurance(lease: Lease, today: date) -> date | None:
+    """The store's next insurance renewal from ``today``: its open-date anniversary, while
+    the store is not closed by then and ``lease`` holds it that day."""
+    store = lease.store
+    if store.open_date is None:
+        return None
+    due = insurance_years.anniversary(store.open_date, today.year)
+    if due < today:
+        due = insurance_years.anniversary(store.open_date, today.year + 1)
+    if store.closed_at is not None and due >= store.closed_at:
+        return None
+    return due if insurance_years.holds_on(lease, due) else None
+
+
+def _header(
+    lease: Lease | None, today: date, now: datetime, balance: Decimal, open_count: int = 0
+) -> Header:
     """The header card of ``lease`` (the store's current one, or ``None``), with
-    ``balance`` as its open balance."""
+    ``balance`` as its open balance over ``open_count`` open charges."""
     if lease is None:
         return Header(
             lease=None,
@@ -351,6 +431,7 @@ def _header(lease: Lease | None, today: date, now: datetime, balance: Decimal) -
             credit=Decimal("0.00"),
             next_payment=None,
             open_promise=None,
+            open_count=open_count,
         )
     schedules = leases.live_schedules(lease)
     moved = leases.autopay_move(lease, now)
@@ -364,6 +445,11 @@ def _header(lease: Lease | None, today: date, now: datetime, balance: Decimal) -
         credit=credits.balance(lease),
         next_payment=_next_payment(lease, schedules, moved, today, now),
         open_promise=contacts.open_promise(lease.operator, lease),
+        open_count=open_count,
+        debit_day_text=_debit_day_text(lease),
+        deposit_text=_deposit_text(lease),
+        next_rent=_next_rent(schedules, moved, now) or _next_debit_day(lease, today),
+        next_insurance=_next_insurance(lease, today),
     )
 
 
@@ -1073,7 +1159,13 @@ def store_workspace(
     is a name :func:`chosen_tab` returned, ``chosen`` the tab's filter (``?filter=``)."""
     moment = now or timezone.now()
     balances = store_balances(store, store.leases.all(), today)
-    header = _header(lease_end.current_lease(store, today), today, moment, balances.total)
+    header = _header(
+        lease_end.current_lease(store, today),
+        today,
+        moment,
+        balances.total,
+        len(balances.owed),
+    )
     return Workspace(
         store=store,
         header=header,
@@ -1109,6 +1201,8 @@ class OperatorWorkspace:
     data: dict[str, Any]
     #: The open balance of every store of the operator (D14: the operator-level total).
     open_balance: Decimal
+    #: The open charges of every store of the operator (PLAN-012f D8: the Charges tab's pill).
+    open_count: int = 0
 
 
 def operator_stores(operator: Operator) -> list[Store]:
@@ -1176,7 +1270,9 @@ def operator_workspace(
     space: Workspace | None = None
     if selected is not None:
         mine = _balances_of(rows, carried, selected.pk)
-        header = _header(_operator_lease(selected, operator, today), today, moment, mine.total)
+        header = _header(
+            _operator_lease(selected, operator, today), today, moment, mine.total, len(mine.owed)
+        )
         space = Workspace(
             store=selected,
             header=header,
@@ -1202,4 +1298,5 @@ def operator_workspace(
         tab=tab,
         data=data,
         open_balance=balances.total,
+        open_count=len(balances.owed),
     )

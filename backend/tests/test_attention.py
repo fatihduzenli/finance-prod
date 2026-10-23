@@ -5,6 +5,7 @@ lease-end balance stays listed until it is paid (PLAN-012e D14)."""
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -616,16 +617,21 @@ def test_a_returned_installment_is_one_item_per_plan_linking_to_it(today: date) 
 # --- The pages -----------------------------------------------------------------------------
 
 
-def test_the_dashboard_shows_the_list_above_the_figures(today: date) -> None:
+def test_the_dashboard_shows_the_list_under_the_figures(today: date) -> None:
     lease = a_lease(a_store("2204 FOREST PARK", 2204), an_operator("Acme"))
     returned_payment(lease)
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
-    assert page.index('id="attention"') < page.index('class="kpi-row"')  # PLAN-012f D6
-    assert (
-        "Returned debit not rescheduled: 2204 FOREST PARK, $3,500.00, returned 2026-10-03" in page
+    # PLAN-012f D7: the four figures first, then the Needs attention card; each row's why
+    # badge is the text before its first ": ", the rest under it, linked for a viewer.
+    assert page.index('class="kpi-row"') < page.index('id="attention"')
+    row = page[page.index('data-kind="returned_debit"') :].split("</tr>", 1)[0]
+    assert "</span> Returned debit not rescheduled</span>" in row
+    assert re.search(
+        r'<a href="/returns/#return-[^"]+">2204 FOREST PARK, \$3,500\.00, returned 2026-10-03</a>',
+        row,
     )
-    assert 'href="/returns/#return-' in page
+    assert "Acme" in row and "$3,500.00" in row
 
 
 def test_the_dashboard_says_when_nothing_needs_attention(today: date) -> None:
@@ -751,5 +757,7 @@ def test_a_viewer_sees_the_balance_on_the_dashboard(monkeypatch: pytest.MonkeyPa
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
     assert f'data-kind="{attention.LEASE_END_BALANCE}"' in page
-    assert escape(expected(end, "$300.00")) in page
-    assert f'href="/one-off-charges/{end.debt_charge_id}/"' in page
+    # PLAN-012f D7: the why badge, then the rest of the text, linked for a viewer.
+    why, details = expected(end, "$300.00").split(": ", 1)
+    assert f"</span> {escape(why)}</span>" in page
+    assert f'href="/one-off-charges/{end.debt_charge_id}/">{escape(details)}</a>' in page

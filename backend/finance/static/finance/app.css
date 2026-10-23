@@ -265,17 +265,20 @@ td.line-number { white-space: nowrap; color: var(--muted); }
 /* --- Progress bar ------------------------------------------------------------------------
    .progress ({% progress segments %}): a 10 px bar (.progress-bar) of stacked segments
    (.progress-segment.progress-<family>) in the status colours, widths summing to at most
-   100 %, then the legend (.progress-legend) of 8 px squares (.progress-key). */
+   100 %, then the legend (.progress-legend) of 8 px squares (.progress-key). As the dashboard's
+   reference draws them (PLAN-012f Batch C): Paid in the paid text green, Pending and Partly paid
+   in their two decorative fills (--progress-pending, --progress-partial), Unpaid in the unpaid
+   family's light red. */
 .progress-bar { display: flex; height: 10px; overflow: hidden; border-radius: var(--radius-pill); background: var(--border-soft); }
 .progress-segment { display: block; height: 100%; }
 .progress-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 10px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: var(--fs-sm); }
 .progress-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .progress-key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
 .progress-paid { background: var(--paid-text); }
-.progress-unpaid { background: var(--unpaid-text); }
+.progress-unpaid { background: var(--unpaid-bg); }
 .progress-overdue { background: var(--overdue-bg); }
-.progress-pending { background: var(--pending-text); }
-.progress-partial { background: var(--partial-text); }
+.progress-pending { background: var(--progress-pending); }
+.progress-partial { background: var(--progress-partial); }
 .progress-waived { background: var(--waived-text); }
 .progress-neutral { background: var(--neutral-text); }
 
@@ -382,24 +385,120 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .steps li[aria-current="step"] { background: var(--navy); border-color: var(--navy); color: var(--surface); }
 .steps li[aria-current="step"]::before { color: var(--sidebar-text); }
 
-/* --- Workspace (the 12d store and operator pages; their layout is PLAN-012f Batch C) -------
-   .workspace-header: the header card (a dl.header-card of label and value), a card;
-   .action-bar: the page's actions in one wrapping row of buttons. */
-.workspace-header { margin: var(--space-4) 0; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); }
-.header-card { display: grid; grid-template-columns: max-content 1fr; gap: 6px var(--space-4); margin: 0; font-size: var(--fs-base); }
-.header-card dt { font-weight: 500; color: var(--muted); } .header-card dd { margin: 0; }
+/* --- Workspace (the store and operator pages: PLAN-012d D1, the approved design's layout
+   PLAN-012f D8) ---------------------------------------------------------------------------
+   In the page header (.workspace-head): .page-title-block holds the 12 px muted .breadcrumb,
+   the 24/700 .store-title with its badge and the muted .store-line (the address and the open
+   date; .store-line-phone, the operator and the city, shows on a phone instead); the
+   .action-bar sits at the right; the .tabs row spans the header's width under them, the
+   Charges tab with its .count-pill; .store-selector is the operator page's store choice. The
+   body (.workspace-grid): the two-thirds .workspace-main (the open tab as a card, the other
+   cards under it) and the one-third .workspace-side (the action bar of the operator page's
+   store, then #workspace-header: the LEASE, NEXT, STORE COST (with the cost rows' History
+   under it) and DOCUMENTS cards, each a .section-label over a .side-list of label and value,
+   .doc-list for the documents).
+   .summary-strip: the phone's three cells (Open balance, Rent, Autopay), hidden on wider
+   screens. */
+.page-title-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.breadcrumb { color: var(--muted); font-size: var(--fs-sm); }
+.breadcrumb a { color: var(--link); text-decoration: none; }
+.breadcrumb a[aria-current="page"] { color: var(--muted); }
+.page-header-bar h1.store-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); font-size: var(--fs-h1-store); font-weight: 700; }
+.store-line { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-base); }
+.store-line-phone { display: none; margin: 2px 0 0; color: var(--muted); font-size: var(--fs-base); }
+.workspace-head { align-items: flex-start; }
+.workspace-head .action-bar { margin: var(--space-2) 0 0; }
+.page-header-inner > .tabs { flex: 1 0 100%; margin: 0 0 calc(-1 * var(--space-3)); border-bottom: 0; }
+.tab .count-pill { margin-left: 6px; }
+.store-selector { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; }
+.store-selector label { margin: 0; color: var(--muted); font-size: var(--fs-base); font-weight: 500; }
+.summary-strip { display: none; }
+.workspace-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.workspace-main, .workspace-side { min-width: 0; }
+.workspace-side > .action-bar { margin: 0 0 var(--space-4); }
+.workspace-header { display: flex; flex-direction: column; gap: var(--space-4); }
+.workspace-header .card { margin: 0; }
+.workspace-header .card-header { margin-bottom: var(--space-3); }
+.workspace-header .section-label { margin: 0 0 var(--space-3); font-size: var(--fs-base); }
+.workspace-header .card-header .section-label { margin: 0; }
+#cost-history summary { color: var(--link); font-size: var(--fs-base); cursor: pointer; }
+#cost-history .table-cards { overflow-x: auto; }
+.side-list { display: grid; grid-template-columns: minmax(6rem, 40%) minmax(0, 1fr); gap: 7px var(--space-3); margin: 0; font-size: var(--fs-base); }
+.side-list dt { margin: 0; color: var(--muted); font-weight: 400; }
+.side-list dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.side-list-dates { grid-template-columns: minmax(0, 1fr) auto; }
+.side-list-dates dt { color: var(--text); }
+.side-list-dates dd { font-weight: 700; text-align: right; }
+.side-list dd.side-promise { color: var(--pending-text); }
+.side-strong { font-weight: 700; }
+.doc-list { list-style: none; margin: 0; padding: 0; font-size: var(--fs-base); }
+.doc-list li { display: flex; align-items: center; gap: var(--space-2); padding: 3px 0; }
+.doc-list .icon { flex: 0 0 auto; color: var(--muted); }
+.doc-list a { overflow-wrap: anywhere; }
+.store-tab > h2:first-child { margin-top: 0; }
+.charges-head { gap: var(--space-3); }
+.charges-head form { margin: 0 0 0 auto; }
+.charges-head .link-action { color: var(--muted); }
+.charges-downloads { margin: var(--space-3) 0 0; }
+td.balance-open { color: var(--unpaid-text); font-weight: 600; }
+.store-tab .table-cards > table th, .store-tab .table-cards > table td { padding-left: 8px; padding-right: 8px; }
+#store-charges td.charge-due { white-space: nowrap; }
 .action-bar { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-4) 0; }
 .action-bar form { margin: 0; }
+
+/* --- Dashboard (PLAN-012f D7) -----------------------------------------------------------------
+   The header's .page-title (the title, then the long date in .page-date). Row 1, .kpi-row: the
+   four KPI cards. Row 2, .dashboard-grid: the Needs attention card (.attention-table: the
+   store, the why badge with the rest of the item's text, the amount, the row's button) over
+   two thirds, beside the month's collection (.collection-total: the 28/700 percentage and
+   "of $X") and Coming up (.coming-list: a date chip beside each item's title and its muted
+   note). Then the Recent payments card and the other cards. */
+.page-header .page-actions .nav-search { flex: 0 0 320px; }
+.page-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-4); }
+.page-date { color: var(--muted); font-size: var(--fs-base); }
+.dashboard-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.dashboard-main, .dashboard-side { min-width: 0; }
+.count-pill-alert { background: var(--unpaid-bg); color: var(--unpaid-text); }
+.attention-table td { vertical-align: middle; }
+.attention-table .badge { white-space: normal; }
+.attention-table .attention-details { overflow-wrap: anywhere; }
+.attention-table .attention-details a { color: inherit; }
+td.attention-action { text-align: right; }
+.collection-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); margin: 0 0 var(--space-3); }
+.collection-percent { color: var(--text); font-size: var(--fs-kpi); font-weight: 700; line-height: 1.1; }
+.coming-list { list-style: none; margin: 0; padding: 0; }
+.coming-item { display: flex; align-items: center; gap: var(--space-3); padding: 5px 0; }
+.coming-text { display: flex; flex-direction: column; min-width: 0; }
+.coming-title { color: var(--text); font-size: var(--fs-base); font-weight: 500; }
+.coming-note { color: var(--muted); font-size: var(--fs-sm); }
+.kpi-note a { color: var(--link); }
+.recent-when { color: var(--muted); text-decoration: none; }
+.recent-when:hover { text-decoration: underline; }
+.badge.promise-open { background: var(--pending-bg); color: var(--pending-text); }
+
+/* --- The monthly rent overview (PLAN-012f D9) -------------------------------------------------
+   .filter-card: the words filter and the filters in one card. .grid-card: the grid's scroll
+   region filling its card (the region's own styles are the grid page's). The totals row's
+   counts (.column-counts) read in the first cell's order: paid · unpaid · pending. */
+.filter-card { padding: var(--space-3) var(--space-4); }
+.filter-card form, .filter-card .actions { margin: 0; }
+.filter-card form + form { margin-top: var(--space-2); }
+.filter-card #grid-q { flex: 1 1 18rem; max-width: 30rem; }
+.filter-card label { font-weight: 500; color: var(--muted); font-size: var(--fs-base); }
+/* A label and its control wrap together (the last pair keeps Show beside it). */
+.filter-card .actions { flex-wrap: wrap; row-gap: var(--space-2); }
+.filter-field { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.grid-card { padding: 0; overflow: hidden; }
+.column-counts { font-weight: 400; }
 
 /* --- Print header and footer (print.css shows them; never on screen) ------------------------ */
 .print-only { display: none; }
 
-/* --- Attention list (PLAN-011b D6; the dashboard's layout is PLAN-012f Batch C) ------------- */
+/* --- Attention list (PLAN-011b D6): the operator page's banners; the dashboard's card is a
+   table (the Dashboard section above) -------------------------------------------------------- */
 .attention-list { list-style: none; padding: 0; margin: 0; }
-.attention-item { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); font-size: var(--fs-base); }
-.attention-item:last-child { border-bottom: 0; }
-.attention-item a { color: var(--text); }
-.attention-banners .attention-item { padding: var(--space-2) var(--space-3); margin-bottom: var(--space-1); border: 0; border-radius: var(--radius-ctl); background: var(--pending-bg); }
+.attention-banners .attention-item { padding: var(--space-2) var(--space-3); margin-bottom: var(--space-1); border-radius: var(--radius-ctl); background: var(--pending-bg); font-size: var(--fs-base); }
+.attention-banners .attention-item a { color: var(--text); }
 .attention-banners .attention-item.severity-high { background: var(--unpaid-bg); }
 
 /* --- Calendar (PLAN-011b D8) ------------------------------------------------------------- */
@@ -426,6 +525,13 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
 
 /* --- 720px and wider: the tables' head row stays in view (PLAN-012c D5) -------------------- */
 @media (min-width: 720px) {
+  /* The tables of the workspace and dashboard cards reach the cards' edges (PLAN-012f D7, D8). */
+  .store-tab .table-cards, .store-tab .table-scroll { margin: 0 -20px; overflow-x: auto; }
+  .store-tab .table-cards > table th:first-child, .store-tab .table-cards > table td:first-child { padding-left: 20px; }
+  .store-tab .table-cards > table th:last-child, .store-tab .table-cards > table td:last-child { padding-right: 20px; }
+  .attention .table-cards, .attention .table-scroll, #recent-payments .table-cards { margin: 0 -20px; }
+  .attention .table-cards > table th:first-child, .attention .table-cards > table td:first-child, #recent-payments .table-cards > table th:first-child, #recent-payments .table-cards > table td:first-child { padding-left: 20px; }
+  .attention .table-cards > table th:last-child, .attention .table-cards > table td:last-child, #recent-payments .table-cards > table th:last-child, #recent-payments .table-cards > table td:last-child { padding-right: 20px; }
   .table thead th, .table-cards > table > thead th { position: sticky; top: 0; z-index: 2; }
 }
 /* No fade for a reader who asked for less motion: the message stays until dismissed. */
@@ -473,6 +579,26 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
   .more-list form { margin: 0; }
   .more-list .more-group { padding: var(--space-2) var(--space-2) 0; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
   .more-list .more-sublist { list-style: none; margin: 0; padding: 0 0 0 var(--space-6); }
+  /* The dashboard (DESIGN-SPEC §6): KPI cards two per row, the rest stacked. */
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+  .kpi { padding: var(--space-3) 14px; }
+  .kpi-value { font-size: 20px; }
+  .dashboard-grid, .workspace-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  .page-header .page-actions .nav-search { display: none; }
+  /* The store page (DESIGN-SPEC §6): the operator and the city in place of the address, the
+     summary strip, a full-width primary action over two half-width secondaries, the tabs
+     scrolling sideways under them. */
+  .store-line { display: none; }
+  .store-line-phone { display: block; }
+  .workspace-head { flex-direction: column; align-items: stretch; }
+  .workspace-head .action-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: var(--space-2) 0 0; }
+  .workspace-head .action-bar > .btn-primary { grid-column: 1 / -1; }
+  .workspace-head .action-bar > .btn, .workspace-head .action-bar > .menu > .btn { width: 100%; }
+  .summary-strip { display: grid; flex: 1 0 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin: 0; }
+  .summary-cell { padding: var(--space-2) 10px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+  .summary-cell dt { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
+  .summary-cell dd { margin: 0; color: var(--text); font-size: var(--fs-md); font-weight: 700; overflow-wrap: anywhere; }
+  .summary-cell dd.tone-unpaid { color: var(--unpaid-text); }
 }
 
 /* --- Tablet and phone: touch targets ---------------------------------------------------- */
@@ -493,6 +619,7 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
   /* One form column: labels above full-width fields, inline widths overridden. */
   form .actions { flex-direction: column; align-items: stretch; }
   form .actions label { margin: .5rem 0 0; }
+  .filter-field { display: flex; flex-direction: column; align-items: stretch; gap: 0; white-space: normal; }
   form input:not([type=checkbox]):not([type=radio]):not([type=hidden]), form select, form textarea { width: 100% !important; }
   form .btn, form button { width: 100%; }
   form button.link-action { width: auto; }

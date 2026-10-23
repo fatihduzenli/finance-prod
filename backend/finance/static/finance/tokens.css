@@ -68,7 +68,11 @@
    tint of the grid's current month (DESIGN-SPEC §4 writes the value). Its pairs and the muted
    ones of the components (a table's header on --surface-2, a date chip's month and the
    segmented filter's segments on --bg) measure muted/bg 4.79, muted/surface-2 4.96,
-   text/month-current 13.9, muted/month-current 4.73. */
+   text/month-current 13.9, muted/month-current 4.73.
+   PLAN-012f Batch C adds two more beside it: --progress-pending #E5B800 and --progress-partial
+   #F08A24, the fills of the dashboard's progress bar (the yellow and orange of the reference);
+   each segment is named by the legend's word beside its 8 px square, so the fills carry no text
+   and have no text pair. */
 
 @font-face {
   font-family: Inter;
@@ -115,4 +119,8 @@
 
   /* the grid's current month (PLAN-012f D6; DESIGN-SPEC §4) */
   --month-current: #EEF6F5;
+
+  /* the progress bar's Pending and Partly paid fills (PLAN-012f Batch C, dashboard-laptop.png):
+     decoration beside the legend's words, never a text colour */
+  --progress-pending: #E5B800;  --progress-partial: #F08A24;
 }

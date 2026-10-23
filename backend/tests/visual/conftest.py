@@ -71,6 +71,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=str(DEFAULT_BASELINE),
         help="the baseline folder (default: backend/tests/visual/baseline)",
     )
+    group.addoption(
+        "--report-dir",
+        default="",
+        help="also write the report shots of PLAN-012f D12 (1,440 px pages, the phone store page) "
+        "into this folder; off by default",
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

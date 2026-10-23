@@ -873,6 +873,10 @@ class Dashboard:
     run: RunSummary
     last_reconciliation: ReconciliationRun | None
     waived_live: list[OneOffCharge]
+    #: The stores with an open balance, and those with an overdue one (PLAN-012f D7: the
+    #: Unpaid balances card's "N stores · M overdue"; a charge without a store is not counted).
+    outstanding_stores: int = 0
+    overdue_stores: int = 0
 
 
 def paid_in(start: date, end: date) -> Decimal:
@@ -972,4 +976,6 @@ def dashboard(today: date) -> Dashboard:
         .order_by("-started_at", "-id")
         .first(),
         waived_live=one_off_charges.waived_with_live_invoice(),
+        outstanding_stores=len({row.store_id for row in rows if row.store_id is not None}),
+        overdue_stores=len({row.store_id for row in overdue if row.store_id is not None}),
     )

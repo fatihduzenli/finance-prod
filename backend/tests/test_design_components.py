@@ -126,10 +126,19 @@ LIST_PAGES = [
 ]
 
 
+#: The page header's title (PLAN-012c D5): the h1 first in .page-header, or, on the dashboard
+#: and the workspaces (PLAN-012f D7, D8), first in its title block (after the breadcrumb).
+PAGE_HEADER = re.compile(
+    r'<div class="page-header[^"]*">\s*(?:<div class="page-title(?:-block)?">\s*'
+    r"(?:<nav [^>]*>.*?</nav>\s*)?)?<h1[ >]",
+    re.S,
+)
+
+
 @pytest.mark.parametrize("path", LIST_PAGES)
 def test_every_list_page_has_its_page_header(path: str) -> None:
     html = body(client_for(Role.ADMIN)[0].get(path))
-    assert re.search(r'<div class="page-header"><h1[ >]', html), path
+    assert PAGE_HEADER.search(html), path
     assert html.count("<h1") == 1, path
 
 
@@ -145,7 +154,7 @@ def test_the_detail_pages_have_their_page_header() -> None:
         f"/operators/{lease.operator_id}/statement/",
     ):
         html = body(client.get(path))
-        assert re.search(r'<div class="page-header"><h1[ >]', html), path
+        assert PAGE_HEADER.search(html), path
 
 
 def test_every_staff_template_with_a_title_wraps_it_in_the_page_header() -> None:
@@ -158,10 +167,15 @@ def test_every_staff_template_with_a_title_wraps_it_in_the_page_header() -> None
         relative = path.relative_to(TEMPLATES).as_posix()
         if relative in exempt:
             continue
-        for line in path.read_text().splitlines():
-            if "<h1" in line:
-                found += 1
-                assert '<div class="page-header"><h1' in line, relative
+        text = path.read_text()
+        for at in [match.start() for match in re.finditer("<h1", text)]:
+            found += 1
+            line = text[text.rfind("\n", 0, at) + 1 : text.find("\n", at)]
+            if '<div class="page-header"><h1' in line:
+                continue
+            header = text.rfind('{% block header %}<div class="page-header', 0, at)
+            assert header != -1 and "{% endblock %}" not in text[header:at], relative
+            assert PAGE_HEADER.search(text[header:at] + "<h1>"), relative
     assert found >= 70
 
 
@@ -196,7 +210,8 @@ def test_the_amount_cells_of_the_charge_tables_are_money_cells() -> None:
     a_rent_charge(lease, OCTOBER)
     html = body(client_for(Role.BILLING)[0].get(f"/stores/{lease.store_id}/"))
     table = html[html.index('<table id="store-charges">') :].split("</table>", 1)[0]
-    assert '<td class="money" data-label="Billed">$3,500.00</td>' in table
+    # PLAN-012f D8: the charge's amount is the Amount column.
+    assert '<td class="money" data-label="Amount">$3,500.00</td>' in table
     assert '<td class="money" data-label="Balance">$3,500.00</td>' in table
     assert '<th class="money">Balance</th>' in table
 
@@ -755,22 +770,29 @@ def test_with_done_marks_the_steps_before_the_current_one() -> None:
 # --- The dashboard as cards ----------------------------------------------------------------------
 
 
-def test_the_dashboard_is_cards_with_the_attention_list_first() -> None:
+def test_the_dashboard_is_cards_with_the_figures_then_the_attention_list() -> None:
     html = body(client_for(Role.VIEWER)[0].get("/"))
-    content = html[html.index('<div class="page-header"><h1>Dashboard</h1></div>') :]
+    content = html[html.index('<div class="page-header"><div class="page-title"><h1>Dashboard') :]
     cards = re.findall(
         r'<section class="([^"]*\bcard\b[^"]*)"[^>]*?(?:id="([^"]+)")?[^>]*>', content
     )
     assert len(cards) >= 5
     first = content.index('class="card')
-    assert content.index('id="attention-none"') > first  # the attention card comes first
+    # PLAN-012f D7: the four figures, then the attention card, the collection and coming-up
+    # cards, the recent payments, then the run, the failed attempts and the other lists.
+    assert content.index('id="figures-card"') < content.index('id="attention-none"')
+    assert content.index('id="attention-none"') >= first  # the first card is the attention card
     assert content.index('id="attention-none"') < content.index('id="today-run"')
     order = [
         content.index(f'id="{name}"')
         for name in (
+            "figures-card",
+            "attention",
+            "collection-card",
+            "coming-up",
+            "recent-payments",
             "today-run",
             "failed-attempts",
-            "figures-card",
             "not-sent-card",
             "last-reconciliation-card",
         )

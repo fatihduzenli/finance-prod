@@ -59,6 +59,12 @@ operator are returned (the operator page's banners): charges billed to it, its r
 promises, leases and schedules, itself without an e-mail, and today's entries naming it
 or its lease; store-level kinds and the system-wide counts are left out.
 
+For the dashboard's table (PLAN-012f D7) each item also carries, from the rows its kind
+already read, the store (label and id), the operator's name and the amount where it has them;
+its why badge is the text before the first ": " (:attr:`Item.why`, in the family of
+:data:`WHY_BADGES`) and the rest is :attr:`Item.details`. :func:`dashboard_leases` reads the
+leases once for the dashboard's other blocks to share (``attention(..., leases=...)``).
+
 Bounded: a fixed number of queries whatever the number of rows.
 """
 
@@ -69,6 +75,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from django.db.models import Count, F, Min, Q, Sum
 from django.urls import reverse
@@ -171,6 +178,30 @@ KIND_LABELS: dict[str, str] = {
     CALENDAR_TODAY: "calendar entries today",
 }
 
+#: The family of each kind's why badge on the dashboard (PLAN-012f D7), as a status value of
+#: finance.templatetags.components: an overdue charge dark red; a returned debit, a balance
+#: left at a lease end, a missing premium and the system counts in the unpaid red; a split
+#: charge paid partly; a promise and what falls due soon pending; the rest neutral.
+WHY_BADGES: dict[str, str] = {
+    OVERDUE: "overdue",
+    RETURNED_DEBIT: "returned",
+    INSTALLMENT_RETURNED: "returned",
+    SPLIT_CHARGE_PAID: "partial",
+    LEASE_END_BALANCE: "attention",
+    BROKEN_PROMISE: "pending",
+    INSURANCE_PREMIUM_MISSING: "needs premium",
+    INSURANCE_DUE: "pending",
+    LEASE_ENDING: "pending",
+    LANDLORD_LEASE_ENDING: "pending",
+    SCHEDULE_REVIEW: "pending",
+    DEAD_LETTERS: "attention",
+    RECONCILIATION_MISMATCHES: "attention",
+    VACANT_STORE: "neutral",
+    STORE_NO_OPEN_DATE: "neutral",
+    OPERATOR_NO_EMAIL: "neutral",
+    CALENDAR_TODAY: "neutral",
+}
+
 #: An overdue charge this many days late or more is ``high``.
 OVERDUE_HIGH_DAYS = 30
 INSURANCE_DAYS = 30
@@ -203,6 +234,35 @@ class Item:
     operator_id: uuid.UUID | None = None
     #: A broken promise's entry: its Kept, Reschedule and Broken actions (PLAN-012c-b D2).
     promise_id: uuid.UUID | None = None
+    #: What the dashboard's table shows beside the text (PLAN-012f D7), from the rows each
+    #: kind already read: the store (its label and id), the operator's name and the amount.
+    store: str = ""
+    store_id: uuid.UUID | None = None
+    operator_name: str = ""
+    amount: Decimal | None = None
+
+    @property
+    def why(self) -> str:
+        """The text's first part, before its first ": " (the dashboard's why badge)."""
+        return self.text.split(": ", 1)[0]
+
+    @property
+    def details(self) -> str:
+        """The rest of the text, after its first ": " (the line under the badge)."""
+        parts = self.text.split(": ", 1)
+        return parts[1] if len(parts) > 1 else ""
+
+    @property
+    def store_url(self) -> str:
+        """The store's page, or ``""`` for an item without a store."""
+        if self.store_id is None:
+            return ""
+        return reverse("ledger:stores:detail", kwargs={"pk": self.store_id})
+
+    @property
+    def badge_value(self) -> str:
+        """The status (finance.templatetags.components) whose family the why badge takes."""
+        return WHY_BADGES.get(self.kind, "neutral")
 
 
 @dataclass(slots=True)
@@ -245,6 +305,10 @@ def _overdue(today: date, balances: list[receivables.OpenBalance]) -> list[Item]
                 url=url,
                 since=row.due_on,
                 operator_id=row.operator_id,
+                store=row.store_label,
+                store_id=row.store_id,
+                operator_name=row.operator_name,
+                amount=row.balance,
             )
         )
     return found
@@ -270,6 +334,10 @@ def _returned(today: date, operator: uuid.UUID | None) -> list[Item]:
                 url=f"{reverse('ledger:returns:list')}#return-{payment.pk}",
                 since=returned_on,
                 operator_id=operator_id,
+                store=row.store.external_label if row.store is not None else "",
+                store_id=row.store.pk if row.store is not None else None,
+                operator_name=row.operator.display_name if row.operator is not None else "",
+                amount=row.amount,
             )
         )
     return found
@@ -294,7 +362,7 @@ def _installments_returned(operator: uuid.UUID | None) -> list[Item]:
         since.setdefault(plan_id, day)
     plans = (
         InstallmentPlan.objects.filter(pk__in=list(since))
-        .select_related("lease__store", "rent_charge", "one_off_charge__fee_type")
+        .select_related("lease__store", "operator", "rent_charge", "one_off_charge__fee_type")
         .annotate(
             paid=Count("installments", filter=Q(installments__status=OneOffChargeStatus.PAID))
         )
@@ -317,6 +385,9 @@ def _installments_returned(operator: uuid.UUID | None) -> list[Item]:
                 url=reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
                 since=day,
                 operator_id=plan.operator_id,
+                store=plan.lease.store.external_label if plan.lease is not None else "",
+                store_id=plan.lease.store_id if plan.lease is not None else None,
+                operator_name=plan.operator.display_name if plan.operator is not None else "",
             )
         )
     return found
@@ -355,7 +426,14 @@ def _split_charges_paid(operator: uuid.UUID | None) -> list[Item]:
         if plan.one_off_charge is not None:
             store = plan.lease.store.external_label if plan.lease is not None else "No store"
             found.append(
-                _split_item(plan, plan.one_off_charge, plan.total, store, plan.operator_id)
+                _split_item(
+                    plan,
+                    plan.one_off_charge,
+                    plan.total,
+                    store,
+                    plan.operator_id,
+                    plan.lease.store_id if plan.lease is not None else None,
+                )
             )
     for plan in rent:
         if plan.rent_charge is not None:
@@ -367,6 +445,7 @@ def _split_charges_paid(operator: uuid.UUID | None) -> list[Item]:
                     plan.total,
                     lease.store.external_label,
                     lease.operator_id,
+                    lease.store_id,
                 )
             )
     return [item for _, _, item in sorted(found, key=lambda row: (row[0], row[1]))]
@@ -378,6 +457,7 @@ def _split_item(
     total: Decimal,
     store: str,
     operator_id: uuid.UUID | None,
+    store_id: uuid.UUID | None,
 ) -> tuple[datetime, uuid.UUID, Item]:
     """A ``split_charge_paid`` item with the plan's last change and key, to order by."""
     if isinstance(parent, RentCharge):
@@ -396,6 +476,9 @@ def _split_item(
         url=reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
         since=timezone.localdate(plan.updated_at),
         operator_id=operator_id,
+        store="" if store == "No store" else store,
+        store_id=store_id,
+        amount=paid,
     )
     return plan.updated_at, plan.pk, item
 
@@ -442,6 +525,10 @@ def _lease_end_balances(operator: uuid.UUID | None) -> list[Item]:
                 url=reverse("ledger:one_off_charges:detail", kwargs={"pk": charge.pk}),
                 since=end.ended_on,
                 operator_id=charge.operator_id,
+                store=end.lease.store.external_label,
+                store_id=end.lease.store_id,
+                operator_name=charge.operator.display_name if charge.operator is not None else "",
+                amount=charge.balance,
             )
         )
     return found
@@ -473,6 +560,10 @@ def _promises(
             since=promise.promised_date,
             operator_id=promise.operator_id,
             promise_id=promise.pk,
+            store=promise.lease.store.external_label if promise.lease is not None else "",
+            store_id=promise.lease.store_id if promise.lease is not None else None,
+            operator_name=promise.operator.display_name,
+            amount=promise.promised_amount,
         )
         for promise in contacts.broken_promises(today, operator=operator)
         if promise.promised_amount is not None
@@ -496,6 +587,15 @@ def _lease_url(lease: Lease, tab: str) -> str:
     """The store page's tab of an item about a lease (PLAN-012d D5): Charges for the
     insurance items, Schedules for a lease ending and a schedule to review."""
     return workspace.tab_url(lease.store_id, tab)
+
+
+def _lease_fields(lease: Lease) -> dict[str, Any]:
+    """The dashboard table's store and operator of an item about ``lease``."""
+    return {
+        "store": lease.store.external_label,
+        "store_id": lease.store_id,
+        "operator_name": lease.operator.display_name if lease.operator is not None else "",
+    }
 
 
 def _where(lease: Lease) -> str:
@@ -540,6 +640,7 @@ def _insurance(today: date, leases: list[Lease]) -> list[Item]:
                     url=_lease_url(lease, workspace.TAB_CHARGES),
                     since=due,
                     operator_id=lease.operator_id,
+                    **_lease_fields(lease),
                 )
             )
     by_pk = {lease.pk: lease for lease in leases}
@@ -555,6 +656,7 @@ def _insurance(today: date, leases: list[Lease]) -> list[Item]:
                 url=_lease_url(holder, workspace.TAB_CHARGES),
                 since=due,
                 operator_id=holder.operator_id,
+                **_lease_fields(holder),
             )
         )
     return found
@@ -570,6 +672,7 @@ def _lease_ending(today: date, leases: list[Lease]) -> list[Item]:
             url=_lease_url(lease, workspace.TAB_SCHEDULES),
             since=lease.ended_on,
             operator_id=lease.operator_id,
+            **_lease_fields(lease),
         )
         for lease in sorted(leases, key=lambda lease: (lease.ended_on or today, str(lease.pk)))
         if lease.ended_on is not None
@@ -598,6 +701,7 @@ def _schedules(operator: uuid.UUID | None) -> list[Item]:
             url=_lease_url(schedule.lease, workspace.TAB_SCHEDULES),
             since=timezone.localdate(schedule.updated_at),
             operator_id=schedule.lease.operator_id,
+            **_lease_fields(schedule.lease),
         )
         for schedule in rows
     ]
@@ -623,6 +727,8 @@ def _landlord(today: date) -> list[Item]:
             text=f"Landlord lease ends {row.landlord_lease_end}: {row.store.external_label}",
             url=reverse("ledger:stores:detail", kwargs={"pk": row.store_id}),
             since=row.landlord_lease_end,
+            store=row.store.external_label,
+            store_id=row.store_id,
         )
         for row in rows
     ]
@@ -639,6 +745,8 @@ def _stores_without_open_date() -> list[Item]:
             text=f"Store without an open date: {store.external_label}",
             url=reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
             since=None,
+            store=store.external_label,
+            store_id=store.pk,
         )
         for store in rows
     ]
@@ -656,6 +764,7 @@ def _operators_without_email(operator: uuid.UUID | None) -> list[Item]:
             url=_operator_url(row.pk),
             since=None,
             operator_id=row.pk,
+            operator_name=row.display_name,
         )
         for row in rows.order_by("display_name", "id")
     ]
@@ -700,6 +809,8 @@ def _vacant(today: date) -> list[Item]:
                 text=f"Vacant since {since}: {store.external_label}",
                 url=reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
                 since=since,
+                store=store.external_label,
+                store_id=store.pk,
             )
         )
     return found
@@ -767,12 +878,24 @@ def _limited(items: Iterable[Item], limit: int | None, more: dict[str, int]) -> 
     return kept
 
 
+def dashboard_leases() -> list[Lease]:
+    """The leases the dashboard's list reads (every lease but the prospective ones, with
+    their store and operator; one query), for the page's other blocks to share."""
+    return _leases(None)
+
+
 def attention(
-    today: date, *, operator: uuid.UUID | None = None, limit: int | None = KIND_LIMIT
+    today: date,
+    *,
+    operator: uuid.UUID | None = None,
+    limit: int | None = KIND_LIMIT,
+    leases: list[Lease] | None = None,
 ) -> Attention:
     """Every item for ``today`` (see the module docstring), by severity, then kind, then
-    the order within the kind; with ``operator``, only that operator's items."""
-    leases = _leases(operator)
+    the order within the kind; with ``operator``, only that operator's items. ``leases``
+    is :func:`dashboard_leases` when the caller read it already (without ``operator``)."""
+    if leases is None or operator is not None:
+        leases = _leases(operator)
     balances = receivables.open_balances(today, operator=operator)
     sources: list[Callable[[], list[Item]]] = [
         lambda: _overdue(today, balances),

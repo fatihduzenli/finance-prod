@@ -14,6 +14,7 @@ sentence :data:`ledger.views.reports.TOO_SLOW`.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from urllib.parse import urlencode
 
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
@@ -26,20 +27,29 @@ from django.views.decorators.http import require_safe
 
 from accounts.roles import Role, meets, role_of
 from finance.templatetags.components import GLYPHS, badge_family
-from ledger.models import PaymentChannel, PaymentStatus
-from ledger.services import attention, grid, one_off_charges, receivables, rent_run
+from ledger.models import PaymentChannel, PaymentMethod, PaymentStatus, Store
+from ledger.services import attention, grid, one_off_charges, receivables, rent_run, stores
+from ledger.services import dashboard as dashboard_blocks
 from ledger.views.operators import csv_response, role_required
 from ledger.views.reports import TOO_SLOW, ReportTooSlow, bounded
+from ledger.wording import format_amount
 
 
 @role_required
 @require_safe
 def home(request: HttpRequest) -> HttpResponse:
-    """``ledger:home`` (D1): what needs attention (PLAN-011b D6), then who owes what,
-    and since when."""
+    """``ledger:home`` (D1; the approved design's layout, PLAN-012f D7): the four figures,
+    what needs attention (PLAN-011b D6) beside the month's collection and what is coming
+    up, the recent payments, then today's run, the failed attempts, the waived charges,
+    the invoices not sent and the last nightly check."""
     today = timezone.localdate()
+    role = role_of(request.user)
     data = receivables.dashboard(today)
-    needs = attention.attention(today)
+    leases = attention.dashboard_leases()
+    needs = _titled(attention.attention(today, leases=leases))
+    debits = dashboard_blocks.pending_debits()
+    collection = dashboard_blocks.collection_progress(today)
+    run_line = rent_run.run_line(today)
     payments_query = urlencode(
         {
             "date_from": data.month_start.isoformat(),
@@ -54,10 +64,17 @@ def home(request: HttpRequest) -> HttpResponse:
             "data": data,
             "attention": needs,
             # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
-            "can_record_outcome": meets(role_of(request.user), Role.BILLING),
+            "can_record_outcome": meets(role, Role.BILLING),
+            # PLAN-012f D7: a row's action button and "+ New invoice" are billing's; a viewer
+            # reads the rows and follows their links.
+            "can_act": meets(role, Role.BILLING),
             "payments_query": payments_query,
+            "kpis": _kpis(data, collection, debits, run_line, payments_query),
+            "collection": collection,
+            "coming_up": dashboard_blocks.coming_up(leases, today, debits),
+            "recent_payments": dashboard_blocks.recent_payments(today),
             # PLAN-012d D11: today's rent run in one line, from its audit rows.
-            "run_line": rent_run.run_line(today),
+            "run_line": run_line,
             "waived_live_heading": one_off_charges.WAIVED_LIVE_HEADING,
             "not_sent": [
                 (invoice, receivables.invoice_store_label(invoice)) for invoice in data.not_sent
@@ -68,6 +85,88 @@ def home(request: HttpRequest) -> HttpResponse:
             ],
         },
     )
+
+
+def _titled(found: attention.Attention) -> attention.Attention:
+    """The items with their store as the store page and the grid title it ("#1991 Istanbul",
+    :func:`ledger.services.stores.title`; one query for the stores the items name)."""
+    ids = {item.store_id for item in found.items if item.store_id is not None}
+    titles = {store.pk: stores.title(store) for store in Store.objects.filter(pk__in=ids)}
+    found.items = [
+        replace(item, store=titles[item.store_id]) if item.store_id in titles else item
+        for item in found.items
+    ]
+    return found
+
+
+@dataclass(frozen=True, slots=True)
+class Kpi:
+    """One of the dashboard's four figures (PLAN-012f D7): ``url`` makes the card a link;
+    ``note`` is escaped text, or markup built here with its parts escaped."""
+
+    element_id: str
+    label: str
+    value: str
+    note: str
+    tone: str = ""
+    url: str = ""
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+def _kpis(
+    data: receivables.Dashboard,
+    collection: dashboard_blocks.Collection,
+    debits: dashboard_blocks.PendingDebits,
+    run_line: rent_run.RunLine | None,
+    payments_query: str,
+) -> list[Kpi]:
+    """Unpaid balances, Collected this month, Pending bank debits, Today's daily charges."""
+    share = (
+        f"{collection.percent}% of {collection.month:%B} rent"
+        if collection.percent is not None
+        else "—"
+    )
+    run_page = reverse("ledger:run:today")
+    details = format_html('<a href="{}">details</a>', run_page)
+    run_note = (
+        format_html("created · {} skipped · {}", run_line.skipped, details)
+        if run_line is not None
+        else format_html("not created yet · {}", details)
+    )
+    pending_query = urlencode({"status": PaymentStatus.PENDING, "method": PaymentMethod.ACH})
+    return [
+        Kpi(
+            "figure-outstanding",
+            "Unpaid balances",
+            format_amount(data.outstanding),
+            f"{_plural(data.outstanding_stores, 'store')} · {data.overdue_stores} overdue",
+            tone="unpaid",
+            url=reverse("ledger:arrears:page"),
+        ),
+        Kpi(
+            "figure-paid",
+            "Collected this month",
+            format_amount(data.paid_this_month),
+            share,
+            url=f"{reverse('ledger:payments:list')}?{payments_query}",
+        ),
+        Kpi(
+            "figure-pending",
+            "Pending bank debits",
+            format_amount(debits.amount),
+            debits.note,
+            url=f"{reverse('ledger:payments:list')}?{pending_query}",
+        ),
+        Kpi(
+            "figure-run",
+            "Today's daily charges",
+            str(run_line.created) if run_line is not None else "—",
+            run_note,
+        ),
+    ]
 
 
 #: Stands for a charge's id in its page's URL, reversed once per page (PLAN-011 D6).
