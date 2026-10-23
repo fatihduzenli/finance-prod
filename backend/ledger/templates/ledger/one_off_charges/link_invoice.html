@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load responsive money %}
 {% block title %}Attach {{ company.provider_name }} invoice{% endblock %}
-{% block header %}<div class="page-header"><h1>Attach {{ company.provider_name }} invoice</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if charge.lease %}{% include "ledger/_store_crumb.html" with crumb_store=charge.lease.store %}{% elif charge.operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=charge.operator.pk %}">{{ charge.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Attach {{ company.provider_name }} invoice</span></nav><h1>Attach {{ company.provider_name }} invoice</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
+  <section class="card form-card">
   <p>Price: <strong id="price">{{ charge.price|money }}</strong>. Balance: <strong id="balance">{{ charge.balance|money }}</strong>.</p>
   <p class="muted">The invoices of this lease's operator that are not linked to any charge, such as a one-off invoice created on the {{ company.provider_name }} dashboard. A charge has at most one invoice, and a link cannot be undone here. When the invoice total differs from the balance, check the box and say why in the note; the charge is then marked Needs review.</p>
   {{ form.non_field_errors }}
@@ -37,8 +37,9 @@
         <label for="{{ form.confirm.id_for_label }}">{{ form.confirm }} I confirm linking an invoice whose total differs from the balance.</label>
       </p>
       {% include "ledger/stores/_form_field.html" with field=form.note label="Note" no_mark=True %}
-      <p class="actions"><button class="btn btn-primary" type="submit" id="link-invoice-submit">Attach {{ company.provider_name }} invoice</button></p>
+      <div class="form-actions"><button class="btn btn-primary" type="submit" id="link-invoice-submit">Attach {{ company.provider_name }} invoice</button></div>
     </form>
   {% endif %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

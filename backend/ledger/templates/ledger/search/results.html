@@ -5,15 +5,16 @@
 {% block content %}
   {% comment %}The top-bar search's results (PLAN-012d D17): the stores and the operators matching every word;
   an archived operator is listed and marked, never jumped to.{% endcomment %}
-  <form method="get" action="{% url 'ledger:search' %}" class="actions" role="search" id="search-form">
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:search' %}" class="actions" role="search" id="search-form">
     <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators" style="max-width:24rem;">
     <button class="btn" type="submit">Search</button>
-  </form>
+  </form></div>
   {% if not query %}
     <p class="muted" id="search-empty">Type a store number, a store name, a city or an operator's name.</p>
   {% elif results.empty %}
     <p class="muted empty" id="search-no-match">No match for '{{ query }}'.</p>
   {% else %}
+    <section class="card" id="search-stores-card">
     <h2>Stores</h2>
     {% if results.stores %}
       {% responsive_table %}
@@ -35,6 +36,8 @@
     {% else %}
       <p class="muted empty" id="search-no-store">No store matches.</p>
     {% endif %}
+    </section>
+    <section class="card" id="search-operators-card">
     <h2>Operators</h2>
     {% if operators %}
       {% responsive_table %}
@@ -54,5 +57,6 @@
     {% else %}
       <p class="muted empty" id="search-no-operator">No operator matches.</p>
     {% endif %}
+    </section>
   {% endif %}
 {% endblock %}

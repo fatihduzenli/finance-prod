@@ -526,10 +526,14 @@ def test_the_lease_menu_is_a_drop_down_button_ending_with_the_arrow() -> None:
 
 # --- No 12c component class left -----------------------------------------------------------------
 
+#: PLAN-012f D10 (Batch D) adds the back-link paragraph of PLAN-012d D5 (``p.crumb``, now the
+#: page header's breadcrumb) and the sign-in pages' 12c box (``main.container``, now the
+#: two-panel layout of D13).
 OLD_COMPONENT = re.compile(
     r"badge-glyph|badge-(?:due|voided|attention)\b|badge not-due|\.not-due\b"
     r'|class="[^"]*\bfigures?\b|\.figures?\b|actions tabs|actions store-tabs|alert-list'
     r"|nth-child\(even\)"
+    r'|class="crumb"|\.crumb\b|class="container"|\.container\b'
 )
 
 
@@ -549,3 +553,6 @@ def test_no_12c_component_class_remains() -> None:
         '<div class="figures">'
     )
     assert not OLD_COMPONENT.search('<div class="kpi-row">')
+    assert OLD_COMPONENT.search('<p class="crumb" id="store-crumb">')
+    assert OLD_COMPONENT.search('<main class="container">')
+    assert not OLD_COMPONENT.search('<nav class="breadcrumb" id="breadcrumb">')

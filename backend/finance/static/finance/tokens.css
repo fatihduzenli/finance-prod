@@ -45,6 +45,10 @@
    pair: --muted on --surface-2
    pair: --text on --month-current
    pair: --muted on --month-current
+   pair: --sidebar-text on --login-gradient[start]
+   pair: --sidebar-text on --login-gradient[end]
+   pair: --sidebar-active-text on --login-gradient[start]
+   pair: --sidebar-active-text on --login-gradient[end]
    The sandbox banner (finance/templates/finance/banner.html) carries #6B4E00 on #FFF3C4 as
    literals, the pending pair's values: it is injected into the Django admin too, which never
    loads this file. White on --btn-primary-bg is the primary button's label, white on #B42318 the confirming
@@ -72,7 +76,12 @@
    PLAN-012f Batch C adds two more beside it: --progress-pending #E5B800 and --progress-partial
    #F08A24, the fills of the dashboard's progress bar (the yellow and orange of the reference);
    each segment is named by the legend's word beside its 8 px square, so the fills carry no text
-   and have no text pair. */
+   and have no text pair.
+   PLAN-012f Batch D adds --login-gradient beside them: the sign-in pages' brand panel, the
+   sidebar gradient's two stops at 160 degrees (DESIGN-SPEC §4 Login), so its text pairs measure
+   as the sidebar's (sidebar-text 11.5 and 7.3, white 15.4 and 9.8); its two soft teal shapes
+   (teal at 12 % and 10 % over the panel, color-mix in app.css) are decoration and sit beside
+   the text, not under it. */
 
 @font-face {
   font-family: Inter;
@@ -123,4 +132,8 @@
   /* the progress bar's Pending and Partly paid fills (PLAN-012f Batch C, dashboard-laptop.png):
      decoration beside the legend's words, never a text colour */
   --progress-pending: #E5B800;  --progress-partial: #F08A24;
+
+  /* the sign-in pages' brand panel (PLAN-012f D13; DESIGN-SPEC §4 Login): the sidebar's two
+     stops at 160 degrees */
+  --login-gradient: linear-gradient(160deg, #0B2545 0%, #0E4A5C 100%);
 }

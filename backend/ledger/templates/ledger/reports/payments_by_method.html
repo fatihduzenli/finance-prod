@@ -1,9 +1,8 @@
 {% extends "finance/base.html" %}
 {% load money responsive %}
 {% block title %}Payments by method{% endblock %}
-{% block header %}<div class="page-header"><h1>Payments by method</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Payments by method</span></nav><h1>Payments by method</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
   {% url 'ledger:reports:payments_by_method' as action %}{% url 'ledger:reports:payments_by_method_export' as export %}
   {% include "ledger/reports/_range.html" with action=action export=export %}
   {% if too_slow %}
@@ -11,6 +10,7 @@
   {% else %}
   <p class="muted">Settled payments by settled month and method, less the refunds settled that month. Deposits and deposit refunds are left out, as on the dashboard's "paid this month". Amounts in US dollars.</p>
   <p class="muted" id="cards-note">{{ cards_note }}</p>
+  <div class="card table-card">
   {% responsive_table "scroll" %}
   <table id="payments-by-method">
     <thead>
@@ -34,5 +34,6 @@
     </tfoot>
   </table>
   {% endresponsive_table %}
+  </div>
   {% endif %}
 {% endblock %}

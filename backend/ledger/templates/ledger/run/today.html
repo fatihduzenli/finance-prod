@@ -2,7 +2,7 @@
 {% load components money %}
 {% load responsive %}
 {% block title %}Daily charges, {{ run.day|date:"Y-m-d" }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Daily charges, {{ run.day|date:"Y-m-d" }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><h1>Daily charges, {{ run.day|date:"Y-m-d" }}</h1>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form><form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
   {% if not health.ok %}
     <ul class="messages" id="provider-banner">
@@ -18,17 +18,8 @@
 
   <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. {{ company.provider_name }}'s autopay makes the invoices; "Update from {{ company.provider_name }}" links them to these charges. Nothing here debits anyone. Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
 
-  {% if can_run %}
-    <div class="actions">
-      <form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">
-        {% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button>
-      </form>
-      <form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">
-        {% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button>
-      </form>
-    </div>
-  {% endif %}
   {% if last_run %}
+    <section class="card" id="last-run-card">
     <h2>Last run</h2>
     <p id="last-run">{{ last_run.day|date:"Y-m-d" }}, {% if last_run.actor %}by {{ last_run.actor.get_username }}{% else %}by the daily run{% endif %}: {{ last_run.created }} created today, {{ last_run.caught_up }} by the catch-up, {{ last_run.already }} already created, {{ last_run.skipped }} skipped.</p>
     {% responsive_table %}
@@ -50,14 +41,15 @@
     </table>
     {% endresponsive_table %}
     {% if last_run.not_listed %}<p class="muted" id="created-not-listed">{{ last_run.not_listed }} more not listed.</p>{% endif %}
+    </section>
   {% endif %}
   {% include "ledger/_job_status.html" %}
   {% if match_lines %}
     <ul id="match-report">{% for line in match_lines %}<li>{{ line }}</li>{% endfor %}</ul>
   {% endif %}
 
-  <h2>Due today</h2>
-  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:run:export' %}">Download spreadsheet</a></p>
+  <section class="card" id="due-today-card">
+  <div class="card-header"><h2>Due today</h2><a class="btn card-link" id="export-csv" href="{% url 'ledger:run:export' %}">Download spreadsheet</a></div>
   {% responsive_table %}
   <table id="due-today">
     <thead><tr><th>Store</th><th>Operator</th><th>Debit</th><th>Channel</th><th class="money">Amount</th><th>Carried balance</th><th>This month</th><th>Last month</th></tr></thead>
@@ -80,7 +72,9 @@
   </table>
   {% endresponsive_table %}
   <p class="muted" id="carried-balance-note">"Carried balance" is what earlier charges of the lease still owe. It is not added to today's amount.</p>
+  </section>
 
+  <section class="card" id="skipped-today-card">
   <h2>Skipped today</h2>
   {% responsive_table %}
   <table id="skipped-today">
@@ -99,7 +93,9 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </section>
 
+  <section class="card" id="insurance-due-card">
   <h2>Insurance due in the next {{ insurance_days }} days</h2>
   {% responsive_table %}
   <table id="insurance-due">
@@ -120,5 +116,6 @@
   </table>
   {% endresponsive_table %}
   <p class="muted">Insurance charges are created by the yearly insurance charges run on or after each anniversary. Insurance autopay is a later step.</p>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

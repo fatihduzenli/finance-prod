@@ -1,5 +1,4 @@
-{% load components %}
-<p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
+{% load components %}{% comment %}Under a wizard step's header (PLAN-012c D5, PLAN-012f D10): the lease the wizard ends, the step list as pills (.steps; a reachable step is a link, the current one aria-current="step", a step before it done) and, on a phone in their place, "Step 2 of 7 · Statement" with its bar ({% step_line %}). The way back to the store is the header's breadcrumb.{% endcomment %}
 {% if transfer %}
 <p class="muted" id="transfer-banner">Ending the lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}, so that {{ transfer.incoming_operator.display_name|default:"the incoming operator" }} can take the store over.</p>
 {% else %}
@@ -10,3 +9,4 @@
     <li{% if done %} class="step-done"{% endif %}{% if is_current %} aria-current="step"{% endif %}>{% if is_current %}<strong>{{ label }}</strong>{% elif url %}<a href="{{ url }}">{{ label }}</a>{% else %}{{ label }}{% endif %}{% if done %}<span class="visually-hidden"> (done)</span>{% endif %}</li>
   {% endfor %}
 </ol>
+{% step_line step_links %}

@@ -3,7 +3,7 @@
 {% block title %}Messages from {{ company.provider_name }}{% endblock %}
 {% block header %}<div class="page-header"><h1>Messages from {{ company.provider_name }}</h1></div>{% endblock %}
 {% block content %}
-  <form method="get" action="{% url 'ledger:webhooks:list' %}" class="actions" role="search">
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:webhooks:list' %}" class="actions" role="search">
     <label for="outcome" style="margin:0;">Outcome</label>
     <select name="outcome" id="outcome">
       <option value="">Any</option>
@@ -16,7 +16,8 @@
     </select>
     <button class="btn" type="submit">Filter</button>
     <a class="btn" id="export-csv" href="{% url 'ledger:webhooks:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>
-  </form>
+  </form></div>
+  <div class="card table-card">
   {% responsive_table %}
   <table id="webhook-events">
     <thead>
@@ -39,6 +40,7 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </div>
   {% if page.paginator.num_pages > 1 %}
     <div class="pager" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?{% if outcome %}outcome={{ outcome|urlencode:'' }}&amp;{% endif %}{% if event_type %}type={{ event_type|urlencode:'' }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

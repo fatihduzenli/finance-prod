@@ -1,20 +1,13 @@
 {% extends "finance/base.html" %}
 {% load responsive money %}
 {% block title %}Payment{% endblock %}
-{% block header %}<div class="page-header"><h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% else %}<a href="{% url 'ledger:payments:list' %}">Payments</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</span></nav><h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</h1></div>{% if can_refund or can_void %}<div class="page-actions">{% if can_void %}<a class="btn" href="{% url 'ledger:payments:void' pk=payment.pk %}" id="void-payment">Void</a>{% endif %}{% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
-  {% include "ledger/_store_crumb.html" %}
-  <p><a href="{% url 'ledger:payments:list' %}">&larr; Payments</a>{% if charge %} · <a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Charge</a>{% elif one_off_charge %} · <a href="{% url 'ledger:one_off_charges:detail' pk=one_off_charge.pk %}">One-off charge</a>{% endif %}</p>
-  {% if can_refund or can_void %}
-    <p class="actions">
-      {% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}
-      {% if can_void %}<a class="btn" href="{% url 'ledger:payments:void' pk=payment.pk %}" id="void-payment">Void</a>{% endif %}
-    </p>
-  {% endif %}
+  <section class="card" id="payment-card" aria-label="Payment">
 
   {% include "ledger/_job_status.html" %}
   {% include "ledger/payments/summary.html" %}
-  <dl>
+  <dl class="detail-list">
     <dt>Initiated</dt><dd>{{ payment.initiated_on|date:"Y-m-d"|default:"—" }}</dd>
     <dt>Paid on</dt><dd>{{ payment.settled_on|date:"Y-m-d"|default:"—" }}</dd>
     {% if payment.return_code %}<dt>Return</dt><dd>{{ payment.return_code }} {{ payment.return_reason }}</dd>{% endif %}
@@ -22,13 +15,17 @@
     <dt>Note</dt><dd style="white-space:pre-wrap;">{{ payment.note|default:"—" }}</dd>
     <dt>Recorded by</dt><dd>{{ payment.recorded_by|default:"—" }}</dd>
   </dl>
+  </section>
 
   {% if payment.parent_payment %}
+    <section class="card">
     <h2>Refunds payment</h2>
     <p id="parent-payment"><a href="{% url 'ledger:payments:detail' pk=payment.parent_payment.pk %}">{{ payment.parent_payment.get_method_display }} payment of {{ payment.parent_payment.amount|money }}</a>, {{ payment.parent_payment.get_status_display }}{% if parent_transaction %}, transaction {{ parent_transaction }}{% endif %}</p>
+    </section>
   {% endif %}
 
   {% if not payment.is_refund %}
+    <section class="card">
     <h2>Refunds</h2>
     {% responsive_table %}
     <table id="refunds">
@@ -47,8 +44,10 @@
       </tbody>
     </table>
     {% endresponsive_table %}
+    </section>
   {% endif %}
 
+  <section class="card">
   <h2>Invoice</h2>
   {% if invoice %}
     <dl id="payment-invoice">
@@ -61,7 +60,9 @@
   {% else %}
     <p class="muted">No invoice.</p>
   {% endif %}
+  </section>
 
+  <section class="card">
   <h2>Charge</h2>
   {% if charge %}
     <dl id="payment-charge">
@@ -86,7 +87,9 @@
   {% else %}
     <p class="muted">No charge linked.</p>
   {% endif %}
+  </section>
 
+  <section class="card">
   <h2>Audit</h2>
   {% responsive_table %}
   <table id="payment-audit">
@@ -100,4 +103,5 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </section>
 {% endblock %}

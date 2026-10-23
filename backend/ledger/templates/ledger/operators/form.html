@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load static %}
 {% block title %}{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}{% endblock %}
-{% block header %}<div class="page-header"><h1>{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> {% if operator %}<a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}</span></nav><h1>{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}</h1></div></div>{% endblock %}
 {% block content %}
-  <p>{% if operator %}<a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a>{% else %}<a href="{% url 'ledger:operators:list' %}">&larr; Operators</a>{% endif %}</p>
+  <section class="card form-card">
   <p class="muted">With an e-mail address, saving also connects or creates the operator's customer in {{ company.provider_name }}. Without one, connect the customer by hand afterwards.</p>
   <form method="post" id="operator-form" class="js-single-submit">
     {% csrf_token %}
@@ -12,7 +12,8 @@
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" with hide_help=True %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-operator">Save</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-operator">Save</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% endblock %}

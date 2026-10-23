@@ -2,9 +2,9 @@
 {% load static money %}
 {% load responsive %}
 {% block title %}Add payment: store {{ store.external_label }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Add payment</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store crumb_query="?tab=payments#tab-payments" %}<span aria-current="page">Add payment</span></nav><h1>Add payment</h1></div></div>{% endblock %}
 {% block content %}
-  <p class="crumb" id="store-crumb"><a href="{% url 'ledger:stores:detail' pk=store.pk %}?tab=payments#tab-payments">&larr; Store {{ store.external_label }}</a></p>
+  <section class="card form-card">
   <p class="muted" id="known-fields">Store {{ store.external_label }} · {% if lease.started_on %}Lease from {{ lease.started_on|date:"Y-m-d" }}{% else %}Lease{% endif %}{% if lease.operator %} · Operator {{ lease.operator.display_name }}{% endif %}</p>
   <p class="muted">A payment received by Zelle, wire, check or another way outside {{ company.provider_name }}. Enter what was received once, then type how much of it pays each open charge below. The allocations must add up to the amount received, or the rest is kept as a credit on the lease. Each charge's invoice is marked paid in {{ company.provider_name }} once its charge is fully covered; a partial payment is marked Needs review.</p>
   <form method="post" id="allocation-form" class="js-single-submit js-allocation" autocomplete="off">
@@ -43,7 +43,8 @@
     {{ form.keep_credit.errors }}
     <p><label for="{{ form.keep_credit.id_for_label }}">{{ form.keep_credit }} Keep <span id="keep-credit-amount">the unallocated amount</span> as a credit on the lease</label><br><span class="muted">A credit is held for the operator, never revenue: it can pay a charge later from this form, or is refunded at the lease end.</span></p>
     </div>
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-payment">Add payment</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-payment">Add payment</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/payment_allocation.js' %}" defer></script>{% endblock %}

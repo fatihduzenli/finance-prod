@@ -1703,3 +1703,18 @@ Checked at 1,440 against the references: the store page and the dashboard read l
 the owner:** the attention row's button reads "Open" for every kind (the screenshot's per-kind
 labels would misname where the links lead). Batch D (every other page, the login layout, the
 baselines, the side-by-side report) assigned.
+
+## Update, 2026-10-23, PLAN-012f Batch D built and gated (not pushed)
+
+Every other page on the components (the page header's breadcrumb "Stores › #NNNN › <page>",
+cards, table cards, filter cards, form cards with the sticky phone actions, the wizards' "Step N
+of M" line on phones), the 404 and 403 in the shell for a signed-in user, the two-panel sign-in
+layout (brand panel on the sidebar gradient; "Username"; no forgot-password or keep-me control;
+the banner as the rounded strip), print rules for the cards. Gate: sqlite 6,470 passed (one
+environmental failure explained in the QA report); PostgreSQL 34 + 7,098 passed; e2e 26 passed in
+four runs; Fable's adversarial file 9 cases green. The thirty visual baselines regenerated in the
+Playwright image; the four report shots and their side-by-side images in `docs/qa/12f/`. **One
+MAJOR found at the phone comparison:** the store page's charge rows at 390 px are the generic
+label-and-value cards, not the spec's two-line card (Batch C's phone criterion); recorded as slice
+D-2 in the plan, Fable's tests written, assigned to Opus; the step's checkpoint and the Publish
+Request follow its gate.

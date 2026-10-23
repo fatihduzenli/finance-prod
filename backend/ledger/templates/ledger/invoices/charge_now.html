@@ -1,9 +1,8 @@
 {% extends "finance/base.html" %}
 {% load money %}
 {% block title %}Charge now {{ draft.number }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Charge now</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if draft.lease %}{% include "ledger/_store_crumb.html" with crumb_store=draft.lease.store %}{% else %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">{{ draft.number }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Charge now</span></nav><h1>Charge now</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">&larr; {{ draft.number }}</a></p>
   <section class="confirm" aria-labelledby="confirm-what-heading">
   <div class="confirm-what">
   <h2 id="confirm-what-heading">What will happen</h2>

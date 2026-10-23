@@ -1,15 +1,15 @@
 {% extends "finance/base.html" %}
 {% load money responsive %}
 {% block title %}Revenue by month{% endblock %}
-{% block header %}<div class="page-header"><h1>Revenue by month</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Revenue by month</span></nav><h1>Revenue by month</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
   {% url 'ledger:reports:revenue' as action %}{% url 'ledger:reports:revenue_export' as export %}
   {% include "ledger/reports/_range.html" with action=action export=export %}
   {% if too_slow %}
     <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
   <p class="muted" id="revenue-basis">Revenue is by settled month: collected amounts count in the month their payment settled, less refunds settled that month. Unpaid by age is by due date. Billed: rent by rent month (waived charges left out), insurance and other fees by due date (waived and voided charges left out). Deposits held are not revenue and are not here. The part of a deposit withheld at the end of a lease counts as other fees collected in the month it was withheld. Amounts in US dollars.</p>
+  <div class="card table-card">
   {% responsive_table "scroll" %}
   <table id="revenue">
     <thead>
@@ -39,5 +39,6 @@
     </tfoot>
   </table>
   {% endresponsive_table %}
+  </div>
   {% endif %}
 {% endblock %}

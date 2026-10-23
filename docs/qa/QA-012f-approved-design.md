@@ -175,3 +175,67 @@ attention rows but no action button while billing sees one; a store without a nu
 address keeps a sensible header; a viewer's dashboard carries no link to a form.
 
 **Verdict (C):** PASS (two MINOR resolved; one label question for the owner).
+
+### Batch D — every other page, the sign-in layout, the baselines, the report (D10, D12, D13)
+
+**Scope.** Ninety-five templates under `ledger/templates/ledger/` (every list, detail, form, confirm
+and wizard page: the page header's title block with the breadcrumb "Stores › #NNNN › <page>" via
+`_store_crumb.html` and `crumb_query`, each block a `.card`, lists in `.table-card`, filters in
+`.filter-card`, forms in `.form-card` with `.form-actions`, facts in `.detail-list`), the help pages,
+`finance/settings.html`, `finance/templates/404.html` (new: the shell for a signed-in user, the
+sign-in panel otherwise), `accounts/403.html` (the same split), `two_factor/_base.html` (the
+two-panel sign-in layout: `#auth-brand` on `--login-gradient`, `main#auth-main`, the banner as the
+rounded strip), `two_factor/core/login.html` (new: the package's wizard with the fields one per row,
+"Username", the full-width primary, no forgot-password or keep-me control), `two_factor/_wizard_actions.html`
+(new), `app.css` (+115 lines: the cards, the breadcrumb, the form card, the wizard's phone step
+line, the sign-in panels), `print.css` (cards print as plain sections; the breadcrumb and the step
+line do not print), `tokens.css` (`--login-gradient` and its four pairs), `components.py`
+(`{% step_line %}`), `views/invoices.py` (`crumb_store`, `crumb_operator`). Tests: Opus's
+`tests/test_plan012f_d_pages.py` (19), `tests/e2e/test_pages_12f_d.py` (5), six existing test files
+moved with the markup; Fable's `tests/test_plan012f_d_adversarial.py` (9) and one earlier
+adversarial expectation (`test_plan012e2_c_adversarial.py`: the 404 wears the shell, so it carries
+the shell's scripts and no others). Baselines: all 30 regenerated in the Playwright image; the four
+report shots written by the visual suite's `--report-dir` mode into `docs/qa/12f/`, and the four
+side-by-side images composed from them beside the references.
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| 1 | MAJOR | stores/_tab_charges.html, app.css (phone) | At 390 px the Charges card's rows are the generic label-and-value cards (Charge, Due, Status, Amount, Paid, Balance, Actions as seven lines) where DESIGN-SPEC §6 and store-workspace-phone.png show a two-line card: title and amount, then due and kind with the status badge | Open against Batch C's acceptance line ("the phone store page at 390"); assigned as slice D-2 (below); not a Batch D change |
+
+**Decisions taken (Fable) and for the owner.** The login's brand sentence drops the screenshot's
+"517 stores" (a made-up figure); the primary button keeps the package's "Next" (the flow's word on
+the token step too; the owner may ask for "Sign in" on the first step); "Cancel" is a text link
+under the buttons where the package offers one; the package's disabled "Back" on the first step is
+left out. The 404 and 403 of a signed-in user render inside the shell (sidebar, banner, page header);
+anonymous ones in the sign-in panel. The operator statement's Print button keeps its inline handler
+(pre-existing; no CSP is set). The billing user's store screenshot has no Lease menu: the menu is
+admin-only (PLAN-012e), the reference was drawn as an admin.
+
+**Gate 1.** ruff, `ruff format --check` (562 files), mypy strict (457 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16: all clean. **Gate 2.** sqlite 6,470 passed, 664 skipped (20:55), with one failure: the Rule 8 fence test walked a `backend/.mypy_cache` that Fable's own mypy run had created mid-gate (gitignored, untracked, created 12:41; deleted; the fence file re-run 6 passed); PostgreSQL "Migration tests" 34 passed (17:56), "Unit tests" 7,098 passed, 3 skipped (20:59), the three D-2 markup cases failing as intended (the slice is not built; they define finding 1); e2e 26 passed in each of four runs on PostgreSQL, the two D-2 browser cases failing likewise. The flaky
+`test_every_control_on_the_main_pages_has_a_label` (one failure in Opus's eight runs on a tree
+mid-edit): six isolated runs of the file green (14 passed each), green in every full run; not
+reproduced, kept under residual risk. **Gate 3.** Diff read: the permission guards of the templates
+(every `can_*`, `csrf_token` and `is_admin` occurrence present at HEAD is present after, several
+more where a page split into cards); no `|safe`, no `autoescape off`, no inline style added but the
+pre-existing search width; the 404 shows nothing from the request; the sign-in page reflects
+nothing. **Gate 4.** Secret scans (`scripts/check-no-secrets.sh`, the pattern scan of the diff and
+the new files) clean; no secret-store read. Fable's cases: the login page keeps its one POST form
+with the CSRF token, the field names, the "Username" label, no forgot or keep-me control, one banner
+and the invitation sentence; a hostile `next` (protocol-relative, absolute, javascript:, markup,
+backslash) is never reflected outside an escaped attribute; a signed-in viewer's 404 and 403 carry
+the shell and one banner; a breadcrumb never carries raw markup and a viewer sees no primary
+action in any page header; every main page renders for every role with the sidebar, the tab bar and
+one page header.
+
+**Visual check (D12).** The four built shots beside the references, `docs/qa/12f/*-side-by-side.png`:
+the dashboard, the store workspace and the monthly rent overview read like the references at
+1,440 (the known copy differences of Batch C: "Open" on the attention rows, "Pending · from <date>"
+in the grid, the earlier blocks below the dashboard as cards). The phone store page matches the
+shell, the header, the three summary tiles, the actions and the segmented filter; its charge rows do
+not (finding 1).
+
+**Verdict (D):** PASS for Batch D's own scope; the step carries finding 1 (MAJOR, Batch C's phone
+criterion) until slice D-2 is gated.

@@ -1,23 +1,17 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
 {% block title %}Nightly check{% endblock %}
-{% block header %}<div class="page-header"><h1>Nightly check</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><h1>Nightly check</h1>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:reconciliation:run' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="run-now"{% if job_refresh %} disabled{% endif %}>Run the nightly check now</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
   <p class="muted">Each night the check re-reads open invoices, recent transactions, bank deposits and ACH rejections from {{ company.provider_name }}, and marks pending payments that are too old. Times are shown in {{ timezone }}. Identifiers are masked.</p>
 
-  {% if can_run %}
-    <div class="actions">
-      <form method="post" action="{% url 'ledger:reconciliation:run' %}" class="js-single-submit">
-        {% csrf_token %}<button class="btn btn-primary" type="submit" id="run-now"{% if job_refresh %} disabled{% endif %}>Run the nightly check now</button>
-      </form>
-      <span class="muted">Runs the nightly check now. Only one runs at a time.</span>
-    </div>
-  {% endif %}
+  {% if can_run %}<p id="run-now-note"><span class="muted">Runs the nightly check now. Only one runs at a time.</span></p>{% endif %}
   {% include "ledger/_job_status.html" %}
 
+  <section class="card" id="last-run-card">
   <h2>Last run</h2>
   {% if last %}
-    <dl id="last-run">
+    <dl id="last-run" class="detail-list">
       <dt>Started</dt><dd id="last-started">{{ last.started_local }}</dd>
       <dt>How</dt><dd>{{ last.run.get_trigger_display }}</dd>
       <dt>Status</dt><dd id="last-status">{{ last.run.get_status_display }}</dd>
@@ -41,9 +35,10 @@
   {% else %}
     <p class="muted empty" id="no-run">No nightly check has run yet.</p>
   {% endif %}
+  </section>
 
-  <h2>Findings</h2>
-  <p class="actions"><a class="btn" id="export-csv" href="{% url 'ledger:reconciliation:export' %}">Download spreadsheet</a></p>
+  <section class="card" id="findings-card">
+  <div class="card-header"><h2>Findings</h2><a class="btn card-link" id="export-csv" href="{% url 'ledger:reconciliation:export' %}">Download spreadsheet</a></div>
   <p class="muted">{{ open_count }} unresolved. Unresolved first, newest first.</p>
   {% responsive_table %}
   <table id="mismatches">
@@ -75,6 +70,7 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </section>
   {% if page.paginator.num_pages > 1 %}
     <div class="pager" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
@@ -83,6 +79,7 @@
     </div>
   {% endif %}
 
+  <section class="card" id="recent-runs-card">
   <h2>Recent runs</h2>
   {% responsive_table %}
   <table id="recent-runs">
@@ -104,5 +101,6 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

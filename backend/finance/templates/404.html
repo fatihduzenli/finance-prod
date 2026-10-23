@@ -1,0 +1,16 @@
+{% extends request.user.is_authenticated|yesno:"finance/base.html,two_factor/_base.html" %}
+{% comment %}
+The 404 page (docs/qa/PLAN-012f-approved-design.md D10; Django's page_not_found renders it with
+the request): for a signed-in user the staff shell (the sidebar, the banner, the page header,
+the bottom bar), for anyone else the sign-in pages' panel, which shows no navigation. Its words
+are Django's default page's; nothing from the request is shown.
+{% endcomment %}
+{% block title %}Not found{% endblock %}
+{% block header %}<div class="page-header"><h1>Not found</h1></div>{% endblock %}
+{% block content %}
+  {% if not request.user.is_authenticated %}<h1>Not found</h1>{% endif %}
+  <section class="card error-card" id="error-page">
+    <p>The requested resource was not found on this server.</p>
+    {% if request.user.is_authenticated %}<p><a class="btn" href="{% url 'ledger:home' %}">Dashboard</a></p>{% endif %}
+  </section>
+{% endblock %}

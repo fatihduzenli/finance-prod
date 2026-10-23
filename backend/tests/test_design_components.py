@@ -171,7 +171,9 @@ def test_every_staff_template_with_a_title_wraps_it_in_the_page_header() -> None
         for at in [match.start() for match in re.finditer("<h1", text)]:
             found += 1
             line = text[text.rfind("\n", 0, at) + 1 : text.find("\n", at)]
-            if '<div class="page-header"><h1' in line:
+            # A header partial (the wizards' ledger/lease_ends/_title.html) holds the whole
+            # page header on its line: the breadcrumb title block of PLAN-012f D10 included.
+            if '<div class="page-header"><h1' in line or PAGE_HEADER.search(line):
                 continue
             header = text.rfind('{% block header %}<div class="page-header', 0, at)
             assert header != -1 and "{% endblock %}" not in text[header:at], relative

@@ -1,16 +1,14 @@
 {% extends "finance/base.html" %}
 {% block title %}Calendar {{ month|date:"Y-m" }}{% endblock %}
 {% block main_class %}wide{% endblock %}
-{% block header %}<div class="page-header"><h1>Calendar: {{ month|date:"F Y" }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><h1>Calendar: {{ month|date:"F Y" }}</h1><div class="page-actions"><a class="btn" href="{% url 'finance:settings' %}">Calendar feed</a>{% if can_add %}<a class="btn btn-primary" id="calendar-add" href="{% url 'ledger:calendar:add' %}">Add note or reminder</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
   <p class="actions" id="calendar-nav">
     <a class="btn" id="calendar-previous" href="{{ previous_link }}">&larr; Previous</a>
     <a class="btn" id="calendar-this-month" href="{{ this_month_link }}">This month</a>
     <a class="btn" id="calendar-next" href="{{ next_link }}">Next &rarr;</a>
-    {% if can_add %}<a class="btn btn-primary" id="calendar-add" href="{% url 'ledger:calendar:add' %}">Add note or reminder</a>{% endif %}
-    <a class="btn" href="{% url 'finance:settings' %}">Calendar feed</a>
   </p>
-  <form method="get" action="{% url 'ledger:calendar:page' %}" id="calendar-filters" role="search">
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:calendar:page' %}" id="calendar-filters" role="search">
     <input type="hidden" name="month" value="{{ month|date:'Y-m' }}">
     <fieldset class="calendar-kinds">
       <legend>Show</legend>
@@ -24,7 +22,7 @@
       {% if filters.lease %}<input type="hidden" name="lease" value="{{ filters.lease }}"><span class="badge">One lease</span>{% endif %}
       <button class="btn" type="submit">Show</button>
     </div>
-  </form>
+  </form></div>
   {% if messages_shown %}<ul class="messages" id="calendar-messages">{% for text in messages_shown %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>{% endif %}
   <p class="muted" id="calendar-count">{{ count }} item{{ count|pluralize }} this month. New York dates. Generated items (debit days, insurance anniversaries, lease ends) link to their lease.</p>
   <div class="calendar-month" id="calendar-month">

@@ -1,7 +1,10 @@
-{% extends "two_factor/_base.html" %}
-{% comment %}Status 403 from accounts.middleware.RoleEnforcementMiddleware.{% endcomment %}
+{% extends request.user.is_authenticated|yesno:"finance/base.html,two_factor/_base.html" %}
+{% comment %}Status 403 from accounts.middleware.RoleEnforcementMiddleware and the views that refuse a role (accounts.views.forbidden). A signed-in user sees it in the staff shell (PLAN-012f D10); the sign-in pages' panel otherwise.{% endcomment %}
 {% block title %}Not allowed{% endblock %}
+{% block header %}<div class="page-header"><h1>Not allowed</h1></div>{% endblock %}
 {% block content %}
-  <h1>Not allowed</h1>
-  <p>Your role does not allow this action.</p>
+  {% if not request.user.is_authenticated %}<h1>Not allowed</h1>{% endif %}
+  <section class="card error-card" id="error-page">
+    <p>Your role does not allow this action.</p>
+  </section>
 {% endblock %}

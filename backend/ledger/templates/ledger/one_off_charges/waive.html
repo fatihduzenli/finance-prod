@@ -1,9 +1,8 @@
 {% extends "finance/base.html" %}
 {% load money %}
 {% block title %}Waive {{ charge.label }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Waive {{ charge.label }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if charge.lease %}{% include "ledger/_store_crumb.html" with crumb_store=charge.lease.store %}{% elif charge.operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=charge.operator.pk %}">{{ charge.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Waive {{ charge.label }}</span></nav><h1>Waive {{ charge.label }}</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
   <div class="confirm-what">

@@ -523,6 +523,85 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
 .calendar-item.kind-insurance { background: var(--partial-bg); } .calendar-item.kind-lease_end { background: var(--unpaid-bg); }
 .feed-new { border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--space-3); background: var(--paid-bg); }
 
+/* --- Every other page (PLAN-012f D10) ----------------------------------------------------------
+   The page header's .page-title-block holds the 12 px .breadcrumb ("Stores › store › Record a
+   payment": the parents' titles as links, then the page's own title, aria-current="page") over
+   the title. Each block of the page is a .card with its h2 (or .card-header) first; .table-card:
+   a card that holds a list's table alone, the table reaching the card's edges. .filter-card (the
+   grid's) holds a list's filters. .form-card: a form's card, at most 760 px wide; its fields are
+   .field stacks; .form-actions: its buttons, the one primary first. .detail-list: a card's facts
+   (dl), label and value. .page-note: the one muted line under the header that a page keeps
+   (its help). */
+.page-title-block h1 { overflow-wrap: anywhere; }
+.breadcrumb span[aria-current="page"] { color: var(--muted); }
+.card > p:last-child, .card > ul:last-child, .card > dl:last-child, .card > form:last-child { margin-bottom: 0; }
+.card > p:first-child, .card > ul:first-child, .card > dl:first-child { margin-top: 0; }
+.table-card { padding: 0; overflow: clip; }
+.table-card > .table-cards > table > tbody > tr:last-child > td, .table-card > .table-scroll > table > tbody > tr:last-child > td, .table-card > table > tbody > tr:last-child > td { border-bottom: 0; }
+.table-card > p, .table-card > .card-header, .table-card > h2 { margin: 0; padding: 16px 20px 12px; }
+.form-card { max-width: 760px; }
+.form-card .field:first-child > label, .form-card form > .field:first-of-type > label { margin-top: 0; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-5) 0 0; }
+.form-actions form { margin: 0; }
+.detail-list { margin: 0; font-size: var(--fs-base); }
+.detail-list dt { color: var(--muted); font-weight: 500; }
+.card + .pager { margin-top: 0; }
+/* The wizards (lease end, transfer): the step pills on a laptop; on a phone the "Step 2 of 7 ·
+   Statement" line (.steps-line) and its bar (progress.steps-progress) in their place. */
+.steps-line { display: none; margin: 0; color: var(--text); font-size: var(--fs-base); font-weight: 600; }
+.steps-line .steps-name { color: var(--muted); font-weight: 500; }
+.steps-progress { display: none; width: 100%; height: 6px; margin: var(--space-2) 0 var(--space-4); border: 0; border-radius: var(--radius-pill); background: var(--border-soft); appearance: none; -webkit-appearance: none; }
+.steps-progress::-webkit-progress-bar { background: var(--border-soft); border-radius: var(--radius-pill); }
+.steps-progress::-webkit-progress-value { background: var(--teal); border-radius: var(--radius-pill); }
+.steps-progress::-moz-progress-bar { background: var(--teal); border-radius: var(--radius-pill); }
+/* The error pages (404, 403) in the shell: one card with the sentence and the way back. */
+.error-card { max-width: 640px; }
+
+/* --- The sign-in pages (PLAN-012f D13; DESIGN-SPEC §4 Login, login-laptop.png) ---------------
+   two_factor/_base.html: body.auth is two columns. Left, .auth-brand on --login-gradient (the
+   sidebar's stops at 160 degrees) with its two soft teal shapes (12 % and 10 %, decoration,
+   aria-hidden), the logo 52 px, the 34/700 headline, one sentence, three check-marked lines
+   (.auth-points) and the company's name · Monvera at the bottom. Right, on --bg: the sandbox
+   banner (injected first in the body) as a rounded strip, then .auth-main, 400 px: "Sign in"
+   26/700, the muted sub-line (.auth-sub), the fields at 12/14 padding and radius 10, the full-
+   width primary button (13 px padding, radius 10) and the muted note (.auth-note). At 768 px
+   and under the panel is a short gradient header (the logo and the headline) and the form takes
+   the width. */
+body.auth { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 1fr auto auto 1fr; min-height: 100vh; padding-top: 0 !important; background: var(--bg); }
+.auth-brand { grid-column: 1; grid-row: 1 / -1; position: relative; overflow: hidden; display: flex; flex-direction: column; gap: var(--space-6); box-sizing: border-box; min-height: 100vh; padding: 56px 56px 48px; background: var(--login-gradient); color: var(--sidebar-text); }
+.auth-shape { position: absolute; pointer-events: none; }
+.auth-shape-1 { top: 0; right: 0; width: 280px; height: 300px; border-radius: 0 0 0 80px; background: color-mix(in srgb, var(--teal) 12%, transparent); }
+.auth-shape-2 { bottom: 0; right: 60px; width: 360px; height: 160px; border-radius: 80px 80px 0 0; background: color-mix(in srgb, var(--teal) 10%, transparent); }
+.auth-logo, .auth-pitch, .auth-company { position: relative; }
+.auth-logo img { display: block; height: 52px; width: auto; max-width: 100%; }
+.auth-pitch { margin: auto 0; max-width: 440px; }
+.auth-headline { margin: 0 0 var(--space-4); color: var(--sidebar-active-text); font-size: 34px; font-weight: 700; line-height: 1.18; }
+.auth-sentence { margin: 0 0 28px; color: var(--sidebar-text); font-size: var(--fs-lg); line-height: 1.6; }
+.auth-points { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; list-style: none; color: var(--sidebar-text); font-size: var(--fs-md); }
+.auth-points li { display: flex; align-items: center; gap: var(--space-3); }
+.auth-check { display: inline-flex; flex: 0 0 22px; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--sidebar-active-bg); color: var(--sidebar-active-text); }
+.auth-company { margin: 0; color: var(--sidebar-text); font-size: var(--fs-sm); }
+body.auth > #sandbox-banner { grid-column: 2; grid-row: 2; justify-self: center; position: static !important; box-sizing: border-box; width: min(400px, calc(100% - 32px)) !important; height: auto !important; min-height: 28px; line-height: 28px !important; margin: 0 0 28px; padding: 0 var(--space-3); border-radius: var(--radius-ctl); white-space: normal !important; }
+.auth-main { grid-column: 2; grid-row: 3; justify-self: center; box-sizing: border-box; width: min(400px, calc(100% - 32px)); padding: 0 0 48px; }
+.auth-main h1 { margin: 0 0 var(--space-1); color: var(--text); font-size: 26px; font-weight: 700; }
+.auth-sub { margin: 0 0 var(--space-6); color: var(--muted); font-size: var(--fs-md); }
+.auth-main p { color: var(--text-2); font-size: var(--fs-md); }
+.auth-main .field { margin: 0 0 var(--space-4); }
+.auth-main label { margin: 0 0 6px; color: var(--text); font-size: var(--fs-base); font-weight: 600; }
+.auth-main input[type=text], .auth-main input[type=password], .auth-main input[type=number], .auth-main input[type=email], .auth-main input[type=tel] { width: 100%; padding: 12px 14px; border-radius: 10px; font-size: var(--fs-md); }
+.auth-main .btn { padding: 13px; border-radius: 10px; font-size: var(--fs-md); }
+.auth-main .auth-actions { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-6) 0 0; }
+.auth-main .auth-actions .btn { width: 100%; }
+.auth-main .auth-actions .btn-primary { order: -1; }
+.auth-main .auth-actions .auth-cancel { align-self: center; margin-top: var(--space-1); }
+.auth-note { margin: var(--space-6) 0 0; color: var(--muted); font-size: var(--fs-sm); text-align: center; }
+.auth-main .errorlist { margin: var(--space-1) 0 0; padding: 0; list-style: none; font-size: var(--fs-sm); font-weight: 600; }
+.auth-main .errorlist.nonfield { margin: 0 0 var(--space-4); padding: 10px var(--space-3); border-radius: var(--radius-ctl); background: var(--unpaid-bg); }
+/* The package's own form table on the enrolment pages: each label above its field. */
+.auth-main form table, .auth-main form tbody, .auth-main form tr, .auth-main form th, .auth-main form td { display: block; width: 100%; box-sizing: border-box; padding: 0; border: 0; text-align: left; }
+.auth-main form th { padding-top: var(--space-3); }
+.auth-main img { display: block; margin: var(--space-3) 0; }
+
 /* --- 720px and wider: the tables' head row stays in view (PLAN-012c D5) -------------------- */
 @media (min-width: 720px) {
   /* The tables of the workspace and dashboard cards reach the cards' edges (PLAN-012f D7, D8). */
@@ -533,6 +612,13 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
   .attention .table-cards > table th:first-child, .attention .table-cards > table td:first-child, #recent-payments .table-cards > table th:first-child, #recent-payments .table-cards > table td:first-child { padding-left: 20px; }
   .attention .table-cards > table th:last-child, .attention .table-cards > table td:last-child, #recent-payments .table-cards > table th:last-child, #recent-payments .table-cards > table td:last-child { padding-right: 20px; }
   .table thead th, .table-cards > table > thead th { position: sticky; top: 0; z-index: 2; }
+  /* Every other card's table reaches the card's edges too (PLAN-012f D10). */
+  .card > .table-cards, .card > .table-scroll { margin-left: -20px; margin-right: -20px; }
+  .table-card > .table-cards, .table-card > .table-scroll { margin: 0; }
+  .card:not(.table-card) > .table-cards:last-child, .card:not(.table-card) > .table-scroll:last-child { margin-bottom: -18px; }
+  .card > .table-cards:last-child > table > tbody:last-child > tr:last-child > td, .card > .table-scroll:last-child > table > tbody:last-child > tr:last-child > td { border-bottom: 0; }
+  .card > .table-cards > table th:first-child, .card > .table-cards > table td:first-child, .card > .table-scroll > table th:first-child, .card > .table-scroll > table td:first-child { padding-left: 20px; }
+  .card > .table-cards > table th:last-child, .card > .table-cards > table td:last-child, .card > .table-scroll > table th:last-child, .card > .table-scroll > table td:last-child { padding-right: 20px; }
 }
 /* No fade for a reader who asked for less motion: the message stays until dismissed. */
 @media (prefers-reduced-motion: reduce) { .toast { animation: none !important; } }
@@ -599,6 +685,32 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
   .summary-cell dt { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
   .summary-cell dd { margin: 0; color: var(--text); font-size: var(--fs-md); font-weight: 700; overflow-wrap: anywhere; }
   .summary-cell dd.tone-unpaid { color: var(--unpaid-text); }
+  /* The dashboard's Needs attention (DESIGN-SPEC §6): each row a card, its action button (or
+     the promise's three) full width under the rest. */
+  .attention-table td.attention-action { padding-left: 0 !important; text-align: left; }
+  .attention-table td.attention-action::before { content: none !important; }
+  .attention-table td.attention-action > .btn { display: flex; width: 100%; }
+  .attention-table td.attention-action .promise-outcomes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+  .attention-table td.attention-action .promise-outcomes .btn { width: 100%; }
+  /* Forms (DESIGN-SPEC §6): one field per row, the primary button kept in view at the bottom,
+     above the tab bar. */
+  .form-card input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .form-card select, .form-card textarea { width: 100%; }
+  .form-actions { position: sticky; bottom: calc(90px + env(safe-area-inset-bottom)); z-index: 5; margin: var(--space-4) -20px 0; padding: var(--space-3) 20px; background: var(--surface); border-top: 1px solid var(--border-soft); }
+  .form-actions .btn { flex: 1 1 auto; }
+  /* Wizards (DESIGN-SPEC §6): "Step 2 of 7" and its bar in place of the step pills. */
+  .steps { display: none; }
+  .steps-line { display: block; }
+  .steps-progress { display: block; }
+  /* The sign-in pages: the brand panel a short gradient header (the logo and the headline); the
+     banner strip and the form take the width. */
+  body.auth { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto 1fr; }
+  .auth-brand { grid-column: 1; grid-row: 1; min-height: 0; gap: var(--space-3); padding: var(--space-5) var(--space-4); }
+  .auth-shape, .auth-sentence, .auth-points, .auth-company { display: none; }
+  .auth-logo img { height: 30px; }
+  .auth-pitch { margin: 0; }
+  .auth-headline { margin: 0; font-size: 20px; }
+  body.auth > #sandbox-banner { grid-column: 1; grid-row: 2; margin: var(--space-4) 0; }
+  .auth-main { grid-column: 1; grid-row: 3; align-self: start; }
 }
 
 /* --- Tablet and phone: touch targets ---------------------------------------------------- */
@@ -625,6 +737,9 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
   form button.link-action { width: auto; }
   /* An open bar menu opens in the flow: nothing hangs past the screen's edge. */
   .menu ul { position: static; margin-top: var(--space-1); box-shadow: none; }
+  /* A list's card gives way to its rows' cards. */
+  .table-card { padding: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+  .table-card > p, .table-card > .card-header, .table-card > h2 { padding: 0 0 var(--space-3); }
   /* Tables become cards: one bordered block per row, a "label: value" line per cell. */
   .table-cards > table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .table-cards > table, .table-cards > table tbody, .table-cards > table tfoot, .table-cards > table tr, .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { display: block; width: 100%; box-sizing: border-box; }

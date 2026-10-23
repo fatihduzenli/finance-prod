@@ -4,7 +4,7 @@
 {% block title %}Leases{% endblock %}
 {% block header %}<div class="page-header"><h1>Leases</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">New lease</a></div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <form method="get" action="{% url 'ledger:leases:list' %}" class="actions" role="search" id="lease-filters">
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:leases:list' %}" class="actions" role="search" id="lease-filters">
     <label for="operator" style="margin:0;">Operator</label>
     <select name="operator" id="operator">
       <option value="">Any</option>
@@ -12,7 +12,8 @@
     </select>
     <button class="btn" type="submit">Filter</button>
     <a class="btn" id="export-csv" href="{% url 'ledger:leases:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a>
-  </form>
+  </form></div>
+  <div class="card table-card">
   {% responsive_table %}
   <table>
     <thead>
@@ -34,6 +35,7 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </div>
   {% if page.paginator.num_pages > 1 %}
     <div class="pager" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

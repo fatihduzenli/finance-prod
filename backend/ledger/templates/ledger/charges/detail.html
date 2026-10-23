@@ -2,18 +2,11 @@
 {% load components money %}
 {% load responsive %}
 {% block title %}Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" %}<span aria-current="page">Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}</span></nav><h1>Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% if can_record or can_link_invoice %}<div class="page-actions">{% if can_link_invoice %}<a class="btn" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
-  {% include "ledger/_store_crumb.html" %}
   <p class="muted"><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Daily charges</a></p>
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
 
-  {% if can_record or can_link_invoice %}
-    <p class="actions">
-      {% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}
-      {% if can_link_invoice %}<a class="btn" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}
-    </p>
-  {% endif %}
   {% include "ledger/_job_status.html" %}
   {% if can_retry_release %}
     <form method="post" action="{% url 'ledger:charges:retry_release' pk=charge.pk %}" class="actions js-single-submit">
@@ -28,7 +21,8 @@
     <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
   {% endif %}
 
-  <dl>
+  <section class="card" id="charge-summary" aria-label="Charge">
+  <dl class="detail-list">
     <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
     <dt>Due</dt><dd>{{ charge.due_on|date:"Y-m-d" }}</dd>
     <dt>Amount due</dt><dd id="amount-due">{{ charge.amount_due|money }}</dd>
@@ -38,9 +32,11 @@
     <dt>Carried balance</dt><dd id="carried-balance">{{ carried_balance|money }} <span class="muted">from earlier charges, not part of this charge</span></dd>
     <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
   </dl>
+  </section>
 
-  {% include "ledger/installments/_parent.html" %}
+  {% if plan_progress or can_split or split_refusal %}<section class="card" id="plan-card">{% include "ledger/installments/_parent.html" %}</section>{% endif %}
 
+  <section class="card" id="invoices-card">
   <h2>Invoices</h2>
   {% responsive_table %}
   <table id="invoices">
@@ -55,7 +51,9 @@
   </table>
   {% endresponsive_table %}
   <p class="muted">The {{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>
+  </section>
 
+  <section class="card" id="payments-card">
   <h2>Payments</h2>
   {% responsive_table %}
   <table id="payments">
@@ -77,14 +75,17 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </section>
 
-  {% include "ledger/collections/_charge.html" %}
+  <section class="card" id="collections-card">{% include "ledger/collections/_charge.html" %}</section>
 
+  <section class="card" id="charge-notes">
   <h2>Notes</h2>
   {% for note in notes %}
     <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|date:"Y-m-d" }}</span></p>
   {% empty %}
     <p class="muted">No notes.</p>
   {% endfor %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

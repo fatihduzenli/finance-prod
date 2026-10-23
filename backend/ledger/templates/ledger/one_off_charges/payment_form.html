@@ -1,10 +1,10 @@
 {% extends "finance/base.html" %}
 {% load static money %}
 {% block title %}Add payment{% endblock %}
-{% block header %}<div class="page-header"><h1>Add payment</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if charge.lease %}{% include "ledger/_store_crumb.html" with crumb_store=charge.lease.store %}{% elif charge.operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=charge.operator.pk %}">{{ charge.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Add payment</span></nav><h1>Add payment</h1></div></div>{% endblock %}
 {% block content %}
+  <section class="card form-card">
   {% include "ledger/_store_context.html" %}
-  <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{% if not store_context %}&larr; {% endif %}{{ charge.label }}{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}</a></p>
   <p>Balance due: <strong id="balance">{{ charge.balance|money }}</strong>. A payment received by Zelle, wire, check or another way outside {{ company.provider_name }}. The amount may not be more than the balance. When the charge has an invoice in {{ company.provider_name }} and this payment covers the whole price, that invoice is then marked paid in {{ company.provider_name }}; a partial payment is recorded here only.</p>
   <form method="post" id="payment-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
@@ -13,7 +13,8 @@
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-payment">Add payment</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-payment">Add payment</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% endblock %}

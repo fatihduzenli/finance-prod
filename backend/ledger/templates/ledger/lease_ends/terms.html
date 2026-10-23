@@ -4,6 +4,7 @@
 {% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
+  <section class="card wizard-card">
   <p class="muted" id="step-help">Say on which day the lease ended and why; nothing changes until you confirm on the last step.</p>
   <form method="post" id="lease-end-terms" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
@@ -11,8 +12,9 @@
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save and continue</button></div>
   </form>
+  </section>
   {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% endblock %}

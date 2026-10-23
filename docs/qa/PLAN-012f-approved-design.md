@@ -177,6 +177,23 @@ for the badge families, the KPI, progress, date-chip and avatar helpers), `backe
   page at 390 captured from the final tree and placed beside the references in the QA report
   (`docs/qa/12f/` holds the eight images: `*-reference.png` copied from `docs/design/`,
   `*-built.png` from the suite's data set).
+- **D-2. The phone's charge cards** (rework slice, found at the Batch D report, 2026-10-23;
+  a Batch C acceptance miss): at 719.98 px and under, the Charges card of the store and operator
+  workspaces (`stores/_tab_charges.html`, `table.charges-table`) shows each charge as the §6
+  two-line card of store-workspace-phone.png: line 1 the title block (the bold title or link, its
+  badges, the muted kind under it) with the Amount bold at the right; line 2 "Due <ISO date>"
+  with the status badge at the right; a third, muted line "Paid <x> · Balance <y>" only on a row
+  with both (class `partial`: paid > 0 and balance > 0); the row's action buttons full width as
+  the last line (the attention rows' pattern); on the operator page the Store cell as a muted
+  first line. Paid and Balance are otherwise not shown on the phone (the charge page carries
+  them); the thead stays hidden; the totals row is a one-line final card (label left, sum right);
+  the empty row unchanged. The cells carry fixed classes (`cell-store`, `cell-charge`, `cell-due`,
+  `cell-status`, `cell-amount`, `cell-paid`, `cell-balance`, `cell-actions`) so the layout is CSS
+  grid on the row, no new markup order and no duplicated text. Dates stay ISO (the app's
+  convention; the reference's "Nov 1" is the drawing's). The other tables keep the generic
+  label-and-value cards for now (*for the owner*: whether §6's two-line rule is applied to every
+  table is a follow-up decision). The phone baselines and the phone report shot are regenerated
+  after it.
 
 ## 4. Interface contract
 
@@ -200,6 +217,7 @@ No route, stored value or audit action changes.
 | B | D6: the component set | every component class exists with tokens only and the templates use them; the six badge families; the one-line help rule holds |
 | C | D7–D9: the dashboard, the store and operator workspaces, the grid | the three pages match the screenshots at 1,440 and the phone store page at 390; budgets kept |
 | D | D10–D12: every other page, baselines, the side-by-side report | the suite green against new baselines in the image; the report images in place |
+| D-2 | the phone's charge cards (rework of C's phone criterion) | at 390 px a charge row reads title + amount, due + badge, actions full width; Paid/Balance only on a partial row; e2e and markup tests; baselines and the phone report shot regenerated; the full gate again |
 
 ## 6. Test plan (before implementation)
 

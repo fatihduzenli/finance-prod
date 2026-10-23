@@ -1,0 +1,74 @@
+{% extends "two_factor/_base_focus.html" %}
+{% load i18n two_factor_tags %}
+{% comment %}
+The sign-in page (docs/qa/PLAN-012f-approved-design.md D13; login-laptop.png): the package's
+login wizard in the right panel of two_factor/_base.html. "Sign in" 26/700 and the muted
+sub-line ("Use your <company> account." on the password step; the package's sentence on the
+token and backup steps); the wizard's fields one per row (the label, without the package's
+colon, over the field at 12/14 padding and radius 10; the fields keep their names, ids and
+autocomplete attributes: the first is labelled "Username", the owner's decision); the
+full-width primary button (Next, as the package words it; Back on a later step); "Access is by
+invitation. Ask an admin if you need an account." No "Forgot password?" and no "Keep me
+signed in" (the owner's decision). The same form, fields, names and flow as the package's
+template: the hidden submit for the Enter key, the other devices, the backup-token form. The tab
+title stays "Login".
+{% endcomment %}
+
+{% block extra_media %}
+  {{ form.media }}
+{% endblock %}
+
+{% block title %}Login{% endblock %}
+
+{% block content %}
+  <h1 id="sign-in-heading">Sign in</h1>
+
+  {% if wizard.steps.current == 'auth' %}
+    <p class="auth-sub" id="auth-sub">Use your {{ company.name }} account.</p>
+  {% elif wizard.steps.current == 'token' %}
+    <p class="auth-sub" id="auth-sub">{{ device|as_verbose_action }}</p>
+  {% elif wizard.steps.current == 'backup' %}
+    <p class="auth-sub" id="auth-sub">{% blocktrans trimmed %}Use this form for entering backup tokens for logging in.
+      These tokens have been generated for you to print and keep safe. Please
+      enter one of these backup tokens to login to your account.{% endblocktrans %}</p>
+  {% endif %}
+
+  <form action="" method="post" id="sign-in-form">
+    {% csrf_token %}
+    {{ wizard.management_form }}
+    {% if wizard.form.non_field_errors %}<ul class="errorlist nonfield">{% for error in wizard.form.non_field_errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+    {% for field in wizard.form.hidden_fields %}{{ field }}{% endfor %}
+    {% for field in wizard.form.visible_fields %}
+      <div class="field{% if field.errors %} has-error{% endif %}">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {{ field.errors }}
+      </div>
+    {% endfor %}
+
+    {# hidden submit button to enable [enter] key #}
+    <input type="submit" value="" hidden />
+
+    {% if other_devices %}
+      <p>{% trans "Or, alternatively, use one of your other authentication methods:" %}</p>
+      <p>
+        {% for other in other_devices %}
+        <button name="challenge_device" value="{{ other.persistent_id }}" class="btn" type="submit">
+          {{ other|as_action }}
+        </button>
+      {% endfor %}</p>
+    {% endif %}
+
+    {% include "two_factor/_wizard_actions.html" %}
+  </form>
+
+  {% if backup_tokens %}
+    <form action="" method="post" class="auth-backup">
+      {% csrf_token %}
+      <p>{% trans "As a last resort, you can use a backup token:" %}</p>
+      <p><button name="wizard_goto_step" type="submit" value="backup" class="btn">{% trans "Use Backup Token" %}</button></p>
+    </form>
+  {% endif %}
+
+  <p class="auth-note" id="auth-note">Access is by invitation. Ask an admin if you need an account.</p>
+{% endblock %}

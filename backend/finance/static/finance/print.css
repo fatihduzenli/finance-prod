@@ -32,6 +32,11 @@
   .print-header .print-company { font-weight: 700; }
   .print-footer { margin-top: var(--space-6); padding-top: var(--space-2); border-top: 1px solid var(--text); font-size: var(--fs-sm); }
 
+  /* Every other page's cards (PLAN-012f D10) print as plain sections; the breadcrumb and the
+     wizards' step line are screen navigation. */
+  .card, .table-card, .form-card { border: 0 !important; border-radius: 0 !important; padding: 0 !important; margin: 0 0 var(--space-4) !important; max-width: none !important; overflow: visible !important; }
+  .card > .table-cards, .card > .table-scroll { margin: 0 !important; }
+  .breadcrumb, .steps-line, .steps-progress, .form-actions { display: none !important; }
   .table-scroll, .table-cards, .grid-scroll { overflow: visible !important; max-height: none !important; }
   table { border-collapse: collapse !important; width: 100% !important; }
   th, td { border: 1px solid var(--text) !important; padding: var(--space-1) var(--space-2); position: static !important; }

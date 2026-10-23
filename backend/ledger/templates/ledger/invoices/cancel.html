@@ -1,8 +1,7 @@
 {% extends "finance/base.html" %}
 {% block title %}{% if sent %}Cancel {{ draft.number }}{% else %}Delete draft {{ draft.number }}{% endif %}{% endblock %}
-{% block header %}<div class="page-header"><h1>{% if sent %}Cancel invoice {{ draft.sent_invoice.invoice_number }}{% else %}Delete draft {{ draft.number }}{% endif %}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if draft.lease %}{% include "ledger/_store_crumb.html" with crumb_store=draft.lease.store %}{% else %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">{{ draft.number }}</a> <span aria-hidden="true">›</span> <span aria-current="page">{% if sent %}Cancel invoice {{ draft.sent_invoice.invoice_number }}{% else %}Delete draft {{ draft.number }}{% endif %}</span></nav><h1>{% if sent %}Cancel invoice {{ draft.sent_invoice.invoice_number }}{% else %}Delete draft {{ draft.number }}{% endif %}</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">&larr; {{ draft.number }}</a></p>
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
   <div class="confirm-what">

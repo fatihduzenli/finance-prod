@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}Edit contact entry{% endblock %}
-{% block header %}<div class="page-header"><h1>Edit contact entry</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ back_url }}">Contact log</a> <span aria-hidden="true">›</span> <span aria-current="page">Edit contact entry</span></nav><h1>Edit contact entry</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{{ back_url }}">&larr; Contact log</a></p>
+  <section class="card form-card">
   <p id="edit-window">You recorded this entry; you can change it until {{ edit_until|date:"Y-m-d H:i" }} (New York). After that, add a correction instead.</p>
   <form method="post" id="contact-edit-form" class="js-single-submit">
     {% csrf_token %}
@@ -10,7 +10,8 @@
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-contact-edit">Save</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-contact-edit">Save</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

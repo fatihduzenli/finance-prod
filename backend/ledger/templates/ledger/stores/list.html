@@ -4,12 +4,13 @@
 {% block header %}<div class="page-header"><h1>Stores</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">New store</a></div>{% endif %}</div>{% endblock %}
 {% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
 {% block content %}
-  <form method="get" action="{% url 'ledger:stores:list' %}" class="actions" role="search">
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:stores:list' %}" class="actions" role="search">
     <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Search stores" style="max-width:24rem;">
     <button class="btn" type="submit">Search</button>
     <a class="btn" id="export-csv" href="{% url 'ledger:stores:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>
-  </form>
+  </form></div>
   {% if query %}<p class="muted" id="stores-filtered">Filtered by '{{ query }}' · <a href="{% url 'ledger:stores:list' %}" id="stores-clear">Clear</a></p>{% endif %}
+  <div class="card table-card">
   {% responsive_table %}
   <table>
     <thead>
@@ -31,6 +32,7 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </div>
   {% if page.paginator.num_pages > 1 %}
     <div class="pager" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?{% if query %}q={{ query|urlencode:'' }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

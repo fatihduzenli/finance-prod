@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load static %}
 {% block title %}{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}{% endblock %}
-{% block header %}<div class="page-header"><h1>{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if store %}{% include "ledger/_store_crumb.html" with crumb_store=store %}{% else %}<a href="{% url 'ledger:stores:list' %}">Stores</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}</span></nav><h1>{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}</h1></div></div>{% endblock %}
 {% block content %}
-  <p>{% if store %}<a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; {{ store.external_label }}</a>{% else %}<a href="{% url 'ledger:stores:list' %}">&larr; Stores</a>{% endif %}</p>
+  <section class="card form-card">
   <form method="post" id="store-form" class="js-single-submit"{% if not store %} enctype="multipart/form-data"{% endif %}>
     {% csrf_token %}
     {{ form.non_field_errors }}
@@ -20,7 +20,8 @@
       </fieldset>
     {% endif %}
     {% if not store %}{% include "ledger/documents/_create_upload.html" %}{% endif %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-store">Save</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-store">Save</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

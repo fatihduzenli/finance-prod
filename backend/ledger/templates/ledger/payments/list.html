@@ -4,7 +4,7 @@
 {% block title %}Payments{% endblock %}
 {% block header %}<div class="page-header"><h1>Payments</h1></div>{% endblock %}
 {% block content %}
-  <form method="get" action="{% url 'ledger:payments:list' %}" id="payment-filters" role="search">
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:payments:list' %}" id="payment-filters" role="search">
     <div class="actions">
       <label for="date_by" style="margin:0;">Date</label>
       <select name="date_by" id="date_by">
@@ -39,8 +39,9 @@
       <button class="btn" type="submit">Filter</button>
       <a class="btn" id="export-csv" href="{% url 'ledger:payments:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a>
     </div>
-  </form>
+  </form></div>
 
+  <section class="card" id="payment-totals-card">
   <h2>Totals of the {{ totals.count }} payment{{ totals.count|pluralize }} shown</h2>
   {% responsive_table %}
   <table id="payment-totals">
@@ -57,7 +58,9 @@
   </table>
   {% endresponsive_table %}
   <p class="muted">Pending payments are never counted as collected. Refunds are shown as their own rows. Deposits are money held for the operator, not revenue: they are left out of the other totals. "Deposits held" is the settled deposit payments shown minus their refunds and the deposit refunds shown.</p>
+  </section>
 
+  <div class="card table-card">
   {% responsive_table %}
   <table id="payments">
     <thead>
@@ -84,6 +87,7 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </div>
   {% if page.paginator.num_pages > 1 %}
     <div class="pager" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

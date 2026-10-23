@@ -476,6 +476,7 @@ def _new(
     back: str,
     heading: str,
     context: StoreContext | None = None,
+    store: Store | None = None,
 ) -> HttpResponse:
     target = f"invoice-new:{request.path}"
     operators = (
@@ -570,6 +571,10 @@ def _new(
             "store_context": context,
             "back": back,
             "heading": heading,
+            # The page header's breadcrumb (PLAN-012f D10): the store or the operator the
+            # builder was opened from.
+            "crumb_store": store,
+            "crumb_operator": operator,
             "due_days": invoice_builder.DUE_DAYS,
             "collect_form": collect_form,
             "collect_total": _lines_total(formset),
@@ -612,6 +617,7 @@ def new_store(request: HttpRequest, pk: str) -> HttpResponse:
         ),
         heading=f"New invoice: store {store.external_label}",
         context=context,
+        store=store,
     )
 
 

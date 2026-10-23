@@ -16,7 +16,7 @@
   {% include "ledger/stores/_form_field.html" with field=collect_form.reference %}
   {% include "ledger/stores/_form_field.html" with field=collect_form.payment_note mark=True %}
 </div>
-<p class="actions" id="collect-actions">
+<p class="actions form-actions" id="collect-actions">
   <button class="btn btn-primary" type="submit" name="submit_collect" value="draft" id="save-draft" data-shown-when="collect-draft">Save draft</button>
   <button class="btn btn-primary" type="submit" name="submit_collect" value="email" id="send-draft" data-shown-when="collect-email">Send <span class="collect-amount">{{ collect_total|money }}</span> by e-mail</button>
   {% if collect_form.can_charge_now %}<button class="btn btn-primary" type="submit" name="submit_collect" value="charge_now" id="draft-charge-now" data-shown-when="collect-charge_now">Charge <span class="collect-amount">{{ collect_total|money }}</span> now</button>{% endif %}

@@ -2,9 +2,8 @@
 {% load money responsive %}
 {% block title %}Bank account check{% endblock %}
 {% block head %}<style>tr.unmatched{background:var(--unpaid-bg);}</style>{% endblock %}
-{% block header %}<div class="page-header"><h1>Bank account check</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Bank account check</span></nav><h1>Bank account check</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:reports:index' %}">&larr; Reports</a></p>
   {% url 'ledger:reports:deposits' as action %}{% url 'ledger:reports:deposits_export' as export %}
   {% include "ledger/reports/_range.html" with action=action export=export %}
   {% if too_slow %}
@@ -12,6 +11,7 @@
   {% else %}
   <p class="muted">Bank deposits {{ company.provider_name }} reported, by deposit date, against the ACH payments and refunds settled in the same months. Security deposits paid by ACH are included: they reach the bank like rent. The difference is gross deposits less net settled ACH; a payment settled at the end of a month may be deposited in the next. Amounts in US dollars.</p>
 
+  <section class="card" id="unmatched-card">
   <h2>Unmatched items</h2>
   <p class="muted">Open findings of the nightly check's bank-deposit step, whatever their date. Resolve them on the <a href="{% url 'ledger:reconciliation:page' %}" id="reconciliation-link">nightly check page</a>.</p>
   {% responsive_table "scroll" %}
@@ -31,7 +31,9 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </section>
 
+  <section class="card" id="deposit-months-card">
   <h2>By month</h2>
   {% responsive_table "scroll" %}
   <table id="deposit-months">
@@ -57,7 +59,9 @@
     </tfoot>
   </table>
   {% endresponsive_table %}
+  </section>
 
+  <section class="card" id="deposits-card">
   <h2>Deposits received</h2>
   {% responsive_table "scroll" %}
   <table id="deposits">
@@ -71,5 +75,6 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </section>
   {% endif %}
 {% endblock %}

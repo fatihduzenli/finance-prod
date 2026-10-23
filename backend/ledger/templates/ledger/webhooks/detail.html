@@ -1,20 +1,13 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
 {% block title %}Message from {{ company.provider_name }}: {{ event.event_type_words }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Message from {{ company.provider_name }}: {{ event.event_type_words }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:webhooks:list' %}">Messages from {{ company.provider_name }}</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ event.event_type_words }}</span></nav><h1>Message from {{ company.provider_name }}: {{ event.event_type_words }}</h1></div>{% if can_replay %}<div class="page-actions"><form method="post" action="{% url 'ledger:webhooks:replay' pk=event.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="replay"{% if job_refresh %} disabled{% endif %}>Process again</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:webhooks:list' %}">&larr; Messages from {{ company.provider_name }}</a></p>
-  {% if can_replay %}
-    <div class="actions">
-      <form method="post" action="{% url 'ledger:webhooks:replay' pk=event.pk %}" class="js-single-submit">
-        {% csrf_token %}<button class="btn btn-primary" type="submit" id="replay"{% if job_refresh %} disabled{% endif %}>Process again</button>
-      </form>
-      <span class="muted">Runs the handler for this event again. Handlers re-read the object from {{ company.provider_name }}; processing a processed event again changes nothing.</span>
-    </div>
-  {% endif %}
+  {% if can_replay %}<p class="muted" id="replay-help">Runs the handler for this event again. Handlers re-read the object from {{ company.provider_name }}; processing a processed event again changes nothing.</p>{% endif %}
   {% include "ledger/_job_status.html" %}
 
-  <dl id="webhook-event">
+  <section class="card" id="webhook-event-card">
+  <dl id="webhook-event" class="detail-list">
     <dt>Received</dt><dd>{{ event.received_at|date:"Y-m-d H:i:s" }}</dd>
     <dt>Type</dt><dd>{{ event.event_type }}</dd>
     <dt>Name from</dt><dd>{{ event.get_event_source_display }}</dd>
@@ -27,7 +20,9 @@
     <dt>Last error</dt><dd id="error">{{ event.error|default:"—" }}</dd>
     <dt>Duplicate deliveries</dt><dd id="duplicates">{{ event.duplicate_count }}</dd>
   </dl>
+  </section>
 
+  <section class="card" id="payload-card">
   <h2>Content (without account data)</h2>
   {% if payload_rows %}
     {% responsive_table %}
@@ -42,5 +37,6 @@
   {% else %}
     <p class="muted" id="no-payload">No content stored: the message could not be read, or nothing of it could be kept without card or account data.</p>
   {% endif %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

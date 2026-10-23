@@ -1,13 +1,23 @@
 {% comment %}
 Replaces django-two-factor-auth's default base, which loads Bootstrap and jQuery from a
 third-party CDN and shows a "provide a template" notice. Self-contained: no external
-asset is loaded on the login or enrolment pages. The accounts/ pages extend it too.
-The SANDBOX banner is injected by finance.middleware.SandboxBannerMiddleware. The staff
-screens' style sheets (finance/tokens.css, finance/app.css) give the colours, the phone
-layout and the 44 px touch targets (docs/qa/PLAN-011-dashboard-reports-mobile.md D9,
-PLAN-012c D1, the tokens of PLAN-012f D1); the forms and their flow are the package's own. The tab title is
-"<short name> · <page>" from the company settings (PLAN-012c D2).
-{% endcomment %}{% load static %}<!DOCTYPE html>
+asset and no script on the login or enrolment pages. The accounts/ pages (401, the second
+factor's 403, signed out everywhere) extend it too.
+
+The approved design's sign-in layout (docs/qa/PLAN-012f-approved-design.md D13;
+docs/design/DESIGN-SPEC.md §4 Login, login-laptop.png): body.auth holds two panels. Left, the
+brand panel (the sidebar's gradient at 160 degrees, two soft teal shapes as decoration, the
+brand logo at 52 px, the headline, one sentence, three check-marked lines and the company's
+name · Monvera at the bottom). Right, on --bg: the SANDBOX banner, injected first in the body
+by finance.middleware.SandboxBannerMiddleware, which app.css sets as a rounded strip over the
+form, then the 400 px form area (main#auth-main: {% block content %}). The token and setup steps
+of the two-factor flow take the same right panel. At 768 px and under the left panel is a
+short gradient header (the logo and the headline) and the form takes the width. The logo is the
+brand's own file, never the company row's override (a stored document needs a session). The
+colours and sizes are app.css's (tokens.css first); the forms and their flow are the
+package's own. The tab title is "<short name> · <page>" from the company settings (PLAN-012c
+D2).
+{% endcomment %}{% load icons static %}<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -18,28 +28,25 @@ PLAN-012c D1, the tokens of PLAN-012f D1); the forms and their flow are the pack
   <link rel="stylesheet" href="{% static 'finance/app.css' %}">
   <link rel="icon" href="{% static 'finance/brand/monvera_icon_192.png' %}" type="image/png" sizes="192x192">
   <link rel="icon" href="{% static 'finance/brand/monvera_icon.svg' %}" type="image/svg+xml">
-  <style>
-    body{margin:0;font-family:var(--font);color:var(--text);background:var(--bg);}
-    .container{max-width:32rem;margin:3rem auto;padding:1.5rem 2rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);}
-    h1{font-size:1.5rem;margin-top:0;}
-    label{display:block;margin:.75rem 0 .25rem;font-weight:600;}
-    input[type=text],input[type=password],input[type=number],input[type=email]{width:100%;padding:.5rem;box-sizing:border-box;font-size:1rem;}
-    .btn{display:inline-block;margin-top:1rem;padding:.5rem 1rem;border:1px solid var(--input-border);border-radius:var(--radius-ctl);background:var(--surface);color:var(--text);font-size:1rem;cursor:pointer;text-decoration:none;}
-    .btn-primary{background:var(--btn-primary-bg);border-color:var(--btn-primary-border);color:var(--surface);font-weight:600;}
-    .errorlist{color:var(--unpaid-text);padding-left:1rem;}
-    table{border-collapse:collapse;width:auto;} td,th{padding:.25rem .5rem;border:0;}
-    @media (max-width:719.98px){
-      .container{margin:0;padding:1rem;border:0;border-radius:0;max-width:none;}
-      .btn{width:100%;}
-      /* The package's form table: each label above its field. */
-      .container form table,.container form tbody,.container form tr,.container form th,.container form td{display:block;width:100%;box-sizing:border-box;padding:.25rem 0;}
-    }
-  </style>
   {% block extra_media %}{% endblock %}
 </head>
-<body>
+<body class="auth">
+  <div class="auth-brand" id="auth-brand">
+    <span class="auth-shape auth-shape-1" aria-hidden="true"></span><span class="auth-shape auth-shape-2" aria-hidden="true"></span>
+    <div class="auth-logo"><img src="{% static 'finance/brand/monvera_logo_dark_transparent.svg' %}" alt="Monvera" height="52"></div>
+    <div class="auth-pitch">
+      <p class="auth-headline" id="auth-headline">Rent collection for every store, in one place.</p>
+      <p class="auth-sentence">Charges, autopay, payments and promises for every store — with nothing to chase in a spreadsheet.</p>
+      <ul class="auth-points" id="auth-points">
+        <li><span class="auth-check">{% icon "check" 14 %}</span>Monthly rent overview for all stores</li>
+        <li><span class="auth-check">{% icon "check" 14 %}</span>Bank debits and invoices through {{ company.provider_name }}</li>
+        <li><span class="auth-check">{% icon "check" 14 %}</span>Promises, returned payments and lease ends, tracked</li>
+      </ul>
+    </div>
+    <p class="auth-company" id="auth-company">{{ company.name }} · Monvera</p>
+  </div>
   {% block content_wrapper %}
-    <main class="container">
+    <main class="auth-main" id="auth-main">
       {% block content %}{% endblock %}
     </main>
   {% endblock %}

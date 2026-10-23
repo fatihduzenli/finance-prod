@@ -5,6 +5,7 @@
 {% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
+  <section class="card wizard-card">
   <p class="muted" id="step-help">Check the figures and list what is kept from the deposit. The unpaid balance offset pays the open charges from the deposit; it can be lowered, never raised above the open balance.</p>
   {% include "ledger/lease_ends/_figures.html" %}
   <h2>Deductions from the deposit</h2>
@@ -27,8 +28,9 @@
     <p class="table-total" id="deductions-typed-total">Deductions: <span class="js-total-out" data-total-for="deduction-rows">{{ form.total|money }}</span></p>
     {% if not has_rows %}</details>{% endif %}
     {% endwith %}
-    <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save and continue</button></div>
   </form>
+  </section>
   {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}

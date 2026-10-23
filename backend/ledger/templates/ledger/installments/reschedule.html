@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}Reschedule the installments of {{ parent_label }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Reschedule the installments of {{ parent_label }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if plan.lease %}{% include "ledger/_store_crumb.html" with crumb_store=plan.lease.store %}{% endif %}<a href="{% url 'ledger:plans:detail' pk=plan.pk %}">Installment plan</a> <span aria-hidden="true">›</span> <span aria-current="page">Reschedule</span></nav><h1>Reschedule the installments of {{ parent_label }}</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:plans:detail' pk=plan.pk %}">&larr; Installment plan, {{ parent_label }}</a></p>
+  <section class="card form-card">
   <p class="muted" id="page-help">{{ help }}</p>
   <form method="post" id="reschedule-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
@@ -10,7 +10,8 @@
     {% for field in form %}
       {% include "ledger/stores/_form_field.html" with field=field no_mark=True hide_help=True %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="reschedule-submit">Move the unpaid installments</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="reschedule-submit">Move the unpaid installments</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

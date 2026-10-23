@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}{{ action }}: promise of {{ entry.operator.display_name }}{% endblock %}
-{% block header %}<div class="page-header"><h1>{{ action }}: promise of {{ entry.operator.display_name }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if entry.operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=entry.operator.pk %}">{{ entry.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{{ action }}</span></nav><h1>{{ action }}: promise of {{ entry.operator.display_name }}</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{{ back_url }}">&larr; Back</a></p>
+  <section class="card form-card">
   {% include "ledger/contacts/_entry.html" %}
   <p class="muted" id="outcome-help">{% if outcome == "rescheduled" %}Saving records a new promise to pay and closes this one as Rescheduled.{% elif outcome == "kept" %}Saving records how you learned it and closes this promise as Kept.{% else %}Saving records how you learned it and closes this promise as Broken.{% endif %} Never write card or account numbers.</p>
   <form method="post" id="contact-outcome-form" class="js-single-submit">
@@ -12,7 +12,8 @@
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-outcome">Save</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-outcome">Save</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

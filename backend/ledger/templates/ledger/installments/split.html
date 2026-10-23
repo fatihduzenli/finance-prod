@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load responsive money %}
 {% block title %}Split {{ parent_label }} into installments{% endblock %}
-{% block header %}<div class="page-header"><h1>Split {{ parent_label }} into installments</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ parent_url }}">{{ parent_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Split into installments</span></nav><h1>Split {{ parent_label }} into installments</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{{ parent_url }}">&larr; {{ parent_label }}</a></p>
+  <section class="card form-card">
   <p class="muted" id="page-help">{{ split_help }}</p>
   <dl id="split-summary">
     <dt>Balance to split</dt><dd id="split-balance">{{ balance|money }}</dd>
@@ -45,9 +45,10 @@
         {% if large_debit %}
           <p><label><input type="checkbox" name="{{ confirm_field }}" id="split-confirmed"> I confirm the large autopay debits.</label></p>
         {% endif %}
-        <p class="actions"><button class="btn btn-primary" type="submit" id="split-confirm">Create the plan</button></p>
+        <div class="form-actions"><button class="btn btn-primary" type="submit" id="split-confirm">Create the plan</button></div>
       </form>
     {% endif %}
   {% endif %}
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

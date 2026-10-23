@@ -191,5 +191,9 @@ def test_a_hostile_help_slug_answers_404_and_echoes_nothing(path: str) -> None:
     response = viewer.get(path)
     assert response.status_code in (404, 200)
     body = response.content.decode()
-    assert "<script>" not in body and "etc/passwd" not in body
-    assert "a" * 100 not in body
+    # The 404 wears the shell since PLAN-012f, with the shell's own scripts: a hostile slug
+    # must add none (compared with a plain unknown slug) and must not be echoed.
+    plain = viewer.get("/help/no-such-topic/").content.decode()
+    assert body.count("<script") == plain.count("<script")
+    assert "etc/passwd" not in body and "a" * 100 not in body
+    assert "%3Cscript%3E" not in body

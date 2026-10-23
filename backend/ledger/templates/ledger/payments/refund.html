@@ -1,9 +1,8 @@
 {% extends "finance/base.html" %}
 {% load money %}
 {% block title %}Refund a payment{% endblock %}
-{% block header %}<div class="page-header"><h1>Refund a payment</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:payments:list' %}">Payments</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:payments:detail' pk=payment.pk %}">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Refund a payment</span></nav><h1>Refund a payment</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">&larr; Payment</a></p>
   <section class="confirm" aria-labelledby="confirm-what-heading">
   <div class="confirm-what">
   <h2 id="confirm-what-heading">What will happen</h2>

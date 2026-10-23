@@ -5,6 +5,7 @@
 {% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
+  <section class="card wizard-card">
   <p class="muted" id="step-help">Set the lease of {{ transfer.incoming_operator.display_name }}: it starts the day after the outgoing lease ends ({{ end.ended_on|date:"Y-m-d" }}) or later, so that the store never has two leases on one day. The deposit and the setup items with a price go on one invoice draft for you to review and send; nothing reaches {{ company.provider_name }} until it is sent.</p>
   <form method="post" id="transfer-incoming" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
@@ -29,8 +30,9 @@
     {% endresponsive_table %}
     <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-rows">{{ form.setup_total|money }}</span></p>
     {% endif %}
-    <p class="actions"><button class="btn btn-primary" type="submit">Save and continue</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save and continue</button></div>
   </form>
+  </section>
   {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}

@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}Transfer of store {{ store.external_label }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Transfer of store {{ store.external_label }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store %}<span aria-current="page">Transfer</span></nav><h1>Transfer of store {{ store.external_label }}</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
+  <section class="card wizard-card">
   <p id="transfer-done">Confirmed {{ transfer.confirmed_at|date:"Y-m-d H:i" }}: the lease of {{ transfer.outgoing_lease.operator.display_name }} ended on {{ end.ended_on|date:"Y-m-d" }} and the lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_lease.started_on|date:"Y-m-d" }}.</p>
   <ul>
     <li><a href="{% url 'ledger:lease_ends:confirm' pk=end.pk %}" id="outgoing-statement">Final statement of the outgoing lease</a></li>
@@ -10,4 +10,5 @@
     {% if transfer.draft %}<li><a href="{% url 'ledger:invoices:draft' pk=transfer.draft.pk %}" id="move-in-draft">Move-in invoice draft</a>: review it and send it; nothing reaches {{ company.provider_name }} until then.</li>{% endif %}
   </ul>
   {% if transfer.debt_override_at %}{% include "ledger/transfers/_debt_allowed.html" %}{% endif %}
+  </section>
 {% endblock %}

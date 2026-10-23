@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}Connect to {{ company.provider_name }}: {{ operator.display_name }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Connect to {{ company.provider_name }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Connect to {{ company.provider_name }}</span></nav><h1>Connect to {{ company.provider_name }}</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>
+  <section class="card form-card">
   <p>Enter the operator's bank method in the {{ company.provider_name }} dashboard first. Then copy the {{ company.provider_name }} customer ID and the {{ company.provider_name }} bank method ID here. No bank details are entered in this app.</p>
   {% if customer_masked %}<p class="muted">Currently connected customer: {{ customer_masked }}. Enter the same customer ID to add or replace the payment method.</p>{% endif %}
   <form method="post" class="js-single-submit" autocomplete="off">
@@ -11,7 +11,8 @@
     {% for field in form %}
       {% include "ledger/stores/_form_field.html" with hide_help=True no_mark=True %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit">Connect to {{ company.provider_name }}</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Connect to {{ company.provider_name }}</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

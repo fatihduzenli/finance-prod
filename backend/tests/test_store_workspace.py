@@ -851,10 +851,9 @@ def test_detail_pages_link_back_to_the_store() -> None:
         confirmed_at=timezone.now(),
     )
     billing, _ = client_for(Role.BILLING)
-    crumb = (
-        f'<p class="crumb" id="store-crumb"><a href="/stores/{lease.store_id}/">'
-        "&larr; Store 2477</a></p>"
-    )
+    # PLAN-012f D10: the "← Store" link became the page header's breadcrumb, "Stores › <the
+    # store> › <the page>", the store's link keeping its id.
+    crumb = f'<a href="/stores/{lease.store_id}/" id="store-crumb">'
     for url in (
         f"/charges/{rent.pk}/",
         f"/one-off-charges/{one_off.pk}/",
@@ -862,7 +861,14 @@ def test_detail_pages_link_back_to_the_store() -> None:
         f"/plans/{plan.pk}/",
         f"/payments/{payment.pk}/",
     ):
-        assert crumb in page(billing, url), url
+        html = page(billing, url)
+        start = html.index('<nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">')
+        trail = html[start : html.index("</nav>", start)]
+        assert crumb in trail, url
+        assert trail.startswith(
+            '<nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">'
+            '<a href="/stores/">Stores</a>'
+        ), url
 
 
 def test_the_attention_list_links_the_store_tabs() -> None:

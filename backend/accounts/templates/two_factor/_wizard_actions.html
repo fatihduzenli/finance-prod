@@ -1,0 +1,10 @@
+{% load i18n %}{% comment %}The wizard's buttons (the login and the enrolment, PLAN-012f D13): the full-width primary Next, then Back on a later step and Cancel (back to the first step) as a text link where the package offers one. The package's disabled Back on the first step is left out: it did nothing.{% endcomment %}
+<div class="auth-actions">
+  {% if wizard.steps.prev %}
+    <button name="wizard_goto_step" type="submit" value="{{ wizard.steps.prev }}" class="btn">{% trans "Back" %}</button>
+  {% endif %}
+  <button type="submit" class="btn btn-primary">{% trans "Next" %}</button>
+  {% if cancel_url %}
+    <a href="{{ cancel_url }}" class="link-action auth-cancel">{% trans "Cancel" %}</a>
+  {% endif %}
+</div>

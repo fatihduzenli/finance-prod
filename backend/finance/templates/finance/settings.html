@@ -2,6 +2,7 @@
 {% block title %}Settings{% endblock %}
 {% block header %}<div class="page-header"><h1>Settings</h1></div>{% endblock %}
 {% block content %}
+  <section class="card" id="calendar-feed-card">
   <h2 id="calendar-feed">Calendar feed</h2>
   <p>Subscribe to the staff calendar from Google Calendar or another calendar app: debit days, insurance anniversaries, lease ends and the shared notes and reminders, from 30 days ago to 180 days ahead. The address is yours: anyone who has it can read the calendar, so keep it private, and revoke it if it leaks.</p>
   {% if new_url %}
@@ -27,4 +28,5 @@
       {% csrf_token %}<button class="btn btn-primary" type="submit" id="feed-create">Create a calendar address</button>
     </form>
   {% endif %}
+  </section>
 {% endblock %}

@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}Edit {{ charge.label }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Edit {{ charge.label }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if charge.lease %}{% include "ledger/_store_crumb.html" with crumb_store=charge.lease.store %}{% elif charge.operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=charge.operator.pk %}">{{ charge.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Edit {{ charge.label }}</span></nav><h1>Edit {{ charge.label }}</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">&larr; {{ charge.label }}{% if lease %}, {{ lease.store.external_label }}{% endif %}</a></p>
+  <section class="card form-card">
   {% if price_locked %}<p id="price-locked" class="muted">A payment is recorded on this charge, so its price cannot change.</p>{% endif %}
   <form method="post" id="setup-charge-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
@@ -10,7 +10,8 @@
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-setup-charge">Save</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-setup-charge">Save</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

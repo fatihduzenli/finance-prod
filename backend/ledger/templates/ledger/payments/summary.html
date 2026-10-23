@@ -1,5 +1,5 @@
 {% load money %}
-<dl id="payment-summary">
+<dl id="payment-summary" class="detail-list">
   <dt>Operator</dt><dd id="summary-operator">{{ row.operator.display_name|default:"—" }}</dd>
   <dt>Store</dt><dd id="summary-store">{{ row.store.external_label|default:"—" }}</dd>
   <dt>Invoice number</dt><dd id="summary-invoice">{{ invoice.invoice_number|default:"—" }}</dd>

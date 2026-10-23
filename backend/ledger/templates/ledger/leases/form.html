@@ -2,9 +2,10 @@
 {% load responsive money %}
 {% load static %}
 {% block title %}{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}{% endblock %}
-{% block header %}<div class="page-header"><h1>{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if store_context %}{% include "ledger/_store_crumb.html" with crumb_store=store_context.store %}{% else %}<a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> {% if lease %}<a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> <span aria-hidden="true">›</span> {% endif %}{% endif %}<span aria-current="page">{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}</span></nav><h1>{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}</h1></div></div>{% endblock %}
 {% block content %}
-  {% if store_context %}{% include "ledger/_store_context.html" %}{% else %}<p>{% if lease %}<a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; {{ lease.store.external_label }}</a>{% else %}<a href="{% url 'ledger:leases:list' %}">&larr; Leases</a>{% endif %}</p>{% endif %}
+  <section class="card form-card">
+  {% include "ledger/_store_context.html" %}
   {% if lease %}<p class="muted">A rent change is never overwritten: the current rent ends the day before the new one takes effect, and the history keeps both. A lease with autopay keeps its autopay; any autopay that no longer matches is marked Needs review.</p>{% endif %}
   <form method="post" id="lease-form" class="js-single-submit"{% if not lease %} enctype="multipart/form-data"{% endif %}>
     {% csrf_token %}
@@ -38,7 +39,8 @@
       <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-checklist">{{ form.setup_total|money }}</span></p>
       {% include "ledger/documents/_create_upload.html" %}
     {% endif %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-lease">Save</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-lease">Save</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% if not lease %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endif %}{% if document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

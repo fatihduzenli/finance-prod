@@ -3,12 +3,13 @@
 {% block title %}Operators{% endblock %}
 {% block header %}<div class="page-header"><h1>Operators</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:operators:create' %}">New operator</a></div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <form method="get" action="{% url 'ledger:operators:list' %}" class="actions" role="search">
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:operators:list' %}" class="actions" role="search">
     <input type="search" name="q" value="{{ query }}" maxlength="200" placeholder="Name, company or e-mail" aria-label="Search operators" style="max-width:24rem;">
     <label style="margin:0;font-weight:normal;"><input type="checkbox" name="archived" value="1"{% if include_archived %} checked{% endif %}> Include archived</label>
     <button class="btn" type="submit">Search</button>
     <a class="btn" id="export-csv" href="{% url 'ledger:operators:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>
-  </form>
+  </form></div>
+  <div class="card table-card">
   {% responsive_table %}
   <table>
     <thead>
@@ -29,6 +30,7 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </div>
   {% if page.paginator.num_pages > 1 %}
     <div class="pager" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?{% if query %}q={{ query|urlencode:'' }}&amp;{% endif %}{% if include_archived %}archived=1&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

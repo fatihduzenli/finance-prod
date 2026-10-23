@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
 {% block title %}{% if entry %}Edit {{ entry.title }}{% else %}New calendar entry{% endif %}{% endblock %}
-{% block header %}<div class="page-header"><h1>{% if entry %}Edit calendar entry{% else %}New calendar entry{% endif %}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:calendar:page' %}">Calendar</a> <span aria-hidden="true">›</span> {% if entry %}<a href="{% url 'ledger:calendar:detail' pk=entry.pk %}">{{ entry.title }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if entry %}Edit calendar entry{% else %}New calendar entry{% endif %}</span></nav><h1>{% if entry %}Edit calendar entry{% else %}New calendar entry{% endif %}</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:calendar:page' %}">&larr; Calendar</a></p>
+  <section class="card form-card">
   <p class="muted">Calendar entries are shared with all staff and appear in every staff member's calendar feed. Never write card or account numbers.</p>
   <form method="post" id="calendar-form" class="js-single-submit">
     {% csrf_token %}
@@ -10,7 +10,8 @@
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-calendar-entry">Save</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-calendar-entry">Save</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

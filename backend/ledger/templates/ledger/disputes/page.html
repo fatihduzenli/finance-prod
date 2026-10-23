@@ -1,19 +1,14 @@
 {% extends "finance/base.html" %}
 {% load money responsive %}
 {% block title %}Disputes{% endblock %}
-{% block header %}<div class="page-header"><h1>Disputes</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><h1>Disputes</h1><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:disputes:export' %}">Download spreadsheet</a><form method="post" action="{% url 'ledger:disputes:refresh' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="refresh-disputes"{% if job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form></div></div>{% endblock %}
 {% block content %}
   <p class="muted">The disputes {{ company.provider_name }} reports for the last 90 days, read in the background each day, on a dispute event and when you press Update from {{ company.provider_name }}. Statuses and reasons are {{ company.provider_name }}'s own words. Transaction identifiers are masked. Fewer than {{ highlight_days }} days left to respond is highlighted.</p>
 
-  <div class="actions">
-    <form method="post" action="{% url 'ledger:disputes:refresh' %}" class="js-single-submit">
-      {% csrf_token %}<button class="btn btn-primary" type="submit" id="refresh-disputes"{% if job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button>
-    </form>
-    <span class="muted" id="last-synced">{% if last_synced %}Last updated from {{ company.provider_name }} {{ last_synced|date:"Y-m-d H:i" }}.{% else %}Not updated yet.{% endif %}</span>
-    <a class="btn" id="export-csv" href="{% url 'ledger:disputes:export' %}">Download spreadsheet</a>
-  </div>
+  <p><span class="muted" id="last-synced">{% if last_synced %}Last updated from {{ company.provider_name }} {{ last_synced|date:"Y-m-d H:i" }}.{% else %}Not updated yet.{% endif %}</span></p>
   {% include "ledger/_job_status.html" %}
 
+  <div class="card table-card">
   {% responsive_table %}
   <table id="disputes">
     <thead>
@@ -84,4 +79,5 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </div>
 {% endblock %}

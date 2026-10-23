@@ -11,18 +11,17 @@
     table { page-break-inside: auto; } tr { page-break-inside: avoid; }
   }
 </style>{% endblock %}
-{% block header %}<div class="page-header"><h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Statement</span></nav><h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div><div class="page-actions no-print"><button class="btn" type="button" onclick="window.print()">Print</button></div></div>{% endblock %}
 {% block content %}
-  <p class="no-print"><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>
   {% if operator.legal_name or operator.company %}<p>{{ operator.legal_name }}{% if operator.legal_name and operator.company %} · {% endif %}{{ operator.company }}</p>{% endif %}
   {% url 'ledger:operators:statement' pk=operator.pk as action %}{% url 'ledger:operators:statement_export' pk=operator.pk as export %}
   <div class="no-print">{% include "ledger/reports/_range.html" with action=action export=export %}</div>
-  <p class="actions no-print"><button class="btn" type="button" onclick="window.print()">Print</button></p>
   {% if too_slow %}
     <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
   <p class="muted">As of {{ report.today|date:"Y-m-d" }}; payment history {{ selected.from_month|date:"Y-m" }} to {{ selected.to_month|date:"Y-m" }}. Every store of this operator. Amounts in US dollars.</p>
 
+  <section class="card" id="open-charges-card">
   <h2>Open charges</h2>
   {% responsive_table "scroll" %}
   <table id="open-charges">
@@ -40,7 +39,9 @@
     </tfoot>
   </table>
   {% endresponsive_table %}
+  </section>
 
+  <section class="card" id="payment-history-card">
   <h2>Payment history</h2>
   {% responsive_table "scroll" %}
   <table id="payment-history">
@@ -66,5 +67,6 @@
   </table>
   {% endresponsive_table %}
   <p class="muted">Deposits are money held for the operator, not a payment of a charge. A pending payment is not yet collected.</p>
+  </section>
   {% endif %}
 {% endblock %}

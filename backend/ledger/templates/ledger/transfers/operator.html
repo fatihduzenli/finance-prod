@@ -3,6 +3,7 @@
 {% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
   {% include "ledger/lease_ends/_steps.html" %}
+  <section class="card wizard-card">
   <p class="muted" id="step-help">Find the operator who takes the store over by name and choose them, or create a new operator below. An archived operator or the current one cannot be chosen.</p>
   {% if transfer.incoming_operator %}<p id="chosen-operator">Chosen: <strong>{{ transfer.incoming_operator.display_name }}</strong>. <a href="{% url 'ledger:transfers:end' pk=transfer.pk %}">Continue</a></p>{% endif %}
   <form method="get" id="operator-search">
@@ -36,8 +37,9 @@
     {% for field in create_form.visible_fields %}
       {% include "ledger/stores/_form_field.html" with hide_help=True %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="create-operator">Save and choose</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="create-operator">Save and choose</button></div>
   </form>
+  </section>
   {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

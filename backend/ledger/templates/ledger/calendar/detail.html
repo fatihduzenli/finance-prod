@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% block title %}{{ entry.title }}{% endblock %}
-{% block header %}<div class="page-header"><h1>{{ entry.title }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:calendar:page' %}?month={{ entry.on|date:'Y-m' }}">Calendar: {{ entry.on|date:"F Y" }}</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ entry.title }}</span></nav><h1>{{ entry.title }}</h1></div>{% if can_change %}<div class="page-actions"><a class="btn" id="calendar-edit" href="{% url 'ledger:calendar:edit' pk=entry.pk %}">Edit</a><form method="post" action="{% url 'ledger:calendar:delete' pk=entry.pk %}" onsubmit="return window.confirm('Delete this calendar entry?');">{% csrf_token %}<button class="btn btn-danger" type="submit" id="calendar-delete">Delete</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:calendar:page' %}?month={{ entry.on|date:'Y-m' }}">&larr; Calendar {{ entry.on|date:"Y-m" }}</a></p>
-  <dl>
+  <section class="card" id="calendar-entry">
+  <dl class="detail-list">
     <dt>Kind</dt><dd>{{ entry.get_kind_display }}</dd>
     <dt>Date</dt><dd>{{ entry.on|date:"Y-m-d" }}</dd>
     <dt>Text</dt><dd style="white-space:pre-wrap;">{{ entry.body|default:"—" }}</dd>
@@ -13,12 +13,5 @@
     <dt>Morning e-mail</dt><dd>{% if entry.email_morning %}Yes: e-mailed to the author on the morning of that day{% else %}No{% endif %}</dd>
     <dt>Author</dt><dd>{{ entry.author.get_username|default:"—" }}, {{ entry.created_at|date:"Y-m-d H:i" }}</dd>
   </dl>
-  {% if can_change %}
-    <div class="actions">
-      <a class="btn" id="calendar-edit" href="{% url 'ledger:calendar:edit' pk=entry.pk %}">Edit</a>
-      <form method="post" action="{% url 'ledger:calendar:delete' pk=entry.pk %}" onsubmit="return window.confirm('Delete this calendar entry?');">
-        {% csrf_token %}<button class="btn btn-danger" type="submit" id="calendar-delete">Delete</button>
-      </form>
-    </div>
-  {% endif %}
+  </section>
 {% endblock %}

@@ -3,7 +3,9 @@
 {% block title %}Help{% endblock %}
 {% block header %}<div class="page-header"><h1>Help</h1></div>{% endblock %}
 {% block content %}
+  <section class="card" id="help-topics-card">
   <ul id="help-topics">
     {% for topic in topics %}<li><a href="{% url 'finance:help_topic' slug=topic.slug %}" id="help-{{ topic.slug }}">{{ topic.title }}</a></li>{% endfor %}
   </ul>
+  </section>
 {% endblock %}

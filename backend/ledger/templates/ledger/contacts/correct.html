@@ -1,15 +1,16 @@
 {% extends "finance/base.html" %}
 {% block title %}Add a correction{% endblock %}
-{% block header %}<div class="page-header"><h1>Add a correction</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ back_url }}">Contact log</a> <span aria-hidden="true">›</span> <span aria-current="page">Add a correction</span></nav><h1>Add a correction</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{{ back_url }}">&larr; Contact log</a></p>
+  <section class="card form-card">
   {% include "ledger/contacts/_entry.html" %}
   <p class="muted">The entry stays as it was recorded; the correction is listed under it with your name and the time. Never write card or account numbers.</p>
   <form method="post" id="contact-correct-form" class="js-single-submit">
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% include "ledger/stores/_form_field.html" with field=form.body mark=True hide_help=True %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-correction">Add correction</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-correction">Add correction</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

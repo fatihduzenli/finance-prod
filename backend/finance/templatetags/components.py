@@ -22,6 +22,8 @@ pending or the neutral colours.
 
 ``step_links|with_done`` adds a fourth item to each wizard step (label, link, current):
 ``True`` for the steps before the current one, which ``.steps`` marks done.
+``{% step_line step_links %}``: the phone's form of the same list (PLAN-012f D10; DESIGN-SPEC §6):
+"Step 2 of 7 · Statement" and a bar of the steps reached; nothing without a current step.
 
 ``actions|action_named:"key"`` finds a workspace action (ledger.services.workspace.Action)
 by its key, or ``None``: an empty state names it as its next step.
@@ -249,6 +251,28 @@ def with_done(steps: Iterable[Sequence[Any]]) -> list[tuple[Any, Any, bool, bool
     if not seen_current:  # no current step: nothing is known to be done
         return [(label, url, is_current, False) for label, url, is_current, _ in found]
     return found
+
+
+@register.simple_tag
+def step_line(steps: Iterable[Sequence[Any]] | None) -> SafeString:
+    """The phone's step line, "Step N of M · <the current step's label>", over a bar of N
+    of M; nothing when no step is current."""
+    listed = list(steps or ())
+    position = next(
+        (number for number, (_, _, is_current) in enumerate(listed, 1) if is_current), None
+    )
+    if position is None:
+        return mark_safe("")  # noqa: S308 - the empty string
+    return format_html(
+        '<p class="steps-line" id="wizard-step-line">Step {} of {} '
+        '<span class="steps-name">· {}</span></p>'
+        '<progress class="steps-progress" value="{}" max="{}" aria-hidden="true"></progress>',
+        position,
+        len(listed),
+        listed[position - 1][0],
+        position,
+        len(listed),
+    )
 
 
 @register.filter

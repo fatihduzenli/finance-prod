@@ -1,20 +1,17 @@
 {% extends "finance/base.html" %}
 {% block title %}Contact log: {{ title }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Contact log: {{ title }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ back_url }}">{{ back_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Contact log</span></nav><h1>Contact log: {{ title }}</h1></div>{% if add_url or export_url %}<div class="page-actions">{% if export_url %}<a class="btn" id="export-contacts" href="{{ export_url }}">Download spreadsheet</a>{% endif %}{% if add_url %}<a class="btn" id="add-contact" href="{{ add_url }}">Add entry</a>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <p><a href="{{ back_url }}">&larr; {{ back_label }}</a></p>
-  <p class="actions">
-    {% if add_url %}<a class="btn" id="add-contact" href="{{ add_url }}">Add entry</a>{% endif %}
-    {% if export_url %}<a class="btn" id="export-contacts" href="{{ export_url }}">Download spreadsheet</a>{% endif %}
-  </p>
   <p class="actions" id="contact-status-filter">Promises:
     {% if status %}<a href="?">All entries</a>{% else %}<strong>All entries</strong>{% endif %}
     {% for value, label in statuses %}
       {% if status == value %}<strong>{{ label }}</strong>{% else %}<a href="?status={{ value }}">{{ label }}</a>{% endif %}
     {% endfor %}
   </p>
+  <section class="card" id="contact-log-card">
   <p class="muted">Newest first. Dates are New York days.</p>
   {% include "ledger/contacts/_log.html" with rows=rows %}
+  </section>
   {% if page.paginator.num_pages > 1 %}
     <div class="pager pagination" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?{% if status %}status={{ status }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

@@ -1,9 +1,8 @@
 {% extends "finance/base.html" %}
 {% load responsive money %}
 {% block title %}Turn off autopay: lease {{ lease.store.external_label }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Turn off autopay</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Turn off autopay</span></nav><h1>Turn off autopay</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">&larr; Lease {{ lease.store.external_label }}</a></p>
   {% include "ledger/_job_status.html" %}
   <section class="confirm" aria-labelledby="confirm-what-heading">
   <div class="confirm-what">

@@ -1,14 +1,16 @@
 {% extends "finance/base.html" %}
 {% load static %}
 {% block title %}{{ heading }}{% endblock %}
-{% block header %}<div class="page-header"><h1>{{ heading }}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if store_context %}{% include "ledger/_store_crumb.html" with crumb_store=store_context.store %}{% elif crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif crumb_operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{{ back }}">{{ crumb_operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">New invoice</span></nav><h1>{{ heading }}</h1></div></div>{% endblock %}
 {% block content %}
-  {% if store_context %}{% include "ledger/_store_context.html" %}{% else %}<p><a href="{{ back }}">&larr; Back</a></p>{% endif %}
+  <section class="card" id="draft-card">
+  {% include "ledger/_store_context.html" %}
   <p class="muted">A draft stays here until it is sent: nothing reaches {{ company.provider_name }} before it is collected.</p>
   <form method="post" id="draft-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {% include "ledger/invoices/_draft_form.html" %}
     {% include "ledger/invoices/_collect.html" %}
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/invoice_lines.js' %}" defer></script>{% endblock %}

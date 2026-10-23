@@ -1,4 +1,4 @@
-{% comment %}The range form of a ranged report: "action" (the page), "export" (its CSV route), "selected" (a reports.ReportRange), "picker_months" (its month selects) and "export_query".{% endcomment %}<form method="get" action="{{ action }}" id="report-filters" role="search">
+{% comment %}The range form of a ranged report: "action" (the page), "export" (its CSV route), "selected" (a reports.ReportRange), "picker_months" (its month selects) and "export_query".{% endcomment %}<div class="card filter-card"><form method="get" action="{{ action }}" id="report-filters" role="search">
     <div class="actions">
       <label for="from" style="margin:0;">From</label>
       {% include "ledger/_month_select.html" with name="from" months=picker_months selected=selected.from_month %}
@@ -7,7 +7,7 @@
       <button class="btn" type="submit">Show</button>
       <a class="btn" id="export-csv" href="{{ export }}?{{ export_query }}">Download spreadsheet</a>
     </div>
-  </form>
+  </form></div>
   {% if selected.messages %}
     <ul class="messages" id="report-messages">{% for text in selected.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}

@@ -515,6 +515,51 @@ def test_every_control_on_the_main_pages_has_a_label(seeded: visual_world.World)
     assert findings == [], "controls without a label:\n" + "\n".join(findings)
 
 
+#: The sign-in and error pages (PLAN-012f D10, D13): the two steps of the login wizard on
+#: their two-panel layout, the 401 page, the second factor's 403, a role's 403 and a 404 in
+#: the shell. (name, status, how to open it).
+def sign_in_and_error_pages() -> list[tuple[str, int, HttpResponse]]:
+    from tests.auth_helpers import TEST_PASSWORD
+
+    make_user(f"a11y-login-{uuid.uuid4().hex[:6]}", Role.VIEWER)
+    token_user, _ = make_user(f"a11y-token-{uuid.uuid4().hex[:6]}", Role.VIEWER)
+    no_device, _ = make_user(f"a11y-nodev-{uuid.uuid4().hex[:6]}", Role.VIEWER, with_device=False)
+    unverified = Client()
+    unverified.force_login(no_device)
+    viewer = client_as(Role.VIEWER)
+    token_step = Client().post(
+        "/account/login/",
+        {
+            "login_view-current_step": "auth",
+            "auth-username": token_user.get_username(),
+            "auth-password": TEST_PASSWORD,
+        },
+    )
+    pages = [
+        ("login, password step", 200, Client().get("/account/login/")),
+        ("login, token step", 200, token_step),
+        ("401", 401, Client().get("/stores/")),
+        ("second factor required", 403, unverified.get("/stores/")),
+        ("role refused", 403, viewer.get("/audit/")),
+        ("not found", 404, viewer.get("/stores/00000000-0000-0000-0000-000000000000/")),
+    ]
+    return [(name, status, response) for name, status, response in pages]  # type: ignore[misc]
+
+
+@pytest.mark.django_db
+def test_every_control_on_the_sign_in_and_error_pages_has_a_label() -> None:
+    findings: list[str] = []
+    for name, status, response in sign_in_and_error_pages():
+        assert response.status_code == status, (name, response.status_code)
+        page = response.content.decode()
+        assert '<html lang="en">' in page, name
+        assert page.count("<h1") == 1, name  # one heading names the page
+        findings += [f"{name}: {c}" for c in unlabelled_controls(page)]
+    assert findings == [], "controls without a label:\n" + "\n".join(findings)
+    # The token step has its field (the walk saw the second step, not the first again).
+    assert 'id="id_token-otp_token"' in sign_in_and_error_pages()[1][2].content.decode()
+
+
 # --- 3. Focus ----------------------------------------------------------------------------------
 
 OUTLINE_REMOVED = re.compile(

@@ -1,9 +1,9 @@
 {% extends "finance/base.html" %}
 {% load money %}
 {% block title %}Set landlord rent {{ store.external_label }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Set landlord rent</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store %}<span aria-current="page">Set landlord rent</span></nav><h1>Set landlord rent</h1></div></div>{% endblock %}
 {% block content %}
-  <p><a href="{% url 'ledger:stores:detail' pk=store.pk %}">&larr; Store {{ store.external_label }}</a></p>
+  <section class="card form-card">
   {% if current %}<p id="current-cost">Current row: {{ current.landlord_rent|money }} a month from {{ current.effective_from|date:"Y-m-d" }}.</p>{% else %}<p id="current-cost">No landlord rent is recorded for this store yet: its cost is unknown.</p>{% endif %}
   <p class="help">Learn more: <a href="{% url 'finance:help_topic' slug='store-costs' %}">Store costs and margin</a></p>
   <form method="post" id="store-cost-form" class="js-single-submit" autocomplete="off">
@@ -12,7 +12,8 @@
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
-    <p class="actions"><button class="btn btn-primary" type="submit" id="save-store-cost">Save</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-store-cost">Save</button></div>
   </form>
+  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

@@ -2,9 +2,8 @@
 {% load components money %}
 {% load responsive %}
 {% block title %}{{ charge.label }}{% if lease %} {{ lease.store.external_label }}{% endif %}{% endblock %}
-{% block header %}<div class="page-header"><h1>{{ charge.label }}{% if charge.status == "voided" %} {% status_badge "Voided" %}{% endif %}{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">From the spreadsheet</span>{% endif %}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{{ charge.label }}</span></nav><h1>{{ charge.label }}{% if charge.status == "voided" %} {% status_badge "Voided" %}{% endif %}{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">From the spreadsheet</span>{% endif %}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% if can_record or can_link_invoice or can_edit or can_waive or can_cancel %}<div class="page-actions" id="charge-actions">{% if can_link_invoice %}<a class="btn" href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}{% if can_edit %}<a class="btn" href="{% url 'ledger:one_off_charges:edit' pk=charge.pk %}" id="edit-charge">Edit</a>{% endif %}{% if can_waive %}<a class="btn" href="{% url 'ledger:one_off_charges:waive' pk=charge.pk %}" id="waive-charge">Waive</a>{% endif %}{% if can_cancel %}<a class="btn" href="{% url 'ledger:one_off_charges:cancel' pk=charge.pk %}" id="cancel-charge">Cancel charge</a>{% endif %}{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:one_off_charges:payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
-  {% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif operator %}<p><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">&larr; {{ operator.display_name }}</a></p>{% endif %}
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
 
   {% if charge_now_shown %}
@@ -29,15 +28,6 @@
       <span class="muted">{{ delete_invoice_hint }}</span>
     </form>
   {% endif %}
-  {% if can_record or can_link_invoice or can_edit or can_waive or can_cancel %}
-    <p class="actions">
-      {% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:one_off_charges:payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}
-      {% if can_link_invoice %}<a class="btn" href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}
-      {% if can_edit %}<a class="btn" href="{% url 'ledger:one_off_charges:edit' pk=charge.pk %}" id="edit-charge">Edit</a>{% endif %}
-      {% if can_waive %}<a class="btn" href="{% url 'ledger:one_off_charges:waive' pk=charge.pk %}" id="waive-charge">Waive</a>{% endif %}
-      {% if can_cancel %}<a class="btn" href="{% url 'ledger:one_off_charges:cancel' pk=charge.pk %}" id="cancel-charge">Cancel charge</a>{% endif %}
-    </p>
-  {% endif %}
   {% include "ledger/_job_status.html" %}
   {% if can_retry_provider %}
     <form method="post" action="{% url 'ledger:one_off_charges:retry' pk=charge.pk %}" class="actions js-single-submit">
@@ -52,7 +42,8 @@
     <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
   {% endif %}
 
-  <dl>
+  <section class="card" id="charge-summary" aria-label="Charge">
+  <dl class="detail-list">
     <dt>Store</dt><dd>{% if lease %}{{ lease.store.external_label }}{% else %}—{% endif %}</dd>
     <dt>Operator</dt><dd>{{ operator.display_name|default:"—" }}</dd>
     <dt>Category</dt><dd id="category">{{ charge.get_category_display }}</dd>
@@ -71,16 +62,17 @@
     {% if charge.voided_at %}<dt>Voided</dt><dd id="voided">{{ charge.voided_at|date:"Y-m-d" }} by {{ charge.voided_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.void_note }}</span></dd>{% endif %}
     {% if charge.waived_at %}<dt>Waived</dt><dd id="waived">{{ charge.waived_at|date:"Y-m-d" }} by {{ charge.waived_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.waive_note }}</span></dd>{% endif %}
   </dl>
-
   {% if installment_plan %}
     <p id="installment-of">Installment {{ charge.installment_no }} of {{ installment_plan.count }} of an <a href="{% url 'ledger:plans:detail' pk=installment_plan.pk %}">installment plan</a> ({{ installment_plan.get_status_display|lower }}).</p>
-  {% else %}
-    {% include "ledger/installments/_parent.html" %}
   {% endif %}
+  </section>
+
+  {% if not installment_plan %}{% if plan_progress or can_split or split_refusal %}<section class="card" id="plan-card">{% include "ledger/installments/_parent.html" %}</section>{% endif %}{% endif %}
 
   {% if resolution %}
+    <section class="card" id="deposit-resolution-card">
     <h2>Deposit resolution</h2>
-    <dl id="deposit-resolution">
+    <dl id="deposit-resolution" class="detail-list">
       <dt>Resolved</dt><dd id="resolution-kind">{{ resolution.get_kind_display }} on {{ resolution.resolved_on|date:"Y-m-d" }}{% if resolution.created_by %} by {{ resolution.created_by }}{% endif %}</dd>
       <dt>Amount</dt><dd id="resolution-amount">{{ resolution.amount|money }}</dd>
       {% if resolution.method %}<dt>Method</dt><dd id="resolution-method">{{ resolution.get_method_display }}</dd>{% endif %}
@@ -88,8 +80,10 @@
       <dt>Withheld</dt><dd id="resolution-withheld">{{ resolution.withheld_amount|money }}</dd>
       <dt>Note</dt><dd id="resolution-note" style="white-space:pre-wrap;">{{ resolution.note }}</dd>
     </dl>
+    </section>
   {% endif %}
 
+  <section class="card" id="invoices-card">
   <h2>Invoices</h2>
   {% responsive_table %}
   <table id="invoices">
@@ -105,7 +99,9 @@
   {% endresponsive_table %}
   {% for released in released_invoices %}<p class="invoice-released"{% if forloop.first %} id="invoice-released"{% endif %}>{{ released }}</p>{% endfor %}
   <p class="muted">The {{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>
+  </section>
 
+  <section class="card" id="payments-card">
   <h2>Payments</h2>
   {% responsive_table %}
   <table id="payments">
@@ -128,7 +124,8 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  </section>
 
-  {% include "ledger/collections/_charge.html" %}
+  <section class="card" id="collections-card">{% include "ledger/collections/_charge.html" %}</section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
