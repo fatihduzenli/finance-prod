@@ -302,3 +302,40 @@ need a regeneration. (4) Checked by eye against the references at 1,440 and 390 
 side-by-side images); the owner's own comparison is the acceptance.
 
 **Verdict (step 12f):** PASS. A Publish Request for the local commits follows in the checkpoint.
+
+## Addendum — the first CI run of `80bbe28` (2026-10-23)
+
+**What happened.** On the owner's "push", CI run 40004391468 went red in the visual job and the
+deploy was skipped; staging stayed on `990f480`. Checks, Unit tests A and B, Migration tests
+(15:03) and the end-to-end job were green. Two visual cases failed, `pnl-1280` (1.46 % of the
+pixels) and `pnl-390` (0.70 %): CI's P&L showed store 0202's rent billed as $7,225.81 (total
+$22,425.81) where the baseline shows $6,000.00 (total $21,200.00).
+
+**Cause.** The difference is $1,225.81, the prorated last month (19 of 31 days of $2,000.00) that
+the lease-end wizard's statement step creates when it is opened (`lease_end.open_statement`,
+the rent run's catch-up). The visual suite shoots the statement page before the P&L. On
+PostgreSQL (CI) the live server writes that charge on its own connection, committed, so the P&L
+shot after it counts the charge; on in-memory SQLite (the image runs that wrote the baselines) the
+live server shares the test's connection and the write is rolled back with the test, so the P&L
+never saw it. Reproduced on demand: the full suite in the Playwright image against a throwaway
+PostgreSQL 16 differs from the baselines in exactly those two files by exactly CI's pixel counts
+(15,974 and 4,083); only the P&L cases on PostgreSQL, or the full suite on SQLite, match the
+baselines pixel for pixel. The engine dependence was not visible before this push; why the
+previous visual run (`990f480`, the same job on PostgreSQL, the same baseline figure) passed is
+not explained, and is recorded as such.
+
+**Fix (test data, Fable).** `tests/visual/world.py` opens the statement step when it builds the
+data set, with the pinned date, so the charges that step creates exist before any page is shot
+on either engine, and a visit writes nothing more. `tests/test_visual_world_adversarial.py` pins
+it: the end is marked opened, the October charge of $1,225.81 exists once, and
+`open_statement` with the real or the pinned date creates nothing. The thirty baselines and the
+four report shots regenerated in the image against PostgreSQL; 38 passed on the regeneration, then 34 passed in a compare run on PostgreSQL and 34 passed in one on SQLite, and a SQLite regeneration into a scratch folder equals the PostgreSQL baselines in all thirty files pixel for pixel. The dashboard, the
+operator page, the grid and the P&L baselines gain the charge (one more open item for store
+0202). The side-by-side images recomposed.
+
+**Gate for this change.** ruff, `ruff format --check` (461 files), mypy strict (461 files),
+secret scans: clean. `tests/test_design_accessibility.py` (the other user of the data set) 14
+passed; the new world test 1 passed. No production file changes; the full suites were run on
+`80bbe28`'s tree an hour earlier and CI runs them again on the push.
+
+**Verdict:** PASS for the step; a second Publish Request follows.

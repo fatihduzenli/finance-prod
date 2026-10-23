@@ -265,6 +265,13 @@ def _build() -> World:
         today=TODAY,
     )
     assert deducted.ok, deducted.message
+    # The statement step opened here, as the wizard does on its page: the end month's
+    # prorated charge and any missing month exist before any page is shot. Left to the page
+    # visit, the charge would be written by the live server's own connection on PostgreSQL
+    # (committed, so later shots such as the P&L include it) but by the shared in-memory
+    # connection on SQLite (rolled back with the test), and the baselines would depend on
+    # the engine (QA-012f, the first CI run of 80bbe28).
+    lease_end.open_statement(LeaseEnd.objects.get(pk=end.pk), user, today=TODAY)
 
     # Last, so that the rows above keep their ids whoever else signs in.
     _, admin_device = make_user(ADMIN_USERNAME, Role.ADMIN)

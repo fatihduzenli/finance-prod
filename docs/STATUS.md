@@ -1732,3 +1732,15 @@ Gate: sqlite 6,485 passed; PostgreSQL 34 + 7,112 passed; e2e 28 passed in four r
 regenerated in the Playwright image, two compare runs green. The wizard e2e's 500 is a sqlite
 live-server artefact (never on PostgreSQL in 30 runs); residual risk. Step 12f: PASS; the
 checkpoint report with the four side-by-side images and the Publish Request goes to the owner.
+
+## Update, 2026-10-23, Step 12f pushed; the first CI run red in the visual job (not deployed)
+
+Pushed `990f480..80bbe28` on the owner's "push". CI run 40004391468: checks, Unit tests A and
+B, Migration tests (15:03) and end-to-end green; the visual job red on the two P&L cases and the
+deploy skipped; staging still runs `990f480`. Cause: the lease-end statement page, shot before
+the P&L, creates the end month's prorated charge; on CI's PostgreSQL the live server commits it
+and the P&L counts it, on the SQLite image runs that wrote the baselines it was rolled back with
+the test. Fix in the visual data set: the statement step is opened at build with the pinned date,
+so the charge exists before any shot on either engine; a world test pins it; the baselines and
+the report shots regenerated against PostgreSQL and checked pixel-identical on SQLite. A second
+Publish Request goes to the owner.
