@@ -239,3 +239,66 @@ not (finding 1).
 
 **Verdict (D):** PASS for Batch D's own scope; the step carries finding 1 (MAJOR, Batch C's phone
 criterion) until slice D-2 is gated.
+
+### Slice D-2 — the phone's charge cards (rework of finding D-1)
+
+**Scope.** `stores/_tab_charges.html` (`table.charges-table`; the cells' fixed classes `charge-cell-store`,
+`charge-cell-title`, `charge-cell-due`, `charge-cell-status`, `charge-cell-amount`, `charge-cell-paid`,
+`charge-cell-balance`, `charge-cell-actions` beside the existing ones; the row class `partial` when paid > 0 and balance > 0; DOM order and
+text unchanged), `app.css` (+31 lines inside the ≤ 719.98 px block only: the row as a CSS grid of
+five lines, the "Due", "Paid" and "· Balance" words drawn by CSS, Paid and Balance hidden off a
+`partial` row, the buttons full width, the store a muted first line, the totals row one line, the
+header a zero-size box that a screen reader still reads). Tests: Opus's
+`tests/test_plan012f_d2_pages.py` (10); Fable's `tests/test_plan012f_d2_adversarial.py` (3) and
+`tests/e2e/test_phone_charge_cards_12f_d2.py` (2), written before the slice and passed unedited;
+two existing test files updated to the table's new opening tag and the amount and balance cells' classes
+(`test_design_components.py`, `test_plan012f_components.py`). The phone baselines of the store
+and operator pages and the phone report shot regenerated in the image; the side-by-side image
+recomposed.
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| D-1 | MAJOR | the phone's charge rows | (Batch D, finding 1) | Resolved by D-2: at 390 px a row reads title + amount, "Due <date>" + badge, the buttons full width; a partial row adds "Paid · Balance" |
+| D-2-1 | BLOCKER | _tab_charges.html, app.css | The first build's cell classes, fixed by Fable's own brief (`cell-amount`, `cell-status`, `cell-due`, `cell-paid`), matched the monthly grid's cell-block rules (`.cell-amount { display: block }` …), so at 1,280 px the amount cell left the row and the columns shifted (the laptop baselines grew by 144 px); Fable's laptop e2e checked the balance cell's line, not the amount's | Resolved: the eight classes renamed to the prefix `charge-cell-`, which no stylesheet used; the laptop e2e now checks every cell against the row's top; a new adversarial case refuses a `charge-cell-` rule outside the phone block and any grid cell class in the template; the 1,280 baselines regenerated equal the committed ones pixel for pixel (checked) |
+| D-2-2 | — | tests/e2e/test_pages_12f_d.py (the wizard step e2e) | Failed twice in twelve local runs: a 500 on the statement page. Probed with the request logger routed to stdout: `TransactionManagementError` out of the lease end's rent catch-up (`get_or_create` inside `open_statement`'s atomic block) after an earlier error Django's `get_or_create` savepoint swallowed; 3 of 6 runs on in-memory sqlite under load, 0 of 6 against a throwaway PostgreSQL 16, 0 of 24 in the gate's four PostgreSQL e2e runs | Not a product defect and not a test defect: the live server and the test thread share one in-memory sqlite connection, which breaks under load (the same cause as Opus's "database table is locked" with a file database). The gate's e2e run on PostgreSQL; local sqlite e2e runs are a convenience. Recorded under residual risk; no change |
+
+**Gate 1.** ruff, `ruff format --check` (460 files), mypy strict (460 files), `uv lock --check`, `makemigrations --check` on sqlite and PostgreSQL 16: all clean, run on the renamed tree. Visual: the thirty baselines regenerated in the Playwright image (38 passed), two compare runs 34 passed each; the two 1,280 baselines of the store and operator pages equal the committed ones pixel for pixel, the two 390 ones change (the cards). **Gate 2.** sqlite 6,485 passed, 664 skipped (11:51); PostgreSQL "Migration tests" 34 passed (10:22), "Unit tests" 7,112 passed, 3 skipped (13:52); e2e 28 passed in each of four runs on PostgreSQL (the 21 of before, Opus's 5 of Batch D, Fable's 2 of D-2). All on the renamed tree. **Gate 3.** Diff read: the template's change is classes
+and one row-class expression on values the row already carries; the CSS is scoped to
+`.table-cards > table.charges-table` under the phone media query and to nothing wider; no
+duplicated text, no change to any other table. **Gate 4.** Secret scans clean; no new input,
+no new query. Fable's cases: the classes in order on both workspaces (the operator page's Store
+cell first); `partial` on exactly the rows with a payment and a balance (unpaid, partial, paid,
+waived); one title and at most one subline a row, no phone-only copy; the due cell holds the date
+only; the totals and the empty rows unchanged; in the browser at 390 the title and the amount
+share a line, the due date and the badge the next, Paid and Balance hidden on an unpaid row and
+shown as a third line on a partial one, the button spans the card at 44 px or more, nothing
+scrolls sideways; at 1,280 every column and the header stay.
+
+**Verdict (D-2):** PASS (one BLOCKER of Fable's own contract resolved; finding D-1 closed; D-2-2 under residual risk).
+
+## Step summary — 12f
+
+**Scope.** Batches A–D and slice D-2: `321f3e2`, `cbcbf13`, `bc7486c`, `fa3e2f4` and the D-2
+commit; nothing pushed; staging at `990f480`. Tokens and Inter, the shell and the phone shell, the
+component set, the three pages and the operator workspace, every other page, the sign-in layout,
+the baselines and the report images.
+
+**Findings over the step.** A: 4 (resolved, the owner's four decisions taken). B: 3 MINOR resolved.
+C: 2 MINOR resolved. D: 1 MAJOR (the phone's charge cards) resolved by D-2. D-2: 1 BLOCKER (the
+class collision, Fable's contract) resolved. Open for the owner: the attention rows' button reads
+"Open" for every kind; the sign-in button reads "Next" (the package's word); the §6 two-line card is
+applied to the Charges table only, the other tables keep the generic phone cards; "Pending · from
+<date>" in the grid where the drawing reads "· ACH".
+
+**Residual risk.** (1) The lease-end statement page's e2e returns a 500 on in-memory sqlite under
+load (a broken transaction on the shared connection between the live server and the test thread);
+never on PostgreSQL in 30 runs; local sqlite e2e runs are a convenience, the gate's and CI's run on
+PostgreSQL. (2) `test_every_control_on_the_main_pages_has_a_label` failed once in Opus's eight runs
+on a tree mid-edit and never since (six isolated runs, every full run). (3) The visual baselines
+are compared in CI's image, the same image that wrote them; a different Chromium build would
+need a regeneration. (4) Checked by eye against the references at 1,440 and 390 (the four
+side-by-side images); the owner's own comparison is the acceptance.
+
+**Verdict (step 12f):** PASS. A Publish Request for the local commits follows in the checkpoint.

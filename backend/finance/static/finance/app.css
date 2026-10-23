@@ -751,6 +751,37 @@ body.auth > #sandbox-banner { grid-column: 2; grid-row: 2; justify-self: center;
   .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 500; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
   .table-cards > table td:empty { display: none; }
   .table-cards > table td.money { text-align: left; } /* a card line reads "label: value" */
+  /* The Charges card's rows (PLAN-012f D-2; DESIGN-SPEC §6, store-workspace-phone.png): a
+     two-line card on a grid. Line 1 the title block with the amount bold at the right; line 2
+     "Due <date>" with the status badge at the right; Paid and Balance only on a "partial" row,
+     as a muted third line; the buttons full width last; the operator page's store a muted first
+     line. The cells' "Due", "Paid" and "Balance" words are drawn here, never a second copy. */
+  .table-cards > table.charges-table > thead { width: 0; height: 0; } /* still read by a screen reader; no box on screen */
+  .table-cards > table.charges-table > tbody > tr.store-charge { display: grid; grid-template-columns: auto minmax(0, 1fr) fit-content(55%); grid-template-areas: "store store store" "charge charge amount" "due due status" "paid balance balance" "actions actions actions"; column-gap: var(--space-2); align-items: start; }
+  .table-cards > table.charges-table > tbody > tr.store-charge > td { width: auto; min-width: 0; padding-left: 0; }
+  .table-cards > table.charges-table > tbody > tr.store-charge > td::before { content: none; }
+  .table-cards > table.charges-table td.charge-cell-store { grid-area: store; color: var(--muted); font-size: var(--fs-sm); }
+  .table-cards > table.charges-table td.charge-cell-store a { color: inherit; }
+  .table-cards > table.charges-table td.charge-cell-title { grid-area: charge; overflow-wrap: anywhere; }
+  .table-cards > table.charges-table td.charge-cell-amount { grid-area: amount; display: flex; align-items: center; justify-content: flex-end; min-height: var(--tap); font-weight: 700; white-space: nowrap; } /* centred on the title link's 44 px line */
+  .table-cards > table.charges-table td.charge-cell-due { grid-area: due; }
+  .table-cards > table.charges-table td.charge-cell-status { grid-area: status; text-align: right; }
+  .table-cards > table.charges-table td.charge-cell-paid { grid-area: paid; }
+  .table-cards > table.charges-table td.charge-cell-balance { grid-area: balance; }
+  .table-cards > table.charges-table tr.store-charge:not(.partial) > td.charge-cell-paid, .table-cards > table.charges-table tr.store-charge:not(.partial) > td.charge-cell-balance { display: none; }
+  .table-cards > table.charges-table td.charge-cell-paid, .table-cards > table.charges-table td.charge-cell-balance { color: var(--muted); font-size: var(--fs-sm); text-align: left; }
+  .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-due::before, .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-paid::before, .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-balance::before { position: static; width: auto; font: inherit; color: var(--muted); }
+  .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-due::before { content: "Due "; }
+  .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-paid::before { content: "Paid "; }
+  .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-balance::before { content: "\00B7  Balance "; }
+  .table-cards > table.charges-table td.charge-cell-actions { grid-area: actions; }
+  .table-cards > table.charges-table td.charge-cell-actions > .btn { display: flex; justify-content: center; width: 100%; box-sizing: border-box; }
+  .table-cards > table.charges-table td.charge-cell-actions > .btn + .btn { margin-top: var(--space-2); }
+  /* The totals row: one line, the label at the left and the sum at the right. */
+  .table-cards > table.charges-table tr.totals { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); background: var(--surface-2); }
+  .table-cards > table.charges-table tr.totals > th, .table-cards > table.charges-table tr.totals > td { width: auto; padding-left: 0; background: transparent; }
+  .table-cards > table.charges-table tr.totals > td::before { content: none; }
+  .table-cards > table.charges-table tr.totals > td.money { text-align: right; }
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
   /* The phone keeps the sideways scroll and the fixed store column, narrower. */
   table.grid th.store-col { width: 8rem !important; min-width: 8rem !important; max-width: 9rem !important; white-space: normal !important; }

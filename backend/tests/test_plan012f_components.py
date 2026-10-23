@@ -134,7 +134,7 @@ def test_the_charges_tab_shows_the_overdue_and_unpaid_families() -> None:
     a_rent_charge(lease, date(2026, 9, 1), RentChargeStatus.UNPAID)
     a_rent_charge(lease, date(2026, 10, 1), RentChargeStatus.DUE)
     html = page(client_for(Role.VIEWER)[0], f"/stores/{lease.store_id}/?tab=charges")
-    table = section(html, '<table id="store-charges">', "</table>")
+    table = section(html, '<table id="store-charges" class="charges-table">', "</table>")
     assert f'<span class="badge badge-overdue">{ICON}●</span> Unpaid</span>' in table
     assert f'<span class="badge badge-unpaid">{ICON}●</span> Due</span>' in table
 

@@ -1718,3 +1718,17 @@ MAJOR found at the phone comparison:** the store page's charge rows at 390 px ar
 label-and-value cards, not the spec's two-line card (Batch C's phone criterion); recorded as slice
 D-2 in the plan, Fable's tests written, assigned to Opus; the step's checkpoint and the Publish
 Request follow its gate.
+
+## Update, 2026-10-23, PLAN-012f slice D-2 built and gated; Step 12f at its checkpoint (not pushed)
+
+The phone's charge cards: at 390 px each row of the Charges card is the spec's two-line card
+(title with the amount at the right; "Due <date>" with the status badge; "Paid · Balance" on a
+partially paid row only; the button full width; the operator page's store as a muted first line;
+the totals row one line), as a CSS grid on fixed `charge-cell-` classes inside the phone media
+block; nothing changes on a laptop (the 1,280 baselines equal the committed ones pixel for pixel).
+One BLOCKER on the way, Fable's own: the first contract's class names collided with the monthly
+grid's cell-block rules and broke the laptop table; renamed, with tests that refuse a recurrence.
+Gate: sqlite 6,485 passed; PostgreSQL 34 + 7,112 passed; e2e 28 passed in four runs; baselines
+regenerated in the Playwright image, two compare runs green. The wizard e2e's 500 is a sqlite
+live-server artefact (never on PostgreSQL in 30 runs); residual risk. Step 12f: PASS; the
+checkpoint report with the four side-by-side images and the Publish Request goes to the owner.

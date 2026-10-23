@@ -187,9 +187,13 @@ for the badge families, the KPI, progress, date-chip and avatar helpers), `backe
   the last line (the attention rows' pattern); on the operator page the Store cell as a muted
   first line. Paid and Balance are otherwise not shown on the phone (the charge page carries
   them); the thead stays hidden; the totals row is a one-line final card (label left, sum right);
-  the empty row unchanged. The cells carry fixed classes (`cell-store`, `cell-charge`, `cell-due`,
-  `cell-status`, `cell-amount`, `cell-paid`, `cell-balance`, `cell-actions`) so the layout is CSS
-  grid on the row, no new markup order and no duplicated text. Dates stay ISO (the app's
+  the empty row unchanged. The cells carry fixed classes with a prefix no stylesheet uses (`charge-cell-store`,
+  `charge-cell-title`, `charge-cell-due`, `charge-cell-status`, `charge-cell-amount`,
+  `charge-cell-paid`, `charge-cell-balance`, `charge-cell-actions`; the first contract's
+  `cell-amount`, `cell-status`, `cell-due` and `cell-paid` collided with the monthly grid's
+  cell-block rules and broke the laptop table, D-2 finding 1) so the layout is CSS grid on
+  the row, no new markup order and no duplicated text; the new classes appear in no rule
+  outside the phone media block. Dates stay ISO (the app's
   convention; the reference's "Nov 1" is the drawing's). The other tables keep the generic
   label-and-value cards for now (*for the owner*: whether §6's two-line rule is applied to every
   table is a follow-up decision). The phone baselines and the phone report shot are regenerated

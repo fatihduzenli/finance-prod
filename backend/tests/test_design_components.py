@@ -211,10 +211,12 @@ def test_the_amount_cells_of_the_charge_tables_are_money_cells() -> None:
     lease = a_lease(a_store("2203 MONEY", 2203), an_operator("Money Ops"))
     a_rent_charge(lease, OCTOBER)
     html = body(client_for(Role.BILLING)[0].get(f"/stores/{lease.store_id}/"))
-    table = html[html.index('<table id="store-charges">') :].split("</table>", 1)[0]
+    table = html[html.index('<table id="store-charges" class="charges-table">') :].split(
+        "</table>", 1
+    )[0]
     # PLAN-012f D8: the charge's amount is the Amount column.
-    assert '<td class="money" data-label="Amount">$3,500.00</td>' in table
-    assert '<td class="money" data-label="Balance">$3,500.00</td>' in table
+    assert '<td class="charge-cell-amount money" data-label="Amount">$3,500.00</td>' in table
+    assert '<td class="charge-cell-balance money" data-label="Balance">$3,500.00</td>' in table
     assert '<th class="money">Balance</th>' in table
 
 
@@ -299,7 +301,9 @@ def test_the_charge_table_shows_the_status_as_a_badge() -> None:
     a_rent_charge(lease, OCTOBER, RentChargeStatus.UNPAID)
     a_rent_charge(lease, date(2026, 9, 1), RentChargeStatus.PAID, paid="3500.00")
     html = body(client_for(Role.VIEWER)[0].get(f"/stores/{lease.store_id}/?tab=charges&filter=all"))
-    table = html[html.index('<table id="store-charges">') :].split("</table>", 1)[0]
+    table = html[html.index('<table id="store-charges" class="charges-table">') :].split(
+        "</table>", 1
+    )[0]
     # PLAN-012f D6: a rent charge "unpaid" (past due) is the overdue family.
     assert f'<span class="badge badge-overdue">{GLYPH}\u25cf</span> Unpaid</span>' in table
     assert f'<span class="badge badge-paid">{GLYPH}\u2713</span> Paid</span>' in table
