@@ -1,10 +1,11 @@
 {% extends "finance/base.html" %}
-{% load money responsive %}
+{% load components money responsive %}
 {% load tz %}
 {% block title %}Dashboard{% endblock %}
 {% comment %}The dashboard as cards (docs/qa/PLAN-012c-design-pass.md D6): the attention list
 (PLAN-011b D6) first, then today's run (the PLAN-012d line), the failed payment attempts, the
-figures, then the recent lists. The cards' styles are app.css's (.card, .figures).{% endcomment %}
+figures as KPI cards ({% kpi %}, PLAN-012f D6), then the recent lists. The cards' styles are
+app.css's (.card, .kpi-row).{% endcomment %}
 {% block header %}<div class="page-header"><h1>Dashboard</h1></div>{% endblock %}
 {% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
 {% block content %}
@@ -21,7 +22,7 @@ figures, then the recent lists. The cards' styles are app.css's (.card, .figures
     <li><a href="{% url 'ledger:returns:list' %}">Returned, not resolved: <strong id="run-returned">{{ data.run.returned }}</strong></a></li>
   </ul>
   </section>
-  <section aria-labelledby="failed-heading" class="card alert-list" id="failed-attempts">
+  <section aria-labelledby="failed-heading" class="card" id="failed-attempts">
     <h2 id="failed-heading">Failed payment attempts: {{ data.failed_attempts_count }}</h2>
     {% if failed_attempts %}
       {% responsive_table %}
@@ -46,16 +47,16 @@ figures, then the recent lists. The cards' styles are app.css's (.card, .figures
     {% endif %}
   </section>
   <section class="card" id="figures-card" aria-label="Figures">
-  <div class="figures">
-    <div class="figure" id="figure-outstanding"><a href="{% url 'ledger:arrears:page' %}">Total outstanding<span class="value">{{ data.outstanding|money }}</span><span class="muted">{{ data.outstanding_count }} open charge{{ data.outstanding_count|pluralize }}</span></a></div>
-    <div class="figure" id="figure-overdue"><a href="{% url 'ledger:arrears:page' %}">Overdue<span class="value">{{ data.overdue|money }}</span><span class="muted">{{ data.overdue_count }} charge{{ data.overdue_count|pluralize }} past due</span></a></div>
-    <div class="figure" id="figure-paid"><a href="{% url 'ledger:payments:list' %}?{{ payments_query }}">Paid this month<span class="value">{{ data.paid_this_month|money }}</span><span class="muted">Settled {{ data.month_start|date:"Y-m-d" }} to {{ data.month_end|date:"Y-m-d" }}, net of refunds, deposits left out</span></a></div>
-    <div class="figure" id="figure-not-sent"><a href="#not-sent">Invoices not sent<span class="value">{{ data.not_sent_count }}</span><span class="muted">In {{ company.provider_name }}, not sent yet</span></a></div>
+  <div class="kpi-row">
+    {% with count=data.outstanding_count|stringformat:"d" plural=data.outstanding_count|pluralize %}{% with note=count|add:" open charge"|add:plural %}<a class="kpi-link" id="figure-outstanding" href="{% url 'ledger:arrears:page' %}">{% kpi "Total outstanding" data.outstanding|money note %}</a>{% endwith %}{% endwith %}
+    {% with count=data.overdue_count|stringformat:"d" plural=data.overdue_count|pluralize %}{% with note=count|add:" charge"|add:plural|add:" past due" %}<a class="kpi-link" id="figure-overdue" href="{% url 'ledger:arrears:page' %}">{% kpi "Overdue" data.overdue|money note "unpaid" %}</a>{% endwith %}{% endwith %}
+    {% with start=data.month_start|date:"Y-m-d" end=data.month_end|date:"Y-m-d" %}{% with note="Settled "|add:start|add:" to "|add:end|add:", net of refunds, deposits left out" %}<a class="kpi-link" id="figure-paid" href="{% url 'ledger:payments:list' %}?{{ payments_query }}">{% kpi "Paid this month" data.paid_this_month|money note %}</a>{% endwith %}{% endwith %}
+    {% with note="In "|add:company.provider_name|add:", not sent yet" %}<a class="kpi-link" id="figure-not-sent" href="#not-sent">{% kpi "Invoices not sent" data.not_sent_count note %}</a>{% endwith %}
   </div>
   <p class="muted">Outstanding: rent, insurance and one-off charges with a balance, not waived or voided, deposits left out. Overdue: due before today.</p>
   </section>
   {% if data.waived_live %}
-    <section class="card alert-list" id="waived-live">
+    <section class="card" id="waived-live">
       <h2>{{ waived_live_heading }}: {{ data.waived_live|length }}</h2>
       <p class="muted">An admin clears each with "Cancel in {{ company.provider_name }}" on the charge page.</p>
       <ul>

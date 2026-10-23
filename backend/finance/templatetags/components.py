@@ -1,13 +1,24 @@
-"""Template helpers of the component set (docs/qa/PLAN-012c-design-pass.md D5).
+"""Template helpers of the component set (docs/qa/PLAN-012c-design-pass.md D5; the approved
+design's components, docs/qa/PLAN-012f-approved-design.md D6 and docs/design/DESIGN-SPEC.md §3).
 
-``{% status_badge label %}`` (or ``{% status_badge label value %}``) renders a status as
-``<span class="badge badge-<status>"><span class="badge-glyph" aria-hidden="true">✓</span>
-label</span>``: the status is found from the stored value when one is given, else from the
-label (case and spaces ignored). Each status has its leading glyph (✓ ◻ ◐ ◑ – ○ ✕ !), in
-the markup so that it prints and reads without the style sheet, hidden from screen readers
-(the label is the text): colour is never the only signal. "Not due" (the grid) is a plain
-``.badge.not-due``: no colour, no glyph, its text only. A status this module does not know
-renders as a plain ``.badge``.
+``{% status_badge label %}`` (or ``{% status_badge label value %}``) renders a status as a
+pill of its *family*: ``<span class="badge badge-<family>"><span class="badge-icon"
+aria-hidden="true">✓</span> label</span>``. The family is found from the stored value when one
+is given, else from the label (case and spaces ignored). The seven families are the spec's:
+paid ✓, unpaid ●, overdue ● (dark red, white text), pending ◐, partial ◑, waived – and neutral
+○. Today's statuses map onto them: a rent charge ``due`` (unpaid, not yet overdue) and a
+one-off charge ``owed`` are *unpaid*; a rent charge ``unpaid`` (past due) is *overdue*;
+``voided`` and "Not yet due" are *neutral*; ``attention`` (a returned payment, a store or row
+that needs review, a missing premium) is *unpaid*. The icon is in the markup, so that it prints
+and reads without the style sheet, hidden from screen readers (the label is the text): colour
+is never the only signal. A status this module does not know renders as a plain ``.badge``.
+
+``{% kpi label value note tone %}``: a KPI card (label, value, third line); ``tone="unpaid"``
+sets the value in the unpaid red. ``{% progress segments %}``: a stacked bar of
+``(family, amount)`` segments with its legend; the widths are rounded down to a tenth of a per
+cent, so they sum to at most 100 %, and a zero total draws nothing. ``{% date_chip day %}``:
+the month over the day. ``{% avatar letter family %}``: the contact log's round letter, in the
+pending or the neutral colours.
 
 ``step_links|with_done`` adds a fourth item to each wizard step (label, link, current):
 ``True`` for the steps before the current one, which ``.steps`` marks done.
@@ -15,85 +26,99 @@ renders as a plain ``.badge``.
 ``actions|action_named:"key"`` finds a workspace action (ledger.services.workspace.Action)
 by its key, or ``None``: an empty state names it as its next step.
 
-Every helper works on what the view already passed: no query, no setting.
+Every helper works on what the view already passed: no query, no setting. Every text is
+escaped.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from datetime import date
+from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from typing import Any
 
 from django import template
-from django.utils.html import format_html
-from django.utils.safestring import SafeString
+from django.utils.html import format_html, format_html_join
+from django.utils.safestring import SafeString, mark_safe
+
+from ledger.wording import format_amount
 
 register = template.Library()
 
-#: The badge statuses, each with a ``.badge-<status>`` rule in app.css.
+#: The badge families (DESIGN-SPEC §3), each with a ``.badge-<family>`` rule in app.css.
 PAID = "paid"
 UNPAID = "unpaid"
+OVERDUE = "overdue"
 PENDING = "pending"
 PARTIAL = "partial"
 WAIVED = "waived"
-DUE = "due"
-VOIDED = "voided"
-ATTENTION = "attention"
-BADGE_STATUSES: tuple[str, ...] = (
-    PAID,
-    UNPAID,
-    PENDING,
-    PARTIAL,
-    WAIVED,
-    DUE,
-    VOIDED,
-    ATTENTION,
-)
-#: The leading glyph of each badge status.
+NEUTRAL = "neutral"
+FAMILIES: tuple[str, ...] = (PAID, UNPAID, OVERDUE, PENDING, PARTIAL, WAIVED, NEUTRAL)
+#: The icon of each family, as the spec writes it.
 GLYPHS: dict[str, str] = {
-    PAID: "\u2713",  # ✓
-    UNPAID: "\u25fb",  # ◻
-    PENDING: "\u25d0",  # ◐
-    PARTIAL: "\u25d1",  # ◑
-    WAIVED: "\u2013",  # –
-    DUE: "\u25cb",  # ○ (● is the grid's note marker)
-    VOIDED: "\u2715",  # ✕
-    ATTENTION: "!",
+    PAID: "✓",  # ✓
+    UNPAID: "●",  # ●
+    OVERDUE: "●",  # ●
+    PENDING: "◐",  # ◐
+    PARTIAL: "◑",  # ◑
+    WAIVED: "–",  # –
+    NEUTRAL: "○",  # ○
 }
-#: Not a badge status: a plain, glyph-less badge (the grid's "Not due" cells hold no charge).
-NOT_DUE = "not-due"
+#: The family's word where a component names the family itself (the progress legend).
+WORDS: dict[str, str] = {
+    PAID: "Paid",
+    UNPAID: "Unpaid",
+    OVERDUE: "Overdue",
+    PENDING: "Pending",
+    PARTIAL: "Partly paid",
+    WAIVED: "Waived",
+    NEUTRAL: "Other",
+}
 
-#: Stored values and on-screen labels (lower case) to their badge status. Labels from
-#: RentChargeStatus, OneOffChargeStatus, PaymentStatus, the insurance rows of the store
-#: page and the grid's filter (with the copy list's future wording, §4.5).
-_STATUS_OF: dict[str, str] = {
+#: Stored values and on-screen labels (lower case) to their family. Labels from
+#: RentChargeStatus, OneOffChargeStatus, PaymentStatus, the store statuses
+#: (ledger.services.stores.STATUS_BADGES), the insurance rows of the store page and the grid's
+#: filter (with the copy list's wording, §4.5).
+_FAMILY_OF: dict[str, str] = {
     "paid": PAID,
     "settled": PAID,
-    "unpaid": UNPAID,
+    "due": UNPAID,
     "owed": UNPAID,
+    "unpaid, not yet overdue": UNPAID,
+    "attention": UNPAID,
+    "returned": UNPAID,
+    "needs premium": UNPAID,
+    "needs review": UNPAID,
+    "unpaid": OVERDUE,
+    "unpaid, overdue": OVERDUE,
+    "overdue": OVERDUE,
     "pending": PENDING,
     "carried by re-debit": PENDING,
     "partial": PARTIAL,
     "partially paid": PARTIAL,
     "partly paid": PARTIAL,
     "waived": WAIVED,
-    "due": DUE,
-    "voided": VOIDED,
-    "attention": ATTENTION,
-    "returned": ATTENTION,
-    "needs premium": ATTENTION,
-    "needs review": ATTENTION,
-    "not_due": NOT_DUE,
-    "not due": NOT_DUE,
-    "not yet due": NOT_DUE,
+    "voided": NEUTRAL,
+    "not_due": NEUTRAL,
+    "not due": NEUTRAL,
+    "not yet due": NEUTRAL,
+    "neutral": NEUTRAL,
 }
 
+#: The families the KPI value may take (DESIGN-SPEC §3: red for unpaid balances).
+KPI_TONES: tuple[str, ...] = (UNPAID,)
+#: The families of the contact log's avatar (DESIGN-SPEC §3: P pending, C neutral).
+AVATAR_FAMILIES: tuple[str, ...] = (PENDING, NEUTRAL)
+#: A tenth of a per cent: the progress bar's widths are rounded down to it.
+_TENTH = Decimal("0.1")
 
-def badge_status(*candidates: object) -> str:
-    """The badge status of the first candidate this module knows, or ``""``."""
+
+def badge_family(*candidates: object) -> str:
+    """The family of the first candidate this module knows, or ``""``."""
     for candidate in candidates:
         if candidate is None:
             continue
-        found = _STATUS_OF.get(" ".join(str(candidate).split()).lower())
+        found = _FAMILY_OF.get(" ".join(str(candidate).split()).lower())
         if found:
             return found
     return ""
@@ -101,19 +126,116 @@ def badge_status(*candidates: object) -> str:
 
 @register.simple_tag
 def status_badge(label: object, value: object = None) -> SafeString:
-    """A status badge: its class from ``value`` (or ``label``), its text ``label``."""
-    status = badge_status(value, label)
-    if status == NOT_DUE:
-        return format_html('<span class="badge not-due">{}</span>', label)
-    if status:
-        return format_html(
-            '<span class="badge badge-{}"><span class="badge-glyph" aria-hidden="true">{}</span>'
-            " {}</span>",
-            status,
-            GLYPHS[status],
-            label,
-        )
-    return format_html('<span class="badge">{}</span>', label)
+    """A status badge: its family from ``value`` (or ``label``), its text ``label``."""
+    family = badge_family(value, label)
+    if not family:
+        return format_html('<span class="badge">{}</span>', label)
+    return format_html(
+        '<span class="badge badge-{}"><span class="badge-icon" aria-hidden="true">{}</span>'
+        " {}</span>",
+        family,
+        GLYPHS[family],
+        label,
+    )
+
+
+@register.simple_tag
+def kpi(label: object, value: object, note: object = "", tone: str = "") -> SafeString:
+    """A KPI card: the label, the value (red for ``tone="unpaid"``), the third line."""
+    value_class = f"kpi-value tone-{tone}" if tone in KPI_TONES else "kpi-value"
+    third = format_html('<span class="kpi-note">{}</span>', note) if note not in ("", None) else ""
+    return format_html(
+        '<div class="kpi"><span class="kpi-label">{}</span><span class="{}">{}</span>{}</div>',
+        label,
+        value_class,
+        value,
+        third,
+    )
+
+
+def _positive(value: object) -> Decimal:
+    """``value`` as a ``Decimal`` above zero, else zero (a negative, a non-number)."""
+    try:
+        amount = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal(0)
+    return amount if amount.is_finite() and amount > 0 else Decimal(0)
+
+
+def progress_widths(segments: Iterable[Sequence[Any]]) -> list[tuple[str, Decimal, Decimal]]:
+    """``(family, amount, width %)`` of each segment with an amount above zero, the widths
+    rounded down to a tenth so that they sum to at most 100; ``[]`` for a zero total. A family
+    this module does not know raises ``ValueError`` (a template mistake)."""
+    found: list[tuple[str, Decimal]] = []
+    for family, value in segments:
+        if family not in FAMILIES:
+            raise ValueError(f"unknown progress family {family!r}")
+        amount = _positive(value)
+        if amount > 0:
+            found.append((str(family), amount))
+    total = sum((amount for _, amount in found), Decimal(0))
+    if total <= 0:
+        return []
+    return [
+        (family, amount, (amount * 100 / total).quantize(_TENTH, rounding=ROUND_FLOOR))
+        for family, amount in found
+    ]
+
+
+@register.simple_tag
+def progress(segments: Iterable[Sequence[Any]]) -> SafeString:
+    """A stacked bar of ``(family, amount)`` segments in the status colours with its legend
+    of 8 px squares; nothing for a zero total."""
+    widths = progress_widths(segments)
+    if not widths:
+        return mark_safe("")  # noqa: S308 - the empty string
+    described = ", ".join(
+        f"{WORDS[family]} {format_amount(amount)}" for family, amount, _ in widths
+    )
+    bar = format_html_join(
+        "",
+        '<span class="progress-segment progress-{}" style="width: {}%"></span>',
+        ((family, width) for family, _, width in widths),
+    )
+    legend = format_html_join(
+        "",
+        '<li><span class="progress-key progress-{}" aria-hidden="true"></span>{}</li>',
+        ((family, WORDS[family]) for family, _, _ in widths),
+    )
+    return format_html(
+        '<div class="progress"><div class="progress-bar" role="img" aria-label="{}">{}</div>'
+        '<ul class="progress-legend">{}</ul></div>',
+        described,
+        bar,
+        legend,
+    )
+
+
+@register.simple_tag
+def date_chip(day: object) -> SafeString:
+    """The date chip of a "Coming up" list: the month over the day; nothing without a date."""
+    if not isinstance(day, date):
+        return mark_safe("")  # noqa: S308 - the empty string
+    return format_html(
+        '<time class="date-chip" datetime="{}"><span class="date-chip-month">{}</span>'
+        '<span class="date-chip-day">{}</span></time>',
+        f"{day:%Y-%m-%d}",
+        f"{day:%b}",
+        day.day,
+    )
+
+
+@register.simple_tag
+def avatar(letter: object, family: str = NEUTRAL) -> SafeString:
+    """The contact log's 34 px round letter in the ``family``'s colours (pending or
+    neutral), hidden from screen readers: the entry's kind is its text."""
+    if family not in AVATAR_FAMILIES:
+        raise ValueError(f"unknown avatar family {family!r}")
+    return format_html(
+        '<span class="avatar avatar-{}" aria-hidden="true">{}</span>',
+        family,
+        str(letter).strip()[:1].upper(),
+    )
 
 
 @register.filter

@@ -135,7 +135,8 @@ def page_of(client: Client, path: str) -> str:
 
 
 def table_of(page: str) -> str:
-    return page.split('id="contact-entries"')[1].split("</table>")[0]
+    """The contact log: its entries (PLAN-012f D6: a list of ledger/contacts/_log_entry.html)."""
+    return page.split('id="contact-entries"')[1].split("</ul>")[0]
 
 
 # --- D2: the edit window ---------------------------------------------------------------------
@@ -367,7 +368,7 @@ def test_the_deleted_entry_is_struck_through_for_billing_and_hidden_from_viewers
         for path in (f"/operators/{operator.pk}/", f"/operators/{operator.pk}/contacts/"):
             log = table_of(page_of(client, path))
             assert f'id="contact-{gone.pk}"' in log
-            row = log.split(f'id="contact-{gone.pk}"')[1].split("</tr>")[0]
+            row = log.split(f'id="contact-{gone.pk}"')[1].split("</li>")[0]
             assert "<s>" in row and "Typed on the wrong shop." in row
             assert f"/contacts/{gone.pk}/" not in row  # no action on a deleted entry
     viewer, _ = client_for(Role.VIEWER)
@@ -1476,10 +1477,13 @@ def closing(
 
 
 def promise_cell(log: str, row: ContactEntry) -> str:
-    """The Promise column (the fifth cell) of ``row`` in the table ``log``."""
-    tr = log.split(f'id="contact-{row.pk}"')[1].split("</tr>")[0]
-    cells: list[str] = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.DOTALL)
-    return cells[4]
+    """What the Promise column held for ``row`` in the log ``log``: its own promise (PLAN-012f
+    D6: the entry's .contact-promise, after the kind) then the promise it closed
+    (.contact-closes); "" for an entry with neither."""
+    entry = log.split(f'id="contact-{row.pk}"')[1].split("</li>")[0]
+    own = re.search(r'<span class="contact-promise">(.*?)</span>(?=</s>|</p>)', entry, re.S)
+    closes = re.search(r'<div class="contact-closes">.*?</div>', entry, re.S)
+    return (own.group(1) if own else "") + (closes.group(0) if closes else "")
 
 
 def closes_link(cell: str) -> tuple[str, str]:
@@ -1540,7 +1544,7 @@ def test_the_closing_entries_name_their_promise_on_every_page_and_in_the_csv(
             assert href == f"{escape(path)}#contact-{closed.pk}", path
             # The original promise itself names nothing it closed.
             assert "contact-closes" not in promise_cell(log, closed), path
-        assert promise_cell(log, plain) == "—", path
+        assert promise_cell(log, plain) == "", path  # PLAN-012f D6: no promise, nothing shown
     # The Rescheduled closing entry is a promise: its own promise first, then the sentence.
     _, moved_by = closings["Closed $400.00 by 2026-10-04 as Rescheduled"]
     cell = promise_cell(table_of(page_of(client, f"/operators/{operator.pk}/")), moved_by)

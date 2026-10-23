@@ -41,6 +41,10 @@
    pair: --surface on --btn-primary-bg
    pair: --surface on --unpaid-text
    pair: --surface on --navy
+   pair: --muted on --bg
+   pair: --muted on --surface-2
+   pair: --text on --month-current
+   pair: --muted on --month-current
    The sandbox banner (finance/templates/finance/banner.html) carries #6B4E00 on #FFF3C4 as
    literals, the pending pair's values: it is injected into the Django admin too, which never
    loads this file. White on --btn-primary-bg is the primary button's label, white on #B42318 the confirming
@@ -59,7 +63,12 @@
    One finding remains (reported, not hidden): white on --btn-primary-bg is 3.97:1, under 4.5;
    the button's 14 px / 600 label is not large text (18.66 px bold), so the pair is a text
    pair and the contrast test fails on it until the owner decides. --faint has no pair: it is
-   decoration only (2.44:1 on --surface), and no text and no control uses it (a test checks). */
+   decoration only (2.44:1 on --surface), and no text and no control uses it (a test checks).
+   PLAN-012f D6 (Batch B) adds one token beside the spec's block: --month-current #EEF6F5, the
+   tint of the grid's current month (DESIGN-SPEC §4 writes the value). Its pairs and the muted
+   ones of the components (a table's header on --surface-2, a date chip's month and the
+   segmented filter's segments on --bg) measure muted/bg 4.79, muted/surface-2 4.96,
+   text/month-current 13.9, muted/month-current 4.73. */
 
 @font-face {
   font-family: Inter;
@@ -103,4 +112,7 @@
   --radius-card: 12px; --radius-ctl: 8px; --radius-pill: 99px;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-8: 32px;
   --shadow-none: none;  /* no drop shadows; borders carry the hierarchy */
+
+  /* the grid's current month (PLAN-012f D6; DESIGN-SPEC §4) */
+  --month-current: #EEF6F5;
 }

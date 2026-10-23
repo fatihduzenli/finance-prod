@@ -27,7 +27,7 @@
 {% if billing %}<p class="muted">Send e-mails the saved draft through {{ company.provider_name }}; Delete removes a draft that was never sent.</p>{% endif %}
 
 <h2>Invoices</h2>
-<p class="actions tabs" id="invoice-filters">{% for value, label in invoice_filters %}<a class="btn" href="?{{ keep_store }}tab=invoices&amp;filter={{ value }}#tab-invoices"{% if value == invoice_filter %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</p>
+<p class="actions"><span class="segmented" id="invoice-filters" role="group" aria-label="Show invoices">{% for value, label in invoice_filters %}<a href="?{{ keep_store }}tab=invoices&amp;filter={{ value }}#tab-invoices"{% if value == invoice_filter %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</span></p>
 {% responsive_table %}
 <table id="store-invoices">
   <thead><tr><th>Number</th><th>{% if by_store %}Store{% else %}Operator{% endif %}</th><th>Issued</th><th>Due</th><th class="money">Total</th><th class="money">Paid</th><th>Status</th><th>{{ company.provider_name }} status</th><th></th></tr></thead>
@@ -42,7 +42,7 @@
         <td class="money">{{ invoice.amount_paid|money }}</td>
         <td>{{ invoice.get_internal_status_display }}</td>
         <td>{{ invoice.provider_status|default:"—" }}</td>
-        <td>{% if item.cancel_url %}<a class="btn invoice-cancel" href="{{ item.cancel_url }}">Cancel</a>{% endif %}</td>
+        <td>{% if item.cancel_url %}<a class="btn btn-sm invoice-cancel" href="{{ item.cancel_url }}">Cancel</a>{% endif %}</td>
       </tr>
     {% endwith %}{% empty %}
       <tr><td colspan="9" class="muted empty">{% if invoice_filter == "unpaid" %}No unpaid invoice.{% else %}No invoice.{% endif %}{% with next=space.actions|action_named:"create_invoice" %}{% if next %} <a class="btn empty-next" href="{{ next.url }}">{{ next.label }}</a>{% endif %}{% endwith %}</td></tr>

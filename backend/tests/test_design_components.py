@@ -6,9 +6,9 @@ Each component is checked where it lives: the page header on every list and deta
 status badges with their glyphs (the charge tables and the grid legend), the empty states
 with a next step, the confirmation pages, the flash messages as toasts, the pagers and the
 wizards' step lists. A style-sheet test checks that app.css has no literal colour, that every
-``.badge-<status>`` names its status tokens and has its glyph, and that print.css hides the bar
-and the navigation. The twelve-month grid at 1,280 px is the e2e suite's
-(``tests/e2e/test_grid_laptop.py``).
+``.badge-<family>`` names its family's tokens and has its icon (PLAN-012f D6: the seven
+families of the spec), and that print.css hides the bar and the navigation. The twelve-month
+grid at 1,280 px is the e2e suite's (``tests/e2e/test_grid_laptop.py``).
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from django.urls import reverse
 import documents_storage
 from accounts.roles import Role
 from documents_storage.memory import MemoryDocumentStorage
-from finance.templatetags.components import BADGE_STATUSES, action_named, badge_status, with_done
+from finance.templatetags.components import FAMILIES, action_named, badge_family, with_done
 from ledger.models import (
     LeaseEnd,
     Payment,
@@ -48,17 +48,6 @@ from tests.test_transfer import ready as a_ready_transfer
 
 pytestmark = pytest.mark.django_db
 
-#: The token family of each badge status (PLAN-012e-4 D2, PLAN-012f D1).
-BADGE_FAMILIES = {
-    "paid": "paid",
-    "unpaid": "overdue",
-    "due": "unpaid",
-    "pending": "pending",
-    "partial": "partial",
-    "waived": "waived",
-    "voided": "neutral",
-    "attention": "unpaid",
-}
 
 BACKEND = Path(settings.BASE_DIR)
 TEMPLATES = BACKEND / "ledger" / "templates" / "ledger"
@@ -68,18 +57,28 @@ PRINT_CSS = STATIC / "print.css"
 TOKENS_CSS = STATIC / "tokens.css"
 LITERAL_COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(")
 OCTOBER = date(2026, 10, 1)
-#: The leading glyph of each badge status (PLAN-012c D5).
+#: The icon of each badge family (DESIGN-SPEC §3, PLAN-012f D6).
 GLYPHS = {
     "paid": "\u2713",
-    "unpaid": "\u25fb",
+    "unpaid": "\u25cf",
+    "overdue": "\u25cf",
     "pending": "\u25d0",
     "partial": "\u25d1",
     "waived": "\u2013",
-    "due": "\u25cb",
-    "voided": "\u2715",
-    "attention": "!",
+    "neutral": "\u25cb",
 }
-GLYPH = '<span class="badge-glyph" aria-hidden="true">'
+GLYPH = '<span class="badge-icon" aria-hidden="true">'
+#: A stored value of each family (PLAN-012f D6): a rent charge "due" is unpaid, one "unpaid"
+#: (past due) overdue; "voided" is neutral. A family's own name is not a value for "unpaid".
+VALUE_OF = {
+    "paid": "paid",
+    "unpaid": "due",
+    "overdue": "unpaid",
+    "pending": "pending",
+    "partial": "partial",
+    "waived": "waived",
+    "neutral": "voided",
+}
 
 
 def client_for(role: Role) -> tuple[Client, Any]:
@@ -182,10 +181,11 @@ def test_the_store_workspace_carries_the_reference_classes() -> None:
     html = body(client_for(Role.BILLING)[0].get(f"/stores/{lease.store_id}/"))
     assert '<section id="workspace-header" class="workspace-header"' in html
     assert 'id="action-bar" class="action-bar"' in html
-    assert 'class="actions store-tabs tabs" id="store-tabs"' in html
-    assert 'class="actions tabs" id="charge-filters"' in html
+    # PLAN-012f D6: the tabs are .tab links; the Charges filter is the segmented filter.
+    assert 'class="tabs store-tabs" id="store-tabs"' in html
+    assert 'class="segmented" id="charge-filters"' in html
     css = APP_CSS.read_text()
-    assert '.tabs a[aria-current="page"], .tabs [aria-selected="true"] {' in css
+    assert '.tab[aria-current="page"], .tab[aria-selected="true"] {' in css
 
 
 # --- Tables ------------------------------------------------------------------------------------
@@ -269,7 +269,9 @@ def test_the_table_component_styles_the_responsive_regions() -> None:
     )
     wide = css.split("@media (min-width: 720px) {", 1)[1].split("\n}\n", 1)[0]
     assert "position: sticky; top: 0;" in wide  # the head row stays in view
-    assert "tr:nth-child(even)" in wide  # zebra rows
+    # PLAN-012f D6 (DESIGN-SPEC §3): rows separated by --border-soft, no zebra rows.
+    assert "tr:nth-child(even)" not in css
+    assert "th, td { padding: 10px 12px; border-bottom: 1px solid var(--border-soft);" in css
 
 
 # --- Badges ------------------------------------------------------------------------------------
@@ -281,27 +283,28 @@ def test_the_charge_table_shows_the_status_as_a_badge() -> None:
     a_rent_charge(lease, date(2026, 9, 1), RentChargeStatus.PAID, paid="3500.00")
     html = body(client_for(Role.VIEWER)[0].get(f"/stores/{lease.store_id}/?tab=charges&filter=all"))
     table = html[html.index('<table id="store-charges">') :].split("</table>", 1)[0]
-    glyph = '<span class="badge-glyph" aria-hidden="true">'
-    assert f'<span class="badge badge-unpaid">{glyph}\u25fb</span> Unpaid</span>' in table
-    assert f'<span class="badge badge-paid">{glyph}\u2713</span> Paid</span>' in table
+    # PLAN-012f D6: a rent charge "unpaid" (past due) is the overdue family.
+    assert f'<span class="badge badge-overdue">{GLYPH}\u25cf</span> Unpaid</span>' in table
+    assert f'<span class="badge badge-paid">{GLYPH}\u2713</span> Paid</span>' in table
 
 
 def test_the_grid_legend_is_a_badge_per_status() -> None:
     html = body(client_for(Role.VIEWER)[0].get("/grid/"))
     legend = html[html.index('<p class="legend muted">') :].split("</p>", 1)[0]
-    # PLAN-012e-4 D2: the owner's order, "Unpaid" in its two shades, no "Due" item.
-    for status, label in (
+    # PLAN-012e-4 D2: the owner's order, "Unpaid" in its two shades, no "Due" item; PLAN-012f
+    # D6: each a badge of its family (due is the unpaid family, unpaid the overdue one).
+    for family, label in (
         ("paid", "Paid"),
-        ("due", "Unpaid, not yet overdue"),
-        ("unpaid", "Unpaid, overdue"),
+        ("unpaid", "Unpaid, not yet overdue"),
+        ("overdue", "Unpaid, overdue"),
         ("pending", "Pending"),
         ("partial", "Partly paid"),
         ("waived", "Waived"),
     ):
-        badge = f'<span class="badge badge-{status}">{GLYPH}{GLYPHS[status]}</span> {label}</span>'
-        assert badge in legend, status
-    # "Not yet due" holds no charge: a plain badge, text only.
-    assert '<span class="badge not-due">Not yet due</span>' in legend
+        badge = f'<span class="badge badge-{family}">{GLYPH}{GLYPHS[family]}</span> {label}</span>'
+        assert badge in legend, family
+    # "Not yet due" holds no charge: its dashed box, as the cells show it.
+    assert '<span class="cell-not-due">Not yet due</span>' in legend
     assert "</span> Due</span>" not in legend
     # The grid's own thead stays the first on the page (the month headers).
     assert html.index("<thead") > html.index('<p class="legend muted">')
@@ -313,9 +316,10 @@ def test_needs_review_is_an_attention_badge() -> None:
     store.needs_review = True
     store.save()
     html = body(client_for(Role.VIEWER)[0].get(f"/stores/{store.pk}/"))
-    assert f'<span class="badge badge-attention">{GLYPH}!</span> Needs review</span>' in html
+    assert f'<span class="badge badge-unpaid">{GLYPH}\u25cf</span> Needs review</span>' in html
     every = "".join(path.read_text() for path in TEMPLATES.rglob("*.html"))
-    assert every.count("Needs review</span>") == every.count(f"{GLYPH}!</span> Needs review</span>")
+    # Every "Needs review" comes from the tag (none is laid out by hand).
+    assert "Needs review</span>" not in every
 
 
 @pytest.mark.parametrize(
@@ -326,18 +330,21 @@ def test_needs_review_is_an_attention_badge() -> None:
         (("Partially paid",), "partial"),
         (("Partly paid",), "partial"),
         (("Owed",), "unpaid"),
-        (("Voided",), "voided"),
-        (("Returned",), "attention"),
-        (("Not due", "not_due"), "not-due"),  # a plain badge, not a status
+        (("Voided",), "neutral"),
+        (("Returned",), "unpaid"),
+        (("attention",), "unpaid"),
+        (("Not due", "not_due"), "neutral"),
         (("  PENDING  ",), "pending"),
         (("Something else",), ""),
-        ((None, "Due"), "due"),
+        ((None, "Due"), "unpaid"),
+        (("unpaid", "Paid"), "overdue"),  # the value first: a rent charge past due
+        (("Unpaid, overdue",), "overdue"),
     ],
 )
-def test_badge_status_reads_the_value_then_the_label(
+def test_badge_family_reads_the_value_then_the_label(
     candidates: tuple[object, ...], status: str
 ) -> None:
-    assert badge_status(*candidates) == status
+    assert badge_family(*candidates) == status
 
 
 def test_a_badge_label_is_escaped_and_an_unknown_status_is_a_plain_badge() -> None:
@@ -347,32 +354,36 @@ def test_a_badge_label_is_escaped_and_an_unknown_status_is_a_plain_badge() -> No
     assert status_badge("Waived", "waived") == (
         f'<span class="badge badge-waived">{GLYPH}\u2013</span> Waived</span>'
     )
-    assert status_badge("Not due", "not_due") == '<span class="badge not-due">Not due</span>'
+    assert status_badge("Not due", "not_due") == (
+        f'<span class="badge badge-neutral">{GLYPH}\u25cb</span> Not due</span>'
+    )
+    assert status_badge("<i>Paid</i>", "paid") == (
+        f'<span class="badge badge-paid">{GLYPH}\u2713</span> &lt;i&gt;Paid&lt;/i&gt;</span>'
+    )
 
 
-def test_every_badge_status_names_its_status_tokens_and_has_its_glyph() -> None:
+def test_every_badge_family_names_its_status_tokens_and_has_its_glyph() -> None:
     from finance.templatetags.components import status_badge
 
     css = APP_CSS.read_text()
     tokens = TOKENS_CSS.read_text()
     # PLAN-012f D1: the spec's block writes several tokens a line.
     defined = set(re.findall(r"(--[a-z0-9-]+):", tokens.split(":root", 1)[1]))
-    assert set(BADGE_STATUSES) == set(GLYPHS)
-    for status in BADGE_STATUSES:
-        rule = css.split(f".badge-{status} {{", 1)[1].split("}", 1)[0]
+    # PLAN-012f D6: the seven families of the spec, each with its icon.
+    assert FAMILIES == ("paid", "unpaid", "overdue", "pending", "partial", "waived", "neutral")
+    assert set(FAMILIES) == set(GLYPHS)
+    for family in FAMILIES:
+        rule = css.split(f".badge-{family} {{", 1)[1].split("}", 1)[0]
         used = re.findall(r"var\((--[a-z0-9-]+)\)", rule)
-        # PLAN-012e-4 D2: due (unpaid, not yet overdue) is on the light unpaid pair; PLAN-012f
-        # D1: the spec's families (unpaid, once overdue, is the overdue pair).
-        family = BADGE_FAMILIES[status]
-        assert f"--{family}-bg" in used and f"--{family}-text" in used, status
-        assert all(name in defined for name in used), (status, used)
-        # The glyph is in the markup, hidden from screen readers (the label is the text).
-        assert status_badge("x", status).startswith(
-            f'<span class="badge badge-{status}">{GLYPH}{GLYPHS[status]}</span> '
+        assert f"--{family}-bg" in used and f"--{family}-text" in used, family
+        assert all(name in defined for name in used), (family, used)
+        # The icon is in the markup, hidden from screen readers (the label is the text).
+        assert status_badge("x", VALUE_OF[family]).startswith(
+            f'<span class="badge badge-{family}">{GLYPH}{GLYPHS[family]}</span> '
         )
-    # Every .badge-<status> rule in the sheet is one of the documented statuses.
+    # Every .badge-<name> rule in the sheet is a family or the icon's.
     rules = set(re.findall(r"^\.badge-([a-z-]+) \{", css, re.MULTILINE))
-    assert rules == set(BADGE_STATUSES)
+    assert rules == {*FAMILIES, "icon"}
 
 
 def test_app_css_has_no_literal_colour_and_print_css_neither() -> None:
@@ -394,22 +405,27 @@ def test_the_new_status_tokens_are_documented_pairs() -> None:
 
 
 def test_the_badges_take_the_grid_colour_families() -> None:
-    """PLAN-012e-4 D1, D2: unpaid dark red with white text (no outline), due on the soft
-    unpaid pair, pending, partly paid and waived on their own pairs, each a documented pair."""
+    """PLAN-012e-4 D1, D2 in the families of PLAN-012f D6: overdue dark red with white text
+    (no outline), unpaid on the soft pair, pending, partly paid, waived and neutral on their own
+    pairs, each a documented pair; the grid's cell blocks read the same tokens."""
     css = APP_CSS.read_text()
     tokens = TOKENS_CSS.read_text()
-    expected = {
-        "unpaid": ("--overdue-bg", "--overdue-text"),
-        "due": ("--unpaid-bg", "--unpaid-text"),
-        "pending": ("--pending-bg", "--pending-text"),
-        "partial": ("--partial-bg", "--partial-text"),
-        "waived": ("--waived-bg", "--waived-text"),
-        "paid": ("--paid-bg", "--paid-text"),
-    }
-    for status, (background, ink) in expected.items():
-        rule = css.split(f".badge-{status} {{", 1)[1].split("}", 1)[0]
-        assert rule.strip() == f"background: var({background}); color: var({ink});", status
-        assert f"pair: {ink} on {background}\n" in tokens, status
+    for family in FAMILIES:
+        background, ink = f"--{family}-bg", f"--{family}-text"
+        rule = css.split(f".badge-{family} {{", 1)[1].split("}", 1)[0]
+        assert rule.strip() == f"background: var({background}); color: var({ink});", family
+        assert f"pair: {ink} on {background}\n" in tokens, family
+    # The grid's statuses take the same pairs: due the unpaid family, unpaid the overdue one.
+    for status, family in (
+        ("paid", "paid"),
+        ("due", "unpaid"),
+        ("unpaid", "overdue"),
+        ("pending", "pending"),
+        ("partial", "partial"),
+        ("waived", "waived"),
+    ):
+        rule = css.split(f"td.cell-{status} .cell-block {{", 1)[1].split("}", 1)[0]
+        assert rule.strip() == f"background: var(--{family}-bg); color: var(--{family}-text);"
     assert "--overdue-text: #FFFFFF;" in tokens
     assert "--status-unpaid-border" not in tokens and "--status-unpaid-border" not in css
 

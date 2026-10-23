@@ -12,8 +12,8 @@ by tests.
    pages, rendered as the real roles over one data set (``tests/visual/world.py``), has an
    associated label.
 3. Focus: a ``:focus-visible`` ring from the focus tokens; no ``outline: none`` without a ring.
-4. Status never by colour alone: the badges carry their glyph and the grid cells name the
-   status in words.
+4. Status never by colour alone: the badges carry their icon and the grid cells name the
+   status in words (PLAN-012f D6: the seven families, the cell blocks).
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from django.urls import reverse
 import documents_storage
 from accounts.roles import Role
 from documents_storage.memory import MemoryDocumentStorage
-from finance.templatetags.components import BADGE_STATUSES, GLYPHS, status_badge
+from finance.templatetags.components import FAMILIES, GLYPHS, status_badge
 from payments.fake import FakeProvider
 from tests.auth_helpers import make_user, verified_client
 from tests.visual import world as visual_world
@@ -588,7 +588,7 @@ def test_the_focus_check_catches_a_removed_outline() -> None:
 
 HAND_LAID_BADGE = re.compile(
     r'<span class="badge badge-([a-z-]+)"[^>]*>'
-    r'(?:<span class="badge-glyph" aria-hidden="true">([^<]*)</span> ([^<]+))?'
+    r'(?:<span class="badge-icon" aria-hidden="true">([^<]*)</span> ([^<]+))?'
 )
 
 
@@ -610,30 +610,42 @@ def test_every_status_badge_in_a_template_carries_its_glyph_and_its_words() -> N
             status, glyph, label = match.groups()
             line = text[: match.start()].count("\n") + 1
             where = f"{path.relative_to(BACKEND)}:{line}: badge-{status}"
-            assert status in BADGE_STATUSES, where
+            assert status in FAMILIES, where
             assert glyph is not None and label is not None, f"{where} has no glyph"
             assert html.unescape(glyph) == GLYPHS[status], where
             assert label.strip(), where
             laid.append(match.start())
-        for found in re.finditer(r"\bbadge-(?!glyph)[a-z{]", text):
+        for found in re.finditer(r"\bbadge-(?!icon)[a-z{]", text):
             line = text[: found.start()].count("\n") + 1
             assert text.rfind("<span", 0, found.start()) in laid, (
                 f"{path.relative_to(BACKEND)}:{line}"
             )
     assert used_tag >= 5
-    # The tag itself: every status gets its glyph and its words.
-    for status in BADGE_STATUSES:
-        assert GLYPHS[status] in status_badge("Words", status)
-        assert status_badge("Words", status).endswith(" Words</span>")
+    # The tag itself: every family gets its icon and its words (a stored value of each).
+    for family, value in (
+        ("paid", "paid"),
+        ("unpaid", "due"),
+        ("overdue", "unpaid"),
+        ("pending", "pending"),
+        ("partial", "partial"),
+        ("waived", "waived"),
+        ("neutral", "voided"),
+    ):
+        badge = status_badge("Words", value)
+        assert f'class="badge badge-{family}"' in badge and GLYPHS[family] in badge, value
+        assert badge.endswith(" Words</span>")
+    assert set(FAMILIES) == set(GLYPHS)
 
 
+#: The status line's first words of each cell status (PLAN-012f D6: the amount comes first,
+#: then the icon and these words; an overdue cell reads "Overdue N d").
 GRID_WORDS = {
-    "paid": "Paid ",
-    "unpaid": "Unpaid ",
-    "partial": "Partly paid ",
-    "pending": "Pending ",
+    "paid": "Paid",
+    "unpaid": "Overdue",
+    "partial": "Partly paid",
+    "pending": "Pending",
     "waived": "Waived",
-    "due": "Unpaid ",  # PLAN-012e-4 D2: not yet overdue, the soft shade, the same words
+    "due": "Unpaid",  # PLAN-012e-4 D2: not yet overdue, the soft shade
     "not_due": "Not yet due",
 }
 GRID_CELL = re.compile(r'<td class="cell cell-([a-z_]+)"[^>]*>(.*?)</td>', re.S)
@@ -647,8 +659,14 @@ def test_every_grid_cell_names_its_status_in_words(seeded: visual_world.World) -
     statuses = {status for status, _ in cells}
     assert {"paid", "unpaid", "partial", "pending", "waived"} <= statuses, statuses
     for status, inner in cells:
-        words = html.unescape(re.sub(r"<[^>]+>", "", inner))
+        line = re.search(r'<span class="cell-status">(.*)', inner, re.S)
+        assert line is not None, (status, inner)
+        # The icon is hidden from screen readers; the words follow it.
+        shown = re.sub(r'<span aria-hidden="true">[^<]*</span>', "", line.group(1))
+        words = html.unescape(re.sub(r"<[^>]+>", "", shown)).strip()
         assert words.startswith(GRID_WORDS[status]), (status, words)
+        if status != "not_due":
+            assert '<span aria-hidden="true">' in line.group(1), (status, inner)
         link = re.search(r'aria-label="([^"]+)"', inner)
         if link is not None:
-            assert GRID_WORDS[status].strip() in html.unescape(link.group(1)), (status, inner)
+            assert GRID_WORDS[status] in html.unescape(link.group(1)), (status, inner)

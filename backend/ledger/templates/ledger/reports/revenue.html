@@ -28,7 +28,7 @@
     </tbody>
     <tfoot>
       {% with item=report.total %}
-      <tr id="revenue-total">
+      <tr class="totals" id="revenue-total">
         <th scope="row">Total</th>
         <td class="money">{{ item.rent_billed|money }}</td><td class="money">{{ item.rent_collected|money }}</td>
         <td class="money">{{ item.insurance_billed|money }}</td><td class="money">{{ item.insurance_collected|money }}</td>

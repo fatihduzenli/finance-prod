@@ -157,8 +157,10 @@ def test_the_grid_cells_and_the_column_totals_carry_the_dollar_and_the_separator
     a_rent_charge(lease, date(2026, 8, 1), status="partial", due="3500.00", paid="1200.00")
     viewer, _ = client_for(Role.VIEWER)
     html = page(viewer, reverse("ledger:grid:page") + "?from=2026-08&to=2026-09")
-    assert "Paid $2,000.00" in html
-    assert "Partly paid $1,200.00 of $3,500.00" in html
+    # PLAN-012f D6: the cell block's amount over its status line.
+    assert '<span class="cell-amount">$2,000.00</span>' in html
+    assert '<span class="cell-amount">$1,200.00 of $3,500.00</span>' in html
+    assert "</span> Partly paid</span>" in html
     assert "$2,000.00<br>" in html  # the September column's collected total
     assert "paid 2,000.00" not in html and "partial 1,200.00" not in html
     assert grid.CELL_STATUSES[4] == ("partial", "Partly paid")
@@ -171,8 +173,9 @@ def test_the_dashboard_figures_are_formatted() -> None:
     a_rent_charge(lease, SEPTEMBER, due="12345.60")
     viewer, _ = client_for(Role.VIEWER)
     figures = page(viewer, "/").split('id="figures-card"')[1].split("</section>")[0]
-    assert '<span class="value">$12,345.60</span>' in figures
-    assert '<span class="value">$0.00</span>' in figures  # paid this month
+    # PLAN-012f D6: the figures are KPI cards ({% kpi %}).
+    assert '<span class="kpi-value">$12,345.60</span>' in figures
+    assert '<span class="kpi-value">$0.00</span>' in figures  # paid this month
 
 
 def test_the_promise_cells_and_the_closed_sentence_are_formatted() -> None:
@@ -496,7 +499,7 @@ PAIRS: list[tuple[str, str, str]] = [
     ("webhooks/detail.html", "the body was not JSON", "the message could not be read"),
     ("audit/page.html", "Time (UTC)", "<th>Time</th>"),
     # §4.7 empty states
-    ("operators/_contacts_table.html", "No contact entries.", "No entries yet. Add one."),
+    ("contacts/_log.html", "No contact entries.", "No entries yet. Add one."),  # PLAN-012f D6
     ("documents/_section.html", "No documents.", "No documents yet. Upload one below."),
     ("leases/list.html", "No leases.", "No lease yet."),
     # The leases list has no action bar: the header's "New lease" is the next step there.

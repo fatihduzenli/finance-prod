@@ -91,8 +91,10 @@ def test_a_charge_due_today_is_the_soft_shade_and_one_due_yesterday_the_dark_sha
     a_rent_charge(lease, date(2026, 9, 1), status=RentChargeStatus.UNPAID, day=5)
     cells = _cells(_row(page(_viewer(), WINDOW), "Boundary Co"))
     by_month = {index + 1: cell for index, cell in enumerate(cells)}
-    assert by_month[10][0] == "due" and by_month[10][1].startswith("Unpaid"), by_month[10]
-    assert by_month[9][0] == "unpaid" and by_month[9][1].startswith("Unpaid"), by_month[9]
+    # PLAN-012f D6: the cell block reads the amount, then the status words.
+    assert by_month[10][0] == "due" and "Unpaid" in by_month[10][1], by_month[10]
+    assert by_month[9][0] == "unpaid" and "Overdue" in by_month[9][1], by_month[9]
+    assert "$3,500.00" in by_month[10][1] and "$3,500.00" in by_month[9][1]
     assert "Due $" not in by_month[10][1]
 
 
@@ -157,7 +159,7 @@ def test_a_cell_with_a_charge_is_never_blank_even_outside_the_lease_dates() -> N
     lease.save(update_fields=["ended_on"])
     a_rent_charge(lease, date(2026, 9, 1), status=RentChargeStatus.UNPAID)
     cells = _cells(_row(page(_viewer(), WINDOW), "Stray Co"))
-    assert cells[8][0] == "unpaid" and cells[8][1].startswith("Unpaid")
+    assert cells[8][0] == "unpaid" and "Overdue" in cells[8][1] and "$" in cells[8][1]
 
 
 # --- the legend and the shared tokens -------------------------------------------------------------
@@ -185,6 +187,10 @@ def test_the_legend_has_no_due_item_and_two_unpaid_shades() -> None:
 
 
 def test_the_badges_and_the_cells_share_their_tokens_and_no_due_token_remains() -> None:
+    """Since PLAN-012f the cell colours live in app.css (`td.cell-<status> .cell-block`): a
+    charge not yet overdue (`due`) and the unpaid badge share the unpaid family; an overdue
+    charge (`unpaid`) and the overdue badge share the overdue family; no 12c token remains."""
+
     def read(static_path: str) -> str:
         found = finders.find(static_path)
         assert found, static_path
@@ -196,19 +202,24 @@ def test_the_badges_and_the_cells_share_their_tokens_and_no_due_token_remains() 
         encoding="utf-8"
     )
     for text in (tokens, app, grid):
-        assert "--status-due-" not in text and "--status-" not in text  # the 12c names are gone
-    for status in ("unpaid", "pending", "partial", "waived", "paid"):
-        badge = re.search(rf"\.badge-{status}\s*\{{([^}}]*)\}}", app)
-        cell = re.search(rf"\.cell-{status}\s*\{{([^}}]*)\}}", grid)
-        assert badge and cell, status
-        badge_bg = re.search(r"background:\s*var\((--[a-z-]+)\)", badge.group(1))
-        cell_bg = re.search(r"background:\s*var\((--[a-z-]+)\)", cell.group(1))
-        assert badge_bg and cell_bg and badge_bg.group(1) == cell_bg.group(1), status
-    due_badge = re.search(r"\.badge-due\s*\{([^}]*)\}", app)
-    due_cell = re.search(r"\.cell-due\s*\{([^}]*)\}", grid)
-    assert due_badge and due_cell
-    # PLAN-012f tokens: a charge not yet overdue is the "unpaid" family (light red), the
-    # overdue one the "overdue" family; the badge and the cell read the same token.
-    badge_bg = re.search(r"background:\s*var\((--[a-z-]+)\)", due_badge.group(1))
-    cell_bg = re.search(r"background:\s*var\((--[a-z-]+)\)", due_cell.group(1))
-    assert badge_bg and cell_bg and badge_bg.group(1) == cell_bg.group(1) == "--unpaid-bg"
+        assert "--status-" not in text  # the 12c names are gone
+
+    def background(rule: str) -> str:
+        found = re.search(rule + r"\s*\{([^}]*)\}", app)
+        assert found, rule
+        token = re.search(r"background:\s*var\((--[a-z-]+)\)", found.group(1))
+        assert token, rule
+        return token.group(1)
+
+    assert (
+        background(r"td\.cell-due \.cell-block") == background(r"\.badge-unpaid") == "--unpaid-bg"
+    )
+    assert (
+        background(r"td\.cell-unpaid \.cell-block")
+        == background(r"\.badge-overdue")
+        == "--overdue-bg"
+    )
+    for family in ("paid", "pending", "partial", "waived"):
+        assert background(rf"td\.cell-{family} \.cell-block") == background(rf"\.badge-{family}"), (
+            family
+        )

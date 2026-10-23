@@ -20,11 +20,12 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.html import conditional_escape, format_html, format_html_join
+from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 from django.views.decorators.http import require_safe
 
 from accounts.roles import Role, meets, role_of
+from finance.templatetags.components import GLYPHS, badge_family
 from ledger.models import PaymentChannel, PaymentStatus
 from ledger.services import attention, grid, one_off_charges, receivables, rent_run
 from ledger.views.operators import csv_response, role_required
@@ -76,28 +77,43 @@ _NOTE = format_html('<span class="note-marker" title="Has a note">{}</span>', gr
 
 def cell_html(cell: grid.Cell, charge_url: str) -> SafeString:
     """One grid cell, as the template wrote it, built here: 12,000 cells through the
-    template engine (a ``{% url %}`` each) took longer than the page's 2 s (D6)."""
+    template engine (a ``{% url %}`` each) took longer than the page's 2 s (D6). A cell with a
+    status holds the grid cell block (PLAN-012f D6): the amount over the status line (the
+    family's icon, the words, the details and the note marker), a link to the cell's first
+    charge when it has one; a blank cell holds nothing."""
     css = f"cell cell-{cell.status}" if cell.status else "cell"
-    if cell.charge_id is not None and cell.proration_text:
-        # PLAN-012e D2: a prorated month shows its arithmetic as the link's title.
-        inner = format_html(
-            '<a href="{}" aria-label="{}" title="{}">{}{}</a>',
-            charge_url.replace(_CHARGE_PK, str(cell.charge_id)),
-            cell.label,
-            cell.proration_text,
-            cell.text,
-            _NOTE if cell.has_note else "",
-        )
-    elif cell.charge_id is not None:
-        inner = format_html(
-            '<a href="{}" aria-label="{}">{}{}</a>',
-            charge_url.replace(_CHARGE_PK, str(cell.charge_id)),
-            cell.label,
-            cell.text,
-            _NOTE if cell.has_note else "",
-        )
+    if not cell.status:
+        inner = SafeString("")
     else:
-        inner = conditional_escape(cell.text)
+        icon = (
+            format_html('<span aria-hidden="true">{}</span> ', GLYPHS[family])
+            if cell.status != grid.STATUS_NOT_DUE and (family := badge_family(cell.status))
+            else ""
+        )
+        lines = format_html(
+            "{}{}",
+            format_html('<span class="cell-amount">{}</span>', cell.amount_text)
+            if cell.amount_text
+            else "",
+            format_html(
+                '<span class="cell-status">{}{}{}{}</span>',
+                icon,
+                cell.status_words,
+                format_html(" · {}", cell.details) if cell.details else "",
+                _NOTE if cell.has_note else "",
+            ),
+        )
+        if cell.charge_id is not None:
+            # PLAN-012e D2: a prorated month shows its arithmetic as the link's title.
+            inner = format_html(
+                '<a class="cell-block" href="{}" aria-label="{}"{}>{}</a>',
+                charge_url.replace(_CHARGE_PK, str(cell.charge_id)),
+                cell.label,
+                format_html(' title="{}"', cell.proration_text) if cell.proration_text else "",
+                lines,
+            )
+        else:
+            inner = format_html('<span class="cell-block">{}</span>', lines)
     return format_html(
         '<td class="{}" data-month="{}" data-status="{}">{}</td>',
         css,
@@ -137,6 +153,8 @@ def _grid_page(
             "channels": PaymentChannel.choices,
             "statuses": grid.CELL_STATUSES,
             "note_marker": grid.NOTE_MARKER,
+            # PLAN-012f D6: the current month's column is tinted.
+            "this_month": timezone.localdate().replace(day=1),
         },
     )
 

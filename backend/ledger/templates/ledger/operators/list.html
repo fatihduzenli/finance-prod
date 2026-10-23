@@ -17,7 +17,7 @@
     <tbody>
       {% for operator in page %}
         <tr>
-          <td><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a>{% if operator.archived_at %} <span class="badge">Archived</span>{% endif %}{% if operator.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
+          <td>{% url 'ledger:operators:detail' pk=operator.pk as operator_url %}{% include "ledger/_cell_title.html" with title=operator.display_name link=operator_url %}{% if operator.archived_at %} <span class="badge">Archived</span>{% endif %}{% if operator.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
           <td>{{ operator.legal_name }}</td>
           <td>{{ operator.email|default:"" }}</td>
           <td>{{ operator.get_sync_status_display }}</td>

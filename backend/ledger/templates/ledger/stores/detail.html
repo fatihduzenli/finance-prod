@@ -19,8 +19,8 @@
 
   {% if space.actions %}{% include "ledger/stores/_action_bar.html" %}{% endif %}
 
-  <nav aria-label="Store tabs" class="actions store-tabs tabs" id="store-tabs">
-    {% for name, label in space.tabs %}<a class="btn" id="tab-link-{{ name }}" href="?tab={{ name }}#tab-{{ name }}"{% if name == space.tab %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+  <nav aria-label="Store tabs" class="tabs store-tabs" id="store-tabs">
+    {% for name, label in space.tabs %}<a class="tab" id="tab-link-{{ name }}" href="?tab={{ name }}#tab-{{ name }}"{% if name == space.tab %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
   </nav>
   <section id="tab-{{ space.tab }}" class="store-tab">
     {% if space.tab == "charges" %}{% include "ledger/stores/_tab_charges.html" %}
@@ -83,7 +83,7 @@
             {% else %}
               <td class="money">{{ row.landlord_rent|money }}</td><td class="money">{% if row.other_monthly_cost is not None %}{{ row.other_monthly_cost|money }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.landlord_lease_end|date:"Y-m-d"|default:"—" }}</td><td>{{ row.get_source_display }}</td>
               <td style="white-space:pre-wrap;">{{ row.notes }}{% if row.change_note %}{% if row.notes %}<br>{% endif %}<span class="badge">{% if entry.closed_by_user %}Closed{% else %}Correction{% endif %}</span>{% if entry.closed_by_user %} by {{ entry.closed_by_user }}{% endif %}: {{ row.change_note }}{% endif %}</td>
-              <td>{% if can_correct_cost %}<a class="btn cost-correct" href="{% url 'ledger:stores:correct_cost' pk=store.pk row=row.pk %}">Correct</a>{% endif %}</td>
+              <td>{% if can_correct_cost %}<a class="btn btn-sm cost-correct" href="{% url 'ledger:stores:correct_cost' pk=store.pk row=row.pk %}">Correct</a>{% endif %}</td>
             {% endif %}
           </tr>
         {% endwith %}{% endfor %}

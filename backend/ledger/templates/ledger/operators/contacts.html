@@ -14,7 +14,7 @@
     {% endfor %}
   </p>
   <p class="muted">Newest first. Dates are New York days.</p>
-  {% include "ledger/operators/_contacts_table.html" with rows=rows %}
+  {% include "ledger/contacts/_log.html" with rows=rows %}
   {% if page.paginator.num_pages > 1 %}
     <div class="pager pagination" role="navigation" aria-label="Pages">
       {% if page.has_previous %}<a class="btn" href="?{% if status %}status={{ status }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}

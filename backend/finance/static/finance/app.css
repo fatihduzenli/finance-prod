@@ -68,41 +68,23 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 .nav-search input[type=search] { width: 100%; box-sizing: border-box; padding: 9px 12px 9px 36px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--fs-base); }
 .nav-search .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 
-/* The invoice builder's lines (PLAN-012d D10): the Item box takes its cell's full width so
-   the chosen value (a long "Existing open charge: ..." included) shows; the trash button;
-   the visible line numbers; the total line under a table of amounts. */
-#draft-lines td.line-item { min-width: 16rem; }
-td.line-item input { width: 100%; box-sizing: border-box; }
-td.line-item .rent-text { display: block; font-size: .85rem; }
-td.line-number { white-space: nowrap; color: var(--muted); }
-.line-trash { display: inline-flex; align-items: center; justify-content: center; padding: .35rem .5rem; }
-.line-trash[hidden], .no-js-remove[hidden] { display: none; }
-.table-total { font-weight: 600; text-align: right; margin: .5rem 0 1rem; }
-
 /* --- Page --------------------------------------------------------------------------- */
 main { box-sizing: border-box; width: 100%; max-width: 1240px; padding: 28px 32px; }
 main.wide { max-width: none; }
-h1 { font-size: 1.5rem; margin-top: 0; } h2 { font-size: 1.15rem; margin-top: 2rem; }
-table { border-collapse: collapse; width: 100%; }
-th, td { padding: .4rem .5rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+h1 { font-size: var(--fs-h1); font-weight: 600; margin-top: 0; }
+h2 { font-size: var(--fs-lg); font-weight: 600; margin: var(--space-6) 0 var(--space-3); }
 label { display: block; margin: .75rem 0 .25rem; font-weight: 600; }
-input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], select, textarea { padding: .5rem; box-sizing: border-box; font-size: 1rem; max-width: 100%; }
-input[type=text], input[type=email], input[type=search], textarea { width: 100%; }
-.btn { display: inline-block; padding: .45rem .9rem; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface); color: var(--text); font-size: .95rem; cursor: pointer; text-decoration: none; box-sizing: border-box; }
-.btn-primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-border); color: var(--surface); font-weight: 600; } .btn-danger { border-color: var(--unpaid-text); color: var(--unpaid-text); }
-.btn:disabled { opacity: .5; cursor: default; }
-.actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: 1rem 0; } .actions form { margin: 0; }
+.actions { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; margin: var(--space-4) 0; } .actions form { margin: 0; }
 /* A page's own message list (the flash messages are .toast, below). */
-.messages { list-style: none; padding: 0; } .messages li { padding: .6rem .8rem; margin-bottom: .5rem; border-radius: var(--radius-ctl); background: var(--neutral-bg); color: var(--neutral-text); }
+.messages { list-style: none; padding: 0; } .messages li { padding: 10px var(--space-3); margin-bottom: var(--space-2); border-radius: var(--radius-ctl); background: var(--neutral-bg); color: var(--neutral-text); }
 .messages .error { background: var(--unpaid-bg); color: var(--unpaid-text); } .messages .warning { background: var(--pending-bg); color: var(--pending-text); } .messages .success { background: var(--paid-bg); color: var(--paid-text); }
 .errorlist { color: var(--unpaid-text); padding-left: 1rem; }
 .muted { color: var(--muted); }
-/* A block's one line of help, "Learn more" (PLAN-012e-2 D10). */
-p.help { color: var(--muted); }
-dl { display: grid; grid-template-columns: 12rem 1fr; gap: .35rem 1rem; } dt { font-weight: 600; } dd { margin: 0; }
+dl { display: grid; grid-template-columns: 12rem 1fr; gap: 6px var(--space-4); } dt { font-weight: 600; } dd { margin: 0; }
 img, iframe { max-width: 100%; }
 
-/* === Components (PLAN-012c D5) ==============================================================
+/* === Components (PLAN-012c D5, restated on the approved design: PLAN-012f D6,
+   docs/design/DESIGN-SPEC.md §3) ==============================================================
    One section per component, tokens only. Each class is named in its section's comment.
    Templates adopt them with classes and wrappers: no id, field name or URL changes. */
 
@@ -118,48 +100,58 @@ img, iframe { max-width: 100%; }
 .page-header .page-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .page-header .page-actions form { margin: 0; }
 
-/* --- Workspace (the 12d store and operator pages: the reference layout) -------------------
-   .workspace-header: the header card (a dl.header-card of label and value) on a tinted card;
-   .action-bar: the page's actions in one wrapping row of buttons;
-   .tabs: the tab links, each a .btn; the open one carries aria-current="page" (they are links
-   to pages; a role="tab" control would carry aria-selected="true", styled the same). The
-   charge and invoice filters (#charge-filters, #invoice-filters) are tabs too. */
-.workspace-header { margin: var(--space-4) 0; padding: var(--space-4); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-ctl); }
-.header-card { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-4); margin: 0; }
-.header-card dt { font-weight: 600; color: var(--text-2); } .header-card dd { margin: 0; }
-.action-bar { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-4) 0; padding: 0 0 var(--space-4); border-bottom: 1px solid var(--border); }
-.action-bar form { margin: 0; }
-.tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: var(--space-4) 0; }
-.tabs a[aria-current="page"], .tabs [aria-selected="true"] { background: var(--navy); border-color: var(--navy); color: var(--surface); }
+/* --- Cards -------------------------------------------------------------------------------
+   .card: a block on --surface, a 1 px border, radius 12, padding 18/20; its first heading
+   (h2) is the card's 15/600 title. .card-header: a header row (the title, an optional
+   .count-pill, a right-aligned .card-link such as "All payments →"). .section-label: the
+   13/600 muted uppercase label of a right-column card (LEASE, NEXT, STORE COST, DOCUMENTS). */
+.card { margin: 0 0 var(--space-5); padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.card h2 { margin: 0 0 var(--space-3); font-size: var(--fs-lg); font-weight: 600; }
+.card > * + h2, .card > section + section > h2 { margin-top: var(--space-5); }
+.card-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); }
+.card-header h2 { margin: 0; }
+.count-pill { display: inline-block; min-width: 1.5em; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-sm); font-weight: 600; text-align: center; box-sizing: border-box; }
+.card-link { margin-left: auto; font-size: var(--fs-base); text-decoration: none; }
+.section-label { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-base); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+
+/* --- Buttons -----------------------------------------------------------------------------
+   .btn: the secondary button, white with --input-border, 10/16, radius 8, 600.
+   .btn-primary: the page's one primary action on the button tokens, white text.
+   .btn-sm: a row's small button, 6/12 at 12 px. .btn-danger: a destructive action, its text
+   red (a confirmation page fills it, below). .btn-menu: the summary of a drop-down (the Lease
+   and More menus), its label ending with "▾". */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box; padding: 10px 16px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-base); font-weight: 600; line-height: 1.2; text-decoration: none; white-space: nowrap; cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.btn-primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-border); color: var(--surface); font-weight: 600; }
+.btn-sm { padding: 6px 12px; font-size: var(--fs-sm); font-weight: 500; }
+.btn-danger { color: var(--unpaid-text); }
+.btn-menu { list-style: none; }
+.btn-menu::-webkit-details-marker { display: none; }
+.btn:disabled { opacity: .5; cursor: default; }
+.link-action { background: none; border: 0; padding: 0; color: var(--link); font: inherit; font-size: var(--fs-base); text-decoration: none; cursor: pointer; }
+.link-action:hover { text-decoration: underline; }
 
 /* --- Menu (PLAN-012e-2 D5, D6) -----------------------------------------------------------
-   .menu: a bar's menu (Lease, More), a native <details> whose <summary class="btn"> opens a
-   list of links or one-button forms; it works without script. .menu-danger: the destructive
-   item (End lease, Archive). .link-action: a POST button that reads as a text link (Create
-   missing charges on the Charges tab). */
+   .menu: a bar's menu (Lease, More), a native <details> whose <summary class="btn btn-menu">
+   opens a list of links or one-button forms; it works without script. .menu-danger: the
+   destructive item (End lease, Archive). */
 .menu { position: relative; display: inline-block; }
 .menu summary { list-style: none; }
 .menu summary::-webkit-details-marker { display: none; }
-.menu ul { position: absolute; left: 0; top: calc(100% + var(--space-1)); z-index: 10; min-width: 14rem; margin: 0; padding: var(--space-2); list-style: none; display: flex; flex-direction: column; gap: var(--space-1); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-ctl); }
+.menu ul { position: absolute; left: 0; top: calc(100% + var(--space-1)); z-index: 10; min-width: 14rem; margin: 0; padding: 6px; list-style: none; display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-ctl); }
 .menu li form { margin: 0; }
-.menu li a, .menu li button { display: block; width: 100%; box-sizing: border-box; padding: var(--space-1) var(--space-2); background: none; border: 0; color: var(--text); font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.menu li a, .menu li button { display: block; width: 100%; box-sizing: border-box; padding: var(--space-2) 10px; border-radius: 6px; background: none; border: 0; color: var(--text); font: inherit; font-size: var(--fs-base); text-align: left; text-decoration: none; cursor: pointer; }
+.menu li a:hover, .menu li button:hover { background: var(--surface-2); }
 .menu .menu-danger { color: var(--unpaid-text); }
-.link-action { background: none; border: 0; padding: 0; color: var(--link); font: inherit; text-decoration: underline; cursor: pointer; }
 
-/* --- Table -------------------------------------------------------------------------------
-   .table: a list. The regions of {% responsive_table %} (.table-cards and .table-scroll)
-   give their table the same look, so no table tag changes. td.money and th.money: an amount,
-   right-aligned in tabular figures. Zebra rows and a head row that stays at the top of the
-   page while the list scrolls (wide screens; the phone shows cards). A sortable header (only
-   where the view sorts: the arrears list) is a link in a th with aria-sort on the sorted
-   column; its arrow is drawn here, so the cells' data-label stays the header's text. */
-.table th, .table-cards > table th, .table-scroll > table th { font-weight: 600; }
-.table thead th, .table-cards > table > thead th, .table-scroll > table > thead th { background: var(--surface-2); border-bottom: 2px solid var(--border); vertical-align: bottom; }
-.table-scroll > table > thead th:first-child { background: var(--surface-2); z-index: 2; }
-td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-th[aria-sort] a, th.sortable a { color: inherit; }
-th[aria-sort="ascending"] a::after { content: " \25B2"; }
-th[aria-sort="descending"] a::after { content: " \25BC"; }
+/* --- Inputs and selects ------------------------------------------------------------------
+   Every text field, select and text area: 9/12, --input-border, radius 8, on --surface; a
+   search field on --surface-2. The focus ring is --link's (the :focus-visible rule above),
+   and the border takes --link too. */
+input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=tel], input[type=url], select, textarea { box-sizing: border-box; max-width: 100%; padding: 9px 12px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-md); }
+input[type=text], input[type=email], input[type=search], textarea { width: 100%; }
+input[type=search] { background: var(--surface-2); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--link); }
 
 /* --- Forms -------------------------------------------------------------------------------
    .field: one control with its label, the control, its help text (.help) and its error
@@ -167,46 +159,193 @@ th[aria-sort="descending"] a::after { content: " \25BC"; }
    field's label ends in " *" with .required (and "required" for screen readers): marked in
    text, not in colour alone. One .btn-primary per form; the others are .btn. */
 .field { margin: 0 0 var(--space-3); }
-.field > label { margin: var(--space-3) 0 var(--space-1); }
-.field .help { display: block; color: var(--text-2); font-size: var(--fs-md); margin-top: var(--space-1); }
-.field .errorlist { list-style: none; margin: var(--space-1) 0 0; padding: 0; font-weight: 600; }
-.field .field-error { display: block; margin-top: var(--space-1); color: var(--unpaid-text); }
+.field > label { margin: var(--space-3) 0 var(--space-1); font-size: var(--fs-base); }
+.field .help { display: block; color: var(--muted); font-size: var(--fs-sm); margin-top: var(--space-1); }
+.field .errorlist { list-style: none; margin: var(--space-1) 0 0; padding: 0; font-size: var(--fs-sm); font-weight: 600; }
+.field .field-error { display: block; margin-top: var(--space-1); color: var(--unpaid-text); font-size: var(--fs-sm); }
 .field.has-error input, .field.has-error select, .field.has-error textarea { border: 2px solid var(--unpaid-text); }
 .required { font-weight: 700; }
 
-/* --- Badges ------------------------------------------------------------------------------
-   .badge: a short label. .badge-<status> for paid, unpaid, pending, partial, waived, due,
-   voided, attention: each takes its status tokens (due, not yet overdue, takes the soft
-   unpaid pair; PLAN-012e-4 D2); its leading glyph (.badge-glyph: paid ✓,
-   unpaid ◻, pending ◐, partial ◑, waived –, due ○, voided ✕, attention !) is in the markup
-   (finance.templatetags.components), hidden from screen readers, so colour is never the
-   only signal. .badge.not-due: the grid legend's "Not due", text only. */
-.badge { display: inline-block; padding: .1rem .45rem; border: 1px solid transparent; border-radius: var(--radius-ctl); background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-md); line-height: 1.4; white-space: nowrap; }
+/* --- Help line ---------------------------------------------------------------------------
+   p.help: at most one 12 px muted line under a block (the one-line rule, PLAN-012e-2 D10);
+   everything else is on the help pages. */
+p.help { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-sm); }
+
+/* --- Segmented filter --------------------------------------------------------------------
+   .segmented: a few links that filter one list (the Charges tab's Open / Paid / All and the
+   Invoices tab's filter): a grey track on --bg, radius 8; the current segment (aria-current
+   "page") white with a 1 px ring. The grid's status filter stays a select. */
+.segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--bg); }
+.segmented a { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; }
+.segmented a[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+
+/* --- Tabs --------------------------------------------------------------------------------
+   .tabs: a row of .tab links (the store's and the operator's tabs) over a 1 px rule; 13 px,
+   10/14, muted; the open tab (aria-current "page"; a role="tab" control would carry
+   aria-selected "true") in --text with a 2 px teal bottom border. The row scrolls sideways
+   on a phone. */
+.tabs { display: flex; gap: var(--space-1); margin: var(--space-4) 0; overflow-x: auto; -webkit-overflow-scrolling: touch; border-bottom: 1px solid var(--border); }
+.tab { display: inline-flex; align-items: center; flex: 0 0 auto; padding: 10px 14px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; white-space: nowrap; }
+.tab:hover { color: var(--text); }
+.tab[aria-current="page"], .tab[aria-selected="true"] { border-bottom-color: var(--teal); color: var(--text); font-weight: 600; }
+
+/* --- Status badges -----------------------------------------------------------------------
+   .badge: a pill, 12/600, 3/9; .badge-<family> for the seven families of the spec: paid ✓,
+   unpaid ●, overdue ● (dark red, white text), pending ◐, partial ◑, waived –, neutral ○, each
+   on its status tokens. The icon (.badge-icon) is in the markup
+   (finance.templatetags.components.status_badge), hidden from screen readers, so colour is
+   never the only signal. A plain .badge (a word: Archived, Deposit) takes the neutral pair. */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: var(--radius-pill); background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-sm); font-weight: 600; line-height: 1.3; white-space: nowrap; vertical-align: middle; }
+.badge-icon { font-size: .85em; line-height: 1; }
 .badge-paid { background: var(--paid-bg); color: var(--paid-text); }
-.badge-unpaid { background: var(--overdue-bg); color: var(--overdue-text); }
+.badge-unpaid { background: var(--unpaid-bg); color: var(--unpaid-text); }
+.badge-overdue { background: var(--overdue-bg); color: var(--overdue-text); }
 .badge-pending { background: var(--pending-bg); color: var(--pending-text); }
 .badge-partial { background: var(--partial-bg); color: var(--partial-text); }
 .badge-waived { background: var(--waived-bg); color: var(--waived-text); }
-.badge-due { background: var(--unpaid-bg); color: var(--unpaid-text); }
-.badge-voided { background: var(--neutral-bg); color: var(--neutral-text); }
-.badge-attention { background: var(--unpaid-bg); color: var(--unpaid-text); font-weight: 600; }
-.badge.not-due { background: var(--surface); color: var(--muted); border-color: var(--border); font-style: italic; }
+.badge-neutral { background: var(--neutral-bg); color: var(--neutral-text); }
+
+/* --- Tables ------------------------------------------------------------------------------
+   .table: a list. The regions of {% responsive_table %} (.table-cards and .table-scroll)
+   give their table the same look, so no table tag changes: 13 px; the header 12/500 muted on
+   --surface-2; rows separated by --border-soft; the head row stays at the top of the page
+   while the list scrolls (wide screens; the phone shows cards). td.money and th.money: an
+   amount, right-aligned in tabular figures. .cell-title and .cell-subline (the include
+   ledger/_cell_title.html): the first cell's bold link and its muted 12 px second line.
+   tr.totals: a totals row on --surface-2 with a 2 px top border. .table-scroll: a wide table
+   in a box that scrolls sideways (overflow-x: auto) with its first column sticky. A sortable
+   header (only where the view sorts: the arrears list) is a link in a th with aria-sort on
+   the sorted column; its arrow is drawn here, so the cells' data-label stays the header's
+   text. */
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 10px 12px; border-bottom: 1px solid var(--border-soft); text-align: left; vertical-align: top; }
+.table, .table-cards > table, .table-scroll > table { font-size: var(--fs-base); }
+.table th, .table-cards > table th, .table-scroll > table th { font-weight: 600; }
+.table thead th, .table-cards > table > thead th, .table-scroll > table > thead th { background: var(--surface-2); color: var(--muted); font-size: var(--fs-sm); font-weight: 500; border-bottom: 1px solid var(--border); vertical-align: bottom; }
+.table-scroll > table > thead th:first-child { background: var(--surface-2); z-index: 2; }
+td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cell-title { color: var(--text); font-weight: 600; text-decoration: none; }
+.cell-title:hover { text-decoration: underline; }
+.cell-subline { display: block; color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
+tr.totals > th, tr.totals > td { background: var(--surface-2); border-top: 2px solid var(--border); font-weight: 600; }
+tr.totals + tr.totals > th, tr.totals + tr.totals > td { border-top: 0; }
+th[aria-sort] a, th.sortable a { color: inherit; }
+th[aria-sort="ascending"] a::after { content: " \25B2"; }
+th[aria-sort="descending"] a::after { content: " \25BC"; }
+/* Tables that scroll sideways (the grid, the audit page, the reports, the builder's lines):
+   first column sticky. The region is the containing block of what is positioned inside it
+   (the builder's visually hidden line labels), so nothing escapes it and widens the page. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; position: relative; }
+.table-scroll > table { width: auto; min-width: 100%; border-collapse: separate; border-spacing: 0; }
+.table-scroll > table th:first-child, .table-scroll > table td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+/* The invoice builder's lines (PLAN-012d D10): the Item box takes its cell's full width so
+   the chosen value (a long "Existing open charge: ..." included) shows; the trash button;
+   the visible line numbers; the total line under a table of amounts. */
+#draft-lines td.line-item { min-width: 16rem; }
+td.line-item input { width: 100%; box-sizing: border-box; }
+td.line-item .rent-text { display: block; font-size: var(--fs-sm); }
+td.line-number { white-space: nowrap; color: var(--muted); }
+.line-trash { display: inline-flex; align-items: center; justify-content: center; padding: 6px var(--space-2); }
+.line-trash[hidden], .no-js-remove[hidden] { display: none; }
+.table-total { font-weight: 600; text-align: right; margin: var(--space-2) 0 var(--space-4); }
+
+/* --- KPI card ----------------------------------------------------------------------------
+   .kpi ({% kpi label value note tone %}): a card with its label (.kpi-label, 12 px muted),
+   its value (.kpi-value, 28/700; .tone-unpaid red) and a third line (.kpi-note, 12 px
+   muted). .kpi-row: the cards in a row; .kpi-link: a card that is a link. */
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-5); }
+.kpi { display: flex; flex-direction: column; gap: var(--space-1); height: 100%; box-sizing: border-box; padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.kpi-label { color: var(--muted); font-size: var(--fs-sm); }
+.kpi-value { color: var(--text); font-size: var(--fs-kpi); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kpi-value.tone-unpaid { color: var(--unpaid-text); }
+.kpi-note { color: var(--muted); font-size: var(--fs-sm); }
+.kpi-link { display: block; color: inherit; text-decoration: none; }
+.kpi-link:hover .kpi { border-color: var(--input-border); }
+
+/* --- Progress bar ------------------------------------------------------------------------
+   .progress ({% progress segments %}): a 10 px bar (.progress-bar) of stacked segments
+   (.progress-segment.progress-<family>) in the status colours, widths summing to at most
+   100 %, then the legend (.progress-legend) of 8 px squares (.progress-key). */
+.progress-bar { display: flex; height: 10px; overflow: hidden; border-radius: var(--radius-pill); background: var(--border-soft); }
+.progress-segment { display: block; height: 100%; }
+.progress-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 10px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: var(--fs-sm); }
+.progress-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.progress-key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.progress-paid { background: var(--paid-text); }
+.progress-unpaid { background: var(--unpaid-text); }
+.progress-overdue { background: var(--overdue-bg); }
+.progress-pending { background: var(--pending-text); }
+.progress-partial { background: var(--partial-text); }
+.progress-waived { background: var(--waived-text); }
+.progress-neutral { background: var(--neutral-text); }
+
+/* --- Date chip ---------------------------------------------------------------------------
+   .date-chip ({% date_chip day %}): 44 px wide, the month (.date-chip-month, 11 px muted)
+   over the day (.date-chip-day, 15/700), on --bg, radius 8. */
+.date-chip { display: inline-flex; flex: 0 0 44px; flex-direction: column; align-items: center; justify-content: center; width: 44px; box-sizing: border-box; padding: 5px 0; border-radius: var(--radius-ctl); background: var(--bg); color: var(--text); line-height: 1.15; }
+.date-chip-month { color: var(--muted); font-size: var(--fs-xs); text-transform: uppercase; }
+.date-chip-day { font-size: var(--fs-lg); font-weight: 700; }
+
+/* --- Contact-log entry -------------------------------------------------------------------
+   .contact-log: the entries (ledger/contacts/_log.html), each a .contact-entry
+   (ledger/contacts/_log_entry.html): the 34 px round .avatar letter ({% avatar %}: P a
+   promise in the pending colours, C, E, V the others neutral), the body (.contact-body: the
+   bold kind .contact-kind, the note, the muted meta line .contact-meta) and the row actions
+   at the right (.contact-actions). A deleted entry is struck through. */
+.contact-log { list-style: none; margin: 0; padding: 0; }
+.contact-entry { display: flex; align-items: flex-start; gap: var(--space-3); padding: 14px 0; border-bottom: 1px solid var(--border-soft); }
+.contact-entry:last-child { border-bottom: 0; }
+.avatar { display: inline-flex; flex: 0 0 34px; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; font-size: var(--fs-sm); font-weight: 700; }
+.avatar-pending { background: var(--pending-bg); color: var(--pending-text); }
+.avatar-neutral { background: var(--neutral-bg); color: var(--neutral-text); }
+.contact-body { flex: 1 1 auto; min-width: 0; font-size: var(--fs-base); overflow-wrap: anywhere; }
+.contact-body p { margin: 0; }
+.contact-kind { font-weight: 700; }
+.contact-text { white-space: pre-wrap; }
+.contact-meta { color: var(--muted); font-size: var(--fs-sm); }
+.contact-correction, .contact-deleted-note, .contact-closes { margin-top: var(--space-1); }
+.contact-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 50%; }
+.contact-actions form { margin: 0; }
+.contact-deleted .contact-body { color: var(--muted); }
+
+/* --- Grid cell block ---------------------------------------------------------------------
+   td.cell (ledger.views.dashboard.cell_html): a month of the grid. .cell-block: a rounded
+   block in the family's colours of the cell's status (td.cell-<status>: paid; due, the
+   unpaid family; unpaid, the overdue family, "Overdue N d"; pending; partial; waived), the
+   amount (.cell-amount) over the status line (.cell-status: the icon and the word, then the
+   invoice number, the plan or the pending date). A month outside the lease is blank; a
+   future month inside it, "Not yet due", italic in a dashed 1 px --input-border box
+   (td.cell-not_due; .cell-not-due in the legend). The current month's column
+   (col.month-current, th.month-current, td.month-current) is tinted --month-current. */
+.cell-block { display: block; box-sizing: border-box; padding: 6px 8px; border-radius: var(--radius-ctl); line-height: 1.25; text-align: right; text-decoration: none; }
+.cell-amount { display: block; font-size: var(--fs-sm); font-weight: 700; font-variant-numeric: tabular-nums; }
+.cell-status { display: block; font-size: var(--fs-xs); }
+td.cell-paid .cell-block { background: var(--paid-bg); color: var(--paid-text); }
+td.cell-due .cell-block { background: var(--unpaid-bg); color: var(--unpaid-text); }
+td.cell-unpaid .cell-block { background: var(--overdue-bg); color: var(--overdue-text); }
+td.cell-pending .cell-block { background: var(--pending-bg); color: var(--pending-text); }
+td.cell-partial .cell-block { background: var(--partial-bg); color: var(--partial-text); }
+td.cell-waived .cell-block { background: var(--waived-bg); color: var(--waived-text); }
+td.cell-not_due .cell-block, .cell-not-due { border: 1px dashed var(--input-border); color: var(--muted); font-style: italic; font-size: var(--fs-xs); }
+.cell-not-due { display: inline-block; padding: 3px 9px; border-radius: var(--radius-ctl); }
+.note-marker { margin-left: 3px; color: inherit; }
+table.grid col.month-current, table.grid .month-current { background: var(--month-current); }
 
 /* --- Empty state -------------------------------------------------------------------------
    .empty: what shows instead of a list: a sentence, then the next step (.empty-next) as a
    link or a button where one exists. A table's "No rows" cell carries it too. */
 .empty { color: var(--muted); }
 .empty .empty-next { margin-left: var(--space-2); }
-p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius-ctl); background: var(--surface-2); }
+p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-border); border-radius: var(--radius-card); background: var(--surface); }
 
 /* --- Confirmation page ---------------------------------------------------------------------
-   .confirm: a page that asks before an action that cannot be taken back. The question is its
-   heading (.confirm-question), "What will happen" a list (.confirm-what), then one primary
-   button (the action: .btn-primary, or .btn-danger when it ends or removes something) and one
-   secondary (.btn: back, or cancel). */
-.confirm { margin: var(--space-4) 0; padding: var(--space-4) var(--space-5); border: 1px solid var(--border); border-left: 4px solid var(--navy); border-radius: var(--radius-ctl); background: var(--surface); }
-.confirm .confirm-question { margin-top: 0; }
-.confirm-what h2, .confirm-what h3 { font-size: var(--fs-lg); margin: var(--space-4) 0 var(--space-2); }
+   .confirm: a page that asks before an action that cannot be taken back, a card. The
+   question is its heading (.confirm-question), "What will happen" a list (.confirm-what),
+   then one primary button (the action: .btn-primary, or .btn-danger, filled red here, when
+   it ends or removes something) and one secondary (.btn: back, or cancel). */
+.confirm { margin: var(--space-4) 0; padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.confirm .confirm-question { margin-top: 0; font-size: var(--fs-lg); }
+.confirm-what h2, .confirm-what h3 { font-size: var(--fs-md); margin: var(--space-4) 0 var(--space-2); }
 .confirm-what ul { margin: 0 0 var(--space-3); padding-left: var(--space-6); }
 .confirm .btn-danger { background: var(--unpaid-text); border-color: var(--unpaid-text); color: var(--surface); }
 
@@ -218,11 +357,11 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--border); 
    refusal) stays until it is dismissed. Dismissing removes it (the script in base.html):
    the reader chose to. */
 .toasts { list-style: none; margin: 0 0 var(--space-4); padding: 0; }
-.toast { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); border-radius: var(--radius-ctl); border-left: 4px solid var(--teal); background: var(--neutral-bg); color: var(--neutral-text); overflow: hidden; }
+.toast { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); border-radius: var(--radius-ctl); border: 1px solid var(--border); background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-base); overflow: hidden; }
 .toast-text { flex: 1 1 auto; }
-.toast.success { background: var(--paid-bg); color: var(--paid-text); border-left-color: var(--green); }
-.toast.warning { background: var(--pending-bg); color: var(--pending-text); border-left-color: var(--pending-text); }
-.toast.error { background: var(--unpaid-bg); color: var(--unpaid-text); border-left-color: var(--unpaid-text); }
+.toast.success { background: var(--paid-bg); color: var(--paid-text); }
+.toast.warning { background: var(--pending-bg); color: var(--pending-text); }
+.toast.error { background: var(--unpaid-bg); color: var(--unpaid-text); }
 .toast-dismiss { flex: 0 0 auto; background: none; border: 0; padding: 0 var(--space-1); font: inherit; font-size: var(--fs-lg); line-height: 1; color: inherit; cursor: pointer; }
 .toast:not(.warning):not(.error) { animation: toast-fade 600ms ease-in 8s forwards; }
 @keyframes toast-fade { to { opacity: 0; } }
@@ -230,76 +369,64 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--border); 
 /* --- Pager -------------------------------------------------------------------------------
    .pager: a paged list's Previous and Next links (.btn) around the page count. */
 .pager { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: var(--space-4) 0; }
-.pager .pager-count { color: var(--muted); }
+.pager .pager-count { color: var(--muted); font-size: var(--fs-base); }
 
 /* --- Wizard steps ------------------------------------------------------------------------
    .steps: the wizard's step list (an ol). A step that can be opened is a link; the current
    one carries aria-current="step"; a step before it is done (.step-done, a ✓ and "done" for
    screen readers). */
 .steps { display: flex; flex-wrap: wrap; gap: var(--space-2); list-style: none; margin: var(--space-4) 0; padding: 0; counter-reset: step; }
-.steps li { counter-increment: step; display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); font-size: var(--fs-md); }
+.steps li { counter-increment: step; display: inline-flex; align-items: center; gap: var(--space-1); padding: 6px var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); font-size: var(--fs-base); }
 .steps li::before { content: counter(step) "."; color: var(--text-2); }
 .steps li.step-done::before { content: "\2713"; content: "\2713" / ""; color: var(--paid-text); font-weight: 700; }
 .steps li[aria-current="step"] { background: var(--navy); border-color: var(--navy); color: var(--surface); }
 .steps li[aria-current="step"]::before { color: var(--sidebar-text); }
 
-/* --- Cards (the dashboard, PLAN-012c D6) ----------------------------------------------------
-   .card: one block of the dashboard, a heading and its content; .cards: the figures' row of
-   small cards (.figure, each a link with its .value). The attention list is the first card. */
-.card { margin: 0 0 var(--space-4); padding: var(--space-4) var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); }
-.card > h2:first-child, .card > section > h2:first-child { margin-top: 0; }
-.card.attention { border-left: 4px solid var(--pending-text); padding: var(--space-4) var(--space-5); margin: 0 0 var(--space-4); }
-.card.alert-list { border-left: 4px solid var(--unpaid-text); }
-.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-3); margin: var(--space-2) 0; }
-.figure { border: 1px solid var(--border); border-radius: var(--radius-ctl); padding: var(--space-3); background: var(--surface-2); }
-.figure a { color: inherit; text-decoration: none; display: block; }
-.figure .value { font-size: var(--fs-h1); font-weight: 700; display: block; margin-top: var(--space-1); color: var(--navy); font-variant-numeric: tabular-nums; }
+/* --- Workspace (the 12d store and operator pages; their layout is PLAN-012f Batch C) -------
+   .workspace-header: the header card (a dl.header-card of label and value), a card;
+   .action-bar: the page's actions in one wrapping row of buttons. */
+.workspace-header { margin: var(--space-4) 0; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); }
+.header-card { display: grid; grid-template-columns: max-content 1fr; gap: 6px var(--space-4); margin: 0; font-size: var(--fs-base); }
+.header-card dt { font-weight: 500; color: var(--muted); } .header-card dd { margin: 0; }
+.action-bar { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-4) 0; }
+.action-bar form { margin: 0; }
 
 /* --- Print header and footer (print.css shows them; never on screen) ------------------------ */
 .print-only { display: none; }
 
-/* Tables that scroll sideways (the grid, the audit page, the reports, the builder's lines):
-   first column sticky. The region is the containing block of what is positioned inside it
-   (the builder's visually hidden line labels), so nothing escapes it and widens the page. */
-.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; position: relative; }
-.table-scroll > table { width: auto; min-width: 100%; border-collapse: separate; border-spacing: 0; }
-.table-scroll > table th:first-child, .table-scroll > table td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
-
-/* --- Attention list (PLAN-011b D6) ------------------------------------------------------- */
-.attention { border-left: 4px solid var(--pending-text); padding-left: .75rem; margin: 1rem 0; }
-.attention h2 { margin-top: 0; }
+/* --- Attention list (PLAN-011b D6; the dashboard's layout is PLAN-012f Batch C) ------------- */
 .attention-list { list-style: none; padding: 0; margin: 0; }
-.attention-item { padding: .3rem .5rem; margin-bottom: .25rem; border-radius: var(--radius-ctl); background: var(--pending-bg); }
-.attention-item.severity-high { background: var(--unpaid-bg); }
-.attention-item.severity-low { background: var(--surface-2); }
-.attention-item a { color: inherit; }
+.attention-item { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-soft); font-size: var(--fs-base); }
+.attention-item:last-child { border-bottom: 0; }
+.attention-item a { color: var(--text); }
+.attention-banners .attention-item { padding: var(--space-2) var(--space-3); margin-bottom: var(--space-1); border: 0; border-radius: var(--radius-ctl); background: var(--pending-bg); }
+.attention-banners .attention-item.severity-high { background: var(--unpaid-bg); }
 
 /* --- Calendar (PLAN-011b D8) ------------------------------------------------------------- */
-.calendar-kinds { border: 0; padding: 0; margin: .5rem 0; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.calendar-kinds { border: 0; padding: 0; margin: var(--space-2) 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
 .calendar-kinds legend { font-weight: 600; padding: 0; }
 /* The invoice builder's "How to collect" (PLAN-012e-2 D3): the calendar's row of choices. */
-.collect-choices { border: 0; padding: 0; margin: 1rem 0 .5rem; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.collect-choices { border: 0; padding: 0; margin: var(--space-4) 0 var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
 .collect-choices legend { font-weight: 600; padding: 0; }
 #collect-actions .btn[hidden] { display: none; }
-label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0; font-weight: 400; }
-.calendar-month { border: 1px solid var(--border); }
+label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-weight: 400; }
+.calendar-month { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--surface); }
 .calendar-head, .calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.calendar-head span { font-weight: 600; padding: .3rem .4rem; border-bottom: 1px solid var(--border); }
-.calendar-day { min-height: 6rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: .25rem .35rem; font-size: .85rem; overflow-wrap: anywhere; }
+.calendar-head span { font-weight: 500; font-size: var(--fs-sm); color: var(--muted); padding: 6px var(--space-2); border-bottom: 1px solid var(--border); }
+.calendar-day { min-height: 6rem; border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); padding: var(--space-1) 6px; font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .calendar-day.other-month { background: var(--surface-2); color: var(--text-2); }
-.calendar-day.today { outline: 2px solid var(--navy); outline-offset: -2px; }
+.calendar-day.today { outline: 2px solid var(--teal); outline-offset: -2px; }
 .calendar-date { font-weight: 600; }
-.calendar-day ul { list-style: none; padding: 0; margin: .2rem 0 0; }
-.calendar-item { margin-bottom: .15rem; padding: .1rem .25rem; border-radius: var(--radius-ctl); background: var(--neutral-bg); }
+.calendar-day ul { list-style: none; padding: 0; margin: 3px 0 0; }
+.calendar-item { margin-bottom: 2px; padding: 2px var(--space-1); border-radius: 6px; background: var(--neutral-bg); }
 .calendar-item a { color: inherit; text-decoration: none; }
 .calendar-item.kind-reminder { background: var(--pending-bg); } .calendar-item.kind-debit { background: var(--paid-bg); }
 .calendar-item.kind-insurance { background: var(--partial-bg); } .calendar-item.kind-lease_end { background: var(--unpaid-bg); }
-.feed-new { border: 1px solid var(--border); border-radius: var(--radius-ctl); padding: .75rem; background: var(--paid-bg); }
+.feed-new { border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--space-3); background: var(--paid-bg); }
 
-/* --- 720px and wider: the tables' zebra rows and sticky head row (PLAN-012c D5) ------------- */
+/* --- 720px and wider: the tables' head row stays in view (PLAN-012c D5) -------------------- */
 @media (min-width: 720px) {
   .table thead th, .table-cards > table > thead th { position: sticky; top: 0; z-index: 2; }
-  .table > tbody > tr:nth-child(even) > *, .table-cards > table > tbody > tr:nth-child(even) > *, .table-scroll > table > tbody > tr:nth-child(even) > * { background: var(--surface-2); }
 }
 /* No fade for a reader who asked for less motion: the message stays until dismissed. */
 @media (prefers-reduced-motion: reduce) { .toast { animation: none !important; } }
@@ -351,17 +478,18 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
 /* --- Tablet and phone: touch targets ---------------------------------------------------- */
 @media (max-width: 1023.98px), (pointer: coarse) {
   .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=file] { min-height: var(--tap); }
-  .btn { display: inline-flex; align-items: center; justify-content: center; }
   input[type=checkbox], input[type=radio] { min-width: 24px; min-height: 24px; }
-  td a, li a, .pagination a, .pager a { display: inline-flex; align-items: center; min-height: var(--tap); }
-  table.grid td a { min-height: var(--tap); display: flex; align-items: center; justify-content: flex-end; }
+  td a, li a, .pagination a, .pager a, .segmented a, .tab { display: inline-flex; align-items: center; min-height: var(--tap); }
+  /* A grid cell's block keeps its amount over its status line. */
+  table.grid td a.cell-block { min-height: var(--tap); display: flex; flex-direction: column; align-items: flex-end; justify-content: center; }
 }
 
 /* --- Phone ------------------------------------------------------------------------------ */
 @media (max-width: 719.98px) {
-  main, main.wide { margin: 0; padding: 1rem; border: 0; border-radius: 0; max-width: none; }
-  h1 { font-size: 1.3rem; }
-  dl { grid-template-columns: 1fr; gap: .1rem; } dd { margin-bottom: .6rem; }
+  main, main.wide { margin: 0; padding: var(--space-4); border: 0; border-radius: 0; max-width: none; }
+  dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 10px; }
+  /* A 16 px field keeps a phone from zooming in on focus. */
+  input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=tel], input[type=url], select, textarea { font-size: 16px; }
   /* One form column: labels above full-width fields, inline widths overridden. */
   form .actions { flex-direction: column; align-items: stretch; }
   form .actions label { margin: .5rem 0 0; }
@@ -373,11 +501,12 @@ label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0;
   /* Tables become cards: one bordered block per row, a "label: value" line per cell. */
   .table-cards > table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .table-cards > table, .table-cards > table tbody, .table-cards > table tfoot, .table-cards > table tr, .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { display: block; width: 100%; box-sizing: border-box; }
-  .table-cards > table tr { border: 1px solid var(--border); border-radius: var(--radius-ctl); margin: 0 0 .75rem; padding: .25rem .75rem; background: var(--surface); }
+  .table-cards > table tr { border: 1px solid var(--border); border-radius: var(--radius-card); margin: 0 0 var(--space-3); padding: var(--space-1) 14px; background: var(--surface); }
+  .table-cards > table tr.totals > th, .table-cards > table tr.totals > td { border-top: 0; }
   .table-cards > table td, .table-cards > table tbody th, .table-cards > table tfoot th { border: 0; padding: .35rem 0; }
   /* The label sits in a left column; the cell's own content (a link and its badges) keeps flowing inline. */
   .table-cards > table td[data-label] { position: relative; padding-left: calc(40% + .75rem); min-height: 1.4em; }
-  .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 600; color: var(--text-2); overflow-wrap: anywhere; }
+  .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 500; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
   .table-cards > table td:empty { display: none; }
   .table-cards > table td.money { text-align: left; } /* a card line reads "label: value" */
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }

@@ -27,7 +27,7 @@
       {% endfor %}
     </tbody>
     <tfoot>
-      <tr id="aging-total">
+      <tr class="totals" id="aging-total">
         <th scope="row">Total</th>
         {% for amount in report.totals.amounts %}<th class="money bucket-total">{{ amount|money }}</th>{% endfor %}
         <th class="money" id="aging-grand-total">{{ report.totals.total|money }}</th>

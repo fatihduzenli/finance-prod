@@ -49,6 +49,12 @@ status is its charge's as any other, so a rent paid before its month is ``paid``
 month's cell, and a future month billed or paid in advance shows it with the invoice
 number (PLAN-012d D12).
 
+**The page's cell block** (PLAN-012f D6): the amount (:attr:`Cell.amount_text`) over the
+status line (:attr:`Cell.status_words`, then :attr:`Cell.details`); an overdue cell (``unpaid``)
+reads "Overdue N d", N the days since the earliest due date of its unpaid charges
+(:attr:`Cell.overdue_days`). The link's label (:attr:`Cell.label`) says the same in full words.
+The CSV keeps :func:`cell_text`.
+
 **Column totals** (:attr:`Grid.columns`): per month, the count of cells of each status
 and the sum collected (``amount_paid``).
 
@@ -133,6 +139,16 @@ CELL_STATUSES: tuple[tuple[str, str], ...] = (
     (STATUS_NOT_DUE, "Not yet due"),
 )
 NOTE_MARKER = "●"
+#: The status line's words of each cell status (PLAN-012f D6); ``unpaid`` (overdue) reads
+#: "Overdue N d" (:attr:`Cell.status_words`).
+STATUS_WORDS: dict[str, str] = {
+    STATUS_PAID: "Paid",
+    STATUS_DUE: "Unpaid",
+    STATUS_PENDING: "Pending",
+    STATUS_PARTIAL: "Partly paid",
+    STATUS_WAIVED: "Waived",
+    STATUS_NOT_DUE: "Not yet due",
+}
 
 CSV_FIXED_HEADER = ("Store number", "Store", "State", "Operator", "Channel")
 
@@ -266,17 +282,50 @@ class Cell:
     invoice_numbers: str = ""
     #: A month with no charge outside the store's leases (PLAN-012e-4 D3).
     outside_lease: bool = False
+    #: An overdue cell's days since the earliest due date of its unpaid charges (PLAN-012f D6).
+    overdue_days: int | None = None
 
     @property
     def text(self) -> str:
         return cell_text(self)
 
     @property
+    def amount_text(self) -> str:
+        """The block's first line: paid, "paid of due" when partly paid, else the amount due;
+        nothing for "Not yet due" and a blank cell."""
+        if self.status == STATUS_PAID:
+            return _amount(self.amount_paid)
+        if self.status == STATUS_PARTIAL:
+            return f"{_amount(self.amount_paid)} of {_amount(self.amount_due)}"
+        if self.status in (STATUS_UNPAID, STATUS_DUE, STATUS_PENDING, STATUS_WAIVED):
+            return _amount(self.amount_due)
+        return ""
+
+    @property
+    def status_words(self) -> str:
+        """The status line's words: "Overdue N d" for an overdue cell, else its status's."""
+        if self.status == STATUS_UNPAID:
+            return "Overdue" if self.overdue_days is None else f"Overdue {self.overdue_days} d"
+        return STATUS_WORDS.get(self.status, "")
+
+    @property
+    def details(self) -> str:
+        """What the status line adds: the plan's progress, the day a pending payment started
+        and the invoice numbers, joined by " · "."""
+        since = f"from {self.pending_from.isoformat()}" if self.pending_from else ""
+        return " · ".join(part for part in (self.plan_text, since, self.invoice_numbers) if part)
+
+    @property
     def label(self) -> str:
-        """What a screen reader says for the cell: the month only outside the leases."""
+        """What a screen reader says for the cell: the month only outside the leases, else
+        the block's lines in full words."""
         if self.outside_lease:
             return f"{self.month:%Y-%m}"
-        text = self.text or "no charge"
+        words = self.status_words
+        if self.status == STATUS_UNPAID and self.overdue_days is not None:
+            words = f"Overdue {self.overdue_days} day{'' if self.overdue_days == 1 else 's'}"
+        parts = [part for part in (self.amount_text, words, self.details) if part]
+        text = ", ".join(parts) or "no charge"
         return f"{self.month:%Y-%m}: {text}{', has a note' if self.has_note else ''}"
 
 
@@ -443,6 +492,7 @@ class _Charge:
     proration_text: str = ""
     plan_text: str = ""
     invoice_number: str = ""
+    due_on: date | None = None
 
 
 def _charges(start: date, end: date) -> dict[tuple[uuid.UUID, date], list[_Charge]]:
@@ -461,12 +511,13 @@ def _charges(start: date, end: date) -> dict[tuple[uuid.UUID, date], list[_Charg
             "proration_text",
             "billed_by_invoice__invoice_number",
             "billed_by_invoice__internal_status",
+            "due_on",
         )
         .order_by("lease__store", "period_month", "lease__created_at", "seq", "pk")
     )
     plans = installments.live_rent_progress(start, end)
     found: dict[tuple[uuid.UUID, date], list[_Charge]] = defaultdict(list)
-    for pk, store, month, status, due, paid, has_note, text, number, state in rows:
+    for pk, store, month, status, due, paid, has_note, text, number, state, due_on in rows:
         charge = _Charge(
             pk,
             status,
@@ -476,6 +527,7 @@ def _charges(start: date, end: date) -> dict[tuple[uuid.UUID, date], list[_Charg
             text or "",
             # A voided invoice stays named on the charge as history, not in the cell.
             invoice_number=number if number and state != InvoiceStatus.VOID else "",
+            due_on=due_on,
         )
         plan = plans.get(pk)
         if plan is not None:
@@ -530,9 +582,8 @@ def build(query: GridQuery, today: date | None = None) -> Grid:
         if query.channel and channel != query.channel:
             continue
         span = _lease_span(leases)
-        this_month = day.replace(day=1)
         cells = [
-            _cell(month, by_cell.get((store.pk, month), []), pending, store.pk, span, this_month)
+            _cell(month, by_cell.get((store.pk, month), []), pending, store.pk, span, day)
             for month in months
         ]
         if query.status and not any(cell.status == query.status for cell in cells):
@@ -552,15 +603,20 @@ def _cell(
     pending: dict[tuple[uuid.UUID, date], date],
     store_id: uuid.UUID,
     span: _LeaseSpan | None,
-    this_month: date,
+    today: date,
 ) -> Cell:
     if not charges:
         if span is None or not span.holds(month):
             return Cell(month, outside_lease=True)
-        return Cell(month, STATUS_NOT_DUE if month > this_month else "")
+        return Cell(month, STATUS_NOT_DUE if month > today.replace(day=1) else "")
     due = sum((charge.amount_due for charge in charges), ZERO)
     paid = sum((charge.amount_paid for charge in charges), ZERO)
     status = combined_status([charge.status for charge in charges], paid)
+    overdue_since = [
+        charge.due_on
+        for charge in charges
+        if charge.status == STATUS_UNPAID and charge.due_on is not None
+    ]
     return Cell(
         month=month,
         status=status,
@@ -575,6 +631,11 @@ def _cell(
         plan_text="; ".join(charge.plan_text for charge in charges if charge.plan_text),
         invoice_numbers=" ".join(
             charge.invoice_number for charge in charges if charge.invoice_number
+        ),
+        overdue_days=(
+            max((today - min(overdue_since)).days, 0)
+            if status == STATUS_UNPAID and overdue_since
+            else None
         ),
     )
 

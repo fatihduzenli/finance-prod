@@ -621,7 +621,7 @@ def test_the_dashboard_shows_the_list_above_the_figures(today: date) -> None:
     returned_payment(lease)
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
-    assert page.index('id="attention"') < page.index('class="figures"')
+    assert page.index('id="attention"') < page.index('class="kpi-row"')  # PLAN-012f D6
     assert (
         "Returned debit not rescheduled: 2204 FOREST PARK, $3,500.00, returned 2026-10-03" in page
     )

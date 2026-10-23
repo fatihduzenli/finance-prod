@@ -173,15 +173,17 @@ def test_how_to_collect_shows_the_chosen_choices_fields_and_button(
     assert date_field.is_visible() and date_field.is_enabled()
     assert not method.is_visible()
     assert schedule.is_visible() and not save.is_visible()
-    assert "Schedule $125.50 for" in schedule.inner_text()
+    # The button is a flex box since PLAN-012f (its spans read as lines in innerText).
+    assert "Schedule $125.50 for" in " ".join(schedule.inner_text().split())
     page.fill("#id_schedule_on", "2026-12-01")
-    assert schedule.inner_text() == "Schedule $125.50 for 2026-12-01"
+    assert " ".join(schedule.inner_text().split()) == "Schedule $125.50 for 2026-12-01"
     page.check("#collect-record")
     assert method.is_visible() and page.locator("#id_payment_note").is_visible()
     assert not date_field.is_visible() and date_field.is_disabled()
-    assert record.inner_text() == "Record $125.50 received"
+    assert " ".join(record.inner_text().split()) == "Record $125.50 received"
     page.check("#collect-email")
-    assert send.inner_text() == "Send $125.50 by e-mail" and not record.is_visible()
+    assert " ".join(send.inner_text().split()) == "Send $125.50 by e-mail"
+    assert not record.is_visible()
 
 
 def test_without_javascript_how_to_collect_shows_every_field_and_button(

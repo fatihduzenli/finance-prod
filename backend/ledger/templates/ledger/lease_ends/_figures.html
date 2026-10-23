@@ -24,7 +24,7 @@
         <tr><td colspan="3" class="muted empty">Nothing is open.</td></tr>
       {% endfor %}
     </tbody>
-    <tfoot><tr><th colspan="2">Open balance</th><th id="open-total">{{ figures.open_total|money }}</th></tr></tfoot>
+    <tfoot><tr class="totals"><th colspan="2">Open balance</th><th id="open-total">{{ figures.open_total|money }}</th></tr></tfoot>
   </table>
   {% endresponsive_table %}
   <h2>Deposit</h2>

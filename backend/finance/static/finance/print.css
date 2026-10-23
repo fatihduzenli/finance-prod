@@ -15,11 +15,11 @@
   @page { margin: 14mm 12mm; }
 
   #sidebar, #phone-bar, #tab-bar, #phone-search, .sheet-toggle, .toasts, .toast, .no-print,
-  .action-bar, .tabs, .pager, .page-actions, .grid-scroll-top, form[role="search"],
+  .action-bar, .tabs, .segmented, .pager, .page-actions, .grid-scroll-top, form[role="search"],
   #report-filters, #report-messages, button, .btn { display: none !important; }
 
   html, body { background: var(--surface) !important; color: var(--text); display: block !important; }
-  body, main, .card, .figure, .workspace-header, .confirm { box-shadow: none !important; }
+  body, main, .card, .kpi, .workspace-header, .confirm { box-shadow: none !important; }
   .content { display: block; padding: 0 !important; }
   #page-header { position: static; padding: 0; border: 0; background: transparent; }
   main, main.wide { margin: 0; padding: 0; border: 0; max-width: none; width: auto; background: var(--surface); }

@@ -258,7 +258,10 @@ def test_the_bar_by_role() -> None:
     invoice = f"/invoices/new/store/{store.pk}/?store={store.pk}&amp;lease={lease.pk}"
     assert f'<a class="btn btn-primary" id="create-invoice" href="{invoice}">' in bar
     assert f'<a class="btn" id="record-payment" href="/stores/{store.pk}/payments/new/">' in bar
-    assert '<details class="menu" id="lease-menu"><summary class="btn">Lease ▾</summary><ul>' in bar
+    assert (
+        '<details class="menu" id="lease-menu"><summary class="btn btn-menu">Lease ▾</summary><ul>'
+        in bar
+    )  # PLAN-012f D6: the drop-down button
     edit = f"/leases/{lease.pk}/edit/?store={store.pk}&amp;lease={lease.pk}"
     assert f'<li><a id="bar-edit-lease" href="{edit}">Edit lease</a></li>' in bar
     end = f'<a id="store-end-lease" href="/stores/{store.pk}/end-lease/" class="menu-danger">'

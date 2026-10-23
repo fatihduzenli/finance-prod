@@ -8,6 +8,7 @@ the QA owner's (test_plan012d_d_adversarial.py)."""
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from io import StringIO
@@ -262,7 +263,8 @@ def test_create_missing_charges_on_an_unknown_store_is_404() -> None:
 
 def month_columns(html: str) -> list[str]:
     head = html.split('<table class="grid" id="grid">')[1].split("</thead>")[0]
-    return [part.split("<")[0] for part in head.split('class="month-col">')[1:]]
+    # PLAN-012f D6: the current month's header also carries month-current.
+    return re.findall(r'class="month-col[^"]*"[^>]*>([^<]*)<', head)
 
 
 def picker_options(html: str, name: str) -> list[tuple[str, str, bool]]:
@@ -340,7 +342,9 @@ def test_a_future_month_billed_in_advance_shows_it_with_the_invoice_number() -> 
     viewer, _ = client_for(Role.VIEWER)
     html = body(viewer, "/grid/")
     november = html.split('data-month="2026-11"')[1].split("</td>")[0]
-    assert "Paid $3,500.00 INV-2026-0042" in november
+    # PLAN-012f D6: the cell block, the amount over "Paid" and the invoice number.
+    assert '<span class="cell-amount">$3,500.00</span>' in november
+    assert "</span> Paid · INV-2026-0042</span>" in november
     assert reverse("ledger:charges:detail", kwargs={"pk": advance.pk}) in november
     built = grid.build(grid.parse_query({}, TODAY), TODAY)
     [row] = [row for row in built.rows if row.store.pk == lease.store_id]

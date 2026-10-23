@@ -35,8 +35,8 @@
       {% endfor %}
     </tbody>
     <tfoot>
-      <tr><th scope="row" colspan="4">Open balance</th><th class="money" id="open-total">{{ report.open_total|money }}</th></tr>
-      <tr><th scope="row" colspan="4">of which overdue</th><th class="money" id="overdue-total">{{ report.overdue_total|money }}</th></tr>
+      <tr class="totals"><th scope="row" colspan="4">Open balance</th><th class="money" id="open-total">{{ report.open_total|money }}</th></tr>
+      <tr class="totals"><th scope="row" colspan="4">of which overdue</th><th class="money" id="overdue-total">{{ report.overdue_total|money }}</th></tr>
     </tfoot>
   </table>
   {% endresponsive_table %}

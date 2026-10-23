@@ -74,3 +74,49 @@ regenerated at the end of the step, so the pixel check of the shell waits for Ba
 `:has()` and `color-mix()` rules need current browsers (the owner's phone and laptop are).
 
 **Verdict (A):** PASS (one MAJOR and one MINOR, resolved by the owner's decisions in one rework cycle).
+
+### Batch B — the component set (D6)
+
+**Scope.** `app.css` (one section per component, tokens only: cards with header, count pill,
+right link and section label; the button set with the menu "▾"; inputs and selects; the
+segmented filter; the tabs with the teal active border; the seven badge families; tables with
+the muted header on surface-2, `--border-soft` rows, no zebra, `td.money`, the first-cell title
+and subline, the totals row, the scroll region, the sticky store column; the KPI card; the
+progress bar; the date chip; the contact-log entry with its avatar; the grid cell block with the
+dashed "Not yet due" and the tinted current month; the help line; the 12c toast, pager, steps,
+confirm, empty and field styles restated), `print.css`, `tokens.css` (`--month-current` with its
+pairs), `finance/templatetags/components.py` (`status_badge` over the families, `kpi`,
+`progress`/`progress_widths`, `date_chip`, `avatar`), `ledger/_cell_title.html` and
+`contacts/_log.html`/`_log_entry.html` (new; `operators/_contacts_table.html` removed),
+`ledger/services/grid.py` (the cell's words, `overdue_days`, no new query), `ledger/views/dashboard.py`
+(`cell_html`, `this_month`), the templates that carry the classes (lists, tabs, tables, the
+grid). Tests: `tests/test_plan012f_components.py` (41), thirteen test files moved with the
+markup (each change listed in Opus's report), Fable's `tests/test_plan012f_b_adversarial.py`
+(14 cases) and `tests/test_plan012e4_adversarial.py` moved to the cell block.
+
+**Badge families.** paid ✓ (paid, settled); unpaid ● (due, owed, Needs review, returned, needs
+premium); overdue ● dark red with white text (a rent charge past due); pending ◐; partial ◑;
+waived –; neutral ○ (voided, not yet due). An unknown status is a plain badge.
+
+**Findings.** None open. One test-only correction by Fable: three assertions of the dependent-fields e2e case compared a button's raw `innerText`, which now reports the button's spans as lines because `.btn` is a flex box; they compare the whitespace-normalised text (the button reads as before).
+
+**Decisions taken (Fable).** A one-off "owed" sits in the light unpaid family (the screenshot's
+deposit); "Not yet due" reads in `--muted` because `--faint` is decoration only; the progress
+bar's and the promise badge's colours (the screenshot's amber and orange; the yellow "Open")
+are set in Batch C where those appear; the grid's cell widths are Batch C's layout.
+
+**Gate 1.** ruff, `ruff format --check` (554 files), mypy strict (449 files), `makemigrations
+--check`: all clean. **Gate 2.** sqlite 6,396 passed, 664 skipped (18:04); PostgreSQL "Migration tests" 34 passed
+(15:46), "Unit tests" 7,037 passed, 3 skipped (19:26); e2e: four runs of 21 with the one
+innerText failure above, then three runs of 21 passed after the test correction, all on
+PostgreSQL. **Gate 3.** Diff read: the stylesheet sections, the
+tags (every tag goes through `format_html`; the progress widths are floored to a tenth so they
+sum to at most 100; an unknown family or avatar family raises, never renders), the partials,
+the grid service. **Gate 4.** Secret scans clean. Fable's cases: the progress widths never
+exceed 100 for thirds, extremes and five equal parts; a zero, negative, text, NaN or infinite
+total draws no bar; an unknown family is a template error; the KPI, badge, avatar and date chip
+escape markup and ignore a hostile tone; a contact entry with markup is escaped and its avatar
+letter comes from the kind; the segmented filter keeps the tab's query; the grid block carries
+the formatted amount and never a raw one.
+
+**Verdict (B):** PASS (no finding; three decisions deferred to Batch C where their elements appear).

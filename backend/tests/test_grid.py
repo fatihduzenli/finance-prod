@@ -11,6 +11,7 @@ import io
 import re
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from django.db import connection
@@ -33,6 +34,7 @@ from tests.test_operator_views import client_for
 pytestmark = pytest.mark.django_db
 
 TODAY = date(2026, 10, 6)
+APP_CSS = Path(__file__).resolve().parents[1] / "finance" / "static" / "finance" / "app.css"
 JUL, AUG, SEP, OCT = (date(2026, m, 1) for m in (7, 8, 9, 10))
 
 
@@ -87,7 +89,8 @@ def every_status_store() -> dict[str, RentCharge]:
 # --- Cells, colours, marker, click-through --------------------------------------------------
 
 #: PLAN-012c D1, PLAN-012e-4 D2: each status's fill and ink tokens (unpaid dark red with
-#: white ink; due, not yet overdue, the light unpaid pair), by PLAN-012f D1's names.
+#: white ink; due, not yet overdue, the light unpaid pair), by PLAN-012f D1's names; PLAN-012f
+#: D6: on the cell's block, in app.css's grid cell block section.
 COLOURS = {
     "paid": ("var(--paid-bg)", "var(--paid-text)"),
     "unpaid": ("var(--overdue-bg)", "var(--overdue-text)"),
@@ -101,8 +104,9 @@ COLOURS = {
 def test_every_status_has_its_colour_text_and_link(today: date, viewer: Client) -> None:
     charges = every_status_store()
     html = page(viewer, "?from=2026-05&to=2026-10")
+    css = APP_CSS.read_text()
     for status, (colour, ink) in COLOURS.items():
-        assert f".cell-{status}{{background:{colour};color:{ink};}}" in html, status
+        assert f"td.cell-{status} .cell-block {{ background: {colour}; color: {ink}; }}" in css
         charge = charges[status]
         assert f'<td class="cell cell-{status}" data-month=' in html, status
         assert f'href="/charges/{charge.pk}/"' in html, status
@@ -116,10 +120,15 @@ def test_every_status_has_its_colour_text_and_link(today: date, viewer: Client) 
         "Unpaid $3,500.00",
         "Waived",
     ]
-    # Overdue (unpaid) and not yet overdue (due) read alike; colour and glyph tell them apart.
+    # The CSV text reads overdue (unpaid) and not yet overdue (due) alike; the page's block
+    # says "Overdue N d" (PLAN-012f D6), the days since the charge's due date.
     assert "Due $" not in html
-    assert ".cell-unpaid{background:var(--overdue-bg);color:var(--overdue-text);}" in (
-        html
+    row = html[html.index('data-store="') :]
+    assert "</span> Overdue 123 d</span>" in row  # June, due 2026-06-05
+    assert "</span> Unpaid</span>" in row  # September, not yet overdue
+    assert (
+        "td.cell-unpaid .cell-block { background: var(--overdue-bg); color: var(--overdue-text); }"
+        in (css)
     )  # no inset border any more
     assert "status-unpaid-border" not in html and "--status-due-" not in html
 
@@ -132,7 +141,7 @@ def test_the_note_marker_shows_only_on_a_charge_with_a_note(today: date, viewer:
     assert marked == [date(2026, 6, 1)]
     html = page(viewer, "?from=2026-05&to=2026-10")
     assert html.count('<span class="note-marker" title="Has a note">●</span>') == 1
-    assert 'aria-label="2026-06: Unpaid $3,500.00, has a note"' in html
+    assert 'aria-label="2026-06: $3,500.00, Overdue 123 days, has a note"' in html
 
 
 def test_blank_before_the_lease_started_and_not_yet_due_only_in_a_future_month(
@@ -151,7 +160,7 @@ def test_blank_before_the_lease_started_and_not_yet_due_only_in_a_future_month(
         "2026-06",
         "2026-07",
         "2026-08: no charge",
-        "2026-09: Paid $3,740.00",
+        "2026-09: $3,740.00, Paid",
         "2026-10: no charge",
         "2026-11: Not yet due",
     ]
@@ -169,7 +178,7 @@ def test_blank_after_the_last_lease_ended_and_no_not_yet_due_there(today: date) 
     assert [item.status for item in cells] == ["paid", "", "", "", ""]
     assert [item.text for item in cells] == ["Paid $10.00", "", "", "", ""]
     assert [item.label for item in cells] == [
-        "2026-08: Paid $10.00",
+        "2026-08: $10.00, Paid",
         "2026-09: no charge",
         "2026-10",
         "2026-11",
@@ -381,7 +390,7 @@ def test_the_range_is_capped_at_24_months(today: date, viewer: Client) -> None:
     assert (query.from_month, query.to_month) == (date(2025, 1, 1), date(2026, 12, 1))
     assert CAPPED.format(limit=24, start="2025-01", end="2026-12") in query.messages
     html = page(viewer, "?from=2024-01&to=2026-12")
-    assert html.count('class="month-col"') == 24
+    assert html.count('class="month-col') == 24
     assert grid.parse_query({"from": "2025-01", "to": "2026-12"}, TODAY).messages == ()
 
 
@@ -525,18 +534,20 @@ def test_the_store_cell_is_the_numbered_name_over_the_operator(today: date, view
     only_number = a_store("2475", 2475, "GA")  # the sheet's label is the number alone
     html = page(viewer)
     cell = store_cell(html, numbered.pk)
+    # PLAN-012f D6: the first cell's title and its muted second line (ledger/_cell_title.html).
     assert cell == (
-        f'<a href="/stores/{numbered.pk}/">#1991 Istanbul</a><br>'
-        '<span class="muted">Bosphorus Co</span>'
+        f'<a class="cell-title" href="/stores/{numbered.pk}/">#1991 Istanbul</a>'
+        '<span class="cell-subline">Bosphorus Co</span>'
     )
     # The state, the city and the channel left the cell.
     assert "GA" not in cell and "Kadikoy" not in cell and "Wire" not in cell
     assert store_cell(html, unnumbered.pk) == (
-        f'<a href="/stores/{unnumbered.pk}/">PEACHTREE MALL</a><br>'
-        '<span class="muted">Mall Co</span>'
+        f'<a class="cell-title" href="/stores/{unnumbered.pk}/">PEACHTREE MALL</a>'
+        '<span class="cell-subline">Mall Co</span>'
     )
     assert store_cell(html, only_number.pk) == (
-        f'<a href="/stores/{only_number.pk}/">#2475</a><br><span class="muted">No operator</span>'
+        f'<a class="cell-title" href="/stores/{only_number.pk}/">#2475</a>'
+        '<span class="cell-subline">No operator</span>'
     )
     # The words filter still matches the city, and the channel filter still applies.
     assert labels(built(q="kadikoy")) == ["Istanbul"]
@@ -576,8 +587,9 @@ def test_the_legend_is_the_owners_order_with_the_two_unpaid_shades(
     )
     html = page(viewer)
     legend = html[html.index('<p class="legend muted">') :].split("</p>", 1)[0]
-    shown = re.findall(r'<span class="badge(?: badge-([a-z]+)| not-due)">', legend)
-    assert shown == ["paid", "due", "unpaid", "pending", "partial", "waived", ""]
+    # PLAN-012f D6: each a badge of its family, then "Not yet due" as its dashed box.
+    shown = re.findall(r'<span class="(?:badge badge-([a-z]+)|cell-not-due)">', legend)
+    assert shown == ["paid", "unpaid", "overdue", "pending", "partial", "waived", ""]
     assert "> Due</span>" not in legend
 
 

@@ -21,7 +21,7 @@
     <tbody>
       {% for lease in page %}
         <tr>
-          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">{{ lease.store.external_label }}</a>{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}{% if lease.has_charge_note %} <span class="badge note-indicator" title="A charge of this lease has a note">Note</span>{% endif %}</td>
+          <td>{% url 'ledger:leases:detail' pk=lease.pk as lease_url %}{% include "ledger/_cell_title.html" with title=lease.store.external_label link=lease_url %}{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}{% if lease.has_charge_note %} <span class="badge note-indicator" title="A charge of this lease has a note">Note</span>{% endif %}</td>
           <td>{{ lease.operator.display_name|default:"—" }}</td>
           <td class="money">{% with row=lease.rent_now|first %}{% if row %}{{ row.amount|money }}{% else %}—{% endif %}{% endwith %}</td>
           <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>

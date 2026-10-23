@@ -26,17 +26,11 @@
   /* A cell's text wraps inside its 80 px ("Partly paid $0.00 of $3,500.00"); a word that does not fit breaks. */
   table.grid td{white-space:normal;overflow-wrap:break-word;}
   table.grid tfoot th,table.grid tfoot td{background:var(--surface-2);font-weight:600;}
-  table.grid td a{color:inherit;text-decoration:none;display:block;}
+  table.grid td{padding:3px;}
   table.grid td a:focus{outline:2px solid var(--link);outline-offset:-2px;}
-  /* PLAN-012c D1, PLAN-012e-4 D2, the tokens of PLAN-012f D1: unpaid is light red while not
-     yet overdue (due: the unpaid pair) and dark red with white text once overdue (the overdue
-     pair). */
-  .cell-paid{background:var(--paid-bg);color:var(--paid-text);} .cell-unpaid{background:var(--overdue-bg);color:var(--overdue-text);}
-  .cell-pending{background:var(--pending-bg);color:var(--pending-text);} .cell-partial{background:var(--partial-bg);color:var(--partial-text);}
-  .cell-due{background:var(--unpaid-bg);color:var(--unpaid-text);} .cell-waived{background:var(--waived-bg);color:var(--waived-text);}
-  .cell-not_due{color:var(--muted);font-style:italic;}
-  .note-marker{color:inherit;margin-left:.2rem;}
-  .legend span{display:inline-block;padding:.1rem .45rem;margin-right:.25rem;border-radius:var(--radius-ctl);}
+  /* The cells' blocks, their colours and the current month's tint are the grid cell block
+     component of app.css (PLAN-012f D6). */
+  .legend{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);}
 </style>{% endblock %}
 {% block header %}<div class="page-header"><h1>Monthly rent overview</h1></div>{% endblock %}
 {% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
@@ -80,7 +74,7 @@
   {% if query.messages %}
     <ul class="messages" id="grid-messages">{% for text in query.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}
-  <p class="legend muted">{% for value, label in statuses %}{% status_badge label value %}{% endfor %} <span>{{ note_marker }} has a note</span> Amounts in US dollars. A cell sums the store's rent charges of the month.</p>
+  <p class="legend muted">{% for value, label in statuses %}{% if value == "not_due" %}<span class="cell-not-due">{{ label }}</span>{% else %}{% status_badge label value %}{% endif %}{% endfor %} <span>{{ note_marker }} has a note</span> Amounts in US dollars. A cell sums the store's rent charges of the month.</p>
 
   {% if too_slow %}
     <p class="warning" id="grid-too-slow" role="status">{{ too_slow }}</p>
@@ -89,16 +83,17 @@
   <div class="grid-scroll-top" id="grid-scroll-top" aria-hidden="true" hidden><div></div></div>
   <div class="grid-scroll" tabindex="0" id="grid-scroll" aria-label="Month grid, scrolls both ways">
     <table class="grid" id="grid">
+      <colgroup><col>{% for month in grid.months %}<col{% if month == this_month %} class="month-current"{% endif %}>{% endfor %}</colgroup>
       <thead>
         <tr>
           <th scope="col" class="store-col">Store</th>
-          {% for month in grid.months %}<th scope="col" class="month-col">{{ month|date:"Y-m" }}</th>{% endfor %}
+          {% for month in grid.months %}<th scope="col" class="month-col{% if month == this_month %} month-current{% endif %}"{% if month == this_month %} aria-current="date"{% endif %}>{{ month|date:"Y-m" }}</th>{% endfor %}
         </tr>
       </thead>
       <tbody>
         {% for row, cells in rows %}
           <tr class="grid-row" data-store="{{ row.store.pk }}">
-            <th scope="row" class="store-col"><a href="{% url 'ledger:stores:detail' pk=row.store.pk %}">{{ row.store_title }}</a><br><span class="muted">{{ row.operator.display_name|default:"No operator" }}</span></th>
+            <th scope="row" class="store-col">{% url 'ledger:stores:detail' pk=row.store.pk as store_url %}{% include "ledger/_cell_title.html" with title=row.store_title link=store_url subline=row.operator.display_name|default:"No operator" %}</th>
             {{ cells }}
           </tr>
         {% empty %}
@@ -106,9 +101,9 @@
         {% endfor %}
       </tbody>
       <tfoot>
-        <tr>
+        <tr class="totals">
           <th scope="row" class="store-col">Collected</th>
-          {% for column in grid.columns %}<td class="column-total" data-month="{{ column.month|date:'Y-m' }}">{{ column.collected|money }}<br><span class="muted">{{ column.counts.paid|default:0 }} paid · {{ column.counts.unpaid|default:0 }} unpaid · {{ column.counts.pending|default:0 }} pending</span></td>{% endfor %}
+          {% for column in grid.columns %}<td class="column-total{% if column.month == this_month %} month-current{% endif %}" data-month="{{ column.month|date:'Y-m' }}">{{ column.collected|money }}<br><span class="muted">{{ column.counts.paid|default:0 }} paid · {{ column.counts.unpaid|default:0 }} unpaid · {{ column.counts.pending|default:0 }} pending</span></td>{% endfor %}
         </tr>
       </tfoot>
     </table>

@@ -1675,3 +1675,15 @@ sqlite 6,350 passed; PostgreSQL 34 + 6,977 passed; e2e 21 passed in four runs; F
 adversarial file 10 cases and the font-host e2e case green. The grid scrolls at 1,280 px by the
 owner's decision (PLAN-011b D2 retired). Batch B (the components) assigned. The visual baselines
 are regenerated at the end of the step (Batch D); nothing is pushed before the checkpoint.
+
+## Update, 2026-10-22, PLAN-012f Batch B built and gated (not pushed)
+
+The component set on the spec's tokens: cards with header, count pill, link and section label;
+the button set with the menu "▾"; inputs and the segmented filter; the tabs; the seven badge
+families with icon and word (Overdue dark red, white text); tables with the muted header, the
+first-cell title and subline, the totals row and the scroll region; the KPI card, the progress
+bar, the date chip and the contact-log entry with its avatar as tags and partials; the grid's cell
+block with the dashed "Not yet due" and the tinted current month; the help line. Gate: sqlite
+6,396 passed; PostgreSQL 34 + 7,037 passed; e2e 21 passed in three runs after one test-only
+correction; Fable's adversarial file 14 cases green. Batch C (the dashboard, the store and
+operator workspaces, the monthly rent overview) assigned.

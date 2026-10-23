@@ -48,7 +48,7 @@
     </tbody>
     <tfoot>
       {% with item=report.total %}
-      <tr id="deposits-total">
+      <tr class="totals" id="deposits-total">
         <th scope="row">Total</th><td>{{ item.count }}</td>
         <td class="money">{{ item.gross|money }}</td><td class="money">{{ item.fees|money }}</td><td class="money">{{ item.net|money }}</td>
         <td class="money">{{ item.ach_paid|money }}</td><td class="money">{{ item.ach_refunded|money }}</td><td class="money">{{ item.difference|money }}</td>

@@ -133,9 +133,10 @@ def test_an_edit_of_the_address_is_audited_before_and_after() -> None:
 @pytest.mark.parametrize(
     ("status", "markup"),
     [
+        # PLAN-012f D6: "attention" is the unpaid family.
         (StoreStatus.ACTIVE, '<span class="badge badge-paid">'),
-        (StoreStatus.CLOSED, '<span class="badge badge-attention">'),
-        (StoreStatus.TERMINATED, '<span class="badge badge-attention">'),
+        (StoreStatus.CLOSED, '<span class="badge badge-unpaid">'),
+        (StoreStatus.TERMINATED, '<span class="badge badge-unpaid">'),
         (StoreStatus.PROSPECTIVE, '<span class="badge">Prospective</span>'),
     ],
 )

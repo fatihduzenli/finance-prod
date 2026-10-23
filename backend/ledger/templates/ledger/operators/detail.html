@@ -15,7 +15,7 @@
     {% if can_edit %}<a class="btn" href="{% url 'ledger:operators:edit' pk=operator.pk %}">Edit</a>{% endif %}
     {% if can_link %}<a class="btn" href="{% url 'ledger:operators:link' pk=operator.pk %}">Connect to {{ company.provider_name }}</a>{% endif %}
     {% if can_archive %}
-      <details class="menu" id="more-menu"><summary class="btn">More ▾</summary><ul>
+      <details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
         <li><form method="post" action="{% url 'ledger:operators:archive' pk=operator.pk %}" onsubmit="return window.confirm('Archive this operator? It is hidden from the list but never deleted.');">
           {% csrf_token %}<button class="menu-danger" type="submit" id="archive-operator">Archive</button>
         </form></li>
@@ -92,7 +92,7 @@
     <a class="btn" id="export-contacts" href="{% url 'ledger:operators:contacts_export' pk=operator.pk %}">Download spreadsheet</a>
   </p>
   {% if can_add_contact %}{% url 'ledger:operators:contacts_add' pk=operator.pk as contact_add_next %}{% endif %}
-  {% include "ledger/operators/_contacts_table.html" with rows=contact_rows|slice:contact_limit empty_next_url=contact_add_next %}
+  {% include "ledger/contacts/_log.html" with rows=contact_rows|slice:contact_limit empty_next_url=contact_add_next %}
   {% if contact_rows|length > contact_limit %}<p class="muted">The {{ contact_limit }} latest are shown; <a href="{% url 'ledger:operators:contacts' pk=operator.pk %}">see every entry</a>.</p>{% endif %}
 
   <h2>Notes</h2>
@@ -125,8 +125,8 @@
     <p class="muted empty" id="no-stores">No store has a lease of this operator.</p>
   {% endif %}
 
-  <nav aria-label="Operator tabs" class="actions store-tabs tabs" id="store-tabs">
-    {% for name, label in ows.tabs %}{% if name == "contacts" %}<a class="btn" id="tab-link-contacts" href="#contacts">{{ label }}</a>{% else %}<a class="btn" id="tab-link-{{ name }}" href="?{{ keep_store }}tab={{ name }}#tab-{{ name }}"{% if name == ows.tab %} aria-current="page"{% endif %}>{{ label }}</a>{% endif %}{% endfor %}
+  <nav aria-label="Operator tabs" class="tabs store-tabs" id="store-tabs">
+    {% for name, label in ows.tabs %}{% if name == "contacts" %}<a class="tab" id="tab-link-contacts" href="#contacts">{{ label }}</a>{% else %}<a class="tab" id="tab-link-{{ name }}" href="?{{ keep_store }}tab={{ name }}#tab-{{ name }}"{% if name == ows.tab %} aria-current="page"{% endif %}>{{ label }}</a>{% endif %}{% endfor %}
   </nav>
   <section id="tab-{{ ows.tab }}" class="store-tab">
     {% if ows.tab == "charges" %}{% include "ledger/stores/_tab_charges.html" %}

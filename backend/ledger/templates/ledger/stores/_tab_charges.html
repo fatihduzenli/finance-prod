@@ -2,8 +2,8 @@
 {% load components money %}
 {% load responsive %}
 <h2>Charges</h2>
-<p class="actions tabs" id="charge-filters">
-  {% for value, label in charge_filters %}<a class="btn" href="?{{ keep_store }}tab=charges&amp;filter={{ value }}#tab-charges"{% if value == charge_filter %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+<p class="actions">
+  <span class="segmented" id="charge-filters" role="group" aria-label="Show charges">{% for value, label in charge_filters %}<a href="?{{ keep_store }}tab=charges&amp;filter={{ value }}#tab-charges"{% if value == charge_filter %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</span>
   <a class="btn" id="export-charges" href="{% url 'ledger:charges:export' %}?{{ export_query }}">Download rent charges</a>
   <a class="btn" id="export-one-off-charges" href="{% url 'ledger:one_off_charges:export' %}?{{ export_query }}">Download one-off charges</a>
 </p>
@@ -16,14 +16,14 @@
       <tr class="store-charge store-charge-{{ row.kind }}">
         {% if by_store %}<td>{% if row.lease %}<a href="{% url 'ledger:stores:detail' pk=row.lease.store_id %}">{{ row.lease.store.external_label }}</a>{% else %}—{% endif %}</td>{% endif %}
         <td>{{ row.kind_label }}</td>
-        <td>{% if row.url %}<a href="{{ row.url }}">{{ row.description }}</a>{% else %}{{ row.description }}{% endif %}{% for badge in row.badges %} <span class="badge">{{ badge }}</span>{% endfor %}{% if several_leases and row.lease %}<br><span class="muted">{{ row.lease.operator.display_name|default:"No operator" }}, lease from {{ row.lease.started_on|date:"Y-m-d"|default:"no start date" }}</span>{% endif %}</td>
+        <td>{% include "ledger/_cell_title.html" with title=row.description link=row.url %}{% for badge in row.badges %} <span class="badge">{{ badge }}</span>{% endfor %}{% if several_leases and row.lease %}<span class="cell-subline">{{ row.lease.operator.display_name|default:"No operator" }}, lease from {{ row.lease.started_on|date:"Y-m-d"|default:"no start date" }}</span>{% endif %}</td>
         <td>{{ row.due|date:"Y-m-d" }}</td>
         <td class="money">{% if row.billed is not None %}{{ row.billed|money }}{% else %}—{% endif %}</td>
         <td class="money">{{ row.paid|money }}</td>
         <td class="money">{{ row.balance|money }}</td>
         <td>{% status_badge row.status %}{% if row.resolution %}<br><span class="deposit-resolved">{{ row.resolution }}</span>{% endif %}</td>
         <td>{% for invoice in row.invoices %}{% if not forloop.first %}, {% endif %}{% if invoice.url %}<a href="{{ invoice.url }}">{{ invoice.number }}</a>{% else %}{{ invoice.number }}{% endif %}{% empty %}—{% endfor %}</td>
-        <td>{% if row.payment_url %}<a class="btn record-payment" href="{{ row.payment_url }}">Add payment</a>{% endif %}{% if row.resolve_url %} <a class="btn resolve-deposit" href="{{ row.resolve_url }}">Return deposit</a>{% endif %}</td>
+        <td>{% if row.payment_url %}<a class="btn btn-sm record-payment" href="{{ row.payment_url }}">Add payment</a>{% endif %}{% if row.resolve_url %} <a class="btn btn-sm resolve-deposit" href="{{ row.resolve_url }}">Return deposit</a>{% endif %}</td>
       </tr>
     {% empty %}
       <tr><td colspan="{% if by_store %}10{% else %}9{% endif %}" class="muted empty">{% if charge_filter == "open" %}No open charges.{% elif charge_filter == "paid" %}No paid charges.{% else %}No charges.{% endif %}{% with next=space.actions|action_named:"create_invoice" %}{% if next %} <a class="btn empty-next" href="{{ next.url }}">{{ next.label }}</a>{% endif %}{% endwith %}</td></tr>

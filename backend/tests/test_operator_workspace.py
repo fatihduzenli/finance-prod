@@ -369,7 +369,7 @@ def test_the_operator_bar_is_statement_new_invoice_edit_connect_and_more() -> No
     assert top.count("btn-primary") == 1
     assert top.index("Connect to Stax") < top.index('id="more-menu"')
     menu = top[top.index('<details class="menu" id="more-menu">') : top.index("</details>")]
-    assert '<summary class="btn">More ▾</summary>' in menu
+    assert '<summary class="btn btn-menu">More ▾</summary>' in menu  # PLAN-012f D6
     archive = reverse("ledger:operators:archive", kwargs={"pk": operator.pk})
     assert f'<form method="post" action="{archive}"' in menu and "csrfmiddlewaretoken" in menu
     assert (

@@ -56,7 +56,7 @@
       {% endfor %}
     </tbody>
     <tfoot>
-      <tr id="pnl-total">
+      <tr class="totals" id="pnl-total">
         <th scope="row">Total</th>
         {% include "ledger/reports/_figures.html" with item=total %}
         <td>{% if total.unknown %}<span class="badge">Unknown: {{ total.unknown|join:", " }}</span>{% endif %}</td>
