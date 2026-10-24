@@ -41,6 +41,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from finance.dates import day_text
 from ledger.forms import EnrolForm, LeaseCreateForm, LeaseForm
 from ledger.models import (
     ChargeNote,
@@ -468,7 +469,7 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
             "starts": debit.starts,
             "large": service.is_large_debit(debit.amount),
             "changes_message": (
-                service.RENT_CHANGES.format(date=debit.changes_on.isoformat())
+                service.RENT_CHANGES.format(date=day_text(debit.changes_on))
                 if debit.changes_on is not None
                 else ""
             ),

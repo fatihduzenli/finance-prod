@@ -63,6 +63,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
+from finance.dates import day_text
 from ledger.models import (
     NAME_MAX_LENGTH,
     AuditLog,
@@ -303,25 +304,27 @@ def decide(latest: StoreCost | None, values: CostValues, effective_from: date) -
             return CostOutcome(
                 False,
                 ACTION_REFUSED,
-                AFTER_CLOSED.format(end=latest.effective_to.isoformat()),
+                AFTER_CLOSED.format(end=day_text(latest.effective_to)),
                 "effective_from",
             )
-        return CostOutcome(True, ACTION_CREATED, SAVED_NEW.format(start=effective_from))
+        return CostOutcome(True, ACTION_CREATED, SAVED_NEW.format(start=day_text(effective_from)))
     open_row = latest
     if open_row is None:
-        return CostOutcome(True, ACTION_CREATED, SAVED_NEW.format(start=effective_from))
+        return CostOutcome(True, ACTION_CREATED, SAVED_NEW.format(start=day_text(effective_from)))
     if values.same_as(open_row):
         return CostOutcome(True, ACTION_UNCHANGED, UNCHANGED)
     if effective_from < open_row.effective_from:
         return CostOutcome(
             False,
             ACTION_REFUSED,
-            EARLIER_THAN_OPEN.format(start=open_row.effective_from.isoformat()),
+            EARLIER_THAN_OPEN.format(start=day_text(open_row.effective_from)),
             "effective_from",
         )
     if effective_from == open_row.effective_from:
-        return CostOutcome(True, ACTION_UPDATED, SAVED_IN_PLACE.format(start=effective_from))
-    return CostOutcome(True, ACTION_CREATED, SAVED_NEW.format(start=effective_from))
+        return CostOutcome(
+            True, ACTION_UPDATED, SAVED_IN_PLACE.format(start=day_text(effective_from))
+        )
+    return CostOutcome(True, ACTION_CREATED, SAVED_NEW.format(start=day_text(effective_from)))
 
 
 def set_cost(
@@ -528,8 +531,8 @@ def correct_cost(
                     False,
                     ACTION_REFUSED,
                     OVERLAPS.format(
-                        start=other.effective_from.isoformat(),
-                        end=other.effective_to.isoformat() if other.effective_to else "open",
+                        start=day_text(other.effective_from),
+                        end=day_text(other.effective_to) if other.effective_to else "open",
                     ),
                     "effective_from",
                 )
@@ -579,7 +582,7 @@ def close_cost(store: Store, effective_to: date, note: str, actor: User | None) 
                 return CostOutcome(
                     False,
                     ACTION_REFUSED,
-                    CLOSE_BEFORE_START.format(start=row.effective_from.isoformat()),
+                    CLOSE_BEFORE_START.format(start=day_text(row.effective_from)),
                     "effective_to",
                 )
             before = _state(row)
@@ -588,7 +591,7 @@ def close_cost(store: Store, effective_to: date, note: str, actor: User | None) 
             row.save(update_fields=["effective_to", "change_note", "updated_at"])
             _audit(actor, ACTION_AUDIT_CLOSED_BY_ADMIN, row, before, _state(row))
             return CostOutcome(
-                True, ACTION_UPDATED, CLOSED.format(end=effective_to.isoformat()), cost=row
+                True, ACTION_UPDATED, CLOSED.format(end=day_text(effective_to)), cost=row
             )
     except ValidationError:
         return CostOutcome(False, ACTION_REFUSED, PAYMENT_DATA_MESSAGE)

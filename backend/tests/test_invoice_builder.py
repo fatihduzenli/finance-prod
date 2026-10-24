@@ -27,6 +27,7 @@ from django.core.management.base import CommandError
 from django.test import override_settings
 
 from accounts.roles import Role
+from finance.dates import day_text
 from ledger.models import (
     NSF_FEE_FIRST,
     AuditLog,
@@ -1039,7 +1040,7 @@ def test_the_preview_and_the_print_view_render_for_a_viewer(fake: FakeProvider) 
         assert draft.number in text and settings.COMPANY_NAME in text
         assert operator.display_name in text and lease.store.external_label in text
         assert "Poster" in text and "$99.99" in text and MEMO in text
-        assert (TODAY + timedelta(days=15)).isoformat() in text
+        assert day_text(TODAY + timedelta(days=15)) in text
     page = printed.content.decode()
     assert "<nav" not in page and 'id="save-as-pdf"' in page and "@media print" in page
     sent(draft)

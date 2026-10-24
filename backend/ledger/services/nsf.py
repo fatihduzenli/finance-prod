@@ -45,6 +45,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
+from finance.dates import day_text
 from ledger.models import (
     DESCRIPTION_MAX_LENGTH,
     NSF_FEE_FIRST,
@@ -365,11 +366,11 @@ def reschedule(
     fee_text = FEE_WAIVED if waive_fee else _money(fee_price)
     if debit:
         message = RESCHEDULED_DEBIT.format(
-            amount=_money(total), date=redebit_date.isoformat(), fee=fee_text
+            amount=_money(total), date=day_text(redebit_date), fee=fee_text
         )
     else:
         number = invoice.invoice_number if invoice is not None else ""
         message = RESCHEDULED_INVOICE.format(
-            number=number, amount=_money(total), date=redebit_date.isoformat(), fee=fee_text
+            number=number, amount=_money(total), date=day_text(redebit_date), fee=fee_text
         )
     return Outcome(True, message, redebit=redebit, fee=fee, job=job)

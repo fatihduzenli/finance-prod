@@ -105,6 +105,7 @@ from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Sum
 from django.utils import timezone
 
 import payments
+from finance.dates import month_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -772,15 +773,26 @@ def _rent_in(rows: list[LeaseRentHistory], day: date) -> LeaseRentHistory | None
     return max(found, key=lambda row: row.effective_from, default=None)
 
 
-def catch_up_lease(lease: Lease, day: date, actor: User | None) -> list[RentCharge]:
-    """Create the missing charges of ``lease`` for the debit dates from its start month
-    to ``day`` (PLAN-012b-b D1, D2); returns the charges created.
+@dataclass(frozen=True, slots=True)
+class Planned:
+    """One charge :func:`catch_up_lease` would create (PLAN-012f-a D): its month, debit,
+    due date, amount and proration text."""
+
+    period_month: date
+    seq: int
+    due_on: date
+    amount: Decimal
+    proration_text: str
+
+
+def months_catch_up_would_create(lease: Lease, day: date) -> list[Planned]:
+    """The charges :func:`catch_up_lease` would create for ``lease`` on ``day``, in the
+    order it creates them, without writing anything (PLAN-012f-a D).
 
     Only for a lease that is active, has a known channel, a debit day and a start date
     on or before ``day``. Each missing ``(month, debit)`` whose due date
-    (:func:`debit_date`) is on or before ``day`` and has a rent in effect gets a charge
-    through :func:`create_month`, the first month prorated, audited with ``"catch_up":
-    true``. Months after the month of ``ended_on`` and months before
+    (:func:`debit_date`) is on or before ``day`` and has a rent in effect is planned, the
+    first month prorated. Months after the month of ``ended_on`` and months before
     :data:`CATCH_UP_MONTHS` are never looked at; a month with the debit's charge (paid,
     waived or not) is left as it is."""
     start = lease.started_on
@@ -803,7 +815,7 @@ def catch_up_lease(lease: Lease, day: date, actor: User | None) -> list[RentChar
         )
     )
     rows = list(lease.rent_history.all())
-    made: list[RentCharge] = []
+    planned: list[Planned] = []
     while period <= until:
         for seq, debit_day in enumerate(days, start=1):
             if (period, seq) in have:
@@ -816,19 +828,32 @@ def catch_up_lease(lease: Lease, day: date, actor: User | None) -> list[RentChar
                 continue
             month = first_month(lease, period, rent.amount)
             amount = debit_amounts(month.amount, twice_monthly=len(days) == 2)[seq - 1]
-            charge, created = create_month(
-                lease,
-                period,
-                actor,
-                due_on=due,
-                seq=seq,
-                amount=amount,
-                proration_text=month.text,
-                context={"catch_up": True},
-            )
-            if created:
-                made.append(charge)
+            planned.append(Planned(period, seq, due, amount, month.text))
         period = _next_month(period)
+    return planned
+
+
+def catch_up_lease(lease: Lease, day: date, actor: User | None) -> list[RentCharge]:
+    """Create the missing charges of ``lease`` for the debit dates from its start month
+    to ``day`` (PLAN-012b-b D1, D2); returns the charges created.
+
+    The charges are exactly :func:`months_catch_up_would_create`'s, each through
+    :func:`create_month`, audited with ``"catch_up": true``; one created meanwhile by
+    another run is left as it is and not returned."""
+    made: list[RentCharge] = []
+    for plan in months_catch_up_would_create(lease, day):
+        charge, created = create_month(
+            lease,
+            plan.period_month,
+            actor,
+            due_on=plan.due_on,
+            seq=plan.seq,
+            amount=plan.amount,
+            proration_text=plan.proration_text,
+            context={"catch_up": True},
+        )
+        if created:
+            made.append(charge)
     return made
 
 
@@ -977,7 +1002,7 @@ def run_line(day: date) -> RunLine | None:
 
 
 def created_message(report: ChargeRunReport) -> str:
-    """What a run created, in one sentence (PLAN-012d D13): ``Created: Rent 2026-08
+    """What a run created, in one sentence (PLAN-012d D13): ``Created: Rent Aug 2026
     $612.90 (catch-up), ...`` in month order, at most :data:`MESSAGE_LIST_MAX` named; or
     :data:`NOTHING_MISSING`."""
     made = [(charge, WHEN_TODAY) for charge in report.created] + [
@@ -987,7 +1012,7 @@ def created_message(report: ChargeRunReport) -> str:
         return NOTHING_MISSING
     made.sort(key=lambda pair: (pair[0].period_month, pair[0].seq, str(pair[0].lease_id)))
     parts = [
-        f"Rent {charge.period_month:%Y-%m}"
+        f"Rent {month_text(charge.period_month)}"
         + (f" (debit {charge.seq})" if charge.seq > 1 else "")
         + f" {format_amount(charge.amount_due)} ({when})"
         for charge, when in made[:MESSAGE_LIST_MAX]

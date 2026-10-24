@@ -63,6 +63,7 @@ from tests.receivables_helpers import (
 )
 from tests.test_contact_log import promise
 from tests.test_deposits import held_deposit
+from tests.test_lease_end import OCTOBER, october
 from tests.test_lease_end import draft as lease_end_draft
 from tests.test_operator_views import client_for
 from tests.test_plan012f_components import OLD_COMPONENT
@@ -182,11 +183,24 @@ def world() -> World:
             a_lease(a_store("0910 END", 910), an_operator("End Co"), channel=PaymentChannel.WIRE),
             admin_user,
         ),
-        transfer=begin(
-            a_lease(a_store("0911 MOVE", 911), an_operator("Move Co"), channel=PaymentChannel.WIRE),
-            admin_user,
-        ),
+        transfer=begin(moving_lease(), admin_user),
     )
+
+
+def moving_lease() -> Lease:
+    """The transfer's outgoing lease: it starts in the end month and that month is paid in
+    full, so no month is missing and nothing blocks the incoming step (the balance
+    blockers count the months the statement would still create, PLAN-012f-a D)."""
+    lease = a_lease(
+        a_store("0911 MOVE", 911),
+        an_operator("Move Co"),
+        channel=PaymentChannel.WIRE,
+        started=OCTOBER,
+        debit_day=1,
+        rent="2000.00",
+    )
+    october(lease, paid="2000.00")
+    return lease
 
 
 def path_of(world: World, name: str) -> str:
@@ -542,16 +556,16 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:transfers:operator": lambda w: (["Stores", "#911"], "Transfer"),
     "ledger:transfers:blockers": lambda w: (["Stores", "#911"], "Transfer"),
     "ledger:transfers:incoming": lambda w: (["Stores", "#911"], "Transfer"),
-    "ledger:charges:detail": lambda w: (_store(w), "Rent October 2026, debit 1"),
+    "ledger:charges:detail": lambda w: (_store(w), "Rent Oct 2026, debit 1"),
     "ledger:charges:record_payment": lambda w: (
-        [*_store(w), f"Rent 2026-10, {w.store.external_label}"],
+        [*_store(w), f"Rent Oct 2026, {w.store.external_label}"],
         "Add payment",
     ),
     "ledger:charges:link_invoice": lambda w: (
-        [*_store(w), f"Rent 2026-10, {w.store.external_label}"],
+        [*_store(w), f"Rent Oct 2026, {w.store.external_label}"],
         "Attach Stax invoice",
     ),
-    "ledger:charges:split": lambda w: (["Rent 2026-10"], "Split into installments"),
+    "ledger:charges:split": lambda w: (["Rent Oct 2026"], "Split into installments"),
     "ledger:one_off_charges:detail": lambda w: (_store(w), w.one_off.label),
     "ledger:one_off_charges:payment": lambda w: ([*_store(w), w.one_off.label], "Add payment"),
     "ledger:one_off_charges:link": lambda w: (
@@ -572,7 +586,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     ),
     "ledger:one_off_charges:charge_now": lambda w: ([*_store(w), w.one_off.label], "Charge now"),
     "ledger:one_off_charges:split": lambda w: ([w.one_off.label], "Split into installments"),
-    "ledger:plans:detail": lambda w: ([*_store(w), "Rent 2026-10"], "Installment plan"),
+    "ledger:plans:detail": lambda w: ([*_store(w), "Rent Oct 2026"], "Installment plan"),
     "ledger:plans:reschedule": lambda w: (
         [*_store(w), "Installment plan"],
         "Reschedule",
@@ -592,7 +606,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:payments:detail": lambda w: (_store(w), "Payment of $100.00"),
     "ledger:payments:refund": lambda w: (["Payments", "Payment of $100.00"], "Refund a payment"),
     "ledger:payments:void": lambda w: (["Payments", "Payment of $100.00"], "Void a payment"),
-    "ledger:calendar:detail": lambda w: (["Calendar: October 2026"], "Walk note"),
+    "ledger:calendar:detail": lambda w: (["Calendar: Oct 2026"], "Walk note"),
     "ledger:calendar:add": lambda w: (["Calendar"], "New calendar entry"),
     "ledger:calendar:edit": lambda w: (["Calendar", "Walk note"], "Edit calendar entry"),
     "ledger:webhooks:detail": lambda w: (

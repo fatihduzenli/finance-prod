@@ -282,7 +282,7 @@ def test_the_last_reconciliation_is_the_latest_run_that_was_not_skipped(today: d
     assert data.last_reconciliation.status == ReconciliationStatus.DONE
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
-    assert "Done, started 2026-10-05 02:00" in page and 'href="/reconciliation/"' in page
+    assert "Done, started Oct 5, 2026 · 02:00" in page and 'href="/reconciliation/"' in page
 
 
 def test_an_empty_database_shows_zeroes(today: date) -> None:

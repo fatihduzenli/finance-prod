@@ -473,7 +473,7 @@ def test_an_admin_resolves_through_the_page_and_the_deposit_page_shows_it() -> N
     resolution = DepositResolution.objects.get()
     assert (resolution.created_by, resolution.withheld_amount) == (user, D("500.00"))
     detail = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
-    assert 'id="deposit-resolution"' in detail and "Refunded on 2026-10-01" in detail
+    assert 'id="deposit-resolution"' in detail and "Refunded on Oct 1, 2026" in detail
     assert '<dd id="resolution-withheld">$500.00</dd>' in detail
     assert "Kept 500 for repairs." in detail
     store = lease_of(charge).store_id

@@ -63,6 +63,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 import mail
+from finance.dates import day_text
 from ledger.models import (
     CALENDAR_TITLE_MAX_LENGTH,
     AuditLog,
@@ -736,7 +737,7 @@ def _author_address(author: User | None) -> str:
 
 def _entry_message(entry: CalendarEntry, address: str) -> mail.Message:
     link = f"{settings.APP_BASE_URL.rstrip('/')}{entry_item(entry).url}"
-    text = f"{entry.get_kind_display()} for {entry.on:%Y-%m-%d}: {entry.title}\n\n"
+    text = f"{entry.get_kind_display()} for {day_text(entry.on)}: {entry.title}\n\n"
     if entry.body:
         text += f"{entry.body}\n\n"
     text += f"Open it: {link}\n"
@@ -748,9 +749,10 @@ def _promise_message(promise: ContactEntry, address: str) -> mail.Message:
     operator = promise.operator
     path = reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
     amount = format_amount(promise.promised_amount) if promise.promised_amount is not None else ""
+    by = day_text(promise.promised_date) if promise.promised_date is not None else ""
     text = (
         f"{operator.display_name} promised to pay {amount} by "
-        f"{promise.promised_date:%Y-%m-%d}.\n\n{promise.body}\n\n"
+        f"{by}.\n\n{promise.body}\n\n"
         f"Contact log: {settings.APP_BASE_URL.rstrip('/')}{path}#contacts\n"
     )
     subject = " ".join(f"Promise to pay due today: {operator.display_name}".split())

@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load money %}
+{% load money dates %}
 {% block title %}Transfer store {{ store.external_label }}: confirm{% endblock %}
 {% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
 {% block content %}
@@ -15,7 +15,7 @@
   </ul>
   <h4>The incoming lease ({{ transfer.incoming_operator.display_name }})</h4>
   <ul id="incoming-effects">
-    <li>A lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_started_on|date:"Y-m-d" }} at {{ transfer.incoming_rent|money }} a month, debited on day {{ transfer.incoming_debit_day }}{% if transfer.incoming_second_debit_day %} and day {{ transfer.incoming_second_debit_day }}{% endif %} ({{ transfer.get_incoming_channel_display }}){% if transfer.incoming_prorate_first_month %}, the first month prorated{% endif %}.</li>
+    <li>A lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_started_on|day }} at {{ transfer.incoming_rent|money }} a month, debited on day {{ transfer.incoming_debit_day }}{% if transfer.incoming_second_debit_day %} and day {{ transfer.incoming_second_debit_day }}{% endif %} ({{ transfer.get_incoming_channel_display }}){% if transfer.incoming_prorate_first_month %}, the first month prorated{% endif %}.</li>
     {% if transfer.deposit_amount or setup %}
       <li>One invoice draft "Move-in charges for store {{ store.external_label }}" is saved for review, with:
         <ul id="draft-lines">

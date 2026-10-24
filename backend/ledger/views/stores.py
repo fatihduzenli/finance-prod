@@ -197,7 +197,7 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
         **space.data,
         "leases": store.leases.select_related("operator", "lease_end").order_by("started_on", "id"),
         "vacant_since": lease_end.vacant_since(store, today),
-        # PLAN-012b-b D9: a lease end whose statement step opened, with Continue and
+        # PLAN-012b-b D9: a lease end whose statement step was saved, with Continue and
         # Cancel (admin); a draft that never got there shows nothing.
         "end_in_progress": in_progress,
         "end_in_progress_transfer": (

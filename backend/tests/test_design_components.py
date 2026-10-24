@@ -211,12 +211,14 @@ def test_the_amount_cells_of_the_charge_tables_are_money_cells() -> None:
     lease = a_lease(a_store("2203 MONEY", 2203), an_operator("Money Ops"))
     a_rent_charge(lease, OCTOBER)
     html = body(client_for(Role.BILLING)[0].get(f"/stores/{lease.store_id}/"))
-    table = html[html.index('<table id="store-charges" class="charges-table">') :].split(
+    table = html[html.index('<table id="store-charges" class="role-cards">') :].split(
         "</table>", 1
     )[0]
     # PLAN-012f D8: the charge's amount is the Amount column.
-    assert '<td class="charge-cell-amount money" data-label="Amount">$3,500.00</td>' in table
-    assert '<td class="charge-cell-balance money" data-label="Balance">$3,500.00</td>' in table
+    assert '<td class="money" data-role="amount" data-label="Amount">$3,500.00</td>' in table
+    assert (
+        '<td class="money" data-role="meta-if-partial" data-label="Balance">$3,500.00</td>' in table
+    )
     assert '<th class="money">Balance</th>' in table
 
 
@@ -260,7 +262,7 @@ def test_the_sorted_column_of_the_arrears_list_carries_aria_sort(
     query: str, column: str, direction: str
 ) -> None:
     html = body(client_for(Role.VIEWER)[0].get(f"/arrears/{query}"))
-    head = html[html.index('<table id="arrears">') :].split("</thead>", 1)[0]
+    head = html[html.index('<table id="arrears" class="role-cards">') :].split("</thead>", 1)[0]
     sorted_headers = re.findall(
         r'<th class="sortable[^"]*" aria-sort="(\w+)"><a [^>]*>([^<]+)</a>', head
     )
@@ -301,7 +303,7 @@ def test_the_charge_table_shows_the_status_as_a_badge() -> None:
     a_rent_charge(lease, OCTOBER, RentChargeStatus.UNPAID)
     a_rent_charge(lease, date(2026, 9, 1), RentChargeStatus.PAID, paid="3500.00")
     html = body(client_for(Role.VIEWER)[0].get(f"/stores/{lease.store_id}/?tab=charges&filter=all"))
-    table = html[html.index('<table id="store-charges" class="charges-table">') :].split(
+    table = html[html.index('<table id="store-charges" class="role-cards">') :].split(
         "</table>", 1
     )[0]
     # PLAN-012f D6: a rent charge "unpaid" (past due) is the overdue family.
@@ -824,7 +826,8 @@ def test_the_print_style_sheet_is_linked_on_the_statement_and_the_pnl() -> None:
         )
         assert re.search(
             r'<div class="print-only print-footer" id="print-footer">'
-            r"Printed \d{4}-\d{2}-\d{2}</div>",
+            # DESIGN-SPEC §5: the footer is read by a person, "Printed Oct 24, 2026".
+            r"Printed [A-Z][a-z]{2} \d{1,2}, \d{4}</div>",
             html,
         )
 
@@ -860,7 +863,12 @@ def test_print_css_hides_the_shell_and_breaks_the_pages() -> None:
 
 def test_the_statement_has_a_month_row_per_month_and_the_pnl_its_detail_class() -> None:
     text = (TEMPLATES / "reports" / "statement.html").read_text()
-    assert '{% ifchanged line.on|date:"Y-m" %}<tr class="print-month">' in text
+    # The ISO month is the grouping key only, never shown; the heading reads "Oct 2026"
+    # (DESIGN-SPEC §5).
+    assert (
+        '{% ifchanged line.on|date:"Y-m" %}<tr class="print-month">'
+        '<th colspan="7" scope="colgroup">{{ line.on|month|default:"No date" }}</th>' in text
+    )
     pnl = body(client_for(Role.ADMIN)[0].get("/reports/pnl/?detail=1"))
     assert '<div class="pnl-print pnl-detail">' in pnl
     assert '<div class="pnl-print">' in body(client_for(Role.ADMIN)[0].get("/reports/pnl/"))

@@ -141,7 +141,7 @@ def test_the_note_marker_shows_only_on_a_charge_with_a_note(today: date, viewer:
     assert marked == [date(2026, 6, 1)]
     html = page(viewer, "?from=2026-05&to=2026-10")
     assert html.count('<span class="note-marker" title="Has a note">●</span>') == 1
-    assert 'aria-label="2026-06: $3,500.00, Overdue 123 days, has a note"' in html
+    assert 'aria-label="Jun 2026: $3,500.00, Overdue 123 days, has a note"' in html
 
 
 def test_blank_before_the_lease_started_and_not_yet_due_only_in_a_future_month(
@@ -157,12 +157,12 @@ def test_blank_before_the_lease_started_and_not_yet_due_only_in_a_future_month(
     assert [item.status for item in cells] == ["", "", "", "paid", "", "not_due"]
     assert [item.text for item in cells] == ["", "", "", "Paid $3,740.00", "", "Not yet due"]
     assert [item.label for item in cells] == [
-        "2026-06",
-        "2026-07",
-        "2026-08: no charge",
-        "2026-09: $3,740.00, Paid",
-        "2026-10: no charge",
-        "2026-11: Not yet due",
+        "Jun 2026",
+        "Jul 2026",
+        "Aug 2026: no charge",
+        "Sep 2026: $3,740.00, Paid",
+        "Oct 2026: no charge",
+        "Nov 2026: Not yet due",
     ]
 
 
@@ -178,11 +178,11 @@ def test_blank_after_the_last_lease_ended_and_no_not_yet_due_there(today: date) 
     assert [item.status for item in cells] == ["paid", "", "", "", ""]
     assert [item.text for item in cells] == ["Paid $10.00", "", "", "", ""]
     assert [item.label for item in cells] == [
-        "2026-08: $10.00, Paid",
-        "2026-09: no charge",
-        "2026-10",
-        "2026-11",
-        "2026-12",
+        "Aug 2026: $10.00, Paid",
+        "Sep 2026: no charge",
+        "Oct 2026",
+        "Nov 2026",
+        "Dec 2026",
     ]
 
 
@@ -214,9 +214,9 @@ def test_two_leases_on_one_store_leave_no_gap_in_the_hand_over_month(today: date
     # Neither lease has an August charge: the hand-over month is inside, not outside.
     cells = row_of(built(**{"from": "2026-07", "to": "2026-11"}), "1087").cells
     assert [item.label for item in cells][:3] == [
-        "2026-07: no charge",
-        "2026-08: no charge",
-        "2026-09: no charge",
+        "Jul 2026: no charge",
+        "Aug 2026: no charge",
+        "Sep 2026: no charge",
     ]
     assert cells[-1].text == "Not yet due"
 
@@ -228,7 +228,7 @@ def test_a_store_without_a_lease_is_a_row_of_blank_cells(today: date) -> None:
     assert {item.text for item in row.cells} == {""}
     # Outside any lease, the future months too: no "Not yet due", the label the month only.
     assert {item.status for item in row.cells} == {""}
-    assert [item.label for item in row.cells][-1] == "2026-11"
+    assert [item.label for item in row.cells][-1] == "Nov 2026"
 
 
 def test_a_month_without_any_charge_is_blank_in_every_row(today: date) -> None:
@@ -388,7 +388,7 @@ def test_the_range_is_capped_at_24_months(today: date, viewer: Client) -> None:
     query = grid.parse_query({"from": "2024-01", "to": "2026-12"}, TODAY)
     assert len(query.months) == 24
     assert (query.from_month, query.to_month) == (date(2025, 1, 1), date(2026, 12, 1))
-    assert CAPPED.format(limit=24, start="2025-01", end="2026-12") in query.messages
+    assert CAPPED.format(limit=24, start="Jan 2025", end="Dec 2026") in query.messages
     html = page(viewer, "?from=2024-01&to=2026-12")
     assert html.count('class="month-col') == 24
     assert grid.parse_query({"from": "2025-01", "to": "2026-12"}, TODAY).messages == ()
@@ -409,17 +409,17 @@ def test_the_month_pickers_are_selects_of_the_current_month_and_24_either_side(
     for name in ("from", "to"):
         select = html.split(f'<select name="{name}" id="{name}">')[1].split("</select>")[0]
         assert select.count("<option ") == 49 and select.count(" selected") == 1
-    assert '<option value="2026-10">October 2026</option>' in html
-    assert '<option value="2025-12" selected>December 2025</option>' in html
-    assert '<option value="2026-11" selected>November 2026</option>' in html
+    assert '<option value="2026-10">Oct 2026</option>' in html
+    assert '<option value="2025-12" selected>Dec 2025</option>' in html
+    assert '<option value="2026-11" selected>Nov 2026</option>' in html
 
 
 def test_a_bad_or_reversed_range_answers_with_a_sentence(today: date, viewer: Client) -> None:
     bad = grid.parse_query({"from": "2026-13"}, TODAY)
-    assert UNREADABLE.format(start="2025-12", end="2026-11") in bad.messages
+    assert UNREADABLE.format(start="Dec 2025", end="Nov 2026") in bad.messages
     swapped = grid.parse_query({"from": "2026-09", "to": "2026-01"}, TODAY)
     assert (swapped.from_month, swapped.to_month) == (date(2026, 1, 1), SEP)
-    assert SWAPPED.format(start="2026-01", end="2026-09") in swapped.messages
+    assert SWAPPED.format(start="Jan 2026", end="Sep 2026") in swapped.messages
     assert "The months could not be read" in page(viewer, "?from=garbage&to=%00")
 
 

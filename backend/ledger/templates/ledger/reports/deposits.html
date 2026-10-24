@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load money responsive %}
+{% load money responsive dates %}
 {% block title %}Bank account check{% endblock %}
 {% block head %}<style>tr.unmatched{background:var(--unpaid-bg);}</style>{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Bank account check</span></nav><h1>Bank account check</h1></div></div>{% endblock %}
@@ -20,7 +20,7 @@
     <tbody>
       {% for item in report.unmatched %}
         <tr class="unmatched" data-kind="{{ item.kind }}">
-          <td>{{ item.found_on|date:"Y-m-d" }}</td>
+          <td>{{ item.found_on|day }}</td>
           <td><a href="{% url 'ledger:reconciliation:page' %}">{{ item.kind_label }}</a></td>
           <td>{% if item.payment_id %}<a href="{% url 'ledger:payments:detail' pk=item.payment_id %}">payment {{ item.record }}</a>{% else %}{{ item.record }}{% endif %}</td>
           <td>{{ item.detail }}</td>
@@ -41,7 +41,7 @@
     <tbody>
       {% for item in report.months %}
         <tr class="deposit-month" data-month="{{ item.month|date:'Y-m' }}">
-          <th scope="row">{{ item.month|date:"Y-m" }}</th><td>{{ item.count }}</td>
+          <th scope="row">{{ item.month|month }}</th><td>{{ item.count }}</td>
           <td class="money">{{ item.gross|money }}</td><td class="money">{{ item.fees|money }}</td><td class="money">{{ item.net|money }}</td>
           <td class="money">{{ item.ach_paid|money }} <span class="muted">({{ item.ach_count }})</span></td><td class="money">{{ item.ach_refunded|money }}</td>
           <td class="money difference">{{ item.difference|money }}</td>
@@ -68,7 +68,7 @@
     <thead><tr><th>Date</th><th>Deposit</th><th>Status</th><th class="money">Gross</th><th class="money">Fees</th><th class="money">Net</th></tr></thead>
     <tbody>
       {% for line in report.deposits %}
-        <tr class="deposit"><td>{{ line.deposit_date|date:"Y-m-d" }}</td><td>{{ line.reference }}</td><td>{{ line.status }}</td><td class="money">{{ line.gross|money }}</td><td class="money">{{ line.fees|money }}</td><td class="money">{{ line.net|money }}</td></tr>
+        <tr class="deposit"><td>{{ line.deposit_date|day }}</td><td>{{ line.reference }}</td><td>{{ line.status }}</td><td class="money">{{ line.gross|money }}</td><td class="money">{{ line.fees|money }}</td><td class="money">{{ line.net|money }}</td></tr>
       {% empty %}
         <tr><td colspan="6" class="muted empty">No deposit in these months.</td></tr>
       {% endfor %}

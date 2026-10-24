@@ -1,7 +1,7 @@
-{% load responsive money %}
+{% load dates responsive money %}
 <section id="statement-figures">
   {% if figures.last_month %}
-    <h2>Last month ({{ figures.last_month.month|date:"F Y" }})</h2>
+    <h2>Last month ({{ figures.last_month.month|month }})</h2>
     {% if figures.last_month.text %}<p id="last-month-text">Prorated: {{ figures.last_month.text }}</p>{% else %}<p id="last-month-text">Full month at {{ figures.last_month.rent|money }}.</p>{% endif %}
     {% if figures.last_month.credit %}<p id="last-month-credit">Credit: {{ figures.last_month.credit|money }} paid for days after the end date, refunded with the settlement.</p>{% endif %}
   {% endif %}
@@ -19,7 +19,7 @@
     <thead><tr><th>Charge</th><th>Due</th><th class="money">Balance</th></tr></thead>
     <tbody>
       {% for line in figures.open_lines %}
-        <tr><td>{% if line.url %}<a href="{{ line.url }}">{{ line.description }}</a>{% else %}{{ line.description }}{% endif %}</td><td>{{ line.due_on|date:"Y-m-d" }}</td><td class="money">{{ line.balance|money }}</td></tr>
+        <tr><td>{% if line.url %}<a href="{{ line.url }}">{{ line.description }}</a>{% else %}{{ line.description }}{% if line.preview and end.status != "confirmed" %} <span class="muted preview-line">not created yet</span>{% endif %}{% endif %}</td><td>{{ line.due_on|day }}</td><td class="money">{{ line.balance|money }}</td></tr>
       {% empty %}
         <tr><td colspan="3" class="muted empty">Nothing is open.</td></tr>
       {% endfor %}

@@ -1,12 +1,12 @@
 {% comment %}The invoice as the operator reads it (PLAN-012 D7): the preview and the print view.{% endcomment %}
-{% load responsive money %}
+{% load responsive money dates %}
 <section class="invoice-document" id="invoice-document">
   <header class="invoice-header">
     <p class="invoice-company" id="invoice-company"><strong>{{ preview.company }}</strong></p>
     <h1 id="invoice-number">Invoice {{ preview.number }}</h1>
     <dl class="invoice-dates">
-      <dt>Issued</dt><dd id="invoice-issued">{{ preview.issue_date|date:"Y-m-d" }}</dd>
-      <dt>Due</dt><dd id="invoice-due">{{ preview.due_date|date:"Y-m-d" }}</dd>
+      <dt>Issued</dt><dd id="invoice-issued">{{ preview.issue_date|day }}</dd>
+      <dt>Due</dt><dd id="invoice-due">{{ preview.due_date|day }}</dd>
     </dl>
   </header>
   <div class="invoice-parties">

@@ -200,7 +200,7 @@ def test_the_run_page_lists_due_and_skipped_leases_and_a_double_run_creates_noth
     due = lease()
     lease(collection_status="paused")
     page = billing.get(RUN).content.decode()
-    assert "Daily charges, 2026-10-15" in page
+    assert "Daily charges, Oct 15, 2026" in page
     assert "Not created" in page and rent_run.SKIP_PAUSED in page
     first = billing.post(CREATE)
     assert (first.status_code, first["Location"]) == (302, RUN)
@@ -447,7 +447,7 @@ def test_the_link_list_shows_only_the_operators_unlinked_invoices(billing: Clien
     assert mine.invoice_number in page
     assert linked.invoice_number not in page and foreign.invoice_number not in page
     assert "dashboard-invoice-0001" not in page and "dash…0001" in page
-    assert "2026-10-14" in page and "$1,500.00" in page and "DRAFT" in page
+    assert "Oct 14, 2026" in page and "$1,500.00" in page and "DRAFT" in page
     assert f'value="{mine.pk}"' in page
     assert 'id="balance">$1,500.00<' in page
 

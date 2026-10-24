@@ -1144,7 +1144,7 @@ def test_the_ledger_names_the_parent_of_an_installment_payment(fake: FakeProvide
     client, _ = client_for(Role.VIEWER)
     html = client.get("/payments/").content.decode()
     assert "Installment 1 of 3: Rent 2026-10" in html
-    assert f'<a href="/charges/{parent.pk}/">Rent 2026-10</a>' in html
+    assert f'<a href="/charges/{parent.pk}/">Rent Oct 2026</a>' in html
 
 
 def test_the_grid_cell_of_a_split_rent_charge_shows_the_plans_progress(
@@ -1916,11 +1916,11 @@ def test_a_rent_charge_on_an_autopay_lease_splits_in_one_step_and_autopay_moves_
     assert installments.release_pending(plan) == ""
     page = client.get(f"/leases/{lease.pk}/").content.decode()
     assert (
-        '<p id="autopay-moved"><strong>Autopay resumes 2026-11-20 (this month is collected in '
+        '<p id="autopay-moved"><strong>Autopay resumes Nov 20, 2026 (this month is collected in '
         "installments)</strong></p>"
     ) in page
     table = page.split('id="schedules"')[1].split("</table>")[0]
-    assert ">2026-11-20</td>" in table and "2026-10-20" not in table
+    assert ">Nov 20, 2026</td>" in table and "Oct 20, 2026" not in table
     # Once the plan is no longer live the lease page says nothing more.
     assert installments.cancel(plan, "Paid another way.", a_user(Role.ADMIN)).ok
     assert leases.autopay_move(lease) is None

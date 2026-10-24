@@ -52,6 +52,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets
+from finance.dates import month_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -737,7 +738,7 @@ def _invoice_links(
 
 
 def _rent_description(charge: RentCharge) -> str:
-    text = f"Rent {charge.period_month:%Y-%m}" + (
+    text = f"Rent {month_text(charge.period_month)}" + (
         f" (debit {charge.seq})" if charge.seq > 1 else ""
     )
     return f"{text}: {charge.proration_text}" if charge.proration_text else text

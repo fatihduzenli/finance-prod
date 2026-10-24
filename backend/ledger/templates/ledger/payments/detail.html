@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive money %}
+{% load responsive money dates %}
 {% block title %}Payment{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% else %}<a href="{% url 'ledger:payments:list' %}">Payments</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</span></nav><h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</h1></div>{% if can_refund or can_void %}<div class="page-actions">{% if can_void %}<a class="btn" href="{% url 'ledger:payments:void' pk=payment.pk %}" id="void-payment">Void</a>{% endif %}{% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
@@ -8,8 +8,8 @@
   {% include "ledger/_job_status.html" %}
   {% include "ledger/payments/summary.html" %}
   <dl class="detail-list">
-    <dt>Initiated</dt><dd>{{ payment.initiated_on|date:"Y-m-d"|default:"—" }}</dd>
-    <dt>Paid on</dt><dd>{{ payment.settled_on|date:"Y-m-d"|default:"—" }}</dd>
+    <dt>Initiated</dt><dd>{{ payment.initiated_on|day|default:"—" }}</dd>
+    <dt>Paid on</dt><dd>{{ payment.settled_on|day|default:"—" }}</dd>
     {% if payment.return_code %}<dt>Return</dt><dd>{{ payment.return_code }} {{ payment.return_reason }}</dd>{% endif %}
     <dt>Reference</dt><dd>{{ payment.reference|default:"—" }}</dd>
     <dt>Note</dt><dd style="white-space:pre-wrap;">{{ payment.note|default:"—" }}</dd>
@@ -33,8 +33,8 @@
       <tbody>
         {% for refund in refunds %}
           <tr>
-            <td><a href="{% url 'ledger:payments:detail' pk=refund.pk %}">{{ refund.initiated_on|date:"Y-m-d"|default:"—" }}</a></td>
-            <td>{{ refund.settled_on|date:"Y-m-d"|default:"—" }}</td>
+            <td><a href="{% url 'ledger:payments:detail' pk=refund.pk %}">{{ refund.initiated_on|day|default:"—" }}</a></td>
+            <td>{{ refund.settled_on|day|default:"—" }}</td>
             <td class="money">&minus;{{ refund.amount|money }}</td>
             <td>{{ refund.get_status_display }}</td>
           </tr>
@@ -66,7 +66,7 @@
   <h2>Charge</h2>
   {% if charge %}
     <dl id="payment-charge">
-      <dt>Charge</dt><dd><a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Rent {{ charge.period_month|date:"Y-m" }}, debit {{ charge.seq }}</a></dd>
+      <dt>Charge</dt><dd><a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Rent {{ charge.period_month|month }}, debit {{ charge.seq }}</a></dd>
       <dt>Amount due</dt><dd id="charge-due">{{ charge.amount_due|money }}</dd>
       <dt>Paid</dt><dd id="charge-paid">{{ charge.amount_paid|money }}</dd>
       <dt>Balance</dt><dd id="charge-balance">{{ charge.balance|money }}</dd>
@@ -96,7 +96,7 @@
     <thead><tr><th>When</th><th>Action</th><th>By</th></tr></thead>
     <tbody>
       {% for entry in audit_rows %}
-        <tr><td>{{ entry.at|date:"Y-m-d H:i" }}</td><td>{{ entry.action }}</td><td>{% if entry.actor %}{{ entry.actor }}{% else %}{{ company.provider_name }} or system{% endif %}</td></tr>
+        <tr><td>{{ entry.at|moment }}</td><td>{{ entry.action }}</td><td>{% if entry.actor %}{{ entry.actor }}{% else %}{{ company.provider_name }} or system{% endif %}</td></tr>
       {% empty %}
         <tr><td colspan="3" class="muted empty">No audit rows.</td></tr>
       {% endfor %}

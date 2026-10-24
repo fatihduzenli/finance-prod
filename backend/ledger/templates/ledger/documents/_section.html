@@ -5,7 +5,7 @@ post with one file, from the file input or the "Take photo" input (PLAN-011 D9);
 ledger/document_drop.js only moves a dropped file into the file input and clears the
 other input when one is chosen.
 {% endcomment %}
-{% load responsive %}
+{% load responsive dates %}
 <section id="documents">
   <h2>Documents</h2>
   {% if not documents_feature_on %}
@@ -45,8 +45,8 @@ other input when one is chosen.
           <td>{% if document.deleted_at %}<s>{{ document.original_filename }}</s>{% else %}{{ document.original_filename }}{% endif %}</td>
           <td>{{ document.size_bytes|filesizeformat }}</td>
           <td>{{ document.uploaded_by.get_username|default:"—" }}</td>
-          <td>{{ document.uploaded_at|date:"Y-m-d" }}</td>
-          <td style="white-space:pre-wrap;">{{ document.note }}{% if document.deleted_at %}{% if document.note %}<br>{% endif %}<span class="badge">Deleted</span> {{ document.deleted_at|date:"Y-m-d" }} by {{ document.deleted_by.get_username|default:"—" }}: {{ document.delete_note }}{% endif %}</td>
+          <td>{{ document.uploaded_at|day }}</td>
+          <td style="white-space:pre-wrap;">{{ document.note }}{% if document.deleted_at %}{% if document.note %}<br>{% endif %}<span class="badge">Deleted</span> {{ document.deleted_at|day }} by {{ document.deleted_by.get_username|default:"—" }}: {{ document.delete_note }}{% endif %}</td>
           <td>
             <div class="actions" style="margin:0;">
               {% if item.can_preview and not document.deleted_at %}<a class="btn document-preview" href="{{ documents_owner_url }}?preview={{ document.pk }}#documents">Preview</a>{% endif %}

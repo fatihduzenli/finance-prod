@@ -1,11 +1,11 @@
-{% extends "finance/base.html" %}
+{% extends "finance/base.html" %}{% load dates %}
 {% block title %}Transfer store {{ store.external_label }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store %}<span aria-current="page">Transfer</span></nav><h1>Transfer store {{ store.external_label }}</h1></div></div>{% endblock %}
 {% block content %}
   <section class="card wizard-card">
   <p class="muted" id="step-help">The wizard hands the store to another operator: you end the current lease, set the incoming one and confirm both at once. You can leave it and come back. Learn more: <a href="{% url 'finance:help_topic' slug='lease-ends-and-transfers' %}">Lease ends and transfers</a></p>
   {% if lease and end_in_progress %}
-    <p id="lease-to-transfer">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}.</p>
+    <p id="lease-to-transfer">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|day|default:"no start date" }}.</p>
     <p id="end-in-progress">A lease end is in progress for this lease (statement step): continue it, or cancel it to transfer the store.</p>
     <div class="actions">
       <a class="btn btn-primary" id="end-in-progress-continue" href="{% url 'ledger:lease_ends:statement' pk=end_in_progress.pk %}">Continue the lease end</a>
@@ -14,7 +14,7 @@
       </form>
     </div>
   {% elif lease %}
-    <p id="lease-to-transfer">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}.</p>
+    <p id="lease-to-transfer">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|day|default:"no start date" }}.</p>
     <form method="post" id="start-transfer" class="js-single-submit">
       {% csrf_token %}
       <div class="form-actions"><button class="btn btn-primary" type="submit">{% if draft %}Continue{% else %}Start{% endif %}</button></div>

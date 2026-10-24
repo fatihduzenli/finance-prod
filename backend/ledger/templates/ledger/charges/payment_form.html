@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
-{% load static money %}
+{% load static money dates %}
 {% block title %}Add payment{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=charge.lease.store %}<a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Rent {{ charge.period_month|date:"Y-m" }}, {{ charge.lease.store.external_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Add payment</span></nav><h1>Add payment</h1></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=charge.lease.store %}<a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Rent {{ charge.period_month|month }}, {{ charge.lease.store.external_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Add payment</span></nav><h1>Add payment</h1></div></div>{% endblock %}
 {% block content %}
   <section class="card form-card">
   {% include "ledger/_store_context.html" %}

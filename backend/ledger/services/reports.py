@@ -57,6 +57,7 @@ from decimal import Decimal
 from django.db.models import Count, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce, TruncMonth
 
+from finance.dates import month_text
 from ledger.models import (
     ZERO,
     MoneyMethod,
@@ -557,12 +558,13 @@ def _history_kind(payment: Payment) -> str:
     return KIND_REFUND if payment.is_refund else KIND_PAYMENT
 
 
-def _charge_description(payment: Payment) -> str:
+def _charge_description(payment: Payment, *, export: bool = False) -> str:
+    """What ``payment`` was for: "Rent Oct 2026" on a page, "Rent 2026-10" in the CSV
+    (``export``; DESIGN-SPEC §5)."""
     if payment.rent_charge is not None:
         charge = payment.rent_charge
-        return f"Rent {charge.period_month:%Y-%m}" + (
-            f" (debit {charge.seq})" if charge.seq > 1 else ""
-        )
+        month = f"{charge.period_month:%Y-%m}" if export else month_text(charge.period_month)
+        return f"Rent {month}" + (f" (debit {charge.seq})" if charge.seq > 1 else "")
     if payment.insurance_charge is not None:
         return f"Insurance, policy year {payment.insurance_charge.policy_year}"
     if payment.one_off_charge is not None:
@@ -660,12 +662,13 @@ def statement_csv_lines(report: Statement) -> Iterator[str]:
         )
     )
     records: list[list[object]] = [
-        [SECTION_OPEN, None, item.store_label, item.description, item.due_on]
+        [SECTION_OPEN, None, item.store_label, item.csv_description, item.due_on]
         + [kinds[item.kind], item.status, "", None, item.balance]
         for item in report.open_charges
     ]
     records.extend(
-        [SECTION_HISTORY, line.on, line.store, line.description, None, line.kind]
+        [SECTION_HISTORY, line.on, line.store, _charge_description(line.payment, export=True)]
+        + [None, line.kind]
         + [line.payment.status, line.payment.method, line.payment.amount, None]
         for line in report.history
     )

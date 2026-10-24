@@ -1,11 +1,11 @@
 {% extends "finance/base.html" %}
-{% load static money %}
+{% load static money dates %}
 {% load responsive %}
 {% block title %}Add payment: store {{ store.external_label }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store crumb_query="?tab=payments#tab-payments" %}<span aria-current="page">Add payment</span></nav><h1>Add payment</h1></div></div>{% endblock %}
 {% block content %}
   <section class="card form-card">
-  <p class="muted" id="known-fields">Store {{ store.external_label }} · {% if lease.started_on %}Lease from {{ lease.started_on|date:"Y-m-d" }}{% else %}Lease{% endif %}{% if lease.operator %} · Operator {{ lease.operator.display_name }}{% endif %}</p>
+  <p class="muted" id="known-fields">Store {{ store.external_label }} · {% if lease.started_on %}Lease from {{ lease.started_on|day }}{% else %}Lease{% endif %}{% if lease.operator %} · Operator {{ lease.operator.display_name }}{% endif %}</p>
   <p class="muted">A payment received by Zelle, wire, check or another way outside {{ company.provider_name }}. Enter what was received once, then type how much of it pays each open charge below. The allocations must add up to the amount received, or the rest is kept as a credit on the lease. Each charge's invoice is marked paid in {{ company.provider_name }} once its charge is fully covered; a partial payment is marked Needs review.</p>
   <form method="post" id="allocation-form" class="js-single-submit js-allocation" autocomplete="off">
     {% csrf_token %}
@@ -26,7 +26,7 @@
           <tr class="allocation-line" data-balance="{{ row.charge.balance }}">
             <td>{{ row.charge.kind_label }}</td>
             <td>{{ row.charge.description }}</td>
-            <td>{{ row.charge.due_on|date:"Y-m-d" }}</td>
+            <td>{{ row.charge.due_on|day }}</td>
             <td class="money">{{ row.charge.balance|money }}</td>
             <td>{{ row.alloc.errors }}<input type="number" step="0.01" min="0" inputmode="decimal" class="js-alloc" name="{{ row.alloc.html_name }}" id="{{ row.alloc.auto_id }}" value="{{ row.alloc.value|default_if_none:'' }}" aria-label="Allocate to {{ row.charge.description }}"{% if single %} data-prefill="{{ row.charge.balance }}"{% endif %}></td>
             {% if credit_held %}<td>{{ row.credit.errors }}<input type="number" step="0.01" min="0" inputmode="decimal" class="js-credit" name="{{ row.credit.html_name }}" id="{{ row.credit.auto_id }}" value="{{ row.credit.value|default_if_none:'' }}" aria-label="Apply credit to {{ row.charge.description }}"></td>{% endif %}

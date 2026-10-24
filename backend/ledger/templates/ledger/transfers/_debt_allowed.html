@@ -1,2 +1,2 @@
-{% comment %}The admin's allowance of a lease-end balance (PLAN-012e D14).{% endcomment %}
-<p id="debt-allowed">Allowed by {{ transfer.debt_override_by.get_username|default:"—" }} on {{ transfer.debt_override_at|date:"Y-m-d" }}: <span style="white-space:pre-wrap;">{{ transfer.debt_override_reason }}</span></p>
+{% load dates %}{% comment %}The admin's allowance of a lease-end balance (PLAN-012e D14).{% endcomment %}
+<p id="debt-allowed">Allowed by {{ transfer.debt_override_by.get_username|default:"—" }} on {{ transfer.debt_override_at|day }}: <span style="white-space:pre-wrap;">{{ transfer.debt_override_reason }}</span></p>

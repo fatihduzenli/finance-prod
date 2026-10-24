@@ -113,7 +113,7 @@ def test_a_date_in_the_future_is_refused() -> None:
 def test_a_date_before_the_start_is_refused() -> None:
     error = refused(a_lease(), on=STARTED - timedelta(days=1))
     assert error.field == "ended_on"
-    assert str(error) == "The end date cannot be before the lease started (2026-01-01)."
+    assert str(error) == "The end date cannot be before the lease started (Jan 1, 2026)."
 
 
 def test_a_missing_date_is_refused() -> None:

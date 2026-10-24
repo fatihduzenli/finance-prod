@@ -19,6 +19,7 @@ from django.core.validators import RegexValidator
 from django.db.models import Q
 from django.utils import timezone
 
+from finance.dates import day_text
 from ledger.models import (
     CALENDAR_TITLE_MAX_LENGTH,
     CONSENT_FIELDS,
@@ -746,7 +747,7 @@ RENT_MONTHS_AROUND = 12
 
 
 def _lease_label(lease: Lease) -> str:
-    start = lease.started_on.isoformat() if lease.started_on else "no start date"
+    start = day_text(lease.started_on) if lease.started_on else "no start date"
     operator = lease.operator.display_name if lease.operator is not None else "no operator"
     return f"{lease.store.external_label}: {operator}, from {start}"
 
@@ -2066,7 +2067,7 @@ class CalendarEntryForm(forms.Form):
                 .values_list("pk", "display_name")
             ],
             "lease": [
-                (str(pk), f"{label} from {started or 'no start date'}")
+                (str(pk), f"{label} from {day_text(started) if started else 'no start date'}")
                 for pk, label, started in Lease.objects.order_by(
                     "store__external_label", "started_on", "id"
                 ).values_list("pk", "store__external_label", "started_on")

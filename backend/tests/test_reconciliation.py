@@ -508,7 +508,7 @@ def test_the_second_firing_while_the_job_still_waits_queues_nothing(
     [run] = started_runs()
     assert (run.trigger, run.requested_by) == (ReconciliationTrigger.SCHEDULED, None)
     page = billing.get("/reconciliation/").content.decode()
-    assert '<td data-label="How">Scheduled</td>' in page
+    assert '<td data-role="meta" data-label="How">Scheduled</td>' in page
     assert NOT_DUE not in page
 
 
@@ -900,7 +900,7 @@ def test_the_page_shows_counts_and_masked_identifiers_only(fake: FakeProvider) -
     assert str(payment.pk) not in page
     assert TXN not in page and INVOICE not in page
     # 06:30 UTC is 02:30 in New York (EDT).
-    assert "2026-10-06 02:30 EDT" in page
+    assert "Oct 6, 2026 · 02:30 EDT" in page
     assert 'id="run-now"' not in page  # Run now is for admins
     uuids = re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", page)
     mismatch_ids = {str(pk) for pk in ReconciliationMismatch.objects.values_list("pk", flat=True)}

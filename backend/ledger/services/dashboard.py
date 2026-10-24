@@ -41,6 +41,7 @@ from django.db.models import Count, F, Max, Sum
 from django.db.models.functions import Least
 from django.utils import timezone
 
+from finance.dates import day_text, month_text
 from ledger.models import (
     ZERO,
     CollectionStatus,
@@ -108,9 +109,9 @@ class PendingDebits:
 
     @property
     def note(self) -> str:
-        """The KPI's third line: "19 debits · settle by 2026-10-24"."""
+        """The KPI's third line: "19 debits · settle by Oct 24, 2026"."""
         text = _plural(self.count, "debit")
-        return f"{text} · settle by {self.settle_by:%Y-%m-%d}" if self.settle_by else text
+        return f"{text} · settle by {day_text(self.settle_by)}" if self.settle_by else text
 
 
 def pending_debits() -> PendingDebits:
@@ -290,14 +291,14 @@ def _when(payment: Payment, today: date) -> str:
         return TODAY_WORD
     if settled == today - timedelta(days=1):
         return YESTERDAY_WORD
-    return f"{settled:%Y-%m-%d}"
+    return day_text(settled)
 
 
 def _paid_for(payment: Payment) -> tuple[str, str]:
     """(store label, what the payment was for)."""
     if payment.rent_charge is not None:
         charge = payment.rent_charge
-        return stores.title(charge.lease.store), f"Rent {charge.period_month:%Y-%m}"
+        return stores.title(charge.lease.store), f"Rent {month_text(charge.period_month)}"
     if payment.insurance_charge is not None:
         held = payment.insurance_charge
         year = payment.policy_year or held.policy_year

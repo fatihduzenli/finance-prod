@@ -178,6 +178,7 @@ Rules first, then the lists; anything not listed keeps its text.
 | Time | "… UTC" | New York time, no suffix (the app's time zone) |
 | Codes never shown | "TODO-VERIFY-036", "DTSTART", raw field names (`other_cost_description`), ALL-CAPS Stax statuses in sentences | removed or spelt out ("First debit"; "Other cost description"; "not yet paid") |
 | Money | `$2000.00`, `2000.00`, `paid 2,000.00` | `$2,000.00` everywhere (one `money` filter and `format_amount`), the grid cells too ("Paid $2,000.00") |
+| Dates | On screen a day reads `Nov 1, 2026` (`Nov 1` beside a month label), a month `Oct 2026`, a time `14:02`; never ISO on a page. ISO stays in CSV and spreadsheet exports, the ICS feed, JSON, audit rows, form values, `data-*` and `<time datetime>`, URLs and query strings; stored descriptions written earlier keep their text (owner, 2026-10-23, PLAN-012f-a B4). |
 | Button names | mixed ("Record a payment" / "Record payment") | one name per action, the list below |
 | Spelling | "email" and "e-mail" mixed | "e-mail" |
 

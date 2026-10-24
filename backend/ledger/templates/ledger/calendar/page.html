@@ -1,7 +1,7 @@
-{% extends "finance/base.html" %}
-{% block title %}Calendar {{ month|date:"Y-m" }}{% endblock %}
+{% extends "finance/base.html" %}{% load dates %}
+{% block title %}Calendar {{ month|month }}{% endblock %}
 {% block main_class %}wide{% endblock %}
-{% block header %}<div class="page-header"><h1>Calendar: {{ month|date:"F Y" }}</h1><div class="page-actions"><a class="btn" href="{% url 'finance:settings' %}">Calendar feed</a>{% if can_add %}<a class="btn btn-primary" id="calendar-add" href="{% url 'ledger:calendar:add' %}">Add note or reminder</a>{% endif %}</div></div>{% endblock %}
+{% block header %}<div class="page-header"><h1>Calendar: {{ month|month }}</h1><div class="page-actions"><a class="btn" href="{% url 'finance:settings' %}">Calendar feed</a>{% if can_add %}<a class="btn btn-primary" id="calendar-add" href="{% url 'ledger:calendar:add' %}">Add note or reminder</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
   <p class="actions" id="calendar-nav">
     <a class="btn" id="calendar-previous" href="{{ previous_link }}">&larr; Previous</a>
@@ -31,7 +31,7 @@
       <div class="calendar-week">
         {% for cell in week %}
           <div class="calendar-day{% if not cell.in_month %} other-month{% endif %}{% if cell.day == today %} today{% endif %}{% if not cell.items %} empty{% endif %}" data-day="{{ cell.day|date:'Y-m-d' }}">
-            <div class="calendar-date">{% if can_add and cell.in_month %}<a href="{% url 'ledger:calendar:add' %}?on={{ cell.day|date:'Y-m-d' }}" title="Add on {{ cell.day|date:'Y-m-d' }}">{{ cell.day|date:"D j" }}</a>{% else %}{{ cell.day|date:"D j" }}{% endif %}</div>
+            <div class="calendar-date">{% if can_add and cell.in_month %}<a href="{% url 'ledger:calendar:add' %}?on={{ cell.day|date:'Y-m-d' }}" title="Add on {{ cell.day|day }}">{{ cell.day|date:"D j" }}</a>{% else %}{{ cell.day|date:"D j" }}{% endif %}</div>
             <ul>
               {% for item in cell.items %}<li class="calendar-item kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a href="{{ item.url }}">{{ item.title }}</a></li>{% endfor %}
             </ul>

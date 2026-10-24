@@ -164,7 +164,7 @@ def test_the_closed_date_shows_only_when_set_and_needs_open_date_stays() -> None
         closed_at=date(2026, 6, 30),
     )
     html = page(client_for(Role.VIEWER)[0], closed)
-    assert '<dt>Closed date</dt><dd id="store-closed-date">2026-06-30</dd>' in html
+    assert '<dt>Closed date</dt><dd id="store-closed-date">Jun 30, 2026</dd>' in html
 
 
 def test_edit_stays_in_the_details_block_and_set_landlord_rent_left_it() -> None:
@@ -189,8 +189,8 @@ def test_the_store_cost_block_lines_and_no_margin_or_rule_paragraph() -> None:
     html = page(client_for(Role.VIEWER)[0], store)
     cost = block(html, '<section class="card" id="store-cost"')
     assert "<h2" in cost and ">Store cost</h2>" in cost
-    assert '<dd id="landlord-rent">$3,500.00 a month from 2026-01-01</dd>' in cost
-    assert '<dd id="landlord-lease-end">2030-12-31</dd>' in cost
+    assert '<dd id="landlord-rent">$3,500.00 a month from Jan 1, 2026</dd>' in cost
+    assert '<dd id="landlord-lease-end">Dec 31, 2030</dd>' in cost
     assert "Other monthly cost" not in cost
     assert cost.count('<p class="help">') == 1
     assert (
@@ -222,7 +222,7 @@ def test_unknown_without_a_row_and_no_cost_at_zero() -> None:
     assert '<dd id="landlord-lease-end">unknown</dd>' in cost
     set_cost(store, "0.00")
     cost = block(page(client_for(Role.VIEWER)[0], store), 'id="store-cost"')
-    assert "$0.00 a month (no cost) from 2026-01-01" in cost
+    assert "$0.00 a month (no cost) from Jan 1, 2026" in cost
 
 
 @pytest.mark.parametrize(
@@ -281,7 +281,7 @@ def test_the_new_store_form_creates_the_first_cost_row_from_the_open_date() -> N
     assert entry.entity_id == str(row.pk) and entry.before is None
     assert entry.after is not None and entry.after["effective_from"] == "2025-03-01"
     cost = block(admin.get(response["Location"]).content.decode(), 'id="store-cost"')
-    assert "$3,500.00 a month from 2025-03-01" in cost
+    assert "$3,500.00 a month from Mar 1, 2025" in cost
 
 
 def test_the_audit_row_is_the_one_change_writes() -> None:

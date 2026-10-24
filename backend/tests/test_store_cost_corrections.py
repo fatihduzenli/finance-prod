@@ -17,10 +17,10 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 from django.urls import reverse
-from django.utils import timezone
 
 from accounts import registry
 from accounts.roles import Role
+from finance.dates import moment_text
 from ledger.models import AuditLog, Store, StoreCost, StoreCostSource
 from ledger.services import pnl
 from ledger.services import store_costs as service
@@ -181,11 +181,11 @@ def test_a_correction_that_would_overlap_another_live_row_is_refused(admin: User
         outcome = correct(target, first, admin, starts=starts, ends=ends)
         assert (outcome.ok, outcome.message) == (
             False,
-            service.OVERLAPS.format(start="2026-04-01", end="open"),
+            service.OVERLAPS.format(start="Apr 1, 2026", end="open"),
         )
     # Moving the open row before the first one ends is refused as well.
     outcome = correct(target, second, admin, starts=date(2026, 3, 31))
-    assert outcome.message == service.OVERLAPS.format(start="2026-01-01", end="2026-03-31")
+    assert outcome.message == service.OVERLAPS.format(start="Jan 1, 2026", end="Mar 31, 2026")
     assert live(target) == before
     assert not AuditLog.objects.filter(action=service.ACTION_AUDIT_SUPERSEDED).exists()
 
@@ -334,7 +334,7 @@ def test_close_ends_the_open_row_and_later_months_are_unknown(admin: User) -> No
     row_ = set_cost(target, "2500.00").cost
     assert row_ is not None
     outcome = service.close_cost(target, date(2026, 3, 31), "​Landlord lease ended.", admin)
-    assert (outcome.ok, outcome.message) == (True, service.CLOSED.format(end="2026-03-31"))
+    assert (outcome.ok, outcome.message) == (True, service.CLOSED.format(end="Mar 31, 2026"))
     row_.refresh_from_db()
     assert (row_.effective_to, row_.change_note, row_.superseded_at) == (
         date(2026, 3, 31),
@@ -372,7 +372,7 @@ def test_close_on_the_start_day_is_allowed_and_before_it_refused(admin: User) ->
     refused = service.close_cost(target, date(2026, 1, 31), "Too early.", admin)
     assert (refused.ok, refused.message) == (
         False,
-        service.CLOSE_BEFORE_START.format(start="2026-02-01"),
+        service.CLOSE_BEFORE_START.format(start="Feb 1, 2026"),
     )
     cost.refresh_from_db()
     assert cost.effective_to is None
@@ -401,7 +401,7 @@ def test_after_a_close_a_new_row_must_start_after_the_end(admin: User) -> None:
         refused = set_cost(target, "2600.00", starts)
         assert (refused.ok, refused.message) == (
             False,
-            service.AFTER_CLOSED.format(end="2026-03-31"),
+            service.AFTER_CLOSED.format(end="Mar 31, 2026"),
         )
     created = set_cost(target, "2600.00", date(2026, 4, 1))
     assert created.ok and created.closed is None
@@ -439,7 +439,7 @@ def test_the_importer_after_a_close_refuses_an_overlapping_row(tmp_path: Path, a
     assert run_import(path, dry_run=True).refused == 1
     report = run_import(path)
     assert report.refused == 1
-    assert "2026-03-31" in report.refusals[0][1]
+    assert "Mar 31, 2026" in report.refusals[0][1]
     path = write_csv(tmp_path / "costs.csv", [row("4322", "2600.00", "04/01/2026")])
     assert run_import(path).created == 1
 
@@ -503,8 +503,8 @@ def test_an_admin_corrects_from_the_page_and_the_history_shows_who_when_why() ->
     old.refresh_from_db()
     assert old.superseded_at is not None
     # The page shows the time in the project's zone, New York (PLAN-011b D1).
-    assert timezone.localtime(old.superseded_at).strftime("%Y-%m-%d %H:%M") in old_row
-    assert "$2,600.00 a month from 2026-01-01" in page
+    assert moment_text(old.superseded_at) in old_row
+    assert "$2,600.00 a month from Jan 1, 2026" in page
     # PLAN-012e-2 D8, D10: the rule paragraphs moved to the help page, linked once.
     assert 'months after a closed row have no cost row and read "unknown"' not in page.lower()
     assert 'href="/help/store-costs/"' in page
@@ -521,7 +521,7 @@ def test_a_refused_correction_is_held_with_its_sentence() -> None:
     assert response.status_code == 302
     assert response["Location"] == correct_url(target, first)
     page = client.get(correct_url(target, first)).content.decode()
-    assert "overlap the row from 2026-04-01 to open" in page
+    assert "overlap the row from Apr 1, 2026 to open" in page
     response = client.post(correct_url(target, first), correct_form(change_note="​"))
     page = client.get(correct_url(target, first)).content.decode()
     assert "A note is required: say why the row is changed." in page
@@ -537,7 +537,7 @@ def test_an_admin_closes_from_the_page() -> None:
     assert response.status_code == 302
     assert response["Location"] == detail(target) + "#store-cost"
     page = client.get(detail(target)).content.decode()
-    assert service.CLOSED.format(end="2026-03-31") in page
+    assert service.CLOSED.format(end="Mar 31, 2026") in page
     assert "Landlord ended it." in page
     assert 'id="close-cost-form"' not in page
     cost.refresh_from_db()
@@ -554,7 +554,7 @@ def test_a_close_without_a_note_or_before_the_start_says_why() -> None:
     )
     client.post(close_url(target), {"effective_to": "2026-01-01", "change_note": "Early."})
     page = client.get(detail(target)).content.decode()
-    assert service.CLOSE_BEFORE_START.format(start="2026-02-01") in page
+    assert service.CLOSE_BEFORE_START.format(start="Feb 1, 2026") in page
     cost.refresh_from_db()
     assert cost.effective_to is None
 
@@ -591,4 +591,4 @@ def test_bad_row_ids_are_404_and_close_takes_post_only() -> None:
 def test_a_zero_rent_row_reads_no_cost_on_the_page() -> None:
     target, _ = opened(rent="0.00")
     client, _ = client_for(Role.VIEWER)
-    assert "$0.00 a month (no cost) from 2026-01-01" in client.get(detail(target)).content.decode()
+    assert "$0.00 a month (no cost) from Jan 1, 2026" in client.get(detail(target)).content.decode()

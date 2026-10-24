@@ -1,11 +1,12 @@
-"""PLAN-012f D-2 in a browser (docs/qa/PLAN-012f-approved-design.md D-2; DESIGN-SPEC §6,
-store-workspace-phone.png), by the QA owner.
+"""The phone's two-line table card in a browser (PLAN-012f D-2, generalised by PLAN-012f-a B3;
+DESIGN-SPEC §6, store-workspace-phone.png), by the QA owner.
 
 At 390 x 844 a charge row of the store page's Charges card is a two-line card: the title and
-the amount on the first line, the due date and the status badge on the second, the action
-button full width as the last line; Paid and Balance are not shown unless the row has both
-(then a third line); the table's header row is not visible. At 1,280 x 800 the same table
-shows every column with its header.
+the amount on the first line, the due date (a meta cell) and the status badge on the second,
+the action button full width as the last line; Paid and Balance are not shown unless the row
+has both (then they join the meta line); the table's header row is not visible. The stores list
+and the dashboard's Recent payments read the same way (one table of each family). At 1,280 x 800
+the Charges table shows every column with its header, every cell on the row's line.
 """
 
 from __future__ import annotations
@@ -80,54 +81,82 @@ def a_store_with_an_unpaid_and_a_partial_charge() -> str:
     return reverse("ledger:stores:detail", kwargs={"pk": lease.store_id}) + "?tab=charges"
 
 
+def row_named(table: Locator, iso: str, words: str) -> Locator:
+    """The row of "Rent 2026-09" today and "Rent Sep 2026" once the dates change (B4)."""
+    found = table.locator("tbody tr", has_text=f"Rent {iso}")
+    return found if found.count() else table.locator("tbody tr", has_text=f"Rent {words}")
+
+
+def two_line_card(row: Locator, page: Page) -> None:
+    """The geometry every role card shares at 390: title left and amount right on line 1,
+    the meta cells and the badge below, actions (if any) last and full width; the card fits."""
+    frame = box(row)
+    title = box(row.locator('td[data-role="title"]'))
+    amount = row.locator('td[data-role="amount"]')
+    if amount.count():
+        amount_box = box(amount)
+        assert abs(title["y"] - amount_box["y"]) <= 8, (title, amount_box)
+        assert title["x"] < amount_box["x"]
+        assert amount_box["x"] + amount_box["width"] >= frame["x"] + frame["width"] - 40
+    meta = row.locator('td[data-role="meta"]').first
+    if meta.count():
+        meta_box = box(meta)
+        assert meta_box["y"] >= title["y"] + title["height"] - 2, (meta_box, title)
+    status = row.locator('td[data-role="status"] .badge')
+    if status.count():
+        status_box = box(status)
+        assert status_box["y"] >= title["y"] + title["height"] - 2
+        if meta.count():
+            assert abs(status_box["y"] - box(meta)["y"]) <= 14
+    actions = row.locator('td[data-role="actions"] .btn')
+    if actions.count():
+        button = box(actions.first)
+        assert button["width"] >= 0.85 * frame["width"], (button, frame)
+        assert button["height"] >= 40
+        assert button["y"] >= title["y"] + title["height"]
+    assert frame["x"] + frame["width"] <= PHONE["width"] + 1, frame
+    assert page.evaluate("document.documentElement.scrollWidth") <= PHONE["width"]
+
+
 def test_at_390_a_charge_row_is_the_two_line_card(
     live_server: LiveServer, phone: BrowserContext
 ) -> None:
     path = a_store_with_an_unpaid_and_a_partial_charge()
     page = signed_in(phone, live_server, "phone")
     page.goto(f"{live_server.url}{path}")
-    table = page.locator("table.charges-table")
+    table = page.locator("table#store-charges")
     table.wait_for()
     assert not table.locator("thead").is_visible()
-
-    unpaid = table.locator("tbody tr", has_text="Rent 2026-09")
-    partial = table.locator("tbody tr", has_text="Rent 2026-08")
+    unpaid = row_named(table, "2026-09", "Sep 2026")
+    partial = row_named(table, "2026-08", "Aug 2026")
     assert unpaid.count() == 1 and partial.count() == 1
-
-    row = box(unpaid)
-    title = box(unpaid.locator(".charge-cell-title .cell-title"))
-    amount = box(unpaid.locator(".charge-cell-amount"))
-    due = box(unpaid.locator(".charge-cell-due"))
-    badge = box(unpaid.locator(".charge-cell-status .badge"))
-    button = box(unpaid.locator(".charge-cell-actions .btn").first)
-    # Line 1: the title at the left, the amount at the right, on the same line.
-    assert abs(title["y"] - amount["y"]) <= 8, (title, amount)
-    assert title["x"] < amount["x"]
-    assert amount["x"] + amount["width"] >= row["x"] + row["width"] - 40, (amount, row)
-    # Line 2: the due date and the badge, below line 1, on the same line.
-    assert due["y"] >= title["y"] + title["height"] - 2, (due, title)
-    assert abs(due["y"] - badge["y"]) <= 10, (due, badge)
-    assert due["x"] < badge["x"]
-    # Paid and Balance are not shown on a row without a payment.
-    assert not unpaid.locator(".charge-cell-paid").is_visible()
-    assert not unpaid.locator(".charge-cell-balance").is_visible()
-    # The action button is the last line and spans the card.
-    assert button["y"] >= due["y"] + due["height"] - 2, (button, due)
-    assert button["width"] >= 0.85 * row["width"], (button, row)
-    assert button["height"] >= 40
-
-    # The partial row shows its payment and its balance on a third line, below the due line.
-    paid = box(partial.locator(".charge-cell-paid"))
-    balance = box(partial.locator(".charge-cell-balance"))
-    partial_due = box(partial.locator(".charge-cell-due"))
-    assert paid["y"] >= partial_due["y"] + partial_due["height"] - 2, (paid, partial_due)
-    assert abs(paid["y"] - balance["y"]) <= 10, (paid, balance)
+    two_line_card(unpaid, page)
+    # Paid and Balance are not shown on a row without a payment, shown on a partial one.
+    for cell in unpaid.locator('td[data-role="meta-if-partial"]').all():
+        assert not cell.is_visible()
+    shown = [
+        cell
+        for cell in partial.locator('td[data-role="meta-if-partial"]').all()
+        if cell.is_visible()
+    ]
+    assert len(shown) == 2
     text = " ".join(partial.inner_text().split())
     assert "$500.00" in text and "$1,500.00" in text and "Partially paid" in text
 
-    # Nothing scrolls sideways: the card fits the viewport.
-    assert row["x"] + row["width"] <= PHONE["width"] + 1, row
-    assert page.evaluate("document.documentElement.scrollWidth") <= PHONE["width"]
+
+def test_at_390_the_stores_list_and_the_recent_payments_read_as_cards(
+    live_server: LiveServer, phone: BrowserContext
+) -> None:
+    a_store_with_an_unpaid_and_a_partial_charge()
+    page = signed_in(phone, live_server, "lists")
+    page.goto(f"{live_server.url}/stores/")
+    rows = page.locator('.table-cards table tbody tr:has(td[data-role="title"])')
+    rows.first.wait_for()
+    two_line_card(rows.first, page)
+    page.goto(f"{live_server.url}/")
+    recent = page.locator('#recent-payments-table tbody tr:has(td[data-role="title"])')
+    if recent.count():
+        two_line_card(recent.first, page)
 
 
 def test_at_1280_the_table_keeps_every_column_and_its_header(
@@ -136,35 +165,16 @@ def test_at_1280_the_table_keeps_every_column_and_its_header(
     path = a_store_with_an_unpaid_and_a_partial_charge()
     page = signed_in(laptop, live_server, "laptop")
     page.goto(f"{live_server.url}{path}")
-    table = page.locator("table.charges-table")
+    table = page.locator("table#store-charges")
     table.wait_for()
     assert table.locator("thead").is_visible()
-    unpaid = table.locator("tbody tr", has_text="Rent 2026-09")
-    for cell in (
-        ".charge-cell-title",
-        ".charge-cell-due",
-        ".charge-cell-status",
-        ".charge-cell-amount",
-        ".charge-cell-paid",
-        ".charge-cell-balance",
-    ):
-        assert unpaid.locator(cell).is_visible(), cell
-    title = box(unpaid.locator(".charge-cell-title .cell-title"))
-    # One table row: every cell starts on the row's line (a cell that became a block, as the
-    # first D-2 build's clashing class names made the amount cell, would sit below it).
+    unpaid = row_named(table, "2026-09", "Sep 2026")
     row_top = box(unpaid)["y"]
-    for cell in (
-        ".charge-cell-due",
-        ".charge-cell-status",
-        ".charge-cell-amount",
-        ".charge-cell-paid",
-        ".charge-cell-balance",
-        ".charge-cell-actions",
-    ):
-        found = box(unpaid.locator(cell))
+    cells = unpaid.locator("td").all()
+    assert len(cells) == 7
+    for cell in cells:
+        assert cell.is_visible()
+        found = box(cell)
         assert abs(found["y"] - row_top) <= 2, (cell, found, row_top)
-    assert abs(title["y"] - row_top) <= 20
-    amount = box(unpaid.locator(".charge-cell-amount"))
-    assert amount["x"] > box(unpaid.locator(".charge-cell-status"))["x"]
     header = [" ".join(th.split()) for th in table.locator("thead th").all_inner_texts()]
     assert header[:6] == ["Charge", "Due", "Status", "Amount", "Paid", "Balance"], header

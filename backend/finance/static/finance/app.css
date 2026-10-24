@@ -751,37 +751,37 @@ body.auth > #sandbox-banner { grid-column: 2; grid-row: 2; justify-self: center;
   .table-cards > table td[data-label]::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 40%; font-weight: 500; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
   .table-cards > table td:empty { display: none; }
   .table-cards > table td.money { text-align: left; } /* a card line reads "label: value" */
-  /* The Charges card's rows (PLAN-012f D-2; DESIGN-SPEC §6, store-workspace-phone.png): a
-     two-line card on a grid. Line 1 the title block with the amount bold at the right; line 2
-     "Due <date>" with the status badge at the right; Paid and Balance only on a "partial" row,
-     as a muted third line; the buttons full width last; the operator page's store a muted first
-     line. The cells' "Due", "Paid" and "Balance" words are drawn here, never a second copy. */
-  .table-cards > table.charges-table > thead { width: 0; height: 0; } /* still read by a screen reader; no box on screen */
-  .table-cards > table.charges-table > tbody > tr.store-charge { display: grid; grid-template-columns: auto minmax(0, 1fr) fit-content(55%); grid-template-areas: "store store store" "charge charge amount" "due due status" "paid balance balance" "actions actions actions"; column-gap: var(--space-2); align-items: start; }
-  .table-cards > table.charges-table > tbody > tr.store-charge > td { width: auto; min-width: 0; padding-left: 0; }
-  .table-cards > table.charges-table > tbody > tr.store-charge > td::before { content: none; }
-  .table-cards > table.charges-table td.charge-cell-store { grid-area: store; color: var(--muted); font-size: var(--fs-sm); }
-  .table-cards > table.charges-table td.charge-cell-store a { color: inherit; }
-  .table-cards > table.charges-table td.charge-cell-title { grid-area: charge; overflow-wrap: anywhere; }
-  .table-cards > table.charges-table td.charge-cell-amount { grid-area: amount; display: flex; align-items: center; justify-content: flex-end; min-height: var(--tap); font-weight: 700; white-space: nowrap; } /* centred on the title link's 44 px line */
-  .table-cards > table.charges-table td.charge-cell-due { grid-area: due; }
-  .table-cards > table.charges-table td.charge-cell-status { grid-area: status; text-align: right; }
-  .table-cards > table.charges-table td.charge-cell-paid { grid-area: paid; }
-  .table-cards > table.charges-table td.charge-cell-balance { grid-area: balance; }
-  .table-cards > table.charges-table tr.store-charge:not(.partial) > td.charge-cell-paid, .table-cards > table.charges-table tr.store-charge:not(.partial) > td.charge-cell-balance { display: none; }
-  .table-cards > table.charges-table td.charge-cell-paid, .table-cards > table.charges-table td.charge-cell-balance { color: var(--muted); font-size: var(--fs-sm); text-align: left; }
-  .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-due::before, .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-paid::before, .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-balance::before { position: static; width: auto; font: inherit; color: var(--muted); }
-  .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-due::before { content: "Due "; }
-  .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-paid::before { content: "Paid "; }
-  .table-cards > table.charges-table > tbody > tr.store-charge > td.charge-cell-balance::before { content: "\00B7  Balance "; }
-  .table-cards > table.charges-table td.charge-cell-actions { grid-area: actions; }
-  .table-cards > table.charges-table td.charge-cell-actions > .btn { display: flex; justify-content: center; width: 100%; box-sizing: border-box; }
-  .table-cards > table.charges-table td.charge-cell-actions > .btn + .btn { margin-top: var(--space-2); }
+  /* Every cards table's two-line card (PLAN-012f-a B3; DESIGN-SPEC §6, store-workspace-phone.png):
+     the responsive_table tag gives each body cell a data-role and the table "role-cards". Line 1
+     the title (its subline under it) with the amount bold at the right; line 2 the meta cells
+     inline, "Label value" in muted small text joined by " · ", the status badge at the right; the
+     actions last, full width, stacked; a meta-badge cell (badges only) without its label. A cell
+     without a role (the empty row) takes the width. The rules hang on the tag's "role-cards"
+     class, not on :has(). A wrapping flex row, not a grid (the plan's deviation, PLAN-012f-a
+     A4): a grid area holds one cell and the meta line holds several. */
+  .table-cards > table.role-cards > thead { width: 0; height: 0; } /* still read by a screen reader; no box on screen */
+  .table-cards > table.role-cards > tbody > tr { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: var(--space-2); }
+  .table-cards > table.role-cards > tbody > tr::before { content: ""; order: 3; flex: 0 0 100%; height: 0; } /* the end of line 1 */
+  .table-cards > table.role-cards > tbody > tr > td { width: auto; min-width: 0; padding-left: 0; }
+  .table-cards > table.role-cards > tbody > tr > td::before { content: none; }
+  .table-cards > table.role-cards > tbody > tr > td:not([data-role]) { flex: 0 0 100%; }
+  .table-cards > table.role-cards > tbody > tr > td[data-role=title] { order: 1; flex: 1 1 0; overflow-wrap: anywhere; }
+  .table-cards > table.role-cards > tbody > tr > td[data-role=amount] { order: 2; flex: 0 0 auto; margin-left: auto; display: flex; align-items: center; justify-content: flex-end; min-height: calc(var(--tap) + .7rem); font-weight: 700; white-space: nowrap; text-align: right; } /* centred on the title link's 44 px line (the cell's padding counted) */
+  .table-cards > table.role-cards > tbody > tr > td[data-role=meta-badge] { order: 4; flex: 0 1 auto; }
+  .table-cards > table.role-cards > tbody > tr > td[data-role=meta], .table-cards > table.role-cards > tbody > tr > td[data-role=meta-if-partial] { order: 4; flex: 0 1 auto; color: var(--muted); font-size: var(--fs-sm); text-align: left; overflow-wrap: anywhere; }
+  .table-cards > table.role-cards > tbody > tr > td[data-role=meta]::before, .table-cards > table.role-cards > tbody > tr > td[data-role=meta-if-partial]::before { content: attr(data-label) " "; position: static; width: auto; font: inherit; color: inherit; }
+  .table-cards > table.role-cards > tbody > tr > td[data-role^=meta] ~ td[data-role^=meta]::before { content: "\00B7  " attr(data-label) " "; }
+  .table-cards > table.role-cards > tbody > tr > td[data-role^=meta] ~ td[data-role=meta-badge]::before { content: none; } /* a badge reads alone */
+  .table-cards > table.role-cards > tbody > tr:not(.partial) > td[data-role=meta-if-partial] { display: none; } /* Paid and Balance: only on a part-paid charge */
+  .table-cards > table.role-cards > tbody > tr > td[data-role=status] { order: 5; margin-left: auto; text-align: right; }
+  .table-cards > table.role-cards > tbody > tr > td[data-role=actions] { order: 6; flex: 0 0 100%; }
+  .table-cards > table.role-cards td[data-role=actions] .btn, .table-cards > table.role-cards td[data-role=actions] button { display: flex; justify-content: center; align-items: center; width: 100%; min-height: var(--tap); box-sizing: border-box; }
+  .table-cards > table.role-cards td[data-role=actions] > * + * { margin-top: var(--space-2); }
   /* The totals row: one line, the label at the left and the sum at the right. */
-  .table-cards > table.charges-table tr.totals { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); background: var(--surface-2); }
-  .table-cards > table.charges-table tr.totals > th, .table-cards > table.charges-table tr.totals > td { width: auto; padding-left: 0; background: transparent; }
-  .table-cards > table.charges-table tr.totals > td::before { content: none; }
-  .table-cards > table.charges-table tr.totals > td.money { text-align: right; }
+  .table-cards > table.role-cards tr.totals { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); background: var(--surface-2); }
+  .table-cards > table.role-cards tr.totals > th, .table-cards > table.role-cards tr.totals > td { width: auto; padding-left: 0; background: transparent; }
+  .table-cards > table.role-cards tr.totals > td::before { content: none; }
+  .table-cards > table.role-cards tr.totals > td.money { text-align: right; }
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
   /* The phone keeps the sideways scroll and the fixed store column, narrower. */
   table.grid th.store-col { width: 8rem !important; min-width: 8rem !important; max-width: 9rem !important; white-space: normal !important; }

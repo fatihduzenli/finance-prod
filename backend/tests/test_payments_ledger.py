@@ -218,15 +218,22 @@ def test_every_role_reads_the_ledger_and_the_totals(book: dict[str, Any], role: 
     client, _ = client_for(role)
     page = client.get(LIST).content.decode()
     assert (
-        '<td id="total-settled" class="money" data-label="Settled (collected)">$1,900.00</td>'
+        '<td id="total-settled" class="money" data-role="meta" data-label="Settled (collected)">'
+        "$1,900.00</td>" in page
+    )
+    assert (
+        '<td id="total-pending" class="money" data-role="meta" '
+        'data-label="Pending (not collected yet)">'
+        "$700.00</td>" in page
+    )
+    assert (
+        '<td id="total-returned" class="money" data-role="meta" data-label="Returned">$300.00</td>'
         in page
     )
     assert (
-        '<td id="total-pending" class="money" data-label="Pending (not collected yet)">'
-        "$700.00</td>" in page
+        '<td id="total-refunded" class="money" data-role="meta" data-label="Refunded">$200.00</td>'
+        in page
     )
-    assert '<td id="total-returned" class="money" data-label="Returned">$300.00</td>' in page
-    assert '<td id="total-refunded" class="money" data-label="Refunded">$200.00</td>' in page
     assert "txn-…5678" in page and TRANSACTION not in page
 
 

@@ -19,20 +19,23 @@ The wizard's state is one :class:`~ledger.models.LeaseEnd` row per lease
    provider: the existing actions clear them, and nothing past this step is offered
    while one is listed. Confirm checks them again.
 3. **Statement and deductions** (:func:`ledger.services.statements.final`,
-   :func:`set_deductions`): typed deductions; the unpaid-balance offset never above the
-   open balance. The first time the step renders with nothing blocking
-   (:func:`open_statement`, PLAN-012b-b D9, D10) the rent charges the statement needs
-   are created through the rent run's helpers (the earlier months' missing debits and
-   the end month's charge as confirm would create it), so the statement lists real
-   charges, and the draft is marked ``statement_opened_at``: from then on it is in
-   progress (the store page's banner). A draft that never got there is adopted by a
+   :func:`save_statement`): typed deductions; the unpaid-balance offset never above the
+   open balance. Showing the step writes nothing: the rent charges the statement needs
+   (the earlier months' missing debits and the end month's charge as confirm would
+   create it) are preview lines with the same totals. When the step is saved with
+   nothing blocking (:func:`save_statement`, PLAN-012b-b D9, D10, PLAN-012f-a D) they
+   are created through the rent run's helpers, and the draft is marked
+   ``statement_opened_at`` (set when the statement step is first saved): from then on it
+   is in progress (the store page's banner). A draft that never got there is adopted by a
    transfer (:func:`adopt_for_transfer`); one whose terms were never set is deleted
    after :data:`STALE_DRAFT_DAYS` days by the daily job (:func:`sweep_drafts`).
 4. **Settlement** (:func:`set_settlement`): when a refund is due, how (Zelle, wire or
    check, never the payment provider), when, a reference and a note.
 5. **Confirm** (:func:`confirm`, an explicit "are you sure"): in one transaction, under
-   the lease's and the draft's row locks, the blockers are read again and the statement
-   computed again, then the last month is applied (D3), the lease is ended
+   the lease's and the draft's row locks, the blockers are read again, the rent charges
+   the statement needs are created as the statement step's save creates them (nothing
+   when it was saved, PLAN-012f-a D) and the statement computed again, then the last
+   month is applied (D3), the lease is ended
    (:func:`ledger.services.leases.end_lease`), the unpaid-balance offset is paid to the
    open charges oldest first as settled manual payments (method ``other``, reference
    "deposit offset"), each deposit is resolved in one row
@@ -79,6 +82,7 @@ from django.utils import timezone
 
 import mail
 from documents_storage import StorageUnavailable
+from finance.dates import day_text, month_text
 from ledger import merge
 from ledger.models import (
     LIVE_PLAN_STATUSES,
@@ -399,7 +403,7 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
         # A builder invoice's Rent line names the charge too (PLAN-012b-b D5).
         invoice = _live_invoice(rent_run.charge_invoices(rent))
         if invoice is not None:
-            what = f"Rent {rent.period_month:%Y-%m}" + (
+            what = f"Rent {month_text(rent.period_month)}" + (
                 f" (debit {rent.seq})" if rent.seq > 1 else ""
             )
             found.append(
@@ -538,7 +542,7 @@ def start(lease: Lease, actor: User | None, *, reason: str = "") -> LeaseEnd:
 
 def in_progress(end: LeaseEnd | None) -> bool:
     """Whether a lease end is in progress (PLAN-012b-b D9): a draft whose statement step
-    has opened."""
+    has been saved (``statement_opened_at``, set on its first save)."""
     return (
         end is not None
         and end.status == LeaseEndStatus.DRAFT
@@ -562,7 +566,7 @@ def store_in_progress(store: Store) -> LeaseEnd | None:
 
 
 def adopt_for_transfer(end: LeaseEnd, actor: User | None) -> LeaseEnd:
-    """PLAN-012b-b D9: a draft that never reached the statement becomes the transfer's:
+    """PLAN-012b-b D9: a draft whose statement step was never saved becomes the transfer's:
     the reason is set to ``transfer``, the terms are kept, audited
     ``lease_end.adopted_by_transfer``. Runs in the caller's transaction (the transfer's
     start, under the store's row lock). ``ValueError`` with one sentence for a draft
@@ -577,70 +581,6 @@ def adopt_for_transfer(end: LeaseEnd, actor: User | None) -> LeaseEnd:
     row.save(update_fields=["reason", "updated_at"])
     _audit(actor, "lease_end.adopted_by_transfer", row.pk, before, _state(row))
     return row
-
-
-def open_statement(
-    end: LeaseEnd, actor: User | None, today: date | None = None
-) -> list[RentCharge]:
-    """The statement step opened (PLAN-012b-b D9, D10): returns the rent charges created.
-
-    Under the lease's and the draft's row locks, when the draft's terms are set and
-    nothing blocks (:func:`blockers`): the missing debits of the months before the end
-    month are created by the rent run's catch-up
-    (:func:`ledger.services.rent_run.catch_up_lease`), and each charge of the end month
-    that confirm would create (:func:`ledger.services.statements.last_month`, prorated
-    by its rule) by :func:`ledger.services.rent_run.create_month`, audited with the
-    lease end. Charges that exist are never changed here (confirm reduces them). The
-    first time, ``statement_opened_at`` is set (``lease_end.statement_opened``).
-    Nothing for a confirmed draft, one without terms, or one with a blocker. Local data
-    only: no provider call."""
-    day = today or timezone.localdate()
-    made: list[RentCharge] = []
-    with transaction.atomic():
-        lease = Lease.objects.select_for_update(of=("self",)).get(pk=end.lease_id)
-        row = (
-            LeaseEnd.objects.select_for_update(of=("self",))
-            .select_related("lease", "lease__store", "lease__operator")
-            .filter(pk=end.pk, status=LeaseEndStatus.DRAFT)
-            .first()
-        )
-        if row is None or row.ended_on is None or not terms_set(row):
-            return made
-        if lease.ended_on is not None or blockers(lease, day):
-            return made
-        month = row.ended_on.replace(day=1)
-        made.extend(rent_run.catch_up_lease(lease, month - timedelta(days=1), actor))
-        last = statements.last_month(row)
-        if last is not None:
-            for change in last.changes:
-                if change.charge_id is not None:
-                    continue
-                charge, created = rent_run.create_month(
-                    lease,
-                    last.month,
-                    actor,
-                    due_on=change.due_on,
-                    seq=change.seq,
-                    amount=change.after,
-                    proration_text=last.text,
-                    context={"lease_end": str(row.pk)},
-                )
-                if created:
-                    made.append(charge)
-        if row.statement_opened_at is None:
-            row.statement_opened_at = timezone.now()
-            row.save(update_fields=["statement_opened_at", "updated_at"])
-            _audit(
-                actor,
-                "lease_end.statement_opened",
-                row.pk,
-                {"statement_opened_at": None},
-                {
-                    "statement_opened_at": row.statement_opened_at.isoformat(),
-                    "charges": [str(charge.pk) for charge in made],
-                },
-            )
-    return made
 
 
 def sweep_drafts(now: datetime | None = None) -> int:
@@ -717,9 +657,7 @@ def set_terms(
             if ended_on > day:
                 raise _Abort(DATE_FUTURE, "ended_on")
             if lease.started_on is not None and ended_on < lease.started_on:
-                raise _Abort(
-                    DATE_BEFORE_START.format(start=lease.started_on.isoformat()), "ended_on"
-                )
+                raise _Abort(DATE_BEFORE_START.format(start=day_text(lease.started_on)), "ended_on")
             if reason not in LeaseEndReason.values:
                 raise _Abort(REASON_REQUIRED, "reason")
             if reason != LeaseEndReason.TRANSFER and draft_transfer(row) is not None:
@@ -775,6 +713,37 @@ def _offset_refusal(figures: statements.Final) -> str:
     return ""
 
 
+def _write_deductions(
+    row: LeaseEnd, lines: Sequence[DeductionInput], actor: User | None, today: date | None
+) -> None:
+    """Replace the locked draft's deductions, refused (:class:`_Abort`) when one is not
+    valid or the unpaid-balance offset is above the open balance; audited
+    ``lease_end.deductions_set``. Runs in the caller's transaction."""
+    if len(lines) > MAX_DEDUCTIONS:
+        raise _Abort(TOO_MANY_DEDUCTIONS, "deductions")
+    cleaned = [_clean_deduction(item) for item in lines]
+    before = [_deduction_state(item) for item in row.deductions.all()]
+    row.deductions.all().delete()
+    for position, item in enumerate(cleaned, start=1):
+        LeaseEndDeduction.objects.create(
+            lease_end=row,
+            kind=item.kind,
+            description=item.description,
+            amount=item.amount,
+            position=position,
+        )
+    refusal = _offset_refusal(statements.final(row, today=today))
+    if refusal:
+        raise _Abort(refusal, "deductions")
+    _audit(
+        actor,
+        "lease_end.deductions_set",
+        row.pk,
+        {"deductions": before},
+        {"deductions": [_deduction_state(item) for item in cleaned]},
+    )
+
+
 def set_deductions(
     end: LeaseEnd,
     lines: Sequence[DeductionInput],
@@ -782,36 +751,100 @@ def set_deductions(
     actor: User | None,
     today: date | None = None,
 ) -> Outcome:
-    """Step (c): replace the deductions. The unpaid-balance offset is never above the
-    open balance."""
+    """Replace the deductions only, no rent charge created (the statement step saves
+    through :func:`save_statement`). The unpaid-balance offset is never above the open
+    balance."""
     try:
         with transaction.atomic():
             row = _locked_draft(end.pk)
             if not terms_set(row):
                 raise _Abort(TERMS_REQUIRED)
-            if len(lines) > MAX_DEDUCTIONS:
-                raise _Abort(TOO_MANY_DEDUCTIONS, "deductions")
-            cleaned = [_clean_deduction(item) for item in lines]
-            before = [_deduction_state(item) for item in row.deductions.all()]
-            row.deductions.all().delete()
-            for position, item in enumerate(cleaned, start=1):
-                LeaseEndDeduction.objects.create(
-                    lease_end=row,
-                    kind=item.kind,
-                    description=item.description,
-                    amount=item.amount,
-                    position=position,
-                )
-            refusal = _offset_refusal(statements.final(row, today=today))
-            if refusal:
-                raise _Abort(refusal, "deductions")
-            _audit(
+            _write_deductions(row, lines, actor, today)
+    except _Abort as abort:
+        return _refused(abort.message, abort.field)
+    return Outcome(True, DEDUCTIONS_SAVED, lease_end=row)
+
+
+def _create_statement_charges(lease: Lease, row: LeaseEnd, actor: User | None) -> list[RentCharge]:
+    """The rent charges the statement needs (PLAN-012b-b D10, PLAN-012f-a D), created under
+    the caller's lease and draft row locks: the missing debits of the months before the end
+    month by the rent run's catch-up (:func:`ledger.services.rent_run.catch_up_lease`), and
+    each charge of the end month that the last month's rule needs
+    (:func:`ledger.services.statements.last_month`) by
+    :func:`ledger.services.rent_run.create_month`, audited with the lease end. Charges that
+    exist are never changed here (confirm reduces them). Returns the charges created."""
+    if row.ended_on is None:
+        return []
+    month = row.ended_on.replace(day=1)
+    made = list(rent_run.catch_up_lease(lease, month - timedelta(days=1), actor))
+    last = statements.last_month(row)
+    if last is not None:
+        for change in last.changes:
+            if change.charge_id is not None:
+                continue
+            charge, created = rent_run.create_month(
+                lease,
+                last.month,
                 actor,
-                "lease_end.deductions_set",
-                row.pk,
-                {"deductions": before},
-                {"deductions": [_deduction_state(item) for item in cleaned]},
+                due_on=change.due_on,
+                seq=change.seq,
+                amount=change.after,
+                proration_text=last.text,
+                context={"lease_end": str(row.pk)},
             )
+            if created:
+                made.append(charge)
+    return made
+
+
+def save_statement(
+    end: LeaseEnd,
+    lines: Sequence[DeductionInput],
+    *,
+    actor: User | None,
+    today: date | None = None,
+) -> Outcome:
+    """Step (c) saved, "Save and continue" (PLAN-012b-b D9, D10; PLAN-012f-a D).
+
+    In one transaction, under the lease's and the draft's row locks, when the draft's
+    terms are set, the lease has not ended and nothing blocks (:func:`blockers`): the
+    missing debits of the months before the end month are created by the rent run's
+    catch-up (:func:`ledger.services.rent_run.catch_up_lease`), each charge of the end
+    month that confirm would create (:func:`ledger.services.statements.last_month`,
+    prorated by its rule) by :func:`ledger.services.rent_run.create_month`, audited with
+    the lease end, and the deductions are replaced (the unpaid-balance offset never above
+    the open balance). Charges that exist are never changed here (confirm reduces them).
+    The first time, ``statement_opened_at`` is set (``lease_end.statement_saved``, with
+    the charges created). A refusal is one sentence and writes nothing. The statement
+    page shows the same figures before the save (preview lines). Local data only: no
+    provider call."""
+    day = today or timezone.localdate()
+    try:
+        with transaction.atomic():
+            lease = Lease.objects.select_for_update(of=("self",)).get(pk=end.lease_id)
+            row = _locked_draft(end.pk)
+            if row.ended_on is None or not terms_set(row):
+                raise _Abort(TERMS_REQUIRED)
+            if lease.ended_on is not None:
+                raise _Abort(ALREADY_ENDED)
+            found = blockers(lease, day)
+            if found:
+                raise _Abort(BLOCKED.format(count=len(found)))
+            made = _create_statement_charges(lease, row, actor)
+            _write_deductions(row, lines, actor, day)
+            if row.statement_opened_at is None:
+                row.statement_opened_at = timezone.now()
+                row.save(update_fields=["statement_opened_at", "updated_at"])
+                _audit(
+                    actor,
+                    "lease_end.statement_saved",
+                    row.pk,
+                    {"statement_opened_at": None},
+                    {
+                        "statement_opened_at": row.statement_opened_at.isoformat(),
+                        "charges": [str(charge.pk) for charge in made],
+                    },
+                )
     except _Abort as abort:
         return _refused(abort.message, abort.field)
     return Outcome(True, DEDUCTIONS_SAVED, lease_end=row)
@@ -911,36 +944,17 @@ def _settlement_text(end: LeaseEnd, what: str) -> str:
 def _apply_last_month(
     end: LeaseEnd, last: statements.LastMonth, on: date, actor: User | None
 ) -> tuple[list[str], list[Payment]]:
-    """D3: reduce the month's charges, refund a credit, create a missing charge. Returns
-    the charges written and the credit refunds."""
-    lease = end.lease
+    """D3: reduce the month's charges and refund a credit (the missing charges are created
+    before, :func:`_create_statement_charges`). Returns the charges written and the credit
+    refunds."""
     written: list[str] = []
     refunds: list[Payment] = []
     for change in last.changes:
         if change.charge_id is None:
-            try:
-                with transaction.atomic():
-                    charge = RentCharge.objects.create(
-                        lease=lease,
-                        period_month=last.month,
-                        seq=change.seq,
-                        due_on=change.due_on,
-                        amount_due=change.after,
-                        status=RentChargeStatus.DUE,
-                        proration_text=last.text or None,
-                    )
-            except IntegrityError:
-                raise _Abort(CHANGED_MEANWHILE) from None
-            _audit(
-                actor,
-                "rent_charge.created",
-                charge.pk,
-                None,
-                {**rent_run.charge_state(charge), "lease_end": str(end.pk)},
-                entity_type=rent_run.ENTITY_CHARGE,
-            )
-            written.append(str(charge.pk))
-            continue
+            # PLAN-012f-a D: never reached; confirm creates the end month's missing charges
+            # (_create_statement_charges) before it reads the figures. A missing charge here
+            # means the month changed under the locks: refuse rather than create it.
+            raise _Abort(CHANGED_MEANWHILE)
         charge = RentCharge.objects.select_for_update().get(pk=change.charge_id)
         if (charge.amount_due, charge.amount_paid) != (change.before, change.paid):
             raise _Abort(CHANGED_MEANWHILE)
@@ -1284,6 +1298,9 @@ def _confirm(
     found = blockers(lease, day)
     if found:
         raise _Abort(BLOCKED.format(count=len(found)))
+    # PLAN-012f-a D: confirm creates what the statement step's save creates (a no-op once
+    # it was saved), so the figures and the kept statement hold real charges only.
+    _create_statement_charges(lease, row, actor)
     figures = statements.final(row, today=day)
     refusal = _offset_refusal(figures)
     if refusal:

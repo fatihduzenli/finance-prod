@@ -1771,3 +1771,19 @@ sixth "How to collect" choice, a repeating plan of single-occurrence debits (ADR
 `docs/qa/PLAN-012f-a-design-follow-up.md` holds the decisions, the contract, the five batches,
 the test plan and nine questions for the owner, none blocking Batch A. Batch A assigned: D and the
 two-line card in parallel, then the dates.
+
+## Update, 2026-10-24, PLAN-012f-a Batch A built and gated (not pushed)
+
+Part D: the lease-end and transfer statement step writes nothing on GET or HEAD; the charges it
+needs are preview lines with the same totals until "Save and continue" creates them under the
+locks; confirm creates the same charges before its figures; a transfer's balance blockers count a
+planned charge like an existing one (two MAJOR findings closed on the way). B3: the two-line phone
+card on every table by roles the responsive-table tag assigns (title, amount, meta, status,
+actions; summary tables, form tables and explicit roles handled), replacing the hand-written
+Charges rule. B4: `finance/dates.py` and the `dates` filters; 63 templates and some forty service
+strings now read "Nov 1, 2026" / "Oct 2026" / "14:02"; CSV, ICS, JSON, audit rows, form values
+and URLs keep ISO; a guard test renders 27 pages for three roles and refuses any ISO text. Part A
+docs restored. Gate: sqlite 6,625 passed; PostgreSQL 34 + 7,252 passed; e2e 29 passed in four
+runs; seven test expectations fixed by Fable and re-run green on both engines; the thirty
+baselines regenerated against PostgreSQL and pixel-identical on sqlite. Batch B (the list and
+detail families) assigned.

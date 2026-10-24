@@ -121,7 +121,8 @@ def _split_page(request: HttpRequest, parent: service.Parent, url: str) -> HttpR
     refusal = service.split_refusal(parent)
     context: dict[str, Any] = {
         "parent": parent,
-        "parent_label": service.parent_label(parent),
+        # The screen label, under the key the templates read (PLAN-012f-a B4).
+        "parent_label": service.parent_screen_label(parent),
         "parent_url": service.parent_url(parent),
         "balance": service.balance_of(parent),
         "collection": InstallmentCollection(service.collection_of(parent)).label,
@@ -245,7 +246,8 @@ def plan_detail(request: HttpRequest, pk: str) -> HttpResponse:
             # PLAN-012d D5: "← Store NNNN".
             "crumb_store": plan.lease.store if plan.lease is not None else None,
             "progress": service.progress(plan),
-            "parent_label": service.parent_label(plan.parent),
+            # The screen label, under the key the templates read (PLAN-012f-a B4).
+            "parent_label": service.parent_screen_label(plan.parent),
             "parent_url": service.parent_url(plan.parent),
             "can_reschedule": live and meets(_role(request), Role.BILLING),
             "can_cancel": live and meets(_role(request), Role.ADMIN),
@@ -289,7 +291,8 @@ def plan_reschedule(request: HttpRequest, pk: str) -> HttpResponse:
         {
             "plan": plan,
             "form": form,
-            "parent_label": service.parent_label(plan.parent),
+            # The screen label, under the key the templates read (PLAN-012f-a B4).
+            "parent_label": service.parent_screen_label(plan.parent),
             "help": service.RESCHEDULE_HELP,
         },
     )
@@ -321,7 +324,8 @@ def plan_cancel(request: HttpRequest, pk: str) -> HttpResponse:
         {
             "plan": plan,
             "form": form,
-            "parent_label": service.parent_label(plan.parent),
+            # The screen label, under the key the templates read (PLAN-012f-a B4).
+            "parent_label": service.parent_screen_label(plan.parent),
             "help": service.CANCEL_HELP,
         },
     )

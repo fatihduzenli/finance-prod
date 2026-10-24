@@ -25,6 +25,7 @@ from django.utils.html import escape
 
 from accounts import registry
 from accounts.roles import Role
+from finance.dates import day_text, moment_text
 from ledger.models import (
     AuditLog,
     ContactCorrection,
@@ -216,7 +217,7 @@ def test_the_edit_page_inside_and_outside_the_window(monkeypatch: pytest.MonkeyP
     assert f"until {closes:%H:%M}" in log
     assert f"/contacts/{row.pk}/correct/" not in log
     form = page_of(client, f"/contacts/{row.pk}/edit/")
-    assert f"until {closes:%Y-%m-%d %H:%M}" in form
+    assert f"until {moment_text(closes)}" in form
     response = client.post(f"/contacts/{row.pk}/edit/", edit_post(row, body="Agreed Friday."))
     assert response.status_code == 302
     row.refresh_from_db()
@@ -605,7 +606,7 @@ def test_add_entry_on_a_store_whose_only_lease_is_not_in_effect(
     lease = a_lease(store, operator, started=started, status=status)
     if ended_on is not None:
         Lease.objects.filter(pk=lease.pk).update(ended_on=ended_on)
-        suffix = f", lease ended {ended_on.isoformat()}"
+        suffix = f", lease ended {day_text(ended_on)}"
     for role in (Role.BILLING, Role.ADMIN):
         client, _ = client_for(role)
         assert add_link(store) in page_of(client, f"/stores/{store.pk}/?tab=contacts")
@@ -651,7 +652,7 @@ def test_of_two_ended_leases_the_later_start_wins_then_the_later_creation(
     assert contacts.store_contact_lease(store, TODAY) == later
     client, _ = client_for(Role.BILLING)
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
-    assert "<h1>Add entry: Second, store 2477, lease ended 2024-06-30</h1>" in form
+    assert "<h1>Add entry: Second, store 2477, lease ended Jun 30, 2024</h1>" in form
     # A lease without a start comes last; between two, the later creation wins.
     other = a_store("2478")
     Lease.objects.filter(pk=undated.pk).update(store=other)
@@ -741,8 +742,8 @@ def test_the_attention_text_names_the_store_and_the_leases_balance() -> None:
     promise(operator, lease=other, by=date(2026, 10, 4), amount="100.00")
     items = [i.text for i in attention.attention(TODAY).items if i.kind == "broken_promise"]
     assert items == [
-        "Promise to pay $100.00 by 2026-10-04: Acme on store 2476: owes $3,500.00, not kept",
-        "Promise to pay $500.00 by 2026-10-05: Acme on store 2477: owes $1,250.00, not kept",
+        "Promise to pay $100.00 by Oct 4, 2026: Acme on store 2476: owes $3,500.00, not kept",
+        "Promise to pay $500.00 by Oct 5, 2026: Acme on store 2477: owes $1,250.00, not kept",
     ]
     banners = attention.attention(TODAY, operator=operator.pk).items
     assert "on store 2477: owes $1,250.00" in " ".join(item.text for item in banners)
@@ -905,7 +906,7 @@ def test_the_form_asks_for_the_outcome_when_a_promise_is_open(today: date) -> No
     old = promise(operator, by=date(2026, 10, 9), amount="700.00")
     page = form_page(client, operator)
     assert 'name="outcome"' in page and 'name="closes"' not in page
-    assert f'<option value="{old.pk}" selected>$700.00 by 2026-10-09' in page
+    assert f'<option value="{old.pk}" selected>$700.00 by Oct 9, 2026' in page
     assert '"amount": "700.00"' in page and '"date": "2026-10-09"' in page
     assert '<input type="radio" name="outcome" value="open"' in page
     assert 'value="open" id="id_outcome_0" checked' in page
@@ -1342,7 +1343,7 @@ def test_a_new_promise_closes_the_open_promise_of_its_lease_as_rescheduled(today
     # The store form warns beforehand.
     form = page_of(client, f"/stores/{store.pk}/contacts/new/")
     warning = (
-        "Saving a promise closes the open promise of $700.00 by 2026-10-09 on this store "
+        "Saving a promise closes the open promise of $700.00 by Oct 9, 2026 on this store "
         "as Rescheduled."
     )
     assert warning in form
@@ -1364,7 +1365,7 @@ def test_a_new_promise_closes_the_open_promise_of_its_lease_as_rescheduled(today
     old.refresh_from_db()
     assert (old.status, old.closed_by) == (ContactStatus.RESCHEDULED, new)
     message = (
-        "Promise recorded; the earlier promise of $700.00 by 2026-10-09 is closed as Rescheduled."
+        "Promise recorded; the earlier promise of $700.00 by Oct 9, 2026 is closed as Rescheduled."
     )
     assert message in page_of(client, f"/stores/{store.pk}/?tab=contacts")
     for untouched in (elsewhere, no_store, gone):
@@ -1514,9 +1515,9 @@ def three_closings(
         body="New date.",
     )
     return {
-        "Closed $2,000.00 by 2026-10-01 as Kept": (kept, kept_by),
-        "Closed $300.00 by 2026-10-03 as Broken": (broken, broken_by),
-        "Closed $400.00 by 2026-10-04 as Rescheduled": (moved, moved_by),
+        "Closed $2,000.00 by Oct 1, 2026 as Kept": (kept, kept_by),
+        "Closed $300.00 by Oct 3, 2026 as Broken": (broken, broken_by),
+        "Closed $400.00 by Oct 4, 2026 as Rescheduled": (moved, moved_by),
     }
 
 
@@ -1546,13 +1547,13 @@ def test_the_closing_entries_name_their_promise_on_every_page_and_in_the_csv(
             assert "contact-closes" not in promise_cell(log, closed), path
         assert promise_cell(log, plain) == "", path  # PLAN-012f D6: no promise, nothing shown
     # The Rescheduled closing entry is a promise: its own promise first, then the sentence.
-    _, moved_by = closings["Closed $400.00 by 2026-10-04 as Rescheduled"]
+    _, moved_by = closings["Closed $400.00 by Oct 4, 2026 as Rescheduled"]
     cell = promise_cell(table_of(page_of(client, f"/operators/{operator.pk}/")), moved_by)
-    own = cell.index("$450.00 by 2026-10-20")
+    own = cell.index("$450.00 by Oct 20, 2026")
     assert own < cell.index('<div class="contact-closes">') < cell.index("as Rescheduled")
     assert 'promise-status promise-open">Open<' in cell
     # The call closings show the sentence alone, without "—".
-    _, kept_by = closings["Closed $2,000.00 by 2026-10-01 as Kept"]
+    _, kept_by = closings["Closed $2,000.00 by Oct 1, 2026 as Kept"]
     kept_cell = promise_cell(table_of(page_of(client, f"/operators/{operator.pk}/")), kept_by)
     assert kept_cell.startswith('<div class="contact-closes">') and "—" not in kept_cell
     # The CSV column reads the same sentence without the link.
@@ -1587,11 +1588,11 @@ def test_the_store_page_links_to_the_operator_page_for_a_promise_not_on_that_sto
         log = table_of(page_of(client, path))
         assert closes_link(promise_cell(log, moved)) == (
             f"{operator_page}#contact-{on_there.pk}",
-            "Closed $2,000.00 by 2026-10-01 as Broken",
+            "Closed $2,000.00 by Oct 1, 2026 as Broken",
         )
         assert closes_link(promise_cell(log, kept)) == (
             f"{operator_page}#contact-{no_store.pk}",
-            "Closed $100.00 by 2026-10-02 as Kept",
+            "Closed $100.00 by Oct 2, 2026 as Kept",
         )
     # On the operator page both promises are listed: the links stay there.
     log = table_of(page_of(client, operator_page))
@@ -1620,7 +1621,7 @@ def test_an_entry_whose_closed_by_names_nothing_shows_nothing(today: date) -> No
     client, _ = client_for(Role.BILLING)
     log = table_of(page_of(client, f"/operators/{operator.pk}/"))
     cell = promise_cell(log, moved)
-    assert cell.count("contact-closes") == 1 and "$200.00 by 2026-10-09 as Rescheduled" in cell
+    assert cell.count("contact-closes") == 1 and "$200.00 by Oct 9, 2026 as Rescheduled" in cell
     assert "$300.00" not in cell
     for row in (on_a, on_b):
         assert "contact-closes" not in promise_cell(log, row)
@@ -1632,7 +1633,8 @@ def test_a_deleted_promise_or_closing_entry_keeps_the_sentence(today: date) -> N
     lease = a_lease(operator=operator)
     original = promise(operator, lease=lease, by=date(2026, 10, 1), amount="2000.00")
     closer = closing(operator, original, "broken", lease=lease, body="Will not pay.")
-    sentence = "Closed $2,000.00 by 2026-10-01 as Broken"
+    sentence = "Closed $2,000.00 by Oct 1, 2026 as Broken"
+    csv_sentence = "Closed $2,000.00 by 2026-10-01 as Broken"  # the export keeps ISO
     deleted(original, "Entered twice.")
     path = f"/operators/{operator.pk}/"
     for role in (Role.BILLING, Role.VIEWER):
@@ -1650,7 +1652,7 @@ def test_a_deleted_promise_or_closing_entry_keeps_the_sentence(today: date) -> N
     body = b"".join(
         admin.get(f"{path}contacts/export.csv").streaming_content  # type: ignore[attr-defined]
     ).decode()
-    assert sentence in body
+    assert csv_sentence in body
 
 
 def test_the_pages_read_the_closed_promises_in_their_own_queries(today: date) -> None:

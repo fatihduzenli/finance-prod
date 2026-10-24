@@ -217,7 +217,8 @@ def test_the_closing_entry_names_the_promise_for_viewers_too_and_its_link_stays_
         actor=None,
     )
     assert outcome.ok and outcome.entry is not None, outcome.message
-    sentence = "Closed $2,000.00 by 2026-10-01 as Broken"  # PLAN-012c §4.8 money
+    sentence = "Closed $2,000.00 by Oct 1, 2026 as Broken"  # PLAN-012c §4.8 money; the page
+    csv_sentence = "Closed $2,000.00 by 2026-10-01 as Broken"  # an export keeps ISO (12f-a B4)
     viewer, _ = client_for(Role.VIEWER)
     for path in (
         f"/operators/{operator.pk}/",
@@ -233,7 +234,7 @@ def test_the_closing_entry_names_the_promise_for_viewers_too_and_its_link_stays_
         assert "/outcome/" not in log  # a viewer still has no buttons
     export = b"".join(viewer.get(f"/operators/{operator.pk}/contacts/export.csv")).decode()
     assert "Closes promise" in export.splitlines()[0]
-    assert sentence in export
+    assert csv_sentence in export and sentence not in export
     # Deleting the original promise keeps the sentence; its deletion reason never reaches a viewer.
     deleted(ContactEntry.objects.get(pk=row.pk), "Entered twice MARKER-D5-REASON.")
     page = page_of(viewer, f"/operators/{operator.pk}/")

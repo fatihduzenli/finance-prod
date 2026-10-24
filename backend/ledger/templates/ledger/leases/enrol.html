@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive money %}
+{% load responsive money dates %}
 {% load tz %}
 {% block title %}Set up autopay: lease {{ lease.store.external_label }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Set up autopay</span></nav><h1>Set up autopay</h1></div></div>{% endblock %}
@@ -21,7 +21,7 @@
             <td>{{ item.debit.seq }}</td>
             <td>{{ item.debit.debit_day }}</td>
             <td class="money">{{ item.debit.amount|money }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}</td>
-            <td>{{ item.starts|date:"Y-m-d H:i" }}{% if item.changes_message %}<br><strong class="schedule-review">{{ item.changes_message }}</strong>{% endif %}</td>
+            <td>{{ item.starts|moment }}{% if item.changes_message %}<br><strong class="schedule-review">{{ item.changes_message }}</strong>{% endif %}</td>
           </tr>
         {% empty %}
           <tr><td colspan="4" class="muted empty">No rent is in effect on the first debit date.</td></tr>
@@ -40,7 +40,7 @@
       <p id="methods-error"><strong>{{ choices.error }}</strong>{% if choices.fields %} Fields {{ company.provider_name }} rejected: {{ choices.fields|join:", " }}.{% endif %}</p>
     {% else %}
       <div class="actions">
-        {% if choices.fetched_at %}<span id="methods-as-of" class="muted">Bank methods as of {{ choices.fetched_at|date:"Y-m-d H:i" }}</span>{% else %}<span id="methods-not-read"><strong>{{ methods_not_read }}</strong></span>{% endif %}
+        {% if choices.fetched_at %}<span id="methods-as-of" class="muted">Bank methods as of {{ choices.fetched_at|moment }}</span>{% else %}<span id="methods-not-read"><strong>{{ methods_not_read }}</strong></span>{% endif %}
         <form method="post" class="js-single-submit">
           {% csrf_token %}<button class="btn" type="submit" name="refresh_methods" value="1" id="refresh-methods"{% if job_refresh %} disabled{% endif %}>Update bank methods from {{ company.provider_name }}</button>
         </form>

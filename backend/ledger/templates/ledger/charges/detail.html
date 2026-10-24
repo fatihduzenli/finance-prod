@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
-{% load components money %}
+{% load components money dates %}
 {% load responsive %}
-{% block title %}Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" %}<span aria-current="page">Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}</span></nav><h1>Rent {{ charge.period_month|date:"F Y" }}, debit {{ charge.seq }}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% if can_record or can_link_invoice %}<div class="page-actions">{% if can_link_invoice %}<a class="btn" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}</div>{% endif %}</div>{% endblock %}
+{% block title %}Rent {{ charge.period_month|month }}, debit {{ charge.seq }}{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" %}<span aria-current="page">Rent {{ charge.period_month|month }}, debit {{ charge.seq }}</span></nav><h1>Rent {{ charge.period_month|month }}, debit {{ charge.seq }}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% if can_record or can_link_invoice %}<div class="page-actions">{% if can_link_invoice %}<a class="btn" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
   <p class="muted"><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Daily charges</a></p>
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
@@ -24,7 +24,7 @@
   <section class="card" id="charge-summary" aria-label="Charge">
   <dl class="detail-list">
     <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
-    <dt>Due</dt><dd>{{ charge.due_on|date:"Y-m-d" }}</dd>
+    <dt>Due</dt><dd>{{ charge.due_on|day }}</dd>
     <dt>Amount due</dt><dd id="amount-due">{{ charge.amount_due|money }}</dd>
     {% if charge.proration_text %}<dt>Prorated</dt><dd id="proration-text">{{ charge.proration_text }}</dd>{% endif %}
     <dt>Paid</dt><dd id="amount-paid">{{ charge.amount_paid|money }}</dd>
@@ -43,7 +43,7 @@
     <thead><tr><th>Number</th><th>Date</th><th class="money">Total</th><th>{{ company.provider_name }} status</th></tr></thead>
     <tbody>
       {% for invoice in invoices %}
-        <tr><td>{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|date:"Y-m-d" }}</td><td class="money">{{ invoice.total|money }}</td><td>{{ invoice.provider_status|default:"—" }}</td></tr>
+        <tr><td>{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|day }}</td><td class="money">{{ invoice.total|money }}</td><td>{{ invoice.provider_status|default:"—" }}</td></tr>
       {% empty %}
         <tr><td colspan="4" class="muted empty">No invoice linked yet.{% if can_link_invoice %} An invoice made on the {{ company.provider_name }} dashboard can be attached with "Attach {{ company.provider_name }} invoice".{% endif %}</td></tr>
       {% endfor %}
@@ -61,7 +61,7 @@
     <tbody>
       {% for payment in payments %}
         <tr>
-          <td><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">{{ payment.settled_on|date:"Y-m-d"|default:"—" }}</a></td>
+          <td><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">{{ payment.settled_on|day|default:"—" }}</a></td>
           <td>{{ payment.get_method_display }}</td>
           <td class="money">{% if payment.is_refund %}&minus;{% endif %}{{ payment.amount|money }}</td>
           <td>{% if payment.is_refund %}<span class="badge">Refund</span> {% endif %}{% status_badge payment.get_status_display payment.status %}</td>
@@ -82,7 +82,7 @@
   <section class="card" id="charge-notes">
   <h2>Notes</h2>
   {% for note in notes %}
-    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|date:"Y-m-d" }}</span></p>
+    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|day }}</span></p>
   {% empty %}
     <p class="muted">No notes.</p>
   {% endfor %}

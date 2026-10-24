@@ -85,16 +85,16 @@ def test_the_grid_picker_swaps_a_reversed_range_and_caps_it_at_twenty_four_month
     body = default.content.decode()
     months = _grid_months(body)
     # 10 past months, the current and the next: December 2025 to November 2026.
-    assert "2025-12" in months and "2026-11" in months
-    assert "2025-11" not in months and "2026-12" not in months
+    assert "Dec 2025" in months and "Nov 2026" in months  # PLAN-012f-a B4: "Oct 2026"
+    assert "Nov 2025" not in months and "Dec 2026" not in months
     reversed_range = viewer.get(f"{grid}?from=2026-11&to=2026-06")
     assert reversed_range.status_code == 200
     swapped = _grid_months(reversed_range.content.decode())
-    assert "2026-06" in swapped and "2026-11" in swapped
+    assert "Jun 2026" in swapped and "Nov 2026" in swapped
     too_wide = viewer.get(f"{grid}?from=2020-01&to=2026-12")
     assert too_wide.status_code == 200
     wide = _grid_months(too_wide.content.decode())
-    assert "2020-01" not in wide and "2026-12" in wide and "2025-01" in wide
+    assert "Jan 2020" not in wide and "Dec 2026" in wide and "Jan 2025" in wide
     hostile = viewer.get(f"{grid}?from=2026-13&to=%3Cscript%3Ealert(1)%3C/script%3E")
     assert hostile.status_code == 200
     hostile_body = hostile.content.decode()

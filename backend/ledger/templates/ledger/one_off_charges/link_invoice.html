@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive money %}
+{% load responsive money dates %}
 {% block title %}Attach {{ company.provider_name }} invoice{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if charge.lease %}{% include "ledger/_store_crumb.html" with crumb_store=charge.lease.store %}{% elif charge.operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=charge.operator.pk %}">{{ charge.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Attach {{ company.provider_name }} invoice</span></nav><h1>Attach {{ company.provider_name }} invoice</h1></div></div>{% endblock %}
 {% block content %}
@@ -23,7 +23,7 @@
             <tr>
               <td><input type="radio" name="invoice" value="{{ row.invoice.pk }}" id="invoice-{{ forloop.counter }}"{% if form.invoice.value|stringformat:"s" == row.invoice.pk|stringformat:"s" %} checked{% endif %} required></td>
               <td><label for="invoice-{{ forloop.counter }}">{{ row.invoice.invoice_number }}</label></td>
-              <td>{{ row.invoice.issue_date|date:"Y-m-d" }}</td>
+              <td>{{ row.invoice.issue_date|day }}</td>
               <td class="money">{{ row.invoice.total|money }}{% if row.invoice.total != charge.balance %} <span class="badge">Differs from the balance</span>{% endif %}</td>
               <td>{{ row.invoice.provider_status|default:"—" }}</td>
               <td><code>{{ row.provider_invoice|default:"—" }}</code></td>

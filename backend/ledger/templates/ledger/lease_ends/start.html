@@ -1,11 +1,11 @@
-{% extends "finance/base.html" %}
+{% extends "finance/base.html" %}{% load dates %}
 {% block title %}End lease {{ store.external_label }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store %}<span aria-current="page">End lease</span></nav><h1>End lease {{ store.external_label }}</h1></div></div>{% endblock %}
 {% block content %}
   <section class="card wizard-card">
   <p class="muted">The wizard takes you through the end date, the items still open in {{ company.provider_name }}, the final statement, the settlement and a confirmation; you can come back to it.</p>
   {% if lease %}
-    <p id="lease-to-end">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}.</p>
+    <p id="lease-to-end">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|day|default:"no start date" }}.</p>
     <form method="post" id="start-lease-end" class="js-single-submit">
       {% csrf_token %}
       <div class="form-actions"><button class="btn btn-primary" type="submit">{% if draft %}Continue{% else %}Start{% endif %}</button></div>

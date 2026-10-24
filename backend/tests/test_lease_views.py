@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from accounts import registry
 from accounts.roles import Role
+from finance.dates import day_text
 from ledger.models import (
     AuditLog,
     CollectionSchedule,
@@ -249,7 +250,7 @@ def test_admin_creates_a_lease_and_a_replay_saves_nothing(admin: Client) -> None
     [row] = LeaseRentHistory.objects.filter(lease=lease)
     assert row.amount == D("1500.00")
     page = admin.get(f"/leases/{lease.pk}/").content.decode()
-    assert "$1,500.00 from 2026-01-01" in page
+    assert "$1,500.00 from Jan 1, 2026" in page
 
 
 @pytest.mark.parametrize(
@@ -285,7 +286,7 @@ def test_a_rent_edit_writes_history_and_a_too_early_date_is_refused(
         route["edit"], edit_data(lease, rent="1650.00", rent_effective_from="2026-01-02")
     )
     assert (refused.status_code, refused["Location"]) == (302, route["edit"])
-    assert "at least two days after the current rent started (2026-01-01)" in (
+    assert "at least two days after the current rent started (Jan 1, 2026)" in (
         admin.get(route["edit"]).content.decode()
     )
     assert LeaseRentHistory.objects.filter(lease=lease).count() == 1
@@ -296,9 +297,9 @@ def test_a_rent_edit_writes_history_and_a_too_early_date_is_refused(
     assert (saved.status_code, saved["Location"]) == (302, route["detail"])
     page = admin.get(route["detail"]).content.decode()
     # Future-dated: today's rent stays current and the change is shown as upcoming.
-    assert "$1,500.00 from 2026-01-01" in page
-    assert "Rent changes to $1,650.00 on 2026-11-01" in page
-    assert "2026-10-31" in page  # the closed row
+    assert "$1,500.00 from Jan 1, 2026" in page
+    assert "Rent changes to $1,650.00 on Nov 1, 2026" in page
+    assert "Oct 31, 2026" in page  # the closed row
 
 
 # --- Rows 2 and 3 through the enrolment screen ---------------------------------------------------
@@ -323,7 +324,7 @@ def test_the_enrolment_page_lists_bank_methods_and_shows_cards_as_not_allowed(
     fake.add_payment_method(CUSTOMER, method(CARD_ID, kind="card"))
     lease = read_methods(make_lease(D("1000.01"), debit_day=5, second_debit_day=20), fake)
     page = admin.get(paths(lease)["enrol"]).content.decode()
-    assert 'id="methods-as-of"' in page and "Bank methods as of 2026-10-01 11:00" in page
+    assert 'id="methods-as-of"' in page and "Bank methods as of Oct 1, 2026 · 11:00" in page
     assert f'name="payment_method_id" value="{BANK}"' in page
     assert f'value="{CARD_ID}"' not in page
     assert "Card, not allowed" in page
@@ -400,8 +401,8 @@ def test_enable_through_the_screen_then_a_second_click_creates_nothing(
     # The first debit of each day is the next such day after now, whatever day it is.
     now = timezone.now()
     for day in (5, 20):
-        assert service.next_debit_at(day, now).date().isoformat() in page
-    assert '<td data-label="State">On</td>' in page
+        assert day_text(service.next_debit_at(day, now).date()) in page
+    assert '<td data-role="meta" data-label="State">On</td>' in page
     for ref in ExternalRef.objects.filter(external_kind="schedule"):
         assert ref.external_id not in page  # masked: first four and last four only
 
@@ -635,9 +636,9 @@ def test_a_future_rent_change_shows_the_dated_review_message_on_the_lease(
     admin.post(route["enrol"], {"payment_method_id": BANK})
     admin.post(route["edit"], edit_data(lease, rent="1650.00", rent_effective_from="2026-11-01"))
     page = admin.get(route["detail"]).content.decode()
-    assert service.RENT_CHANGES.format(date="2026-11-01") in page
+    assert service.RENT_CHANGES.format(date="Nov 1, 2026") in page
     assert service.SCHEDULE_DIFFERS not in page
-    assert "Rent changes to $1,650.00 on 2026-11-01" in page
+    assert "Rent changes to $1,650.00 on Nov 1, 2026" in page
 
 
 def test_the_detail_page_lists_blockers_and_information(admin: Client, fake: FakeProvider) -> None:

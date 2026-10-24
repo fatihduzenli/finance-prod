@@ -114,10 +114,10 @@ def test_the_link_opens_the_statement_without_a_session(operator: Operator) -> N
     assert response.status_code == 200
     body = response.content.decode()
     assert "Statement: Acme Stores LLC" in body
-    assert "Rent 2026-09" in body and "1850.00" in body
+    assert "Rent Sep 2026" in body and "1850.00" in body
     assert "Damage: Broken shelf" in body
     assert 'id="open-total">1970.00<' in body
-    assert "Rent 2026-08" in body  # the payment history of the last 12 months
+    assert "Rent Aug 2026" in body  # the payment history of the last 12 months
     assert "Global Retail Groups" in body
     assert response["Cache-Control"] == "private, no-store"
     assert response["Referrer-Policy"] == "no-referrer"

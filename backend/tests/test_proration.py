@@ -200,7 +200,8 @@ def test_the_text_is_on_the_charge_page_the_grid_title_and_the_statement() -> No
     grid_page = client.get("/grid/?from=2026-10&to=2026-10").content.decode()
     assert f'title="{TEXT}"' in grid_page
     [open_line] = receivables.open_balances(date(2026, 10, 20))
-    assert open_line.description == f"Rent 2026-10: {TEXT}"
+    assert open_line.description == f"Rent Oct 2026: {TEXT}"
+    assert open_line.csv_description == f"Rent 2026-10: {TEXT}"  # an export keeps ISO
 
 
 @pytest.mark.django_db

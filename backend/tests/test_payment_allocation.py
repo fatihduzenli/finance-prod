@@ -248,7 +248,7 @@ def test_the_form_lists_the_open_charges_oldest_first_with_their_inputs() -> Non
     order = [html.index(f'name="alloc_{pk}"') for pk in (other.pk, rent.pk, insurance.pk)]
     assert order == sorted(order)
     assert 'id="unallocated"' in html and 'name="keep_credit"' in html
-    assert "Store 2477 · Lease from 2026-08-01" in html
+    assert "Store 2477 · Lease from Aug 1, 2026" in html
     # No credit held: no "From credit" inputs; nothing is pre-filled with three charges.
     assert 'name="credit_' not in html and "data-prefill" not in html
     assert 'name="amount"' in html and 'value=""' not in html.split('name="amount"')[1][:40]
@@ -412,7 +412,7 @@ def test_a_later_form_applies_the_credit_as_a_credit_payment() -> None:
     tab = client.get(
         reverse("ledger:stores:detail", kwargs={"pk": lease.store_id}) + "?tab=payments"
     )
-    assert '<td data-label="Method">Credit</td>' in tab.content.decode()
+    assert '<td data-role="meta" data-label="Method">Credit</td>' in tab.content.decode()
     # More than the credit held is refused, nothing written.
     page = refused(client, lease, form("", credit={rent.pk: "30.01"}))
     assert "more than the credit held" in page

@@ -126,7 +126,7 @@ def test_admin_creates_a_store_with_an_audit_row(admin: Client, fake: FakeProvid
     assert row.after["external_label"] == "Store 0202"
     assert row.actor is not None and row.actor.username == "admin-store-views"
     page = admin.get(response["Location"]).content.decode()
-    assert "Store saved." in page and "Springfield" in page and "2025-03-01" in page
+    assert "Store saved." in page and "Springfield" in page and "Mar 1, 2025" in page
     assert fake.calls == []
 
 
@@ -258,9 +258,9 @@ def test_a_closed_store_is_saved_and_listed_with_its_status(admin: Client) -> No
     assert store.status == StoreStatus.CLOSED
     assert store.closed_at is not None and store.closed_at.isoformat() == "2026-06-30"
     page = admin.get(LIST).content.decode()
-    assert "Closed One" in page and '<td data-label="Status">Closed</td>' in page
+    assert "Closed One" in page and '<td data-role="meta" data-label="Status">Closed</td>' in page
     detail = admin.get(paths(store)["detail"]).content.decode()
-    assert "2026-06-30" in detail and "Closed" in detail
+    assert "Jun 30, 2026" in detail and "Closed" in detail
 
 
 def test_every_post_ends_in_a_redirect(admin: Client) -> None:
@@ -327,7 +327,7 @@ def test_the_detail_shows_the_leases_of_the_store(admin: Client) -> None:
     page = admin.get(f"/stores/{lease.store_id}/").content.decode()
     assert f"/leases/{lease.pk}/" in page
     assert f"/leases/{other.pk}/" not in page
-    assert "Northwind Stores" in page and "2026-01-01" in page
+    assert "Northwind Stores" in page and "Jan 1, 2026" in page
     empty = admin.get(f"/stores/{make_store().pk}/").content.decode()
     assert "No lease yet. New lease from the action bar." in empty
 

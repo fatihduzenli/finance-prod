@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components money %}
+{% load components money dates %}
 {% load responsive %}
 {% block title %}Payments{% endblock %}
 {% block header %}<div class="page-header"><h1>Payments</h1></div>{% endblock %}
@@ -69,8 +69,8 @@
     <tbody>
       {% for row in rows %}
         <tr>
-          <td><a href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.payment.settled_on|date:"Y-m-d"|default:"—" }}</a></td>
-          <td>{{ row.payment.initiated_on|date:"Y-m-d"|default:"—" }}</td>
+          <td><a href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.payment.settled_on|day|default:"—" }}</a></td>
+          <td>{{ row.payment.initiated_on|day|default:"—" }}</td>
           <td>{{ row.operator.display_name|default:"—" }}</td>
           <td>{{ row.store.external_label|default:"—" }}</td>
           <td>{% include "ledger/payments/_charge.html" with payment=row.payment %}</td>

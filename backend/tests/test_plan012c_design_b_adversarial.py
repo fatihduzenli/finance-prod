@@ -173,7 +173,17 @@ def test_the_lease_end_steps_mark_one_current_step_and_link_only_to_steps_that_a
 
 def test_the_transfer_steps_mark_one_current_step_and_link_only_to_steps_that_answer() -> None:
     admin, user = client_for(Role.ADMIN)
-    lease = a_lease(a_store("2485"), an_operator("Moving Co"), channel=PaymentChannel.WIRE)
+    # Started in the end month with October paid: a planned (not yet created) month blocks a
+    # transfer like an existing one since PLAN-012f-a D, so the steps must answer.
+    lease = a_lease(
+        a_store("2485"),
+        an_operator("Moving Co"),
+        channel=PaymentChannel.WIRE,
+        started=lease_end_tests.OCTOBER,
+        rent="2000.00",
+        debit_day=1,
+    )
+    lease_end_tests.october(lease, paid="2000.00")
     row = begin(lease, user)
     for name in ("operator", "blockers"):
         page = admin.get(reverse(f"ledger:transfers:{name}", kwargs={"pk": row.pk}))

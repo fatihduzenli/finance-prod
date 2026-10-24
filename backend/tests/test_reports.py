@@ -8,6 +8,7 @@ from __future__ import annotations
 import csv
 import io
 import random
+import re
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -927,7 +928,7 @@ def test_the_statement_covers_every_store_and_never_another_operator(today: date
     statement = reports.statement(built["operator"], rng("2026-08", "2026-10"), TODAY)
     assert {item.store_label for item in statement.open_charges} == {"Store A", "Store B"}
     assert [item.description for item in statement.open_charges] == [
-        "Rent 2026-09",
+        "Rent Sep 2026",
         "Insurance, policy year 2026",
     ]
     assert statement.open_total == D("1695.00") and statement.overdue_total == D("1695.00")
@@ -958,6 +959,10 @@ def test_the_statement_csv(today: date) -> None:
     sections = [record["Section"] for record in records]
     assert sections == ["Open charge"] * 2 + ["Payment history"] * 3 + ["Total"] * 6
     assert records[0]["Balance (USD)"] == "1000.00" and records[0]["Due date"] == "2026-09-05"
+    # The page reads "Rent Sep 2026"; the CSV keeps ISO months (DESIGN-SPEC §5).
+    assert records[0]["Description"] == "Rent 2026-09"
+    rent_rows = [record["Description"] for record in records if "Rent" in record["Description"]]
+    assert rent_rows and all(re.match(r"Rent \d{4}-\d{2}(?!\d)", text) for text in rent_rows)
     totals = {record["Description"]: record["Amount (USD)"] for record in records[5:]}
     assert totals["Open balance"] == "1695.00"
     assert totals["Deposits held from the range"] == "1500.00"

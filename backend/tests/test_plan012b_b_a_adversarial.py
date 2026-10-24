@@ -27,8 +27,9 @@ from ledger.models import (
     RentChargeStatus,
 )
 from ledger.services import lease_end, rent_run, transfer
+from ledger.services.lease_end import DeductionInput
 from tests.receivables_helpers import a_lease, a_store, an_operator
-from tests.test_lease_end import TODAY, deductions, deposit, fresh
+from tests.test_lease_end import TODAY, deposit, fresh
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 
@@ -163,7 +164,7 @@ def test_a_viewer_sees_the_banner_without_the_cancel_link() -> None:
     viewer, _ = client_for(Role.VIEWER)
     # Not yet at the statement: nobody sees a banner.
     assert "in progress" not in viewer.get(store_page).content.decode()
-    lease_end.open_statement(fresh(draft), admin)
+    assert lease_end.save_statement(fresh(draft), [], actor=admin).ok
     assert fresh(draft).statement_opened_at is not None
     page = viewer.get(store_page).content.decode()
     assert "in progress" in page and cancel not in page
@@ -183,13 +184,20 @@ def test_the_final_charge_never_exceeds_the_prorated_amount_whatever_the_deducti
     lease = _wire_lease(TODAY)
     deposit(lease, "500.00")
     draft = _draft_at_terms(lease)
-    assert deductions(draft, ("damage", "Door", "99999.00"), ("other", "Keys", "40.00")).ok
-    lease_end.open_statement(fresh(draft), admin)
+    assert lease_end.save_statement(
+        fresh(draft),
+        [
+            DeductionInput("damage", "Door", D("99999.00")),
+            DeductionInput("other", "Keys", D("40.00")),
+        ],
+        actor=admin,
+    ).ok
     [(month, seq, amount, due)] = _months(lease)
     assert (month, seq, amount, due) == (TODAY.replace(day=1), 1, D("32.26"), TODAY)
     # Again, with other deductions: the same single charge, the same amount.
-    assert deductions(fresh(draft), ("cleaning", "Floors", "1.00")).ok
-    lease_end.open_statement(fresh(draft), admin)
+    assert lease_end.save_statement(
+        fresh(draft), [DeductionInput("cleaning", "Floors", D("1.00"))], actor=admin
+    ).ok
     assert _months(lease) == [(TODAY.replace(day=1), 1, D("32.26"), TODAY)]
     charge = RentCharge.objects.get(lease=lease)
     assert charge.proration_text and "1 of 31" in charge.proration_text

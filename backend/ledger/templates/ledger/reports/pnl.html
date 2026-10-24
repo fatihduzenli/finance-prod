@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load money responsive %}
+{% load money responsive dates %}
 {% block title %}Profit and loss{% endblock %}
 {% block header %}<div class="page-header"><h1>Profit and loss</h1></div>{% endblock %}
 {% block content %}
@@ -27,7 +27,7 @@
   {% if too_slow %}
     <p class="warning" id="pnl-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted">{{ query.from_month|date:"Y-m" }} to {{ query.to_month|date:"Y-m" }}, by {{ group_label|lower }}; {{ row_count }} store, operator and month row{{ row_count|pluralize }}{% if cost_only_count %}, {{ cost_only_count }} cost-only{% endif %}. Amounts in US dollars. Billed: rent charges by rent month (waived ones left out), setup fees by due date and insurance by due date. Collected: settled payments by settled date, less their settled refunds, plus withheld deposits by resolution date. Landlord rent and other costs are the store's cost row in effect on the first of the month, counted once per store and month. A margin is "unknown" when a cost is not known. A cost-only row is a month in which the store is held and no lease is active.</p>
+  <p class="muted">{{ query.from_month|month }} to {{ query.to_month|month }}, by {{ group_label|lower }}; {{ row_count }} store, operator and month row{{ row_count|pluralize }}{% if cost_only_count %}, {{ cost_only_count }} cost-only{% endif %}. Amounts in US dollars. Billed: rent charges by rent month (waived ones left out), setup fees by due date and insurance by due date. Collected: settled payments by settled date, less their settled refunds, plus withheld deposits by resolution date. Landlord rent and other costs are the store's cost row in effect on the first of the month, counted once per store and month. A margin is "unknown" when a cost is not known. A cost-only row is a month in which the store is held and no lease is active.</p>
 
   <div class="card table-card"><div class="pnl-print{% if query.detail %} pnl-detail{% endif %}">
   {% responsive_table "scroll" %}
@@ -45,7 +45,7 @@
         {% if query.detail %}
           {% for row in group.rows %}
             <tr class="pnl-row{% if row.cost_only %} cost-only{% endif %}"{% if row.cost_only %} style="background:var(--pending-bg);"{% endif %}>
-              <td style="padding-left:1.5rem;">{{ row.store }} · {{ row.operator }} · {{ row.month|date:"Y-m" }}</td>
+              <td style="padding-left:1.5rem;">{{ row.store }} · {{ row.operator }} · {{ row.month|month }}</td>
               {% include "ledger/reports/_figures.html" with item=row %}
               <td>{% if row.cost_only %}<span class="badge">Cost only</span> {% endif %}{% if row.unknown %}<span class="badge">Unknown: {{ row.unknown|join:", " }}</span>{% endif %}</td>
             </tr>
@@ -67,8 +67,8 @@
   </div></div>
 
   <section class="card" id="held-card">
-  <p id="deposits-held"><strong>Deposits held</strong> at {{ query.end|date:"Y-m-d" }}: <span id="deposits-held-amount">{{ deposits_held|money }}</span>. <span class="muted">Deposits are money held for operators, not revenue: they are in no figure above except the part withheld at the end of a lease.</span></p>
-  <p id="credits-held"><strong>Credits held</strong> at {{ query.end|date:"Y-m-d" }}: <span id="credits-held-amount">{{ credits_held|money }}</span>. <span class="muted">Credits are money received and not yet applied to a charge, held for operators, not revenue: a credit counts as collected only when it is applied to a charge, in the month applied.</span></p>
+  <p id="deposits-held"><strong>Deposits held</strong> at {{ query.end|day }}: <span id="deposits-held-amount">{{ deposits_held|money }}</span>. <span class="muted">Deposits are money held for operators, not revenue: they are in no figure above except the part withheld at the end of a lease.</span></p>
+  <p id="credits-held"><strong>Credits held</strong> at {{ query.end|day }}: <span id="credits-held-amount">{{ credits_held|money }}</span>. <span class="muted">Credits are money received and not yet applied to a charge, held for operators, not revenue: a credit counts as collected only when it is applied to a charge, in the month applied.</span></p>
   </section>
   {% endif %}
 {% endblock %}

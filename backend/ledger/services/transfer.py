@@ -65,6 +65,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
+from finance.dates import day_text
 from ledger.models import (
     ZERO,
     AuditLog,
@@ -363,11 +364,12 @@ def _balance_url(kind: str, charge_id: uuid.UUID | None, lease: Lease) -> str:
 def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list[lease_end.Blocker]:
     """Every charge of the outgoing lease with money still owed once it ends, one each
     with its page (D6(b)). Deposits are never listed (they are held, not owed; an unpaid
-    one is a lease-end blocker). A charge the end month still needs is not listed: the
-    statement step creates it (PLAN-012b-b D10). Once the terms are set, a balance is
-    listed as the statement leaves it: the unpaid-balance offset pays the open lines
-    oldest due first, as the confirm pays them (PLAN-012b-b D10, D12). A credit held on
-    the outgoing lease blocks too (PLAN-012d D6b): it is the outgoing operator's money."""
+    one is a lease-end blocker). A rent charge the statement still needs (not created
+    yet: the save or the confirm creates it) is listed like an existing one, the same debt
+    (PLAN-012f-a D). Once the terms are set, a balance is listed as the statement leaves
+    it: the unpaid-balance offset pays the open lines oldest due first, as the confirm
+    pays them (PLAN-012b-b D10, D12). A credit held on the outgoing lease blocks too
+    (PLAN-012d D6b): it is the outgoing operator's money."""
     day = today or timezone.localdate()
     lease = transfer.outgoing_lease
     end = transfer.lease_end
@@ -388,10 +390,6 @@ def balance_blockers(transfer: LeaseTransfer, today: date | None = None) -> list
     found = []
     for kind, charge_id, description, balance in lines:
         if balance <= 0:
-            continue
-        if charge_id is None:
-            # PLAN-012b-b D10: the end month's charge not created yet is created when the
-            # statement step opens (lease_end.open_statement); it blocks once it exists.
             continue
         text = (
             f"{description}: {format_amount(balance)} is still owed by the outgoing "
@@ -442,11 +440,11 @@ def incoming_lines(transfer: LeaseTransfer) -> list[invoice_builder.LineInput]:
 
 def start(store: Store, actor: User | None, today: date | None = None) -> LeaseTransfer:
     """The store's transfer in progress, made now with the current lease's end draft
-    (reason ``transfer``) or found. A plain draft of the lease that never reached the
-    statement step is adopted (:func:`ledger.services.lease_end.adopt_for_transfer`,
+    (reason ``transfer``) or found. A plain draft of the lease whose statement step was
+    never saved is adopted (:func:`ledger.services.lease_end.adopt_for_transfer`,
     PLAN-012b-b D9). ``ValueError`` with one sentence when the store has no lease in
     effect, the lease has no operator, or a plain lease end is in progress (its
-    statement step opened)."""
+    statement step saved)."""
     day = today or timezone.localdate()
     with transaction.atomic():
         Store.objects.select_for_update().get(pk=store.pk)
@@ -533,7 +531,7 @@ def _start_refusal(started_on: date | None, ended_on: date) -> str:
         return START_REQUIRED
     first = ended_on + timedelta(days=1)
     if started_on < first:
-        return START_TOO_EARLY.format(end=ended_on.isoformat(), first=first.isoformat())
+        return START_TOO_EARLY.format(end=day_text(ended_on), first=day_text(first))
     return ""
 
 
@@ -783,7 +781,7 @@ def confirm(
                     DEBT_GREW.format(now=format_amount(debt), allowed=format_amount(allowed))
                 )
             if _other_lease(row.store, row.outgoing_lease, start):
-                raise _Abort(OTHER_LEASE.format(start=start.isoformat()))
+                raise _Abort(OTHER_LEASE.format(start=day_text(start)))
             if row.deposit_amount and deposit_type() is None:
                 raise _Abort(NO_DEPOSIT_TYPE)
             ended = lease_end.confirm_within(end, actor, day, transfer=row)

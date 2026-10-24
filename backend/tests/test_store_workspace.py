@@ -178,9 +178,9 @@ def test_the_header_shows_the_lease_balance_credit_next_payment_and_open_promise
     # The credit line shows only when a credit is held (QA-012d finding 5, "if any").
     assert 'id="header-credit"' not in html and "<dt>Credit</dt>" not in html
     # PLAN-012f D8: the NEXT card names the next scheduled payment beside its date.
-    assert '<dt>Broken shelf</dt><dd id="header-next-payment">2026-10-25</dd>' in html
-    assert "$500.00 by 2026-10-20" in html
-    assert "Acme Ops" in html and "From 2026-09-01" in html
+    assert '<dt>Broken shelf</dt><dd id="header-next-payment">Oct 25, 2026</dd>' in html
+    assert "$500.00 by Oct 20, 2026" in html
+    assert "Acme Ops" in html and "From Sep 1, 2026" in html
 
 
 def test_without_a_one_off_due_the_next_payment_is_the_rent_debit() -> None:
@@ -398,7 +398,7 @@ def test_add_setup_charge_from_the_store_opens_the_builder_with_the_line_and_the
     )
     assert (response.status_code, response["Location"]) == (302, builder)
     html = page(billing, builder)
-    assert "Store 2477 · Lease from 2026-09-01 · Operator Acme Ops" in html
+    assert "Store 2477 · Lease from Sep 1, 2026 · Operator Acme Ops" in html
     assert 'value="Sign"' in html and 'value="75.00"' in html
     assert 'id="collect-draft" checked' in html
     saved = billing.post(
@@ -418,7 +418,7 @@ def test_edit_lease_from_the_store_hides_store_and_operator_and_returns_to_the_s
     url = reverse("ledger:leases:edit", kwargs={"pk": lease.pk}) + known(lease)
     html = page(admin, url)
     assert '<select name="operator"' not in html and '<select name="store"' not in html
-    assert "Store 2477 · Lease from 2026-09-01 · Operator Acme Ops" in html
+    assert "Store 2477 · Lease from Sep 1, 2026 · Operator Acme Ops" in html
     other = an_operator("Someone Else")
     response = admin.post(
         url,
@@ -458,7 +458,7 @@ def test_add_contact_from_the_store_hides_the_lease_and_returns_to_the_contact_t
     url = reverse("ledger:stores:contacts_add", kwargs={"pk": lease.store_id}) + known(lease)
     html = page(billing, url)
     assert f'type="hidden" name="lease" value="{lease.pk}"' in html
-    assert "Store 2477 · Lease from 2026-09-01 · Operator Acme Ops" in html
+    assert "Store 2477 · Lease from Sep 1, 2026 · Operator Acme Ops" in html
     response = billing.post(
         url,
         {
@@ -533,7 +533,7 @@ def test_a_new_invoice_from_the_store_keeps_the_context_to_the_draft() -> None:
     url = reverse("ledger:invoices:new_store", kwargs={"pk": lease.store_id}) + known(lease)
     html = page(billing, url)
     assert f'type="hidden" name="lease" value="{lease.pk}"' in html
-    assert "Store 2477 · Lease from 2026-09-01 · Operator Acme Ops" in html
+    assert "Store 2477 · Lease from Sep 1, 2026 · Operator Acme Ops" in html
     response = billing.post(
         url,
         page_data(
@@ -564,15 +564,15 @@ def test_the_charges_tab_lists_every_kind_and_filters_open_paid_all() -> None:
     viewer, _ = client_for(Role.VIEWER)
     opened = page(viewer, store_page(lease.store_id))
     assert 'id="tab-charges"' in opened
-    assert "Rent 2026-10" in opened and "Broken shelf" in opened
+    assert "Rent Oct 2026" in opened and "Broken shelf" in opened
     assert "Insurance, policy year 2026" in opened
-    assert "Rent 2026-09" not in opened and "$777.00" not in opened
+    assert "Rent Sep 2026" not in opened and "$777.00" not in opened
     assert 'id="charges-balance">$1,945.00<' in opened
     assert "Add payment" not in opened  # billing only
     paid = page(viewer, store_page(lease.store_id, tab="charges", filter="paid"))
-    assert "Rent 2026-09" in paid and "Rent 2026-10" not in paid
+    assert "Rent Sep 2026" in paid and "Rent Oct 2026" not in paid
     every = page(viewer, store_page(lease.store_id, tab="charges", filter="all"))
-    assert "Rent 2026-09" in every and "Rent 2026-10" in every
+    assert "Rent Sep 2026" in every and "Rent Oct 2026" in every
     assert f'href="/charges/export.csv?store={lease.store_id}"' in opened
     exported = viewer.get(f"/charges/export.csv?store={lease.store_id}")
     body = b"".join(exported.streaming_content).decode()  # type: ignore[attr-defined]
@@ -744,7 +744,7 @@ def test_the_schedules_tab_lists_schedules_autopay_charges_and_live_plans() -> N
     )
     html = page(client_for(Role.VIEWER)[0], store_page(lease.store_id, tab="schedules"))
     assert 'id="tab-schedules"' in html
-    assert "2026-11-05" in html and "Insurance" in html and "Paused" in html
+    assert "Nov 5, 2026" in html and "Insurance" in html and "Paused" in html
     assert "Key copy" in html and f"/plans/{plan.pk}/" in html
 
 

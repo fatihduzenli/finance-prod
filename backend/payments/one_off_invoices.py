@@ -90,6 +90,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 import payments
+from finance.dates import day_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -1161,7 +1162,7 @@ def schedule(charge_id: uuid.UUID, actor: User | None, *, now: datetime | None =
         else:
             _audit(actor, SCHEDULE_ATTEMPT_ACTION, ENTITY_CHARGE, charge.pk, {"rule": rule})
             record = provider.create_scheduled_invoice(request)
-            text = SCHEDULED.format(date=charge.due_date.isoformat())
+            text = SCHEDULED.format(date=day_text(charge.due_date))
             action = "one_off_charge.schedule_created"
     except ProviderError as error:
         return _failed(charge, actor, "one_off_charge.schedule_failed", error, SCHEDULE_FAILED)
@@ -1287,7 +1288,7 @@ def move_schedule(
         charge.pk,
         {"schedule": mask_identifier(ref), "rule": record.rule or rule},
     )
-    return True, MOVED_SCHEDULE.format(date=charge.due_date.isoformat())
+    return True, MOVED_SCHEDULE.format(date=day_text(charge.due_date))
 
 
 def move_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
@@ -1324,7 +1325,7 @@ def move_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
         },
     )
     return True, MOVED_INVOICE.format(
-        number=invoice.invoice_number, date=invoice.due_date.isoformat()
+        number=invoice.invoice_number, date=day_text(invoice.due_date)
     )
 
 

@@ -17,6 +17,7 @@ from django.urls import reverse
 from django.utils.html import escape
 
 from accounts.roles import Role
+from finance.dates import day_text
 from ledger.models import (
     CalendarEntry,
     CollectionSchedule,
@@ -227,9 +228,9 @@ def test_overdue_charges_worst_first_with_links(today: date) -> None:
     a_rent_charge(lease, date(2026, 11, 1), RentChargeStatus.DUE, "3500.00")  # not yet due
     items = of_kind(attention.OVERDUE)
     assert [item.url for item in items] == [f"/charges/{old.pk}/", f"/charges/{recent.pk}/"]
-    assert items[0].text == "Overdue 62 days: 2204 FOREST PARK, Rent 2026-08, $3,500.00"
+    assert items[0].text == "Overdue 62 days: 2204 FOREST PARK, Rent Aug 2026, $3,500.00"
     assert items[0].severity == attention.HIGH
-    assert items[1].text == "Overdue 1 day: 2204 FOREST PARK, Rent 2026-10, $2,500.00"
+    assert items[1].text == "Overdue 1 day: 2204 FOREST PARK, Rent Oct 2026, $2,500.00"
     assert items[1].severity == attention.MEDIUM
 
 
@@ -245,7 +246,7 @@ def test_a_returned_debit_reads_exactly_as_planned(today: date) -> None:
     [item] = of_kind(attention.RETURNED_DEBIT)
     assert (
         item.text
-        == "Returned debit not rescheduled: 3409 LEICESTER, $1,850.00, returned 2026-10-03"
+        == "Returned debit not rescheduled: 3409 LEICESTER, $1,850.00, returned Oct 3, 2026"
     )
     assert item.url == f"/returns/#return-{payment.pk}"
     assert item.severity == attention.HIGH and item.since == date(2026, 10, 3)
@@ -283,21 +284,21 @@ def test_insurance_due_in_30_days_and_a_missing_premium(today: date) -> None:
     due = of_kind(attention.INSURANCE_DUE)
     assert [(item.text, item.url) for item in due] == [
         # PLAN-012d D5: the store page's Charges tab.
-        ("Insurance due 2026-11-05: Soon (A)", f"/stores/{soon.store_id}/?tab=charges#tab-charges")
+        ("Insurance due Nov 5, 2026: Soon (A)", f"/stores/{soon.store_id}/?tab=charges#tab-charges")
     ]
     # A charge still waiting for its premium.
     waiting = a_lease(opened(a_store("Waiting"), date(2020, 3, 1)), an_operator("C"))
     an_insurance_charge(waiting, 2025, date(2025, 3, 1), None)
     missing = of_kind(attention.INSURANCE_PREMIUM_MISSING)
     assert [item.text for item in missing] == [
-        "Insurance premium for 2025 missing, due 2025-03-01: Waiting (C)"
+        "Insurance premium for 2025 missing, due Mar 1, 2025: Waiting (C)"
     ]
 
 
 def test_an_upcoming_anniversary_without_a_premium_is_missing(today: date) -> None:
     lease = a_lease(opened(a_store("NoPremium"), date(2020, 10, 20)), an_operator("D"))
     [item] = of_kind(attention.INSURANCE_PREMIUM_MISSING)
-    assert item.text == "Insurance premium for 2026 missing, due 2026-10-20: NoPremium (D)"
+    assert item.text == "Insurance premium for 2026 missing, due Oct 20, 2026: NoPremium (D)"
     assert item.url == f"/stores/{lease.store_id}/?tab=charges#tab-charges"
     assert of_kind(attention.INSURANCE_DUE) == []
 
@@ -314,7 +315,7 @@ def test_leases_ending_in_60_days_including_today(today: date) -> None:
         f"/stores/{ends_today.store_id}/?tab=schedules#tab-schedules",
         f"/stores/{ends_day_60.store_id}/?tab=schedules#tab-schedules",
     ]
-    assert items[0].text == "Lease ends 2026-10-06: Today (A)"
+    assert items[0].text == "Lease ends Oct 6, 2026: Today (A)"
 
 
 def test_landlord_leases_ending_in_90_days(today: date) -> None:
@@ -332,7 +333,7 @@ def test_landlord_leases_ending_in_90_days(today: date) -> None:
             source=StoreCostSource.STAFF,
         )
     [item] = of_kind(attention.LANDLORD_LEASE_ENDING)
-    assert item.text == "Landlord lease ends 2027-01-04: Landlord"
+    assert item.text == "Landlord lease ends Jan 4, 2027: Landlord"
     assert item.url == f"/stores/{store.pk}/"
 
 
@@ -367,7 +368,7 @@ def test_vacant_stores_after_30_days(today: date) -> None:
         f"/stores/{never.pk}/",
     }
     texts = {item.text for item in items}
-    assert f"Vacant since {TODAY - timedelta(days=30)}: Ended31" in texts
+    assert f"Vacant since {day_text(TODAY - timedelta(days=30))}: Ended31" in texts
 
 
 def test_a_schedule_flagged_after_a_rent_change(today: date) -> None:
@@ -628,7 +629,7 @@ def test_the_dashboard_shows_the_list_under_the_figures(today: date) -> None:
     row = page[page.index('data-kind="returned_debit"') :].split("</tr>", 1)[0]
     assert "</span> Returned debit not rescheduled</span>" in row
     assert re.search(
-        r'<a href="/returns/#return-[^"]+">2204 FOREST PARK, \$3,500\.00, returned 2026-10-03</a>',
+        r'<a href="/returns/#return-[^"]+">2204 FOREST PARK, \$3,500\.00, returned Oct 3, 2026</a>',
         row,
     )
     assert "Acme" in row and "$3,500.00" in row
@@ -677,7 +678,7 @@ def expected(end: LeaseEnd, amount: str, marker: str = "") -> str:
     assert lease.operator is not None
     return (
         f"Lease-end balance: {lease.operator.display_name} on store "
-        f"{lease.store.external_label}, {amount} open since {le.ENDED.isoformat()}{marker}"
+        f"{lease.store.external_label}, {amount} open since {day_text(le.ENDED)}{marker}"
     )
 
 

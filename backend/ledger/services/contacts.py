@@ -71,6 +71,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
+from finance.dates import day_text
 from ledger.models import (
     AuditLog,
     CollectionStatus,
@@ -229,11 +230,22 @@ def closed_promise(entry: ContactEntry) -> ContactEntry | None:
 
 
 def closes_sentence(promise: ContactEntry) -> str:
-    """PLAN-012c-b D5: "Closed $2,000.00 by 2026-10-01 as Broken", the closed promise's
-    amount, date and outcome."""
+    """PLAN-012c-b D5: "Closed $2,000.00 by Oct 1, 2026 as Broken", the closed promise's
+    amount, date and outcome, as the page reads it (DESIGN-SPEC §5); the CSV's cell is
+    :func:`closes_csv_text`."""
+    return _closes(promise, day_text(promise.promised_date) if promise.promised_date else "")
+
+
+def closes_csv_text(promise: ContactEntry) -> str:
+    """The CSV's form of :func:`closes_sentence`: "Closed $2,000.00 by 2026-10-01 as Broken"
+    (an export keeps ISO, DESIGN-SPEC §5)."""
+    return _closes(promise, f"{promise.promised_date:%Y-%m-%d}")
+
+
+def _closes(promise: ContactEntry, day: str) -> str:
     return (
         f"Closed {format_amount(promise.promised_amount or Decimal(0))} by "
-        f"{promise.promised_date:%Y-%m-%d} as {promise.get_status_display()}"
+        f"{day} as {promise.get_status_display()}"
     )
 
 
@@ -457,7 +469,8 @@ def add_entry(operator_id: uuid.UUID, data: ContactInput, *, actor: User | None)
 
 
 def _promise_words(promise: ContactEntry) -> str:
-    return f"{format_amount(promise.promised_amount or Decimal(0))} by {promise.promised_date}"
+    day = day_text(promise.promised_date) if promise.promised_date is not None else ""
+    return f"{format_amount(promise.promised_amount or Decimal(0))} by {day}"
 
 
 def _superseded_message(closed: list[ContactEntry]) -> str:
@@ -826,7 +839,7 @@ def _csv_record(entry: ContactEntry) -> list[object]:
         entry.promised_date,
         entry.promised_amount,
         entry.get_status_display() if entry.kind == ContactKind.PROMISE else "",
-        closes_sentence(closed) if (closed := closed_promise(entry)) is not None else "",
+        closes_csv_text(closed) if (closed := closed_promise(entry)) is not None else "",
         entry.author.get_username() if entry.author is not None else "",
         entry.created_at,
         _corrections_text(entry),

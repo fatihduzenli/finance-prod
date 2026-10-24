@@ -123,6 +123,7 @@ from django.db.models import Count, F, Q, Sum
 from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
 
+from finance.dates import month_text
 from ledger.models import (
     ZERO,
     CollectionStatus,
@@ -205,7 +206,13 @@ def _span(start: date, end: date) -> int:
 
 
 def _label(month: date) -> str:
+    """The month as a URL, a query string and the CSV write it: ``2026-07``."""
     return f"{month:%Y-%m}"
+
+
+def label_for_screen(month: date) -> str:
+    """The month as a page reads it (DESIGN-SPEC §5): ``Jul 2026``."""
+    return month_text(month)
 
 
 def _parse_month(raw: str) -> date | None:
@@ -266,17 +273,21 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> PnlQuer
     end = _parse_month(raw_to) if raw_to else None
     if (raw_from and start is None) or (raw_to and end is None):
         start, end = default_from, default_to
-        messages.append(UNREADABLE.format(start=_label(start), end=_label(end)))
+        messages.append(UNREADABLE.format(start=label_for_screen(start), end=label_for_screen(end)))
     if end is None:
         end = default_to
     if start is None:
         start = add_months(end, -DEFAULT_PAST_MONTHS)
     if end < start:
         start, end = end, start
-        messages.append(SWAPPED.format(start=_label(start), end=_label(end)))
+        messages.append(SWAPPED.format(start=label_for_screen(start), end=label_for_screen(end)))
     if _span(start, end) > MAX_MONTHS:
         start = add_months(end, -(MAX_MONTHS - 1))
-        messages.append(CAPPED.format(limit=MAX_MONTHS, start=_label(start), end=_label(end)))
+        messages.append(
+            CAPPED.format(
+                limit=MAX_MONTHS, start=label_for_screen(start), end=label_for_screen(end)
+            )
+        )
     group = params.get("group", "") or GROUP_STORE
     if group not in dict(GROUP_CHOICES):
         group = GROUP_STORE
@@ -962,7 +973,7 @@ def grouped(items: Iterable[PnlRow], group: str) -> list[PnlGroup]:
             order[bucket] = (row.operator_id is None, row.operator, str(row.operator_id))
         elif group == GROUP_MONTH:
             bucket = row.month
-            labels[bucket] = _label(row.month)
+            labels[bucket] = label_for_screen(row.month)
             order[bucket] = (row.month,)
         else:
             bucket = row.store_id
@@ -1089,7 +1100,8 @@ def csv_records(query: PnlQuery) -> Iterator[list[object]]:
         for group in grouped(found, query.group):
             store = group.label if query.group == GROUP_STORE else ""
             operator = group.label if query.group == GROUP_OPERATOR else ""
-            month = group.label if query.group == GROUP_MONTH else ""
+            # The page's label reads "Jul 2026"; the CSV keeps ISO (DESIGN-SPEC §5).
+            month = _label(group.rows[0].month) if query.group == GROUP_MONTH else ""
             yield _record(query.group, store, operator, month, group, group.cost_only_count)
     yield _record("total", "", "", "", total(found), sum(1 for row in found if row.cost_only))
 

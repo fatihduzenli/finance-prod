@@ -1,8 +1,8 @@
-{% load components %}{% comment %}Under a wizard step's header (PLAN-012c D5, PLAN-012f D10): the lease the wizard ends, the step list as pills (.steps; a reachable step is a link, the current one aria-current="step", a step before it done) and, on a phone in their place, "Step 2 of 7 · Statement" with its bar ({% step_line %}). The way back to the store is the header's breadcrumb.{% endcomment %}
+{% load components dates %}{% comment %}Under a wizard step's header (PLAN-012c D5, PLAN-012f D10): the lease the wizard ends, the step list as pills (.steps; a reachable step is a link, the current one aria-current="step", a step before it done) and, on a phone in their place, "Step 2 of 7 · Statement" with its bar ({% step_line %}). The way back to the store is the header's breadcrumb.{% endcomment %}
 {% if transfer %}
-<p class="muted" id="transfer-banner">Ending the lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}, so that {{ transfer.incoming_operator.display_name|default:"the incoming operator" }} can take the store over.</p>
+<p class="muted" id="transfer-banner">Ending the lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|day|default:"no start date" }}, so that {{ transfer.incoming_operator.display_name|default:"the incoming operator" }} can take the store over.</p>
 {% else %}
-<p class="muted">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}.</p>
+<p class="muted">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|day|default:"no start date" }}.</p>
 {% endif %}
 <ol class="wizard-steps steps" id="wizard-steps" aria-label="Steps">
   {% for label, url, is_current, done in step_links|with_done %}

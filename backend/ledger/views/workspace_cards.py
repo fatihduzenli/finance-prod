@@ -19,6 +19,7 @@ from typing import Any
 from django.http import HttpRequest
 
 from accounts.roles import Role, meets, role_of
+from finance.dates import day_text
 from ledger.models import Operator, Store
 from ledger.services import documents as document_service
 from ledger.services import store_costs, workspace
@@ -35,7 +36,7 @@ def _joined(*parts: str) -> str:
 def header_lines(store: Store, operator: Operator | None) -> dict[str, str]:
     """The breadcrumb's store, the title, the address line and the phone's line."""
     address = store_service.address_line(store)
-    opened = f"Open since {store.open_date:%Y-%m-%d}" if store.open_date else ""
+    opened = f"Open since {day_text(store.open_date)}" if store.open_date else ""
     place = ", ".join(part for part in (store.city.strip(), store.state.strip()) if part)
     return {
         "store_crumb": store_service.crumb(store),

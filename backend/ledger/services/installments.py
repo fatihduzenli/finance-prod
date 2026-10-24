@@ -92,6 +92,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
+from finance.dates import day_text, month_text
 from ledger.models import (
     DESCRIPTION_MAX_LENGTH,
     INSTALLMENTS_MAX,
@@ -356,6 +357,16 @@ def parent_label(parent: Parent) -> str:
     """What staff call the parent: ``Rent 2026-10`` (``(debit 2)``) or the one-off label."""
     if isinstance(parent, RentCharge):
         return f"Rent {parent.period_month:%Y-%m}" + (
+            f" (debit {parent.seq})" if parent.seq > 1 else ""
+        )
+    return parent.label
+
+
+def parent_screen_label(parent: Parent) -> str:
+    """The parent's name on a page (PLAN-012f-a B4): ``Rent Oct 2026`` (``(debit 2)``) or
+    the one-off label. :func:`parent_label` stays ISO: it writes the stored descriptions."""
+    if isinstance(parent, RentCharge):
+        return f"Rent {month_text(parent.period_month)}" + (
             f" (debit {parent.seq})" if parent.seq > 1 else ""
         )
     return parent.label
@@ -1041,7 +1052,7 @@ def reschedule(
             },
         )
     return Outcome(
-        True, RESCHEDULED.format(count=len(moving), date=first_due.isoformat()), plan=locked
+        True, RESCHEDULED.format(count=len(moving), date=day_text(first_due)), plan=locked
     )
 
 

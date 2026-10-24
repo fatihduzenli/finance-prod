@@ -81,6 +81,7 @@ from django.db.models import Count, F, Min, Q, Sum
 from django.urls import reverse
 from django.utils import timezone
 
+from finance.dates import day_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -279,6 +280,11 @@ class Attention:
 # --- Kinds ---------------------------------------------------------------------------------
 
 
+def _day(value: date | None) -> str:
+    """A day in an item's text (DESIGN-SPEC §5: "Nov 1, 2026"); "unknown" without one."""
+    return day_text(value) if value is not None else "unknown"
+
+
 def _overdue(today: date, balances: list[receivables.OpenBalance]) -> list[Item]:
     rows = [row for row in balances if row.overdue(today)]
     rows.sort(key=lambda row: (row.due_on, row.store_label, str(row.charge_id)))
@@ -329,7 +335,7 @@ def _returned(today: date, operator: uuid.UUID | None) -> list[Item]:
                 text=RETURNED_TEXT.format(
                     store=row.store.external_label if row.store is not None else "No store",
                     amount=format_amount(row.amount),
-                    date=returned_on.isoformat() if returned_on is not None else "unknown",
+                    date=day_text(returned_on) if returned_on is not None else "unknown",
                 ),
                 url=f"{reverse('ledger:returns:list')}#return-{payment.pk}",
                 since=returned_on,
@@ -511,7 +517,7 @@ def _lease_end_balances(operator: uuid.UUID | None) -> list[Item]:
             operator=charge.operator.display_name if charge.operator is not None else "No operator",
             label=end.lease.store.external_label,
             amount=format_amount(charge.balance),
-            ended_on=end.ended_on,
+            ended_on=_day(end.ended_on),
         )
         held_by = getattr(end, "transfer", None)
         if held_by is not None and held_by.debt_override_at is not None:
@@ -541,7 +547,7 @@ def _promise_text(promise: ContactEntry, owed: dict[uuid.UUID, Decimal]) -> str:
         balance = owed.get(promise.lease.pk, ZERO)
         where += f" on store {promise.lease.store.external_label}: owes {format_amount(balance)}"
     amount = format_amount(promise.promised_amount or ZERO)
-    return f"Promise to pay {amount} by {promise.promised_date}: {where}, not kept"
+    return f"Promise to pay {amount} by {_day(promise.promised_date)}: {where}, not kept"
 
 
 def _promises(
@@ -633,9 +639,10 @@ def _insurance(today: date, leases: list[Lease]) -> list[Item]:
                     kind=INSURANCE_PREMIUM_MISSING if no_premium else INSURANCE_DUE,
                     severity=MEDIUM if no_premium else LOW,
                     text=(
-                        f"Insurance premium for {year} missing, due {due}: {_where(lease)}"
+                        f"Insurance premium for {year} missing, due {day_text(due)}: "
+                        f"{_where(lease)}"
                         if no_premium
-                        else f"Insurance due {due}: {_where(lease)}"
+                        else f"Insurance due {day_text(due)}: {_where(lease)}"
                     ),
                     url=_lease_url(lease, workspace.TAB_CHARGES),
                     since=due,
@@ -652,7 +659,7 @@ def _insurance(today: date, leases: list[Lease]) -> list[Item]:
             Item(
                 kind=INSURANCE_PREMIUM_MISSING,
                 severity=MEDIUM,
-                text=f"Insurance premium for {year} missing, due {due}: {_where(holder)}",
+                text=f"Insurance premium for {year} missing, due {day_text(due)}: {_where(holder)}",
                 url=_lease_url(holder, workspace.TAB_CHARGES),
                 since=due,
                 operator_id=holder.operator_id,
@@ -668,7 +675,7 @@ def _lease_ending(today: date, leases: list[Lease]) -> list[Item]:
         Item(
             kind=LEASE_ENDING,
             severity=MEDIUM,
-            text=f"Lease ends {lease.ended_on}: {_where(lease)}",
+            text=f"Lease ends {day_text(lease.ended_on)}: {_where(lease)}",
             url=_lease_url(lease, workspace.TAB_SCHEDULES),
             since=lease.ended_on,
             operator_id=lease.operator_id,
@@ -724,7 +731,7 @@ def _landlord(today: date) -> list[Item]:
         Item(
             kind=LANDLORD_LEASE_ENDING,
             severity=MEDIUM,
-            text=f"Landlord lease ends {row.landlord_lease_end}: {row.store.external_label}",
+            text=f"Landlord lease ends {_day(row.landlord_lease_end)}: {row.store.external_label}",
             url=reverse("ledger:stores:detail", kwargs={"pk": row.store_id}),
             since=row.landlord_lease_end,
             store=row.store.external_label,
@@ -806,7 +813,7 @@ def _vacant(today: date) -> list[Item]:
             Item(
                 kind=VACANT_STORE,
                 severity=LOW,
-                text=f"Vacant since {since}: {store.external_label}",
+                text=f"Vacant since {day_text(since)}: {store.external_label}",
                 url=reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
                 since=since,
                 store=store.external_label,

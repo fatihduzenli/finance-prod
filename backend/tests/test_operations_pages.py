@@ -139,7 +139,7 @@ def test_the_daily_tick_writes_its_row_and_the_run_page_shows_its_list() -> None
     assert "by the daily run" in html
     table = created_table(html)
     assert reverse("ledger:stores:detail", kwargs={"pk": lease.store_id}) in table
-    assert "2026-09" in table and "2026-10" in table
+    assert "Sep 2026" in table and "Oct 2026" in table
     # A second tick creates nothing: its row says so and the page lists nothing.
     tick()
     assert AuditLog.objects.filter(action=rent_run.TICKED_ACTION).count() == 2
@@ -210,10 +210,10 @@ def test_create_missing_charges_names_what_it_created_and_then_says_nothing_miss
     html = body(billing, response["Location"])
     assert "Created: " in html
     # August prorated from the 13th (19 of 31 days of $3,500); October due today.
-    assert "Rent 2026-08 $2,145.16 (catch-up)" in html
-    assert "Rent 2026-09 $3,500.00 (catch-up)" in html
-    assert "Rent 2026-10 $3,500.00 (today)" in html
-    assert "Rent 2025-12 $1,000.00 (catch-up)" in html and "Rent 2026-07 $1,000.00" in html
+    assert "Rent Aug 2026 $2,145.16 (catch-up)" in html
+    assert "Rent Sep 2026 $3,500.00 (catch-up)" in html
+    assert "Rent Oct 2026 $3,500.00 (today)" in html
+    assert "Rent Dec 2025 $1,000.00 (catch-up)" in html and "Rent Jul 2026 $1,000.00" in html
     assert months(lease) == [AUG, SEP, OCT]
     assert len(months(ended)) == 8  # December 2025 to July 2026
     assert months(elsewhere) == []
@@ -282,16 +282,16 @@ def test_the_grid_opens_on_ten_past_months_this_month_and_the_next() -> None:
     viewer, _ = client_for(Role.VIEWER)
     html = body(viewer, "/grid/")
     columns = month_columns(html)
-    assert columns[0] == "2025-12" and columns[-1] == "2026-11" and len(columns) == 12
+    assert columns[0] == "Dec 2025" and columns[-1] == "Nov 2026" and len(columns) == 12
     # The pickers are plain selects (no HTML month input, which Safari does not render)
     # offering the current month +/- 24 months, labelled by name, the range selected.
     assert 'type="month"' not in html
     for name, chosen in (("from", "2025-12"), ("to", "2026-11")):
         options = picker_options(html, name)
         assert len(options) == 49
-        assert options[0][:2] == ("2024-10", "October 2024")
-        assert options[24][:2] == ("2026-10", "October 2026")
-        assert options[-1][:2] == ("2028-10", "October 2028")
+        assert options[0][:2] == ("2024-10", "Oct 2024")
+        assert options[24][:2] == ("2026-10", "Oct 2026")
+        assert options[-1][:2] == ("2028-10", "Oct 2028")
         assert [value for value, _, selected in options if selected] == [chosen]
     assert '<button class="btn" type="submit">Show</button>' in html
     assert 'id="grid-messages"' not in html
@@ -300,11 +300,12 @@ def test_the_grid_opens_on_ten_past_months_this_month_and_the_next() -> None:
 def test_the_grid_swaps_a_reversed_range_caps_a_wide_one_and_ignores_hostile_values() -> None:
     viewer, _ = client_for(Role.VIEWER)
     swapped = body(viewer, "/grid/?from=2026-11&to=2026-06")
-    assert month_columns(swapped) == [f"2026-{month:02d}" for month in range(6, 12)]
+    months = ("Jun", "Jul", "Aug", "Sep", "Oct", "Nov")
+    assert month_columns(swapped) == [f"{name} 2026" for name in months]
     assert "The end month was before the start month" in swapped
     wide = body(viewer, "/grid/?from=2020-01&to=2026-12")
     columns = month_columns(wide)
-    assert (columns[0], columns[-1], len(columns)) == ("2025-01", "2026-12", grid.MAX_MONTHS)
+    assert (columns[0], columns[-1], len(columns)) == ("Jan 2025", "Dec 2026", grid.MAX_MONTHS)
     assert "At most 24 months are shown" in wide
     # A range outside the pickers' months stays submittable: its months are added.
     old = body(viewer, "/grid/?from=2022-01&to=2022-03")
@@ -317,7 +318,7 @@ def test_the_grid_swaps_a_reversed_range_caps_a_wide_one_and_ignores_hostile_val
             "2022-03",
             "2024-10",
         ]
-        assert options[0][1] == "January 2022"
+        assert options[0][1] == "Jan 2022"
         assert [value for value, _, selected in options if selected] == [chosen]
     # A range partly inside the window adds only the months outside it.
     edge = body(viewer, "/grid/?from=2024-08&to=2024-12")
@@ -329,7 +330,7 @@ def test_the_grid_swaps_a_reversed_range_caps_a_wide_one_and_ignores_hostile_val
     assert len(picker_options(edge, "to")) == 51
     hostile = body(viewer, "/grid/?from=2026-13&to=%3Cscript%3Ealert(1)%3C/script%3E")
     assert "alert(1)" not in hostile and "&lt;script" not in hostile and "2026-13" not in hostile
-    assert month_columns(hostile)[0] == "2025-12"
+    assert month_columns(hostile)[0] == "Dec 2025"
     assert "The months could not be read" in hostile
 
 
@@ -352,7 +353,7 @@ def test_a_future_month_billed_in_advance_shows_it_with_the_invoice_number() -> 
     # PLAN-012e-4 D3: before the lease started, blank (outside the lease); a past or current
     # month inside it with no charge, blank; the future month billed in advance shows it.
     assert states[date(2026, 8, 1)] == ""
-    assert next(cell for cell in row.cells if cell.month == date(2026, 8, 1)).label == "2026-08"
+    assert next(cell for cell in row.cells if cell.month == date(2026, 8, 1)).label == "Aug 2026"
     assert states[OCT] == "" and states[NOV] == grid.STATUS_PAID
 
 

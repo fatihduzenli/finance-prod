@@ -1,4 +1,4 @@
-{% load responsive %}<!doctype html>
+{% load responsive dates %}<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -25,7 +25,7 @@
   <p class="muted">{{ company }}</p>
   <h1>Statement: {{ operator.display_name }}</h1>
   {% if operator.legal_name or operator.company %}<p>{{ operator.legal_name }}{% if operator.legal_name and operator.company %} · {% endif %}{{ operator.company }}</p>{% endif %}
-  <p class="muted">As of {{ report.today|date:"Y-m-d" }}; payment history {{ report.range.from_month|date:"Y-m" }} to {{ report.range.to_month|date:"Y-m" }} (the last {{ months }} months). Every store. Amounts in US dollars.</p>
+  <p class="muted">As of {{ report.today|day }}; payment history {{ report.range.from_month|month }} to {{ report.range.to_month|month }} (the last {{ months }} months). Every store. Amounts in US dollars.</p>
 
   <h2>Open charges</h2>
   {% responsive_table "scroll" %}
@@ -33,7 +33,7 @@
     <thead><tr><th>Store</th><th>Charge</th><th>Due date</th><th class="money">Balance</th></tr></thead>
     <tbody>
       {% for item in report.open_charges %}
-        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|date:"Y-m-d" }}</td><td class="money">{{ item.balance }}</td></tr>
+        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|day }}</td><td class="money">{{ item.balance }}</td></tr>
       {% empty %}
         <tr><td colspan="4" class="muted">Nothing is owed.</td></tr>
       {% endfor %}
@@ -51,7 +51,7 @@
     <thead><tr><th>Date</th><th>Store</th><th>Charge</th><th>Kind</th><th>Status</th><th class="money">Amount</th></tr></thead>
     <tbody>
       {% for line in report.history %}
-        <tr class="history-line"><td>{{ line.on|date:"Y-m-d"|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_status_display }}</td><td class="money">{{ line.payment.amount }}</td></tr>
+        <tr class="history-line"><td>{{ line.on|day|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_status_display }}</td><td class="money">{{ line.payment.amount }}</td></tr>
       {% empty %}
         <tr><td colspan="6" class="muted">No payment in these months.</td></tr>
       {% endfor %}

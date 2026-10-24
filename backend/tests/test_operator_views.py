@@ -23,6 +23,7 @@ from django.utils import timezone
 
 from accounts import registry
 from accounts.roles import Role
+from finance.dates import moment_text
 from ledger.admin import OperatorAdmin
 from ledger.forms import CONSENT_INPUT_FORMAT
 from ledger.models import (
@@ -1060,7 +1061,7 @@ def test_billing_saves_an_sms_phone_and_two_consent_times_without_a_provider_cal
     assert operator.sync_status == SyncStatus.LINKED
     page = response.content.decode()
     assert '<dd id="sms-phone">+14045551234</dd>' in page
-    shown = timezone.localtime(sms_at).strftime("%Y-%m-%d %H:%M")
+    shown = moment_text(sms_at)
     assert f'<dd id="sms-consent">{shown}</dd>' in page
     after = (
         AuditLog.objects.filter(action="operator.updated", entity_id=str(operator.pk))

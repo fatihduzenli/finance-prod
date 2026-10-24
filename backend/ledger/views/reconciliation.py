@@ -26,6 +26,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST, require_safe
 
 from accounts.roles import Role, meets
+from finance.dates import day_text
 from ledger.forms import ResolveMismatchForm
 from ledger.services import csv_export
 from ledger.services.csv_export import CsvWriter
@@ -62,7 +63,9 @@ RUN_QUEUED = (
 def _local(moment: datetime | None) -> str:
     if moment is None:
         return ""
-    return schedule.local(moment).strftime("%Y-%m-%d %H:%M %Z")
+    # The day as a page reads it (DESIGN-SPEC §5), in the reconciliation's own zone.
+    local = schedule.local(moment)
+    return f"{day_text(local.date())} · {local:%H:%M %Z}"
 
 
 def _run_row(run: ReconciliationRun) -> dict[str, Any]:

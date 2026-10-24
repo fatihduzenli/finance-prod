@@ -138,7 +138,9 @@ def test_the_refund_is_the_deposit_less_deductions_whatever_the_form_posts(
 
 
 def test_a_deduction_above_the_deposit_and_balance_owes_and_refunds_nothing(pinned: None) -> None:
-    lease = a_store_lease()
+    # Started in the end month: since PLAN-012f-a D the statement previews (and the save
+    # creates) every missing earlier month, which would add to the amount owed.
+    lease = a_store_lease(started_on=lease_end_tests.OCTOBER)
     deposit(lease, "500.00")
     end = draft(lease)
     assert deductions(end, ("damage", "Floor", "1200.00")).ok

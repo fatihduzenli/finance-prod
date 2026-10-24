@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components money %}
+{% load components money dates %}
 {% load responsive %}
 {% load static %}
 {% block title %}{{ preview.number }}{% endblock %}
@@ -11,7 +11,7 @@
     <dt>Operator</dt><dd><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a></dd>
     <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
     <dt>Total</dt><dd id="draft-total">{{ preview.total|money }}</dd>
-    <dt>Due date</dt><dd id="draft-due">{% if preview.invoice or draft.due_date %}{{ preview.due_date|date:"Y-m-d" }}{% else %}{{ due_days }} days after sending{% endif %}</dd>
+    <dt>Due date</dt><dd id="draft-due">{% if preview.invoice or draft.due_date %}{{ preview.due_date|day }}{% else %}{{ due_days }} days after sending{% endif %}</dd>
   </dl>
   </section>
 
@@ -41,7 +41,7 @@
           <tr class="sent-charge"><td>{{ forloop.counter }}</td><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge.get_category_display }}</td><td class="money">{{ charge.price|money }}</td><td class="money">{{ charge.amount_paid|money }}</td><td>{% status_badge charge.get_status_display charge.status %}</td></tr>
         {% endfor %}
         {% for rent in rent_charges %}
-          <tr class="sent-rent-charge"><td>Rent</td><td><a href="{% url 'ledger:charges:detail' pk=rent.pk %}">Rent {{ rent.period_month|date:"F Y" }}, store {{ rent.lease.store.external_label }}</a></td><td>Rent</td><td class="money">{{ rent.amount_due|money }}</td><td class="money">{{ rent.amount_paid|money }}</td><td>{% status_badge rent.get_status_display rent.status %}</td></tr>
+          <tr class="sent-rent-charge"><td>Rent</td><td><a href="{% url 'ledger:charges:detail' pk=rent.pk %}">Rent {{ rent.period_month|month }}, store {{ rent.lease.store.external_label }}</a></td><td>Rent</td><td class="money">{{ rent.amount_due|money }}</td><td class="money">{{ rent.amount_paid|money }}</td><td>{% status_badge rent.get_status_display rent.status %}</td></tr>
         {% endfor %}
       </tbody>
     </table>

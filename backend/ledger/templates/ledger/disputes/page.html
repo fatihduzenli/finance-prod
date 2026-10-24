@@ -1,11 +1,11 @@
 {% extends "finance/base.html" %}
-{% load money responsive %}
+{% load money responsive dates %}
 {% block title %}Disputes{% endblock %}
 {% block header %}<div class="page-header"><h1>Disputes</h1><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:disputes:export' %}">Download spreadsheet</a><form method="post" action="{% url 'ledger:disputes:refresh' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="refresh-disputes"{% if job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form></div></div>{% endblock %}
 {% block content %}
   <p class="muted">The disputes {{ company.provider_name }} reports for the last 90 days, read in the background each day, on a dispute event and when you press Update from {{ company.provider_name }}. Statuses and reasons are {{ company.provider_name }}'s own words. Transaction identifiers are masked. Fewer than {{ highlight_days }} days left to respond is highlighted.</p>
 
-  <p><span class="muted" id="last-synced">{% if last_synced %}Last updated from {{ company.provider_name }} {{ last_synced|date:"Y-m-d H:i" }}.{% else %}Not updated yet.{% endif %}</span></p>
+  <p><span class="muted" id="last-synced">{% if last_synced %}Last updated from {{ company.provider_name }} {{ last_synced|moment }}.{% else %}Not updated yet.{% endif %}</span></p>
   {% include "ledger/_job_status.html" %}
 
   <div class="card table-card">
@@ -17,7 +17,7 @@
     <tbody>
       {% for item in rows %}{% with dispute=item.dispute %}
         <tr id="dispute-{{ dispute.pk }}" class="{% if item.past %}dispute-past{% elif item.soon %}dispute-soon{% endif %}"{% if item.past %} style="background:var(--unpaid-bg);"{% elif item.soon %} style="background:var(--pending-bg);"{% endif %}>
-          <td>{% if dispute.respond_by %}{{ dispute.respond_by|date:"Y-m-d H:i" }}{% else %}—{% endif %}</td>
+          <td>{% if dispute.respond_by %}{{ dispute.respond_by|moment }}{% else %}—{% endif %}</td>
           <td class="days-left">{% if item.past %}<strong>Past</strong>{% elif item.days_left is not None %}{% if item.soon %}<strong>{{ item.days_left }}</strong>{% else %}{{ item.days_left }}{% endif %}{% else %}—{% endif %}</td>
           <td class="dispute-status">{{ dispute.status|default:"—" }}</td>
           <td>{{ dispute.reason|default:"—" }}</td>
@@ -35,7 +35,7 @@
                 {% for entry in item.evidence %}
                   <li id="evidence-{{ entry.evidence.pk }}">
                     {{ entry.evidence.name }} ({{ entry.evidence.document.get_content_type_display }}, {{ entry.evidence.document.size_bytes|filesizeformat }}):
-                    <span class="evidence-status">{{ entry.evidence.get_status_display }}</span>{% if entry.evidence.sent_at %} {{ entry.evidence.sent_at|date:"Y-m-d H:i" }}{% endif %}{% if entry.job_text %} <span class="muted evidence-job">{{ entry.job_text }}</span>{% endif %}
+                    <span class="evidence-status">{{ entry.evidence.get_status_display }}</span>{% if entry.evidence.sent_at %} {{ entry.evidence.sent_at|moment }}{% endif %}{% if entry.job_text %} <span class="muted evidence-job">{{ entry.job_text }}</span>{% endif %}
                     <a href="{% url 'ledger:documents:download' pk=entry.evidence.document.pk %}">Download</a>
                     {% if can_add_evidence and entry.can_retry and not item.past %}
                       <form method="post" action="{% url 'ledger:disputes:evidence_retry' pk=entry.evidence.pk %}" class="js-single-submit" style="display:inline;">

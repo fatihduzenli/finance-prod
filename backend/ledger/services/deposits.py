@@ -43,6 +43,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from finance.dates import day_text
 from ledger.models import (
     MANUAL_PAYMENT_METHODS,
     AuditLog,
@@ -511,5 +512,5 @@ def _state(resolution: DepositResolution) -> dict[str, Any]:
 
 
 def lease_label(lease: Lease) -> str:
-    started = lease.started_on.isoformat() if lease.started_on else "no start date"
+    started = day_text(lease.started_on) if lease.started_on else "no start date"
     return f"Lease {lease.store.external_label} from {started}"

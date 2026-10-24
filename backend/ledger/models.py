@@ -2720,7 +2720,7 @@ class LeaseEnd(GuardedModel):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
-    #: PLAN-012b-b D9: the first time the statement step rendered with nothing blocking.
+    #: PLAN-012b-b D9, PLAN-012f-a D: set when the statement step is first saved.
     #: A draft without it is not in progress: the store page shows no banner and a
     #: transfer adopts it.
     statement_opened_at = models.DateTimeField(null=True, blank=True)

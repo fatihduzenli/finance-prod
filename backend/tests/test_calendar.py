@@ -208,12 +208,12 @@ def test_the_month_page_moves_and_keeps_its_filters(today: date) -> None:
     client, _ = client_for(Role.VIEWER)
     store = a_store("Kept")
     page = client.get(f"/calendar/?month=2026-12&kind=note&store={store.pk}").content.decode()
-    assert "December 2026" in page
+    assert "Dec 2026" in page
     assert f"?month=2026-11&amp;kind=note&amp;store={store.pk}" in page
     assert f"?month=2027-01&amp;kind=note&amp;store={store.pk}" in page
     bad = client.get("/calendar/?month=2026-13&store=nonsense").content.decode()
     assert calendar_views.BAD_MONTH in bad and calendar_views.BAD_RECORD in bad
-    assert "October 2026" in bad
+    assert "Oct 2026" in bad
 
 
 def test_every_role_reads_the_page_and_only_billing_adds(today: date) -> None:

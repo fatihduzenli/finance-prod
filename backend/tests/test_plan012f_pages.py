@@ -115,11 +115,11 @@ def test_the_four_kpis_read_the_seeded_figures() -> None:
     # Collected this month: 1,000 settled; the month's rent: 1,400 of 3,000 collected (46 %).
     collected = kpi(html, "figure-paid")
     assert '<span class="kpi-value">$1,000.00</span>' in collected
-    assert '<span class="kpi-note">46% of October rent</span>' in collected
+    assert '<span class="kpi-note">46% of Oct 2026 rent</span>' in collected
     # One pending debit of 500 started on Friday the 2nd: five business days, Friday the 9th.
     pending = kpi(html, "figure-pending")
     assert '<span class="kpi-value">$500.00</span>' in pending
-    assert '<span class="kpi-note">1 debit · settle by 2026-10-09</span>' in pending
+    assert '<span class="kpi-note">1 debit · settle by Oct 9, 2026</span>' in pending
     assert 'href="/payments/?status=pending&amp;method=ach"' in html
     run = kpi(html, "figure-run")
     assert '<span class="kpi-value">—</span>' in run
@@ -131,7 +131,7 @@ def test_an_empty_dashboard_has_its_dashes_and_sentences() -> None:
     assert '<span class="kpi-note">0 stores · 0 overdue</span>' in html
     assert '<span class="kpi-note">—</span>' in html  # nothing billed this month
     assert '<span class="kpi-note">0 debits</span>' in html
-    assert 'id="collection-none">No rent billed for October yet.</p>' in html
+    assert 'id="collection-none">No rent billed for Oct 2026 yet.</p>' in html
     assert 'class="progress' not in html
     assert 'id="coming-up-none">Nothing scheduled.</p>' in html
     assert 'id="recent-payments-none">No settled payments yet.</p>' in html
@@ -141,7 +141,7 @@ def test_an_empty_dashboard_has_its_dashes_and_sentences() -> None:
 def test_the_header_has_the_long_date_and_new_invoice_for_billing_only() -> None:
     billing = page(client_for(Role.BILLING)[0], "/")
     header = section(billing, 'id="page-header"', "</header>")
-    assert '<span class="page-date" id="dashboard-date">Tuesday, October 6, 2026</span>' in header
+    assert '<span class="page-date" id="dashboard-date">Tuesday, Oct 6, 2026</span>' in header
     assert 'id="nav-search"' in header
     assert re.search(
         r'<a class="btn btn-primary" id="new-invoice" href="/stores/">.*New invoice</a>', header
@@ -168,7 +168,7 @@ def test_the_collection_card_shows_the_share_and_four_segments() -> None:
     assert sum(widths) <= 100
     html = page(client_for(Role.VIEWER)[0], "/")
     card = section(html, 'id="collection-card"', "</section>")
-    assert '<h2 id="collection-heading">October collection</h2>' in card
+    assert '<h2 id="collection-heading">Oct 2026 collection</h2>' in card
     assert 'id="collection-percent">46%</span>' in card
     assert 'id="collection-billed">of $3,000.00</span>' in card
     assert re.findall(r'class="progress-segment progress-([a-z]+)"', card) == [
@@ -213,7 +213,7 @@ def test_the_attention_rows_have_one_button_each_for_billing_and_none_for_a_view
     overdue = next(row for row in rows if 'data-kind="overdue"' in row)
     assert '<span class="badge badge-overdue">' in overdue and "Overdue 35 days</span>" in overdue
     assert '<a class="cell-title" href="/stores/' in overdue and "Fourth Co</span>" in overdue
-    assert '<td class="money" data-label="Amount">$700.00</td>' in overdue
+    assert '<td class="money" data-role="amount" data-label="Amount">$700.00</td>' in overdue
     assert 'id="attention-count">' in billing and 'id="all-unpaid" href="/arrears/"' in billing
     viewer = page(client_for(Role.VIEWER)[0], "/")
     table = section(viewer, 'id="attention-rows"', "</table>")
@@ -282,12 +282,12 @@ def test_the_five_recent_payments_say_today_and_yesterday() -> None:
     assert [row.when for row in rows] == [
         "Today 14:02",
         "Yesterday",
-        "2026-10-01",
-        "2026-09-30",
-        "2026-09-02",
+        "Oct 1, 2026",
+        "Sep 30, 2026",
+        "Sep 2, 2026",
     ]
     # The store as its page and the grid title it (Fable's review of Batch C).
-    assert rows[0].store == "#2310" and rows[0].paid_for == "Rent 2026-03"
+    assert rows[0].store == "#2310" and rows[0].paid_for == "Rent Mar 2026"
     assert rows[0].method == "Bank debit (ACH)" and rows[0].amount == D("100.00")
     html = page(client_for(Role.VIEWER)[0], "/")
     card = section(html, 'id="recent-payments"', "</section>")
@@ -356,7 +356,7 @@ def test_the_store_header_has_the_crumb_title_line_tabs_and_strip() -> None:
     assert re.search(r'id="store-title">#1991 Istanbul <span class="badge badge-paid">', header)
     assert (
         '<p class="store-line" id="store-line">221 Ridge Rd, North Arlington, NJ 07031 · '
-        "Open since 2024-10-20</p>"
+        "Open since Oct 20, 2024</p>"
     ) in header
     assert (
         '<p class="store-line-phone" id="store-line-phone">fatih · North Arlington, NJ</p>'
@@ -404,7 +404,7 @@ def test_the_four_side_cards_read_the_lease() -> None:
     labels = re.findall(r'<h2 class="section-label"[^>]*>([^<]+)</h2>', side)
     assert labels == ["Lease", "Next", "Store cost", "Documents"]
     assert '<dd id="header-rent"><strong>$2,000.00</strong> / month</dd>' in side
-    assert '<dd id="header-since">2025-01-01</dd>' in side
+    assert '<dd id="header-since">Jan 1, 2025</dd>' in side
     assert '<dd id="header-debit-day">1st</dd>' in side
     assert '<dd id="header-deposit">$3,000.00 · not collected</dd>' in side
     assert re.search(
@@ -412,8 +412,8 @@ def test_the_four_side_cards_read_the_lease() -> None:
         r'<a href="[^"]*tab=schedules',
         side,
     )
-    assert '<dt>Rent debit</dt><dd id="header-next-rent">2026-11-01</dd>' in side
-    assert '<dt>Insurance renewal</dt><dd id="header-insurance">2026-10-20</dd>' in side
+    assert '<dt>Rent debit</dt><dd id="header-next-rent">Nov 1, 2026</dd>' in side
+    assert '<dt>Insurance renewal</dt><dd id="header-insurance">Oct 20, 2026</dd>' in side
     assert 'id="change-cost">Change</a>' in side
     assert re.search(
         r'id="documents-upload" href="/stores/[^"]+/\?tab=documents#tab-documents"', side

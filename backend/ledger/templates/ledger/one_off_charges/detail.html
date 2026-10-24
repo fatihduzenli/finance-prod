@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components money %}
+{% load components money dates %}
 {% load responsive %}
 {% block title %}{{ charge.label }}{% if lease %} {{ lease.store.external_label }}{% endif %}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{{ charge.label }}</span></nav><h1>{{ charge.label }}{% if charge.status == "voided" %} {% status_badge "Voided" %}{% endif %}{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">From the spreadsheet</span>{% endif %}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% if can_record or can_link_invoice or can_edit or can_waive or can_cancel %}<div class="page-actions" id="charge-actions">{% if can_link_invoice %}<a class="btn" href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}{% if can_edit %}<a class="btn" href="{% url 'ledger:one_off_charges:edit' pk=charge.pk %}" id="edit-charge">Edit</a>{% endif %}{% if can_waive %}<a class="btn" href="{% url 'ledger:one_off_charges:waive' pk=charge.pk %}" id="waive-charge">Waive</a>{% endif %}{% if can_cancel %}<a class="btn" href="{% url 'ledger:one_off_charges:cancel' pk=charge.pk %}" id="cancel-charge">Cancel charge</a>{% endif %}{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:one_off_charges:payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}</div>{% endif %}</div>{% endblock %}
@@ -52,15 +52,15 @@
     <dt>Internal note</dt><dd id="note" style="white-space:pre-wrap;">{{ charge.note|default:"—" }}</dd>{% endif %}
     {% if schedule_masked %}<dt>Autopay in {{ company.provider_name }}</dt><dd id="schedule">{{ schedule_masked }}</dd>{% endif %}
     {% if provider_invoice_masked %}<dt>{{ company.provider_name }} invoice</dt><dd id="provider-invoice">{{ provider_invoice_masked }}</dd>{% endif %}
-    <dt>Due</dt><dd id="due-date">{{ charge.due_date|date:"Y-m-d" }}</dd>
+    <dt>Due</dt><dd id="due-date">{{ charge.due_date|day }}</dd>
     <dt>Vendor</dt><dd id="vendor">{{ charge.vendor|default:"—" }}</dd>
     <dt>Cost</dt><dd id="cost">{% if charge.cost is not None %}{{ charge.cost|money }}{% else %}unknown{% endif %}</dd>
     <dt>Price</dt><dd id="price">{{ charge.price|money }}</dd>
     <dt>Paid</dt><dd id="amount-paid">{{ charge.amount_paid|money }}</dd>
     <dt>Balance</dt><dd id="balance">{{ charge.balance|money }}</dd>
     <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
-    {% if charge.voided_at %}<dt>Voided</dt><dd id="voided">{{ charge.voided_at|date:"Y-m-d" }} by {{ charge.voided_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.void_note }}</span></dd>{% endif %}
-    {% if charge.waived_at %}<dt>Waived</dt><dd id="waived">{{ charge.waived_at|date:"Y-m-d" }} by {{ charge.waived_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.waive_note }}</span></dd>{% endif %}
+    {% if charge.voided_at %}<dt>Voided</dt><dd id="voided">{{ charge.voided_at|day }} by {{ charge.voided_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.void_note }}</span></dd>{% endif %}
+    {% if charge.waived_at %}<dt>Waived</dt><dd id="waived">{{ charge.waived_at|day }} by {{ charge.waived_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.waive_note }}</span></dd>{% endif %}
   </dl>
   {% if installment_plan %}
     <p id="installment-of">Installment {{ charge.installment_no }} of {{ installment_plan.count }} of an <a href="{% url 'ledger:plans:detail' pk=installment_plan.pk %}">installment plan</a> ({{ installment_plan.get_status_display|lower }}).</p>
@@ -73,7 +73,7 @@
     <section class="card" id="deposit-resolution-card">
     <h2>Deposit resolution</h2>
     <dl id="deposit-resolution" class="detail-list">
-      <dt>Resolved</dt><dd id="resolution-kind">{{ resolution.get_kind_display }} on {{ resolution.resolved_on|date:"Y-m-d" }}{% if resolution.created_by %} by {{ resolution.created_by }}{% endif %}</dd>
+      <dt>Resolved</dt><dd id="resolution-kind">{{ resolution.get_kind_display }} on {{ resolution.resolved_on|day }}{% if resolution.created_by %} by {{ resolution.created_by }}{% endif %}</dd>
       <dt>Amount</dt><dd id="resolution-amount">{{ resolution.amount|money }}</dd>
       {% if resolution.method %}<dt>Method</dt><dd id="resolution-method">{{ resolution.get_method_display }}</dd>{% endif %}
       {% if resolution.to_lease %}<dt>Transferred to</dt><dd id="resolution-to-lease"><a href="{% url 'ledger:leases:detail' pk=resolution.to_lease.pk %}">Lease {{ resolution.to_lease.store.external_label }}</a></dd>{% endif %}
@@ -90,7 +90,7 @@
     <thead><tr><th>Number</th><th>Date</th><th>Due</th><th class="money">Total</th><th>Status</th><th>{{ company.provider_name }} status</th></tr></thead>
     <tbody>
       {% for invoice in invoices %}
-        <tr><td class="invoice-number">{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|date:"Y-m-d" }}</td><td>{{ invoice.due_date|date:"Y-m-d" }}</td><td class="money">{{ invoice.total|money }}</td><td class="invoice-status">{{ invoice.get_internal_status_display }}</td><td class="provider-status">{{ invoice.provider_status|default:"—" }}</td></tr>
+        <tr><td class="invoice-number">{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|day }}</td><td>{{ invoice.due_date|day }}</td><td class="money">{{ invoice.total|money }}</td><td class="invoice-status">{{ invoice.get_internal_status_display }}</td><td class="provider-status">{{ invoice.provider_status|default:"—" }}</td></tr>
       {% empty %}
         <tr><td colspan="6" class="muted empty">No invoice linked.{% if can_link_invoice %} A one-off invoice made on the {{ company.provider_name }} dashboard can be attached with "Attach {{ company.provider_name }} invoice".{% endif %}</td></tr>
       {% endfor %}
@@ -109,7 +109,7 @@
     <tbody>
       {% for payment in payments %}
         <tr>
-          <td><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">{{ payment.settled_on|date:"Y-m-d"|default:"—" }}</a></td>
+          <td><a href="{% url 'ledger:payments:detail' pk=payment.pk %}">{{ payment.settled_on|day|default:"—" }}</a></td>
           <td>{{ payment.get_kind_display }}</td>
           <td>{{ payment.get_method_display }}</td>
           <td class="money">{% if payment.is_refund or payment.kind == "refund_deposit" %}&minus;{% endif %}{{ payment.amount|money }}</td>

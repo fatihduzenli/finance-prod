@@ -1,8 +1,8 @@
 {% extends "finance/base.html" %}
-{% load components money %}
+{% load components money dates %}
 {% load responsive %}
-{% block title %}Daily charges, {{ run.day|date:"Y-m-d" }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Daily charges, {{ run.day|date:"Y-m-d" }}</h1>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form><form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button></form></div>{% endif %}</div>{% endblock %}
+{% block title %}Daily charges, {{ run.day|day }}{% endblock %}
+{% block header %}<div class="page-header"><h1>Daily charges, {{ run.day|day }}</h1>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form><form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
   {% if not health.ok %}
     <ul class="messages" id="provider-banner">
@@ -21,7 +21,7 @@
   {% if last_run %}
     <section class="card" id="last-run-card">
     <h2>Last run</h2>
-    <p id="last-run">{{ last_run.day|date:"Y-m-d" }}, {% if last_run.actor %}by {{ last_run.actor.get_username }}{% else %}by the daily run{% endif %}: {{ last_run.created }} created today, {{ last_run.caught_up }} by the catch-up, {{ last_run.already }} already created, {{ last_run.skipped }} skipped.</p>
+    <p id="last-run">{{ last_run.day|day }}, {% if last_run.actor %}by {{ last_run.actor.get_username }}{% else %}by the daily run{% endif %}: {{ last_run.created }} created today, {{ last_run.caught_up }} by the catch-up, {{ last_run.already }} already created, {{ last_run.skipped }} skipped.</p>
     {% responsive_table %}
     <table id="created-charges">
       <thead><tr><th>Store</th><th>Month</th><th class="money">Amount</th><th>Created</th><th>Charge</th></tr></thead>
@@ -29,7 +29,7 @@
         {% for item in last_run.charges %}
           <tr>
             <td><a href="{% url 'ledger:stores:detail' pk=item.charge.lease.store.pk %}">{{ item.charge.lease.store.external_label }}</a></td>
-            <td>{{ item.charge.period_month|date:"Y-m" }}{% if item.charge.seq > 1 %} (debit {{ item.charge.seq }}){% endif %}</td>
+            <td>{{ item.charge.period_month|month }}{% if item.charge.seq > 1 %} (debit {{ item.charge.seq }}){% endif %}</td>
             <td class="money">{{ item.charge.amount_due|money }}</td>
             <td>{{ item.when }}</td>
             <td><a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{% status_badge item.charge.get_status_display item.charge.status %}</a></td>
@@ -103,7 +103,7 @@
     <tbody>
       {% for item in insurance_due %}
         <tr>
-          <td>{{ item.due_on|date:"Y-m-d" }}</td>
+          <td>{{ item.due_on|day }}</td>
           <td><a href="{% url 'ledger:stores:detail' pk=item.lease.store.pk %}">{{ item.lease.store.external_label }}</a></td>
           <td>{{ item.policy_year }}</td>
           <td class="money">{% if item.amount is not None %}{{ item.amount|money }}{% else %}<strong>Premium missing</strong>{% endif %}</td>

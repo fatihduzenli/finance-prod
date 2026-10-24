@@ -104,6 +104,7 @@ invoice release, mail, Step 12d.
   confirmation, one POST), and the transfer start page shows the same two links in place of the
   bare sentence. A draft whose terms were never set is deleted by the daily job after 7 days
   (audited); not needed for the rule, but it keeps the table clean.
+  Changed by PLAN-012f-a D: created and set when the statement step is saved, not when it opens.
 
 ### 3.4 The final rent charge in the wizards (owner's item 6)
 
@@ -115,6 +116,7 @@ invoice release, mail, Step 12d.
   balance; `confirm` keeps its fallback. Only live Stax objects, active or paused schedules,
   pending payments, live plans and the unpaid deposit (D11) remain blockers; an open balance
   blocks a **transfer** only as the statement leaves it (after the offset), as today.
+  Changed by PLAN-012f-a D: created and set when the statement step is saved, not when it opens.
 
 ### 3.5 An unpaid deposit at lease end (owner's item 7)
 

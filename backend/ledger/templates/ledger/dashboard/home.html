@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components icons money responsive %}
+{% load components icons money responsive dates %}
 {% load tz %}
 {% block title %}Dashboard{% endblock %}
 {% comment %}The dashboard (docs/qa/PLAN-012f-approved-design.md D7; docs/design/DESIGN-SPEC.md §4 and
@@ -10,7 +10,7 @@ store-less builder route exists). Row 1: the four figures as KPI cards (ledger.v
 beside the month's collection (ledger.services.dashboard.collection_progress) and what is coming
 up. Row 3: the recent payments. Then today's run, the failed payment attempts, the waived charges
 with a live invoice, the invoices not sent and the last nightly check, each a card.{% endcomment %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Dashboard</h1><span class="page-date" id="dashboard-date">{{ data.today|date:"l, F j, Y" }}</span></div><div class="page-actions">{% include "finance/_header_search.html" %}{% if can_act %}<a class="btn btn-primary" id="new-invoice" href="{% url 'ledger:stores:list' %}">{% icon "plus" 16 %}New invoice</a>{% endif %}</div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Dashboard</h1><span class="page-date" id="dashboard-date">{{ data.today|day_long }}</span></div><div class="page-actions">{% include "finance/_header_search.html" %}{% if can_act %}<a class="btn btn-primary" id="new-invoice" href="{% url 'ledger:stores:list' %}">{% icon "plus" 16 %}New invoice</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
   <section class="kpi-row" id="figures-card" aria-label="Figures">
     {% for item in kpis %}{% if item.url %}<a class="kpi-link" id="{{ item.element_id }}" href="{{ item.url }}">{% kpi item.label item.value item.note item.tone %}</a>{% else %}<div class="kpi-link" id="{{ item.element_id }}">{% kpi item.label item.value item.note item.tone %}</div>{% endif %}{% endfor %}
@@ -22,12 +22,12 @@ with a live invoice, the invoices not sent and the last nightly check, each a ca
     </div>
     <div class="dashboard-side">
       <section class="card" id="collection-card" aria-labelledby="collection-heading">
-        <h2 id="collection-heading">{{ collection.month|date:"F" }} collection</h2>
+        <h2 id="collection-heading">{{ collection.month|month }} collection</h2>
         {% if collection.percent is not None %}
           <p class="collection-total"><span class="collection-percent" id="collection-percent">{{ collection.percent }}%</span> <span class="muted" id="collection-billed">of {{ collection.billed|money }}</span></p>
           {% progress collection.segments %}
         {% else %}
-          <p class="muted" id="collection-none">No rent billed for {{ collection.month|date:"F" }} yet.</p>
+          <p class="muted" id="collection-none">No rent billed for {{ collection.month|month }} yet.</p>
         {% endif %}
       </section>
       <section class="card" id="coming-up" aria-labelledby="coming-up-heading">
@@ -89,7 +89,7 @@ with a live invoice, the invoices not sent and the last nightly check, each a ca
               <td><a href="{% url 'ledger:operators:detail' pk=invoice.operator_id %}">{{ invoice.operator.display_name }}</a></td>
               <td>{{ store|default:"—" }}</td>
               <td class="money">{{ invoice.total|money }}</td>
-              <td>{{ invoice.updated_at|date:"Y-m-d" }}</td>
+              <td>{{ invoice.updated_at|day }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -106,7 +106,7 @@ with a live invoice, the invoices not sent and the last nightly check, each a ca
       <p class="muted">An admin clears each with "Cancel in {{ company.provider_name }}" on the charge page.</p>
       <ul>
         {% for charge in data.waived_live %}
-          <li><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a>{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}, {{ charge.price|money }}, waived {{ charge.waived_at|date:"Y-m-d" }}</li>
+          <li><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a>{% if charge.lease %}, {{ charge.lease.store.external_label }}{% endif %}, {{ charge.price|money }}, waived {{ charge.waived_at|day }}</li>
         {% endfor %}
       </ul>
     </section>
@@ -124,7 +124,7 @@ with a live invoice, the invoices not sent and the last nightly check, each a ca
             <td><a href="{% url 'ledger:operators:detail' pk=invoice.operator_id %}">{{ invoice.operator.display_name }}</a></td>
             <td>{{ store|default:"—" }}</td>
             <td class="money">{{ invoice.total|money }}</td>
-            <td>{{ invoice.issue_date|date:"Y-m-d" }}</td>
+            <td>{{ invoice.issue_date|day }}</td>
             <td>{{ invoice.get_internal_status_display }}</td>
           </tr>
         {% endfor %}
@@ -138,7 +138,7 @@ with a live invoice, the invoices not sent and the last nightly check, each a ca
   <section class="card" id="last-reconciliation-card" aria-label="Last nightly check">
   <h2>Last nightly check</h2>
   {% if data.last_reconciliation %}
-    <p id="last-reconciliation"><a href="{% url 'ledger:reconciliation:page' %}">{{ data.last_reconciliation.get_status_display }}, started {{ data.last_reconciliation.started_at|date:"Y-m-d H:i" }}</a></p>
+    <p id="last-reconciliation"><a href="{% url 'ledger:reconciliation:page' %}">{{ data.last_reconciliation.get_status_display }}, started {{ data.last_reconciliation.started_at|moment }}</a></p>
   {% else %}
     <p id="last-reconciliation" class="muted">No nightly check has run yet.</p>
   {% endif %}

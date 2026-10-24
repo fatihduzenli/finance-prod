@@ -1,12 +1,12 @@
 {% extends "finance/base.html" %}
-{% load components icons responsive %}
+{% load components icons responsive dates %}
 {% load static %}
 {% load tz %}
 {% block title %}{{ operator.display_name }}{% endblock %}
 {% block header %}<div class="page-header workspace-head">
   <div class="page-title-block">
     <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}" aria-current="page">{{ operator.display_name }}</a></nav>
-    <h1 class="store-title">{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1>
+    <h1 class="store-title">{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|day }}</span>{% endif %}</h1>
   </div>
   {% comment %}PLAN-012e-2 D6: Statement, New invoice (primary), Edit, Connect when it applies; Archive in the More menu (ledger/_menu_script.html).{% endcomment %}
   <div class="page-actions" id="operator-actions">
@@ -62,8 +62,8 @@
     <dt>E-mail</dt><dd>{{ operator.email|default:"—" }}</dd>
     <dt>Phone</dt><dd>{{ operator.phone|default:"—" }}</dd>
     <dt>Text-message phone</dt><dd id="sms-phone">{{ operator.sms_phone|default:"—" }}</dd>
-    <dt>Text-message consent given on</dt><dd id="sms-consent">{{ operator.sms_consent_at|date:"Y-m-d H:i"|default:"—" }}</dd>
-    <dt>E-mail consent given on</dt><dd id="email-consent">{{ operator.email_consent_at|date:"Y-m-d H:i"|default:"—" }}</dd>
+    <dt>Text-message consent given on</dt><dd id="sms-consent">{{ operator.sms_consent_at|moment|default:"—" }}</dd>
+    <dt>E-mail consent given on</dt><dd id="email-consent">{{ operator.email_consent_at|moment|default:"—" }}</dd>
     <dt>Address</dt>
     <dd>{% if operator.address_line1 %}{{ operator.address_line1 }}<br>{% endif %}{% if operator.address_line2 %}{{ operator.address_line2 }}<br>{% endif %}{{ operator.city }}{% if operator.city and operator.state %}, {% endif %}{{ operator.state }} {{ operator.postal_code }}{% if not operator.address_line1 and not operator.city %}—{% endif %}</dd>
   </dl>
@@ -76,11 +76,11 @@
     <dt>Connection to {{ company.provider_name }}</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} {% status_badge "Needs review" %}{% endif %}</dd>
     {% if failure_message %}
       <dt>Last failure</dt>
-      <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.get_sync_failure_display }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|date:"Y-m-d H:i" }}{% endif %}</span>{% if failure_fields %}<br><span id="sync-failure-fields">Fields {{ company.provider_name }} rejected: {{ failure_fields }}</span>{% endif %}</dd>
+      <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.get_sync_failure_display }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|moment }}{% endif %}</span>{% if failure_fields %}<br><span id="sync-failure-fields">Fields {{ company.provider_name }} rejected: {{ failure_fields }}</span>{% endif %}</dd>
     {% elif provider_updated_at %}
-      <dt>Last update</dt><dd id="provider-updated">Updated from {{ company.provider_name }} {{ provider_updated_at|date:"Y-m-d H:i" }}</dd>
+      <dt>Last update</dt><dd id="provider-updated">Updated from {{ company.provider_name }} {{ provider_updated_at|moment }}</dd>
     {% elif operator.sync_attempted_at %}
-      <dt>Last attempt</dt><dd>{{ operator.sync_attempted_at|date:"Y-m-d H:i" }}</dd>
+      <dt>Last attempt</dt><dd>{{ operator.sync_attempted_at|moment }}</dd>
     {% endif %}
     {% comment %}PLAN-012c D8: the provider's identifiers and the enrolment only for an operator with a provider customer; the link status above says when there is none.{% endcomment %}
     {% if customer_masked %}<dt>{{ company.provider_name }} customer ID</dt><dd id="provider-customer">{{ customer_masked }}</dd>
@@ -111,7 +111,7 @@
       <p class="actions"><button class="btn" type="submit">Save</button></p>
     </form>
   {% endif %}
-  <p id="statement-links" class="muted">Each collection e-mail carries a link to this operator's statement that opens without an account for {{ statement_link_days }} days.{% if operator.statement_links_revoked_at %} Links sent before {{ operator.statement_links_revoked_at|date:"Y-m-d H:i" }} were revoked.{% endif %}</p>
+  <p id="statement-links" class="muted">Each collection e-mail carries a link to this operator's statement that opens without an account for {{ statement_link_days }} days.{% if operator.statement_links_revoked_at %} Links sent before {{ operator.statement_links_revoked_at|moment }} were revoked.{% endif %}</p>
   {% if can_revoke_links %}
     <form method="post" action="{% url 'ledger:operators:statement_links_revoke' pk=operator.pk %}" class="js-single-submit" id="statement-links-revoke-form">
       {% csrf_token %}
@@ -138,7 +138,7 @@
   <h2>Notes</h2>
   {% if operator.notes %}<p style="white-space:pre-wrap;">{{ operator.notes }}</p>{% endif %}
   {% for note in notes %}
-    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|date:"Y-m-d" }}</span></p>
+    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|day }}</span></p>
   {% empty %}
     {% if not operator.notes %}<p class="muted">No notes.</p>{% endif %}
   {% endfor %}

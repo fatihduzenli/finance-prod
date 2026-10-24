@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components icons money %}
+{% load components icons money dates %}
 {% load responsive %}
 {% load static %}
 {% block title %}Store {{ store.external_label }}{% endblock %}
@@ -51,9 +51,9 @@
     <dl>
       <dt>Address</dt><dd id="store-address">{{ address_line }}</dd>
       <dt>Store number</dt><dd>{{ store.store_number|default_if_none:"—" }}</dd>
-      <dt>Open date</dt><dd>{% if store.open_date %}{{ store.open_date|date:"Y-m-d" }}{% else %}— <span class="badge">Needs open date</span>{% endif %}</dd>
-      {% if store.closed_at %}<dt>Closed date</dt><dd id="store-closed-date">{{ store.closed_at|date:"Y-m-d" }}</dd>{% endif %}
-      <dt>Status</dt><dd id="store-status">{% status_badge store.get_status_display status_value %}{% if vacant_since %} <span class="badge" id="vacant-since">Vacant since {{ vacant_since|date:"Y-m-d" }}</span>{% endif %}</dd>
+      <dt>Open date</dt><dd>{% if store.open_date %}{{ store.open_date|day }}{% else %}— <span class="badge">Needs open date</span>{% endif %}</dd>
+      {% if store.closed_at %}<dt>Closed date</dt><dd id="store-closed-date">{{ store.closed_at|day }}</dd>{% endif %}
+      <dt>Status</dt><dd id="store-status">{% status_badge store.get_status_display status_value %}{% if vacant_since %} <span class="badge" id="vacant-since">Vacant since {{ vacant_since|day }}</span>{% endif %}</dd>
     </dl>
   </section>
 
@@ -65,9 +65,9 @@
     <tbody>
       {% for lease in leases %}
         <tr>
-          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease from {{ lease.started_on|date:"Y-m-d"|default:"no start date" }}</a>{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
+          <td><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease from {{ lease.started_on|day|default:"no start date" }}</a>{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
           <td>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</td>
-          <td>{{ lease.started_on|date:"Y-m-d"|default:"—" }}</td>
+          <td>{{ lease.started_on|day|default:"—" }}</td>
           <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>
           <td>{{ lease.get_collection_status_display }}{% if lease.lease_end and lease.lease_end.status == "confirmed" and can_edit %} <a href="{% url 'ledger:lease_ends:confirm' pk=lease.lease_end.pk %}">Final statement</a>{% endif %}</td>
         </tr>

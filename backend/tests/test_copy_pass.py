@@ -190,14 +190,16 @@ def test_the_promise_cells_and_the_closed_sentence_are_formatted() -> None:
     closer = closing(operator, kept, "kept", lease=lease, body="Paid.")
     open_one = promise(operator, lease=lease, by=date(2026, 10, 20), amount="12500.00")
     kept.refresh_from_db()
-    assert contacts.closes_sentence(kept) == "Closed $2,000.00 by 2026-10-01 as Kept"
+    assert contacts.closes_sentence(kept) == "Closed $2,000.00 by Oct 1, 2026 as Kept"
+    # The CSV's form keeps ISO (DESIGN-SPEC §5).
+    assert contacts.closes_csv_text(kept) == "Closed $2,000.00 by 2026-10-01 as Kept"
     client, _ = client_for(Role.BILLING)
     log = page(client, f"/operators/{operator.pk}/contacts/")
-    assert "Closed $2,000.00 by 2026-10-01 as Kept" in log
-    assert "$12,500.00 by 2026-10-20" in log
+    assert "Closed $2,000.00 by Oct 1, 2026 as Kept" in log
+    assert "$12,500.00 by Oct 20, 2026" in log
     header = page(client, f"/stores/{store.pk}/").split('id="workspace-header"')[1]
     header = header.split("</section>")[0]
-    assert "$12,500.00 by 2026-10-20" in header  # the open promise
+    assert "$12,500.00 by Oct 20, 2026" in header  # the open promise
     assert '<dd id="header-rent"><strong>$3,500.00</strong> / month</dd>' in header  # 12f D8
     assert closer.pk and open_one.pk
 
@@ -208,7 +210,7 @@ def test_the_morning_e_mail_writes_the_promised_amount_with_its_separator() -> N
     operator = an_operator("Morning Co")
     row = promise(operator, by=date(2026, 10, 1), amount="2000.00")
     message = calendar._promise_message(row, "staff@example.com")
-    assert "promised to pay $2,000.00 by 2026-10-01." in message.text
+    assert "promised to pay $2,000.00 by Oct 1, 2026." in message.text
     assert message.subject == "Promise to pay due today: Morning Co"
 
 
@@ -407,7 +409,7 @@ PAIRS: list[tuple[str, str, str]] = [
     ("audit/page.html", "Audit log", "Activity log"),
     ("lease_ends/blockers.html", "live items", f"still open at {P}"),
     ("transfers/blockers.html", "live items and balances", f"still open at {P}, and balances"),
-    ("charges/detail.html", "Charge {{ charge.lease", 'Rent {{ charge.period_month|date:"F Y" }}'),
+    ("charges/detail.html", "Charge {{ charge.lease", "Rent {{ charge.period_month|month }}"),
     ("payments/detail.html", "Payment of ${", "of {{ payment.amount|money }}"),
     ("invoices/cancel.html", "{% else %}Cancel {{ draft.number }}", "Delete draft"),
     ("one_off_charges/gone.html", "Create one-off charge", "This form has moved"),
@@ -450,7 +452,7 @@ PAIRS: list[tuple[str, str, str]] = [
         "Cancel every statement link sent",
     ),
     # §4.6 template sentences
-    ("_job_status.html", " UTC", "started {{ job.created_at|date:"),
+    ("_job_status.html", " UTC", "started {{ job.created_at|moment }}"),
     ("dashboard/home.html", "ATTEMPTED", f"Invoices {P} could not collect are listed here."),
     ("dashboard/home.html", "Last reconciliation", "Last nightly check"),
     ("disputes/page.html", "Last synced", f"Last updated from {P}"),

@@ -1,5 +1,5 @@
 {% comment %}The Invoices tab (docs/qa/PLAN-012d D3, finding 12d-1): ledger.services.workspace.invoices_tab. A never-sent draft has Edit, Send (single submit) and Delete (no note, no confirmation page); a sent invoice keeps its cancel form. On the operator page (D14) the operator's drafts and invoices, with a Store column; Send and Delete come back to it.{% endcomment %}
-{% load components money %}
+{% load components money dates %}
 {% load responsive %}
 <h2>Drafts</h2>
 {% responsive_table %}
@@ -11,7 +11,7 @@
         <td><a href="{% if billing %}{% url 'ledger:invoices:draft' pk=draft.pk %}{% else %}{% url 'ledger:invoices:preview' pk=draft.pk %}{% endif %}">{{ draft.number }}</a></td>
         <td>{% if by_store %}{{ draft.lease.store.external_label|default:"No store (the operator)" }}{% else %}{{ draft.operator.display_name }}{% endif %}</td>
         <td class="money">{{ draft.total|default:"0.00"|money }}</td>
-        <td>{{ draft.created_at|date:"Y-m-d" }}</td>
+        <td>{{ draft.created_at|day }}</td>
         <td>{% if billing %}<div class="actions" style="margin:0;">
           <a class="btn draft-edit" href="{% url 'ledger:invoices:draft' pk=draft.pk %}{{ draft_edit_query }}">Edit</a>
           <form method="post" action="{% url 'ledger:invoices:send' pk=draft.pk %}{{ draft_return_query }}" class="js-single-submit draft-send">{% csrf_token %}<button class="btn btn-primary" type="submit">Send</button></form>
@@ -36,8 +36,8 @@
       <tr class="store-invoice">
         <td>{% if item.url %}<a href="{{ item.url }}">{{ invoice.invoice_number }}</a>{% else %}{{ invoice.invoice_number }}{% endif %}</td>
         <td>{% if by_store %}{{ item.stores|default:"—" }}{% else %}{{ invoice.operator.display_name }}{% endif %}</td>
-        <td>{{ invoice.issue_date|date:"Y-m-d" }}</td>
-        <td>{{ invoice.due_date|date:"Y-m-d" }}</td>
+        <td>{{ invoice.issue_date|day }}</td>
+        <td>{{ invoice.due_date|day }}</td>
         <td class="money">{{ invoice.total|money }}</td>
         <td class="money">{{ invoice.amount_paid|money }}</td>
         <td>{{ invoice.get_internal_status_display }}</td>

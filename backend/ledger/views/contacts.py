@@ -47,6 +47,7 @@ from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from finance.dates import day_text
 from ledger.forms import (
     ContactCorrectionForm,
     ContactDeleteForm,
@@ -191,11 +192,16 @@ def contacts_export(request: HttpRequest, pk: str) -> StreamingHttpResponse:
 # --- Adding an entry ------------------------------------------------------------------------
 
 
+def _day(value: date | None) -> str:
+    """A promise's day as the page reads it (DESIGN-SPEC §5), ``""`` without one."""
+    return day_text(value) if value is not None else ""
+
+
 def _promise_label(promise: ContactEntry) -> str:
-    label = f"{format_amount(promise.promised_amount or ZERO)} by {promise.promised_date}"
+    label = f"{format_amount(promise.promised_amount or ZERO)} by {_day(promise.promised_date)}"
     if promise.lease is not None:
         label += f" on store {promise.lease.store.external_label}"
-    return f"{label} (recorded {promise.happened_on})"
+    return f"{label} (recorded {_day(promise.happened_on)})"
 
 
 def entry_form(
@@ -254,7 +260,7 @@ def supersede_warnings(operator: Operator) -> dict[str, str]:
         warnings.setdefault(
             str(row.lease_id or ""),
             f"Saving a promise closes the open promise of "
-            f"{format_amount(row.promised_amount or ZERO)} by {row.promised_date} {where} "
+            f"{format_amount(row.promised_amount or ZERO)} by {_day(row.promised_date)} {where} "
             "as Rescheduled.",
         )
     return warnings
@@ -383,7 +389,7 @@ def _lease_state(lease: Lease, today: date) -> str:
     if lease.collection_status == CollectionStatus.ENDED or (
         lease.ended_on is not None and lease.ended_on < today
     ):
-        return f", lease ended {lease.ended_on.isoformat()}" if lease.ended_on else ", lease ended"
+        return f", lease ended {day_text(lease.ended_on)}" if lease.ended_on else ", lease ended"
     return ", lease pending"
 
 

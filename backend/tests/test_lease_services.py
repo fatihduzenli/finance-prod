@@ -253,7 +253,7 @@ def test_a_rent_change_too_close_to_the_current_start_is_refused_and_nothing_cha
     with pytest.raises(LeaseRefused) as raised:
         edit(lease, D("1650.00"), starts, debit_day=20)
     assert raised.value.field == "rent_effective_from"
-    assert "2026-01-01" in str(raised.value)
+    assert "Jan 1, 2026" in str(raised.value)
     lease.refresh_from_db()
     assert lease.debit_day == 15
     [row] = LeaseRentHistory.objects.filter(lease=lease)
@@ -851,9 +851,9 @@ def test_a_future_rent_change_flags_with_the_dated_message_and_early_re_enabling
     enable(lease)
     edit(lease, D("1650.00"), date(2026, 11, 1))
     [row] = service.live_schedules(lease)
-    expected = service.RENT_CHANGES.format(date="2026-11-01")
+    expected = service.RENT_CHANGES.format(date="Nov 1, 2026")
     assert expected == (
-        "Rent changes on 2026-11-01; pause and re-enable autopay on or after that date."
+        "Rent changes on Nov 1, 2026; pause and re-enable autopay on or after that date."
     )
     assert row.needs_review
     assert service.schedule_review_message(lease, row, date(2026, 10, 1)) == expected
@@ -915,7 +915,7 @@ def test_no_rent_in_effect_on_the_first_debit_is_refused_without_a_provider_call
     outcome = enable(lease)
     assert (outcome.action, outcome.message) == (
         AutopayAction.REFUSED,
-        service.RENT_NOT_STARTED.format(date="2026-10-15"),
+        service.RENT_NOT_STARTED.format(date="Oct 15, 2026"),
     )
     assert fake.calls == []
     assert service.live_schedules(lease) == []
@@ -1364,7 +1364,7 @@ def test_the_move_deletes_the_schedule_and_creates_it_from_next_months_debit(
     outcome = move(lease, actor)
     assert (outcome.action, outcome.message) == (
         AutopayAction.MOVED,
-        "Autopay moved: it resumes 2026-11-15; this month is collected in installments.",
+        "Autopay moved: it resumes Nov 15, 2026; this month is collected in installments.",
     )
     assert [args for name, args in fake.calls if name == "delete_scheduled_invoice"] == [(old_ref,)]
     first, second = creates(fake)

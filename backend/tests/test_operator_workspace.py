@@ -205,7 +205,7 @@ def test_the_other_tabs_list_the_operators_rows() -> None:
     assert f"operator={operator.pk}" in payments
     invoices = section(page(client, operator_page(operator, tab="invoices")), "tab-invoices")
     assert "INV-2026-0077" in invoices and "INV-2026-0078" not in invoices
-    assert '<td data-label="Store">1002</td>' in invoices
+    assert '<td data-role="meta" data-label="Store">1002</td>' in invoices
     schedules = page(client, operator_page(operator, tab="schedules"))
     assert 'id="tab-schedules"' in schedules
     contacts = page(client, operator_page(operator, tab="contacts"))
@@ -494,10 +494,10 @@ def test_the_reports_from_and_to_are_month_selects_of_49_months(route: str) -> N
     start, end = month_select(html, "from"), month_select(html, "to")
     for select in (start, end):
         assert select.count("<option ") == 49 and select.count(" selected") == 1
-        assert '<option value="2024-10">October 2024</option>' in select
-        assert '<option value="2028-10">October 2028</option>' in select
-    assert '<option value="2026-07" selected>July 2026</option>' in start
-    assert '<option value="2026-09" selected>September 2026</option>' in end
+        assert '<option value="2024-10">Oct 2024</option>' in select
+        assert '<option value="2028-10">Oct 2028</option>' in select
+    assert '<option value="2026-07" selected>Jul 2026</option>' in start
+    assert '<option value="2026-09" selected>Sep 2026</option>' in end
     assert "from=2026-07" in html and "to=2026-09" in html
 
 
@@ -507,8 +507,8 @@ def test_a_range_outside_the_window_is_offered_too_and_the_pnl_reads_it() -> Non
     )
     start = month_select(html, "from")
     assert start.count("<option ") == 52
-    assert '<option value="2023-01" selected>January 2023</option>' in start
-    assert '<option value="2023-03" selected>March 2023</option>' in month_select(html, "to")
+    assert '<option value="2023-01" selected>Jan 2023</option>' in start
+    assert '<option value="2023-03" selected>Mar 2023</option>' in month_select(html, "to")
     export = re.search(r'id="export-csv" href="([^"]+)"', html)
     assert export is not None and "from=2023-01" in export.group(1)
     assert "to=2023-03" in export.group(1)

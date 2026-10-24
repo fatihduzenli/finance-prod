@@ -74,6 +74,7 @@ from decimal import Decimal
 from django.db.models import Exists, F, Max, OuterRef, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce
 
+from finance.dates import month_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -155,10 +156,18 @@ class OpenBalance:
     status: str = ""
     #: The rent month of a rent charge; ``None`` otherwise.
     period_month: date | None = None
-    #: What the charge is for, as a statement names it.
+    #: What the charge is for, as a statement names it (a page's text: "Rent Oct 2026").
     description: str = ""
     #: The charge's lease; ``None`` for a one-off charge without one.
     lease_id: uuid.UUID | None = None
+    #: ``description`` as an export writes it ("Rent 2026-10", DESIGN-SPEC §5); ``""`` when
+    #: it is the same text (see :attr:`csv_description`).
+    export_description: str = ""
+
+    @property
+    def csv_description(self) -> str:
+        """What the charge is for in a CSV: ISO months."""
+        return self.export_description or self.description
 
     def overdue(self, today: date) -> bool:
         return self.due_on < today
@@ -168,10 +177,13 @@ def _money(value: object) -> Decimal:
     return Decimal(str(value)) if value is not None else ZERO
 
 
-def _rent_description(period_month: date, seq: int, proration_text: str | None = None) -> str:
-    """``Rent 2026-10``, ``(debit 2)`` for a second debit, and a prorated month's
-    arithmetic (PLAN-012e D2)."""
-    text = f"Rent {period_month:%Y-%m}" + (f" (debit {seq})" if seq > 1 else "")
+def _rent_description(
+    period_month: date, seq: int, proration_text: str | None = None, *, export: bool = False
+) -> str:
+    """``Rent Oct 2026`` (a page's month, DESIGN-SPEC §5; ``Rent 2026-10`` with ``export``),
+    ``(debit 2)`` for a second debit, and a prorated month's arithmetic (PLAN-012e D2)."""
+    month = f"{period_month:%Y-%m}" if export else month_text(period_month)
+    text = f"Rent {month}" + (f" (debit {seq})" if seq > 1 else "")
     return f"{text}: {proration_text}" if proration_text else text
 
 
@@ -215,6 +227,9 @@ def _rent_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
             period_month=row["period_month"],
             description=_rent_description(row["period_month"], row["seq"], row["proration_text"]),
             lease_id=row["lease"],
+            export_description=_rent_description(
+                row["period_month"], row["seq"], row["proration_text"], export=True
+            ),
         )
         for row in values
     ]

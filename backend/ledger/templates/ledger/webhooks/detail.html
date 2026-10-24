@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load responsive dates %}
 {% block title %}Message from {{ company.provider_name }}: {{ event.event_type_words }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:webhooks:list' %}">Messages from {{ company.provider_name }}</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ event.event_type_words }}</span></nav><h1>Message from {{ company.provider_name }}: {{ event.event_type_words }}</h1></div>{% if can_replay %}<div class="page-actions"><form method="post" action="{% url 'ledger:webhooks:replay' pk=event.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="replay"{% if job_refresh %} disabled{% endif %}>Process again</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
@@ -8,15 +8,15 @@
 
   <section class="card" id="webhook-event-card">
   <dl id="webhook-event" class="detail-list">
-    <dt>Received</dt><dd>{{ event.received_at|date:"Y-m-d H:i:s" }}</dd>
+    <dt>Received</dt><dd>{{ event.received_at|moment }}</dd>
     <dt>Type</dt><dd>{{ event.event_type }}</dd>
     <dt>Name from</dt><dd>{{ event.get_event_source_display }}</dd>
     <dt>Object ID</dt><dd>{{ object_id_masked|default:"—" }}</dd>
     <dt>Object ID from</dt><dd id="object-id-source">{% if event.object_id_source %}<code>{{ event.object_id_source }}</code>{% else %}—{% endif %}</dd>
     <dt>Outcome</dt><dd id="outcome">{{ event.outcome_words|default:"—" }}</dd>
-    <dt>Processed</dt><dd>{% if event.processed_at %}{{ event.processed_at|date:"Y-m-d H:i:s" }}{% else %}<span class="muted">Not processed</span>{% endif %}</dd>
+    <dt>Processed</dt><dd>{% if event.processed_at %}{{ event.processed_at|moment }}{% else %}<span class="muted">Not processed</span>{% endif %}</dd>
     <dt>Failed attempts</dt><dd id="attempts">{{ event.attempts }}</dd>
-    <dt>Last attempt</dt><dd>{% if event.last_attempt_at %}{{ event.last_attempt_at|date:"Y-m-d H:i:s" }}{% else %}—{% endif %}</dd>
+    <dt>Last attempt</dt><dd>{% if event.last_attempt_at %}{{ event.last_attempt_at|moment }}{% else %}—{% endif %}</dd>
     <dt>Last error</dt><dd id="error">{{ event.error|default:"—" }}</dd>
     <dt>Duplicate deliveries</dt><dd id="duplicates">{{ event.duplicate_count }}</dd>
   </dl>

@@ -90,6 +90,7 @@ from django.db import transaction
 from django.utils import timezone
 
 import payments
+from finance.dates import day_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     AuditLog,
@@ -466,7 +467,7 @@ def schedule_review_message(
         planned = {debit.seq: debit for debit in planned_debits(lease, now_row.amount)}
         debit = planned.get(row.seq)
         if debit is not None and (debit.debit_day, debit.amount) == (row.debit_day, row.amount):
-            return RENT_CHANGES.format(date=later.effective_from.isoformat())
+            return RENT_CHANGES.format(date=day_text(later.effective_from))
     return SCHEDULE_DIFFERS
 
 
@@ -741,7 +742,7 @@ def update_lease(
                 if closes <= open_row.effective_from:
                     raise LeaseRefused(
                         "rent_effective_from",
-                        RENT_DATE_TOO_EARLY.format(start=open_row.effective_from.isoformat()),
+                        RENT_DATE_TOO_EARLY.format(start=day_text(open_row.effective_from)),
                     )
                 open_row.effective_to = closes
                 open_row.save(update_fields=["effective_to"])
@@ -793,7 +794,7 @@ def end_lease(
             raise LeaseRefused("ended_on", END_IN_FUTURE)
         if lease.started_on is not None and ended_on < lease.started_on:
             raise LeaseRefused(
-                "ended_on", END_BEFORE_START.format(start=lease.started_on.isoformat())
+                "ended_on", END_BEFORE_START.format(start=day_text(lease.started_on))
             )
         if not text:
             raise LeaseRefused("end_reason", END_REASON_REQUIRED)
@@ -871,7 +872,7 @@ def enable_autopay(
         if len(plan) != len(days):
             first = min(next_debit_at(day, moment) for day in days)
             return AutopayOutcome(
-                AutopayAction.REFUSED, RENT_NOT_STARTED.format(date=first.date().isoformat())
+                AutopayAction.REFUSED, RENT_NOT_STARTED.format(date=day_text(first.date()))
             )
         live = {row.seq: (row, schedule_ref(row)) for row in live_schedules(lease)}
         if any(
@@ -1110,7 +1111,7 @@ class AutopayMove:
 
     @property
     def text(self) -> str:
-        return AUTOPAY_RESUMES.format(date=self.resumes.isoformat())
+        return AUTOPAY_RESUMES.format(date=day_text(self.resumes))
 
 
 def _move_rows(lease: Lease, action: str, plan_id: uuid.UUID) -> dict[int, dict[str, Any]]:
@@ -1193,7 +1194,7 @@ def move_autopay(
         if len(planned) != len(missing):
             first = min(start_from.values())
             return AutopayOutcome(
-                AutopayAction.REFUSED, RENT_NOT_STARTED.format(date=first.date().isoformat())
+                AutopayAction.REFUSED, RENT_NOT_STARTED.format(date=day_text(first.date()))
             )
 
         provider = payments.get_provider()
@@ -1254,7 +1255,7 @@ def move_autopay(
                 },
             )
     resumes = next_debit_at(planned[seq].debit_day, start_from[seq]) if seq in planned else None
-    when = resumes.date().isoformat() if resumes is not None else "-"
+    when = day_text(resumes.date()) if resumes is not None else "-"
     return AutopayOutcome(AutopayAction.MOVED, AUTOPAY_MOVED.format(date=when))
 
 

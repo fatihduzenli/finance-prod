@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load money responsive %}
+{% load money responsive dates %}
 {% block title %}Unpaid balances{% endblock %}
 {% block header %}<div class="page-header"><h1>Unpaid balances</h1></div>{% endblock %}
 {% block content %}
@@ -67,7 +67,7 @@
           <td class="months-behind">{{ row.months_behind }}</td>
           <td class="money total-owed">{{ row.total_owed|money }}</td>
           <td class="money">{{ row.overdue|money }}</td>
-          <td>{{ row.last_payment|date:"Y-m-d"|default:"—" }}</td>
+          <td>{{ row.last_payment|day|default:"—" }}</td>
           <td>{{ row.channel_labels|join:", "|default:"—" }}</td>
           <td>{{ row.store_labels|join:", "|default:"—" }}</td>
         </tr>

@@ -68,7 +68,7 @@ RANGE = "?from=2026-10&to=2026-10"
 #: The control the reference's label follows, and the text it switches to.
 LABEL_SWITCH = 'data-label-when="id_method=check" data-label="Check number"'
 #: A table cell naming the method (the responsive tables label their cells).
-CHECK_CELL = re.compile(r"<td(?: data-label=\"Method\")?>Check</td>")
+CHECK_CELL = re.compile(r"<td(?: data-role=\"meta\")?(?: data-label=\"Method\")?>Check</td>")
 
 
 @pytest.fixture(autouse=True)

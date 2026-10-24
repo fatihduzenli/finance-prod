@@ -134,7 +134,7 @@ def test_the_charges_tab_shows_the_overdue_and_unpaid_families() -> None:
     a_rent_charge(lease, date(2026, 9, 1), RentChargeStatus.UNPAID)
     a_rent_charge(lease, date(2026, 10, 1), RentChargeStatus.DUE)
     html = page(client_for(Role.VIEWER)[0], f"/stores/{lease.store_id}/?tab=charges")
-    table = section(html, '<table id="store-charges" class="charges-table">', "</table>")
+    table = section(html, '<table id="store-charges" class="role-cards">', "</table>")
     assert f'<span class="badge badge-overdue">{ICON}●</span> Unpaid</span>' in table
     assert f'<span class="badge badge-unpaid">{ICON}●</span> Due</span>' in table
 
@@ -149,7 +149,8 @@ def test_the_first_cell_is_a_bold_link_with_a_muted_second_line() -> None:
     stores = page(viewer, "/stores/")
     assert MARKUP not in stores
     assert (
-        f'<td data-label="Name"><a class="cell-title" href="/stores/{store.pk}/">Istanbul '
+        '<td data-role="title" data-label="Name">'
+        f'<a class="cell-title" href="/stores/{store.pk}/">Istanbul '
         "&lt;script&gt;" in stores
     )
     grid = page(viewer, "/grid/")
@@ -348,7 +349,7 @@ def test_the_contact_tabs_show_each_entry_with_its_avatar() -> None:
         call_entry = section(log, f'id="contact-{called.pk}"', "</li>")
         assert called.kind == ContactKind.CALL
         assert '<span class="avatar avatar-neutral" aria-hidden="true">C</span>' in call_entry
-        assert '<p class="contact-meta">2026-10-01 · <a href="/stores/' in call_entry
+        assert '<p class="contact-meta">Oct 1, 2026 · <a href="/stores/' in call_entry
     assert "color: var(--muted);" in rule(".contact-meta")
     assert "font-weight: 700;" in rule(".contact-kind")
 
@@ -420,16 +421,16 @@ def test_each_grid_cell_is_a_block_with_its_amount_over_its_status_line() -> Non
     cells = dict(re.findall(r'<td class="cell cell-([a-z_]+)"[^>]*>(.*?)</td>', row, re.S))
     paid = charges["paid"].pk
     assert cells["paid"] == (
-        f'<a class="cell-block" href="/charges/{paid}/" aria-label="2026-05: $3,500.00, Paid">'
+        f'<a class="cell-block" href="/charges/{paid}/" aria-label="May 2026: $3,500.00, Paid">'
         '<span class="cell-amount">$3,500.00</span><span class="cell-status">'
         '<span aria-hidden="true">✓</span> Paid</span></a>'
     )
     # Overdue: "Overdue N d", N the days since its due date (2026-06-05 to 2026-10-06).
     assert '<span aria-hidden="true">●</span> Overdue 123 d</span>' in cells["unpaid"]
-    assert 'aria-label="2026-06: $3,500.00, Overdue 123 days"' in cells["unpaid"]
+    assert 'aria-label="Jun 2026: $3,500.00, Overdue 123 days"' in cells["unpaid"]
     assert '<span aria-hidden="true">●</span> Unpaid</span>' in cells["due"]
     assert '<span class="cell-amount">$1,200.00 of $3,500.00</span>' in cells["partial"]
-    assert "</span> Pending · from 2026-07-05</span>" in cells["pending"]
+    assert "</span> Pending · from Jul 5, 2026</span>" in cells["pending"]
     assert '<span class="cell-amount">$3,500.00</span>' in cells["waived"]
     # November and December: future months inside the lease, "Not yet due" in its dashed box.
     assert cells["not_due"] == (
@@ -453,7 +454,7 @@ def test_the_current_month_is_tinted() -> None:
     cols = re.findall(r"<col(?: class=\"([a-z-]+)\")?>", section(html, "<colgroup>", "</colgroup>"))
     assert cols == ["", "", "", "month-current", ""]  # the store column, Aug, Sep, Oct, Nov
     assert (
-        '<th scope="col" class="month-col month-current" aria-current="date">2026-10</th>' in html
+        '<th scope="col" class="month-col month-current" aria-current="date">Oct 2026</th>' in html
     )
     assert html.count('class="column-total month-current"') == 1
     assert "background: var(--month-current);" in rule(

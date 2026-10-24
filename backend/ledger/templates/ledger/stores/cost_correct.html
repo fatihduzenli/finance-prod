@@ -1,10 +1,10 @@
 {% extends "finance/base.html" %}
-{% load money %}
+{% load money dates %}
 {% block title %}Correct cost row {{ store.external_label }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store crumb_query="#store-costs" %}<span aria-current="page">Correct a cost row</span></nav><h1>Correct a cost row</h1></div></div>{% endblock %}
 {% block content %}
   <section class="card form-card">
-  <p id="corrected-row">Row being corrected: {{ cost.landlord_rent|money }} a month from {{ cost.effective_from|date:"Y-m-d" }} to {{ cost.effective_to|date:"Y-m-d"|default:"open" }}.</p>
+  <p id="corrected-row">Row being corrected: {{ cost.landlord_rent|money }} a month from {{ cost.effective_from|day }} to {{ cost.effective_to|day|default:"open" }}.</p>
   <p class="muted">Saving writes a new row with these values and dates and keeps this one in the history, struck through, with your note. The dates may not overlap another current row of this store.</p>
   <form method="post" id="store-cost-correct-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}

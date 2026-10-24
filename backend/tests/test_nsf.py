@@ -221,7 +221,7 @@ def test_reschedule_makes_the_two_charges_and_one_two_line_schedule(
     [job] = Job.objects.all()
     assert (job.kind, job.entity_id) == (JobKind.SCHEDULE_CREATE, redebit.pk)
     assert not Invoice.objects.exists()
-    assert outcome.message.startswith("Rescheduled: re-debit of $1,334.56 on 2026-10-20")
+    assert outcome.message.startswith("Rescheduled: re-debit of $1,334.56 on Oct 20, 2026")
     [done] = run_queued_jobs()
     assert done.status == JobStatus.DONE, done.result
     [schedule] = created_calls(fake, "create_scheduled_invoice")

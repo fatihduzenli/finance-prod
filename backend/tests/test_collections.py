@@ -832,7 +832,7 @@ def test_a_promise_due_today_reminds_its_author(clock: Any, memory: MemoryMailSe
     assert (
         sent.subject == "[to: promise-author@example.com] Promise to pay due today: Promising Shop"
     )
-    assert "$1,500.00 by 2026-10-09" in sent.text
+    assert "$1,500.00 by Oct 9, 2026" in sent.text
     assert "Promise reminders queued: 0." in tick()
 
 

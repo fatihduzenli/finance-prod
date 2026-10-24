@@ -294,7 +294,8 @@ def test_an_unpaid_last_month_is_reduced_to_the_days_used() -> None:
 
 
 def test_a_paid_last_month_gives_the_excess_back_as_a_credit_refund() -> None:
-    lease = a_store_lease()
+    # Started so that no month before the end month is missing (PLAN-012f-a D).
+    lease = a_store_lease(started_on=OCTOBER)
     charge = october(lease, paid="2000.00")
     end = draft(lease)
     found = figures(end)
@@ -329,11 +330,12 @@ def test_a_partly_paid_month_above_the_prorated_amount_refunds_only_the_excess()
 
 
 def test_without_a_charge_the_prorated_month_is_created_and_owed() -> None:
-    lease = a_store_lease()
+    # Started so that no month before the end month is missing (PLAN-012f-a D).
+    lease = a_store_lease(started_on=OCTOBER)
     end = draft(lease)
     found = figures(end)
     assert found.open_total == PRORATED
-    assert [line.description for line in found.open_lines] == [f"Rent 2026-10: {TEXT}"]
+    assert [line.description for line in found.open_lines] == [f"Rent Oct 2026: {TEXT}"]
     assert confirm(end).ok
     charge = RentCharge.objects.get(lease=lease, period_month=OCTOBER)
     assert (charge.amount_due, charge.status, charge.proration_text) == (
@@ -346,20 +348,22 @@ def test_without_a_charge_the_prorated_month_is_created_and_owed() -> None:
 
 
 def test_prorate_off_keeps_the_charge_and_creates_a_full_month_when_missing() -> None:
-    kept = a_store_lease()
+    # Started so that no month before the end month is missing (PLAN-012f-a D).
+    kept = a_store_lease(started_on=OCTOBER)
     charge = october(kept)
     end = draft(kept, prorate=False)
     assert figures(end).last_month is not None
     assert confirm(end).ok
     assert fresh(charge).amount_due == RENT and fresh(charge).proration_text is None
-    created = a_store_lease()
+    created = a_store_lease(started_on=OCTOBER)
     other = draft(created, prorate=False)
     assert confirm(other).ok
     assert RentCharge.objects.get(lease=created).amount_due == RENT
 
 
 def test_prorate_off_creates_nothing_when_the_debit_day_falls_after_the_end_date() -> None:
-    lease = a_store_lease(debit_day=25)
+    # Started so that no month before the end month is missing (PLAN-012f-a D).
+    lease = a_store_lease(debit_day=25, started_on=OCTOBER)
     end = draft(lease, prorate=False)
     assert confirm(end).ok
     assert not RentCharge.objects.filter(lease=lease).exists()
@@ -448,7 +452,7 @@ def test_a_rent_charge_with_a_live_invoice_blocks_with_a_link_to_its_charge() ->
     assert found.kind == lease_end.LIVE_INVOICE
     assert found.url == f"/charges/{charge.pk}/"
     assert found.text.startswith(
-        f"Rent 2026-10: invoice {invoice.invoice_number} is still open in Stax"
+        f"Rent Oct 2026: invoice {invoice.invoice_number} is still open in Stax"
     )
 
 
@@ -677,7 +681,8 @@ def test_confirm_refuses_while_an_installment_plan_is_live() -> None:
 
 
 def test_no_deposit_and_no_deduction_owes_the_open_balance() -> None:
-    lease = a_store_lease()
+    # Started so that no month before the end month is missing (PLAN-012f-a D).
+    lease = a_store_lease(started_on=OCTOBER)
     october(lease)
     found = figures(draft(lease))
     assert (found.deposit_held, found.refund_due, found.amount_owed) == (
@@ -732,7 +737,8 @@ def test_a_deposit_above_the_deductions_refunds_the_rest_by_the_chosen_method() 
 
 
 def test_a_deposit_below_the_deductions_charges_the_lease_end_balance() -> None:
-    lease = a_store_lease()
+    # Started so that no month before the end month is missing (PLAN-012f-a D).
+    lease = a_store_lease(started_on=OCTOBER)
     october(lease, paid="1225.81")  # the prorated month exactly: nothing open
     deposit(lease, "500.00")
     end = draft(lease)
@@ -759,7 +765,8 @@ def test_a_deposit_below_the_deductions_charges_the_lease_end_balance() -> None:
 
 
 def test_the_offset_pays_the_oldest_open_charges_first_and_is_capped_at_the_balance() -> None:
-    lease = a_store_lease()
+    # Started so that no month before the end month is missing (PLAN-012f-a D).
+    lease = a_store_lease(started_on=date(2026, 9, 1))
     september = RentCharge.objects.create(
         lease=lease,
         period_month=date(2026, 9, 1),
@@ -802,7 +809,8 @@ def test_the_offset_pays_the_oldest_open_charges_first_and_is_capped_at_the_bala
 
 
 def test_an_offset_is_revenue_once_in_the_pnl() -> None:
-    lease = a_store_lease()
+    # Started so that no month before the end month is missing (PLAN-012f-a D).
+    lease = a_store_lease(started_on=date(2026, 9, 1))
     september = RentCharge.objects.create(
         lease=lease,
         period_month=date(2026, 9, 1),
@@ -942,8 +950,8 @@ def test_terms_are_refused_before_the_start_in_the_future_and_without_a_reason()
 
     assert terms(None) == lease_end.DATE_REQUIRED
     assert terms(date(2026, 10, 21)) == lease_end.DATE_FUTURE
-    assert (
-        terms(date(2025, 12, 31)) == "The end date cannot be before the lease started (2026-01-01)."
+    assert terms(date(2025, 12, 31)) == (
+        "The end date cannot be before the lease started (Jan 1, 2026)."
     )
     assert terms(ENDED, "") == lease_end.REASON_REQUIRED
     assert terms(ENDED, "other") == lease_end.REASON_NOTE_REQUIRED
@@ -1266,9 +1274,9 @@ def test_an_admin_walks_the_wizard_from_the_store_page(admin: Any, pinned: None)
     client.post(f"{base}/confirm/", {"confirmed": "on"})
     assert fresh(lease).ended_on == ENDED
     done = client.get(f"{base}/confirm/").content.decode()
-    assert "The lease ended on 2026-10-19" in done and "being prepared" in done
+    assert "The lease ended on Oct 19, 2026" in done and "being prepared" in done
     store_after = client.get(store_page).content.decode()
-    assert 'id="vacant-since">Vacant since 2026-10-20' in store_after
+    assert 'id="vacant-since">Vacant since Oct 20, 2026' in store_after
     assert 'id="store-end-lease"' not in store_after
     assert f"{base}/confirm/" in store_after
     assert AuditLog.objects.get(action="lease_end.confirmed").actor == user
@@ -1562,7 +1570,8 @@ def test_a_back_dated_end_waives_the_later_months_and_refunds_what_was_paid(
     paid: str, admin: Any, pinned: None
 ) -> None:
     client, user = admin
-    lease = a_store_lease()
+    # Started so that no month before the end month is missing (PLAN-012f-a D).
+    lease = a_store_lease(started_on=date(2026, 8, 1))
     september = a_month(lease, SEPTEMBER)
     october_charge = a_month(lease, OCTOBER, paid=paid)
     [payment] = Payment.objects.filter(rent_charge=october_charge, is_refund=False)
@@ -1573,8 +1582,8 @@ def test_a_back_dated_end_waives_the_later_months_and_refunds_what_was_paid(
         (september.pk, D(0)),
         (october_charge.pk, D(paid)),
     ]
-    assert found.after_end[0].text == "Waived: September 2026 rent, after the end date"
-    assert found.after_end[1].text == "Credit: October 2026 rent paid, after the end date"
+    assert found.after_end[0].text == "Waived: Sep 2026 rent, after the end date"
+    assert found.after_end[1].text == "Credit: Oct 2026 rent paid, after the end date"
     assert {line.charge_id for line in found.open_lines}.isdisjoint(
         {september.pk, october_charge.pk}
     )
@@ -1582,7 +1591,7 @@ def test_a_back_dated_end_waives_the_later_months_and_refunds_what_was_paid(
     assert found.open_total == PRORATED
     assert (found.credit, found.refund_due) == (D(paid), D(paid))
     statement_page = client.get(f"/lease-ends/{end.pk}/statement/").content.decode()
-    assert "Waived: September 2026 rent, after the end date" in statement_page
+    assert "Waived: Sep 2026 rent, after the end date" in statement_page
 
     refused = confirm(end, user)
     assert not refused.ok and refused.message == lease_end.SETTLEMENT_REQUIRED
@@ -1621,12 +1630,12 @@ def test_a_back_dated_end_waives_the_later_months_and_refunds_what_was_paid(
     assert row.refund_payment is not None
     kept = statements.from_json(row.statement_json)
     assert [item.text for item in kept.after_end] == [
-        "Waived: September 2026 rent, after the end date",
-        "Credit: October 2026 rent paid, after the end date",
+        "Waived: Sep 2026 rent, after the end date",
+        "Credit: Oct 2026 rent paid, after the end date",
     ]
     text = pdf_text(statements.render_pdf(kept))
-    assert "Waived: September 2026 rent, after the end date" in text
-    assert "Credit: October 2026 rent paid, after the end date" in text
+    assert "Waived: Sep 2026 rent, after the end date" in text
+    assert "Credit: Oct 2026 rent paid, after the end date" in text
     assert lease_end.blockers(lease) == []
 
 

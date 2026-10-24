@@ -12,9 +12,10 @@ A lease end that is part of a transfer (PLAN-012e D6) shows the transfer's steps
 reason is fixed, its live items are the transfer's (``ledger:transfers:blockers``), its
 settlement leads to the incoming lease and its confirm is the transfer's; until the
 transfer's incoming operator is chosen, its terms step leads there (a draft the transfer
-adopted, PLAN-012b-b D9). Opening the statement step creates the rent charges the
-statement needs and marks the draft in progress
-(:func:`ledger.services.lease_end.open_statement`).
+adopted, PLAN-012b-b D9). Showing the statement step writes nothing (its GET and HEAD
+show the charges not created yet as preview lines); saving it creates the rent charges
+the statement needs, saves the deductions and marks the draft in progress
+(:func:`ledger.services.lease_end.save_statement`, PLAN-012f-a D).
 
 Every change goes through :mod:`ledger.services.lease_end`, which audits it; no view
 calls the payment provider. Every POST ends in a redirect; a form with errors is held in
@@ -280,16 +281,15 @@ def statement(request: HttpRequest, pk: str) -> HttpResponse:
                 service.DeductionInput(kind, description, amount)
                 for kind, description, amount in form.lines()
             ]
-            outcome = service.set_deductions(end, lines, actor=_actor(request))
+            outcome = service.save_statement(end, lines, actor=_actor(request))
             if outcome.ok:
                 messages.success(request, outcome.message)
                 return redirect("ledger:lease_ends:settlement", pk=end.pk)
             form.add_error(None, outcome.message)
         _hold(request, target, form)
         return redirect("ledger:lease_ends:statement", pk=end.pk)
-    # PLAN-012b-b D9, D10: nothing blocks here; the rent charges the statement needs are
-    # created and the draft is in progress from now on.
-    service.open_statement(end, _actor(request))
+    # PLAN-012f-a D: GET and HEAD write nothing; the charges not created yet are preview
+    # lines of the figures until the step is saved.
     saved = list(end.deductions.all())
     shown = (
         [service.DeductionInput(row.kind, row.description, row.amount) for row in saved]

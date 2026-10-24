@@ -56,9 +56,9 @@ def test_each_cell_is_labelled_with_its_column_header() -> None:
         "<tbody><tr><td>A</td><td>1.00</td></tr><tr><td>B</td><td>2.00</td></tr></tbody></table>"
         "{% endresponsive_table %}"
     )
-    assert out.startswith("<div class=\"table-cards\"><table id='t'>")
-    assert out.count('<td data-label="Store">') == 2
-    assert out.count('<td data-label="Amount (USD)">') == 2
+    assert out.startswith('<div class="table-cards"><table id=\'t\' class="role-cards">')
+    assert out.count('<td data-role="title" data-label="Store">') == 2
+    assert out.count('<td data-role="meta" data-label="Amount (USD)">') == 2
 
 
 def test_colspan_headers_and_cells_are_counted() -> None:
@@ -70,11 +70,15 @@ def test_colspan_headers_and_cells_are_counted() -> None:
     assert headers(table) == ["Who", "Who", "Total"]
     out = responsive(table)
     assert (
-        '<td data-label="Who">a</td><td data-label="Who">b</td><td data-label="Total">c</td>' in out
+        '<td data-role="title" data-label="Who">a</td><td data-role="meta" data-label="Who">b</td>'
+        '<td data-role="amount" data-label="Total">c</td>' in out
     )
     assert '<td colspan="3">No rows.</td>' in out
     # The row header takes the first column; its cells take the next ones.
-    assert '<td colspan="1" data-label="Who">x</td><td data-label="Total">y</td>' in out
+    assert (
+        '<td colspan="1" data-role="meta" data-label="Who">x</td>'
+        '<td data-role="amount" data-label="Total">y</td>'
+    ) in out
 
 
 def test_a_cell_keeps_its_own_label_and_an_empty_header_gives_none() -> None:
@@ -92,7 +96,9 @@ def test_header_text_is_escaped_once_in_the_label() -> None:
         '<table><thead><tr><th>Fees &amp; "costs" &lt;net&gt;</th></tr></thead>'
         "<tbody><tr><td>1</td></tr></tbody></table>"
     )
-    assert '<td data-label="Fees &amp; &quot;costs&quot; &lt;net&gt;">1</td>' in out
+    assert (
+        '<td data-role="title" data-label="Fees &amp; &quot;costs&quot; &lt;net&gt;">1</td>'
+    ) in out
 
 
 def test_a_cell_value_never_becomes_a_label() -> None:
@@ -103,7 +109,7 @@ def test_a_cell_value_never_becomes_a_label() -> None:
         v=hostile,
     )
     assert hostile not in out
-    assert '<td data-label="Note">&quot;&gt;&lt;script&gt;' in out
+    assert '<td data-role="title" data-label="Note">&quot;&gt;&lt;script&gt;' in out
 
 
 def test_a_table_without_a_head_is_left_as_it_is() -> None:
@@ -180,7 +186,9 @@ def test_the_lists_render_as_cards(path: str) -> None:
 
 def test_the_reconciliation_page_renders_as_cards() -> None:
     page = client_for(Role.BILLING).get("/reconciliation/").content.decode()
-    assert re.search(r'<div class="table-cards">\s*<table id="mismatches">', page)
+    assert re.search(
+        r'<div class="table-cards">\s*<table id="mismatches" class="role-cards">', page
+    )
 
 
 @pytest.mark.parametrize(
@@ -226,7 +234,9 @@ def test_the_detail_pages_render_as_cards(monkeypatch: pytest.MonkeyPatch) -> No
         r'<div class="table-scroll" tabindex="0">\s*<table id="open-charges">', statement
     )
     store_page = client.get(f"/stores/{lease.store_id}/?tab=documents").content.decode()
-    assert re.search(r'<div class="table-cards">\s*<table id="documents-list">', store_page)
+    assert re.search(
+        r'<div class="table-cards">\s*<table id="documents-list" class="role-cards">', store_page
+    )
 
 
 # --- Style sheet and layout ----------------------------------------------------------------

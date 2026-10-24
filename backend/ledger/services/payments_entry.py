@@ -55,6 +55,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from finance.dates import day_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
@@ -338,7 +339,7 @@ def _check(
         raise _Refused(
             CREDIT_OVER.format(
                 applied=format_amount(applied_total),
-                day=day.isoformat(),
+                day=day_text(day),
                 held=format_amount(held),
             )
         )

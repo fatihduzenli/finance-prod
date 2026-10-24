@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load money components %}
+{% load money components dates %}
 {% load responsive %}
 {% block title %}Statement: {{ operator.display_name }}{% endblock %}
 {% block head %}{% comment %}print.css (base.html) does the print layout (PLAN-012c D6): the header and footer, a heading row per month of the payment history (tr.print-month), no forced page break; the rules below stay for the page itself.{% endcomment %}<style>
@@ -11,7 +11,7 @@
     table { page-break-inside: auto; } tr { page-break-inside: avoid; }
   }
 </style>{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Statement</span></nav><h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|date:"Y-m-d" }}</span>{% endif %}</h1></div><div class="page-actions no-print"><button class="btn" type="button" onclick="window.print()">Print</button></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Statement</span></nav><h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|day }}</span>{% endif %}</h1></div><div class="page-actions no-print"><button class="btn" type="button" onclick="window.print()">Print</button></div></div>{% endblock %}
 {% block content %}
   {% if operator.legal_name or operator.company %}<p>{{ operator.legal_name }}{% if operator.legal_name and operator.company %} · {% endif %}{{ operator.company }}</p>{% endif %}
   {% url 'ledger:operators:statement' pk=operator.pk as action %}{% url 'ledger:operators:statement_export' pk=operator.pk as export %}
@@ -19,7 +19,7 @@
   {% if too_slow %}
     <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted">As of {{ report.today|date:"Y-m-d" }}; payment history {{ selected.from_month|date:"Y-m" }} to {{ selected.to_month|date:"Y-m" }}. Every store of this operator. Amounts in US dollars.</p>
+  <p class="muted">As of {{ report.today|day }}; payment history {{ selected.from_month|month }} to {{ selected.to_month|month }}. Every store of this operator. Amounts in US dollars.</p>
 
   <section class="card" id="open-charges-card">
   <h2>Open charges</h2>
@@ -28,7 +28,7 @@
     <thead><tr><th>Store</th><th>Charge</th><th>Due date</th><th>Status</th><th class="money">Balance</th></tr></thead>
     <tbody>
       {% for item in report.open_charges %}
-        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|date:"Y-m-d" }}</td><td>{% if item.status %}{% status_badge item.status %}{% else %}—{% endif %}</td><td class="money">{{ item.balance|money }}</td></tr>
+        <tr class="open-charge{% if item.due_on < report.today %} overdue{% endif %}"><td>{{ item.store_label|default:"—" }}</td><td>{{ item.description }}</td><td>{{ item.due_on|day }}</td><td>{% if item.status %}{% status_badge item.status %}{% else %}—{% endif %}</td><td class="money">{{ item.balance|money }}</td></tr>
       {% empty %}
         <tr><td colspan="5" class="muted empty">Nothing is owed.</td></tr>
       {% endfor %}
@@ -48,8 +48,8 @@
     <thead><tr><th>Date</th><th>Store</th><th>Charge</th><th>Kind</th><th>Method</th><th>Status</th><th class="money">Amount</th></tr></thead>
     <tbody>
       {% for line in report.history %}
-        {% ifchanged line.on|date:"Y-m" %}<tr class="print-month"><th colspan="7" scope="colgroup">{{ line.on|date:"F Y"|default:"No date" }}</th></tr>{% endifchanged %}
-        <tr class="history-line"><td>{{ line.on|date:"Y-m-d"|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_method_display }}</td><td>{% status_badge line.payment.get_status_display line.payment.status %}</td><td class="money">{{ line.payment.amount|money }}</td></tr>
+        {% ifchanged line.on|date:"Y-m" %}<tr class="print-month"><th colspan="7" scope="colgroup">{{ line.on|month|default:"No date" }}</th></tr>{% endifchanged %}
+        <tr class="history-line"><td>{{ line.on|day|default:"—" }}</td><td>{{ line.store|default:"—" }}</td><td>{{ line.description|default:"—" }}</td><td>{{ line.kind }}</td><td>{{ line.payment.get_method_display }}</td><td>{% status_badge line.payment.get_status_display line.payment.status %}</td><td class="money">{{ line.payment.amount|money }}</td></tr>
       {% empty %}
         <tr><td colspan="7" class="muted empty">No payment in these months.</td></tr>
       {% endfor %}

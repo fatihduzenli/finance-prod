@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load money responsive %}
+{% load money responsive dates %}
 {% block title %}Payments by method{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Payments by method</span></nav><h1>Payments by method</h1></div></div>{% endblock %}
 {% block content %}
@@ -19,7 +19,7 @@
     <tbody>
       {% for item in report.months %}
         <tr class="method-month" data-month="{{ item.month|date:'Y-m' }}">
-          <th scope="row">{{ item.month|date:"Y-m" }}</th>
+          <th scope="row">{{ item.month|month }}</th>
           {% for amount in item.ordered %}<td class="money">{{ amount|money }}</td>{% endfor %}
           <td class="money month-total">{{ item.total|money }}</td><td>{{ item.count }}</td>
         </tr>

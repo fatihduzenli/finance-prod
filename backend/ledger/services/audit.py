@@ -39,6 +39,7 @@ from django.contrib.auth.models import User
 from django.db.models import CharField, Q, QuerySet, Value
 from django.utils import timezone
 
+from finance.dates import day_text, moment_text
 from ledger.models import (
     AuditLog,
     CollectionSchedule,
@@ -218,7 +219,7 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> AuditQu
         messages.append(SWAPPED)
     if (end - start).days + 1 > MAX_DAYS:
         start = end - timedelta(days=MAX_DAYS - 1)
-        messages.append(CAPPED.format(days=MAX_DAYS, start=start.isoformat()))
+        messages.append(CAPPED.format(days=MAX_DAYS, start=day_text(start)))
     owner = None
     if text["documents_of"]:
         owner = _owner(text["documents_of"])
@@ -470,7 +471,9 @@ def utc_text(moment: datetime) -> str:
 
 
 def new_york_text(moment: datetime) -> str:
-    return moment.astimezone(NEW_YORK).strftime("%Y-%m-%d %H:%M:%S %Z")
+    """The Time column as a page reads it (DESIGN-SPEC §5): ``Oct 7, 2026 · 12:30``, New
+    York; the export keeps both ISO times (:func:`_csv_record`)."""
+    return moment_text(moment)
 
 
 # --- Masking --------------------------------------------------------------------------

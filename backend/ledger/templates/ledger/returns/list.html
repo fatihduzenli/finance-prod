@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive money %}
+{% load responsive money dates %}
 {% block title %}Returned payments{% endblock %}
 {% block header %}<div class="page-header"><h1>Returned payments</h1><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
@@ -18,7 +18,7 @@
           <td class="money">{{ item.amount|money }}{% if item.payment.rent_charge_id %} <a href="{% url 'ledger:charges:detail' pk=item.payment.rent_charge_id %}">charge</a>{% elif item.payment.one_off_charge_id %} <a href="{% url 'ledger:one_off_charges:detail' pk=item.payment.one_off_charge_id %}">one-off charge</a>{% endif %}</td>
           <td>{{ item.code|default:"—" }}</td>
           <td>{{ item.reason|default:"—" }}</td>
-          <td>{{ item.returned_at|date:"Y-m-d H:i"|default:"—" }}</td>
+          <td>{{ item.returned_at|moment|default:"—" }}</td>
           {% if can_resolve %}
             <td>
               {% comment %}PLAN-012c D8: Reschedule only on a returned ACH debit; Resolve with a note on every return.{% endcomment %}

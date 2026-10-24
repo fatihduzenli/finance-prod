@@ -137,7 +137,7 @@ def test_366_days_are_allowed_and_more_are_capped() -> None:
     assert (full.date_from, full.messages) == (date(2025, 10, 7), ())
     ten_years = query(**{"from": "2016-10-07", "to": "2026-10-07"})
     assert ten_years.date_from == date(2025, 10, 7)
-    assert ten_years.messages == (audit.CAPPED.format(days=366, start="2025-10-07"),)
+    assert ten_years.messages == (audit.CAPPED.format(days=366, start="Oct 7, 2025"),)
 
 
 def test_swapped_and_unreadable_dates_are_replaced_with_a_message() -> None:
@@ -186,7 +186,7 @@ def test_the_first_and_last_readable_years_never_overflow() -> None:
     assert last.end == datetime(2101, 1, 1, 5, 0, tzinfo=UTC)
     wide = query(**{"from": "2000-01-01", "to": "2100-12-31"})
     assert wide.date_from == date(2099, 12, 31)
-    assert wide.messages == (audit.CAPPED.format(days=366, start="2099-12-31"),)
+    assert wide.messages == (audit.CAPPED.format(days=366, start="Dec 31, 2099"),)
 
 
 @pytest.mark.parametrize(
@@ -333,7 +333,7 @@ def test_a_row_shows_the_new_york_time_masks_identifiers_and_keeps_money_as_text
     body = page(client)
     # One time, New York's (copy list §4.6: "Time (UTC)" → "Time"); the export keeps both.
     assert "2026-10-07 16:30:00" not in body
-    assert "2026-10-07 12:30:00 EDT" in body
+    assert "Oct 7, 2026 · 12:30" in body
     assert user.get_username() in body
     assert str(operator.pk) not in body.replace(f"/operators/{operator.pk}/", "")
     assert f'href="/operators/{operator.pk}/"' in body

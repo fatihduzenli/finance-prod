@@ -1,9 +1,9 @@
-{% extends "finance/base.html" %}
+{% extends "finance/base.html" %}{% load dates %}
 {% block title %}Transfer of store {{ store.external_label }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store %}<span aria-current="page">Transfer</span></nav><h1>Transfer of store {{ store.external_label }}</h1></div></div>{% endblock %}
 {% block content %}
   <section class="card wizard-card">
-  <p id="transfer-done">Confirmed {{ transfer.confirmed_at|date:"Y-m-d H:i" }}: the lease of {{ transfer.outgoing_lease.operator.display_name }} ended on {{ end.ended_on|date:"Y-m-d" }} and the lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_lease.started_on|date:"Y-m-d" }}.</p>
+  <p id="transfer-done">Confirmed {{ transfer.confirmed_at|moment }}: the lease of {{ transfer.outgoing_lease.operator.display_name }} ended on {{ end.ended_on|day }} and the lease of {{ transfer.incoming_operator.display_name }} starts on {{ transfer.incoming_lease.started_on|day }}.</p>
   <ul>
     <li><a href="{% url 'ledger:lease_ends:confirm' pk=end.pk %}" id="outgoing-statement">Final statement of the outgoing lease</a></li>
     <li><a href="{% url 'ledger:leases:detail' pk=transfer.incoming_lease.pk %}" id="incoming-lease">The incoming lease</a></li>

@@ -28,7 +28,10 @@ for what is not yet refunded, as the last month's credit is.
 
 **Open balances** are :func:`ledger.services.receivables.open_balances` of the lease
 (deposits are never open balances), with the last month as it will be and without the
-months after the end.
+months after the end. A rent charge not created yet is a preview line (no charge, no
+link, PLAN-012f-a D): the end month's charge, and each earlier month the statement step's
+save catches up (:func:`ledger.services.rent_run.months_catch_up_would_create`), so the
+figures read the same before and after that save.
 
 **Settlement** (D5(c), D5(d)): the deductions are covered by the deposits held, the
 unpaid-balance offset first (it is applied to the open charges, oldest first, as "deposit
@@ -52,7 +55,7 @@ import io
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -61,6 +64,7 @@ from django.db.models import Sum
 from django.urls import reverse
 from django.utils import timezone
 
+from finance.dates import month_text
 from ledger.models import (
     ZERO,
     DeductionKind,
@@ -77,7 +81,7 @@ from ledger.models import (
 )
 from ledger.services import one_off_charges, proration, receivables
 from ledger.services.leases import debit_amounts, rent_on
-from ledger.services.rent_run import falls_on
+from ledger.services.rent_run import falls_on, months_catch_up_would_create
 
 #: What a new charge of the last month is named on the statement.
 NEW_CHARGE = "new charge"
@@ -143,7 +147,7 @@ class AfterEnd:
     @property
     def label(self) -> str:
         debit = f" (debit {self.seq})" if self.seq > 1 else ""
-        return f"{self.month:%B %Y} rent{debit}"
+        return f"{month_text(self.month)} rent{debit}"
 
     @property
     def text(self) -> str:
@@ -174,6 +178,12 @@ class OpenLine:
     description: str
     due_on: date
     balance: Decimal
+
+    @property
+    def preview(self) -> bool:
+        """A rent charge not created yet (PLAN-012f-a D): the statement step's save, or
+        confirm, creates it."""
+        return self.charge_id is None
 
     @property
     def url(self) -> str:
@@ -587,6 +597,12 @@ def after_end(lease_end: LeaseEnd) -> tuple[AfterEnd, ...]:
 # --- Open balances, deposits ---------------------------------------------------------------
 
 
+def _rent_text(month: date, seq: int, text: str) -> str:
+    """A rent charge not created yet, named as the open balances name it once it is."""
+    description = f"Rent {month_text(month)}" + (f" (debit {seq})" if seq > 1 else "")
+    return f"{description}: {text}" if text else description
+
+
 def _open_lines(
     lease_end: LeaseEnd, today: date, last: LastMonth | None, later: Iterable[AfterEnd] = ()
 ) -> list[OpenLine]:
@@ -612,16 +628,31 @@ def _open_lines(
         if balance <= 0:
             continue
         lines.append(OpenLine(row.kind, row.charge_id, row.description, row.due_on, balance))
+    if lease_end.ended_on is not None and lease.ended_on is None:
+        # PLAN-012f-a D: the earlier months the statement step's save catches up.
+        before_end = lease_end.ended_on.replace(day=1) - timedelta(days=1)
+        for plan in months_catch_up_would_create(lease, before_end):
+            if plan.amount > 0:
+                lines.append(
+                    OpenLine(
+                        receivables.KIND_RENT,
+                        None,
+                        _rent_text(plan.period_month, plan.seq, plan.proration_text),
+                        plan.due_on,
+                        plan.amount,
+                    )
+                )
     if last is not None:
         for change in last.changes:
             if change.charge_id is None:
-                description = f"Rent {last.month:%Y-%m}" + (
-                    f" (debit {change.seq})" if change.seq > 1 else ""
-                )
-                if last.text:
-                    description += f": {last.text}"
                 lines.append(
-                    OpenLine(receivables.KIND_RENT, None, description, change.due_on, change.after)
+                    OpenLine(
+                        receivables.KIND_RENT,
+                        None,
+                        _rent_text(last.month, change.seq, last.text),
+                        change.due_on,
+                        change.after,
+                    )
                 )
     return sorted(lines, key=lambda line: (line.due_on, line.kind, line.description))
 
@@ -767,7 +798,7 @@ def _lines(statement: Final) -> list[tuple[str, str, str]]:
     ]
     last = statement.last_month
     if last is not None:
-        rows.append(("heading", f"Last month: {last.month:%B %Y}", ""))
+        rows.append(("heading", f"Last month: {month_text(last.month)}", ""))
         if last.text:
             rows.append(("text", f"Prorated: {last.text}", ""))
         else:

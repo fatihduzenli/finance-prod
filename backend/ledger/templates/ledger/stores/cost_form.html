@@ -1,10 +1,10 @@
 {% extends "finance/base.html" %}
-{% load money %}
+{% load money dates %}
 {% block title %}Set landlord rent {{ store.external_label }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store %}<span aria-current="page">Set landlord rent</span></nav><h1>Set landlord rent</h1></div></div>{% endblock %}
 {% block content %}
   <section class="card form-card">
-  {% if current %}<p id="current-cost">Current row: {{ current.landlord_rent|money }} a month from {{ current.effective_from|date:"Y-m-d" }}.</p>{% else %}<p id="current-cost">No landlord rent is recorded for this store yet: its cost is unknown.</p>{% endif %}
+  {% if current %}<p id="current-cost">Current row: {{ current.landlord_rent|money }} a month from {{ current.effective_from|day }}.</p>{% else %}<p id="current-cost">No landlord rent is recorded for this store yet: its cost is unknown.</p>{% endif %}
   <p class="help">Learn more: <a href="{% url 'finance:help_topic' slug='store-costs' %}">Store costs and margin</a></p>
   <form method="post" id="store-cost-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}

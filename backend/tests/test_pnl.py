@@ -586,8 +586,8 @@ def test_groups_by_operator_and_month_sum_the_rows() -> None:
     assert by_operator.margin_billed == D("1500.00") + D("3500.00") - D("2500.00")
     by_month = pnl.grouped(found, pnl.GROUP_MONTH)
     assert [(group.label, group.margin_collected) for group in by_month] == [
-        ("2026-07", D("500.00")),
-        ("2026-08", D("-2500.00")),
+        ("Jul 2026", D("500.00")),
+        ("Aug 2026", D("-2500.00")),
     ]
 
 
@@ -616,11 +616,11 @@ def test_a_thousand_year_range_is_capped_to_36_months() -> None:
     selected = parse(**{"from": "2000-01", "to": "2100-12"})
     assert (selected.from_month, selected.to_month) == (date(2098, 1, 1), date(2100, 12, 1))
     assert len(selected.months) == pnl.MAX_MONTHS
-    assert selected.messages == ("At most 36 months are shown; showing 2098-01 to 2100-12.",)
+    assert selected.messages == ("At most 36 months are shown; showing Jan 2098 to Dec 2100.",)
     far = parse(**{"from": "1026-01", "to": "2026-01"})
     assert (far.from_month, far.to_month) == (date(2026, 7, 1), date(2026, 10, 1))
     assert far.messages == (
-        "The months could not be read (choose a month); showing 2026-07 to 2026-10.",
+        "The months could not be read (choose a month); showing Jul 2026 to Oct 2026.",
     )
 
 
@@ -634,7 +634,7 @@ def test_to_before_from_is_swapped() -> None:
     selected = parse(**{"from": "2026-09", "to": "2026-03"})
     assert (selected.from_month, selected.to_month) == (date(2026, 3, 1), date(2026, 9, 1))
     assert selected.messages == (
-        "The end month was before the start month; showing 2026-03 to 2026-09.",
+        "The end month was before the start month; showing Mar 2026 to Sep 2026.",
     )
 
 
@@ -713,7 +713,7 @@ def test_the_breakdown_lists_the_rows_and_highlights_cost_only_ones() -> None:
     detailed = get(PAGE, {**params, "detail": "1"}).content.decode()
     assert detailed.count('class="pnl-row"') == 1
     assert detailed.count('class="pnl-row cost-only"') == 1
-    assert "Store 1796 · No operator · 2026-08" in detailed
+    assert "Store 1796 · No operator · Aug 2026" in detailed
     assert "background:var(--pending-bg)" in detailed  # PLAN-012f D1 token names
 
 
@@ -1046,9 +1046,9 @@ def store_three(
     ``other``, as the builder billed it before the Rent line) and paid, and a transfer
     whose statement withholds the deposit against an $800.00 damage deduction, the
     lease-end balance allowed by an admin. The end month's $32.26 charge the statement
-    step creates (PLAN-012b-b D10) is paid by the unpaid-balance offset the wizard
-    pre-fills (``offset``), or else by wire before the transfer. Returns the store's
-    October rows."""
+    step's save creates (PLAN-012b-b D10, PLAN-012f-a D) is paid by the unpaid-balance
+    offset the wizard pre-fills (``offset``), or else by wire before the transfer. Returns
+    the store's October rows."""
     from ledger.services import lease_end, leases, one_off_charges, rent_run, transfer
     from ledger.services.lease_end import DeductionInput
     from tests.test_lease_services import lease_fields, make_operator
@@ -1112,11 +1112,11 @@ def store_three(
     end = LeaseEnd.objects.get(transfer=row)
     assert lease_end.set_terms(end, THREE_DAY, "transfer", True, actor=user, today=THREE_TODAY).ok
     end = LeaseEnd.objects.get(pk=end.pk)
-    lease_end.open_statement(end, user, today=THREE_TODAY)
     deductions = [DeductionInput("damage", "Broken door", D("800.00"))]
     if offset:
         deductions = [*lease_end.default_deductions(end, THREE_TODAY), *deductions]
-    else:
+    assert lease_end.save_statement(end, deductions, actor=user, today=THREE_TODAY).ok
+    if not offset:
         october = RentCharge.objects.get(lease=lease, period_month=OCTOBER)
         assert rent_run.record_manual_payment(
             october.pk,
@@ -1127,7 +1127,6 @@ def store_three(
             actor=user,
             today=THREE_TODAY,
         ).ok
-    assert lease_end.set_deductions(end, deductions, actor=user, today=THREE_TODAY).ok
     outcome = incoming(row, user, started_on=THREE_DAY + timedelta(days=1))
     assert outcome.ok, outcome.message
     assert allow(row, user).ok

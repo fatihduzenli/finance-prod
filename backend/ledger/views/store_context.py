@@ -22,6 +22,7 @@ from django.http import Http404, HttpRequest
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
+from finance.dates import day_text
 from ledger.models import Lease, Store
 from ledger.services import workspace
 
@@ -39,7 +40,7 @@ class StoreContext:
         parts = [f"Store {self.store.external_label}"]
         if self.lease is not None:
             started = self.lease.started_on
-            parts.append(f"Lease from {started:%Y-%m-%d}" if started else "Lease")
+            parts.append(f"Lease from {day_text(started)}" if started else "Lease")
             if self.lease.operator is not None:
                 parts.append(f"Operator {self.lease.operator.display_name}")
         return " · ".join(parts)

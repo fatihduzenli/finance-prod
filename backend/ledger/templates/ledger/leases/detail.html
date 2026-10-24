@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components money %}
+{% load components money dates %}
 {% load responsive %}
 {% load static %}
 {% block title %}Lease {{ lease.store.external_label }}{% endblock %}
@@ -28,12 +28,12 @@
     <dt>Status</dt><dd>{{ lease.get_collection_status_display }}</dd>
     <dt>Channel</dt><dd>{{ lease.get_payment_channel_display }}{% if provider_ach %} through {{ company.provider_name }}{% endif %}</dd>
     <dt>Debit days</dt><dd>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</dd>
-    <dt>Start date</dt><dd>{{ lease.started_on|date:"Y-m-d"|default:"—" }}</dd>
+    <dt>Start date</dt><dd>{{ lease.started_on|day|default:"—" }}</dd>
     <dt>Prorate first month</dt><dd id="prorate-first-month">{{ lease.prorate_first_month|yesno:"Yes,No" }}</dd>
-    {% if lease.ended_on %}<dt>End date</dt><dd id="lease-ended-on">{{ lease.ended_on|date:"Y-m-d" }}</dd>
+    {% if lease.ended_on %}<dt>End date</dt><dd id="lease-ended-on">{{ lease.ended_on|day }}</dd>
     <dt>End reason</dt><dd id="lease-end-reason">{{ lease.end_reason|default:"—" }}</dd>{% endif %}
-    <dt>Current rent</dt><dd id="current-rent">{% if rent %}{{ rent.amount|money }} from {{ rent.effective_from|date:"Y-m-d" }}{% else %}—{% endif %}</dd>
-    {% if upcoming %}<dt>Upcoming rent</dt><dd id="upcoming-rent">Rent changes to {{ upcoming.amount|money }} on {{ upcoming.effective_from|date:"Y-m-d" }}</dd>{% endif %}
+    <dt>Current rent</dt><dd id="current-rent">{% if rent %}{{ rent.amount|money }} from {{ rent.effective_from|day }}{% else %}—{% endif %}</dd>
+    {% if upcoming %}<dt>Upcoming rent</dt><dd id="upcoming-rent">Rent changes to {{ upcoming.amount|money }} on {{ upcoming.effective_from|day }}</dd>{% endif %}
   </dl>
   </section>
 
@@ -44,7 +44,7 @@
     <thead><tr><th class="money">Amount</th><th>From</th><th>To</th><th>Source</th></tr></thead>
     <tbody>
       {% for row in history %}
-        <tr><td class="money">{{ row.amount|money }}</td><td>{{ row.effective_from|date:"Y-m-d" }}</td><td>{{ row.effective_to|date:"Y-m-d"|default:"open" }}</td><td>{{ row.get_source_display }}</td></tr>
+        <tr><td class="money">{{ row.amount|money }}</td><td>{{ row.effective_from|day }}</td><td>{{ row.effective_to|day|default:"open" }}</td><td>{{ row.get_source_display }}</td></tr>
       {% empty %}
         <tr><td colspan="4" class="muted empty">No rent recorded.</td></tr>
       {% endfor %}
@@ -75,7 +75,7 @@
           <td>{{ item.row.debit_day|default:"—" }}</td>
           <td class="money">{{ item.row.amount|money }}</td>
           <td>{{ item.row.get_state_display }}{% if item.review_message %}<br><strong class="schedule-review">{{ item.review_message }}</strong>{% endif %}</td>
-          <td>{% if item.next_run %}{{ item.next_run|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+          <td>{% if item.next_run %}{{ item.next_run|day }}{% else %}—{% endif %}</td>
           <td>{{ item.schedule_masked|default:"—" }}</td>
         </tr>
       {% empty %}
@@ -96,7 +96,7 @@
   <section class="card" id="lease-notes">
   <h2>Notes</h2>
   {% for note in notes %}
-    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|date:"Y-m-d" }}</span></p>
+    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|day }}</span></p>
   {% empty %}
     <p class="muted">No notes.</p>
   {% endfor %}

@@ -1,12 +1,12 @@
 {% extends "finance/base.html" %}
-{% load money responsive %}
+{% load money responsive dates %}
 {% block title %}Unpaid by age{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Unpaid by age</span></nav><h1>Unpaid by age</h1></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
   {% if too_slow %}
     <p class="warning" id="aging-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted">Open balances on {{ today|date:"Y-m-d" }} by operator and days past due: rent, insurance and one-off charges not waived or voided, deposits left out. These are the same charges as the dashboard's total outstanding. Current is not yet due or due today. Aging is by due date; revenue is by settled month. Amounts in US dollars.</p>
+  <p class="muted">Open balances on {{ today|day }} by operator and days past due: rent, insurance and one-off charges not waived or voided, deposits left out. These are the same charges as the dashboard's total outstanding. Current is not yet due or due today. Aging is by due date; revenue is by settled month. Amounts in US dollars.</p>
   <div class="card table-card">
   {% responsive_table "scroll" %}
   <table id="aging">

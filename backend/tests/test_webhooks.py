@@ -912,9 +912,12 @@ def test_the_detail_page_shows_the_redacted_payload_as_a_table() -> None:
     response = viewer.get(f"/webhooks/{event.pk}/")
     assert response.status_code == 200
     page = response.content.decode()
-    assert '<table id="payload">' in page
-    assert '<code>status</code></td><td data-label="Value">SENT</td>' in page
-    assert '<code>customer.firstname</code></td><td data-label="Value">Pat</td>' in page
+    assert '<table id="payload" class="role-cards">' in page
+    assert '<code>status</code></td><td data-role="meta" data-label="Value">SENT</td>' in page
+    assert (
+        '<code>customer.firstname</code></td><td data-role="meta" data-label="Value">Pat</td>'
+        in page
+    )
     assert "invoice-identifier-1" not in page and "invo…er-1" in page
     assert "customer-identifier-1" not in page and "cust…er-1" in page
     assert CARD not in page

@@ -104,7 +104,7 @@ page header. The sign-in pages keep their own base, two_factor/_base.html.
       <div class="page-header-inner">{% block header %}<div class="page-header"><h1>{% page_title %}</h1></div>{% endblock %}{% block header_search %}{% endblock %}</div>
     </header>
     <main class="{% block main_class %}{% endblock %}">
-      {% now "Y-m-d" as printed_on %}<div class="print-only print-header" id="print-header"><span class="print-company">{{ company.name }}</span> <span class="print-date">{{ printed_on }}</span></div>
+      {% now "M j, Y" as printed_on %}<div class="print-only print-header" id="print-header"><span class="print-company">{{ company.name }}</span> <span class="print-date">{{ printed_on }}</span></div>
       {% if messages %}
         <ul class="toasts" id="toasts" aria-live="polite">
           {% for message in messages %}<li class="toast {{ message.tags }}" role="status"><span class="toast-text">{{ message }}</span><button type="button" class="toast-dismiss" aria-label="Dismiss this message">&times;</button></li>{% endfor %}

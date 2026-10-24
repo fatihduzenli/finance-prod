@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load money responsive %}
+{% load money responsive dates %}
 {% block title %}Revenue by month{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Revenue by month</span></nav><h1>Revenue by month</h1></div></div>{% endblock %}
 {% block content %}
@@ -18,7 +18,7 @@
     <tbody>
       {% for item in report.months %}
         <tr class="revenue-month" data-month="{{ item.month|date:'Y-m' }}">
-          <th scope="row">{{ item.month|date:"Y-m" }}</th>
+          <th scope="row">{{ item.month|month }}</th>
           <td class="money">{{ item.rent_billed|money }}</td><td class="money">{{ item.rent_collected|money }}</td>
           <td class="money">{{ item.insurance_billed|money }}</td><td class="money">{{ item.insurance_collected|money }}</td>
           <td class="money">{{ item.fees_billed|money }}</td><td class="money">{{ item.fees_collected|money }}{% if item.withheld_deposits %}<br><span class="muted">incl. {{ item.withheld_deposits|money }} withheld deposit</span>{% endif %}</td>

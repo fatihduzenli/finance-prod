@@ -1,4 +1,4 @@
-{% load components money responsive %}{% comment %}The attention list (docs/qa/PLAN-011b D6): each item links to the page that deals with it. "banners" shows them as the operator page's banners. A broken promise carries Kept, Reschedule and Broken when "can_record_outcome" (billing; PLAN-012c-b D2).
+{% load components money responsive dates %}{% comment %}The attention list (docs/qa/PLAN-011b D6): each item links to the page that deals with it. "banners" shows them as the operator page's banners. A broken promise carries Kept, Reschedule and Broken when "can_record_outcome" (billing; PLAN-012c-b D2).
 
 On the dashboard (PLAN-012f D7) the "Needs attention" card: its count, "All unpaid balances →" (the arrears list), then a table: the store as the bold first cell with the operator below; the why badge (the item's text before its first ": ", in its kind's family) with the rest of the text under it; the amount; and, for billing ("can_act"), one small button to the item's page ("Open"), or the promise's Kept, Reschedule and Broken. The item's page is linked once a row: from the button, else from the line under the badge (a viewer's rows, a promise's).{% endcomment %}
 {% if banners %}{% if attention.items %}
@@ -6,7 +6,7 @@ On the dashboard (PLAN-012f D7) the "Needs attention" card: its count, "All unpa
     <h2 id="attention-heading">Needs attention: {{ attention.items|length }}</h2>
     <ul class="attention-list">
       {% for item in attention.items %}
-        <li class="attention-item severity-{{ item.severity }}" data-kind="{{ item.kind }}" role="status"><a href="{{ item.url }}">{{ item.text }}</a>{% if item.since %} <span class="muted">since {{ item.since|date:"Y-m-d" }}</span>{% endif %}{% if item.promise_id and can_record_outcome %} {% include "ledger/contacts/_outcome_links.html" with promise_id=item.promise_id %}{% endif %}</li>
+        <li class="attention-item severity-{{ item.severity }}" data-kind="{{ item.kind }}" role="status"><a href="{{ item.url }}">{{ item.text }}</a>{% if item.since %} <span class="muted">since {{ item.since|day }}</span>{% endif %}{% if item.promise_id and can_record_outcome %} {% include "ledger/contacts/_outcome_links.html" with promise_id=item.promise_id %}{% endif %}</li>
       {% endfor %}
     </ul>
     {% for label, count in attention.more_lines %}<p class="muted attention-more">And {{ count }} more {{ label }}.</p>{% endfor %}

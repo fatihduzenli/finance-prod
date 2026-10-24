@@ -19,6 +19,7 @@ from ledger.services import attention, installments, one_off_charges, transfer
 from tests import test_lease_end as lease_end_tests
 from tests.job_helpers import run_queued_jobs
 from tests.test_lease_end import (
+    OCTOBER,
     TODAY,
     a_store_lease,
     deductions,
@@ -49,7 +50,9 @@ def _admin() -> tuple[Any, User]:
 def _with_debt(user: User, amount: str = "2500.00") -> LeaseTransfer:
     """A transfer whose statement charges a lease-end balance: the $2,000 deposit held
     against ``amount`` of damage, everything else clean and the incoming lease set."""
-    lease = a_store_lease()
+    # Started in the end month: since PLAN-012f-a D a planned (not yet created) month blocks
+    # the transfer like an existing one.
+    lease = a_store_lease(started_on=OCTOBER)
     october(lease, paid="2000.00")
     deposit(lease, "2000.00")
     row = begin(lease, user)

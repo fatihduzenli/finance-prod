@@ -22,6 +22,7 @@ from django.utils import timezone
 
 from accounts import registry
 from accounts.roles import Role
+from finance.dates import day_text
 from ledger.models import (
     AuditLog,
     ContactEntry,
@@ -280,8 +281,8 @@ def test_the_owners_scenario_lists_both_past_promises_oldest_first_without_a_bal
     assert contacts.broken_promises(TODAY, operator=operator.pk) == [first, fifth]
     items = [item for item in attention.attention(TODAY).items if item.kind == "broken_promise"]
     assert [item.text for item in items] == [
-        "Promise to pay $1,500.00 by 2026-10-01: Sena on store S1: owes $0.00, not kept",
-        "Promise to pay $1,500.00 by 2026-10-05: Sena on store S5: owes $0.00, not kept",
+        "Promise to pay $1,500.00 by Oct 1, 2026: Sena on store S1: owes $0.00, not kept",
+        "Promise to pay $1,500.00 by Oct 5, 2026: Sena on store S5: owes $0.00, not kept",
     ]
     assert [item.since for item in items] == [date(2026, 10, 1), date(2026, 10, 5)]
     assert seventh not in contacts.broken_promises(TODAY)
@@ -294,12 +295,12 @@ def test_the_dashboard_shows_the_owners_two_broken_promises(today: date, role: R
     page = client.get("/").content.decode()
     assert 'id="attention-none"' not in page
     # PLAN-012f D7: the why badge (the text before its first ": "), then the rest, linked.
-    first = page.index("</span> Promise to pay $1,500.00 by 2026-10-01</span>")
-    fifth = page.index("</span> Promise to pay $1,500.00 by 2026-10-05</span>")
+    first = page.index("</span> Promise to pay $1,500.00 by Oct 1, 2026</span>")
+    fifth = page.index("</span> Promise to pay $1,500.00 by Oct 5, 2026</span>")
     assert first < fifth
     assert page.index(">Sena on store S1: owes $0.00, not kept</a>") < fifth
     assert ">Sena on store S5: owes $0.00, not kept</a>" in page
-    assert "by 2026-10-07" not in page
+    assert "by Oct 7, 2026" not in page
     assert page.count(f'href="/operators/{operator.pk}/#contacts"') == 2
 
 
@@ -315,12 +316,12 @@ def test_the_operator_page_shows_the_owners_broken_promises_as_banners(today: da
     ]
     assert banners.count('data-kind="broken_promise"') == 2
     assert (
-        "Promise to pay $1,500.00 by 2026-10-01: Sena on store S1: owes $0.00, not kept" in banners
+        "Promise to pay $1,500.00 by Oct 1, 2026: Sena on store S1: owes $0.00, not kept" in banners
     )
     assert (
-        "Promise to pay $1,500.00 by 2026-10-05: Sena on store S5: owes $0.00, not kept" in banners
+        "Promise to pay $1,500.00 by Oct 5, 2026: Sena on store S5: owes $0.00, not kept" in banners
     )
-    assert "by 2026-10-07" not in banners
+    assert "by Oct 7, 2026" not in banners
     assert "Other" not in banners
 
 
@@ -330,7 +331,7 @@ def test_a_promise_dated_yesterday_with_an_open_balance_is_broken_and_on_the_lis
     assert contacts.broken_promises(TODAY) == [entry]
     items = [item for item in attention.attention(TODAY).items if item.kind == "broken_promise"]
     assert len(items) == 1
-    assert items[0].text == f"Promise to pay $1,500.00 by {YESTERDAY}: Acme, not kept"
+    assert items[0].text == f"Promise to pay $1,500.00 by {day_text(YESTERDAY)}: Acme, not kept"
     assert items[0].url == f"/operators/{operator.pk}/#contacts"
     assert items[0].severity == attention.HIGH
     # The operator page shows it as a banner.
@@ -546,7 +547,7 @@ def test_billing_adds_from_the_operator_page_and_the_page_lists_newest_first(tod
     table = page.split('id="contact-entries"')[1].split("</table>")[0]
     assert table.index("Promised the full balance.") < table.index("Called; will pay Friday.")
     assert table.index("Called; will pay Friday.") < table.index("First visit.")
-    assert "$1,500.00 by 2026-10-09" in table  # PLAN-012c §4.8 money
+    assert "$1,500.00 by Oct 9, 2026" in table  # PLAN-012c §4.8 money
     full = client.get(f"/operators/{operator.pk}/contacts/").content.decode()
     assert "First visit." in full
 

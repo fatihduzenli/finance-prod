@@ -182,7 +182,7 @@ def test_an_earlier_date_than_the_open_row_is_refused_and_writes_nothing() -> No
     set_cost(target, "2500.00", starts=date(2026, 3, 1))
     outcome = set_cost(target, "2400.00", starts=JAN)
     assert (outcome.ok, outcome.field) == (False, "effective_from")
-    assert outcome.message == service.EARLIER_THAN_OPEN.format(start="2026-03-01")
+    assert outcome.message == service.EARLIER_THAN_OPEN.format(start="Mar 1, 2026")
     assert rows_of(target) == [(D("2500.00"), date(2026, 3, 1), None)]
     assert AuditLog.objects.count() == 1
 
@@ -627,7 +627,7 @@ def test_a_later_date_closes_the_row_the_same_date_updates_an_earlier_one_is_ref
     assert same.updated == 1
     earlier = run_import(write_csv(tmp_path / "d.csv", [row("1796", "2400", "06/01/2026")]))
     assert earlier.refusals == [
-        (2, "the effective date is before 2026-07-01, when the current landlord rent started")
+        (2, "the effective date is before Jul 1, 2026, when the current landlord rent started")
     ]
     assert rows_of(target) == [
         (D("2500.00"), JAN, date(2026, 6, 30)),
@@ -661,7 +661,7 @@ EXPECTED_REFUSALS = [
     (10, service.ROW_DATE.format(column="walmart_rent_effective_from")),
     (11, service.ROW_DATE.format(column="walmart_rent_effective_from")),
     (12, service.ROW_NO_OPEN_DATE.format(number=2107)),
-    (13, "the effective date is before 2026-03-01, when the current landlord rent started"),
+    (13, "the effective date is before Mar 1, 2026, when the current landlord rent started"),
     (14, service.ROW_PAYMENT_DATA),
     (15, service.ROW_STORE_NO),
     (16, service.ROW_AMOUNT.format(column="other_monthly_cost")),
@@ -843,9 +843,9 @@ def test_the_store_page_shows_unknown_until_a_cost_is_set_then_the_cost() -> Non
     response = client.post(f"/stores/{lease.store_id}/cost/", cost_form())
     assert response.status_code == 302 and response["Location"] == f"/stores/{lease.store_id}/"
     shown = page(client, lease.store)
-    assert '<dd id="landlord-rent">$2,500.00 a month from 2026-01-01</dd>' in shown
+    assert '<dd id="landlord-rent">$2,500.00 a month from Jan 1, 2026</dd>' in shown
     assert '<dd id="other-cost">$50.00 (dumpster)</dd>' in shown
-    assert '<dd id="landlord-lease-end">2030-12-31</dd>' in shown
+    assert '<dd id="landlord-lease-end">Dec 31, 2030</dd>' in shown
     assert "Margin" not in shown and "$950.00" not in shown
     assert 'id="cost-history"' in shown
     entry = AuditLog.objects.get(action="store_cost.created")
@@ -868,7 +868,7 @@ def test_an_earlier_date_on_the_form_is_held_as_an_error_and_saves_nothing() -> 
     path = f"/stores/{target.pk}/cost/"
     response = client.post(path, cost_form(effective_from="2026-01-01"))
     assert response["Location"] == path
-    assert "The effective date is before 2026-03-01" in client.get(path).content.decode()
+    assert "The effective date is before Mar 1, 2026" in client.get(path).content.decode()
     assert StoreCost.objects.count() == 1
 
 
@@ -890,7 +890,7 @@ def test_the_form_starts_from_the_open_row() -> None:
     client, _ = client_for(Role.BILLING)
     shown = client.get(f"/stores/{target.pk}/cost/").content.decode()
     assert 'value="2500.00"' in shown and 'value="parking"' in shown
-    assert "Current row: $2,500.00 a month from 2026-01-01." in shown
+    assert "Current row: $2,500.00 a month from Jan 1, 2026." in shown
 
 
 def test_the_same_values_on_the_form_change_nothing() -> None:

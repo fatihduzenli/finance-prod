@@ -156,6 +156,7 @@ from django.utils import timezone
 
 import payments
 from accounts.roles import Role, meets, role_of
+from finance.dates import day_text
 from ledger.models import (
     DESCRIPTION_MAX_LENGTH,
     LIVE_PLAN_STATUSES,
@@ -1001,7 +1002,7 @@ def _create_one_off(
         job = None
         if collection == CollectionMethod.AUTOPAY_DUE:
             job = jobs.enqueue(JobKind.SCHEDULE_CREATE, charge, None, actor)
-            message = CREATED_NO_INVOICE.format(date=item.due_date.isoformat())
+            message = CREATED_NO_INVOICE.format(date=day_text(item.due_date))
         elif invoice is not None and (has_customer or collection != CollectionMethod.MANUAL):
             job = jobs.enqueue(JobKind.INVOICE_CREATE, charge, None, actor)
             message = CREATED.format(number=invoice.invoice_number)

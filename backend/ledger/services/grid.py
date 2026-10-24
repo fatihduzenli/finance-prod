@@ -83,6 +83,7 @@ from typing import Protocol
 from django.db.models import Exists, Min, OuterRef, Prefetch
 from django.utils import timezone
 
+from finance.dates import day_text, month_text
 from ledger import wording
 from ledger.models import (
     ZERO,
@@ -108,6 +109,7 @@ from ledger.services.pnl import (
     _parse_month,
     _span,
     add_months,
+    label_for_screen,
 )
 
 #: The longest range shown, in months (D2).
@@ -204,17 +206,21 @@ def _range(params: Mapping[str, str], today: date | None) -> tuple[date, date, l
     end = _parse_month(raw_to) if raw_to else None
     if (raw_from and start is None) or (raw_to and end is None):
         start, end = default_from, default_to
-        messages.append(UNREADABLE.format(start=_label(start), end=_label(end)))
+        messages.append(UNREADABLE.format(start=label_for_screen(start), end=label_for_screen(end)))
     if end is None:
         end = default_to
     if start is None:
         start = add_months(end, -(DEFAULT_PAST_MONTHS + DEFAULT_NEXT_MONTHS))
     if end < start:
         start, end = end, start
-        messages.append(SWAPPED.format(start=_label(start), end=_label(end)))
+        messages.append(SWAPPED.format(start=label_for_screen(start), end=label_for_screen(end)))
     if _span(start, end) > MAX_MONTHS:
         start = add_months(end, -(MAX_MONTHS - 1))
-        messages.append(CAPPED.format(limit=MAX_MONTHS, start=_label(start), end=_label(end)))
+        messages.append(
+            CAPPED.format(
+                limit=MAX_MONTHS, start=label_for_screen(start), end=label_for_screen(end)
+            )
+        )
     return start, end, messages
 
 
@@ -311,7 +317,7 @@ class Cell:
     def details(self) -> str:
         """What the status line adds: the plan's progress, the day a pending payment started
         and the invoice numbers, joined by " · "."""
-        since = f"from {self.pending_from.isoformat()}" if self.pending_from else ""
+        since = f"from {day_text(self.pending_from)}" if self.pending_from else ""
         return " · ".join(part for part in (self.plan_text, since, self.invoice_numbers) if part)
 
     @property
@@ -319,13 +325,13 @@ class Cell:
         """What a screen reader says for the cell: the month only outside the leases, else
         the block's lines in full words."""
         if self.outside_lease:
-            return f"{self.month:%Y-%m}"
+            return month_text(self.month)
         words = self.status_words
         if self.status == STATUS_UNPAID and self.overdue_days is not None:
             words = f"Overdue {self.overdue_days} day{'' if self.overdue_days == 1 else 's'}"
         parts = [part for part in (self.amount_text, words, self.details) if part]
         text = ", ".join(parts) or "no charge"
-        return f"{self.month:%Y-%m}: {text}{', has a note' if self.has_note else ''}"
+        return f"{month_text(self.month)}: {text}{', has a note' if self.has_note else ''}"
 
 
 def _amount(value: Decimal) -> str:

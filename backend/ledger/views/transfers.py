@@ -185,7 +185,7 @@ def store_transfer(request: HttpRequest, pk: str) -> HttpResponse:
             return redirect("ledger:stores:detail", pk=store.pk)
         return redirect("ledger:transfers:operator", pk=transfer.pk)
     lease = found.outgoing_lease if found is not None else lease_end.current_lease(store)
-    # PLAN-012b-b D9: a plain lease end in progress (its statement step opened) is
+    # PLAN-012b-b D9: a plain lease end in progress (its statement step saved) is
     # continued or cancelled first; one that never got there is adopted on Start.
     plain = (
         LeaseEnd.objects.filter(lease=lease).first()

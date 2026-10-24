@@ -1,10 +1,10 @@
-{% load responsive %}{% responsive_table %}
+{% load responsive dates %}{% responsive_table %}
 <table class="message-log" id="message-log">
   <thead><tr><th>When</th><th>Step</th><th>Status</th><th>To</th>{% if show_charge %}<th>Charge</th>{% endif %}<th>Sent by</th></tr></thead>
   <tbody>
     {% for row in log %}
       <tr>
-        <td>{{ row.when|date:"Y-m-d H:i" }}</td>
+        <td>{{ row.when|moment }}</td>
         <td>{% if row.step is not None %}Day {{ row.step }}{% else %}Final statement{% endif %} <span class="muted">({{ row.template }})</span></td>
         <td>{{ row.status_label }}{% if row.error %} <span class="muted">({{ row.error }})</span>{% endif %}</td>
         <td>{{ row.to }}</td>

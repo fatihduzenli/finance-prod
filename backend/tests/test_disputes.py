@@ -453,7 +453,7 @@ def test_the_provider_down_keeps_the_last_fetch_and_its_time(fake: FakeProvider)
         action=disputes.ACTION_SYNC_FAILED, after={"error": "ProviderUnavailable"}
     ).exists()
     page = client_for(Role.BILLING)[0].get(PAGE).content.decode()
-    assert f"Last updated from {provider_name()} 2026-10-06 12:00." in page and ">OPEN<" in page
+    assert f"Last updated from {provider_name()} Oct 6, 2026 · 12:00." in page and ">OPEN<" in page
 
 
 # --- Queueing the sync: Refresh, the daily tick, the webhooks ----------------------------

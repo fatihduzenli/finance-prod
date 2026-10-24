@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components money %}
+{% load components money dates %}
 {% block title %}Monthly rent overview{% endblock %}
 {% block main_class %}wide grid-page{% endblock %}
 {% block head %}<style>
@@ -91,7 +91,7 @@
       <thead>
         <tr>
           <th scope="col" class="store-col">Store</th>
-          {% for month in grid.months %}<th scope="col" class="month-col{% if month == this_month %} month-current{% endif %}"{% if month == this_month %} aria-current="date"{% endif %}>{{ month|date:"Y-m" }}</th>{% endfor %}
+          {% for month in grid.months %}<th scope="col" class="month-col{% if month == this_month %} month-current{% endif %}"{% if month == this_month %} aria-current="date"{% endif %}>{{ month|month }}</th>{% endfor %}
         </tr>
       </thead>
       <tbody>

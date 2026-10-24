@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components responsive %}
+{% load components responsive dates %}
 {% block title %}Stores{% endblock %}
 {% block header %}<div class="page-header"><h1>Stores</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">New store</a></div>{% endif %}</div>{% endblock %}
 {% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
@@ -23,7 +23,7 @@
           <td>{{ store.store_number|default_if_none:"—" }}</td>
           <td>{{ store.city }}</td>
           <td>{{ store.state }}</td>
-          <td>{{ store.open_date|date:"Y-m-d"|default:"—" }}</td>
+          <td>{{ store.open_date|day|default:"—" }}</td>
           <td>{{ store.get_status_display }}</td>
         </tr>
       {% empty %}

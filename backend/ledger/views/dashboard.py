@@ -26,6 +26,7 @@ from django.utils.safestring import SafeString
 from django.views.decorators.http import require_safe
 
 from accounts.roles import Role, meets, role_of
+from finance.dates import month_text
 from finance.templatetags.components import GLYPHS, badge_family
 from ledger.models import PaymentChannel, PaymentMethod, PaymentStatus, Store
 from ledger.services import attention, grid, one_off_charges, receivables, rent_run, stores
@@ -125,7 +126,7 @@ def _kpis(
 ) -> list[Kpi]:
     """Unpaid balances, Collected this month, Pending bank debits, Today's daily charges."""
     share = (
-        f"{collection.percent}% of {collection.month:%B} rent"
+        f"{collection.percent}% of {month_text(collection.month)} rent"
         if collection.percent is not None
         else "—"
     )

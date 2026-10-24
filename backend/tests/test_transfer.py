@@ -17,10 +17,10 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
-from django.utils import timezone
 
 from accounts import registry
 from accounts.roles import Role
+from finance.dates import day_text
 from ledger.models import (
     AuditLog,
     CollectionStatus,
@@ -48,6 +48,7 @@ from ledger.services.lease_end import DeductionInput
 from payments.models import ExternalRef, Job, JobKind
 from tests.test_lease_end import (
     ENDED,
+    OCTOBER,
     TODAY,
     a_live_plan,
     a_manual_charge,
@@ -131,8 +132,9 @@ def confirm(row: LeaseTransfer, user: User | None) -> transfer.Outcome:
 
 
 def a_clean_lease() -> Lease:
-    """October paid in full and a $2,000 deposit held: nothing blocks."""
-    lease = a_store_lease()
+    """October paid in full and a $2,000 deposit held: nothing blocks. It starts in
+    October, so no month before the end month is missing (PLAN-012f-a D)."""
+    lease = a_store_lease(started_on=OCTOBER)
     october(lease, paid="2000.00")
     deposit(lease, "2000.00")
     return lease
@@ -173,11 +175,11 @@ def test_start_makes_one_transfer_with_a_lease_end_whose_reason_is_transfer() ->
 
 
 def test_start_is_refused_while_a_plain_lease_end_is_in_progress() -> None:
-    """PLAN-012b-b D9: in progress means its statement step opened."""
+    """PLAN-012b-b D9: in progress means its statement step was saved (PLAN-012f-a D)."""
     lease = a_clean_lease()
     end = lease_end.start(lease, None)
     assert lease_end.set_terms(end, ENDED, "moved_out", True, actor=None, today=TODAY).ok
-    lease_end.open_statement(fresh(end), None, today=TODAY)
+    assert lease_end.save_statement(fresh(end), [], actor=None, today=TODAY).ok
     assert fresh(end).statement_opened_at is not None
     with pytest.raises(ValueError, match="lease end is in progress"):
         transfer.start(lease.store, None, today=TODAY)
@@ -242,7 +244,8 @@ def test_the_search_finds_operators_by_name_but_not_archived_ones_or_the_outgoin
 
 
 def test_an_open_balance_blocks_listed_per_charge_with_links() -> None:
-    lease = a_store_lease()
+    # Started in October, so no month before the end month is missing (PLAN-012f-a D).
+    lease = a_store_lease(started_on=OCTOBER)
     rent = october(lease)
     other = OneOffCharge.objects.create(
         operator=lease.operator,
@@ -340,7 +343,7 @@ def test_an_incoming_start_on_or_before_the_end_date_is_refused(started_on: date
     outcome = incoming(row, started_on=started_on)
     assert not outcome.ok and outcome.field == "started_on"
     assert outcome.message == transfer.START_TOO_EARLY.format(
-        end=ENDED.isoformat(), first=STARTS.isoformat()
+        end=day_text(ENDED), first=day_text(STARTS)
     )
     assert fresh(row).incoming_started_on is None
 
@@ -501,9 +504,7 @@ def test_another_lease_in_effect_after_the_start_refuses(admin: Any) -> None:
     )
     before = snapshot()
     outcome = confirm(row, user)
-    assert not outcome.ok and outcome.message == transfer.OTHER_LEASE.format(
-        start=STARTS.isoformat()
-    )
+    assert not outcome.ok and outcome.message == transfer.OTHER_LEASE.format(start=day_text(STARTS))
     assert snapshot() == before
 
 
@@ -706,7 +707,7 @@ def test_an_admin_walks_the_transfer_from_the_store_page(admin: Any, pinned: Non
     assert response["Location"] == f"{base}/confirm/"
     confirm_page = client.get(f"{base}/confirm/").content.decode()
     assert "Are you sure?" in confirm_page and "Move-in charges for store" in confirm_page
-    assert "Sign fee: $450.00" in confirm_page and "starts on " + STARTS.isoformat() in confirm_page
+    assert "Sign fee: $450.00" in confirm_page and "starts on " + day_text(STARTS) in confirm_page
     assert client.post(f"{base}/confirm/", {})["Location"] == f"{base}/confirm/"
     assert fresh(row).status == LeaseTransferStatus.DRAFT
     response = client.post(f"{base}/confirm/", {"confirmed": "on"})
@@ -984,7 +985,7 @@ def test_the_confirm_page_shows_the_balance_the_form_and_then_the_allowance(
     response = client.post(f"{base}/allow-balance/", {"reason": REASON})
     assert response["Location"] == f"{base}/confirm/"
     at = fresh(row).debt_override_at
-    day = timezone.localtime(at).date().isoformat()
+    day = day_text(at)
     allowed = f"Allowed by {user.get_username()} on {day}: "
     page = client.get(f"{base}/confirm/").content.decode()
     assert 'id="debt-allowed"' in page and allowed in page and REASON in page
