@@ -1815,3 +1815,16 @@ statement step's three tiles, deductions table with the dashed add and the settl
 sqlite 6,758 passed; PostgreSQL 34 + 7,385 passed; e2e 29 passed in four runs; four MINOR resolved;
 baselines regenerated against PostgreSQL (six changed), pixel-identical on sqlite. Batch D (operator
 workspace, calendar, login re-shot, the suite's family pages, the seven comparisons) assigned.
+
+## Update, 2026-10-24, PLAN-012f-a Batch D built and gated (not pushed); the comparisons sent
+
+The operator workspace to the reference (avatar and badges, the muted line, Statement · Edit · More,
+the Store select with All stores by default, the store cards, the scoped Charges card, CONTACT,
+PAYMENT, RECENT CONTACT and PORTAL), the calendar (Month · List, the month card with its toolbar
+and chips, the legend, the day panel, NEXT 7 DAYS, FEED), the login re-shot; the visual suite grown
+to 25 pages (50 baselines) with one page of each family and the sign-in page; the eleven report
+shots and side-by-side images in `docs/qa/12fa/`, sent to the owner. Gate: sqlite 6,816 passed;
+PostgreSQL 34 + 7,442 passed (one unreproduced failure of a feed test, under residual risk); e2e 29 passed in four runs; two older pins re-pinned to the spec's decision; baselines regenerated
+against PostgreSQL and pixel-identical on sqlite. Open for the owner: the nine questions of
+PLAN-012f-a §9 plus the batches' "for the owner" notes. Next: Batch E (autopay plans), then the
+checkpoint with the Publish Request.

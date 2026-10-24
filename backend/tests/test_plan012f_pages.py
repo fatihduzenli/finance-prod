@@ -443,12 +443,17 @@ def test_a_closed_store_has_no_insurance_renewal() -> None:
 
 
 def test_the_operator_page_has_its_selector_in_the_header_and_the_same_cards() -> None:
+    # PLAN-012f-a D7: All stores by default; a selected store brings its phone strip and its
+    # side cards, after the operator's own (CONTACT, PAYMENT, RECENT CONTACT, PORTAL).
     lease = a_store_world()
-    html = page(client_for(Role.BILLING)[0], f"/operators/{lease.operator_id}/")
+    html = page(
+        client_for(Role.BILLING)[0], f"/operators/{lease.operator_id}/?store={lease.store_id}"
+    )
     header = section(html, 'id="page-header"', "</header>")
     assert 'id="store-selector"' in header and 'id="operator-actions"' in header
     assert 'id="summary-strip"' in header
-    side = html[html.index('<aside class="workspace-side"') :]
+    side = html[html.index('<aside class="workspace-side') :]
+    side = side[side.index('id="selected-store-label"') :]
     labels = re.findall(r'<h2 class="section-label"[^>]*>([^<]+)</h2>', side)
     assert labels == ["Lease", "Next", "Store cost", "Documents"]
     assert 'id="header-store"' in side and 'id="header-operator-balance">$2,000.00<' in side

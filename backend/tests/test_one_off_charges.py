@@ -1030,12 +1030,14 @@ def test_the_removed_create_form_answers_410_and_the_pages_offer_new_invoice(
     client, _ = client_for(Role.BILLING)
     # PLAN-012d D2, D4: the store page's bar has Create invoice; the lease page no longer.
     # PLAN-012e-2 D5: the store bar's id is "create-invoice", the operator page's "new-invoice".
-    for page, element in (
-        (f"/operators/{operator.pk}/", "new-invoice"),
-        (f"/stores/{lease.store_id}/", "create-invoice"),
-    ):
-        text = client.get(page).content.decode()
-        assert 'id="new-one-off-charge"' not in text and f'id="{element}"' in text, page
+    # PLAN-012f-a D7: the operator page offers no New invoice either (invoices are made from
+    # the store page); the store bar keeps Create invoice.
+    operator_page = client.get(f"/operators/{operator.pk}/").content.decode()
+    assert (
+        'id="new-one-off-charge"' not in operator_page and 'id="new-invoice"' not in operator_page
+    )
+    store_page = client.get(f"/stores/{lease.store_id}/").content.decode()
+    assert 'id="new-one-off-charge"' not in store_page and 'id="create-invoice"' in store_page
     for path in (f"/operators/{operator.pk}/charges/new/", f"/leases/{lease.pk}/charges/new/"):
         response = client.get(path)
         assert response.status_code == 410, path

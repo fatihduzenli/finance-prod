@@ -57,6 +57,11 @@ FEED_LIMITER = SlidingWindowLimiter(FEED_LIMIT, FEED_WINDOW_SECONDS)
 LOGGED_PATH = "/calendar/feed/[token].ics"
 BAD_MONTH = "Unknown month; showing this month."
 BAD_RECORD = "Unknown record; showing every record."
+BAD_DAY = "Unknown day; showing today."
+#: The page's two views (PLAN-012f-a D6): the month grid, or the days with items as a list
+#: (the phone's list, a laptop choice by ``?view=list``). There is no week view.
+VIEW_MONTH = "month"
+VIEW_LIST = "list"
 NO_FEED = "You have no calendar feed."
 FEED_REVOKED = "Calendar feed revoked. Its address no longer works."
 
@@ -76,6 +81,19 @@ def _month(raw: str, today: date) -> tuple[date, str]:
         return date(year, month, 1), ""
     except ValueError:
         return today.replace(day=1), BAD_MONTH
+
+
+def _day(raw: str) -> tuple[date | None, str]:
+    """``?on=``: the day the side panel shows (an ISO day from 2000 to 2100), else none."""
+    if not raw:
+        return None, ""
+    try:
+        day = date.fromisoformat(raw)
+    except ValueError:
+        return None, BAD_DAY
+    if not 2000 <= day.year <= 2100:
+        return None, BAD_DAY
+    return day, ""
 
 
 def _record(raw: str, model: type[Store] | type[Operator] | type[Lease]) -> uuid.UUID | None:
@@ -113,16 +131,33 @@ def _filters(request: HttpRequest) -> tuple[calendar.Filters, dict[str, str], li
 @role_required
 @require_safe
 def calendar_page(request: HttpRequest) -> HttpResponse:
-    """``ledger:calendar:page``: one month of items."""
+    """``ledger:calendar:page``: one month of items (PLAN-012f-a D6: the month card, or the
+    list by ``?view=list``; the side column's day, ``?on=`` or today, the next seven days and
+    the user's feed). The month, the day and the next seven days are read together
+    (:func:`calendar.items_in`, three queries)."""
     today = timezone.localdate()
-    month, month_message = _month((request.GET.get("month", "") or "").strip(), today)
+    selected, day_message = _day((request.GET.get("on", "") or "").strip())
+    raw_month = (request.GET.get("month", "") or "").strip()
+    if selected is not None and not raw_month:
+        month, month_message = selected.replace(day=1), ""
+    else:
+        month, month_message = _month(raw_month, today)
+    view = VIEW_LIST if request.GET.get("view") == VIEW_LIST else VIEW_MONTH
     filters, record_query, notes = _filters(request)
     start, end = calendar.month_bounds(month)
-    found = calendar.items(start, end, filters)
+    day = selected or today
+    found = calendar.items_in(((start, end), (day, day), calendar.next_days_window(today)), filters)
+    in_month = [item for item in found if start <= item.on <= end]
     kind_query = [("kind", kind) for kind in calendar.KINDS if kind in filters.kinds]
     if len(kind_query) == len(calendar.KINDS):
         kind_query = []
-    keep = urlencode([*kind_query, *record_query.items()])
+    view_query = [("view", VIEW_LIST)] if view == VIEW_LIST else []
+    keep = urlencode([*kind_query, *record_query.items(), *view_query])
+    # The view's links keep the month, the day, the kinds and the records; never the view.
+    keep_all_but_view = urlencode(
+        [("month", f"{month:%Y-%m}"), *([("on", day.isoformat())] if selected else [])]
+        + [*kind_query, *record_query.items()]
+    )
 
     def link(target: date) -> str:
         query = urlencode([("month", f"{target:%Y-%m}")])
@@ -134,15 +169,25 @@ def calendar_page(request: HttpRequest) -> HttpResponse:
         {
             "month": month,
             "today": today,
-            "weeks": calendar.month_weeks(month, found),
-            "count": len(found),
+            "day": day,
+            "view": view,
+            "weeks": calendar.month_weeks(month, in_month),
+            "count": len(in_month),
+            "day_items": calendar.on_day(found, day),
+            "next_days": calendar.next_days(found, today),
+            "keep": keep,
+            "month_view_link": f"?{keep_all_but_view}",
+            "list_view_link": f"?{keep_all_but_view}&view={VIEW_LIST}",
             "previous_link": link(add_months(month, -1)),
             "next_link": link(add_months(month, 1)),
             "this_month_link": link(today.replace(day=1)),
             "kinds": [(kind, calendar.KIND_LABELS[kind]) for kind in calendar.KINDS],
+            "kind_choice": next(iter(filters.kinds)) if len(filters.kinds) == 1 else "",
+            "several_kinds": 1 < len(filters.kinds) < len(calendar.KINDS),
             "filters": filters,
             "record_query": record_query,
-            "messages_shown": [m for m in (month_message, *notes) if m],
+            "messages_shown": [m for m in (month_message, day_message, *notes) if m],
+            "feed": calendar.live_feed(_actor(request)),
             "stores": Store.objects.order_by("external_label", "id"),
             "operators": Operator.objects.filter(archived_at__isnull=True).order_by(
                 "display_name", "id"

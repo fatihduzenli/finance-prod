@@ -1126,7 +1126,9 @@ def test_a_hand_over_day_offers_both_leases(fake: FakeProvider) -> None:
 def test_new_invoice_on_the_operator_page_may_be_operator_level(fake: FakeProvider) -> None:
     operator, lease = a_world(fake)
     client, _ = client_for(Role.BILLING)
-    assert 'id="new-invoice"' in client.get(f"/operators/{operator.pk}/").content.decode()
+    # PLAN-012f-a D7 (DESIGN-SPEC §4 Operator workspace): the operator page offers no New
+    # invoice button; the operator-level builder keeps its URL.
+    assert 'id="new-invoice"' not in client.get(f"/operators/{operator.pk}/").content.decode()
     path = f"/invoices/new/operator/{operator.pk}/"
     assert "No lease (the operator)" in client.get(path).content.decode()
     client.post(path, page_data([{"item": "Late fee", "unit_amount": "25.00"}]))

@@ -1,5 +1,7 @@
-"""The visual regression pages (docs/qa/PLAN-012c-design-pass.md D10, §3.7): ten pages, the
-store workspace on each of its tabs, at 1280 x 800 and 390 x 844, each a full-page PNG
+"""The visual regression pages (docs/qa/PLAN-012c-design-pass.md D10, §3.7; the family pages
+of PLAN-012f-a Batch D): the main pages, the store workspace on each of its tabs, one page of
+each family (lists, detail, forms, the wizard, the calendar) and the sign-in page (seen signed
+out), at 1280 x 800 and 390 x 844, each a full-page PNG
 compared pixel by pixel with ``baseline/<page>-<width>.png``.
 
 A pixel differs when one of its channels moves by more than :data:`CHANNEL_THRESHOLD`; the
@@ -13,16 +15,18 @@ command that writes it.
 from __future__ import annotations
 
 import io
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import partial
 from pathlib import Path
 
 import pytest
 from django.urls import reverse
 from PIL import Image, ImageChops
-from playwright.sync_api import Page, ViewportSize
+from playwright.sync_api import Browser, BrowserContext, Page, ViewportSize
 
-from tests.visual.conftest import COMMAND, Baseline, Site, open_still
+from ledger.models import OneOffCharge, Payment, PaymentStatus
+from tests.visual import world
+from tests.visual.conftest import COMMAND, DESKTOP, Baseline, Site, open_still
 
 pytestmark = pytest.mark.visual
 
@@ -60,10 +64,51 @@ PAGES: dict[str, Callable[[Site], str]] = {
     ),
     "pnl": lambda site: "/reports/pnl/",
     "daily-charges": lambda site: "/run/",
+    # PLAN-012f-a Batch D: one page of each family beside the references.
+    "operators": lambda site: "/operators/",
+    "leases": lambda site: "/leases/",
+    "payments": lambda site: "/payments/",
+    "calendar": lambda site: "/calendar/",
+    "charge-detail": lambda site: reverse(
+        "ledger:one_off_charges:detail", kwargs={"pk": one_off_of(site).pk}
+    ),
+    "payment-detail": lambda site: reverse(
+        "ledger:payments:detail", kwargs={"pk": settled_payment_of(site).pk}
+    ),
+    "new-store": lambda site: reverse("ledger:stores:create"),
+    "new-lease": lambda site: reverse("ledger:leases:create"),
+    "operator-form": lambda site: reverse(
+        "ledger:operators:edit", kwargs={"pk": site.world.operator.pk}
+    ),
+    "login": lambda site: "/account/login/",
 }
 
-#: The lease-end wizard is for admins only.
-AS_ADMIN = {"lease-end-statement"}
+
+def one_off_of(site: Site) -> OneOffCharge:
+    """The data set's damage charge ("Broken shelf", $250.00): the latest due without a plan."""
+    found = (
+        OneOffCharge.objects.filter(lease=site.world.lease, plan__isnull=True)
+        .order_by("-due_date")
+        .first()
+    )
+    assert found is not None
+    return found
+
+
+def settled_payment_of(site: Site) -> Payment:
+    found = (
+        Payment.objects.filter(rent_charge__lease=site.world.lease, status=PaymentStatus.SETTLED)
+        .order_by("settled_on", "pk")
+        .first()
+    )
+    assert found is not None
+    return found
+
+
+#: The lease-end wizard and the New store and New lease forms are for admins only.
+AS_ADMIN = {"lease-end-statement", "new-store", "new-lease"}
+#: Seen signed out, in a context of its own (the sign-in page, PLAN-012f-a D9).
+SIGNED_OUT = {"login"}
 
 
 def differing_pixels(actual: Image.Image, expected: Image.Image) -> Image.Image:
@@ -116,6 +161,30 @@ def write_out(
         diff_picture(expected, mask).save(out / f"{name}-diff.png")
 
 
+@pytest.fixture
+def anonymous_page(visual_browser: Browser) -> Iterator[Page]:
+    """A page in a fresh context with the suite's settings and no sign-in (the login page)."""
+    context: BrowserContext = visual_browser.new_context(
+        viewport=DESKTOP,
+        device_scale_factor=1,
+        locale="en-US",
+        timezone_id="America/New_York",
+        reduced_motion="reduce",
+        color_scheme="light",
+        service_workers="block",
+    )
+    context.clock.set_fixed_time(world.NOON)
+    page = context.new_page()
+    yield page
+    context.close()
+
+
+def page_for(page_name: str, signed_in: Callable[[str], Page], anonymous: Page) -> Page:
+    if page_name in SIGNED_OUT:
+        return anonymous
+    return signed_in("admin" if page_name in AS_ADMIN else "billing")
+
+
 # The django_db mark makes pytest-django create the test database (it creates only the
 # databases a collected test asks for); the rows are the session's (conftest.py).
 @pytest.mark.django_db
@@ -126,10 +195,11 @@ def test_the_page_looks_as_its_baseline(
     width: int,
     visual_site: Site,
     visual_pages: Callable[[str], Page],
+    anonymous_page: Page,
     baseline: Baseline,
 ) -> None:
     name = f"{page_name}-{width}"
-    page = visual_pages("admin" if page_name in AS_ADMIN else "billing")
+    page = page_for(page_name, visual_pages, anonymous_page)
     page.set_viewport_size(VIEWPORTS[width])
     open_still(page, visual_site.url + PAGES[page_name](visual_site))
     shot = page.screenshot(full_page=True, animations="disabled", caret="hide")
@@ -154,6 +224,15 @@ REPORT_SHOTS: dict[tuple[str, int], str] = {
     ("store-charges", 1440): "store-workspace-laptop",
     ("grid", 1440): "monthly-rent-overview-laptop",
     ("store-charges", 390): "store-workspace-phone",
+    # PLAN-012f-a (the seven references of Step 12f-a; the lease-end statement stands for the
+    # transfer wizard's frame, the same frame with five steps).
+    ("operator", 1440): "operator-workspace-laptop",
+    ("lease-end-statement", 1440): "transfer-wizard-laptop",
+    ("stores", 1440): "stores-list-laptop",
+    ("calendar", 1440): "calendar-laptop",
+    ("invoice-builder", 1440): "create-invoice-laptop",
+    ("charge-detail", 1440): "charge-detail-laptop",
+    ("login", 1440): "login-laptop",
 }
 
 
@@ -164,6 +243,7 @@ def test_the_report_shot_is_written_when_asked(
     width: int,
     visual_site: Site,
     visual_pages: Callable[[str], Page],
+    anonymous_page: Page,
     request: pytest.FixtureRequest,
 ) -> None:
     """With ``--report-dir``, the page at the reference's width goes into that folder as
@@ -171,7 +251,7 @@ def test_the_report_shot_is_written_when_asked(
     folder = request.config.getoption("--report-dir")
     if not folder:
         pytest.skip("report shots are written only with --report-dir")
-    page = visual_pages("admin" if page_name in AS_ADMIN else "billing")
+    page = page_for(page_name, visual_pages, anonymous_page)
     page.set_viewport_size(REPORT_VIEWPORTS[width])
     open_still(page, visual_site.url + PAGES[page_name](visual_site))
     shot = page.screenshot(full_page=True, animations="disabled", caret="hide")

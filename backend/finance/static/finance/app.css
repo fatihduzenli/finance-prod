@@ -501,26 +501,13 @@ td.attention-action { text-align: right; }
 .attention-banners .attention-item a { color: var(--text); }
 .attention-banners .attention-item.severity-high { background: var(--unpaid-bg); }
 
-/* --- Calendar (PLAN-011b D8) ------------------------------------------------------------- */
-.calendar-kinds { border: 0; padding: 0; margin: var(--space-2) 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
-.calendar-kinds legend { font-weight: 600; padding: 0; }
-/* The invoice builder's "How to collect" (PLAN-012e-2 D3): the calendar's row of choices. */
+/* --- Calendar (PLAN-011b D8): the settings page's new feed box. The calendar page's rules are
+   in the "Calendar (PLAN-012f-a D6)" block below. ------------------------------------------ */
+/* The invoice builder's "How to collect" (PLAN-012e-2 D3): a row of choices. */
 .collect-choices { border: 0; padding: 0; margin: var(--space-4) 0 var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
 .collect-choices legend { font-weight: 600; padding: 0; }
 #collect-actions .btn[hidden] { display: none; }
 label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-weight: 400; }
-.calendar-month { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--surface); }
-.calendar-head, .calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.calendar-head span { font-weight: 500; font-size: var(--fs-sm); color: var(--muted); padding: 6px var(--space-2); border-bottom: 1px solid var(--border); }
-.calendar-day { min-height: 6rem; border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); padding: var(--space-1) 6px; font-size: var(--fs-sm); overflow-wrap: anywhere; }
-.calendar-day.other-month { background: var(--surface-2); color: var(--text-2); }
-.calendar-day.today { outline: 2px solid var(--teal); outline-offset: -2px; }
-.calendar-date { font-weight: 600; }
-.calendar-day ul { list-style: none; padding: 0; margin: 3px 0 0; }
-.calendar-item { margin-bottom: 2px; padding: 2px var(--space-1); border-radius: 6px; background: var(--neutral-bg); }
-.calendar-item a { color: inherit; text-decoration: none; }
-.calendar-item.kind-reminder { background: var(--pending-bg); } .calendar-item.kind-debit { background: var(--paid-bg); }
-.calendar-item.kind-insurance { background: var(--partial-bg); } .calendar-item.kind-lease_end { background: var(--unpaid-bg); }
 .feed-new { border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--space-3); background: var(--paid-bg); }
 
 /* --- Every other page (PLAN-012f D10) ----------------------------------------------------------
@@ -896,6 +883,18 @@ fieldset.card > legend + * { clear: both; }
   .wizard-footer .btn { flex: 1 1 auto; }
   .settle-final { font-size: var(--fs-md); }
   #deduction-rows .deduction-amount, #deduction-rows .deduction-clear-cell { width: auto; }
+  /* Operator workspace (PLAN-012f-a D7): the avatar beside the name, the muted line shown (the
+     store page's address line is the one hidden), the actions on a row of their own, the tab
+     row and the Store select stacked, the store cards one a row (selectors one step more
+     specific than the block's own rules, which come later in the sheet). */
+  .operator-head .operator-line { display: block; }
+  .operator-head .operator-avatar { width: 44px; height: 44px; font-size: var(--fs-lg); }
+  .page-header.operator-head .page-actions { margin-top: 0; }
+  .page-header-inner > .operator-tabs-row { flex-direction: column; align-items: stretch; min-width: 0; max-width: 100%; }
+  .page-header-inner > .operator-tabs-row > .tabs { min-width: 0; max-width: 100%; overflow-x: auto; }
+  .page-header-inner > .operator-tabs-row > .store-selector { flex-wrap: nowrap; }
+  .page-header-inner > .operator-tabs-row > .store-selector select { flex: 1 1 auto; min-width: 0; }
+  .workspace-main > .store-strip { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
 }
 
 /* --- List family (PLAN-012f-a D3) ------------------------------------------------------------
@@ -983,6 +982,142 @@ p.detail-more-notes { padding-left: 0; }
   .detail-head .page-actions > .btn-primary { flex: 1 0 100%; justify-content: center; }
 }
 
+/* --- Operator workspace (PLAN-012f-a D7) -------------------------------------------------------
+   DESIGN-SPEC §4 Operator workspace, operator-workspace-laptop.png. The header (.operator-head):
+   its title block is a grid, the breadcrumb across the top, the 56 px round .operator-avatar
+   (the display name's initials in --link on the --month-current tint, the nearest token to the
+   drawing's light teal) at the left of the name with its badges and the muted .operator-line
+   (the avatar follows the title in the markup, so the page header's h1 stays the block's first
+   heading); .operator-tabs-row puts the
+   tabs and the Store select on one row, the select at the right. .store-strip: the store cards
+   above the open tab (the bold title link, the muted rent and collection line, the open balance
+   in red or green); the selected store's card has a teal border. In the side column, the
+   .recent-contacts list (the avatar letter, the bold kind as a link, the muted date and store)
+   and .side-store-label, the selected store's name over its bar and cards. */
+.operator-head > .page-title-block { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-4); row-gap: 2px; align-items: center; }
+.operator-head > .page-title-block > .breadcrumb { grid-column: 1 / -1; }
+.operator-head > .page-title-block > h1 { grid-column: 2; grid-row: 2; }
+.operator-head > .page-title-block > .operator-line { grid-column: 2; grid-row: 3; margin: 0; }
+.operator-avatar { display: inline-flex; grid-column: 1; grid-row: 2 / span 2; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 50%; background: var(--month-current); color: var(--link); font-size: 20px; font-weight: 700; }
+.operator-head .page-actions { margin-top: var(--space-2); }
+.operator-head .provider-pill { font-size: var(--fs-base); }
+.operator-tabs-row { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-2) var(--space-4); margin: 0 0 calc(-1 * var(--space-3)); }
+.operator-tabs-row > .tabs { flex: 1 1 auto; margin: 0; border-bottom: 0; }
+.operator-tabs-row > .store-selector { flex: 0 0 auto; padding-bottom: var(--space-2); }
+.store-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-4); padding: 0; list-style: none; }
+.store-card { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 14px var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.store-card[aria-current="true"] { border-color: var(--teal); }
+.store-card-title { color: var(--text); font-size: var(--fs-md); font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
+.store-card-title:hover { color: var(--link); }
+.store-card-line { color: var(--muted); font-size: var(--fs-sm); }
+.store-card-balance { margin-top: var(--space-1); font-size: var(--fs-md); font-weight: 700; }
+.store-card-balance.tone-unpaid { color: var(--unpaid-text); }
+.store-card-balance.tone-paid { color: var(--paid-text); }
+.operator-side > .card { margin: 0 0 var(--space-4); }
+.operator-side .section-label { margin: 0 0 var(--space-3); font-size: var(--fs-base); }
+.operator-side .card-header { margin-bottom: var(--space-3); }
+.operator-side .card-header .section-label { margin: 0; }
+.operator-side .side-strong.tone-unpaid { color: var(--unpaid-text); }
+.operator-side .card-note { margin: var(--space-3) 0 0; }
+#portal-card #statement-links { margin: 0 0 var(--space-3); font-size: var(--fs-base); }
+.recent-contacts { list-style: none; margin: 0; padding: 0; }
+.recent-contact { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; }
+.recent-contact .avatar { flex-basis: 28px; width: 28px; height: 28px; font-size: var(--fs-xs); }
+.recent-contact-body { display: flex; flex-direction: column; min-width: 0; font-size: var(--fs-base); }
+.recent-contact-title { color: var(--text); font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
+.recent-contact-title:hover { color: var(--link); }
+.recent-contact-meta { color: var(--muted); font-size: var(--fs-sm); }
+.side-store-label { margin: var(--space-5) 0 var(--space-3); color: var(--muted); font-size: var(--fs-base); }
+
+/* --- Calendar (PLAN-012f-a D6) -------------------------------------------------------------------
+   DESIGN-SPEC §4 Calendar, calendar-laptop.png. The page is a .detail-grid: the month card
+   (.calendar-card) beside the side column (the day panel, NEXT 7 DAYS, FEED). The card's
+   .calendar-toolbar: ‹ month › and Today (.calendar-nav) at the left, the filters at the right;
+   the grid (.calendar-month: .calendar-head, the .calendar-week rows of .calendar-day cells: the
+   day's number, today's in a --btn-primary-bg circle, the add link "+", the chips) and the
+   legend row (.calendar-legend, an outlined square per kind). A chip (.calendar-item) holds one line cut
+   with an ellipsis; a cell shows three and "+N more" (.calendar-more); the list view
+   (.calendar-card.is-list, ?view=list) and the phone show the days with items as a list with
+   every chip. The kinds take the drawing's colours from the status tokens: debit days the
+   teal of Rent day, re-debits the green of ACH settles, notes the neutral of E-mail invoices,
+   insurance anniversaries yellow, reminders the orange of Promise due, lease ends red (the
+   drawing's Installment and Jobs have no kind here). The side column's .day-entry: a 4 px bar
+   in the kind's colour, the bold title link, the muted kind; .next-days: date · item at the
+   left, the count at the right. */
+@media (min-width: 769px) { .calendar-layout { grid-template-columns: minmax(0, 1fr) 18rem; } }
+.calendar-card { padding: 0; overflow: hidden; }
+.calendar-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-4); padding: var(--space-4) var(--space-5); }
+.calendar-nav { display: flex; align-items: center; gap: var(--space-2); }
+.calendar-nav h2 { margin: 0 var(--space-2); font-size: 18px; font-weight: 700; white-space: nowrap; }
+.calendar-step { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 1; }
+.calendar-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin: 0 0 0 auto; }
+.calendar-filters label { margin: 0 0 0 4px; color: var(--muted); font-size: var(--fs-base); font-weight: 400; }
+.calendar-filters select { width: auto; max-width: 7.5rem; padding: 7px 8px; font-size: var(--fs-base); }
+.calendar-month { border-top: 1px solid var(--border-soft); }
+.calendar-head, .calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.calendar-head span { padding: 6px var(--space-2); border-bottom: 1px solid var(--border-soft); color: var(--muted); font-size: var(--fs-base); font-weight: 600; text-align: center; }
+.calendar-day { min-width: 0; min-height: 6.5rem; padding: 6px var(--space-2); border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); font-size: var(--fs-sm); }
+.calendar-day:nth-child(7n) { border-right: 0; }
+.calendar-day.other-month { background: var(--surface-2); color: var(--muted); }
+.calendar-day.selected { background: var(--month-current); }
+.calendar-date { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); font-weight: 700; }
+.calendar-num-link { display: inline-flex; align-items: center; color: inherit; text-decoration: none; }
+.calendar-num-link:hover { color: var(--link); }
+.calendar-weekday { display: none; }
+.calendar-num { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 50%; }
+.calendar-day.today .calendar-num { background: var(--btn-primary-bg); color: var(--surface); }
+.calendar-add-day { padding: 0 4px; color: var(--muted); font-weight: 400; text-decoration: none; }
+.calendar-add-day:hover { color: var(--link); }
+@media (hover: hover) {
+  .calendar-add-day { opacity: 0; }
+  .calendar-day:hover .calendar-add-day, .calendar-add-day:focus-visible { opacity: 1; }
+}
+.calendar-day ul { list-style: none; margin: var(--space-1) 0 0; padding: 0; }
+.calendar-item, .calendar-more { margin-bottom: 3px; }
+.calendar-item a { display: block; overflow: hidden; padding: 2px 6px; border-radius: 4px; background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-xs); font-weight: 700; line-height: 1.5; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-item a:hover { text-decoration: underline; }
+.calendar-item.calendar-extra { display: none; }
+.calendar-more a { padding: 0 6px; color: var(--link); font-size: var(--fs-xs); font-weight: 600; text-decoration: none; }
+.calendar-item.kind-debit a { background: var(--month-current); color: var(--link); }
+.calendar-item.kind-redebit a { background: var(--paid-bg); color: var(--paid-text); }
+.calendar-item.kind-note a { background: var(--neutral-bg); color: var(--neutral-text); }
+.calendar-item.kind-insurance a { background: var(--pending-bg); color: var(--pending-text); }
+.calendar-item.kind-reminder a { background: var(--partial-bg); color: var(--partial-text); }
+.calendar-item.kind-lease_end a { background: var(--unpaid-bg); color: var(--unpaid-text); }
+.calendar-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: 0; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border-soft); list-style: none; color: var(--text-2); font-size: var(--fs-base); }
+.calendar-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.legend-swatch { display: inline-block; width: 10px; height: 10px; border: 1.5px solid var(--neutral-text); border-radius: 2px; }
+.legend-swatch.kind-debit, .day-entry.kind-debit { border-color: var(--teal); }
+.legend-swatch.kind-redebit, .day-entry.kind-redebit { border-color: var(--paid-text); }
+.legend-swatch.kind-note, .day-entry.kind-note { border-color: var(--navy); }
+.legend-swatch.kind-insurance, .day-entry.kind-insurance { border-color: var(--pending-text); }
+.legend-swatch.kind-reminder, .day-entry.kind-reminder { border-color: var(--partial-text); }
+.legend-swatch.kind-lease_end, .day-entry.kind-lease_end { border-color: var(--unpaid-text); }
+.calendar-card.is-list .calendar-head { display: none; }
+.calendar-card.is-list .calendar-week { display: block; }
+.calendar-card.is-list .calendar-day { min-height: 0; border-right: 0; }
+.calendar-card.is-list .calendar-day.is-empty, .calendar-card.is-list .calendar-day.other-month { display: none; }
+.calendar-card.is-list .calendar-weekday { display: inline; margin-right: 4px; }
+.calendar-card.is-list .calendar-item.calendar-extra { display: list-item; }
+.calendar-card.is-list .calendar-more { display: none; }
+.calendar-card.is-list .calendar-item a { white-space: normal; overflow-wrap: anywhere; }
+.calendar-side .section-label { text-transform: uppercase; }
+.day-entries, .next-days { list-style: none; margin: 0; padding: 0; font-size: var(--fs-base); }
+.day-entry { display: flex; flex-direction: column; margin: 0 0 var(--space-3); padding-left: 10px; border-left: 4px solid var(--neutral-text); }
+.day-entry:last-child { margin-bottom: 0; }
+.day-entry-title { color: var(--text); font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
+.day-entry-title:hover { color: var(--link); }
+.day-entry-meta { color: var(--muted); font-size: var(--fs-sm); }
+.next-day { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: 4px 0; }
+.next-day-text { min-width: 0; overflow-wrap: anywhere; }
+.next-day-text a { color: var(--text); text-decoration: none; }
+.next-day-text a:hover { color: var(--link); text-decoration: underline; }
+.next-day-count { font-weight: 700; }
+.feed-text { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--fs-base); }
+.feed-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-base); }
+.feed-actions form { margin: 0; }
+.feed-actions a { text-decoration: none; }
+
 /* --- Tablet and phone: touch targets ---------------------------------------------------- */
 @media (max-width: 1023.98px), (pointer: coarse) {
   .btn, button, input[type=submit], select, input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=file] { min-height: var(--tap); }
@@ -1064,11 +1199,21 @@ p.detail-more-notes { padding-left: 0; }
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
   /* The phone keeps the sideways scroll and the fixed store column, narrower. */
   table.grid th.store-col { width: 8rem !important; min-width: 8rem !important; max-width: 9rem !important; white-space: normal !important; }
-  /* The month becomes a list of the days that have items. */
+  /* The month becomes a list of the days that have items, every chip shown (PLAN-012f-a D6). */
   .calendar-head { display: none; }
   .calendar-week { display: block; }
   .calendar-day { min-height: 0; border-right: 0; }
-  .calendar-day.empty, .calendar-day.other-month { display: none; }
+  .calendar-day.is-empty, .calendar-day.other-month { display: none; }
+  .calendar-weekday { display: inline; margin-right: 4px; }
+  .calendar-item.calendar-extra { display: list-item; }
+  .calendar-more { display: none; }
+  .calendar-item a { white-space: normal; overflow-wrap: anywhere; }
+  .calendar-toolbar { padding: var(--space-3) var(--space-4); }
+  .calendar-item a { display: flex; align-items: center; }
+  .calendar-filters { display: grid; grid-template-columns: auto minmax(0, 1fr); width: 100%; margin: 0; }
+  .calendar-filters select { max-width: none; width: 100%; }
+  .calendar-filters #operator, .calendar-filters .badge, .calendar-filters button { grid-column: 1 / -1; }
+  .calendar-legend { padding: var(--space-3) var(--space-4); }
 }
 
 /* --- Print ---------------------------------------------------------------------------------- */

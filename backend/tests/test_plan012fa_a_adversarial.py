@@ -25,7 +25,7 @@ from ledger.services import lease_end
 from payments.fake import FakeProvider
 from tests.test_operator_views import client_for
 from tests.visual import world as visual_world
-from tests.visual.test_pages import AS_ADMIN, PAGES
+from tests.visual.test_pages import AS_ADMIN, PAGES, SIGNED_OUT
 
 pytestmark = pytest.mark.django_db
 
@@ -63,8 +63,9 @@ def test_a_get_and_a_head_of_every_page_in_the_suite_write_nothing(
     site: Any = _Site(built)
     before = row_counts()
     audit_before = AuditLog.objects.count()
+    anonymous = Client()
     for name, path_of in PAGES.items():
-        client = admin if name in AS_ADMIN else billing
+        client = anonymous if name in SIGNED_OUT else admin if name in AS_ADMIN else billing
         path = path_of(site)
         for method in (client.get, client.head):
             response = method(path)

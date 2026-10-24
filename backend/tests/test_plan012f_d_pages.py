@@ -607,6 +607,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:payments:detail": lambda w: ([*_store(w), "Payments"], "Payment of $100.00"),
     "ledger:payments:refund": lambda w: (["Payments", "Payment of $100.00"], "Refund a payment"),
     "ledger:payments:void": lambda w: (["Payments", "Payment of $100.00"], "Void a payment"),
+    # PLAN-012f-a D6: the calendar page's header carries "Reports ›" (calendar-laptop.png).
+    "ledger:calendar:page": lambda w: (["Reports"], "Calendar"),
     "ledger:calendar:detail": lambda w: (["Calendar: Oct 2026"], "Walk note"),
     "ledger:calendar:add": lambda w: (["Calendar"], "New calendar entry"),
     "ledger:calendar:edit": lambda w: (["Calendar", "Walk note"], "Edit calendar entry"),
@@ -632,7 +634,6 @@ NO_PARENT = (
     "ledger:leases:list",
     "ledger:payments:list",
     "ledger:returns:list",
-    "ledger:calendar:page",
     "ledger:arrears:page",
     "ledger:reports:index",
     "ledger:reports:pnl",

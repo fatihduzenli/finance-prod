@@ -1,10 +1,10 @@
 """The operator page as the workspace (docs/qa/PLAN-012d-store-workspace.md D14, §6 E) and the
 reports' month selects (the owner's Safari rule, applied to every month picker).
 
-The selector (the operator's only store by default, else the first by label; ``?store=``
-picks another of the operator's stores; another operator's store is ignored), the header
-card of the selected store with the operator's total, the bar on the operator's lease of
-the selected store, the tabs across the operator's stores with a store column, the drafts'
+The selector (All stores by default, PLAN-012f-a D7; ``?store=`` picks one of the operator's
+stores; another operator's store or a bad value is All stores), the header card of the
+selected store with the operator's total, the bar on the operator's lease of the selected
+store, the tabs across the operator's stores with a store column, the drafts'
 Edit, Send and Delete, the operator-level items kept above the tabs, the roles, the query
 budget, and the From and To selects of the P&L and the ranged reports. The adversarial
 cases are the QA owner's (test_plan012d_e_adversarial.py)."""
@@ -88,18 +88,25 @@ def section(html: str, element_id: str) -> str:
 # --- The selector and the header -----------------------------------------------------------
 
 
-def test_the_default_store_is_the_first_by_label_and_the_selector_lists_the_operators() -> None:
+def test_the_default_is_all_stores_and_the_selector_lists_the_operators_stores() -> None:
+    # PLAN-012f-a D7 (operator-workspace-laptop.png): "All stores (N)" first and selected by
+    # default, then the operator's stores by label; no store's bar or cards until one is picked.
     operator, first, second = two_stores()
     a_rent_charge(first, OCTOBER, due="1000.00")
     a_rent_charge(second, OCTOBER, due="250.00")
     other = a_lease(a_store("3001"), an_operator("Other"), started=STARTED)
-    html = page(client_for(Role.BILLING)[0], operator_page(operator))
+    client = client_for(Role.BILLING)[0]
+    html = page(client, operator_page(operator))
     selector = re.search(r'<select name="store" id="store-select">.*?</select>', html, re.S)
     assert selector is not None
     options = selector.group(0)
-    assert options.index("1001") < options.index("1002")
-    assert f'value="{first.store_id}" selected' in options
+    assert options.index("All stores (2)") < options.index("1001") < options.index("1002")
+    assert '<option value="" selected>All stores (2)</option>' in options
+    assert options.count(" selected") == 1
     assert str(other.store_id) not in html and "3001" not in options
+    assert 'id="workspace-header"' not in html and bar(html) == ""
+    html = page(client, operator_page(operator, store=str(first.store_id)))
+    assert f'value="{first.store_id}" selected' in html
     header = section(html, "workspace-header")
     assert "1001" in header and "1002" not in header
     assert re.search(r'id="header-open-balance">\$1,000\.00<', header)
@@ -109,10 +116,14 @@ def test_the_default_store_is_the_first_by_label_and_the_selector_lists_the_oper
     assert reverse("ledger:stores:record_payment", kwargs={"pk": first.store_id}) in actions
 
 
-def test_an_only_store_is_the_default() -> None:
+def test_an_only_store_is_all_stores_by_default_and_can_be_picked() -> None:
     lease = a_lease(a_store("2477"), an_operator("Solo"), started=STARTED)
     assert lease.operator is not None
-    html = page(client_for(Role.BILLING)[0], operator_page(lease.operator))
+    client = client_for(Role.BILLING)[0]
+    html = page(client, operator_page(lease.operator))
+    assert '<option value="" selected>All stores (1)</option>' in html
+    assert bar(html) == ""
+    html = page(client, operator_page(lease.operator, store=str(lease.store_id)))
     assert f'value="{lease.store_id}" selected' in html
     assert f"lease={lease.pk}" in bar(html)
 
@@ -134,13 +145,15 @@ def test_the_store_parameter_switches_the_store_and_the_bar() -> None:
 
 
 @pytest.mark.parametrize("raw", ["another", "not-a-uuid", ""])
-def test_another_operators_store_or_a_bad_value_falls_back_to_the_default(raw: str) -> None:
+def test_another_operators_store_or_a_bad_value_falls_back_to_all_stores(raw: str) -> None:
     operator, first, _ = two_stores()
     theirs = a_lease(a_store("9009"), an_operator("Other"), started=STARTED)
     a_rent_charge(theirs, OCTOBER, due="4321.00")
     value = str(theirs.store_id) if raw == "another" else raw
     html = page(client_for(Role.ADMIN)[0], operator_page(operator, store=value, tab="history"))
-    assert f'value="{first.store_id}" selected' in html
+    assert '<option value="" selected>All stores (2)</option>' in html
+    assert f'value="{first.store_id}" selected' not in html
+    assert 'id="choose-store"' in section(html, "tab-history")
     assert "9009" not in html and "4,321.00" not in html and str(theirs.pk) not in html
 
 
@@ -156,7 +169,7 @@ def test_a_store_now_leased_to_another_operator_shows_no_lease_and_no_bar() -> N
     )
     Lease.objects.filter(store=store).update(ended_on=date(2026, 8, 31))
     incoming = a_lease(store, an_operator("Incoming"), started=STARTED)
-    html = page(client_for(Role.ADMIN)[0], operator_page(operator))
+    html = page(client_for(Role.ADMIN)[0], operator_page(operator, store=str(store.pk)))
     assert f'value="{store.pk}" selected' in html
     assert "No current lease of this operator" in section(html, "workspace-header")
     assert bar(html) == "" and 'id="no-operator-lease"' in html
@@ -190,6 +203,16 @@ def test_the_charges_tab_lists_every_store_of_the_operator_with_a_store_column()
     assert f"?operator={operator.pk}" in html
     # The payment forms come back to the operator page.
     assert "next=%2Foperators%2F" in html
+    # PLAN-012f-a D7: the title names the stores shown; a selected store's rows only.
+    assert '<span id="charges-scope">· all stores</span>' in html
+    assert "Open balance · all stores" in html
+    picked = section(
+        page(client_for(Role.BILLING)[0], operator_page(operator, store=str(first.store_id))),
+        "tab-charges",
+    )
+    assert '<span id="charges-scope">· 1001</span>' in picked
+    assert ">1001</a>" in picked and ">1002</a>" not in picked and "Broken shelf" not in picked
+    assert 'id="charges-balance">$1,000.00<' in picked
 
 
 def test_the_other_tabs_list_the_operators_rows() -> None:
@@ -306,16 +329,19 @@ def test_send_without_a_store_follows_a_local_next_only(monkeypatch: pytest.Monk
 
 
 def test_the_operator_level_items_follow_the_open_tab_and_the_old_lists_are_gone() -> None:
-    # PLAN-012f D8 (the store page's layout): the header (New invoice, the store selector),
-    # the open tab in the two-thirds column, then the operator-level items as cards in that
-    # column, before the side column (the selected store's bar and cards).
+    # PLAN-012f D8 (the store page's layout; PLAN-012f-a D7): the header (the actions, the
+    # tabs with the store selector at their right), the strip of store cards and the open tab
+    # in the two-thirds column, then the operator-level items as cards in that column, before
+    # the side column (the operator's cards, then the selected store's bar and cards).
     operator, first, _ = two_stores()
     Operator.objects.filter(pk=operator.pk).update(notes="Prefers calls after noon")
-    html = page(client_for(Role.BILLING)[0], operator_page(operator))
+    html = page(client_for(Role.BILLING)[0], operator_page(operator, store=str(first.store_id)))
     workspace_at = html.index('<h2 id="workspace"')
-    side_at = html.index('<aside class="workspace-side"')
-    assert html.index('id="new-invoice"') < html.index('id="store-selector"') < workspace_at
-    assert workspace_at < html.index('id="tab-charges"') < html.index('id="sms-phone"')
+    side_at = html.index('<aside class="workspace-side')
+    assert html.index('id="operator-actions"') < html.index('id="store-tabs"')
+    assert html.index('id="store-tabs"') < html.index('id="store-selector"') < workspace_at
+    assert workspace_at < html.index('id="store-strip"') < html.index('id="tab-charges"')
+    assert html.index('id="tab-charges"') < html.index('id="sms-phone"')
     for marker in (
         'id="sms-phone"',
         'id="sms-consent"',
@@ -328,19 +354,22 @@ def test_the_operator_level_items_follow_the_open_tab_and_the_old_lists_are_gone
         "Prefers calls after noon",
     ):
         assert marker in html and workspace_at < html.index(marker) < side_at, marker
-    assert side_at < html.index('id="action-bar"') < html.index('id="workspace-header"')
+    assert side_at < html.index('id="portal-card"') < html.index('id="action-bar"')
+    assert html.index('id="action-bar"') < html.index('id="workspace-header"')
     for gone in ('id="invoice-drafts-table"', 'id="one-off-charges"', 'id="outstanding"'):
         assert gone not in html, gone
-    # The bar's Create invoice has its own id beside the page's New invoice.
-    assert html.count('id="new-invoice"') == 1 and 'id="bar-new-invoice"' in bar(html)
+    # PLAN-012f-a D7: New invoice left the operator header (DESIGN-SPEC §4); the selected
+    # store's bar keeps its Create invoice under its own id.
+    assert 'id="new-invoice"' not in html and 'id="bar-new-invoice"' in bar(html)
 
 
 def test_a_viewer_sees_no_bar_and_no_history_and_billing_no_admin_actions() -> None:
     operator, first, _ = two_stores()
-    viewer = page(client_for(Role.VIEWER)[0], operator_page(operator))
+    picked = operator_page(operator, store=str(first.store_id))
+    viewer = page(client_for(Role.VIEWER)[0], picked)
     assert bar(viewer) == "" and "tab=history" not in viewer
     assert 'id="store-select"' in viewer
-    billing = bar(page(client_for(Role.BILLING)[0], operator_page(operator)))
+    billing = bar(page(client_for(Role.BILLING)[0], picked))
     # PLAN-012e-2 D5: Create invoice and Add payment; no Lease menu for billing.
     assert re.findall(r'id="([^"]+)"', billing) == [
         "action-bar",
@@ -349,7 +378,7 @@ def test_a_viewer_sees_no_bar_and_no_history_and_billing_no_admin_actions() -> N
     ]
     assert "/payments/new/" in billing and "/schedule-payment/" not in billing
     assert "/end-lease/" not in billing and "/transfer/" not in billing
-    admin = page(client_for(Role.ADMIN)[0], operator_page(operator))
+    admin = page(client_for(Role.ADMIN)[0], picked)
     assert "/end-lease/" in bar(admin) and "/transfer/" in bar(admin)
     assert 'id="lease-menu"' in bar(admin)
     assert "tab=history" in admin
@@ -365,18 +394,21 @@ def operator_bar(html: str) -> str:
     return found.group(0)
 
 
-def test_the_operator_bar_is_statement_new_invoice_edit_connect_and_more() -> None:
-    operator, _, _ = two_stores()
-    html = page(client_for(Role.ADMIN)[0], operator_page(operator))
+def test_the_operator_bar_is_statement_edit_and_more_with_connect_and_archive() -> None:
+    # PLAN-012f-a D7 (DESIGN-SPEC §4): Statement, Edit, More ▾ (Connect to Stax, Archive); no
+    # invoice or payment action and no primary in the operator's header.
+    operator, first, _ = two_stores()
+    html = page(client_for(Role.ADMIN)[0], operator_page(operator, store=str(first.store_id)))
     top = operator_bar(html)
     labels = re.findall(r'<a class="btn[^"]*"[^>]*>([^<]+)</a>', top)
-    assert labels == ["Statement", "New invoice", "Edit", "Connect to Stax"]
-    new = reverse("ledger:invoices:new_operator", kwargs={"pk": operator.pk})
-    assert f'<a class="btn btn-primary" href="{new}" id="new-invoice">New invoice</a>' in top
-    assert top.count("btn-primary") == 1
-    assert top.index("Connect to Stax") < top.index('id="more-menu"')
+    assert labels == ["Statement", "Edit"]
+    assert "btn-primary" not in top and 'id="new-invoice"' not in html
+    assert reverse("ledger:invoices:new_operator", kwargs={"pk": operator.pk}) not in top
     menu = top[top.index('<details class="menu" id="more-menu">') : top.index("</details>")]
     assert '<summary class="btn btn-menu">More ▾</summary>' in menu  # PLAN-012f D6
+    link = reverse("ledger:operators:link", kwargs={"pk": operator.pk})
+    assert f'<li><a id="connect-provider" href="{link}">Connect to Stax</a></li>' in menu
+    assert menu.index("Connect to Stax") < menu.index("Archive")
     archive = reverse("ledger:operators:archive", kwargs={"pk": operator.pk})
     assert f'<form method="post" action="{archive}"' in menu and "csrfmiddlewaretoken" in menu
     assert (
@@ -385,24 +417,22 @@ def test_the_operator_bar_is_statement_new_invoice_edit_connect_and_more() -> No
     assert "window.confirm(" in menu
     # Add entry stays in the contact section's header, not in the bar.
     assert "Add entry" not in top and 'id="add-contact"' in html
-    # The selected store's bar keeps one primary on the page: New invoice.
+    # The selected store's bar has no primary either.
     assert "btn-primary" not in bar(html)
     assert 'document.querySelectorAll("details.menu")' in html
 
 
-def test_billing_has_no_more_menu_and_an_archived_operator_neither() -> None:
+def test_billing_has_connect_only_a_viewer_no_menu_and_an_archived_operator_neither() -> None:
     operator, _, _ = two_stores()
     billing = operator_bar(page(client_for(Role.BILLING)[0], operator_page(operator)))
-    assert 'id="more-menu"' not in billing and "Archive" not in billing
-    assert re.findall(r'<a class="btn[^"]*"[^>]*>([^<]+)</a>', billing) == [
-        "Statement",
-        "New invoice",
-        "Edit",
-        "Connect to Stax",
-    ]
+    assert re.findall(r'<a class="btn[^"]*"[^>]*>([^<]+)</a>', billing) == ["Statement", "Edit"]
+    assert 'id="connect-provider"' in billing and "Archive" not in billing
+    viewer = operator_bar(page(client_for(Role.VIEWER)[0], operator_page(operator)))
+    assert 'id="more-menu"' not in viewer and "Edit" not in viewer and "Statement" in viewer
     Operator.objects.filter(pk=operator.pk).update(archived_at=NOW)
     admin = operator_bar(page(client_for(Role.ADMIN)[0], operator_page(operator)))
     assert 'id="more-menu"' not in admin and 'id="new-invoice"' not in admin
+    assert "Edit" not in admin
 
 
 def test_create_missing_charges_on_the_operator_page_is_the_selected_store_link() -> None:

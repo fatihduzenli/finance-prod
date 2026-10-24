@@ -1,43 +1,70 @@
 {% extends "finance/base.html" %}{% load dates %}
+{% comment %}The calendar (PLAN-011b D8; PLAN-012f-a D6, DESIGN-SPEC §4 Calendar, calendar-laptop.png). Header: the breadcrumb, the title, the segmented Month · List (List: the days with items as a list, ?view=list; there is no week view) and the feed page's link. The month card: ‹ month ›, Today, the Show (one kind or everything), Store and Operator ("All operators", its label for screen readers) filters as a GET form with its Show button; the weekday header and the grid: each day's number (today in a circle; the number selects the day for the side panel, ?on=), the add link for billing, at most three chips coloured by kind (title cut with an ellipsis) and "+N more" (the day's panel); the list view and the phone show every chip. The legend names the kinds. The side column: the selected day (or today), NEXT 7 DAYS (after today, by day and kind: one item's title, or the kind and the count) and FEED (the user's calendar feed: its address is shown once, when made, so the card's actions are the settings page's create or replace, a POST, and the link to that page).{% endcomment %}
 {% block title %}Calendar {{ month|month }}{% endblock %}
 {% block main_class %}wide{% endblock %}
-{% block header %}<div class="page-header"><h1>Calendar: {{ month|month }}</h1><div class="page-actions"><a class="btn" href="{% url 'finance:settings' %}">Calendar feed</a>{% if can_add %}<a class="btn btn-primary" id="calendar-add" href="{% url 'ledger:calendar:add' %}">Add note or reminder</a>{% endif %}</div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Calendar</span></nav><h1>Calendar</h1></div><div class="page-actions"><span class="segmented" id="calendar-views" role="group" aria-label="View"><a href="{{ month_view_link }}" id="calendar-view-month"{% if view == "month" %} aria-current="page"{% endif %}>Month</a><a href="{{ list_view_link }}" id="calendar-view-list"{% if view == "list" %} aria-current="page"{% endif %}>List</a></span><a class="btn" id="calendar-subscribe" href="{% url 'finance:settings' %}#calendar-feed">Subscribe in Google Calendar</a></div></div>{% endblock %}
 {% block content %}
-  <p class="actions" id="calendar-nav">
-    <a class="btn" id="calendar-previous" href="{{ previous_link }}">&larr; Previous</a>
-    <a class="btn" id="calendar-this-month" href="{{ this_month_link }}">This month</a>
-    <a class="btn" id="calendar-next" href="{{ next_link }}">Next &rarr;</a>
-  </p>
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:calendar:page' %}" id="calendar-filters" role="search">
-    <input type="hidden" name="month" value="{{ month|date:'Y-m' }}">
-    <fieldset class="calendar-kinds">
-      <legend>Show</legend>
-      {% for value, label in kinds %}<label class="inline"><input type="checkbox" name="kind" value="{{ value }}"{% if value in filters.kinds %} checked{% endif %}> {{ label }}</label>{% endfor %}
-    </fieldset>
-    <div class="actions">
-      <label for="store" style="margin:0;">Store</label>
-      <select name="store" id="store"><option value="">All</option>{% for store in stores %}<option value="{{ store.pk }}"{% if store.pk == filters.store %} selected{% endif %}>{{ store.external_label }}</option>{% endfor %}</select>
-      <label for="operator" style="margin:0;">Operator</label>
-      <select name="operator" id="operator"><option value="">All</option>{% for operator in operators %}<option value="{{ operator.pk }}"{% if operator.pk == filters.operator %} selected{% endif %}>{{ operator.display_name }}</option>{% endfor %}</select>
-      {% if filters.lease %}<input type="hidden" name="lease" value="{{ filters.lease }}"><span class="badge">One lease</span>{% endif %}
-      <button class="btn" type="submit">Show</button>
-    </div>
-  </form></div>
   {% if messages_shown %}<ul class="messages" id="calendar-messages">{% for text in messages_shown %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>{% endif %}
-  <p class="muted" id="calendar-count">{{ count }} item{{ count|pluralize }} this month. New York dates. Generated items (debit days, insurance anniversaries, lease ends) link to their lease.</p>
-  <div class="calendar-month" id="calendar-month">
-    <div class="calendar-head" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
-    {% for week in weeks %}
-      <div class="calendar-week">
-        {% for cell in week %}
-          <div class="calendar-day{% if not cell.in_month %} other-month{% endif %}{% if cell.day == today %} today{% endif %}{% if not cell.items %} empty{% endif %}" data-day="{{ cell.day|date:'Y-m-d' }}">
-            <div class="calendar-date">{% if can_add and cell.in_month %}<a href="{% url 'ledger:calendar:add' %}?on={{ cell.day|date:'Y-m-d' }}" title="Add on {{ cell.day|day }}">{{ cell.day|date:"D j" }}</a>{% else %}{{ cell.day|date:"D j" }}{% endif %}</div>
-            <ul>
-              {% for item in cell.items %}<li class="calendar-item kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a href="{{ item.url }}">{{ item.title }}</a></li>{% endfor %}
-            </ul>
-          </div>
-        {% endfor %}
+  <div class="detail-grid calendar-layout">
+  <div class="detail-main">
+  <section class="card calendar-card{% if view == 'list' %} is-list{% endif %}" aria-labelledby="calendar-title">
+    <div class="calendar-toolbar">
+      <div class="calendar-nav" id="calendar-nav">
+        <a class="btn calendar-step" id="calendar-previous" href="{{ previous_link }}" aria-label="Previous month" title="Previous month">‹</a>
+        <h2 id="calendar-title">{{ month|month }}</h2>
+        <a class="btn calendar-step" id="calendar-next" href="{{ next_link }}" aria-label="Next month" title="Next month">›</a>
+        <a class="btn btn-sm" id="calendar-this-month" href="{{ this_month_link }}">Today</a>
       </div>
-    {% endfor %}
+      <form method="get" action="{% url 'ledger:calendar:page' %}" id="calendar-filters" class="calendar-filters" role="search">
+        <input type="hidden" name="month" value="{{ month|date:'Y-m' }}">
+        {% if view == "list" %}<input type="hidden" name="view" value="list">{% endif %}
+        <label for="calendar-kind">Show</label>
+        <select name="kind" id="calendar-kind">{% if several_kinds %}<option value="" selected>{{ filters.kinds|length }} kinds</option>{% endif %}<option value=""{% if not kind_choice and not several_kinds %} selected{% endif %}>Everything</option>{% for value, label in kinds %}<option value="{{ value }}"{% if value == kind_choice %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+        <label for="store">Store</label>
+        <select name="store" id="store"><option value="">All</option>{% for store in stores %}<option value="{{ store.pk }}"{% if store.pk == filters.store %} selected{% endif %}>{{ store.external_label }}</option>{% endfor %}</select>
+        <label for="operator" class="visually-hidden">Operator</label>
+        <select name="operator" id="operator"><option value="">All operators</option>{% for operator in operators %}<option value="{{ operator.pk }}"{% if operator.pk == filters.operator %} selected{% endif %}>{{ operator.display_name }}</option>{% endfor %}</select>
+        {% if filters.lease %}<input type="hidden" name="lease" value="{{ filters.lease }}"><span class="badge">One lease</span>{% endif %}
+        <button class="btn btn-sm" type="submit" id="calendar-show">Show</button>
+      </form>
+    </div>
+    <div class="calendar-month" id="calendar-month">
+      <div class="calendar-head" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+      {% for week in weeks %}
+        <div class="calendar-week">
+          {% for cell in week %}
+            <div class="calendar-day{% if not cell.in_month %} other-month{% endif %}{% if cell.day == today %} today{% endif %}{% if cell.day == day %} selected{% endif %}{% if not cell.items %} is-empty{% endif %}" data-day="{{ cell.day|date:'Y-m-d' }}">
+              <div class="calendar-date"><a class="calendar-num-link" href="?month={{ month|date:'Y-m' }}&amp;on={{ cell.day|date:'Y-m-d' }}{% if keep %}&amp;{{ keep }}{% endif %}" aria-label="{{ cell.day|day }}"{% if cell.day == day %} aria-current="date"{% endif %}><span class="calendar-weekday">{{ cell.day|date:"D" }} </span><span class="calendar-num">{{ cell.day.day }}</span></a>{% if can_add and cell.in_month %}<a class="calendar-add-day" href="{% url 'ledger:calendar:add' %}?on={{ cell.day|date:'Y-m-d' }}" title="Add on {{ cell.day|day }}" aria-label="Add on {{ cell.day|day }}">+</a>{% endif %}</div>
+              {% if cell.items %}<ul>
+                {% for item in cell.items %}<li class="calendar-item kind-{{ item.kind }}{% if forloop.counter > 3 %} calendar-extra{% endif %}" data-kind="{{ item.kind }}" title="{{ item.title }}"><a href="{{ item.url }}">{{ item.title }}</a></li>{% endfor %}
+                {% if cell.items|length > 3 %}<li class="calendar-more"><a href="?month={{ month|date:'Y-m' }}&amp;on={{ cell.day|date:'Y-m-d' }}{% if keep %}&amp;{{ keep }}{% endif %}">+{{ cell.items|length|add:"-3" }} more</a></li>{% endif %}
+              </ul>{% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+    <ul class="calendar-legend" id="calendar-legend" aria-label="Kinds">{% for value, label in kinds %}<li><span class="legend-swatch kind-{{ value }}" aria-hidden="true"></span>{{ label }}</li>{% endfor %}</ul>
+  </section>
+  <p class="muted card-note" id="calendar-count">{{ count }} item{{ count|pluralize }} this month. New York dates. Generated items (debit days, insurance anniversaries, lease ends) link to their lease.</p>
+  </div>
+  <aside class="detail-side calendar-side">
+    <section class="card" id="calendar-day-panel" aria-labelledby="calendar-day-title">
+      <h2 class="section-label" id="calendar-day-title">{% if day.year == today.year %}{{ day|date:"l" }}, {{ day|day_short }}{% else %}{{ day|day_long }}{% endif %}</h2>
+      {% if day_items %}<ul class="day-entries">{% for item in day_items %}<li class="day-entry kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a class="day-entry-title" href="{{ item.url }}">{{ item.title }}</a><span class="day-entry-meta">{{ item.kind_label }}</span></li>{% endfor %}</ul>
+      {% else %}<p class="muted" id="calendar-day-empty">Nothing on this day.</p>{% endif %}
+      {% if can_add %}<p class="card-note"><a id="calendar-add" href="{% url 'ledger:calendar:add' %}?on={{ day|date:'Y-m-d' }}">Add note or reminder</a></p>{% endif %}
+    </section>
+    <section class="card" id="calendar-next-days" aria-labelledby="calendar-next-title">
+      <h2 class="section-label" id="calendar-next-title">Next 7 days</h2>
+      {% if next_days %}<ul class="next-days">{% for group in next_days %}<li class="next-day kind-{{ group.kind }}" data-day="{{ group.day|date:'Y-m-d' }}" data-kind="{{ group.kind }}">{% if group.count == 1 %}{% with item=group.items.0 %}<span class="next-day-text">{{ group.day|day_short }} · <a href="{{ item.url }}">{{ item.title }}</a></span>{% endwith %}{% else %}<span class="next-day-text">{{ group.day|day_short }} · <a href="?month={{ group.day|date:'Y-m' }}&amp;on={{ group.day|date:'Y-m-d' }}{% if keep %}&amp;{{ keep }}{% endif %}">{{ group.kind_label }}</a></span><span class="next-day-count">{{ group.count }}</span>{% endif %}</li>{% endfor %}</ul>
+      {% else %}<p class="muted" id="calendar-next-empty">Nothing in the next 7 days.</p>{% endif %}
+    </section>
+    <section class="card" id="calendar-feed-card" aria-labelledby="calendar-feed-title">
+      <h2 class="section-label" id="calendar-feed-title">Feed</h2>
+      <p class="feed-text">The same events as an ICS feed for Google Calendar or Outlook.{% if feed %} Your address was made {{ feed.created_at|moment }}; it is shown only when it is made.{% endif %}</p>
+      <div class="feed-actions">{% if feed %}<form method="post" action="{% url 'finance:feed_create' %}" onsubmit="return window.confirm('Make a new address? The current one stops working.');">{% csrf_token %}<button class="link-action" type="submit" id="calendar-feed-reset">Reset token</button></form>{% else %}<form method="post" action="{% url 'finance:feed_create' %}">{% csrf_token %}<button class="link-action" type="submit" id="calendar-feed-create">Get the link</button></form>{% endif %}<span aria-hidden="true">·</span><a id="calendar-feed-settings" href="{% url 'finance:settings' %}#calendar-feed">Feed settings</a></div>
+    </section>
+  </aside>
   </div>
 {% endblock %}

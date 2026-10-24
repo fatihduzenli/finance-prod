@@ -1204,6 +1204,9 @@ class OperatorWorkspace:
     open_balance: Decimal
     #: The open charges of every store of the operator (PLAN-012f D8: the Charges tab's pill).
     open_count: int = 0
+    #: The operator's receivables rows, every store (PLAN-012f-a D7: the strip of store cards
+    #: reads its balances from them, no second read).
+    open_rows: tuple[receivables.OpenBalance, ...] = ()
 
 
 def operator_stores(operator: Operator) -> list[Store]:
@@ -1214,12 +1217,28 @@ def operator_stores(operator: Operator) -> list[Store]:
 
 
 def _selected(stores: list[Store], raw: str | None) -> Store | None:
-    """The store ``?store=`` names when it is one of ``stores``, else the first; a store
-    of another operator is ignored."""
+    """The store ``?store=`` names when it is one of ``stores``; ``None`` (All stores,
+    PLAN-012f-a D7) otherwise: no value, another operator's store or a bad value."""
     for store in stores:
         if raw and str(store.pk) == raw.strip():
             return store
-    return stores[0] if stores else None
+    return None
+
+
+def _only_store(data: dict[str, Any], store: Store) -> dict[str, Any]:
+    """The Charges tab's data limited to ``store``'s rows (PLAN-012f-a D7: the Store select
+    picks one store), its total and lease count again; the rows are already read."""
+    rows = [
+        row
+        for row in data["charge_rows"]
+        if row.lease is not None and row.lease.store_id == store.pk
+    ]
+    return {
+        **data,
+        "charge_rows": rows,
+        "charge_total": sum((row.balance for row in rows), ZERO),
+        "several_leases": len({row.lease.pk for row in rows if row.lease is not None}) > 1,
+    }
 
 
 def _operator_lease(store: Store, operator: Operator, today: date) -> Lease | None:
@@ -1257,12 +1276,13 @@ def operator_workspace(
     now: datetime | None = None,
 ) -> OperatorWorkspace:
     """The operator page as the workspace (D14) for ``role``: the selected store (``store``
-    is the raw ``?store=``; the operator's only store by default, else the first by
-    label; another operator's store is ignored) with its header card and action bar on
-    the operator's lease of it, and the open tab across all the operator's stores
-    (Charges, Invoices, Payments, Schedules; Documents and History are the selected
-    store's, History with the operator's own rows; the contact log is the page's). One
-    receivables read gives the store's figures and the operator's total."""
+    is the raw ``?store=``; All stores, no store, by default and for a store of another
+    operator or a bad value: PLAN-012f-a D7) with its header card and action bar on the
+    operator's lease of it, and the open tab across all the operator's stores (Charges,
+    Invoices, Payments, Schedules; the Charges tab the selected store's only, when one is
+    selected; Documents and History are the selected store's, History with the operator's
+    own rows; the contact log is the page's). One receivables read gives the store's
+    figures, the operator's total and the rows the strip of store cards reads."""
     moment = now or timezone.now()
     stores = operator_stores(operator)
     selected = _selected(stores, store)
@@ -1291,6 +1311,8 @@ def operator_workspace(
         )
     else:
         data = _tab_data(operator, tab, chosen, role, balances, today, moment)
+        if tab == TAB_CHARGES and selected is not None:
+            data = _only_store(data, selected)
     return OperatorWorkspace(
         operator=operator,
         stores=stores,
@@ -1300,4 +1322,5 @@ def operator_workspace(
         data=data,
         open_balance=balances.total,
         open_count=len(balances.owed),
+        open_rows=tuple(rows),
     )

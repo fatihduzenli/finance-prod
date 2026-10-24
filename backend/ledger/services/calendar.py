@@ -49,7 +49,7 @@ import hmac
 import re
 import secrets
 import uuid
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from urllib.parse import urlsplit
@@ -207,9 +207,24 @@ def entry_item(entry: CalendarEntry, host: str | None = None) -> CalendarItem:
     )
 
 
-def _entries(start: date, end: date, host: str) -> list[CalendarItem]:
+#: Day ranges, each ``(start, end)`` with both days included (:func:`items_in`).
+Windows = Sequence[tuple[date, date]]
+
+
+def _within(field: str, windows: Windows) -> Q:
+    """``field`` in any of ``windows``: one condition, so each read stays one query."""
+    if not windows:
+        return Q(pk__in=[])
+    (start, end), *rest = windows
+    condition = Q(**{f"{field}__gte": start, f"{field}__lte": end})
+    for start, end in rest:
+        condition |= Q(**{f"{field}__gte": start, f"{field}__lte": end})
+    return condition
+
+
+def _entries(windows: Windows, host: str) -> list[CalendarItem]:
     rows = (
-        CalendarEntry.objects.filter(on__gte=start, on__lte=end)
+        CalendarEntry.objects.filter(_within("on", windows))
         .select_related("lease", "store", "operator", "author")
         .order_by("on", "created_at", "id")
     )
@@ -312,14 +327,14 @@ def _lease_ends(leases: Iterable[Lease], start: date, end: date, host: str) -> l
     ]
 
 
-def _redebits(start: date, end: date, host: str) -> list[CalendarItem]:
+def _redebits(windows: Windows, host: str) -> list[CalendarItem]:
     """The re-debit dates of rescheduled returns (PLAN-011b D5): one item per re-debit
     charge due in the range and not voided; the title names the store and the operator,
     never the amount."""
     found = []
     for charge in (
         OneOffCharge.objects.select_related("lease__store", "lease__operator", "operator")
-        .filter(category=OneOffCategory.REDEBIT, due_date__gte=start, due_date__lte=end)
+        .filter(_within("due_date", windows), category=OneOffCategory.REDEBIT)
         .exclude(status=OneOffChargeStatus.VOIDED)
         .order_by("due_date", "id")
     ):
@@ -347,37 +362,47 @@ def _redebits(start: date, end: date, host: str) -> list[CalendarItem]:
 def items(start: date, end: date, filters: Filters | None = None) -> list[CalendarItem]:
     """Every item from ``start`` to ``end`` (both included) that ``filters`` keeps, by day:
     stored entries first, then generated ones, each by title. Three queries."""
+    return items_in(((start, end),), filters)
+
+
+def items_in(windows: Windows, filters: Filters | None = None) -> list[CalendarItem]:
+    """:func:`items` over several ranges at once (the calendar page's month, its selected day
+    and the next seven days: PLAN-012f-a D6), each item once however the ranges overlap.
+    The same three queries as one range."""
     chosen = filters or Filters()
     host = _uid_host()
     found: list[CalendarItem] = []
     if chosen.kinds & {KIND_NOTE, KIND_REMINDER}:
-        found += _entries(start, end, host)
+        found += _entries(windows, host)
     if KIND_REDEBIT in chosen.kinds:
-        found += _redebits(start, end, host)
+        found += _redebits(windows, host)
     if chosen.kinds & LEASE_KINDS:
         leases = list(
             Lease.objects.select_related("store", "operator")
             .filter(
                 Q(collection_status=CollectionStatus.ACTIVE)
-                | Q(ended_on__gte=start, ended_on__lte=end)
+                | _within("ended_on", windows)
                 | Q(store__open_date__isnull=False)
             )
             .exclude(collection_status=CollectionStatus.PROSPECTIVE)
             .order_by("store__external_label", "id")
         )
-        if KIND_DEBIT in chosen.kinds:
-            found += _debits(leases, start, end, host)
-        if KIND_INSURANCE in chosen.kinds:
-            found += _anniversaries(leases, start, end, host)
-        if KIND_LEASE_END in chosen.kinds:
-            found += _lease_ends(leases, start, end, host)
-    kept = [item for item in found if _matches(item, chosen)]
-    return sorted(kept, key=lambda item: (item.on, item.generated, item.title.casefold(), item.uid))
+        for start, end in windows:
+            if KIND_DEBIT in chosen.kinds:
+                found += _debits(leases, start, end, host)
+            if KIND_INSURANCE in chosen.kinds:
+                found += _anniversaries(leases, start, end, host)
+            if KIND_LEASE_END in chosen.kinds:
+                found += _lease_ends(leases, start, end, host)
+    kept = {item.uid: item for item in found if _matches(item, chosen)}
+    return sorted(
+        kept.values(), key=lambda item: (item.on, item.generated, item.title.casefold(), item.uid)
+    )
 
 
 def today_entries(today: date) -> list[CalendarItem]:
     """The stored entries of ``today`` (the attention list shows them). One query."""
-    return _entries(today, today, _uid_host())
+    return _entries(((today, today),), _uid_host())
 
 
 # --- Month view ----------------------------------------------------------------------------
@@ -406,6 +431,49 @@ def month_bounds(month: date) -> tuple[date, date]:
     first = month.replace(day=1)
     last = first.replace(day=month_calendar.monthrange(first.year, first.month)[1])
     return first, last
+
+
+#: The days the calendar page's NEXT 7 DAYS card covers after today (PLAN-012f-a D6).
+NEXT_DAYS = 7
+
+
+def next_days_window(today: date) -> tuple[date, date]:
+    """The NEXT 7 DAYS card's range: the seven days after ``today``."""
+    return today + timedelta(days=1), today + timedelta(days=NEXT_DAYS)
+
+
+@dataclass(frozen=True, slots=True)
+class DayGroup:
+    """The NEXT 7 DAYS card's row: a day's items of one kind (PLAN-012f-a D6)."""
+
+    day: date
+    kind: str
+    items: tuple[CalendarItem, ...]
+
+    @property
+    def kind_label(self) -> str:
+        return KIND_LABELS[self.kind]
+
+    @property
+    def count(self) -> int:
+        return len(self.items)
+
+
+def on_day(found: Iterable[CalendarItem], day: date) -> list[CalendarItem]:
+    """The items of ``day``, in ``found``'s order."""
+    return [item for item in found if item.on == day]
+
+
+def next_days(found: Iterable[CalendarItem], today: date) -> list[DayGroup]:
+    """The items of the seven days after ``today`` grouped by day, then by kind in the order
+    :data:`KINDS` lists them. No query: ``found`` holds them (:func:`items_in`)."""
+    start, end = next_days_window(today)
+    groups: dict[tuple[date, str], list[CalendarItem]] = {}
+    for item in found:
+        if start <= item.on <= end:
+            groups.setdefault((item.on, item.kind), []).append(item)
+    order = sorted(groups, key=lambda key: (key[0], KINDS.index(key[1])))
+    return [DayGroup(day, kind, tuple(groups[day, kind])) for day, kind in order]
 
 
 # --- Entries -------------------------------------------------------------------------------

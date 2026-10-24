@@ -1,61 +1,70 @@
 {% extends "finance/base.html" %}
-{% load components icons responsive dates %}
+{% load components icons responsive dates money %}
 {% load static %}
 {% load tz %}
 {% block title %}{{ operator.display_name }}{% endblock %}
-{% block header %}<div class="page-header workspace-head">
+{% comment %}PLAN-012f-a D7 (DESIGN-SPEC §4 "Operator workspace", operator-workspace-laptop.png): the 56 px avatar with the display name's initials, the name with the Active (or Archived) badge and "Connected to <provider>" while a provider customer is linked, one muted line (phone · e-mail · SMS consent · stores); the actions Statement, Edit and More (Connect to <provider>, Archive): the invoice and payment actions live on the store page. The tab row has the Store select at its right: All stores (the default) or one of the operator's stores; it submits on change, its Show button the no-script way.{% endcomment %}
+{% block header %}<div class="page-header workspace-head operator-head">
   <div class="page-title-block">
     <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}" aria-current="page">{{ operator.display_name }}</a></nav>
-    <h1 class="store-title">{{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|day }}</span>{% endif %}</h1>
+    <h1 class="store-title" id="operator-title">{{ operator.display_name }} {% if operator.archived_at %}<span class="badge">Archived {{ operator.archived_at|day }}</span>{% else %}{% status_badge "Active" "paid" %}{% endif %}{% if customer_masked %} <span class="provider-pill" id="provider-connected">Connected to {{ company.provider_name }}</span>{% endif %}</h1>
+    <span class="operator-avatar" id="operator-avatar" aria-hidden="true">{{ operator_initials }}</span>
+    <p class="store-line operator-line" id="operator-line">{{ operator_line }}</p>
   </div>
-  {% comment %}PLAN-012e-2 D6: Statement, New invoice (primary), Edit, Connect when it applies; Archive in the More menu (ledger/_menu_script.html).{% endcomment %}
   <div class="page-actions" id="operator-actions">
     <a class="btn" id="statement" href="{% url 'ledger:operators:statement' pk=operator.pk %}">Statement</a>
-    {% if can_new_invoice %}<a class="btn btn-primary" href="{% url 'ledger:invoices:new_operator' pk=operator.pk %}" id="new-invoice">New invoice</a>{% endif %}
-    {% if can_edit %}<a class="btn" href="{% url 'ledger:operators:edit' pk=operator.pk %}">Edit</a>{% endif %}
-    {% if can_link %}<a class="btn" href="{% url 'ledger:operators:link' pk=operator.pk %}">Connect to {{ company.provider_name }}</a>{% endif %}
-    {% if can_archive %}
+    {% if can_edit %}<a class="btn" id="edit-operator" href="{% url 'ledger:operators:edit' pk=operator.pk %}">Edit</a>{% endif %}
+    {% if can_link or can_archive %}
       <details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
-        <li><form method="post" action="{% url 'ledger:operators:archive' pk=operator.pk %}" onsubmit="return window.confirm('Archive this operator? It is hidden from the list but never deleted.');">
+        {% if can_link %}<li><a id="connect-provider" href="{% url 'ledger:operators:link' pk=operator.pk %}">Connect to {{ company.provider_name }}</a></li>{% endif %}
+        {% if can_archive %}<li><form method="post" action="{% url 'ledger:operators:archive' pk=operator.pk %}" onsubmit="return window.confirm('Archive this operator? It is hidden from the list but never deleted.');">
           {% csrf_token %}<button class="menu-danger" type="submit" id="archive-operator">Archive</button>
-        </form></li>
+        </form></li>{% endif %}
       </ul></details>
     {% endif %}
   </div>
 </div>
-{% if space %}<form method="get" action="{% url 'ledger:operators:detail' pk=operator.pk %}" id="store-selector" class="store-selector">
+{% if space %}{% include "ledger/stores/_summary_strip.html" %}{% endif %}
+<div class="operator-tabs-row" id="operator-tabs-row">
+<nav aria-label="Operator tabs" class="tabs store-tabs" id="store-tabs">
+  {% for name, label in ows.tabs %}{% if name == "contacts" %}<a class="tab" id="tab-link-contacts" href="#contacts">{{ label }}</a>{% else %}<a class="tab" id="tab-link-{{ name }}" href="?{{ keep_store }}tab={{ name }}#tab-{{ name }}"{% if name == ows.tab %} aria-current="page"{% endif %}>{{ label }}{% if name == "charges" and ows.open_count %} <span class="count-pill" id="open-charges-count">{{ ows.open_count }}</span>{% endif %}</a>{% endif %}{% endfor %}
+</nav>
+{% if ows.stores %}<form method="get" action="{% url 'ledger:operators:detail' pk=operator.pk %}" id="store-selector" class="store-selector">
   <label for="store-select">Store</label>
   <select name="store" id="store-select">
+    <option value=""{% if not store %} selected{% endif %}>All stores ({{ ows.stores|length }})</option>
     {% for item in ows.stores %}<option value="{{ item.pk }}"{% if item.pk == store.pk %} selected{% endif %}>{{ item.external_label }}</option>{% endfor %}
   </select>
   <input type="hidden" name="tab" value="{{ ows.tab }}">
-  <button class="btn btn-sm" type="submit">Show</button>
-  <a class="btn btn-sm" id="selected-store-page" href="{% url 'ledger:stores:detail' pk=store.pk %}">Store page</a>
-</form>
-{% include "ledger/stores/_summary_strip.html" %}{% endif %}
-<nav aria-label="Operator tabs" class="tabs store-tabs" id="store-tabs">
-  {% for name, label in ows.tabs %}{% if name == "contacts" %}<a class="tab" id="tab-link-contacts" href="#contacts">{{ label }}</a>{% else %}<a class="tab" id="tab-link-{{ name }}" href="?{{ keep_store }}tab={{ name }}#tab-{{ name }}"{% if name == ows.tab %} aria-current="page"{% endif %}>{{ label }}{% if name == "charges" and ows.open_count %} <span class="count-pill" id="open-charges-count">{{ ows.open_count }}</span>{% endif %}</a>{% endif %}{% endfor %}
-</nav>{% endblock %}
+  <button class="btn btn-sm" type="submit" id="store-show">Show</button>
+</form>{% endif %}
+</div>{% endblock %}
 {% block content %}
   {% include "ledger/_attention.html" with banners=True %}
 
-  {% comment %}PLAN-012d D14, the approved design's layout (PLAN-012f D8): the open tab across the operator's stores in the two-thirds column, then the operator-level items as cards; the selected store's action bar and its side cards (on the operator's lease of it) in the one-third column.{% endcomment %}
+  {% comment %}PLAN-012d D14, the approved design's layout (PLAN-012f D8; PLAN-012f-a D7, operator-workspace-laptop.png): in the two-thirds column, the strip of store cards (each store's title, rent and how it is collected, its open balance in red, or green at $0.00, "· overdue" when a charge is past due), the open tab across the operator's stores (the Charges card the selected store's when one is selected), then the operator-level items as cards; in the one-third column, CONTACT, PAYMENT, RECENT CONTACT and the statement link's card, then the selected store's action bar and side cards (on the operator's lease of it).{% endcomment %}
   <div class="workspace-grid">
   <div class="workspace-main">
   <h2 id="workspace" class="visually-hidden">Stores</h2>
-  {% if not space %}<p class="muted empty" id="no-stores">No store has a lease of this operator.</p>{% endif %}
+  {% if store_cards %}<ul class="store-strip" id="store-strip" aria-label="Stores of this operator">
+    {% for card in store_cards %}<li class="store-card" id="store-card-{{ card.store.pk }}"{% if card.store == store %} aria-current="true"{% endif %}>
+      <a class="store-card-title" href="{% url 'ledger:stores:detail' pk=card.store.pk %}">{{ card.title }}</a>
+      <span class="store-card-line">{% if card.rent is not None %}{{ card.rent|money }} / month · {% endif %}{{ card.collect_line }}</span>
+      <span class="store-card-balance {% if card.balance > 0 %}tone-unpaid{% else %}tone-paid{% endif %}">{{ card.balance|money }} open{% if card.overdue %} · overdue{% endif %}</span>
+    </li>{% endfor %}
+  </ul>{% else %}<p class="muted empty" id="no-stores">No store has a lease of this operator.</p>{% endif %}
   <section id="tab-{{ ows.tab }}" class="store-tab card">
     {% if ows.tab == "charges" %}{% include "ledger/stores/_tab_charges.html" %}
     {% elif ows.tab == "invoices" %}{% include "ledger/stores/_tab_invoices.html" %}
     {% elif ows.tab == "payments" %}{% include "ledger/stores/_tab_payments.html" %}
     {% elif ows.tab == "schedules" %}{% include "ledger/stores/_tab_schedules.html" %}
-    {% elif ows.tab == "documents" %}{% if store %}{% include "ledger/documents/_section.html" %}{% else %}<p class="muted">No store.</p>{% endif %}
+    {% elif ows.tab == "documents" %}{% if store %}{% include "ledger/documents/_section.html" %}{% elif ows.stores %}<p class="muted" id="choose-store">Choose a store in the Store select to see its documents.</p>{% else %}<p class="muted">No store.</p>{% endif %}
     {% elif ows.tab == "contacts" %}<p class="muted">The operator's contact log, with the store of each entry, is <a href="#contacts">below</a>.</p>
-    {% elif ows.tab == "history" %}{% if store %}{% include "ledger/stores/_tab_history.html" %}{% else %}<p class="muted">No store.</p>{% endif %}{% endif %}
+    {% elif ows.tab == "history" %}{% if store %}{% include "ledger/stores/_tab_history.html" %}{% elif ows.stores %}<p class="muted" id="choose-store">Choose a store in the Store select to see its history.</p>{% else %}<p class="muted">No store.</p>{% endif %}{% endif %}
   </section>
 
   <section class="card" id="operator-contact-card">
-  <h2>Contact</h2>
+  <h2>Details</h2>
   <dl>
     <dt>Legal name</dt><dd>{{ operator.legal_name|default:"—" }}</dd>
     <dt>Company</dt><dd>{{ operator.company|default:"—" }}</dd>
@@ -111,13 +120,6 @@
       <p class="actions"><button class="btn" type="submit">Save</button></p>
     </form>
   {% endif %}
-  <p id="statement-links" class="muted">Each collection e-mail carries a link to this operator's statement that opens without an account for {{ statement_link_days }} days.{% if operator.statement_links_revoked_at %} Links sent before {{ operator.statement_links_revoked_at|moment }} were revoked.{% endif %}</p>
-  {% if can_revoke_links %}
-    <form method="post" action="{% url 'ledger:operators:statement_links_revoke' pk=operator.pk %}" class="js-single-submit" id="statement-links-revoke-form">
-      {% csrf_token %}
-      <p class="actions"><button class="btn" type="submit">Cancel every statement link sent</button></p>
-    </form>
-  {% endif %}
   {% include "ledger/collections/_log.html" with log=collection_log show_charge=True %}
   {% if collection_log|length >= collection_log_limit %}<p>The {{ collection_log_limit }} latest are shown.</p>{% endif %}
 
@@ -144,8 +146,46 @@
   {% endfor %}
   </section>
   </div>
-  <aside class="workspace-side" aria-label="The selected store">
+  <aside class="workspace-side operator-side" aria-label="The operator">
+    <section class="card" id="contact-card" aria-labelledby="contact-card-heading">
+      <h2 class="section-label" id="contact-card-heading">Contact</h2>
+      <dl class="side-list">
+        <dt>Phone</dt><dd id="side-phone">{{ operator.phone|default:"—" }}</dd>
+        <dt>E-mail</dt><dd id="side-email">{{ operator.email|default:"—" }}</dd>
+        <dt>SMS</dt><dd id="side-sms">{% if operator.sms_consent_at %}{% status_badge "Consent" "paid" %}{% else %}{% status_badge "No consent" "neutral" %}{% endif %}</dd>
+      </dl>
+    </section>
+    <section class="card" id="payment-card" aria-labelledby="payment-card-heading">
+      <h2 class="section-label" id="payment-card-heading">Payment</h2>
+      <dl class="side-list">
+        <dt>{{ company.provider_name }}</dt><dd id="side-customer">{% if customer_masked %}Customer · <a href="#operator-provider-card">open</a>{% else %}Not connected{% endif %}</dd>
+        <dt>Bank</dt><dd id="side-bank">{% if bank_method %}{{ bank_method.nickname|default:bank_method.bank_type|default:"Bank method" }}{% if bank_method.last_four %} ····{{ bank_method.last_four }}{% endif %}{% else %}—{% endif %}</dd>
+        <dt>Returns</dt><dd id="side-returns"{% if returns_this_year %} class="side-strong tone-unpaid"{% endif %}>{{ returns_this_year }} this year</dd>
+        <dt>Promise</dt><dd id="side-promise">{% if open_promise %}{{ open_promise.promised_amount|money }} by {{ open_promise.promised_date|day }} <span class="badge promise-status promise-open">Open</span>{% else %}—{% endif %}</dd>
+      </dl>
+    </section>
+    <section class="card" id="recent-contact-card" aria-labelledby="recent-contact-heading">
+      <div class="card-header"><h2 class="section-label" id="recent-contact-heading">Recent contact</h2>{% if can_add_contact %}<a class="card-link" id="recent-add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Add entry</a>{% endif %}</div>
+      <ul class="recent-contacts" id="recent-contacts">
+        {% for row in recent_contacts %}{% with entry=row.entry %}<li class="recent-contact">{% if entry.kind == "promise" %}{% avatar "P" "pending" %}{% else %}{% avatar entry.get_kind_display "neutral" %}{% endif %}
+          <div class="recent-contact-body"><a class="recent-contact-title" href="#contact-{{ entry.pk }}">{{ entry.get_kind_display }}{% if entry.kind == "promise" %} · {{ entry.promised_amount|money }} by {{ entry.promised_date|day }}{% elif entry.body %} · {{ entry.body|truncatechars:40 }}{% endif %}</a>
+          <span class="recent-contact-meta">{{ entry.happened_on|day }} · {% if entry.lease %}{{ entry.lease.store.external_label }}{% else %}—{% endif %}</span></div>
+        </li>{% endwith %}{% empty %}<li class="muted" id="no-recent-contact">No entries yet.</li>{% endfor %}
+      </ul>
+      <p class="card-note"><a id="recent-all-contacts" href="{% url 'ledger:operators:contacts' pk=operator.pk %}">All entries</a></p>
+    </section>
+    <section class="card" id="portal-card" aria-labelledby="portal-card-heading">
+      <h2 class="section-label" id="portal-card-heading">Portal</h2>
+      <p id="statement-links" class="muted">Statement link: each collection e-mail carries a link to this operator's statement that opens without an account for {{ statement_link_days }} days.{% if operator.statement_links_revoked_at %} Links sent before {{ operator.statement_links_revoked_at|moment }} were revoked.{% endif %}</p>
+      <dl class="side-list"><dt>Last opened</dt><dd id="statement-link-opened">{% if statement_link_opened %}{{ statement_link_opened|moment }}{% else %}Never{% endif %}</dd></dl>
+      {% if can_revoke_links %}
+        <form method="post" action="{% url 'ledger:operators:statement_links_revoke' pk=operator.pk %}" class="js-single-submit card-note" id="statement-links-revoke-form">
+          {% csrf_token %}<button class="link-action" type="submit">Cancel every statement link sent</button>
+        </form>
+      {% endif %}
+    </section>
     {% if space %}
+    <h2 class="section-label side-store-label" id="selected-store-label">{{ charges_scope }}</h2>
     {% if space.actions %}
       {% include "ledger/stores/_action_bar.html" %}
     {% elif billing and not header.lease %}
@@ -156,4 +196,14 @@
   </aside>
   </div>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}{% if ows.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}<script>
+  (function () {
+    /* The Store select submits on change; without script its Show button does. */
+    var select = document.getElementById("store-select");
+    var show = document.getElementById("store-show");
+    if (!select || !show) { return; }
+    show.hidden = true;
+    show.style.display = "none";
+    select.addEventListener("change", function () { select.form.submit(); });
+  })();
+</script>{% if ows.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

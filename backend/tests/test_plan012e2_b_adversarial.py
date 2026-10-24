@@ -139,7 +139,9 @@ def test_the_operator_more_menu_holds_archive_as_the_danger_item_and_a_viewer_se
     start = body.index('id="more-menu"')
     menu = body[body.rfind("<details", 0, start) : body.index("</details>", start)]
     assert "Archive" in menu and ("btn-danger" in menu or "menu-danger" in menu)
-    assert 'id="new-invoice"' in body and 'id="statement"' in body
+    # PLAN-012f-a D7 (DESIGN-SPEC §4 Operator workspace): New invoice leaves the operator page;
+    # invoices are made from the store page.
+    assert 'id="new-invoice"' not in body and 'id="statement"' in body
     viewer, _ = client_for(Role.VIEWER)
     body = viewer.get(
         reverse("ledger:operators:detail", kwargs={"pk": lease.operator_id})

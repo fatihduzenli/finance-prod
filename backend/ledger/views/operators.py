@@ -62,6 +62,7 @@ from ledger.services import (
     statement_links,
     workspace,
 )
+from ledger.services import workspace_cards as operator_cards
 from ledger.services.csv_export import CsvWriter
 from ledger.validators import contains_card_number
 from ledger.views import contact_log, workspace_cards
@@ -300,6 +301,10 @@ def operator_export(request: HttpRequest) -> StreamingHttpResponse:
     return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("operators"))
 
 
+#: The entries the RECENT CONTACT card lists (PLAN-012f-a D7); the Contact log card lists more.
+RECENT_CONTACTS = 2
+
+
 @role_required
 @require_safe
 def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
@@ -339,6 +344,16 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
     phone_ok = operator_sync.phone_is_valid(operator)
     retry_in = operator_sync.retry_wait_seconds(operator) if failed and phone_ok else 0
     jobs = job_context(operator)
+    contact_rows = contact_log.log_rows(
+        request,
+        list(
+            contacts.entries(operator, include_deleted=contact_log.include_deleted(request))[
+                : contacts.PAGE_LIMIT + 1
+            ]
+        ),
+    )
+    store_count = len(space.stores)
+    store_cards = operator_cards.store_cards(operator, space.stores, space.open_rows, today)
     return render(
         request,
         "ledger/operators/detail.html",
@@ -392,23 +407,13 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 else ""
             ),
             "can_link": billing and active,
-            # PLAN-012 D6: New invoice replaces "Create one-off charge"; the drafts are
-            # on the Invoices tab (PLAN-012d D14).
-            "can_new_invoice": billing and active,
             "can_archive": meets(role, Role.ADMIN) and active,
             # PLAN-011b D6, D7: the operator's own attention items as banners, and the
             # latest contact log entries.
             "attention": attention.attention(timezone.localdate(), operator=operator.pk),
             # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
             "can_record_outcome": billing and active,
-            "contact_rows": contact_log.log_rows(
-                request,
-                list(
-                    contacts.entries(
-                        operator, include_deleted=contact_log.include_deleted(request)
-                    )[: contacts.PAGE_LIMIT + 1]
-                ),
-            ),
+            "contact_rows": contact_rows,
             "contact_limit": contacts.PAGE_LIMIT,
             "can_add_contact": billing and active,
             # PLAN-011b D4: the collection e-mails sent to the operator, and the
@@ -419,6 +424,31 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
             # PLAN-011b D4: the signed statement links (billing revokes them).
             "can_revoke_links": billing,
             "statement_link_days": statement_links.MAX_AGE_DAYS,
+            # PLAN-012f-a D7 (operator-workspace-laptop.png): the header's avatar and muted
+            # line, the strip of store cards and the right column's cards; facts only.
+            "operator_initials": operator_cards.initials(operator.display_name),
+            "operator_line": " · ".join(
+                part
+                for part in (
+                    operator.phone,
+                    operator.email or "",
+                    "SMS consent given" if operator.sms_consent_at else "no SMS consent",
+                    f"{store_count} store" if store_count == 1 else f"{store_count} stores",
+                )
+                if part
+            ),
+            "store_cards": store_cards,
+            # The Charges card's title: "Charges · all stores", or the selected store's.
+            "charges_scope": next(
+                (card.title for card in store_cards if card.store == selected), "all stores"
+            ),
+            "bank_method": operator_cards.bank_method(operator, method),
+            "returns_this_year": operator_cards.returns_this_year(operator, today),
+            "open_promise": operator_cards.open_promise(operator),
+            "recent_contacts": [row for row in contact_rows if row.entry.deleted_at is None][
+                :RECENT_CONTACTS
+            ],
+            "statement_link_opened": operator_cards.statement_link_opened(operator),
         },
     )
 

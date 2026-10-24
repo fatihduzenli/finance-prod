@@ -294,3 +294,90 @@ circles' counters as CSS content, are checked by markup tests, not by a reader. 
 confirmed before 12f-a keep their old `statement_json` (unchanged).
 
 **Verdict (C):** PASS (four MINOR resolved; C-5 open for the cleanup; the owner's copy questions stand)
+
+### Batch D — the operator workspace (D7), the calendar (D6), the login re-shot (D9), the suite's family pages and the seven comparisons (D12)
+
+**Scope.** *D1 (Opus):* the operator workspace to the reference: the header with the 56 px avatar
+(initials, `--link` on `--month-current`, a documented pair; the drawing's `#E0F4F2` measures under
+AA), the name with Active or Archived and the "Connected to <provider>" pill when a customer exists,
+the muted line (phone · e-mail · SMS consent · N stores), the actions Statement · Edit · More ▾
+(Connect for billing, Archive for admin; New invoice leaves the page as the spec says), the tab row
+with the Store select at its right ("All stores (N)" by default; a bad or foreign value falls back to
+it; the select submits on change, with the Show button without script), the strip of store cards
+(rent and autopay line, the open balance in red or green, "· overdue"), the Charges card scoped to
+the selection ("Charges · all stores" / "Charges · #1999 fatih"), the right column CONTACT, PAYMENT
+(customer link, the linked method's nickname or type and last four, "N this year" returns, the open
+promise), RECENT CONTACT (the two newest entries, Add entry, All entries), PORTAL (the statement
+link's sentence, Last opened, Cancel every statement link sent; "Send invite" has no action to wire
+to), then the selected store's action bar and cards; `ledger/services/workspace_cards.py` (read
+helpers: initials, store cards in three queries, returns this year in one, the method record, the
+open promise, the last statement-link open); `workspace._selected` and `_only_store`; budgets: the
+service ≤ 10 queries by default (was ≤ 19), the page 51 with All stores and 62 with a store and a
+linked method, pinned and constant. *D2 (Opus):* the calendar to the reference: the breadcrumb "Reports › Calendar", the segmented Month ·
+List (`?view=list`, the existing phone list mode as a laptop choice; no Week), "Subscribe in Google
+Calendar" to the feed settings; the month card's toolbar (‹ month ›, Today, Show as one select
+"Everything" + each kind, Store, Operator, a no-script Show button), the grid with the day number
+linking to `?on=` (today a filled circle, the selected day tinted; the billing add link on hover or
+focus), chips per kind on documented pairs cut with an ellipsis, three a cell then "+N more"; the
+legend of the six kinds; the side column: the day panel ("Saturday, Oct 24"; `|day_long` for
+another year), NEXT 7 DAYS grouped by day, FEED (Get the link / Reset token, the existing POSTs, and
+Feed settings; no Copy link: only the token's hash is stored and the URL is shown once);
+`calendar.items_in(windows, filters)` (the month, the selected day and the next seven days in the
+same three queries; `items()` unchanged for the ICS feed), `on_day`, `next_days`; `?on=` with a
+bad or out-of-range day falling back to today with a message; the budget pinned at 15 (was 14; the
+feed lookup), constant. *Fable (D12, D9):* the visual suite grows
+from 15 to 25 pages (Operators, Leases and Payments lists, the calendar, the one-off charge page, a
+payment page, the New store and New lease forms, the operator form, the sign-in page in a signed-out
+context of its own), 50 baselines at 1,280 and 390; the report mode writes the eleven references'
+shots (the four of 12f and the seven of 12f-a; the lease-end statement stands for the transfer
+wizard's frame) into `docs/qa/12fa/` beside the references copied from `docs/design/`, and the
+side-by-side images are composed from them; Fable's page walk and date guard cover the new pages
+(the login page anonymous).
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| D-1 | MINOR | tests/test_plan012e2_b_adversarial.py (Fable) | Pinned the New invoice button on the operator page, which the spec moves to the store page | Resolved (the pin inverted, the decision cited) |
+| D-2 | MINOR | the first D2 build | Two chip colours used undocumented pairs (the accessibility test refused them) | Resolved by Opus before hand-back: documented token pairs only |
+
+**Decisions taken (Fable) and for the owner.** "All stores" is the default selection, so the
+selected store's cards and bar appear after a store is picked (*for the owner*: the drawing shows a
+store selected); the avatar's pair; PORTAL is labelled "Portal" with the statement-link actions
+(*for the owner*: the drawing's "Send invite"); CONTACT has no Language row (no field); the
+customer "open" link goes to the page's provider card (no provider dashboard URL exists, Rule 8);
+the bank row shows the method's nickname or type and its last four only (Rule 1); the transfer
+wizard's comparison is shot on the lease-end statement (the same frame, five steps). The calendar's day panel and NEXT 7 DAYS show kinds and titles, not amounts (calendar items carry none); the drawing's kinds that do not exist here (ACH settles, E-mail invoices, Installment, Jobs, Promise due) are not invented: the six real kinds take the drawing's colours; the Operator filter is kept though the drawing omits it; the FEED card has no Copy link (*for the owner*: a copy button would need the URL stored, which the design refuses; the URL shows once on the settings page's answer).
+
+**Gate 1.** ruff, `ruff format --check` (479 files), mypy strict (479 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16: all clean. **Gate 2.** sqlite 6,816 passed,
+664 skipped (12:56) with two failures, both older tests pinning the New invoice button on the
+operator page that the spec moves to the store page (re-pinned by Fable with the decision cited;
+118 and 75 passed on re-run); PostgreSQL "Migration tests" 34 passed (11:03), "Unit tests" 7,442 passed, 3 skipped (14:57) with the same two pins (re-run on the gate's container: 197 passed) and one failure of Fable's `test_collections_adversarial.py::test_the_feed_never_carries_a_card_number_or_a_private_marker`, which passes on PostgreSQL alone (1), in its file (19) and after the calendar files (62); the run's log kept no detail; recorded under residual risk, the Batch E gate and CI watch it; e2e 29 passed in each of four runs on PostgreSQL. Visual: the suite
+grew to 50 baselines; regenerated in the image against PostgreSQL with the eleven report shots (65
+passed), compare runs 54 passed on PostgreSQL and on sqlite, a sqlite regeneration equal to the
+PostgreSQL baselines in all fifty files (the charge page re-shot twice to land on the data set's
+damage charge, its two files checked identical again). **Gate 3.** Diff read: the operator page's
+helpers are read-only (store cards in three queries, returns in one, the method record through the
+existing trimmed-record reader, the promise and the statement-link open from existing rows); a
+foreign or bad store value falls back to All stores; the calendar's `items_in` keeps the three
+queries for several windows and `items()` unchanged for the feed; `?on=` and `?view=` validated
+with fallbacks; no production line changed in the services beyond those helpers; the token file
+gained one documented pair. **Gate 4.** Secret scans (script and pattern, the diff and every new
+file) clean; the provider mentions in the new test files are rendered sentences and the stored
+provider value (tests are exempt from the fence); no new URL; the calendar page writes nothing on
+GET or HEAD (the page walk covers it); the feed token never reaches a page; a viewer sees no action
+on the operator page and no add link on the calendar; markup in an operator's name is escaped in
+the header and the cards.
+
+**Visual check.** The eleven side-by-side images in `docs/qa/12fa/`: the seven references read like
+the drawings at 1,440 within the facts-only decisions recorded per batch; the four 12f pages
+re-shot after the dates, the role cards and the pure-GET statement. Sent to the owner.
+
+**Residual risk (D).** One failure of the feed adversarial test in the full PostgreSQL run, not reproduced three ways (above). B-3 and C-5 stay open for the cleanup (the phone list cards' meta line;
+the statement's Deductions tile not live). The suite's new pages have baselines from this run
+only; CI's visual job compares them in the same image. The transfer wizard's own frame is shot
+through the lease-end statement (the same template base; a transfer in the data set would need an
+incoming operator and a second draft).
+
+**Verdict (D):** PASS (two MINOR resolved; B-3 and C-5 open for the cleanup; one unreproduced PostgreSQL failure under residual risk; the owner's questions stand)
