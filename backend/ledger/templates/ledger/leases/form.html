@@ -2,20 +2,31 @@
 {% load responsive money %}
 {% load static %}
 {% block title %}{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if store_context %}{% include "ledger/_store_crumb.html" with crumb_store=store_context.store %}{% else %}<a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> {% if lease %}<a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> <span aria-hidden="true">›</span> {% endif %}{% endif %}<span aria-current="page">{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}</span></nav><h1>{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}</h1></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if store_context %}{% include "ledger/_store_crumb.html" with crumb_store=store_context.store %}{% else %}<a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> {% if lease %}<a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> <span aria-hidden="true">›</span> {% endif %}{% endif %}<span aria-current="page">{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}</span></nav><h1>{% if lease %}Edit lease {{ lease.store.external_label }}{% else %}New lease{% endif %}</h1>{% include "ledger/_store_context.html" %}</div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
-  {% include "ledger/_store_context.html" %}
-  {% if lease %}<p class="muted">A rent change is never overwritten: the current rent ends the day before the new one takes effect, and the history keeps both. A lease with autopay keeps its autopay; any autopay that no longer matches is marked Needs review.</p>{% endif %}
+  {% comment %}The form family (PLAN-012f-a D5): a card per group (Lease; Debits: the debit days and the channel; on the create form the Setup checklist in the Lines style and Documents) beside the summary card with the setup charges' total and the one primary.{% endcomment %}
   <form method="post" id="lease-form" class="js-single-submit"{% if not lease %} enctype="multipart/form-data"{% endif %}>
     {% csrf_token %}
-    {{ form.non_field_errors }}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
-    {% for field in form.lease_fields %}
-      {% if field.name == "second_debit_day" %}{% include "ledger/leases/_twice_monthly.html" %}{% endif %}
-      {% include "ledger/stores/_form_field.html" %}
-    {% endfor %}
+    <div class="form-layout">
+    <div class="form-main">
+    <section class="card form-card" id="lease-card">
+      <h2>Lease</h2>
+      {% if lease %}<p class="muted">A rent change is never overwritten: the current rent ends the day before the new one takes effect, and the history keeps both. A lease with autopay keeps its autopay; any autopay that no longer matches is marked Needs review.</p>{% endif %}
+      {{ form.non_field_errors }}
+      {% for field in form.lease_fields %}
+        {% if field.name != "debit_day" and field.name != "second_debit_day" and field.name != "payment_channel" %}{% include "ledger/stores/_form_field.html" %}{% endif %}
+      {% endfor %}
+    </section>
+    <section class="card form-card" id="debits-card">
+      <h2>Debits</h2>
+      {% for field in form.lease_fields %}
+        {% if field.name == "second_debit_day" %}{% include "ledger/leases/_twice_monthly.html" %}{% endif %}
+        {% if field.name == "debit_day" or field.name == "second_debit_day" or field.name == "payment_channel" %}{% include "ledger/stores/_form_field.html" %}{% endif %}
+      {% endfor %}
+    </section>
     {% if not lease %}
+      <section class="card form-card lines-card" id="setup-card">
       <h2>Setup checklist</h2>
       <p class="muted">Type the price of each one-time item the operator is charged; a row without a price is not charged. The grey amount is the catalogue's usual price, shown as a hint only. Saving creates the lease and those setup charges together. The cost is what the item costs the business (empty: unknown); the price is what the operator pays. An empty due date is the lease's start date. More items can be added from the lease page later.</p>
       {% responsive_table %}
@@ -36,11 +47,17 @@
         </tbody>
       </table>
       {% endresponsive_table %}
-      <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-checklist">{{ form.setup_total|money }}</span></p>
-      {% include "ledger/documents/_create_upload.html" %}
+      </section>
+      <section class="card form-card" id="documents-card"><h2>Documents</h2>{% include "ledger/documents/_create_upload.html" %}</section>
     {% endif %}
-    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-lease">Save</button></div>
+    </div>
+    <aside class="form-summary" aria-label="Save">
+      <section class="card summary-card{% if lease %} actions-only{% endif %}">
+      {% if not lease %}<p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-checklist">{{ form.setup_total|money }}</span></p>{% endif %}
+      <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-lease">Save</button></div>
+      </section>
+    </aside>
+    </div>
   </form>
-  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% if not lease %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endif %}{% if document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

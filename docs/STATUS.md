@@ -1802,3 +1802,16 @@ fixture (a provider status assigned directly, refused by PostgreSQL's Rule 2 tri
 the sync layer and re-run green on both engines; baselines regenerated against PostgreSQL (the two
 stores-list files changed), pixel-identical on sqlite. Open: the phone list cards' uneven meta line
 (cleanup). Batch C (the builder and form family, the wizard frame) assigned.
+
+## Update, 2026-10-24, PLAN-012f-a Batch C built and gated (not pushed)
+
+The invoice builder on the reference's frame (the Lines card, the How to collect tiles from the
+form's options with the chosen one holding its fields, the SUMMARY card with the lines, total, memo,
+due date, the primary and Discard; the rounding rule shared by the view and the page) and the form
+family on the same frame (Store, Lease, Add payment, the charge payment forms, Operator, Calendar
+entry); the wizard frame for End lease and Transfer (the header's "Step N of M · nothing changes
+until you confirm", the step card with its states and the cancel, the main card, the footer, the
+statement step's three tiles, deductions table with the dashed add and the settlement box). Gate:
+sqlite 6,758 passed; PostgreSQL 34 + 7,385 passed; e2e 29 passed in four runs; four MINOR resolved;
+baselines regenerated against PostgreSQL (six changed), pixel-identical on sqlite. Batch D (operator
+workspace, calendar, login re-shot, the suite's family pages, the seven comparisons) assigned.

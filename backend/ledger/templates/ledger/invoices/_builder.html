@@ -1,0 +1,8 @@
+{% comment %}The invoice builder's body inside its form (PLAN-012f-a D5, create-invoice-laptop.png): two thirds, the Lines card (_draft_form.html) over the How to collect card (_collect.html); one third, the SUMMARY card and the help card (_summary.html). On a phone one column in that order. Context: the builder's (ledger.views.invoices), discard_url and discard_id.{% endcomment %}
+<div class="form-layout builder-layout">
+  <div class="form-main">
+    {% include "ledger/invoices/_draft_form.html" %}
+    {% include "ledger/invoices/_collect.html" %}
+  </div>
+  {% include "ledger/invoices/_summary.html" %}
+</div>

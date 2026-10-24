@@ -1,4 +1,4 @@
-{% load dates responsive money %}
+{% load dates responsive money %}{% comment %}The statement's figures (PLAN-012e D4; PLAN-012f-a D: a charge not created yet is a preview line). With compact (the statement step, PLAN-012f-a D8) the deposit, deductions and settlement lists are left to the tiles (_tiles.html), the deductions table and the SETTLEMENT box (_settlement_box.html).{% endcomment %}
 <section id="statement-figures">
   {% if figures.last_month %}
     <h2>Last month ({{ figures.last_month.month|month }})</h2>
@@ -24,14 +24,16 @@
         <tr><td colspan="3" class="muted empty">Nothing is open.</td></tr>
       {% endfor %}
     </tbody>
-    <tfoot><tr class="totals"><th colspan="2">Open balance</th><th id="open-total">{{ figures.open_total|money }}</th></tr></tfoot>
+    <tfoot><tr class="totals"><th colspan="2">Open balance</th><th class="money" id="open-total">{{ figures.open_total|money }}</th></tr></tfoot>
   </table>
   {% endresponsive_table %}
+  {% if not compact %}
   <h2>Deposit</h2>
   <dl>
     {% for deposit in figures.deposits %}<dt>{{ deposit.label }}</dt><dd class="deposit-line">{% if deposit.charged != deposit.held %}{{ deposit.text }}{% else %}{{ deposit.held|money }}{% endif %}</dd>{% endfor %}
     <dt>Deposit held</dt><dd id="deposit-held">{{ figures.deposit_held|money }}</dd>
   </dl>
+  {% endif %}
   {% if figures.held_credits %}
     <h2>Credit on the lease</h2>
     <dl id="credit-lines">
@@ -39,6 +41,7 @@
       <dt>Credit held</dt><dd id="lease-credit">{{ figures.lease_credit|money }}</dd>
     </dl>
   {% endif %}
+  {% if not compact %}
   {% if figures.deductions %}
     <h2>Deductions</h2>
     <dl id="deduction-lines">
@@ -55,4 +58,5 @@
     {% if figures.debt %}<dt>Lease-end balance charged</dt><dd id="debt">{{ figures.debt|money }}</dd>{% endif %}
     {% if figures.still_open %}<dt>Still open on its charges</dt><dd id="still-open">{{ figures.still_open|money }}</dd>{% endif %}
   </dl>
+  {% endif %}
 </section>

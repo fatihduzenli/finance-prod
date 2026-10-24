@@ -1,20 +1,16 @@
-{% extends "finance/base.html" %}
+{% extends "ledger/lease_ends/_wizard.html" %}
 {% load static %}
 {% block title %}End lease {{ store.external_label }}: end date{% endblock %}
-{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
-{% block content %}
-  {% include "ledger/lease_ends/_steps.html" %}
-  <section class="card wizard-card">
-  <p class="muted" id="step-help">Say on which day the lease ended and why; nothing changes until you confirm on the last step.</p>
+{% block step_title %}{% if transfer %}End date{% else %}End date and reason{% endif %}{% endblock %}
+{% block step_body %}
+  <p class="muted wizard-help" id="step-help">Say on which day the lease ended and why; nothing changes until you confirm on the last step.</p>
   <form method="post" id="lease-end-terms" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" %}
     {% endfor %}
-    <div class="form-actions"><button class="btn btn-primary" type="submit">Save and continue</button></div>
   </form>
-  </section>
-  {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% endblock %}
+{% block step_primary %}<button class="btn btn-primary" type="submit" form="lease-end-terms">Save and continue →</button>{% endblock %}
+{% block step_scripts %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% endblock %}

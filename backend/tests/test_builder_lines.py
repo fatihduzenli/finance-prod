@@ -136,7 +136,7 @@ def test_the_month_select_offers_twelve_months_either_side_by_name(fake: FakePro
     assert 'type="month"' not in page
     # The script reveals the lease and the month only for Rent, and reads the amount.
     script = (REPO / "ledger" / "static" / "ledger" / "invoice_lines.js").read_text()
-    assert 'kind === "rent"' in script and "td.rent-field" in script
+    assert 'kind === "rent"' in script and '".rent-field"' in script
     assert "fetch(url" in script and 'data-rent-amount-url="/invoices/rent-amount/?draft=' in page
 
 
@@ -163,24 +163,14 @@ def test_a_rent_line_posted_from_the_item_box_takes_the_typed_amount(fake: FakeP
     assert '<option value="2026-10" selected>October 2026</option>' in page
 
 
-def test_the_rent_columns_start_collapsible_and_open_when_a_saved_line_is_rent(
-    fake: FakeProvider,
-) -> None:
-    """PLAN-012e-3: the two Rent columns carry ``rent-col`` (the script collapses them
-    while no line is Rent); the table starts with ``has-rent`` only when a saved line is
-    Rent."""
+def test_the_rent_selects_sit_under_each_item_box(fake: FakeProvider) -> None:
+    """PLAN-012f-a D5 (in place of PLAN-012e-3's collapsible Rent columns): a row's lease and
+    month selects sit under its Item box in one ``rent-field`` box, which the script shows only
+    for Rent; without the script they show on every row. The table has no Rent column."""
     operator = an_operator(fake)
     lease = a_rent_lease(operator)
     draft = a_draft(operator, lease, [line()])
     billing, _ = client_for(Role.BILLING)
-    page = html(billing, f"/invoices/drafts/{draft.pk}/")
-    table = page[page.index('<table id="draft-lines"') : page.index("</table>")]
-    head = table[: table.index("</thead>")]
-    assert '<th class="rent-col">Rent: lease</th><th class="rent-col">Rent: month</th>' in head
-    # Two Rent cells on every row (the saved line and the blank one the page adds).
-    rows = table.count('class="draft-line"')
-    assert rows >= 1 and table.count('<td class="rent-field rent-col"') == 2 * rows
-    assert "has-rent" not in table[: table.index(">")]
     data = page_data(
         [
             {"item": "Sign repair", "unit_amount": "100.00"},
@@ -191,10 +181,18 @@ def test_the_rent_columns_start_collapsible_and_open_when_a_saved_line_is_rent(
     data["lines-1-unit_amount"] = "500.00"
     billing.post(f"/invoices/drafts/{draft.pk}/edit/", data)
     page = html(billing, f"/invoices/drafts/{draft.pk}/")
-    opening = page[page.index('<table id="draft-lines"') :]
-    assert 'class="has-rent"' in opening[: opening.index(">")]
+    table = page[page.index('<table id="draft-lines"') : page.index("</table>")]
+    head = table[: table.index("</thead>")]
+    assert "Rent: lease" not in head and "rent-col" not in table and "has-rent" not in table
+    rows = table.split('<tr class="draft-line"')[1:]
+    assert len(rows) >= 2
+    for row in rows:
+        item = row[row.index('<td class="line-item"') : row.index("</td>")]
+        box = item[item.index('<div class="rent-field">') :]
+        assert 'name="lines-' in box and "-rent_lease" in box and "-rent_month" in box
+    assert '<option value="2026-10" selected>October 2026</option>' in rows[1]
     script = (REPO / "ledger" / "static" / "ledger" / "invoice_lines.js").read_text()
-    assert '"has-rent"' in script and ".rent-col" in script and "cell.hidden" in script
+    assert 'box.hidden = kind !== "rent";' in script and "has-rent" not in script
 
 
 # --- The rent-amount endpoint ------------------------------------------------------------------
@@ -495,8 +493,9 @@ def test_removed_lines_are_ignored_and_errors_name_the_visible_line(fake: FakePr
     assert "Line 3:" not in page
     # The held form keeps the removed row hidden and numbers the others.
     assert page.count('<tr class="draft-line" hidden>') == 1
-    assert 'class="line-number" data-label="Line">2</td>' in page
-    assert 'class="line-number" data-label="Line">3</td>' not in page
+    # PLAN-012f-a D5: no number column; each control's hidden label names the visible line.
+    assert '<span class="line-name">Line 2</span>, item</label>' in page
+    assert '<span class="line-name">Line 3</span>' not in page
     # With a blank row between, a service refusal still names the visible line.
     rows = [
         {"item": "Sign repair", "unit_amount": "100.00"},

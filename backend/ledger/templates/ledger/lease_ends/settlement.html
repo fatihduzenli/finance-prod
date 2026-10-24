@@ -1,11 +1,9 @@
-{% extends "finance/base.html" %}
+{% extends "ledger/lease_ends/_wizard.html" %}
 {% load money %}
 {% block title %}End lease {{ store.external_label }}: settlement{% endblock %}
-{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
-{% block content %}
-  {% include "ledger/lease_ends/_steps.html" %}
-  <section class="card wizard-card">
-  <p class="muted" id="step-help">Say how and when the refund is paid back by Zelle, wire or check; leave the method empty when nothing is refunded.</p>
+{% block step_title %}Settlement{% endblock %}
+{% block step_body %}
+  <p class="muted wizard-help" id="step-help">Say how and when the refund is paid back by Zelle, wire or check; leave the method empty when nothing is refunded.</p>
   {% comment %}PLAN-012c D8: the refund's method, date and reference only when a refund is due; when the operator owes, the amount owed and "Save and continue". A refund field the server refused is shown with its error whatever the state.{% endcomment %}
   <dl>
     {% if refund %}<dt>Refund due to the operator</dt><dd id="refund-due">{{ figures.refund_due|money }}</dd>
@@ -17,9 +15,6 @@
     {% for field in form.visible_fields %}
       {% if refund or field.name == "note" or field.errors %}{% include "ledger/stores/_form_field.html" %}{% endif %}
     {% endfor %}
-    <div class="form-actions"><button class="btn btn-primary" type="submit">Save and continue</button></div>
   </form>
-  </section>
-  {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block step_primary %}<button class="btn btn-primary" type="submit" form="lease-end-settlement">Save and continue →</button>{% endblock %}

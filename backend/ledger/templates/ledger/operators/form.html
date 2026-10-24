@@ -3,17 +3,25 @@
 {% block title %}{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> {% if operator %}<a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}</span></nav><h1>{% if operator %}Edit {{ operator.display_name }}{% else %}New operator{% endif %}</h1></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
-  <p class="muted">With an e-mail address, saving also connects or creates the operator's customer in {{ company.provider_name }}. Without one, connect the customer by hand afterwards.</p>
+  {% comment %}The form family (PLAN-012f-a D5): the Operator card beside the summary card with the one primary.{% endcomment %}
   <form method="post" id="operator-form" class="js-single-submit">
     {% csrf_token %}
-    {{ form.non_field_errors }}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+    <div class="form-layout">
+    <div class="form-main">
+    <section class="card form-card" id="operator-card">
+    <h2>Operator</h2>
+    <p class="muted">With an e-mail address, saving also connects or creates the operator's customer in {{ company.provider_name }}. Without one, connect the customer by hand afterwards.</p>
+    {{ form.non_field_errors }}
     {% for field in form.visible_fields %}
       {% include "ledger/stores/_form_field.html" with hide_help=True %}
     {% endfor %}
-    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-operator">Save</button></div>
+    </section>
+    </div>
+    <aside class="form-summary" aria-label="Save">
+      <section class="card summary-card actions-only"><div class="form-actions"><button class="btn btn-primary" type="submit" id="save-operator">Save</button></div></section>
+    </aside>
+    </div>
   </form>
-  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% endblock %}

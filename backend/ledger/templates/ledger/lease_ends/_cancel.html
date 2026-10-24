@@ -1,11 +1,13 @@
-{% if transfer %}
-<form method="post" action="{% url 'ledger:transfers:cancel' pk=transfer.pk %}" id="transfer-cancel" class="js-single-submit">
+{% comment %}The wizard's cancel (PLAN-012f-a D8): the POST form as a red text link in the step card, its note under it.{% endcomment %}{% if transfer %}
+<form method="post" action="{% url 'ledger:transfers:cancel' pk=transfer.pk %}" id="transfer-cancel" class="js-single-submit wizard-cancel">
   {% csrf_token %}
-  <p class="actions"><button class="btn" type="submit">Cancel the transfer</button> <span class="muted">Deletes this transfer and its lease end draft; nothing else changes.</span></p>
+  <button class="link-action danger" type="submit">Cancel the transfer</button>
+  <p class="muted wizard-cancel-note">Deletes this transfer and its lease end draft; nothing else changes.</p>
 </form>
 {% else %}
-<form method="post" action="{% url 'ledger:lease_ends:cancel' pk=end.pk %}" id="lease-end-cancel" class="js-single-submit">
+<form method="post" action="{% url 'ledger:lease_ends:cancel' pk=end.pk %}" id="lease-end-cancel" class="js-single-submit wizard-cancel">
   {% csrf_token %}
-  <p class="actions"><button class="btn" type="submit">Cancel the lease end</button> <span class="muted">Deletes this draft; nothing else changes.</span></p>
+  <button class="link-action danger" type="submit">Cancel the lease end</button>
+  <p class="muted wizard-cancel-note">Deletes this draft; nothing else changes.</p>
 </form>
 {% endif %}

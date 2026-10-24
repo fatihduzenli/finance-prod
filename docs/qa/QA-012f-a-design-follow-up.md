@@ -203,3 +203,94 @@ pages to the suite). The Payments list's note badge and the operator page's meta
 covered by the tag's synthetic tests, not by a rendered page with a note.
 
 **Verdict (B):** PASS (one MAJOR in a test fixture and two MINOR resolved; B-3 open for the cleanup; the owner's questions of plan §9 stand, plus the counts-line reading of "vacant")
+
+### Batch C — the builder and form family (D5) and the wizard frame (D8)
+
+**Scope.** *C1 (Opus):* the invoice builder on the reference's frame: `invoices/_builder.html`
+(the form layout), `_draft_form.html` as the Lines card (Item, Description, Qty, Unit amount, Total,
+a trash icon button; the rent line's lease and month selects under its item; the Save-as-catalogue
+label under the item; the dashed "+ Add line" with the help sentence), `_collect.html` with one
+`collect-tile` per entry of `collect_form.options` (the chosen tile `is-chosen`, its fields inside
+it; a sixth choice needs no template change), `_collect_note.html` (one sentence per choice),
+`_summary.html` (the SUMMARY card: lines and amounts, the total, memo, due date, the five primary
+buttons with their ids, Discard; the help card); `new.html` and `draft.html`'s header line and
+"Draft · nothing reaches <provider>…" note; `invoice_lines.js` (the rent-column collapse removed,
+the summary lines rebuilt with `textContent`); the `line_total` filter over
+`invoice_builder.shown_line_total` (the rounding rule moved to the service, the view's total summing
+it); the form family on the same frame (Store with Store cost and Documents cards; Lease with
+Lease, Debits, Setup checklist in the Lines style and Documents; Add payment with Payment and
+Allocation, the unallocated line in the summary; the charge payment forms; Operator; Calendar
+entry), every field id, name, help text and error placement kept; the `trash` icon; app.css's
+"Form and builder family" block, the summary sticky on a laptop and fixed above the tab bar on a
+phone. *C2 (Opus):* `views/wizard_frame.py` (`frame`: step number, count, back link, the store's
+title; `statement_notes`: the tiles' notes from the figures and one query for the deposit's
+collection day; the settlement rows), `lease_ends/_wizard.html` (the base every step of both
+wizards extends: the header with "Step N of M · nothing changes until you confirm", the 260 px step
+card with done / current / later states and links, the context lines and the cancel as a red
+text-link POST form, the main card with the step's title and description, the footer with ← Back
+and the step's primary bound by `form=`), `_tiles.html`, `_settlement_box.html` (Deposit held, −
+applied, − kept, + credit, the green refund or red owed row, both when both), the statement step's
+deductions table (Reason, Note, Amount, trash; `deduction_rows.js` hides the empty rows after the
+last filled one, "+ Add deduction" reveals the next, the trash clears a row; without script all
+eight rows show), `_figures.html`'s compact mode; app.css's "Wizard frame" block with the phone
+rules in the one phone block. *Fable:* `tests/test_plan012fa_c_adversarial.py` (6: the tiles come
+from the options and a hostile choice is never echoed; a viewer's POST to the builder and every form
+is refused and writes nothing; every form page has its cards and one primary in the summary; the
+wizard header counts the steps and the cancel is a guarded POST; a viewer and billing cannot open
+the statement step; the statement tiles read the figures).
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| C-1 | MINOR | finance/templatetags/builder.py (C1) | The `line_total` filter imported a private helper from a view module through a one-form shim | Resolved: `invoice_builder.shown_line_total` in the service, used by the view's total and the filter; a test that both agree; the dead `lines_have_rent` context value removed |
+| C-2 | MINOR | tests/test_plan012fa_c_adversarial.py (Fable) | The tile test counted radios by the buttons' name | Resolved (the radios are `collect`), found by Opus |
+| C-3 | MINOR | the first C1 build | A marker class `is-checked` tripped an earlier adversarial test's substring check for `checked` between inputs | Resolved by Opus before hand-back (`is-chosen`) |
+
+**Decisions taken (Fable) and for the owner.** The confirm button keeps "Transfer the store" (the
+brief kept the sentences; *for the owner*: "Confirm the transfer" as in the drawing is a copy
+change); the builder's primary keeps "Record $X received" (the drawing reads "as paid"; same);
+the item box keeps the existing text-and-datalist field (the drawing's bold kind + month would
+need the form's choice field, out of scope); the Charge now tile does not name a threshold
+("after a confirmation page"); the step circles use documented pairs (done: the paid pair; current:
+the primary button's pair) rather than the drawing's solid green; the step descriptions are the
+steps' existing help sentences; the "#" column, the typed deductions total and the Last month /
+After the end / Credit lines stay on the statement step (pinned, informative); the Deposit tile's
+"collected <day>" shows only when a settled payment gives the day; a viewer may still render the
+new-operator form read-only (the route rule gates the POST; pre-existing, *for the owner* whether
+the GET should refuse too); the lease-end confirmed page runs the notes helper (one read, harmless).
+
+**Gate 1.** ruff, `ruff format --check` (476 files), mypy strict (476 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16: all clean. **Gate 2.** sqlite 6,758 passed,
+664 skipped (20:41) with one failure, the shell's literal-colour guard on the wizard title
+partial's comment ("#1991 Istanbul" read as a hex colour; C-4 below) — reworded by Opus, the file
+re-run 91 passed on both engines; PostgreSQL "Migration tests" 34 passed (16:46), "Unit tests"
+7,385 passed, 3 skipped (21:56) with the same pre-fix failure; e2e 29 passed in each of four runs on
+PostgreSQL. Visual: the thirty baselines regenerated in the image against PostgreSQL (34 passed),
+compare runs 34 passed on both engines, a sqlite regeneration equal in all thirty files; the six
+baselines of the builder, the statement step and the record-payment form changed, no other.
+**Gate 3.** Diff read: the tiles come from the form's options; the rounding rule lives in the
+service and the view's total sums it; the wizard frame's helpers are read-only (one query for the
+deposit's day); every step keeps its URL, method, ids and guards; the two CSS blocks are delimited
+and the phone rules sit in the one phone block; no production line changed in forms.py or the
+services beyond the shared rounding helper. **Gate 4.** Secret scans (script and pattern, the diff
+and every new file) clean; the one provider mention in a new file is a test's expected rendered
+sentence (tests are exempt from the Rule 8 fence by design); no new input; a hostile `collect`
+value opens Save draft and is not echoed; a viewer's POST to the builder and every form is refused
+and writes nothing; a viewer and billing cannot open the statement step; the cancel is a CSRF POST
+with the single-submit guard; markup in a store's name is escaped in every wizard title.
+
+| C-4 | MINOR | lease_ends/_title.html (C2) | The new comment's examples "#1991 Istanbul" tripped the literal-colour guard | Resolved: reworded |
+
+**Visual check.** C1's builder at 1,440 reads like the drawing (Lines card, tiles with the chosen
+one holding its fields, the SUMMARY card); C2's transfer statement at 1,440 matches the reference's
+frame (step card, tiles, deductions with the dashed add, the settlement box with the green refund
+row, Back and Save); at 390 the wizard stacks with the step line and bar and the sticky footer.
+*Open (C-5, MINOR):* the Deductions tile reads the saved state while the table already shows the
+suggested offset row and its typed total; a live tile update is a small follow-up for the cleanup.
+
+**Residual risk (C).** The `(debit 2)`-style edge of the tiles' proration note, and the step
+circles' counters as CSS content, are checked by markup tests, not by a reader. Statements
+confirmed before 12f-a keep their old `statement_json` (unchanged).
+
+**Verdict (C):** PASS (four MINOR resolved; C-5 open for the cleanup; the owner's copy questions stand)

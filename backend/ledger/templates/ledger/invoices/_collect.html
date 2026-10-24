@@ -1,25 +1,20 @@
-{% comment %}The draft form's last step, "How to collect" (docs/qa/PLAN-012e2-fewer-actions.md D3): five radios (Charge now for an admin only), the debit date of Schedule for a date and the received payment of Record payment now, each shown only while its radio is chosen (ledger/shown_when.js; without the script every field shows), and one button per choice that names it and the amount. With the script only the chosen choice's button shows; without it each button submits its own choice (submit_collect). Charge now opens its confirmation page. Schedule for a date is offered only on an active lease with one item line (invoice_builder.can_schedule); else one line says so.{% endcomment %}
-{% load money %}
+{% comment %}The builder's "How to collect" card (docs/qa/PLAN-012e2-fewer-actions.md D3; PLAN-012f-a D5, create-invoice-laptop.png): one bordered tile per choice of collect_form.options, two a row (a new choice is a new tile with no change here), each a radio with its bold name and one muted sentence (_collect_note.html); the chosen tile is tinted (:has(:checked)). Schedule for a date's tile holds its debit date and Record payment now's the received payment, each shown only while its radio is chosen (ledger/shown_when.js; without the script every field shows). Charge now for an admin only. The buttons, one per choice, are in the SUMMARY card (_summary.html). Schedule for a date is offered only on an active lease with one item line (invoice_builder.can_schedule); else one line says so.{% endcomment %}
+<section class="card collect-card" id="collect-card">
 <fieldset class="collect-choices" id="collect">
   <legend>How to collect</legend>
-  {% for option in collect_form.options %}<label class="inline" for="{{ option.id }}"><input type="radio" name="collect" value="{{ option.value }}" id="{{ option.id }}"{% if option.checked %} checked{% endif %}> {{ option.label }}</label>{% endfor %}
+  <p class="help" id="collect-help">One choice: the draft is saved first, then collected as chosen.</p>
+  <div class="collect-tiles">
+  {% for option in collect_form.options %}<div class="collect-tile{% if option.checked %} is-chosen{% endif %}" id="tile-{{ option.value }}"><label class="collect-option" for="{{ option.id }}"><input type="radio" name="collect" value="{{ option.value }}" id="{{ option.id }}"{% if option.checked %} checked{% endif %}><span class="collect-text"><span class="collect-name">{{ option.label }}</span>{% include "ledger/invoices/_collect_note.html" with value=option.value %}</span></label>{% if option.value == "schedule" and collect_form.can_schedule %}<div class="collect-fields" id="collect-schedule-fields">
+    {% include "ledger/stores/_form_field.html" with field=collect_form.schedule_on mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=collect_form.confirm_large_debit %}
+  </div>{% elif option.value == "record" %}<div class="collect-fields" id="collect-record-fields">
+    {% include "ledger/stores/_form_field.html" with field=collect_form.method mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=collect_form.paid_on mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=collect_form.reference %}
+    {% include "ledger/stores/_form_field.html" with field=collect_form.payment_note mark=True %}
+  </div>{% endif %}</div>{% endfor %}
+  </div>
 </fieldset>
 {% if collect_form.schedule_note %}<p class="muted" id="collect-schedule-note">{{ collect_form.schedule_note }}</p>{% endif %}
 {{ collect_form.collect.errors }}
-{% if collect_form.can_schedule %}<div id="collect-schedule-fields">
-  {% include "ledger/stores/_form_field.html" with field=collect_form.schedule_on mark=True %}
-  {% include "ledger/stores/_form_field.html" with field=collect_form.confirm_large_debit %}
-</div>{% endif %}
-<div id="collect-record-fields">
-  {% include "ledger/stores/_form_field.html" with field=collect_form.method mark=True %}
-  {% include "ledger/stores/_form_field.html" with field=collect_form.paid_on mark=True %}
-  {% include "ledger/stores/_form_field.html" with field=collect_form.reference %}
-  {% include "ledger/stores/_form_field.html" with field=collect_form.payment_note mark=True %}
-</div>
-<p class="actions form-actions" id="collect-actions">
-  <button class="btn btn-primary" type="submit" name="submit_collect" value="draft" id="save-draft" data-shown-when="collect-draft">Save draft</button>
-  <button class="btn btn-primary" type="submit" name="submit_collect" value="email" id="send-draft" data-shown-when="collect-email">Send <span class="collect-amount">{{ collect_total|money }}</span> by e-mail</button>
-  {% if collect_form.can_charge_now %}<button class="btn btn-primary" type="submit" name="submit_collect" value="charge_now" id="draft-charge-now" data-shown-when="collect-charge_now">Charge <span class="collect-amount">{{ collect_total|money }}</span> now</button>{% endif %}
-  {% if collect_form.can_schedule %}<button class="btn btn-primary" type="submit" name="submit_collect" value="schedule" id="schedule-draft" data-shown-when="collect-schedule">Schedule <span class="collect-amount">{{ collect_total|money }}</span> for <span class="collect-date" data-empty="the date chosen">{% if collect_form.schedule_on.value %}{{ collect_form.schedule_on.value }}{% else %}the date chosen{% endif %}</span></button>{% endif %}
-  <button class="btn btn-primary" type="submit" name="submit_collect" value="record" id="record-draft" data-shown-when="collect-record">Record <span class="collect-amount">{{ collect_total|money }}</span> received</button>
-</p>
+</section>

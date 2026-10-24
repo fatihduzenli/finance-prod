@@ -523,7 +523,7 @@ def test_the_builder_lines_table_is_inside_the_scroll_region(fake: FakeProvider)
     table = region.group(1)
     # The builder's script still finds its table and rows; each control keeps its
     # visually hidden label inside the table.
-    assert 'class="draft-line"' in table and 'class="line-number" data-label="Line"' in table
+    assert 'class="draft-line"' in table and '<span class="line-name">Line 1</span>' in table
     assert 'class="visually-hidden"' in table
     assert 'class="table-cards"' not in html.split('id="draft-lines"')[0][-200:]
     assert "ledger/invoice_lines.js" in html

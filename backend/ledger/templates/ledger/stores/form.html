@@ -3,25 +3,33 @@
 {% block title %}{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if store %}{% include "ledger/_store_crumb.html" with crumb_store=store %}{% else %}<a href="{% url 'ledger:stores:list' %}">Stores</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}</span></nav><h1>{% if store %}Edit store {{ store.external_label }}{% else %}New store{% endif %}</h1></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
+  {% comment %}The form family (PLAN-012f-a D5): a card per group (Store; Store cost, the create form's first cost row; Documents, the create form's optional file) beside the summary card with the one primary.{% endcomment %}
   <form method="post" id="store-form" class="js-single-submit"{% if not store %} enctype="multipart/form-data"{% endif %}>
     {% csrf_token %}
-    {{ form.non_field_errors }}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
-    {% for field in form.store_fields %}
-      {% include "ledger/stores/_form_field.html" %}
-    {% endfor %}
+    <div class="form-layout">
+    <div class="form-main">
+    <section class="card form-card" id="store-card">
+      <h2>Store</h2>
+      {{ form.non_field_errors }}
+      {% for field in form.store_fields %}
+        {% include "ledger/stores/_form_field.html" %}
+      {% endfor %}
+    </section>
     {% if form.cost_fields %}
-      <fieldset id="store-cost-fields">
+      <fieldset id="store-cost-fields" class="card form-card">
         <legend>Store cost</legend>
         {% for field in form.cost_fields %}
           {% include "ledger/stores/_form_field.html" %}
         {% endfor %}
       </fieldset>
     {% endif %}
-    {% if not store %}{% include "ledger/documents/_create_upload.html" %}{% endif %}
-    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-store">Save</button></div>
+    {% if not store %}<section class="card form-card" id="documents-card"><h2>Documents</h2>{% include "ledger/documents/_create_upload.html" %}</section>{% endif %}
+    </div>
+    <aside class="form-summary" aria-label="Save">
+      <section class="card summary-card actions-only"><div class="form-actions"><button class="btn btn-primary" type="submit" id="save-store">Save</button></div></section>
+    </aside>
+    </div>
   </form>
-  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

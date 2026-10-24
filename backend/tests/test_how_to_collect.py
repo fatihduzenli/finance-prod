@@ -444,7 +444,8 @@ def test_the_buttons_name_the_choice_and_the_amount(fake: FakeProvider, enabled:
         "Schedule for a date",
         "Record payment now",
     ):
-        assert f"> {label}</label>" in html, label
+        # PLAN-012f-a D5: each choice is a tile, its radio beside its bold name.
+        assert f'<span class="collect-name">{label}</span>' in html, label
     assert 'id="save-draft" data-shown-when="collect-draft">Save draft</button>' in html
     assert '>Send <span class="collect-amount">$175.00</span> by e-mail</button>' in html
     assert '>Charge <span class="collect-amount">$175.00</span> now</button>' in html

@@ -555,6 +555,7 @@ ICON_NAMES = (
     "arrow-right",
     "x",
     "banknote",  # PLAN-012f-a D4: the Payments card's empty state
+    "trash",  # PLAN-012f-a D5: the builder's remove-line button
 )
 
 

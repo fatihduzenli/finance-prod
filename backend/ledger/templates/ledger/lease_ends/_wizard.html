@@ -1,0 +1,24 @@
+{% extends "finance/base.html" %}{% load components %}
+{% comment %}The wizard frame of End lease and Transfer (PLAN-012f-a D8; DESIGN-SPEC §4 Transfer wizard, transfer-wizard-laptop.png), extended by every step of both wizards. The header (ledger/lease_ends/_title.html: breadcrumb, title, "Step N of M · nothing changes until you confirm"); on a phone "Step N of M · <step>" and its bar ({% step_line %}) above the card; div.wizard: the main column first (section.card.wizard-card with the step's 17/600 title, {% block step_title %}, its muted one-line description and content, {% block step_body %}; then the footer outside the card, "← Back" to the step before, or the store on the first step, and the step's primary, {% block step_primary %}, right-aligned), then aside.card.wizard-steps-card (ledger/lease_ends/_steps.html), drawn on the left on a laptop and after the footer on a phone. A confirm step replaces the card with its confirmation section ({% block step_card %}), which holds its own footer. No id, field name, URL or post changes.{% endcomment %}
+{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
+{% block content %}
+  {% step_line step_links %}
+  <div class="wizard" id="wizard">
+    <div class="wizard-main">
+      {% block step_card %}
+      <section class="card wizard-card" aria-labelledby="wizard-title">
+        <h2 class="wizard-title" id="wizard-title">{% block step_title %}{% endblock %}</h2>
+        {% block step_body %}{% endblock %}
+      </section>
+      <div class="wizard-footer" id="wizard-footer">
+        <a class="btn" href="{{ step_back }}" id="wizard-back">← Back</a>
+        {% block step_primary %}{% endblock %}
+      </div>
+      {% endblock %}
+    </div>
+    <aside class="card wizard-steps-card" aria-label="Wizard steps">
+      {% include "ledger/lease_ends/_steps.html" %}
+    </aside>
+  </div>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% block step_scripts %}{% endblock %}{% endblock %}

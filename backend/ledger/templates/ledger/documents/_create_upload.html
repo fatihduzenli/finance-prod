@@ -1,9 +1,8 @@
 {% comment %}
 The optional file on the store and lease create forms (docs/qa/PLAN-010c D7). Rendered
 with the prefix "document"; uploaded after the record is saved, and a refused file never
-undoes the record.
+undoes the record. Inside the form's Documents card, which gives the heading (PLAN-012f-a D5).
 {% endcomment %}
-<h2>Document (optional)</h2>
 {% if document_form %}
   {% include "ledger/documents/_notice.html" %}
   <p class="muted">The file is uploaded after the record is saved. If the file is refused, the record is still saved and the page says why. If the form has to be corrected, choose the file again.</p>

@@ -1289,7 +1289,10 @@ def test_the_blockers_page_lists_each_item_and_offers_no_way_on(admin: Any, pinn
     end = draft(lease)
     page = client.get(f"/lease-ends/{end.pk}/blockers/").content.decode()
     assert 'id="blocked"' in page and f"/one-off-charges/{charge.pk}/" in page
-    assert f"/lease-ends/{end.pk}/statement/" not in page.split('id="blocker-list"')[1]
+    # PLAN-012f-a D8: the step card (after the main column in markup) links the steps as
+    # before; the card and its footer offer no way on.
+    main = page.split('id="blocker-list"')[1].split('<aside class="card wizard-steps-card"')[0]
+    assert f"/lease-ends/{end.pk}/statement/" not in main and 'id="continue"' not in main
     response = client.get(f"/lease-ends/{end.pk}/statement/")
     assert response["Location"] == f"/lease-ends/{end.pk}/blockers/"
 

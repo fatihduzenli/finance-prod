@@ -437,13 +437,14 @@ PAIRS: list[tuple[str, str, str]] = [
     ("returns/list.html", ">Reschedule<", ">Debit again<"),
     ("invoices/charge_now.html", "Charge ${", "|money }} now"),
     ("one_off_charges/charge_now.html", "Charge ${", "|money }} now"),
-    # PLAN-012e-2 D3: the draft's Send is a button of How to collect.
-    ("invoices/_collect.html", "Send ${", "|money }}</span> by e-mail"),
+    # PLAN-012e-2 D3: the draft's Send is a button of How to collect (in the SUMMARY card
+    # since PLAN-012f-a D5).
+    ("invoices/_summary.html", "Send ${", "|money }}</span> by e-mail"),
     ("leases/enrol.html", "Refresh methods", f"Update bank methods from {P}"),
     ("disputes/page.html", ">Refresh<", f">Update from {P}<"),
     ("disputes/page.html", "Store and send", f"Save and send to {P}"),
     # PLAN-012e-2 D3, D4: Schedule a payment is How to collect's Schedule for a date.
-    ("invoices/_collect.html", ">Schedule payment<", '>Schedule <span class="collect-amount">'),
+    ("invoices/_summary.html", ">Schedule payment<", '>Schedule <span class="collect-amount">'),
     ("stores/_tab_history.html", "Open in the audit log", "Open in the activity log"),
     ("stores/_tab_payments.html", "Open in the payments ledger", "Open in Payments"),
     (

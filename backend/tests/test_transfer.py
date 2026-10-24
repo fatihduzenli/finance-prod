@@ -656,7 +656,8 @@ def test_an_admin_walks_the_transfer_from_the_store_page(admin: Any, pinned: Non
     assert response["Location"] == f"{base}/end/"
     assert client.get(f"{base}/end/")["Location"] == f"/lease-ends/{end.pk}/terms/"
     terms_page = client.get(f"/lease-ends/{end.pk}/terms/").content.decode()
-    assert "Transfer store" in terms_page and "the reason is fixed" in terms_page
+    # PLAN-012f-a D8: the wizard's title reads "Transfer <store> to another operator".
+    assert "to another operator</h1>" in terms_page and "the reason is fixed" in terms_page
     response = client.post(
         f"/lease-ends/{end.pk}/terms/",
         {"ended_on": ENDED.isoformat(), "reason": "moved_out", "prorate_last_month": "on"},

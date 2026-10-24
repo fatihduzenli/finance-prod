@@ -179,10 +179,18 @@ def test_a_hidden_refund_field_posted_is_checked_as_before(admin: Any, pinned: d
     assert fresh(end).refund_method == RefundMethod.ZELLE
 
 
-# --- The deductions table: no rows, the "Add deduction" control only ---------------------
+# --- The deductions table: the eight rows, the script's "+ Add deduction" ----------------------
+# PLAN-012f-a D8 replaced PLAN-012c D8's disclosure: the eight rows are always in the markup (no
+# script: all shown); ledger/deduction_rows.js hides the empty rows after the last filled one
+# and reveals its dashed "+ Add deduction" button, which the markup keeps hidden.
 
 
-def test_with_no_deduction_the_rows_are_behind_the_add_deduction_control(
+def _rows(html: str) -> list[str]:
+    table = html.split('id="deduction-rows"', 1)[1].split("</table>", 1)[0]
+    return re.findall(r'<tr class="deduction-row"[^>]*>', table)
+
+
+def test_with_no_deduction_every_row_is_in_the_markup_and_the_add_control_waits_for_script(
     admin: Any, pinned: date
 ) -> None:
     client, _ = admin
@@ -190,11 +198,14 @@ def test_with_no_deduction_the_rows_are_behind_the_add_deduction_control(
     october(lease, paid="2000.00")  # nothing open, no deposit: nothing is suggested
     end = draft(lease)
     html = page(client, f"/lease-ends/{end.pk}/statement/")
-    disclosure = html.split('<details id="add-deduction">', 1)
-    assert len(disclosure) == 2, "the rows are not behind the control"
-    assert '<summary class="btn" id="add-deduction-control">Add deduction</summary>' in html
-    assert 'id="deduction-rows"' in disclosure[1].split("</details>", 1)[0]
-    # The rows still post as before: a deduction typed behind the control is saved.
+    assert "<details" not in html.split('id="lease-end-deductions"', 1)[1].split("</form>", 1)[0]
+    rows = _rows(html)
+    assert len(rows) == 8 and not any("hidden" in row for row in rows)
+    assert re.search(
+        r'<button class="btn add-deduction" type="button" id="add-deduction" hidden>', html
+    )
+    assert "ledger/deduction_rows.js" in html
+    # The rows still post as before: a deduction typed in the first row is saved.
     response = client.post(
         f"/lease-ends/{end.pk}/statement/",
         {"kind_1": "cleaning", "description_1": "Floors", "amount_1": "150.00"},
@@ -203,9 +214,7 @@ def test_with_no_deduction_the_rows_are_behind_the_add_deduction_control(
     assert [row.amount for row in fresh(end).deductions.all()] == [D("150.00")]
 
 
-def test_a_saved_or_suggested_deduction_shows_the_table_without_the_control(
-    admin: Any, pinned: date
-) -> None:
+def test_a_saved_or_suggested_deduction_fills_its_row(admin: Any, pinned: date) -> None:
     client, _ = admin
     saved = a_refund_draft()
     assert deductions(saved, ("cleaning", "Floors", "150.00")).ok
@@ -215,18 +224,20 @@ def test_a_saved_or_suggested_deduction_shows_the_table_without_the_control(
     deposit(lease, "500.00")  # a deposit and an open balance: the offset is suggested
     for end in (saved, suggested):
         html = page(client, f"/lease-ends/{end.pk}/statement/")
-        assert 'id="deduction-rows"' in html, end.pk
-        assert 'id="add-deduction"' not in html, end.pk
+        assert len(_rows(html)) == 8, end.pk
+        first = html.split('class="deduction-row"', 2)[1]
+        assert 'name="amount_1"' in first and 'value="' in first.split('name="amount_1"')[1][:60]
 
 
-def test_a_refused_deduction_comes_back_in_the_open_table(admin: Any, pinned: date) -> None:
+def test_a_refused_deduction_comes_back_in_its_row(admin: Any, pinned: date) -> None:
     client, _ = admin
     lease = a_store_lease()
     october(lease, paid="2000.00")
     end = draft(lease)
     client.post(f"/lease-ends/{end.pk}/statement/", {"kind_1": "cleaning", "amount_1": "-5"})
     html = page(client, f"/lease-ends/{end.pk}/statement/")
-    assert 'id="add-deduction"' not in html and 'id="deduction-rows"' in html
+    first = html.split('class="deduction-row"', 2)[1]
+    assert "errorlist" in first and 'value="-5"' in first
     assert not fresh(end).deductions.exists()
 
 
@@ -480,7 +491,8 @@ def test_the_builder_marks_the_rent_fields_and_the_save_tick_for_its_script_alre
     billing, _ = client_for(Role.BILLING)
     lease = a_lease(a_store("D8-8"), an_operator())
     html = page(billing, f"/invoices/new/operator/{lease.operator_id}/")
-    assert html.count('class="rent-field rent-col"') == 2 and 'class="save-item"' in html
+    # PLAN-012f-a D5: one rent-field box (lease and month) under the row's Item box.
+    assert html.count('class="rent-field"') == 1 and 'class="save-item"' in html
     assert "ledger/invoice_lines.js" in html
     from django.contrib.staticfiles import finders
 
@@ -488,7 +500,7 @@ def test_the_builder_marks_the_rent_fields_and_the_save_tick_for_its_script_alre
     assert isinstance(found, str)
     with open(found, encoding="utf-8") as handle:
         script = handle.read()
-    assert "td.rent-field" in script and "-save_item" in script
+    assert '".rent-field"' in script and "-save_item" in script
 
 
 # --- Record a payment: the credit inputs (already) and the keep-credit tick ------------------

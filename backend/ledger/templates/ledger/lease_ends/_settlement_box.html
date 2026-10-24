@@ -1,0 +1,11 @@
+{% load money %}{% comment %}The statement step's SETTLEMENT box (PLAN-012f-a D8; DESIGN-SPEC §4 Transfer wizard), from the saved figures: the deposit held, "Applied to the open balance" and "Kept for the deductions" as "− $x", the credits paid back with the refund as "+ $x" when there are any, then the green "Refund due to <operator>" row, or the red "Still owed by <operator>" row when the deposit does not cover (both when a credit is refunded while a balance stays owed); the muted help line under it.{% endcomment %}
+<h2 class="section-label" id="settlement-label">Settlement</h2>
+<dl class="settlement-box" id="settlement-box" aria-labelledby="settlement-label">
+  <div class="settle-row"><dt>Deposit held</dt><dd id="settle-held">{{ figures.deposit_held|money }}</dd></div>
+  <div class="settle-row"><dt>Applied to the open balance</dt><dd id="settle-applied">− {{ figures.offset_applied|money }}</dd></div>
+  <div class="settle-row"><dt>Kept for the deductions</dt><dd id="settle-kept">− {{ kept_for_deductions|money }}</dd></div>
+  {% if credit_paid_back > 0 %}<div class="settle-row"><dt>Credit paid back with the refund</dt><dd id="settle-credit">+ {{ credit_paid_back|money }}</dd></div>{% endif %}
+  {% if figures.refund_due > 0 or figures.amount_owed <= 0 %}<div class="settle-row settle-final settle-refund" id="settle-refund"><dt>Refund due to {{ figures.operator|default:"the operator" }}</dt><dd>{{ figures.refund_due|money }}</dd></div>{% endif %}
+  {% if figures.amount_owed > 0 %}<div class="settle-row settle-final settle-owed" id="settle-owed"><dt>Still owed by {{ figures.operator|default:"the operator" }}</dt><dd>{{ figures.amount_owed|money }}</dd></div>{% endif %}
+</dl>
+<p class="muted help settlement-help" id="settlement-help">The refund is paid back by Zelle, wire or check on the next step; nothing goes through {{ company.provider_name }}.</p>

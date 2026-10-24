@@ -1,0 +1,20 @@
+{% comment %}The builder's right column (PLAN-012f-a D5, create-invoice-laptop.png): the SUMMARY card (each kept line's item and amount, |line_total; the total, p#lines-total, kept live by ledger/invoice_lines.js with the lines; the memo and the due date; the buttons, one per "How to collect" choice, each naming it and the amount: with the script only the chosen choice's shows (data-shown-when), without it each submits its own choice (submit_collect), Charge now opens its confirmation page; Discard, a link to discard_url: the draft's delete page, or the way back from a new draft, which saves nothing), then the help card. On a phone the column comes after How to collect and the buttons stay in view at the bottom.{% endcomment %}
+{% load money builder %}
+<aside class="form-summary builder-side" aria-label="Summary">
+<section class="card summary-card" id="builder-summary">
+  <h2 class="section-label">Summary</h2>
+  <ul class="summary-lines" id="summary-lines">{% for row in line_rows %}{% if not row.removed %}{% with amount=row.form|line_total %}{% if row.form.item.value or amount %}<li><span class="summary-name">{{ row.form.item.value|default:"Line" }}</span> <span class="summary-amount">{{ amount|money }}</span></li>{% endif %}{% endwith %}{% endif %}{% endfor %}</ul>
+  <p class="summary-total" id="lines-total"><span>Total</span> <span id="lines-total-value">{{ lines_total|money }}</span></p>
+  {% include "ledger/stores/_form_field.html" with field=form.memo %}
+  {% include "ledger/stores/_form_field.html" with field=form.due_date %}
+  <div class="form-actions" id="collect-actions">
+    <button class="btn btn-primary" type="submit" name="submit_collect" value="draft" id="save-draft" data-shown-when="collect-draft">Save draft</button>
+    <button class="btn btn-primary" type="submit" name="submit_collect" value="email" id="send-draft" data-shown-when="collect-email">Send <span class="collect-amount">{{ collect_total|money }}</span> by e-mail</button>
+    {% if collect_form.can_charge_now %}<button class="btn btn-primary" type="submit" name="submit_collect" value="charge_now" id="draft-charge-now" data-shown-when="collect-charge_now">Charge <span class="collect-amount">{{ collect_total|money }}</span> now</button>{% endif %}
+    {% if collect_form.can_schedule %}<button class="btn btn-primary" type="submit" name="submit_collect" value="schedule" id="schedule-draft" data-shown-when="collect-schedule">Schedule <span class="collect-amount">{{ collect_total|money }}</span> for <span class="collect-date" data-empty="the date chosen">{% if collect_form.schedule_on.value %}{{ collect_form.schedule_on.value }}{% else %}the date chosen{% endif %}</span></button>{% endif %}
+    <button class="btn btn-primary" type="submit" name="submit_collect" value="record" id="record-draft" data-shown-when="collect-record">Record <span class="collect-amount">{{ collect_total|money }}</span> received</button>
+  </div>
+  <a class="btn summary-discard" href="{{ discard_url }}" id="{{ discard_id }}">Discard</a>
+</section>
+<section class="card builder-help" id="builder-help"><p class="help">The primary button changes with the choice under How to collect.</p></section>
+</aside>

@@ -47,6 +47,7 @@ from ledger.forms import (
 from ledger.models import LeaseEnd, LeaseTransfer, LeaseTransferStatus, Operator, Store
 from ledger.services import lease_end, leases, statements
 from ledger.services import transfer as service
+from ledger.views import wizard_frame
 from ledger.views.operators import (
     EMAIL_TAKEN,
     _actor,
@@ -126,12 +127,17 @@ def _load(pk: str) -> LeaseTransfer:
 
 
 def _context(transfer: LeaseTransfer, current: str, **extra: Any) -> dict[str, Any]:
+    steps = transfer_steps(transfer, current)
+    figures = extra.get("figures")
     return {
         "transfer": transfer,
         "end": transfer.lease_end,
         "lease": transfer.outgoing_lease,
         "store": transfer.store,
-        "step_links": transfer_steps(transfer, current),
+        "step_links": steps,
+        # PLAN-012f-a D8: the frame's step count, Back link and title; the tiles' notes.
+        **wizard_frame.frame(steps, transfer.store),
+        **(wizard_frame.statement_notes(figures) if figures is not None else {}),
         **extra,
     }
 

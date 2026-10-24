@@ -1,12 +1,10 @@
-{% extends "finance/base.html" %}
+{% extends "ledger/lease_ends/_wizard.html" %}
 {% load money responsive dates %}
 {% load static %}
 {% block title %}Transfer store {{ store.external_label }}: incoming lease{% endblock %}
-{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
-{% block content %}
-  {% include "ledger/lease_ends/_steps.html" %}
-  <section class="card wizard-card">
-  <p class="muted" id="step-help">Set the lease of {{ transfer.incoming_operator.display_name }}: it starts the day after the outgoing lease ends ({{ end.ended_on|day }}) or later, so that the store never has two leases on one day. The deposit and the setup items with a price go on one invoice draft for you to review and send; nothing reaches {{ company.provider_name }} until it is sent.</p>
+{% block step_title %}Incoming lease{% endblock %}
+{% block step_body %}
+  <p class="muted wizard-help" id="step-help">Set the lease of {{ transfer.incoming_operator.display_name }}: it starts the day after the outgoing lease ends ({{ end.ended_on|day }}) or later, so that the store never has two leases on one day. The deposit and the setup items with a price go on one invoice draft for you to review and send; nothing reaches {{ company.provider_name }} until it is sent.</p>
   <form method="post" id="transfer-incoming" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
@@ -16,7 +14,7 @@
     {% endfor %}
     {% comment %}PLAN-012c D8: the setup charges only when the checklist has an item; the deposit field (in the fields above) only when the catalogue offers a deposit.{% endcomment %}
     {% if form.fee_types %}
-    <h2>Setup charges</h2>
+    <h2 class="section-label">Setup charges</h2>
     <p class="muted">Type the price of each catalogue item the incoming operator pays at move-in; a row without a price is not charged. The grey amount is the catalogue's usual price, shown as a hint only.</p>
     {% responsive_table %}
     <table id="setup-rows" class="js-table-total">
@@ -30,9 +28,7 @@
     {% endresponsive_table %}
     <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-rows">{{ form.setup_total|money }}</span></p>
     {% endif %}
-    <div class="form-actions"><button class="btn btn-primary" type="submit">Save and continue</button></div>
   </form>
-  </section>
-  {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}
+{% block step_primary %}<button class="btn btn-primary" type="submit" form="transfer-incoming">Save and continue →</button>{% endblock %}
+{% block step_scripts %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}

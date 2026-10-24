@@ -3,23 +3,23 @@
 // as catalogue item box and a Remove box on each. Here:
 // - one Item box per row on the form's one list: "Rent", then the lease's existing open
 //   charges, then the catalogue items; any other text is a typed item;
-// - Rent shows the row's lease and month selects; once both are set, the unit amount is
+// - Rent shows the row's lease and month selects (.rent-field, under the Item box); once
+//   both are set, the unit amount is
 //   filled at once from the rent-amount endpoint (read-only, same origin) and stays
 //   editable; its proration text, or why the month cannot be billed, shows under the box;
 // - an existing open charge names the charge in the row's hidden field, fills the unit
-//   amount with its balance and makes it read-only (the charge is billed at its balance;
-//   PLAN-012d D10 amended; the server refuses any other amount without this script); any
-//   other text clears the field and the amount is editable again;
+//   amount with its balance and makes it and the quantity read-only (the charge is billed
+//   at its balance; PLAN-012d D10 amended; the server refuses any other amount or a
+//   quantity without this script); any other text clears the field and both are editable
+//   again;
 // - the Save box shows only on a typed item that is not on the list (case and surrounding
 //   spaces ignored); the server ignores it on a listed name either way;
 // - the trash button ticks the row's Remove box and hides the row; the visible rows are
 //   numbered 1, 2, ... (each control's hidden label says its line: "Line 2, quantity",
-//   "Removed line, quantity") and the invoice total under the table is kept live;
+//   "Removed line, quantity"); each row's Total cell, the SUMMARY card's lines (item and
+//   amount; PLAN-012f-a D5) and the total under them are kept live;
 // - "Add line" copies the last row, blank, under the next index of the management form
 //   (at most its MAX_NUM_FORMS), its labels' for renamed with its controls' ids;
-// - the two Rent columns (.rent-col) are collapsed while no visible line is Rent and shown
-//   as soon as one is (the table's has-rent class; PLAN-012e-3), so the amount columns fit
-//   a laptop screen; without this script they stay visible;
 // - the "How to collect" buttons name the live total (.collect-amount) and the Schedule
 //   button the debit date (.collect-date; PLAN-012e-2 D3).
 // Nothing is sent from here but the read of the rent amount.
@@ -30,6 +30,7 @@
   var total = document.getElementById("id_lines-TOTAL_FORMS");
   var max = document.getElementById("id_lines-MAX_NUM_FORMS");
   var totalOut = document.getElementById("lines-total-value");
+  var summary = document.getElementById("summary-lines");
   if (!table || !button || !total) {
     return;
   }
@@ -70,22 +71,26 @@
     });
   }
 
-  function rentColumns() {
-    var shown = rows().some(function (row) {
-      return !row.hidden && row.dataset.kind === "rent";
-    });
-    table.classList.toggle("has-rent", shown);
-    table.querySelectorAll(".rent-col").forEach(function (cell) {
-      cell.hidden = !shown;
-    });
+  function summaryLine(item, amount) {
+    var entry = document.createElement("li");
+    var label = document.createElement("span");
+    var value = document.createElement("span");
+    label.className = "summary-name";
+    label.textContent = item || "Line";
+    value.className = "summary-amount";
+    value.textContent = money(amount);
+    entry.appendChild(label);
+    entry.appendChild(document.createTextNode(" "));
+    entry.appendChild(value);
+    return entry;
   }
 
   function refresh() {
-    rentColumns();
     var number = 0;
     var sum = 0;
+    var lines = [];
     rows().forEach(function (row) {
-      var cell = row.querySelector("td.line-number");
+      var cell = row.querySelector("td.line-total");
       if (row.hidden) {
         if (cell) {
           cell.textContent = "";
@@ -94,17 +99,25 @@
         return;
       }
       number += 1;
-      if (cell) {
-        cell.textContent = String(number);
-      }
       name(row, "Line " + number);
       var unit = cents((row.querySelector("input[name$='-unit_amount']") || {}).value);
       var quantityInput = row.querySelector("input[name$='-quantity']");
       var quantity = quantityInput && quantityInput.value.trim() !== "" ? cents(quantityInput.value) : 1;
-      sum += Math.round(unit * quantity * 100) / 100;
+      var line = Math.round(unit * quantity * 100) / 100;
+      sum += line;
+      if (cell) {
+        cell.textContent = money(line);
+      }
+      var item = (field(row, "item") || {}).value || "";
+      if (item.trim() !== "" || line > 0) {
+        lines.push(summaryLine(item.trim(), line));
+      }
     });
     if (totalOut) {
       totalOut.textContent = money(sum);
+    }
+    if (summary) {
+      summary.replaceChildren.apply(summary, lines);
     }
     document.querySelectorAll(".collect-amount").forEach(function (span) {
       span.textContent = money(sum);
@@ -150,6 +163,7 @@
     var trash = row.querySelector("button.line-trash");
     var plain = row.querySelector(".no-js-remove");
     var unit = field(row, "unit_amount");
+    var quantity = field(row, "quantity");
     var note = row.querySelector(".rent-text");
     var lastExisting = hidden ? hidden.value : "";
 
@@ -157,12 +171,12 @@
       var chosen = input ? option(input) : null;
       var kind = chosen ? chosen.dataset.kind || "item" : (input && key(input.value) !== "" ? "typed" : "");
       row.dataset.kind = kind;
-      row.querySelectorAll("td.rent-field").forEach(function (cell) {
-        cell.style.visibility = kind === "rent" ? "" : "hidden";
+      row.querySelectorAll(".rent-field").forEach(function (box) {
+        box.hidden = kind !== "rent";
       });
       if (save) {
-        var cell = save.closest("td") || save;
-        cell.style.visibility = kind === "typed" ? "" : "hidden";
+        var box = save.closest(".save-item") || save;
+        box.hidden = kind !== "typed";
         if (kind !== "typed") {
           save.checked = false;
         }
@@ -182,6 +196,9 @@
               unit.value = "";
             }
           }
+        }
+        if (quantity) {
+          quantity.readOnly = kind === "existing";
         }
         lastExisting = hidden.value;
       }

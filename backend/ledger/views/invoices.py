@@ -51,7 +51,7 @@ import re
 import uuid
 from collections.abc import Iterable
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 from django import forms
@@ -91,8 +91,8 @@ from ledger.models import (
 from ledger.services import contacts, detail_cards, invoice_builder, one_off_charges, workspace
 from ledger.services import stores as store_service
 from ledger.services.invoice_builder import CollectChoice
-from ledger.services.rent_run import CENT, ENTITY_INVOICE
 from ledger.services.rent_run import ENTITY_CHARGE as ENTITY_RENT_CHARGE
+from ledger.services.rent_run import ENTITY_INVOICE
 from ledger.validators import contains_card_number
 from ledger.views import store_context
 from ledger.views.detail_cards import activity_context
@@ -173,20 +173,16 @@ def _item_options(existing: Iterable[OneOffCharge]) -> list[dict[str, str]]:
 
 
 def _lines_total(formset: Any) -> Decimal:
-    """The total of the rows the form shows (the line total of each kept row: quantity,
-    empty 1, times the unit amount, rounded to the cent); a value that is not a number
-    counts as nothing. Rendered under the table and kept live by the script."""
-    total = Decimal("0.00")
-    for _, form in kept_rows(formset):
-        try:
-            unit = Decimal(str(form["unit_amount"].value() or "0"))
-            quantity = Decimal(str(form["quantity"].value() or "1"))
-            if not (unit.is_finite() and quantity.is_finite()) or unit <= 0 or quantity <= 0:
-                continue
-            total += (quantity * unit).quantize(CENT, rounding=ROUND_HALF_UP)
-        except InvalidOperation:
-            continue
-    return total
+    """The total of the rows the form shows: the sum of each kept row's
+    :func:`~ledger.services.invoice_builder.shown_line_total`. Rendered under the lines and
+    kept live by the script."""
+    return sum(
+        (
+            invoice_builder.shown_line_total(form["quantity"].value(), form["unit_amount"].value())
+            for _, form in kept_rows(formset)
+        ),
+        Decimal("0.00"),
+    )
 
 
 def _line_rows(formset: Any) -> list[dict[str, Any]]:
@@ -197,16 +193,6 @@ def _line_rows(formset: Any) -> list[dict[str, Any]]:
         {"form": form, "removed": id(form) not in numbers, "number": numbers.get(id(form))}
         for form in formset.forms
     ]
-
-
-def _lines_have_rent(formset: Any) -> bool:
-    """Whether a kept row's Item is Rent: the table then starts with its Rent columns
-    shown (PLAN-012e-3; ``ledger/invoice_lines.js`` keeps them in step afterwards)."""
-    rent = invoice_builder.catalogue_key(RENT_ITEM)
-    return any(
-        invoice_builder.catalogue_key(str(form["item"].value() or "")) == rent
-        for _, form in kept_rows(formset)
-    )
 
 
 def _renumber(message: str, numbers: list[int]) -> str:
@@ -568,7 +554,6 @@ def _new(
             "items_list_id": ITEMS_LIST_ID,
             "lines_total": _lines_total(formset),
             "line_rows": _line_rows(formset),
-            "lines_have_rent": _lines_have_rent(formset),
             "rent_amount_url": _rent_amount_url(operators),
             "errors": _error_items(errors, operators),
             "store_context": context,
@@ -774,7 +759,6 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
             "items_list_id": ITEMS_LIST_ID,
             "lines_total": _lines_total(formset) if formset is not None else None,
             "line_rows": _line_rows(formset) if formset is not None else [],
-            "lines_have_rent": formset is not None and _lines_have_rent(formset),
             "rent_amount_url": _rent_amount_url([draft.operator], draft),
             "errors": _error_items(errors, [draft.operator]),
             "editable": editable,

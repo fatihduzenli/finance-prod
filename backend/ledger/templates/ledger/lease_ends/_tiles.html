@@ -1,0 +1,6 @@
+{% load components money %}{% comment %}The statement's three tiles on --surface-2 (PLAN-012f-a D8; DESIGN-SPEC §4 Transfer wizard), from the figures: Open balance ("rent <days>, N of M days" when the end month is prorated), Deposit held ("collected <day>" when a settled payment of the deposit gives the day), Deductions (red above zero; "N lines"). The notes come from ledger.views.wizard_frame.statement_notes.{% endcomment %}
+<div class="kpi-row wizard-tiles" id="statement-tiles">
+  {% kpi "Open balance" figures.open_total|money open_note %}
+  {% kpi "Deposit held" figures.deposit_held|money deposit_note %}
+  {% if figures.deductions_total > 0 %}{% kpi "Deductions" figures.deductions_total|money deductions_note "unpaid" %}{% else %}{% kpi "Deductions" figures.deductions_total|money deductions_note %}{% endif %}
+</div>

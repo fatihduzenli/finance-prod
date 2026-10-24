@@ -721,7 +721,8 @@ def test_the_form_offers_the_catalogue_as_one_list_and_has_no_free_text(fake: Fa
         assert f'<option value="{nsf_name}">' not in page
         assert page.count('list="draft-items"') == page.count('class="draft-line"') > 0
         assert "Rent, an open charge, a catalogue item or a new name" in page
-        assert "<th>Item</th>" in page and "<th>Save as catalogue item</th>" in page
+        # PLAN-012f-a D5: the Save box sits under the Item box, labelled beside its tick.
+        assert "<th>Item</th>" in page and "</span>Save as catalogue item</label>" in page
         assert 'name="lines-0-save_item"' in page and "lines-0-fee_type" not in page
     form_source = (Path(__file__).parents[1] / "ledger" / "forms.py").read_text(encoding="utf-8")
     assert "Free text" not in form_source

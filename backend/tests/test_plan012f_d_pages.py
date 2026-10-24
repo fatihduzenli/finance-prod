@@ -699,7 +699,10 @@ def test_every_form_card_ends_in_one_primary_button(world: World) -> None:
     for name in FORM_PAGES:
         client = client_of(world, name, clients)
         body = client.get(path_of(world, name)).content.decode()
-        for card in re.findall(r'<section class="card form-card">(.*?)</section>', body, re.S):
+        # PLAN-012f-a D5: the form family's primary is in the summary card beside the cards.
+        blocks = re.findall(r'<section class="card form-card">(.*?)</section>', body, re.S)
+        blocks += re.findall(r'<aside class="form-summary"[^>]*>(.*?)</aside>', body, re.S)
+        for card in blocks:
             actions = re.findall(r'<div class="form-actions">(.*?)</div>', card, re.S)
             for block in actions:
                 found += 1

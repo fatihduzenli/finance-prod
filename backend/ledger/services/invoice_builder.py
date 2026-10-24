@@ -154,7 +154,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 
@@ -654,6 +654,22 @@ def _guarded(text: str) -> bool:
     except ValidationError:
         return False
     return True
+
+
+def shown_line_total(quantity: object, unit_amount: object) -> Decimal:
+    """A builder row's line total as the page shows it while it is typed (PLAN-012f-a D5;
+    the Lines card's Total column, the SUMMARY card's lines and the total under them): the
+    quantity (empty: 1) times the unit amount, rounded half up to the cent. A value that is
+    not a positive finite number, or a product too large to round, counts as nothing. A
+    display rule only: :func:`_clean_line` checks a line when it is saved."""
+    try:
+        unit = Decimal(str(unit_amount or "0"))
+        count = Decimal(str(quantity or "1"))
+        if not (unit.is_finite() and count.is_finite()) or unit <= 0 or count <= 0:
+            return Decimal("0.00")
+        return (count * unit).quantize(CENT, rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        return Decimal("0.00")
 
 
 def _clean_line(

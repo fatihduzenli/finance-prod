@@ -602,6 +602,160 @@ body.auth > #sandbox-banner { grid-column: 2; grid-row: 2; justify-self: center;
 .auth-main form th { padding-top: var(--space-3); }
 .auth-main img { display: block; margin: var(--space-3) 0; }
 
+/* --- Form and builder family (PLAN-012f-a D5) --------------------------------------------------
+   DESIGN-SPEC §4 Create invoice, create-invoice-laptop.png; New/Edit store, New/Edit lease, Add
+   payment (store, charge, one-off), New/Edit operator and the calendar form follow. The header
+   (.builder-head on the builder) holds the breadcrumb, the title with its muted context line
+   beside it (#known-fields, the store context) and the builder's .builder-note at the right. The
+   body, .form-layout (inside the form): the two-thirds .form-main (one .card per group: a section
+   with its 15/600 h2, or a fieldset.card whose legend is the heading) beside the one-third
+   aside.form-summary (the summary card with the one primary, .form-actions, full width). Lines
+   style (.lines-card): the builder's lines, the setup checklist and the allocation, the header on
+   the card. The builder: .rent-field (a Rent line's lease and month under its Item box),
+   .save-item, the line's .line-total, .add-line (dashed); How to collect's .collect-tiles two a
+   row, each .collect-tile a radio with its .collect-name and .collect-note and its choice's
+   .collect-fields, the chosen one on --surface-2 with a teal border; the SUMMARY card's
+   .summary-lines, .summary-total and Discard; the help card. On the phone (the phone block's
+   "Form and builder family" sub-section) one column in markup order and the primary fixed above
+   the tab bar. */
+.builder-head { align-items: flex-end; }
+.builder-note { margin: 0 0 3px auto; color: var(--muted); font-size: var(--fs-base); }
+.page-title-block:has(> h1 + #known-fields) { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: var(--space-4); }
+.page-title-block:has(> h1 + #known-fields) > .breadcrumb { grid-column: 1 / -1; }
+.page-title-block > h1 + #known-fields { margin: 0; font-size: var(--fs-base); }
+.form-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.form-main, .form-summary { min-width: 0; }
+.form-summary { position: sticky; top: var(--space-4); }
+.form-layout .form-card { max-width: none; }
+fieldset.card { min-width: 0; }
+fieldset.card > legend { float: left; width: 100%; margin: 0 0 var(--space-3); padding: 0; font-size: var(--fs-lg); font-weight: 600; }
+fieldset.card > legend + * { clear: both; }
+.form-summary .card { margin: 0 0 var(--space-4); }
+.form-summary .form-actions { flex-direction: column; align-items: stretch; margin: var(--space-4) 0 0; }
+.form-summary .card > .form-actions:first-child { margin-top: 0; }
+.form-summary .form-actions .btn { width: 100%; white-space: normal; }
+.form-summary .table-total { margin: 0; }
+/* Lines style. */
+.lines-card .table-scroll > table > thead th, .lines-card .table-scroll > table > thead th:first-child, .lines-card .table-cards > table > thead th { background: var(--surface); border-bottom: 0; padding-bottom: var(--space-1); }
+.lines-card .table-scroll { margin: 0 -6px; }
+#draft-lines td, #draft-lines th { padding: 6px; }
+#draft-lines td.line-item { min-width: 15rem; }
+#draft-lines td.line-description { width: 7rem; }
+#draft-lines td.line-quantity { width: 4.5rem; }
+#draft-lines td.line-unit { width: 8rem; }
+#draft-lines td.line-description input, #draft-lines td.line-quantity input, #draft-lines td.line-unit input { width: 100%; }
+#draft-lines td.line-quantity input, #draft-lines td.line-unit input { text-align: right; font-variant-numeric: tabular-nums; }
+#draft-lines input[readonly] { background: var(--surface-2); color: var(--muted); }
+#draft-lines input[type=number] { padding: 9px 10px; -moz-appearance: textfield; appearance: textfield; }
+#draft-lines input[type=number]::-webkit-inner-spin-button, #draft-lines input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+#draft-lines td.line-total { width: 6.5rem; padding-top: 16px; font-weight: 700; }
+#draft-lines td.line-remove { width: 1%; }
+#draft-lines .line-trash { min-height: 0; padding: 9px; color: var(--muted); }
+.rent-field { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
+.rent-field select { flex: 1 1 9rem; min-width: 0; }
+.save-item { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0; color: var(--text-2); font-size: var(--fs-sm); font-weight: 400; }
+.rent-field[hidden], .save-item[hidden], .add-line[hidden] { display: none; }
+.add-line-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: var(--space-4) 0 0; }
+.add-line-row p.help { flex: 1 1 16rem; margin: 0; }
+.add-line { border-style: dashed; color: var(--link); font-weight: 500; }
+/* How to collect. */
+.collect-card .collect-choices { display: block; min-width: 0; margin: 0; padding: 0; border: 0; }
+.collect-card .collect-choices legend { margin: 0 0 2px; padding: 0; font-size: var(--fs-lg); font-weight: 600; }
+.collect-card #collect-help { margin: 0 0 var(--space-3); }
+.collect-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.collect-tile { box-sizing: border-box; min-width: 0; padding: var(--space-3) 14px; border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); }
+.collect-tile:has(input[type=radio]:checked) { background: var(--surface-2); border-color: var(--teal); }
+@supports not selector(:has(*)) { .collect-tile.is-chosen { background: var(--surface-2); border-color: var(--teal); } }
+.collect-option { display: flex; align-items: flex-start; gap: 10px; margin: 0; font-weight: 400; cursor: pointer; }
+.collect-option input[type=radio] { flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--btn-primary-bg); }
+.collect-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.collect-name { color: var(--text); font-size: var(--fs-md); font-weight: 700; }
+.collect-note { color: var(--muted); font-size: var(--fs-sm); }
+.collect-fields { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); margin: 0 0 0 23px; }
+.collect-fields .field { flex: 1 1 8rem; min-width: 0; margin: var(--space-2) 0 0; }
+.collect-fields .field:has(textarea), .collect-fields .field:has(input[type=checkbox]) { flex-basis: 100%; }
+.collect-fields .field > label { margin: 0 0 var(--space-1); font-size: var(--fs-sm); }
+.collect-fields .field input:not([type=checkbox]), .collect-fields .field select, .collect-fields .field textarea { width: 100%; }
+.collect-card #collect-schedule-note { margin: var(--space-3) 0 0; }
+/* SUMMARY and the help card. */
+.summary-lines { list-style: none; margin: 0; padding: 0; font-size: var(--fs-base); }
+.summary-lines li { display: flex; justify-content: space-between; gap: var(--space-3); padding: 3px 0; }
+.summary-name { min-width: 0; overflow-wrap: anywhere; }
+.summary-amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.summary-total { display: flex; justify-content: space-between; gap: var(--space-3); margin: var(--space-3) 0 0; padding: var(--space-3) 0 0; border-top: 1px solid var(--border-soft); font-size: var(--fs-lg); font-weight: 700; font-variant-numeric: tabular-nums; }
+.summary-card .field > label { margin-top: var(--space-3); }
+.summary-discard { width: 100%; margin: var(--space-2) 0 0; color: var(--text-2); font-weight: 500; }
+.builder-help { background: transparent; }
+.builder-help p.help { margin: 0; }
+
+/* --- Wizard frame (PLAN-012f-a D8) -------------------------------------------------------------
+   DESIGN-SPEC §4 Transfer wizard, transfer-wizard-laptop.png; End lease on the same frame
+   (ledger/lease_ends/_wizard.html). The header (.wizard-head) carries the right-aligned muted
+   .wizard-progress, "Step N of M · nothing changes until you confirm". .wizard: two columns, the
+   260 px aside.wizard-steps-card on the left (drawn there by the grid; it follows the main column
+   in markup) and .wizard-main: the step's card (.wizard-card, or a confirm step's .confirm) with
+   its 17/600 .wizard-title and muted .wizard-help, then .wizard-footer (← Back and the step's
+   primary, right-aligned; inside the card on a confirm step, its danger button filled red). The
+   step card: the vertical .steps (a done step's circle green with ✓, the paid pair; the current
+   one teal with its number, the primary button's pair, and a bold label; a later one outlined
+   with a muted label), the divider and .wizard-context, the red text-link cancel (.wizard-cancel) and its note. The statement step:
+   .wizard-tiles (three .kpi on --surface-2), the section labels, the deduction rows (the amount
+   right-aligned, the trash .deduction-clear, the dashed .add-deduction; a [hidden] row or control
+   is not drawn) and the SETTLEMENT box (.settlement-box, its .settle-row lines, the final row
+   green .settle-refund or red .settle-owed). On the phone (the phone block's "Wizard frame"
+   sub-section) one column in markup order, the step line above the card, the footer sticky. */
+.wizard-head { align-items: flex-end; }
+.wizard-progress { margin: 0 0 4px auto; color: var(--muted); font-size: var(--fs-base); }
+.wizard { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.wizard-main { grid-column: 2; grid-row: 1; min-width: 0; }
+.wizard-steps-card { grid-column: 1; grid-row: 1; margin: 0; padding: var(--space-5) 18px; }
+.wizard-steps-card .steps { flex-direction: column; flex-wrap: nowrap; gap: 0; margin: 0; }
+.wizard-steps-card .steps li { display: flex; align-items: center; gap: 10px; padding: var(--space-2) 0; border: 0; border-radius: 0; background: none; color: var(--muted); font-size: var(--fs-md); line-height: 1.25; }
+.wizard-steps-card .steps li::before { content: counter(step); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; box-sizing: border-box; width: 24px; height: 24px; border: 1px solid var(--input-border); border-radius: 50%; background: var(--surface); color: var(--muted); font-size: var(--fs-sm); font-weight: 600; }
+.wizard-steps-card .steps li.step-done { color: var(--text-2); }
+.wizard-steps-card .steps li.step-done::before { content: "\2713"; content: "\2713" / ""; border-color: var(--paid-text); background: var(--paid-bg); color: var(--paid-text); font-weight: 700; }
+.wizard-steps-card .steps li[aria-current="step"] { background: none; color: var(--text); }
+.wizard-steps-card .steps li[aria-current="step"]::before { border-color: var(--btn-primary-border); background: var(--btn-primary-bg); color: var(--surface); }
+.wizard-steps-card .steps li strong { font-weight: 700; }
+.wizard-steps-card .steps li a { color: inherit; text-decoration: none; }
+.wizard-steps-card .steps li a:hover { text-decoration: underline; }
+.wizard-context { margin: var(--space-3) 0 0; padding: var(--space-4) 0 0; border-top: 1px solid var(--border-soft); font-size: var(--fs-base); }
+.wizard-context p { margin: 0 0 2px; }
+.wizard-cancel { margin: var(--space-3) 0 0; }
+.link-action.danger { color: var(--unpaid-text); }
+.wizard-cancel-note { margin: 2px 0 0; font-size: var(--fs-sm); }
+.wizard-main > .wizard-card, .wizard-main > .confirm { margin: 0 0 var(--space-4); padding: 22px var(--space-6); }
+.wizard-main .wizard-title, .wizard-main > .confirm > .confirm-question { margin: 0 0 2px; font-size: 17px; font-weight: 600; }
+.wizard-help { margin: 0 0 var(--space-5); font-size: var(--fs-base); }
+.wizard-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-2); }
+.confirm > .wizard-footer { margin: var(--space-5) 0 0; }
+.wizard-footer .btn-danger { background: var(--unpaid-text); border-color: var(--unpaid-text); color: var(--surface); }
+.wizard-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin: 0 0 var(--space-5); }
+.wizard-tiles .kpi { gap: 2px; padding: var(--space-3) 14px; background: var(--surface-2); }
+.wizard-tiles .kpi-value { font-size: 20px; }
+.wizard-card h2.section-label, .wizard-card #statement-figures h2 { margin: var(--space-5) 0 var(--space-2); color: var(--muted); font-size: var(--fs-base); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+#deduction-rows td { vertical-align: middle; }
+#deduction-rows td.line-number { width: 1%; color: var(--muted); }
+#deduction-rows td select, #deduction-rows td input { width: 100%; box-sizing: border-box; }
+#deduction-rows .deduction-amount { width: 9rem; }
+#deduction-rows .deduction-amount input { text-align: right; font-variant-numeric: tabular-nums; }
+#deduction-rows .deduction-clear-cell { width: 1%; }
+#deduction-rows tr.deduction-row[hidden], .add-deduction[hidden], .deduction-clear[hidden] { display: none; }
+.deduction-clear { padding: 8px; color: var(--muted); }
+.deduction-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
+.deduction-foot .table-total { margin: 0 0 0 auto; }
+.add-deduction { border-style: dashed; color: var(--link); font-weight: 500; }
+.settlement-box { display: block; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-ctl); overflow: hidden; }
+.settle-row { display: flex; justify-content: space-between; gap: var(--space-3); padding: 10px 14px; border-top: 1px solid var(--border-soft); font-size: var(--fs-base); }
+.settle-row:first-child { border-top: 0; }
+.settle-row dt { font-weight: 400; }
+.settle-row dd { margin: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.settle-final { padding: var(--space-3) 14px; font-size: 16px; font-weight: 700; }
+.settle-final dt { font-weight: 700; }
+.settle-refund { background: var(--paid-bg); color: var(--paid-text); }
+.settle-owed { background: var(--unpaid-bg); color: var(--unpaid-text); }
+.settlement-help { margin: var(--space-2) 0 0; font-size: var(--fs-sm); }
+
 /* --- 720px and wider: the tables' head row stays in view (PLAN-012c D5) -------------------- */
 @media (min-width: 720px) {
   /* The tables of the workspace and dashboard cards reach the cards' edges (PLAN-012f D7, D8). */
@@ -711,6 +865,37 @@ body.auth > #sandbox-banner { grid-column: 2; grid-row: 2; justify-self: center;
   .auth-headline { margin: 0; font-size: 20px; }
   body.auth > #sandbox-banner { grid-column: 1; grid-row: 2; margin: var(--space-4) 0; }
   .auth-main { grid-column: 1; grid-row: 3; align-self: start; }
+  /* Form and builder family (PLAN-012f-a D5): one column in markup order (the builder's SUMMARY
+     after How to collect), the tiles one a row; the summary card's primary is fixed above the tab
+     bar (a sticky one would stay inside its card), the form keeping room for it at the bottom; a
+     summary card that holds the button alone gives way to it. */
+  .form-layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding-bottom: 72px; }
+  .form-summary .form-actions { position: fixed; left: 0; right: 0; bottom: calc(90px + env(safe-area-inset-bottom)); margin: 0; padding: var(--space-3) var(--space-4); }
+  .form-summary .actions-only { display: contents; }
+  .form-summary { position: static; }
+  .builder-head { align-items: flex-start; }
+  .builder-note { margin-left: 0; }
+  .page-title-block:has(> h1 + #known-fields) { grid-template-columns: minmax(0, 1fr); }
+  .collect-tiles { grid-template-columns: minmax(0, 1fr); }
+  .collect-fields { margin-left: 0; }
+  /* Wizard frame (PLAN-012f-a D8; DESIGN-SPEC §6): one column in markup order (the step line and
+     its bar, the card, the footer, then the step card with the context and the cancel, its list
+     hidden by the .steps rule above); the footer kept in view above the tab bar. */
+  .wizard { display: block; }
+  .wizard-head { align-items: flex-start; }
+  .wizard-progress { margin: 0; }
+  .wizard-main > .wizard-card, .wizard-main > .confirm { padding: 18px var(--space-4); }
+  .wizard-steps-card { margin: var(--space-4) 0 0; }
+  .wizard-context { margin: 0; padding: 0; border-top: 0; }
+  .wizard-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+  .wizard-tiles .kpi { padding: 10px; }
+  .wizard-tiles .kpi-value { font-size: var(--fs-lg); }
+  .wizard-card .form-actions { position: static; margin: var(--space-4) 0 0; padding: 0; border-top: 0; }
+  .wizard-footer { position: sticky; bottom: calc(90px + env(safe-area-inset-bottom)); z-index: 5; margin: 0 calc(-1 * var(--space-4)); padding: var(--space-3) var(--space-4); background: var(--surface); border-top: 1px solid var(--border-soft); }
+  .confirm > .wizard-footer { margin: var(--space-4) calc(-1 * var(--space-4)) 0; }
+  .wizard-footer .btn { flex: 1 1 auto; }
+  .settle-final { font-size: var(--fs-md); }
+  #deduction-rows .deduction-amount, #deduction-rows .deduction-clear-cell { width: auto; }
 }
 
 /* --- List family (PLAN-012f-a D3) ------------------------------------------------------------

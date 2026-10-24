@@ -200,9 +200,10 @@ def test_without_javascript_how_to_collect_shows_every_field_and_button(
         assert page.locator(control).is_visible(), control
     for button in ("#save-draft", "#send-draft", "#schedule-draft", "#record-draft"):
         assert page.locator(button).is_visible(), button
-    # PLAN-012e-3: without the script the Rent columns stay visible (the region scrolls).
-    assert page.locator("#draft-lines th.rent-col").first.is_visible()
+    # Without the script a row's Rent selects stay visible under its Item box (PLAN-012f-a
+    # D5; the Rent columns of PLAN-012e-3 before it).
     assert page.locator("#id_lines-0-rent_lease").is_visible()
+    assert page.locator("#id_lines-0-rent_month").is_visible()
 
 
 def _reference_label(page: Page) -> str:
@@ -270,21 +271,20 @@ def test_the_draft_page_is_no_wider_than_a_laptop_viewport(
         region = page.locator(".table-scroll:has(> #draft-lines)")
         assert region.count() == 1
         assert page.evaluate("document.documentElement.scrollWidth") == 1280
-        # No line is Rent: the Rent columns are collapsed and line 1's amount is on screen.
-        rent_header = page.locator("#draft-lines th.rent-col").first
-        assert not rent_header.is_visible()
+        # No line is Rent: its Rent selects are hidden and line 1's amount is on screen.
+        rent_month = page.locator("#id_lines-0-rent_month")
+        assert not rent_month.is_visible()
         assert page.locator("#draft-lines").get_attribute("class") in (None, "")
         unit_right = page.evaluate(
             "document.getElementById('id_lines-0-unit_amount').getBoundingClientRect().right"
         )
         assert 0 < unit_right <= 1280
-        # Choosing Rent on a line opens the columns; another item closes them again.
+        # Choosing Rent on a line shows its selects under its Item box; another item hides them.
         page.fill("#id_lines-0-item", "Rent")
-        assert rent_header.is_visible()
-        assert page.locator("#id_lines-0-rent_month").is_visible()
+        assert rent_month.is_visible() and page.locator("#id_lines-0-rent_lease").is_visible()
         assert page.evaluate("document.documentElement.scrollWidth") == 1280
         page.fill("#id_lines-0-item", "Sign repair")
-        assert not rent_header.is_visible()
+        assert not rent_month.is_visible()
         # The builder's script still runs on the table inside the region.
         assert page.locator("#add-line").is_visible()
         rows = page.locator("#draft-lines tr.draft-line:visible").count()

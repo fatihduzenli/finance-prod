@@ -1,49 +1,41 @@
-{% comment %}The draft's header and lines (PLAN-012 D6; PLAN-012b D2; PLAN-012d D10: one Item box per
-line on one list that starts with Rent, then the lease's existing open charges, then the catalogue
-items; a Rent line shows its lease and month selects, filled from the rent-amount endpoint by the
-script). Without script the form shows its rows, every field, a Save box and a Remove box per row;
-ledger/invoice_lines.js adds rows, removes a row with its trash button (DELETE set, the row hidden),
-numbers the visible rows, keeps the total live, shows the Save box only on a typed item and the
-lease and month only on a Rent line. Each control has a visually hidden label naming its line and
-column (_line_label.html). The table sits in the scroll region (PLAN-012e-3 D5), so a wide table
-scrolls inside it and the page stays within the viewport. The two Rent columns (.rent-col) are
-collapsed by the script while no line is Rent (the table's has-rent class, set here too when a
-saved line is Rent); without the script they stay visible.{% endcomment %}
-{% load responsive money %}
+{% comment %}The builder's Lines card (PLAN-012 D6; PLAN-012b D2; PLAN-012d D10; PLAN-012f-a D5,
+create-invoice-laptop.png): one Item box per line on one list that starts with Rent, then the
+lease's existing open charges, then the catalogue items; a Rent line's lease and month selects
+sit under its Item box (.rent-field), filled from the rent-amount endpoint by the script; the
+Save box under the Item box; then Description, Qty, Unit amount, Total (the row's line total,
+|line_total) and the trash. Without script the form shows its rows, every field and a Remove
+box per row; ledger/invoice_lines.js adds rows ("+ Add line"), removes a row with its trash
+button (DELETE set, the row hidden), keeps the line totals, the SUMMARY card's lines and the
+total live, shows the Save box only on a typed item, the lease and month only on a Rent line,
+and an existing charge's quantity and amount read-only. Each control has a visually hidden
+label naming its line and column (_line_label.html; the Save box's label names its line the
+same way). The table sits in the scroll region (PLAN-012e-3 D5), so a wide table scrolls inside
+it and the page stays within the viewport. The memo and the due date are in the SUMMARY card
+(_summary.html).{% endcomment %}
+{% load responsive money builder icons %}
+<section class="card lines-card" id="draft-card">
+<h2>Lines</h2>
 {% if errors %}<ul class="errorlist" id="draft-errors">{% for error in errors %}<li>{{ error.text }}{% if error.url %}<a href="{{ error.url }}" class="draft-link">{{ error.number }}</a>{{ error.after }}{% endif %}</li>{% endfor %}</ul>{% endif %}
 {{ form.creation_key }}
-{% if form.lease.is_hidden %}{{ form.lease }}{% else %}
-<label for="{{ form.lease.id_for_label }}">{{ form.lease.label }}{% if form.lease.field.required %} *{% endif %}</label>
-{{ form.lease }}{% endif %}
-<label for="{{ form.memo.id_for_label }}">{{ form.memo.label }}</label>
-{{ form.memo }}
-<br><span class="muted">{{ form.memo.help_text }}</span>
-<label for="{{ form.due_date.id_for_label }}">{{ form.due_date.label }}</label>
-{{ form.due_date }}
-<br><span class="muted">{{ form.due_date.help_text }}</span>
-<h2>Lines</h2>
-<p class="help" id="lines-help">Item: Rent, an open charge of the lease, a catalogue item or a new name; the line total is the quantity (empty: 1) times the unit amount. Learn more: <a href="{% url 'finance:help_topic' slug='invoice-lines' %}">The lines of an invoice</a></p>
+{% if form.lease.is_hidden %}{{ form.lease }}{% else %}{% include "ledger/stores/_form_field.html" with field=form.lease %}{% endif %}
 {{ formset.management_form }}
 <datalist id="{{ items_list_id }}">{% for option in item_options %}<option value="{{ option.value }}"{% if option.kind != "item" %} data-kind="{{ option.kind }}"{% endif %}{% if option.charge %} data-charge="{{ option.charge }}" data-balance="{{ option.balance }}"{% endif %}></option>{% endfor %}</datalist>
 {% responsive_table "scroll" %}
-<table id="draft-lines" data-rent-amount-url="{{ rent_amount_url }}"{% if lines_have_rent %} class="has-rent"{% endif %}>
-  <thead><tr><th>Line</th><th>Item</th><th class="rent-col">Rent: lease</th><th class="rent-col">Rent: month</th><th>Description</th><th>Quantity</th><th>Unit amount</th><th>Save as catalogue item</th><th>Remove</th></tr></thead>
+<table id="draft-lines" data-rent-amount-url="{{ rent_amount_url }}">
+  <thead><tr><th>Item</th><th>Description</th><th class="money">Qty</th><th class="money">Unit amount</th><th class="money">Total</th><th><span class="visually-hidden">Remove</span></th></tr></thead>
   <tbody>
     {% for row in line_rows %}
       <tr class="draft-line"{% if row.removed %} hidden{% endif %}>
-        <td class="line-number">{{ row.number|default_if_none:"" }}</td>
-        <td class="line-item">{% include "ledger/invoices/_line_label.html" with field=row.form.item column="item" %}{{ row.form.item }}{{ row.form.existing_charge }}<span class="muted rent-text"></span></td>
-        <td class="rent-field rent-col">{% include "ledger/invoices/_line_label.html" with field=row.form.rent_lease column="rent lease" %}{{ row.form.rent_lease }}</td>
-        <td class="rent-field rent-col">{% include "ledger/invoices/_line_label.html" with field=row.form.rent_month column="rent month" %}{{ row.form.rent_month }}</td>
-        <td>{% include "ledger/invoices/_line_label.html" with field=row.form.description column="description" %}{{ row.form.description }}</td>
-        <td>{% include "ledger/invoices/_line_label.html" with field=row.form.quantity column="quantity" %}{{ row.form.quantity }}</td>
-        <td>{% include "ledger/invoices/_line_label.html" with field=row.form.unit_amount column="unit amount" %}{{ row.form.unit_amount }}</td>
-        <td class="save-item">{% include "ledger/invoices/_line_label.html" with field=row.form.save_item column="save as catalogue item" %}{{ row.form.save_item }}</td>
-        <td class="line-remove"><span class="no-js-remove">{% include "ledger/invoices/_line_label.html" with field=row.form.DELETE column="remove" %}{{ row.form.DELETE }}</span><button class="btn line-trash js-only" type="button" aria-label="Remove line" title="Remove line" hidden><svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M6 1h4l1 1h3v2H2V2h3l1-1zM3 5h10l-1 10H4L3 5zm3 2v6h1V7H6zm3 0v6h1V7H9z"/></svg></button></td>
+        <td class="line-item">{% include "ledger/invoices/_line_label.html" with field=row.form.item column="item" %}{{ row.form.item }}{{ row.form.existing_charge }}<span class="muted rent-text"></span><div class="rent-field">{% include "ledger/invoices/_line_label.html" with field=row.form.rent_lease column="rent lease" %}{{ row.form.rent_lease }}{% include "ledger/invoices/_line_label.html" with field=row.form.rent_month column="rent month" %}{{ row.form.rent_month }}</div><label class="save-item" for="{{ row.form.save_item.id_for_label }}">{{ row.form.save_item }} <span class="visually-hidden"><span class="line-name">{% if row.removed %}Removed line{% else %}Line {{ row.number }}{% endif %}</span>, </span>{{ row.form.save_item.label }}</label></td>
+        <td class="line-description">{% include "ledger/invoices/_line_label.html" with field=row.form.description column="description" %}{{ row.form.description }}</td>
+        <td class="money line-quantity">{% include "ledger/invoices/_line_label.html" with field=row.form.quantity column="quantity" %}{{ row.form.quantity }}</td>
+        <td class="money line-unit">{% include "ledger/invoices/_line_label.html" with field=row.form.unit_amount column="unit amount" %}{{ row.form.unit_amount }}</td>
+        <td class="money line-total">{% if not row.removed %}{{ row.form|line_total|money }}{% endif %}</td>
+        <td class="line-remove"><span class="no-js-remove">{% include "ledger/invoices/_line_label.html" with field=row.form.DELETE column="remove" %}{{ row.form.DELETE }}</span><button class="btn line-trash js-only" type="button" aria-label="Remove line" title="Remove line" hidden>{% icon "trash" 16 %}</button></td>
       </tr>
     {% endfor %}
   </tbody>
 </table>
 {% endresponsive_table %}
-<p class="table-total" id="lines-total">Invoice total: <span id="lines-total-value">{{ lines_total|money }}</span></p>
-<p class="actions"><button class="btn js-only" type="button" id="add-line" hidden>Add line</button></p>
+<div class="add-line-row"><button class="btn add-line js-only" type="button" id="add-line" hidden>{% icon "plus" 16 %} Add line</button><p class="help" id="lines-help">Item: Rent, an open charge of the lease, a catalogue item or a new name; the line total is the quantity (empty: 1) times the unit amount. Learn more: <a href="{% url 'finance:help_topic' slug='invoice-lines' %}">The lines of an invoice</a></p></div>
+</section>

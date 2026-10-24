@@ -1,16 +1,12 @@
 {% extends "finance/base.html" %}
 {% load static %}
 {% block title %}{{ heading }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if store_context %}{% include "ledger/_store_crumb.html" with crumb_store=store_context.store %}{% elif crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif crumb_operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{{ back }}">{{ crumb_operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">New invoice</span></nav><h1>{{ heading }}</h1></div></div>{% endblock %}
+{% comment %}The invoice builder for a new draft (PLAN-012f-a D5, create-invoice-laptop.png): the header's breadcrumb, the title with the muted context line (the store and lease it was opened from, else the operator) and, at the right, the one muted line that nothing is sent before a choice is made; then the builder (_builder.html), whose Discard goes back to where the builder was opened.{% endcomment %}
+{% block header %}<div class="page-header builder-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if store_context %}{% include "ledger/_store_crumb.html" with crumb_store=store_context.store %}{% elif crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif crumb_operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{{ back }}">{{ crumb_operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">New invoice</span></nav><h1 class="store-title">New invoice</h1>{% if store_context %}{% include "ledger/_store_context.html" %}{% elif crumb_store %}<p class="muted" id="known-fields">Store {{ crumb_store.external_label }}</p>{% elif crumb_operator %}<p class="muted" id="known-fields">{{ crumb_operator.display_name }}</p>{% endif %}</div><p class="builder-note" id="builder-note">Draft · nothing reaches {{ company.provider_name }} until you choose how to collect</p></div>{% endblock %}
 {% block content %}
-  <section class="card" id="draft-card">
-  {% include "ledger/_store_context.html" %}
-  <p class="muted">A draft stays here until it is sent: nothing reaches {{ company.provider_name }} before it is collected.</p>
   <form method="post" id="draft-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
-    {% include "ledger/invoices/_draft_form.html" %}
-    {% include "ledger/invoices/_collect.html" %}
+    {% include "ledger/invoices/_builder.html" with discard_url=back discard_id="builder-discard" %}
   </form>
-  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/invoice_lines.js' %}" defer></script>{% endblock %}

@@ -2,20 +2,25 @@
 {% load static money dates %}
 {% load responsive %}
 {% block title %}Add payment: store {{ store.external_label }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store crumb_query="?tab=payments#tab-payments" %}<span aria-current="page">Add payment</span></nav><h1>Add payment</h1></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=store crumb_query="?tab=payments#tab-payments" %}<span aria-current="page">Add payment</span></nav><h1>Add payment</h1><p class="muted" id="known-fields">Store {{ store.external_label }} · {% if lease.started_on %}Lease from {{ lease.started_on|day }}{% else %}Lease{% endif %}{% if lease.operator %} · Operator {{ lease.operator.display_name }}{% endif %}</p></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
-  <p class="muted" id="known-fields">Store {{ store.external_label }} · {% if lease.started_on %}Lease from {{ lease.started_on|day }}{% else %}Lease{% endif %}{% if lease.operator %} · Operator {{ lease.operator.display_name }}{% endif %}</p>
-  <p class="muted">A payment received by Zelle, wire, check or another way outside {{ company.provider_name }}. Enter what was received once, then type how much of it pays each open charge below. The allocations must add up to the amount received, or the rest is kept as a credit on the lease. Each charge's invoice is marked paid in {{ company.provider_name }} once its charge is fully covered; a partial payment is marked Needs review.</p>
+  {% comment %}The form family (PLAN-012f-a D5): the Payment card, the Allocation card in the Lines style, beside the summary card with the unallocated line and the one primary.{% endcomment %}
   <form method="post" id="allocation-form" class="js-single-submit js-allocation" autocomplete="off">
     {% csrf_token %}
-    {{ form.non_field_errors }}
     {{ form.creation_key }}
+    <div class="form-layout">
+    <div class="form-main">
+    <section class="card form-card" id="payment-card">
+    <h2>Payment</h2>
+    <p class="muted">A payment received by Zelle, wire, check or another way outside {{ company.provider_name }}. Enter what was received once, then type how much of it pays each open charge below. The allocations must add up to the amount received, or the rest is kept as a credit on the lease. Each charge's invoice is marked paid in {{ company.provider_name }} once its charge is fully covered; a partial payment is marked Needs review.</p>
+    {{ form.non_field_errors }}
     {% include "ledger/stores/_form_field.html" with field=form.method %}
     {% include "ledger/stores/_form_field.html" with field=form.amount %}
     {% include "ledger/stores/_form_field.html" with field=form.paid_on %}
     {% include "ledger/stores/_form_field.html" with field=form.reference %}
     {% include "ledger/stores/_form_field.html" with field=form.note %}
+    </section>
+    <section class="card form-card lines-card" id="allocation-card">
     <h2>Allocation</h2>
     {% if credit_held %}<p id="credit-held">Credit on the lease: <strong>{{ credit_held|money }}</strong>. Type in "From credit" how much of it pays a charge; it is applied as a payment of method credit.</p>{% endif %}
     {% responsive_table %}
@@ -37,14 +42,20 @@
       </tbody>
     </table>
     {% endresponsive_table %}
-    <p id="unallocated-line">Unallocated: <strong id="unallocated">{{ unallocated|money }}</strong> <span class="muted">(the amount received less the allocations; checked again when saved)</span></p>
     {% comment %}PLAN-012c D8: the keep-credit tick only while something is unallocated (ledger/payment_allocation.js hides it, and does not send it, otherwise); without the script it stays visible, and the server checks it as before.{% endcomment %}
     <div id="keep-credit-field"{% if form.keep_credit.errors %} class="has-error"{% endif %}>
     {{ form.keep_credit.errors }}
     <p><label for="{{ form.keep_credit.id_for_label }}">{{ form.keep_credit }} Keep <span id="keep-credit-amount">the unallocated amount</span> as a credit on the lease</label><br><span class="muted">A credit is held for the operator, never revenue: it can pay a charge later from this form, or is refunded at the lease end.</span></p>
     </div>
-    <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-payment">Add payment</button></div>
+    </section>
+    </div>
+    <aside class="form-summary" aria-label="Save">
+      <section class="card summary-card">
+      <p id="unallocated-line">Unallocated: <strong id="unallocated">{{ unallocated|money }}</strong> <span class="muted">(the amount received less the allocations; checked again when saved)</span></p>
+      <div class="form-actions"><button class="btn btn-primary" type="submit" id="save-payment">Add payment</button></div>
+      </section>
+    </aside>
+    </div>
   </form>
-  </section>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/payment_allocation.js' %}" defer></script>{% endblock %}

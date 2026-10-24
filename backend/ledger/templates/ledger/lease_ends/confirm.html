@@ -1,11 +1,10 @@
-{% extends "finance/base.html" %}
+{% extends "ledger/lease_ends/_wizard.html" %}
 {% block title %}End lease {{ store.external_label }}: confirm{% endblock %}
-{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
-{% block content %}
-  {% include "ledger/lease_ends/_steps.html" %}
-  <p class="muted" id="step-help">Read what will happen and check the box; this cannot be undone from here.</p>
+{% block step_card %}
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <p class="muted wizard-help" id="step-help">Read what will happen and check the box; this cannot be undone from here.</p>
+  {% include "ledger/lease_ends/_tiles.html" %}
   <div class="confirm-what">
   <h3>What will happen</h3>
   <ul id="effects">
@@ -20,9 +19,10 @@
     {{ form.non_field_errors }}
     {{ form.confirmed.errors }}
     <label for="{{ form.confirmed.id_for_label }}">{{ form.confirmed }} {{ form.confirmed.label }}</label>
-    <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-lease-end">End the lease</button></p>
   </form>
-  {% include "ledger/lease_ends/_cancel.html" %}
+  <div class="wizard-footer" id="wizard-footer">
+    <a class="btn" href="{{ step_back }}" id="wizard-back">← Back</a>
+    <button class="btn btn-danger" type="submit" form="lease-end-confirm" id="confirm-lease-end">End the lease</button>
+  </div>
   </section>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

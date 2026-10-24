@@ -1,11 +1,9 @@
-{% extends "finance/base.html" %}
+{% extends "ledger/lease_ends/_wizard.html" %}
 {% block title %}Transfer store {{ store.external_label }}: incoming operator{% endblock %}
-{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
-{% block content %}
-  {% include "ledger/lease_ends/_steps.html" %}
-  <section class="card wizard-card">
-  <p class="muted" id="step-help">Find the operator who takes the store over by name and choose them, or create a new operator below. An archived operator or the current one cannot be chosen.</p>
-  {% if transfer.incoming_operator %}<p id="chosen-operator">Chosen: <strong>{{ transfer.incoming_operator.display_name }}</strong>. <a href="{% url 'ledger:transfers:end' pk=transfer.pk %}">Continue</a></p>{% endif %}
+{% block step_title %}Incoming operator{% endblock %}
+{% block step_body %}
+  <p class="muted wizard-help" id="step-help">Find the operator who takes the store over by name and choose them, or create a new operator below. An archived operator or the current one cannot be chosen.</p>
+  {% if transfer.incoming_operator %}<p id="chosen-operator">Chosen: <strong>{{ transfer.incoming_operator.display_name }}</strong>.</p>{% endif %}
   <form method="get" id="operator-search">
     <label for="operator-query">Operator name</label>
     <input type="search" name="q" id="operator-query" value="{{ query }}" maxlength="200">
@@ -27,7 +25,7 @@
       {% endfor %}
     </ul>
   {% endif %}
-  <h2>New operator</h2>
+  <h2 class="section-label">New operator</h2>
   <p class="muted">With an e-mail address, saving also connects or creates the operator's customer in {{ company.provider_name }}, as on the operator form.</p>
   <form method="post" id="operator-create" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
@@ -37,9 +35,7 @@
     {% for field in create_form.visible_fields %}
       {% include "ledger/stores/_form_field.html" with hide_help=True %}
     {% endfor %}
-    <div class="form-actions"><button class="btn btn-primary" type="submit" id="create-operator">Save and choose</button></div>
+    <div class="form-actions"><button class="btn{% if not transfer.incoming_operator %} btn-primary{% endif %}" type="submit" id="create-operator">Save and choose</button></div>
   </form>
-  </section>
-  {% include "ledger/lease_ends/_cancel.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block step_primary %}{% if transfer.incoming_operator %}<a class="btn btn-primary" href="{% url 'ledger:transfers:end' pk=transfer.pk %}" id="continue">Continue →</a>{% endif %}{% endblock %}

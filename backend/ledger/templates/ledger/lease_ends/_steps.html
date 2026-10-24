@@ -1,12 +1,15 @@
-{% load components dates %}{% comment %}Under a wizard step's header (PLAN-012c D5, PLAN-012f D10): the lease the wizard ends, the step list as pills (.steps; a reachable step is a link, the current one aria-current="step", a step before it done) and, on a phone in their place, "Step 2 of 7 · Statement" with its bar ({% step_line %}). The way back to the store is the header's breadcrumb.{% endcomment %}
-{% if transfer %}
-<p class="muted" id="transfer-banner">Ending the lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|day|default:"no start date" }}, so that {{ transfer.incoming_operator.display_name|default:"the incoming operator" }} can take the store over.</p>
-{% else %}
-<p class="muted">Lease of {{ lease.operator.display_name|default:"no operator" }} from {{ lease.started_on|day|default:"no start date" }}.</p>
-{% endif %}
+{% load components dates %}{% comment %}The wizard's step card (PLAN-012c D5, PLAN-012f D10, PLAN-012f-a D8; DESIGN-SPEC §4 Transfer wizard), inside aside.wizard-steps-card of ledger/lease_ends/_wizard.html: the vertical step list (.steps; a done step a green circle with ✓ and a muted label, linked; the current one a teal circle with its number, a bold label and aria-current="step"; a later one an outlined circle with its number, linked only where it can be opened), a divider, the context lines ("outgoing → incoming" for a transfer, the lease for an end; "Lease ends <day>" once the end date is set) and the red "Cancel the transfer" / "Cancel the lease end" (ledger/lease_ends/_cancel.html). On a phone the list gives way to "Step 2 of 7 · Statement" and its bar ({% step_line %}, above the card).{% endcomment %}
 <ol class="wizard-steps steps" id="wizard-steps" aria-label="Steps">
   {% for label, url, is_current, done in step_links|with_done %}
-    <li{% if done %} class="step-done"{% endif %}{% if is_current %} aria-current="step"{% endif %}>{% if is_current %}<strong>{{ label }}</strong>{% elif url %}<a href="{{ url }}">{{ label }}</a>{% else %}{{ label }}{% endif %}{% if done %}<span class="visually-hidden"> (done)</span>{% endif %}</li>
+    <li{% if done %} class="step-done"{% endif %}{% if is_current %} aria-current="step"{% endif %}>{% if is_current %}<strong>{{ label }}</strong>{% elif url %}<a href="{{ url }}">{{ label }}</a>{% else %}<span>{{ label }}</span>{% endif %}{% if done %}<span class="visually-hidden"> (done)</span>{% endif %}</li>
   {% endfor %}
 </ol>
-{% step_line step_links %}
+<div class="wizard-context" id="wizard-context">
+  {% if transfer %}
+    <p class="wizard-parties" id="transfer-banner"><strong>{{ lease.operator.display_name|default:"no operator" }} <span aria-hidden="true">→</span><span class="visually-hidden">to</span> {{ transfer.incoming_operator.display_name|default:"the incoming operator" }}</strong></p>
+  {% else %}
+    <p class="wizard-parties">Lease of <strong>{{ lease.operator.display_name|default:"no operator" }}</strong> from {{ lease.started_on|day|default:"no start date" }}.</p>
+  {% endif %}
+  {% if end.ended_on %}<p class="muted" id="wizard-end-day">Lease ends {{ end.ended_on|day }}</p>{% endif %}
+</div>
+{% include "ledger/lease_ends/_cancel.html" %}

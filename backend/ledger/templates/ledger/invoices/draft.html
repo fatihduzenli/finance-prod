@@ -3,27 +3,15 @@
 {% load responsive %}
 {% load static %}
 {% block title %}{{ preview.number }}{% endblock %}
-{% comment %}The invoice builder's page: the draft's form while it is a draft; once sent, the invoice in the detail family (PLAN-012f-a D4): the tiles Total / Paid / Balance (its charges' figures), the Lines, Charges and Activity cards beside DETAILS and MORE (Cancel).{% endcomment %}
-{% block header %}<div class="page-header{% if sent_paid is not None %} detail-head{% endif %}"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% if preview.invoice %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=invoices#tab-invoices" id="invoices-crumb">Invoices</a> <span aria-hidden="true">›</span> {% endif %}{% else %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %}</span></nav><h1{% if sent_paid is not None %} class="store-title"{% endif %}>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div><div class="page-actions"><a class="btn" href="{% url 'ledger:invoices:preview' pk=draft.pk %}" id="draft-preview">Preview</a><a class="btn" href="{% url 'ledger:invoices:print' pk=draft.pk %}" id="draft-print">Print view</a>{% if can_cancel %}{% if sent_paid is not None %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><a class="menu-danger" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel invoice</a></li></ul></details>{% else %}<a class="btn" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel</a>{% endif %}{% endif %}</div></div>{% endblock %}
+{% comment %}The invoice builder's page: the draft's form while it is a draft (the builder of PLAN-012f-a D5, _builder.html: its header is the new draft's, with Preview and Print view; Discard opens the draft's delete page); once sent, the invoice in the detail family (PLAN-012f-a D4): the tiles Total / Paid / Balance (its charges' figures), the Lines, Charges and Activity cards beside DETAILS and MORE (Cancel).{% endcomment %}
+{% block header %}<div class="page-header{% if sent_paid is not None %} detail-head{% elif editable %} builder-head{% endif %}"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% if preview.invoice %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=invoices#tab-invoices" id="invoices-crumb">Invoices</a> <span aria-hidden="true">›</span> {% endif %}{% else %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %}</span></nav><h1{% if sent_paid is not None or editable %} class="store-title"{% endif %}>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1>{% if editable %}{% if store_context %}{% include "ledger/_store_context.html" %}{% else %}<p class="muted" id="known-fields">{{ draft.operator.display_name }}</p>{% endif %}{% elif header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if editable %}<p class="builder-note" id="builder-note">Draft · nothing reaches {{ company.provider_name }} until you choose how to collect</p>{% endif %}<div class="page-actions"><a class="btn" href="{% url 'ledger:invoices:preview' pk=draft.pk %}" id="draft-preview">Preview</a><a class="btn" href="{% url 'ledger:invoices:print' pk=draft.pk %}" id="draft-print">Print view</a>{% if can_cancel and not editable %}{% if sent_paid is not None %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><a class="menu-danger" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel invoice</a></li></ul></details>{% else %}<a class="btn" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel</a>{% endif %}{% endif %}</div></div>{% endblock %}
 {% block content %}
-  {% if store_context %}<p class="muted" id="known-fields">{{ store_context.line }}</p>{% endif %}
   {% if editable %}
-    <section class="card" id="draft-summary-card">
-    <dl id="draft-summary" class="detail-list">
-      <dt>Operator</dt><dd><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a></dd>
-      <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
-      <dt>Total</dt><dd id="draft-total">{{ preview.total|money }}</dd>
-      <dt>Due date</dt><dd id="draft-due">{% if preview.invoice or draft.due_date %}{{ preview.due_date|day }}{% else %}{{ due_days }} days after sending{% endif %}</dd>
-    </dl>
-    </section>
-
-    <section class="card" id="draft-card">
+    {% url 'ledger:invoices:cancel' pk=draft.pk as cancel_url %}
     <form method="post" action="{% url 'ledger:invoices:edit' pk=draft.pk %}{{ context_query }}" id="draft-form" class="js-single-submit" autocomplete="off">
       {% csrf_token %}
-      {% include "ledger/invoices/_draft_form.html" %}
-      {% include "ledger/invoices/_collect.html" %}
+      {% include "ledger/invoices/_builder.html" with discard_url=cancel_url discard_id="draft-cancel" %}
     </form>
-    </section>
   {% elif first_charge or rent_charges %}
     <div class="detail-grid">
     <div class="detail-main">

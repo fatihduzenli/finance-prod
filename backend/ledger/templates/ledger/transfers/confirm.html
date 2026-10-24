@@ -1,12 +1,11 @@
-{% extends "finance/base.html" %}
+{% extends "ledger/lease_ends/_wizard.html" %}
 {% load money dates %}
 {% block title %}Transfer store {{ store.external_label }}: confirm{% endblock %}
-{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
-{% block content %}
-  {% include "ledger/lease_ends/_steps.html" %}
-  <p class="muted" id="step-help">Read both effects and check the box: the outgoing lease ends and the incoming lease starts in one step, or nothing changes. This cannot be undone from here.</p>
+{% block step_card %}
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <p class="muted wizard-help" id="step-help">Read both effects and check the box: the outgoing lease ends and the incoming lease starts in one step, or nothing changes. This cannot be undone from here.</p>
+  {% include "ledger/lease_ends/_tiles.html" %}
   <div class="confirm-what">
   <h3>What will happen</h3>
   <h4>The outgoing lease ({{ lease.operator.display_name }})</h4>
@@ -50,12 +49,13 @@
     {{ form.non_field_errors }}
     {{ form.confirmed.errors }}
     <label for="{{ form.confirmed.id_for_label }}">{{ form.confirmed }} {{ form.confirmed.label }}</label>
-    <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-transfer">Transfer the store</button></p>
   </form>
   {% else %}
     {{ form.non_field_errors }}
   {% endif %}
-  {% include "ledger/lease_ends/_cancel.html" %}
+  <div class="wizard-footer" id="wizard-footer">
+    <a class="btn" href="{{ step_back }}" id="wizard-back">← Back</a>
+    {% if debt <= 0 or debt_allowed %}<button class="btn btn-danger" type="submit" form="transfer-confirm" id="confirm-transfer">Transfer the store</button>{% endif %}
+  </div>
   </section>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

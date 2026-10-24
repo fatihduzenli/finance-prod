@@ -143,6 +143,15 @@ def test_a_wizard_step_reads_step_n_of_m_on_a_phone_and_shows_its_pills_on_a_lap
     wide.goto(f"{live_server.url}{path}")
     assert wide.locator("#wizard-steps").is_visible()
     assert not wide.locator("#wizard-step-line").is_visible()
+    # PLAN-012f-a D8: the step card on the left of the main card; with script the empty
+    # deduction rows after the last filled one are hidden and "+ Add deduction" shows the next.
+    assert box(wide, ".wizard-steps-card")["x"] < box(wide, ".wizard-card")["x"]
+    rows = wide.locator("#deduction-rows tr.deduction-row")
+    shown = [rows.nth(index).is_visible() for index in range(rows.count())]
+    assert rows.count() == 8 and shown[0] and shown.count(True) < 8
+    assert shown == sorted(shown, reverse=True)  # the shown rows first, then the hidden ones
+    wide.locator("#add-deduction").click()
+    assert rows.nth(shown.count(True)).is_visible()
 
 
 def test_the_other_pages_fit_a_phones_width(live_server: LiveServer, phone: BrowserContext) -> None:

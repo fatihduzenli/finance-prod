@@ -1,36 +1,32 @@
-{% extends "finance/base.html" %}
-{% load responsive money %}
-{% load static %}
+{% extends "ledger/lease_ends/_wizard.html" %}
+{% load responsive money icons static %}
 {% block title %}End lease {{ store.external_label }}: statement{% endblock %}
-{% block header %}{% include "ledger/lease_ends/_title.html" %}{% endblock %}
-{% block content %}
-  {% include "ledger/lease_ends/_steps.html" %}
-  <section class="card wizard-card">
-  <p class="muted" id="step-help">Check the figures and list what is kept from the deposit. The unpaid balance offset pays the open charges from the deposit; it can be lowered, never raised above the open balance. A charge marked "not created yet" is created when you save this step.</p>
-  {% include "ledger/lease_ends/_figures.html" %}
-  <h2>Deductions from the deposit</h2>
+{% block step_title %}Statement for {{ lease.operator.display_name|default:"the operator" }}{% endblock %}
+{% block step_body %}
+  <p class="muted wizard-help" id="step-help">Check the figures and list what is kept from the deposit. The unpaid balance offset pays the open charges from the deposit; it can be lowered, never raised above the open balance. A charge marked "not created yet" is created when you save this step.</p>
+  {% include "ledger/lease_ends/_tiles.html" %}
+  {% include "ledger/lease_ends/_figures.html" with compact=True %}
+  <h2 class="section-label" id="deductions-label">Deductions</h2>
   <form method="post" id="lease-end-deductions" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     {{ form.non_field_errors }}
-    {% comment %}PLAN-012c D8: with no deduction (none saved, suggested or typed) the rows are behind the "Add deduction" control; a native disclosure, so it works without JavaScript.{% endcomment %}
-    {% with has_rows=form.has_rows %}
-    {% if not has_rows %}<details id="add-deduction"><summary class="btn" id="add-deduction-control">Add deduction</summary>{% endif %}
+    {% comment %}PLAN-012f-a D8: the eight rows as before; with script (ledger/deduction_rows.js) the empty rows after the last filled one (the first row always) are hidden until the dashed "+ Add deduction" shows the next, and each row's trash button clears its fields; without script every row shows and those two controls stay hidden.{% endcomment %}
     {% responsive_table %}
-    <table id="deduction-rows" class="js-table-total">
-      <thead><tr><th>#</th><th>Kind</th><th>Description</th><th>Amount</th></tr></thead>
+    <table id="deduction-rows" class="js-table-total deduction-rows" aria-labelledby="deductions-label">
+      <thead><tr><th>#</th><th>Reason</th><th>Note</th><th class="money">Amount</th><th><span class="visually-hidden">Clear</span></th></tr></thead>
       <tbody>
         {% for row in form.rows %}
-          <tr><td class="line-number">{{ row.number }}</td><td>{{ row.kind.errors }}<label class="visually-hidden" for="{{ row.kind.id_for_label }}">Deduction {{ row.number }}, kind</label>{{ row.kind }}</td><td>{{ row.description.errors }}<label class="visually-hidden" for="{{ row.description.id_for_label }}">Deduction {{ row.number }}, description</label>{{ row.description }}</td><td>{{ row.amount.errors }}<label class="visually-hidden" for="{{ row.amount.id_for_label }}">Deduction {{ row.number }}, amount</label>{{ row.amount }}</td></tr>
+          <tr class="deduction-row"><td class="line-number">{{ row.number }}</td><td>{{ row.kind.errors }}<label class="visually-hidden" for="{{ row.kind.id_for_label }}">Deduction {{ row.number }}, kind</label>{{ row.kind }}</td><td>{{ row.description.errors }}<label class="visually-hidden" for="{{ row.description.id_for_label }}">Deduction {{ row.number }}, description</label>{{ row.description }}</td><td class="deduction-amount">{{ row.amount.errors }}<label class="visually-hidden" for="{{ row.amount.id_for_label }}">Deduction {{ row.number }}, amount</label>{{ row.amount }}</td><td class="deduction-clear-cell"><button class="btn btn-sm deduction-clear" type="button" hidden aria-label="Clear deduction {{ row.number }}">{% icon "trash" 16 %}</button></td></tr>
         {% endfor %}
       </tbody>
     </table>
     {% endresponsive_table %}
-    <p class="table-total" id="deductions-typed-total">Deductions: <span class="js-total-out" data-total-for="deduction-rows">{{ form.total|money }}</span></p>
-    {% if not has_rows %}</details>{% endif %}
-    {% endwith %}
-    <div class="form-actions"><button class="btn btn-primary" type="submit">Save and continue</button></div>
+    <div class="deduction-foot">
+      <button class="btn add-deduction" type="button" id="add-deduction" hidden>+ Add deduction</button>
+      <p class="table-total" id="deductions-typed-total">Deductions: <span class="js-total-out" data-total-for="deduction-rows">{{ form.total|money }}</span></p>
+    </div>
   </form>
-  </section>
-  {% include "ledger/lease_ends/_cancel.html" %}
+  {% include "ledger/lease_ends/_settlement_box.html" %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}<script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}
+{% block step_primary %}<button class="btn btn-primary" type="submit" form="lease-end-deductions">Save and continue →</button>{% endblock %}
+{% block step_scripts %}<script src="{% static 'ledger/table_total.js' %}" defer></script><script src="{% static 'ledger/deduction_rows.js' %}" defer></script>{% endblock %}
