@@ -1843,3 +1843,14 @@ their files); PostgreSQL 36 + 7,643 passed (the same four pins, then 91 passed i
 31 passed on each of four runs; two MAJOR and three MINOR resolved; baselines regenerated against
 PostgreSQL. Step 12f-a: five batches gated; the checkpoint report with the Publish Request goes to
 the owner.
+
+## Update, 2026-10-24, PLAN-012f-a §9 decided; slice F planned (not pushed)
+
+The owner answered all nine §9 questions as assumed (stored ISO text stays; `statement_opened_at` →
+`statement_saved_at`; list filters as query parameters; Month / List, no Week view; PORTAL wording;
+one line per plan; seven-day lead; large-debit confirmation once at setup) and accepted the four
+drafted DESIGN-SPEC sections; ADR-0014 is Accepted. The owner's updated DESIGN-SPEC and five new reference screenshots landed the same day and were merged, the owner's text winning; the §1 Batch A values, the §5 date rule and the Login decision carried back in. Slice F
+(PLAN-012f-a §10): both wizards refuse Confirm unless the statement step was saved, a direct POST
+writes nothing and returns to the statement step; the column rename rides with it. It runs after the
+checkpoint push and before Step 12f-b. B-3, C-5, the unreproduced feed-test failure and the
+migration job's time go to Step 13.

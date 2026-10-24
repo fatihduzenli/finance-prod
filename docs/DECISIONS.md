@@ -800,9 +800,9 @@ the per-charge payment forms stay for single-charge entry from a charge page.
 ## ADR-0014 — Repeating debits as a local plan of single-occurrence schedules
 
 **Date:** 2026-10-24
-**Status:** Proposed (built by PLAN-012f-a Batch E under Fable's working assumptions; the owner's
-answers to PLAN-012f-a §9 items 6–8 — one line per plan, the seven-day lead, the large-debit
-confirmation once at setup — turn this into Accepted or change it)
+**Status:** Accepted (owner, 2026-10-24: one line per plan, the seven-day lead and the large-debit
+confirmation once at setup, audited per occurrence, confirmed as PLAN-012f-a §9 items 6–8; built by
+Batch E under the same assumptions)
 
 ### Context
 

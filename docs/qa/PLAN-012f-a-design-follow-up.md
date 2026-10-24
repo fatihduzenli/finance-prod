@@ -426,7 +426,7 @@ pair of a non-partial charge row (rendered, not displayed, is counted as hidden:
    pixel-identical on sqlite; secret scans clean; no new dependency; ADR-0014 written; the plan's
    decisions for the owner answered or deferred in writing.
 
-## 9. Decisions needed from the owner (none blocks Batch A)
+## 9. Decisions needed from the owner (none blocks Batch A) — all nine decided 2026-10-24
 
 1. **B4, stored text:** new one-off descriptions and notes ("Re-debit of Rent 2026-10",
    "Installment 1 of 3: Rent 2026-10", "Rescheduled: re-debit on 2026-11-05") keep ISO under the
@@ -444,3 +444,63 @@ pair of a non-partial charge row (rendered, not displayed, is counted as hidden:
    cannot ask per debit.
 9. **DESIGN-SPEC §4:** Fable drafts the four missing sections from the screenshots, marked as
    drafts; the owner replaces or approves them.
+
+**Owner's decisions (2026-10-24), all nine as assumed:** 1 old notes keep the stored ISO text, only
+the screen formats dates; 2 rename `statement_opened_at` → `statement_saved_at` (slice F below); 3
+the list filters are new query parameters; 4 no Week view in this step, the calendar control is
+Month / List (DESIGN-SPEC §4 Calendar updated); 5 the PORTAL card wording stands; 6 one line per
+plan; 7 the seven-day lead; 8 the large-debit confirmation once at setup, audited per occurrence
+(ADR-0014 Accepted); 9 the four drafted spec sections accepted. The owner's updated
+`docs/design/DESIGN-SPEC.md` (adding §4 Profit and loss, Daily charges, Help, States, Add payment
+and a §4a, with five new reference screenshots) landed the same day and was merged: the owner's text
+wins where the two overlap (it replaces the four drafts); the §1 Batch A note and values, the §5
+date rule and the Login decision were carried back in because the owner's copy predates them.
+
+## 10. Slice F — confirm needs a saved statement (owner, 2026-10-24; after the checkpoint push, before Step 12f-b)
+
+**Objective.** The lease-end and transfer wizards refuse Confirm unless the statement step was saved
+in this wizard (the draft's `statement_saved_at`, set by the statement step's save). A direct POST
+to either confirm URL on a draft whose statement step was never saved writes nothing — no charge, no
+balance change, no lease or draft status change — and returns to the statement step with a message.
+Batch A's decision (a), confirm's catch-up fallback, is withdrawn: confirm no longer creates the
+statement's charges itself; it checks they exist (the save created them) and refuses otherwise.
+Under the same slice, decision 2: the column `statement_opened_at` is renamed `statement_saved_at`
+(model, services, a rename migration on the 0038/0040 pattern that reverses cleanly, DATA_OWNERSHIP
+row, the audit payload key).
+
+**Affected.** `backend/ledger/models.py` (the field), a new migration
+`0050_rename_statement_saved_at`, `backend/ledger/services/lease_end.py` (`_confirm`:
+`STATEMENT_REQUIRED` refusal with `field="statement"` replacing the `_create_statement_charges`
+call; `save_statement` sets `statement_saved_at`; the module docstring),
+`backend/ledger/services/transfer.py` (its confirm refuses the same way through
+`lease_end.confirm_within`), `backend/ledger/views/lease_ends.py` and `views/transfers.py` (a
+refusal on the statement field redirects to the wizard's statement step with the message; both GET
+and POST of the confirm page redirect there while the statement is unsaved),
+`docs/DATA_OWNERSHIP.md`. Out of scope: the statement step's own behaviour, the wizard frame, any
+other column.
+
+**Interface.** `lease_end.STATEMENT_REQUIRED = "Save the statement step before confirming."` (value-
+free, final wording Fable's); `LeaseEnd.statement_saved_at: DateTimeField(null=True)`; `confirm` and
+`transfer.confirm` keep their signatures and `Outcome` shape; the redirect targets are the existing
+`ledger:lease_ends:statement` and `ledger:transfers:statement` routes. No new route, no new stored
+value.
+
+**Test plan (Fable writes `tests/test_plan012fa_f_adversarial.py`; Opus extends
+`test_lease_end_drafts.py` and `test_transfer.py`).** Happy path: save then confirm on both wizards
+still ends the lease with the same figures as before. Refusals, both wizards: a direct POST to the
+confirm URL with a valid form and no saved statement answers a redirect to the statement step with
+the message, and the database is unchanged (rent charge count, one-off count, every open balance,
+the lease's `ended_on`, the draft's status and `updated_at`); the service call `confirm(end, actor,
+confirmed=True)` returns `ok=False` with `field="statement"` and writes nothing; a GET of the
+confirm page while unsaved redirects likewise; a transfer whose lease end was never saved refuses
+before any incoming lease is created; a saved statement followed by a new charge still confirms (the
+save's marker, not a figure match, is the rule). Adversarial: a forged `statement_saved_at` cannot
+be set from any form field; the race of a save and a confirm in two transactions on PostgreSQL ends
+with at most one confirmed row; the fallback test in `test_lease_end_drafts.py` (an existing charge
+is left for confirm and the fallback) is re-pinned to the refusal. Migration: the round trip on
+sqlite and PostgreSQL, a row's timestamp kept across the rename.
+
+**Acceptance.** Both confirm URLs refuse an unsaved statement with nothing written on sqlite and
+PostgreSQL; the tests above pass on both engines; `statement_opened_at` appears nowhere in
+`backend/` outside migrations 0040 and 0050 and the historical tests that name the migration; the
+full gate is clean; the QA report's Slice F section is PASS.
