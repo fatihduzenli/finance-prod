@@ -185,8 +185,11 @@ def test_a_list_page_puts_its_primary_action_in_the_header() -> None:
     html = body(client_for(Role.ADMIN)[0].get("/stores/"))
     header = html[html.index('<div class="page-header">') :].split("</h1>", 1)[1]
     header = header.split("</div></div>", 1)[0]
-    assert '<div class="page-actions"><a class="btn btn-primary"' in header
-    assert ">New store</a>" in header
+    # PLAN-012f-a D3: "Download spreadsheet" (secondary) then "+ New store" (primary).
+    actions = header[header.index('<div class="page-actions">') :]
+    assert '<a class="btn" id="export-csv"' in actions
+    assert actions.index('id="export-csv"') < actions.index('<a class="btn btn-primary"')
+    assert " New store</a>" in actions
 
 
 # --- The workspace classes ---------------------------------------------------------------------
@@ -277,7 +280,7 @@ def test_the_sorted_column_of_the_arrears_list_carries_aria_sort(
 def test_no_other_page_claims_a_sort_it_does_not_do() -> None:
     for path in sorted(TEMPLATES.rglob("*.html")):
         relative = path.relative_to(TEMPLATES).as_posix()
-        if relative == "arrears/page.html":
+        if relative in ("arrears/page.html", "stores/list.html"):  # PLAN-012f-a D3: Sort
             continue
         assert "aria-sort" not in path.read_text(), relative
 
@@ -460,7 +463,7 @@ def test_an_empty_list_says_so_and_offers_the_next_step() -> None:
     admin, _ = client_for(Role.ADMIN)
     stores = body(admin.get("/stores/"))
     assert re.search(
-        r'<td colspan="6" class="muted empty">No stores match\. <a class="btn '
+        r'<td colspan="7" class="muted empty">No stores match\. <a class="btn '
         r'empty-next" href="/stores/new/">New store</a></td>',
         stores,
     ), stores[stores.index("<tbody>") :][:400]
@@ -692,6 +695,16 @@ def test_the_toast_fades_after_eight_seconds_but_keeps_its_text_and_spares_refus
 # --- Pagers --------------------------------------------------------------------------------------
 
 
+#: The list family's paged lists (PLAN-012f-a D3): their footer is ledger/_list_footer.html.
+LIST_FAMILY = (
+    "stores/list.html",
+    "operators/list.html",
+    "leases/list.html",
+    "payments/list.html",
+    "returns/list.html",
+)
+
+
 @pytest.mark.parametrize(
     "relative",
     [
@@ -708,6 +721,12 @@ def test_the_toast_fades_after_eight_seconds_but_keeps_its_text_and_spares_refus
 )
 def test_every_paged_list_uses_the_pager(relative: str) -> None:
     text = (TEMPLATES / relative).read_text()
+    if relative in LIST_FAMILY:  # PLAN-012f-a D3: the family's footer, inside the card
+        assert '{% include "ledger/_list_footer.html" with page=page' in text
+        text = (TEMPLATES / "_list_footer.html").read_text()
+        assert '<div class="pager list-footer" role="navigation" aria-label="Pages">' in text
+        assert '<span class="pager-count">' in text
+        return
     assert '<div class="pager' in text and 'role="navigation" aria-label="Pages"' in text
     assert '<span class="pager-count">Page ' in text
 
@@ -716,8 +735,10 @@ def test_a_paged_list_renders_its_pager() -> None:
     for number in range(60):
         a_store(f"P{number:03d}", 9000 + number)
     html = body(client_for(Role.VIEWER)[0].get("/stores/"))
-    pager = html[html.index('<div class="pager"') :].split("</div>", 1)[0]
-    assert ">Next</a>" in pager and '<span class="pager-count">Page 1 of ' in pager
+    pager = html[html.index('<div class="pager list-footer"') :].split("</div>", 1)[0]
+    assert '<span class="pager-count">1–25 of 60</span>' in pager
+    assert 'rel="next" href="?page=2">Next ›</a>' in pager
+    assert '<span class="pager-page" aria-current="page">1</span>' in pager
 
 
 # --- Wizard steps --------------------------------------------------------------------------------

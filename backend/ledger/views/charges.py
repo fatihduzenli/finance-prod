@@ -30,10 +30,20 @@ from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import LinkInvoiceForm, ManualPaymentForm
 from ledger.models import ChargeEntityType, ChargeNote, RentCharge, RentChargeStatus
-from ledger.services import collections, csv_export, installments, rent_run, workspace
+from ledger.services import (
+    collections,
+    contacts,
+    csv_export,
+    installments,
+    rent_run,
+    workspace,
+)
+from ledger.services import detail_cards as detail_service
+from ledger.services import stores as store_service
 from ledger.services.csv_export import CsvWriter
 from ledger.services.rent_run import MarkAction, MarkResult
 from ledger.views import store_context
+from ledger.views.detail_cards import activity_context
 from ledger.views.installments import parent_context
 from ledger.views.jobs import already_submitted, busy, job_context, submit
 from ledger.views.operators import (
@@ -58,7 +68,9 @@ def _load(pk: str) -> RentCharge:
         key = uuid.UUID(pk)
     except ValueError:
         raise Http404 from None
-    return get_object_or_404(RentCharge.objects.select_related("lease", "lease__store"), pk=key)
+    return get_object_or_404(
+        RentCharge.objects.select_related("lease", "lease__store", "lease__operator"), pk=key
+    )
 
 
 def _report(request: HttpRequest, result: MarkResult | None) -> None:
@@ -128,9 +140,16 @@ def charge_export(request: HttpRequest) -> StreamingHttpResponse:
 @require_safe
 def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
     charge = _load(pk)
-    billing = meets(_role(request), Role.BILLING)
+    role = _role(request)
+    billing = meets(role, Role.BILLING)
     retry_wait = rent_run.provider_retry_wait(charge) if billing else None
     jobs = job_context(charge)
+    # PLAN-012f-a D4: the invoices with their sublines, the header's line, the tiles' tone,
+    # the store's open promise and the Activity card.
+    invoice_rows = detail_service.invoice_rows(charge, "rent")
+    payments = list(charge.payments.order_by("-settled_on", "-created_at"))
+    lease = charge.lease
+    balance_open = charge.status != RentChargeStatus.WAIVED and charge.balance > 0
     return render(
         request,
         "ledger/charges/detail.html",
@@ -140,8 +159,30 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "lease": charge.lease,
             # PLAN-012d D5: "← Store NNNN".
             "crumb_store": charge.lease.store,
-            "invoices": rent_run.charge_invoices(charge),
-            "payments": charge.payments.order_by("-settled_on", "-created_at"),
+            "invoice_rows": invoice_rows,
+            "can_open_invoice": billing,
+            "payments": payments,
+            "header_line": detail_service.header_line(
+                store=store_service.title(lease.store),
+                operator=lease.operator.display_name if lease.operator is not None else "",
+                created=charge.created_at,
+                source=detail_service.rent_source(charge),
+                due=charge.due_on,
+            ),
+            "balance_open": balance_open,
+            "promise": contacts.open_promise(lease.operator, lease) if balance_open else None,
+            "can_record_outcome": billing
+            and lease.operator is not None
+            and lease.operator.archived_at is None,
+            **activity_context(
+                [
+                    *((rent_run.ENTITY_INVOICE, row.invoice.pk) for row in invoice_rows),
+                    *((rent_run.ENTITY_PAYMENT, row.pk) for row in payments),
+                ],
+                admin=meets(role, Role.ADMIN),
+                store=lease.store,
+                record=(rent_run.ENTITY_CHARGE, charge.pk),
+            ),
             "notes": ChargeNote.objects.filter(rent_charge=charge).order_by("-created_at"),
             "review_message": rent_run.charge_review_message(charge),
             "carried_balance": rent_run.carried_balance(charge),
@@ -158,7 +199,7 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "can_retry_mark": retry_wait == 0 and not jobs["job_refresh"],
             # PLAN-012b-b D13: a failed release of the split charge's invoice or autopay.
             "can_retry_release": billing and installments.retry_release(charge) is not None,
-            "can_link_invoice": billing and not rent_run.charge_invoices(charge).exists(),
+            "can_link_invoice": billing and not invoice_rows,
             "retry_wait_message": (
                 operator_sync.retry_wait_message(retry_wait) if retry_wait else ""
             ),

@@ -28,7 +28,7 @@ from ledger.models import (
     PaymentStatus,
     RentChargeStatus,
 )
-from ledger.services import refunds
+from ledger.services import detail_cards, refunds
 from payments.errors import ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
 from payments.models import ExternalRef
@@ -809,8 +809,9 @@ def test_the_payment_page_shows_the_chain(settling: FakeProvider) -> None:
         'id="charge-due">$1,500.00',
         'id="charge-paid">$1,200.00',
         'id="charge-balance">$300.00',
-        refunds.REFUNDED_ACTION,
-        "payment.created_from_provider",
+        # PLAN-012f-a D4: the Activity card names the audit rows' actions in words.
+        detail_cards.action_words(refunds.REFUNDED_ACTION),
+        "Payment created from provider",
     ):
         assert text in html, text
     child = client.get(detail_path(row)).content.decode()

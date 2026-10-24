@@ -3,38 +3,25 @@
 {% load responsive %}
 {% load static %}
 {% block title %}Lease {{ lease.store.external_label }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> <span aria-current="page">Lease {{ lease.store.external_label }}</span></nav><h1>Lease {{ lease.store.external_label }}{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>
+{% comment %}The lease page, in the detail family (PLAN-012f-a D4): the header (breadcrumb, title, the muted line, Edit and More ▾ with autopay's controls and End lease; admin), the tiles Rent / Open balance / Deposit, the Rent history, Autopay, Charges, Notes, Documents and Activity cards beside DETAILS and MORE.{% endcomment %}
+{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> <span aria-current="page">Lease {{ lease.store.external_label }}</span></nav><h1 class="store-title">Lease {{ lease.store.external_label }} <span class="badge" id="lease-status">{{ lease.get_collection_status_display }}</span>{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>
   {% if can_edit or can_enrol or can_end or can_pause or can_resume or can_stop %}<div class="page-actions" id="lease-actions">
     {% if can_edit %}<a class="btn" href="{% url 'ledger:leases:edit' pk=lease.pk %}">Edit</a>{% endif %}
-    {% if can_enrol %}<a class="btn" href="{% url 'ledger:leases:enrol' pk=lease.pk %}">Set up autopay</a>{% endif %}
-    {% if can_end %}<a class="btn btn-danger" id="end-lease" href="{% url 'ledger:leases:end' pk=lease.pk %}">End lease</a>{% endif %}
-    {% if can_pause %}
-      <form method="post" action="{% url 'ledger:leases:pause' pk=lease.pk %}" class="js-single-submit">
-        {% csrf_token %}<button class="btn" type="submit" id="pause-autopay">Pause autopay</button>
-      </form>
-    {% endif %}
-    {% if can_resume %}
-      <form method="post" action="{% url 'ledger:leases:resume' pk=lease.pk %}" class="js-single-submit">
-        {% csrf_token %}<button class="btn" type="submit" id="resume-autopay">Resume autopay</button>
-      </form>
-    {% endif %}
-    {% if can_stop %}<a class="btn btn-danger" id="stop-autopay" href="{% url 'ledger:leases:stop_autopay' pk=lease.pk %}">Turn off autopay</a>{% endif %}
+    {% if can_enrol or can_end or can_pause or can_resume or can_stop %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
+      {% if can_enrol %}<li><a href="{% url 'ledger:leases:enrol' pk=lease.pk %}">Set up autopay</a></li>{% endif %}
+      {% if can_pause %}<li><form method="post" action="{% url 'ledger:leases:pause' pk=lease.pk %}" class="js-single-submit">{% csrf_token %}<button type="submit" id="pause-autopay">Pause autopay</button></form></li>{% endif %}
+      {% if can_resume %}<li><form method="post" action="{% url 'ledger:leases:resume' pk=lease.pk %}" class="js-single-submit">{% csrf_token %}<button type="submit" id="resume-autopay">Resume autopay</button></form></li>{% endif %}
+      {% if can_stop %}<li><a class="menu-danger" id="stop-autopay" href="{% url 'ledger:leases:stop_autopay' pk=lease.pk %}">Turn off autopay</a></li>{% endif %}
+      {% if can_end %}<li><a class="menu-danger" id="end-lease" href="{% url 'ledger:leases:end' pk=lease.pk %}">End lease</a></li>{% endif %}
+    </ul></details>{% endif %}
   </div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <section class="card" id="lease-summary" aria-label="Lease">
-  <dl class="detail-list">
-    <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
-    <dt>Operator</dt><dd>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</dd>
-    <dt>Status</dt><dd>{{ lease.get_collection_status_display }}</dd>
-    <dt>Channel</dt><dd>{{ lease.get_payment_channel_display }}{% if provider_ach %} through {{ company.provider_name }}{% endif %}</dd>
-    <dt>Debit days</dt><dd>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</dd>
-    <dt>Start date</dt><dd>{{ lease.started_on|day|default:"—" }}</dd>
-    <dt>Prorate first month</dt><dd id="prorate-first-month">{{ lease.prorate_first_month|yesno:"Yes,No" }}</dd>
-    {% if lease.ended_on %}<dt>End date</dt><dd id="lease-ended-on">{{ lease.ended_on|day }}</dd>
-    <dt>End reason</dt><dd id="lease-end-reason">{{ lease.end_reason|default:"—" }}</dd>{% endif %}
-    <dt>Current rent</dt><dd id="current-rent">{% if rent %}{{ rent.amount|money }} from {{ rent.effective_from|day }}{% else %}—{% endif %}</dd>
-    {% if upcoming %}<dt>Upcoming rent</dt><dd id="upcoming-rent">Rent changes to {{ upcoming.amount|money }} on {{ upcoming.effective_from|day }}</dd>{% endif %}
-  </dl>
+  <div class="detail-grid">
+  <div class="detail-main">
+  <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
+    <div id="tile-rent">{% if rent %}{% kpi "Rent" rent.amount|money %}{% else %}{% kpi "Rent" "—" %}{% endif %}</div>
+    <div id="tile-open-balance">{% if open_balance is None %}{% kpi "Open balance" "—" %}{% elif open_balance > 0 %}{% kpi "Open balance" open_balance|money "" "unpaid" %}{% else %}{% kpi "Open balance" open_balance|money %}{% endif %}</div>
+    <div id="tile-deposit">{% if deposit_text %}{% kpi "Deposit" deposit_text %}{% else %}{% kpi "Deposit" "None" %}{% endif %}</div>
   </section>
 
   <section class="card" id="rent-history-card">
@@ -84,7 +71,7 @@
     </tbody>
   </table>
   {% endresponsive_table %}
-  <p class="muted">Next debit is computed here from the debit day; {{ company.provider_name }} runs the autopay.</p>
+  <p class="muted card-note">Next debit is computed here from the debit day; {{ company.provider_name }} runs the autopay.</p>
   </section>
 
   <section class="card" id="lease-charges-card">
@@ -92,6 +79,10 @@
   <p id="charges-moved">Charges, invoices and payments are on the store page: <a href="{% url 'ledger:stores:detail' pk=lease.store.pk %}?tab=charges#tab-charges" id="store-charges-link">Store {{ lease.store.external_label }}, Charges</a>.</p>
   <p class="muted" id="exports-moved">Exports: the rent and one-off charges CSV files are on the store page's Charges tab.</p>
   </section>
+
+  <div class="card">{% include "ledger/documents/_section.html" %}</div>
+
+  {% include "ledger/_detail_activity.html" %}
 
   <section class="card" id="lease-notes">
   <h2>Notes</h2>
@@ -101,7 +92,39 @@
     <p class="muted">No notes.</p>
   {% endfor %}
   </section>
+  </div>
 
-  <div class="card">{% include "ledger/documents/_section.html" %}</div>
+  <aside class="detail-side" aria-label="Details">
+  <section class="card" id="lease-summary" aria-label="Lease">
+  <h2 class="section-label">Details</h2>
+  <dl class="detail-list side-list">
+    <dt>Store</dt><dd><a href="{% url 'ledger:stores:detail' pk=lease.store.pk %}">{{ lease.store.external_label }}</a></dd>
+    <dt>Operator</dt><dd>{% if lease.operator %}<a href="{% url 'ledger:operators:detail' pk=lease.operator.pk %}">{{ lease.operator.display_name }}</a>{% else %}—{% endif %}</dd>
+    <dt>Status</dt><dd>{{ lease.get_collection_status_display }}</dd>
+    <dt>Channel</dt><dd>{{ lease.get_payment_channel_display }}{% if provider_ach %} through {{ company.provider_name }}{% endif %}</dd>
+    <dt>Debit days</dt><dd>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</dd>
+    <dt>Start date</dt><dd>{{ lease.started_on|day|default:"—" }}</dd>
+    <dt>Prorate first month</dt><dd id="prorate-first-month">{{ lease.prorate_first_month|yesno:"Yes,No" }}</dd>
+    {% if lease.ended_on %}<dt>End date</dt><dd id="lease-ended-on">{{ lease.ended_on|day }}</dd>
+    <dt>End reason</dt><dd id="lease-end-reason">{{ lease.end_reason|default:"—" }}</dd>{% endif %}
+    <dt>Current rent</dt><dd id="current-rent">{% if rent %}{{ rent.amount|money }} from {{ rent.effective_from|day }}{% else %}—{% endif %}</dd>
+    {% if upcoming %}<dt>Upcoming rent</dt><dd id="upcoming-rent">Rent changes to {{ upcoming.amount|money }} on {{ upcoming.effective_from|day }}</dd>{% endif %}
+  </dl>
+  </section>
+
+  {% if can_enrol or can_end or can_pause or can_resume or can_stop %}
+  <section class="card" id="more-card">
+    <h2 class="section-label">More</h2>
+    <ul class="detail-more">
+      {% if can_enrol %}<li><a href="{% url 'ledger:leases:enrol' pk=lease.pk %}" id="more-enrol">Set up autopay</a></li>{% endif %}
+      {% if can_pause %}<li><form method="post" action="{% url 'ledger:leases:pause' pk=lease.pk %}" class="js-single-submit">{% csrf_token %}<button class="link-action" type="submit" id="more-pause-autopay">Pause autopay</button></form></li>{% endif %}
+      {% if can_resume %}<li><form method="post" action="{% url 'ledger:leases:resume' pk=lease.pk %}" class="js-single-submit">{% csrf_token %}<button class="link-action" type="submit" id="more-resume-autopay">Resume autopay</button></form></li>{% endif %}
+      {% if can_stop %}<li><a class="detail-danger" href="{% url 'ledger:leases:stop_autopay' pk=lease.pk %}" id="more-stop-autopay">Turn off autopay</a></li>{% endif %}
+      {% if can_end %}<li><a class="detail-danger" href="{% url 'ledger:leases:end' pk=lease.pk %}" id="more-end-lease">End lease</a></li>{% endif %}
+    </ul>
+  </section>
+  {% endif %}
+  </aside>
+  </div>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}{% if documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

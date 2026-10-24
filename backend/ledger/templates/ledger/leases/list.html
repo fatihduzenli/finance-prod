@@ -1,33 +1,33 @@
 {% extends "finance/base.html" %}
-{% load components money %}
+{% load components money icons %}
 {% load responsive %}
 {% block title %}Leases{% endblock %}
-{% block header %}<div class="page-header"><h1>Leases</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">New lease</a></div>{% endif %}</div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Leases</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} lease{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:leases:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">{% icon "plus" 16 %} New lease</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:leases:list' %}" class="actions" role="search" id="lease-filters">
-    <label for="operator" style="margin:0;">Operator</label>
+  {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3).{% endcomment %}
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:leases:list' %}" class="actions list-filters" role="search" id="lease-filters">
+    <span class="filter-field"><label for="operator">Operator</label>
     <select name="operator" id="operator">
       <option value="">Any</option>
       {% for item in operators %}<option value="{{ item.pk }}"{% if item.pk == operator %} selected{% endif %}>{{ item.display_name }}</option>{% endfor %}
-    </select>
-    <button class="btn" type="submit">Filter</button>
-    <a class="btn" id="export-csv" href="{% url 'ledger:leases:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a>
+    </select></span>
+    <button class="btn btn-dark" type="submit">Filter</button>
   </form></div>
-  <div class="card table-card">
+  <div class="card table-card list-card">
   {% responsive_table %}
-  <table>
+  <table id="leases">
     <thead>
-      <tr><th>Store</th><th>Operator</th><th class="money">Rent</th><th>Debit days</th><th>Channel</th><th>Status</th></tr>
+      <tr><th>Store</th><th class="money">Rent</th><th>Debit days</th><th>Channel</th><th>Status</th><th class="cell-chevron"><span class="visually-hidden">Open</span></th></tr>
     </thead>
     <tbody>
-      {% for lease in page %}
+      {% for lease in page %}{% url 'ledger:leases:detail' pk=lease.pk as lease_url %}
         <tr>
-          <td>{% url 'ledger:leases:detail' pk=lease.pk as lease_url %}{% include "ledger/_cell_title.html" with title=lease.store.external_label link=lease_url %}{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}{% if lease.has_charge_note %} <span class="badge note-indicator" title="A charge of this lease has a note">Note</span>{% endif %}</td>
-          <td>{{ lease.operator.display_name|default:"—" }}</td>
+          <td>{% include "ledger/_cell_title.html" with title=lease.store.external_label link=lease_url subline=lease.operator.display_name|default:"No operator" %}{% if lease.needs_review %} {% status_badge "Needs review" %}{% endif %}{% if lease.has_charge_note %} <span class="badge note-indicator" title="A charge of this lease has a note">Note</span>{% endif %}</td>
           <td class="money">{% with row=lease.rent_now|first %}{% if row %}{{ row.amount|money }}{% else %}—{% endif %}{% endwith %}</td>
           <td>{{ lease.debit_day|default:"—" }}{% if lease.second_debit_day %} and {{ lease.second_debit_day }}{% endif %}</td>
           <td>{{ lease.get_payment_channel_display }}</td>
-          <td>{{ lease.get_collection_status_display }}</td>
+          <td class="lease-status">{% if lease.collection_status == "active" %}{% status_badge lease.get_collection_status_display "paid" %}{% elif lease.collection_status == "paused" %}{% status_badge lease.get_collection_status_display "pending" %}{% else %}{% status_badge lease.get_collection_status_display "neutral" %}{% endif %}</td>
+          <td class="cell-chevron" data-role="meta"><a href="{{ lease_url }}" aria-label="Open the lease of {{ lease.store.external_label }}">{% icon "chevron-right" 16 %}</a></td>
         </tr>
       {% empty %}
         <tr><td colspan="6" class="muted empty">No lease yet.{% if can_create %} <a class="btn empty-next" href="{% url 'ledger:leases:create' %}">New lease</a>{% endif %}</td></tr>
@@ -35,12 +35,6 @@
     </tbody>
   </table>
   {% endresponsive_table %}
+  {% include "ledger/_list_footer.html" with page=page pager_query=query %}
   </div>
-  {% if page.paginator.num_pages > 1 %}
-    <div class="pager" role="navigation" aria-label="Pages">
-      {% if page.has_previous %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
-      <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} leases)</span>
-      {% if page.has_next %}<a class="btn" href="?{% if query %}{{ query }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
-    </div>
-  {% endif %}
 {% endblock %}

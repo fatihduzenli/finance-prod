@@ -1,0 +1,13 @@
+{% load components responsive money dates %}{% comment %}The detail family's Invoices table (docs/qa/PLAN-012f-a-design-follow-up.md D4): ledger.services.detail_cards.invoice_rows: the number bold with its subline (the memo or the charge's kind, and the line count), the issue and due days, the total, the status here as a badge and the provider's status as it was copied (a teal pill; "· view" opens the invoice builder's page of the invoice, billing). Context: invoice_rows, can_link_invoice, can_open_invoice.{% endcomment %}{% responsive_table %}
+  <table id="invoices">
+    <thead><tr><th>Number</th><th>Issued</th><th>Due</th><th class="money">Total</th><th>Status</th><th>In {{ company.provider_name }}</th></tr></thead>
+    <tbody>
+      {% for row in invoice_rows %}
+        <tr><td class="invoice-number">{% include "ledger/_cell_title.html" with title=row.invoice.invoice_number link="" subline=row.subline %}</td><td>{{ row.invoice.issue_date|day }}</td><td>{{ row.invoice.due_date|day }}</td><td class="money">{{ row.invoice.total|money }}</td><td class="invoice-status">{% status_badge row.invoice.get_internal_status_display %}</td><td class="provider-status">{% if row.invoice.provider_status %}<span class="provider-pill">{{ row.invoice.provider_status }}{% if can_open_invoice and row.draft_id %} · <a href="{% url 'ledger:invoices:draft' pk=row.draft_id %}">view</a>{% endif %}</span>{% else %}—{% if can_open_invoice and row.draft_id %} · <a href="{% url 'ledger:invoices:draft' pk=row.draft_id %}">view</a>{% endif %}{% endif %}</td></tr>
+      {% empty %}
+        <tr><td colspan="6" class="muted empty">No invoice linked.{% if can_link_invoice %} An invoice made on the {{ company.provider_name }} dashboard can be attached with "Attach {{ company.provider_name }} invoice".{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endresponsive_table %}
+<p class="muted card-note">The {{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>

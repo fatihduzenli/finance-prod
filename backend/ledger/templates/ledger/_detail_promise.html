@@ -1,0 +1,4 @@
+{% load money dates %}{% comment %}The detail family's "Open promise" card (docs/qa/PLAN-012f-a-design-follow-up.md D4): the operator's newest open promise about this store or about no store (ledger.services.contacts.open_promise, as the store page's header reads it), on the pending tint: the amount and the day, and Kept · Reschedule · Broken (the contact log's outcome links, billing) as text links. Context: promise, can_record_outcome.{% endcomment %}{% if promise %}<section class="card promise-card" id="promise-card" aria-label="Open promise">
+  <p class="promise-title">Open promise</p>
+  <p class="promise-line"><span id="promise-text">{{ promise.promised_amount|money }} by {{ promise.promised_date|day }}</span>{% if can_record_outcome %} · {% include "ledger/contacts/_outcome_links.html" with promise_id=promise.pk %}{% endif %}</p>
+</section>{% endif %}

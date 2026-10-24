@@ -69,6 +69,8 @@ RANGE = "?from=2026-10&to=2026-10"
 LABEL_SWITCH = 'data-label-when="id_method=check" data-label="Check number"'
 #: A table cell naming the method (the responsive tables label their cells).
 CHECK_CELL = re.compile(r"<td(?: data-role=\"meta\")?(?: data-label=\"Method\")?>Check</td>")
+#: The payments ledger's method: the first cell's subline (PLAN-012f-a D3).
+LEDGER_CHECK = '<span class="cell-subline">Check</span>'
 
 
 @pytest.fixture(autouse=True)
@@ -131,7 +133,7 @@ def assert_shown_as_check(client: Client, payment: Payment, lease: Lease) -> Non
     detail = client.get(reverse("ledger:payments:detail", kwargs={"pk": payment.pk}))
     assert "<dt>Method</dt><dd>Check</dd>" in detail.content.decode()
     ledger = client.get(reverse("ledger:payments:list") + "?method=check").content.decode()
-    assert CHECK_CELL.search(ledger) and str(payment.pk) in ledger
+    assert LEDGER_CHECK in ledger and str(payment.pk) in ledger
     statement = client.get(
         reverse("ledger:operators:statement", kwargs={"pk": operator_of(lease).pk}) + RANGE
     ).content.decode()

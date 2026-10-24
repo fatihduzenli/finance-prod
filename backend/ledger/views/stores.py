@@ -125,16 +125,27 @@ def _listed(request: HttpRequest) -> tuple[QuerySet[Store], str]:
 @role_required
 @require_safe
 def store_list(request: HttpRequest) -> HttpResponse:
-    stores, query = _listed(request)
-    page = Paginator(stores, PAGE_SIZE).get_page(request.GET.get("page"))
+    """The stores list (PLAN-012f-a D3): the counts line, the filters (search, State, Status,
+    Balance, Sort; :func:`ledger.services.stores.store_list`) over every store, then the page.
+    The spreadsheet keeps the search only (its rows are PLAN-011 D5's)."""
+    listed = service.store_list(request.GET, timezone.localdate())
+    filters = listed.filters
+    page = Paginator(listed.rows, PAGE_SIZE).get_page(request.GET.get("page"))
     return render(
         request,
         "ledger/stores/list.html",
         {
             "page": page,
-            "query": query,
+            "listed": listed,
+            "filters": filters,
+            "query": filters.query,
+            "status_choices": service.LIST_STATUSES,
+            "balance_choices": service.LIST_BALANCES,
+            "sort_choices": service.LIST_SORTS,
             "can_create": meets(_role(request), Role.ADMIN),
-            "export_query": urlencode({"q": query}) if query else "",
+            "export_query": urlencode({"q": filters.query}) if filters.query else "",
+            "pager_query": urlencode(filters.as_query()),
+            "filtered_from": listed.total if filters.narrowed else None,
         },
     )
 

@@ -551,8 +551,10 @@ ICON_NAMES = (
     "circle-half",
     "dash",
     "chevron-down",
+    "chevron-right",  # PLAN-012f-a D3: the list rows' chevron
     "arrow-right",
     "x",
+    "banknote",  # PLAN-012f-a D4: the Payments card's empty state
 )
 
 

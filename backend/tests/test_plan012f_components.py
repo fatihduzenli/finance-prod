@@ -149,8 +149,8 @@ def test_the_first_cell_is_a_bold_link_with_a_muted_second_line() -> None:
     stores = page(viewer, "/stores/")
     assert MARKUP not in stores
     assert (
-        '<td data-role="title" data-label="Name">'
-        f'<a class="cell-title" href="/stores/{store.pk}/">Istanbul '
+        '<td data-role="title" data-label="Store ▲">'
+        f'<a class="cell-title" href="/stores/{store.pk}/">#3302 Istanbul '
         "&lt;script&gt;" in stores
     )
     grid = page(viewer, "/grid/")

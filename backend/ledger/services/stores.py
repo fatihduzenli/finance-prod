@@ -18,21 +18,44 @@ without one); a row the cost service refuses saves no store either (:class:`Cost
 
 :func:`address_line` is the store's address on one line and :func:`status_badge` the
 badge status of its status (D7).
+
+:func:`store_list` reads the stores list (PLAN-012f-a D3; DESIGN-SPEC §4 Stores list): one row
+per store with its current lease's operator, rent and channel, its open balance as a badge
+(:func:`ledger.services.receivables.open_balances` grouped by store) and its status (Closed
+for a closed or terminated store, Vacant without a lease in effect or to come, else Active);
+the counts line (every store, those with a lease, the rest vacant); the filters ``q``,
+``state``, ``status``, ``balance`` and ``sort``, each checked against its fixed list. Read
+only.
 """
 
 from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models import Case, Exists, F, OuterRef, Q, Subquery, Value, When
 from django.utils import timezone
 
-from ledger.models import AuditLog, Store, StoreCostSource, StoreStatus
-from ledger.services import store_costs
+from ledger.models import (
+    AuditLog,
+    CollectionStatus,
+    Lease,
+    LeaseRentHistory,
+    PaymentChannel,
+    RentChargeStatus,
+    Store,
+    StoreCostSource,
+    StoreStatus,
+)
+from ledger.services import receivables, search, store_costs
+from ledger.wording import format_amount
 from payments.models import SyncState
 
 ENTITY_STORE = "store"
@@ -218,4 +241,297 @@ def _audit(
         entity_id=str(store.pk),
         before=before,
         after=after,
+    )
+
+
+# --- The stores list (PLAN-012f-a D3) ---------------------------------------------------------
+
+#: The Status filter's values and words; "" (All) is the default.
+LIST_STATUS_ACTIVE = "active"
+LIST_STATUS_VACANT = "vacant"
+LIST_STATUS_CLOSED = "closed"
+LIST_STATUSES: tuple[tuple[str, str], ...] = (
+    ("", "All"),
+    (LIST_STATUS_ACTIVE, "Active"),
+    (LIST_STATUS_VACANT, "Vacant"),
+    (LIST_STATUS_CLOSED, "Closed"),
+)
+#: The Balance filter's values and words; "" (Any) is the default.
+BALANCE_OWING = "owing"
+BALANCE_PAID_UP = "paid"
+BALANCE_OVERDUE = "overdue"
+LIST_BALANCES: tuple[tuple[str, str], ...] = (
+    ("", "Any"),
+    (BALANCE_OWING, "Owing"),
+    (BALANCE_PAID_UP, "Paid up"),
+    (BALANCE_OVERDUE, "Overdue"),
+)
+#: The Sort's values and words; the first is the default.
+SORT_NUMBER = "number"
+SORT_NAME = "name"
+SORT_BALANCE = "balance"
+LIST_SORTS: tuple[tuple[str, str], ...] = (
+    (SORT_NUMBER, "Store number"),
+    (SORT_NAME, "Name"),
+    (SORT_BALANCE, "Balance"),
+)
+#: The store statuses the list shows as closed (the Closed filter and badge).
+CLOSED_STATUSES: tuple[str, ...] = (StoreStatus.CLOSED, StoreStatus.TERMINATED)
+
+
+@dataclass(frozen=True, slots=True)
+class ListFilter:
+    """The stores list's filters, each a value of its fixed list (an unknown value is the
+    default, never kept)."""
+
+    query: str = ""
+    state: str = ""
+    status: str = ""
+    balance: str = ""
+    sort: str = SORT_NUMBER
+
+    @property
+    def narrowed(self) -> bool:
+        """A filter other than the sort is set: the footer says "filtered from"."""
+        return bool(self.query or self.state or self.status or self.balance)
+
+    def as_query(self) -> dict[str, str]:
+        """The filters that differ from their default, for the pager's links."""
+        found = {
+            "q": self.query,
+            "state": self.state,
+            "status": self.status,
+            "balance": self.balance,
+            "sort": "" if self.sort == SORT_NUMBER else self.sort,
+        }
+        return {key: value for key, value in found.items() if value}
+
+
+def _one_of(raw: object, allowed: Iterable[str]) -> str:
+    value = raw if isinstance(raw, str) else ""
+    return value if value in set(allowed) else ""
+
+
+def parse_list_filter(params: Mapping[str, str], states: Iterable[str]) -> ListFilter:
+    """The filters of ``params`` (a request's GET): ``q`` cleaned as the search cleans it;
+    ``state`` one of ``states``; ``status``, ``balance`` and ``sort`` from their lists."""
+    return ListFilter(
+        query=search.clean_query(params.get("q")),
+        state=_one_of(params.get("state"), states),
+        status=_one_of(params.get("status"), (value for value, _ in LIST_STATUSES)),
+        balance=_one_of(params.get("balance"), (value for value, _ in LIST_BALANCES)),
+        sort=_one_of(params.get("sort"), (value for value, _ in LIST_SORTS)) or SORT_NUMBER,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ListBalance:
+    """A store's open balance as its badge reads it: the text and the badge value
+    (``finance.templatetags.components``)."""
+
+    amount: Decimal
+    overdue: bool
+    label: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class ListRow:
+    store: Store
+    title: str
+    #: "City, ST" (either alone when the other is missing; "" without both).
+    place: str
+    operator_id: uuid.UUID | None
+    operator_name: str
+    rent: Decimal | None
+    #: The current lease's payment channel as the lease page words it; "" without a lease.
+    channel: str
+    has_lease: bool
+    #: ``active``, ``vacant``, ``closed`` or the store's own status (Prospective).
+    status_key: str
+    status_label: str
+    status_value: str
+    balance: ListBalance
+
+
+@dataclass(frozen=True, slots=True)
+class StoreList:
+    rows: list[ListRow]
+    filters: ListFilter
+    #: Every store, before any filter; those with a lease in effect or to come.
+    total: int
+    with_lease: int
+    #: The distinct states of every store, sorted: the State filter's choices.
+    states: list[str]
+
+    @property
+    def vacant(self) -> int:
+        return self.total - self.with_lease
+
+
+def _place(store: Store) -> str:
+    return ", ".join(part for part in (store.city.strip(), store.state.strip()) if part)
+
+
+def _list_stores(query: str, today: date) -> list[Store]:
+    """Every store in one query, each annotated with its current lease (in effect today, else
+    the latest started of those not ended before today), that lease's operator, channel and
+    rent in effect today, the day its last lease ended, and whether it matches ``query``."""
+    not_ended = Q(ended_on__isnull=True) | Q(ended_on__gte=today)
+    in_effect_now = Q(collection_status=CollectionStatus.ACTIVE) & (
+        Q(started_on__isnull=True) | Q(started_on__lte=today)
+    )
+    current = (
+        Lease.objects.filter(not_ended, store=OuterRef("pk"))
+        .annotate(
+            list_rank=Case(When(in_effect_now, then=Value(0)), default=Value(1)),
+        )
+        .order_by("list_rank", F("started_on").desc(nulls_last=True), "-created_at")
+    )
+    rent = (
+        LeaseRentHistory.objects.filter(lease=OuterRef("list_lease"), effective_from__lte=today)
+        .exclude(effective_to__lt=today)
+        .order_by("-effective_from")
+    )
+    last_ended = Lease.objects.filter(store=OuterRef("pk"), ended_on__isnull=False).order_by(
+        "-ended_on"
+    )
+    stores = Store.objects.annotate(
+        list_lease=Subquery(current.values("pk")[:1]),
+        list_operator=Subquery(current.values("operator")[:1]),
+        list_operator_name=Subquery(current.values("operator__display_name")[:1]),
+        list_channel=Subquery(current.values("payment_channel")[:1]),
+        list_last_ended=Subquery(last_ended.values("ended_on")[:1]),
+    ).annotate(list_rent=Subquery(rent.values("amount")[:1]))
+    if search.words(query):
+        stores = stores.annotate(
+            list_matched=Exists(
+                search.filter_stores(Store.objects.filter(pk=OuterRef("pk")), query, today)
+            )
+        )
+    return list(stores.order_by())
+
+
+def _store_balances(today: date) -> dict[uuid.UUID, tuple[Decimal, bool, bool]]:
+    """Per store: what its open charges owe (:func:`ledger.services.receivables.open_balances`,
+    the one place that decides it), whether one is overdue and whether one is partly paid."""
+    found: dict[uuid.UUID, tuple[Decimal, bool, bool]] = {}
+    for row in receivables.open_balances(today):
+        if row.store_id is None:
+            continue
+        amount, overdue, partial = found.get(row.store_id, (Decimal("0.00"), False, False))
+        found[row.store_id] = (
+            amount + row.balance,
+            overdue or row.overdue(today),
+            partial or row.status == RentChargeStatus.PARTIAL,
+        )
+    return found
+
+
+def _vacant_label(last_ended: date | None, today: date) -> str:
+    if last_ended is None or last_ended >= today:
+        return "Vacant"
+    days = (today - last_ended).days
+    return f"Vacant {days} day{'s' if days != 1 else ''}"
+
+
+def _balance(
+    owed: tuple[Decimal, bool, bool] | None, has_lease: bool, last_ended: date | None, today: date
+) -> ListBalance:
+    """The Balance badge: an open balance by its worst state (overdue, partly paid, unpaid);
+    nothing owed reads "Paid up" with a lease and "Vacant" (with its days) without one."""
+    amount, overdue, partial = owed or (Decimal("0.00"), False, False)
+    if amount > 0:
+        text = format_amount(amount)
+        if overdue:
+            return ListBalance(amount, True, f"{text} overdue", "overdue")
+        if partial:
+            return ListBalance(amount, False, f"{text} partly paid", "partial")
+        return ListBalance(amount, False, f"{text} unpaid", "due")
+    if has_lease:
+        return ListBalance(amount, False, "Paid up", "paid")
+    return ListBalance(amount, False, _vacant_label(last_ended, today), "neutral")
+
+
+def _status(store: Store, has_lease: bool) -> tuple[str, str, str]:
+    """(key, label, badge value) of the Status column."""
+    if store.status in CLOSED_STATUSES:
+        return LIST_STATUS_CLOSED, store.get_status_display(), status_badge(store)
+    if not has_lease:
+        return LIST_STATUS_VACANT, "Vacant", "neutral"
+    if store.status == StoreStatus.ACTIVE:
+        return LIST_STATUS_ACTIVE, "Active", status_badge(store)
+    return store.status, store.get_status_display(), "neutral"
+
+
+def _row(store: Any, owed: tuple[Decimal, bool, bool] | None, today: date) -> ListRow:
+    has_lease = store.list_lease is not None
+    key, label, value = _status(store, has_lease)
+    channel = store.list_channel or ""
+    return ListRow(
+        store=store,
+        title=title(store),
+        place=_place(store),
+        # A subquery's UUID comes back as text on SQLite; the same UUID on PostgreSQL.
+        operator_id=uuid.UUID(str(store.list_operator)) if store.list_operator else None,
+        operator_name=store.list_operator_name or "",
+        rent=store.list_rent,
+        channel=str(PaymentChannel(channel).label) if channel in PaymentChannel.values else "",
+        has_lease=has_lease,
+        status_key=key,
+        status_label=label,
+        status_value=value,
+        balance=_balance(owed, has_lease, store.list_last_ended, today),
+    )
+
+
+def _kept(row: ListRow, filters: ListFilter) -> bool:
+    if filters.state and row.store.state != filters.state:
+        return False
+    if filters.status and row.status_key != filters.status:
+        return False
+    if filters.balance == BALANCE_OWING:
+        return row.balance.amount > 0
+    if filters.balance == BALANCE_OVERDUE:
+        return row.balance.overdue
+    if filters.balance == BALANCE_PAID_UP:
+        return row.balance.amount == 0 and row.has_lease
+    return True
+
+
+def _number_key(row: ListRow) -> tuple[object, ...]:
+    number = row.store.store_number
+    return (number is None, number or 0, row.store.external_label.lower(), str(row.store.pk))
+
+
+def _sort_key(sort: str) -> Callable[[ListRow], tuple[object, ...]]:
+    if sort == SORT_NAME:
+        return lambda row: (row.store.external_label.lower(), str(row.store.pk))
+    if sort == SORT_BALANCE:
+        return lambda row: (-row.balance.amount, *_number_key(row))
+    return _number_key
+
+
+def store_list(params: Mapping[str, str], today: date) -> StoreList:
+    """The stores list (PLAN-012f-a D3) in five queries whatever the number of stores: every
+    store with its current lease, operator, channel and rent (one), and the open balances
+    (:func:`ledger.services.receivables.open_balances`, four; six when a re-debit carries a
+    charge). The counts and the states are of every store; the filters, the Balance among
+    them, apply to every store before the sort, never to one page."""
+    stores = _list_stores(search.clean_query(params.get("q")), today)
+    states = sorted({store.state for store in stores if store.state})
+    filters = parse_list_filter(params, states)
+    balances = _store_balances(today)
+    rows = [
+        _row(store, balances.get(store.pk), today)
+        for store in stores
+        if not filters.query or getattr(store, "list_matched", True)
+    ]
+    kept = sorted((row for row in rows if _kept(row, filters)), key=_sort_key(filters.sort))
+    return StoreList(
+        rows=kept,
+        filters=filters,
+        total=len(stores),
+        with_lease=sum(1 for store in stores if getattr(store, "list_lease", None) is not None),
+        states=states,
     )

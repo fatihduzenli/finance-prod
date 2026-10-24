@@ -556,7 +556,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:transfers:operator": lambda w: (["Stores", "#911"], "Transfer"),
     "ledger:transfers:blockers": lambda w: (["Stores", "#911"], "Transfer"),
     "ledger:transfers:incoming": lambda w: (["Stores", "#911"], "Transfer"),
-    "ledger:charges:detail": lambda w: (_store(w), "Rent Oct 2026, debit 1"),
+    # PLAN-012f-a D4: the detail family's breadcrumb names the store page's tab.
+    "ledger:charges:detail": lambda w: ([*_store(w), "Charges"], "Rent Oct 2026, debit 1"),
     "ledger:charges:record_payment": lambda w: (
         [*_store(w), f"Rent Oct 2026, {w.store.external_label}"],
         "Add payment",
@@ -566,7 +567,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
         "Attach Stax invoice",
     ),
     "ledger:charges:split": lambda w: (["Rent Oct 2026"], "Split into installments"),
-    "ledger:one_off_charges:detail": lambda w: (_store(w), w.one_off.label),
+    "ledger:one_off_charges:detail": lambda w: ([*_store(w), "Charges"], w.one_off.label),
     "ledger:one_off_charges:payment": lambda w: ([*_store(w), w.one_off.label], "Add payment"),
     "ledger:one_off_charges:link": lambda w: (
         [*_store(w), w.one_off.label],
@@ -603,7 +604,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
         [*_store(w), w.draft.number],
         f"Delete draft {w.draft.number}",
     ),
-    "ledger:payments:detail": lambda w: (_store(w), "Payment of $100.00"),
+    "ledger:payments:detail": lambda w: ([*_store(w), "Payments"], "Payment of $100.00"),
     "ledger:payments:refund": lambda w: (["Payments", "Payment of $100.00"], "Refund a payment"),
     "ledger:payments:void": lambda w: (["Payments", "Payment of $100.00"], "Void a payment"),
     "ledger:calendar:detail": lambda w: (["Calendar: Oct 2026"], "Walk note"),
@@ -671,8 +672,9 @@ def test_a_store_parent_is_named_by_its_number_or_its_label() -> None:
     lease = a_lease(a_store("NO NUMBER PLAZA"), an_operator("Plain Co"))
     charge = a_rent_charge(lease, date(2026, 10, 1))
     links, _ = crumbs(client_for(Role.VIEWER)[0].get(f"/charges/{charge.pk}/").content.decode())
-    assert [text for _, text in links] == ["Stores", lease.store.external_label]
+    assert [text for _, text in links] == ["Stores", lease.store.external_label, "Charges"]
     assert links[1][0] == f"/stores/{lease.store_id}/"
+    assert links[2][0] == f"/stores/{lease.store_id}/?tab=charges#tab-charges"
 
 
 # --- Forms and wizards on a phone --------------------------------------------------------------

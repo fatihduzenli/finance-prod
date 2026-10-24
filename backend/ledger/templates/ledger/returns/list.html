@@ -1,20 +1,19 @@
 {% extends "finance/base.html" %}
-{% load responsive money dates %}
+{% load responsive money dates icons %}
 {% block title %}Returned payments{% endblock %}
-{% block header %}<div class="page-header"><h1>Returned payments</h1><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Download spreadsheet</a></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Returned payments</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} not resolved</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
   <p class="muted">ACH debits {{ company.provider_name }} reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing debits again unless staff reschedule it: <strong>Debit again</strong> adds the NSF fee ({{ nsf_first }} on an operator's first return, {{ nsf_later }} afterwards). Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
-  <div class="card table-card">
+  <div class="card table-card list-card">
   {% responsive_table %}
   <table id="returns">
     <thead>
-      <tr><th>Operator</th><th>Store</th><th class="money">Amount</th><th>Code</th><th>Reason</th><th>Returned at</th>{% if can_resolve %}<th>Resolve or reschedule</th>{% endif %}</tr>
+      <tr><th>Operator</th><th class="money">Amount</th><th>Code</th><th>Reason</th><th>Returned at</th>{% if can_resolve %}<th>Resolve or reschedule</th>{% endif %}</tr>
     </thead>
     <tbody>
       {% for item in rows %}
         <tr id="return-{{ item.payment.pk }}">
-          <td>{% if item.operator %}<a href="{% url 'ledger:operators:detail' pk=item.operator.pk %}">{{ item.operator.display_name }}</a>{% else %}<span class="muted">Unknown</span>{% endif %}</td>
-          <td>{% if item.store %}{{ item.store.external_label }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>{% if item.operator %}{% url 'ledger:operators:detail' pk=item.operator.pk as operator_url %}{% include "ledger/_cell_title.html" with title=item.operator.display_name link=operator_url subline=item.store.external_label|default:"No store" %}{% else %}{% include "ledger/_cell_title.html" with title="Unknown operator" subline=item.store.external_label|default:"No store" %}{% endif %}</td>
           <td class="money">{{ item.amount|money }}{% if item.payment.rent_charge_id %} <a href="{% url 'ledger:charges:detail' pk=item.payment.rent_charge_id %}">charge</a>{% elif item.payment.one_off_charge_id %} <a href="{% url 'ledger:one_off_charges:detail' pk=item.payment.one_off_charge_id %}">one-off charge</a>{% endif %}</td>
           <td>{{ item.code|default:"—" }}</td>
           <td>{{ item.reason|default:"—" }}</td>
@@ -44,18 +43,12 @@
           {% endif %}
         </tr>
       {% empty %}
-        <tr><td colspan="{% if can_resolve %}7{% else %}6{% endif %}" class="muted empty">No unresolved returns.</td></tr>
+        <tr><td colspan="{% if can_resolve %}6{% else %}5{% endif %}" class="muted empty">No unresolved returns.</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endresponsive_table %}
+  {% include "ledger/_list_footer.html" with page=page pager_query="" %}
   </div>
-  {% if page.paginator.num_pages > 1 %}
-    <div class="pager" role="navigation" aria-label="Pages">
-      {% if page.has_previous %}<a class="btn" href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
-      <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} returns)</span>
-      {% if page.has_next %}<a class="btn" href="?page={{ page.next_page_number }}">Next</a>{% endif %}
-    </div>
-  {% endif %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

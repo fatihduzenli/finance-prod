@@ -646,4 +646,8 @@ def test_the_run_and_charge_pages_show_the_carried_balance(billing: Client) -> N
     rent_run.create_charges(DAY, actor=None)
     detail = billing.get(f"/charges/{charge_of(row).pk}/").content.decode()
     assert '<dd id="carried-balance">$500.00' in detail
-    assert '<dd id="amount-due">$1,500.00</dd>' in detail
+    # PLAN-012f-a D4: the amount due is the Amount tile.
+    assert (
+        '<div id="tile-amount"><div class="kpi"><span class="kpi-label">Amount</span>'
+        '<span class="kpi-value">$1,500.00</span>'
+    ) in detail

@@ -37,7 +37,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import IntegrityError
-from django.db.models import Q, QuerySet
+from django.db.models import Count, Q, QuerySet
 from django.db.models.functions import Lower
 from django.http import (
     Http404,
@@ -228,8 +228,19 @@ def _listed(request: HttpRequest) -> tuple[QuerySet[Operator], str, bool]:
 @require_safe
 def operator_list(request: HttpRequest) -> HttpResponse:
     operators, query, include_archived = _listed(request)
+    # PLAN-012f-a D3: the stores each operator has a lease of, in effect or to come (the
+    # search's rule), counted in the page's own query.
+    today = timezone.localdate()
+    operators = operators.annotate(
+        store_count=Count(
+            "leases__store",
+            distinct=True,
+            filter=Q(leases__ended_on__isnull=True) | Q(leases__ended_on__gte=today),
+        )
+    )
     page = Paginator(operators, PAGE_SIZE).get_page(request.GET.get("page"))
     export = {"q": query, "archived": "1" if include_archived else ""}
+    export_query = urlencode({k: v for k, v in export.items() if v})
     return render(
         request,
         "ledger/operators/list.html",
@@ -238,7 +249,8 @@ def operator_list(request: HttpRequest) -> HttpResponse:
             "query": query,
             "include_archived": include_archived,
             "can_create": meets(_role(request), Role.BILLING),
-            "export_query": urlencode({k: v for k, v in export.items() if v}),
+            "export_query": export_query,
+            "pager_query": export_query,
         },
     )
 

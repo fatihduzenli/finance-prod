@@ -21,6 +21,7 @@ ends in a redirect; a form with errors is held in the session for the next GET.
 from __future__ import annotations
 
 import uuid
+from typing import cast
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -34,10 +35,12 @@ from django.views.decorators.http import require_http_methods, require_safe
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import RefundForm, VoidForm
-from ledger.models import AuditLog, Operator, Payment, PaymentMethod, Store
-from ledger.services import one_off_charges, refunds
+from ledger.models import Operator, Payment, PaymentMethod, Store
+from ledger.services import detail_cards, one_off_charges, refunds
 from ledger.services import payments_ledger as ledger
+from ledger.services import stores as store_service
 from ledger.services.rent_run import charge_review_message
+from ledger.views.detail_cards import activity_context
 from ledger.views.jobs import already_submitted, job_context, submit
 from ledger.views.operators import (
     PAGE_SIZE,
@@ -132,19 +135,30 @@ def payment_detail(request: HttpRequest, pk: str) -> HttpResponse:
     payment = _load(pk)
     admin = meets(_role(request), Role.ADMIN)
     facts = refunds.payment_facts(payment)
+    summary = _summary(payment, facts)
+    row = cast(ledger.LedgerRow, summary["row"])
+    payment_refunds = list(payment.refunds.order_by("created_at", "id"))
     return render(
         request,
         "ledger/payments/detail.html",
         {
-            **_summary(payment, facts),
+            **summary,
             **job_context(payment),
-            "refunds": payment.refunds.order_by("created_at", "id"),
+            "refunds": payment_refunds,
             "charge_review": _charge_review(payment),
-            "audit_rows": AuditLog.objects.filter(
-                entity_type=ENTITY_PAYMENT, entity_id=str(payment.pk)
-            )
-            .select_related("actor")
-            .order_by("-at", "-id"),
+            # PLAN-012f-a D4: the header's line and the Activity card (the payment's rows
+            # and its refunds').
+            "header_line": detail_cards.header_line(
+                store=store_service.title(row.store) if row.store is not None else "",
+                operator=row.operator.display_name if row.operator is not None else "",
+                created=payment.created_at,
+            ),
+            **activity_context(
+                [(ENTITY_PAYMENT, refund.pk) for refund in payment_refunds],
+                admin=admin,
+                store=row.store,
+                record=(ENTITY_PAYMENT, payment.pk),
+            ),
             "can_refund": admin and facts.can_refund,
             "can_void": admin and facts.can_void,
             "parent_transaction": (

@@ -265,7 +265,7 @@ def test_the_ledger_pages_25_rows_and_keeps_the_filter() -> None:
     client, _ = client_for(Role.VIEWER)
     first = client.get(LIST, {"method": "wire"}).content.decode()
     assert first.count("<tr>") == 2 + 1 + 25  # totals (head and body), list head, 25 rows
-    assert "Page 1 of 2 (26 payments)" in first
+    assert '<span class="pager-count">1–25 of 26</span>' in first  # PLAN-012f-a D3 footer
     assert "?method=wire&amp;page=2" in first
 
 

@@ -2,9 +2,11 @@
 {% load components money dates %}
 {% load responsive %}
 {% block title %}Rent {{ charge.period_month|month }}, debit {{ charge.seq }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" %}<span aria-current="page">Rent {{ charge.period_month|month }}, debit {{ charge.seq }}</span></nav><h1>Rent {{ charge.period_month|month }}, debit {{ charge.seq }}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% if can_record or can_link_invoice %}<div class="page-actions">{% if can_link_invoice %}<a class="btn" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}</div>{% endif %}</div>{% endblock %}
+{% comment %}The rent charge page, in the detail family (PLAN-012f-a D4; DESIGN-SPEC §4 Charge detail): the header (breadcrumb, title with the status badge, the muted line, Add payment, Split into installments, More ▾), the tiles, Invoices, Payments, Activity and the charge's other cards beside DETAILS, the open promise and MORE.{% endcomment %}
+{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=charges#tab-charges" id="charges-crumb">Charges</a> <span aria-hidden="true">›</span> <span aria-current="page">Rent {{ charge.period_month|month }}, debit {{ charge.seq }}</span></nav><h1 class="store-title">Rent {{ charge.period_month|month }}, debit {{ charge.seq }} <span id="charge-status">{% status_badge charge.get_status_display charge.status %}</span>{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if can_record or can_split or can_link_invoice %}<div class="page-actions" id="charge-actions">{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:charges:record_payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}{% if can_split %}<a class="btn" href="{{ split_url }}" id="split-installments">Split into installments</a>{% endif %}{% if can_link_invoice %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
+  <li><a href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a></li>
+</ul></details>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <p class="muted"><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> · <a href="{% url 'ledger:run:today' %}">Daily charges</a></p>
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
 
   {% include "ledger/_job_status.html" %}
@@ -21,40 +23,22 @@
     <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
   {% endif %}
 
-  <section class="card" id="charge-summary" aria-label="Charge">
-  <dl class="detail-list">
-    <dt>Store</dt><dd>{{ lease.store.external_label }}</dd>
-    <dt>Due</dt><dd>{{ charge.due_on|day }}</dd>
-    <dt>Amount due</dt><dd id="amount-due">{{ charge.amount_due|money }}</dd>
-    {% if charge.proration_text %}<dt>Prorated</dt><dd id="proration-text">{{ charge.proration_text }}</dd>{% endif %}
-    <dt>Paid</dt><dd id="amount-paid">{{ charge.amount_paid|money }}</dd>
-    <dt>Balance</dt><dd id="balance">{{ charge.balance|money }}</dd>
-    <dt>Carried balance</dt><dd id="carried-balance">{{ carried_balance|money }} <span class="muted">from earlier charges, not part of this charge</span></dd>
-    <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
-  </dl>
+  <div class="detail-grid">
+  <div class="detail-main">
+  <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
+    <div id="tile-amount">{% kpi "Amount" charge.amount_due|money %}</div>
+    <div id="tile-paid">{% kpi "Paid" charge.amount_paid|money %}</div>
+    <div id="tile-balance">{% if balance_open %}{% kpi "Balance" charge.balance|money "" "unpaid" %}{% else %}{% kpi "Balance" charge.balance|money %}{% endif %}</div>
   </section>
 
-  {% if plan_progress or can_split or split_refusal %}<section class="card" id="plan-card">{% include "ledger/installments/_parent.html" %}</section>{% endif %}
-
   <section class="card" id="invoices-card">
-  <h2>Invoices</h2>
-  {% responsive_table %}
-  <table id="invoices">
-    <thead><tr><th>Number</th><th>Date</th><th class="money">Total</th><th>{{ company.provider_name }} status</th></tr></thead>
-    <tbody>
-      {% for invoice in invoices %}
-        <tr><td>{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|day }}</td><td class="money">{{ invoice.total|money }}</td><td>{{ invoice.provider_status|default:"—" }}</td></tr>
-      {% empty %}
-        <tr><td colspan="4" class="muted empty">No invoice linked yet.{% if can_link_invoice %} An invoice made on the {{ company.provider_name }} dashboard can be attached with "Attach {{ company.provider_name }} invoice".{% endif %}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endresponsive_table %}
-  <p class="muted">The {{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>
+  <div class="card-header"><h2>Invoices</h2>{% if can_link_invoice %}<a class="card-link" href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="attach-invoice-link">Attach {{ company.provider_name }} invoice</a>{% endif %}</div>
+  {% include "ledger/_detail_invoices.html" %}
   </section>
 
   <section class="card" id="payments-card">
   <h2>Payments</h2>
+  {% if payments %}
   {% responsive_table %}
   <table id="payments">
     <thead><tr><th>Received</th><th>Method</th><th class="money">Amount</th><th>Status</th><th>Reference</th><th>Note</th><th>Recorded by</th></tr></thead>
@@ -69,13 +53,18 @@
           <td style="white-space:pre-wrap;">{{ payment.note }}</td>
           <td>{{ payment.recorded_by|default:"—" }}</td>
         </tr>
-      {% empty %}
-        <tr><td colspan="7" class="muted empty">No payments yet. Add one from the action bar.</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endresponsive_table %}
+  {% else %}
+  {% if can_record %}{% url 'ledger:charges:record_payment' pk=charge.pk as payment_url %}{% endif %}{% include "ledger/_detail_payments_empty.html" %}
+  {% endif %}
   </section>
+
+  {% include "ledger/_detail_activity.html" %}
+
+  {% if plan_progress or split_refusal %}<section class="card" id="plan-card">{% include "ledger/installments/_parent.html" %}</section>{% endif %}
 
   <section class="card" id="collections-card">{% include "ledger/collections/_charge.html" %}</section>
 
@@ -87,5 +76,31 @@
     <p class="muted">No notes.</p>
   {% endfor %}
   </section>
+  </div>
+
+  <aside class="detail-side" aria-label="Details">
+  <section class="card" id="charge-summary" aria-label="Charge">
+  <h2 class="section-label">Details</h2>
+  <dl class="detail-list side-list">
+    <dt>Lease</dt><dd id="charge-lease"><a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a></dd>
+    <dt>Due</dt><dd id="due-date">{{ charge.due_on|day }}</dd>
+    {% if charge.proration_text %}<dt>Prorated</dt><dd id="proration-text">{{ charge.proration_text }}</dd>{% endif %}
+    <dt>Carried balance</dt><dd id="carried-balance">{{ carried_balance|money }} <span class="muted">from earlier charges, not part of this charge</span></dd>
+    <dt>Daily charges</dt><dd><a href="{% url 'ledger:run:today' %}" id="daily-charges-link">Today's run</a></dd>
+  </dl>
+  </section>
+
+  {% include "ledger/_detail_promise.html" %}
+
+  {% if can_link_invoice %}
+  <section class="card" id="more-card">
+    <h2 class="section-label">More</h2>
+    <ul class="detail-more">
+      <li><a href="{% url 'ledger:charges:link_invoice' pk=charge.pk %}" id="more-link-invoice">Attach {{ company.provider_name }} invoice</a></li>
+    </ul>
+  </section>
+  {% endif %}
+  </aside>
+  </div>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}{% endblock %}

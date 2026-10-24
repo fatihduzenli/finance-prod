@@ -571,7 +571,7 @@ def test_search_paging_and_hostile_input(billing: Client) -> None:
     for index in range(30):
         new_operator(display_name=f"Operator {index:02d}", email=f"op{index}@example.com")
     first = billing.get(LIST).content.decode()
-    assert "Page 1 of 2 (30 operators)" in first
+    assert '<span class="pager-count">1–25 of 30</span>' in first  # PLAN-012f-a D3 footer
     assert billing.get(f"{LIST}?page=99").status_code == 200
     assert billing.get(f"{LIST}?page=-1").status_code == 200
     assert billing.get(f"{LIST}?page=abc").status_code == 200

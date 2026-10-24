@@ -1,41 +1,36 @@
 {% extends "finance/base.html" %}
-{% load components responsive %}
+{% load components responsive icons %}
 {% block title %}Operators{% endblock %}
-{% block header %}<div class="page-header"><h1>Operators</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:operators:create' %}">New operator</a></div>{% endif %}</div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Operators</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} operator{{ page.paginator.count|pluralize }}{% if include_archived %}, archived included{% endif %}</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:operators:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:operators:create' %}">{% icon "plus" 16 %} New operator</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:operators:list' %}" class="actions" role="search">
-    <input type="search" name="q" value="{{ query }}" maxlength="200" placeholder="Name, company or e-mail" aria-label="Search operators" style="max-width:24rem;">
-    <label style="margin:0;font-weight:normal;"><input type="checkbox" name="archived" value="1"{% if include_archived %} checked{% endif %}> Include archived</label>
-    <button class="btn" type="submit">Search</button>
-    <a class="btn" id="export-csv" href="{% url 'ledger:operators:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>
+  {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3).{% endcomment %}
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:operators:list' %}" class="actions list-filters" role="search">
+    <input type="search" name="q" value="{{ query }}" maxlength="200" placeholder="Name, company or e-mail" aria-label="Search operators" class="list-search">
+    <label class="inline"><input type="checkbox" name="archived" value="1"{% if include_archived %} checked{% endif %}> Include archived</label>
+    <button class="btn btn-dark" type="submit">Filter</button>
   </form></div>
-  <div class="card table-card">
+  <div class="card table-card list-card">
   {% responsive_table %}
-  <table>
+  <table id="operators">
     <thead>
-      <tr><th>Display name</th><th>Legal name</th><th>E-mail</th><th>{{ company.provider_name }} connection</th><th>Enrolment</th></tr>
+      <tr><th>Operator</th><th>Stores</th><th>E-mail</th><th>{{ company.provider_name }} connection</th><th>Enrolment</th><th class="cell-chevron"><span class="visually-hidden">Open</span></th></tr>
     </thead>
     <tbody>
-      {% for operator in page %}
+      {% for operator in page %}{% url 'ledger:operators:detail' pk=operator.pk as operator_url %}
         <tr>
-          <td>{% url 'ledger:operators:detail' pk=operator.pk as operator_url %}{% include "ledger/_cell_title.html" with title=operator.display_name link=operator_url %}{% if operator.archived_at %} <span class="badge">Archived</span>{% endif %}{% if operator.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
-          <td>{{ operator.legal_name }}</td>
+          <td>{% include "ledger/_cell_title.html" with title=operator.display_name link=operator_url subline=operator.legal_name %}{% if operator.archived_at %} <span class="badge">Archived</span>{% endif %}{% if operator.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
+          <td class="operator-stores">{{ operator.store_count }}</td>
           <td>{{ operator.email|default:"" }}</td>
           <td>{{ operator.get_sync_status_display }}</td>
           <td>{{ operator.get_enrolment_status_display }}</td>
+          <td class="cell-chevron" data-role="meta"><a href="{{ operator_url }}" aria-label="Open {{ operator.display_name }}">{% icon "chevron-right" 16 %}</a></td>
         </tr>
       {% empty %}
-        <tr><td colspan="5" class="muted empty">No operators match.{% if query or include_archived %} <a class="empty-next" href="{% url 'ledger:operators:list' %}">Clear</a>{% elif can_create %} <a class="btn empty-next" href="{% url 'ledger:operators:create' %}">New operator</a>{% endif %}</td></tr>
+        <tr><td colspan="6" class="muted empty">No operators match.{% if query or include_archived %} <a class="empty-next" href="{% url 'ledger:operators:list' %}">Clear</a>{% elif can_create %} <a class="btn empty-next" href="{% url 'ledger:operators:create' %}">New operator</a>{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endresponsive_table %}
+  {% include "ledger/_list_footer.html" with page=page pager_query=pager_query %}
   </div>
-  {% if page.paginator.num_pages > 1 %}
-    <div class="pager" role="navigation" aria-label="Pages">
-      {% if page.has_previous %}<a class="btn" href="?{% if query %}q={{ query|urlencode:'' }}&amp;{% endif %}{% if include_archived %}archived=1&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
-      <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} operators)</span>
-      {% if page.has_next %}<a class="btn" href="?{% if query %}q={{ query|urlencode:'' }}&amp;{% endif %}{% if include_archived %}archived=1&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
-    </div>
-  {% endif %}
 {% endblock %}

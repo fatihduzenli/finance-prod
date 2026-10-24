@@ -25,6 +25,8 @@ pending or the neutral colours.
 ``{% step_line step_links %}``: the phone's form of the same list (PLAN-012f D10; DESIGN-SPEC §6):
 "Step 2 of 7 · Statement" and a bar of the steps reached; nothing without a current step.
 
+``page|page_numbers``: the list footer's page numbers, gaps as "…" (PLAN-012f-a D3).
+
 ``actions|action_named:"key"`` finds a workspace action (ledger.services.workspace.Action)
 by its key, or ``None``: an empty state names it as its next step.
 
@@ -282,3 +284,17 @@ def action_named(actions: Iterable[Any] | None, key: str) -> Any:
         if getattr(action, "key", None) == key:
             return action
     return None
+
+
+@register.filter
+def page_numbers(page: Any) -> list[tuple[str, int | None, bool]]:
+    """The list footer's page numbers (PLAN-012f-a D3; DESIGN-SPEC §4 Stores list) around
+    ``page`` (a Django ``Page``): (text, number to link or ``None`` for a gap "…", current),
+    the first and last pages and one on each side of the current one."""
+    found: list[tuple[str, int | None, bool]] = []
+    for number in page.paginator.get_elided_page_range(page.number, on_each_side=1, on_ends=1):
+        if isinstance(number, int):
+            found.append((str(number), number, number == page.number))
+        else:
+            found.append((str(number), None, False))
+    return found

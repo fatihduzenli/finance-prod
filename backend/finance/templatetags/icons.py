@@ -74,8 +74,14 @@ ICONS: dict[str, str] = {
     ),
     "dash": '<path d="M6 12h12"/>',
     "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+    "chevron-right": '<path d="m9 6 6 6-6 6"/>',
     "arrow-right": '<path d="M5 12h14M13 6l6 6-6 6"/>',
     "x": '<path d="M6 6l12 12M18 6 6 18"/>',
+    # PLAN-012f-a D4: the detail pages' empty Payments card.
+    "banknote": (
+        '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/>'
+        '<path d="M6 12h.01M18 12h.01"/>'
+    ),
 }
 
 

@@ -1,0 +1,6 @@
+{% load dates %}{% comment %}The detail family's Activity card (docs/qa/PLAN-012f-a-design-follow-up.md D4; DESIGN-SPEC §4 Charge detail): ledger.services.detail_cards.activity, the record's audit rows newest first, at most twenty: the time, the action in bold, by whom and the row's quoted note. "All activity" (activity_url, admin) when older rows exist. Context: activity, activity_url.{% endcomment %}<section class="card" id="activity-card">
+  <div class="card-header"><h2>Activity</h2>{% if activity.more %}{% if activity_url %}<a class="card-link" id="activity-all" href="{{ activity_url }}">All activity</a>{% else %}<span class="card-link muted" id="activity-newest">The newest {{ activity.rows|length }}</span>{% endif %}{% endif %}</div>
+  {% if activity.rows %}<ul class="activity-list" id="activity">{% for row in activity.rows %}
+    <li class="activity-row"><span class="activity-time">{{ row.at|moment }}</span><span class="activity-text"><strong class="activity-action">{{ row.action }}</strong>{% if row.user %} by {{ row.user }}{% endif %}{% if row.note %} · <q class="activity-note">{{ row.note }}</q>{% endif %}</span></li>{% endfor %}
+  </ul>{% else %}<p class="muted" id="activity-empty">No activity recorded yet.</p>{% endif %}
+</section>

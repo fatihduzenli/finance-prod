@@ -45,6 +45,7 @@ from ledger.models import CalendarEntry, Lease, Operator, Store
 from ledger.services import calendar
 from ledger.services.pnl import add_months
 from ledger.views.contacts import drop_payment_data
+from ledger.views.detail_cards import activity_context
 from ledger.views.operators import _actor, _role, role_required
 from ledger.views.run import _billing_only
 
@@ -173,7 +174,17 @@ def calendar_detail(request: HttpRequest, pk: str) -> HttpResponse:
     return render(
         request,
         "ledger/calendar/detail.html",
-        {"entry": entry, "can_change": can_change},
+        {
+            "entry": entry,
+            "can_change": can_change,
+            # PLAN-012f-a D4: the entry's Activity card.
+            **activity_context(
+                [],
+                admin=meets(role, Role.ADMIN),
+                store=entry.store,
+                record=(calendar.ENTITY_ENTRY, entry.pk),
+            ),
+        },
     )
 
 

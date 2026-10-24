@@ -2,31 +2,22 @@
 {% load components money dates %}
 {% load responsive %}
 {% block title %}{{ charge.label }}{% if lease %} {{ lease.store.external_label }}{% endif %}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{{ charge.label }}</span></nav><h1>{{ charge.label }}{% if charge.status == "voided" %} {% status_badge "Voided" %}{% endif %}{% if charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}{% if charge.legacy %} <span class="badge">From the spreadsheet</span>{% endif %}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1></div>{% if can_record or can_link_invoice or can_edit or can_waive or can_cancel %}<div class="page-actions" id="charge-actions">{% if can_link_invoice %}<a class="btn" href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a>{% endif %}{% if can_edit %}<a class="btn" href="{% url 'ledger:one_off_charges:edit' pk=charge.pk %}" id="edit-charge">Edit</a>{% endif %}{% if can_waive %}<a class="btn" href="{% url 'ledger:one_off_charges:waive' pk=charge.pk %}" id="waive-charge">Waive</a>{% endif %}{% if can_cancel %}<a class="btn" href="{% url 'ledger:one_off_charges:cancel' pk=charge.pk %}" id="cancel-charge">Cancel charge</a>{% endif %}{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:one_off_charges:payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}</div>{% endif %}</div>{% endblock %}
+{% comment %}The one-off charge page (PLAN-012f-a D4; DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png): the header (breadcrumb, title with the status and kind badges, the muted line, Add payment / Charge now, Split into installments, More ▾), then the two-thirds column (the Amount, Paid and Balance tiles, Invoices, Payments, Activity and the charge's other cards) beside the one-third column (DETAILS, the open promise, MORE). The More menu and the MORE card hold the same actions by role.{% endcomment %}
+{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=charges#tab-charges" id="charges-crumb">Charges</a> <span aria-hidden="true">›</span> {% elif operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{{ charge.label }}</span></nav><h1 class="store-title">{{ charge.label }} <span id="charge-status">{% status_badge charge.get_status_display charge.status %}</span> <span class="badge kind-badge" id="charge-kind">{{ kind_badge }}</span>{% if charge.legacy %} <span class="badge">From the spreadsheet</span>{% endif %}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if can_record or can_charge_now or can_split or can_link_invoice or can_edit or can_waive or can_cancel or can_delete_invoice %}<div class="page-actions" id="charge-actions">{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:one_off_charges:payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}{% if can_charge_now %}<a class="btn{% if not can_record %} btn-primary{% endif %}" href="{% url 'ledger:one_off_charges:charge_now' pk=charge.pk %}" id="charge-now">Charge now</a>{% endif %}{% if can_split %}<a class="btn" href="{{ split_url }}" id="split-installments">Split into installments</a>{% endif %}{% if can_link_invoice or can_edit or can_waive or can_cancel or can_delete_invoice %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
+  {% if can_link_invoice %}<li><a href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="link-invoice">Attach {{ company.provider_name }} invoice</a></li>{% endif %}
+  {% if can_edit %}<li><a href="{% url 'ledger:one_off_charges:edit' pk=charge.pk %}" id="edit-charge">Edit charge</a></li>{% endif %}
+  {% if can_waive %}<li><a href="{% url 'ledger:one_off_charges:waive' pk=charge.pk %}" id="waive-charge">Waive</a></li>{% endif %}
+  {% if can_delete_invoice %}<li><form method="post" action="{% url 'ledger:one_off_charges:delete_invoice' pk=charge.pk %}" class="js-single-submit">{% csrf_token %}<button class="menu-danger" type="submit" id="delete-invoice">Cancel in {{ company.provider_name }}</button></form></li>{% endif %}
+  {% if can_cancel %}<li><a class="menu-danger" href="{% url 'ledger:one_off_charges:cancel' pk=charge.pk %}" id="cancel-charge">Cancel charge</a></li>{% endif %}
+</ul></details>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
-
-  {% if charge_now_shown %}
-    {% if can_charge_now %}
-      <p class="actions"><a class="btn btn-primary" href="{% url 'ledger:one_off_charges:charge_now' pk=charge.pk %}" id="charge-now">Charge now</a></p>
-    {% elif charge_now_refusal %}
+  {% if charge_now_shown and not can_charge_now %}
+    {% if charge_now_refusal %}
       <p id="charge-now-refusal" class="muted">{{ charge_now_refusal }}</p>
     {% elif charge_now_wait %}
       <p id="charge-now-wait" class="muted">{{ charge_now_wait }}</p>
     {% endif %}
-  {% endif %}
-  {% if can_waive or can_cancel %}
-    <ul id="close-actions" class="muted">
-      {% if can_cancel %}<li id="cancel-meaning"><strong>Cancel</strong> {{ cancel_meaning }}.</li>{% endif %}
-      {% if can_waive %}<li id="waive-meaning"><strong>Waive</strong> {{ waive_meaning }}.</li>{% endif %}
-    </ul>
-    {% if can_waive and waive_refusal %}<p id="waive-refusal"><strong>{{ waive_refusal }}</strong></p>{% endif %}
-  {% endif %}
-  {% if can_delete_invoice %}
-    <form method="post" action="{% url 'ledger:one_off_charges:delete_invoice' pk=charge.pk %}" class="actions js-single-submit">
-      {% csrf_token %}<button class="btn btn-danger" type="submit" id="delete-invoice">Cancel in {{ company.provider_name }}</button>
-      <span class="muted">{{ delete_invoice_hint }}</span>
-    </form>
   {% endif %}
   {% include "ledger/_job_status.html" %}
   {% if can_retry_provider %}
@@ -42,67 +33,27 @@
     <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
   {% endif %}
 
-  <section class="card" id="charge-summary" aria-label="Charge">
-  <dl class="detail-list">
-    <dt>Store</dt><dd>{% if lease %}{{ lease.store.external_label }}{% else %}—{% endif %}</dd>
-    <dt>Operator</dt><dd>{{ operator.display_name|default:"—" }}</dd>
-    <dt>Category</dt><dd id="category">{{ charge.get_category_display }}</dd>
-    {% if charge.category != "setup" %}<dt>Description</dt><dd id="description">{{ charge.description }}</dd>
-    <dt>Collected by</dt><dd id="collection">{{ charge.get_collection_display }}</dd>
-    <dt>Internal note</dt><dd id="note" style="white-space:pre-wrap;">{{ charge.note|default:"—" }}</dd>{% endif %}
-    {% if schedule_masked %}<dt>Autopay in {{ company.provider_name }}</dt><dd id="schedule">{{ schedule_masked }}</dd>{% endif %}
-    {% if provider_invoice_masked %}<dt>{{ company.provider_name }} invoice</dt><dd id="provider-invoice">{{ provider_invoice_masked }}</dd>{% endif %}
-    <dt>Due</dt><dd id="due-date">{{ charge.due_date|day }}</dd>
-    <dt>Vendor</dt><dd id="vendor">{{ charge.vendor|default:"—" }}</dd>
-    <dt>Cost</dt><dd id="cost">{% if charge.cost is not None %}{{ charge.cost|money }}{% else %}unknown{% endif %}</dd>
-    <dt>Price</dt><dd id="price">{{ charge.price|money }}</dd>
-    <dt>Paid</dt><dd id="amount-paid">{{ charge.amount_paid|money }}</dd>
-    <dt>Balance</dt><dd id="balance">{{ charge.balance|money }}</dd>
-    <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
-    {% if charge.voided_at %}<dt>Voided</dt><dd id="voided">{{ charge.voided_at|day }} by {{ charge.voided_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.void_note }}</span></dd>{% endif %}
-    {% if charge.waived_at %}<dt>Waived</dt><dd id="waived">{{ charge.waived_at|day }} by {{ charge.waived_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.waive_note }}</span></dd>{% endif %}
-  </dl>
+  <div class="detail-grid">
+  <div class="detail-main">
+  <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
+    <div id="tile-amount">{% kpi "Amount" charge.price|money %}</div>
+    <div id="tile-paid">{% kpi "Paid" charge.amount_paid|money %}</div>
+    <div id="tile-balance">{% if balance_open %}{% kpi "Balance" charge.balance|money "" "unpaid" %}{% else %}{% kpi "Balance" charge.balance|money %}{% endif %}</div>
+  </section>
+
   {% if installment_plan %}
     <p id="installment-of">Installment {{ charge.installment_no }} of {{ installment_plan.count }} of an <a href="{% url 'ledger:plans:detail' pk=installment_plan.pk %}">installment plan</a> ({{ installment_plan.get_status_display|lower }}).</p>
   {% endif %}
-  </section>
-
-  {% if not installment_plan %}{% if plan_progress or can_split or split_refusal %}<section class="card" id="plan-card">{% include "ledger/installments/_parent.html" %}</section>{% endif %}{% endif %}
-
-  {% if resolution %}
-    <section class="card" id="deposit-resolution-card">
-    <h2>Deposit resolution</h2>
-    <dl id="deposit-resolution" class="detail-list">
-      <dt>Resolved</dt><dd id="resolution-kind">{{ resolution.get_kind_display }} on {{ resolution.resolved_on|day }}{% if resolution.created_by %} by {{ resolution.created_by }}{% endif %}</dd>
-      <dt>Amount</dt><dd id="resolution-amount">{{ resolution.amount|money }}</dd>
-      {% if resolution.method %}<dt>Method</dt><dd id="resolution-method">{{ resolution.get_method_display }}</dd>{% endif %}
-      {% if resolution.to_lease %}<dt>Transferred to</dt><dd id="resolution-to-lease"><a href="{% url 'ledger:leases:detail' pk=resolution.to_lease.pk %}">Lease {{ resolution.to_lease.store.external_label }}</a></dd>{% endif %}
-      <dt>Withheld</dt><dd id="resolution-withheld">{{ resolution.withheld_amount|money }}</dd>
-      <dt>Note</dt><dd id="resolution-note" style="white-space:pre-wrap;">{{ resolution.note }}</dd>
-    </dl>
-    </section>
-  {% endif %}
 
   <section class="card" id="invoices-card">
-  <h2>Invoices</h2>
-  {% responsive_table %}
-  <table id="invoices">
-    <thead><tr><th>Number</th><th>Date</th><th>Due</th><th class="money">Total</th><th>Status</th><th>{{ company.provider_name }} status</th></tr></thead>
-    <tbody>
-      {% for invoice in invoices %}
-        <tr><td class="invoice-number">{{ invoice.invoice_number }}</td><td>{{ invoice.issue_date|day }}</td><td>{{ invoice.due_date|day }}</td><td class="money">{{ invoice.total|money }}</td><td class="invoice-status">{{ invoice.get_internal_status_display }}</td><td class="provider-status">{{ invoice.provider_status|default:"—" }}</td></tr>
-      {% empty %}
-        <tr><td colspan="6" class="muted empty">No invoice linked.{% if can_link_invoice %} A one-off invoice made on the {{ company.provider_name }} dashboard can be attached with "Attach {{ company.provider_name }} invoice".{% endif %}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endresponsive_table %}
+  <div class="card-header"><h2>Invoices</h2>{% if can_link_invoice %}<a class="card-link" href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="attach-invoice-link">Attach {{ company.provider_name }} invoice</a>{% endif %}</div>
+  {% include "ledger/_detail_invoices.html" %}
   {% for released in released_invoices %}<p class="invoice-released"{% if forloop.first %} id="invoice-released"{% endif %}>{{ released }}</p>{% endfor %}
-  <p class="muted">The {{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>
   </section>
 
   <section class="card" id="payments-card">
   <h2>Payments</h2>
+  {% if payments %}
   {% responsive_table %}
   <table id="payments">
     <thead><tr><th>Received</th><th>Kind</th><th>Method</th><th class="money">Amount</th><th>Status</th><th>Reference</th><th>Note</th><th>Recorded by</th></tr></thead>
@@ -118,14 +69,78 @@
           <td style="white-space:pre-wrap;">{{ payment.note }}</td>
           <td>{{ payment.recorded_by|default:"—" }}</td>
         </tr>
-      {% empty %}
-        <tr><td colspan="8" class="muted empty">No payments yet. Add one from the action bar.</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endresponsive_table %}
+  {% else %}
+  {% if can_record %}{% url 'ledger:one_off_charges:payment' pk=charge.pk as payment_url %}{% endif %}{% include "ledger/_detail_payments_empty.html" %}
+  {% endif %}
   </section>
 
+  {% include "ledger/_detail_activity.html" %}
+
+  {% if not installment_plan %}{% if plan_progress or split_refusal %}<section class="card" id="plan-card">{% include "ledger/installments/_parent.html" %}</section>{% endif %}{% endif %}
+
+  {% if resolution %}
+    <section class="card" id="deposit-resolution-card">
+    <h2>Deposit resolution</h2>
+    <dl id="deposit-resolution" class="detail-list">
+      <dt>Resolved</dt><dd id="resolution-kind">{{ resolution.get_kind_display }} on {{ resolution.resolved_on|day }}{% if resolution.created_by %} by {{ resolution.created_by }}{% endif %}</dd>
+      <dt>Amount</dt><dd id="resolution-amount">{{ resolution.amount|money }}</dd>
+      {% if resolution.method %}<dt>Method</dt><dd id="resolution-method">{{ resolution.get_method_display }}</dd>{% endif %}
+      {% if resolution.to_lease %}<dt>Transferred to</dt><dd id="resolution-to-lease"><a href="{% url 'ledger:leases:detail' pk=resolution.to_lease.pk %}">Lease {{ resolution.to_lease.store.external_label }}</a></dd>{% endif %}
+      <dt>Withheld</dt><dd id="resolution-withheld">{{ resolution.withheld_amount|money }}</dd>
+      <dt>Note</dt><dd id="resolution-note" style="white-space:pre-wrap;">{{ resolution.note }}</dd>
+    </dl>
+    </section>
+  {% endif %}
+
   <section class="card" id="collections-card">{% include "ledger/collections/_charge.html" %}</section>
+  </div>
+
+  <aside class="detail-side" aria-label="Details">
+  <section class="card" id="charge-summary" aria-label="Charge">
+  <h2 class="section-label">Details</h2>
+  <dl class="detail-list side-list">
+    <dt>Category</dt><dd id="category">{{ charge.get_category_display }}</dd>
+    {% if charge.category != "setup" %}<dt>Description</dt><dd id="description">{{ charge.description }}</dd>
+    <dt>Collected by</dt><dd id="collection">{{ charge.get_collection_display }}</dd>{% endif %}
+    <dt>Due</dt><dd id="due-date">{{ charge.due_date|day }}</dd>
+    <dt>Vendor</dt><dd id="vendor">{{ charge.vendor|default:"—" }}</dd>
+    <dt>Cost</dt><dd id="cost">{% if charge.cost is not None %}{{ charge.cost|money }}{% else %}unknown{% endif %}</dd>
+    <dt>Price</dt><dd id="price">{{ charge.price|money }}</dd>
+    {% if charge.category != "setup" %}<dt>Internal note</dt><dd id="note" style="white-space:pre-wrap;">{{ charge.note|default:"—" }}</dd>{% endif %}
+    {% if schedule_masked %}<dt>Autopay in {{ company.provider_name }}</dt><dd id="schedule">{{ schedule_masked }}</dd>{% endif %}
+    {% if provider_invoice_masked %}<dt>{{ company.provider_name }} invoice</dt><dd id="provider-invoice">{{ provider_invoice_masked }}</dd>{% endif %}
+    {% if charge.voided_at %}<dt>Voided</dt><dd id="voided">{{ charge.voided_at|day }} by {{ charge.voided_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.void_note }}</span></dd>{% endif %}
+    {% if charge.waived_at %}<dt>Waived</dt><dd id="waived">{{ charge.waived_at|day }} by {{ charge.waived_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.waive_note }}</span></dd>{% endif %}
+  </dl>
+  </section>
+
+  {% include "ledger/_detail_promise.html" %}
+
+  {% if can_link_invoice or can_edit or can_waive or can_cancel or can_delete_invoice %}
+  <section class="card" id="more-card">
+    <h2 class="section-label">More</h2>
+    <ul class="detail-more">
+      {% if can_link_invoice %}<li><a href="{% url 'ledger:one_off_charges:link' pk=charge.pk %}" id="more-link-invoice">Attach {{ company.provider_name }} invoice</a></li>{% endif %}
+      {% if can_edit %}<li><a href="{% url 'ledger:one_off_charges:edit' pk=charge.pk %}" id="more-edit-charge">Edit charge</a></li>{% endif %}
+      {% if can_waive %}<li><a href="{% url 'ledger:one_off_charges:waive' pk=charge.pk %}" id="more-waive-charge">Waive</a></li>{% endif %}
+      {% if can_delete_invoice %}<li><form method="post" action="{% url 'ledger:one_off_charges:delete_invoice' pk=charge.pk %}" class="js-single-submit">{% csrf_token %}<button class="link-action detail-danger" type="submit" id="more-delete-invoice">Cancel in {{ company.provider_name }}</button></form></li>{% endif %}
+      {% if can_cancel %}<li><a class="detail-danger" href="{% url 'ledger:one_off_charges:cancel' pk=charge.pk %}" id="more-cancel-charge">Cancel charge</a></li>{% endif %}
+    </ul>
+    {% if can_waive or can_cancel %}
+      <ul id="close-actions" class="muted detail-more-notes">
+        {% if can_cancel %}<li id="cancel-meaning"><strong>Cancel</strong> {{ cancel_meaning }}.</li>{% endif %}
+        {% if can_waive %}<li id="waive-meaning"><strong>Waive</strong> {{ waive_meaning }}.</li>{% endif %}
+      </ul>
+      {% if can_waive and waive_refusal %}<p id="waive-refusal"><strong>{{ waive_refusal }}</strong></p>{% endif %}
+    {% endif %}
+    {% if can_delete_invoice %}<p class="muted detail-more-notes" id="delete-invoice-hint">{{ delete_invoice_hint }}</p>{% endif %}
+  </section>
+  {% endif %}
+  </aside>
+  </div>
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}{% endblock %}

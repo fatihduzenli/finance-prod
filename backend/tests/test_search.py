@@ -149,7 +149,7 @@ def test_the_list_paging_and_export_keep_the_filter(viewer: Client) -> None:
         a_city_store(f"Depot {n:02d}", 5000 + n, "Waco")
     a_city_store("Elsewhere", 6000, "Tyler")
     page = text(viewer.get("/stores/", {"q": "waco"}))
-    assert "Page 1 of 2 (30 stores)" in page
+    assert '<span class="pager-count">1–25 of 30 · filtered from 31</span>' in page
     assert 'href="?q=waco&amp;page=2"' in page
     second = text(viewer.get("/stores/", {"q": "waco", "page": "2"}))
     assert 'href="?q=waco&amp;page=1"' in second and "Elsewhere" not in second

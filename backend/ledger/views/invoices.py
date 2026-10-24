@@ -88,11 +88,14 @@ from ledger.models import (
     Operator,
     Store,
 )
-from ledger.services import contacts, invoice_builder, one_off_charges, workspace
+from ledger.services import contacts, detail_cards, invoice_builder, one_off_charges, workspace
+from ledger.services import stores as store_service
 from ledger.services.invoice_builder import CollectChoice
-from ledger.services.rent_run import CENT
+from ledger.services.rent_run import CENT, ENTITY_INVOICE
+from ledger.services.rent_run import ENTITY_CHARGE as ENTITY_RENT_CHARGE
 from ledger.validators import contains_card_number
 from ledger.views import store_context
+from ledger.views.detail_cards import activity_context
 from ledger.views.jobs import job_context
 from ledger.views.operators import _actor, _role, role_required
 from ledger.views.store_context import StoreContext
@@ -681,6 +684,38 @@ def _sent_context(draft: InvoiceDraft) -> dict[str, Any]:
     }
 
 
+def _sent_detail(request: HttpRequest, draft: InvoiceDraft, sent: dict[str, Any]) -> dict[str, Any]:
+    """The sent invoice page in the detail family (PLAN-012f-a D4): the Paid and Balance tiles
+    (its charges' figures), the header's line and the Activity card (the invoice's rows, its
+    draft's and its charges')."""
+    invoice = draft.sent_invoice
+    if invoice is None:
+        return {}
+    charges = list(sent.get("charges", []))
+    rents = list(sent.get("rent_charges", []))
+    store = draft.lease.store if draft.lease is not None else None
+    return {
+        "sent_paid": sum((row.amount_paid for row in [*charges, *rents]), Decimal("0.00")),
+        "sent_balance": sum((row.balance for row in [*charges, *rents]), Decimal("0.00")),
+        "header_line": detail_cards.header_line(
+            store=store_service.title(store) if store is not None else "",
+            operator=draft.operator.display_name,
+            created=invoice.created_at,
+            due=invoice.due_date,
+        ),
+        **activity_context(
+            [
+                (invoice_builder.ENTITY_DRAFT, draft.pk),
+                *((one_off_charges.ENTITY_ONE_OFF_CHARGE, row.pk) for row in charges),
+                *((ENTITY_RENT_CHARGE, row.pk) for row in rents),
+            ],
+            admin=meets(_role(request), Role.ADMIN),
+            store=store,
+            record=(ENTITY_INVOICE, invoice.pk),
+        ),
+    }
+
+
 @role_required
 @require_safe
 def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
@@ -722,6 +757,8 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
     if form is not None and context is not None:
         _hide_lease(form)
     sent = _sent_context(draft) if draft.status == InvoiceDraftStatus.SENT else {}
+    if sent:
+        sent.update(_sent_detail(request, draft, sent))
     preview = invoice_builder.preview(draft)
     preview_total = _lines_total(formset) if formset is not None else preview.total
     return render(

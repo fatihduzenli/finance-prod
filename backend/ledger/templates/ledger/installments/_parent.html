@@ -4,8 +4,7 @@
   {% if plan_live %}<p class="muted">While the plan runs, this charge is paid through its installments; record payments on them.</p>{% endif %}
   {% include "ledger/installments/_installments.html" with installments=plan_progress.installments count=plan_progress.count %}
 {% endif %}
-{% if can_split %}
-  <p class="actions"><a class="btn" href="{{ split_url }}" id="split-installments">Split into installments</a> <span class="muted">{{ split_help }}</span></p>
-{% elif split_refusal %}
+{% comment %}PLAN-012f-a D4: "Split into installments" is in the page header's actions; its help is on the split page.{% endcomment %}
+{% if split_refusal %}
   <p id="split-refusal">Split into installments is not possible now: {{ split_refusal }}</p>
 {% endif %}

@@ -1,0 +1,5 @@
+{% load icons %}{% comment %}The detail family's empty Payments card (docs/qa/PLAN-012f-a-design-follow-up.md D4): the round icon, "No payment yet." and the next step: "Add a payment" (payment_url, when the page offers it) and, when the charge has an invoice, "or wait for the invoice". Context: payment_url, invoice_rows.{% endcomment %}<div class="detail-empty" id="payments-empty">
+  <span class="detail-empty-icon">{% icon "banknote" %}</span>
+  <p class="detail-empty-title">No payment yet.</p>
+  {% if payment_url or invoice_rows %}<p class="detail-empty-next">{% if payment_url %}<a href="{{ payment_url }}" id="payments-empty-add">Add a payment</a>{% if invoice_rows %} · or wait for the invoice{% endif %}{% else %}Wait for the invoice{% endif %}</p>{% endif %}
+</div>

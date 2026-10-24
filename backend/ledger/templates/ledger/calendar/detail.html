@@ -1,12 +1,23 @@
 {% extends "finance/base.html" %}{% load dates %}
 {% block title %}{{ entry.title }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:calendar:page' %}?month={{ entry.on|date:'Y-m' }}">Calendar: {{ entry.on|month }}</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ entry.title }}</span></nav><h1>{{ entry.title }}</h1></div>{% if can_change %}<div class="page-actions"><a class="btn" id="calendar-edit" href="{% url 'ledger:calendar:edit' pk=entry.pk %}">Edit</a><form method="post" action="{% url 'ledger:calendar:delete' pk=entry.pk %}" onsubmit="return window.confirm('Delete this calendar entry?');">{% csrf_token %}<button class="btn btn-danger" type="submit" id="calendar-delete">Delete</button></form></div>{% endif %}</div>{% endblock %}
+{% comment %}A calendar entry's page, in the detail family (PLAN-012f-a D4): the header (breadcrumb, title with the kind badge, the muted line, Edit and More ▾ with Delete), the entry's text and its Activity beside DETAILS and MORE.{% endcomment %}
+{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:calendar:page' %}?month={{ entry.on|date:'Y-m' }}">Calendar: {{ entry.on|month }}</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ entry.title }}</span></nav><h1 class="store-title">{{ entry.title }} <span class="badge kind-badge" id="entry-kind">{{ entry.get_kind_display }}</span></h1><p class="store-line" id="detail-line">{{ entry.on|day_long }}</p></div>{% if can_change %}<div class="page-actions"><a class="btn" id="calendar-edit" href="{% url 'ledger:calendar:edit' pk=entry.pk %}">Edit</a><details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><form method="post" action="{% url 'ledger:calendar:delete' pk=entry.pk %}" onsubmit="return window.confirm('Delete this calendar entry?');">{% csrf_token %}<button class="menu-danger" type="submit" id="calendar-delete">Delete</button></form></li></ul></details></div>{% endif %}</div>{% endblock %}
 {% block content %}
+  <div class="detail-grid">
+  <div class="detail-main">
+  <section class="card" id="calendar-text">
+  <h2>Text</h2>
+  <p style="white-space:pre-wrap;" id="entry-body">{{ entry.body|default:"—" }}</p>
+  </section>
+  {% include "ledger/_detail_activity.html" %}
+  </div>
+
+  <aside class="detail-side" aria-label="Details">
   <section class="card" id="calendar-entry">
-  <dl class="detail-list">
+  <h2 class="section-label">Details</h2>
+  <dl class="detail-list side-list">
     <dt>Kind</dt><dd>{{ entry.get_kind_display }}</dd>
     <dt>Date</dt><dd>{{ entry.on|day }}</dd>
-    <dt>Text</dt><dd style="white-space:pre-wrap;">{{ entry.body|default:"—" }}</dd>
     <dt>Store</dt><dd>{% if entry.store %}<a href="{% url 'ledger:stores:detail' pk=entry.store.pk %}">{{ entry.store.external_label }}</a>{% else %}—{% endif %}</dd>
     <dt>Operator</dt><dd>{% if entry.operator %}<a href="{% url 'ledger:operators:detail' pk=entry.operator.pk %}">{{ entry.operator.display_name }}</a>{% else %}—{% endif %}</dd>
     <dt>Lease</dt><dd>{% if entry.lease %}<a href="{% url 'ledger:leases:detail' pk=entry.lease.pk %}">{{ entry.lease.store.external_label }}</a>{% else %}—{% endif %}</dd>
@@ -14,4 +25,16 @@
     <dt>Author</dt><dd>{{ entry.author.get_username|default:"—" }}, {{ entry.created_at|moment }}</dd>
   </dl>
   </section>
+
+  {% if can_change %}
+  <section class="card" id="more-card">
+    <h2 class="section-label">More</h2>
+    <ul class="detail-more">
+      <li><form method="post" action="{% url 'ledger:calendar:delete' pk=entry.pk %}" onsubmit="return window.confirm('Delete this calendar entry?');">{% csrf_token %}<button class="link-action detail-danger" type="submit" id="more-calendar-delete">Delete</button></form></li>
+    </ul>
+  </section>
+  {% endif %}
+  </aside>
+  </div>
 {% endblock %}
+{% block scripts %}{% include "ledger/_menu_script.html" %}{% endblock %}

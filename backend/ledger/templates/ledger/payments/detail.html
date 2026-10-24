@@ -1,31 +1,29 @@
 {% extends "finance/base.html" %}
-{% load responsive money dates %}
+{% load components responsive money dates %}
 {% block title %}Payment{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% else %}<a href="{% url 'ledger:payments:list' %}">Payments</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</span></nav><h1>{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</h1></div>{% if can_refund or can_void %}<div class="page-actions">{% if can_void %}<a class="btn" href="{% url 'ledger:payments:void' pk=payment.pk %}" id="void-payment">Void</a>{% endif %}{% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}</div>{% endif %}</div>{% endblock %}
+{% comment %}The payment page, in the detail family (PLAN-012f-a D4): the header (breadcrumb, title with the status badge, the muted line, Refund, More ▾ with Void; admin), the tiles Amount / Refunded / Remaining (a refund: its amount), the Refunds (or "Refunds payment"), Invoice, Charge and Activity cards beside DETAILS and MORE.{% endcomment %}
+{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=payments#tab-payments" id="payments-crumb">Payments</a> <span aria-hidden="true">›</span> {% else %}<a href="{% url 'ledger:payments:list' %}">Payments</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</span></nav><h1 class="store-title">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }} <span id="payment-status">{% status_badge payment.get_status_display payment.status %}</span>{% if payment.is_refund %} <span class="badge kind-badge">Refund</span>{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if can_refund or can_void %}<div class="page-actions" id="payment-actions">{% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}{% if can_void %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><a class="menu-danger" href="{% url 'ledger:payments:void' pk=payment.pk %}" id="void-payment">Void</a></li></ul></details>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
-  <section class="card" id="payment-card" aria-label="Payment">
-
   {% include "ledger/_job_status.html" %}
-  {% include "ledger/payments/summary.html" %}
-  <dl class="detail-list">
-    <dt>Initiated</dt><dd>{{ payment.initiated_on|day|default:"—" }}</dd>
-    <dt>Paid on</dt><dd>{{ payment.settled_on|day|default:"—" }}</dd>
-    {% if payment.return_code %}<dt>Return</dt><dd>{{ payment.return_code }} {{ payment.return_reason }}</dd>{% endif %}
-    <dt>Reference</dt><dd>{{ payment.reference|default:"—" }}</dd>
-    <dt>Note</dt><dd style="white-space:pre-wrap;">{{ payment.note|default:"—" }}</dd>
-    <dt>Recorded by</dt><dd>{{ payment.recorded_by|default:"—" }}</dd>
-  </dl>
+  <div class="detail-grid">
+  <div class="detail-main">
+  <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
+    <div id="tile-amount">{% kpi "Amount" payment.amount|money %}</div>
+    {% if not payment.is_refund %}
+    <div id="tile-refunded">{% kpi "Refunded" facts.refunded|money "pending and settled refunds" %}</div>
+    <div id="tile-remaining">{% kpi "Remaining" facts.refundable|money "refundable" %}</div>
+    {% endif %}
   </section>
 
   {% if payment.parent_payment %}
-    <section class="card">
+    <section class="card" id="parent-payment-card">
     <h2>Refunds payment</h2>
     <p id="parent-payment"><a href="{% url 'ledger:payments:detail' pk=payment.parent_payment.pk %}">{{ payment.parent_payment.get_method_display }} payment of {{ payment.parent_payment.amount|money }}</a>, {{ payment.parent_payment.get_status_display }}{% if parent_transaction %}, transaction {{ parent_transaction }}{% endif %}</p>
     </section>
   {% endif %}
 
   {% if not payment.is_refund %}
-    <section class="card">
+    <section class="card" id="refunds-card">
     <h2>Refunds</h2>
     {% responsive_table %}
     <table id="refunds">
@@ -36,7 +34,7 @@
             <td><a href="{% url 'ledger:payments:detail' pk=refund.pk %}">{{ refund.initiated_on|day|default:"—" }}</a></td>
             <td>{{ refund.settled_on|day|default:"—" }}</td>
             <td class="money">&minus;{{ refund.amount|money }}</td>
-            <td>{{ refund.get_status_display }}</td>
+            <td>{% status_badge refund.get_status_display refund.status %}</td>
           </tr>
         {% empty %}
           <tr><td colspan="4" class="muted empty">No refunds.</td></tr>
@@ -47,39 +45,39 @@
     </section>
   {% endif %}
 
-  <section class="card">
+  <section class="card" id="invoice-card">
   <h2>Invoice</h2>
   {% if invoice %}
-    <dl id="payment-invoice">
+    <dl id="payment-invoice" class="detail-list">
       <dt>Number</dt><dd>{{ invoice.invoice_number }}</dd>
       <dt>Total</dt><dd>{{ invoice.total|money }}</dd>
-      <dt>{{ company.provider_name }} status</dt><dd id="invoice-provider-status">{{ invoice.provider_status|default:"—" }}</dd>
+      <dt>{{ company.provider_name }} status</dt><dd id="invoice-provider-status">{% if invoice.provider_status %}<span class="provider-pill">{{ invoice.provider_status }}</span>{% else %}—{% endif %}</dd>
       <dt>{{ company.provider_name }} amount paid</dt><dd>{% if invoice.amount_paid is not None %}{{ invoice.amount_paid|money }}{% else %}—{% endif %}</dd>
     </dl>
-    <p class="muted">The {{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>
+    <p class="muted card-note">The {{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>
   {% else %}
     <p class="muted">No invoice.</p>
   {% endif %}
   </section>
 
-  <section class="card">
+  <section class="card" id="charge-card">
   <h2>Charge</h2>
   {% if charge %}
-    <dl id="payment-charge">
+    <dl id="payment-charge" class="detail-list">
       <dt>Charge</dt><dd><a href="{% url 'ledger:charges:detail' pk=charge.pk %}">Rent {{ charge.period_month|month }}, debit {{ charge.seq }}</a></dd>
       <dt>Amount due</dt><dd id="charge-due">{{ charge.amount_due|money }}</dd>
       <dt>Paid</dt><dd id="charge-paid">{{ charge.amount_paid|money }}</dd>
       <dt>Balance</dt><dd id="charge-balance">{{ charge.balance|money }}</dd>
-      <dt>Status</dt><dd id="charge-status">{{ charge.get_status_display }}</dd>
+      <dt>Status</dt><dd id="charge-status">{% status_badge charge.get_status_display charge.status %}</dd>
     </dl>
     {% if charge_review %}<p><strong>{{ charge_review }}</strong></p>{% endif %}
   {% elif one_off_charge %}
-    <dl id="payment-setup-charge">
+    <dl id="payment-setup-charge" class="detail-list">
       <dt>Charge</dt><dd><a href="{% url 'ledger:one_off_charges:detail' pk=one_off_charge.pk %}">{{ one_off_charge.label }}</a> <span class="muted">({{ payment.get_kind_display }})</span>{% if one_off_charge.fee_type.refundable %} <span class="badge">Deposit</span>{% endif %}</dd>
       <dt>Price</dt><dd id="charge-due">{{ one_off_charge.price|money }}</dd>
       <dt>Paid</dt><dd id="charge-paid">{{ one_off_charge.amount_paid|money }}</dd>
       <dt>Balance</dt><dd id="charge-balance">{{ one_off_charge.balance|money }}</dd>
-      <dt>Status</dt><dd id="charge-status">{{ one_off_charge.get_status_display }}</dd>
+      <dt>Status</dt><dd id="charge-status">{% status_badge one_off_charge.get_status_display one_off_charge.status %}</dd>
     </dl>
     {% if charge_review %}<p><strong>{{ charge_review }}</strong></p>{% endif %}
   {% elif payment.insurance_charge %}
@@ -89,19 +87,35 @@
   {% endif %}
   </section>
 
-  <section class="card">
-  <h2>Audit</h2>
-  {% responsive_table %}
-  <table id="payment-audit">
-    <thead><tr><th>When</th><th>Action</th><th>By</th></tr></thead>
-    <tbody>
-      {% for entry in audit_rows %}
-        <tr><td>{{ entry.at|moment }}</td><td>{{ entry.action }}</td><td>{% if entry.actor %}{{ entry.actor }}{% else %}{{ company.provider_name }} or system{% endif %}</td></tr>
-      {% empty %}
-        <tr><td colspan="3" class="muted empty">No audit rows.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endresponsive_table %}
+  {% include "ledger/_detail_activity.html" %}
+  </div>
+
+  <aside class="detail-side" aria-label="Details">
+  <section class="card" id="payment-card" aria-label="Payment">
+  <h2 class="section-label">Details</h2>
+  <dl class="detail-list side-list" id="payment-details">
+    <dt>Operator</dt><dd id="summary-operator">{{ row.operator.display_name|default:"—" }}</dd>
+    <dt>Store</dt><dd id="summary-store">{{ row.store.external_label|default:"—" }}</dd>
+    <dt>Method</dt><dd>{{ payment.get_method_display }}</dd>
+    <dt>Transaction</dt><dd id="summary-transaction">{{ row.transaction|default:"—" }}</dd>
+    <dt>Initiated</dt><dd>{{ payment.initiated_on|day|default:"—" }}</dd>
+    <dt>Paid on</dt><dd>{{ payment.settled_on|day|default:"—" }}</dd>
+    {% if payment.return_code %}<dt>Return</dt><dd>{{ payment.return_code }} {{ payment.return_reason }}</dd>{% endif %}
+    <dt>Reference</dt><dd>{{ payment.reference|default:"—" }}</dd>
+    <dt>Note</dt><dd style="white-space:pre-wrap;">{{ payment.note|default:"—" }}</dd>
+    <dt>Recorded by</dt><dd>{{ payment.recorded_by|default:"—" }}</dd>
+  </dl>
   </section>
+
+  {% if can_void %}
+  <section class="card" id="more-card">
+    <h2 class="section-label">More</h2>
+    <ul class="detail-more">
+      <li><a class="detail-danger" href="{% url 'ledger:payments:void' pk=payment.pk %}" id="more-void-payment">Void</a></li>
+    </ul>
+  </section>
+  {% endif %}
+  </aside>
+  </div>
 {% endblock %}
+{% block scripts %}{% include "ledger/_menu_script.html" %}{% endblock %}

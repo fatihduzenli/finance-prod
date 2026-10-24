@@ -58,11 +58,21 @@ from ledger.models import (
     OneOffChargeStatus,
     Operator,
 )
-from ledger.services import collections, csv_export, invoice_builder, rent_run, workspace
+from ledger.services import (
+    collections,
+    contacts,
+    csv_export,
+    invoice_builder,
+    rent_run,
+    workspace,
+)
+from ledger.services import detail_cards as detail_service
 from ledger.services import one_off_charges as service
+from ledger.services import stores as store_service
 from ledger.services.csv_export import CsvWriter
 from ledger.views import store_context, stores
 from ledger.views.charges import _report
+from ledger.views.detail_cards import activity_context
 from ledger.views.installments import parent_context
 from ledger.views.jobs import already_submitted, busy, job_context, submit
 from ledger.views.operators import (
@@ -181,8 +191,19 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
     closed = charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
     retry_wait = service.retry_wait(charge) if billing else None
     jobs = job_context(charge)
-    # Every line of a builder invoice has the invoice (PLAN-012c-a D1).
-    invoices = list(service.invoices_of(charge))
+    # Every line of a builder invoice has the invoice (PLAN-012c-a D1); PLAN-012f-a D4: each
+    # with its subline and the builder draft that sent it.
+    invoice_rows = detail_service.invoice_rows(charge, str(charge.get_category_display()))
+    invoices = [row.invoice for row in invoice_rows]
+    payments = list(charge.payments.order_by("-settled_on", "-created_at"))
+    operator = _operator(charge)
+    store = charge.lease.store if charge.lease is not None else None
+    balance_open = not closed and charge.balance > 0
+    resolution = (
+        DepositResolution.objects.filter(setup_charge=charge)
+        .select_related("to_lease__store", "created_by")
+        .first()
+    )
     linked = rent_run.provider_invoice(charge)
     schedule = service.provider_schedule(charge)
     # A setup charge billed on an invoice (PLAN-012 D6) is not edited here.
@@ -196,13 +217,15 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "lease": charge.lease,
             # PLAN-012d D5: "← Store NNNN".
             "crumb_store": charge.lease.store if charge.lease is not None else None,
-            "operator": _operator(charge),
+            "operator": operator,
             "invoices": invoices,
+            "invoice_rows": invoice_rows,
+            "can_open_invoice": billing,
             # PLAN-012b-a D5: an invoice released for the installment plan.
             "released_invoices": service.released_invoices(charge),
             "provider_invoice_masked": mask_identifier(linked[1]) if linked else "",
             "schedule_masked": mask_identifier(schedule) if schedule else "",
-            "payments": charge.payments.order_by("-settled_on", "-created_at"),
+            "payments": payments,
             "review_message": service.review_message(charge),
             # Any line of a builder invoice takes a payment of its own (PLAN-012c-a D2).
             "can_record": billing
@@ -249,9 +272,29 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
                     split_url=reverse("ledger:one_off_charges:split", kwargs={"pk": charge.pk}),
                 )
             ),
-            "resolution": DepositResolution.objects.filter(setup_charge=charge)
-            .select_related("to_lease__store", "created_by")
-            .first(),
+            "resolution": resolution,
+            # PLAN-012f-a D4: the header's kind badge and muted line, the tiles' tone, the
+            # open promise of the charge's store and the Activity card.
+            "kind_badge": detail_service.kind_words(charge, resolution),
+            "header_line": detail_service.header_line(
+                store=store_service.title(store) if store is not None else "",
+                operator=operator.display_name if operator is not None else "",
+                created=charge.created_at,
+                source=detail_service.one_off_source(charge, invoice_rows),
+                due=charge.due_date,
+            ),
+            "balance_open": balance_open,
+            "promise": contacts.open_promise(operator, charge.lease) if balance_open else None,
+            "can_record_outcome": billing and operator is not None and operator.archived_at is None,
+            **activity_context(
+                [
+                    *((rent_run.ENTITY_INVOICE, row.pk) for row in invoices),
+                    *((rent_run.ENTITY_PAYMENT, row.pk) for row in payments),
+                ],
+                admin=admin,
+                store=store,
+                record=(service.ENTITY_ONE_OFF_CHARGE, charge.pk),
+            ),
             # PLAN-011b D4: the charge's collection e-mails and the hand send.
             **collections.charge_context(
                 ChargeEntityType.ONE_OFF_CHARGE,

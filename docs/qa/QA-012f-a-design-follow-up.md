@@ -105,3 +105,101 @@ promise message, run without a direct test. The audit page's Time column lost it
 zone word (the CSV keeps both).
 
 **Verdict (A):** PASS (two MAJOR and three MINOR resolved; the owner's questions of plan §9 stand)
+
+### Batch B — the list family (D3) and the detail family (D4)
+
+**Scope.** *B1 (Opus):* `ledger/services/stores.py` gains `store_list(params, today)` (every store
+with its current lease, operator, channel, rent and last lease end in one query of correlated
+subqueries; the balances from the shared `receivables.open_balances` grouped by store; the filters
+`q`, `state`, `status` (active / vacant / closed), `balance` (owing / paid / overdue) and `sort`
+(number / name / balance) parsed against fixed lists, applied over every store before the sort and
+the page; an unknown value falls back and is never echoed); `views/stores.py` and the operators
+list's store count; `_list_footer.html` ("1–7 of 7 · filtered from 517" and the pager with the
+current page as a dark pill); `stores/list.html` to the reference (counts line, one filter row,
+the store title with "City, ST" under it, Operator, Rent, Collected by, the Balance badge in its
+family, the Status badge, a chevron); the siblings Operators, Leases, Payments, Returned payments,
+Disputes, Unpaid balances and Search with the counts line, the title-and-subline first cell, badges
+for money state and status, the footer where the page is paged; the `page_numbers` filter and the
+`chevron-right` icon; app.css's "List family" block. Budget: the stores list 11 → 14 (the counts,
+the balances), pinned and constant. *B2 (Opus):* `ledger/services/detail_cards.py` (read helpers:
+`activity` in one query over the record's audit rows, newest first, capped at 20 with the "more"
+flag, notes masked; `invoice_rows` with the line count and the builder draft; `kind_words`,
+`one_off_source`, `rent_source`, `header_line`, `lease_open_balance`) and `views/detail_cards.py`
+(`activity_context`: the "All activity" link to the store's History tab or the audit page filtered
+to the record, admin only); the partials `_detail_activity`, `_detail_invoices` (the provider status
+as copied in a teal pill, "view" to the builder page for billing), `_detail_payments_empty`,
+`_detail_promise` (the existing outcome links as text); the six pages rewritten on one frame
+(breadcrumb with Charges or Payments, the title with the status and kind badges, the muted
+header line, the primary and More ▾, the three tiles, the relation cards, Activity, the DETAILS,
+Open promise and MORE cards): one-off charge, rent charge, payment (Amount / Refunded / Remaining),
+sent invoice (Total / Paid / Balance), lease (Rent / Open balance / Deposit), calendar entry; the
+`banknote` icon; app.css's "Detail family" block. Budgets: one-off 35 → 37, rent 28 → 28, payment
+17 → 17, sent invoice 25 → 26, lease 24 → 30, calendar entry 10 → 11, each pinned and constant.
+*Fable:* `tests/test_plan012fa_b_adversarial.py` (8: every list filter control fed markup, overlong,
+traversal and odd values answers on site and echoes none of them; a viewer sees no primary action
+or form link on any list; the stores counts line and footer equal the database; the balance badge's
+family per store; markup escaped on every list and detail page; the detail page's actions by role;
+the balance sort and filter; the vacant filter versus the counts line).
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| B-1 | MINOR | app.css (B1) | The list family's phone rules opened a second `@media (max-width: 719.98px)` block with a `data-role` rule, outside the one block the role rules are confined to | Resolved: folded into the existing phone block (one block in the file) |
+| B-2 | MINOR | tests/test_plan012fa_b_adversarial.py (Fable) | "With a lease" counted through an outer join and so counted a store with no lease | Resolved (`leases__isnull=False`), found by Opus |
+| B-3 | MINOR | the phone's list cards | The operator link's 44 px tap height stretches the meta line and splits the two badges over lines | Open: a CSS tidy of the list family's phone meta line (the role card's inline links at text height while the row stays ≥ 44 px), for the Batch D cleanup |
+| B-4 | — | brief B1 | Fable asked for the balances "in one query grouped by store"; Opus kept the shared `open_balances` (four queries, six with a re-debit carry) so the list's figures cannot drift from the dashboard's | Accepted: the shared helper; the budget +3 as planned |
+| B-5 | — | brief B2 | Fable's "≤ 25 and constant" budget was already untrue for four of the six pages before the slice; the lease page's Open balance tile adds the receivables read | Accepted: the pages pinned at their constants (one-off 37, rent 28, payment 17, invoice 26, lease 30, entry 11) |
+
+| B-6 | MAJOR | tests/test_plan012fa_b_detail.py (Opus) | Twenty fixtures assigned `provider_status` directly: green on sqlite, refused by PostgreSQL's Rule 2 trigger, so the file could never pass CI | Resolved: the fixture goes through the sync layer; re-run green on both engines; no production line writes the column |
+
+**Decisions taken (Fable) and for the owner.** The counts line's "N vacant" counts every store
+without a lease, closed ones included, while the Vacant filter shows the open ones (closed sit under
+Closed) — *for the owner*; "Collected by" reads the lease's channel words (Bank debit, Wire, Zelle,
+Other; the drawing's "E-mail" is not a channel); the Status filter defaults to All (the drawing's
+"Active" selection shows vacant and closed rows); "filtered from N" appears on the stores list only
+(the siblings would need one more count query); the provider status reads as copied ("SENT", Rule
+2) where the drawing reads "Open"; the "view" link opens the builder's invoice page (no provider
+URL exists); "Cancel in Stax" is the existing delete-invoice action, admin only, and a one-off has no
+Void; the promise card uses the operator's open promise on the lease (no field ties a promise to a
+charge) and shows while the balance is open; the Activity card shows to every role (the payment page
+already did), the "All activity" link to admins; the Invoices card's date column reads "Issued"
+(`sent_at` is often empty); "from the lease checklist" is written only when a field says so; the
+outcome links are the existing GET links (no single-submit guard needed).
+
+**Gate 1.** ruff, `ruff format --check` (471 files), mypy strict (471 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16: all clean. **Gate 2.** sqlite 6,704 passed,
+664 skipped (20:32) with one failure, the shell test's icon list (the chevron and the banknote
+added; the pin and the plan's contract updated by Fable, the file re-run 74 passed on both
+engines); PostgreSQL "Migration tests" 34 passed (16:51), "Unit tests" 7,311 passed, 3 skipped
+(21:42) with the icon pin and 20 failures in Opus's `test_plan012fa_b_detail.py`, every one at
+fixture setup: the tests assigned `provider_status` directly, which PostgreSQL's Rule 2 trigger
+(`finance_guard_provider_status`) refuses and sqlite does not enforce (finding B-6) — fixed by Opus (the invoice's status written through `invoice_sync.record_provider_status`, the suite's pattern), the file and the shell test re-run by Fable: 97 passed on sqlite and 97 passed on PostgreSQL;
+e2e 29 passed in each of four runs on PostgreSQL. Visual: the thirty baselines regenerated in the
+image against PostgreSQL (34 passed), compare runs 34 passed on both engines, a sqlite regeneration
+equal to the PostgreSQL baselines in all thirty files; the two stores-list baselines changed, no
+other. **Gate 3.** Diff read: every list parameter passes `_one_of` against a fixed list or the
+search's cleaner; the filters, the sort and the page run over every store; the balances come from
+the shared receivables helper; the activity card is one query with notes masked and a bounded slice;
+the "All activity" link is admin-only and keeps ISO in its query string; no production line writes
+`provider_status`; every existing action keeps its URL, method and role; the two CSS blocks are
+delimited and the role rules stay in the one phone block. **Gate 4.** Secret scans (script and
+pattern, the diff and every new file) clean; no provider name in a new file; the new inputs are
+five GET filters on an existing page, each validated against a list, none echoed when unknown
+(Fable's fuzz over every control of six lists: markup, overlong, traversal, injection-shaped,
+negative, NUL and encoded NUL); a viewer sees no primary action or form link on any list and no
+action on a charge page, billing no Void; markup in a store's and an operator's name is escaped on
+every list and detail page; the balance badge never names a wrong family; the vacant filter and the
+counts line pinned as decided.
+
+**Visual check.** B1's stores list at 1,440 reads like the drawing (counts line, one filter row,
+the title-and-subline store, the balance and status badges, the chevron, the footer); B2's charge
+page at 1,440 reads like the drawing (tiles, the Invoices card with the provider pill, the empty
+Payments state, Activity, DETAILS, the tinted Open promise card, MORE). At 390 the list cards wrap
+unevenly (B-3, open for the cleanup); the charge page stacks cleanly.
+
+**Residual risk (B).** The sibling lists have no visual baseline yet (Batch D adds the family
+pages to the suite). The Payments list's note badge and the operator page's meta-badge rule are
+covered by the tag's synthetic tests, not by a rendered page with a note.
+
+**Verdict (B):** PASS (one MAJOR in a test fixture and two MINOR resolved; B-3 open for the cleanup; the owner's questions of plan §9 stand, plus the counts-line reading of "vacant")

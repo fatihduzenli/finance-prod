@@ -1,43 +1,55 @@
 {% extends "finance/base.html" %}
-{% load components responsive dates %}
+{% load components responsive money icons %}
 {% block title %}Stores{% endblock %}
-{% block header %}<div class="page-header"><h1>Stores</h1>{% if can_create %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">New store</a></div>{% endif %}</div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Stores</h1><span class="list-counts" id="list-counts">{{ listed.total }} store{{ listed.total|pluralize }} · {{ listed.with_lease }} with a lease · {{ listed.vacant }} vacant</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:stores:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">{% icon "plus" 16 %} New store</a>{% endif %}</div></div>{% endblock %}
 {% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
 {% block content %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:stores:list' %}" class="actions" role="search">
-    <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Search stores" style="max-width:24rem;">
-    <button class="btn" type="submit">Search</button>
-    <a class="btn" id="export-csv" href="{% url 'ledger:stores:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>
+  {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3; DESIGN-SPEC §4 Stores list, stores-list-laptop.png).{% endcomment %}
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:stores:list' %}" class="actions list-filters" role="search" id="store-filters">
+    <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Search stores" class="list-search">
+    <span class="filter-field"><label for="state">State</label>
+    <select name="state" id="state">
+      <option value="">All</option>
+      {% for state in listed.states %}<option value="{{ state }}"{% if state == filters.state %} selected{% endif %}>{{ state }}</option>{% endfor %}
+    </select></span>
+    <span class="filter-field"><label for="status">Status</label>
+    <select name="status" id="status">
+      {% for value, label in status_choices %}<option value="{{ value }}"{% if value == filters.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></span>
+    <span class="filter-field"><label for="balance">Balance</label>
+    <select name="balance" id="balance">
+      {% for value, label in balance_choices %}<option value="{{ value }}"{% if value == filters.balance %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></span>
+    <span class="filter-field"><label for="sort">Sort</label>
+    <select name="sort" id="sort">
+      {% for value, label in sort_choices %}<option value="{{ value }}"{% if value == filters.sort %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></span>
+    <button class="btn btn-dark" type="submit">Filter</button>
   </form></div>
   {% if query %}<p class="muted" id="stores-filtered">Filtered by '{{ query }}' · <a href="{% url 'ledger:stores:list' %}" id="stores-clear">Clear</a></p>{% endif %}
-  <div class="card table-card">
+  <div class="card table-card list-card">
   {% responsive_table %}
-  <table>
+  <table id="stores">
     <thead>
-      <tr><th>Name</th><th>Store number</th><th>City</th><th>State</th><th>Open date</th><th>Status</th></tr>
+      <tr><th{% if filters.sort != "balance" %} aria-sort="ascending"{% endif %}>Store{% if filters.sort != "balance" %} <span aria-hidden="true">▲</span>{% endif %}</th><th>Operator</th><th class="money">Rent</th><th>Collected by</th><th{% if filters.sort == "balance" %} aria-sort="descending"{% endif %}>Balance{% if filters.sort == "balance" %} <span aria-hidden="true">▼</span>{% endif %}</th><th>Status</th><th class="cell-chevron"><span class="visually-hidden">Open</span></th></tr>
     </thead>
     <tbody>
-      {% for store in page %}
+      {% for row in page %}{% url 'ledger:stores:detail' pk=row.store.pk as store_url %}
         <tr>
-          <td>{% url 'ledger:stores:detail' pk=store.pk as store_url %}{% include "ledger/_cell_title.html" with title=store.external_label link=store_url %}{% if store.needs_open_date %} <span class="badge">Needs open date</span>{% endif %}{% if store.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
-          <td>{{ store.store_number|default_if_none:"—" }}</td>
-          <td>{{ store.city }}</td>
-          <td>{{ store.state }}</td>
-          <td>{{ store.open_date|day|default:"—" }}</td>
-          <td>{{ store.get_status_display }}</td>
+          <td>{% include "ledger/_cell_title.html" with title=row.title link=store_url subline=row.place %}{% if row.store.needs_open_date %} <span class="badge">Needs open date</span>{% endif %}{% if row.store.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
+          <td>{% if row.operator_id %}<a href="{% url 'ledger:operators:detail' pk=row.operator_id %}">{{ row.operator_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="money">{% if row.rent is not None %}{{ row.rent|money }}{% else %}—{% endif %}</td>
+          <td>{{ row.channel|default:"—" }}</td>
+          <td class="store-balance">{% status_badge row.balance.label row.balance.value %}</td>
+          <td class="store-status">{% status_badge row.status_label row.status_value %}</td>
+          <td class="cell-chevron" data-role="meta"><a href="{{ store_url }}" aria-label="Open {{ row.title }}">{% icon "chevron-right" 16 %}</a></td>
         </tr>
       {% empty %}
-        <tr><td colspan="6" class="muted empty">No stores match.{% if query %} <a class="empty-next" href="{% url 'ledger:stores:list' %}">Clear</a>{% elif can_create %} <a class="btn empty-next" href="{% url 'ledger:stores:create' %}">New store</a>{% endif %}</td></tr>
+        <tr><td colspan="7" class="muted empty">No stores match.{% if filters.narrowed %} <a class="empty-next" href="{% url 'ledger:stores:list' %}">Clear</a>{% elif can_create %} <a class="btn empty-next" href="{% url 'ledger:stores:create' %}">New store</a>{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
   {% endresponsive_table %}
+  {% include "ledger/_list_footer.html" with page=page pager_query=pager_query filtered_from=filtered_from %}
   </div>
-  {% if page.paginator.num_pages > 1 %}
-    <div class="pager" role="navigation" aria-label="Pages">
-      {% if page.has_previous %}<a class="btn" href="?{% if query %}q={{ query|urlencode:'' }}&amp;{% endif %}page={{ page.previous_page_number }}">Previous</a>{% endif %}
-      <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }} ({{ page.paginator.count }} stores)</span>
-      {% if page.has_next %}<a class="btn" href="?{% if query %}q={{ query|urlencode:'' }}&amp;{% endif %}page={{ page.next_page_number }}">Next</a>{% endif %}
-    </div>
-  {% endif %}
 {% endblock %}

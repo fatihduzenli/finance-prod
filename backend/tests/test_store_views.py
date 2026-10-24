@@ -258,7 +258,10 @@ def test_a_closed_store_is_saved_and_listed_with_its_status(admin: Client) -> No
     assert store.status == StoreStatus.CLOSED
     assert store.closed_at is not None and store.closed_at.isoformat() == "2026-06-30"
     page = admin.get(LIST).content.decode()
-    assert "Closed One" in page and '<td data-role="meta" data-label="Status">Closed</td>' in page
+    # PLAN-012f-a D3: the Status column is a badge (a closed store in the unpaid family's red).
+    status = re.search(r'<td class="store-status"[^>]*>(.*?)</td>', page, re.S)
+    assert "Closed One" in page and status is not None
+    assert 'class="badge badge-unpaid"' in status.group(1) and "Closed" in status.group(1)
     detail = admin.get(paths(store)["detail"]).content.decode()
     assert "Jun 30, 2026" in detail and "Closed" in detail
 
@@ -296,7 +299,7 @@ def test_list_search_by_label_and_city_and_paging(admin: Client) -> None:
     for index in range(30):
         make_store(external_label=f"Store {index:02d}", city="Springfield" if index else "Capital")
     first = admin.get(LIST).content.decode()
-    assert "Page 1 of 2 (30 stores)" in first
+    assert '<span class="pager-count">1–25 of 30</span>' in first
     assert "Store 00" in first and "Store 29" not in first
     second = admin.get(f"{LIST}?page=2").content.decode()
     assert "Store 29" in second
@@ -317,7 +320,7 @@ def test_paging_keeps_the_search(admin: Client) -> None:
         make_store(external_label=f"Match {index:02d}", city="Alphaville")
     make_store(external_label="Other", city="Betatown")
     page = admin.get(LIST, {"q": "Alphaville"}).content.decode()
-    assert "Page 1 of 2 (26 stores)" in page
+    assert '<span class="pager-count">1–25 of 26 · filtered from 27</span>' in page
     assert "?q=Alphaville&amp;page=2" in page
 
 

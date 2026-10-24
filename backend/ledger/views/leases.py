@@ -55,12 +55,14 @@ from ledger.models import (
     ScheduleState,
     Store,
 )
-from ledger.services import csv_export, one_off_charges
+from ledger.services import csv_export, detail_cards, one_off_charges, workspace
 from ledger.services import leases as service
+from ledger.services import stores as store_service
 from ledger.services.csv_export import CsvWriter
 from ledger.services.leases import LeaseRefused
 from ledger.services.one_off_charges import SetupRefused
 from ledger.views import documents, store_context
+from ledger.views.detail_cards import activity_context
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import (
     PAGE_SIZE,
@@ -204,11 +206,12 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
     provider_ach = lease.payment_channel == PaymentChannel.PROVIDER_ACH
     now = timezone.now()
     today = timezone.localdate()
+    live = list(service.live_schedules(lease))
     schedules = []
     linked_states = set()
     # PLAN-012b-b D13: autopay moved past a split month starts on its new first debit.
     moved = service.autopay_move(lease, now)
-    for row in service.live_schedules(lease):
+    for row in live:
         ref = service.schedule_ref(row)
         if ref:
             linked_states.add(row.state)
@@ -233,6 +236,21 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
         {
             **job_context(lease),
             "lease": lease,
+            # PLAN-012f-a D4: the header's line, the Open balance and Deposit tiles and the
+            # Activity card (the lease's rows and its live schedules').
+            "header_line": detail_cards.header_line(
+                store=store_service.title(lease.store),
+                operator=lease.operator.display_name if lease.operator is not None else "",
+            ),
+            "open_balance": detail_cards.lease_open_balance(lease, today),
+            # The store page's DEPOSIT line (one query), as the workspace header reads it.
+            "deposit_text": workspace._deposit_text(lease),
+            **activity_context(
+                [(service.ENTITY_SCHEDULE, row.pk) for row in live],
+                admin=admin,
+                store=lease.store,
+                record=(service.ENTITY_LEASE, lease.pk),
+            ),
             "rent": service.current_rent(lease, today),
             "upcoming": service.upcoming_rent(lease, today),
             "history": lease.rent_history.order_by("-effective_from"),

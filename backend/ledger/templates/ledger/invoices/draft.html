@@ -3,19 +3,20 @@
 {% load responsive %}
 {% load static %}
 {% block title %}{{ preview.number }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% else %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %}</span></nav><h1>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1></div><div class="page-actions"><a class="btn" href="{% url 'ledger:invoices:preview' pk=draft.pk %}" id="draft-preview">Preview</a><a class="btn" href="{% url 'ledger:invoices:print' pk=draft.pk %}" id="draft-print">Print view</a>{% if can_cancel %}<a class="btn" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel</a>{% endif %}</div></div>{% endblock %}
+{% comment %}The invoice builder's page: the draft's form while it is a draft; once sent, the invoice in the detail family (PLAN-012f-a D4): the tiles Total / Paid / Balance (its charges' figures), the Lines, Charges and Activity cards beside DETAILS and MORE (Cancel).{% endcomment %}
+{% block header %}<div class="page-header{% if sent_paid is not None %} detail-head{% endif %}"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% if preview.invoice %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=invoices#tab-invoices" id="invoices-crumb">Invoices</a> <span aria-hidden="true">›</span> {% endif %}{% else %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %}</span></nav><h1{% if sent_paid is not None %} class="store-title"{% endif %}>{% if preview.invoice %}Invoice {{ preview.invoice.invoice_number }}{% else %}Invoice draft {{ draft.number }}{% endif %} <span class="badge" id="draft-status">{{ draft.get_status_display }}</span></h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div><div class="page-actions"><a class="btn" href="{% url 'ledger:invoices:preview' pk=draft.pk %}" id="draft-preview">Preview</a><a class="btn" href="{% url 'ledger:invoices:print' pk=draft.pk %}" id="draft-print">Print view</a>{% if can_cancel %}{% if sent_paid is not None %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><a class="menu-danger" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel invoice</a></li></ul></details>{% else %}<a class="btn" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="draft-cancel">Cancel</a>{% endif %}{% endif %}</div></div>{% endblock %}
 {% block content %}
   {% if store_context %}<p class="muted" id="known-fields">{{ store_context.line }}</p>{% endif %}
-  <section class="card" id="draft-summary-card">
-  <dl id="draft-summary" class="detail-list">
-    <dt>Operator</dt><dd><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a></dd>
-    <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
-    <dt>Total</dt><dd id="draft-total">{{ preview.total|money }}</dd>
-    <dt>Due date</dt><dd id="draft-due">{% if preview.invoice or draft.due_date %}{{ preview.due_date|day }}{% else %}{{ due_days }} days after sending{% endif %}</dd>
-  </dl>
-  </section>
-
   {% if editable %}
+    <section class="card" id="draft-summary-card">
+    <dl id="draft-summary" class="detail-list">
+      <dt>Operator</dt><dd><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a></dd>
+      <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
+      <dt>Total</dt><dd id="draft-total">{{ preview.total|money }}</dd>
+      <dt>Due date</dt><dd id="draft-due">{% if preview.invoice or draft.due_date %}{{ preview.due_date|day }}{% else %}{{ due_days }} days after sending{% endif %}</dd>
+    </dl>
+    </section>
+
     <section class="card" id="draft-card">
     <form method="post" action="{% url 'ledger:invoices:edit' pk=draft.pk %}{{ context_query }}" id="draft-form" class="js-single-submit" autocomplete="off">
       {% csrf_token %}
@@ -24,14 +25,32 @@
     </form>
     </section>
   {% elif first_charge or rent_charges %}
+    <div class="detail-grid">
+    <div class="detail-main">
+    <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
+      <div id="tile-total">{% kpi "Total" preview.total|money %}</div>
+      <div id="tile-paid">{% kpi "Paid" sent_paid|money %}</div>
+      <div id="tile-balance">{% if sent_balance > 0 %}{% kpi "Balance" sent_balance|money "" "unpaid" %}{% else %}{% kpi "Balance" sent_balance|money %}{% endif %}</div>
+    </section>
+
+    {% if preview.lines %}
+    <section class="card" id="invoice-lines-card">
+    <h2>Lines</h2>
+    {% responsive_table %}
+    <table id="invoice-lines">
+      <thead><tr><th>Item</th><th class="money">Quantity</th><th class="money">Unit amount</th><th class="money">Amount</th></tr></thead>
+      <tbody>
+        {% for line in preview.lines %}
+          <tr class="invoice-line"><td>{% include "ledger/_cell_title.html" with title=line.item link="" subline=line.description %}</td><td class="money">{{ line.quantity_text }}</td><td class="money">{{ line.unit_amount|money }}</td><td class="money">{{ line.line_total|money }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endresponsive_table %}
+    </section>
+    {% endif %}
+
     <section class="card" id="sent-invoice-card">
-    <h2>Invoice</h2>
-    <dl id="sent-invoice" class="detail-list">
-      <dt>Number</dt><dd id="sent-number">{{ preview.invoice.invoice_number }}</dd>
-      <dt>Here</dt><dd id="sent-internal-status">{{ preview.invoice.get_internal_status_display }}</dd>
-      <dt>In {{ company.provider_name }}</dt><dd id="sent-provider-status">{{ preview.invoice.provider_status|default:"not yet" }}</dd>
-      <dt>Collection</dt><dd id="sent-collection">{{ collection_label }}</dd>
-    </dl>
+    <h2>Charges</h2>
     {% include "ledger/_job_status.html" %}
     {% responsive_table %}
     <table id="sent-charges">
@@ -54,6 +73,46 @@
       <p class="muted" id="invoice-split-lines">To pay in installments, split each line from its charge page.</p>
     {% endif %}
     </section>
+
+    {% include "ledger/_detail_activity.html" %}
+    </div>
+
+    <aside class="detail-side" aria-label="Details">
+    <section class="card" id="draft-summary-card">
+    <h2 class="section-label">Details</h2>
+    <dl id="draft-summary" class="detail-list side-list">
+      <dt>Number</dt><dd id="sent-number">{{ preview.invoice.invoice_number }}</dd>
+      <dt>Here</dt><dd id="sent-internal-status">{{ preview.invoice.get_internal_status_display }}</dd>
+      <dt>In {{ company.provider_name }}</dt><dd id="sent-provider-status">{{ preview.invoice.provider_status|default:"not yet" }}</dd>
+      <dt>Collection</dt><dd id="sent-collection">{{ collection_label }}</dd>
+      <dt>Operator</dt><dd><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a></dd>
+      <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
+      <dt>Total</dt><dd id="draft-total">{{ preview.total|money }}</dd>
+      <dt>Issued</dt><dd id="sent-issued">{{ preview.issue_date|day }}</dd>
+      <dt>Due date</dt><dd id="draft-due">{{ preview.due_date|day }}</dd>
+      {% if draft.memo %}<dt>Memo</dt><dd id="sent-memo" style="white-space:pre-wrap;">{{ draft.memo }}</dd>{% endif %}
+    </dl>
+    </section>
+
+    {% if can_cancel %}
+    <section class="card" id="more-card">
+      <h2 class="section-label">More</h2>
+      <ul class="detail-more">
+        <li><a class="detail-danger" href="{% url 'ledger:invoices:cancel' pk=draft.pk %}" id="more-draft-cancel">Cancel invoice</a></li>
+      </ul>
+    </section>
+    {% endif %}
+    </aside>
+    </div>
+  {% else %}
+    <section class="card" id="draft-summary-card">
+    <dl id="draft-summary" class="detail-list">
+      <dt>Operator</dt><dd><a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a></dd>
+      <dt>Store</dt><dd>{% if draft.lease %}{{ draft.lease.store.external_label }}{% else %}Operator-level{% endif %}</dd>
+      <dt>Total</dt><dd id="draft-total">{{ preview.total|money }}</dd>
+      <dt>Due date</dt><dd id="draft-due">{% if preview.invoice or draft.due_date %}{{ preview.due_date|day }}{% else %}{{ due_days }} days after sending{% endif %}</dd>
+    </dl>
+    </section>
   {% endif %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if editable %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/invoice_lines.js' %}" defer></script>{% endif %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}{% if editable %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/invoice_lines.js' %}" defer></script>{% endif %}{% endblock %}

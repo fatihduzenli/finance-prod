@@ -1787,3 +1787,18 @@ docs restored. Gate: sqlite 6,625 passed; PostgreSQL 34 + 7,252 passed; e2e 29 p
 runs; seven test expectations fixed by Fable and re-run green on both engines; the thirty
 baselines regenerated against PostgreSQL and pixel-identical on sqlite. Batch B (the list and
 detail families) assigned.
+
+## Update, 2026-10-24, PLAN-012f-a Batch B built and gated (not pushed)
+
+The list family: the stores list to the reference (counts line, one filter row with State,
+Status, Balance and Sort over every store, the title-and-subline store, the balance and status
+badges, the chevron, the footer pager) in five queries whatever the number of stores, and the same
+frame on Operators, Leases, Payments, Returned payments, Disputes, Unpaid balances and Search. The
+detail family: the one-off and rent charge, payment, sent invoice, lease and calendar-entry pages on
+one frame (breadcrumb, badges and header line, primary and More ▾, three tiles, relation cards, an
+Activity card from the audit rows, DETAILS, Open promise, MORE), budgets pinned and constant. Gate:
+sqlite 6,704 passed; PostgreSQL 34 + 7,311 passed; e2e 29 passed in four runs; one MAJOR in a test
+fixture (a provider status assigned directly, refused by PostgreSQL's Rule 2 trigger) fixed through
+the sync layer and re-run green on both engines; baselines regenerated against PostgreSQL (the two
+stores-list files changed), pixel-identical on sqlite. Open: the phone list cards' uneven meta line
+(cleanup). Batch C (the builder and form family, the wizard frame) assigned.

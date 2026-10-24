@@ -384,14 +384,23 @@ def _section(page: str, opening: str) -> str:
 def test_the_stores_list_carries_roles() -> None:
     store = a_store(f"4101 ROLES {uuid.uuid4().hex[:4]}", 4101)
     page = client_for(Role.VIEWER).get("/stores/").content.decode()
-    table = _section(page, '<table class="role-cards">')
+    table = _section(page, '<table id="stores" class="role-cards">')
     row = next(
         r
         for r in re.findall(r"<tr>.*?</tr>", table[table.index("<tbody>") :], re.S)
         if store.external_label in r
     )
-    # Name, Store number, City, State, Open date, Status (a plain text status: meta).
-    assert _roles(f"<tbody>{row}") == ["title", "meta", "meta", "meta", "meta", "meta"]
+    # PLAN-012f-a D3: Store, Operator, Rent, Collected by, Balance (the first badge: status),
+    # Status (a second badge: meta-badge), the chevron (meta, written in the template).
+    assert _roles(f"<tbody>{row}") == [
+        "title",
+        "meta",
+        "amount",
+        "meta",
+        "status",
+        "meta-badge",
+        "meta",
+    ]
 
 
 @pytest.mark.django_db
@@ -402,9 +411,9 @@ def test_the_payments_list_carries_roles() -> None:
     page = client_for(Role.VIEWER).get("/payments/").content.decode()
     table = _section(page, '<table id="payments" class="role-cards">')
     roles = _roles(table)
-    # Paid on, Initiated, Operator, Store, Charge, Method, Amount, Status, Reference,
-    # Transaction, Note.
-    assert roles == ["title", *["meta"] * 5, "amount", "status", "meta", "meta", "meta"]
+    # Paid on (the method under it, PLAN-012f-a D3), Initiated, Operator, Store, Charge,
+    # Amount, Status, Reference, Transaction, Note, the chevron.
+    assert roles == ["title", *["meta"] * 4, "amount", "status", "meta", "meta", "meta", "meta"]
     # The totals table above it: five money cells, a summary: each "Label value".
     totals = _section(page, '<table id="payment-totals" class="role-cards">')
     assert _roles(totals) == ["meta"] * 5

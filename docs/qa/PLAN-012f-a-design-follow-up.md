@@ -330,6 +330,8 @@ schedule, `plan` and `installment_no` on the charge).
 - URLs: the Autopay tab's four actions `stores:plan_pause|plan_resume|plan_stop|plan_end`
   (`/stores/<pk>/plans/<plan>/…`, POST; `RouteRule`s in `accounts/registry.py`): the only new
   URLs of the step, under E. No API, no JSON.
+- Icons (`finance/templatetags/icons.py`): `chevron-right` (D3, the list rows) and `banknote` (D4,
+  the empty Payments card); the shell test's icon list grows with them.
 - Migrations: ledger `0049_statement_saved_and_autopay_plans` (the rename, the model, the two
   columns, the category value with its CHECK, `refuse_reverse` while plans exist). No payments
   migration (jobs reused).

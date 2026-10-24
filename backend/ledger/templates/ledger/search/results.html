@@ -1,13 +1,14 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
+{% load icons %}
 {% block title %}Search{% endblock %}
-{% block header %}<div class="page-header"><h1>Search</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Search</h1>{% if query and not results.empty %}<span class="list-counts" id="list-counts">{{ results.stores|length }}{% if results.more_stores %}+{% endif %} store{{ results.stores|length|pluralize }} · {{ operators|length }}{% if results.more_operators %}+{% endif %} operator{{ operators|length|pluralize }}</span>{% endif %}</div></div>{% endblock %}
 {% block content %}
   {% comment %}The top-bar search's results (PLAN-012d D17): the stores and the operators matching every word;
   an archived operator is listed and marked, never jumped to.{% endcomment %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:search' %}" class="actions" role="search" id="search-form">
-    <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators" style="max-width:24rem;">
-    <button class="btn" type="submit">Search</button>
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:search' %}" class="actions list-filters" role="search" id="search-form">
+    <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators" class="list-search">
+    <button class="btn btn-dark" type="submit">Search</button>
   </form></div>
   {% if not query %}
     <p class="muted" id="search-empty">Type a store number, a store name, a city or an operator's name.</p>
@@ -19,14 +20,14 @@
     {% if results.stores %}
       {% responsive_table %}
       <table id="search-stores">
-        <thead><tr><th>Store number</th><th>Name</th><th>City</th><th>Operator</th></tr></thead>
+        <thead><tr><th>Store</th><th>Store number</th><th>Operator</th><th class="cell-chevron"><span class="visually-hidden">Open</span></th></tr></thead>
         <tbody>
-          {% for hit in results.stores %}
+          {% for hit in results.stores %}{% url 'ledger:stores:detail' pk=hit.store.pk as store_url %}
             <tr>
+              <td>{% include "ledger/_cell_title.html" with title=hit.store.external_label link=store_url subline=hit.store.city %}</td>
               <td>{{ hit.store.store_number|default_if_none:"—" }}</td>
-              <td><a href="{% url 'ledger:stores:detail' pk=hit.store.pk %}">{{ hit.store.external_label }}</a></td>
-              <td>{{ hit.store.city }}</td>
               <td>{% if hit.operator %}<a href="{% url 'ledger:operators:detail' pk=hit.operator.pk %}">{{ hit.operator.display_name }}</a>{% else %}<span class="muted">No operator</span>{% endif %}</td>
+              <td class="cell-chevron" data-role="meta"><a href="{{ store_url }}" aria-label="Open {{ hit.store.external_label }}">{% icon "chevron-right" 16 %}</a></td>
             </tr>
           {% endfor %}
         </tbody>
@@ -42,12 +43,13 @@
     {% if operators %}
       {% responsive_table %}
       <table id="search-operators">
-        <thead><tr><th>Name</th><th>E-mail</th></tr></thead>
+        <thead><tr><th>Operator</th><th>E-mail</th><th class="cell-chevron"><span class="visually-hidden">Open</span></th></tr></thead>
         <tbody>
-          {% for operator, email in operators %}
+          {% for operator, email in operators %}{% url 'ledger:operators:detail' pk=operator.pk as operator_url %}
             <tr>
-              <td><a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a>{% if operator.archived_at %} <span class="badge">Archived</span>{% endif %}</td>
+              <td>{% include "ledger/_cell_title.html" with title=operator.display_name link=operator_url %}{% if operator.archived_at %} <span class="badge">Archived</span>{% endif %}</td>
               <td>{{ email }}</td>
+              <td class="cell-chevron" data-role="meta"><a href="{{ operator_url }}" aria-label="Open {{ operator.display_name }}">{% icon "chevron-right" 16 %}</a></td>
             </tr>
           {% endfor %}
         </tbody>
