@@ -66,6 +66,7 @@ GUARD_TRIGGERS = {
             "ledger.migrations.0044_draft_existing_charge",
             "ledger.migrations.0045_company_settings",
             "ledger.migrations.0047_store_address",
+            "ledger.migrations.0049_autopay_plans",
         )
         for table in importlib.import_module(module).GUARDED_COLUMNS
     ),
@@ -2108,6 +2109,139 @@ def test_the_check_method_migration_alters_choices_only() -> None:
     removed = {op.name for op in migration.operations if isinstance(op, RemoveConstraint)}
     added = {op.constraint.name for op in migration.operations if isinstance(op, AddConstraint)}
     assert removed == added == CHECK_CONSTRAINTS
+
+
+# --- PLAN-012f-a D11: ledger 0049, autopay plans ------------------------------------------
+# Seeds a lease and an arrears charge at ``ledger.0048``, migrates forward, back and forward
+# again on both engines with plain SQL: 0049 leaves the charge as it was (no plan, no
+# period); an ``autopay_plan`` charge needs its plan; a plan's end rule is checked; the
+# reverse refuses while a plan exists and, once none does, drops the table. On PostgreSQL
+# the plan's item and detail are guarded by the trigger.
+
+STATE_BEFORE_AUTOPAY = (("ledger", "0048_check_method"),)
+AUTOPAY_CHARGE_ROWS = (
+    "SELECT category, price, status, autopay_plan_id, period_no FROM one_off_charges"
+)
+AUTOPAY_TABLE = "SELECT count(*) FROM information_schema.tables WHERE table_name = 'autopay_plans'"
+
+
+def seed_before_autopay() -> None:
+    """Seed a lease and an arrears charge with the models of ``STATE_BEFORE_AUTOPAY``.
+
+    Runs inside ``manage.py shell`` against the scratch database, not under pytest.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.db import connection as db
+    from django.db.migrations.loader import MigrationLoader
+
+    apps = MigrationLoader(db).project_state(list(STATE_BEFORE_AUTOPAY)).apps
+    operator = apps.get_model("ledger", "Operator").objects.create(display_name="Plan Co")
+    store = apps.get_model("ledger", "Store").objects.create(
+        external_label="Store 4901", status="active"
+    )
+    lease = apps.get_model("ledger", "Lease").objects.create(
+        store=store,
+        operator=operator,
+        debit_day=1,
+        collection_status="active",
+        payment_channel="wire",
+    )
+    apps.get_model("ledger", "OneOffCharge").objects.create(
+        operator=operator,
+        lease=lease,
+        category="arrears",
+        collection="manual",
+        description="Arrears",
+        price=Decimal("1000.00"),
+        due_date=date(2026, 10, 1),
+        status="owed",
+    )
+
+
+def _a_plan(item: str = "Sign fee", end_count: str = "3") -> str:
+    """One plan row, with plain SQL that both engines read (fixed test values only)."""
+    return (
+        "INSERT INTO autopay_plans (id, lease_id, operator_id, store_id, item_name, "  # noqa: S608
+        "description, quantity, unit_amount, amount, cadence, first_on, end_rule, end_count, "
+        "end_on, state, next_on, made_count, created_at, updated_at) VALUES "
+        f"('{uuid.uuid4().hex}', (SELECT id FROM leases), (SELECT id FROM operators), "
+        f"(SELECT id FROM stores), '{item}', '', 1, 100.00, 100.00, 'monthly', '2026-11-01', "
+        f"'count', {end_count}, NULL, 'active', '2026-11-01', 0, CURRENT_TIMESTAMP, "
+        "CURRENT_TIMESTAMP)"
+    )
+
+
+def _autopay_table(url: str) -> list[tuple[str, ...]]:
+    if url.startswith("sqlite:///"):
+        return _rows(
+            url,
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'autopay_plans'",
+        )
+    return _rows(url, AUTOPAY_TABLE)
+
+
+def _autopay_round_trip(repo_root: Path, url: str) -> None:
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    _migrate_to(repo_root, url, *STATE_BEFORE_AUTOPAY)
+    seeded = _manage(
+        repo_root,
+        url,
+        "shell",
+        "-c",
+        "from tests.test_migrations_roundtrip import seed_before_autopay as seed; seed()",
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    assert _autopay_table(url) == [("0",)]
+    after = [("arrears", "1000.00", "owed", "None", "None")]
+    for _ in range(2):
+        result = _manage(repo_root, url, "migrate", "--noinput")
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert _rows(url, AUTOPAY_CHARGE_ROWS, (1,)) == after
+        # An occurrence needs its plan; a plan's count is 2 or more.
+        assert not _accepted(url, "UPDATE one_off_charges SET category = 'autopay_plan'")
+        assert not _accepted(url, _a_plan(end_count="1"))
+        assert not _accepted(url, _a_plan(item=" "))
+        assert _accepted(url, _a_plan())
+        # A plan cannot be lost by going back.
+        back = _manage(repo_root, url, "migrate", *STATE_BEFORE_AUTOPAY[0], "--noinput")
+        assert back.returncode != 0 and "refuses to reverse" in back.stderr
+        assert _rows(url, "SELECT count(*) FROM autopay_plans") == [("1",)]
+        assert _accepted(url, "DELETE FROM autopay_plans")
+        _migrate_to(repo_root, url, *STATE_BEFORE_AUTOPAY)
+        assert _autopay_table(url) == [("0",)]
+        assert _rows(url, "SELECT category, price, status FROM one_off_charges", (1,)) == [
+            ("arrears", "1000.00", "owed")
+        ]
+    result = _manage(repo_root, url, "migrate", "--noinput")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+
+
+def test_the_autopay_plans_migration_over_existing_rows_on_sqlite(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    _autopay_round_trip(repo_root, f"sqlite:///{tmp_path / 'autopay.sqlite3'}")
+
+
+@requires_postgresql
+def test_the_autopay_plans_migration_over_existing_rows_on_postgresql(
+    repo_root: Path, scratch_postgresql_url: str
+) -> None:
+    import psycopg
+
+    url = scratch_postgresql_url
+    _autopay_round_trip(repo_root, url)
+    for column in ("item_name", "description"):
+        with psycopg.connect(url) as scratch:
+            scratch.execute(_a_plan())
+        with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
+            scratch.execute(
+                f"UPDATE autopay_plans SET {column} = 'Card 4111 1111 1111 1111'"  # noqa: S608
+            )
+        with psycopg.connect(url) as scratch:
+            scratch.execute("DELETE FROM autopay_plans")
 
 
 # --- Row 2 --------------------------------------------------------------------------

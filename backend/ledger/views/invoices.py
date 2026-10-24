@@ -38,7 +38,8 @@ an existing one updated), then :func:`ledger.services.invoice_builder.collect` r
 choice: Save draft opens the draft; Send by e-mail and Record payment now return to the
 store page's Invoices tab when opened from it, else to the draft; Schedule for a date
 returns to the store page's Charges tab (the draft became the charge), else to the
-operator page; Charge now opens its confirmation page (admin; 10d D4). A refusal of the
+operator page; Set up autopay returns to the store page's Autopay tab (the draft became
+the plan); Charge now opens its confirmation page (admin; 10d D4). A refusal of the
 choice keeps the saved draft and shows the sentence on its page with the choice's fields.
 ``?collect=<choice>`` pre-selects the radio (anything else, or Charge now for billing:
 Save draft); ``?item=<catalogue code>`` fills line 1 of a new draft with that offered
@@ -342,15 +343,27 @@ def _collected(
         draft.pk,
         choice,
         actor=_actor(request),
-        confirmed=data.get("confirm_large_debit") is True,
+        confirmed=data.get(
+            "autopay_confirm_large_debit"
+            if choice == CollectChoice.AUTOPAY
+            else "confirm_large_debit"
+        )
+        is True,
         due_date=data.get("schedule_on"),
         payment=collect_form.payment(),
+        autopay=collect_form.autopay() if choice == CollectChoice.AUTOPAY else None,
     )
     if not outcome.ok:
         messages.success(request, saved)
         _hold(request, f"invoice-edit:{draft.pk}", [str(outcome.message)])
         return redirect(_draft_url(draft, context))
     messages.success(request, outcome.message)
+    if choice == CollectChoice.AUTOPAY:
+        if context is not None:
+            return redirect(context.tab_url(workspace.TAB_SCHEDULES))
+        if lease is not None:
+            return redirect(workspace.tab_url(lease.store_id, workspace.TAB_SCHEDULES))
+        return redirect("ledger:operators:detail", pk=draft.operator_id)
     if choice == CollectChoice.SCHEDULE:
         if context is not None:
             return redirect(context.tab_url(workspace.TAB_CHARGES))

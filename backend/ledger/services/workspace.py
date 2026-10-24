@@ -52,10 +52,14 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets
-from finance.dates import month_text
+from finance.dates import day_text, month_text
 from ledger.models import (
+    LIVE_AUTOPAY_STATES,
     LIVE_PLAN_STATUSES,
     ZERO,
+    AutopayEndRule,
+    AutopayPlan,
+    AutopayPlanState,
     CollectionMethod,
     CollectionSchedule,
     ContactEntry,
@@ -1028,11 +1032,86 @@ def payments_tab(owner: Owner) -> dict[str, Any]:
 # --- Schedules tab -------------------------------------------------------------------------
 
 
-def schedules_tab(owner: Owner, today: date, now: datetime) -> dict[str, Any]:
+#: The state badge of an autopay plan on the Autopay tab (PLAN-012f-a D14): its label and
+#: its family (``{% status_badge label family %}``).
+PLAN_BADGES: dict[str, tuple[str, str]] = {
+    AutopayPlanState.ACTIVE: ("On", "paid"),
+    AutopayPlanState.PAUSED: ("Paused", "pending"),
+    AutopayPlanState.STOPPED: ("Stopped", "neutral"),
+    AutopayPlanState.FINISHED: ("Finished", "neutral"),
+}
+
+
+def plan_line(plan: AutopayPlan, next_debit: date | None = None) -> str:
+    """The plan's row text (D14): "Monthly from Nov 1, 2026 · 2 of 12 made · next Dec 1,
+    2026"; "2 made" for a plan that never ends, "2 made, until Jun 1, 2027" for one that
+    ends on a date; the next debit only while the plan is active: ``next_debit`` (the
+    date of an occurrence made and not debited yet), else the date of the next one to
+    make."""
+    parts = [f"{plan.get_cadence_display()} from {day_text(plan.first_on)}"]
+    if plan.end_rule == AutopayEndRule.COUNT and plan.end_count is not None:
+        parts.append(f"{plan.made_count} of {plan.end_count} made")
+    elif plan.end_rule == AutopayEndRule.DATE and plan.end_on is not None:
+        parts.append(f"{plan.made_count} made, until {day_text(plan.end_on)}")
+    else:
+        parts.append(f"{plan.made_count} made")
+    if plan.state == AutopayPlanState.ACTIVE:
+        parts.append(f"next {day_text(next_debit or plan.next_on)}")
+    return " · ".join(parts)
+
+
+def _plan_rows(owner: Owner, role: Role | None, today: date) -> list[dict[str, Any]]:
+    """The owner's autopay plans (D14), live ones first, each oldest first, in one query
+    (the next debit, an occurrence owed from today on, as a subquery): the row text, the
+    state badge and the actions ``role`` may take (billing pauses and resumes, an admin
+    stops and changes the end; the views and the service check again)."""
+    billing = meets(role, Role.BILLING)
+    admin = meets(role, Role.ADMIN)
+    owned = Q(operator=owner) if isinstance(owner, Operator) else Q(store=owner)
+    next_debit = (
+        OneOffCharge.objects.filter(
+            autopay_plan=OuterRef("pk"),
+            status=OneOffChargeStatus.OWED,
+            amount_paid=0,
+            due_date__gte=today,
+        )
+        .order_by("due_date")
+        .values("due_date")[:1]
+    )
+    plans = sorted(
+        AutopayPlan.objects.filter(owned)
+        .annotate(next_debit=Subquery(next_debit))
+        .select_related("store")
+        .order_by("created_at", "id"),
+        key=lambda plan: plan.state not in LIVE_AUTOPAY_STATES,
+    )
+    rows = []
+    for plan in plans:
+        live = plan.state in LIVE_AUTOPAY_STATES
+        label, family = PLAN_BADGES.get(plan.state, (plan.get_state_display(), "neutral"))
+        rows.append(
+            {
+                "plan": plan,
+                "line": plan_line(plan, plan.next_debit),
+                "badge_label": label,
+                "badge_family": family,
+                "can_pause": billing and plan.state == AutopayPlanState.ACTIVE,
+                "can_resume": billing and plan.state == AutopayPlanState.PAUSED,
+                "can_stop": admin and live,
+                "can_change_end": admin and live,
+            }
+        )
+    return rows
+
+
+def schedules_tab(
+    owner: Owner, today: date, now: datetime, role: Role | None = None
+) -> dict[str, Any]:
     """The Schedules tab (D3): the live rent and insurance schedules of the store's leases
     (of the operator's, with the store named: D14; as the lease page shows them: next
     debit, masked provider schedule, why one needs review), the open one-off charges
-    collected by autopay on their due date, and the live installment plans."""
+    collected by autopay on their due date, and the live installment plans; above them
+    the autopay plans ("Repeating debits", PLAN-012f-a D14) with what ``role`` may do."""
     schedules = list(
         CollectionSchedule.objects.filter(_owned(owner))
         .exclude(state=ScheduleState.ENDED)
@@ -1067,6 +1146,8 @@ def schedules_tab(owner: Owner, today: date, now: datetime) -> dict[str, Any]:
         )
     return {
         "by_store": isinstance(owner, Operator),
+        "plans": _plan_rows(owner, role, today),
+        "plan_end_rules": AutopayEndRule.choices,
         "schedule_rows": rows,
         "autopay_moved": [move.text for move in moves.values() if move is not None],
         "autopay_charges": list(
@@ -1143,7 +1224,7 @@ def _tab_data(
     if tab == TAB_PAYMENTS:
         return payments_tab(owner)
     if tab == TAB_SCHEDULES:
-        return schedules_tab(owner, today, now)
+        return schedules_tab(owner, today, now, role)
     return {}
 
 

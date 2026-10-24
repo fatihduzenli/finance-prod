@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +21,8 @@ from django.utils import timezone
 
 from finance.dates import day_text
 from ledger.models import (
+    AUTOPAY_COUNT_MAX,
+    AUTOPAY_COUNT_MIN,
     CALENDAR_TITLE_MAX_LENGTH,
     CONSENT_FIELDS,
     DESCRIPTION_MAX_LENGTH,
@@ -28,6 +30,8 @@ from ledger.models import (
     INSTALLMENTS_MAX,
     INSTALLMENTS_MIN,
     NAME_MAX_LENGTH,
+    AutopayCadence,
+    AutopayEndRule,
     CalendarEntryKind,
     CollectionStatus,
     ContactKind,
@@ -46,7 +50,7 @@ from ledger.models import (
     RefundMethod,
     Store,
 )
-from ledger.services import invoice_builder, one_off_charges, rent_run
+from ledger.services import autopay_plans, invoice_builder, one_off_charges, rent_run
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import END_DATE_REQUIRED
 from ledger.services.one_off_charges import ChargeInput
@@ -1093,6 +1097,20 @@ COLLECT_CHOICES: tuple[tuple[str, str], ...] = (
     (invoice_builder.CollectChoice.CHARGE_NOW.value, "Charge now"),
     (invoice_builder.CollectChoice.SCHEDULE.value, "Schedule for a date"),
     (invoice_builder.CollectChoice.RECORD.value, "Record payment now"),
+    (invoice_builder.CollectChoice.AUTOPAY.value, "Set up autopay"),
+)
+#: Set up autopay's fields (PLAN-012f-a D12).
+AUTOPAY_FIELDS = (
+    "autopay_cadence",
+    "autopay_first_on",
+    "autopay_end_rule",
+    "autopay_end_count",
+    "autopay_end_on",
+    "autopay_confirm_large_debit",
+)
+#: The choices offered only where Schedule for a date is (PLAN-012f-a D12).
+SCHEDULED_CHOICES = frozenset(
+    {invoice_builder.CollectChoice.SCHEDULE.value, invoice_builder.CollectChoice.AUTOPAY.value}
 )
 #: The name of the submit buttons, one per choice: without the page's script each button
 #: says which choice it submits; with it the one shown matches the chosen radio.
@@ -1101,12 +1119,13 @@ COLLECT_SUBMIT = "submit_collect"
 
 def collect_choices(*, can_charge_now: bool, can_schedule: bool = True) -> list[tuple[str, str]]:
     """The choices one may take (PLAN-012e-2 D3): Charge now for an admin only, Schedule
-    for a date only where :func:`ledger.services.invoice_builder.can_schedule` allows."""
+    for a date and Set up autopay (PLAN-012f-a D12) only where
+    :func:`ledger.services.invoice_builder.can_schedule` allows."""
     return [
         (value, label)
         for value, label in COLLECT_CHOICES
         if (can_charge_now or value != invoice_builder.CollectChoice.CHARGE_NOW)
-        and (can_schedule or value != invoice_builder.CollectChoice.SCHEDULE)
+        and (can_schedule or value not in SCHEDULED_CHOICES)
     ]
 
 
@@ -1159,7 +1178,40 @@ class CollectForm(forms.Form):
         validators=[validate_no_payment_data],
         label="Note",
     )
+    autopay_cadence = forms.ChoiceField(
+        required=False,
+        choices=AutopayCadence.choices,
+        initial=AutopayCadence.MONTHLY.value,
+        label="Repeat",
+    )
+    autopay_first_on = forms.DateField(
+        required=False, label="First debit", widget=forms.DateInput(attrs={"type": "date"})
+    )
+    autopay_end_rule = forms.ChoiceField(
+        required=False,
+        choices=AutopayEndRule.choices,
+        initial=AutopayEndRule.COUNT.value,
+        label="Ends",
+    )
+    autopay_end_count = forms.IntegerField(
+        required=False,
+        min_value=AUTOPAY_COUNT_MIN,
+        max_value=AUTOPAY_COUNT_MAX,
+        error_messages={
+            "invalid": autopay_plans.END_COUNT,
+            "min_value": autopay_plans.END_COUNT,
+            "max_value": autopay_plans.END_COUNT,
+        },
+        label="Number of payments",
+    )
+    autopay_end_on = forms.DateField(
+        required=False, label="Last debit on", widget=forms.DateInput(attrs={"type": "date"})
+    )
+    autopay_confirm_large_debit = forms.BooleanField(
+        required=False, widget=_ExactCheckboxInput, label="I confirm this large debit"
+    )
 
+    #: ``<id>`` conditions are alternatives (``|``); ``&`` joins the ones that must all hold.
     SHOWN_WHEN: dict[str, str] = {
         "schedule_on": "collect-schedule",
         "confirm_large_debit": "collect-schedule",
@@ -1167,6 +1219,12 @@ class CollectForm(forms.Form):
         "paid_on": "collect-record",
         "reference": "collect-record",
         "payment_note": "collect-record",
+        "autopay_cadence": "collect-autopay",
+        "autopay_first_on": "collect-autopay",
+        "autopay_end_rule": "collect-autopay",
+        "autopay_end_count": f"collect-autopay&id_autopay_end_rule={AutopayEndRule.COUNT.value}",
+        "autopay_end_on": f"collect-autopay&id_autopay_end_rule={AutopayEndRule.DATE.value}",
+        "autopay_confirm_large_debit": "collect-autopay",
     }
 
     def __init__(
@@ -1217,7 +1275,69 @@ class CollectForm(forms.Form):
                 self.add_error("paid_on", "Enter the date the payment was received.")
             if not data.get("payment_note") and "payment_note" not in self.errors:
                 self.add_error("payment_note", rent_run.PAY_NOTE_REQUIRED)
+        self._drop_ignored_autopay(data, chosen)
+        if chosen == invoice_builder.CollectChoice.AUTOPAY:
+            self._clean_autopay(data, timezone.localdate())
         return data
+
+    def _drop_ignored_autopay(self, data: dict[str, Any], chosen: str) -> None:
+        """A page without the script sends every field: Set up autopay's fields count only
+        for that choice, and the count and the date only for the end rule naming them (the
+        service ignores them otherwise), so a leftover value there refuses nothing."""
+        rule = data.get("autopay_end_rule")
+        for name in AUTOPAY_FIELDS:
+            ignored = chosen != invoice_builder.CollectChoice.AUTOPAY or (
+                (name == "autopay_end_count" and rule != AutopayEndRule.COUNT)
+                or (name == "autopay_end_on" and rule != AutopayEndRule.DATE)
+            )
+            if ignored and name in self.errors:
+                del self.errors[name]
+                data[name] = None
+
+    def _clean_autopay(self, data: dict[str, Any], today: date) -> None:
+        """Set up autopay's repeat, by the rules and sentences of
+        :mod:`ledger.services.autopay_plans` (the service checks them again with the line)."""
+        if data.get("autopay_cadence") not in AutopayCadence.values:
+            self.add_error("autopay_cadence", autopay_plans.CHOOSE_CADENCE)
+        first = data.get("autopay_first_on")
+        if "autopay_first_on" not in self.errors:
+            if first is None:
+                self.add_error("autopay_first_on", autopay_plans.FIRST_REQUIRED)
+            elif first <= today:
+                self.add_error("autopay_first_on", autopay_plans.FIRST_NOT_AFTER_TODAY)
+            elif first > today + timedelta(days=autopay_plans.FIRST_HORIZON_DAYS):
+                self.add_error("autopay_first_on", autopay_plans.FIRST_TOO_FAR)
+        if any(name in self.errors for name in ("autopay_end_count", "autopay_end_on")):
+            return
+        refused = autopay_plans.end_refusal(
+            # Without a first date only the rule and its count or date are checked.
+            first if isinstance(first, date) else date.min,
+            data.get("autopay_end_rule") or "",
+            data.get("autopay_end_count"),
+            data.get("autopay_end_on"),
+        )
+        if refused is not None:
+            self.add_error(f"autopay_{refused.field}", refused.message)
+
+    def autopay(self) -> invoice_builder.AutopayInput:
+        """Set up autopay's repeat as the form cleaned it."""
+        data = self.cleaned_data
+        return invoice_builder.AutopayInput(
+            cadence=data.get("autopay_cadence") or "",
+            first_on=data.get("autopay_first_on"),
+            end_rule=data.get("autopay_end_rule") or "",
+            end_count=data.get("autopay_end_count"),
+            end_on=data.get("autopay_end_on"),
+        )
+
+    def cadence_words(self) -> list[dict[str, Any]]:
+        """The words of Set up autopay's button, one per cadence (PLAN-012f-a D12): the
+        page's script shows the chosen cadence's; without it the bound cadence's shows."""
+        chosen = self["autopay_cadence"].value() or AutopayCadence.MONTHLY.value
+        return [
+            {"value": value, "word": autopay_plans.CADENCE_WORDS[value], "shown": value == chosen}
+            for value in AutopayCadence.values
+        ]
 
     def options(self) -> list[dict[str, Any]]:
         """The radios as the fieldset renders them, with their ids (``collect-<value>``)."""

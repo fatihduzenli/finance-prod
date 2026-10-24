@@ -1828,3 +1828,18 @@ PostgreSQL 34 + 7,442 passed (one unreproduced failure of a feed test, under res
 against PostgreSQL and pixel-identical on sqlite. Open for the owner: the nine questions of
 PLAN-012f-a §9 plus the batches' "for the owner" notes. Next: Batch E (autopay plans), then the
 checkpoint with the Publish Request.
+
+## Update, 2026-10-24, PLAN-012f-a Batch E built and gated; Step 12f-a at its checkpoint (not pushed)
+
+"Set up autopay", the sixth How to collect choice: a local plan (`autopay_plans`, migration 0049)
+repeating an invoice's one line as bank debits monthly, weekly or yearly from a first date, ending
+after N payments, on a date or never; each occurrence a one-off charge with its own single-
+occurrence Stax schedule through the existing job, created seven days before its day by the daily
+run (the first at setup); the Autopay tab's "Repeating debits" card with Pause and Resume (billing),
+Stop behind a confirmation page and Change end (admin); a live plan blocks a lease end or transfer;
+rent excluded; ADR-0014 (Proposed until the owner answers plan §9 items 6–8). Gate: sqlite 7,009
+passed (four contract-freeze pins re-pinned for the new stored values and routes, then 90 passed in
+their files); PostgreSQL 36 + 7,643 passed (the same four pins, then 91 passed in their files); e2e
+31 passed on each of four runs; two MAJOR and three MINOR resolved; baselines regenerated against
+PostgreSQL. Step 12f-a: five batches gated; the checkpoint report with the Publish Request goes to
+the owner.

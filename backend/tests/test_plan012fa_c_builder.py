@@ -189,6 +189,7 @@ def test_the_summary_holds_one_button_per_choice_and_discard() -> None:
         "charge_now": "draft-charge-now",
         "schedule": "schedule-draft",
         "record": "record-draft",
+        "autopay": "autopay-draft",  # PLAN-012f-a Batch E: the sixth choice
     }
     assert ids == [named[value] for value in radios]
     for attributes, value in zip(buttons, radios, strict=True):
@@ -225,13 +226,14 @@ def tiles(body: str) -> list[str]:
 
 def test_one_tile_per_choice_each_with_its_radio_name_and_sentence() -> None:
     lease = a_world()
-    for role, count in ((Role.BILLING, 4), (Role.ADMIN, 5)):
+    for role, count in ((Role.BILLING, 5), (Role.ADMIN, 6)):
         body = get(role, new_store_path(lease))
         found = tiles(body)
         radios = re.findall(r'type="radio" name="collect"', body)
         assert len(found) == len(radios), role
         # Charge now is an admin's choice only while the pay-invoice switch is on.
-        assert len(found) == (count if 'id="collect-charge_now"' in body else 4), role
+        # Six choices for an admin (Charge now included), five for billing (PLAN-012f-a E).
+        assert len(found) == (count if 'id="collect-charge_now"' in body else 5), role
         for tile in found:
             assert tile.count('type="radio" name="collect"') == 1
             assert tile.count('<span class="collect-name">') == 1

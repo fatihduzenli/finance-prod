@@ -355,6 +355,9 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     # PLAN-012e-2 D4: Charge now and Schedule a payment moved into the invoice builder;
     # their routes are read-only redirects there.
     redirects = ("charge_now_pick", "schedule_payment")
+    # PLAN-012f-a Batch E (ADR-0014): a repeating debit plan's Pause and Resume (billing),
+    # Stop and its end rule (admin); all POST, Stop asks first on its GET (E-4).
+    plans = ("plan_pause", "plan_resume", "plan_stop", "plan_end")
     assert names == {
         f"ledger:stores:{short}"
         for short in (
@@ -368,8 +371,15 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
             *lease_end,
             *workspace_bar,
             *schedule,
+            *plans,
         )
     }
+    for short in ("plan_pause", "plan_resume"):
+        rule = registry.rule_for(f"ledger:stores:{short}")
+        assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    for short in ("plan_stop", "plan_end"):
+        rule = registry.rule_for(f"ledger:stores:{short}")
+        assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
     for short in redirects:
         assert f"ledger:stores:{short}" in registry.READ_ONLY_ROUTE_NAMES
         assert registry.rule_for(f"ledger:stores:{short}") is None

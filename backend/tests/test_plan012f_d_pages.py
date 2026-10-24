@@ -20,6 +20,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from django.utils import timezone
 from accounts import registry
 from accounts.roles import Role
 from ledger.models import (
+    AutopayPlan,
     CalendarEntry,
     CompanySettings,
     ContactEntry,
@@ -94,6 +96,7 @@ class World:
     one_off: OneOffCharge
     draft: InvoiceDraft
     plan: InstallmentPlan
+    autopay: AutopayPlan
     cost: StoreCost
     entry: ContactEntry
     calendar: CalendarEntry
@@ -164,6 +167,21 @@ def world() -> World:
         one_off=one_off,
         draft=a_draft(lease),
         plan=plan,
+        # PLAN-012f-a Batch E: a repeating debit plan on the lease; its Stop page asks first.
+        autopay=AutopayPlan.objects.create(
+            lease=lease,
+            operator=operator,
+            store=store,
+            item_name="Sign fee",
+            description="",
+            quantity=Decimal("1"),
+            unit_amount=Decimal("100.00"),
+            amount=Decimal("100.00"),
+            cadence="monthly",
+            first_on=date(2026, 11, 1),
+            end_rule="never",
+            next_on=date(2026, 11, 1),
+        ),
         cost=a_cost(store),
         # Recorded by the admin, so its edit window is open to them.
         entry=promise(
@@ -209,6 +227,7 @@ def path_of(world: World, name: str) -> str:
         "pk": world.pk_for(name),
         "row": world.cost.pk,
         "charge": world.deposit.pk,
+        "plan": world.autopay.pk,
         "outcome": "kept",
         "slug": "promises-to-pay",
         "rest": "no-such-token",
@@ -227,6 +246,8 @@ def path_of(world: World, name: str) -> str:
 #: the view keeps to a role (PLAN-011 D2, PLAN-012 D3) or one every role reads.
 PAGES: dict[str, Role] = {
     "finance:settings": Role.VIEWER,
+    # PLAN-012f-a Batch E (E-4): Stop asks first; the page is the admin's, as its POST.
+    "ledger:stores:plan_stop": Role.ADMIN,
     "finance:help": Role.VIEWER,
     "finance:help_topic": Role.VIEWER,
     "ledger:home": Role.VIEWER,
@@ -349,6 +370,9 @@ for _name in (
     "ledger:operators:statement_links_revoke",
     "ledger:stores:close_cost",
     "ledger:stores:create_charges",
+    "ledger:stores:plan_pause",
+    "ledger:stores:plan_resume",
+    "ledger:stores:plan_end",
     "ledger:leases:pause",
     "ledger:leases:resume",
     "ledger:lease_ends:cancel",

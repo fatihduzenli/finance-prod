@@ -31,7 +31,7 @@ from django.views.decorators.http import require_POST, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
-from ledger.services import insurance, rent_run
+from ledger.services import autopay_plans, insurance, rent_run
 from ledger.services.csv_export import CsvWriter
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import _actor, _role, csv_response, export_name, role_required
@@ -76,6 +76,8 @@ def run_today(request: HttpRequest) -> HttpResponse:
             "threshold": settings.LARGE_DEBIT_WARNING_AMOUNT,
             "can_run": meets(_role(request), Role.BILLING),
             "last_run": rent_run.last_run(),
+            # PLAN-012f-a D13: the autopay plans' debits the daily run created today.
+            "autopay_charges": autopay_plans.made_on(today),
             "catch_up_months": rent_run.CATCH_UP_MONTHS,
             "dead_letters": WebhookEvent.objects.filter(outcome=WebhookOutcome.DEAD_LETTER).count(),
         },

@@ -74,6 +74,28 @@
   <p class="muted" id="carried-balance-note">"Carried balance" is what earlier charges of the lease still owe. It is not added to today's amount.</p>
   </section>
 
+  <section class="card" id="autopay-charges-card">
+  <h2>Repeating debits created today</h2>
+  {% responsive_table %}
+  <table id="autopay-charges">
+    <thead><tr><th>Charge</th><th>Store</th><th>Due</th><th class="money">Amount</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for charge in autopay_charges %}
+        <tr>
+          <td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td>
+          <td>{% if charge.lease %}<a href="{% url 'ledger:stores:detail' pk=charge.lease.store.pk %}?tab=schedules#tab-schedules">{{ charge.lease.store.external_label }}</a>{% else %}—{% endif %}</td>
+          <td>{{ charge.due_date|day }}</td>
+          <td class="money">{{ charge.price|money }}</td>
+          <td>{% status_badge charge.get_status_display charge.status %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="muted empty">No repeating debit was created today.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  </section>
+
   <section class="card" id="skipped-today-card">
   <h2>Skipped today</h2>
   {% responsive_table %}

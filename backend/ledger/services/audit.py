@@ -42,6 +42,7 @@ from django.utils import timezone
 from finance.dates import day_text, moment_text
 from ledger.models import (
     AuditLog,
+    AutopayPlan,
     CollectionSchedule,
     ContactEntry,
     Document,
@@ -303,8 +304,8 @@ def _filtered(query: AuditQuery) -> QuerySet[AuditLog] | None:
 def _store_records(store_id: uuid.UUID) -> dict[str, list[str]]:
     """Per entity type, the ids of the store's records (one query, a union): the store,
     its leases and cost rows, their rent, one-off and insurance charges, invoices, invoice
-    drafts, payments, schedules, documents, contact entries, lease ends, transfers and
-    installment plans."""
+    drafts, payments, schedules, documents, contact entries, lease ends, transfers,
+    installment plans and autopay plans."""
     on_store = Q(lease__store_id=store_id)
     on_charge = (
         Q(rent_charge__lease__store_id=store_id)
@@ -334,6 +335,7 @@ def _store_records(store_id: uuid.UUID) -> dict[str, list[str]]:
         ("lease_end", LeaseEnd.objects.filter(on_store)),
         ("lease_transfer", LeaseTransfer.objects.filter(store_id=store_id)),
         ("installment_plan", InstallmentPlan.objects.filter(on_store)),
+        ("autopay_plan", AutopayPlan.objects.filter(store_id=store_id)),
     ]
     parts = [
         rows.annotate(record_type=Value(kind, output_field=CharField())).values_list(

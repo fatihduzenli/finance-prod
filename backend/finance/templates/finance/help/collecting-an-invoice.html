@@ -1,9 +1,10 @@
-{% comment %}How an invoice is collected: the five choices of the invoice builder's "How to collect", one sentence each (PLAN-012e-2 D3, D10), and the line order of the invoice page.{% endcomment %}
+{% comment %}How an invoice is collected: the six choices of the invoice builder's "How to collect", one sentence each (PLAN-012e-2 D3, D10; Set up autopay, PLAN-012f-a D12), and the line order of the invoice page.{% endcomment %}
 <dl id="help-collect-choices">
   <dt>Save draft</dt><dd>Keeps the invoice as a draft: nothing is sent to {{ company.provider_name }} and no one is charged.</dd>
   <dt>Send by e-mail</dt><dd>Creates the invoice in {{ company.provider_name }} and e-mails it to the operator, who pays it from the e-mail.</dd>
   <dt>Charge now</dt><dd>Debits the operator's linked bank account at once, after a confirmation page (admin only).</dd>
   <dt>Schedule for a date</dt><dd>Debits the operator's linked bank account once, on a date after today and at most {{ schedule_horizon_days }} days ahead, for an active lease and an invoice of one item line.</dd>
+  <dt>Set up autopay</dt><dd>Repeats this invoice's one line as bank debits of the operator's linked bank account, monthly, weekly or yearly from a first date, ending after a number of payments, on a date or never. The plan appears on the store's Autopay tab, where it can be paused, resumed or stopped. Rent is never set up this way.</dd>
   <dt>Record payment now</dt><dd>Records a wire, Zelle or other payment already received: the invoice is created in {{ company.provider_name }} and marked paid there, never e-mailed.</dd>
 </dl>
 <p id="help-line-order">A payment on this invoice pays the lines in order; a refund or a return takes it back from the last line first.</p>

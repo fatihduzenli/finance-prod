@@ -23,6 +23,7 @@ from django.urls import include, path, re_path
 
 from ledger.views import (
     audit,
+    autopay_plans,
     calendar,
     charges,
     collections,
@@ -109,6 +110,11 @@ store_patterns = (
         path("<str:pk>/charge-now/", stores.store_charge_now_pick, name="charge_now_pick"),
         # PLAN-012d D13: Create missing charges (the rent run for this store).
         path("<str:pk>/create-charges/", stores.store_create_charges, name="create_charges"),
+        # PLAN-012f-a D14: the Autopay tab's actions on an autopay plan (POST only).
+        path("<str:pk>/plans/<str:plan>/pause/", autopay_plans.plan_pause, name="plan_pause"),
+        path("<str:pk>/plans/<str:plan>/resume/", autopay_plans.plan_resume, name="plan_resume"),
+        path("<str:pk>/plans/<str:plan>/stop/", autopay_plans.plan_stop, name="plan_stop"),
+        path("<str:pk>/plans/<str:plan>/end/", autopay_plans.plan_end, name="plan_end"),
     ],
     "stores",
 )

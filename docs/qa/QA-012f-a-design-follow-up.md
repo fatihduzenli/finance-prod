@@ -381,3 +381,93 @@ through the lease-end statement (the same template base; a transfer in the data 
 incoming operator and a second draft).
 
 **Verdict (D):** PASS (two MINOR resolved; B-3 and C-5 open for the cleanup; one unreproduced PostgreSQL failure under residual risk; the owner's questions stand)
+
+### Batch E — "Set up autopay": repeating plans of single-occurrence debits (D11–D16)
+
+**Scope.** *E1 (Opus):* `AutopayPlan` (`autopay_plans`: the one line, cadence, first date, end rule,
+state, `next_on`, `made_count`, the large-debit confirmation; CHECKs on every shape, a partial
+unique of one live plan per lease and item, an index on state and next date), `OneOffCharge.
+autopay_plan` and `period_no` (one charge per plan and period; category `autopay_plan` ⇔
+collection `autopay_due`), `OneOffCategory.AUTOPAY_PLAN`; migration `0049_autopay_plans` (the
+0038 pattern: pending checks, the guards on the two text columns, the category CHECKs recreated,
+`refuse_reverse` while plans exist; the statement column untouched); `ledger/services/autopay_plans.py`
+(`create` with every refusal of the plan's D11–D13, `make_due` under the plan's row lock with the
+creation key `uuid5(plan, period)`, `run_due` per plan in its own transaction with a bounded
+catch-up, `pause` / `resume` / `stop` / `change_end` with the roles of D14 checked in the service,
+`LEAD_DAYS = 7`, the occurrence's description by the made ordinal, `made_ordinal_of`); the one-off
+path accepting a plan occurrence and auditing the large debit against the plan's confirmation;
+the lease-end and transfer blockers listing a live plan; the daily run's new step and the run
+page's data; the plan in the store's History. *E2 (Opus):* the sixth choice: `CollectChoice.AUTOPAY`, `AutopayInput`, `invoice_builder._autopay`
+(the draft and operator locked, a transfer draft refused, one item line only, the line handed to
+`autopay_plans.create`, the refusal fields mapped to the tile's fields, the audit row
+`invoice_draft.sent` with the plan and its first occurrence, the draft deleted), the form's
+`autopay_*` fields (cadence, first debit, end rule, count 2–999, last debit date, its own
+large-debit tick) cleaned on the service's sentences with leftovers from a scriptless page
+ignored, the tile from `collect_form.options` with its fields inside, the primary "Set up $X
+monthly/weekly/yearly", the redirect to the store's Autopay tab, `shown_when.js` gaining an "and"
+within an alternative, the help page's sixth entry; 21 page cases and two browser cases. *E3 (Opus):* the Autopay tab's "Repeating debits" card (a list: item, amount, the state badge On /
+Paused / Stopped / Finished, the line "Monthly from Nov 3, 2026 · 1 of 12 made · next Nov 3, 2026"
+with "next" the earliest owed occurrence from today; Pause and Resume as single-submit POSTs for
+billing; Stop as a link to its confirmation page, admin; Change end as an inline form, admin),
+`views/autopay_plans.py` (the plan must belong to the store, else 404; the role checked in the
+view and the service; the sentence flashed; `plan_stop`'s GET renders "Are you sure?" with what
+will happen and "cannot be undone", its POST stops), the four POST routes under `/stores/<pk>/
+plans/<plan>/…` with their RouteRules, the run page's "Repeating debits created today" card, the
+help paragraph; the tab's budget 17 → 18; 44 page cases. *Fable:*
+ADR-0014 (Proposed until the owner answers plan §9 items 6–8); `tests/test_plan012fa_e_adversarial.py`
+(17: two runs on the same day make one occurrence and the lead never runs early; a hostile cadence
+and a hostile end rule are refused and write nothing; a rent item and an ended lease are refused;
+every occurrence is a single Stax occurrence and never a rent charge; markup in an item name is
+escaped on the Autopay and Charges tabs, the History tab and the run page; a plan's actions refuse
+another store's plan and a viewer's or billing's forbidden post; the new module and its templates
+carry no provider name).
+
+**Findings.**
+
+| # | Severity | Where | Defect | Outcome |
+|---|---|---|---|---|
+| E-1 | MAJOR | autopay_plans.create (E1, first build) | `select_for_update` across the lease's outer join: PostgreSQL refuses "FOR UPDATE cannot be applied to the nullable side of an outer join"; green on sqlite | Resolved by Opus before hand-back, found by its own PostgreSQL proof run (`of=("self",)`) |
+| E-2 | MINOR | tests/test_plan012fa_e_adversarial.py (Fable) | Two operators from the one-off helper shared the default customer id and tripped the external-refs unique | Resolved (ids per operator), found by Opus |
+| E-3 | MINOR | E1's occurrence description | The description carried the internal period number, which can exceed the count after a pause ("4 of 3") | Resolved: the made ordinal at creation; a test after pause and resume |
+| E-4 | MAJOR | the Autopay tab (E3, first build) | Stop, final and a provider write (the pending debit's schedule deleted), was a one-click POST; Rule 2 puts such an action behind a confirmation step as the one-off Cancel has | Resolved: a confirmation page on GET (admin only), the POST behind it; tests for both roles and a stopped plan |
+| E-5 | MINOR | tests/test_plan012fa_c_builder.py and tests/test_plan012fa_e_adversarial.py (Fable) | Two pins counted five choices; the stop case posted while the first debit's provider request was still queued (the busy guard refused it, by design) | Resolved (six choices; the queued job run first on the fake provider) |
+
+**Decisions taken (Fable) and for the owner.** The three assumptions of plan §9 (one line per plan;
+a seven-day lead; the large-debit confirmation once at setup, audited per occurrence) stand until
+answered; a missed daily run collects the occurrence late (due today, at most twelve a run), never
+skips it; a provider failure on an occurrence leaves a FAILED job with its retry (the worker's
+existing behaviour) and the plan active; pause or stop while a job waits is refused with the
+existing busy sentence; billing pauses and resumes, admin stops and changes the end (D14; plan §6
+corrected); a plan may end on its first date (one debit); an end count of 2 to 999; "never" ignores
+a count or date given with it; the plan is listed in the History tab but has no page of its own, so
+the audit page's links skip it. E2's separate large-debit tick, always in the tile's markup like Schedule's; the Ends select on its own row; after an action from the operator page's Autopay tab the user lands on the store's tab (no `?next=`); Change end shows its three controls without script.
+
+**Gate 1.** ruff, `ruff format --check` (485 files), mypy strict (485 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16 after migration 0049: all clean. **Gate 2.**
+sqlite full suite 7,009 passed, 673 skipped, 98 deselected, 4 failed in 871 s; the four were contract-freeze pins that Batch E's additions move by design and Fable re-pinned (the stored choices now list AutopayCadence, AutopayEndRule, AutopayPlanState and the autopay_plan category; the route digest reads 261 names with the four plan actions; the pages test opens the Stop page as the admin's page on a plan of its world and lists Pause, Resume and Change end as POST-only; the store-route classification carries the four with their roles); the three files re-run on sqlite: 90 passed, 1 skipped; PostgreSQL 16 (CI's split on a throwaway container): migration selection 36 passed in 844 s, unit selection 7,643 passed, 3 skipped, 101 deselected, the same 4 pins failed before the re-pin and the three files then passed on the container (91 passed), e2e 31 passed on each of four runs. Visual: regenerated in the image against PostgreSQL with the eleven report shots
+(65 passed), compare runs 54 passed on PostgreSQL and on sqlite; the sqlite regeneration equals the
+PostgreSQL baselines in 48 of 50 files, the other two differ by 28 and 38 pixels (antialiasing on a
+badge row of the stores list and the login field's focus-ring edge, against a tolerance of 0.5 %
+of the page; the compare runs pass on both engines); the baselines of the Autopay tab and the daily
+run page changed with their new cards, the stores list by those 28 pixels. **Gate 3.** Diff read:
+the plan is row-locked and each period keyed; refusals audited without changing the plan; the
+daily run per plan in its own transaction with a bounded catch-up; every Stax rule a single
+occurrence through the existing job; the builder's path locks the draft and the operator, takes
+one line, maps refusal fields, audits and deletes the draft; the four views check the store, the
+role (also in the service) and the method; Stop behind its page; the migration follows the 0038
+pattern with its reverse guard and the text-column guards; no production file carries a provider
+name. **Gate 4.** Secret scans (script and pattern, the diff and every new file) clean; `.env.example`
+unchanged (no new secret); no new file type; the new inputs (the builder's six autopay fields, the
+four POST actions, the end form) validated against fixed lists and the service's rules, unknown
+values refused and never echoed; a viewer's and billing's forbidden posts refused with nothing
+written; a plan of another store answers 404; two runs on the same day make one occurrence; the
+lead never runs early; markup in an item name escaped on four pages; Rule 8 held over the new
+module and templates.
+
+**Residual risk (E).** The owner's answers to plan §9 items 6–8 may change the lead, the one-line
+rule or the per-debit confirmation (ADR-0014 is Proposed). The provider's weekly and yearly
+cadences are never sent (single occurrences only), so TODO-VERIFY-019/036 are untouched. A missed
+daily run collects late, never skips. The migration's round trip on CI adds to the 19:54 of the
+migration job (Step 13's planning decides the split or squash).
+
+**Verdict (E):** **PASS.** Every gate clean on both engines; two MAJOR and three MINOR findings resolved; the four moved pins re-pinned by Fable and re-run on both engines; the visual suite's two cross-engine antialiasing diffs recorded above. ADR-0014 stays Proposed until the owner answers plan §9 items 6–8.

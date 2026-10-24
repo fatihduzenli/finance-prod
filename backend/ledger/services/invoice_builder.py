@@ -128,6 +128,14 @@ one entry point of the draft form's last step, with a :class:`CollectChoice`:
   The draft becomes that charge: ``invoice_draft.sent`` is audited with the choice and the
   charge, and the draft row is removed (a sent draft holds an invoice, and this one has
   none). A second submit finds no draft.
+- ``autopay`` (billing; PLAN-012f-a D12): the one line repeated as bank debits, monthly,
+  weekly or yearly from a first date (:class:`AutopayInput`), under Schedule for a date's
+  conditions: :func:`ledger.services.autopay_plans.create` checks every rule (one item
+  line, not rent, the active lease, the provider customer and linked bank method, the
+  dates and the end rule, the large-debit confirmation) and makes the first occurrence at
+  once. The draft becomes that plan: ``invoice_draft.sent`` is audited with the choice,
+  the plan and the first occurrence's charge, and the draft row is removed, as Schedule
+  does.
 - ``record`` (billing): a wire, Zelle or other payment already received
   (:class:`PaymentInput`; a check is "other" with its number as the reference). The
   draft is converted as by :func:`send` with collection ``manual`` (the provider invoice
@@ -173,6 +181,7 @@ from ledger.models import (
     NSF_FEE_CODES,
     ZERO,
     AuditLog,
+    AutopayPlan,
     CollectionMethod,
     CollectionStatus,
     FeeType,
@@ -196,7 +205,7 @@ from ledger.models import (
     Store,
     format_quantity,
 )
-from ledger.services import leases, numbering, one_off_charges, rent_run
+from ledger.services import autopay_plans, leases, numbering, one_off_charges, rent_run
 from ledger.services.one_off_charges import (
     AMOUNT_MAX,
     CHARGE_NOW_PARAM,
@@ -390,6 +399,9 @@ SCHEDULE_NOT_OFFERED = "Schedule needs an active lease with one line."
 SCHEDULE_TRANSFER = (
     "This draft belongs to a transfer; send it from its page instead. Nothing was scheduled."
 )
+AUTOPAY_TRANSFER = (
+    "This draft belongs to a transfer; send it from its page instead. Nothing was set up."
+)
 #: The internal note of a scheduled debit's charge.
 SCHEDULE_NOTE = "Scheduled with the invoice builder from {draft}: {item}."
 RECORD_PAYMENT_REQUIRED = "Enter how and when the payment was received. Nothing was recorded."
@@ -468,6 +480,7 @@ class CollectChoice(StrEnum):
     CHARGE_NOW = "charge_now"
     SCHEDULE = "schedule"
     RECORD = "record"
+    AUTOPAY = "autopay"
 
 
 @dataclass(frozen=True, slots=True)
@@ -480,6 +493,19 @@ class PaymentInput:
     paid_on: date
     reference: str = ""
     note: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class AutopayInput:
+    """The repeat of :data:`CollectChoice.AUTOPAY` (PLAN-012f-a D12): the cadence (one of
+    :class:`~ledger.models.AutopayCadence`), the first debit's date and the end rule (one of
+    :class:`~ledger.models.AutopayEndRule`, with its count or date)."""
+
+    cadence: str
+    first_on: date | None
+    end_rule: str
+    end_count: int | None = None
+    end_on: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,6 +523,8 @@ class Outcome:
     payment: Payment | None = None
     #: The ``schedule_create`` job of :data:`CollectChoice.SCHEDULE`.
     schedule: Job | None = None
+    #: The plan of :data:`CollectChoice.AUTOPAY`.
+    plan: AutopayPlan | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1463,6 +1491,7 @@ def collect(
     confirmed: bool = False,
     due_date: date | None = None,
     payment: PaymentInput | None = None,
+    autopay: AutopayInput | None = None,
 ) -> Outcome:
     """Collect the draft as ``choice`` says (PLAN-012e-2 D1; see the module docstring).
     Never calls the provider: the provider work is queued."""
@@ -1496,6 +1525,10 @@ def collect(
         if refused is not None or due_date is None:
             return refused or Outcome(False, SCHEDULE_DATE_REQUIRED, "due_date")
         return _schedule(draft_id, actor, due_date, confirmed=confirmed is True, today=day)
+    if chosen == CollectChoice.AUTOPAY:
+        if autopay is None:
+            return Outcome(False, autopay_plans.CHOOSE_CADENCE, "autopay_cadence")
+        return _autopay(draft_id, actor, autopay, confirmed=confirmed is True, today=day)
     refused = _payment_refusal(payment, day)
     if refused is not None or payment is None:
         return refused or Outcome(False, RECORD_PAYMENT_REQUIRED, "method")
@@ -1672,6 +1705,88 @@ def _schedule(
         )
         draft.delete()
     return Outcome(True, made.message, charges=(made.charge,), job=made.job, schedule=made.job)
+
+
+def _autopay(
+    draft_id: uuid.UUID,
+    actor: User | None,
+    repeat: AutopayInput,
+    *,
+    confirmed: bool,
+    today: date,
+) -> Outcome:
+    """:data:`CollectChoice.AUTOPAY` (see the module docstring), in one transaction."""
+    with transaction.atomic():
+        draft, refused = _locked_draft(draft_id)
+        if draft is None:
+            return refused or Outcome(False, NOT_A_DRAFT)
+        if LeaseTransfer.objects.filter(draft=draft).exists():
+            return Outcome(False, AUTOPAY_TRANSFER, draft=draft)
+        operator = Operator.objects.select_for_update().get(pk=draft.operator_id)
+        lease = draft.lease
+        header = _header_refusal(operator, lease, draft.memo, draft.due_date, today)
+        if header is not None:
+            return Outcome(False, header.message, header.field, draft=draft)
+        try:
+            lines = _stored_lines(draft, operator)
+        except _Refused as error:
+            return Outcome(False, error.outcome.message, error.outcome.field, draft=draft)
+        if len(lines) != 1 or lines[0].is_existing:
+            return Outcome(False, autopay_plans.ONE_LINE, draft=draft)
+        [line] = lines
+        made = autopay_plans.create(
+            lease,
+            item_name=line.item,
+            description=line.description,
+            quantity=line.quantity,
+            unit_amount=line.unit_amount,
+            cadence=repeat.cadence,
+            first_on=repeat.first_on,
+            end_rule=repeat.end_rule,
+            end_count=repeat.end_count,
+            end_on=repeat.end_on,
+            actor=actor,
+            confirmed=confirmed,
+            today=today,
+            fee_type=line.fee_type,
+            line_count=len(lines),
+            rent_line=line.is_rent,
+        )
+        if not made.ok or made.plan is None or made.charge is None:
+            transaction.set_rollback(True)
+            return Outcome(False, made.message, _autopay_field(made.field), draft=draft)
+        before = draft_state(draft)
+        _audit(
+            actor,
+            SENT_ACTION,
+            draft,
+            before,
+            {
+                **before,
+                "status": InvoiceDraftStatus.SENT.value,
+                "invoice_number": None,
+                "collection": CollectionMethod.AUTOPAY_DUE.value,
+                "choice": CollectChoice.AUTOPAY.value,
+                "plan": str(made.plan.pk),
+                "charges": [str(made.charge.pk)],
+                "rent_charges": [],
+            },
+        )
+        draft.delete()
+    return Outcome(True, made.message, charges=(made.charge,), plan=made.plan)
+
+
+def _autopay_field(field: str | None) -> str | None:
+    """The draft form's field of a plan's refusal: the repeat's fields and the large-debit
+    confirmation are the tile's; the line's are the lines'."""
+    return {
+        "cadence": "autopay_cadence",
+        "first_on": "autopay_first_on",
+        "end_rule": "autopay_end_rule",
+        "end_count": "autopay_end_count",
+        "end_on": "autopay_end_on",
+        "confirm": "confirm",
+    }.get(field or "", None)
 
 
 def _schedule_field(field: str | None) -> str | None:

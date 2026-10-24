@@ -7,11 +7,15 @@ Schedule for a date with their refusals, a second submit, Charge now's confirmat
 role; Record payment now through the worker (the provider invoice created, then marked
 paid as cash). The page: the fieldset, its buttons, the dependent fields' markup, the
 query string. The three moved routes: their redirects and role gates, and the removed
-templates and form classes. Nothing reaches a network.
+templates and form classes. Set up autopay (PLAN-012f-a D12): where it is offered, each
+cadence and end rule through the page, the form's refusals, the large-debit tick, a rent
+line, the redirect to the Autopay tab, the audit row and the removed draft. Nothing
+reaches a network.
 """
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -27,6 +31,7 @@ from accounts.roles import Role
 from ledger import forms as ledger_forms
 from ledger.models import (
     AuditLog,
+    AutopayPlan,
     CollectionStatus,
     FeeType,
     Invoice,
@@ -38,9 +43,14 @@ from ledger.models import (
     Operator,
     Payment,
 )
-from ledger.services import invoice_builder, rent_run
+from ledger.services import autopay_plans, invoice_builder, rent_run, workspace
 from ledger.services import one_off_charges as one_off_service
-from ledger.services.invoice_builder import CollectChoice, LineInput, PaymentInput
+from ledger.services.invoice_builder import (
+    AutopayInput,
+    CollectChoice,
+    LineInput,
+    PaymentInput,
+)
 from payments import offline_marking
 from payments.errors import ProviderUnavailable
 from payments.fake import FakeProvider
@@ -719,3 +729,329 @@ def test_the_old_templates_and_form_classes_are_gone() -> None:
     assert "Add setup charge" not in form
     for name in ("SetupChargeAddForm", "SchedulePaymentForm"):
         assert not hasattr(ledger_forms, name), name
+
+
+# --- Set up autopay (PLAN-012f-a D12) -----------------------------------------------------------
+
+
+MONTHLY_12 = AutopayInput("monthly", date(2026, 11, 1), "count", 12)
+
+
+def autopay_offered(html: str) -> bool:
+    radio = 'id="collect-autopay"' in html
+    assert radio == ('id="autopay-draft"' in html), "the radio and its button go together"
+    return radio
+
+
+def test_the_page_offers_set_up_autopay_where_schedule_is_offered(fake: FakeProvider) -> None:
+    operator, lease = a_world(fake)
+    offered = draft_page(a_draft(operator, lease, one_line()))
+    assert autopay_offered(offered)
+    assert '<span class="collect-name">Set up autopay</span>' in offered
+    assert (
+        '<span class="collect-note">Repeat this as bank debits: monthly, weekly or yearly.</span>'
+    ) in offered
+    assert not autopay_offered(draft_page(a_draft(operator, lease, two_lines())))
+    assert not autopay_offered(draft_page(a_draft(operator, None, one_line())))
+    rent = LineInput("", "", None, None, rent_lease=lease.pk, rent_month=date(2026, 10, 1))
+    assert not autopay_offered(draft_page(a_draft(operator, lease, [rent])))
+    ended = a_draft(operator, lease, one_line())
+    Lease.objects.filter(pk=lease.pk).update(ended_on=date(2026, 12, 31))
+    assert not autopay_offered(draft_page(ended))
+    client = client_for(Role.BILLING)[0]
+    alone = client.get(f"/invoices/new/operator/{operator.pk}/", {"collect": "autopay"})
+    html = alone.content.decode()
+    assert not autopay_offered(html) and 'id="collect-draft" checked' in html
+    # The sixth choice is the last tile, through collect_form.options like the others.
+    assert [value for value, _ in ledger_forms.COLLECT_CHOICES][-1] == "autopay"
+
+
+def test_the_autopay_tile_holds_its_fields_each_shown_by_its_conditions(
+    fake: FakeProvider,
+) -> None:
+    operator, lease = a_world(fake)
+    html = draft_page(a_draft(operator, lease, one_line("175.00")), query="?collect=autopay")
+    assert 'id="collect-autopay" checked' in html
+    tile = html[html.index('id="tile-autopay"') : html.index('id="tile-autopay"') + 6000]
+    fields = tile[: tile.index("</fieldset>")]
+    for name, condition in (
+        ("autopay_cadence", "collect-autopay"),
+        ("autopay_first_on", "collect-autopay"),
+        ("autopay_end_rule", "collect-autopay"),
+        ("autopay_end_count", "collect-autopay&amp;id_autopay_end_rule=count"),
+        ("autopay_end_on", "collect-autopay&amp;id_autopay_end_rule=date"),
+        ("autopay_confirm_large_debit", "collect-autopay"),
+    ):
+        assert f'name="{name}"' in fields, name
+        at = fields.index(f'name="{name}"')
+        assert f'data-shown-when="{condition}"' in fields[at - 300 : at + 300], name
+    # The selects' options are the model's choices; the count's bounds are the plan's.
+    assert '<option value="monthly" selected>Monthly</option>' in fields
+    assert '<option value="weekly">Weekly</option>' in fields
+    assert '<option value="count" selected>After a number of payments</option>' in fields
+    assert '<option value="never">Never</option>' in fields
+    assert 'min="2"' in fields and 'max="999"' in fields
+    # Nothing is hidden by the server: the script hides what does not apply.
+    block = fields[fields.index('id="collect-autopay-fields"') :]
+    assert re.search(r'<div class="field[^"]*"[^>]*\bhidden\b', block) is None
+    # The & form is in the dependent-fields script.
+    script = (TEMPLATES.parents[1] / "static" / "ledger" / "shown_when.js").read_text()
+    assert 'alternative.split("&").every(' in script
+
+
+def test_the_autopay_button_names_the_amount_and_the_cadence(fake: FakeProvider) -> None:
+    operator, lease = a_world(fake)
+    html = draft_page(a_draft(operator, lease, one_line("175.00")))
+    button = html[
+        html.index('id="autopay-draft"') : html.index("</button>", html.index('id="autopay-draft"'))
+    ]
+    assert 'name="submit_collect" value="autopay"' in html
+    assert (
+        'data-shown-when="collect-autopay">Set up <span class="collect-amount">$175.00</span> '
+        in button
+    )
+    words = re.findall(r'<span class="collect-cadence" ([^>]*)>(\w+)</span>', button)
+    assert words == [
+        ('data-shown-when="id_autopay_cadence=monthly"', "monthly"),
+        ('data-shown-when="id_autopay_cadence=weekly" hidden', "weekly"),
+        ('data-shown-when="id_autopay_cadence=yearly" hidden', "yearly"),
+    ]
+
+
+def autopay_post(lease: Lease, **fields: str) -> dict[str, str]:
+    return {
+        **page_post(
+            lease,
+            collect="autopay",
+            autopay_cadence="monthly",
+            autopay_first_on="2026-11-01",
+            autopay_end_rule="count",
+            autopay_end_count="12",
+            autopay_end_on="",
+        ),
+        "lines-TOTAL_FORMS": "1",
+        **fields,
+    }
+
+
+@pytest.mark.parametrize(
+    ("fields", "wanted"),
+    [
+        (
+            {},
+            ("monthly", date(2026, 11, 1), "count", 12, None, "$100.00 monthly"),
+        ),
+        (
+            {
+                "autopay_cadence": "weekly",
+                "autopay_end_rule": "date",
+                "autopay_end_on": "2027-01-31",
+            },
+            ("weekly", date(2026, 11, 1), "date", None, date(2027, 1, 31), "$100.00 weekly"),
+        ),
+        (
+            {"autopay_cadence": "yearly", "autopay_end_rule": "never", "autopay_end_count": "1"},
+            ("yearly", date(2026, 11, 1), "never", None, None, "$100.00 yearly"),
+        ),
+    ],
+)
+def test_set_up_autopay_on_the_page_makes_the_plan_and_opens_the_autopay_tab(
+    fake: FakeProvider, fields: dict[str, str], wanted: tuple[Any, ...]
+) -> None:
+    operator, lease = a_world(fake)
+    client = client_for(Role.BILLING)[0]
+    response = client.post(f"/invoices/new/store/{lease.store_id}/", autopay_post(lease, **fields))
+    assert response.status_code == 302
+    assert response["Location"] == workspace.tab_url(lease.store_id, workspace.TAB_SCHEDULES)
+    assert response["Location"].endswith("?tab=schedules#tab-schedules")
+    plan = AutopayPlan.objects.get()
+    cadence, first, rule, count, end, words = wanted
+    assert (plan.cadence, plan.first_on, plan.end_rule, plan.end_count, plan.end_on) == (
+        cadence,
+        first,
+        rule,
+        count,
+        end,
+    )
+    assert (plan.lease_id, plan.item_name, plan.amount) == (
+        lease.pk,
+        "Arrears September",
+        D("100.00"),
+    )
+    # The draft became the plan: removed, its sending audited with the first occurrence.
+    assert not InvoiceDraft.objects.exists() and not Invoice.objects.exists()
+    [charge] = OneOffCharge.objects.filter(autopay_plan=plan)
+    assert (charge.collection, charge.due_date, charge.price) == ("autopay_due", first, D("100.00"))
+    sent = AuditLog.objects.get(action=invoice_builder.SENT_ACTION)
+    assert sent.after is not None
+    assert (sent.after["choice"], sent.after["plan"], sent.after["charges"]) == (
+        "autopay",
+        str(plan.pk),
+        [str(charge.pk)],
+    )
+    assert AuditLog.objects.filter(action=autopay_plans.CREATED_ACTION).count() == 1
+    page = client.get(response["Location"]).content.decode()
+    assert f"Autopay set up: {words}, the first debit on Nov 1, 2026." in page
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ({"autopay_cadence": "daily"}, None),
+        ({"autopay_first_on": ""}, autopay_plans.FIRST_REQUIRED),
+        ({"autopay_first_on": TODAY.isoformat()}, autopay_plans.FIRST_NOT_AFTER_TODAY),
+        (
+            {
+                "autopay_first_on": (
+                    TODAY + timedelta(days=autopay_plans.FIRST_HORIZON_DAYS + 1)
+                ).isoformat()
+            },
+            autopay_plans.FIRST_TOO_FAR,
+        ),
+        ({"autopay_end_rule": "forever"}, None),
+        ({"autopay_end_count": "1"}, autopay_plans.END_COUNT),
+        ({"autopay_end_count": "1000"}, autopay_plans.END_COUNT),
+        ({"autopay_end_count": ""}, autopay_plans.END_COUNT),
+        ({"autopay_end_rule": "date", "autopay_end_on": ""}, autopay_plans.END_DATE_REQUIRED),
+        (
+            {"autopay_end_rule": "date", "autopay_end_on": "2026-10-31"},
+            autopay_plans.END_BEFORE_FIRST,
+        ),
+    ],
+)
+def test_the_form_refuses_a_bad_repeat_with_the_services_sentence_and_writes_nothing(
+    fake: FakeProvider, fields: dict[str, str], message: str | None
+) -> None:
+    operator, lease = a_world(fake)
+    client = client_for(Role.BILLING)[0]
+    path = f"/invoices/new/store/{lease.store_id}/"
+    response = client.post(path, autopay_post(lease, **fields))
+    assert response["Location"] == path
+    assert not InvoiceDraft.objects.exists() and not AutopayPlan.objects.exists()
+    assert nothing_written() == (0, 0, 0, 0)
+    held = client.get(path).content.decode()
+    assert 'id="collect-autopay" checked' in held
+    if message is not None:
+        assert message in held
+
+
+def test_the_form_and_the_service_agree_on_the_repeat() -> None:
+    form = ledger_forms.CollectForm(
+        {
+            "collect": "autopay",
+            "autopay_cadence": "weekly",
+            "autopay_first_on": "2026-11-01",
+            "autopay_end_rule": "count",
+            "autopay_end_count": "3",
+            "autopay_end_on": "2026-12-01",
+        },
+        can_charge_now=False,
+    )
+    assert form.is_valid(), form.errors
+    assert form.autopay() == AutopayInput(
+        "weekly", date(2026, 11, 1), "count", 3, date(2026, 12, 1)
+    )
+    # A page without the script sends every field: a leftover value the choice or the end
+    # rule ignores refuses nothing (the service ignores it too).
+    for posted in (
+        {"collect": "email", "autopay_end_count": "abc", "autopay_first_on": "x"},
+        {
+            "collect": "autopay",
+            "autopay_cadence": "monthly",
+            "autopay_first_on": "2026-11-01",
+            "autopay_end_rule": "never",
+            "autopay_end_count": "1",
+            "autopay_end_on": "not-a-date",
+        },
+    ):
+        leftover = ledger_forms.CollectForm(posted, can_charge_now=False)
+        assert leftover.is_valid(), (posted, leftover.errors)
+    counted = ledger_forms.CollectForm(
+        {
+            "collect": "autopay",
+            "autopay_cadence": "monthly",
+            "autopay_first_on": "2026-11-01",
+            "autopay_end_rule": "count",
+            "autopay_end_count": "abc",
+        },
+        can_charge_now=False,
+    )
+    assert not counted.is_valid()
+    assert counted.errors["autopay_end_count"] == [autopay_plans.END_COUNT]
+    # Not offered (no active lease with one item line), the choice itself is refused.
+    hidden = ledger_forms.CollectForm(
+        {"collect": "autopay"}, can_charge_now=False, can_schedule=False
+    )
+    assert not hidden.is_valid() and "collect" in hidden.errors
+
+
+def test_set_up_autopay_needs_the_large_debit_tick(fake: FakeProvider, settings: Any) -> None:
+    settings.LARGE_DEBIT_WARNING_AMOUNT = D("1000.00")
+    operator, lease = a_world(fake)
+    client = client_for(Role.BILLING)[0]
+    data = autopay_post(lease, **{"lines-0-unit_amount": "1500.00"})
+    response = client.post(f"/invoices/new/store/{lease.store_id}/", data)
+    draft = InvoiceDraft.objects.get()
+    assert response["Location"] == f"/invoices/drafts/{draft.pk}/"
+    assert not AutopayPlan.objects.exists() and not OneOffCharge.objects.exists()
+    html = client.get(response["Location"]).content.decode()
+    assert "large debit" in html and 'id="collect-autopay" checked' in html
+    # A ticked Schedule box does not confirm the plan: the autopay tile has its own.
+    again = {**data, "confirm_large_debit": "on"}
+    client.post(f"/invoices/drafts/{draft.pk}/edit/", again)
+    assert not AutopayPlan.objects.exists()
+    ticked = {**data, "autopay_confirm_large_debit": "on"}
+    response = client.post(f"/invoices/drafts/{draft.pk}/edit/", ticked)
+    assert response["Location"] == workspace.tab_url(lease.store_id, workspace.TAB_SCHEDULES)
+    plan = AutopayPlan.objects.get()
+    assert plan.amount == D("1500.00") and plan.large_debit_confirmed_at is not None
+
+
+def test_set_up_autopay_refuses_a_rent_line_two_lines_and_an_operator_draft(
+    fake: FakeProvider,
+) -> None:
+    operator, lease = a_world(fake)
+    rent = LineInput("", "", None, None, rent_lease=lease.pk, rent_month=date(2026, 10, 1))
+    outcome = collect(a_draft(operator, lease, [rent]), CollectChoice.AUTOPAY, autopay=MONTHLY_12)
+    assert (outcome.ok, outcome.message) == (False, autopay_plans.RENT)
+    named = collect(
+        a_draft(operator, lease, [LineInput("Rent", "", None, D("50.00"))]),
+        CollectChoice.AUTOPAY,
+        autopay=MONTHLY_12,
+    )
+    assert (named.ok, named.message) == (False, autopay_plans.RENT)
+    two = collect(a_draft(operator, lease, two_lines()), CollectChoice.AUTOPAY, autopay=MONTHLY_12)
+    assert (two.ok, two.message) == (False, autopay_plans.ONE_LINE)
+    alone = collect(a_draft(operator, None, one_line()), CollectChoice.AUTOPAY, autopay=MONTHLY_12)
+    assert (alone.ok, alone.message) == (False, autopay_plans.NO_LEASE)
+    missing = collect(a_draft(operator, lease, one_line()), CollectChoice.AUTOPAY)
+    assert (missing.ok, missing.field) == (False, "autopay_cadence")
+    assert not AutopayPlan.objects.exists() and nothing_written() == (0, 0, 0, 0)
+    assert InvoiceDraft.objects.filter(status=InvoiceDraftStatus.DRAFT).count() == 5
+
+
+def test_set_up_autopay_twice_makes_one_plan_and_a_viewer_is_refused(fake: FakeProvider) -> None:
+    operator, lease = a_world(fake)
+    draft = a_draft(operator, lease, one_line())
+    viewer = collect(draft, CollectChoice.AUTOPAY, Role.VIEWER, autopay=MONTHLY_12)
+    assert (viewer.ok, viewer.message) == (False, invoice_builder.BILLING_ONLY)
+    made = collect(draft, CollectChoice.AUTOPAY, autopay=MONTHLY_12)
+    assert made.ok, made.message
+    assert (
+        made.plan is not None and made.charges and made.charges[0].autopay_plan_id == made.plan.pk
+    )
+    again = collect(draft, CollectChoice.AUTOPAY, autopay=MONTHLY_12)
+    assert (again.ok, again.message) == (False, invoice_builder.NOT_A_DRAFT)
+    assert AutopayPlan.objects.count() == 1
+    assert OneOffCharge.objects.filter(autopay_plan=made.plan).count() == 1
+
+
+def test_a_refused_plan_keeps_the_draft_and_writes_nothing(fake: FakeProvider) -> None:
+    operator = an_operator(fake, bank=None)
+    lease = make_lease(operator=operator)
+    draft = a_draft(operator, lease, one_line())
+    outcome = collect(draft, CollectChoice.AUTOPAY, autopay=MONTHLY_12)
+    assert not outcome.ok and "no linked bank method" in outcome.message
+    assert InvoiceDraft.objects.get(pk=draft.pk).status == InvoiceDraftStatus.DRAFT
+    assert not AutopayPlan.objects.exists() and nothing_written() == (0, 0, 0, 0)
+    assert not AuditLog.objects.filter(action=invoice_builder.SENT_ACTION).exists()

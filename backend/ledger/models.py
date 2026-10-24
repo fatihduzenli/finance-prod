@@ -871,6 +871,9 @@ class OneOffCategory(models.TextChoices):
     NSF_FEE = "nsf_fee", "Returned payment (NSF) fee"
     #: One installment of a plan (PLAN-012e D9); ``plan`` and ``installment_no`` name it.
     INSTALLMENT = "installment", "Installment"
+    #: One occurrence of an autopay plan (PLAN-012f-a D11); ``autopay_plan`` and
+    #: ``period_no`` name it.
+    AUTOPAY_PLAN = "autopay_plan", "Autopay plan"
 
 
 class CollectionMethod(models.TextChoices):
@@ -901,6 +904,7 @@ NON_SETUP_CATEGORIES: list[str] = [
     OneOffCategory.REDEBIT.value,
     OneOffCategory.NSF_FEE.value,
     OneOffCategory.INSTALLMENT.value,
+    OneOffCategory.AUTOPAY_PLAN.value,
 ]
 #: The fee types of the NSF fee (PLAN-011b D5): the first return of an operator, then
 #: every later one. Seeded inactive, so the setup checklist never offers them.
@@ -987,6 +991,16 @@ class OneOffCharge(GuardedModel):
         related_name="installments",
     )
     installment_no = models.SmallIntegerField(null=True, blank=True)
+    #: PLAN-012f-a D11: the autopay plan an ``autopay_plan`` charge is an occurrence of,
+    #: and its period (1, 2, ...); both set exactly for that category.
+    autopay_plan = models.ForeignKey(
+        "AutopayPlan",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="occurrences",
+    )
+    period_no = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1061,6 +1075,24 @@ class OneOffCharge(GuardedModel):
                 )
                 | (~Q(category="installment") & Q(plan__isnull=True, installment_no__isnull=True)),
                 name="one_off_charges_plan_iff_installment",
+            ),
+            models.CheckConstraint(
+                condition=Q(
+                    category="autopay_plan",
+                    collection="autopay_due",
+                    autopay_plan__isnull=False,
+                    period_no__isnull=False,
+                    period_no__gte=1,
+                )
+                | (
+                    ~Q(category="autopay_plan")
+                    & Q(autopay_plan__isnull=True, period_no__isnull=True)
+                ),
+                name="one_off_charges_autopay_plan_iff_category",
+            ),
+            models.UniqueConstraint(
+                fields=["autopay_plan", "period_no"],
+                name="one_off_charges_one_per_autopay_period",
             ),
             _valid_choice("one_off_charges", "status", OneOffChargeStatus),
             _valid_choice("one_off_charges", "category", OneOffCategory),
@@ -1223,6 +1255,135 @@ class InstallmentPlan(GuardedModel):
         if self.one_off_charge is None:
             raise ValueError("An installment plan has a parent.")
         return self.one_off_charge
+
+
+# --- Autopay plans (PLAN-012f-a D11 to D15) -----------------------------------------
+
+
+class AutopayCadence(models.TextChoices):
+    MONTHLY = "monthly", "Monthly"
+    WEEKLY = "weekly", "Weekly"
+    YEARLY = "yearly", "Yearly"
+
+
+class AutopayEndRule(models.TextChoices):
+    """When a plan ends: after ``end_count`` debits, after ``end_on``, or never."""
+
+    COUNT = "count", "After a number of payments"
+    DATE = "date", "On a date"
+    NEVER = "never", "Never"
+
+
+class AutopayPlanState(models.TextChoices):
+    """``active`` makes occurrences; ``paused`` makes none until resumed; ``stopped`` is
+    final (an admin's stop); ``finished`` once the end rule is met."""
+
+    ACTIVE = "active", "Active"
+    PAUSED = "paused", "Paused"
+    STOPPED = "stopped", "Stopped"
+    FINISHED = "finished", "Finished"
+
+
+#: The plan states that still make, or may again make, an occurrence.
+LIVE_AUTOPAY_STATES: list[str] = [AutopayPlanState.ACTIVE.value, AutopayPlanState.PAUSED.value]
+#: The fewest and most debits of a plan that ends after a number of payments.
+AUTOPAY_COUNT_MIN = 2
+AUTOPAY_COUNT_MAX = 999
+
+
+class AutopayPlan(GuardedModel):
+    """One item repeated as bank debits on a lease (PLAN-012f-a D11): monthly, weekly or
+    yearly from ``first_on``, ending after ``end_count`` debits, after ``end_on`` or never.
+    Each period is a :class:`OneOffCharge` of category ``autopay_plan`` (``autopay_plan``,
+    ``period_no``) collected by its own single-occurrence schedule, made by
+    :mod:`ledger.services.autopay_plans` ahead of its date. ``next_on`` is the date of the
+    next occurrence to make; ``made_count`` the occurrences made and not cancelled by the
+    plan. ``fee_type`` (the catalogue item the line named) is for reporting only. At most
+    one live plan per lease and item."""
+
+    lease = models.ForeignKey(Lease, on_delete=models.PROTECT, related_name="autopay_plans")
+    operator = models.ForeignKey(Operator, on_delete=models.PROTECT, related_name="autopay_plans")
+    #: The lease's store, kept for the store page's Autopay tab.
+    store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="autopay_plans")
+    item_name = guarded_char(NAME_MAX_LENGTH)
+    description = free_text()
+    quantity = StrictDecimalField(max_digits=12, decimal_places=4)
+    unit_amount = MoneyField()
+    #: Each debit: the quantity times the unit amount, rounded half up to the cent.
+    amount = MoneyField()
+    fee_type = models.ForeignKey(
+        FeeType, on_delete=models.PROTECT, null=True, blank=True, related_name="autopay_plans"
+    )
+    cadence = _choice(AutopayCadence)
+    first_on = models.DateField()
+    end_rule = _choice(AutopayEndRule)
+    end_count = models.SmallIntegerField(null=True, blank=True)
+    end_on = models.DateField(null=True, blank=True)
+    state = _choice(AutopayPlanState, default=AutopayPlanState.ACTIVE)
+    next_on = models.DateField()
+    made_count = models.IntegerField(default=0)
+    #: When staff confirmed the large debit at setup; every occurrence is audited
+    #: against it (D13). Null when the amount is not a large debit.
+    large_debit_confirmed_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "autopay_plans"
+        indexes = [
+            # The daily run reads the active plans whose next occurrence is near.
+            models.Index(fields=["state", "next_on"], name="autopay_plans_state_next_idx"),
+        ]
+        constraints = [
+            _not_blank("autopay_plans", "item_name"),
+            _positive("autopay_plans", "quantity"),
+            _positive("autopay_plans", "unit_amount"),
+            _positive("autopay_plans", "amount"),
+            _not_negative("autopay_plans", "made_count"),
+            models.CheckConstraint(
+                condition=Q(amount__gte=F("quantity") * F("unit_amount") - HALF_CENT)
+                & Q(amount__lte=F("quantity") * F("unit_amount") + HALF_CENT),
+                name="autopay_plans_amount_is_quantity_times_unit",
+            ),
+            # Each rule reads only its own shape, so an unknown rule fails its own CHECK
+            # (``autopay_plans_end_rule_valid``) alone; ``isnull=False`` because a NULL
+            # comparison passes a CHECK.
+            models.CheckConstraint(
+                condition=(
+                    ~Q(end_rule="count")
+                    | Q(
+                        end_count__isnull=False,
+                        end_count__gte=AUTOPAY_COUNT_MIN,
+                        end_count__lte=AUTOPAY_COUNT_MAX,
+                        end_on__isnull=True,
+                    )
+                )
+                & (
+                    ~Q(end_rule="date")
+                    | Q(end_on__isnull=False, end_on__gte=F("first_on"), end_count__isnull=True)
+                )
+                & (~Q(end_rule="never") | Q(end_count__isnull=True, end_on__isnull=True)),
+                name="autopay_plans_end_rule_shape",
+            ),
+            models.CheckConstraint(
+                condition=Q(next_on__gte=F("first_on")),
+                name="autopay_plans_next_on_from_first",
+            ),
+            models.UniqueConstraint(
+                fields=["lease", "item_name"],
+                condition=Q(state__in=LIVE_AUTOPAY_STATES),
+                name="autopay_plans_one_live_per_item",
+            ),
+            _valid_choice("autopay_plans", "cadence", AutopayCadence),
+            _valid_choice("autopay_plans", "end_rule", AutopayEndRule),
+            _valid_choice("autopay_plans", "state", AutopayPlanState),
+        ]
+
+    def __str__(self) -> str:
+        return f"Autopay plan {self.pk}"
 
 
 # --- Store costs (PLAN-010b D8) ------------------------------------------------------

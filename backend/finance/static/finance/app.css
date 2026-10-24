@@ -663,6 +663,8 @@ fieldset.card > legend + * { clear: both; }
 .collect-fields .field:has(textarea), .collect-fields .field:has(input[type=checkbox]) { flex-basis: 100%; }
 .collect-fields .field > label { margin: 0 0 var(--space-1); font-size: var(--fs-sm); }
 .collect-fields .field input:not([type=checkbox]), .collect-fields .field select, .collect-fields .field textarea { width: 100%; }
+/* Set up autopay's Ends takes the tile's whole row, so "After a number of payments" reads whole. */
+#collect-autopay-fields .field:has(#id_autopay_end_rule) { flex-basis: 100%; }
 .collect-card #collect-schedule-note { margin: var(--space-3) 0 0; }
 /* SUMMARY and the help card. */
 .summary-lines { list-style: none; margin: 0; padding: 0; font-size: var(--fs-base); }
@@ -1117,6 +1119,28 @@ p.detail-more-notes { padding-left: 0; }
 .feed-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-base); }
 .feed-actions form { margin: 0; }
 .feed-actions a { text-decoration: none; }
+
+/* --- Repeating debits (PLAN-012f-a D14) -----------------------------------------------------
+   The Autopay tab's card above the schedules (ledger/stores/_tab_schedules.html): one
+   .plan-row per autopay plan, the bold item with its amount and state badge over the muted
+   .plan-line, the actions at the right (wrapping under the text on a narrow screen); Change
+   end is a <details> whose small form opens under its summary. */
+.plans-card { margin: 0 0 var(--space-6); }
+.plan-rows { list-style: none; margin: 0; padding: 0; }
+.plan-row { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-2) var(--space-4); padding: var(--space-3) 0; border-top: 1px solid var(--border-soft); }
+.plan-row:first-child { border-top: 0; }
+.plan-main { flex: 1 1 18rem; min-width: 0; }
+.plan-title { margin: 0; font-size: var(--fs-md); overflow-wrap: anywhere; }
+.plan-amount { margin-left: var(--space-1); font-weight: 700; font-variant-numeric: tabular-nums; }
+.plan-line { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-base); overflow-wrap: anywhere; }
+.plan-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2); }
+.plan-actions form { margin: 0; }
+.plan-end > summary { list-style: none; cursor: pointer; }
+.plan-end > summary::-webkit-details-marker { display: none; }
+.plan-end-form { display: grid; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface-2); }
+.plan-end-form fieldset { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: 0; padding: 0; border: 0; }
+.plan-end-form legend { margin-bottom: var(--space-1); font-weight: 700; }
+.plan-end-rule { display: inline-flex; align-items: center; gap: var(--space-1); }
 
 /* --- Tablet and phone: touch targets ---------------------------------------------------- */
 @media (max-width: 1023.98px), (pointer: coarse) {

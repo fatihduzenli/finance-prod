@@ -8,6 +8,10 @@ something is unallocated. The invoice builder's How to collect (PLAN-012e-2 D3) 
 choice's fields and button only while its radio is chosen. Without JavaScript every field
 stays visible and the tick that only drives the script stays hidden.
 
+PLAN-012f-a D12: Set up autopay's fields show only while its radio is chosen, the number
+of payments and the last date only while the end rule names them, and its button names the
+cadence chosen; without JavaScript they all show.
+
 PLAN-012e-3 D3: a manual payment's reference is labelled "Check number" while Check is the
 method chosen, and "Reference" otherwise and without JavaScript. D5: the builder's lines
 table scrolls inside its region, so the draft page is no wider than a 1,280 px viewport.
@@ -204,6 +208,71 @@ def test_without_javascript_how_to_collect_shows_every_field_and_button(
     # D5; the Rent columns of PLAN-012e-3 before it).
     assert page.locator("#id_lines-0-rent_lease").is_visible()
     assert page.locator("#id_lines-0-rent_month").is_visible()
+
+
+def test_set_up_autopay_shows_its_fields_by_the_choice_and_the_end_rule(
+    live_server: LiveServer, page: Page
+) -> None:
+    lease = a_lease(a_store("E2E-12FA-E2-1"), an_operator("Repeat Co"), started=date(2026, 1, 1))
+    _sign_in(page, live_server, "e2e-12fa-e2-autopay")
+    page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/")
+    cadence, first = page.locator("#id_autopay_cadence"), page.locator("#id_autopay_first_on")
+    rule = page.locator("#id_autopay_end_rule")
+    count, last = page.locator("#id_autopay_end_count"), page.locator("#id_autopay_end_on")
+    tick, button = page.locator("#id_autopay_confirm_large_debit"), page.locator("#autopay-draft")
+    for control in (cadence, first, rule, count, last, tick):
+        assert not control.is_visible() and control.is_disabled()
+    assert not button.is_visible()
+    page.fill("#id_lines-0-item", "Storage bin")
+    page.fill("#id_lines-0-unit_amount", "40.00")
+    page.check("#collect-autopay")
+    for control in (cadence, first, rule, count, tick):
+        assert control.is_visible() and control.is_enabled()
+    assert not last.is_visible() and last.is_disabled()
+    assert not page.locator("#id_schedule_on").is_visible()
+    assert button.is_visible() and not page.locator("#save-draft").is_visible()
+    assert " ".join(button.inner_text().split()) == "Set up $40.00 monthly"
+    page.select_option("#id_autopay_cadence", "weekly")
+    assert " ".join(button.inner_text().split()) == "Set up $40.00 weekly"
+    page.select_option("#id_autopay_cadence", "yearly")
+    assert " ".join(button.inner_text().split()) == "Set up $40.00 yearly"
+    page.select_option("#id_autopay_end_rule", "date")
+    assert last.is_visible() and not count.is_visible() and count.is_disabled()
+    page.select_option("#id_autopay_end_rule", "never")
+    assert not last.is_visible() and not count.is_visible()
+    page.select_option("#id_autopay_end_rule", "count")
+    assert count.is_visible() and not last.is_visible()
+    # Another choice hides the tile's fields again, whatever the end rule says.
+    page.check("#collect-schedule")
+    for control in (cadence, first, rule, count, last, tick):
+        assert not control.is_visible() and control.is_disabled()
+    assert not button.is_visible()
+
+
+def test_without_javascript_set_up_autopay_shows_every_field(
+    live_server: LiveServer, no_script: BrowserContext
+) -> None:
+    lease = a_lease(
+        a_store("E2E-12FA-E2-2"), an_operator("No Script Repeat"), started=date(2026, 1, 1)
+    )
+    page = no_script.new_page()
+    _sign_in(page, live_server, "e2e-12fa-e2-noscript")
+    page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/?collect=autopay")
+    assert page.locator("#collect-autopay").is_checked()
+    for control in (
+        "#id_autopay_cadence",
+        "#id_autopay_first_on",
+        "#id_autopay_end_rule",
+        "#id_autopay_end_count",
+        "#id_autopay_end_on",
+        "#id_autopay_confirm_large_debit",
+        "#id_schedule_on",
+    ):
+        assert page.locator(control).is_visible(), control
+    button = page.locator("#autopay-draft")
+    assert button.is_visible()
+    # The bound cadence's word only: the others wait for the script.
+    assert " ".join(button.inner_text().split()) == "Set up $0.00 monthly"
 
 
 def _reference_label(page: Page) -> str:

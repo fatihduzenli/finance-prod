@@ -123,6 +123,7 @@ from ledger.models import (
     Store,
 )
 from ledger.services import (
+    autopay_plans,
     credits,
     deposits,
     documents,
@@ -168,6 +169,7 @@ ONE_OFF_SCHEDULE = "one_off_schedule"
 AUTOPAY = "autopay"
 PENDING_PAYMENT = "pending_payment"
 INSTALLMENT_PLAN = "installment_plan"
+AUTOPAY_PLAN = "autopay_plan"
 DEPOSIT_UNPAID = "deposit_unpaid"
 
 # --- Fixed sentences -----------------------------------------------------------------------
@@ -176,6 +178,8 @@ NOT_DRAFT = "This lease end is already confirmed. Nothing was changed."
 IN_PROGRESS = "A lease end is in progress for this lease (statement step). Nothing was changed."
 ALREADY_ENDED = "This lease has already ended. Nothing was changed."
 NOT_CURRENT = "This store has no lease to end."
+#: A live autopay plan (PLAN-012f-a D15): it would make debits after the lease ends.
+AUTOPAY_PLAN_LIVE = "{item}: a repeating debit is set up; stop it first."
 DATE_REQUIRED = leases.END_DATE_REQUIRED
 DATE_FUTURE = leases.END_IN_FUTURE
 DATE_BEFORE_START = leases.END_BEFORE_START
@@ -455,6 +459,16 @@ def blockers(lease: Lease, today: date | None = None) -> list[Blocker]:
                 f"({progress.paid_count} of {progress.count} paid). Let it complete or "
                 "cancel it first.",
                 reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
+            )
+        )
+    for autopay_plan in autopay_plans.live_plans(lease):
+        found.append(
+            Blocker(
+                AUTOPAY_PLAN,
+                AUTOPAY_PLAN_LIVE.format(item=autopay_plan.item_name),
+                reverse("ledger:stores:detail", kwargs={"pk": autopay_plan.store_id})
+                # The Autopay tab (workspace.tab_url, which imports this module).
+                + "?tab=schedules#tab-schedules",
             )
         )
     pending = (

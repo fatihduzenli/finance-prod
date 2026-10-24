@@ -133,6 +133,12 @@ Rules kept here, not in the views:
   (:func:`mark_schedule_released`) and the charge stays owed at its price; a failed
   release is retried with its flag (:func:`retry_kind`, :func:`retry_params`).
 
+- **Autopay plans** (PLAN-012f-a D13; occurrences made by
+  :mod:`ledger.services.autopay_plans`): each occurrence is an ``autopay_plan`` charge
+  (``autopay_plan``, ``period_no``) created here with the collection ``autopay_due``,
+  so the worker makes its single-occurrence schedule as for any scheduled charge. A large
+  debit's audit row names the plan's setup confirmation (:func:`_plan_confirmation`).
+
 Every write is audited (entity ``one_off_charge``); provider identifiers are masked.
 Money is ``Decimal`` throughout.
 """
@@ -163,6 +169,7 @@ from ledger.models import (
     NSF_FEE_CODES,
     ZERO,
     AuditLog,
+    AutopayPlan,
     CollectionMethod,
     CollectionStatus,
     FeeType,
@@ -473,6 +480,10 @@ class ChargeInput:
     confirmed: bool = False
     #: The form's one-time key: a resubmitted form returns the charge the first made.
     creation_key: uuid.UUID | None = None
+    #: An occurrence of an autopay plan (PLAN-012f-a D13): its plan and period; category
+    #: ``autopay_plan`` and collection ``autopay_due`` only.
+    autopay_plan: AutopayPlan | None = None
+    period_no: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -717,7 +728,11 @@ def one_off_refusal(
         return Outcome(False, OPERATOR_ARCHIVED)
     if lease is not None and lease.operator_id != operator.pk:
         return Outcome(False, LEASE_OTHER_OPERATOR, "lease")
-    if item.category not in FORM_CATEGORIES and not _billed_setup(item):
+    if (
+        item.category not in FORM_CATEGORIES
+        and not _billed_setup(item)
+        and not _plan_occurrence(item)
+    ):
         return Outcome(False, CHOOSE_CATEGORY, "category")
     if item.collection not in FORM_COLLECTIONS:
         return Outcome(False, CHOOSE_COLLECTION, "collection")
@@ -756,6 +771,17 @@ def one_off_refusal(
         if leases.is_large_debit(item.price) and item.confirmed is not True:
             return Outcome(False, leases.large_debit_confirmation([item.price]), "confirm")
     return None
+
+
+def _plan_occurrence(item: ChargeInput) -> bool:
+    """An occurrence of an autopay plan (PLAN-012f-a D13): category ``autopay_plan``, its
+    plan and period, debited on its due date."""
+    return (
+        item.category == OneOffCategory.AUTOPAY_PLAN
+        and item.autopay_plan is not None
+        and item.period_no is not None
+        and item.collection == CollectionMethod.AUTOPAY_DUE
+    )
 
 
 def _billed_setup(item: ChargeInput) -> bool:
@@ -937,6 +963,8 @@ def _create_one_off(
             due_date=item.due_date,
             note=visible_text(item.note),
             status=OneOffChargeStatus.OWED,
+            autopay_plan=item.autopay_plan if _plan_occurrence(item) else None,
+            period_no=item.period_no if _plan_occurrence(item) else None,
         )
         try:
             with transaction.atomic():
@@ -985,6 +1013,7 @@ def _create_one_off(
                 "invoice_number": invoice.invoice_number if invoice is not None else None,
                 "note": charge.note,
                 "creation_key": str(item.creation_key) if item.creation_key else None,
+                **_plan_fields(charge),
             },
         )
         if collection in DEBIT_COLLECTIONS and leases.is_large_debit(item.price):
@@ -997,6 +1026,7 @@ def _create_one_off(
                     "amount": str(item.price),
                     "threshold": str(settings.LARGE_DEBIT_WARNING_AMOUNT),
                     "confirmed_by": actor.pk if actor is not None else None,
+                    **_plan_confirmation(charge),
                 },
             )
         job = None
@@ -1010,6 +1040,28 @@ def _create_one_off(
             number = invoice.invoice_number if invoice is not None else ""
             message = CREATED_MANUAL_LOCAL.format(number=number)
     return Outcome(True, message, charge=charge, job=job)
+
+
+def _plan_fields(charge: OneOffCharge) -> dict[str, Any]:
+    """The plan and period of an autopay plan's occurrence, for its audit rows."""
+    if charge.autopay_plan_id is None:
+        return {}
+    return {"autopay_plan": str(charge.autopay_plan_id), "period_no": charge.period_no}
+
+
+def _plan_confirmation(charge: OneOffCharge) -> dict[str, Any]:
+    """The setup confirmation a plan's large debit is made under (PLAN-012f-a D13): the
+    daily run has no one to ask, so each occurrence names the plan's confirmation, who
+    gave it and when."""
+    plan = charge.autopay_plan
+    if plan is None:
+        return {}
+    confirmed = plan.large_debit_confirmed_at
+    return {
+        **_plan_fields(charge),
+        "confirmed_by": plan.created_by_id,
+        "plan_confirmed_at": confirmed.isoformat() if confirmed is not None else None,
+    }
 
 
 def _charge_for_key(creation_key: uuid.UUID | None) -> OneOffCharge | None:

@@ -374,8 +374,9 @@ Error paths: the worker's `schedule_create` failing for an occurrence (the charg
 `needs_review`, the plan continues); cancel of an occurrence whose schedule has made an invoice;
 `save_statement` refused by the offset rule writes nothing (one transaction).
 
-Adversarial (Fable's files): a viewer and billing cannot pause, resume or stop a plan or change its
-end (403/redirect, no row); a plan's forms refuse a plan of another store in the URL; a hostile
+Adversarial (Fable's files): a viewer cannot pause, resume, stop a plan or change its end, and
+billing cannot stop one or change its end (D14: billing pauses and resumes, admin stops and
+changes the end; 403/redirect, no row); a plan's forms refuse a plan of another store in the URL; a hostile
 cadence or end rule value is refused, not echoed; two concurrent ticks make one occurrence
 (`select_for_update`, the creation key); a GET of every page in the visual suite and of the
 statement step writes nothing; markup in an item name is escaped on the Autopay tab, the Charges

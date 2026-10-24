@@ -230,6 +230,14 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # PLAN-012d D13: the store page's Create missing charges (the rent run for one store)
     # needs billing, as the run page's button does; POST only.
     "ledger:stores:create_charges": RouteRule(min_role=Role.BILLING, methods=POST),
+    # PLAN-012f-a D14: the Autopay tab's plan actions. Pause and Resume need billing; Stop
+    # and Change end need admin (the views and the service check again). Pause, Resume and
+    # Change end are POST only; Stop's GET is its confirmation page, which the view
+    # refuses below admin too.
+    "ledger:stores:plan_pause": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:stores:plan_resume": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:stores:plan_stop": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:stores:plan_end": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),

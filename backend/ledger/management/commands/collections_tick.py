@@ -12,10 +12,13 @@ and the day's morning e-mails (:func:`ledger.services.calendar.queue_morning_ema
 one ``calendar_email`` job each), which the worker sends. It also queues the day's read
 of the dispute list (:func:`ledger.services.disputes.queue_daily`, one ``disputes_sync``
 job, PLAN-012 D8), and deletes the lease-end drafts whose terms were never set after
-seven days (:func:`ledger.services.lease_end.sweep_drafts`, PLAN-012b-b D9). It calls no
-external service, so it runs whatever process role it is given. "Today" is the
-project's local date. Running it twice the same day creates and queues nothing more (it
-writes a second ``rent_run.ticked`` row, with nothing created). It prints counts only.
+seven days (:func:`ledger.services.lease_end.sweep_drafts`, PLAN-012b-b D9). After the
+rent run it makes the autopay plans' due occurrences
+(:func:`ledger.services.autopay_plans.run_due`, PLAN-012f-a D13: one one-off charge each,
+whose ``schedule_create`` job the worker runs). It calls no external service, so it
+runs whatever process role it is given. "Today" is the project's local date. Running it
+twice the same day creates and queues nothing more (it writes a second
+``rent_run.ticked`` row, with nothing created). It prints counts only.
 """
 
 from __future__ import annotations
@@ -25,7 +28,15 @@ from typing import Any
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from ledger.services import calendar, collections, contacts, disputes, lease_end, rent_run
+from ledger.services import (
+    autopay_plans,
+    calendar,
+    collections,
+    contacts,
+    disputes,
+    lease_end,
+    rent_run,
+)
 
 
 class Command(BaseCommand):
@@ -40,6 +51,8 @@ class Command(BaseCommand):
         charges = rent_run.create_charges(today, actor=None)
         # PLAN-012d D11: the run's report, for the run page and the dashboard's line.
         rent_run.record_run(charges, today, actor=None)
+        # PLAN-012f-a D13: the plans' occurrences, after the rent run.
+        occurrences = autopay_plans.run_due(today)
         # Before the queueing, so that a promise a payment kept gets no reminder.
         kept = contacts.close_kept()
         ladder = collections.queue_due(today)
@@ -49,7 +62,9 @@ class Command(BaseCommand):
         self.stdout.write(
             f"Day {today:%Y-%m-%d}. Rent charges created: {len(charges.created)}. "
             f"Created (catch-up): {len(charges.caught_up)}. "
-            f"Already created: {len(charges.already)}. Collection e-mails queued: {ladder.queued} "
+            f"Already created: {len(charges.already)}. "
+            f"Autopay plan debits created: {len(occurrences)}. "
+            f"Collection e-mails queued: {ladder.queued} "
             f"(already logged: {ladder.already}). Morning e-mails queued: {morning.entries}. "
             f"Promise reminders queued: {morning.promises}. Promises kept by a payment: {kept}. "
             f"Dispute list read queued: {'yes' if dispute_read else 'no'}. "

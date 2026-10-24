@@ -35,6 +35,10 @@ BANNER = "SANDBOX — test system, no real money"
 #: values never.
 FROZEN_CHOICES: dict[str, list[str]] = {
     "AdjustmentReason": ["carry_forward", "credit", "cross_store_balance", "discount"],
+    # PLAN-012f-a Batch E (ADR-0014): the repeating debit plan's three stored choices.
+    "AutopayCadence": ["monthly", "weekly", "yearly"],
+    "AutopayEndRule": ["count", "date", "never"],
+    "AutopayPlanState": ["active", "finished", "paused", "stopped"],
     "CalendarEntryKind": ["note", "reminder"],
     "ChargeEntityType": ["lease_end", "one_off_charge", "rent_charge"],
     "CollectionMethod": ["autopay_due", "charge_now", "email", "manual", "none"],
@@ -90,6 +94,7 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "OneOffCategory": [
         "adjustment",
         "arrears",
+        "autopay_plan",  # PLAN-012f-a Batch E
         "damage",
         "installment",
         "nsf_fee",
@@ -137,9 +142,10 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "SyncStatus": ["awaiting_link", "failed", "linked", "not_applicable", "pending"],
 }
 #: The route names as one digest (sorted, newline-joined, sha256): 255 before Batch D of
-#: PLAN-012c; 257 since PLAN-012e-2 Batch C added finance:help and finance:help_topic (the
-#: only change, checked by hand on 2026-10-21).
-FROZEN_ROUTES = (257, "24592c0cf746cd991b6ed9b6b2e474747f1420c315ea6c2f6d7c338597f61672")
+#: PLAN-012c; 257 since PLAN-012e-2 Batch C added finance:help and finance:help_topic; 261
+#: since PLAN-012f-a Batch E added the four plan actions under ledger:stores (plan_pause,
+#: plan_resume, plan_stop, plan_end; the only change, checked by hand on 2026-10-24).
+FROZEN_ROUTES = (261, "3eb06f79e1d67083a28254b963c3ac78ee77aa8ed4f54ec9d052b75444e25b8f")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

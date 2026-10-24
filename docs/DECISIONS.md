@@ -796,3 +796,65 @@ the owner in writing 2026-10-16)
 New columns `payments.allocation_group`, `payments.credit_id`, a new table `lease_credits`, a
 new payment method `credit`; the lease-end statement and the transfer blockers read credits;
 the per-charge payment forms stay for single-charge entry from a charge page.
+
+## ADR-0014 — Repeating debits as a local plan of single-occurrence schedules
+
+**Date:** 2026-10-24
+**Status:** Proposed (built by PLAN-012f-a Batch E under Fable's working assumptions; the owner's
+answers to PLAN-012f-a §9 items 6–8 — one line per plan, the seven-day lead, the large-debit
+confirmation once at setup — turn this into Accepted or change it)
+
+### Context
+
+The owner asked for a sixth "How to collect" choice, "Set up autopay": repeat an invoice as bank
+debits monthly, weekly or yearly from a first date, ending after N payments, on a date or never,
+with Pause / Resume / Stop and an editable end rule on the store's Autopay tab, each run creating
+that period's charge and Stax schedule like a scheduled one-off, rent excluded (owner, 2026-10-23).
+What the code had: "Schedule for a date" creates one `autopay_due` one-off charge and a
+single-occurrence Stax schedule (`DTSTART…;FREQ=DAILY;COUNT=1`) at once; a repeating Stax schedule
+cannot back one charge (adoption requires `COUNT=1`, a second invoice on a charge is refused); the
+catalogue's unique (lease, fee type) refuses a repeated catalogue item; `CollectionSchedule` holds
+monthly rent and yearly insurance only; weekly and yearly Stax rules are unverified
+(TODO-VERIFY-019/036); no daily job created one-off charges.
+
+### Decision
+
+1. **A plan is local; Stax sees one single-occurrence schedule per debit.** `AutopayPlan` holds the
+   line (one item, quantity, unit amount, amount), the cadence, the first date, the end rule, the
+   state and `next_on`. Each occurrence is one `OneOffCharge` (category `autopay_plan`, collection
+   `autopay_due`, the plan and a period number) created through the existing one-off path, which
+   queues the existing `schedule_create` job; the rule sent stays `FREQ=DAILY;COUNT=1`. No repeating
+   rule is ever sent, so nothing unverified at the provider is relied on.
+2. **The daily run creates the next occurrence seven days before its due date** (`LEAD_DAYS`), the
+   first at setup. The Stax debit hour is 12:00 UTC on the due date and the tick runs at 09:00 New
+   York, so the occurrence must exist before its day; a week gives staff time to see it. A missed
+   run catches up: the occurrence falls due today and is collected late, never skipped (at most
+   twelve a run). The run is idempotent (a creation key per plan and period, the plan locked).
+3. **Rent is excluded; one line per plan.** A rent line is refused as the Schedule choice refuses it
+   (rent stays on the lease's autopay). The plan takes the invoice's one line; several lines would
+   need a multi-line schedule linked to several charges, which the schedule path cannot do today.
+4. **Pause and Stop cancel the pending occurrence** (the existing cancel, which deletes its Stax
+   schedule while no invoice was made) and set the state; Resume makes the next occurrence due from
+   today; Stop is final; Change end rewrites the rule and finishes a met plan at once. Billing may
+   pause and resume; admin stops and changes the end. Each is audited; the History tab lists them.
+5. **The large-debit confirmation is given once at setup** and stored on the plan; every occurrence
+   above the warning amount carries the audit row naming that confirmation; a plan above the
+   provider limit is refused at setup. The daily run has no human to ask per debit.
+6. **A live plan blocks a lease end or a transfer** like a one-off schedule does, until stopped.
+
+### Alternatives rejected
+
+One repeating Stax schedule per plan (cannot be linked to per-period charges; weekly and yearly
+rules unverified; a pause would be a provider-side edit of an amount-bearing schedule, which
+ADR-0009's rule against editing schedule amounts forbids); a new `CollectionSchedule` kind (its
+debit day, seq and uniqueness cannot hold weekly or yearly plans; it is the rent and insurance
+contract); creating the whole series of charges at setup (months of open charges on the books,
+each a Stax schedule, before they are due).
+
+### Consequences
+
+New table `autopay_plans`, two columns on `one_off_charges`, one category value, one migration
+(0049) that refuses to reverse while plans exist; the daily run gains a step; the plan is the
+source of truth for the cadence and the end rule, Stax for each debit's state; pausing deletes the
+pending debit's schedule (the only Stax write besides creation); a period number is internal and
+can exceed the count after a pause, so the charge's description carries the made ordinal.

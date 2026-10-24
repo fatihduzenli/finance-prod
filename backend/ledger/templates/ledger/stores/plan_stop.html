@@ -1,0 +1,24 @@
+{% extends "finance/base.html" %}
+{% load money dates %}
+{% comment %}Stop a repeating debit (docs/qa/PLAN-012f-a D14; admin): the confirmation step before the final stop, in the pattern of ledger/one_off_charges/cancel.html. ledger.views.autopay_plans.plan_stop: GET shows this page, POST stops the plan.{% endcomment %}
+{% block title %}Stop {{ plan.item_name }}{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" with crumb_store=plan.store crumb_query="?tab=schedules#tab-schedules" %}<span aria-current="page">Stop {{ plan.item_name }}</span></nav><h1>Stop {{ plan.item_name }}</h1></div></div>{% endblock %}
+{% block content %}
+  <section class="confirm" aria-labelledby="confirm-question">
+  <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
+  <div class="confirm-what">
+  <h3>What will happen</h3>
+  <ul id="plan-stop-what">
+    <li>{{ plan.item_name }}, {{ plan.amount|money }} {{ plan.get_cadence_display|lower }} from {{ plan.first_on|day }} ({{ line }}).</li>
+    <li>The plan stops making debits. The pending debit's schedule is removed from {{ company.provider_name }} and its charge cancelled; debits already made stay.</li>
+    <li>This cannot be undone: to debit again, set up a new plan.</li>
+  </ul>
+  </div>
+  {% if refusal %}<p id="plan-stop-refusal"><strong>{{ refusal }}</strong></p>{% endif %}
+  <form method="post" id="plan-stop-form" class="js-single-submit">
+    {% csrf_token %}
+    <p class="actions">{% if not refusal %}<button class="btn btn-danger" type="submit" id="plan-stop-submit">Stop plan</button> {% endif %}<a class="btn" href="{% url 'ledger:stores:detail' pk=plan.store_id %}?tab=schedules#tab-schedules" id="plan-stop-back">Back</a></p>
+  </form>
+  </section>
+{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

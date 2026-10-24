@@ -1,6 +1,49 @@
 {% comment %}The Schedules tab (docs/qa/PLAN-012d D3): ledger.services.workspace.schedules_tab. On the operator page (D14) the operator's, each lease named with its store.{% endcomment %}
 {% load components money dates %}
 {% load responsive %}
+{% comment %}The "Repeating debits" card (docs/qa/PLAN-012f-a D14): ledger.services.workspace._plan_rows. One row per autopay plan (live ones first): the item and the amount, the plan's line, its state badge (On, Paused, Stopped, Finished) and the actions the role may take, Pause and Resume POSTs with the single-submit guard (billing), Stop a link to its confirmation page and Change end (admin; the views and the service check again). Change end opens a small form in place: the three end rules, the count, the date.{% endcomment %}
+<section class="plans-card" id="repeating-debits" aria-labelledby="repeating-debits-title">
+  <h2 id="repeating-debits-title">Repeating debits</h2>
+  {% if plans %}
+  <ul class="plan-rows" id="plan-rows">
+    {% for item in plans %}
+      <li class="plan-row" id="plan-{{ item.plan.pk }}">
+        <div class="plan-main">
+          <p class="plan-title"><strong>{{ item.plan.item_name }}</strong> <span class="plan-amount money">{{ item.plan.amount|money }}</span> {% status_badge item.badge_label item.badge_family %}</p>
+          <p class="plan-line">{% if by_store %}{{ item.plan.store.external_label }} · {% endif %}{{ item.line }}</p>
+        </div>
+        {% if item.can_pause or item.can_resume or item.can_stop or item.can_change_end %}
+        <div class="plan-actions">
+          {% if item.can_pause %}<form method="post" action="{% url 'ledger:stores:plan_pause' pk=item.plan.store_id plan=item.plan.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="plan-pause-{{ item.plan.pk }}">Pause</button></form>{% endif %}
+          {% if item.can_resume %}<form method="post" action="{% url 'ledger:stores:plan_resume' pk=item.plan.store_id plan=item.plan.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="plan-resume-{{ item.plan.pk }}">Resume</button></form>{% endif %}
+          {% if item.can_stop %}<a class="btn btn-danger" href="{% url 'ledger:stores:plan_stop' pk=item.plan.store_id plan=item.plan.pk %}" id="plan-stop-{{ item.plan.pk }}">Stop</a>{% endif %}
+          {% if item.can_change_end %}
+          <details class="plan-end" id="plan-end-{{ item.plan.pk }}">
+            <summary class="btn">Change end</summary>
+            <form method="post" action="{% url 'ledger:stores:plan_end' pk=item.plan.store_id plan=item.plan.pk %}" class="js-single-submit plan-end-form" autocomplete="off">
+              {% csrf_token %}
+              <fieldset>
+                <legend>Ends</legend>
+                {% for value, label in plan_end_rules %}<label class="plan-end-rule"><input type="radio" name="end_rule" value="{{ value }}"{% if value == item.plan.end_rule %} checked{% endif %}> {{ label }}</label>{% endfor %}
+              </fieldset>
+              <label for="plan-end-count-{{ item.plan.pk }}">Number of payments</label>
+              <input type="number" name="end_count" id="plan-end-count-{{ item.plan.pk }}" min="2" max="999" step="1" value="{{ item.plan.end_count|default_if_none:'' }}">
+              <label for="plan-end-on-{{ item.plan.pk }}">Last debit on</label>
+              <input type="date" name="end_on" id="plan-end-on-{{ item.plan.pk }}" value="{{ item.plan.end_on|date:'Y-m-d' }}">
+              <button class="btn btn-primary" type="submit" id="plan-end-save-{{ item.plan.pk }}">Save end</button>
+            </form>
+          </details>
+          {% endif %}
+        </div>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted empty" id="plan-rows-empty">No repeating debit. Set one up from New invoice: How to collect, Set up autopay.</p>
+  {% endif %}
+</section>
+
 <h2>Autopay</h2>
 {% for text in autopay_moved %}<p class="autopay-moved"><strong>{{ text }}</strong></p>{% endfor %}
 {% responsive_table %}

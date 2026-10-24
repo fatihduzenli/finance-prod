@@ -448,6 +448,48 @@ def new_installment(**fields: Any) -> ledger.OneOffCharge:
     return new_one_off_charge(**{**values, **fields})
 
 
+def new_autopay_plan(**fields: Any) -> ledger.AutopayPlan:
+    """An active monthly plan of three debits (PLAN-012f-a D11)."""
+    _default(fields, "lease", lambda: saved(new_lease()))
+    _default(fields, "operator", lambda: fields["lease"].operator)
+    _default(fields, "store", lambda: fields["lease"].store)
+    values = {
+        "item_name": "Sign fee",
+        "quantity": D("1.0000"),
+        "unit_amount": D("100.00"),
+        "amount": D("100.00"),
+        "cadence": "monthly",
+        "first_on": date(2026, 11, 1),
+        "end_rule": "count",
+        "end_count": 3,
+        "next_on": date(2026, 11, 1),
+    }
+    return ledger.AutopayPlan(**{**values, **fields})
+
+
+def new_plan_occurrence(**fields: Any) -> ledger.OneOffCharge:
+    """An occurrence of an autopay plan (PLAN-012f-a D13)."""
+    _default(fields, "autopay_plan", lambda: saved(new_autopay_plan()))
+    values = {
+        "category": "autopay_plan",
+        "collection": "autopay_due",
+        "description": "Sign fee",
+        "period_no": 1,
+    }
+    return new_one_off_charge(**{**values, **fields})
+
+
+def _second_occurrence(*, same_period: bool) -> ledger.OneOffCharge:
+    plan = saved(new_autopay_plan())
+    insert(new_plan_occurrence(autopay_plan=plan))
+    return new_plan_occurrence(autopay_plan=plan, period_no=1 if same_period else 2)
+
+
+def _second_live_plan(*, stopped_first: bool) -> ledger.AutopayPlan:
+    first = saved(new_autopay_plan(state="stopped" if stopped_first else "active"))
+    return new_autopay_plan(lease=first.lease)
+
+
 def _second_plan(*, cancelled_first: bool, rent: bool) -> ledger.InstallmentPlan:
     parent = saved(new_rent_charge()) if rent else saved(new_one_off_charge())
     key = "rent_charge" if rent else "one_off_charge"
@@ -549,6 +591,7 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.LeaseEndDeduction: new_lease_end_deduction,
     ledger.LeaseTransfer: new_lease_transfer,
     ledger.InstallmentPlan: new_installment_plan,
+    ledger.AutopayPlan: new_autopay_plan,
     ledger.LeaseCredit: new_lease_credit,
     ledger.CompanySettings: new_company_settings,
 }
@@ -1867,6 +1910,64 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: _second_plan(cancelled_first=True, rent=False),
         lambda: _second_plan(cancelled_first=False, rent=False),
     ),
+    # PLAN-012f-a D11: autopay plans (0049).
+    ConstraintCase(
+        "one_off_charges_autopay_plan_iff_category",
+        lambda: new_plan_occurrence(),
+        lambda: new_plan_occurrence(autopay_plan=None),
+    ),
+    ConstraintCase(
+        "one_off_charges_one_per_autopay_period",
+        lambda: _second_occurrence(same_period=False),
+        lambda: _second_occurrence(same_period=True),
+    ),
+    ConstraintCase(
+        "autopay_plans_item_name_not_blank",
+        lambda: new_autopay_plan(),
+        lambda: new_autopay_plan(item_name=" "),
+    ),
+    ConstraintCase(
+        "autopay_plans_quantity_positive",
+        lambda: new_autopay_plan(),
+        lambda: new_autopay_plan(quantity=D("0")),
+        exact=False,
+    ),
+    ConstraintCase(
+        "autopay_plans_unit_amount_positive",
+        lambda: new_autopay_plan(),
+        lambda: new_autopay_plan(unit_amount=D("0.00")),
+        exact=False,
+    ),
+    ConstraintCase(
+        "autopay_plans_amount_positive",
+        lambda: new_autopay_plan(unit_amount=D("0.01"), amount=D("0.01")),
+        lambda: new_autopay_plan(quantity=D("0.0001"), unit_amount=D("0.01"), amount=D("0.00")),
+    ),
+    ConstraintCase(
+        "autopay_plans_made_count_not_negative",
+        lambda: new_autopay_plan(made_count=0),
+        lambda: new_autopay_plan(made_count=-1),
+    ),
+    ConstraintCase(
+        "autopay_plans_amount_is_quantity_times_unit",
+        lambda: new_autopay_plan(quantity=D("1.5000"), amount=D("150.00")),
+        lambda: new_autopay_plan(amount=D("100.01")),
+    ),
+    ConstraintCase(
+        "autopay_plans_end_rule_shape",
+        lambda: new_autopay_plan(end_rule="date", end_count=None, end_on=date(2026, 11, 1)),
+        lambda: new_autopay_plan(end_rule="date", end_count=None, end_on=date(2026, 10, 31)),
+    ),
+    ConstraintCase(
+        "autopay_plans_next_on_from_first",
+        lambda: new_autopay_plan(next_on=date(2026, 12, 1)),
+        lambda: new_autopay_plan(next_on=date(2026, 10, 31)),
+    ),
+    ConstraintCase(
+        "autopay_plans_one_live_per_item",
+        lambda: _second_live_plan(stopped_first=True),
+        lambda: _second_live_plan(stopped_first=False),
+    ),
     # PLAN-012d D6a, D6b: lease credits and credit payments (0042).
     ConstraintCase(
         "lease_credits_amount_positive",
@@ -2134,6 +2235,38 @@ EXTRA_REJECTIONS: list[ConstraintCase] = [
             functools.partial(new_operator, sms_phone=phone),
         )
         for phone in ("+1", "+1404555123456789", "+04045551234", "+1 4045551234")
+    ),
+    # PLAN-012f-a D11: each end rule's shape, and an occurrence's collection and period.
+    *(
+        ConstraintCase(
+            "autopay_plans_end_rule_shape",
+            new_autopay_plan,
+            functools.partial(new_autopay_plan, **shape),
+        )
+        for shape in (
+            {"end_count": 1},
+            {"end_count": 1000},
+            {"end_count": None},
+            {"end_on": date(2027, 1, 1)},
+            {"end_rule": "date", "end_count": 3, "end_on": date(2027, 1, 1)},
+            {"end_rule": "never"},
+            {"end_rule": "never", "end_count": None, "end_on": date(2027, 1, 1)},
+        )
+    ),
+    ConstraintCase(
+        "one_off_charges_autopay_plan_iff_category",
+        new_plan_occurrence,
+        lambda: new_plan_occurrence(collection="email"),
+    ),
+    ConstraintCase(
+        "one_off_charges_autopay_plan_iff_category",
+        new_plan_occurrence,
+        lambda: new_plan_occurrence(period_no=0),
+    ),
+    ConstraintCase(
+        "one_off_charges_autopay_plan_iff_category",
+        new_one_off_charge,
+        lambda: new_one_off_charge(period_no=1),
     ),
 ]
 

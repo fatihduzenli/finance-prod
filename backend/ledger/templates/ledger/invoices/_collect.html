@@ -1,4 +1,4 @@
-{% comment %}The builder's "How to collect" card (docs/qa/PLAN-012e2-fewer-actions.md D3; PLAN-012f-a D5, create-invoice-laptop.png): one bordered tile per choice of collect_form.options, two a row (a new choice is a new tile with no change here), each a radio with its bold name and one muted sentence (_collect_note.html); the chosen tile is tinted (:has(:checked)). Schedule for a date's tile holds its debit date and Record payment now's the received payment, each shown only while its radio is chosen (ledger/shown_when.js; without the script every field shows). Charge now for an admin only. The buttons, one per choice, are in the SUMMARY card (_summary.html). Schedule for a date is offered only on an active lease with one item line (invoice_builder.can_schedule); else one line says so.{% endcomment %}
+{% comment %}The builder's "How to collect" card (docs/qa/PLAN-012e2-fewer-actions.md D3; PLAN-012f-a D5, create-invoice-laptop.png): one bordered tile per choice of collect_form.options, two a row (a new choice is a new tile with no change here), each a radio with its bold name and one muted sentence (_collect_note.html); the chosen tile is tinted (:has(:checked)). Schedule for a date's tile holds its debit date, Set up autopay's its repeat (PLAN-012f-a D12: Repeat, First debit, Ends with the count or the date the rule names, the large-debit tick) and Record payment now's the received payment, each shown only while its radio is chosen (ledger/shown_when.js; without the script every field shows). Charge now for an admin only. The buttons, one per choice, are in the SUMMARY card (_summary.html). Schedule for a date and Set up autopay are offered only on an active lease with one item line (invoice_builder.can_schedule); else one line says so.{% endcomment %}
 <section class="card collect-card" id="collect-card">
 <fieldset class="collect-choices" id="collect">
   <legend>How to collect</legend>
@@ -7,6 +7,13 @@
   {% for option in collect_form.options %}<div class="collect-tile{% if option.checked %} is-chosen{% endif %}" id="tile-{{ option.value }}"><label class="collect-option" for="{{ option.id }}"><input type="radio" name="collect" value="{{ option.value }}" id="{{ option.id }}"{% if option.checked %} checked{% endif %}><span class="collect-text"><span class="collect-name">{{ option.label }}</span>{% include "ledger/invoices/_collect_note.html" with value=option.value %}</span></label>{% if option.value == "schedule" and collect_form.can_schedule %}<div class="collect-fields" id="collect-schedule-fields">
     {% include "ledger/stores/_form_field.html" with field=collect_form.schedule_on mark=True %}
     {% include "ledger/stores/_form_field.html" with field=collect_form.confirm_large_debit %}
+  </div>{% elif option.value == "autopay" and collect_form.can_schedule %}<div class="collect-fields" id="collect-autopay-fields">
+    {% include "ledger/stores/_form_field.html" with field=collect_form.autopay_cadence mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=collect_form.autopay_first_on mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=collect_form.autopay_end_rule mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=collect_form.autopay_end_count mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=collect_form.autopay_end_on mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=collect_form.autopay_confirm_large_debit %}
   </div>{% elif option.value == "record" %}<div class="collect-fields" id="collect-record-fields">
     {% include "ledger/stores/_form_field.html" with field=collect_form.method mark=True %}
     {% include "ledger/stores/_form_field.html" with field=collect_form.paid_on mark=True %}
