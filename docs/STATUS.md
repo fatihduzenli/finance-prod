@@ -1758,3 +1758,16 @@ the owner: the four decisions of the checkpoint ("Open" on the attention rows, "
 sign-in button, the two-line phone card beyond the Charges table, ISO dates and month labels).
 Next: the owner's clicks on staging; Step 13 on the owner's prompt (the migration round trips at
 19:54 on CI need their split or squash decided in its planning).
+
+## Update, 2026-10-23, Step 12f-a received; PLAN-012f-a written
+
+The owner's design follow-up: A the Batch A points confirmed (all five built; the spec's §1 note
+and values, lost to the owner's later copy of the file, restored); B "Open" and "Next" accepted,
+the two-line phone card on every table, "Nov 1, 2026" and "Oct 2026" on screen with ISO kept in
+exports, the API, audit rows, form values and URLs (rule added to DESIGN-SPEC §5); C seven more
+references and their families (the four newest have no spec section: Fable drafts them from the
+screenshots for the owner's approval); D the statement step writes nothing until saved; E the
+sixth "How to collect" choice, a repeating plan of single-occurrence debits (ADR-0014 planned).
+`docs/qa/PLAN-012f-a-design-follow-up.md` holds the decisions, the contract, the five batches,
+the test plan and nine questions for the owner, none blocking Batch A. Batch A assigned: D and the
+two-line card in parallel, then the dates.

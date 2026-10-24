@@ -23,7 +23,7 @@ re-debit dates, insurance anniversaries and lease ends, and a revocable per-user
 the same items in Google Calendar. The project time zone becomes America/New_York with storage
 in UTC; nothing migrates silently: the staging rows whose date would change are listed for the
 owner before anything is applied. The grid gets a visible scrollbar, a fixed store column and
-twelve months on a laptop.
+twelve months on a laptop. *(The twelve-months rule was retired by the owner on 2026-10-22, PLAN-012f Batch A: the grid scrolls at 1,280 px with 116 px months.)*
 
 ## 2. Affected packages
 

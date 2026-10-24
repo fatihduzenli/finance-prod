@@ -1,5 +1,13 @@
 # Monvera — design specification (owner-approved, 2026-10-22)
 
+**Change of 2026-10-22 (owner's decision, PLAN-012f Batch A):** four §1 values were nudged so
+that every text pair meets WCAG AA, which §5 requires: `--muted` `#6B7A90` → `#5F6E85`, `--link`
+`#0E8F86` → `#0B7C74`, `--paid-text` `#1B7F3B` → `#176B33`; the primary button is `#0E8F86` with a
+1px `#0B7C74` border (`--btn-primary-bg`, `--btn-primary-border`) while `--teal` stays `#13A89E`
+for the logo, the active tab and the bottom bar; `--faint` is decoration only, never for text
+that must be read. White on the primary button measures 3.97:1, the one pair under AA, accepted
+by the owner for the button's fill; the contrast test pins it. The values below are the ones built.
+
 Reference screenshots in this folder are the source of truth for the look. Where this file and a screenshot differ, the screenshot wins.
 
 - `dashboard-laptop.png`, `store-workspace-laptop.png`, `monthly-rent-overview-laptop.png` — laptop (1440)
@@ -21,11 +29,12 @@ Reference screenshots in this folder are the source of truth for the look. Where
   --border: #E3E8EF;  --border-soft: #EEF1F5;  --input-border: #D5DCE6;
 
   /* text */
-  --text: #0B2545;  --text-2: #3D4B60;  --muted: #6B7A90;  --faint: #9AA7B8;
-  --link: #0E8F86;
+  --text: #0B2545;  --text-2: #3D4B60;  --muted: #5F6E85;  --faint: #9AA7B8;  /* faint: decoration only */
+  --link: #0B7C74;
+  --btn-primary-bg: #0E8F86;  --btn-primary-border: #0B7C74;  /* the primary button; --teal stays the brand accent */
 
   /* status (bg / text) — always paired with an icon or word, never colour alone */
-  --paid-bg: #E3F5E8;      --paid-text: #1B7F3B;
+  --paid-bg: #E3F5E8;      --paid-text: #176B33;
   --unpaid-bg: #FDE8E6;    --unpaid-text: #B42318;
   --overdue-bg: #B42318;   --overdue-text: #FFFFFF;
   --pending-bg: #FFF3C4;   --pending-text: #6B4E00;
@@ -57,7 +66,7 @@ Sandbox banner: `#FFF3C4` background, `#6B4E00` text, 12px, 600, letter-spacing 
 
 - **Card**: `--surface`, 1px `--border`, radius 12px, padding 18px 20px; header row 15px/600 with an optional count pill and a right-aligned link ("All payments →").
 - **Section label inside right-column cards**: 13px, 600, `--muted`, uppercase, letter-spacing .04em (LEASE, NEXT, STORE COST, DOCUMENTS).
-- **Buttons**: primary teal `#13A89E` white text, 10px 16px, radius 8px, 600; secondary white with `--input-border`, same size; small row buttons 6px 12px, 12px text; destructive text `#B42318`. Drop-down buttons end with "▾".
+- **Buttons**: primary `--btn-primary-bg` (#0E8F86) with a 1px `--btn-primary-border` and white text, 10px 16px, radius 8px, 600; secondary white with `--input-border`, same size; small row buttons 6px 12px, 12px text; destructive text `#B42318`. Drop-down buttons end with "▾".
 - **Inputs/selects**: 9px 12px, `--input-border`, radius 8px, `--surface-2` background for search fields.
 - **Segmented filter** (Open / Paid / All): grey track `--bg` radius 8px, active segment white with a 1px shadow.
 - **Tabs**: 13px, 10px 14px, 2px bottom border teal on the active tab, muted text otherwise, horizontal scroll on phones.
@@ -88,12 +97,13 @@ Same skeleton as the store workspace. Header: breadcrumb; 56 px round avatar wit
 Header: breadcrumb (Stores › store › Transfer), title "Transfer #1991 Istanbul to another operator", right-aligned "Step 4 of 7 · nothing changes until you confirm". Body: a 260 px left card with the vertical step list (done = green circle with ✓ and muted label; current = teal circle with the number and a bold label; later = outlined circle, faint label), a divider, "outgoing → incoming" and the end date, and a red "Cancel the transfer" link; the main card holds the current step with a 17px/600 title and a muted one-line description. Statement step: three summary tiles (Open balance, Deposit held, Deductions) on `--surface-2`; a Deductions table (reason select, note input, right-aligned amount input, trash icon) with a dashed "+ Add deduction" button; a Settlement box listing deposit held, amounts applied and kept, ending in a green "Refund due" row (or a red "Still owed" row when the deposit does not cover); one muted help line. Footer: ← Back (secondary) and "Save and continue →" (primary), right-aligned. On phones the step card becomes a "Step 4 of 7" line with a progress bar above the main card.
 
 ### Login (`login-laptop.png`)
-Two panels. Left: the sidebar gradient at 160°, two soft teal circles (12% and 10% alpha) as decoration, logo 52 px, a 34px/700 headline ("Rent collection for every store, in one place."), one muted sentence, three check-marked lines; company name at the bottom. Right: on `--bg`, a 400 px form card area — sandbox banner as a rounded strip, "Sign in" 26px/700, muted sub-line, E-mail and Password fields (12px 14px padding, radius 10px, autocomplete attributes), "Forgot password?" link in the password label row, "Keep me signed in" checkbox, full-width teal Sign in button (13px padding, radius 10px), a faint "Access is by invitation" line. On phones the left panel collapses to a short gradient header with the logo and the headline; the form takes the full width.
+Two panels. Left: the sidebar gradient at 160°, two soft teal circles (12% and 10% alpha) as decoration, logo 52 px, a 34px/700 headline ("Rent collection for every store, in one place."), one muted sentence, three check-marked lines; company name at the bottom. Right: on `--bg`, a 400 px form card area — sandbox banner as a rounded strip, "Sign in" 26px/700, muted sub-line, E-mail and Password fields (12px 14px padding, radius 10px, autocomplete attributes), full-width primary Sign in button (13px padding, radius 10px), a muted "Access is by invitation" line. On phones the left panel collapses to a short gradient header with the logo and the headline; the form takes the full width. **Owner's decision of 2026-10-22 (PLAN-012f D13):** the first field is labelled "Username" (accounts are not e-mail addresses); "Forgot password?" and "Keep me signed in" are left out (no reset flow, no session change); the layout is otherwise as the screenshot shows.
 
 ## 5. Rules
 - No gradients except the sidebar; no drop shadows; no emoji; icons are inline stroke SVG (Lucide-style, 16–18px).
 - Colour is never the only signal (icon or word beside it); AA contrast on every pair above.
 - Money through the existing `money` filter (`$2,000.00`).
+- Dates on screen (owner, 2026-10-23, Step 12f-a): a day reads `Nov 1, 2026` (the year dropped only where the surrounding text names it, as in a calendar month), a month reads `Oct 2026`, a time `14:02`; never ISO on a page. ISO (`2026-11-01`) stays in CSV and spreadsheet exports, the API, audit rows, e-mails to systems, form field values and URLs/query strings.
 - Phone width: see §6; nothing is hidden that exists on the laptop.
 
 ## 6. Phone layout (≤ 768 px) — `store-workspace-phone.png`
