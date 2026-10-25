@@ -785,9 +785,9 @@ def test_the_page_offers_set_up_autopay_where_schedule_is_offered(fake: FakeProv
     alone = client.get(f"/invoices/new/operator/{operator.pk}/", {"collect": "autopay"})
     html = alone.content.decode()
     assert not autopay_offered(html) and 'id="collect-draft" checked' in html
-    # The last tile (PLAN-012f-b D15: the fifth; Send by e-mail is Save's prompt now),
-    # through collect_form.options like the others.
-    assert [value for value, _ in ledger_forms.COLLECT_CHOICES][-1] == "autopay"
+    # The fifth tile (PLAN-012f-b D15: Send by e-mail is Save's prompt now; D16: Schedule
+    # settlement is the sixth and last), through collect_form.options like the others.
+    assert [value for value, _ in ledger_forms.COLLECT_CHOICES][-2:] == ["autopay", "settlement"]
 
 
 def test_the_autopay_tile_holds_its_fields_each_shown_by_its_conditions(

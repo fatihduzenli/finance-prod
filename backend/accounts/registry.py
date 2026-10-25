@@ -425,6 +425,9 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # PLAN-012d D10: a Rent line's default amount as JSON (billing, checked by the
         # view); GET only.
         "ledger:invoices:rent_amount",
+        # PLAN-012f-b D16: Schedule settlement's preview sentence as JSON (billing,
+        # checked by the view); GET only, it reads and writes nothing.
+        "ledger:invoices:settlement_preview",
         # The calendar page and an entry's page (PLAN-011b D8): any verified role.
         "ledger:calendar:page",
         "ledger:calendar:detail",

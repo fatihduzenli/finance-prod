@@ -256,6 +256,11 @@ invoice_patterns = (
         path("new/store/<str:pk>/", invoices.new_store, name="new_store"),
         path("new/operator/<str:pk>/", invoices.new_operator, name="new_operator"),
         path("rent-amount/", invoices.rent_amount, name="rent_amount"),
+        path(
+            "settlement-preview.json",
+            invoices.settlement_preview,
+            name="settlement_preview",
+        ),
         path("drafts/<str:pk>/", invoices.draft_page, name="draft"),
         path("drafts/<str:pk>/edit/", invoices.draft_edit, name="edit"),
         path("drafts/<str:pk>/preview/", invoices.draft_preview, name="preview"),

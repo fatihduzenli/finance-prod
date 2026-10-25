@@ -47,7 +47,7 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
-from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery, Sum
+from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Subquery, Sum
 from django.urls import reverse
 from django.utils import timezone
 
@@ -65,6 +65,7 @@ from ledger.models import (
     ContactEntry,
     DepositResolution,
     DepositResolutionKind,
+    InstallmentOrigin,
     InstallmentPlan,
     InsuranceCharge,
     Invoice,
@@ -90,6 +91,7 @@ from ledger.services import (
     audit,
     contacts,
     credits,
+    installments,
     lease_end,
     leases,
     payments_ledger,
@@ -624,7 +626,7 @@ def _one_off_rows(owner: Owner, chosen: str) -> QuerySet[OneOffCharge]:
         rows = rows.filter(balance__gt=0).exclude(status__in=_CLOSED_ONE_OFF)
     elif chosen == FILTER_PAID:
         rows = rows.filter(status=OneOffChargeStatus.PAID)
-    return rows.select_related("fee_type", "lease__operator", "lease__store").order_by(
+    return rows.select_related("fee_type", "lease__operator", "lease__store", "plan").order_by(
         "-due_date", "-created_at", "id"
     )
 
@@ -797,7 +799,12 @@ def _one_off_row(charge: OneOffCharge, role: Role | None, back: str) -> ChargeRo
     return ChargeRow(
         kind=KIND_ONE_OFF,
         charge_id=charge.pk,
-        kind_label=charge.get_category_display(),
+        # An installment names its plan (PLAN-012f-b D16: "Settlement plan · 3 of 10").
+        kind_label=(
+            installments.plan_label(charge.plan, charge.installment_no)
+            if charge.plan is not None and charge.installment_no is not None
+            else charge.get_category_display()
+        ),
         description=charge.label,
         due=charge.due_date,
         billed=charge.price,
@@ -1160,13 +1167,28 @@ def schedules_tab(
             .select_related("fee_type", "lease__store")
             .order_by("due_date", "created_at", "id")
         ),
-        "live_plans": list(
-            InstallmentPlan.objects.filter(
+        # Each live plan with a settlement plan's "Settlement plan · 3 of 10" (paid of
+        # its count; PLAN-012f-b D16), "" for a split's.
+        "live_plans": [
+            {
+                "plan": plan,
+                "label": (
+                    installments.plan_label(plan, plan.paid_installments)
+                    if plan.origin == InstallmentOrigin.SETTLEMENT
+                    else ""
+                ),
+            }
+            for plan in InstallmentPlan.objects.filter(
                 _owned(owner, direct=True), status__in=LIVE_PLAN_STATUSES
+            )
+            .annotate(
+                paid_installments=Count(
+                    "installments", filter=Q(installments__status=OneOffChargeStatus.PAID)
+                )
             )
             .select_related("rent_charge", "one_off_charge__fee_type", "lease__store")
             .order_by("first_due", "id")
-        ),
+        ],
         "lease_page_leases": sorted(
             {row.lease for row in schedules},
             key=lambda lease: (str(lease.started_on), str(lease.pk)),

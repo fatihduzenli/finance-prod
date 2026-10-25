@@ -1218,6 +1218,16 @@ class InstallmentCadence(models.TextChoices):
     WEEKLY = "weekly", "Weekly"
     BIWEEKLY = "biweekly", "Every two weeks"
     MONTHLY = "monthly", "Monthly"
+    #: Schedule settlement's (PLAN-012f-b D16); Split into installments does not offer it.
+    YEARLY = "yearly", "Yearly"
+
+
+class InstallmentOrigin(models.TextChoices):
+    """Where a plan was made (PLAN-012f-b D16): a charge's Split into installments, or the
+    invoice builder's Schedule settlement (the charge then reads "Settlement plan")."""
+
+    SPLIT = "split", "Split into installments"
+    SETTLEMENT = "settlement", "Settlement plan"
 
 
 class InstallmentCollection(models.TextChoices):
@@ -1261,6 +1271,7 @@ class InstallmentPlan(GuardedModel):
     cadence = _choice(InstallmentCadence)
     collection = _choice(InstallmentCollection)
     status = _choice(InstallmentPlanStatus, default=InstallmentPlanStatus.ACTIVE)
+    origin = _choice(InstallmentOrigin, default=InstallmentOrigin.SPLIT)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
@@ -1301,6 +1312,7 @@ class InstallmentPlan(GuardedModel):
             _valid_choice("installment_plans", "cadence", InstallmentCadence),
             _valid_choice("installment_plans", "collection", InstallmentCollection),
             _valid_choice("installment_plans", "status", InstallmentPlanStatus),
+            _valid_choice("installment_plans", "origin", InstallmentOrigin),
         ]
 
     def __str__(self) -> str:

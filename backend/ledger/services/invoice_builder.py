@@ -136,6 +136,19 @@ one entry point of the draft form's last step, with a :class:`CollectChoice`:
   once. The draft becomes that plan: ``invoice_draft.sent`` is audited with the choice,
   the plan and the first occurrence's charge, and the draft row is removed, as Schedule
   does.
+- ``settlement`` (billing; PLAN-012f-b D16): the invoice total split into 2 to 12 equal
+  bank debits (:class:`SettlementInput`: the count, the first debit today or later within
+  :data:`SCHEDULE_HORIZON_DAYS`, monthly, weekly or yearly; the rounding difference on the
+  last) through the installment engine: under Schedule for a date's conditions (an active
+  lease, exactly one line, an item), the line becomes one one-off charge collected
+  ``manual`` with no invoice and no provider job, and, in the same transaction,
+  :func:`ledger.services.installments.create_plan` gives it a plan of origin
+  ``settlement`` whose installments are collected ``autopay_due`` (the provider customer
+  and linked bank method, the provider limit, the large-debit confirmation per debit;
+  each installment's one-occurrence schedule queued). The draft row is removed, as
+  Schedule does; ``invoice_draft.sent`` is audited with the choice, the plan and the
+  charge. Refused, with nothing written: two lines or more, and every refusal of the
+  engine.
 - ``record`` (billing): a wire, Zelle or other payment already received
   (:class:`PaymentInput`; a check is "other" with its number as the reference). The
   draft is converted as by :func:`send` with collection ``manual`` (the provider invoice
@@ -175,8 +188,11 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from accounts.roles import Role, meets, role_of
+from finance.dates import day_text
 from ledger.models import (
     DESCRIPTION_MAX_LENGTH,
+    INSTALLMENTS_MAX,
+    INSTALLMENTS_MIN,
     NAME_MAX_LENGTH,
     NSF_FEE_CODES,
     ZERO,
@@ -185,6 +201,9 @@ from ledger.models import (
     CollectionMethod,
     CollectionStatus,
     FeeType,
+    InstallmentCollection,
+    InstallmentOrigin,
+    InstallmentPlan,
     Invoice,
     InvoiceDraft,
     InvoiceDraftLine,
@@ -205,7 +224,14 @@ from ledger.models import (
     Store,
     format_quantity,
 )
-from ledger.services import autopay_plans, leases, numbering, one_off_charges, rent_run
+from ledger.services import (
+    autopay_plans,
+    installments,
+    leases,
+    numbering,
+    one_off_charges,
+    rent_run,
+)
 from ledger.services.one_off_charges import (
     AMOUNT_MAX,
     CHARGE_NOW_PARAM,
@@ -404,6 +430,31 @@ AUTOPAY_TRANSFER = (
 )
 #: The internal note of a scheduled debit's charge.
 SCHEDULE_NOTE = "Scheduled with the invoice builder from {draft}: {item}."
+SETTLEMENT_ONE_LINE = "Schedule settlement takes an invoice with one line."
+SETTLEMENT_ITEM = (
+    "Schedule settlement takes one line, an item (not rent or an existing charge). "
+    "Nothing was scheduled."
+)
+SETTLEMENT_TRANSFER = (
+    "This draft belongs to a transfer; send it from its page instead. Nothing was scheduled."
+)
+SETTLEMENT_COUNT = (
+    f"Choose between {INSTALLMENTS_MIN} and {INSTALLMENTS_MAX} payments. Nothing was scheduled."
+)
+SETTLEMENT_CADENCE = "Choose monthly, weekly or yearly. Nothing was scheduled."
+SETTLEMENT_FIRST_REQUIRED = "Choose the date of the first debit. Nothing was scheduled."
+SETTLEMENT_FIRST_IN_PAST = "The first debit must be today or later. Nothing was scheduled."
+SETTLEMENT_FIRST_TOO_FAR = (
+    f"The first debit can be at most {SCHEDULE_HORIZON_DAYS} days from today. "
+    "Nothing was scheduled."
+)
+SETTLEMENT_TOTAL = "Enter the invoice total first."
+SETTLEMENT_TOO_SMALL = (
+    "The total cannot be split into that many debits of at least one cent. Nothing was scheduled."
+)
+#: The internal note of a settlement's charge (the installments carry their own).
+SETTLEMENT_NOTE = "Settlement scheduled with the invoice builder from {draft}: {item}."
+SETTLEMENT_SCHEDULED = "{count} debits scheduled; the first on {date}."
 RECORD_PAYMENT_REQUIRED = "Enter how and when the payment was received. Nothing was recorded."
 RECORD_RENT = (
     "Record payment now takes lines other than rent: record a rent payment with Add "
@@ -481,6 +532,7 @@ class CollectChoice(StrEnum):
     SCHEDULE = "schedule"
     RECORD = "record"
     AUTOPAY = "autopay"
+    SETTLEMENT = "settlement"
 
 
 @dataclass(frozen=True, slots=True)
@@ -509,6 +561,17 @@ class AutopayInput:
 
 
 @dataclass(frozen=True, slots=True)
+class SettlementInput:
+    """The equal debits of :data:`CollectChoice.SETTLEMENT` (PLAN-012f-b D16): how many
+    (2 to 12), the first debit's date and the cadence (one of
+    :data:`ledger.services.installments.SETTLEMENT_CADENCES`)."""
+
+    count: int | None
+    first_on: date | None
+    cadence: str
+
+
+@dataclass(frozen=True, slots=True)
 class Outcome:
     ok: bool
     message: str
@@ -525,6 +588,8 @@ class Outcome:
     schedule: Job | None = None
     #: The plan of :data:`CollectChoice.AUTOPAY`.
     plan: AutopayPlan | None = None
+    #: The installment plan of :data:`CollectChoice.SETTLEMENT`.
+    settlement: InstallmentPlan | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1511,6 +1576,7 @@ def collect(
     due_date: date | None = None,
     payment: PaymentInput | None = None,
     autopay: AutopayInput | None = None,
+    settlement: SettlementInput | None = None,
 ) -> Outcome:
     """Collect the draft as ``choice`` says (PLAN-012e-2 D1; see the module docstring).
     Never calls the provider: the provider work is queued."""
@@ -1548,6 +1614,13 @@ def collect(
         if autopay is None:
             return Outcome(False, autopay_plans.CHOOSE_CADENCE, "autopay_cadence")
         return _autopay(draft_id, actor, autopay, confirmed=confirmed is True, today=day)
+    if chosen == CollectChoice.SETTLEMENT:
+        if settlement is None:
+            return Outcome(False, SETTLEMENT_COUNT, "settlement_count")
+        refused = settlement_refusal(settlement, day)
+        if refused is not None:
+            return refused
+        return _settlement(draft_id, actor, settlement, confirmed=confirmed is True, today=day)
     refused = _payment_refusal(payment, day)
     if refused is not None or payment is None:
         return refused or Outcome(False, RECORD_PAYMENT_REQUIRED, "method")
@@ -1599,6 +1672,41 @@ def schedule_refusal(due_date: date | None, today: date) -> Outcome | None:
     if due_date > today + timedelta(days=SCHEDULE_HORIZON_DAYS):
         return Outcome(False, SCHEDULE_TOO_FAR, "due_date")
     return None
+
+
+def settlement_refusal(settlement: SettlementInput, today: date) -> Outcome | None:
+    """The first rule Schedule settlement's count, first date or cadence breaks (D16), or
+    ``None``: 2 to 12 debits, a cadence it offers, the first debit today or later and at
+    most :data:`SCHEDULE_HORIZON_DAYS` days ahead. The shares are checked with the total."""
+    count = settlement.count
+    if count is None or not INSTALLMENTS_MIN <= count <= INSTALLMENTS_MAX:
+        return Outcome(False, SETTLEMENT_COUNT, "settlement_count")
+    if settlement.cadence not in installments.SETTLEMENT_CADENCES:
+        return Outcome(False, SETTLEMENT_CADENCE, "settlement_cadence")
+    first = settlement.first_on
+    if first is None:
+        return Outcome(False, SETTLEMENT_FIRST_REQUIRED, "settlement_first_on")
+    if first < today:
+        return Outcome(False, SETTLEMENT_FIRST_IN_PAST, "settlement_first_on")
+    if first > today + timedelta(days=SCHEDULE_HORIZON_DAYS):
+        return Outcome(False, SETTLEMENT_FIRST_TOO_FAR, "settlement_first_on")
+    return None
+
+
+def settlement_lines(
+    total: Decimal, settlement: SettlementInput
+) -> tuple[list[installments.Line], Outcome | None]:
+    """The debits of ``total`` (:func:`ledger.services.installments.settlement_lines`), or
+    why the total cannot be split so. Valid once :func:`settlement_refusal` is ``None``."""
+    if settlement.count is None or settlement.first_on is None:
+        return [], Outcome(False, SETTLEMENT_COUNT, "settlement_count")
+    try:
+        lines = installments.settlement_lines(
+            total, settlement.count, settlement.first_on, settlement.cadence
+        )
+    except ValueError:
+        return [], Outcome(False, SETTLEMENT_TOO_SMALL, "settlement_count")
+    return lines, None
 
 
 def _payment_refusal(payment: PaymentInput | None, today: date) -> Outcome | None:
@@ -1793,6 +1901,108 @@ def _autopay(
         )
         draft.delete()
     return Outcome(True, made.message, charges=(made.charge,), plan=made.plan)
+
+
+def _settlement(
+    draft_id: uuid.UUID,
+    actor: User | None,
+    settlement: SettlementInput,
+    *,
+    confirmed: bool,
+    today: date,
+) -> Outcome:
+    """:data:`CollectChoice.SETTLEMENT` (D16, see the module docstring), in one transaction:
+    the draft's one line becomes one ``manual`` one-off charge (no invoice and no provider
+    job: :func:`ledger.services.one_off_charges.create_charge` with ``with_invoice=False``),
+    then :func:`ledger.services.installments.create_plan` splits it into equal bank debits
+    (``autopay_due``, origin ``settlement``). A refusal of either writes nothing."""
+    with transaction.atomic():
+        draft, refused = _locked_draft(draft_id)
+        if draft is None:
+            return refused or Outcome(False, NOT_A_DRAFT)
+        if LeaseTransfer.objects.filter(draft=draft).exists():
+            return Outcome(False, SETTLEMENT_TRANSFER, draft=draft)
+        operator = Operator.objects.select_for_update().get(pk=draft.operator_id)
+        lease = draft.lease
+        refused_lease = schedule_lease_refusal(lease)
+        if refused_lease:
+            return Outcome(False, refused_lease, draft=draft)
+        header = _header_refusal(operator, lease, draft.memo, draft.due_date, today)
+        if header is not None:
+            return Outcome(False, header.message, header.field, draft=draft)
+        try:
+            lines = _stored_lines(draft, operator)
+        except _Refused as error:
+            return Outcome(False, error.outcome.message, error.outcome.field, draft=draft)
+        if len(lines) != 1:
+            return Outcome(False, SETTLEMENT_ONE_LINE, draft=draft)
+        [line] = lines
+        if line.is_rent or line.is_existing:
+            return Outcome(False, SETTLEMENT_ITEM, draft=draft)
+        debits, refused_split = settlement_lines(line.line_total, settlement)
+        if refused_split is not None or not debits:
+            return replace(refused_split or Outcome(False, SETTLEMENT_COUNT), draft=draft)
+        category = category_for(line.fee_type)
+        name = charge_description(line)
+        item = ChargeInput(
+            fee_type=line.fee_type if category == OneOffCategory.SETUP else None,
+            price=line.line_total,
+            cost=None,
+            vendor="",
+            due_date=debits[0].due,
+            note=SETTLEMENT_NOTE.format(draft=draft.number, item=line.item),
+            category=category,
+            collection=CollectionMethod.MANUAL,
+            description=f"{name}: {line.description}" if line.description else name,
+            confirmed=True,
+            creation_key=uuid.uuid5(draft.pk, CollectChoice.SETTLEMENT.value),
+        )
+        made = one_off_charges.create_charge(
+            operator, lease, item, actor, today=today, with_invoice=False
+        )
+        if not made.ok or made.charge is None:
+            transaction.set_rollback(True)
+            return Outcome(False, made.message, None, draft=draft)
+        # The charge is manual with no invoice and no provider job, so nothing of it is
+        # live at the provider and the plan releases nothing (release_kind is ""): the
+        # installments' one-occurrence schedules are queued at once, as Split queues them.
+        planned = installments.create_plan(
+            made.charge,
+            len(debits),
+            debits[0].due,
+            settlement.cadence,
+            debits,
+            actor,
+            confirmed=confirmed,
+            today=today,
+            collection=InstallmentCollection.AUTOPAY_DUE,
+            origin=InstallmentOrigin.SETTLEMENT,
+        )
+        if not planned.ok or planned.plan is None:
+            transaction.set_rollback(True)
+            field = "settlement_confirm_large_debit" if planned.field == "confirm" else None
+            return Outcome(False, planned.message, field, draft=draft)
+        before = draft_state(draft)
+        _audit(
+            actor,
+            SENT_ACTION,
+            draft,
+            before,
+            {
+                **before,
+                "status": InvoiceDraftStatus.SENT.value,
+                "invoice_number": None,
+                "collection": CollectionMethod.MANUAL.value,
+                "choice": CollectChoice.SETTLEMENT.value,
+                "installment_plan": str(planned.plan.pk),
+                "charges": [str(made.charge.pk)],
+                "rent_charges": [],
+                "due_date": debits[0].due.isoformat(),
+            },
+        )
+        draft.delete()
+    message = SETTLEMENT_SCHEDULED.format(count=len(debits), date=day_text(debits[0].due))
+    return Outcome(True, message, charges=(made.charge,), settlement=planned.plan)
 
 
 def _autopay_field(field: str | None) -> str | None:

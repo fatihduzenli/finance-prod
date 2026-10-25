@@ -75,6 +75,7 @@ from ledger.services import detail_cards as detail_service
 from ledger.services import one_off_charges as service
 from ledger.services import stores as store_service
 from ledger.services.csv_export import CsvWriter
+from ledger.services.installments import plan_label
 from ledger.views import store_context, stores
 from ledger.views.charges import _report, render_add_payment
 from ledger.views.detail_cards import activity_context
@@ -268,6 +269,12 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             **_charge_now_context(charge, admin, closed, jobs["job_refresh"]),
             # PLAN-012e D9, D10: an installment's plan, or the parent's plan and Split.
             "installment_plan": charge.plan,
+            # PLAN-012f-b D16: "Installment 3 of 10", or "Settlement plan · 3 of 10".
+            "installment_label": (
+                plan_label(charge.plan, charge.installment_no)
+                if charge.plan is not None and charge.installment_no is not None
+                else ""
+            ),
             **(
                 {}
                 if charge.plan_id is not None

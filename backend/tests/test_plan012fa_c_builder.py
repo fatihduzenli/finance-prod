@@ -243,9 +243,10 @@ def test_one_tile_per_choice_each_with_its_radio_name_and_sentence() -> None:
         found = tiles(body)
         radios = re.findall(r'type="radio" name="collect"', body)
         assert len(found) == len(radios), role
-        # PLAN-012f-b D15: five tiles for every role, a tile not on offer greyed (never
-        # hidden) with its one line in place of its sentence.
-        assert len(found) == 5, role
+        # PLAN-012f-b D15: a tile for every choice and every role, a tile not on offer
+        # greyed (never hidden) with its one line in place of its sentence; D16: six, with
+        # Schedule settlement.
+        assert len(found) == 6, role
         for tile in found:
             assert tile.count('type="radio" name="collect"') == 1
             assert tile.count('<span class="collect-name">') == 1

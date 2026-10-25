@@ -93,7 +93,14 @@ from ledger.models import (
     Operator,
     Store,
 )
-from ledger.services import contacts, detail_cards, invoice_builder, one_off_charges, workspace
+from ledger.services import (
+    contacts,
+    detail_cards,
+    installments,
+    invoice_builder,
+    one_off_charges,
+    workspace,
+)
 from ledger.services import stores as store_service
 from ledger.services.invoice_builder import CollectChoice
 from ledger.services.rent_run import ENTITY_CHARGE as ENTITY_RENT_CHARGE
@@ -293,6 +300,25 @@ COLLECTION_LABELS = {
 }
 
 
+#: The large-debit tick of each choice that debits (the others share Schedule's).
+CONFIRM_FIELDS = {
+    CollectChoice.AUTOPAY: "autopay_confirm_large_debit",
+    CollectChoice.SETTLEMENT: "settlement_confirm_large_debit",
+}
+
+
+def _settlement_context(collect_form: CollectForm | None, total: Decimal | None) -> dict[str, Any]:
+    """Schedule settlement's preview sentence as the page opens (PLAN-012f-b D16; the
+    script fetches it again from ``settlement_preview_url`` as the fields change)."""
+    sentence = ""
+    if collect_form is not None and total is not None:
+        sentence = collect_form.settlement_sentence(total)
+    return {
+        "settlement_sentence": sentence,
+        "settlement_preview_url": reverse("ledger:invoices:settlement_preview"),
+    }
+
+
 def _collect_form(
     request: HttpRequest,
     data: Any = None,
@@ -364,21 +390,20 @@ def _collected(
         draft.pk,
         choice,
         actor=_actor(request),
-        confirmed=data.get(
-            "autopay_confirm_large_debit"
-            if choice == CollectChoice.AUTOPAY
-            else "confirm_large_debit"
-        )
-        is True,
+        confirmed=data.get(CONFIRM_FIELDS.get(choice, "confirm_large_debit")) is True,
         due_date=data.get("schedule_on"),
         payment=collect_form.payment(),
         autopay=collect_form.autopay() if choice == CollectChoice.AUTOPAY else None,
+        settlement=collect_form.settlement() if choice == CollectChoice.SETTLEMENT else None,
     )
     if not outcome.ok:
         messages.success(request, saved)
         _hold(request, f"invoice-edit:{draft.pk}", [str(outcome.message)])
         return redirect(_draft_url(draft, context))
     messages.success(request, outcome.message)
+    if choice == CollectChoice.SETTLEMENT and outcome.charges:
+        # PLAN-012f-b D16: the charge the draft became, with its settlement plan.
+        return redirect("ledger:one_off_charges:detail", pk=outcome.charges[0].pk)
     if choice == CollectChoice.AUTOPAY:
         if context is not None:
             return redirect(context.tab_url(workspace.TAB_SCHEDULES))
@@ -601,6 +626,7 @@ def _new(
             "due_days": invoice_builder.DUE_DAYS,
             "collect_form": collect_form,
             "collect_total": _lines_total(formset),
+            **_settlement_context(collect_form, _lines_total(formset)),
         },
     )
 
@@ -804,6 +830,7 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
             "crumb_store": draft.lease.store if draft.lease is not None else None,
             "collect_form": collect_form,
             "collect_total": preview_total if editable else None,
+            **_settlement_context(collect_form, preview_total if editable else None),
             "can_cancel": draft.status == InvoiceDraftStatus.DRAFT
             or (draft.status == InvoiceDraftStatus.SENT and not sent.get("cancel_refusal")),
             "due_days": invoice_builder.DUE_DAYS,
@@ -1079,6 +1106,65 @@ def rent_amount(request: HttpRequest) -> HttpResponse:
             "message": message,
         }
     )
+
+
+# --- Schedule settlement's preview sentence (PLAN-012f-b D16) ---------------------------------
+
+#: A total the preview reads: digits with at most two decimals.
+TOTAL = re.compile(r"^\d{1,9}(\.\d{1,2})?$")
+#: A number of payments the preview reads (the range is the service's).
+COUNT = re.compile(r"^\d{1,2}$")
+#: A first debit date the preview reads.
+ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _preview_refused(message: str) -> JsonResponse:
+    return JsonResponse({"ok": False, "message": message}, status=400)
+
+
+@role_required
+@require_safe
+def settlement_preview(request: HttpRequest) -> HttpResponse:
+    """``ledger:invoices:settlement_preview`` (billing; read-only JSON): Schedule
+    settlement's preview sentence (:func:`ledger.services.installments.settlement_preview`)
+    of ``?total=`` (dollars, at most two decimals, up to the one-off maximum), ``?count=``
+    (2 to 12), ``?first=`` (an ISO date, today or later within the horizon) and
+    ``?cadence=`` (monthly, weekly or yearly): ``{"ok": true, "sentence": ...}``, or 400
+    with ``{"ok": false, "message": ...}`` naming the first parameter refused. Pure
+    arithmetic on the parameters: nothing is read from or written to the database."""
+    refused = _refuse_below(request, Role.BILLING)
+    if refused is not None:
+        return refused
+    text = request.GET.get("total", "")
+    if not TOTAL.fullmatch(text):
+        return _preview_refused(invoice_builder.SETTLEMENT_TOTAL)
+    total = Decimal(text)
+    if total <= 0 or total > one_off_charges.AMOUNT_MAX:
+        return _preview_refused(invoice_builder.SETTLEMENT_TOTAL)
+    count_text = request.GET.get("count", "")
+    count = int(count_text) if COUNT.fullmatch(count_text) else None
+    first_text = request.GET.get("first", "")
+    try:
+        first = date.fromisoformat(first_text) if ISO_DAY.fullmatch(first_text) else None
+    except ValueError:
+        first = None
+    if first is None and first_text:
+        return _preview_refused(invoice_builder.SETTLEMENT_FIRST_REQUIRED)
+    entered = invoice_builder.SettlementInput(
+        count=count,
+        first_on=first,
+        cadence=request.GET.get("cadence", ""),
+    )
+    rule = invoice_builder.settlement_refusal(entered, timezone.localdate())
+    if rule is not None:
+        return _preview_refused(rule.message)
+    lines, too_small = invoice_builder.settlement_lines(total, entered)
+    if too_small is not None:
+        return _preview_refused(too_small.message)
+    if not lines or count is None or first is None:  # pragma: no cover (refused above)
+        return _preview_refused(invoice_builder.SETTLEMENT_TOTAL)
+    sentence = installments.settlement_preview(total, count, first, entered.cadence)
+    return JsonResponse({"ok": True, "sentence": sentence})
 
 
 # --- Preview and print view (D7) ------------------------------------------------------

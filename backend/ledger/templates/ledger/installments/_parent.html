@@ -1,5 +1,5 @@
 {% if plan_progress %}
-  <h2>Installment plan</h2>
+  <h2>{{ plan_progress.title }}</h2>
   <p id="parent-plan-progress"><a href="{% url 'ledger:plans:detail' pk=plan_progress.plan.pk %}">{{ plan_progress.text }}</a> <span class="badge">{{ plan_progress.plan.get_status_display }}</span></p>
   {% if plan_live %}<p class="muted">While the plan runs, this charge is paid through its installments; record payments on them.</p>{% endif %}
   {% include "ledger/installments/_installments.html" with installments=plan_progress.installments count=plan_progress.count %}

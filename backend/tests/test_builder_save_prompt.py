@@ -42,7 +42,7 @@ pytestmark = pytest.mark.django_db
 NOW = datetime(2026, 10, 6, 16, 0, tzinfo=UTC)
 TODAY = date(2026, 10, 6)
 APP_CSS = Path(__file__).resolve().parents[1] / "finance" / "static" / "finance" / "app.css"
-ORDER = ["draft", "charge_now", "schedule", "record", "autopay"]
+ORDER = ["draft", "charge_now", "schedule", "record", "autopay", "settlement"]
 
 
 @pytest.fixture(autouse=True)

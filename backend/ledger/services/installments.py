@@ -74,6 +74,14 @@ A plan splits the open balance of one charge, a rent charge or a one-off charge 
   again for what the installments did not collect (its paid amount includes what they
   were paid, audited).
 
+- **Schedule settlement** (PLAN-012f-b D16): the invoice builder's choice makes a
+  ``manual`` one-off charge of the invoice's one line and gives it, through
+  :func:`create_plan` (``collection`` ``autopay_due``, ``origin`` ``settlement``), equal
+  bank debits monthly, weekly or yearly (:data:`SETTLEMENT_CADENCES`; Split's form does
+  not offer yearly, :data:`SPLIT_CADENCES`); :func:`settlement_preview` words them and
+  :func:`plan_label` names such a plan's installments "Settlement plan · 3 of 10" on
+  every page.
+
 Money is ``Decimal`` throughout; nothing here calls the payment provider.
 """
 
@@ -103,6 +111,7 @@ from ledger.models import (
     CollectionMethod,
     InstallmentCadence,
     InstallmentCollection,
+    InstallmentOrigin,
     InstallmentPlan,
     InstallmentPlanStatus,
     Invoice,
@@ -148,6 +157,23 @@ RELEASED_ACTION = "installment_plan.released"
 # --- Fixed sentences ------------------------------------------------------------------
 
 COUNT_RANGE = f"Choose between {INSTALLMENTS_MIN} and {INSTALLMENTS_MAX} installments."
+#: The cadences Split into installments' form offers (PLAN-012e D10); ``yearly`` is
+#: Schedule settlement's (PLAN-012f-b D16). The engine itself takes every cadence.
+SPLIT_CADENCES: tuple[str, ...] = (
+    InstallmentCadence.WEEKLY.value,
+    InstallmentCadence.BIWEEKLY.value,
+    InstallmentCadence.MONTHLY.value,
+)
+#: The cadences Schedule settlement offers, in the order of the autopay control (D16):
+#: ``biweekly`` stays for existing plans but is not offered there.
+SETTLEMENT_CADENCES: tuple[str, ...] = (
+    InstallmentCadence.MONTHLY.value,
+    InstallmentCadence.WEEKLY.value,
+    InstallmentCadence.YEARLY.value,
+)
+#: A settlement plan's name with the installment's number (or the paid count) (D16).
+SETTLEMENT_LABEL = "{origin} · {number} of {count}"
+INSTALLMENT_LABEL = "Installment {number} of {count}"
 CHOOSE_CADENCE = "Choose weekly, every two weeks or monthly."
 FIRST_REQUIRED = "Enter the first installment's date."
 FIRST_IN_PAST = "The first installment's date must be today or later."
@@ -298,7 +324,21 @@ class Progress:
     installments: list[OneOffCharge] = field(default_factory=list)
 
     @property
+    def title(self) -> str:
+        """The plan card's heading: "Installment plan", or "Settlement plan" (D16)."""
+        if self.plan.origin == InstallmentOrigin.SETTLEMENT:
+            return str(InstallmentOrigin.SETTLEMENT.label)
+        return "Installment plan"
+
+    @property
     def text(self) -> str:
+        """``Installment plan: 1 of 3 paid, $X of $Y``; a settlement plan's reads
+        ``Settlement plan · 1 of 3 paid, $X of $Y`` (:func:`plan_label`, D16)."""
+        if self.plan.origin == InstallmentOrigin.SETTLEMENT:
+            return (
+                f"{plan_label(self.plan, self.paid_count)} paid, "
+                f"{format_amount(self.paid)} of {format_amount(self.total)}"
+            )
         return (
             f"Installment plan: {self.paid_count} of {self.count} paid, "
             f"{format_amount(self.paid)} of {format_amount(self.total)}"
@@ -338,16 +378,53 @@ def _add_months(first: date, months: int) -> date:
 
 
 def schedule_dates(first: date, cadence: str, count: int) -> list[date]:
-    """The ``count`` dates from ``first``: every 7 days, every 14 days, or monthly on the
+    """The ``count`` dates from ``first``: every 7 days, every 14 days, monthly on the
     first date's day of the month, clamped to the month's last day (the 31st gives 28 or
-    29 February, then 31 March). Raises ``ValueError`` on an unknown cadence."""
+    29 February, then 31 March), or yearly on the same day (29 February gives 28 February
+    in a year that has none, as a short month does; PLAN-012f-b D16). Raises
+    ``ValueError`` on an unknown cadence."""
     if cadence == InstallmentCadence.WEEKLY:
         return [first + timedelta(days=7 * index) for index in range(count)]
     if cadence == InstallmentCadence.BIWEEKLY:
         return [first + timedelta(days=14 * index) for index in range(count)]
     if cadence == InstallmentCadence.MONTHLY:
         return [_add_months(first, index) for index in range(count)]
+    if cadence == InstallmentCadence.YEARLY:
+        return [_add_months(first, 12 * index) for index in range(count)]
     raise ValueError(CHOOSE_CADENCE)
+
+
+def _ordinal(day: int) -> str:
+    """``1st``, ``2nd``, ``3rd``, ``4th``, ``11th`` ... ``31st``."""
+    suffix = "th" if 11 <= day % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def settlement_lines(total: Decimal, count: int, first_on: date, cadence: str) -> list[Line]:
+    """Schedule settlement's debits (D16): :func:`split` of ``total`` (the rounding
+    difference on the last) on :func:`schedule_dates`. Raises ``ValueError`` as they do."""
+    amounts = split(total, count)
+    dates = schedule_dates(first_on, cadence, count)
+    return [Line(due, amount) for due, amount in zip(dates, amounts, strict=True)]
+
+
+def settlement_preview(total: Decimal, count: int, first_on: date, cadence: str) -> str:
+    """Schedule settlement's preview sentence (D16, pure): ``10 debits of $1,000.00 on the
+    1st: Nov 1, 2026 … Aug 1, 2027`` (monthly and yearly), ``3 debits of $50.00 every
+    week: Nov 2, 2026 … Nov 16, 2026`` (weekly), with ``, the last $33.34`` when the last
+    debit carries a rounding difference. Raises ``ValueError`` as :func:`settlement_lines`."""
+    lines = settlement_lines(total, count, first_on, cadence)
+    share, last = lines[0].amount, lines[-1].amount
+    when = (
+        "every week" if cadence == InstallmentCadence.WEEKLY else f"on the {_ordinal(first_on.day)}"
+    )
+    sentence = (
+        f"{count} debits of {format_amount(share)} {when}: "
+        f"{day_text(lines[0].due)} … {day_text(lines[-1].due)}"
+    )
+    if last != share:
+        sentence += f", the last {format_amount(last)}"
+    return sentence
 
 
 # --- Reads -------------------------------------------------------------------------------
@@ -370,6 +447,17 @@ def parent_screen_label(parent: Parent) -> str:
             f" (debit {parent.seq})" if parent.seq > 1 else ""
         )
     return parent.label
+
+
+def plan_label(plan: InstallmentPlan, number: int) -> str:
+    """The one wording of a plan's installment ``number`` (or of its paid count) on every
+    page (D16): ``Settlement plan · 3 of 10`` for Schedule settlement's plan, else
+    ``Installment 3 of 10``."""
+    if plan.origin == InstallmentOrigin.SETTLEMENT:
+        return SETTLEMENT_LABEL.format(
+            origin=InstallmentOrigin.SETTLEMENT.label, number=number, count=plan.count
+        )
+    return INSTALLMENT_LABEL.format(number=number, count=plan.count)
 
 
 def parent_url(parent: Parent) -> str:
@@ -826,9 +914,14 @@ def create_plan(
     *,
     confirmed: bool = False,
     today: date | None = None,
+    collection: str | None = None,
+    origin: str = InstallmentOrigin.SPLIT,
 ) -> Outcome:
     """Create the plan and its installments (D9, D10; see the module docstring). Every
-    rule is checked again under the parent's row lock; a refusal writes nothing."""
+    rule is checked again under the parent's row lock; a refusal writes nothing.
+    ``collection`` overrides the parent's (:func:`collection_of`; Schedule settlement's
+    ``autopay_due`` on a manual charge, PLAN-012f-b D16), its provider prerequisites
+    checked as the parent's would be; ``origin`` is stored on the plan."""
     day = today or timezone.localdate()
     if not INSTALLMENTS_MIN <= count <= INSTALLMENTS_MAX:
         return Outcome(False, COUNT_RANGE, "count")
@@ -840,14 +933,16 @@ def create_plan(
         with transaction.atomic():
             locked = _lock(parent)
             reason = split_refusal(locked, day)
+            operator = operator_of(locked)
+            if not reason and collection is not None and operator is not None:
+                reason = _collection_refusal(collection, operator)
             if reason:
                 return Outcome(False, reason)
             refused = lines_refusal(lines, balance_of(locked), count, day)
-            collection = collection_of(locked)
+            collection = collection or collection_of(locked)
             refused = refused or _debit_refusal(collection, lines, confirmed)
             if refused is not None:
                 return refused
-            operator = operator_of(locked)
             if operator is None:
                 return Outcome(False, NO_OPERATOR)
             plan = InstallmentPlan.objects.create(
@@ -860,6 +955,7 @@ def create_plan(
                 cadence=cadence,
                 collection=collection,
                 status=InstallmentPlanStatus.ACTIVE,
+                origin=origin,
                 created_by=actor,
                 confirmed_at=timezone.now(),
             )
@@ -871,6 +967,7 @@ def create_plan(
                 None,
                 {
                     **plan_state(plan),
+                    "origin": plan.origin,
                     "balance": str(balance_of(locked)),
                     "lines": [
                         {"due": line.due.isoformat(), "amount": str(line.amount)} for line in lines

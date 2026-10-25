@@ -54,7 +54,7 @@ from ledger.models import (
     Store,
     StoreType,
 )
-from ledger.services import autopay_plans, invoice_builder, one_off_charges, rent_run
+from ledger.services import autopay_plans, installments, invoice_builder, one_off_charges, rent_run
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import END_DATE_REQUIRED
 from ledger.services.one_off_charges import ChargeInput
@@ -1429,6 +1429,7 @@ COLLECT_CHOICES: tuple[tuple[str, str], ...] = (
     (invoice_builder.CollectChoice.SCHEDULE.value, "Schedule for a date"),
     (invoice_builder.CollectChoice.RECORD.value, "Record payment now"),
     (invoice_builder.CollectChoice.AUTOPAY.value, "Set up autopay"),
+    (invoice_builder.CollectChoice.SETTLEMENT.value, "Schedule settlement"),
 )
 #: Why Charge now is greyed for billing (PLAN-012f-b D15).
 CHARGE_NOW_NEEDS_ADMIN = "Charge now needs an admin."
@@ -1441,6 +1442,19 @@ AUTOPAY_FIELDS = (
     "autopay_end_on",
     "autopay_confirm_large_debit",
 )
+#: Schedule settlement's fields (PLAN-012f-b D16).
+SETTLEMENT_FIELDS = (
+    "settlement_count",
+    "settlement_first_on",
+    "settlement_cadence",
+    "settlement_confirm_large_debit",
+)
+#: The number of payments Schedule settlement opens with (Split's too).
+SETTLEMENT_COUNT_INITIAL = 3
+#: Schedule settlement's cadences, in the order of Set up autopay's Repeat (D16).
+SETTLEMENT_CADENCE_CHOICES = [
+    (value, InstallmentCadence(value).label) for value in installments.SETTLEMENT_CADENCES
+]
 #: The name of the submit buttons, one per choice: without the page's script each button
 #: says which choice it submits; with it the one shown matches the chosen radio.
 COLLECT_SUBMIT = "submit_collect"
@@ -1459,15 +1473,15 @@ def unavailable_choices(
     :func:`ledger.services.invoice_builder.charge_now_unavailable` (the pay-an-invoice flag
     off, no bank account on file); ``bank_why``:
     :func:`ledger.services.invoice_builder.bank_unavailable` (no bank account on file).
-    Charge now needs an admin, then its flag and the bank; Schedule for a date and Set up
-    autopay the bank, then an active lease with one line."""
+    Charge now needs an admin, then its flag and the bank; Schedule for a date, Set up
+    autopay and Schedule settlement (D16) the bank, then an active lease with one line."""
     choice = invoice_builder.CollectChoice
     why: dict[str, str] = {}
     if not can_charge_now:
         why[choice.CHARGE_NOW.value] = CHARGE_NOW_NEEDS_ADMIN
     elif charge_now_why:
         why[choice.CHARGE_NOW.value] = charge_now_why
-    for scheduled in (choice.SCHEDULE.value, choice.AUTOPAY.value):
+    for scheduled in (choice.SCHEDULE.value, choice.AUTOPAY.value, choice.SETTLEMENT.value):
         if bank_why:
             why[scheduled] = bank_why
         elif not can_schedule:
@@ -1568,6 +1582,33 @@ class CollectForm(forms.Form):
     autopay_confirm_large_debit = forms.BooleanField(
         required=False, widget=_ExactCheckboxInput, label="I confirm this large debit"
     )
+    settlement_count = forms.IntegerField(
+        required=False,
+        min_value=INSTALLMENTS_MIN,
+        max_value=INSTALLMENTS_MAX,
+        initial=SETTLEMENT_COUNT_INITIAL,
+        error_messages={
+            "invalid": invoice_builder.SETTLEMENT_COUNT,
+            "min_value": invoice_builder.SETTLEMENT_COUNT,
+            "max_value": invoice_builder.SETTLEMENT_COUNT,
+        },
+        label="Number of payments",
+    )
+    settlement_first_on = forms.DateField(
+        required=False,
+        label="First debit",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        error_messages={"invalid": invoice_builder.SETTLEMENT_FIRST_REQUIRED},
+    )
+    settlement_cadence = _QuietChoiceField(
+        required=False,
+        choices=SETTLEMENT_CADENCE_CHOICES,
+        initial=InstallmentCadence.MONTHLY.value,
+        label="Repeat",
+    )
+    settlement_confirm_large_debit = forms.BooleanField(
+        required=False, widget=_ExactCheckboxInput, label="I confirm these large debits"
+    )
 
     #: ``<id>`` conditions are alternatives (``|``); ``&`` joins the ones that must all hold.
     SHOWN_WHEN: dict[str, str] = {
@@ -1583,6 +1624,10 @@ class CollectForm(forms.Form):
         "autopay_end_count": f"collect-autopay&id_autopay_end_rule={AutopayEndRule.COUNT.value}",
         "autopay_end_on": f"collect-autopay&id_autopay_end_rule={AutopayEndRule.DATE.value}",
         "autopay_confirm_large_debit": "collect-autopay",
+        "settlement_count": "collect-settlement",
+        "settlement_first_on": "collect-settlement",
+        "settlement_cadence": "collect-settlement",
+        "settlement_confirm_large_debit": "collect-settlement",
     }
 
     def __init__(
@@ -1647,7 +1692,75 @@ class CollectForm(forms.Form):
         self._drop_ignored_autopay(data, chosen)
         if chosen == invoice_builder.CollectChoice.AUTOPAY:
             self._clean_autopay(data, timezone.localdate())
+        self._clean_settlement(data, chosen)
         return data
+
+    def _clean_settlement(self, data: dict[str, Any], chosen: str) -> None:
+        """Schedule settlement's fields count only for that choice (a page without the
+        script sends every field); for it, the rules of
+        :func:`ledger.services.invoice_builder.settlement_refusal` (checked again there)."""
+        if chosen != invoice_builder.CollectChoice.SETTLEMENT:
+            for name in SETTLEMENT_FIELDS:
+                if name in self.errors:
+                    del self.errors[name]
+                    data[name] = None
+            return
+        if any(name in self.errors for name in SETTLEMENT_FIELDS):
+            return
+        if data.get("settlement_count") is None:
+            self.add_error("settlement_count", invoice_builder.SETTLEMENT_COUNT)
+            return
+        refused = invoice_builder.settlement_refusal(self.settlement(), timezone.localdate())
+        if refused is not None:
+            self.add_error(refused.field, refused.message)
+
+    def settlement(self) -> invoice_builder.SettlementInput:
+        """Schedule settlement's debits as the form cleaned them."""
+        data = self.cleaned_data
+        return invoice_builder.SettlementInput(
+            count=data.get("settlement_count"),
+            first_on=data.get("settlement_first_on"),
+            cadence=data.get("settlement_cadence") or "",
+        )
+
+    def _bound(self, name: str) -> Any:
+        """A field's value as entered, as its type (``None`` when it is not one)."""
+        value = self[name].value()
+        if value is None or not isinstance(value, str):
+            return value
+        try:
+            return self.fields[name].to_python(value)
+        except forms.ValidationError:
+            return None
+
+    def settlement_count_shown(self) -> int:
+        """The count Schedule settlement's button names (``Schedule 10 debits``): the one
+        entered when it is 2 to 12, else the initial one."""
+        count = self._bound("settlement_count")
+        if isinstance(count, int) and INSTALLMENTS_MIN <= count <= INSTALLMENTS_MAX:
+            return count
+        return SETTLEMENT_COUNT_INITIAL
+
+    def settlement_sentence(self, total: Decimal) -> str:
+        """Schedule settlement's preview sentence for ``total`` from the values entered
+        (:func:`ledger.services.installments.settlement_preview`; the page's script fetches
+        it as the fields change), or ``""`` while they break a rule."""
+        first = self._bound("settlement_first_on")
+        entered = invoice_builder.SettlementInput(
+            count=self._bound("settlement_count"),
+            first_on=first if isinstance(first, date) else None,
+            cadence=str(self["settlement_cadence"].value() or ""),
+        )
+        if entered.count is None or entered.first_on is None:
+            return ""
+        if invoice_builder.settlement_refusal(entered, timezone.localdate()) is not None:
+            return ""
+        try:
+            return installments.settlement_preview(
+                total, entered.count, entered.first_on, entered.cadence
+            )
+        except ValueError:
+            return ""
 
     def _drop_ignored_autopay(self, data: dict[str, Any], chosen: str) -> None:
         """A page without the script sends every field: Set up autopay's fields count only
@@ -2597,9 +2710,15 @@ class CalendarEntryForm(forms.Form):
 # --- Installment plans (PLAN-012e D10, D11) ----------------------------------------------
 
 
-def _cadence_field() -> forms.ChoiceField:
+def _cadence_field(*, split: bool = False) -> forms.ChoiceField:
+    """The cadence select: every cadence (a plan's reschedule), or Split into
+    installments' own, without Schedule settlement's yearly (PLAN-012f-b D16)."""
     return _QuietChoiceField(
-        choices=InstallmentCadence.choices,
+        choices=[
+            (value, label)
+            for value, label in InstallmentCadence.choices
+            if not split or value in installments.SPLIT_CADENCES
+        ],
         initial=InstallmentCadence.MONTHLY,
         error_messages={
             "required": "Choose weekly, every two weeks or monthly.",
@@ -2636,7 +2755,7 @@ class SplitForm(forms.Form):
         },
     )
     first_due = _first_due_field()
-    cadence = _cadence_field()
+    cadence = _cadence_field(split=True)
 
 
 class PlanRescheduleForm(forms.Form):

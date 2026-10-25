@@ -42,7 +42,7 @@
   </section>
 
   {% if installment_plan %}
-    <p id="installment-of">Installment {{ charge.installment_no }} of {{ installment_plan.count }} of an <a href="{% url 'ledger:plans:detail' pk=installment_plan.pk %}">installment plan</a> ({{ installment_plan.get_status_display|lower }}).</p>
+    <p id="installment-of">{% if installment_plan.origin == "settlement" %}<a href="{% url 'ledger:plans:detail' pk=installment_plan.pk %}">{{ installment_label }}</a>{% else %}{{ installment_label }} of an <a href="{% url 'ledger:plans:detail' pk=installment_plan.pk %}">installment plan</a>{% endif %} ({{ installment_plan.get_status_display|lower }}).</p>
   {% endif %}
 
   <section class="card" id="invoices-card">
