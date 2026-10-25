@@ -1,0 +1,8 @@
+{% comment %}The "Which store?" picker (docs/qa/PLAN-012f-b-staging-review.md D2, D7; DESIGN-SPEC §4a): the dialog that "+ New invoice" on the dashboard and "New invoice for…" on the search page open. ledger/store_picker.js fills the list from ledger:search_stores as one types; Enter with no row chosen (or no script) searches the stores on the search page with intent=new_invoice, whose rows lead to each store's Create invoice page. For billing and above; the page loads the script.{% endcomment %}{% load components %}{% dialog id="store-picker" title="Which store?" size="sm" %}
+  <form method="get" action="{% url 'ledger:search' %}" class="store-picker-form" id="store-picker-form" role="search">
+    <input type="hidden" name="intent" value="new_invoice">
+    <input type="search" name="q" id="store-picker-q" autocomplete="off" maxlength="100" placeholder="Store number, name or operator" aria-label="Store number, name or operator" aria-controls="store-picker-results" data-url="{% url 'ledger:search_stores' %}">
+  </form>
+  <ul class="store-picker-results" id="store-picker-results"></ul>
+  <p class="muted store-picker-status" id="store-picker-status" aria-live="polite">Type to search</p>
+{% enddialog %}

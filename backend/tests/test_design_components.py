@@ -807,8 +807,9 @@ def test_the_dashboard_is_cards_with_the_figures_then_the_attention_list() -> No
     )
     assert len(cards) >= 5
     first = content.index('class="card')
-    # PLAN-012f D7: the four figures, then the attention card, the collection and coming-up
-    # cards, the recent payments, then the run, the failed attempts and the other lists.
+    # PLAN-012f D7, re-pinned by PLAN-012f-b A-3: the four figures, the Cashflow card, the
+    # attention card beside Payment status, the recent payments beside the mini calendar, the
+    # collection and coming-up cards, then the run, the failed attempts and the other lists.
     assert content.index('id="figures-card"') < content.index('id="attention-none"')
     assert content.index('id="attention-none"') >= first  # the first card is the attention card
     assert content.index('id="attention-none"') < content.index('id="today-run"')
@@ -816,10 +817,13 @@ def test_the_dashboard_is_cards_with_the_figures_then_the_attention_list() -> No
         content.index(f'id="{name}"')
         for name in (
             "figures-card",
+            "cashflow-card",
             "attention",
+            "payment-status",
+            "recent-payments",
+            "mini-calendar",
             "collection-card",
             "coming-up",
-            "recent-payments",
             "today-run",
             "failed-attempts",
             "not-sent-card",

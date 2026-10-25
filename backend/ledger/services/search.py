@@ -2,6 +2,10 @@
 
 Read only: nothing here writes or calls the payment provider.
 
+**The picker** (:func:`store_rows`, PLAN-012f-b D7): the same store match, at most
+:data:`PICKER_MAX` rows for the dashboard's "Which store?" dialog, each linking to the
+store's Create invoice page.
+
 **The query** (:func:`clean_query`): the ``q`` text without control characters, cut to
 :data:`QUERY_MAX_LENGTH` characters before any use, surrounding spaces removed. An empty
 or whitespace-only query is no filter. :func:`words` splits it on whitespace (a word
@@ -26,6 +30,7 @@ from datetime import date
 
 from django.db.models import CharField, Exists, F, OuterRef, Q, QuerySet
 from django.db.models.functions import Cast, Lower
+from django.urls import reverse
 from django.utils import timezone
 
 from ledger.models import Lease, Operator, Store
@@ -165,3 +170,42 @@ def search(query: str, today: date | None = None) -> Results:
         more_stores=len(stores) > RESULTS_MAX,
         more_operators=len(operators) > RESULTS_MAX,
     )
+
+
+# --- The "Which store?" picker (PLAN-012f-b D7) ------------------------------------------
+
+#: The most stores the picker lists (D7).
+PICKER_MAX = 10
+
+
+def store_rows(
+    query: str, limit: int = PICKER_MAX, today: date | None = None
+) -> list[dict[str, object]]:
+    """The picker's rows for ``query`` (already cleaned): at most ``limit`` stores matching
+    every word as the top-bar search matches them, each ``{"number", "name", "operator",
+    "closed", "url"}`` with ``url`` the store's Create invoice page; ``[]`` when the query
+    has no word. Two queries (the stores, their leases)."""
+    # Imported here: the stores service imports this module.
+    from ledger.services.stores import CLOSED_STATUSES
+
+    day = today or timezone.localdate()
+    if not words(query):
+        return []
+    stores = list(
+        filter_stores(Store.objects.all(), query, day)
+        .prefetch_related("leases__operator")
+        .order_by(F("store_number").asc(nulls_last=True), Lower("external_label"), "id")[:limit]
+    )
+    rows: list[dict[str, object]] = []
+    for store in stores:
+        operator = _current_operator(store, day)
+        rows.append(
+            {
+                "number": store.store_number,
+                "name": store.external_label,
+                "operator": operator.display_name if operator is not None else "",
+                "closed": store.status in CLOSED_STATUSES,
+                "url": reverse("ledger:invoices:new_store", kwargs={"pk": store.pk}),
+            }
+        )
+    return rows

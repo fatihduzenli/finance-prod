@@ -34,7 +34,8 @@ success and information, the text kept in the page. print.css (media="print") dr
 sidebar, the phone bars and the messages and shows the print header (the company name and
 the date) and footer ("Printed <date>") (D6). The SANDBOX banner and the title prefix are
 injected by finance.middleware.SandboxBannerMiddleware; app.css places the banner above the
-page header. The sign-in pages keep their own base, two_factor/_base.html.
+page header. finance/dialog.js runs the {% dialog %} component (PLAN-012f-b D2) on every
+page. The sign-in pages keep their own base, two_factor/_base.html.
 {% endcomment %}{% load icons roles shell static %}<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -136,6 +137,7 @@ page header. The sign-in pages keep their own base, two_factor/_base.html.
       </div>
     </details>
   </nav>
+  <script src="{% static 'finance/dialog.js' %}" defer></script>
   {% block scripts %}{% endblock %}
   {% if messages %}<script>
     // A flash message's dismiss button removes its message (PLAN-012c D5).

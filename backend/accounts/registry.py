@@ -365,6 +365,9 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:arrears:export",
         # The top-bar search's results (PLAN-012d D17): any verified role.
         "ledger:search",
+        # The "Which store?" picker's type-ahead as JSON (PLAN-012f-b D7): billing,
+        # checked by the view; GET only.
+        "ledger:search_stores",
         # The reports menu, the A/R aging, revenue by month, payments by method, deposits
         # versus transactions and the customer statement, with their CSV exports: any
         # verified role (PLAN-011 D4, D10).

@@ -1,0 +1,18 @@
+{% load charts money %}
+{% comment %}The Payment status card (PLAN-012f-b D5; DESIGN-SPEC §4a): the range's rent charges as a donut with the
+total in the middle ({% donut %}, finance/templatetags/charts.py) and three boxes under it, Overdue, Paid and
+Upcoming, each with its count and amount; "+ n pending" under the donut for the charges it leaves out
+(pending, and partly paid not yet due). The range is the Cashflow card's.{% endcomment %}
+<section class="card" id="payment-status" aria-labelledby="payment-status-heading">
+  <h2 id="payment-status-heading">Payment status</h2>
+  {% if payment_status %}
+    <p class="muted" id="payment-status-range">{{ payment_status.range.label }}</p>
+    {% donut payment_status.parts payment_status.total %}
+    {% if payment_status.pending %}<p class="muted status-pending" id="payment-status-pending">+ {{ payment_status.pending }} pending</p>{% endif %}
+    <ul class="status-boxes">
+      {% for part in payment_status.parts %}<li class="status-box status-{{ part.key }}" id="status-{{ part.key }}"><span class="status-box-label">{% chart_key part.key %}{{ part.label }}</span><span class="status-box-count">{{ part.count }}</span><span class="status-box-amount">{{ part.amount|money }}</span></li>{% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted" id="payment-status-none">Choose a range above.</p>
+  {% endif %}
+</section>

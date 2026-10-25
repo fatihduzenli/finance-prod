@@ -143,8 +143,12 @@ def test_the_header_has_the_long_date_and_new_invoice_for_billing_only() -> None
     header = section(billing, 'id="page-header"', "</header>")
     assert '<span class="page-date" id="dashboard-date">Tuesday, Oct 6, 2026</span>' in header
     assert 'id="nav-search"' in header
+    # PLAN-012f-b D7: the button opens the "Which store?" picker; the search page for a new
+    # invoice is its link without the script (re-pinned from the Stores list).
     assert re.search(
-        r'<a class="btn btn-primary" id="new-invoice" href="/stores/">.*New invoice</a>', header
+        r'<a class="btn btn-primary" id="new-invoice" href="/search/\?intent=new_invoice" '
+        r'data-dialog-open="store-picker">.*New invoice</a>',
+        header,
     )
     viewer = page(client_for(Role.VIEWER)[0], "/")
     assert 'id="new-invoice"' not in viewer

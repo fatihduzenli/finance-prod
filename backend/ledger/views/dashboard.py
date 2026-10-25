@@ -39,11 +39,26 @@ from ledger.wording import format_amount
 @role_required
 @require_safe
 def home(request: HttpRequest) -> HttpResponse:
-    """``ledger:home`` (D1; the approved design's layout, PLAN-012f D7): the four figures,
-    what needs attention (PLAN-011b D6) beside the month's collection and what is coming
-    up, the recent payments, then today's run, the failed attempts, the waived charges,
-    the invoices not sent and the last nightly check."""
+    """``ledger:home`` (D1; the approved design's layout, PLAN-012f D7, and the staging
+    review's, PLAN-012f-b D3 to D6): the four figures, the Cashflow card, what needs
+    attention (PLAN-011b D6) beside the Payment status card, the recent payments beside the
+    mini calendar, the month's collection and what is coming up, then today's run, the
+    failed attempts, the waived charges, the invoices not sent and the last nightly check.
+    ``?range=`` (with ``from`` and ``to``) is the Cashflow and Payment status cards' shared
+    range and ``?cal=`` the mini calendar's month; an unusable range computes neither card
+    and says so. The Cashflow card runs inside the reports' statement timeout."""
     today = timezone.localdate()
+    selected = dashboard_blocks.parse_range(request.GET, today)
+    range_from, range_to = dashboard_blocks.form_months(request.GET, today)
+    cal_month = dashboard_blocks.parse_cal(request.GET.get("cal", "") or "", today)
+    cashflow: dashboard_blocks.Cashflow | None = None
+    cashflow_message = ""
+    if selected is not None:
+        try:
+            cashflow = bounded(lambda: dashboard_blocks.cashflow(selected))
+        except ReportTooSlow:
+            cashflow_message = TOO_SLOW
+    range_query = urlencode(selected.as_query()) if selected is not None else ""
     role = role_of(request.user)
     data = receivables.dashboard(today)
     leases = attention.dashboard_leases()
@@ -84,6 +99,21 @@ def home(request: HttpRequest) -> HttpResponse:
                 (invoice, receivables.invoice_store_label(invoice))
                 for invoice in data.failed_attempts
             ],
+            # PLAN-012f-b D3 to D6: the shared range, its two cards and the mini calendar.
+            "range": selected,
+            "range_choices": dashboard_blocks.RANGE_CHOICES,
+            "range_key": selected.key if selected is not None else dashboard_blocks.RANGE_CUSTOM,
+            "range_from": selected.from_month if selected is not None else range_from,
+            "range_to": selected.to_month if selected is not None else range_to,
+            "range_months": dashboard_blocks.picker_months(selected, range_from, range_to, today),
+            "range_message": dashboard_blocks.RANGE_MESSAGE if selected is None else "",
+            "range_query": range_query,
+            "cashflow": cashflow,
+            "cashflow_message": cashflow_message,
+            "payment_status": (
+                dashboard_blocks.payment_status(selected, today) if selected is not None else None
+            ),
+            "mini_calendar": dashboard_blocks.mini_calendar(cal_month, today),
         },
     )
 

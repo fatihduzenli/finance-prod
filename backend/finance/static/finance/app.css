@@ -448,15 +448,17 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
 
 /* --- Dashboard (PLAN-012f D7) -----------------------------------------------------------------
    The header's .page-title (the title, then the long date in .page-date). Row 1, .kpi-row: the
-   four KPI cards. Row 2, .dashboard-grid: the Needs attention card (.attention-table: the
-   store, the why badge with the rest of the item's text, the amount, the row's button) over
-   two thirds, beside the month's collection (.collection-total: the 28/700 percentage and
-   "of $X") and Coming up (.coming-list: a date chip beside each item's title and its muted
-   note). Then the Recent payments card and the other cards. */
+   four KPI cards. Row 2, .dashboard-cashflow: the Cashflow card, full width (PLAN-012f-b D3).
+   Rows 3 and 4, .dashboard-row-thirds (two thirds | one third): the Needs attention card
+   (.attention-table: the store, the why badge with the rest of the item's text, the amount,
+   the row's button) beside Payment status; Recent payments beside the mini calendar, the
+   month's collection (.collection-total: the 28/700 percentage and "of $X") and Coming up
+   (.coming-list: a date chip beside each item's title and its muted note). Then the other
+   cards. */
 .page-header .page-actions .nav-search { flex: 0 0 320px; }
 .page-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-4); }
 .page-date { color: var(--muted); font-size: var(--fs-base); }
-.dashboard-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.dashboard-row-thirds { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 .dashboard-main, .dashboard-side { min-width: 0; }
 .count-pill-alert { background: var(--unpaid-bg); color: var(--unpaid-text); }
 .attention-table td { vertical-align: middle; }
@@ -475,6 +477,70 @@ td.attention-action { text-align: right; }
 .recent-when { color: var(--muted); text-decoration: none; }
 .recent-when:hover { text-decoration: underline; }
 .badge.promise-open { background: var(--pending-bg); color: var(--pending-text); }
+/* The Cashflow card (PLAN-012f-b D3, D4): .cashflow-head holds the title with the three totals
+   (.cashflow-totals; Net green or red, its sign in the figure) and the range form at the right
+   (.range-form; .range-custom shows when Custom is chosen); .cashflow-chart holds the
+   {% bars %} SVG (a sideways scroll under 36rem so the month labels stay legible), then the
+   legend ({% chart_key %} beside each word) and the muted line of stores without a cost. */
+.cashflow-head { align-items: flex-start; }
+.cashflow-title { display: flex; flex-direction: column; gap: var(--space-1); }
+.cashflow-totals { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 0; color: var(--muted); font-size: var(--fs-base); }
+.total-income strong { color: var(--link); }
+.total-expenses strong { color: var(--text-2); }
+.total-net.is-positive strong { color: var(--paid-text); }
+.total-net.is-negative strong { color: var(--unpaid-text); }
+.range-form { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin: 0 0 0 auto; }
+.range-form label { margin: 0 0 0 4px; color: var(--muted); font-size: var(--fs-base); font-weight: 400; }
+.range-form select { width: auto; padding: 7px 8px; font-size: var(--fs-base); }
+.range-custom { display: none; align-items: center; gap: 6px; flex-wrap: wrap; }
+.range-form.is-custom .range-custom, .range-form:has(#range-select option[value="custom"]:checked) .range-custom { display: inline-flex; }
+.cashflow-range-label { margin: 0 0 var(--space-2); font-size: var(--fs-sm); }
+.cashflow-chart { overflow-x: auto; }
+.cashflow-chart .bars-chart { display: block; width: 100%; min-width: 36rem; height: auto; }
+.cashflow-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: var(--space-2) 0 0; padding: 0; list-style: none; color: var(--text-2); font-size: var(--fs-sm); }
+.cashflow-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.chart-key { flex: 0 0 auto; }
+#cashflow-without-cost { margin: var(--space-2) 0 0; font-size: var(--fs-sm); }
+/* The Payment status card (D5): the {% donut %} ring with the total in its middle
+   (.donut-total), "+ n pending", then the three boxes, each its colour's key
+   ({% chart_key %}: the colours are the charts tag's) beside its word, the count and the
+   amount. */
+.donut { position: relative; width: 168px; max-width: 100%; margin: var(--space-2) auto; }
+.donut svg { display: block; width: 100%; height: auto; }
+.donut-total { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.donut-amount { color: var(--text); font-size: var(--fs-md); font-weight: 700; }
+.donut-label { color: var(--muted); font-size: var(--fs-xs); }
+.status-pending { margin: 0 0 var(--space-3); font-size: var(--fs-sm); text-align: center; }
+.status-boxes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.status-box { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-ctl); }
+.status-box-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: var(--fs-sm); font-weight: 600; }
+.status-box-count { color: var(--text); font-size: var(--fs-lg); font-weight: 700; }
+.status-box-amount { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+/* The mini calendar (D6): ‹ month › (.mini-nav), the 7-column .mini-grid, today's number in
+   a teal circle, a dot (.mini-dot) under a day with items, whose .mini-popover lists them in
+   the Calendar page's chip colours (.calendar-item kind-…); hover and focus show it, a tap
+   toggles .is-open (ledger/static/ledger/dashboard.js). The two columns at each edge open
+   their popover inwards. */
+.mini-head h2 a { color: inherit; text-decoration: none; }
+.mini-head h2 a:hover { color: var(--link); text-decoration: underline; }
+.mini-nav { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
+.mini-month { font-size: var(--fs-base); font-weight: 600; white-space: nowrap; }
+.mini-step { min-width: 32px; padding: 4px 8px; font-size: 16px; line-height: 1; text-align: center; }
+.mini-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; text-align: center; }
+.mini-weekday { padding: 2px 0 6px; color: var(--muted); font-size: var(--fs-xs); font-weight: 600; }
+.mini-day { position: relative; display: flex; flex-direction: column; align-items: center; min-height: 36px; font-size: var(--fs-sm); }
+.mini-day.other-month { color: var(--muted); }
+.mini-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font: inherit; }
+button.mini-num { cursor: pointer; font-weight: 600; }
+button.mini-num:hover { background: var(--month-current); }
+.mini-day.is-today .mini-num { background: var(--btn-primary-bg); color: var(--surface); font-weight: 700; }
+.mini-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--teal); }
+.mini-popover { display: none; position: absolute; top: 100%; left: 50%; z-index: 20; width: 14rem; margin: 2px 0 0; padding: var(--space-2); transform: translateX(-50%); border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); list-style: none; text-align: left; }
+.mini-day:nth-child(7n + 1) .mini-popover, .mini-day:nth-child(7n + 2) .mini-popover { left: 0; transform: none; }
+.mini-day:nth-child(7n) .mini-popover, .mini-day:nth-child(7n + 6) .mini-popover { left: auto; right: 0; transform: none; }
+.mini-day:hover .mini-popover, .mini-day:focus-within .mini-popover, .mini-day.is-open .mini-popover { display: block; }
+.mini-popover .calendar-item { margin-bottom: 3px; }
+.mini-popover .calendar-item:last-child { margin-bottom: 0; }
 
 /* --- The monthly rent overview (PLAN-012f D9) -------------------------------------------------
    .filter-card: the words filter and the filters in one card. .grid-card: the grid's scroll
@@ -745,6 +811,32 @@ fieldset.card > legend + * { clear: both; }
 .settle-owed { background: var(--unpaid-bg); color: var(--unpaid-text); }
 .settlement-help { margin: var(--space-2) 0 0; font-size: var(--fs-sm); }
 
+/* --- Dialog (PLAN-012f-b D2; DESIGN-SPEC §4 States, §4a) ----------------------------------
+   .dialog: the {% dialog %} tag's <dialog>, the confirmation frame: 440 px (.dialog-sm) or
+   640 px for a form (.dialog-lg), radius 14, over the backdrop (--navy at 45 %, the spec's
+   rgba of it). .dialog-head: the 17/600 title and the × button; .dialog-body: the content;
+   .dialog-foot: the caller's buttons, right-aligned. On phones a full-width sheet at the
+   bottom (below). The "Which store?" picker's list (.store-picker-results): one link per
+   store, the highlighted row tinted. */
+.dialog { box-sizing: border-box; width: calc(100% - 2 * var(--space-4)); padding: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); }
+.dialog-sm { max-width: 440px; }
+.dialog-lg { max-width: 640px; }
+.dialog::backdrop { background: color-mix(in srgb, var(--navy) 45%, transparent); }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-5) var(--space-6) 0; }
+.dialog-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.dialog-close { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; padding: 0; border: 0; border-radius: var(--radius-ctl); background: transparent; color: var(--muted); font: inherit; font-size: 22px; line-height: 1; cursor: pointer; }
+.dialog-close:hover { background: var(--surface-2); color: var(--text); }
+.dialog-body { padding: var(--space-4) var(--space-6) var(--space-6); }
+.dialog-body > p:first-child { margin-top: 0; }
+.dialog-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
+.store-picker-form { margin: 0; }
+.store-picker-form input[type=search] { width: 100%; box-sizing: border-box; }
+.store-picker-results { margin: var(--space-3) 0 0; padding: 0; list-style: none; }
+.store-picker-results li a { display: block; padding: var(--space-2) var(--space-3); border-radius: var(--radius-ctl); color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.store-picker-results li a:hover, .store-picker-results li.is-active a { background: var(--month-current); }
+.store-picker-status { margin: var(--space-3) 0 0; }
+.store-picker-status:empty { display: none; }
+
 /* --- 720px and wider: the tables' head row stays in view (PLAN-012c D5) -------------------- */
 @media (min-width: 720px) {
   /* The tables of the workspace and dashboard cards reach the cards' edges (PLAN-012f D7, D8). */
@@ -812,7 +904,8 @@ fieldset.card > legend + * { clear: both; }
   .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
   .kpi { padding: var(--space-3) 14px; }
   .kpi-value { font-size: 20px; }
-  .dashboard-grid, .workspace-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  .dashboard-row-thirds, .workspace-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  .range-form { margin: 0; justify-content: flex-start; }
   .page-header .page-actions .nav-search { display: none; }
   /* The store page (DESIGN-SPEC §6): the operator and the city in place of the address, the
      summary strip, a full-width primary action over two half-width secondaries, the tabs
@@ -1153,6 +1246,10 @@ p.detail-more-notes { padding-left: 0; }
 
 /* --- Phone ------------------------------------------------------------------------------ */
 @media (max-width: 719.98px) {
+  /* A dialog is a full-width sheet at the bottom of the screen (PLAN-012f-b D2). */
+  .dialog, .dialog-sm, .dialog-lg { width: 100%; max-width: none; max-height: 90vh; margin: auto 0 0; border-width: 1px 0 0; border-radius: 14px 14px 0 0; }
+  .dialog-head { padding: var(--space-4) var(--space-4) 0; }
+  .dialog-body { padding: var(--space-3) var(--space-4) var(--space-5); }
   main, main.wide { margin: 0; padding: var(--space-4); border: 0; border-radius: 0; max-width: none; }
   dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 10px; }
   /* A 16 px field keeps a phone from zooming in on focus. */

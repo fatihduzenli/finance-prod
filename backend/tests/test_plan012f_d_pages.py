@@ -356,6 +356,7 @@ NOT_PAGES: dict[str, str] = {
     "ledger:calendar:delete": POST_ONLY,
     "ledger:statement_link": "the operator's own signed statement page (out of scope, §2)",
     "ledger:invoices:rent_amount": "the builder's rent amount (JSON for its script)",
+    "ledger:search_stores": "the store picker's rows (JSON for the picker's script)",
     "ledger:invoices:print": "the invoice document's print page (its own layout)",
     "ledger:lease_ends:pdf": "the statement PDF",
     "ledger:documents:download": "a stored file",
@@ -779,7 +780,9 @@ def test_the_dashboards_attention_rows_are_cards_with_a_full_width_button_on_a_p
     block = phone_block(APP_CSS.read_text(encoding="utf-8"))
     assert ".kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr));" in block
     assert ".attention-table td.attention-action > .btn { display: flex; width: 100%; }" in block
-    assert ".dashboard-grid, .workspace-grid { grid-template-columns: minmax(0, 1fr);" in block
+    # PLAN-012f-b A-3: the dashboard's two-thirds rows are .dashboard-row-thirds.
+    thirds = ".dashboard-row-thirds, .workspace-grid { grid-template-columns: minmax(0, 1fr);"
+    assert thirds in block
 
 
 # --- The login page (D13) ---------------------------------------------------------------------
