@@ -415,6 +415,71 @@ def test_a_negative_net_reads_below_the_zero_line() -> None:
     assert float(point.group(1)) > float(zero.group(1))
 
 
+def labels(html: str) -> list[tuple[str, bool]]:
+    """Each month label's text and whether it stays on a narrow chart."""
+    return [
+        (text, "bar-label-minor" not in classes)
+        for classes, text in re.findall(r'<text class="([^"]+)"[^>]*>([^<]*)</text>', html)
+    ]
+
+
+def test_every_month_is_labelled_and_a_narrow_chart_keeps_every_third_and_both_ends() -> None:
+    # Fable's A3-1: on a phone the twelve labels ran past the card; the kept ones fit.
+    html = render("{% bars rows today %}", rows=months(), today=date(2026, 10, 25))
+    found = labels(html)
+    assert [text for text, _ in found] == [
+        "Nov 2025", "Dec 2025", "Jan 2026", "Feb 2026", "Mar 2026", "Apr 2026",
+        "May 2026", "Jun 2026", "Jul 2026", "Aug 2026", "Sep 2026", "Oct 2026",
+    ]  # fmt: skip
+    kept = [text for text, major in found if major]
+    # The range starts in Aug 2026 (in_range from index 9) and today is in Oct 2026; every
+    # third month back from Oct 2026, less Jul 2026 beside Aug 2026.
+    assert kept == ["Jan 2026", "Apr 2026", "Aug 2026", "Oct 2026"]
+    # A bar's title names its month whether its label is kept or not.
+    assert "<title>Income Nov 2025: $0.00</title>" in html
+
+
+def test_the_range_start_and_today_are_labelled_wherever_they_fall() -> None:
+    rows = [
+        blocks.CashflowMonth(pnl.add_months(date(2025, 11, 1), i), D(10), D(5), D(5), i >= 4)
+        for i in range(12)
+    ]
+    kept = [text for text, major in labels(render("{% bars rows %}", rows=rows)) if major]
+    assert kept == ["Jan 2026", "Mar 2026", "Jul 2026", "Oct 2026"]  # Apr is beside Mar
+    html = render("{% bars rows today %}", rows=rows, today=date(2026, 6, 3))
+    kept = [text for text, major in labels(html) if major]
+    assert kept == ["Jan 2026", "Mar 2026", "Jun 2026", "Oct 2026"]
+    # Never two kept labels side by side.
+    indexes = [i for i, (_, major) in enumerate(labels(html)) if major]
+    assert all(b - a > 1 for a, b in zip(indexes, indexes[1:], strict=False)), indexes
+
+
+def test_a_today_outside_the_drawn_months_adds_no_label() -> None:
+    from finance.templatetags.charts import major_months
+
+    rows = months()
+    assert major_months(rows, date(2030, 1, 1)) == major_months(rows)
+    assert major_months([], date(2026, 10, 1)) == set()
+
+
+def test_on_a_phone_the_chart_fits_its_card_with_the_kept_labels() -> None:
+    from tests.test_plan012f_d_pages import APP_CSS
+
+    css = APP_CSS.read_text(encoding="utf-8")
+    phone = css.split("@media (max-width: 719.98px) {", 1)[1].split("\n}\n", 1)[0]
+    for rule in (
+        ".cashflow-chart .bars-chart { min-width: 0; }",
+        ".bars-chart .bar-label-minor { display: none; }",
+        ".bars-chart .bar-month:last-of-type .bar-label { text-anchor: end; }",
+    ):
+        assert rule in phone, rule
+
+
+def test_the_dashboard_passes_today_to_the_chart() -> None:
+    template = Path(__file__).resolve().parents[1] / "ledger/templates/ledger/dashboard"
+    assert "{% bars cashflow.months data.today %}" in (template / "_cashflow.html").read_text()
+
+
 @dataclass
 class Part:
     key: str

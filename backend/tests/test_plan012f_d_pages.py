@@ -547,16 +547,14 @@ def _store(world: World) -> list[str]:
 
 #: Page → (its parents' titles in the breadcrumb, the page's own words in it).
 BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
-    "ledger:stores:create": lambda w: (["Stores"], "New store"),
-    "ledger:stores:edit": lambda w: (_store(w), f"Edit store {w.store.external_label}"),
+    # PLAN-012f-b Batch B: New / Edit store and operator are dialogs over the list or the
+    # page (tests/test_form_modals.py); the page behind keeps its own header.
     "ledger:stores:set_cost": lambda w: (_store(w), "Set landlord rent"),
     "ledger:stores:correct_cost": lambda w: (_store(w), "Correct a cost row"),
     "ledger:stores:record_payment": lambda w: (_store(w), "Add payment"),
     "ledger:stores:end_lease": lambda w: (_store(w), "End lease"),
     "ledger:stores:transfer": lambda w: (_store(w), "Transfer"),
     "ledger:stores:contacts": lambda w: ([f"Store {w.store.external_label}"], "Contact log"),
-    "ledger:operators:create": lambda w: (["Operators"], "New operator"),
-    "ledger:operators:edit": lambda w: (["Operators", "Walk Co"], "Edit Walk Co"),
     "ledger:operators:link": lambda w: (["Operators", "Walk Co"], "Connect to Stax"),
     "ledger:operators:statement": lambda w: (["Operators", "Walk Co"], "Statement"),
     "ledger:operators:contacts": lambda w: (["Walk Co"], "Contact log"),
@@ -739,6 +737,10 @@ def test_every_form_card_ends_in_one_primary_button(world: World) -> None:
             for block in actions:
                 found += 1
                 assert block.count("btn-primary") == 1, (name, block)
+        # PLAN-012f-b Batch B: a form dialog's primary is in its foot.
+        for foot in re.findall(r'<div class="dialog-foot">(.*?)</div>', body, re.S):
+            found += 1
+            assert foot.count("btn-primary") == 1, (name, foot)
     assert found >= 20
 
 

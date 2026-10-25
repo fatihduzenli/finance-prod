@@ -25,7 +25,7 @@ nothing and says so once.{% endcomment %}
     <p class="warning" id="cashflow-too-slow" role="status">{{ cashflow_message }}</p>
   {% elif cashflow %}
     <p class="muted cashflow-range-label" id="cashflow-range-label">{{ cashflow.range.label }}</p>
-    <div class="cashflow-chart">{% bars cashflow.months %}</div>
+    <div class="cashflow-chart">{% bars cashflow.months data.today %}</div>
     <ul class="cashflow-legend" aria-hidden="true"><li>{% chart_key "income" %}Income</li><li>{% chart_key "expenses" %}Expenses</li><li>{% chart_key "net" %}Net</li></ul>
     {% if cashflow.without_cost_line %}<p class="muted" id="cashflow-without-cost">{{ cashflow.without_cost_line }}</p>{% endif %}
   {% endif %}

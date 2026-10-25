@@ -195,6 +195,7 @@
     {% endif %}
   </aside>
   </div>
+  {% if form_dialog %}{% include "ledger/operators/_form_dialog.html" with dialog=form_dialog open=True %}{% endif %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}<script>
   (function () {

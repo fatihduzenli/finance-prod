@@ -128,26 +128,28 @@ def store_list(request: HttpRequest) -> HttpResponse:
     """The stores list (PLAN-012f-a D3): the counts line, the filters (search, State, Status,
     Balance, Sort; :func:`ledger.services.stores.store_list`) over every store, then the page.
     The spreadsheet keeps the search only (its rows are PLAN-011 D5's)."""
+    return render(request, "ledger/stores/list.html", _list_context(request))
+
+
+def _list_context(request: HttpRequest) -> dict[str, Any]:
+    """The Stores list page's context, for the list and for New store's page behind its
+    dialog (PLAN-012f-b Batch B)."""
     listed = service.store_list(request.GET, timezone.localdate())
     filters = listed.filters
     page = Paginator(listed.rows, PAGE_SIZE).get_page(request.GET.get("page"))
-    return render(
-        request,
-        "ledger/stores/list.html",
-        {
-            "page": page,
-            "listed": listed,
-            "filters": filters,
-            "query": filters.query,
-            "status_choices": service.LIST_STATUSES,
-            "balance_choices": service.LIST_BALANCES,
-            "sort_choices": service.LIST_SORTS,
-            "can_create": meets(_role(request), Role.ADMIN),
-            "export_query": urlencode({"q": filters.query}) if filters.query else "",
-            "pager_query": urlencode(filters.as_query()),
-            "filtered_from": listed.total if filters.narrowed else None,
-        },
-    )
+    return {
+        "page": page,
+        "listed": listed,
+        "filters": filters,
+        "query": filters.query,
+        "status_choices": service.LIST_STATUSES,
+        "balance_choices": service.LIST_BALANCES,
+        "sort_choices": service.LIST_SORTS,
+        "can_create": meets(_role(request), Role.ADMIN),
+        "export_query": urlencode({"q": filters.query}) if filters.query else "",
+        "pager_query": urlencode(filters.as_query()),
+        "filtered_from": listed.total if filters.narrowed else None,
+    }
 
 
 EXPORT_HEADER = (
@@ -191,7 +193,12 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
     """The store page as the workspace (PLAN-012d D1 to D3): the header card, the action
     bar (billing and admin), the open tab (``?tab=``, Charges by default; a document
     preview opens Documents), then the store's details, costs and leases."""
-    store = _load(pk)
+    return render(request, "ledger/stores/detail.html", _detail_context(request, _load(pk)))
+
+
+def _detail_context(request: HttpRequest, store: Store) -> dict[str, Any]:
+    """The store page's context, for the page and for Edit store's page behind its dialog
+    (PLAN-012f-b Batch B)."""
     today = timezone.localdate()
     role = _role(request)
     admin = meets(role, Role.ADMIN)
@@ -245,7 +252,7 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
         )
     if tab == workspace.TAB_DOCUMENTS:
         context.update(documents.section_context(request, store))
-    return render(request, "ledger/stores/detail.html", context)
+    return context
 
 
 @role_required
@@ -449,6 +456,29 @@ def store_charge_now_pick(request: HttpRequest, pk: str) -> HttpResponse:
 
 # --- Write --------------------------------------------------------------------------
 
+#: The New / Edit store dialog's fields that take both columns (PLAN-012f-b Batch B).
+WIDE_FIELDS: tuple[str, ...] = ("address_line1", "other_cost_description")
+
+
+def _form_dialog(
+    form: StoreForm,
+    title: str,
+    return_url: str,
+    *,
+    store: Store | None = None,
+    document_form: Any = None,
+) -> dict[str, Any]:
+    """The New / Edit store dialog (PLAN-012f-b Batch B; ledger/stores/_form_dialog.html),
+    open over the page behind it; closing it goes to ``return_url``."""
+    return {
+        "form": form,
+        "title": title,
+        "return_url": return_url,
+        "store": store,
+        "document_form": document_form,
+        "wide": WIDE_FIELDS,
+    }
+
 
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
@@ -475,22 +505,25 @@ def store_create(request: HttpRequest) -> HttpResponse:
                     field if field in form.fields else None, cost_refused.outcome.message
                 )
             else:
-                if created:
-                    messages.success(request, "Store saved.")
-                    documents.upload_after_create(request, store, "store")
-                else:
+                if not created:
                     messages.info(request, ALREADY_SAVED)
+                    return redirect("ledger:stores:detail", pk=store.pk)
+                messages.success(request, f"Store {service.title(store)} added.")
+                documents.upload_after_create(request, store, "store")
                 return redirect("ledger:stores:detail", pk=store.pk)
         _hold(request, "store-create", form)
         return redirect("ledger:stores:create")
     form = _held(request, "store-create", StoreCreateForm) or StoreCreateForm(
         initial={"creation_key": uuid.uuid4()}
     )
-    return render(
-        request,
-        "ledger/stores/form.html",
-        {"form": form, "store": None, "document_form": documents.create_form(DocumentKind.OTHER)},
+    context = _list_context(request)
+    context["form_dialog"] = _form_dialog(
+        form,
+        "New store",
+        reverse("ledger:stores:list"),
+        document_form=documents.create_form(DocumentKind.OTHER),
     )
+    return render(request, "ledger/stores/list.html", context)
 
 
 @role_required
@@ -512,7 +545,14 @@ def store_edit(request: HttpRequest, pk: str) -> HttpResponse:
     form = _held(request, target, lambda data: StoreForm(data, instance=store)) or StoreForm(
         instance=store
     )
-    return render(request, "ledger/stores/form.html", {"form": form, "store": store})
+    context = _detail_context(request, store)
+    context["form_dialog"] = _form_dialog(
+        form,
+        f"Edit store {service.title(store)}",
+        reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
+        store=store,
+    )
+    return render(request, "ledger/stores/detail.html", context)
 
 
 @role_required

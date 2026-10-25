@@ -340,8 +340,10 @@ def test_the_landlord_rent_is_required_on_the_new_store_form() -> None:
 def test_the_new_store_form_groups_the_cost_fields_and_the_edit_form_has_none() -> None:
     admin, _ = client_for(Role.ADMIN)
     new = admin.get(NEW).content.decode()
-    # PLAN-012f-a D5: the group is one of the form's cards.
-    fieldset = block(new, '<fieldset id="store-cost-fields" class="card form-card">', "</fieldset>")
+    # PLAN-012f-b Batch B: the group is its own fieldset in the New store dialog.
+    fieldset = block(
+        new, '<fieldset id="store-cost-fields" class="dialog-fieldset">', "</fieldset>"
+    )
     assert "<legend>Store cost</legend>" in fieldset
     for name in StoreCreateForm.COST_FIELDS:
         assert f'name="{name}"' in fieldset, name

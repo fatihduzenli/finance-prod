@@ -47,6 +47,7 @@ from django.http import (
     StreamingHttpResponse,
 )
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
@@ -228,6 +229,12 @@ def _listed(request: HttpRequest) -> tuple[QuerySet[Operator], str, bool]:
 @role_required
 @require_safe
 def operator_list(request: HttpRequest) -> HttpResponse:
+    return render(request, "ledger/operators/list.html", _list_context(request))
+
+
+def _list_context(request: HttpRequest) -> dict[str, Any]:
+    """The Operators list page's context, for the list and for New operator's page behind
+    its dialog (PLAN-012f-b Batch B)."""
     operators, query, include_archived = _listed(request)
     # PLAN-012f-a D3: the stores each operator has a lease of, in effect or to come (the
     # search's rule), counted in the page's own query.
@@ -242,18 +249,14 @@ def operator_list(request: HttpRequest) -> HttpResponse:
     page = Paginator(operators, PAGE_SIZE).get_page(request.GET.get("page"))
     export = {"q": query, "archived": "1" if include_archived else ""}
     export_query = urlencode({k: v for k, v in export.items() if v})
-    return render(
-        request,
-        "ledger/operators/list.html",
-        {
-            "page": page,
-            "query": query,
-            "include_archived": include_archived,
-            "can_create": meets(_role(request), Role.BILLING),
-            "export_query": export_query,
-            "pager_query": export_query,
-        },
-    )
+    return {
+        "page": page,
+        "query": query,
+        "include_archived": include_archived,
+        "can_create": meets(_role(request), Role.BILLING),
+        "export_query": export_query,
+        "pager_query": export_query,
+    }
 
 
 EXPORT_HEADER = (
@@ -313,7 +316,12 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
     e-mails, the contact log, notes), then the selected store's header card and action
     bar (``?store=``, one of the operator's stores) and the open tab (``?tab=``) across
     the operator's stores (:func:`ledger.services.workspace.operator_workspace`)."""
-    operator = _load(pk)
+    return render(request, "ledger/operators/detail.html", _detail_context(request, _load(pk)))
+
+
+def _detail_context(request: HttpRequest, operator: Operator) -> dict[str, Any]:
+    """The operator page's context, for the page and for Edit operator's page behind its
+    dialog (PLAN-012f-b Batch B)."""
     refs = operator_sync.current_refs(operator)
     customer = refs.get(operator_sync.KIND_CUSTOMER, "")
     method = refs.get(operator_sync.KIND_PAYMENT_METHOD, "")
@@ -354,106 +362,117 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
     )
     store_count = len(space.stores)
     store_cards = operator_cards.store_cards(operator, space.stores, space.open_rows, today)
-    return render(
-        request,
-        "ledger/operators/detail.html",
-        {
-            **jobs,
-            **space.data,
-            **tab_context,
-            "operator": operator,
-            "ows": space,
-            "space": space.space,
-            "header": space.space.header if space.space is not None else None,
-            "store": selected,
-            "billing": billing,
-            # The tab and filter links keep the selected store (D14).
-            "keep_store": urlencode({"store": str(selected.pk)}) + "&" if selected else "",
-            "customer_masked": mask_identifier(customer) if customer else "",
-            "payment_method_masked": mask_identifier(method) if method else "",
-            "failure_message": (
-                operator_sync.MESSAGES.get(operator.sync_failure, operator_sync.DEFAULT_MESSAGE)
-                if failed
-                else ""
-            ),
-            "failure_fields": (
-                ", ".join(operator.sync_failure_fields.split(","))
-                if failed and operator.sync_failure_fields
-                else ""
-            ),
-            "notes": Note.objects.filter(
-                entity_type=NoteEntityType.OPERATOR, entity_id=operator.pk
-            ).order_by("-created_at"),
-            "provider_updated_at": (
-                operator_sync.provider_updated_at(operator)
-                if operator.sync_status == SyncStatus.LINKED
-                else None
-            ),
-            "can_edit": billing and active,
-            "can_retry": billing
-            and active
-            and failed
-            and phone_ok
-            and not retry_in
-            and not jobs["job_refresh"],
-            "fix_phone_message": (
-                operator_sync.MESSAGES[operator_sync.PHONE_INVALID]
-                if billing and active and failed and not phone_ok
-                else ""
-            ),
-            "retry_wait_message": (
-                operator_sync.retry_wait_message(retry_in)
-                if billing and active and retry_in
-                else ""
-            ),
-            "can_link": billing and active,
-            "can_archive": meets(role, Role.ADMIN) and active,
-            # PLAN-011b D6, D7: the operator's own attention items as banners, and the
-            # latest contact log entries.
-            "attention": attention.attention(timezone.localdate(), operator=operator.pk),
-            # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
-            "can_record_outcome": billing and active,
-            "contact_rows": contact_rows,
-            "contact_limit": contacts.PAGE_LIMIT,
-            "can_add_contact": billing and active,
-            # PLAN-011b D4: the collection e-mails sent to the operator, and the
-            # "handled personally" switch (billing).
-            "collection_log": collections.operator_log(operator, collections.LOG_LIMIT),
-            "collection_log_limit": collections.LOG_LIMIT,
-            "can_set_handled": billing and active,
-            # PLAN-011b D4: the signed statement links (billing revokes them).
-            "can_revoke_links": billing,
-            "statement_link_days": statement_links.MAX_AGE_DAYS,
-            # PLAN-012f-a D7 (operator-workspace-laptop.png): the header's avatar and muted
-            # line, the strip of store cards and the right column's cards; facts only.
-            "operator_initials": operator_cards.initials(operator.display_name),
-            "operator_line": " · ".join(
-                part
-                for part in (
-                    operator.phone,
-                    operator.email or "",
-                    "SMS consent given" if operator.sms_consent_at else "no SMS consent",
-                    f"{store_count} store" if store_count == 1 else f"{store_count} stores",
-                )
-                if part
-            ),
-            "store_cards": store_cards,
-            # The Charges card's title: "Charges · all stores", or the selected store's.
-            "charges_scope": next(
-                (card.title for card in store_cards if card.store == selected), "all stores"
-            ),
-            "bank_method": operator_cards.bank_method(operator, method),
-            "returns_this_year": operator_cards.returns_this_year(operator, today),
-            "open_promise": operator_cards.open_promise(operator),
-            "recent_contacts": [row for row in contact_rows if row.entry.deleted_at is None][
-                :RECENT_CONTACTS
-            ],
-            "statement_link_opened": operator_cards.statement_link_opened(operator),
-        },
-    )
+    return {
+        **jobs,
+        **space.data,
+        **tab_context,
+        "operator": operator,
+        "ows": space,
+        "space": space.space,
+        "header": space.space.header if space.space is not None else None,
+        "store": selected,
+        "billing": billing,
+        # The tab and filter links keep the selected store (D14).
+        "keep_store": urlencode({"store": str(selected.pk)}) + "&" if selected else "",
+        "customer_masked": mask_identifier(customer) if customer else "",
+        "payment_method_masked": mask_identifier(method) if method else "",
+        "failure_message": (
+            operator_sync.MESSAGES.get(operator.sync_failure, operator_sync.DEFAULT_MESSAGE)
+            if failed
+            else ""
+        ),
+        "failure_fields": (
+            ", ".join(operator.sync_failure_fields.split(","))
+            if failed and operator.sync_failure_fields
+            else ""
+        ),
+        "notes": Note.objects.filter(
+            entity_type=NoteEntityType.OPERATOR, entity_id=operator.pk
+        ).order_by("-created_at"),
+        "provider_updated_at": (
+            operator_sync.provider_updated_at(operator)
+            if operator.sync_status == SyncStatus.LINKED
+            else None
+        ),
+        "can_edit": billing and active,
+        "can_retry": billing
+        and active
+        and failed
+        and phone_ok
+        and not retry_in
+        and not jobs["job_refresh"],
+        "fix_phone_message": (
+            operator_sync.MESSAGES[operator_sync.PHONE_INVALID]
+            if billing and active and failed and not phone_ok
+            else ""
+        ),
+        "retry_wait_message": (
+            operator_sync.retry_wait_message(retry_in) if billing and active and retry_in else ""
+        ),
+        "can_link": billing and active,
+        "can_archive": meets(role, Role.ADMIN) and active,
+        # PLAN-011b D6, D7: the operator's own attention items as banners, and the
+        # latest contact log entries.
+        "attention": attention.attention(timezone.localdate(), operator=operator.pk),
+        # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
+        "can_record_outcome": billing and active,
+        "contact_rows": contact_rows,
+        "contact_limit": contacts.PAGE_LIMIT,
+        "can_add_contact": billing and active,
+        # PLAN-011b D4: the collection e-mails sent to the operator, and the
+        # "handled personally" switch (billing).
+        "collection_log": collections.operator_log(operator, collections.LOG_LIMIT),
+        "collection_log_limit": collections.LOG_LIMIT,
+        "can_set_handled": billing and active,
+        # PLAN-011b D4: the signed statement links (billing revokes them).
+        "can_revoke_links": billing,
+        "statement_link_days": statement_links.MAX_AGE_DAYS,
+        # PLAN-012f-a D7 (operator-workspace-laptop.png): the header's avatar and muted
+        # line, the strip of store cards and the right column's cards; facts only.
+        "operator_initials": operator_cards.initials(operator.display_name),
+        "operator_line": " · ".join(
+            part
+            for part in (
+                operator.phone,
+                operator.email or "",
+                "SMS consent given" if operator.sms_consent_at else "no SMS consent",
+                f"{store_count} store" if store_count == 1 else f"{store_count} stores",
+            )
+            if part
+        ),
+        "store_cards": store_cards,
+        # The Charges card's title: "Charges · all stores", or the selected store's.
+        "charges_scope": next(
+            (card.title for card in store_cards if card.store == selected), "all stores"
+        ),
+        "bank_method": operator_cards.bank_method(operator, method),
+        "returns_this_year": operator_cards.returns_this_year(operator, today),
+        "open_promise": operator_cards.open_promise(operator),
+        "recent_contacts": [row for row in contact_rows if row.entry.deleted_at is None][
+            :RECENT_CONTACTS
+        ],
+        "statement_link_opened": operator_cards.statement_link_opened(operator),
+    }
 
 
 # --- Write --------------------------------------------------------------------------
+
+#: The New / Edit operator dialog's fields that take both columns (PLAN-012f-b Batch B).
+WIDE_FIELDS: tuple[str, ...] = ("address_line1", "address_line2", "notes")
+
+
+def _form_dialog(
+    form: OperatorForm, title: str, return_url: str, *, operator: Operator | None = None
+) -> dict[str, Any]:
+    """The New / Edit operator dialog (PLAN-012f-b Batch B; ledger/operators/_form_dialog.html),
+    open over the page behind it; closing it goes to ``return_url``."""
+    return {
+        "form": form,
+        "title": title,
+        "return_url": return_url,
+        "operator": operator,
+        "wide": WIDE_FIELDS,
+    }
 
 
 @role_required
@@ -475,18 +494,20 @@ def operator_create(request: HttpRequest) -> HttpResponse:
             except IntegrityError:
                 form.add_error("email", EMAIL_TAKEN)
             else:
-                if created:
-                    messages.success(request, "Operator saved.")
-                    _after_save(request, operator, form.cleaned_data["creation_key"])
-                else:
+                if not created:
                     messages.info(request, ALREADY_SAVED)
+                    return redirect("ledger:operators:detail", pk=operator.pk)
+                messages.success(request, f"Operator {operator.display_name} added.")
+                _after_save(request, operator, form.cleaned_data["creation_key"])
                 return redirect("ledger:operators:detail", pk=operator.pk)
         _hold(request, "create", form)
         return redirect("ledger:operators:create")
     form = _held(request, "create", OperatorCreateForm) or OperatorCreateForm(
         initial={"creation_key": uuid.uuid4()}
     )
-    return render(request, "ledger/operators/form.html", {"form": form, "operator": None})
+    context = _list_context(request)
+    context["form_dialog"] = _form_dialog(form, "New operator", reverse("ledger:operators:list"))
+    return render(request, "ledger/operators/list.html", context)
 
 
 @role_required
@@ -515,7 +536,14 @@ def operator_edit(request: HttpRequest, pk: str) -> HttpResponse:
     form = _held(
         request, f"edit:{operator.pk}", lambda data: OperatorForm(data, instance=operator)
     ) or OperatorForm(instance=operator)
-    return render(request, "ledger/operators/form.html", {"form": form, "operator": operator})
+    context = _detail_context(request, operator)
+    context["form_dialog"] = _form_dialog(
+        form,
+        f"Edit operator {operator.display_name}",
+        reverse("ledger:operators:detail", kwargs={"pk": operator.pk}),
+        operator=operator,
+    )
+    return render(request, "ledger/operators/detail.html", context)
 
 
 @role_required

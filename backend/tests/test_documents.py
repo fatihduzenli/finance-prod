@@ -1089,7 +1089,8 @@ def test_store_create_uploads_its_file_after_saving() -> None:
     document = Document.objects.get()
     assert document.store == store and document.kind == "floor_plan"
     page = page_messages(admin, store_url(store))
-    assert "Store saved." in page and "Document uploaded." in page
+    # PLAN-012f-b Batch B: the owner's wording for a new store.
+    assert "Store #321 Store 0321 added." in page and "Document uploaded." in page
 
 
 def test_a_refused_file_never_undoes_the_store_and_the_page_says_why() -> None:

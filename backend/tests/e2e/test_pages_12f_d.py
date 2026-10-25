@@ -111,13 +111,15 @@ def test_a_forms_primary_button_stays_in_view_above_the_tab_bar(
     live_server: LiveServer, phone: BrowserContext
 ) -> None:
     page = signed_in(phone, live_server, Role.ADMIN)
-    page.goto(f"{live_server.url}{reverse('ledger:stores:create')}")
-    form = box(page, "#store-form")
+    # PLAN-012f-b Batch B: New store is a dialog now (its Save in the dialog's foot); the
+    # New lease page is the form family's long form.
+    page.goto(f"{live_server.url}{reverse('ledger:leases:create')}")
+    form = box(page, "#lease-form")
     assert form["y"] + form["height"] > PHONE["height"]  # longer than the screen
-    button = box(page, "#save-store")
+    button = box(page, "#save-lease")
     # Sticky 90 px above the bottom: over the tab bar, in view before scrolling.
     assert button["y"] + button["height"] <= PHONE["height"] - TAB_BAR
-    assert page.locator("#save-store").is_visible()
+    assert page.locator("#save-lease").is_visible()
 
 
 def test_a_wizard_step_reads_step_n_of_m_on_a_phone_and_shows_its_pills_on_a_laptop(

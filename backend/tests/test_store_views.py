@@ -126,7 +126,10 @@ def test_admin_creates_a_store_with_an_audit_row(admin: Client, fake: FakeProvid
     assert row.after["external_label"] == "Store 0202"
     assert row.actor is not None and row.actor.username == "admin-store-views"
     page = admin.get(response["Location"]).content.decode()
-    assert "Store saved." in page and "Springfield" in page and "Mar 1, 2025" in page
+    # PLAN-012f-b Batch B: the owner's wording for a new store.
+    assert (
+        "Store #202 Store 0202 added." in page and "Springfield" in page and "Mar 1, 2025" in page
+    )
     assert fake.calls == []
 
 

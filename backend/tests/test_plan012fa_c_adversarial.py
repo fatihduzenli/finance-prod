@@ -93,10 +93,18 @@ def test_a_viewers_post_to_the_builder_and_every_form_is_refused_and_writes_noth
 def test_every_form_page_has_its_cards_and_one_primary_in_the_summary() -> None:
     lease = _lease()
     admin, _ = client_for(Role.ADMIN)
+    # PLAN-012f-b Batch B: New store and New operator are dialogs over their lists (one
+    # primary in the dialog's foot); the other form pages keep the card and summary frame.
+    for path in (reverse("ledger:stores:create"), reverse("ledger:operators:create")):
+        body = admin.get(path).content.decode()
+        dialog = re.search(
+            r"<dialog[^>]*class=\"dialog dialog-lg\"[^>]*>(.*?)</dialog>", body, re.S
+        )
+        assert dialog is not None and " open" in dialog.group(0)[:200], path
+        assert dialog.group(1).count("btn-primary") == 1, path
+        assert body.count('id="page-header"') == 1, path
     for path in (
-        reverse("ledger:stores:create"),
         reverse("ledger:leases:create"),
-        reverse("ledger:operators:create"),
         reverse("ledger:stores:record_payment", kwargs={"pk": lease.store_id}),
         reverse("ledger:calendar:add"),
     ):

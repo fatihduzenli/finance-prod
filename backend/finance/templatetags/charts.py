@@ -7,7 +7,11 @@ docs/design/DESIGN-SPEC.md §4a): no chart library and no script.
 Each month is a pair of bars, Income teal and Expenses muted blue, each with a ``<title>``
 holding its figure, and the net is a navy line through the months it is known in. The scale
 holds zero and every figure, so a negative month reads below the zero line. The ``<svg>`` is
-``role="img"`` with a sentence as its ``aria-label``.
+``role="img"`` with a sentence as its ``aria-label``. Every month's label is written, as a
+``<text class="bar-label">``; the labels kept where the chart is narrow (a phone) are every
+third month counting back from the last, the first month of the range and today's month
+(``{% bars rows today %}``); the others carry ``bar-label-minor``, which the phone's style
+hides (:func:`major_months`). A bar's ``<title>`` names its month either way.
 
 ``{% donut parts total %}`` draws the Payment status card's ring: ``parts`` are objects
 with ``key`` (``overdue``, ``paid`` or ``upcoming``), ``label`` and ``amount``; each part
@@ -28,6 +32,7 @@ is escaped.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -69,6 +74,8 @@ HEIGHT = Decimal(208)
 BAR_WIDTH = Decimal(16)
 BAR_GAP = Decimal(3)
 OUTSIDE_OPACITY = "0.4"
+#: On a narrow chart a label every this many months, counted back from the last (A3-1).
+LABEL_EVERY = 3
 
 _TENTH = Decimal("0.1")
 
@@ -100,12 +107,35 @@ def _bar(x: Decimal, value: Decimal, zero: Decimal, scale: Decimal, fill: str, t
     )
 
 
+def major_months(items: list[Any], today: date | None = None) -> set[int]:
+    """The indexes of the months whose label stays on a narrow chart: the first month of
+    the range (the first row ``in_range``) and today's month, when it is drawn, then every
+    :data:`LABEL_EVERY`th month counted back from the last that is not beside one of those
+    (two labels side by side would overlap)."""
+    kept: set[int] = set()
+    first = next((index for index, row in enumerate(items) if row.in_range), None)
+    if first is not None:
+        kept.add(first)
+    if today is not None:
+        kept.update(
+            index
+            for index, row in enumerate(items)
+            if (row.month.year, row.month.month) == (today.year, today.month)
+        )
+    forced = set(kept)
+    for index in range(len(items) - 1, -1, -LABEL_EVERY):
+        if all(abs(index - other) > 1 for other in forced):
+            kept.add(index)
+    return kept
+
+
 @register.simple_tag
-def bars(rows: Iterable[Any]) -> SafeString:
+def bars(rows: Iterable[Any], today: date | None = None) -> SafeString:
     """The Cashflow chart (see the module docstring)."""
     items = list(rows)
     if not items:
         return mark_safe("")  # noqa: S308 - the empty string
+    major = major_months(items, today)
     values = [value for row in items for value in _figures(row)]
     high = max([Decimal(0), *values])
     low = min([Decimal(0), *values])
@@ -143,10 +173,11 @@ def bars(rows: Iterable[Any]) -> SafeString:
             )
         groups.append(
             format_html(
-                '<g class="bar-month"><g class="bar-pair"{}>{}</g><text x="{}" y="{}" '
+                '<g class="bar-month"><g class="bar-pair"{}>{}</g><text class="{}" x="{}" y="{}" '
                 'text-anchor="middle" font-size="11" fill="{}">{}</text></g>',
                 format_html(' opacity="{}"', OUTSIDE_OPACITY) if not row.in_range else "",
                 format_html_join("", "{}", ((part,) for part in parts)),
+                "bar-label" if index in major else "bar-label bar-label-minor",
                 _coord(centre),
                 _coord(LABEL_Y),
                 LABEL_FILL,

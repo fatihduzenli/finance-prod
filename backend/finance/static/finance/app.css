@@ -480,7 +480,8 @@ td.attention-action { text-align: right; }
 /* The Cashflow card (PLAN-012f-b D3, D4): .cashflow-head holds the title with the three totals
    (.cashflow-totals; Net green or red, its sign in the figure) and the range form at the right
    (.range-form; .range-custom shows when Custom is chosen); .cashflow-chart holds the
-   {% bars %} SVG (a sideways scroll under 36rem so the month labels stay legible), then the
+   {% bars %} SVG (a sideways scroll under 36rem so the month labels stay legible; on a phone
+   it fits the card with fewer, larger labels, see the phone block), then the
    legend ({% chart_key %} beside each word) and the muted line of stores without a cost. */
 .cashflow-head { align-items: flex-start; }
 .cashflow-title { display: flex; flex-direction: column; gap: var(--space-1); }
@@ -817,7 +818,10 @@ fieldset.card > legend + * { clear: both; }
    rgba of it). .dialog-head: the 17/600 title and the × button; .dialog-body: the content;
    .dialog-foot: the caller's buttons, right-aligned. On phones a full-width sheet at the
    bottom (below). The "Which store?" picker's list (.store-picker-results): one link per
-   store, the highlighted row tinted. */
+   store, the highlighted row tinted. A form dialog (New / Edit store and operator, Batch B)
+   scrolls inside, so its foot stays reachable; .dialog-form-grid sets its fields in two
+   columns (.span-2 across both; one column on phones, where the form dialog is full screen),
+   .dialog-fieldset a group with its legend. */
 .dialog { box-sizing: border-box; width: calc(100% - 2 * var(--space-4)); padding: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); }
 .dialog-sm { max-width: 440px; }
 .dialog-lg { max-width: 640px; }
@@ -829,6 +833,14 @@ fieldset.card > legend + * { clear: both; }
 .dialog-body { padding: var(--space-4) var(--space-6) var(--space-6); }
 .dialog-body > p:first-child { margin-top: 0; }
 .dialog-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
+.dialog-lg { max-height: 90vh; overflow: auto; }
+.dialog-form { margin: 0; }
+.dialog-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--space-3); }
+.dialog-form-grid > * { min-width: 0; }
+.dialog-form-grid .span-2 { grid-column: 1 / -1; }
+.dialog-form-grid input:not([type=checkbox]):not([type=radio]), .dialog-form-grid select, .dialog-form-grid textarea { width: 100%; }
+.dialog-fieldset { min-width: 0; margin: var(--space-4) 0 0; padding: 0; border: 0; }
+.dialog-fieldset > legend { margin: 0 0 var(--space-1); padding: 0; font-size: var(--fs-lg); font-weight: 600; }
 .store-picker-form { margin: 0; }
 .store-picker-form input[type=search] { width: 100%; box-sizing: border-box; }
 .store-picker-results { margin: var(--space-3) 0 0; padding: 0; list-style: none; }
@@ -1250,6 +1262,17 @@ p.detail-more-notes { padding-left: 0; }
   .dialog, .dialog-sm, .dialog-lg { width: 100%; max-width: none; max-height: 90vh; margin: auto 0 0; border-width: 1px 0 0; border-radius: 14px 14px 0 0; }
   .dialog-head { padding: var(--space-4) var(--space-4) 0; }
   .dialog-body { padding: var(--space-3) var(--space-4) var(--space-5); }
+  /* A form dialog (.dialog-lg) takes the whole screen; the confirmation keeps the sheet. */
+  .dialog-lg { height: 100dvh; max-height: none; margin: 0; border-width: 0; border-radius: 0; }
+  .dialog-form-grid { grid-template-columns: minmax(0, 1fr); }
+  /* The Cashflow chart fits the card (A3-1): the labels charts.py keeps for a narrow chart
+     (every third month, the range's first, today's), larger; the end labels inside the frame. */
+  .cashflow-chart { overflow-x: visible; }
+  .cashflow-chart .bars-chart { min-width: 0; }
+  .bars-chart .bar-label-minor { display: none; }
+  .bars-chart .bar-label { font-size: 26px; }
+  .bars-chart .bar-month:first-of-type .bar-label { text-anchor: start; }
+  .bars-chart .bar-month:last-of-type .bar-label { text-anchor: end; }
   main, main.wide { margin: 0; padding: var(--space-4); border: 0; border-radius: 0; max-width: none; }
   dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 10px; }
   /* A 16 px field keeps a phone from zooming in on focus. */

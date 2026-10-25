@@ -332,12 +332,8 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
     charge = a_rent_charge(lease, date(2026, 10, 1), due="2000.00")
     one_off = a_one_off_charge(lease.operator, "250.00", date(2026, 10, 20), lease=lease)
     pages = [
-        (reverse("ledger:stores:create"), ["Store", "Store cost", "Documents"], "save-store"),
-        (
-            reverse("ledger:stores:edit", kwargs={"pk": lease.store_id}),
-            ["Store"],
-            "save-store",
-        ),
+        # PLAN-012f-b Batch B: New / Edit store and operator are dialogs, their Save in the
+        # dialog's foot (tests/test_form_modals.py).
         (
             reverse("ledger:leases:create"),
             ["Lease", "Debits", "Setup checklist", "Documents"],
@@ -358,12 +354,6 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
             reverse("ledger:one_off_charges:payment", kwargs={"pk": one_off.pk}),
             ["Payment"],
             "save-payment",
-        ),
-        (reverse("ledger:operators:create"), ["Operator"], "save-operator"),
-        (
-            reverse("ledger:operators:edit", kwargs={"pk": lease.operator.pk}),
-            ["Operator"],
-            "save-operator",
         ),
         (reverse("ledger:calendar:add"), ["Entry"], "save-calendar-entry"),
     ]
