@@ -44,7 +44,7 @@ def test_double_click_on_save_creates_one_operator_and_one_customer(
 
     page.goto(f"{live_server.url}/operators/new/")
     # PLAN-012f-b D9: Type Company shows the company's name; the display name is derived.
-    page.check("#id_kind_0")
+    page.click("label[for='id_kind_0']")  # the segmented control: its label is the target
     page.fill("#id_company", "Double Click Stores")
     page.fill("#id_email", "double.click@example.com")
     page.locator("#save-operator").dblclick()
