@@ -9,7 +9,7 @@ from __future__ import annotations
 import dataclasses
 import re
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -129,7 +129,6 @@ def test_an_unconfirmed_large_debit_is_refused_before_any_write(
         )
     assert not outcome.ok
     assert (row_counts(), Job.objects.count(), fake.calls[:]) == before
-    assert date  # the date type is used by the parametrised cases above
 
 
 # --- Slice C-2: the Add payment page ------------------------------------------------------------
