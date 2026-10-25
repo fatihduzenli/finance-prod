@@ -30,7 +30,7 @@ disagreement is written to `audit_log`.** Business fields are never overwritten 
 | Copied payment status or amount differs from Stax | Copy overwritten. `audit_log` row. The charge's paid amount is recomputed. |
 | Stax reports a payment we have no row for | Row created from Stax. `audit_log` row. Staff see it as unmatched until it is linked to a charge. |
 | We hold a Stax-method payment that Stax does not know | Never deleted automatically. Flagged for staff. `audit_log` row. |
-| A payment recorded by hand (Zelle, wire, other) | Ours. Stax has no knowledge of it and cannot overrule it. |
+| A payment recorded by hand (Zelle, wire, check, cash, other) | Ours. Stax has no knowledge of it and cannot overrule it. |
 | Invoice total in Stax differs from ours | **Not overwritten.** The amount due is business data. Flagged for staff, `audit_log` row, and collection on that charge stops until resolved. |
 | Operator name or email differs between Stax and us | **Not overwritten.** Ours is the business record. Flagged for staff. For email the flag says: receipts go to the address stored in Stax; fix it in Stax (owner, 2026-09-30). |
 | A provider status string we have never seen | Stored exactly as received. Never mapped to a guess. |
@@ -42,7 +42,7 @@ disagreement is written to `audit_log`.** Business fields are never overwritten 
 | A store has no `store_costs` row | Landlord rent and margin are **unknown**, never 0, on the store page and in the P&L; the row is flagged. |
 | A mismatch is resolved by staff | Note required (guarded, invisible characters do not count); `resolved_at`, `resolved_by`, `audit_log` row. The underlying data is not changed by resolving. |
 | A webhook body says an invoice is paid or a transaction settled | **Ignored.** Only the object re-fetched from Stax by ID is applied (Prompt 8). The body is stored, redacted, for the record. |
-| A wire, Zelle or other payment is recorded against a charge that has a Stax invoice | Our ledger keeps the real method. **Stax is told the invoice was paid "in cash"**, with the memo "Paid by <method> on <date>. <note>", because Stax offers no wire or Zelle method and this is what staff did by hand in the dashboard (owner Q19, 2026-10-02). Before marking, the invoice is re-fetched; if Stax already shows it paid, nothing is sent and the mismatch is recorded. A **partial** payment is not sent to Stax until the unit of `apply_balance` is verified (TODO-VERIFY-028); the charge is flagged. |
+| A wire, Zelle, check, cash or other payment is recorded against a charge that has a Stax invoice | Our ledger keeps the real method. **Stax is told the invoice was paid "in cash"**, with the memo "Paid by <method> on <date>. <note>", because Stax offers no wire or Zelle method and this is what staff did by hand in the dashboard (owner Q19, 2026-10-02). Before marking, the invoice is re-fetched; if Stax already shows it paid, nothing is sent and the mismatch is recorded. A **partial** payment is not sent to Stax until the unit of `apply_balance` is verified (TODO-VERIFY-028); the charge is flagged. |
 | An ACH return arrives for a settled payment | Payment `returned`; the charge's paid amount is recomputed and it reopens; the return enters the returns queue; nothing re-debits by itself. |
 
 The detection and repair code arrives with Prompts 8 and 10. This document fixes the rule
@@ -186,7 +186,7 @@ unit amount, audited `fee_type.created`. Everything else about the catalogue sta
 |---|---|---|
 | `id`, `created_at`, `updated_at` | System | |
 | `operator_id`, `lease_id` | App | The operator always (except a legacy setup row on a lease without one); the lease when one applies |
-| `category`, `collection`, `description` | App | `setup`, `arrears`, `adjustment`, `damage`, `other`; how it is collected; the invoice line (guarded) |
+| `category`, `collection`, `description` | App | `setup`, `arrears`, `adjustment`, `damage`, `other`; how it is collected; the invoice line (guarded). PLAN-012f-b D14: a bank debit from Add payment changes `collection` (an `email` or `manual` charge becomes `charge_now` for a debit today; a charge with no invoice and no schedule becomes `autopay_due`, with `due_date` the debit date, for a later date), audited `one_off_charge.debit_requested` / `one_off_charge.debit_scheduled`; the payment it makes is Stax's (pending until the settle webhook) |
 | `fee_type_id`, `price`, `cost`, `vendor`, `due_date`, `note` | App | `fee_type` for `setup` only. `price` is what the operator owes; `cost` is ours, null = unknown. Price locked once a payment exists |
 | `amount_paid`, `balance`, `status` | Derived | From settled payments, as `rent_charges`; `waived` and `voided` set by their actions |
 | `waived_at`, `waived_by_id`, `waive_note` | App | Admin; note mandatory |
@@ -234,7 +234,7 @@ unit amount, audited `fee_type.created`. Everything else about the catalogue sta
 |---|---|---|
 | `id`, `created_at`, `updated_at` | System | |
 | charge and invoice references (`rent_charge`, `insurance_charge`, `charge_adjustment`, `one_off_charge`), `kind`, `policy_year` | App | Linking a payment to a charge is our decision. Kinds `one_off` and `refund_deposit` belong to a one-off charge; `refund_deposit` is money out, manual only, never refundable or voidable |
-| `method` | Stax for `ach`; App for `zelle`, `wire`, `other` | |
+| `method` | Stax for `ach`; App for `zelle`, `wire`, `check`, `cash` (PLAN-012f-b D14, migration 0053), `other` | |
 | **`amount`, `status`** | **Stax** for method `ach`; **App** for manual methods | Overwritten from Stax on disagreement, for `ach` only |
 | **`initiated_on`, `settled_on`, `returned_at`, `return_code`, `return_reason`, `provider_created_at`** | **Stax** for method `ach` | |
 | `is_refund`, `parent_payment_id` | Stax for `ach`; App for manual | |

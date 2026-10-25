@@ -1879,7 +1879,7 @@ class PaymentKind(models.TextChoices):
 #: The payment kinds that belong to a one-off charge.
 ONE_OFF_PAYMENT_KINDS: list[str] = [PaymentKind.ONE_OFF.value, PaymentKind.REFUND_DEPOSIT.value]
 #: Methods recorded by hand, not through the payment provider.
-MANUAL_PAYMENT_METHODS: list[str] = ["zelle", "wire", "check", "other"]
+MANUAL_PAYMENT_METHODS: list[str] = ["zelle", "wire", "check", "cash", "other"]
 
 
 class PaymentMethod(models.TextChoices):
@@ -1888,6 +1888,8 @@ class PaymentMethod(models.TextChoices):
     WIRE = "wire", "Wire"
     #: A paper check received by hand (PLAN-012e-3 D1); its reference is the check number.
     CHECK = "check", "Check"
+    #: Cash received by hand (PLAN-012f-b D14).
+    CASH = "cash", "Cash"
     OTHER = "other", "Other"
     #: A credit held on the lease applied to a charge (PLAN-012d D6a, ADR-0013): no money
     #: moves and no provider is involved.
@@ -1903,6 +1905,8 @@ class MoneyMethod(models.TextChoices):
     WIRE = "wire", "Wire"
     #: A paper check received by hand (PLAN-012e-3 D1); its reference is the check number.
     CHECK = "check", "Check"
+    #: Cash received by hand (PLAN-012f-b D14).
+    CASH = "cash", "Cash"
     OTHER = "other", "Other"
 
 

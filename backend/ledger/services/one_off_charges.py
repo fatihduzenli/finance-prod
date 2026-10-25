@@ -57,6 +57,16 @@ Rules kept here, not in the views:
   does not show as a usable bank account, above the confirmed provider limit, above the
   large-debit threshold without the confirmation, a provider request already waiting,
   or less than a minute after a failed attempt.
+- **Bank debit from Add payment** (:func:`bank_debit_options`, :func:`debit`; PLAN-012f-b
+  D14): the card is offered from local data only (the pay-an-invoice flag, the linked
+  usable bank method's bank type, last four and nickname, the open balance, whether the
+  large-debit confirmation applies) with one sentence when it is not. A debit takes the
+  whole open balance: **today** (admin) through Charge now above, an ``email`` or
+  ``manual`` charge switched to ``charge_now`` first (rolled back if Charge now refuses);
+  **a later date** (billing, within the builder's horizon) makes a charge with no invoice
+  and no schedule ``autopay_due`` on that date and queues ``schedule_create``. Audited
+  ``one_off_charge.debit_requested`` or ``one_off_charge.debit_scheduled`` with the form's
+  key, so a replay changes nothing; never a local payment status.
 - **Manual payments** (:func:`record_payment`): the rent rules (method, amount, date,
   note and the form's creation key; :func:`ledger.services.rent_run.payment_refusal`),
   kind ``one_off``; it closes the open promises it keeps
@@ -206,7 +216,7 @@ from ledger.services.rent_run import (
     PaymentOutcome,
 )
 from ledger.validators import validate_no_payment_data, visible_text
-from ledger.wording import provider_sentence
+from ledger.wording import format_amount, provider_sentence
 from payments import invoice_sync, jobs, offline_marking
 from payments.models import ExternalRef, Job, JobKind, JobStatus
 
@@ -1017,18 +1027,7 @@ def _create_one_off(
             },
         )
         if collection in DEBIT_COLLECTIONS and leases.is_large_debit(item.price):
-            _audit(
-                actor,
-                LARGE_DEBIT_ACTION,
-                charge,
-                None,
-                {
-                    "amount": str(item.price),
-                    "threshold": str(settings.LARGE_DEBIT_WARNING_AMOUNT),
-                    "confirmed_by": actor.pk if actor is not None else None,
-                    **_plan_confirmation(charge),
-                },
-            )
+            _audit_large_debit(actor, charge, item.price)
         job = None
         if collection == CollectionMethod.AUTOPAY_DUE:
             job = jobs.enqueue(JobKind.SCHEDULE_CREATE, charge, None, actor)
@@ -1040,6 +1039,23 @@ def _create_one_off(
             number = invoice.invoice_number if invoice is not None else ""
             message = CREATED_MANUAL_LOCAL.format(number=number)
     return Outcome(True, message, charge=charge, job=job)
+
+
+def _audit_large_debit(actor: User | None, charge: OneOffCharge, amount: Decimal) -> None:
+    """The audit row of a debit above the warning threshold made under its confirmation
+    (D2); a plan's occurrence names the plan's setup confirmation."""
+    _audit(
+        actor,
+        LARGE_DEBIT_ACTION,
+        charge,
+        None,
+        {
+            "amount": str(amount),
+            "threshold": str(settings.LARGE_DEBIT_WARNING_AMOUNT),
+            "confirmed_by": actor.pk if actor is not None else None,
+            **_plan_confirmation(charge),
+        },
+    )
 
 
 def _plan_fields(charge: OneOffCharge) -> dict[str, Any]:
@@ -1541,6 +1557,279 @@ def record_charge_now(
     _audit(actor, action, charge, None, dict(context))
 
 
+# --- Bank debit from Add payment (PLAN-012f-b D14) ------------------------------------
+
+#: Why the bank-debit card of Add payment is greyed (one plain sentence each).
+DEBIT_NO_METHOD = provider_sentence(
+    "No bank account on file — add one in the {provider} dashboard, then Update from {provider}."
+)
+DEBIT_OFF = provider_sentence("Bank debits are off at {provider}.")
+DEBIT_PAID = "This charge is already paid."
+DEBIT_CLOSED = "This charge is waived or voided."
+DEBIT_PENDING = "A payment on this charge is pending."
+DEBIT_NOT_ELIGIBLE = "This charge cannot be debited from here. Nothing was charged."
+DEBIT_DATE_REQUIRED = "Choose the date of the debit. Nothing was charged."
+DEBIT_DATE_PAST = "The debit date must be today or later. Nothing was charged."
+DEBIT_OVER_BALANCE = "The amount is more than the balance due. Nothing was charged."
+#: Neither Charge now (``POST /invoice/{id}/pay`` takes no amount) nor the schedule (it
+#: bills the charge's price) can debit part of a balance.
+DEBIT_WHOLE_BALANCE = "A bank debit takes the whole balance, {amount}. Nothing was charged."
+DEBIT_HAS_INVOICE = (
+    "This charge already has an invoice: a debit on a later date would bill it twice. "
+    "Debit it today. Nothing was scheduled."
+)
+DEBIT_ALREADY_SCHEDULED = "Autopay is already set up for this charge. Nothing was scheduled."
+DEBIT_SCHEDULE_ROLE = "Only billing or an admin can schedule a debit. Nothing was scheduled."
+DEBIT_ALREADY = "This debit was already requested. Nothing was changed."
+DEBIT_SCHEDULED = provider_sentence("{provider} will debit {amount} on {date}.")
+
+DEBIT_NOW_ACTION = "one_off_charge.debit_requested"
+DEBIT_SCHEDULED_ACTION = "one_off_charge.debit_scheduled"
+
+
+@dataclass(frozen=True, slots=True)
+class BankMethod:
+    """The operator's linked bank method as staff may see it (Rule 1): never a number
+    beyond the last four."""
+
+    bank_type: str
+    last_four: str
+    nickname: str
+
+
+@dataclass(frozen=True, slots=True)
+class BankDebitOptions:
+    """Whether Add payment offers a bank debit of the charge, and why not (D14).
+
+    ``enabled`` is the pay-an-invoice flag; ``method`` the linked usable bank method
+    (``None``: none, or not a usable bank account); ``balance`` what the charge's
+    invoice or schedule still bills; ``large`` the large-debit confirmation applies;
+    ``reason`` the sentence of the greyed card (``""``: offered)."""
+
+    enabled: bool
+    method: BankMethod | None
+    balance: Decimal
+    large: bool
+    reason: str
+
+    @property
+    def allowed(self) -> bool:
+        return not self.reason
+
+
+def open_balance(charge: OneOffCharge) -> Decimal:
+    """What the charge's invoice or schedule still bills: :func:`billed_total` less
+    :func:`paid_in`, never below zero."""
+    return max(billed_total(charge) - paid_in(charge), ZERO).quantize(CENT)
+
+
+def _bank_method(operator: Operator | None) -> BankMethod | None:
+    if not leases.customer_ref(operator):
+        return None
+    record = leases.linked_method_record(operator)
+    if record is None or not record.is_usable_bank:
+        return None
+    return BankMethod(
+        bank_type=record.bank_type, last_four=record.last_four, nickname=record.nickname
+    )
+
+
+def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
+    """The bank-debit card of Add payment (D14). Local data only; no provider call."""
+    enabled = charge_now_enabled()
+    method = _bank_method(_charge_operator(charge))
+    balance = open_balance(charge)
+    if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
+        reason = DEBIT_CLOSED
+    elif charge.status == OneOffChargeStatus.PAID or balance <= 0:
+        reason = DEBIT_PAID
+    elif has_pending_payment(charge):
+        reason = DEBIT_PENDING
+    elif not enabled:
+        reason = str(DEBIT_OFF)
+    elif method is None:
+        reason = str(DEBIT_NO_METHOD)
+    else:
+        reason = ""
+    return BankDebitOptions(
+        enabled=enabled,
+        method=method,
+        balance=balance,
+        large=leases.is_large_debit(balance),
+        reason=reason,
+    )
+
+
+def _debit_input_refusal(amount: Decimal, on: date | None, today: date) -> Outcome | None:
+    """The rules of the form's values alone (D14): the amount above zero in cents, the
+    date today or later, a later date within Schedule for a date's horizon."""
+    from ledger.services import invoice_builder  # invoice_builder imports this module
+
+    if not isinstance(amount, Decimal) or not amount.is_finite() or amount <= 0:
+        return Outcome(False, AMOUNT_NOT_POSITIVE, "amount")
+    if amount != amount.quantize(CENT):
+        return Outcome(False, NOT_CENTS, "amount")
+    if on is None:
+        return Outcome(False, DEBIT_DATE_REQUIRED, "on")
+    if on < today:
+        return Outcome(False, DEBIT_DATE_PAST, "on")
+    if on > today:
+        refused = invoice_builder.schedule_refusal(on, today)
+        if refused is not None:
+            return Outcome(False, refused.message, "on")
+    return None
+
+
+def _debit_for_key(charge: OneOffCharge, key: uuid.UUID | None) -> bool:
+    """Whether the form with this one-time key already requested a debit of ``charge``."""
+    if key is None:
+        return False
+    return AuditLog.objects.filter(
+        action__in=(DEBIT_NOW_ACTION, DEBIT_SCHEDULED_ACTION),
+        entity_type=ENTITY_ONE_OFF_CHARGE,
+        entity_id=str(charge.pk),
+        after__debit_key=str(key),
+    ).exists()
+
+
+def debit(
+    charge: OneOffCharge,
+    amount: Decimal,
+    on: date | None,
+    *,
+    actor: User | None,
+    confirmed: bool,
+    key: uuid.UUID | None = None,
+    today: date | None = None,
+) -> Outcome:
+    """Debit the operator's linked bank account for ``charge`` (Add payment, D14).
+
+    Refused with nothing written unless :func:`bank_debit_options` offers the debit, the
+    charge is one Charge now may take (a form category or a setup charge, not a later
+    line of a builder invoice), ``amount`` is the whole open balance, ``on`` is today or
+    a later date within the horizon, and the large-debit confirmation is given when it
+    applies. **Today** (admin): an ``email`` or ``manual`` charge is switched to
+    ``charge_now`` and :func:`charge_now_confirm` queues the single attempt; its refusal
+    rolls the switch back. **A later date** (billing): a charge with no invoice and no
+    schedule becomes ``autopay_due`` on that date and the ``schedule_create`` job makes
+    its single-occurrence schedule, as :func:`create_charge` does for an ``autopay_due``
+    charge. A replay with the same ``key`` changes nothing. No payment state is written
+    here (Rule 2): the charge reads Pending from the provider."""
+    day = today or timezone.localdate()
+    refused = _debit_input_refusal(amount, on, day)
+    if refused is not None or on is None:
+        return refused or Outcome(False, DEBIT_DATE_REQUIRED, "on")
+    role = role_of(actor) if actor is not None else None
+    if on == day and not (role is not None and meets(role, Role.ADMIN)):
+        return Outcome(False, CHARGE_NOW_ADMIN)
+    if on > day and not (role is not None and meets(role, Role.BILLING)):
+        return Outcome(False, DEBIT_SCHEDULE_ROLE)
+    with transaction.atomic():
+        locked = (
+            OneOffCharge.objects.select_for_update(of=("self",))
+            .select_related("operator", "lease")
+            .get(pk=charge.pk)
+        )
+        if _debit_for_key(locked, key):
+            return Outcome(True, DEBIT_ALREADY, charge=locked)
+        options = bank_debit_options(locked)
+        if options.reason:
+            return Outcome(False, options.reason)
+        if locked.category not in (*FORM_CATEGORIES, OneOffCategory.SETUP) or is_later_line(locked):
+            return Outcome(False, DEBIT_NOT_ELIGIBLE)
+        if amount > options.balance:
+            return Outcome(False, DEBIT_OVER_BALANCE, "amount")
+        if amount != options.balance:
+            text = DEBIT_WHOLE_BALANCE.format(amount=format_amount(options.balance))
+            return Outcome(False, text, "amount")
+        if options.large and confirmed is not True:
+            return Outcome(False, leases.large_debit_confirmation([amount]), "confirm")
+        if on == day:
+            outcome = _debit_now(locked, amount, actor=actor, key=key, large=options.large)
+        else:
+            outcome = _debit_on(
+                locked, amount, on, actor=actor, key=key, large=options.large, today=day
+            )
+        if not outcome.ok:
+            transaction.set_rollback(True)
+    return outcome
+
+
+def _debit_now(
+    charge: OneOffCharge,
+    amount: Decimal,
+    *,
+    actor: User | None,
+    key: uuid.UUID | None,
+    large: bool,
+) -> Outcome:
+    """Today's debit: the existing Charge now path for the whole balance (D14)."""
+    before = charge.collection
+    if before in (CollectionMethod.EMAIL, CollectionMethod.MANUAL):
+        charge.collection = CollectionMethod.CHARGE_NOW
+        charge.save(update_fields=["collection", "updated_at"])
+    outcome = charge_now_confirm(charge.pk, actor=actor, confirmed=True)
+    if not outcome.ok:
+        return outcome
+    _audit(
+        actor,
+        DEBIT_NOW_ACTION,
+        charge,
+        {"collection": before},
+        {
+            "collection": CollectionMethod.CHARGE_NOW.value,
+            "amount": str(amount),
+            "debit_key": str(key) if key is not None else None,
+        },
+    )
+    if large:
+        _audit_large_debit(actor, charge, amount)
+    return outcome
+
+
+def _debit_on(
+    charge: OneOffCharge,
+    amount: Decimal,
+    on: date,
+    *,
+    actor: User | None,
+    key: uuid.UUID | None,
+    large: bool,
+    today: date,
+) -> Outcome:
+    """A later date's debit: one single-occurrence schedule for the charge (D14)."""
+    if invoices_of(charge).exists():
+        return Outcome(False, DEBIT_HAS_INVOICE, "on")
+    if charge.collection == CollectionMethod.AUTOPAY_DUE or provider_schedule(charge):
+        return Outcome(False, DEBIT_ALREADY_SCHEDULED, "on")
+    if charge.lease is not None and _lease_ended(charge.lease, today):
+        return Outcome(False, LEASE_ENDED, "on")
+    limit = leases.provider_limit_refusal([amount])
+    if limit:
+        return Outcome(False, limit, "amount")
+    before = {"collection": charge.collection, "due_date": charge.due_date.isoformat()}
+    charge.collection = CollectionMethod.AUTOPAY_DUE
+    charge.due_date = on
+    charge.save(update_fields=["collection", "due_date", "updated_at"])
+    _audit(
+        actor,
+        DEBIT_SCHEDULED_ACTION,
+        charge,
+        before,
+        {
+            "collection": CollectionMethod.AUTOPAY_DUE.value,
+            "due_date": on.isoformat(),
+            "amount": str(amount),
+            "debit_key": str(key) if key is not None else None,
+        },
+    )
+    if large:
+        _audit_large_debit(actor, charge, amount)
+    job = jobs.enqueue(JobKind.SCHEDULE_CREATE, charge, None, actor)
+    text = DEBIT_SCHEDULED.format(amount=format_amount(amount), date=day_text(on))
+    return Outcome(True, text, charge=charge, job=job)
+
+
 #: The provider requests of a one-off charge that the page's single retry repeats (D3).
 PROVIDER_JOB_KINDS: frozenset[str] = frozenset(
     {
@@ -1700,7 +1989,8 @@ def record_payment(
     allocation_group: uuid.UUID | None = None,
     credit_id: uuid.UUID | None = None,
 ) -> PaymentOutcome:
-    """Record a Zelle, wire, check or other payment against a one-off charge (kind ``one_off``).
+    """Record a Zelle, wire, check, cash or other payment against a one-off charge (kind
+    ``one_off``).
 
     Never calls the provider: when the charge has a provider invoice and the payment
     covers the whole price at its total, the outcome has ``mark_due=True`` and the
