@@ -43,6 +43,9 @@ page that deals with it and ``since``, the day it began:
 - ``landlord_lease_ending``: a store's live cost row in effect today whose
   ``landlord_lease_end`` is today or in the next :data:`LANDLORD_END_DAYS` days;
 - ``store_no_open_date``: an active or prospective store without an open date;
+- ``store_state_missing`` (PLAN-012f-b D11): an active or prospective store without a
+  state ("State needs choosing: <store>", linking to its edit form), as ledger migration
+  0051 leaves a state it could not match;
 - ``operator_no_email``: an operator, not archived, without an e-mail address;
 - ``vacant_store``: an active store with no lease in effect today (collection ``active``
   or ``paused``, started on or before today, not ended before today) whose last lease
@@ -133,6 +136,7 @@ INSURANCE_PREMIUM_MISSING = "insurance_premium_missing"
 LEASE_ENDING = "lease_ending"
 LANDLORD_LEASE_ENDING = "landlord_lease_ending"
 STORE_NO_OPEN_DATE = "store_no_open_date"
+STORE_STATE_MISSING = "store_state_missing"
 OPERATOR_NO_EMAIL = "operator_no_email"
 VACANT_STORE = "vacant_store"
 SCHEDULE_REVIEW = "schedule_review"
@@ -156,6 +160,7 @@ KINDS: tuple[str, ...] = (
     RECONCILIATION_MISMATCHES,
     VACANT_STORE,
     STORE_NO_OPEN_DATE,
+    STORE_STATE_MISSING,
     OPERATOR_NO_EMAIL,
     CALENDAR_TODAY,
 )
@@ -175,6 +180,7 @@ KIND_LABELS: dict[str, str] = {
     RECONCILIATION_MISMATCHES: "nightly check findings",
     VACANT_STORE: "vacant stores",
     STORE_NO_OPEN_DATE: "stores without an open date",
+    STORE_STATE_MISSING: "stores whose state needs choosing",
     OPERATOR_NO_EMAIL: "operators without an e-mail",
     CALENDAR_TODAY: "calendar entries today",
 }
@@ -199,6 +205,7 @@ WHY_BADGES: dict[str, str] = {
     RECONCILIATION_MISMATCHES: "attention",
     VACANT_STORE: "neutral",
     STORE_NO_OPEN_DATE: "neutral",
+    STORE_STATE_MISSING: "neutral",
     OPERATOR_NO_EMAIL: "neutral",
     CALENDAR_TODAY: "neutral",
 }
@@ -759,6 +766,24 @@ def _stores_without_open_date() -> list[Item]:
     ]
 
 
+def _stores_without_state() -> list[Item]:
+    rows = Store.objects.filter(
+        state="", status__in=[StoreStatus.ACTIVE, StoreStatus.PROSPECTIVE]
+    ).order_by("external_label", "id")
+    return [
+        Item(
+            kind=STORE_STATE_MISSING,
+            severity=LOW,
+            text=f"State needs choosing: {store.external_label}",
+            url=reverse("ledger:stores:edit", kwargs={"pk": store.pk}),
+            since=None,
+            store=store.external_label,
+            store_id=store.pk,
+        )
+        for store in rows
+    ]
+
+
 def _operators_without_email(operator: uuid.UUID | None) -> list[Item]:
     rows = Operator.objects.filter(email__isnull=True, archived_at__isnull=True)
     if operator is not None:
@@ -921,6 +946,7 @@ def attention(
         sources += [
             lambda: _landlord(today),
             _stores_without_open_date,
+            _stores_without_state,
             lambda: _vacant(today),
             _system_counts,
         ]

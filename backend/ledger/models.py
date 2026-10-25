@@ -346,6 +346,7 @@ class Store(GuardedModel):
     #: The street and the ZIP (PLAN-012e-2 D7), guarded as the operator's address is.
     address_line1 = guarded_char(NAME_MAX_LENGTH, blank=True)
     city = guarded_char(100, blank=True)
+    #: The two-letter code of :data:`finance.us_states.US_STATES` (PLAN-012f-b D11), or "".
     state = guarded_char(50, blank=True)
     postal_code = guarded_char(20, blank=True)
     open_date = models.DateField(null=True, blank=True)
@@ -353,6 +354,10 @@ class Store(GuardedModel):
     needs_open_date = models.BooleanField(default=True)
     closed_at = models.DateField(null=True, blank=True)
     status = _choice(StoreStatus)
+    #: The kind of store (PLAN-012f-b D10), from the admin's list; none is shown as nothing.
+    store_type = models.ForeignKey(
+        "StoreType", on_delete=models.PROTECT, null=True, blank=True, related_name="stores"
+    )
     needs_review = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -841,6 +846,27 @@ class FeeType(GuardedModel):
                 name="fee_types_default_price_positive",
             ),
         ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class StoreType(GuardedModel):
+    """A kind of store (PLAN-012f-b D10): Inline store, Kiosk, Cart, Pop-up, Warehouse,
+    seeded by ledger migration 0051. Edited by an admin in the Django admin: add and
+    change, never delete (a type no longer offered is made inactive). The store form
+    offers the active ones; a store's type shows as a grey pill after its name."""
+
+    name = guarded_char(NAME_MAX_LENGTH, unique=True)
+    sort_order = models.SmallIntegerField(default=0)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "store_types"
+        ordering = ("sort_order", "name")
+        constraints = [_not_blank("store_types", "name")]
 
     def __str__(self) -> str:
         return self.name

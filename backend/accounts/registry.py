@@ -286,6 +286,8 @@ ADMIN_MODEL_PREFIX_RULES: dict[str, RouteRule] = {
     "admin:ledger_messagetemplate_": RouteRule(min_role=Role.ADMIN, methods=POST),
     # The company settings row, changed in the admin (PLAN-012c D2).
     "admin:ledger_companysettings_": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # The store types, edited in the admin (PLAN-012f-b D10).
+    "admin:ledger_storetype_": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Routes that take no unsafe method at all. GET is open to any verified user (the view

@@ -369,6 +369,7 @@ GUARD_MODULES = (
     "ledger.migrations.0048_check_method",
     "ledger.migrations.0049_autopay_plans",
     "ledger.migrations.0050_rename_statement_saved_at",
+    "ledger.migrations.0051_store_type_and_state_codes",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0003_webhook_event_processing",
     "payments.migrations.0005_jobs",

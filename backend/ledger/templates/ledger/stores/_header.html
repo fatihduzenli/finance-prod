@@ -28,7 +28,7 @@
   <section class="card" id="store-cost" aria-labelledby="store-cost-heading">
     <div class="card-header"><h2 class="section-label" id="store-cost-heading">Store cost</h2>{% if can_set_cost %}<a class="card-link" href="{% url 'ledger:stores:set_cost' pk=store.pk %}" id="change-cost">Change</a>{% endif %}</div>
     <dl class="side-list">
-      <dt>Landlord rent</dt><dd id="landlord-rent">{% if cost %}{{ cost.landlord_rent|money }} a month{% if cost.landlord_rent == 0 %} (no cost){% endif %} from {{ cost.effective_from|day }}{% else %}unknown{% endif %}</dd>
+      <dt>Landlord rent</dt><dd id="landlord-rent">{% if cost %}{{ cost.landlord_rent|money }} a month{% if cost.landlord_rent == 0 %} (no cost){% endif %} from {{ cost.effective_from|day }}{% else %}Not entered{% endif %}</dd>
       <dt>Landlord lease end</dt><dd id="landlord-lease-end">{% if cost %}{{ cost.landlord_lease_end|day|default:"—" }}{% else %}unknown{% endif %}</dd>
       {% if cost and cost.other_monthly_cost is not None %}<dt>Other monthly cost</dt><dd id="other-cost">{{ cost.other_monthly_cost|money }}{% if cost.other_cost_description %} ({{ cost.other_cost_description }}){% endif %}</dd>{% endif %}
     </dl>

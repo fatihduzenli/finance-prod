@@ -67,7 +67,7 @@ def form_data(**overrides: Any) -> dict[str, Any]:
         "open_date": "2025-03-01",
         "closed_at": "",
         "status": StoreStatus.ACTIVE,
-        # PLAN-012e-2 D9: the New store form's first cost row (the rent is required).
+        # PLAN-012e-2 D9: the New store form's first cost row (optional since PLAN-012f-b D12).
         "landlord_rent": "0.00",
         "landlord_lease_end": "",
         "other_monthly_cost": "",
@@ -480,6 +480,8 @@ PLAN_010B_ADMIN_MODELS = (
     "collectionstep",
     "messagetemplate",
     "companysettings",
+    # PLAN-012f-b D10: ledger 0051 gives the admin group view, add and change on store types.
+    "storetype",
 )
 
 

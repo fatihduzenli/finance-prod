@@ -125,6 +125,11 @@ def new_insurance_charge(**fields: Any) -> ledger.InsuranceCharge:
     return ledger.InsuranceCharge(**{**values, **fields})
 
 
+def new_store_type(**fields: Any) -> ledger.StoreType:
+    values = {"name": f"Test type {next(_numbers)}", "sort_order": 900}
+    return ledger.StoreType(**{**values, **fields})
+
+
 def new_fee_type(**fields: Any) -> ledger.FeeType:
     values = {"code": f"test_fee_{next(_numbers)}", "name": "Test fee", "sort_order": 900}
     return ledger.FeeType(**{**values, **fields})
@@ -562,6 +567,7 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.InsurancePremium: new_premium,
     ledger.InsuranceCharge: new_insurance_charge,
     ledger.FeeType: new_fee_type,
+    ledger.StoreType: new_store_type,
     ledger.OneOffCharge: new_setup_charge,
     ledger.StoreCost: new_store_cost,
     ledger.DepositResolution: new_deposit_resolution,
@@ -962,6 +968,14 @@ LEDGER_CASES: list[ConstraintCase] = [
     ),
     # fee_types (PLAN-010b D1)
     ConstraintCase("fee_types_name_not_blank", new_fee_type, lambda: new_fee_type(name=" ")),
+    # store_types (PLAN-012f-b D10)
+    ConstraintCase("store_types_name_not_blank", new_store_type, lambda: new_store_type(name=" ")),
+    ConstraintCase(
+        "store_types.name",
+        unique_pair(new_store_type, {"name": "Kiosk A"}, {"name": "Kiosk B"}),
+        unique_pair(new_store_type, {"name": "Kiosk A"}, {"name": "Kiosk A"}),
+        column="name",
+    ),
     ConstraintCase(
         "fee_types_default_cost_not_negative",
         lambda: new_fee_type(default_cost=D("0.00")),

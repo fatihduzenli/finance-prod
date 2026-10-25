@@ -20,6 +20,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from finance.dates import day_text
+from finance.us_states import US_STATES
 from ledger.models import (
     AUTOPAY_COUNT_MAX,
     AUTOPAY_COUNT_MIN,
@@ -49,6 +50,7 @@ from ledger.models import (
     PaymentMethod,
     RefundMethod,
     Store,
+    StoreType,
 )
 from ledger.services import autopay_plans, invoice_builder, one_off_charges, rent_run
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
@@ -464,14 +466,55 @@ class EnrolForm(forms.Form):
 # --- Stores (PLAN-007b §1) ----------------------------------------------------------------
 
 OPEN_DATE_REQUIRED = "Enter the open date."
+LANDLORD_RENT_HELP = (
+    "Leave empty when the cost is not known yet; 0.00 means the store costs nothing."
+)
 CLOSED_BEFORE_OPEN = "The closed date cannot be before the open date."
+
+
+#: The State select (PLAN-012f-b D11): "—" for none, then the full names; the values are
+#: the two-letter codes stored.
+STATE_CHOICES: tuple[tuple[str, str], ...] = (("", "\u2014"), *US_STATES)
+STATE_REFUSED = "Choose a state from the list."
+STORE_TYPE_REFUSED = "Choose a store type from the list."
+
+
+class _QuietModelChoiceField(forms.ModelChoiceField):  # type: ignore[type-arg]
+    """A model select whose every refusal is its own ``invalid_choice`` message: Django
+    reports a value that is not a UUID with the value in the text."""
+
+    def to_python(self, value: Any) -> Any:
+        try:
+            return super().to_python(value)
+        except forms.ValidationError:
+            raise forms.ValidationError(
+                self.error_messages["invalid_choice"], code="invalid_choice"
+            ) from None
 
 
 class StoreForm(_StoreFormBase):
     """Create and edit a store. The open date is required here (ADR-0005) although the
-    model keeps it nullable for the import; ``needs_open_date`` follows the model."""
+    model keeps it nullable for the import; ``needs_open_date`` follows the model.
+
+    PLAN-012f-b D10, D11: Type is optional, a select of the active store types (the store's
+    own type stays offered when it was made inactive since, so an edit keeps it); State is
+    a select of the 50 states and DC by name, the code stored, empty allowed."""
 
     store_number = forms.IntegerField(min_value=1, max_value=2147483647, required=False)
+    # The refusals never repeat the posted value (it may be anything, a card number too).
+    store_type = _QuietModelChoiceField(
+        queryset=StoreType.objects.none(),
+        required=False,
+        empty_label="\u2014",
+        label="Type",
+        error_messages={"invalid_choice": STORE_TYPE_REFUSED},
+    )
+    state = forms.ChoiceField(
+        choices=STATE_CHOICES,
+        required=False,
+        label="State",
+        error_messages={"invalid_choice": STATE_REFUSED},
+    )
     open_date = forms.DateField(
         widget=forms.DateInput(attrs={"type": "date"}),
         error_messages={"required": OPEN_DATE_REQUIRED},
@@ -482,6 +525,7 @@ class StoreForm(_StoreFormBase):
         fields = (
             "store_number",
             "external_label",
+            "store_type",
             "address_line1",
             "city",
             "state",
@@ -501,6 +545,15 @@ class StoreForm(_StoreFormBase):
     #: The fields of the store's first cost row, shown under "Store cost" (create only).
     COST_FIELDS: tuple[str, ...] = ()
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        offered = Q(active=True)
+        if self.instance.store_type_id is not None:
+            offered |= Q(pk=self.instance.store_type_id)
+        field = self.fields["store_type"]
+        if isinstance(field, forms.ModelChoiceField):
+            field.queryset = StoreType.objects.filter(offered)
+
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
         opened = data.get("open_date")
@@ -518,8 +571,9 @@ class StoreForm(_StoreFormBase):
 
 class StoreCreateForm(StoreForm):
     """Adds the one-time key rendered with the form, so a resubmission saves nothing, and
-    the store's first cost row (PLAN-012e-2 D9): the landlord rent is required (``0.00``
-    is a known "no cost"); the Edit form has none of these, "Change" sets them."""
+    the store's first cost row (PLAN-012e-2 D9): the landlord rent is optional (PLAN-012f-b
+    D12): empty is "cost not entered", no cost row, and ``0.00`` is a known "no cost"; the
+    Edit form has none of these, "Change" sets them."""
 
     COST_FIELDS = (
         "landlord_rent",
@@ -529,7 +583,7 @@ class StoreCreateForm(StoreForm):
     )
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
-    landlord_rent = _money_field("Landlord rent (monthly)", minimum=Decimal("0.00"), required=True)
+    landlord_rent = _money_field("Landlord rent (monthly)", minimum=Decimal("0.00"))
     landlord_lease_end = forms.DateField(
         label="Landlord lease end",
         required=False,
@@ -545,7 +599,7 @@ class StoreCreateForm(StoreForm):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.fields["landlord_rent"].help_text = "0.00 means the store costs nothing."
+        self.fields["landlord_rent"].help_text = LANDLORD_RENT_HELP
         self.fields["other_monthly_cost"].help_text = "Empty means no other monthly cost."
 
 

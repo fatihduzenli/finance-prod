@@ -10,7 +10,7 @@
     <span class="filter-field"><label for="state">State</label>
     <select name="state" id="state">
       <option value="">All</option>
-      {% for state in listed.states %}<option value="{{ state }}"{% if state == filters.state %} selected{% endif %}>{{ state }}</option>{% endfor %}
+      {% for code, name in listed.states %}<option value="{{ code }}"{% if code == filters.state %} selected{% endif %}>{{ name }}</option>{% endfor %}
     </select></span>
     <span class="filter-field"><label for="status">Status</label>
     <select name="status" id="status">
@@ -36,7 +36,7 @@
     <tbody>
       {% for row in page %}{% url 'ledger:stores:detail' pk=row.store.pk as store_url %}
         <tr>
-          <td>{% include "ledger/_cell_title.html" with title=row.title link=store_url subline=row.place %}{% if row.store.needs_open_date %} <span class="badge">Needs open date</span>{% endif %}{% if row.store.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
+          <td>{% include "ledger/_cell_title.html" with title=row.title link=store_url subline=row.place pill_store=row.store %}{% if row.store.needs_open_date %} <span class="badge">Needs open date</span>{% endif %}{% if row.store.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
           <td>{% if row.operator_id %}<a href="{% url 'ledger:operators:detail' pk=row.operator_id %}">{{ row.operator_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
           <td class="money">{% if row.rent is not None %}{{ row.rent|money }}{% else %}—{% endif %}</td>
           <td>{{ row.channel|default:"—" }}</td>

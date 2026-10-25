@@ -204,6 +204,8 @@ p.help { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-sm
 .badge-partial { background: var(--partial-bg); color: var(--partial-text); }
 .badge-waived { background: var(--waived-bg); color: var(--waived-text); }
 .badge-neutral { background: var(--neutral-bg); color: var(--neutral-text); }
+/* The store's type after its name (PLAN-012f-b D10): a grey pill, 12/600. */
+.pill-type { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--neutral-bg); color: var(--neutral-text); font-size: 12px; font-weight: 600; line-height: 1.3; white-space: nowrap; vertical-align: middle; }
 
 /* --- Tables ------------------------------------------------------------------------------
    .table: a list. The regions of {% responsive_table %} (.table-cards and .table-scroll)

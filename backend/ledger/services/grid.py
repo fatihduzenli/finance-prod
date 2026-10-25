@@ -12,7 +12,8 @@ a sentence, never an error. The page's month pickers are plain selects (PLAN-012
 not HTML month inputs, which Safari does not render) offering the current month and the
 :data:`PICKER_MONTHS` before and after it, with the shown range's months added
 (:func:`picker_months`). The filters are
-``operator`` (an operator's id), ``state`` (the store's state, any case), ``channel`` (a
+``operator`` (an operator's id), ``state`` (the store's state code, any case; the page's
+select offers :func:`state_choices`, the codes by name, PLAN-012f-b D11), ``channel`` (a
 lease payment channel) and ``status`` (a cell status); an unusable one is dropped with a
 sentence. ``q`` (PLAN-012d D16) keeps the stores whose number, name, city or operator
 matches every word (:func:`ledger.services.search.filter_stores`, in the stores query);
@@ -234,7 +235,7 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> GridQue
             operator = uuid.UUID(raw_operator)
         except ValueError:
             messages.append(BAD_OPERATOR)
-    state = (params.get("state", "") or "").strip()[:STATE_MAX_LENGTH]
+    state = (params.get("state", "") or "").strip()[:STATE_MAX_LENGTH].upper()
     channel = (params.get("channel", "") or "").strip()
     if channel and channel not in PaymentChannel.values:
         messages.append(BAD_CHANNEL)
@@ -466,10 +467,17 @@ def _lease_span(leases: list[Lease]) -> _LeaseSpan | None:
 
 def _stores(q: str, today: date) -> list[Store]:
     return list(
-        search.filter_stores(Store.objects.all(), q, today)
+        search.filter_stores(Store.objects.select_related("store_type"), q, today)
         .prefetch_related(Prefetch("leases", queryset=Lease.objects.select_related("operator")))
         .order_by("store_number", "external_label", "id")
     )
+
+
+def state_choices() -> list[tuple[str, str]]:
+    """The State filter's choices: (code, name) of every store's state, by name (one
+    query)."""
+    codes = Store.objects.exclude(state="").values_list("state", flat=True).distinct()
+    return stores.state_choices(codes.order_by())
 
 
 def _store_order(store: Store) -> tuple[int, int, str, str]:
