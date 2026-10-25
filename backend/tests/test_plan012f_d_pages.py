@@ -377,6 +377,7 @@ for _name in (
     "ledger:operators:statement_links_revoke",
     "ledger:stores:close_cost",
     "ledger:stores:create_charges",
+    "ledger:stores:check_address",
     "ledger:stores:plan_pause",
     "ledger:stores:plan_resume",
     "ledger:stores:plan_end",
