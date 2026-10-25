@@ -387,6 +387,8 @@ any Stax call, and no code may be tested against Stax.
 | `APP_BASE_URL` | Public URL of this deployment; drives allowed hosts and CSRF origins. |
 | `SENTRY_DSN` | Optional. Empty disables Sentry. PII scrubbing is always on. |
 | `DATABASE_URL`, `REDIS_URL`, `DJANGO_SECRET_KEY` | Standard Django/Celery. SQLite is allowed only when `APP_ENV=local`. |
+| `USPS_CLIENT_ID` | Optional, paired with `USPS_CLIENT_SECRET`: the USPS Addresses API OAuth client ID for the store form's "Check address" (PLAN-012f-b D13). Both empty turns the check off; one alone aborts the boot. Vault secret `usps-client-id`. |
+| `USPS_CLIENT_SECRET` | Optional, paired with `USPS_CLIENT_ID`: that client's secret. Read by `finance/usps.py` alone; redacted from logs and Sentry. Vault secret `usps-client-secret`. (`USPS_API_BASE_URL` is `https://apis.usps.com`, overridable only when `APP_ENV=local`.) |
 | `AZURE_KEY_VAULT_URL` | Vault to read the secrets above from at runtime, via managed identity. Locally unset; values come from `.env`. |
 
 **DNS (owner, 2026-09-27):** the public Azure DNS zone **`monvera.io`** lives in resource group

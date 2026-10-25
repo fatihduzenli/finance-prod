@@ -208,6 +208,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # Setting a store's landlord rent (PLAN-010b D8, D12): billing. The view refuses the
     # form's GET below billing too.
     "ledger:stores:set_cost": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The store form's "Check address" (PLAN-012f-b D13): billing. Asks USPS, writes nothing.
+    "ledger:stores:check_address": RouteRule(min_role=Role.BILLING, methods=POST),
     # Correcting a store cost row and closing the open one (PLAN-010c D10): admin. The
     # correction view refuses its form's GET below admin too.
     "ledger:stores:correct_cost": RouteRule(min_role=Role.ADMIN, methods=POST),

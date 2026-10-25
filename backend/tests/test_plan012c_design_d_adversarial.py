@@ -91,6 +91,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "MessageStatus": ["catch_all", "failed", "queued", "sent", "suppressed"],
     "MoneyMethod": ["ach", "check", "other", "wire", "zelle"],  # "check" added by PLAN-012e-3 too
     "NoteEntityType": ["lease", "operator", "store"],
+    # PLAN-012f-b Batch B (D9): the operator's kind.
+    "OperatorKind": ["company", "person"],
     "OneOffCategory": [
         "adjustment",
         "arrears",
@@ -142,11 +144,10 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "SyncStatus": ["awaiting_link", "failed", "linked", "not_applicable", "pending"],
 }
 #: The route names as one digest (sorted, newline-joined, sha256): 255 before Batch D of
-#: PLAN-012c; 257 since PLAN-012e-2 Batch C (finance:help, finance:help_topic); 261 since
-#: PLAN-012f-a Batch E (the four plan actions under ledger:stores); 262 since PLAN-012f-b
-#: Batch A added ledger:search_stores, the picker's JSON (the only change, checked by hand on
-#: 2026-10-25).
-FROZEN_ROUTES = (262, "67018543344cc163b9c35dcb17bc341902ef3f55714e4a747ecd061c5be0896b")
+#: PLAN-012c; 257 since PLAN-012e-2 Batch C; 261 since PLAN-012f-a Batch E; 262 since
+#: PLAN-012f-b Batch A (ledger:search_stores); 268 since PLAN-012f-b Batch B (the five admin
+#: routes of StoreType and ledger:stores:check_address; checked by hand on 2026-10-25).
+FROZEN_ROUTES = (268, "bac85babf0c386181c39df6fb24f2f893aac5b9e432f3780ee99cedae9ff018e")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

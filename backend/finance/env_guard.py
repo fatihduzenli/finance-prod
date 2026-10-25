@@ -93,6 +93,10 @@ DEFAULT_COMPANY_NAME = "Global Retail Groups"
 COMPANY_NAME_MAX_LENGTH = 200
 _ONE_LINE = re.compile(r"[^\x00-\x1f\x7f]+")
 
+#: PLAN-012f-b D13: the USPS APIs' production host. ``USPS_API_BASE_URL`` may differ
+#: only when APP_ENV is local, so tests and a local run can point at a fake.
+DEFAULT_USPS_API_BASE_URL = "https://apis.usps.com"
+
 _SQLITE_SCHEME_PREFIX = "sqlite"
 _WEB_URL_SCHEMES: tuple[str, ...] = ("http", "https")
 
@@ -150,6 +154,12 @@ class Config:
     mail_catch_all: str = ""
     #: PLAN-011b D4.
     company_name: str = DEFAULT_COMPANY_NAME
+    #: PLAN-012f-b D13: the USPS Addresses API's OAuth client. Both empty: the address
+    #: check is off. Both are credentials (the ID too, as USPS issues them as a pair):
+    #: kept out of ``repr``.
+    usps_client_id: str = field(default="", repr=False)
+    usps_client_secret: str = field(default="", repr=False)
+    usps_api_base_url: str = DEFAULT_USPS_API_BASE_URL
 
 
 def _positive_amount(value: str) -> Decimal | None:
@@ -238,6 +248,30 @@ def _mail_problems(
             f"COMPANY_NAME must be one line of at most {COMPANY_NAME_MAX_LENGTH} characters"
         )
     return problems, enabled, gmail_sender, key, mail_catch_all, company_name
+
+
+def _usps_problems(env: Mapping[str, str], is_local: bool) -> tuple[list[str], str, str, str]:
+    """PLAN-012f-b D13: the USPS client ID and secret are optional as a pair; the base URL
+    is the USPS host unless APP_ENV is local. Only variable names are reported, never a
+    value."""
+    problems: list[str] = []
+    client_id = env.get("USPS_CLIENT_ID", "")
+    client_secret = env.get("USPS_CLIENT_SECRET", "")
+    if bool(client_id) != bool(client_secret):
+        problems.append(
+            "USPS_CLIENT_ID and USPS_CLIENT_SECRET must be set together or both left empty"
+        )
+        client_id = client_secret = ""
+    base_url = env.get("USPS_API_BASE_URL", "") or DEFAULT_USPS_API_BASE_URL
+    if base_url != DEFAULT_USPS_API_BASE_URL:
+        parsed = urlsplit(base_url)
+        if not is_local:
+            problems.append(
+                "USPS_API_BASE_URL must be exactly the USPS host unless APP_ENV is 'local'"
+            )
+        elif parsed.scheme.lower() not in _WEB_URL_SCHEMES or not parsed.hostname:
+            problems.append("USPS_API_BASE_URL must be an absolute http(s) URL including a host")
+    return problems, client_id, client_secret, base_url
 
 
 def validate(env: Mapping[str, str]) -> Config:
@@ -400,6 +434,11 @@ def validate(env: Mapping[str, str]) -> Config:
     )
     problems.extend(mail_problems)
 
+    usps_problems, usps_client_id, usps_client_secret, usps_api_base_url = _usps_problems(
+        env, is_local
+    )
+    problems.extend(usps_problems)
+
     if (
         problems
         or large_debit_warning_amount is None
@@ -443,4 +482,7 @@ def validate(env: Mapping[str, str]) -> Config:
         gmail_service_account_json=gmail_key,
         mail_catch_all=mail_catch_all,
         company_name=company_name,
+        usps_client_id=usps_client_id,
+        usps_client_secret=usps_client_secret,
+        usps_api_base_url=usps_api_base_url,
     )

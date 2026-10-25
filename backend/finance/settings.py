@@ -233,6 +233,15 @@ MAIL_CATCH_ALL = _config.mail_catch_all
 #: The ``{company}`` merge field of the collection e-mails.
 COMPANY_NAME = _config.company_name
 
+# --- The USPS address check (docs/qa/PLAN-012f-b-staging-review.md D13) -------------------
+#: Server-side only: the USPS Addresses API's OAuth client, from the vault secrets
+#: usps-client-id and usps-client-secret. Both empty: the "Check address" link is not
+#: offered. Read by ``finance.usps`` alone; never rendered, logged or exported.
+USPS_CLIENT_ID = _config.usps_client_id
+USPS_CLIENT_SECRET = _config.usps_client_secret
+#: https://apis.usps.com; another value is accepted only when APP_ENV is local (a fake).
+USPS_API_BASE_URL = _config.usps_api_base_url
+
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SESSION_COOKIE_HTTPONLY = True
@@ -304,7 +313,10 @@ LOGGING = {
                 django_secret_key=SECRET_KEY,
                 database_url=_config.database_url,
                 redis_url=REDIS_URL,
-                others=log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
+                others=(
+                    *log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
+                    USPS_CLIENT_SECRET,
+                ),
             ),
         },
     },
@@ -332,6 +344,9 @@ LOGGING = {
         },
         # Payments at INFO: one redacted line per Stax request reaches stderr (PLAN-005).
         "payments": {"handlers": [], "level": "INFO", "propagate": True},
+        # The address check at INFO: one line per USPS request, the host, the status and the
+        # latency only (PLAN-012f-b D13).
+        "finance.usps": {"handlers": [], "level": "INFO", "propagate": True},
         # The PDF reader's own warnings about a malformed file are dropped: a document's
         # text must never reach a log line (PLAN-010c D6). The service logs a refusal's
         # class name instead.
@@ -345,5 +360,8 @@ sentry.init(
     stax_env=STAX_ENV,
     stax_api_key=STAX_API_KEY,
     stax_webhook_url_token=STAX_WEBHOOK_URL_TOKEN,
-    other_secrets=log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
+    other_secrets=(
+        *log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
+        USPS_CLIENT_SECRET,
+    ),
 )

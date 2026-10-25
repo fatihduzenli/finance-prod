@@ -47,7 +47,7 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import QuerySet
 from django.db.models.functions import Lower
-from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -55,6 +55,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from finance import usps
 from ledger.forms import (
     ALLOCATION_PREFIX,
     CREDIT_PREFIX,
@@ -477,6 +478,8 @@ def _form_dialog(
         "store": store,
         "document_form": document_form,
         "wide": WIDE_FIELDS,
+        # PLAN-012f-b D13: "Check address" only when the USPS credentials are set.
+        "address_check": usps.is_configured(),
     }
 
 
@@ -694,3 +697,49 @@ def store_close_cost(request: HttpRequest, pk: str) -> HttpResponse:
     else:
         messages.error(request, outcome.message)
     return redirect(destination)
+
+
+# --- The address check (PLAN-012f-b D13) ---------------------------------------------
+
+CHECK_OFF = "The address check is not set up."
+CHECK_FAILED = "The address service did not answer."
+CHECK_NO_MATCH = "No match for this address."
+STREET_REQUIRED = "Enter a street to check."
+
+
+@role_required
+@require_POST
+def check_address(request: HttpRequest) -> HttpResponse:
+    """``ledger:stores:check_address`` (POST, billing): the USPS standardised form of the
+    posted street, city, state and ZIP, as JSON, for the store form's "Check address".
+    Advice only: nothing is written, and the form saves without it."""
+    if not meets(_role(request), Role.BILLING):
+        return forbidden(request)
+    limit = usps.FIELD_MAX_LENGTH
+    address = usps.Address(
+        street=request.POST.get("street", "")[:limit].strip(),
+        city=request.POST.get("city", "")[:limit].strip(),
+        state=request.POST.get("state", "")[:limit].strip(),
+        zip=request.POST.get("zip", "")[:limit].strip(),
+    )
+    if not address.street:
+        return JsonResponse({"verified": False, "reason": STREET_REQUIRED}, status=400)
+    if not usps.is_configured():
+        return JsonResponse({"verified": False, "reason": CHECK_OFF})
+    result = usps.check(address)
+    if isinstance(result, usps.Checked):
+        return JsonResponse(
+            {
+                "verified": True,
+                "address": {
+                    "street": result.street,
+                    "city": result.city,
+                    "state": result.state,
+                    "zip5": result.zip5,
+                    "zip4": result.zip4,
+                    "dpv_confirmed": result.dpv_confirmed,
+                },
+            }
+        )
+    reason = CHECK_NO_MATCH if isinstance(result, usps.NoMatch) else CHECK_FAILED
+    return JsonResponse({"verified": False, "reason": reason})

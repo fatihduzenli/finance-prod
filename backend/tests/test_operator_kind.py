@@ -462,3 +462,86 @@ def test_the_contact_form_never_repeats_a_refused_select(field: str) -> None:
     a_lease(a_store("Contact store"), operator)
     data = {"kind": "call", "happened_on": "2026-10-06", "body": "Called.", field: CARD}
     _assert_not_echoed(billing, f"/operators/{operator.pk}/contacts/new/", data)
+
+
+# --- Fable's review of B-2 (B2-1, B2-2, B2-3) -----------------------------------------------
+
+
+def test_a_person_post_clears_a_stale_company_and_contact_person() -> None:
+    form = OperatorForm(
+        data={
+            "kind": "person",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "company": "Stale Co",
+            "contact_person": "Stale Contact",
+        }
+    )
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["company"] == "" and form.cleaned_data["contact_person"] == ""
+    assert (form.cleaned_data["first_name"], form.cleaned_data["last_name"]) == ("Ada", "Lovelace")
+
+
+def test_a_company_post_clears_stale_person_names_and_keeps_its_contact_person() -> None:
+    form = OperatorForm(
+        data={
+            "kind": "company",
+            "company": "Acme",
+            "contact_person": "Grace Hopper",
+            "first_name": "Stale",
+            "last_name": "Names",
+        }
+    )
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["first_name"] == "" and form.cleaned_data["last_name"] == ""
+    assert form.cleaned_data["contact_person"] == "Grace Hopper"
+    assert form.cleaned_data["company"] == "Acme"
+
+
+@pytest.mark.usefixtures("worker_between_requests")
+def test_a_scripts_off_edit_from_company_to_person_keeps_no_stale_names() -> None:
+    operator = Operator.objects.create(
+        display_name="x", kind="company", company="Acme", contact_person="Grace"
+    )
+    client, _ = client_for(Role.BILLING)
+    edit = f"/operators/{operator.pk}/edit/"
+    data = operator_data(
+        kind="person", company="Acme", contact_person="Grace", first_name="Ada", last_name="L"
+    )
+    assert client.post(edit, data).status_code == 302
+    operator.refresh_from_db()
+    assert operator.kind == "person" and operator.display_name == "Ada L"
+    assert operator.company == "" and operator.contact_person == ""
+
+
+def test_the_type_radios_are_a_segmented_control_named_by_a_span() -> None:
+    form = OperatorCreateForm()
+    body = str(form["kind"])
+    assert '<div id="id_kind" class="radio-segmented">' in body
+    from django.template.loader import render_to_string
+
+    field = render_to_string("ledger/stores/_form_field.html", {"field": form["kind"]})
+    assert '<span class="label" id="id_kind-label">Type' in field
+    assert "<label for=" not in field.split('<div id="id_kind"', 1)[0]
+    text = render_to_string("ledger/stores/_form_field.html", {"field": form["company"]})
+    assert '<label for="id_company">' in text
+
+
+def test_the_transfer_search_shows_a_company_once_and_loads_shown_when() -> None:
+    from django.urls import reverse
+
+    from ledger.models import LeaseTransfer
+
+    store = a_store("Transfer review store", 5151)
+    a_lease(store, an_operator("Outgoing Person"))
+    Operator.objects.create(display_name="x", kind="company", company="Acme Review")
+    Operator.objects.create(display_name="Legacy Name", kind="person", company="Legacy Company")
+    admin, _ = client_for(Role.ADMIN)
+    admin.post(reverse("ledger:stores:transfer", kwargs={"pk": store.pk}))
+    row = LeaseTransfer.objects.get(store=store)
+    url = reverse("ledger:transfers:operator", kwargs={"pk": row.pk})
+    body = admin.get(url + "?q=Acme").content.decode()
+    assert "Acme Review" in body and "Acme Review (Acme Review)" not in body
+    assert "ledger/shown_when.js" in body
+    other = admin.get(url + "?q=Legacy").content.decode()
+    assert "(Legacy Company)" in other

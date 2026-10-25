@@ -361,6 +361,8 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     # PLAN-012f-a Batch E (ADR-0014): a repeating debit plan's Pause and Resume (billing),
     # Stop and its end rule (admin); all POST, Stop asks first on its GET (E-4).
     plans = ("plan_pause", "plan_resume", "plan_stop", "plan_end")
+    # PLAN-012f-b D13: the store form's "Check address" (billing, POST only; writes nothing).
+    address_check = ("check_address",)
     assert names == {
         f"ledger:stores:{short}"
         for short in (
@@ -375,8 +377,11 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
             *workspace_bar,
             *schedule,
             *plans,
+            *address_check,
         )
     }
+    rule = registry.rule_for("ledger:stores:check_address")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     for short in ("plan_pause", "plan_resume"):
         rule = registry.rule_for(f"ledger:stores:{short}")
         assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}

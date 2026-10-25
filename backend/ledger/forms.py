@@ -171,7 +171,8 @@ class OperatorForm(_OperatorFormBase):
         choices=OperatorKind.choices,
         initial=OperatorKind.PERSON.value,
         label="Type",
-        widget=forms.RadioSelect,
+        # B2-2: drawn as the segmented control (app.css .radio-segmented).
+        widget=forms.RadioSelect(attrs={"class": "radio-segmented"}),
         error_messages={"required": "Choose company or person."},
     )
     email = forms.EmailField(required=False, max_length=254)
@@ -246,6 +247,13 @@ class OperatorForm(_OperatorFormBase):
                 data[name] = value
             elif name not in self.errors:
                 self.add_error(name, forms.ValidationError(refusal, code="required"))
+        # B2-3: the other kind's name fields are cleared, so a post without the script (where
+        # every field shows) never keeps stale names. A company keeps its contact person.
+        for kind, names in KIND_SHOWN_FIELDS.items():
+            if data.get("kind") and kind != data.get("kind"):
+                for name in names:
+                    if name in data:
+                        data[name] = ""
         return data
 
 

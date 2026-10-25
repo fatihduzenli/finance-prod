@@ -160,6 +160,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
    text, not in colour alone. One .btn-primary per form; the others are .btn. */
 .field { margin: 0 0 var(--space-3); }
 .field > label { margin: var(--space-3) 0 var(--space-1); font-size: var(--fs-base); }
+/* A radio group's name (B2-2): a span.label, drawn as the field's label. */
+.field > span.label { display: block; margin: var(--space-3) 0 var(--space-1); font-size: var(--fs-base); font-weight: 600; }
 .field .help { display: block; color: var(--muted); font-size: var(--fs-sm); margin-top: var(--space-1); }
 .field .errorlist { list-style: none; margin: var(--space-1) 0 0; padding: 0; font-size: var(--fs-sm); font-weight: 600; }
 .field .field-error { display: block; margin-top: var(--space-1); color: var(--unpaid-text); font-size: var(--fs-sm); }
@@ -178,6 +180,15 @@ p.help { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-sm
 .segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--bg); }
 .segmented a { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; }
 .segmented a[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+/* .radio-segmented: a radio group drawn as the same track (the operator form's Type,
+   PLAN-012f-b D9, B2-2): each option's label a segment, the chosen one white with the 1 px
+   ring; the radio itself stays in the page for the keyboard and screen readers, unseen. */
+.radio-segmented:not(input) { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--bg); }
+.radio-segmented > div { display: flex; }
+.radio-segmented > div > label { position: relative; display: inline-flex; align-items: center; margin: 0; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; cursor: pointer; }
+.radio-segmented > div > label:has(input:checked) { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+.radio-segmented > div > label:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 1px; }
+.radio-segmented input[type=radio] { position: absolute; opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; margin: 0; pointer-events: none; }
 
 /* --- Tabs --------------------------------------------------------------------------------
    .tabs: a row of .tab links (the store's and the operator's tabs) over a 1 px rule; 13 px,
@@ -841,6 +852,11 @@ fieldset.card > legend + * { clear: both; }
 .dialog-form-grid > * { min-width: 0; }
 .dialog-form-grid .span-2 { grid-column: 1 / -1; }
 .dialog-form-grid input:not([type=checkbox]):not([type=radio]), .dialog-form-grid select, .dialog-form-grid textarea { width: 100%; }
+/* The store form's address check (PLAN-012f-b D13): "Check address" under the ZIP field, the
+   USPS answer below it in a quiet box, its two buttons on one line. */
+.address-check:not(:empty) { margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface-2); }
+.address-check p { margin: 0; font-size: var(--fs-sm); }
+.address-check-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
 .dialog-fieldset { min-width: 0; margin: var(--space-4) 0 0; padding: 0; border: 0; }
 .dialog-fieldset > legend { margin: 0 0 var(--space-1); padding: 0; font-size: var(--fs-lg); font-weight: 600; }
 .store-picker-form { margin: 0; }

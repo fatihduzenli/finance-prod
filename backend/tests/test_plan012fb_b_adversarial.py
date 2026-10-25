@@ -7,6 +7,7 @@ is the only form on the page with a primary button."""
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import pytest
 from django.urls import reverse
@@ -246,3 +247,171 @@ def test_a_blank_state_lands_in_needs_review_and_a_closed_store_does_not() -> No
     billing, _ = client_for(Role.BILLING)
     body = billing.get("/").content.decode()
     assert MARKUP not in body and "State needs choosing" in body
+
+
+# --- Slice B-2: the operator type ------------------------------------------------------------
+
+
+def test_a_forged_display_name_is_ignored_and_the_name_is_derived() -> None:
+    from ledger.models import Operator
+    from tests.test_operator_views import form_data as operator_data
+
+    billing, _ = client_for(Role.BILLING)
+    url = reverse("ledger:operators:create")
+    data = operator_data(
+        kind="person",
+        company="",
+        first_name="Ada",
+        last_name="Lovelace",
+        display_name=MARKUP,
+        email="ada@example.com",
+    )
+    response = billing.post(url, data)
+    assert response.status_code == 302, response.status_code
+    operator = Operator.objects.get(email="ada@example.com")
+    assert operator.display_name == "Ada Lovelace"
+    assert operator.kind == "person"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("kind", MARKUP), ("kind", "robot"), ("kind", "4111111111111111"), ("kind", "")],
+)
+def test_a_hostile_kind_is_refused_without_echo_and_writes_nothing(field: str, value: str) -> None:
+    from ledger.models import Operator
+    from tests.test_operator_views import form_data as operator_data
+
+    billing, _ = client_for(Role.BILLING)
+    url = reverse("ledger:operators:create")
+    before = Operator.objects.count()
+    response = billing.post(url, operator_data(email="kind@example.com", **{field: value}))
+    assert response.status_code == 302
+    body = billing.get(url).content.decode()
+    assert "4111111111111111" not in body and MARKUP not in body
+    assert Operator.objects.count() == before
+
+
+def test_a_person_without_a_last_name_and_a_company_without_a_name_are_refused() -> None:
+    from ledger.models import Operator
+    from tests.test_operator_views import form_data as operator_data
+
+    billing, _ = client_for(Role.BILLING)
+    url = reverse("ledger:operators:create")
+    before = Operator.objects.count()
+    for data in (
+        operator_data(kind="person", company="", first_name="Ada", last_name="   "),
+        operator_data(kind="company", company="   "),
+    ):
+        assert billing.post(url, data).status_code == 302
+        body = billing.get(url).content.decode()
+        assert "Enter the" in body
+    assert Operator.objects.count() == before
+
+
+def test_an_existing_operator_opens_as_a_person_with_its_name_kept() -> None:
+    store = a_world()
+    operator = store.leases.get().operator
+    assert operator is not None
+    operator.refresh_from_db()
+    assert operator.kind == "person" and operator.first_name == "" and operator.last_name == ""
+    assert MARKUP in operator.display_name  # kept as it was, never guessed
+    billing, _ = client_for(Role.BILLING)
+    body = billing.get(
+        reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
+    ).content.decode()
+    assert "Fatih &lt;script&gt;" in body and MARKUP not in body
+
+
+def test_the_search_finds_a_person_by_last_name_without_echoing_markup() -> None:
+    from ledger.models import Operator
+
+    Operator.objects.create(
+        display_name="x",
+        kind="person",
+        first_name="Grace",
+        last_name=f"Hopper {MARKUP}",
+        email="g@example.com",
+    )
+    billing, _ = client_for(Role.BILLING)
+    response = billing.get(reverse("ledger:search") + "?q=Hopper", follow=True)
+    body = response.content.decode()
+    assert MARKUP not in body
+    assert "Hopper &lt;script&gt;" in body
+
+
+# --- Slice B-4: the USPS address check ----------------------------------------------------------
+
+
+def check_url() -> str:
+    return reverse("ledger:stores:check_address")
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"street": MARKUP, "city": MARKUP, "state": MARKUP, "zip": MARKUP},
+        {"street": "4111111111111111", "city": "x", "state": "TX", "zip": "4111111111111111"},
+        {"street": "a" * 5000, "city": "b" * 5000, "state": "c" * 5000, "zip": "9" * 5000},
+        {"street": "1 Main St", "state": "TX; drop table stores", "zip": "%00"},
+    ],
+)
+def test_a_hostile_address_check_never_echoes_and_writes_nothing(data: dict[str, str]) -> None:
+    a_world()
+    billing, _ = client_for(Role.BILLING)
+    before = row_counts()
+    response = billing.post(check_url(), data)
+    assert response.status_code == 200
+    assert response["Content-Type"].startswith("application/json")
+    body = response.content.decode()
+    assert MARKUP not in body and "4111111111111111" not in body and "drop table" not in body
+    assert '"verified": false' in body
+    assert row_counts() == before
+
+
+def test_the_address_check_route_refuses_the_wrong_method_role_and_session() -> None:
+    from django.test import Client
+
+    a_world()
+    billing, _ = client_for(Role.BILLING)
+    assert billing.get(check_url()).status_code == 405
+    viewer, _ = client_for(Role.VIEWER)
+    assert viewer.post(check_url(), {"street": "1 Main St"}).status_code in (302, 403)
+    assert Client().post(check_url(), {"street": "1 Main St"}).status_code in (401, 403)
+    assert billing.post(check_url(), {"street": ""}).status_code == 400
+
+
+def test_a_failed_check_answers_a_fixed_sentence_and_never_the_secret(
+    monkeypatch: pytest.MonkeyPatch, settings: Any
+) -> None:
+    from finance import usps
+
+    secret = "placeholder-usps-secret-ZZ9"
+    settings.USPS_CLIENT_ID = "placeholder-usps-id"
+    settings.USPS_CLIENT_SECRET = secret
+    monkeypatch.setattr(usps, "check", lambda address: None)
+    a_world()
+    billing, _ = client_for(Role.BILLING)
+    body = billing.post(check_url(), {"street": "1 Main St", "state": "TX", "zip": "75001"})
+    text = body.content.decode()
+    assert secret not in text and "placeholder-usps-id" not in text
+    assert '"verified": false' in text
+    page = billing.get(reverse("ledger:stores:list")).content.decode()
+    assert secret not in page
+
+
+def test_the_usps_module_and_script_handle_the_secret_and_markup_safely() -> None:
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    module = (backend / "finance" / "usps.py").read_text(encoding="utf-8")
+    for line in module.splitlines():
+        if "logger." in line:
+            assert "secret" not in line.lower() and "token" not in line.lower(), line
+            assert "address" not in line.lower() or "USPS" in line, line
+    assert "verify=False" not in module and "follow_redirects=True" not in module
+    script = (backend / "ledger" / "static" / "ledger" / "address_check.js").read_text(
+        encoding="utf-8"
+    )
+    assert "innerHTML" not in script and "insertAdjacentHTML" not in script
+    assert "X-CSRFToken" in script or "csrfmiddlewaretoken" in script
+    assert "credentials" in script
