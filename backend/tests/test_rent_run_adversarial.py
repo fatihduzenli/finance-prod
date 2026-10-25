@@ -249,7 +249,7 @@ def test_provider_status_cannot_be_written_from_the_ledger_directly() -> None:
         (D("100.00"), f"paid by card {CARD}", "other"),
         (D("100.00"), "ok", "card"),
         (D("100.00"), "ok", "ach"),
-        (D("100.00"), "ok", "cash"),
+        (D("100.00"), "ok", "card"),  # "cash" is accepted since PLAN-012f-b Batch C
     ],
 )
 def test_bad_manual_payments_save_nothing(

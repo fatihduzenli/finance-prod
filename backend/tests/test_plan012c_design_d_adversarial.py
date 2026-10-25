@@ -89,7 +89,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "LegacyStatus": ["paid", "unpaid"],
     "MessageKind": ["final_statement", "ladder"],
     "MessageStatus": ["catch_all", "failed", "queued", "sent", "suppressed"],
-    "MoneyMethod": ["ach", "check", "other", "wire", "zelle"],  # "check" added by PLAN-012e-3 too
+    # "check" added by PLAN-012e-3, "cash" by PLAN-012f-b Batch C.
+    "MoneyMethod": ["ach", "cash", "check", "other", "wire", "zelle"],
     "NoteEntityType": ["lease", "operator", "store"],
     # PLAN-012f-b Batch B (D9): the operator's kind.
     "OperatorKind": ["company", "person"],
@@ -115,7 +116,7 @@ FROZEN_CHOICES: dict[str, list[str]] = {
         "rent",
     ],
     # "check" added by PLAN-012e-3 (owner, 2026-10-22): the one deliberate change since the freeze.
-    "PaymentMethod": ["ach", "check", "credit", "other", "wire", "zelle"],
+    "PaymentMethod": ["ach", "cash", "check", "credit", "other", "wire", "zelle"],
     "PaymentStatus": ["pending", "returned", "settled", "voided"],
     "RefundMethod": ["check", "wire", "zelle"],
     "RentChargeStatus": ["due", "paid", "partial", "pending", "unpaid", "waived"],
