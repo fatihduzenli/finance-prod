@@ -16,6 +16,7 @@ import time
 import uuid
 from collections.abc import Callable
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -331,46 +332,59 @@ GUARDED = guarded_fields()
 GUARDED_IDS = [f"{model._meta.db_table}.{field.column}" for model, field in GUARDED]
 
 
+#: Every migration that creates or replaces a payment-data trigger, and every migration from
+#: ledger 0041 and payments 0018 on whether or not it adds one (the test below keeps the list
+#: complete, PLAN-012f-b Batch 0).
+GUARD_MODULES = (
+    "ledger.migrations.0002_postgresql_guards",
+    "ledger.migrations.0004_reserved_tables",
+    "ledger.migrations.0005_operator_sync_failure_fields",
+    "ledger.migrations.0009_payment_returns_resolution",
+    "ledger.migrations.0010_rent_charge_review_message",
+    "ledger.migrations.0012_setup_charges",
+    "ledger.migrations.0014_store_costs_deposit_resolutions",
+    "ledger.migrations.0015_documents_reshape",
+    "ledger.migrations.0016_store_cost_corrections",
+    "ledger.migrations.0019_one_off_charges_constraints",
+    "ledger.migrations.0023_contacts_and_calendar",
+    "ledger.migrations.0024_collections_ladder",
+    "ledger.migrations.0028_contact_log_maturity",
+    "ledger.migrations.0029_invoice_builder",
+    "ledger.migrations.0030_disputes",
+    "ledger.migrations.0031_line_kind_fees_consent",
+    "ledger.migrations.0032_builder_item",
+    "ledger.migrations.0034_proration",
+    "ledger.migrations.0035_lease_end_transfer",
+    "ledger.migrations.0037_transfer_fields",
+    "ledger.migrations.0038_installments",
+    "ledger.migrations.0039_transfer_debt_override",
+    "ledger.migrations.0040_lease_end_statement_opened",
+    "ledger.migrations.0041_rent_lines",
+    "ledger.migrations.0042_payment_allocation_and_credits",
+    "ledger.migrations.0043_fee_type_show_in_setup",
+    "ledger.migrations.0044_draft_existing_charge",
+    "ledger.migrations.0045_company_settings",
+    "ledger.migrations.0046_copy_labels",
+    "ledger.migrations.0047_store_address",
+    "ledger.migrations.0048_check_method",
+    "ledger.migrations.0049_autopay_plans",
+    "ledger.migrations.0050_rename_statement_saved_at",
+    "payments.migrations.0002_postgresql_guards",
+    "payments.migrations.0003_webhook_event_processing",
+    "payments.migrations.0005_jobs",
+    "payments.migrations.0007_reconciliation",
+    "payments.migrations.0018_copy_labels",
+)
+
+
 def test_guarded_columns_match_the_database_triggers() -> None:
     # A later migration's entry for a table replaces the earlier one: it drops the old
     # trigger and creates the new one (ledger 0015 reshaped ``documents``, PLAN-010c D4).
+    from tests.test_migrations_roundtrip import guarded_columns
+
     triggers: dict[str, tuple[str, ...]] = {}
-    for module in (
-        "ledger.migrations.0002_postgresql_guards",
-        "ledger.migrations.0004_reserved_tables",
-        "ledger.migrations.0005_operator_sync_failure_fields",
-        "ledger.migrations.0009_payment_returns_resolution",
-        "ledger.migrations.0010_rent_charge_review_message",
-        "ledger.migrations.0012_setup_charges",
-        "ledger.migrations.0014_store_costs_deposit_resolutions",
-        "ledger.migrations.0015_documents_reshape",
-        "ledger.migrations.0016_store_cost_corrections",
-        "ledger.migrations.0019_one_off_charges_constraints",
-        "ledger.migrations.0023_contacts_and_calendar",
-        "ledger.migrations.0024_collections_ladder",
-        "ledger.migrations.0028_contact_log_maturity",
-        "ledger.migrations.0029_invoice_builder",
-        "ledger.migrations.0030_disputes",
-        "ledger.migrations.0031_line_kind_fees_consent",
-        "ledger.migrations.0032_builder_item",
-        "ledger.migrations.0034_proration",
-        "ledger.migrations.0035_lease_end_transfer",
-        "ledger.migrations.0037_transfer_fields",
-        "ledger.migrations.0038_installments",
-        "ledger.migrations.0039_transfer_debt_override",
-        "ledger.migrations.0040_lease_end_statement_opened",
-        "ledger.migrations.0042_payment_allocation_and_credits",
-        "ledger.migrations.0043_fee_type_show_in_setup",
-        "ledger.migrations.0044_draft_existing_charge",
-        "ledger.migrations.0045_company_settings",
-        "ledger.migrations.0047_store_address",
-        "ledger.migrations.0049_autopay_plans",
-        "payments.migrations.0002_postgresql_guards",
-        "payments.migrations.0003_webhook_event_processing",
-        "payments.migrations.0005_jobs",
-        "payments.migrations.0007_reconciliation",
-    ):
-        triggers.update(importlib.import_module(module).GUARDED_COLUMNS)
+    for module in GUARD_MODULES:
+        triggers.update(guarded_columns(module))
     # ledger 0017 renamed ``setup_charges`` to ``one_off_charges`` and 0019 replaced its
     # trigger (PLAN-010d D1): the old table's entry names a table that no longer exists.
     del triggers["setup_charges"]
@@ -793,3 +807,37 @@ def test_the_trigger_refuses_a_card_number_split_by_bidi_marks() -> None:
     text = "‮".join(["4111", "1111", "1111", "1111"])
     with pytest.raises(IntegrityError), transaction.atomic():
         ledger_models.Operator.objects.filter(pk=operator.pk).update(notes=text)
+
+
+# --- The two guard lists stay complete ----------------------------------------------------------
+
+FIRST_LISTED_WITHOUT_EXCEPTION = {"ledger": "0041", "payments": "0018"}
+
+
+def every_migration() -> list[str]:
+    found = []
+    for app in ("ledger", "payments"):
+        folder = Path(__file__).resolve().parents[1] / app / "migrations"
+        found += [f"{app}.migrations.{path.stem}" for path in sorted(folder.glob("0*.py"))]
+    return found
+
+
+def test_every_migration_that_may_guard_a_column_is_in_both_guard_lists() -> None:
+    """A new migration lands in both lists (here and the PostgreSQL round trip's) whether or
+    not it adds a guarded column, from ledger 0041 and payments 0018 on; and every migration
+    anywhere that declares ``GUARDED_COLUMNS`` is in this list, the complete history of the
+    triggers (PLAN-012f-b Batch 0, after 0046, 0048 and 0050 were missed)."""
+    from tests.test_migrations_roundtrip import GUARD_MODULES as ROUND_TRIP_MODULES
+
+    missing = []
+    for module in every_migration():
+        app, _, name = module.split(".")
+        since = name[:4] >= FIRST_LISTED_WITHOUT_EXCEPTION[app]
+        declares = hasattr(importlib.import_module(module), "GUARDED_COLUMNS")
+        if (since or declares) and module not in GUARD_MODULES:
+            missing.append(f"{module} (card-number list)")
+        if since and module not in ROUND_TRIP_MODULES:
+            missing.append(f"{module} (round-trip list)")
+    assert missing == []
+    assert set(GUARD_MODULES) <= set(every_migration())
+    assert set(ROUND_TRIP_MODULES) <= set(every_migration())

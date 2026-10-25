@@ -257,10 +257,13 @@ jobs:
   migrations:
     # The seeded migration round trips (PLAN-012b-a part 1): every migration applied and
     # reversed on PostgreSQL, apart from the unit tests and in parallel with them. Measured
-    # 8 to 12 minutes; the limit leaves room for a slow runner.
+    # 8 to 12 minutes at first; 29:40 on 2026-10-25 with fifty migrations. TEMPORARY: the
+    # limit is 45 minutes for Step 12f-b, which adds several migrations (PLAN-012f-b Batch 0);
+    # the permanent fix, a split or a squash, is Step 13's. The job's time is reported at the
+    # step's checkpoint.
     name: Migration tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     services:
       postgres:
