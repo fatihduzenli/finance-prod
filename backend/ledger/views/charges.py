@@ -19,24 +19,44 @@ POST ends in a redirect; a form with errors is held in the session for the next 
 from __future__ import annotations
 
 import uuid
+from datetime import date
+from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
-from ledger.forms import LinkInvoiceForm, ManualPaymentForm
-from ledger.models import ChargeEntityType, ChargeNote, RentCharge, RentChargeStatus
+from finance.dates import month_text
+from ledger.forms import (
+    HOW_DEBIT,
+    HOW_RECORD,
+    RENT_DEBIT_REASON,
+    AddPaymentForm,
+    LinkInvoiceForm,
+)
+from ledger.models import (
+    ChargeEntityType,
+    ChargeNote,
+    Operator,
+    RentCharge,
+    RentChargeStatus,
+    Store,
+)
 from ledger.services import (
     collections,
     contacts,
     csv_export,
     installments,
+    leases,
     rent_run,
     workspace,
+    workspace_cards,
 )
 from ledger.services import detail_cards as detail_service
 from ledger.services import stores as store_service
@@ -57,6 +77,7 @@ from ledger.views.operators import (
     uuid_param,
 )
 from ledger.views.run import _billing_only
+from ledger.wording import format_amount
 from payments import operator_sync
 from payments.models import JobKind
 
@@ -214,22 +235,114 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
     )
 
 
+# --- Add payment (PLAN-012f-b D14; DESIGN-SPEC §4 Add payment) ------------------------
+
+
+def _typed_amount(value: object) -> Decimal:
+    """An amount as typed, or zero for an empty, invalid or negative one."""
+    try:
+        amount = Decimal(str(value or "").strip() or "0")
+    except InvalidOperation:
+        return Decimal("0.00")
+    return amount if amount.is_finite() and amount > 0 else Decimal("0.00")
+
+
+def render_add_payment(
+    request: HttpRequest,
+    form: AddPaymentForm,
+    *,
+    charge_label: str,
+    crumb_label: str,
+    charge_url: str,
+    store: Store | None,
+    operator: Operator | None,
+    status: str,
+    status_label: str,
+    amount: Decimal,
+    paid: Decimal,
+    balance: Decimal,
+    due: date | None,
+    bank: Any,
+    cancel_url: str,
+    large_debit: bool = False,
+) -> HttpResponse:
+    """The Add payment page of a rent or a one-off charge (PLAN-012f-b D14): the header
+    (the status badge with the balance, the muted line), the two radio cards, the Note
+    card, the SUMMARY (tiles, the "After this payment" line, the one primary whose words
+    follow the card) and the OPERATOR card. Local data only."""
+    chosen = form.chosen()
+    typed = form["debit_amount" if chosen == HOW_DEBIT else "amount"].value()
+    this_payment = _typed_amount(typed)
+    left = balance - this_payment
+    badge = f"{status_label} · {format_amount(balance)} due" if balance > 0 else status_label
+    line = detail_service.header_line(
+        store=store_service.title(store) if store is not None else "",
+        operator=operator.display_name if operator is not None else "",
+        due=due,
+    )
+    return render(
+        request,
+        "ledger/payments/add_payment.html",
+        {
+            "form": form,
+            "how_options": form.options(),
+            "chosen": chosen,
+            "how_debit": HOW_DEBIT,
+            "how_record": HOW_RECORD,
+            "charge_label": charge_label,
+            "crumb_label": crumb_label,
+            "charge_url": charge_url,
+            "crumb_store": store,
+            "operator": operator,
+            "status": status,
+            "status_badge_label": badge,
+            "header_line": " · ".join(part for part in (charge_label, line) if part),
+            "amount": amount,
+            "paid": paid,
+            "balance": balance,
+            "this_payment": this_payment,
+            "paid_in_full": this_payment > 0 and left <= 0,
+            "still_owed": max(left, Decimal("0.00")),
+            "bank": bank,
+            "connected": bool(leases.customer_ref(operator)),
+            "returns_this_year": (
+                workspace_cards.returns_this_year(operator, timezone.localdate())
+                if operator is not None
+                else 0
+            ),
+            "cancel_url": cancel_url,
+            "large_debit": large_debit,
+        },
+    )
+
+
+def usable_bank(operator: Operator | None) -> Any:
+    """The operator's linked bank method as stored, when it is a usable bank account
+    (the OPERATOR card's "bank ···· last 4"), or ``None``. No provider call."""
+    record = leases.linked_method_record(operator)
+    return record if record is not None and record.is_usable_bank else None
+
+
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
+    """Add payment on a rent charge (PLAN-012f-b D14): the record card; the bank-debit card
+    is greyed (:data:`ledger.forms.RENT_DEBIT_REASON`) and a posted debit is refused."""
     if not meets(_role(request), Role.BILLING):
         return forbidden(request)
     charge = _load(pk)
     context = store_context.for_lease(request, charge.lease)
-    done = store_context.return_url(
-        request,
-        context,
-        workspace.TAB_PAYMENTS,
-        reverse("ledger:charges:detail", kwargs={"pk": charge.pk}),
-    )
+    detail_url = reverse("ledger:charges:detail", kwargs={"pk": charge.pk})
+    done = store_context.return_url(request, context, workspace.TAB_PAYMENTS, detail_url)
     target = f"charge-payment:{charge.pk}"
+
+    def build(data: Any = None, **kwargs: Any) -> AddPaymentForm:
+        return AddPaymentForm(
+            data, debit_reason=RENT_DEBIT_REASON, balance=charge.balance, **kwargs
+        )
+
     if request.method == "POST":
-        form = ManualPaymentForm(request.POST)
+        form = build(request.POST)
         if form.is_valid():
             data = form.cleaned_data
             if already_submitted(data["creation_key"]):
@@ -264,13 +377,25 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
             form.add_error(outcome.field, outcome.message)
         _hold(request, target, form)
         return redirect(request.get_full_path())
-    form = _held(request, target, ManualPaymentForm) or ManualPaymentForm(
-        initial={"creation_key": uuid.uuid4()}
-    )
-    return render(
+    form = _held(request, target, build) or build(initial={"creation_key": uuid.uuid4()})
+    lease = charge.lease
+    month = month_text(charge.period_month)
+    return render_add_payment(
         request,
-        "ledger/charges/payment_form.html",
-        {"form": form, "charge": charge, "store_context": context},
+        form,
+        charge_label=f"Rent {month}, debit {charge.seq}",
+        crumb_label=f"Rent {month}, {lease.store.external_label}",
+        charge_url=detail_url,
+        store=lease.store,
+        operator=lease.operator,
+        status=charge.status,
+        status_label=str(charge.get_status_display()),
+        amount=charge.amount_due,
+        paid=charge.amount_paid,
+        balance=charge.balance,
+        due=charge.due_on,
+        bank=usable_bank(lease.operator),
+        cancel_url=done,
     )
 
 

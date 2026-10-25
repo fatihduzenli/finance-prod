@@ -323,6 +323,8 @@ NEEDS_ARGUMENTS = {
     "InvoiceDraftForm": "the invoice builder",
     "ContactEntryForm": "the store and operator workspaces, contacts tab",
     "ContactOutcomeForm": "the store and operator workspaces, contacts tab",
+    # PLAN-012f-b C-2: Add payment's form takes the debit card's reason and the balance.
+    "AddPaymentForm": "the Add payment page of a rent charge",
 }
 
 
@@ -472,6 +474,14 @@ def page_paths(seeded: visual_world.World) -> list[tuple[str, Role | None, str]]
         ("returns", Role.BILLING, "/returns/"),
         ("calendar", Role.BILLING, "/calendar/"),
         ("record a payment", Role.BILLING, f"/stores/{store}/payments/new/"),
+        (
+            "add payment (rent charge)",
+            Role.BILLING,
+            reverse(
+                "ledger:charges:record_payment",
+                kwargs={"pk": seeded.lease.rent_charges.order_by("period_month")[0].pk},
+            ),
+        ),
         ("invoice builder (new)", Role.BILLING, f"/invoices/new/store/{store}/"),
         (
             "invoice builder (draft)",

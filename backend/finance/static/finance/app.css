@@ -756,6 +756,24 @@ fieldset.card > legend + * { clear: both; }
 .summary-discard { width: 100%; margin: var(--space-2) 0 0; color: var(--text-2); font-weight: 500; }
 .builder-help { background: transparent; }
 .builder-help p.help { margin: 0; }
+/* Add payment (PLAN-012f-b D14; DESIGN-SPEC §4 Add payment): the builder's tiles one a row with
+   their fields beside each other; a greyed card (.is-unavailable: its radio disabled) in muted
+   text with its reason; the bank method on file as a read-only line; the SUMMARY's four tiles
+   two a row (This payment in teal), the "After this payment" line; the OPERATOR card's lines. */
+.how-tiles { grid-template-columns: minmax(0, 1fr); }
+.collect-tile.is-unavailable { background: var(--surface-2); border-style: dashed; }
+.collect-tile.is-unavailable .collect-option { cursor: not-allowed; }
+.collect-tile.is-unavailable .collect-name { color: var(--muted); }
+.collect-tile.is-unavailable .unavailable-reason { color: var(--text-2); }
+.bank-field .bank-select { pointer-events: none; background: var(--surface-2); color: var(--text); }
+.note-card textarea { width: 100%; }
+.summary-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin: 0 0 var(--space-3); }
+.summary-tiles .kpi { gap: 2px; padding: 10px var(--space-3); border: 0; background: var(--surface-2); }
+.summary-tiles .kpi-value { font-size: 20px; }
+#tile-this-payment .kpi-value { color: var(--link); }
+.after-payment { display: flex; justify-content: space-between; gap: var(--space-3); margin: 0; padding: var(--space-3) 0 0; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: var(--fs-base); }
+.after-payment strong { color: var(--text); }
+.operator-summary-line { margin: 0 0 2px; font-size: var(--fs-base); }
 
 /* --- Wizard frame (PLAN-012f-a D8) -------------------------------------------------------------
    DESIGN-SPEC §4 Transfer wizard, transfer-wizard-laptop.png; End lease on the same frame
@@ -990,6 +1008,8 @@ fieldset.card > legend + * { clear: both; }
   .page-title-block:has(> h1 + #known-fields) { grid-template-columns: minmax(0, 1fr); }
   .collect-tiles { grid-template-columns: minmax(0, 1fr); }
   .collect-fields { margin-left: 0; }
+  .how-card .collect-fields .field { flex-basis: 100%; }
+  .summary-tiles .kpi-value { font-size: var(--fs-lg); }
   /* Wizard frame (PLAN-012f-a D8; DESIGN-SPEC §6): one column in markup order (the step line and
      its bar, the card, the footer, then the step card with the context and the cancel, its list
      hidden by the .steps rule above); the footer kept in view above the tab bar. */

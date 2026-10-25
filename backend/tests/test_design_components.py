@@ -178,7 +178,8 @@ def test_every_staff_template_with_a_title_wraps_it_in_the_page_header() -> None
             header = text.rfind('{% block header %}<div class="page-header', 0, at)
             assert header != -1 and "{% endblock %}" not in text[header:at], relative
             assert PAGE_HEADER.search(text[header:at] + "<h1>"), relative
-    assert found >= 70
+    # PLAN-012f-b C-2: the two payment_form.html pages became one add_payment.html.
+    assert found >= 69
 
 
 def test_a_list_page_puts_its_primary_action_in_the_header() -> None:

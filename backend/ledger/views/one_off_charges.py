@@ -29,22 +29,28 @@ operator, any role.
 
 from __future__ import annotations
 
+import copy
 import uuid
+from typing import Any
+from urllib.parse import urlencode
 
 from django import forms
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import (
+    DEBIT_NEEDS_ADMIN,
+    HOW_DEBIT,
+    AddPaymentForm,
     CancelChargeForm,
     ChargeNowForm,
     LinkInvoiceForm,
-    ManualPaymentForm,
     SetupChargeEditForm,
     WaiveForm,
 )
@@ -71,7 +77,7 @@ from ledger.services import one_off_charges as service
 from ledger.services import stores as store_service
 from ledger.services.csv_export import CsvWriter
 from ledger.views import store_context, stores
-from ledger.views.charges import _report
+from ledger.views.charges import _report, render_add_payment
 from ledger.views.detail_cards import activity_context
 from ledger.views.installments import parent_context
 from ledger.views.jobs import already_submitted, busy, job_context, submit
@@ -328,11 +334,34 @@ def _charge_now_context(
     }
 
 
+def _as_debit(charge: OneOffCharge) -> OneOffCharge:
+    """The charge as today's bank debit reads it (PLAN-012f-b D14): an e-mail or manual
+    charge is switched to Charge now by :func:`ledger.services.one_off_charges.debit`
+    before Charge now's rules apply, so the confirmation page reads the same rules. An
+    unsaved copy; nothing is written."""
+    if charge.collection not in (CollectionMethod.EMAIL, CollectionMethod.MANUAL):
+        return charge
+    preview = copy.copy(charge)
+    preview.collection = CollectionMethod.CHARGE_NOW
+    return preview
+
+
+def _page_key(request: HttpRequest) -> uuid.UUID:
+    """The one-time key Add payment sent in ``?key=``, else a new one."""
+    try:
+        return uuid.UUID(request.GET.get("key", ""))
+    except ValueError:
+        return uuid.uuid4()
+
+
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def charge_now(request: HttpRequest, pk: str) -> HttpResponse:
     """``ledger:one_off_charges:charge_now`` (admin; D4): the confirmation page and its
-    POST, which queues the single attempt. The page reads local data only."""
+    POST, which debits the whole open balance today through
+    :func:`ledger.services.one_off_charges.debit` (PLAN-012f-b D14: the one path of Charge
+    now and of Add payment's bank debit on today; it queues the single attempt). The page
+    reads local data only."""
     refused = _refuse_below(request, Role.ADMIN)
     if refused is not None:
         return refused
@@ -341,17 +370,27 @@ def charge_now(request: HttpRequest, pk: str) -> HttpResponse:
     if request.method == "POST":
         form = ChargeNowForm(request.POST)
         if form.is_valid():
-            outcome = service.charge_now_confirm(
-                charge.pk, actor=_actor(request), confirmed=form.cleaned_data["confirm"] is True
+            outcome = service.debit(
+                charge,
+                service.open_balance(charge),
+                timezone.localdate(),
+                actor=_actor(request),
+                confirmed=form.cleaned_data["confirm"] is True,
+                key=form.cleaned_data["key"],
             )
             if outcome.ok:
-                messages.success(request, outcome.message)
+                if outcome.message == service.DEBIT_ALREADY:
+                    messages.info(request, outcome.message)
+                else:
+                    messages.success(request, outcome.message)
                 return redirect("ledger:one_off_charges:detail", pk=charge.pk)
             _error(form, outcome.field, outcome.message)
         _hold(request, target, form)
-        return redirect("ledger:one_off_charges:charge_now", pk=charge.pk)
-    form = _held(request, target, ChargeNowForm) or ChargeNowForm()
-    details = service.charge_now_request(charge, _actor(request))
+        return redirect(request.get_full_path())
+    form = _held(request, target, ChargeNowForm) or ChargeNowForm(
+        initial={"key": _page_key(request)}
+    )
+    details = service.charge_now_request(_as_debit(charge), _actor(request))
     wait = details.wait_seconds
     return render(
         request,
@@ -368,25 +407,37 @@ def charge_now(request: HttpRequest, pk: str) -> HttpResponse:
     )
 
 
+#: Where a refusal of :func:`ledger.services.one_off_charges.debit` sits on Add payment.
+DEBIT_FIELD = {"amount": "debit_amount", "on": "debit_on", "confirm": "confirm_large_debit"}
+
+
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def charge_payment(request: HttpRequest, pk: str) -> HttpResponse:
+    """Add payment on a one-off charge (PLAN-012f-b D14): ``record`` is today's manual
+    payment; ``debit`` on today opens Charge now's confirmation (admin; nothing written
+    here), on a later date schedules the debit (billing) and lands on the charge."""
     refused = _refuse_below(request, Role.BILLING)
     if refused is not None:
         return refused
     charge = _load(pk)
     context = _charge_context(request, charge)
-    done = store_context.return_url(
-        request,
-        context,
-        workspace.TAB_PAYMENTS,
-        reverse("ledger:one_off_charges:detail", kwargs={"pk": charge.pk}),
-    )
+    detail_url = reverse("ledger:one_off_charges:detail", kwargs={"pk": charge.pk})
+    done = store_context.return_url(request, context, workspace.TAB_PAYMENTS, detail_url)
     target = f"one-off-charge-payment:{charge.pk}"
+    options = service.bank_debit_options(charge)
+    admin = meets(_role(request), Role.ADMIN)
+    reason = options.reason or ("" if admin else DEBIT_NEEDS_ADMIN)
+
+    def build(data: Any = None, **kwargs: Any) -> AddPaymentForm:
+        return AddPaymentForm(data, debit_reason=reason, balance=options.balance, **kwargs)
+
     if request.method == "POST":
-        form = ManualPaymentForm(request.POST)
+        form = build(request.POST)
         if form.is_valid():
             data = form.cleaned_data
+            if data["how"] == HOW_DEBIT:
+                return _debit(request, charge, form, target)
             if already_submitted(data["creation_key"]):
                 messages.info(request, rent_run.PAY_ALREADY)
                 return redirect(done)
@@ -418,14 +469,55 @@ def charge_payment(request: HttpRequest, pk: str) -> HttpResponse:
             _error(form, outcome.field, outcome.message)
         _hold(request, target, form)
         return redirect(request.get_full_path())
-    form = _held(request, target, ManualPaymentForm) or ManualPaymentForm(
-        initial={"creation_key": uuid.uuid4()}
-    )
-    return render(
+    form = _held(request, target, build) or build(initial={"creation_key": uuid.uuid4()})
+    operator = _operator(charge)
+    return render_add_payment(
         request,
-        "ledger/one_off_charges/payment_form.html",
-        {"form": form, "charge": charge, "store_context": context},
+        form,
+        charge_label=charge.label,
+        crumb_label=charge.label,
+        charge_url=detail_url,
+        store=charge.lease.store if charge.lease is not None else None,
+        operator=operator,
+        status=charge.status,
+        status_label=str(charge.get_status_display()),
+        amount=charge.price,
+        paid=charge.amount_paid,
+        balance=charge.balance,
+        due=charge.due_date,
+        bank=options.method,
+        cancel_url=done,
+        large_debit=options.large,
     )
+
+
+def _debit(
+    request: HttpRequest, charge: OneOffCharge, form: AddPaymentForm, target: str
+) -> HttpResponse:
+    """Add payment's bank debit (D14): today → Charge now's confirmation with the page's
+    one-time key (writes nothing); a later date → :func:`service.debit` → the charge."""
+    data = form.cleaned_data
+    key = data["creation_key"]
+    if data["debit_on"] == timezone.localdate():
+        url = reverse("ledger:one_off_charges:charge_now", kwargs={"pk": charge.pk})
+        return redirect(f"{url}?{urlencode({'key': str(key)})}")
+    outcome = service.debit(
+        charge,
+        data["debit_amount"],
+        data["debit_on"],
+        actor=_actor(request),
+        confirmed=data["confirm_large_debit"] is True,
+        key=key,
+    )
+    if outcome.ok:
+        if outcome.message == service.DEBIT_ALREADY:
+            messages.info(request, outcome.message)
+        else:
+            messages.success(request, outcome.message)
+        return redirect("ledger:one_off_charges:detail", pk=charge.pk)
+    _error(form, DEBIT_FIELD.get(outcome.field or "", "how"), outcome.message)
+    _hold(request, target, form)
+    return redirect(request.get_full_path())
 
 
 def _charge_context(
