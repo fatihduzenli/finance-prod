@@ -1,4 +1,4 @@
-{% comment %}The Invoices tab (docs/qa/PLAN-012d D3, finding 12d-1): ledger.services.workspace.invoices_tab. A never-sent draft has Edit, Send (single submit) and Delete (no note, no confirmation page); a sent invoice keeps its cancel form. On the operator page (D14) the operator's drafts and invoices, with a Store column; Send and Delete come back to it.{% endcomment %}
+{% comment %}The Invoices tab (docs/qa/PLAN-012d D3, finding 12d-1): ledger.services.workspace.invoices_tab. A never-sent draft has Edit, Send by e-mail (single submit; PLAN-012f-b D15) and Delete (no note, no confirmation page); a sent invoice keeps its cancel form. On the operator page (D14) the operator's drafts and invoices, with a Store column; Send and Delete come back to it. After Save in the builder (ledger:invoices:saved) the "Invoice saved" dialog opens over this tab (_saved_dialog.html).{% endcomment %}
 {% load components money dates %}
 {% load responsive %}
 <h2>Drafts</h2>
@@ -14,7 +14,7 @@
         <td>{{ draft.created_at|day }}</td>
         <td>{% if billing %}<div class="actions" style="margin:0;">
           <a class="btn draft-edit" href="{% url 'ledger:invoices:draft' pk=draft.pk %}{{ draft_edit_query }}">Edit</a>
-          <form method="post" action="{% url 'ledger:invoices:send' pk=draft.pk %}{{ draft_return_query }}" class="js-single-submit draft-send">{% csrf_token %}<button class="btn btn-primary" type="submit">Send</button></form>
+          <form method="post" action="{% url 'ledger:invoices:send' pk=draft.pk %}{{ draft_return_query }}" class="js-single-submit draft-send">{% csrf_token %}<button class="btn btn-primary" type="submit">Send by e-mail</button></form>
           <form method="post" action="{% url 'ledger:invoices:delete_draft' pk=draft.pk %}{{ draft_return_query }}" class="js-single-submit draft-delete">{% csrf_token %}<button class="btn btn-danger" type="submit">Delete</button></form>
         </div>{% endif %}</td>
       </tr>
@@ -24,7 +24,7 @@
   </tbody>
 </table>
 {% endresponsive_table %}
-{% if billing %}<p class="muted">Send e-mails the saved draft through {{ company.provider_name }}; Delete removes a draft that was never sent.</p>{% endif %}
+{% if billing %}<p class="muted">Send by e-mail sends the saved draft through {{ company.provider_name }}; Delete removes a draft that was never sent.</p>{% endif %}
 
 <h2>Invoices</h2>
 <p class="actions"><span class="segmented" id="invoice-filters" role="group" aria-label="Show invoices">{% for value, label in invoice_filters %}<a href="?{{ keep_store }}tab=invoices&amp;filter={{ value }}#tab-invoices"{% if value == invoice_filter %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</span></p>
@@ -51,3 +51,4 @@
 </table>
 {% endresponsive_table %}
 <p class="muted">{{ company.provider_name }} status is copied from {{ company.provider_name }} as it is.</p>
+{% if saved_dialog %}{% include "ledger/invoices/_saved_dialog.html" %}{% endif %}

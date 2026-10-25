@@ -1024,7 +1024,9 @@ def test_a_viewer_cannot_send_and_billing_cannot_charge_now(
     assert billing.get(f"{base}/charge-now/").status_code == 403
     assert billing.post(f"{base}/charge-now/", {"confirm": "true"}).status_code == 403
     page = billing.get(f"{base}/").content.decode()
-    assert 'id="send-draft"' in page and 'id="draft-charge-now"' not in page
+    # PLAN-012f-b D15: no Send by e-mail button (Save asks); Charge now greyed for billing.
+    assert 'id="save-draft"' in page and 'id="draft-charge-now"' not in page
+    assert 'id="collect-charge_now" disabled>' in page
     admin, _ = client_for(Role.ADMIN)
     assert 'id="draft-charge-now"' in admin.get(f"{base}/").content.decode()
     assert not OneOffCharge.objects.exists() and fresh(draft).status == InvoiceDraftStatus.DRAFT
@@ -1094,12 +1096,13 @@ def test_new_invoice_on_the_store_page_preselects_the_lease_and_saves_a_draft(
         ),
     )
     draft = InvoiceDraft.objects.get()
-    assert response["Location"] == f"/invoices/drafts/{draft.pk}/"
+    # PLAN-012f-b D15: Save opens its e-mail prompt over the Invoices tab.
+    assert response["Location"] == f"/invoices/drafts/{draft.pk}/saved/"
     assert (draft.operator_id, draft.lease_id, draft.memo) == (operator.pk, lease.pk, MEMO)
     assert [(row.item, row.line_total) for row in invoice_builder.lines_of(draft)] == [
         ("Sign repair", D("250.00"))
     ]
-    page = client.get(response["Location"]).content.decode()
+    page = client.get(f"/invoices/drafts/{draft.pk}/").content.decode()
     assert draft.number in page and 'value="Sign repair"' in page
 
 

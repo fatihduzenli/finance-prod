@@ -480,8 +480,10 @@ def test_the_user_menu_links_help() -> None:
         (
             "collecting-an-invoice",
             (
-                "Save draft",
-                "Send by e-mail",
+                # PLAN-012f-b D15: Save and its e-mail prompt; the Drafts table's send.
+                "Send it to the operator by e-mail now?",
+                "Send by e-mail sends it later",
+                "Charge now, Schedule for a date and Set up autopay need a bank account",
                 "Charge now",
                 "Schedule for a date",
                 "Record payment now",

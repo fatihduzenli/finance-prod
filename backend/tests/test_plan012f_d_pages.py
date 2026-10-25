@@ -279,6 +279,8 @@ PAGES: dict[str, Role] = {
     "ledger:plans:detail": Role.VIEWER,
     "ledger:invoices:draft": Role.BILLING,
     "ledger:invoices:preview": Role.BILLING,
+    # PLAN-012f-b D15: Save's "Invoice saved" prompt is the Invoices tab with its dialog open.
+    "ledger:invoices:saved": Role.BILLING,
     "ledger:payments:list": Role.VIEWER,
     "ledger:payments:detail": Role.VIEWER,
     "ledger:disputes:page": Role.BILLING,

@@ -419,6 +419,9 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:invoices:draft",
         "ledger:invoices:preview",
         "ledger:invoices:print",
+        # PLAN-012f-b D15: the "Invoice saved" dialog over the Invoices tab (billing,
+        # checked by the view); GET only, it writes nothing.
+        "ledger:invoices:saved",
         # PLAN-012d D10: a Rent line's default amount as JSON (billing, checked by the
         # view); GET only.
         "ledger:invoices:rent_amount",

@@ -445,20 +445,21 @@ def draft_page(draft: InvoiceDraft, role: Role = Role.BILLING, query: str = "") 
 
 def test_the_buttons_name_the_choice_and_the_amount(fake: FakeProvider, enabled: None) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)
     draft = a_draft(operator, lease, one_line("175.00"))
     html = draft_page(draft, Role.ADMIN)
     assert "<legend>How to collect</legend>" in html
     for label in (
-        "Save draft",
-        "Send by e-mail",
+        "Save",
         "Charge now",
         "Schedule for a date",
         "Record payment now",
     ):
         # PLAN-012f-a D5: each choice is a tile, its radio beside its bold name.
         assert f'<span class="collect-name">{label}</span>' in html, label
-    assert 'id="save-draft" data-shown-when="collect-draft">Save draft</button>' in html
-    assert '>Send <span class="collect-amount">$175.00</span> by e-mail</button>' in html
+    # PLAN-012f-b D15: Save, then its e-mail prompt; no Send by e-mail button.
+    assert 'id="save-draft" data-shown-when="collect-draft">Save</button>' in html
+    assert 'id="send-draft"' not in html
     assert '>Charge <span class="collect-amount">$175.00</span> now</button>' in html
     assert (
         '>Schedule <span class="collect-amount">$175.00</span> for '
@@ -469,12 +470,17 @@ def test_the_buttons_name_the_choice_and_the_amount(fake: FakeProvider, enabled:
     assert 'id="collect-schedule" checked' in dated
 
 
-def test_billing_sees_every_choice_but_charge_now(fake: FakeProvider, enabled: None) -> None:
+def test_billing_sees_charge_now_greyed_and_every_other_choice(
+    fake: FakeProvider, enabled: None
+) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)
     draft = a_draft(operator, lease, one_line("175.00"))
     html = draft_page(draft)
-    assert 'id="collect-charge_now"' not in html and 'id="draft-charge-now"' not in html
-    for value in ("draft", "email", "schedule", "record"):
+    # PLAN-012f-b D15: greyed with its line, not hidden; no button.
+    assert 'id="collect-charge_now" disabled>' in html and 'id="draft-charge-now"' not in html
+    assert f'id="charge_now-reason">{ledger_forms.CHARGE_NOW_NEEDS_ADMIN}</span>' in html
+    for value in ("draft", "schedule", "record"):
         assert f'id="collect-{value}"' in html, value
     # Charge now posted by billing anyway is refused by the form; nothing is collected.
     client = client_for(Role.BILLING)[0]
@@ -487,6 +493,7 @@ def test_each_choices_fields_depend_on_its_radio_and_show_without_script(
     fake: FakeProvider,
 ) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)
     draft = a_draft(operator, lease, one_line("175.00"))
     html = draft_page(draft)
     for name, radio in (
@@ -599,9 +606,13 @@ def test_record_on_the_page_collects_and_the_draft_page_shows_the_collection(
     assert 'id="invoice-split"' not in html  # two lines: split each from its charge
 
 
+@override_settings(LARGE_DEBIT_WARNING_AMOUNT=D("50.00"))
 def test_a_refused_choice_keeps_the_saved_draft_with_the_sentence(fake: FakeProvider) -> None:
-    operator = an_operator(fake, bank=None)
-    lease = make_lease(operator=operator)
+    # PLAN-012f-b D15: no bank account now greys the tile and the form refuses it before
+    # anything is saved (test_builder_save_prompt.py); the service's own refusal here is
+    # the unconfirmed large debit.
+    operator, lease = a_world(fake)
+    store_methods(operator)
     client = client_for(Role.BILLING)[0]
     response = client.post(
         f"/invoices/new/store/{lease.store_id}/",
@@ -613,14 +624,17 @@ def test_a_refused_choice_keeps_the_saved_draft_with_the_sentence(fake: FakeProv
     draft = InvoiceDraft.objects.get()
     assert response["Location"] == f"/invoices/drafts/{draft.pk}/"
     html = client.get(response["Location"]).content.decode()
-    assert "no linked bank method" in html and 'id="collect-schedule" checked' in html
+    assert "exceeds the warning threshold" in html and 'id="collect-schedule" checked' in html
     assert not OneOffCharge.objects.exists()
 
 
 def schedule_offered(html: str) -> bool:
-    offered = 'id="collect-schedule"' in html and 'id="schedule-draft"' in html
-    note = f'id="collect-schedule-note">{invoice_builder.SCHEDULE_NOT_OFFERED}</p>' in html
-    assert offered != note, "the radio or the one line, never both"
+    # PLAN-012f-b D15: the tile always shows; where it is not offered it is greyed with
+    # the one line (its radio disabled, no button).
+    assert 'id="collect-schedule"' in html
+    offered = 'id="schedule-draft"' in html and 'id="collect-schedule" disabled' not in html
+    note = f'id="schedule-reason">{invoice_builder.SCHEDULE_NOT_OFFERED}</span>' in html
+    assert offered != note, "the button or the one line, never both"
     return offered
 
 
@@ -628,6 +642,7 @@ def test_the_page_offers_schedule_on_an_active_lease_with_one_item_line(
     fake: FakeProvider,
 ) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)
     assert invoice_builder.SCHEDULE_NOT_OFFERED == "Schedule needs an active lease with one line."
     assert schedule_offered(draft_page(a_draft(operator, lease, one_line())))
     assert not schedule_offered(draft_page(a_draft(operator, lease, two_lines())))
@@ -646,6 +661,7 @@ def test_the_page_offers_schedule_on_an_active_lease_with_one_item_line(
 
 def test_the_page_offers_no_schedule_on_an_ended_lease(fake: FakeProvider) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)
     draft = a_draft(operator, lease, one_line())
     Lease.objects.filter(pk=lease.pk).update(ended_on=date(2026, 12, 31))
     assert not schedule_offered(draft_page(draft))
@@ -740,13 +756,18 @@ MONTHLY_12 = AutopayInput("monthly", date(2026, 11, 1), "count", 12)
 
 
 def autopay_offered(html: str) -> bool:
-    radio = 'id="collect-autopay"' in html
+    # PLAN-012f-b D15: the tile always shows, greyed with the one line where not offered.
+    assert 'id="collect-autopay"' in html
+    radio = 'id="collect-autopay" disabled' not in html
     assert radio == ('id="autopay-draft"' in html), "the radio and its button go together"
+    note = f'id="autopay-reason">{invoice_builder.SCHEDULE_NOT_OFFERED}</span>' in html
+    assert radio != note, "the button or the one line, never both"
     return radio
 
 
 def test_the_page_offers_set_up_autopay_where_schedule_is_offered(fake: FakeProvider) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)  # PLAN-012f-b D15: a plan needs a bank account on file
     offered = draft_page(a_draft(operator, lease, one_line()))
     assert autopay_offered(offered)
     assert '<span class="collect-name">Set up autopay</span>' in offered
@@ -764,7 +785,8 @@ def test_the_page_offers_set_up_autopay_where_schedule_is_offered(fake: FakeProv
     alone = client.get(f"/invoices/new/operator/{operator.pk}/", {"collect": "autopay"})
     html = alone.content.decode()
     assert not autopay_offered(html) and 'id="collect-draft" checked' in html
-    # The sixth choice is the last tile, through collect_form.options like the others.
+    # The last tile (PLAN-012f-b D15: the fifth; Send by e-mail is Save's prompt now),
+    # through collect_form.options like the others.
     assert [value for value, _ in ledger_forms.COLLECT_CHOICES][-1] == "autopay"
 
 
@@ -772,6 +794,7 @@ def test_the_autopay_tile_holds_its_fields_each_shown_by_its_conditions(
     fake: FakeProvider,
 ) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)  # PLAN-012f-b D15: a plan needs a bank account on file
     html = draft_page(a_draft(operator, lease, one_line("175.00")), query="?collect=autopay")
     assert 'id="collect-autopay" checked' in html
     tile = html[html.index('id="tile-autopay"') : html.index('id="tile-autopay"') + 6000]
@@ -803,6 +826,7 @@ def test_the_autopay_tile_holds_its_fields_each_shown_by_its_conditions(
 
 def test_the_autopay_button_names_the_amount_and_the_cadence(fake: FakeProvider) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)  # PLAN-012f-b D15: a plan needs a bank account on file
     html = draft_page(a_draft(operator, lease, one_line("175.00")))
     button = html[
         html.index('id="autopay-draft"') : html.index("</button>", html.index('id="autopay-draft"'))
@@ -861,6 +885,7 @@ def test_set_up_autopay_on_the_page_makes_the_plan_and_opens_the_autopay_tab(
     fake: FakeProvider, fields: dict[str, str], wanted: tuple[Any, ...]
 ) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)  # PLAN-012f-b D15: a plan needs a bank account on file
     client = client_for(Role.BILLING)[0]
     response = client.post(f"/invoices/new/store/{lease.store_id}/", autopay_post(lease, **fields))
     assert response.status_code == 302
@@ -925,6 +950,7 @@ def test_the_form_refuses_a_bad_repeat_with_the_services_sentence_and_writes_not
     fake: FakeProvider, fields: dict[str, str], message: str | None
 ) -> None:
     operator, lease = a_world(fake)
+    store_methods(operator)  # PLAN-012f-b D15: a plan needs a bank account on file
     client = client_for(Role.BILLING)[0]
     path = f"/invoices/new/store/{lease.store_id}/"
     response = client.post(path, autopay_post(lease, **fields))
@@ -956,7 +982,15 @@ def test_the_form_and_the_service_agree_on_the_repeat() -> None:
     # A page without the script sends every field: a leftover value the choice or the end
     # rule ignores refuses nothing (the service ignores it too).
     for posted in (
-        {"collect": "email", "autopay_end_count": "abc", "autopay_first_on": "x"},
+        # PLAN-012f-b D15: Send by e-mail is no longer a tile; Record is another choice.
+        {
+            "collect": "record",
+            "method": "zelle",
+            "paid_on": "2026-10-06",
+            "payment_note": "Zelle received.",
+            "autopay_end_count": "abc",
+            "autopay_first_on": "x",
+        },
         {
             "collect": "autopay",
             "autopay_cadence": "monthly",
@@ -985,11 +1019,13 @@ def test_the_form_and_the_service_agree_on_the_repeat() -> None:
         {"collect": "autopay"}, can_charge_now=False, can_schedule=False
     )
     assert not hidden.is_valid() and "collect" in hidden.errors
+    assert hidden.errors["collect"] == [invoice_builder.SCHEDULE_NOT_OFFERED]
 
 
 def test_set_up_autopay_needs_the_large_debit_tick(fake: FakeProvider, settings: Any) -> None:
     settings.LARGE_DEBIT_WARNING_AMOUNT = D("1000.00")
     operator, lease = a_world(fake)
+    store_methods(operator)  # PLAN-012f-b D15: a plan needs a bank account on file
     client = client_for(Role.BILLING)[0]
     data = autopay_post(lease, **{"lines-0-unit_amount": "1500.00"})
     response = client.post(f"/invoices/new/store/{lease.store_id}/", data)

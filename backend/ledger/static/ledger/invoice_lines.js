@@ -21,7 +21,7 @@
 // - "Add line" copies the last row, blank, under the next index of the management form
 //   (at most its MAX_NUM_FORMS), its labels' for renamed with its controls' ids;
 // - the "How to collect" buttons name the live total (.collect-amount) and the Schedule
-//   button the debit date (.collect-date; PLAN-012e-2 D3).
+//   button the debit date (.collect-date; PLAN-012e-2 D3), as "Nov 1, 2026" (PLAN-012f-b D15).
 // Nothing is sent from here but the read of the rent amount.
 (function () {
   "use strict";
@@ -241,11 +241,21 @@
     update(false);
   }
 
+  // The picked date as the page prints dates ("Nov 1, 2026", the |day filter; PLAN-012f-b
+  // D15); a value that is not an ISO date reads as the button's empty words.
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function dayText(value) {
+    var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+    if (!match) { return ""; }
+    var month = parseInt(match[2], 10), day = parseInt(match[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) { return ""; }
+    return MONTHS[month - 1] + " " + day + ", " + match[1];
+  }
   var debitOn = document.getElementById("id_schedule_on");
   if (debitOn) {
     debitOn.addEventListener("input", function () {
       document.querySelectorAll(".collect-date").forEach(function (span) {
-        span.textContent = debitOn.value || span.dataset.empty || "";
+        span.textContent = dayText(debitOn.value) || span.dataset.empty || "";
       });
     });
   }

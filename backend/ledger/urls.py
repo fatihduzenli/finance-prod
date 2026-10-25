@@ -261,6 +261,7 @@ invoice_patterns = (
         path("drafts/<str:pk>/preview/", invoices.draft_preview, name="preview"),
         path("drafts/<str:pk>/print/", invoices.draft_print, name="print"),
         path("drafts/<str:pk>/send/", invoices.draft_send, name="send"),
+        path("drafts/<str:pk>/saved/", invoices.draft_saved, name="saved"),
         path("drafts/<str:pk>/charge-now/", invoices.draft_charge_now, name="charge_now"),
         path("drafts/<str:pk>/cancel/", invoices.draft_cancel, name="cancel"),
         path("drafts/<str:pk>/delete/", invoices.draft_delete, name="delete_draft"),

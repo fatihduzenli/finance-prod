@@ -1421,15 +1421,17 @@ class ChargeNowForm(forms.Form):
     key = forms.UUIDField(required=False, widget=forms.HiddenInput)
 
 
-#: The draft form's "How to collect" choices and their labels (PLAN-012e-2 D3).
+#: The draft form's "How to collect" tiles and their labels, in order (PLAN-012e-2 D3;
+#: PLAN-012f-b D15: Save first, no Send by e-mail tile; the e-mail is Save's prompt).
 COLLECT_CHOICES: tuple[tuple[str, str], ...] = (
-    (invoice_builder.CollectChoice.DRAFT.value, "Save draft"),
-    (invoice_builder.CollectChoice.EMAIL.value, "Send by e-mail"),
+    (invoice_builder.CollectChoice.DRAFT.value, "Save"),
     (invoice_builder.CollectChoice.CHARGE_NOW.value, "Charge now"),
     (invoice_builder.CollectChoice.SCHEDULE.value, "Schedule for a date"),
     (invoice_builder.CollectChoice.RECORD.value, "Record payment now"),
     (invoice_builder.CollectChoice.AUTOPAY.value, "Set up autopay"),
 )
+#: Why Charge now is greyed for billing (PLAN-012f-b D15).
+CHARGE_NOW_NEEDS_ADMIN = "Charge now needs an admin."
 #: Set up autopay's fields (PLAN-012f-a D12).
 AUTOPAY_FIELDS = (
     "autopay_cadence",
@@ -1439,35 +1441,60 @@ AUTOPAY_FIELDS = (
     "autopay_end_on",
     "autopay_confirm_large_debit",
 )
-#: The choices offered only where Schedule for a date is (PLAN-012f-a D12).
-SCHEDULED_CHOICES = frozenset(
-    {invoice_builder.CollectChoice.SCHEDULE.value, invoice_builder.CollectChoice.AUTOPAY.value}
-)
 #: The name of the submit buttons, one per choice: without the page's script each button
 #: says which choice it submits; with it the one shown matches the chosen radio.
 COLLECT_SUBMIT = "submit_collect"
 
 
-def collect_choices(*, can_charge_now: bool, can_schedule: bool = True) -> list[tuple[str, str]]:
-    """The choices one may take (PLAN-012e-2 D3): Charge now for an admin only, Schedule
-    for a date and Set up autopay (PLAN-012f-a D12) only where
-    :func:`ledger.services.invoice_builder.can_schedule` allows."""
-    return [
-        (value, label)
-        for value, label in COLLECT_CHOICES
-        if (can_charge_now or value != invoice_builder.CollectChoice.CHARGE_NOW)
-        and (can_schedule or value not in SCHEDULED_CHOICES)
-    ]
+def unavailable_choices(
+    *,
+    can_charge_now: bool,
+    can_schedule: bool = True,
+    charge_now_why: str = "",
+    bank_why: str = "",
+) -> dict[str, str]:
+    """The greyed tiles of How to collect, each with its one line (PLAN-012f-b D15; never
+    hidden). ``can_charge_now``: the role may charge now (admin); ``can_schedule``:
+    :func:`ledger.services.invoice_builder.can_schedule`; ``charge_now_why``:
+    :func:`ledger.services.invoice_builder.charge_now_unavailable` (the pay-an-invoice flag
+    off, no bank account on file); ``bank_why``:
+    :func:`ledger.services.invoice_builder.bank_unavailable` (no bank account on file).
+    Charge now needs an admin, then its flag and the bank; Schedule for a date and Set up
+    autopay the bank, then an active lease with one line."""
+    choice = invoice_builder.CollectChoice
+    why: dict[str, str] = {}
+    if not can_charge_now:
+        why[choice.CHARGE_NOW.value] = CHARGE_NOW_NEEDS_ADMIN
+    elif charge_now_why:
+        why[choice.CHARGE_NOW.value] = charge_now_why
+    for scheduled in (choice.SCHEDULE.value, choice.AUTOPAY.value):
+        if bank_why:
+            why[scheduled] = bank_why
+        elif not can_schedule:
+            why[scheduled] = invoice_builder.SCHEDULE_NOT_OFFERED
+    return why
 
 
-def initial_choice(value: object, *, can_charge_now: bool, can_schedule: bool = True) -> str:
-    """The radio ``?collect=`` pre-selects: one of the choices one may take, else
-    Save draft (no error)."""
-    allowed = {
-        key for key, _ in collect_choices(can_charge_now=can_charge_now, can_schedule=can_schedule)
-    }
+def initial_choice(
+    value: object,
+    *,
+    can_charge_now: bool,
+    can_schedule: bool = True,
+    charge_now_why: str = "",
+    bank_why: str = "",
+) -> str:
+    """The radio ``?collect=`` pre-selects: one of the tiles not greyed, else Save (no
+    error)."""
+    greyed = unavailable_choices(
+        can_charge_now=can_charge_now,
+        can_schedule=can_schedule,
+        charge_now_why=charge_now_why,
+        bank_why=bank_why,
+    )
     text = str(value or "")
-    return text if text in allowed else invoice_builder.CollectChoice.DRAFT.value
+    if text in dict(COLLECT_CHOICES) and text not in greyed:
+        return text
+    return invoice_builder.CollectChoice.DRAFT.value
 
 
 class CollectForm(forms.Form):
@@ -1564,20 +1591,24 @@ class CollectForm(forms.Form):
         *args: Any,
         can_charge_now: bool,
         can_schedule: bool = True,
+        charge_now_why: str = "",
+        bank_why: str = "",
         **kwargs: Any,
     ) -> None:
         if data is not None and data.get(COLLECT_SUBMIT):
             data = data.copy()
             data["collect"] = data.get(COLLECT_SUBMIT)
         super().__init__(data, *args, **kwargs)
-        self.can_charge_now = can_charge_now
-        self.can_schedule = can_schedule
-        self.schedule_note = "" if can_schedule else invoice_builder.SCHEDULE_NOT_OFFERED
+        #: Each greyed tile's one line (PLAN-012f-b D15; see :func:`unavailable_choices`).
+        self.unavailable = unavailable_choices(
+            can_charge_now=can_charge_now,
+            can_schedule=can_schedule,
+            charge_now_why=charge_now_why,
+            bank_why=bank_why,
+        )
         field = self.fields["collect"]
         if isinstance(field, forms.ChoiceField):
-            field.choices = collect_choices(
-                can_charge_now=can_charge_now, can_schedule=can_schedule
-            )
+            field.choices = list(COLLECT_CHOICES)
         for name, radio in self.SHOWN_WHEN.items():
             self.fields[name].widget.attrs["data-shown-when"] = radio
         _label_check_number(self)
@@ -1589,6 +1620,13 @@ class CollectForm(forms.Form):
 
     def clean_payment_note(self) -> str:
         return visible_text(self.cleaned_data["payment_note"])
+
+    def clean_collect(self) -> str:
+        # A greyed tile's radio is disabled; a posted one is refused with its line all the same.
+        chosen = self.cleaned_data.get("collect") or ""
+        if chosen in self.unavailable:
+            raise forms.ValidationError(self.unavailable[chosen])
+        return str(chosen)
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
@@ -1671,14 +1709,34 @@ class CollectForm(forms.Form):
         ]
 
     def options(self) -> list[dict[str, Any]]:
-        """The radios as the fieldset renders them, with their ids (``collect-<value>``)."""
+        """The tiles as the fieldset renders them, with their ids (``collect-<value>``), each
+        ``available`` or greyed with ``why`` (PLAN-012f-b D15). A greyed tile is never the
+        chosen one."""
         chosen = self["collect"].value() or invoice_builder.CollectChoice.DRAFT.value
+        if chosen in self.unavailable:
+            chosen = invoice_builder.CollectChoice.DRAFT.value
         return [
-            {"value": value, "label": label, "id": f"collect-{value}", "checked": value == chosen}
-            for value, label in collect_choices(
-                can_charge_now=self.can_charge_now, can_schedule=self.can_schedule
-            )
+            {
+                "value": value,
+                "label": label,
+                "id": f"collect-{value}",
+                "checked": value == chosen,
+                "available": value not in self.unavailable,
+                "why": self.unavailable.get(value, ""),
+            }
+            for value, label in COLLECT_CHOICES
         ]
+
+    def debit_on(self) -> date | None:
+        """Schedule for a date's debit date as entered, for the button's words (``|day``),
+        or ``None`` when there is none or it is not a date."""
+        value = self["schedule_on"].value()
+        if isinstance(value, date):
+            return value
+        try:
+            return self.fields["schedule_on"].to_python(value)
+        except forms.ValidationError:
+            return None
 
     def payment(self) -> invoice_builder.PaymentInput | None:
         data = self.cleaned_data

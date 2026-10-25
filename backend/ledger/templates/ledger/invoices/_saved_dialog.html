@@ -1,0 +1,7 @@
+{% comment %}Save's prompt (PLAN-012f-b D15; ledger.views.invoices.draft_saved): the {% dialog %} frame open over the Invoices tab, the question naming the operator, then Not now (back to the tab; the draft stays under Drafts with its own "Send by e-mail") and Send e-mail (a single-submit POST to ledger:invoices:send, which e-mails the draft as the Drafts table's button does). Context: saved_dialog.{% endcomment %}{% load components %}{% dialog id="invoice-saved" title=saved_dialog.title size="sm" open=True return_url=saved_dialog.return_url %}
+<p id="invoice-saved-question">{{ saved_dialog.question }}</p>
+<form method="post" action="{{ saved_dialog.send_url }}" class="js-single-submit" id="invoice-saved-form">
+  {% csrf_token %}
+  <div class="dialog-foot"><a class="btn" id="invoice-saved-later" href="{{ saved_dialog.return_url }}">Not now</a><button class="btn btn-primary" type="submit" id="invoice-saved-send">Send e-mail</button></div>
+</form>
+{% enddialog %}

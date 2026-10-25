@@ -1448,6 +1448,25 @@ def _charge_now_refusal(operator: Operator, total: Decimal) -> str:
     return leases.provider_limit_refusal([total])
 
 
+def bank_unavailable(operator: Operator | None) -> str:
+    """Why How to collect greys the tiles that debit the bank account on file (Charge now,
+    Schedule for a date, Set up autopay; PLAN-012f-b D15) for ``operator``: no usable bank
+    method on file (Add payment's sentence, D14), or ``""``. Local data only."""
+    method = leases.linked_method_record(operator) if leases.customer_ref(operator) else None
+    if method is None or not method.is_usable_bank:
+        return str(one_off_charges.DEBIT_NO_METHOD)
+    return ""
+
+
+def charge_now_unavailable(operator: Operator | None) -> str:
+    """Why How to collect greys Charge now for ``operator`` (PLAN-012f-b D15), or ``""``:
+    the pay-an-invoice flag off (it gates that call only; schedules work without it), then
+    :func:`bank_unavailable`."""
+    if not one_off_charges.charge_now_enabled():
+        return str(one_off_charges.DEBIT_OFF)
+    return bank_unavailable(operator)
+
+
 def charge_now_details(draft: InvoiceDraft, actor: User | None) -> ChargeNowDetails:
     """The confirmation page of Charge now on a draft (admin). Never calls the provider."""
     total = total_of(lines_of(draft))
