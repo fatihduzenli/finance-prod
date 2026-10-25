@@ -43,7 +43,9 @@ def test_double_click_on_save_creates_one_operator_and_one_customer(
     page.wait_for_url(f"{live_server.url}/")  # the dashboard (PLAN-011 D1)
 
     page.goto(f"{live_server.url}/operators/new/")
-    page.fill("#id_display_name", "Double Click Stores")
+    # PLAN-012f-b D9: Type Company shows the company's name; the display name is derived.
+    page.check("#id_kind_0")
+    page.fill("#id_company", "Double Click Stores")
     page.fill("#id_email", "double.click@example.com")
     page.locator("#save-operator").dblclick()
 

@@ -1291,7 +1291,7 @@ def test_the_outcome_form_refuses_a_card_number_a_promise_kind_and_unknown_route
     assert response.status_code == 200
     assert CARD not in response.content.decode()
     response = client.post(outcome_url(old, "broken"), outcome_form(kind="promise"))
-    assert response.status_code == 200 and "Select a valid choice." in response.content.decode()
+    assert response.status_code == 200 and "Choose one of the options." in response.content.decode()
     assert ContactEntry.objects.count() == 1
     old.refresh_from_db()
     assert old.status == ContactStatus.OPEN

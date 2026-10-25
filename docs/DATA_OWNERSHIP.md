@@ -368,6 +368,14 @@ scans are covered by the stated policy, not by a check.
 | `stores.state` | App | The two-letter code of one of the 50 states or DC, or empty; screens show the full name, CSV exports the code. Migration 0051 mapped the free-text values (a code or a full name, any case); an unmatched value became empty, its raw value in a `store.state_unmapped` audit row, and the store is listed as "State needs choosing" |
 | `store_costs` (none for a store) | App | Since PLAN-012f-b the New store form's landlord rent is optional: empty writes no cost row ("Not entered", unknown in the P&L and the Cashflow card), `0.00` writes a row with no cost |
 
+### operators — `kind`, `first_name`, `last_name`, `contact_person` (PLAN-012f-b)
+| Field | Owner | Note |
+|---|---|---|
+| `kind` | App | D9: `company` or `person` (CHECK), chosen on the operator form as Type. Migration 0052 made every existing operator `person` (nothing guessed); staff change it |
+| `company`, `contact_person` | App | A company's name (the existing `company` column) and its optional contact person; guarded text |
+| `first_name`, `last_name` | App | A person's names, at most 99 characters each; guarded text; searched with the display name |
+| `display_name` | App | No longer typed on the form: derived on save from the kind's name fields (the company name, or "First Last"); kept as it is while they are empty (the rows before 0052). Still the name sent to the provider, as before; `first_name`, `last_name` and `contact_person` are not sent |
+
 ### lease_credits, payments.allocation_group / credit_id, payment method `credit` (PLAN-012d, ADR-0013)
 | Field | Owner | Note |
 |---|---|---|

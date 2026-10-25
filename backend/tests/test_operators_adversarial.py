@@ -67,9 +67,9 @@ def _worker_runs_between_requests(request: pytest.FixtureRequest) -> None:
 def test_replaying_a_used_creation_key_with_other_values_changes_nothing(
     billing: Client, fake: FakeProvider
 ) -> None:
-    data = form_data(display_name="First Name")
+    data = form_data(company="First Name")
     billing.post("/operators/new/", data)
-    replay = {**data, "display_name": "Overwritten", "email": "other@example.com"}
+    replay = {**data, "company": "Overwritten", "email": "other@example.com"}
     response = billing.post("/operators/new/", replay)
 
     assert response.status_code in (200, 302)
@@ -83,9 +83,9 @@ def test_replaying_a_used_creation_key_with_other_values_changes_nothing(
 def test_a_creation_key_from_another_user_cannot_overwrite_or_leak(fake: FakeProvider) -> None:
     first = _client(Role.BILLING)
     second = _client(Role.BILLING)
-    data = form_data(display_name="Owner One", email="one@example.com")
+    data = form_data(company="Owner One", email="one@example.com")
     first.post("/operators/new/", data)
-    stolen = {**data, "display_name": "Owner Two", "email": "two@example.com"}
+    stolen = {**data, "company": "Owner Two", "email": "two@example.com"}
     response = second.post("/operators/new/", stolen)
 
     assert Operator.objects.count() == 1

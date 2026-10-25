@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from django import forms
 from django.core.validators import RegexValidator
+from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
@@ -46,6 +47,7 @@ from ledger.models import (
     LeaseEndReason,
     OneOffCharge,
     Operator,
+    OperatorKind,
     PaymentChannel,
     PaymentMethod,
     RefundMethod,
@@ -87,8 +89,70 @@ IDENTIFIER_VALIDATOR = RegexValidator(
 )
 
 
+#: Every select's refusal (PLAN-012f-b finding B3-1): Django's own message repeats the
+#: posted value, which may be anything, a card number too.
+CHOICE_REFUSED = "Choose one of the options."
+
+
+class _QuietChoices(forms.Field):
+    """The refusal of every select in this module: its own ``invalid_choice`` message,
+    which never names the posted value (``CHOICE_REFUSED`` unless the field words it).
+    A model select's value that is not a UUID is refused with the same message; Django
+    reports it with the value in the text."""
+
+    default_error_messages = {"invalid_choice": CHOICE_REFUSED}
+
+    def to_python(self, value: Any) -> Any:
+        try:
+            return super().to_python(value)
+        except forms.ValidationError:
+            raise forms.ValidationError(
+                self.error_messages["invalid_choice"], code="invalid_choice"
+            ) from None
+
+
+class _QuietChoiceField(_QuietChoices, forms.ChoiceField):
+    pass
+
+
+class _QuietTypedChoiceField(_QuietChoices, forms.TypedChoiceField):
+    pass
+
+
+class _QuietModelChoiceField(_QuietChoices, forms.ModelChoiceField):  # type: ignore[type-arg]
+    pass
+
+
+def _quiet_formfield(db_field: models.Field[Any, Any], **kwargs: Any) -> forms.Field | None:
+    """A model form's field for ``db_field``, its select quiet (``_QuietChoices``): a
+    foreign key's and a choice column's."""
+    if isinstance(db_field, models.ForeignKey):
+        kwargs.setdefault("form_class", _QuietModelChoiceField)
+    elif db_field.choices:
+        kwargs.setdefault("choices_form_class", _QuietTypedChoiceField)
+    return db_field.formfield(**kwargs)
+
+
 #: The contact detail each consent needs on the operator form (PLAN-012c D8).
 CONSENT_SHOWN_WHEN = {"sms_consent_at": "id_sms_phone|id_phone", "email_consent_at": "id_email"}
+
+
+#: The Type radios' ids (PLAN-012f-b D9): a name field is shown while its kind's radio is
+#: chosen (``ledger/shown_when.js``); Django numbers a radio group's inputs in order.
+KIND_RADIO_IDS = {kind: f"id_kind_{index}" for index, kind in enumerate(OperatorKind.values)}
+#: The name fields each kind asks for, with the refusal when one is empty.
+KIND_NAME_FIELDS: dict[str, dict[str, str]] = {
+    OperatorKind.COMPANY: {"company": "Enter the company name."},
+    OperatorKind.PERSON: {
+        "first_name": "Enter the first name.",
+        "last_name": "Enter the last name.",
+    },
+}
+#: The fields shown with each kind (the other kind's are hidden).
+KIND_SHOWN_FIELDS: dict[str, tuple[str, ...]] = {
+    OperatorKind.COMPANY: ("company", "contact_person"),
+    OperatorKind.PERSON: ("first_name", "last_name"),
+}
 
 
 class OperatorForm(_OperatorFormBase):
@@ -96,16 +160,31 @@ class OperatorForm(_OperatorFormBase):
 
     The phone must pass the payment provider's rule, on create and on every edit, so an
     operator with a bad phone cannot be saved (or re-synced) until it is fixed.
+
+    PLAN-012f-b D9: Type (Company / Person) comes first and picks the name fields: a
+    company needs its name (the contact person is optional), a person a first and a last
+    name. The display name is not a field: ``Operator.save`` derives it, so a posted
+    ``display_name`` is ignored.
     """
 
+    kind = _QuietChoiceField(
+        choices=OperatorKind.choices,
+        initial=OperatorKind.PERSON.value,
+        label="Type",
+        widget=forms.RadioSelect,
+        error_messages={"required": "Choose company or person."},
+    )
     email = forms.EmailField(required=False, max_length=254)
 
     class Meta:
         model = Operator
         fields = (
-            "display_name",
-            "legal_name",
+            "kind",
             "company",
+            "contact_person",
+            "first_name",
+            "last_name",
+            "legal_name",
             "email",
             "phone",
             "address_line1",
@@ -119,17 +198,33 @@ class OperatorForm(_OperatorFormBase):
             "email_consent_at",
         )
         labels = {
+            "company": "Company name",
+            "contact_person": "Contact person",
+            "first_name": "First name",
+            "last_name": "Last name",
             "sms_phone": "Text-message phone (international, +1…)",
             "sms_consent_at": "Text-message consent given on",
             "email_consent_at": "E-mail consent given on",
         }
         # PLAN-012c D8: a consent is shown only with a phone (SMS) or an e-mail on the form.
         widgets = {
-            name: forms.DateTimeInput(
-                attrs={"type": "datetime-local", "step": "1", SHOWN_WHEN: CONSENT_SHOWN_WHEN[name]},
-                format=CONSENT_INPUT_FORMAT,
-            )
-            for name in CONSENT_FIELDS
+            **{
+                name: forms.DateTimeInput(
+                    attrs={
+                        "type": "datetime-local",
+                        "step": "1",
+                        SHOWN_WHEN: CONSENT_SHOWN_WHEN[name],
+                    },
+                    format=CONSENT_INPUT_FORMAT,
+                )
+                for name in CONSENT_FIELDS
+            },
+            # PLAN-012f-b D9: each name field is shown with its kind's radio.
+            **{
+                name: forms.TextInput(attrs={SHOWN_WHEN: KIND_RADIO_IDS[kind]})
+                for kind, names in KIND_SHOWN_FIELDS.items()
+                for name in names
+            },
         }
 
     def clean_email(self) -> str | None:
@@ -143,11 +238,15 @@ class OperatorForm(_OperatorFormBase):
             raise forms.ValidationError(PHONE_MESSAGE, code="phone")
         return digits
 
-    def clean_display_name(self) -> str:
-        value = str(self.cleaned_data.get("display_name") or "").strip()
-        if not value:
-            raise forms.ValidationError("Enter a display name.", code="required")
-        return value
+    def clean(self) -> dict[str, Any]:
+        data = super().clean() or {}
+        for name, refusal in KIND_NAME_FIELDS.get(data.get("kind") or "", {}).items():
+            value = " ".join(str(data.get(name) or "").split())
+            if value:
+                data[name] = value
+            elif name not in self.errors:
+                self.add_error(name, forms.ValidationError(refusal, code="required"))
+        return data
 
 
 class OperatorCreateForm(OperatorForm):
@@ -222,6 +321,8 @@ class LeaseForm(_LeaseFormBase):
 
     class Meta:
         model = Lease
+        # The store, operator and status selects never repeat a refused value (B3-1).
+        formfield_callback = _quiet_formfield
         fields = (
             "store",
             "operator",
@@ -479,19 +580,6 @@ STATE_REFUSED = "Choose a state from the list."
 STORE_TYPE_REFUSED = "Choose a store type from the list."
 
 
-class _QuietModelChoiceField(forms.ModelChoiceField):  # type: ignore[type-arg]
-    """A model select whose every refusal is its own ``invalid_choice`` message: Django
-    reports a value that is not a UUID with the value in the text."""
-
-    def to_python(self, value: Any) -> Any:
-        try:
-            return super().to_python(value)
-        except forms.ValidationError:
-            raise forms.ValidationError(
-                self.error_messages["invalid_choice"], code="invalid_choice"
-            ) from None
-
-
 class StoreForm(_StoreFormBase):
     """Create and edit a store. The open date is required here (ADR-0005) although the
     model keeps it nullable for the import; ``needs_open_date`` follows the model.
@@ -509,7 +597,7 @@ class StoreForm(_StoreFormBase):
         label="Type",
         error_messages={"invalid_choice": STORE_TYPE_REFUSED},
     )
-    state = forms.ChoiceField(
+    state = _QuietChoiceField(
         choices=STATE_CHOICES,
         required=False,
         label="State",
@@ -522,6 +610,8 @@ class StoreForm(_StoreFormBase):
 
     class Meta:
         model = Store
+        # The status select never repeats a refused value (B3-1).
+        formfield_callback = _quiet_formfield
         fields = (
             "store_number",
             "external_label",
@@ -633,7 +723,7 @@ class ManualPaymentForm(forms.Form):
     (balance, date, note) under a row lock; the form checks shape only."""
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
-    method = forms.ChoiceField(choices=MANUAL_METHOD_CHOICES)
+    method = _QuietChoiceField(choices=MANUAL_METHOD_CHOICES)
     amount = forms.DecimalField(
         min_value=Decimal("0.01"), max_value=RENT_MAX, max_digits=12, decimal_places=2
     )
@@ -682,7 +772,7 @@ class AllocationPaymentForm(forms.Form):
     the lease's row lock; the form checks shape only."""
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
-    method = forms.ChoiceField(choices=MANUAL_METHOD_CHOICES)
+    method = _QuietChoiceField(choices=MANUAL_METHOD_CHOICES)
     amount = forms.DecimalField(
         required=False,
         max_value=RENT_MAX,
@@ -816,7 +906,7 @@ class InvoiceDraftForm(forms.Form):
     The form checks shape; :mod:`ledger.services.invoice_builder` checks every rule."""
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput, required=False)
-    lease = forms.ChoiceField(required=False, label="Lease")
+    lease = _QuietChoiceField(required=False, label="Lease")
     memo = forms.CharField(
         required=False,
         widget=forms.Textarea(attrs={"rows": 2}),
@@ -925,8 +1015,8 @@ class InvoiceLineForm(forms.Form):
         widget=forms.NumberInput({"step": "0.01", "class": "js-unit"}),
     )
     save_item = forms.BooleanField(required=False, label="Save as catalogue item")
-    rent_lease = forms.ChoiceField(required=False, label="Rent: lease")
-    rent_month = forms.ChoiceField(required=False, label="Rent: month")
+    rent_lease = _QuietChoiceField(required=False, label="Rent: lease")
+    rent_month = _QuietChoiceField(required=False, label="Rent: month")
 
     def __init__(
         self,
@@ -1203,7 +1293,7 @@ class CollectForm(forms.Form):
     shape and the fields a choice needs; :func:`ledger.services.invoice_builder.collect`
     checks every rule."""
 
-    collect = forms.ChoiceField(required=False, label="How to collect")
+    collect = _QuietChoiceField(required=False, label="How to collect")
     schedule_on = forms.DateField(
         required=False,
         label="Debit on",
@@ -1212,7 +1302,7 @@ class CollectForm(forms.Form):
     confirm_large_debit = forms.BooleanField(
         required=False, widget=_ExactCheckboxInput, label="I confirm this large debit"
     )
-    method = forms.ChoiceField(
+    method = _QuietChoiceField(
         required=False, choices=(("", "—"), *MANUAL_METHOD_CHOICES), label="Received by"
     )
     paid_on = forms.DateField(
@@ -1232,7 +1322,7 @@ class CollectForm(forms.Form):
         validators=[validate_no_payment_data],
         label="Note",
     )
-    autopay_cadence = forms.ChoiceField(
+    autopay_cadence = _QuietChoiceField(
         required=False,
         choices=AutopayCadence.choices,
         initial=AutopayCadence.MONTHLY.value,
@@ -1241,7 +1331,7 @@ class CollectForm(forms.Form):
     autopay_first_on = forms.DateField(
         required=False, label="First debit", widget=forms.DateInput(attrs={"type": "date"})
     )
-    autopay_end_rule = forms.ChoiceField(
+    autopay_end_rule = _QuietChoiceField(
         required=False,
         choices=AutopayEndRule.choices,
         initial=AutopayEndRule.COUNT.value,
@@ -1558,12 +1648,12 @@ class DepositResolutionForm(forms.Form):
     """Resolve a deposit at the end of its lease (admin). The service re-checks every
     rule under the charge's row lock; the form checks shape only."""
 
-    kind = forms.ChoiceField(choices=DepositResolutionKind.choices, label="Resolution")
+    kind = _QuietChoiceField(choices=DepositResolutionKind.choices, label="Resolution")
     amount = forms.DecimalField(
         min_value=Decimal("0.01"), max_value=RENT_MAX, max_digits=12, decimal_places=2
     )
     resolved_on = forms.DateField(label="Date", widget=forms.DateInput(attrs={"type": "date"}))
-    method = forms.ChoiceField(
+    method = _QuietChoiceField(
         choices=RESOLUTION_METHOD_CHOICES,
         required=False,
         help_text="Refunded only: how the money was paid back.",
@@ -1617,7 +1707,7 @@ class LeaseEndTermsForm(forms.Form):
         "not in the future.",
         error_messages={"required": END_DATE_REQUIRED},
     )
-    reason = forms.ChoiceField(
+    reason = _QuietChoiceField(
         choices=[("", "—"), *LeaseEndReason.choices],
         help_text="Why the lease ends; Other needs a few words below.",
     )
@@ -1661,7 +1751,7 @@ class LeaseEndDeductionsForm(forms.Form):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         for index in range(1, DEDUCTION_ROWS + 1):
-            self.fields[f"kind_{index}"] = forms.ChoiceField(
+            self.fields[f"kind_{index}"] = _QuietChoiceField(
                 label="Kind", required=False, choices=[("", "—"), *DeductionKind.choices]
             )
             self.fields[f"description_{index}"] = forms.CharField(
@@ -1724,7 +1814,7 @@ class LeaseEndDeductionsForm(forms.Form):
 class LeaseEndSettlementForm(forms.Form):
     """Step 4: how a refund is paid back. The service checks every rule again."""
 
-    method = forms.ChoiceField(
+    method = _QuietChoiceField(
         label="Refund method",
         required=False,
         choices=[("", "—"), *RefundMethod.choices],
@@ -1804,7 +1894,7 @@ class TransferIncomingForm(forms.Form):
         # as on the lease form; the tick is the page's only, the rules are unchanged.
         widget=forms.NumberInput(attrs={SHOWN_WHEN: TWICE_MONTHLY_ID}),
     )
-    payment_channel = forms.ChoiceField(
+    payment_channel = _QuietChoiceField(
         label="Payment channel",
         choices=[("", "—")]
         + [
@@ -2028,7 +2118,7 @@ class ContactEditForm(forms.Form):
     """The fields of a contact entry its author may change (PLAN-012 D2). The form checks
     shape; the service (:mod:`ledger.services.contacts`) decides every rule."""
 
-    kind = forms.ChoiceField(
+    kind = _QuietChoiceField(
         choices=ContactKind.choices, error_messages={"required": "Choose the kind of contact."}
     )
     happened_on = forms.DateField(
@@ -2083,9 +2173,9 @@ class ContactEntryForm(ContactEditForm):
     open" (PLAN-012c-b D1). Each choice of ``promises`` may carry the promise's date and
     amount for the page's "Rescheduled" preselection."""
 
-    lease = forms.ChoiceField(required=False, label="Store")
-    previous = forms.ChoiceField(required=False, label="Previous promise")
-    outcome = forms.ChoiceField(
+    lease = _QuietChoiceField(required=False, label="Store")
+    previous = _QuietChoiceField(required=False, label="Previous promise")
+    outcome = _QuietChoiceField(
         required=False,
         label="What happened to it",
         choices=OUTCOME_CHOICES,
@@ -2144,7 +2234,7 @@ class ContactOutcomeForm(ContactEditForm):
     offered only when the promise names no store and the operator has more than one lease
     in effect (an entry must then name one)."""
 
-    lease = forms.ChoiceField(
+    lease = _QuietChoiceField(
         label="Store", error_messages={"required": "Choose the store this is about."}
     )
     field_order = ["lease", "kind", "happened_on", "promised_date", "promised_amount", "body"]
@@ -2200,7 +2290,7 @@ class CalendarEntryForm(forms.Form):
     """Add or change a calendar note or reminder (D8). Record choices are UUIDs; the
     view checks they exist."""
 
-    kind = forms.ChoiceField(
+    kind = _QuietChoiceField(
         choices=CalendarEntryKind.choices, error_messages={"required": "Choose note or reminder."}
     )
     on = forms.DateField(label="Date", widget=forms.DateInput(attrs={"type": "date"}))
@@ -2221,9 +2311,9 @@ class CalendarEntryForm(forms.Form):
         label="E-mail me that morning",
         help_text="An e-mail to you on the morning of that day (09:00 New York).",
     )
-    store = forms.ChoiceField(required=False, label="Store")
-    operator = forms.ChoiceField(required=False, label="Operator")
-    lease = forms.ChoiceField(required=False, label="Lease")
+    store = _QuietChoiceField(required=False, label="Store")
+    operator = _QuietChoiceField(required=False, label="Operator")
+    lease = _QuietChoiceField(required=False, label="Lease")
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -2263,7 +2353,7 @@ class CalendarEntryForm(forms.Form):
 
 
 def _cadence_field() -> forms.ChoiceField:
-    return forms.ChoiceField(
+    return _QuietChoiceField(
         choices=InstallmentCadence.choices,
         initial=InstallmentCadence.MONTHLY,
         error_messages={

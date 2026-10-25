@@ -207,7 +207,7 @@ def test_an_edit_that_changes_nothing_writes_no_audit_row(admin: Client) -> None
         ({"closed_at": "2025-02-28"}, "The closed date cannot be before the open date."),
         ({"external_label": "   "}, "This field is required."),
         ({"external_label": ""}, "This field is required."),
-        ({"status": "demolished"}, "Select a valid choice."),
+        ({"status": "demolished"}, "Choose one of the options."),
         ({"store_number": "abc"}, "Enter a whole number."),
         ({"store_number": "0"}, "greater than or equal to 1"),
         ({"open_date": "2025-02-30"}, "Enter a valid date."),

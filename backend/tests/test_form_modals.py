@@ -138,7 +138,9 @@ def test_new_operator_renders_the_operators_list_with_the_dialog_open() -> None:
     assert '<h2 id="operator-form-title">New operator</h2>' in dialog
     assert f'action="{NEW_OPERATOR}"' in dialog
     assert 'class="dialog-form-grid" id="operator-fields"' in dialog
-    assert 'name="creation_key"' in dialog and 'name="display_name"' in dialog
+    # PLAN-012f-b D9: Type and the kind's name fields; the display name is derived.
+    assert 'name="creation_key"' in dialog and 'name="kind"' in dialog
+    assert 'name="display_name"' not in dialog
     # The consents follow the phone and the e-mail (ledger/shown_when.js, loaded once).
     assert 'data-shown-when="id_sms_phone|id_phone"' in dialog
     assert body.count("ledger/shown_when.js") == 1
@@ -155,7 +157,7 @@ def test_edit_operator_renders_the_operator_page_with_the_dialog_open() -> None:
     tag, dialog = dialog_of(body, "operator-form")
     assert_open(tag, detail)
     assert '<h2 id="operator-form-title">Edit operator Walk Co</h2>' in dialog
-    assert f'action="{detail}edit/"' in dialog and 'value="Walk Co"' in dialog
+    assert f'action="{detail}edit/"' in dialog and 'name="display_name"' not in dialog
     assert 'name="creation_key"' not in dialog
     assert_foot(dialog, "operator", detail)
     assert duplicate_ids(body) == []
@@ -244,7 +246,7 @@ def test_an_edited_store_lands_on_its_page_with_the_flash() -> None:
 def test_a_new_operator_lands_on_its_page_with_the_flash() -> None:
     # Fable's B-1 finding: the operator's page, where the sync's state shows.
     billing, _ = client_for(Role.BILLING)
-    response = billing.post(NEW_OPERATOR, operator_data(display_name="Rome Stores", email=""))
+    response = billing.post(NEW_OPERATOR, operator_data(company="Rome Stores", email=""))
     operator = Operator.objects.get()
     assert (response.status_code, response["Location"]) == (302, f"/operators/{operator.pk}/")
     body = page(billing, response["Location"])
@@ -319,11 +321,11 @@ def test_a_refused_operator_reopens_the_dialog_with_the_error_under_the_field(ro
     billing, _ = client_for(Role.BILLING)
     operator = new_operator(email=None, display_name="Walk Co")
     path = NEW_OPERATOR if route == "create" else f"/operators/{operator.pk}/edit/"
-    response = billing.post(path, operator_data(display_name="", legal_name="Kept Legal"))
+    response = billing.post(path, operator_data(company="", legal_name="Kept Legal"))
     assert (response.status_code, response["Location"]) == (302, path)
     body = page(billing, path)
     _, dialog = dialog_of(body, "operator-form")
-    assert "This field is required." in _field_error(dialog, "id_display_name")
+    assert "Enter the company name." in _field_error(dialog, "id_company")
     assert 'value="Kept Legal"' in dialog
     assert Operator.objects.count() == 1
 

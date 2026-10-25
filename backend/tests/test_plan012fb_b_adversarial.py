@@ -123,3 +123,126 @@ def test_the_dialog_holds_the_pages_only_primary_button() -> None:
         header = outside[outside.index('id="page-header"') :]
         header = header[: header.index("</header>")] if "</header>" in header else header
         assert header.count("btn-primary") <= 1, url
+
+
+# --- Slice B-3: the store type, the state select, landlord rent optional ----------------------
+
+
+def test_the_state_mapping_never_invents_a_code() -> None:
+    from importlib import import_module
+
+    from finance.us_states import state_name
+
+    migration = import_module("ledger.migrations.0051_store_type_and_state_codes")
+    assert migration.state_code(" tx ") == "TX"
+    assert migration.state_code("District of Columbia") == "DC"
+    assert migration.state_code("new  york") == "NY"
+    for raw in (MARKUP, "4111111111111111", "", "Tejas", "T", "TXX", "Texas;drop", "ZZ"):
+        assert migration.state_code(raw) == "", raw
+    assert state_name(MARKUP) == "" and state_name(None) == "" and state_name("TX") == "Texas"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("state", "ZZ"),
+        ("state", MARKUP),
+        ("state", "4111111111111111"),
+        ("store_type", "4111111111111111"),
+        ("store_type", MARKUP),
+        ("store_type", "00000000-0000-0000-0000-000000000000"),
+        ("landlord_rent", "-1"),
+        ("landlord_rent", "1e9"),
+        ("landlord_rent", MARKUP),
+    ],
+)
+def test_a_hostile_store_form_value_is_refused_without_echo_and_writes_nothing(
+    field: str, value: str
+) -> None:
+    from ledger.models import StoreCost
+
+    a_world()
+    admin, _ = client_for(Role.ADMIN)
+    before = (row_counts(), StoreCost.objects.count())
+    data = {
+        "external_label": "Probe",
+        "store_number": "4242",
+        "open_date": "2026-10-01",
+        "status": "active",
+        field: value,
+    }
+    url = reverse("ledger:stores:create")
+    response = admin.post(url, data)
+    assert response.status_code == 302
+    body = admin.get(url).content.decode()
+    if field != "landlord_rent":  # a number field re-fills its held value; the selects never do
+        assert value not in body, (field, value)
+    assert "4111111111111111" not in body
+    assert not Store.objects.filter(external_label="Probe").exists()
+    assert (row_counts(), StoreCost.objects.count()) == before
+
+
+def test_an_empty_landlord_rent_writes_no_cost_row_and_zero_writes_one() -> None:
+    from decimal import Decimal
+
+    from ledger.models import StoreCost
+    from tests.test_store_views import form_data
+
+    a_world()
+    admin, _ = client_for(Role.ADMIN)
+    url = reverse("ledger:stores:create")
+
+    def created(**fields: str) -> Store:
+        response = admin.post(url, form_data(**fields))
+        assert response.status_code == 302, response.status_code
+        return Store.objects.get(pk=response["Location"].rstrip("/").rsplit("/", 1)[-1])
+
+    empty = created(external_label="Empty", store_number="4301", landlord_rent="")
+    assert not StoreCost.objects.filter(store=empty).exists()
+    zero = created(external_label="Zero", store_number="4302", landlord_rent="0")
+    assert StoreCost.objects.get(store=zero).landlord_rent == Decimal("0.00")
+    page = admin.get(reverse("ledger:stores:detail", kwargs={"pk": empty.pk})).content.decode()
+    assert "Not entered" in page
+
+
+def test_markup_in_a_store_type_name_is_escaped_on_every_pill() -> None:
+    from ledger.models import StoreType
+
+    store = a_world()
+    kind = StoreType.objects.create(name=f"Kiosk {MARKUP}", sort_order=99)
+    store.store_type = kind
+    store.save(update_fields=["store_type"])
+    operator = store.leases.get().operator
+    assert operator is not None
+    billing, _ = client_for(Role.BILLING)
+    for url in (
+        reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
+        reverse("ledger:stores:list"),
+        "/grid/",
+        reverse("ledger:operators:detail", kwargs={"pk": operator.pk}),
+    ):
+        body = billing.get(url).content.decode()
+        assert MARKUP not in body, url
+        assert "Kiosk &lt;script&gt;" in body, url
+
+
+def test_a_blank_state_lands_in_needs_review_and_a_closed_store_does_not() -> None:
+    from ledger.services import attention
+
+    store = a_world()
+    store.state = ""
+    store.save(update_fields=["state"])
+    closed = a_store("5555 Closed", 5555)
+    closed.state = ""
+    closed.status = "closed"
+    closed.save(update_fields=["state", "status"])
+    from django.utils import timezone
+
+    found = attention.attention(timezone.localdate()).items
+    items = [item for item in found if item.kind == attention.STORE_STATE_MISSING]
+    assert [item.store_id for item in items] == [store.pk]
+    assert all(item.text.startswith("State needs choosing") for item in items)
+    # The text is data; the page escapes it.
+    billing, _ = client_for(Role.BILLING)
+    body = billing.get("/").content.decode()
+    assert MARKUP not in body and "State needs choosing" in body

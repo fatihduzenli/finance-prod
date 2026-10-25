@@ -39,6 +39,8 @@ ZERO = Decimal("0.00")
 HALF_CENT = Decimal("0.005")
 
 NAME_MAX_LENGTH = 200
+#: A first or a last name: "First Last" fits ``NAME_MAX_LENGTH`` (PLAN-012f-b D9).
+PERSON_NAME_MAX_LENGTH = 99
 CHOICE_MAX_LENGTH = 32
 _NOT_BLANK = r"\S"
 _PAYMENT_DATA_VALIDATORS = (validate_no_payment_data, validate_json_has_no_payment_data)
@@ -224,6 +226,14 @@ class SyncFailure(models.TextChoices):
     ALREADY_LINKED_ELSEWHERE = "AlreadyLinkedElsewhere", "Connected to another operator"
 
 
+class OperatorKind(models.TextChoices):
+    """Whether an operator is a company or a person (PLAN-012f-b D9): it picks the name
+    fields the form asks for and the display name derived from them."""
+
+    COMPANY = "company", "Company"
+    PERSON = "person", "Person"
+
+
 #: E.164: a plus sign, a country code that does not start with 0, at most 15 digits in all
 #: (PLAN-012a D3). The form, the model and a CHECK hold ``operators.sms_phone`` to it.
 SMS_PHONE_PATTERN = r"^\+[1-9][0-9]{7,14}$"
@@ -239,9 +249,18 @@ CONSENT_FIELDS: tuple[str, ...] = ("sms_consent_at", "email_consent_at")
 class Operator(GuardedModel):
     """The business that runs a store and pays its rent ("customer" in older prompts)."""
 
+    #: The stored, shown name. :meth:`save` derives it from the kind's name fields when
+    #: they are filled (PLAN-012f-b D9); a row without them (one made before the kind
+    #: existed) keeps the name it has.
     display_name = guarded_char(NAME_MAX_LENGTH)
     legal_name = guarded_char(NAME_MAX_LENGTH, blank=True)
+    #: Existing operators are people until staff say otherwise (nothing guessed).
+    kind = _choice(OperatorKind, default=OperatorKind.PERSON)
+    #: The company name, for a company.
     company = guarded_char(NAME_MAX_LENGTH, blank=True)
+    contact_person = guarded_char(NAME_MAX_LENGTH, blank=True, default="")
+    first_name = guarded_char(PERSON_NAME_MAX_LENGTH, blank=True, default="")
+    last_name = guarded_char(PERSON_NAME_MAX_LENGTH, blank=True, default="")
     email = models.EmailField(null=True, blank=True, validators=[validate_no_payment_data])
     phone = guarded_char(50, blank=True)
     address_line1 = guarded_char(NAME_MAX_LENGTH, blank=True)
@@ -303,6 +322,7 @@ class Operator(GuardedModel):
                 condition=Q(email__isnull=False),
                 name="operators_email_unique",
             ),
+            _valid_choice("operators", "kind", OperatorKind),
             _valid_choice("operators", "enrolment_status", EnrolmentStatus),
             _valid_choice("operators", "sync_status", SyncStatus),
             _valid_choice("operators", "sync_failure", SyncFailure, blank=True),
@@ -326,7 +346,20 @@ class Operator(GuardedModel):
         if errors:
             raise ValidationError(errors, code="consent_in_future")
 
+    def kind_name(self) -> str:
+        """The name the kind's fields give: the company name for a company, "First Last"
+        for a person; "" while they are empty."""
+        if self.kind == OperatorKind.COMPANY:
+            return " ".join(self.company.split())
+        return " ".join(f"{self.first_name} {self.last_name}".split())
+
+    def derive_display_name(self) -> None:
+        """Set ``display_name`` from the kind's name fields when they are filled."""
+        if name := self.kind_name():
+            self.display_name = name
+
     def save(self, *args: Any, **kwargs: Any) -> None:
+        self.derive_display_name()
         # Stored stripped and lower-case; an empty address is NULL, never ''.
         if self.email is not None:
             self.email = self.email.strip().lower() or None

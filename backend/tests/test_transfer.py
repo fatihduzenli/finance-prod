@@ -645,7 +645,9 @@ def test_an_operator_created_on_the_step_queues_its_sync_job(admin: Any, pinned:
         {
             "action": "create",
             "creation_key": str(uuid.uuid4()),
-            "display_name": "Eastwind Stores",
+            # PLAN-012f-b D9: Type and the company's name; the display name is derived.
+            "kind": "company",
+            "company": "Eastwind Stores",
             "email": "eastwind@example.com",
             "phone": "",
         },
