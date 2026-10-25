@@ -779,8 +779,9 @@ RENT_DEBIT_REASON = (
     "Rent is collected by the lease's autopay; a returned debit is re-debited from "
     "Returned payments."
 )
-#: Why the bank-debit card is greyed for a role below admin (PLAN-012f-b D14).
-DEBIT_NEEDS_ADMIN = "Charge now needs an admin."
+#: Billing debits from tomorrow on: today goes through Charge now, an admin's (PLAN-012f-b
+#: C2-1). The line under Debit on, and the refusal of today's date.
+DEBIT_TODAY_NEEDS_ADMIN = "A debit today needs an admin."
 NOTE_OPTIONAL_LABEL = "Note (optional)"
 NOTE_REQUIRED_LABEL = "Note (required)"
 #: The record card's fields, sent and checked only while that card is chosen.
@@ -793,7 +794,8 @@ class AddPaymentForm(ManualPaymentForm):
     """The Add payment page (PLAN-012f-b D14): ``how`` picks the bank-debit card
     (``debit_amount``, ``debit_on``, ``confirm_large_debit``) or the record card (today's
     :class:`ManualPaymentForm` fields). ``debit_reason`` is why the debit card is greyed
-    (``""``: offered); ``balance`` what a debit takes. A post without ``how`` is the record
+    (``""``: offered); ``balance`` what a debit takes; ``admin`` whether today may be the
+    debit date (else Debit on starts tomorrow, C2-1). A post without ``how`` is the record
     card (the shape of the page before). Each card's fields carry ``data-shown-when``
     (``ledger/shown_when.js``) and count only for their card; the note is required only
     for ``record``. The services check every rule again."""
@@ -823,6 +825,7 @@ class AddPaymentForm(ManualPaymentForm):
         debit_reason: str,
         balance: Decimal,
         today: date | None = None,
+        admin: bool = True,
         **kwargs: Any,
     ) -> None:
         if data is not None and not data.get("how"):
@@ -832,13 +835,17 @@ class AddPaymentForm(ManualPaymentForm):
         self.debit_reason = debit_reason
         self.balance = balance
         self.today = today or timezone.localdate()
+        self.admin = admin
+        earliest = self.today if admin else self.today + timedelta(days=1)
         for name in ("method", "amount", "paid_on", "note"):
             self.fields[name].required = False
         self.fields["how"].initial = HOW_RECORD if debit_reason else HOW_DEBIT
         self.fields["debit_amount"].initial = balance
         self.fields["debit_amount"].widget.attrs["max"] = str(balance)
-        self.fields["debit_on"].initial = self.today
-        self.fields["debit_on"].widget.attrs["min"] = self.today.isoformat()
+        self.fields["debit_on"].initial = earliest
+        self.fields["debit_on"].widget.attrs["min"] = earliest.isoformat()
+        if not admin:
+            self.fields["debit_on"].help_text = DEBIT_TODAY_NEEDS_ADMIN
         for name in RECORD_FIELDS:
             self.fields[name].widget.attrs["data-shown-when"] = f"how-{HOW_RECORD}"
         for name in DEBIT_FIELDS:
@@ -931,6 +938,8 @@ class AddPaymentForm(ManualPaymentForm):
             self.add_error("debit_on", one_off_charges.DEBIT_DATE_REQUIRED)
         elif on is not None and on < self.today:
             self.add_error("debit_on", one_off_charges.DEBIT_DATE_PAST)
+        elif on == self.today and not self.admin:
+            self.add_error("debit_on", DEBIT_TODAY_NEEDS_ADMIN)
 
 
 #: The prefixes of the store payment form's per-charge inputs (PLAN-012d D6).

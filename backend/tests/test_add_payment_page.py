@@ -21,7 +21,7 @@ from django.utils.html import escape
 
 from accounts.roles import Role
 from ledger.forms import (
-    DEBIT_NEEDS_ADMIN,
+    DEBIT_TODAY_NEEDS_ADMIN,
     NOTE_OPTIONAL_LABEL,
     NOTE_REQUIRED_LABEL,
     REFERENCE_HELP,
@@ -169,17 +169,17 @@ def test_the_rent_route_renders_the_frame_with_the_debit_card_greyed() -> None:
     assert 'id="operator-card"' in side and "no bank account on file" in side
 
 
-@pytest.mark.parametrize("case", ["no bank", "flag off", "billing"])
+@pytest.mark.parametrize("case", ["no bank", "flag off"])
 def test_the_debit_card_is_greyed_with_its_reason_and_the_record_card_chosen(
     fake: FakeProvider, case: str
 ) -> None:
-    role = Role.BILLING if case == "billing" else Role.ADMIN
+    role = Role.ADMIN
     if case == "no bank":
         charge = invoiced(fake, operator=an_operator(fake, bank=None))
         reason = str(service.DEBIT_NO_METHOD)
     else:
         charge = invoiced(fake)
-        reason = str(service.DEBIT_OFF) if case == "flag off" else DEBIT_NEEDS_ADMIN
+        reason = str(service.DEBIT_OFF)
     if case == "flag off":
         with override_settings(STAX_PAY_INVOICE_ENABLED=False):
             body = get(role, page_of(charge))
@@ -355,10 +355,109 @@ def test_a_large_debit_on_a_later_date_needs_the_confirmation(fake: FakeProvider
     assert fresh(charge).collection == CollectionMethod.AUTOPAY_DUE
 
 
-def test_billing_cannot_post_a_debit(fake: FakeProvider) -> None:
+# --- Billing debits from tomorrow on (C2-1) --------------------------------------------------
+
+
+def test_billing_sees_the_debit_card_from_tomorrow_with_the_line_under_the_date(
+    fake: FakeProvider,
+) -> None:
+    charge = setup_charge(fake)
+    cards = tiles(get(Role.BILLING, page_of(charge)))
+    tomorrow = (today() + timedelta(days=1)).isoformat()
+    assert "is-unavailable" not in cards["debit"] and 'id="how-debit" checked' in cards["debit"]
+    assert f'name="debit_on" value="{tomorrow}"' in cards["debit"]
+    assert f'min="{tomorrow}"' in cards["debit"]
+    assert f'<span class="help muted">{DEBIT_TODAY_NEEDS_ADMIN}</span>' in cards["debit"]
+    admin_cards = tiles(get(Role.ADMIN, page_of(charge)))
+    assert f'min="{today().isoformat()}"' in admin_cards["debit"]
+    assert DEBIT_TODAY_NEEDS_ADMIN not in admin_cards["debit"]
+
+
+def test_billing_cannot_debit_today_and_nothing_is_written(fake: FakeProvider) -> None:
+    charge = invoiced(fake)
+    billing = client(Role.BILLING)
+    before = written()
+    response = billing.post(page_of(charge), debit_post(charge, today()))
+    assert response.status_code == 302 and "charge-now" not in response["Location"]
+    assert written() == before
+    assert fresh(charge).collection == CollectionMethod.EMAIL
+    body = billing.get(page_of(charge)).content.decode()
+    assert body.count(DEBIT_TODAY_NEEDS_ADMIN) == 2  # the line under the date and the refusal
+
+
+def test_billing_schedules_a_debit_on_a_later_date(fake: FakeProvider) -> None:
+    charge = setup_charge(fake, "250.00")
+    on = today() + timedelta(days=5)
+    response = client(Role.BILLING).post(page_of(charge), debit_post(charge, on))
+    assert response["Location"] == reverse(
+        "ledger:one_off_charges:detail", kwargs={"pk": charge.pk}
+    )
+    row = fresh(charge)
+    assert (row.collection, row.due_date) == (CollectionMethod.AUTOPAY_DUE, on)
+
+
+# --- The debit's note (C2-2) ------------------------------------------------------------------
+
+NOTE = "Owner asked for the debit on the fifth."
+
+
+def _with_note(audit_action: str) -> list[AuditLog]:
+    return [
+        row
+        for row in AuditLog.objects.all()
+        if NOTE in str(row.before) or NOTE in str(row.after) or row.action == audit_action
+    ]
+
+
+def test_a_later_debits_note_is_kept_in_its_audit_row_and_nowhere_else(
+    fake: FakeProvider,
+) -> None:
+    charge = setup_charge(fake, "250.00")
+    on = today() + timedelta(days=5)
+    client(Role.ADMIN).post(page_of(charge), debit_post(charge, on, note=NOTE))
+    [audit] = _with_note(service.DEBIT_SCHEDULED_ACTION)
+    assert audit.action == service.DEBIT_SCHEDULED_ACTION and audit.after["note"] == NOTE
+    row = fresh(charge)
+    assert NOTE not in (row.note, row.vendor, row.description)
+    assert not Payment.objects.filter(one_off_charge=charge).exists()
+
+
+def test_todays_debit_carries_the_note_to_the_confirmation_and_its_audit_row(
+    fake: FakeProvider,
+) -> None:
+    charge = invoiced(fake, "100.00")
+    admin = client(Role.ADMIN)
+    response = admin.post(page_of(charge), debit_post(charge, today(), note=NOTE))
+    location = response["Location"]
+    assert NOTE.split()[0] not in location  # never in the URL
+    key = location.split("key=", 1)[1]
+    assert admin.post(location, {"key": key}).status_code == 302
+    [audit] = _with_note(service.DEBIT_NOW_ACTION)
+    assert audit.action == service.DEBIT_NOW_ACTION and audit.after["note"] == NOTE
+    assert not any(NOTE in str(value) for value in admin.session.values())
+
+
+def test_a_debit_note_with_a_card_number_is_refused_and_nothing_written(
+    fake: FakeProvider,
+) -> None:
     charge = setup_charge(fake)
     before = written()
-    client(Role.BILLING).post(page_of(charge), debit_post(charge, today() + timedelta(days=5)))
+    card = "Paid with 4111 1111 1111 1111"
+    client(Role.ADMIN).post(
+        page_of(charge), debit_post(charge, today() + timedelta(days=5), note=card)
+    )
+    assert written() == before
+    assert fresh(charge).collection == CollectionMethod.NONE
+    # The service refuses it too, before anything is read.
+    refused = service.debit(
+        charge,
+        D("250.00"),
+        today() + timedelta(days=5),
+        actor=client_for(Role.ADMIN)[1],
+        confirmed=False,
+        note=card,
+    )
+    assert (refused.ok, refused.message) == (False, service.TEXT_PAYMENT_DATA)
     assert written() == before
 
 
@@ -371,7 +470,8 @@ def test_the_note_label_follows_the_card(fake: FakeProvider) -> None:
     note = element(debit_body, '<section class="card form-card note-card"', "section")
     assert f'<label for="id_note">{NOTE_OPTIONAL_LABEL}</label>' in note
     assert f'data-label="{NOTE_REQUIRED_LABEL}"' in note and 'data-label-when="how-record"' in note
-    record_body = get(Role.BILLING, page_of(charge))
+    with override_settings(STAX_PAY_INVOICE_ENABLED=False):
+        record_body = get(Role.ADMIN, page_of(charge))
     note = element(record_body, '<section class="card form-card note-card"', "section")
     assert f'<label for="id_note">{NOTE_REQUIRED_LABEL}</label>' in note
 
@@ -383,7 +483,8 @@ def test_the_button_and_the_after_line_follow_the_card(fake: FakeProvider) -> No
     side = summary(debit_body)
     assert 'Charge <span class="payment-amount">$5,000.00</span> by ACH' in side
     assert 'id="after-payment-value"' in side and ">Paid in full<" in side
-    record_body = get(Role.BILLING, page_of(charge))
+    with override_settings(STAX_PAY_INVOICE_ENABLED=False):
+        record_body = get(Role.ADMIN, page_of(charge))
     side = summary(record_body)
     assert 'Record <span class="payment-amount">$0.00</span> as paid' in side
     assert "$5,000.00 still owed" in side

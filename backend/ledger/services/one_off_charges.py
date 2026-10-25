@@ -1701,6 +1701,7 @@ def debit(
     confirmed: bool,
     key: uuid.UUID | None = None,
     today: date | None = None,
+    note: str = "",
 ) -> Outcome:
     """Debit the operator's linked bank account for ``charge`` (Add payment, D14).
 
@@ -1713,10 +1714,14 @@ def debit(
     rolls the switch back. **A later date** (billing): a charge with no invoice and no
     schedule becomes ``autopay_due`` on that date and the ``schedule_create`` job makes
     its single-occurrence schedule, as :func:`create_charge` does for an ``autopay_due``
-    charge. A replay with the same ``key`` changes nothing. No payment state is written
-    here (Rule 2): the charge reads Pending from the provider."""
+    charge. A replay with the same ``key`` changes nothing. ``note`` (optional, Add
+    payment's Note card) is refused when it holds card or account data, else kept in the
+    ``debit_requested`` / ``debit_scheduled`` audit row (PLAN-012f-b C2-2; no new stored
+    value). No payment state is written here (Rule 2): the charge reads Pending from the
+    provider."""
     day = today or timezone.localdate()
-    refused = _debit_input_refusal(amount, on, day)
+    note = visible_text(note or "")
+    refused = _text_refusal(note, "note") or _debit_input_refusal(amount, on, day)
     if refused is not None or on is None:
         return refused or Outcome(False, DEBIT_DATE_REQUIRED, "on")
     role = role_of(actor) if actor is not None else None
@@ -1745,10 +1750,12 @@ def debit(
         if options.large and confirmed is not True:
             return Outcome(False, leases.large_debit_confirmation([amount]), "confirm")
         if on == day:
-            outcome = _debit_now(locked, amount, actor=actor, key=key, large=options.large)
+            outcome = _debit_now(
+                locked, amount, actor=actor, key=key, large=options.large, note=note
+            )
         else:
             outcome = _debit_on(
-                locked, amount, on, actor=actor, key=key, large=options.large, today=day
+                locked, amount, on, actor=actor, key=key, large=options.large, today=day, note=note
             )
         if not outcome.ok:
             transaction.set_rollback(True)
@@ -1762,6 +1769,7 @@ def _debit_now(
     actor: User | None,
     key: uuid.UUID | None,
     large: bool,
+    note: str = "",
 ) -> Outcome:
     """Today's debit: the existing Charge now path for the whole balance (D14)."""
     before = charge.collection
@@ -1780,6 +1788,7 @@ def _debit_now(
             "collection": CollectionMethod.CHARGE_NOW.value,
             "amount": str(amount),
             "debit_key": str(key) if key is not None else None,
+            "note": note,
         },
     )
     if large:
@@ -1796,6 +1805,7 @@ def _debit_on(
     key: uuid.UUID | None,
     large: bool,
     today: date,
+    note: str = "",
 ) -> Outcome:
     """A later date's debit: one single-occurrence schedule for the charge (D14)."""
     if invoices_of(charge).exists():
@@ -1821,6 +1831,7 @@ def _debit_on(
             "due_date": on.isoformat(),
             "amount": str(amount),
             "debit_key": str(key) if key is not None else None,
+            "note": note,
         },
     )
     if large:

@@ -45,7 +45,6 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import (
-    DEBIT_NEEDS_ADMIN,
     HOW_DEBIT,
     AddPaymentForm,
     CancelChargeForm,
@@ -346,6 +345,12 @@ def _as_debit(charge: OneOffCharge) -> OneOffCharge:
     return preview
 
 
+def _note_key(charge: OneOffCharge, key: uuid.UUID) -> str:
+    """The session entry holding Add payment's note for today's debit (C2-2) until the
+    confirmation's POST passes it to :func:`ledger.services.one_off_charges.debit`."""
+    return f"add-payment-note:{charge.pk}:{key}"
+
+
 def _page_key(request: HttpRequest) -> uuid.UUID:
     """The one-time key Add payment sent in ``?key=``, else a new one."""
     try:
@@ -370,15 +375,20 @@ def charge_now(request: HttpRequest, pk: str) -> HttpResponse:
     if request.method == "POST":
         form = ChargeNowForm(request.POST)
         if form.is_valid():
+            key = form.cleaned_data["key"]
+            note_key = _note_key(charge, key) if key is not None else ""
             outcome = service.debit(
                 charge,
                 service.open_balance(charge),
                 timezone.localdate(),
                 actor=_actor(request),
                 confirmed=form.cleaned_data["confirm"] is True,
-                key=form.cleaned_data["key"],
+                key=key,
+                note=str(request.session.get(note_key, "")) if note_key else "",
             )
             if outcome.ok:
+                if note_key:
+                    request.session.pop(note_key, None)
                 if outcome.message == service.DEBIT_ALREADY:
                     messages.info(request, outcome.message)
                 else:
@@ -427,10 +437,11 @@ def charge_payment(request: HttpRequest, pk: str) -> HttpResponse:
     target = f"one-off-charge-payment:{charge.pk}"
     options = service.bank_debit_options(charge)
     admin = meets(_role(request), Role.ADMIN)
-    reason = options.reason or ("" if admin else DEBIT_NEEDS_ADMIN)
 
     def build(data: Any = None, **kwargs: Any) -> AddPaymentForm:
-        return AddPaymentForm(data, debit_reason=reason, balance=options.balance, **kwargs)
+        return AddPaymentForm(
+            data, debit_reason=options.reason, balance=options.balance, admin=admin, **kwargs
+        )
 
     if request.method == "POST":
         form = build(request.POST)
@@ -499,6 +510,9 @@ def _debit(
     data = form.cleaned_data
     key = data["creation_key"]
     if data["debit_on"] == timezone.localdate():
+        # The note waits in the session for the confirmation's POST (C2-2), never in the URL.
+        if data["note"]:
+            request.session[_note_key(charge, key)] = data["note"]
         url = reverse("ledger:one_off_charges:charge_now", kwargs={"pk": charge.pk})
         return redirect(f"{url}?{urlencode({'key': str(key)})}")
     outcome = service.debit(
@@ -508,6 +522,7 @@ def _debit(
         actor=_actor(request),
         confirmed=data["confirm_large_debit"] is True,
         key=key,
+        note=data["note"],
     )
     if outcome.ok:
         if outcome.message == service.DEBIT_ALREADY:
