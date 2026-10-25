@@ -96,3 +96,104 @@ def test_an_unknown_draft_answers_404_on_the_prompt() -> None:
         billing.get(reverse("ledger:invoices:saved", kwargs={"pk": uuid.uuid4()})).status_code
         == 404
     )
+
+
+# --- Slice D-2: Schedule settlement -------------------------------------------------------------
+
+
+def preview_url(**params: str) -> str:
+    from urllib.parse import urlencode
+
+    return reverse("ledger:invoices:settlement_preview") + "?" + urlencode(params)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"total": "1000.00", "count": "1", "first": "2026-12-01", "cadence": "monthly"},
+        {"total": "1000.00", "count": "13", "first": "2026-12-01", "cadence": "monthly"},
+        {"total": "1000.00", "count": "3", "first": "2020-01-01", "cadence": "monthly"},
+        {"total": "1000.00", "count": "3", "first": "2026-12-01", "cadence": "daily"},
+        {"total": "-5", "count": "3", "first": "2026-12-01", "cadence": "weekly"},
+        {"total": "NaN", "count": "3", "first": "2026-12-01", "cadence": "weekly"},
+        {"total": MARKUP, "count": MARKUP, "first": MARKUP, "cadence": MARKUP},
+        {"total": "1e400", "count": "3", "first": "2026-12-01", "cadence": "yearly"},
+        {},
+    ],
+)
+def test_a_hostile_preview_request_answers_a_plain_refusal_and_writes_nothing(
+    params: dict[str, str],
+) -> None:
+    billing, _ = client_for(Role.BILLING)
+    before = row_counts()
+    response = billing.get(preview_url(**params))
+    assert response.status_code in (200, 400)
+    body = response.content.decode()
+    assert '"ok": false' in body or '"ok":false' in body
+    assert "<script>" not in body and "NaN" not in body and "Infinity" not in body
+    assert row_counts() == before
+
+
+def test_the_preview_route_needs_billing_and_a_session() -> None:
+    from django.test import Client
+
+    good = {"total": "1000.00", "count": "10", "first": "2026-12-01", "cadence": "monthly"}
+    viewer, _ = client_for(Role.VIEWER)
+    assert viewer.get(preview_url(**good)).status_code in (302, 403)
+    assert Client().get(preview_url(**good)).status_code in (401, 403)
+    billing, _ = client_for(Role.BILLING)
+    response = billing.get(preview_url(**good))
+    assert response.status_code == 200
+    assert "10 debits of $100.00" in response.content.decode()
+
+
+@pytest.mark.parametrize(
+    ("count", "first", "cadence"),
+    [
+        ("1", "2026-12-01", "monthly"),
+        ("13", "2026-12-01", "monthly"),
+        ("3", "2020-01-01", "monthly"),
+        ("3", "2026-12-01", "daily"),
+    ],
+)
+def test_a_hostile_settlement_post_writes_nothing(count: str, first: str, cadence: str) -> None:
+    from ledger.models import InstallmentPlan
+
+    operator, lease = a_bankless_world()
+    billing, _ = client_for(Role.BILLING)
+    before = (
+        InvoiceDraft.objects.count(),
+        OneOffCharge.objects.count(),
+        InstallmentPlan.objects.count(),
+        Job.objects.count(),
+    )
+    url = reverse("ledger:invoices:new_store", kwargs={"pk": lease.store_id})  # type: ignore[attr-defined]
+    data = builder_data(
+        [{"item": "Sign repair", "description": "North wall", "unit_amount": "1000.00"}],
+        lease=str(lease.pk),  # type: ignore[attr-defined]
+        collect="settlement",
+        settlement_count=count,
+        settlement_first_on=first,
+        settlement_cadence=cadence,
+    )
+    response = billing.post(url, data)
+    assert response.status_code in (200, 302)
+    assert (
+        InvoiceDraft.objects.count(),
+        OneOffCharge.objects.count(),
+        InstallmentPlan.objects.count(),
+        Job.objects.count(),
+    ) == before, (count, first, cadence)
+
+
+def test_the_settlement_shares_add_up_and_the_rounding_lands_on_the_last() -> None:
+    from decimal import Decimal
+
+    from ledger.services import installments
+
+    for total, count in (("100.00", 3), ("10000.00", 10), ("0.07", 2), ("999999.99", 12)):
+        shares = installments.split(Decimal(total), count)
+        assert sum(shares) == Decimal(total), (total, count)
+        assert len(shares) == count
+        assert len(set(shares[:-1])) == 1  # every share but the last is equal
+        assert all(share >= 0 for share in shares)
