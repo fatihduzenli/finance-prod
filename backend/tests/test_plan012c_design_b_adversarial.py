@@ -24,7 +24,7 @@ from accounts.roles import Role
 from ledger.models import CompanySettings, PaymentChannel
 from tests import test_lease_end as lease_end_tests
 from tests.receivables_helpers import a_lease, a_store, an_operator
-from tests.test_lease_end import draft
+from tests.test_lease_end import draft, saved
 from tests.test_operator_views import client_for
 from tests.test_transfer import begin
 
@@ -161,7 +161,7 @@ def _step_links(body: str) -> list[str]:
 def test_the_lease_end_steps_mark_one_current_step_and_link_only_to_steps_that_answer() -> None:
     admin, user = client_for(Role.ADMIN)
     lease = a_lease(a_store("2484"), an_operator("Steps Co"), channel=PaymentChannel.WIRE)
-    end = draft(lease, user)
+    end = saved(draft(lease, user), user)
     for name in ("terms", "blockers", "statement"):
         page = admin.get(reverse(f"ledger:lease_ends:{name}", kwargs={"pk": end.pk}))
         assert page.status_code == 200, name

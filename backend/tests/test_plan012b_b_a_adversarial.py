@@ -135,7 +135,7 @@ def test_an_adopted_draft_is_bound_to_its_own_store_and_blocks_no_transfer() -> 
     admin = client_for(Role.ADMIN)[1]
     lease_s, lease_t = _wire_lease(date(2026, 9, 1)), _wire_lease(date(2026, 9, 1))
     draft = _draft_at_terms(lease_s)
-    assert draft.statement_opened_at is None
+    assert draft.statement_saved_at is None
     # Store T's transfer never touches S's draft.
     started_t = transfer.start(lease_t.store, admin, today=TODAY)
     assert started_t.lease_end is not None and started_t.lease_end.pk != draft.pk
@@ -165,7 +165,7 @@ def test_a_viewer_sees_the_banner_without_the_cancel_link() -> None:
     # Not yet at the statement: nobody sees a banner.
     assert "in progress" not in viewer.get(store_page).content.decode()
     assert lease_end.save_statement(fresh(draft), [], actor=admin).ok
-    assert fresh(draft).statement_opened_at is not None
+    assert fresh(draft).statement_saved_at is not None
     page = viewer.get(store_page).content.decode()
     assert "in progress" in page and cancel not in page
     admin_client, _ = client_for(Role.ADMIN)

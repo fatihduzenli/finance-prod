@@ -43,7 +43,7 @@ from ledger.models import (
 )
 from tests.auth_helpers import make_user, verified_client
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
-from tests.test_lease_end import a_store_lease, deductions, draft, settle
+from tests.test_lease_end import a_store_lease, deductions, draft, saved, settle
 from tests.test_transfer import ready as a_ready_transfer
 
 pytestmark = pytest.mark.django_db
@@ -581,7 +581,7 @@ def test_the_lease_end_confirmation_page(monkeypatch: pytest.MonkeyPatch) -> Non
     from tests.test_lease_end import TODAY
 
     monkeypatch.setattr("django.utils.timezone.localdate", lambda *args, **kwargs: TODAY)
-    end = draft(a_store_lease())
+    end = saved(draft(a_store_lease()))
     assert deductions(end).ok
     settle(end)
     client, _ = client_for(Role.ADMIN)

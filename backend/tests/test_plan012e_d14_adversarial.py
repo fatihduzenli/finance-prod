@@ -27,6 +27,7 @@ from tests.test_lease_end import (
     fresh,
     october,
     pdf_text,
+    saved,
     settle,
 )
 from tests.test_operator_views import client_for
@@ -180,12 +181,21 @@ def test_the_debt_cannot_grow_behind_an_override(pinned: None) -> None:
 # --- the reason stays internal ------------------------------------------------------------------
 
 
+def statement_saved(row: Any, user: Any) -> None:
+    """The statement step saved in the transfer's wizard with the deductions as they stand
+    (PLAN-012f-a slice F)."""
+    end = fresh(row).lease_end
+    assert end is not None
+    saved(end, user)
+
+
 def test_the_override_reason_never_reaches_the_operators_statement_or_mail(
     pinned: None, storage: Any, memory: Any
 ) -> None:
     _, user = _admin()
     row = _with_debt(user)
     assert transfer.override_debt(row, f"Owner agreed; {MARKER}.", user).ok
+    statement_saved(row, user)
     outcome = confirm(row, user)
     assert outcome.ok, outcome.message
     run_queued_jobs()
@@ -215,6 +225,7 @@ def test_the_lease_end_balance_stays_on_the_attention_list_until_paid(pinned: No
     _, user = _admin()
     row = _with_debt(user)
     assert transfer.override_debt(row, "Owner agreed.", user).ok
+    statement_saved(row, user)
     assert confirm(row, user).ok
     end = fresh(fresh(row).lease_end)
     assert end.debt_charge is not None

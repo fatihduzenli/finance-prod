@@ -471,3 +471,58 @@ daily run collects late, never skips. The migration's round trip on CI adds to t
 migration job (Step 13's planning decides the split or squash).
 
 **Verdict (E):** **PASS.** Every gate clean on both engines; two MAJOR and three MINOR findings resolved; the four moved pins re-pinned by Fable and re-run on both engines; the visual suite's two cross-engine antialiasing diffs recorded above. ADR-0014 stays Proposed until the owner answers plan §9 items 6–8.
+
+### Slice F — confirm needs a saved statement; `statement_opened_at` → `statement_saved_at` (plan §10, owner 2026-10-24)
+**Scope.** Opus (one brief): `ledger/models.py` (the field renamed), migration
+`0050_rename_statement_saved_at` (one RenameField on 0049, reversible, no guarded column),
+`ledger/services/lease_end.py` (`STATEMENT_REQUIRED`; `_confirm` refuses a draft never saved with
+`field="statement"` after the blockers and before any write, replacing the Batch A fallback that
+created the statement's charges at confirm; `_create_statement_charges` is the save's helper only;
+docstrings), `ledger/views/lease_ends.py` and `views/transfers.py` (GET and POST of the confirm page
+redirect to the lease end's statement step with the message while the statement is unsaved; a
+service refusal on the statement field does the same; the transfer wizard's statement step is the
+lease end's page, there is no transfer statement route), `docs/DATA_OWNERSHIP.md`; tests
+`test_lease_end_drafts.py` (the fallback test re-pinned to the refusal; two more tests save first),
+`test_transfer.py` (`ready()` saves the statement by default; a refusal case),
+`test_migrations_roundtrip.py` (the raw SQL on the latest schema). Fable:
+`tests/test_plan012fa_f_adversarial.py` (eight cases), the shared `confirm()` helper of
+`tests/test_lease_end.py` now saves the statement with the deductions as they stand before
+confirming (the wizard's order; a test of the refusal calls the service directly), three lease-end
+tests re-pinned (the audit rows now include `deductions_set` and `statement_saved`; the later-month
+test saves with the real figures and then changes the charge under the confirm), the attribute
+renamed in two older adversarial files.
+
+**Findings.** F-1 (MINOR, test-only, resolved by Fable): the shared `confirm()` helper of
+`tests/test_lease_end.py` hid the new rule from 31 tests of that file and from every file importing
+it, and twelve more tests across nine files opened a confirm page or confirmed a wizard whose
+statement was never saved (the pages test's world, the wizard-frame tests, the design-component and
+copy pins, the credit-refund allocation, the atomic-confirm and the two debt-override cases); the
+helper now saves the statement with the deductions as they stand before confirming, a `saved()`
+helper does the same for a fixture, and each of those tests saves where the wizard would, so the
+suite exercises the wizard's order and the refusal has its own tests (Fable's file and Opus's re-
+pins, which call the service directly). F-2 (MINOR, deferred): `_statement_first` is written twice,
+in `views/lease_ends.py` and `views/transfers.py` (three lines each); a shared helper would be one
+import, left for the Step 13 cleanup with B-3 and C-5. No BLOCKER, no MAJOR.
+
+**Gate 1.** ruff, `ruff format --check` (487 files), mypy strict (487 files), `uv lock --check`,
+`makemigrations --check` on sqlite and PostgreSQL 16 after migration 0050: all clean. **Gate 2.** sqlite full suite, first run 7,007 passed and 14 failed (F-1), after the test fixes 7,021 passed, 674 skipped, 98 deselected in 1,417 s; PostgreSQL 16 (CI's split on a throwaway container): migration selection 36 passed in 1,254 s (the 0040 round trip and 0050 included), unit selection 7,642 passed, 3 skipped, 101 deselected with the same fourteen failures as the first sqlite run (the pipeline started before the test fixes), then the fourteen changed test files re-run on the container: 420 passed, the save-and-confirm race included; e2e 31 passed on each of four runs. Visual: no template, stylesheet or script changed in
+this slice (the diff is models, services, views, a migration, docs and tests), so the 50 baselines
+stand; a compare-only run in the Playwright image passed on PostgreSQL and on sqlite (54 passed each; no
+baseline rewritten, none changed in the tree). **Gate 3.** The refusal sits after the blockers and before the first write in
+`_confirm`; the transfer path reaches it through `confirm_within`, so both wizards share one rule;
+the views check the marker before rendering and map the service's refusal to the same redirect; the
+migration is one RenameField with the 0040 header and an empty `GUARDED_COLUMNS`; no interface,
+route or stored value changed beyond the column's name; the brief's file list was kept. **Gate 4.**
+Secret scans (script and pattern over the diff and the new files) clean; no secret-store read; no
+new file type; the marker cannot be set from a form field (a forged `statement_saved_at` on the
+terms step and on the confirm POST is ignored, adversarial test); a direct POST of the confirm form
+writes no row and leaves the draft's `updated_at` as it was; the save-and-confirm race on PostgreSQL
+never leaves a confirmed row without the marker; the old column name is gone from `backend/` outside
+migrations 0040 and 0050 and the round-trip test that checks 0039 has no such column.
+
+**Residual risk (F).** Nothing of this slice is on staging until the next push; the migration rename
+runs there with the live rows' values kept (the round trip passed on both engines). A draft saved
+before this slice keeps its marker under the new name, so no open wizard is sent back a step.
+
+**Verdict (F):** **PASS.** Every gate clean on both engines after the test fixes; one MINOR (F-2) deferred to Step 13 by
+written decision; nothing of this slice pushed yet.

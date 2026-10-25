@@ -575,6 +575,7 @@ def test_the_lease_end_lists_the_credit_as_a_refund_due_and_pays_it_back() -> No
     assert "Credit on the lease" in [row[1] for row in statements._lines(found)]
     assert statements.from_json(found.to_json()) == found
     assert settle(end, RefundMethod.WIRE).ok
+    assert lease_end.save_statement(end, [], actor=None, today=END_TODAY).ok
     outcome = lease_end.confirm(end, None, confirmed=True, today=END_TODAY)
     assert outcome.ok, outcome.message
     refund = Payment.objects.get(kind=PaymentKind.CREDIT_REFUND)

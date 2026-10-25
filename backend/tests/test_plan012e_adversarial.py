@@ -256,6 +256,7 @@ def test_confirm_is_atomic_under_a_forced_failure(pinned: None, monkeypatch: Any
     deposit(lease, "2000.00")
     end = draft(lease)
     assert settle(fresh(end)).ok
+    assert lease_end.save_statement(fresh(end), [], actor=None, today=TODAY).ok
     before = (
         fresh(lease).ended_on,
         list(RentCharge.objects.values_list("pk", "amount_due", "status")),

@@ -31,6 +31,7 @@ from ledger.models import (
     LeaseEnd,
     LeaseEndDeduction,
     LeaseEndReason,
+    LeaseEndStatus,
     LeaseTransfer,
     OneOffChargeStatus,
     RentCharge,
@@ -126,14 +127,14 @@ def test_saving_the_statement_creates_the_end_months_prorated_charge_once() -> N
     )
     audit = AuditLog.objects.get(action="rent_charge.created")
     assert audit.after is not None and audit.after["lease_end"] == str(end.pk)
-    opened = fresh(end).statement_opened_at
+    opened = fresh(end).statement_saved_at
     assert opened is not None
     saved = AuditLog.objects.get(action="lease_end.statement_saved")
     assert saved.after is not None and saved.after["charges"] == [str(made.pk)]
     # Saved again: nothing new is created and the marker and its audit row stay.
     assert save(end).ok
     assert RentCharge.objects.filter(lease=lease).count() == 1
-    assert fresh(end).statement_opened_at == opened
+    assert fresh(end).statement_saved_at == opened
     assert AuditLog.objects.filter(action="lease_end.statement_saved").count() == 1
     assert AuditLog.objects.filter(action="rent_charge.created").count() == 1
     assert AuditLog.objects.filter(action="lease_end.deductions_set").count() == 2
@@ -153,11 +154,11 @@ def test_the_statement_page_previews_the_charge_and_its_save_creates_and_links_i
     page = client.get(statement_url(end)).content.decode()
     assert not RentCharge.objects.exists()
     assert f"Rent Oct 2026: {TEXT}" in page and "not created yet" in page
-    assert fresh(end).statement_opened_at is None
+    assert fresh(end).statement_saved_at is None
     response = client.post(statement_url(end), {})
     assert response["Location"] == reverse("ledger:lease_ends:settlement", kwargs={"pk": end.pk})
     charge = RentCharge.objects.get(lease=lease)
-    assert fresh(end).statement_opened_at is not None
+    assert fresh(end).statement_saved_at is not None
     page = client.get(statement_url(end)).content.decode()
     assert reverse("ledger:charges:detail", kwargs={"pk": charge.pk}) in page
     assert "not created yet" not in page.split('id="open-lines"')[1].split("</table>")[0]
@@ -234,7 +235,7 @@ def test_the_save_refuses_and_writes_nothing_when_a_blocker_appears_after_the_pa
     assert not refused.ok
     assert refused.message == lease_end.BLOCKED.format(count=1)
     assert row_counts() == before and AuditLog.objects.count() == audits
-    assert fresh(end).statement_opened_at is None
+    assert fresh(end).statement_saved_at is None
 
 
 def test_an_offset_above_the_open_balance_refuses_the_save_and_creates_no_charge() -> None:
@@ -247,7 +248,7 @@ def test_an_offset_above_the_open_balance_refuses_the_save_and_creates_no_charge
     assert not refused.ok
     assert refused.message == lease_end.OFFSET_ABOVE_OPEN.format(open="$4,451.62")
     assert row_counts() == before and AuditLog.objects.count() == audits
-    assert fresh(end).statement_opened_at is None
+    assert fresh(end).statement_saved_at is None
     assert save(end, DeductionInput(DeductionKind.UNPAID_BALANCE, "", Decimal("4451.62"))).ok
     assert RentCharge.objects.filter(lease=lease).count() == 3
 
@@ -271,7 +272,7 @@ def a_lease_with_two_missing_months() -> Lease:
     return lease
 
 
-def test_confirm_without_a_save_creates_what_the_save_would_and_the_same_figures() -> None:
+def test_confirm_without_a_save_is_refused_and_after_the_save_gives_the_same_figures() -> None:
     saved_end = draft(a_lease_with_two_missing_months())
     assert save(saved_end).ok
     assert settle(fresh(saved_end)).ok
@@ -280,6 +281,13 @@ def test_confirm_without_a_save_creates_what_the_save_would_and_the_same_figures
     end = draft(lease)
     assert settle(end).ok
     before = AuditLog.objects.filter(action="rent_charge.created").count()
+    # PLAN-012f-a §10: without the statement step saved, confirm refuses and creates nothing.
+    refused = lease_end.confirm(fresh(end), None, confirmed=True, today=TODAY)
+    assert not refused.ok and refused.field == "statement"
+    assert not RentCharge.objects.filter(lease=lease).exists()
+    assert AuditLog.objects.filter(action="rent_charge.created").count() == before
+    assert fresh(lease).ended_on is None
+    assert save(fresh(end)).ok
     assert confirm(fresh(end)).ok
     assert [
         (row.period_month, row.amount_due, row.due_on)
@@ -296,7 +304,8 @@ def test_confirm_without_a_save_creates_what_the_save_would_and_the_same_figures
         False,
     ]
     kept = statements.from_json(fresh(end).statement_json)
-    # Confirm creates every charge before its figures: the kept statement has real ones only.
+    # The save created every charge before confirm's figures: the kept statement has real
+    # ones only.
     assert [line.charge_id for line in kept.open_lines if line.charge_id is None] == []
     assert the_figures(kept) == the_figures(statements.from_json(fresh(saved_end).statement_json))
     assert kept.open_total == Decimal("4451.62") and kept.amount_owed == Decimal("4451.62")
@@ -316,7 +325,7 @@ def test_confirm_after_a_save_creates_no_charge() -> None:
     assert {line.charge_id for line in kept.open_lines} == charges
 
 
-def test_a_transfer_confirm_without_a_save_creates_the_missing_months_too() -> None:
+def test_a_transfer_confirm_without_a_save_is_refused_and_after_it_confirms() -> None:
     from tests.test_transfer import begin, incoming
     from tests.test_transfer import confirm as confirm_transfer
 
@@ -332,6 +341,13 @@ def test_a_transfer_confirm_without_a_save_creates_the_missing_months_too() -> N
     assert settle(fresh(end), actor=user).ok
     outcome = incoming(row, user)
     assert outcome.ok, outcome.message
+    # PLAN-012f-a §10: without the statement step saved, the transfer's confirm refuses and
+    # creates nothing.
+    refused = confirm_transfer(row, user)
+    assert not refused.ok and refused.field == "statement"
+    assert not RentCharge.objects.filter(lease=lease).exists()
+    assert fresh(row).incoming_lease is None
+    assert lease_end.save_statement(fresh(end), [offset], actor=user, today=TODAY).ok
     done = confirm_transfer(row, user)
     assert done.ok, done.message
     assert [
@@ -398,24 +414,30 @@ def test_nothing_is_created_while_a_blocker_is_listed_or_before_the_terms() -> N
     deposit(lease, "500.00", paid="0.00")
     end = draft(lease)
     assert not save(end).ok
-    assert fresh(end).statement_opened_at is None
+    assert fresh(end).statement_saved_at is None
     bare = lease_end.start(an_october_lease(), None)
     assert not save(bare).ok
     assert not RentCharge.objects.exists()
 
 
-def test_an_existing_charge_is_left_for_confirm_and_confirms_fallback_still_works() -> None:
+def test_an_existing_charge_is_left_for_confirm_and_an_unsaved_statement_refuses() -> None:
     lease = an_october_lease()
     charge = october(lease)
     end = draft(lease)
     assert save(end).ok
     assert RentCharge.objects.filter(lease=lease).count() == 1
     assert fresh(charge).amount_due == charge.amount_due
-    # Confirm without the statement ever saved still creates the month (its fallback).
+    # PLAN-012f-a §10: confirm without the statement ever saved is refused and creates
+    # nothing (the catch-up fallback is withdrawn).
     other = an_october_lease()
     other_end = draft(other)
-    assert confirm(other_end).ok
-    assert RentCharge.objects.get(lease=other).amount_due == PRORATED
+    outcome = lease_end.confirm(other_end, None, confirmed=True, today=TODAY)
+    assert not outcome.ok
+    assert outcome.field == "statement"
+    assert outcome.message == lease_end.STATEMENT_REQUIRED
+    assert not RentCharge.objects.filter(lease=other).exists()
+    assert fresh(other).ended_on is None
+    assert fresh(other_end).status == LeaseEndStatus.DRAFT
 
 
 def test_the_transfers_blockers_never_say_not_charged_yet() -> None:

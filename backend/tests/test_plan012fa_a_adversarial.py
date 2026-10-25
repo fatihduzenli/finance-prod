@@ -88,7 +88,7 @@ def test_the_statement_step_renders_the_preview_and_writes_nothing(
         lease=built.second_lease, period_month=date(2026, 10, 1)
     ).exists()
     end = LeaseEnd.objects.get(pk=built.lease_end.pk)
-    assert end.statement_opened_at is None
+    assert end.statement_saved_at is None
 
 
 def test_a_viewer_or_billing_cannot_save_the_statement_and_nothing_is_written(

@@ -481,8 +481,9 @@ other column.
 
 **Interface.** `lease_end.STATEMENT_REQUIRED = "Save the statement step before confirming."` (value-
 free, final wording Fable's); `LeaseEnd.statement_saved_at: DateTimeField(null=True)`; `confirm` and
-`transfer.confirm` keep their signatures and `Outcome` shape; the redirect targets are the existing
-`ledger:lease_ends:statement` and `ledger:transfers:statement` routes. No new route, no new stored
+`transfer.confirm` keep their signatures and `Outcome` shape; the redirect target is the existing
+`ledger:lease_ends:statement` route with the lease end's pk (the transfer wizard's statement step is
+the lease end's; there is no transfer statement route). No new route, no new stored
 value.
 
 **Test plan (Fable writes `tests/test_plan012fa_f_adversarial.py`; Opus extends

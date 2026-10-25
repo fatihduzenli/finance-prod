@@ -203,7 +203,30 @@ def settle(end: LeaseEnd, method: str = RefundMethod.ZELLE, **fields: Any) -> le
     return lease_end.set_settlement(end, method, on, reference, note, **values)
 
 
+def saved(end: LeaseEnd, actor: User | None = None) -> LeaseEnd:
+    """The statement step saved with the deductions as they stand (PLAN-012f-a slice F:
+    the confirm page and the confirm need it); nothing else changes."""
+    row = LeaseEnd.objects.get(pk=end.pk)
+    lines = [
+        DeductionInput(line.kind, line.description, line.amount)
+        for line in row.deductions.order_by("pk")
+    ]
+    outcome = lease_end.save_statement(row, lines, actor=actor, today=TODAY)
+    assert outcome.ok, outcome.message
+    return LeaseEnd.objects.get(pk=end.pk)
+
+
 def confirm(end: LeaseEnd, actor: User | None = None) -> lease_end.Outcome:
+    """Confirm as the wizard does: the statement step saved first with the deductions as
+    they stand (PLAN-012f-a slice F: confirm refuses an unsaved statement), then the
+    confirm. A test of the refusal itself calls the service directly."""
+    row = LeaseEnd.objects.get(pk=end.pk)
+    if row.statement_saved_at is None:
+        lines = [
+            DeductionInput(line.kind, line.description, line.amount)
+            for line in row.deductions.order_by("pk")
+        ]
+        lease_end.save_statement(row, lines, actor=actor, today=TODAY)
     return lease_end.confirm(end, actor, confirmed=True, today=TODAY)
 
 
@@ -910,7 +933,7 @@ def test_a_confirmed_lease_end_ends_the_lease_and_keeps_the_figures(admin: Any) 
     deposit(lease, "1000.00")
     end = draft(lease, user, reason="other", note="Closed by the landlord.")
     assert settle(end, actor=user).ok
-    outcome = lease_end.confirm(end, user, confirmed=True, today=TODAY)
+    outcome = confirm(end, user)
     assert outcome.ok and outcome.message == lease_end.CONFIRMED
     ended = fresh(lease)
     assert (ended.ended_on, ended.collection_status, ended.end_reason) == (
@@ -922,10 +945,13 @@ def test_a_confirmed_lease_end_ends_the_lease_and_keeps_the_figures(admin: Any) 
     assert row.status == LeaseEndStatus.CONFIRMED and row.confirmed_at is not None
     assert row.statement_json["refund_due"] == "1000.00"
     assert row.lease.store.status == "active"  # vacancy is derived
+    # The statement step saved before the confirm (slice F) logs its two rows.
     assert actions() == [
         "lease_end.started",
         "lease_end.terms_set",
         "lease_end.settlement_set",
+        "lease_end.deductions_set",
+        "lease_end.statement_saved",
         "lease_end.confirmed",
     ]
     confirmed = AuditLog.objects.get(action="lease_end.confirmed")
@@ -1027,7 +1053,7 @@ def a_confirmed_end(user: User, **lease: Any) -> LeaseEnd:
     end = draft(store_lease, user)
     assert deductions(end, ("cleaning", "Floors", "150.00")).ok
     assert settle(end, RefundMethod.ZELLE, reference="ZL-77821").ok
-    assert lease_end.confirm(end, user, confirmed=True, today=TODAY).ok
+    assert confirm(end, user).ok
     return LeaseEnd.objects.get(pk=end.pk)
 
 
@@ -1665,8 +1691,10 @@ def test_a_later_month_changed_meanwhile_refuses_the_confirm(
         RentCharge.objects.filter(pk=charge.pk).update(amount_due=D("1999.00"))
         return found
 
+    # The statement saved with the real figures; the charge then changes under the confirm.
+    assert lease_end.save_statement(end, [], actor=None, today=TODAY).ok
     monkeypatch.setattr(statements, "final", stale)
-    outcome = confirm(end)
+    outcome = lease_end.confirm(end, None, confirmed=True, today=TODAY)
     assert not outcome.ok and outcome.message == lease_end.CHANGED_MEANWHILE
     assert fresh(lease).ended_on is None
     assert fresh(charge).status == RentChargeStatus.DUE

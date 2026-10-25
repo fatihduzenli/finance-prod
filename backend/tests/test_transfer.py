@@ -140,10 +140,14 @@ def a_clean_lease() -> Lease:
     return lease
 
 
-def ready(user: User) -> LeaseTransfer:
-    """A clean transfer up to the confirm: the refund settled, the incoming lease set."""
+def ready(user: User, *, save_statement: bool = True) -> LeaseTransfer:
+    """A clean transfer up to the confirm: the statement step saved (PLAN-012f-a §10), the
+    refund settled, the incoming lease set."""
     row = begin(a_clean_lease(), user)
     end = fresh(row).lease_end
+    if save_statement:
+        saved = lease_end.save_statement(end, [], actor=user, today=TODAY)
+        assert saved.ok, saved.message
     assert settle(end, RefundMethod.ZELLE, actor=user).ok
     outcome = incoming(row, user)
     assert outcome.ok, outcome.message
@@ -180,7 +184,7 @@ def test_start_is_refused_while_a_plain_lease_end_is_in_progress() -> None:
     end = lease_end.start(lease, None)
     assert lease_end.set_terms(end, ENDED, "moved_out", True, actor=None, today=TODAY).ok
     assert lease_end.save_statement(fresh(end), [], actor=None, today=TODAY).ok
-    assert fresh(end).statement_opened_at is not None
+    assert fresh(end).statement_saved_at is not None
     with pytest.raises(ValueError, match="lease end is in progress"):
         transfer.start(lease.store, None, today=TODAY)
     assert not LeaseTransfer.objects.exists()
@@ -334,6 +338,24 @@ def test_confirm_reads_the_blockers_again_and_writes_nothing(admin: Any) -> None
     assert fresh(row).status == LeaseTransferStatus.DRAFT
 
 
+def test_confirm_refuses_an_unsaved_statement_before_any_incoming_lease(admin: Any) -> None:
+    _, user = admin
+    row = ready(user, save_statement=False)
+    outgoing = row.outgoing_lease
+    charges = RentCharge.objects.count()
+    before = snapshot()
+    outcome = confirm(row, user)
+    assert not outcome.ok
+    assert outcome.field == "statement"
+    assert outcome.message == lease_end.STATEMENT_REQUIRED
+    assert snapshot() == before
+    assert RentCharge.objects.count() == charges
+    row = fresh(row)
+    assert row.status == LeaseTransferStatus.DRAFT and row.incoming_lease is None
+    assert fresh(outgoing).ended_on is None
+    assert fresh(row.lease_end).status == LeaseEndStatus.DRAFT
+
+
 # --- The incoming lease ---------------------------------------------------------------------
 
 
@@ -466,6 +488,7 @@ def test_a_clean_transfer_ends_the_outgoing_lease_and_starts_the_incoming_one(
 def test_without_a_deposit_or_setup_item_no_draft_is_made(admin: Any) -> None:
     _, user = admin
     row = begin(a_clean_lease(), user)
+    assert lease_end.save_statement(fresh(row).lease_end, [], actor=user, today=TODAY).ok
     assert settle(fresh(row).lease_end, actor=user).ok
     assert incoming(row, user, deposit_amount=None, setup=[]).ok
     outcome = confirm(row, user)

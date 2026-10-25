@@ -25,16 +25,17 @@ The wizard's state is one :class:`~ledger.models.LeaseEnd` row per lease
    create it) are preview lines with the same totals. When the step is saved with
    nothing blocking (:func:`save_statement`, PLAN-012b-b D9, D10, PLAN-012f-a D) they
    are created through the rent run's helpers, and the draft is marked
-   ``statement_opened_at`` (set when the statement step is first saved): from then on it
+   ``statement_saved_at`` (set when the statement step is first saved): from then on it
    is in progress (the store page's banner). A draft that never got there is adopted by a
    transfer (:func:`adopt_for_transfer`); one whose terms were never set is deleted
    after :data:`STALE_DRAFT_DAYS` days by the daily job (:func:`sweep_drafts`).
 4. **Settlement** (:func:`set_settlement`): when a refund is due, how (Zelle, wire or
    check, never the payment provider), when, a reference and a note.
 5. **Confirm** (:func:`confirm`, an explicit "are you sure"): in one transaction, under
-   the lease's and the draft's row locks, the blockers are read again, the rent charges
-   the statement needs are created as the statement step's save creates them (nothing
-   when it was saved, PLAN-012f-a D) and the statement computed again, then the last
+   the lease's and the draft's row locks, the blockers are read again, a draft whose
+   statement step was never saved (``statement_saved_at``) is refused before any write
+   (:data:`STATEMENT_REQUIRED`, PLAN-012f-a §10: the save created the rent charges the
+   statement needs) and the statement computed again, then the last
    month is applied (D3), the lease is ended
    (:func:`ledger.services.leases.end_lease`), the unpaid-balance offset is paid to the
    open charges oldest first as settled manual payments (method ``other``, reference
@@ -202,6 +203,8 @@ REFUND_DATE_FUTURE = "The refund date cannot be in the future."
 REFERENCE_TOO_LONG = "The reference may be at most 100 characters."
 SETTLEMENT_SAVED = "Settlement saved."
 SETTLEMENT_REQUIRED = "A refund is due: choose how and when it is paid on the settlement step."
+#: PLAN-012f-a §10: confirm needs the statement step saved in this wizard.
+STATEMENT_REQUIRED = "Save the statement step before confirming."
 CONFIRM_REQUIRED = "Check the box to confirm that the lease ends with these effects."
 BLOCKED = "The lease cannot end yet: {count} item(s) are still live. Nothing was changed."
 NO_OPERATOR_FOR_DEBT = "The lease has no operator to charge the lease-end balance to."
@@ -556,11 +559,11 @@ def start(lease: Lease, actor: User | None, *, reason: str = "") -> LeaseEnd:
 
 def in_progress(end: LeaseEnd | None) -> bool:
     """Whether a lease end is in progress (PLAN-012b-b D9): a draft whose statement step
-    has been saved (``statement_opened_at``, set on its first save)."""
+    has been saved (``statement_saved_at``, set on its first save)."""
     return (
         end is not None
         and end.status == LeaseEndStatus.DRAFT
-        and end.statement_opened_at is not None
+        and end.statement_saved_at is not None
     )
 
 
@@ -571,7 +574,7 @@ def store_in_progress(store: Store) -> LeaseEnd | None:
         LeaseEnd.objects.filter(
             lease__store=store,
             status=LeaseEndStatus.DRAFT,
-            statement_opened_at__isnull=False,
+            statement_saved_at__isnull=False,
         )
         .select_related("lease")
         .order_by("created_at", "id")
@@ -588,7 +591,7 @@ def adopt_for_transfer(end: LeaseEnd, actor: User | None) -> LeaseEnd:
     row = LeaseEnd.objects.select_for_update(of=("self",)).get(pk=end.pk)
     if row.status != LeaseEndStatus.DRAFT:
         raise ValueError(NOT_DRAFT)
-    if row.statement_opened_at is not None:
+    if row.statement_saved_at is not None:
         raise ValueError(IN_PROGRESS)
     before = _state(row)
     row.reason = LeaseEndReason.TRANSFER
@@ -828,7 +831,7 @@ def save_statement(
     prorated by its rule) by :func:`ledger.services.rent_run.create_month`, audited with
     the lease end, and the deductions are replaced (the unpaid-balance offset never above
     the open balance). Charges that exist are never changed here (confirm reduces them).
-    The first time, ``statement_opened_at`` is set (``lease_end.statement_saved``, with
+    The first time, ``statement_saved_at`` is set (``lease_end.statement_saved``, with
     the charges created). A refusal is one sentence and writes nothing. The statement
     page shows the same figures before the save (preview lines). Local data only: no
     provider call."""
@@ -846,16 +849,16 @@ def save_statement(
                 raise _Abort(BLOCKED.format(count=len(found)))
             made = _create_statement_charges(lease, row, actor)
             _write_deductions(row, lines, actor, day)
-            if row.statement_opened_at is None:
-                row.statement_opened_at = timezone.now()
-                row.save(update_fields=["statement_opened_at", "updated_at"])
+            if row.statement_saved_at is None:
+                row.statement_saved_at = timezone.now()
+                row.save(update_fields=["statement_saved_at", "updated_at"])
                 _audit(
                     actor,
                     "lease_end.statement_saved",
                     row.pk,
-                    {"statement_opened_at": None},
+                    {"statement_saved_at": None},
                     {
-                        "statement_opened_at": row.statement_opened_at.isoformat(),
+                        "statement_saved_at": row.statement_saved_at.isoformat(),
                         "charges": [str(charge.pk) for charge in made],
                     },
                 )
@@ -958,16 +961,17 @@ def _settlement_text(end: LeaseEnd, what: str) -> str:
 def _apply_last_month(
     end: LeaseEnd, last: statements.LastMonth, on: date, actor: User | None
 ) -> tuple[list[str], list[Payment]]:
-    """D3: reduce the month's charges and refund a credit (the missing charges are created
-    before, :func:`_create_statement_charges`). Returns the charges written and the credit
-    refunds."""
+    """D3: reduce the month's charges and refund a credit (the missing charges were created
+    by the statement step's save, :func:`_create_statement_charges`). Returns the charges
+    written and the credit refunds."""
     written: list[str] = []
     refunds: list[Payment] = []
     for change in last.changes:
         if change.charge_id is None:
-            # PLAN-012f-a D: never reached; confirm creates the end month's missing charges
-            # (_create_statement_charges) before it reads the figures. A missing charge here
-            # means the month changed under the locks: refuse rather than create it.
+            # PLAN-012f-a §10: never reached; the statement step's save created the end
+            # month's missing charges (_create_statement_charges) and confirm refuses a draft
+            # never saved. A missing charge here means the month changed: refuse rather than
+            # create it.
             raise _Abort(CHANGED_MEANWHILE)
         charge = RentCharge.objects.select_for_update().get(pk=change.charge_id)
         if (charge.amount_due, charge.amount_paid) != (change.before, change.paid):
@@ -1267,7 +1271,8 @@ def confirm(
 ) -> Outcome:
     """Step (e): end the lease with every effect of the statement, in one transaction
     (see the module docstring). Refused, with nothing written, unless ``confirmed`` is
-    exactly ``True``, the draft's terms are set, nothing blocks, the settlement is set
+    exactly ``True``, the draft's terms are set, nothing blocks, the statement step was
+    saved (``field="statement"`` otherwise), the settlement is set
     when a refund is due and the lease end is not part of a transfer (the transfer
     confirms it, :func:`ledger.services.transfer.confirm`)."""
     if confirmed is not True:
@@ -1312,9 +1317,10 @@ def _confirm(
     found = blockers(lease, day)
     if found:
         raise _Abort(BLOCKED.format(count=len(found)))
-    # PLAN-012f-a D: confirm creates what the statement step's save creates (a no-op once
-    # it was saved), so the figures and the kept statement hold real charges only.
-    _create_statement_charges(lease, row, actor)
+    # PLAN-012f-a §10: the statement step's save created the charges the statement needs;
+    # a draft never saved is refused before any write.
+    if row.statement_saved_at is None:
+        raise _Abort(STATEMENT_REQUIRED, "statement")
     figures = statements.final(row, today=day)
     refusal = _offset_refusal(figures)
     if refusal:

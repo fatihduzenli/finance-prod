@@ -2884,7 +2884,7 @@ class LeaseEnd(GuardedModel):
     #: PLAN-012b-b D9, PLAN-012f-a D: set when the statement step is first saved.
     #: A draft without it is not in progress: the store page shows no banner and a
     #: transfer adopts it.
-    statement_opened_at = models.DateTimeField(null=True, blank=True)
+    statement_saved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

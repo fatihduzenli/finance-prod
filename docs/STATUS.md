@@ -1854,3 +1854,28 @@ drafted DESIGN-SPEC sections; ADR-0014 is Accepted. The owner's updated DESIGN-S
 writes nothing and returns to the statement step; the column rename rides with it. It runs after the
 checkpoint push and before Step 12f-b. B-3, C-5, the unreproduced feed-test failure and the
 migration job's time go to Step 13.
+
+## Update, 2026-10-25, Step 12f-a pushed; staging on 2e82377
+
+Pushed on the owner's authorisation (6219723..2e82377, eight commits: the five 12f-a batches, the
+plan, the STATUS entry and the decisions commit). CI run 40143107276 green on every job: lint and
+types 0:40, e2e 2:56, visual 2:14 (50 baselines), unit A 11:03, unit B 8:29, migration tests 28:38
+(near the job's 30-minute limit: Step 13 decides the split or squash), deploy 4:03. The deploy job's
+check found web, worker, reconcile and daily revisions live on 2e82377, Healthy and Running;
+`/healthz` answers 200 and reports the sandbox environment. Slice F (confirm needs a saved
+statement; the column rename) is built and in Fable's gate, not pushed.
+
+## Update, 2026-10-25, PLAN-012f-a slice F built and gated (not pushed)
+
+Both wizards refuse Confirm unless the statement step was saved in that wizard (owner, 2026-10-24;
+plan §10): a direct POST or a GET of either confirm URL on an unsaved draft writes nothing and
+returns to the lease end's statement step with "Save the statement step before confirming."; the
+service refuses with the field "statement" after the blockers and before any write; Batch A's
+confirm fallback is withdrawn. The column is renamed `statement_saved_at` (migration 0050, one
+RenameField, values kept). Gate: fast checks clean; sqlite 7,021 passed after fourteen tests across
+nine files were taught to save the statement where the wizard does (the shared confirm helper saves
+first); PostgreSQL 36 + 7,642 passed and the fourteen changed files 420 passed on the container, the
+save-and-confirm race included; e2e 31 passed on each of four runs; the visual compare 54 passed on each engine, no baseline changed. One MINOR deferred
+(F-2, a three-line helper written in two views) to Step 13 with B-3, C-5, the feed-test failure, the
+migration job's time and the GUARD_TRIGGERS lists missing 0046, 0048 and 0050. QA-012f-a slice F
+PASS; the Publish Request goes to the owner.

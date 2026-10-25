@@ -1269,7 +1269,7 @@ def test_the_debt_override_migration_over_an_existing_row_on_postgresql(
 # the new column is null (the draft is not in progress) and the reverse drops it plainly.
 
 STATE_BEFORE_STATEMENT_OPENED = (("ledger", "0039_transfer_debt_override"),)
-OPENED_ROWS = "SELECT status, ended_on, statement_opened_at FROM lease_ends"
+OPENED_ROWS = "SELECT status, ended_on, statement_saved_at FROM lease_ends"
 
 
 def seed_before_statement_opened() -> None:
@@ -1314,7 +1314,7 @@ def test_the_statement_opened_migration_over_an_existing_row_on_postgresql(
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert _rows(url, OPENED_ROWS) == after
     with psycopg.connect(url) as scratch:
-        scratch.execute("UPDATE lease_ends SET statement_opened_at = now()")
+        scratch.execute("UPDATE lease_ends SET statement_saved_at = now()")
     _migrate_to(repo_root, url, *STATE_BEFORE_STATEMENT_OPENED)
     assert _rows(url, "SELECT count(*) FROM lease_ends") == [("1",)]
     assert _rows(

@@ -65,7 +65,7 @@ from tests.receivables_helpers import (
 )
 from tests.test_contact_log import promise
 from tests.test_deposits import held_deposit
-from tests.test_lease_end import OCTOBER, october
+from tests.test_lease_end import OCTOBER, october, saved
 from tests.test_lease_end import draft as lease_end_draft
 from tests.test_operator_views import client_for
 from tests.test_plan012f_components import OLD_COMPONENT
@@ -197,8 +197,14 @@ def world() -> World:
             outcome=WebhookOutcome.DEAD_LETTER,
         ),
         deposit=held_deposit(),
-        end=lease_end_draft(
-            a_lease(a_store("0910 END", 910), an_operator("End Co"), channel=PaymentChannel.WIRE),
+        # The statement step saved, as the confirm page needs since PLAN-012f-a slice F.
+        end=saved(
+            lease_end_draft(
+                a_lease(
+                    a_store("0910 END", 910), an_operator("End Co"), channel=PaymentChannel.WIRE
+                ),
+                admin_user,
+            ),
             admin_user,
         ),
         transfer=begin(moving_lease(), admin_user),

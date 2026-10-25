@@ -157,6 +157,21 @@ def _needs_terms(transfer: LeaseTransfer) -> HttpResponse | None:
     return None
 
 
+def _needs_statement(request: HttpRequest, transfer: LeaseTransfer) -> HttpResponse | None:
+    """PLAN-012f-a §10: confirm needs the lease end's statement step saved in this wizard."""
+    end = transfer.lease_end
+    if end is None:
+        raise Http404
+    if end.statement_saved_at is None:
+        return _statement_first(request, end)
+    return None
+
+
+def _statement_first(request: HttpRequest, end: LeaseEnd) -> HttpResponse:
+    messages.error(request, lease_end.STATEMENT_REQUIRED)
+    return redirect("ledger:lease_ends:statement", pk=end.pk)
+
+
 def _needs_operator(request: HttpRequest, transfer: LeaseTransfer) -> HttpResponse | None:
     if not service.operator_set(transfer):
         messages.error(request, OPERATOR_FIRST)
@@ -433,6 +448,7 @@ def confirm(request: HttpRequest, pk: str) -> HttpResponse:
         _needs_operator(request, transfer)
         or _needs_terms(transfer)
         or _needs_clear(request, transfer)
+        or _needs_statement(request, transfer)
     )
     if done is None and not service.incoming_set(transfer):
         messages.error(request, INCOMING_FIRST)
@@ -447,6 +463,8 @@ def confirm(request: HttpRequest, pk: str) -> HttpResponse:
             if outcome.ok:
                 messages.success(request, outcome.message)
                 return redirect("ledger:transfers:confirm", pk=transfer.pk)
+            if outcome.field == "statement" and transfer.lease_end is not None:
+                return _statement_first(request, transfer.lease_end)
             form.add_error(None, outcome.message)
         _hold(request, target, form)
         return redirect("ledger:transfers:confirm", pk=transfer.pk)

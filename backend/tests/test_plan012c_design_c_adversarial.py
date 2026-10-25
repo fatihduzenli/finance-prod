@@ -29,7 +29,7 @@ from tests import test_plan012d_b_adversarial as payment_tests
 from tests.document_files import make_pdf
 from tests.receivables_helpers import a_lease, a_store, an_operator
 from tests.test_documents import post_file
-from tests.test_lease_end import deductions, draft, figures, fresh, october
+from tests.test_lease_end import deductions, draft, figures, fresh, october, saved
 from tests.test_lease_views import edit_data
 from tests.test_operator_views import client_for, form_data
 
@@ -125,7 +125,7 @@ def test_a_refund_method_posted_when_the_operator_owes_creates_no_refund() -> No
     admin, user = client_for(Role.ADMIN)
     lease = a_lease(a_store("2493"), an_operator("Owing Co"), channel=PaymentChannel.WIRE)
     october(lease)  # the last month unpaid: the operator owes, nothing is refunded
-    end = draft(lease, user)
+    end = saved(draft(lease, user), user)
     assert deductions(end).ok
     before = figures(end)
     assert before.refund_due == Decimal("0.00") and before.open_total > 0

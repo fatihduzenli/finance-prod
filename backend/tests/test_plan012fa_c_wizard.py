@@ -34,6 +34,7 @@ from tests.test_lease_end import (
     draft,
     figures,
     october,
+    saved,
     settle,
 )
 from tests.test_operator_views import client_for
@@ -90,7 +91,7 @@ def a_ready_end() -> LeaseEnd:
     end = draft(a_clean_lease())
     assert deductions(end, ("cleaning", "Floors", "150.00")).ok
     assert settle(end).ok
-    return LeaseEnd.objects.get(pk=end.pk)
+    return saved(end)
 
 
 def lease_end_paths(end: LeaseEnd) -> list[str]:

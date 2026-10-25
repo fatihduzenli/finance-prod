@@ -334,7 +334,7 @@ scans are covered by the stated policy, not by a check.
 | Field | Owner | Note |
 |---|---|---|
 | `lease_ends.ended_on`, `reason`, `reason_note`, `prorate_last_month`, `refund_method`, `refund_on`, `refund_reference`, `settlement_note` | App | The wizard's terms and settlement; `refund_method` zelle/wire/check (never ach); the reference and notes are guarded text |
-| `lease_ends.statement_opened_at` | System | Set when the statement step first opens with no blockers; only then is the end "in progress" (PLAN-012b-b D9) |
+| `lease_ends.statement_saved_at` | System | Set when the statement step is first saved; only then is the end "in progress" (PLAN-012b-b D9, PLAN-012f-a §10) |
 | `lease_ends.status`, `statement_json`, `document_id`, `refund_payment_id`, `debt_charge_id`, `confirmed_at` | System | `draft`/`confirmed`; the figures as confirmed; the stored PDF; the refund payment; the "Lease-end balance" charge |
 | `lease_end_deductions.kind`, `description`, `amount` | App | damage / cleaning / unpaid_balance / other; one row per typed line |
 | `lease_transfers.*` | System | The outgoing lease, its lease end, the incoming lease and the move-in draft; written once at confirm |
