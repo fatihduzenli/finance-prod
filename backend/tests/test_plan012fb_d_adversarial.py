@@ -6,6 +6,7 @@ refused with nothing written and the reason shown; an unknown draft answers 404.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import pytest
 from django.urls import reverse
@@ -197,3 +198,83 @@ def test_the_settlement_shares_add_up_and_the_rounding_lands_on_the_last() -> No
         assert len(shares) == count
         assert len(set(shares[:-1])) == 1  # every share but the last is equal
         assert all(share >= 0 for share in shares)
+
+
+# --- Slice D-3: Pause / Resume / Stop for installment plans -------------------------------------
+
+from tests.test_installment_plan_actions import (  # noqa: E402 — the slice's fixtures and builders
+    a_store_lease,
+    autopay_plan,
+    fake,  # noqa: F401
+    fixed_now,  # noqa: F401
+    releases,
+    worker,  # noqa: F401
+    written,
+)
+
+
+def plan_url(name: str, plan: object) -> str:
+    return reverse(f"ledger:plans:{name}", kwargs={"pk": plan.pk})  # type: ignore[attr-defined]
+
+
+def test_a_viewer_can_neither_pause_resume_nor_stop_and_nothing_is_written(
+    fake: Any,  # noqa: F811
+    worker: None,  # noqa: F811
+) -> None:
+    plan = autopay_plan(fake, lease=a_store_lease(fake))
+    viewer, _ = client_for(Role.VIEWER)
+    before = (written(), row_counts())
+    for name in ("pause", "resume", "cancel"):
+        assert viewer.post(plan_url(name, plan), {"note": "x"}).status_code in (302, 403), name
+    assert (written(), row_counts()) == before
+
+
+def test_a_pause_never_debits_and_a_double_post_releases_once_per_schedule(
+    fake: Any,  # noqa: F811
+    worker: None,  # noqa: F811
+) -> None:
+    from payments.models import JobKind
+
+    plan = autopay_plan(fake, lease=a_store_lease(fake))
+    billing, _ = client_for(Role.BILLING)
+    assert billing.post(plan_url("pause", plan)).status_code == 302
+    first = len(releases())
+    assert first >= 1
+    assert not Job.objects.filter(kind=JobKind.INVOICE_PAY).exists()  # no money moves on a pause
+    assert billing.post(plan_url("pause", plan)).status_code == 302  # refused as not active or busy
+    assert len(releases()) == first
+    assert not Job.objects.filter(kind=JobKind.INVOICE_PAY).exists()
+
+
+def test_the_routes_refuse_get_and_an_unknown_plan(
+    fake: Any,  # noqa: F811
+    worker: None,  # noqa: F811
+) -> None:
+    plan = autopay_plan(fake, lease=a_store_lease(fake))
+    billing, _ = client_for(Role.BILLING)
+    for name in ("pause", "resume"):
+        assert billing.get(plan_url(name, plan)).status_code == 405, name
+        unknown = reverse(f"ledger:plans:{name}", kwargs={"pk": uuid.uuid4()})
+        assert billing.post(unknown).status_code == 404, name
+    hostile = reverse("ledger:plans:pause", kwargs={"pk": "x" * 36})
+    assert billing.post(hostile).status_code == 404
+
+
+def test_the_stop_page_is_a_read_that_escapes_markup(
+    fake: Any,  # noqa: F811
+    worker: None,  # noqa: F811
+) -> None:
+    from ledger.models import OneOffCharge as Charge
+
+    lease = a_store_lease(fake)
+    plan = autopay_plan(fake, lease=lease)
+    parent = plan.one_off_charge
+    assert parent is not None
+    Charge.objects.filter(pk=parent.pk).update(description=f"Fee {MARKUP}")
+    admin, _ = client_for(Role.ADMIN)
+    before = (written(), row_counts())
+    page = admin.get(plan_url("cancel", plan))
+    assert page.status_code == 200
+    body = page.content.decode()
+    assert "Stop" in body and MARKUP not in body
+    assert (written(), row_counts()) == before
