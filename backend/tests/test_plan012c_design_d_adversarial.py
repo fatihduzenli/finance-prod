@@ -142,10 +142,11 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "SyncStatus": ["awaiting_link", "failed", "linked", "not_applicable", "pending"],
 }
 #: The route names as one digest (sorted, newline-joined, sha256): 255 before Batch D of
-#: PLAN-012c; 257 since PLAN-012e-2 Batch C added finance:help and finance:help_topic; 261
-#: since PLAN-012f-a Batch E added the four plan actions under ledger:stores (plan_pause,
-#: plan_resume, plan_stop, plan_end; the only change, checked by hand on 2026-10-24).
-FROZEN_ROUTES = (261, "3eb06f79e1d67083a28254b963c3ac78ee77aa8ed4f54ec9d052b75444e25b8f")
+#: PLAN-012c; 257 since PLAN-012e-2 Batch C (finance:help, finance:help_topic); 261 since
+#: PLAN-012f-a Batch E (the four plan actions under ledger:stores); 262 since PLAN-012f-b
+#: Batch A added ledger:search_stores, the picker's JSON (the only change, checked by hand on
+#: 2026-10-25).
+FROZEN_ROUTES = (262, "67018543344cc163b9c35dcb17bc341902ef3f55714e4a747ecd061c5be0896b")
 
 
 # --- what is stored or addressed never changes ------------------------------------------
