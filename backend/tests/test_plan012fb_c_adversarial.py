@@ -130,3 +130,106 @@ def test_an_unconfirmed_large_debit_is_refused_before_any_write(
     assert not outcome.ok
     assert (row_counts(), Job.objects.count(), fake.calls[:]) == before
     assert date  # the date type is used by the parametrised cases above
+
+
+# --- Slice C-2: the Add payment page ------------------------------------------------------------
+
+
+def _page_url(charge: object) -> str:
+    from django.urls import reverse
+
+    return reverse("ledger:one_off_charges:payment", kwargs={"pk": charge.pk})  # type: ignore[attr-defined]
+
+
+def test_the_page_renders_for_billing_and_writes_nothing_on_get(
+    fake: FakeProvider,  # noqa: F811
+) -> None:
+    from accounts.roles import Role
+    from tests.test_operator_views import client_for
+
+    charge = setup_charge(fake)
+    client, _ = client_for(Role.BILLING)
+    before = (row_counts(), Job.objects.count(), fake.calls[:])
+    response = client.get(_page_url(charge))
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert "How is this being paid?" in body
+    assert re.findall(r"\d{13,19}", body) == []  # no card or account number on the page
+    assert (row_counts(), Job.objects.count(), fake.calls[:]) == before
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"how": "<script>alert(1)</script>", "debit_amount": "250.00", "debit_on": "2026-11-01"},
+        {"how": "debit", "debit_amount": "250.00", "debit_on": "2026-11-01;drop"},
+        {"how": "debit", "debit_amount": "4111111111111111", "debit_on": "2026-11-01"},
+        {
+            "how": "debit",
+            "debit_amount": "250.00",
+            "debit_on": "2026-11-01",
+            "note": "4111 1111 1111 1111",
+        },
+        {
+            "how": "record",
+            "method": "cash",
+            "amount": "250.00",
+            "paid_on": "2026-10-20",
+            "note": "ok",
+            "reference": "4111111111111111",
+        },
+    ],
+)
+def test_a_hostile_post_is_refused_without_echo_and_writes_nothing(
+    fake: FakeProvider,  # noqa: F811
+    data: dict[str, str],
+) -> None:
+    from accounts.roles import Role
+    from tests.test_operator_views import client_for
+
+    charge = setup_charge(fake)
+    client, _ = client_for(Role.ADMIN)
+    before = (row_counts(), Job.objects.count(), fake.calls[:])
+    response = client.post(_page_url(charge), {"creation_key": str(uuid.uuid4()), **data})
+    assert response.status_code in (200, 302)
+    shown = client.get(_page_url(charge)).content.decode()
+    assert "4111111111111111" not in shown and "4111 1111" not in shown
+    assert "alert(1)" not in shown  # a held date value is re-filled escaped; markup never runs
+    assert (row_counts(), Job.objects.count(), fake.calls[:]) == before
+
+
+def test_a_viewer_cannot_open_or_post_the_page(
+    fake: FakeProvider,  # noqa: F811
+) -> None:
+    from accounts.roles import Role
+    from tests.test_operator_views import client_for
+
+    charge = setup_charge(fake)
+    viewer, _ = client_for(Role.VIEWER)
+    before = (row_counts(), Job.objects.count())
+    assert viewer.get(_page_url(charge)).status_code in (302, 403)
+    assert viewer.post(_page_url(charge), {"how": "debit"}).status_code in (302, 403)
+    assert (row_counts(), Job.objects.count()) == before
+
+
+def test_a_debit_today_from_the_page_writes_nothing_before_the_confirmation(
+    fake: FakeProvider,  # noqa: F811
+) -> None:
+    from accounts.roles import Role
+    from tests.test_operator_views import client_for
+
+    charge = setup_charge(fake)
+    client, _ = client_for(Role.ADMIN)
+    before = (Job.objects.count(), fake.calls[:])
+    response = client.post(
+        _page_url(charge),
+        {
+            "creation_key": str(uuid.uuid4()),
+            "how": "debit",
+            "debit_amount": "250.00",
+            "debit_on": str(timezone.localdate()),
+        },
+    )
+    assert response.status_code == 302
+    assert "charge-now" in response["Location"] or "charge_now" in response["Location"]
+    assert (Job.objects.count(), fake.calls[:]) == before
