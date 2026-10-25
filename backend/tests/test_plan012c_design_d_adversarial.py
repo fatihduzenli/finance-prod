@@ -77,7 +77,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     ],
     "DocumentSource": ["docusign", "upload"],
     "EnrolmentStatus": ["enrolled", "not_enrolled"],
-    "InstallmentCadence": ["biweekly", "monthly", "weekly"],
+    # "yearly" added by PLAN-012f-b Batch D (settlements).
+    "InstallmentCadence": ["biweekly", "monthly", "weekly", "yearly"],
+    "InstallmentOrigin": ["settlement", "split"],  # PLAN-012f-b Batch D
     "InstallmentCollection": ["autopay_due", "email", "manual"],
     "InstallmentPlanStatus": ["active", "attention", "cancelled", "completed"],
     "InvoiceDraftStatus": ["cancelled", "draft", "sent"],
@@ -146,9 +148,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 }
 #: The route names as one digest (sorted, newline-joined, sha256): 255 before Batch D of
 #: PLAN-012c; 257 since PLAN-012e-2 Batch C; 261 since PLAN-012f-a Batch E; 262 since
-#: PLAN-012f-b Batch A (ledger:search_stores); 268 since PLAN-012f-b Batch B (the five admin
-#: routes of StoreType and ledger:stores:check_address; checked by hand on 2026-10-25).
-FROZEN_ROUTES = (268, "bac85babf0c386181c39df6fb24f2f893aac5b9e432f3780ee99cedae9ff018e")
+#: PLAN-012f-b Batch A; 268 since Batch B; 270 since Batch D (ledger:invoices:saved, the
+#: prompt, and ledger:invoices:settlement_preview, JSON; checked by hand on 2026-10-25).
+FROZEN_ROUTES = (270, "0ee3e2abf1a2184d58592ba8751d1d2376bbfc88a913d2be34076cf1e3f7a985")
 
 
 # --- what is stored or addressed never changes ------------------------------------------
