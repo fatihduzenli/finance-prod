@@ -417,6 +417,8 @@ class Grid:
     months: list[date]
     rows: list[GridRow]
     columns: list[ColumnTotal]
+    #: The State filter's choices (:func:`state_choices`), from the stores loaded.
+    states: list[tuple[str, str]] = field(default_factory=list)
 
 
 def current_lease(leases: list[Lease], today: date) -> Lease | None:
@@ -473,11 +475,13 @@ def _stores(q: str, today: date) -> list[Store]:
     )
 
 
-def state_choices() -> list[tuple[str, str]]:
-    """The State filter's choices: (code, name) of every store's state, by name (one
-    query)."""
-    codes = Store.objects.exclude(state="").values_list("state", flat=True).distinct()
-    return stores.state_choices(codes.order_by())
+def state_choices(built: Grid | None, query: GridQuery) -> list[tuple[str, str]]:
+    """The State filter's choices: (code, name) of the state of every store the grid
+    loaded (before the operator, state, channel and status filters), by name; no query of
+    its own. Without a grid (too slow) only the state asked for, so it stays chosen."""
+    if built is not None:
+        return built.states
+    return stores.state_choices([query.state])
 
 
 def _store_order(store: Store) -> tuple[int, int, str, str]:
@@ -573,7 +577,8 @@ def build(query: GridQuery, today: date | None = None) -> Grid:
     pending = _pending_since(start, end)
     rows: list[GridRow] = []
     columns = {month: ColumnTotal(month) for month in months}
-    for store in sorted(_stores(query.q, day), key=_store_order):
+    loaded = sorted(_stores(query.q, day), key=_store_order)
+    for store in loaded:
         leases = list(store.leases.all())
         current = current_lease(leases, day)
         operator = current.operator if current is not None else None
@@ -597,7 +602,13 @@ def build(query: GridQuery, today: date | None = None) -> Grid:
             if cell.status:
                 column.counts[cell.status] = column.counts.get(cell.status, 0) + 1
             column.collected += cell.amount_paid
-    return Grid(query, months, rows, [columns[month] for month in months])
+    return Grid(
+        query,
+        months,
+        rows,
+        [columns[month] for month in months],
+        stores.state_choices(store.state.strip() for store in loaded),
+    )
 
 
 def _cell(
