@@ -148,11 +148,12 @@ def assert_shown_as_check(client: Client, payment: Payment, lease: Lease) -> Non
 def test_check_is_a_manual_method_between_wire_and_other() -> None:
     assert (PaymentMethod.CHECK.value, PaymentMethod.CHECK.label) == ("check", "Check")
     assert (MoneyMethod.CHECK.value, MoneyMethod.CHECK.label) == ("check", "Check")
-    assert rent_run.MANUAL_METHODS == ("zelle", "wire", "check", "other")
+    assert rent_run.MANUAL_METHODS == ("zelle", "wire", "check", "cash", "other")
     assert ledger_forms.MANUAL_METHOD_CHOICES == (
         ("zelle", "Zelle"),
         ("wire", "Wire"),
         ("check", "Check"),
+        ("cash", "Cash"),
         ("other", "Other"),
     )
     # The deposit refund offers the same methods after its empty choice.
@@ -164,7 +165,7 @@ def test_check_is_a_manual_method_between_wire_and_other() -> None:
         ledger_forms.CollectForm(can_charge_now=False),
     ):
         offered = [value for value, _ in form.fields["method"].choices if value]  # type: ignore[attr-defined]
-        assert offered == ["zelle", "wire", "check", "other"], type(form).__name__
+        assert offered == ["zelle", "wire", "check", "cash", "other"], type(form).__name__
 
 
 def test_no_form_lists_the_manual_methods_by_hand() -> None:
@@ -477,12 +478,13 @@ def test_the_csv_exports_write_the_check_method() -> None:
     )
     assert "check" in {row["Method"] for row in statement}
     by_method = csv_rows(client, reverse("ledger:reports:payments_by_method_export") + RANGE)
-    assert list(by_method[0])[:6] == [
+    assert list(by_method[0])[:7] == [
         "Month",
         "ACH (USD)",
         "Zelle (USD)",
         "Wire (USD)",
         "Check (USD)",
+        "Cash (USD)",
         "Other (USD)",
     ]
     october = by_method[0]

@@ -16,6 +16,7 @@ import importlib
 import inspect
 import re
 import uuid
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -354,6 +355,7 @@ def test_the_search_finds_a_company_by_its_name_and_a_person_by_either_name() ->
 
 #: The keyword arguments the forms that need them are built with.
 FORM_KWARGS: dict[str, dict[str, Any]] = {
+    "AddPaymentForm": {"debit_reason": "", "balance": Decimal("100.00")},
     "CollectForm": {"can_charge_now": True},
     "ContactEntryForm": {
         "leases": [(str(uuid.uuid4()), "A lease")],

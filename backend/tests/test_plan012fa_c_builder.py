@@ -345,14 +345,16 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
             ["Payment", "Allocation"],
             "save-payment",
         ),
+        # PLAN-012f-b C-2: Add payment's "How is this being paid?" card (the Note card has
+        # its field's label, no heading).
         (
             reverse("ledger:charges:record_payment", kwargs={"pk": charge.pk}),
-            ["Payment"],
+            ["How is this being paid?"],
             "save-payment",
         ),
         (
             reverse("ledger:one_off_charges:payment", kwargs={"pk": one_off.pk}),
-            ["Payment"],
+            ["How is this being paid?"],
             "save-payment",
         ),
         (reverse("ledger:calendar:add"), ["Entry"], "save-calendar-entry"),
@@ -404,18 +406,17 @@ def test_the_payment_form_has_the_allocation_in_lines_style_and_the_unallocated_
 def test_the_context_line_is_in_the_header_where_the_form_has_context() -> None:
     lease = a_world()
     query = f"?store={lease.store_id}&lease={lease.pk}"
-    for path in (
-        reverse("ledger:leases:edit", kwargs={"pk": lease.pk}) + query,
-        reverse(
-            "ledger:charges:record_payment",
-            kwargs={"pk": a_rent_charge(lease, date(2026, 10, 1)).pk},
-        )
-        + query,
-    ):
-        body = get(Role.ADMIN, path)
-        head = header(body)
-        assert "Store 1991 Istanbul · Lease from Jan 13, 2026 · Operator Fatih Co" in head, path
-        assert body.count('id="known-fields"') == 1, path
+    path = reverse("ledger:leases:edit", kwargs={"pk": lease.pk}) + query
+    body = get(Role.ADMIN, path)
+    head = header(body)
+    assert "Store 1991 Istanbul · Lease from Jan 13, 2026 · Operator Fatih Co" in head, path
+    assert body.count('id="known-fields"') == 1, path
+    # PLAN-012f-b C-2: Add payment's header carries its own muted line (charge · store ·
+    # operator · due), opened from the store page or not.
+    charge = a_rent_charge(lease, date(2026, 10, 1))
+    path = reverse("ledger:charges:record_payment", kwargs={"pk": charge.pk}) + query
+    head = header(get(Role.ADMIN, path))
+    assert "Rent Oct 2026, debit 1 · #1991 Istanbul · Fatih Co · due " in head, path
 
 
 # --- the line_total filter -----------------------------------------------------------------

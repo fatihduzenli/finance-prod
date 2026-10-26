@@ -136,3 +136,60 @@ writes nothing; the check route refuses GET (405), a viewer (403) and no session
 number posted to any form never comes back.
 
 **Verdict (B):** **PASS.** Every gate clean on both engines after the re-pins and B3-2; two MAJOR and six MINOR resolved; the departures listed for the checkpoint; residual: the shell's sidebar browser test failed once in four runs on a saturated machine and passed on every re-run (recorded, not reproduced); no real USPS call (TODO-VERIFY-065); PostgreSQL ran the migrations' round trips but not the USPS client against the live service.
+
+
+
+## Batch C — Add payment with ACH (branch `step-12f-b/batch-c`, finding 5)
+
+**Scope.** Opus, two briefs and one rework (commits 0c9dd26, e0c426a, 02cce3e, rebased onto Batch
+B). C-1, the services: `one_off_charges.bank_debit_options` (local data only — the linked bank
+method's type, last four and nickname, the open balance, the large-debit flag, one plain reason when
+the card is not offered) and `one_off_charges.debit` (today through the existing Charge now path
+with its confirmation, audit and one-time key; a later date as a single-occurrence schedule through
+the existing schedule job; the whole balance only; a replayed key writes nothing; no local payment
+status written); `PaymentMethod.CASH` and `MoneyMethod.CASH` with migration 0053 rebuilding the
+CHECK constraints (the payments-by-method report gains its column). C-2, the page: one template for
+the one-off and the rent routes on the builder's frame (the charge in the header with its badge and
+one muted line; "How is this being paid?" with two radio cards; the Note card optional on a debit,
+required otherwise; the sticky summary with its tiles, the "After this payment" line and the primary
+whose label follows the choice); a debit today redirects to the existing Charge now confirmation
+page carrying the key; a later date schedules from the page; billing schedules from tomorrow ("A
+debit today needs an admin."); the debit's note goes to the audit row. Fable:
+`tests/test_plan012fb_c_adversarial.py` (19 cases), the visual suite's `add-payment` page.
+
+**Findings.** C2-1 (MINOR, resolved): billing saw the debit card greyed although the service lets
+billing schedule a later date; billing now schedules from tomorrow. C2-2 (MINOR, resolved): the note
+typed on the debit card was checked and dropped; it travels to the audit row of the request or the
+schedule, never in a URL. C2-4 (MINOR, deferred to Batch D's pull request by written decision): with the amount still empty the primary reads "Record $0.00 as paid"; the label should drop the figure until an amount is typed. C2-3 (MINOR, deferred to Step 13 by written decision): a debit-today note
+waits in the session for the confirmation page and is removed only on success; an abandoned
+confirmation leaves it there until the session ends (a plain note that already passed the card-
+number check). Opus's own finding on C-1: the payments-by-method CSV's hard-coded header shifted
+when Cash was added; fixed in the slice.
+
+**Departures from the owner's message, for the checkpoint (plan D14 and §9).** A rent charge gets no
+bank debit from this page: a re-debit cannot exist without a returned source payment (a database
+rule) and `redebit` is outside Charge now's reach, so the card is greyed with "Rent is collected by
+the lease's autopay; a returned debit is re-debited from Returned payments." — a schema change (a
+nullable link to the rent charge, the CHECK relaxed) is the owner's call. No "Stax link to add a
+bank account" exists (the owner's 2026-09-29 decision keeps operators off any processor page): the
+greyed card says to add the account in the processor's dashboard and update. A debit takes the whole
+balance on both paths (the pay call and the schedule bill the price). A later date needs a charge
+with no invoice yet (a setup charge); an e-mailed charge is refused with that reason. The debit
+today runs through the existing confirmation page rather than from the Add payment button (Rule 2's
+confirmation step). Cash was added; Other stays. The store-level "Record a payment" page (the
+allocation across charges) keeps its frame.
+
+**Gate.** ruff, `ruff format --check` (505 files), mypy strict (505 files, after one leftover assertion of Fable's was removed, 19ccc24), `uv lock --check`, `makemigrations --check` after 0053: clean. sqlite: full suite 7,453 passed, 690 skipped, 106 deselected in 1,679 s; nine pins moved by design and re-pinned by Fable (e4777b6: Cash in the stored choices and the manual methods on four pins, the builder's method list, the payments-by-method dict, the Add payment form's required arguments in the card-number sweep, and the charge-now confirmation's audit rows, which now carry the Add payment path's `debit_requested` row beside `charge_now_requested` — a known, intended difference from the builder's Charge now), their files re-run: 324 passed. PostgreSQL 16: migration selection 36 passed in 1,598 s (26:37 under the day's load; the round trips of 0053 included), unit selection 8,104 passed, 3 skipped, 109 deselected with the same nine pins (the pipeline started before the re-pin), the nine files and Fable's re-run on the container: 343 passed in 105.45s (0:01:45); e2e 35 passed on each of four runs. Visual: the Add payment page's two baselines generated in the Playwright image against PostgreSQL, then the whole suite compared: 58 passed on PostgreSQL and 58 on sqlite; no other baseline changed. Shots: `docs/qa/12f-b/shots/c/`: the Add payment page at 1280 and 390, reviewed at both widths (the phone keeps the primary in view above the tab bar, as the phone rules say). Secret
+scans clean; no secret-store read; no new file type; the bank method shown to staff carries nothing
+beyond the last four (adversarial); a hostile amount, date, kind or note is refused with nothing
+written and no job queued; a viewer cannot open or post the page; a card number in any field never
+comes back; no provider name in the new files.
+
+**TODO-VERIFY for the checkpoint.** The ACH debit from Add payment on live Stax: the sandbox has no
+tokenization gateway, so card 1 was exercised against the fake provider only; the owner's steps once
+Stax enables the gateway — on staging with a linked bank method: open a setup charge's Add payment,
+choose the bank account, Debit on today, confirm on the Charge now page; the charge shows Pending;
+the settle webhook marks it Paid within five business days; then the same with a later date and
+watch the schedule fire.
+
+**Verdict (C):** **PASS.** Every gate clean on both engines after the re-pins; two MINOR resolved, two MINOR deferred by written decision (C2-3 to Step 13, C2-4 to Batch D's pull request); the departures and the TODO-VERIFY listed for the checkpoint; no real ACH debit was made (the sandbox has no tokenization gateway).

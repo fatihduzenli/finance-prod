@@ -59,7 +59,7 @@ from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
 from ledger.services.leases import END_DATE_REQUIRED
 from ledger.services.one_off_charges import ChargeInput
 from ledger.validators import validate_no_payment_data, visible_text
-from ledger.wording import provider_sentence
+from ledger.wording import format_amount, provider_sentence
 from payments.operator_sync import normalise_phone
 
 if TYPE_CHECKING:
@@ -766,6 +766,182 @@ class ManualPaymentForm(forms.Form):
         return note
 
 
+#: Add payment's two cards (PLAN-012f-b D14): the radio ``how``.
+HOW_DEBIT = "debit"
+HOW_RECORD = "record"
+HOW_CHOICES: tuple[tuple[str, str], ...] = (
+    (HOW_DEBIT, provider_sentence("Charge the operator's bank account (ACH via {provider})")),
+    (HOW_RECORD, provider_sentence("Record a payment received outside {provider}")),
+)
+#: Why the bank-debit card is greyed on a rent charge (PLAN-012f-b D14): no re-debit path
+#: exists without a returned payment.
+RENT_DEBIT_REASON = (
+    "Rent is collected by the lease's autopay; a returned debit is re-debited from "
+    "Returned payments."
+)
+#: Billing debits from tomorrow on: today goes through Charge now, an admin's (PLAN-012f-b
+#: C2-1). The line under Debit on, and the refusal of today's date.
+DEBIT_TODAY_NEEDS_ADMIN = "A debit today needs an admin."
+NOTE_OPTIONAL_LABEL = "Note (optional)"
+NOTE_REQUIRED_LABEL = "Note (required)"
+#: The record card's fields, sent and checked only while that card is chosen.
+RECORD_FIELDS = ("method", "amount", "paid_on", "reference")
+#: The debit card's fields, sent and checked only while that card is chosen.
+DEBIT_FIELDS = ("debit_amount", "debit_on", "confirm_large_debit")
+
+
+class AddPaymentForm(ManualPaymentForm):
+    """The Add payment page (PLAN-012f-b D14): ``how`` picks the bank-debit card
+    (``debit_amount``, ``debit_on``, ``confirm_large_debit``) or the record card (today's
+    :class:`ManualPaymentForm` fields). ``debit_reason`` is why the debit card is greyed
+    (``""``: offered); ``balance`` what a debit takes; ``admin`` whether today may be the
+    debit date (else Debit on starts tomorrow, C2-1). A post without ``how`` is the record
+    card (the shape of the page before). Each card's fields carry ``data-shown-when``
+    (``ledger/shown_when.js``) and count only for their card; the note is required only
+    for ``record``. The services check every rule again."""
+
+    how = _QuietChoiceField(required=False, choices=HOW_CHOICES, label="How is this being paid?")
+    debit_amount = forms.DecimalField(
+        required=False,
+        min_value=Decimal("0.01"),
+        max_value=RENT_MAX,
+        max_digits=12,
+        decimal_places=2,
+        label="Amount",
+        help_text="Up to the balance due.",
+        widget=forms.NumberInput(attrs={"step": "0.01", "inputmode": "decimal"}),
+    )
+    debit_on = forms.DateField(
+        required=False, label="Debit on", widget=forms.DateInput(attrs={"type": "date"})
+    )
+    confirm_large_debit = forms.BooleanField(
+        required=False, widget=_ExactCheckboxInput, label="I confirm this large debit"
+    )
+
+    def __init__(
+        self,
+        data: Any = None,
+        *args: Any,
+        debit_reason: str,
+        balance: Decimal,
+        today: date | None = None,
+        admin: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        if data is not None and not data.get("how"):
+            data = data.copy()
+            data["how"] = HOW_RECORD
+        super().__init__(data, *args, **kwargs)
+        self.debit_reason = debit_reason
+        self.balance = balance
+        self.today = today or timezone.localdate()
+        self.admin = admin
+        earliest = self.today if admin else self.today + timedelta(days=1)
+        for name in ("method", "amount", "paid_on", "note"):
+            self.fields[name].required = False
+        self.fields["how"].initial = HOW_RECORD if debit_reason else HOW_DEBIT
+        self.fields["debit_amount"].initial = balance
+        self.fields["debit_amount"].widget.attrs["max"] = str(balance)
+        self.fields["debit_on"].initial = earliest
+        self.fields["debit_on"].widget.attrs["min"] = earliest.isoformat()
+        if not admin:
+            self.fields["debit_on"].help_text = DEBIT_TODAY_NEEDS_ADMIN
+        for name in RECORD_FIELDS:
+            self.fields[name].widget.attrs["data-shown-when"] = f"how-{HOW_RECORD}"
+        for name in DEBIT_FIELDS:
+            self.fields[name].widget.attrs["data-shown-when"] = f"how-{HOW_DEBIT}"
+        # The note's label follows the card: optional for a debit, required to record.
+        chosen = self.chosen()
+        note = self.fields["note"]
+        note.help_text = ""
+        other = HOW_DEBIT if chosen == HOW_RECORD else HOW_RECORD
+        note.label = NOTE_REQUIRED_LABEL if chosen == HOW_RECORD else NOTE_OPTIONAL_LABEL
+        note.widget.attrs["data-label-when"] = f"how-{other}"
+        note.widget.attrs["data-label"] = (
+            NOTE_OPTIONAL_LABEL if chosen == HOW_RECORD else NOTE_REQUIRED_LABEL
+        )
+
+    def chosen(self) -> str:
+        """The card chosen: the record card while the debit card is greyed, else the bound
+        or initial choice."""
+        if self.debit_reason:
+            return HOW_RECORD
+        return HOW_RECORD if self["how"].value() == HOW_RECORD else HOW_DEBIT
+
+    def options(self) -> list[dict[str, Any]]:
+        """The two radio cards as the page renders them (ids ``how-<value>``)."""
+        chosen = self.chosen()
+        return [
+            {
+                "value": value,
+                "label": label,
+                "id": f"how-{value}",
+                "checked": value == chosen,
+                "reason": self.debit_reason if value == HOW_DEBIT else "",
+            }
+            for value, label in HOW_CHOICES
+        ]
+
+    def clean_note(self) -> str:
+        return visible_text(self.cleaned_data.get("note") or "")
+
+    def clean(self) -> dict[str, Any]:
+        data = super().clean() or {}
+        how = data.get("how") or HOW_RECORD
+        data["how"] = how
+        ignored = DEBIT_FIELDS if how == HOW_RECORD else RECORD_FIELDS
+        for name in ignored:
+            # A page without the script sends both cards; the other card's values count
+            # for nothing, but a card number is never let through (Rule 1).
+            if name in self.errors and not (name == "reference" and self._holds_payment_data(name)):
+                del self.errors[name]
+                data[name] = None
+        if how == HOW_RECORD:
+            self._clean_record(data)
+        else:
+            self._clean_debit(data)
+        return data
+
+    def _holds_payment_data(self, name: str) -> bool:
+        try:
+            validate_no_payment_data(str(self.data.get(name) or ""))
+        except forms.ValidationError:
+            return True
+        return False
+
+    def _clean_record(self, data: dict[str, Any]) -> None:
+        if not data.get("method") and "method" not in self.errors:
+            self.add_error("method", rent_run.PAY_METHOD)
+        if data.get("amount") is None and "amount" not in self.errors:
+            self.add_error("amount", rent_run.PAY_NOT_POSITIVE)
+        if data.get("paid_on") is None and "paid_on" not in self.errors:
+            self.add_error("paid_on", "Enter the date the payment was received.")
+        if not data.get("note") and "note" not in self.errors:
+            self.add_error("note", self.fields["note"].error_messages["required"])
+
+    def _clean_debit(self, data: dict[str, Any]) -> None:
+        if self.debit_reason:
+            self.add_error("how", self.debit_reason)
+            return
+        amount = data.get("debit_amount")
+        if amount is None and "debit_amount" not in self.errors:
+            self.add_error("debit_amount", one_off_charges.AMOUNT_NOT_POSITIVE)
+        elif amount is not None and amount > self.balance:
+            self.add_error("debit_amount", one_off_charges.DEBIT_OVER_BALANCE)
+        elif amount is not None and amount != self.balance:
+            self.add_error(
+                "debit_amount",
+                one_off_charges.DEBIT_WHOLE_BALANCE.format(amount=format_amount(self.balance)),
+            )
+        on = data.get("debit_on")
+        if on is None and "debit_on" not in self.errors:
+            self.add_error("debit_on", one_off_charges.DEBIT_DATE_REQUIRED)
+        elif on is not None and on < self.today:
+            self.add_error("debit_on", one_off_charges.DEBIT_DATE_PAST)
+        elif on == self.today and not self.admin:
+            self.add_error("debit_on", DEBIT_TODAY_NEEDS_ADMIN)
+
+
 #: The prefixes of the store payment form's per-charge inputs (PLAN-012d D6).
 ALLOCATION_PREFIX = "alloc_"
 CREDIT_PREFIX = "credit_"
@@ -1237,9 +1413,12 @@ class ResolveMismatchForm(forms.Form):
 
 class ChargeNowForm(forms.Form):
     """An admin's confirmation of "Charge now" (PLAN-010d D4). ``confirm`` is the
-    large-debit box; the service re-checks every rule under the charge's row lock."""
+    large-debit box; the service re-checks every rule under the charge's row lock. ``key``
+    is the page's one-time key (PLAN-012f-b D14: Add payment's, carried in ``?key=``), so a
+    second submit of the same page debits nothing."""
 
     confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
+    key = forms.UUIDField(required=False, widget=forms.HiddenInput)
 
 
 #: The draft form's "How to collect" choices and their labels (PLAN-012e-2 D3).

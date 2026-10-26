@@ -24,7 +24,7 @@
   {% else %}
     <p id="charge-now-one-attempt"><strong>{{ one_attempt }}</strong></p>
     <form method="post" class="js-single-submit" autocomplete="off" id="charge-now-form">
-      {% csrf_token %}
+      {% csrf_token %}{{ form.key }}
       {% if form.non_field_errors %}<p class="errorlist">{{ form.non_field_errors|join:" " }}</p>{% endif %}
       {% if details.large_debit %}
         <p id="charge-now-large-debit"><label style="font-weight:normal;"><input type="checkbox" name="confirm" value="true" id="confirm-large-debit"> {{ details.large_debit }}</label>

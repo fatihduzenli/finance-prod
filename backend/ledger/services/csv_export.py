@@ -140,6 +140,7 @@ HEADERS: frozenset[str] = frozenset(
         "Zelle (USD)",
         "Wire (USD)",
         "Check (USD)",
+        "Cash (USD)",
         "Other (USD)",
         "Payments",
         # Deposits versus transactions

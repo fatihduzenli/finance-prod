@@ -386,8 +386,8 @@ PAIRS: list[tuple[str, str, str]] = [
     ("finance/_admin_links.html", ">Django admin</a>", ">System settings</a>"),
     ("finance/banner.html", "SANDBOX — NO REAL MONEY", BANNER),
     # §4.3 page titles
-    ("charges/payment_form.html", "Record a payment", "Add payment"),
-    ("one_off_charges/payment_form.html", "Record a payment", "Add payment"),
+    # PLAN-012f-b C-2: one Add payment page for the rent and the one-off charge.
+    ("payments/add_payment.html", "Record a payment", "Add payment"),
     ("stores/record_payment.html", "Record a payment", "Add payment"),
     ("deposits/resolve.html", "Resolve deposit", "Return deposit"),
     ("charges/link_invoice.html", "Link an invoice", f"Attach {P} invoice"),
@@ -414,7 +414,7 @@ PAIRS: list[tuple[str, str, str]] = [
     ("invoices/cancel.html", "{% else %}Cancel {{ draft.number }}", "Delete draft"),
     ("one_off_charges/gone.html", "Create one-off charge", "This form has moved"),
     # §4.4 buttons and action links
-    ("charges/payment_form.html", ">Record payment<", ">Add payment<"),
+    ("payments/add_payment.html", ">Record payment<", ">Add payment<"),
     ("charges/link_invoice.html", ">Link invoice<", f">Attach {P} invoice<"),
     ("operators/detail.html", "Link provider IDs", f"Connect to {P}"),
     ("operators/link.html", ">Link</button>", f">Connect to {P}</button>"),

@@ -19,12 +19,12 @@ not here. Revenue is counted by **settled month**; the aging is by **due date**:
 charge due in July and paid in August is July's billing and August's collection.
 
 **Payments by method** (:func:`payments_by_method`): settled payments by ``settled_on``
-month and method (ACH, Zelle, wire, check, other), less the settled refunds of the month by
+month and method (ACH, Zelle, wire, check, cash, other), less the settled refunds of the month by
 the refund's own method; deposits and deposit refunds left out, and credits applied or
 paid back (PLAN-012d D6b: no money moves by a method), as on the dashboard's
 "paid this month" (:func:`ledger.services.receivables.paid_in`), so a month's total is
 that figure. Cards do not exist in this app; cash or check appear only as the payment
-provider's mark of a manual payment, recorded here as Zelle, wire, check or other.
+provider's mark of a manual payment, recorded here as Zelle, wire, check, cash or other.
 
 **Deposits versus transactions** (:func:`deposits_vs_transactions`): the bank deposits the
 provider reported (the ``deposits`` table, by ``deposit_date``) against the settled ACH
@@ -219,7 +219,7 @@ def revenue_csv_lines(report: Revenue) -> Iterator[str]:
 METHODS: tuple[str, ...] = tuple(MoneyMethod.values)
 CARDS_NOTE = provider_sentence(
     "Cards do not exist in this app. A payment recorded by hand and marked in {provider} as "
-    "cash or check is recorded here as Zelle, wire, check or other, with a note."
+    "cash or check is recorded here as Zelle, wire, check, cash or other, with a note."
 )
 
 
@@ -291,6 +291,7 @@ PAYMENTS_BY_METHOD_CSV_HEADER = (
     "Zelle (USD)",
     "Wire (USD)",
     "Check (USD)",
+    "Cash (USD)",
     "Other (USD)",
     "Total (USD)",
     "Payments",

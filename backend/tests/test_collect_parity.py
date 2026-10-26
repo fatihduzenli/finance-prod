@@ -332,7 +332,15 @@ CHARGE_NOW_CONFIRM = {
             "one_off_charge.charge_now_requested",
             "charge-1",
             ["amount", "invoice_number", "large_debit_confirmed"],
-        )
+        ),
+        # PLAN-012f-b Batch C: the confirmation page runs through debit(), which keeps its
+        # own row (the Add payment path's key and note) beside the charge-now one; the
+        # builder's Charge now has no such row.
+        (
+            "one_off_charge.debit_requested",
+            "charge-1",
+            ["amount", "collection", "debit_key", "note"],
+        ),
     ],
     "draft_audit": [],
     "payments": [],

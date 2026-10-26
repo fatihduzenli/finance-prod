@@ -71,6 +71,10 @@ PAGES: dict[str, Callable[[Site], str]] = {
     "leases": lambda site: "/leases/",
     "payments": lambda site: "/payments/",
     "calendar": lambda site: "/calendar/",
+    # PLAN-012f-b Batch C: Add payment on a one-off charge (the two radio cards).
+    "add-payment": lambda site: reverse(
+        "ledger:one_off_charges:payment", kwargs={"pk": one_off_of(site).pk}
+    ),
     "charge-detail": lambda site: reverse(
         "ledger:one_off_charges:detail", kwargs={"pk": one_off_of(site).pk}
     ),

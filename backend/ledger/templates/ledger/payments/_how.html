@@ -1,0 +1,20 @@
+{% comment %}Add payment's "How is this being paid?" card (PLAN-012f-b D14), on the builder's tile markup (.collect-tile, .is-chosen; .is-unavailable for a greyed card, its radio disabled and its one reason under the name): the bank-debit card (the bank method on file as a one-option select that is never sent, Amount at the balance, Debit on from today, the large-debit tick when it applies, its sentence) and the record card (today's manual payment: Method, Amount, Received on, Reference). Each card's fields carry data-shown-when (ledger/shown_when.js): shown, and sent, only while their radio is chosen; without the script every field shows and the server ignores the other card's. Context: form, how_options, bank, company.{% endcomment %}
+{% load money %}
+<fieldset class="card form-card collect-card how-card" id="how-card">
+  <legend>How is this being paid?</legend>
+  <p class="help" id="how-help">Pick one. Nothing is charged until you press the button at the right.</p>
+  <div class="collect-tiles how-tiles">
+  {% for option in how_options %}<div class="collect-tile{% if option.checked %} is-chosen{% endif %}{% if option.reason %} is-unavailable{% endif %}" id="tile-{{ option.value }}"><label class="collect-option" for="{{ option.id }}"><input type="radio" name="how" value="{{ option.value }}" id="{{ option.id }}"{% if option.checked %} checked{% endif %}{% if option.reason %} disabled{% endif %}><span class="collect-text"><span class="collect-name">{{ option.label }}</span>{% if option.reason %}<span class="collect-note unavailable-reason" id="{{ option.value }}-reason">{{ option.reason }}</span>{% elif option.value == how_debit %}<span class="collect-note">{{ company.provider_name }} debits the account; the charge shows Pending until the bank settles.</span>{% else %}<span class="collect-note">Zelle, wire, check or cash already received. When the charge has an invoice in {{ company.provider_name }} and this payment covers the whole price, that invoice is then marked paid there; a partial payment is recorded here only.</span>{% endif %}</span></label>{% if option.value == how_debit and not option.reason %}<div class="collect-fields" id="how-debit-fields">
+    <div class="field bank-field" data-shown-when="how-debit"><label for="debit-bank">Bank account</label><select id="debit-bank" class="bank-select">{% if bank %}<option selected>{{ bank.bank_type|default:"Bank" }} · ···· {{ bank.last_four }}{% if bank.nickname %} · {{ bank.nickname }}{% endif %} (on file)</option>{% endif %}</select></div>
+    {% include "ledger/stores/_form_field.html" with field=form.debit_amount mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=form.debit_on mark=True %}
+    {% if large_debit %}{% include "ledger/stores/_form_field.html" with field=form.confirm_large_debit %}{% endif %}
+  </div>{% elif option.value == how_record %}<div class="collect-fields" id="how-record-fields">
+    {% include "ledger/stores/_form_field.html" with field=form.method mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=form.amount mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=form.paid_on mark=True %}
+    {% include "ledger/stores/_form_field.html" with field=form.reference %}
+  </div>{% endif %}</div>{% endfor %}
+  </div>
+  {{ form.how.errors }}
+</fieldset>

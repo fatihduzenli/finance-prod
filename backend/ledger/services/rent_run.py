@@ -162,6 +162,7 @@ MANUAL_METHODS: tuple[str, ...] = (
     PaymentMethod.ZELLE,
     PaymentMethod.WIRE,
     PaymentMethod.CHECK,
+    PaymentMethod.CASH,
     PaymentMethod.OTHER,
 )
 #: A credit held on the lease applied to a charge (PLAN-012d D6a): never chosen on a form.
@@ -210,7 +211,7 @@ SECOND_INVOICE = provider_sentence(
     "review the others in {provider}."
 )
 
-PAY_METHOD = "Choose Zelle, wire, check or other."
+PAY_METHOD = "Choose Zelle, wire, check, cash or other."
 PAY_NOT_POSITIVE = "The amount must be more than zero."
 PAY_NOT_CENTS = "The amount must have at most two decimals."
 PAY_OVER_BALANCE = "The amount is more than the balance due. Nothing was recorded."

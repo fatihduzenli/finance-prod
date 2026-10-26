@@ -634,6 +634,7 @@ def test_cash_reports_leave_credits_out() -> None:
     by_method = reports.payments_by_method(selected)
     assert by_method.total.amounts == {
         "ach": ZERO,
+        "cash": ZERO,
         "zelle": D("100.00"),
         "wire": ZERO,
         "check": ZERO,

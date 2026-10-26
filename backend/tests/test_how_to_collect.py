@@ -136,7 +136,8 @@ def collect(draft: InvoiceDraft, choice: str, role: Role = Role.BILLING, **kwarg
 @pytest.mark.parametrize(
     ("payment", "message"),
     [
-        (PaymentInput("cash", TODAY, "1234", "Cash received."), rent_run.PAY_METHOD),
+        # "cash" is a manual method since PLAN-012f-b Batch C; "card" is still refused.
+        (PaymentInput("card", TODAY, "1234", "Card received."), rent_run.PAY_METHOD),
         (PaymentInput("credit", TODAY, "", "Credit."), rent_run.PAY_METHOD),
         (
             PaymentInput("wire", TODAY + timedelta(days=1), "", "Wire received."),
@@ -508,6 +509,7 @@ def test_each_choices_fields_depend_on_its_radio_and_show_without_script(
         "zelle",
         "wire",
         "check",
+        "cash",
         "other",
     ]
 

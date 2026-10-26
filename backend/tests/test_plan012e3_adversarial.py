@@ -133,7 +133,8 @@ def test_the_record_path_writes_the_same_rows_for_a_check_as_for_zelle(
     ) == Decimal("120.00")
 
 
-@pytest.mark.parametrize("method", ["ach", "credit", "cash", "CHECK", "check ", MARKUP])
+# "cash" is a manual method since PLAN-012f-b Batch C.
+@pytest.mark.parametrize("method", ["ach", "credit", "card", "CHECK", "check ", MARKUP])
 def test_a_method_outside_the_manual_set_is_refused_everywhere(
     fake: FakeProvider, method: str
 ) -> None:
