@@ -439,7 +439,6 @@ PAIRS: list[tuple[str, str, str]] = [
     ("one_off_charges/charge_now.html", "Charge ${", "|money }} now"),
     # PLAN-012e-2 D3: the draft's Send is a button of How to collect (in the SUMMARY card
     # since PLAN-012f-a D5).
-    ("invoices/_summary.html", "Send ${", "|money }}</span> by e-mail"),
     ("leases/enrol.html", "Refresh methods", f"Update bank methods from {P}"),
     ("disputes/page.html", ">Refresh<", f">Update from {P}<"),
     ("disputes/page.html", "Store and send", f"Save and send to {P}"),

@@ -71,6 +71,7 @@ from tests.receivables_helpers import (
     an_insurance_charge,
     an_operator,
 )
+from tests.test_charge_now import store_methods
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 
@@ -131,6 +132,18 @@ def linked(operator: Operator, *, bank: bool = True) -> Operator:
     ref("operator", operator.pk, "customer")
     if bank:
         ref("operator", operator.pk, "payment_method")
+    return operator
+
+
+def banked(operator: Operator) -> Operator:
+    """The operator with a provider customer and a usable bank account on file: the linked
+    method is the one the worker's refresh stored (PLAN-012f-b D-1 offers Schedule only then)."""
+    ref("operator", operator.pk, "customer")
+    store_methods(operator)
+    from payments.models import ProviderSnapshot
+
+    snapshot = ProviderSnapshot.objects.get(external_ref__entity_id=operator.pk)
+    ref("operator", operator.pk, "payment_method", snapshot.payload[0]["external_id"])
     return operator
 
 
@@ -681,7 +694,7 @@ def schedule_form(lease: Lease, item: str = "Sign repair", **extra: str) -> dict
 
 def test_schedule_a_payment_creates_an_autopay_charge_and_queues_its_schedule() -> None:
     lease = a_world()
-    linked(operator_of(lease))
+    banked(operator_of(lease))
     client = billing()
     opened = client.get(schedule_url(lease))
     assert (opened.status_code, opened["Location"]) == (302, builder_url(lease))
@@ -716,7 +729,7 @@ def test_schedule_a_payment_creates_an_autopay_charge_and_queues_its_schedule() 
 
 def test_a_catalogue_item_keeps_its_fee_type() -> None:
     lease = a_world()
-    linked(operator_of(lease))
+    banked(operator_of(lease))
     fee = FeeType.objects.create(code=f"sign-{uuid.uuid4().hex[:6]}", name="Sign", active=True)
     assert billing().post(builder_url(lease), schedule_form(lease, "  sign "))
     charge = OneOffCharge.objects.get()
@@ -739,17 +752,19 @@ def test_schedule_a_payment_is_refused_without_a_customer_or_a_bank_method(
         linked(operator_of(lease), bank=bank)
     client = billing()
     response = client.post(builder_url(lease), schedule_form(lease))
-    # The draft is kept, with the sentence on its page.
-    draft = InvoiceDraft.objects.get()
-    assert response["Location"].startswith(f"/invoices/drafts/{draft.pk}/")
+    # PLAN-012f-b D-1: without a bank account on file the Schedule tile is greyed and a
+    # posted choice is refused before any write: no draft, the reason on the re-opened page.
+    assert response["Location"] == builder_url(lease)
+    assert not InvoiceDraft.objects.exists()
     assert not OneOffCharge.objects.exists() and not Job.objects.exists()
-    assert sentence in client.get(response["Location"]).content.decode()
+    assert "No bank account on file" in client.get(builder_url(lease)).content.decode()
+    assert sentence  # the service's own sentence is pinned by the service tests
 
 
 def test_schedule_a_payment_refuses_today_and_needs_the_large_debit_tick(settings: Any) -> None:
     settings.LARGE_DEBIT_WARNING_AMOUNT = D("1000.00")
     lease = a_world()
-    linked(operator_of(lease))
+    banked(operator_of(lease))
     client = billing()
     for day in ("2026-10-14", TODAY.isoformat()):
         past = client.post(builder_url(lease), schedule_form(lease, schedule_on=day))
