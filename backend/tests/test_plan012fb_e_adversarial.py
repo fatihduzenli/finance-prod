@@ -120,3 +120,53 @@ def test_a_toast_escapes_its_text() -> None:
     body = response.content.decode()
     assert 'class="toast' in body and "added." in body
     assert MARKUP not in body and "Rome &lt;script&gt;" in body
+
+
+# --- Slice E-1: Profit and loss ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "from=2026-13&to=2026-10",
+        "from=2026-10&to=2020-01",
+        "from=" + MARKUP + "&to=" + MARKUP,
+        "from=2026-10&to=2026-10&group=" + MARKUP,
+        "from=2026-10&to=2026-10&group=state",
+        "from=2026-10&to=2026-10&detail=" + MARKUP,
+        "from=1999-01&to=2026-10",
+        "from=%00&to=%00",
+    ],
+)
+def test_a_hostile_report_query_never_breaks_the_page_or_writes(query: str) -> None:
+    a_world()
+    billing, _ = client_for(Role.BILLING)
+    before = row_counts()
+    response = billing.get("/reports/pnl/?" + query)
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert MARKUP not in body and "Traceback" not in body
+    assert 'id="page-header"' in body
+    assert row_counts() == before
+
+
+def test_the_report_escapes_a_stores_name_in_its_first_cell_and_the_viewer_may_read() -> None:
+    from tests.test_pnl import a_cost
+
+    payment, lease = a_world()
+    a_cost(lease.store)  # type: ignore[attr-defined]
+    viewer, _ = client_for(Role.VIEWER)
+    before = row_counts()
+    response = viewer.get("/reports/pnl/?from=2026-10&to=2026-10&detail=1")
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert MARKUP not in body and "Istanbul &lt;script&gt;" in body
+    assert row_counts() == before
+
+
+def test_a_store_without_a_cost_row_never_reads_zero_on_the_report() -> None:
+    payment, lease = a_world()  # the store has no cost row
+    billing, _ = client_for(Role.BILLING)
+    body = billing.get("/reports/pnl/?from=2026-10&to=2026-10&detail=1").content.decode()
+    assert "unknown" in body
+    assert "Unknown: landlord rent" in body
