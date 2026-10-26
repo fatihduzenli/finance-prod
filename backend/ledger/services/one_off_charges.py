@@ -1578,6 +1578,8 @@ DEBIT_PENDING = "A payment on this charge is pending."
 RENT_DEBIT_PENDING = "A debit is already pending."
 #: A rent charge whose balance a live installment plan collects (D19, Fable 2026-10-26).
 DEBIT_ON_PLAN = "This charge is collected by its installment plan."
+#: A ``due`` rent charge the lease's active autopay will debit (D19, Fable's finding).
+DEBIT_BY_AUTOPAY = "The lease's autopay debits this charge on {date}."
 #: How a rent charge's bank debit's description begins (D19).
 BANK_DEBIT_PREFIX = "Bank debit of "
 DEBIT_NOT_ELIGIBLE = "This charge cannot be debited from here. Nothing was charged."
@@ -1729,12 +1731,16 @@ def rent_debit_live(charge: RentCharge) -> bool:
     )
 
 
-def rent_debit_options(charge: RentCharge) -> BankDebitOptions:
+def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDebitOptions:
     """The bank-debit card of Add payment on a rent charge (PLAN-012f-b §10 D19): the
     whole open balance, as one bank debit. Greyed, in this order: waived; paid or nothing
-    owed; a live installment plan collects it; a debit in flight
-    (:func:`rent_debit_live`); the pay-an-invoice flag off; no usable linked bank method.
-    Local data only; no provider call."""
+    owed; a live installment plan collects it; the lease's active autopay will debit it (a
+    ``due`` charge due ``today`` or later: a debit here would charge the operator twice);
+    a debit in flight (:func:`rent_debit_live`); the pay-an-invoice flag off; no usable
+    linked bank method. A ``due`` charge past its due date (the schedule did not fire), an
+    ``unpaid`` one, and autopay off or paused keep the card. Local data only; no provider
+    call."""
+    day = today or timezone.localdate()
     enabled = charge_now_enabled()
     method = _bank_method(charge.lease.operator)
     balance = max(Decimal(charge.balance), ZERO).quantize(CENT)
@@ -1744,6 +1750,12 @@ def rent_debit_options(charge: RentCharge) -> BankDebitOptions:
         reason = DEBIT_PAID
     elif rent_run.on_live_plan(rent_charge=charge):
         reason = DEBIT_ON_PLAN
+    elif (
+        charge.status == RentChargeStatus.DUE
+        and charge.due_on >= day
+        and leases.autopay_on(charge.lease)
+    ):
+        reason = DEBIT_BY_AUTOPAY.format(date=day_text(charge.due_on))
     elif rent_debit_live(charge):
         reason = RENT_DEBIT_PENDING
     elif not enabled:
@@ -2012,7 +2024,7 @@ def rent_debit(
         )
         if earlier is not None:
             return Outcome(True, DEBIT_ALREADY, charge=earlier)
-        options = rent_debit_options(locked)
+        options = rent_debit_options(locked, today=day)
         if options.reason:
             return Outcome(False, options.reason)
         operator = locked.lease.operator

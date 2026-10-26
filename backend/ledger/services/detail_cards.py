@@ -39,7 +39,7 @@ from ledger.models import (
     OneOffCharge,
     RentCharge,
 )
-from ledger.services import audit, one_off_charges, receivables, rent_run
+from ledger.services import audit, installments, one_off_charges, receivables, rent_run
 
 #: The newest rows the Activity card shows; older ones are on the store page's History tab.
 ACTIVITY_SIZE = 20
@@ -66,6 +66,10 @@ SOURCE_SPREADSHEET = "the spreadsheet"
 SOURCE_PLAN = "an installment plan"
 SOURCE_RETURN = "a returned payment"
 SOURCE_BUILDER = "the invoice builder"
+#: A source that names what the charge is, read "created <date> as ..." (not "from").
+SOURCE_AS = "as "
+#: A rent charge's bank debit from Add payment (PLAN-012f-b D19).
+SOURCE_BANK_DEBIT = SOURCE_AS + "a bank debit of {rent}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,7 +200,9 @@ def one_off_source(charge: OneOffCharge, invoices: Sequence[InvoiceRow]) -> str:
         return SOURCE_PLAN
     if charge.source_rent_charge is not None:
         # PLAN-012f-b D19: a rent charge's bank debit from Add payment, not a return.
-        return one_off_charges.rent_debit_description(charge.source_rent_charge)
+        return SOURCE_BANK_DEBIT.format(
+            rent=installments.parent_screen_label(charge.source_rent_charge)
+        )
     if charge.category in (OneOffCategory.REDEBIT, OneOffCategory.NSF_FEE):
         return SOURCE_RETURN
     if any(row.draft_id is not None for row in invoices):
@@ -225,7 +231,10 @@ def header_line(
     2026": the parts that exist, joined by " · "."""
     made = ""
     if created is not None:
-        made = f"created {day_text(created)}" + (f" from {source}" if source else "")
+        # A source that says what the charge is ("as a bank debit of ...") reads without
+        # "from" (PLAN-012f-b D19).
+        joined = source if source.startswith(SOURCE_AS) else f"from {source}"
+        made = f"created {day_text(created)}" + (f" {joined}" if source else "")
     parts = (store, operator, made, f"due {day_text(due)}" if due is not None else "")
     return " · ".join(part for part in parts if part)
 

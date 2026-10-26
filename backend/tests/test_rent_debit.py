@@ -31,6 +31,7 @@ from django.utils import timezone
 from django.utils.html import escape
 
 from accounts.roles import Role
+from finance.dates import day_text
 from ledger.models import (
     ZERO,
     AuditLog,
@@ -49,15 +50,25 @@ from ledger.models import (
     RentCharge,
     RentChargeStatus,
 )
-from ledger.services import calendar, installments, nsf, pnl, receivables, rent_run, workspace
+from ledger.services import (
+    calendar,
+    installments,
+    leases,
+    nsf,
+    pnl,
+    receivables,
+    rent_run,
+    workspace,
+)
 from ledger.services import one_off_charges as service
 from payments.errors import ProviderRejected
 from payments.fake import FakeProvider
-from payments.models import Job, JobKind
+from payments.models import ExternalRef, Job, JobKind, ProviderSnapshot
 from payments.provider import PayWithStoredMethod, ScheduleInput
 from tests.job_helpers import run_queued_jobs
 from tests.test_charge_now import LAST_FOUR, NICKNAME, store_methods
-from tests.test_lease_services import make_lease
+from tests.test_lease_services import BANK as LEASE_BANK
+from tests.test_lease_services import linked_lease, make_lease
 from tests.test_one_off_charges import actions, an_operator, calls
 from tests.test_operator_views import client_for
 
@@ -1076,7 +1087,7 @@ def test_the_debit_page_reads_bank_debit(fake: FakeProvider) -> None:
     )
     assert '<span class="badge kind-badge" id="charge-kind">Bank debit</span>' in body
     assert '<dd id="category">Bank debit</dd>' in body
-    assert "from Bank debit of Rent Sep 2026" in body
+    assert "as a bank debit of Rent Sep 2026" in body and "from Bank debit" not in body
     assert "Re-debit" not in body and "a returned payment" not in body
 
 
@@ -1110,3 +1121,85 @@ def test_the_unpaid_balances_and_the_charges_tab_read_bank_debit(fake: FakeProvi
     rows = {row.charge_id: row for row in every["charge_rows"]}
     assert rows[rent.pk].status == workspace.CARRIED_BY_BANK_DEBIT == "Carried by bank debit"
     assert rows[debit.pk].kind_label == "Bank debit"
+
+
+# --- The lease's own autopay (Fable's finding on C2) ---------------------------------------
+
+
+def an_autopay_rent(fake: FakeProvider, due_on: date, *, paused: bool = False) -> RentCharge:
+    """A ``due`` rent charge of a lease whose rent autopay is on (or paused) at the fake,
+    the operator's bank method stored."""
+    lease = linked_lease(fake)
+    assert lease.operator is not None
+    customer = ExternalRef.objects.get(
+        entity_type="operator", entity_id=lease.operator.pk, external_kind="customer"
+    )
+    # The stored method list (as the worker's refresh leaves it) names the linked method.
+    ProviderSnapshot.objects.create(
+        external_ref=customer,
+        payload=[
+            {
+                "external_id": LEASE_BANK,
+                "raw_status": "",
+                "method": "bank",
+                "last_four": LAST_FOUR,
+                "bank_type": "checking",
+                "nickname": NICKNAME,
+                "is_default": True,
+            }
+        ],
+        fetched_at=timezone.now(),
+    )
+    if paused:
+        assert leases.pause_autopay(lease.pk, actor=None).ok
+    assert leases.autopay_on(lease) is not paused
+    return RentCharge.objects.create(
+        lease=lease,
+        period_month=due_on.replace(day=1),
+        seq=1,
+        due_on=due_on,
+        amount_due=D("1500.00"),
+        status=RentChargeStatus.DUE,
+    )
+
+
+def test_autopay_on_and_due_today_greys_the_card(fake: FakeProvider) -> None:
+    rent = an_autopay_rent(fake, today())
+    expected = f"The lease's autopay debits this charge on {day_text(today())}."
+    assert reason(rent) == expected
+    assert service.DEBIT_BY_AUTOPAY.format(date=day_text(today())) == expected
+    before = written()
+    outcome = rent_debit(rent, today() + timedelta(days=2), actor=billing())
+    assert (outcome.ok, outcome.message) == (False, expected)
+    assert written() == before
+
+
+def test_autopay_on_and_due_later_greys_the_card(fake: FakeProvider) -> None:
+    rent = an_autopay_rent(fake, today() + timedelta(days=6))
+    assert reason(rent).startswith("The lease's autopay debits this charge on ")
+
+
+def test_autopay_on_and_due_yesterday_still_due_is_offered(fake: FakeProvider) -> None:
+    rent = an_autopay_rent(fake, today() - timedelta(days=1))
+    assert reason(rent) == ""
+
+
+def test_autopay_on_and_an_unpaid_charge_is_offered(fake: FakeProvider) -> None:
+    rent = an_autopay_rent(fake, today())
+    RentCharge.objects.filter(pk=rent.pk).update(status=RentChargeStatus.UNPAID)
+    assert reason(rent) == ""
+
+
+def test_autopay_paused_and_due_today_is_offered(fake: FakeProvider) -> None:
+    rent = an_autopay_rent(fake, today(), paused=True)
+    assert reason(rent) == ""
+
+
+def test_the_autopay_reason_sits_after_the_plan_and_before_a_live_debit(
+    fake: FakeProvider,
+) -> None:
+    rent = an_autopay_rent(fake, today())
+    a_payment(rent, PaymentStatus.PENDING, "100.00")
+    assert reason(rent).startswith("The lease's autopay debits this charge on ")
+    a_plan(rent)
+    assert reason(rent) == service.DEBIT_ON_PLAN
