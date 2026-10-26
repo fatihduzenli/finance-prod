@@ -663,9 +663,11 @@ def test_the_page_renders_within_a_fixed_number_of_queries(selected: bool) -> No
     # The operator's cards read the store cards' leases, rents and schedules (3), the bank
     # record (3), the returns count (1), the open promise with its prefetch (2) and the
     # statement link's last open (1); the selected store adds its bar and side cards. Three
-    # more stores change nothing.
+    # more stores change nothing. PLAN-012f-b Batch D (D-3) adds one: Needs review's rule for
+    # plans paused over thirty days reads the operator's paused plans (one query, no audit
+    # read while none is paused): 52 and 63.
     assert large == small, (small, large)
-    assert small <= (62 if selected else 51), small
+    assert small <= (63 if selected else 52), small
 
 
 def test_the_page_writes_nothing() -> None:
