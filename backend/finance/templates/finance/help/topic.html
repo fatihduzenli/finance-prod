@@ -1,9 +1,19 @@
 {% extends "finance/base.html" %}
-{% comment %}One help topic (docs/qa/PLAN-012e2-fewer-actions.md D10): its title and its own template, static.{% endcomment %}
+{% load static dates %}
+{% comment %}One help topic (docs/qa/PLAN-012e2-fewer-actions.md D10; the frame, PLAN-012f-b E-3, DESIGN-SPEC §4 Help): the header's title only; the topic card beside one article card (the topic's title, "Updated {date} · {n} min read", its own template rendered by finance.help.topic as "body"), then "Still stuck? E-mail …" when the company settings name a support e-mail. Static.{% endcomment %}
 {% block title %}Help{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'finance:help' %}">Help</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ topic.title }}</span></nav><h1>{{ topic.title }}</h1></div></div>{% endblock %}
+{% block header %}<div class="page-header"><h1>Help</h1></div>{% endblock %}
 {% block content %}
-  <article id="help-topic" class="help-topic card">
-    {% include topic.template %}
-  </article>
+  <div class="help-layout" id="help-layout">
+    {% include "finance/help/_topics.html" %}
+    <div class="help-main">
+      <article id="help-topic" class="help-topic card">
+        <h2 class="help-title" id="help-title">{{ topic.title }}</h2>
+        <p class="help-meta" id="help-meta">Updated <time datetime="{{ topic.updated|date:'Y-m-d' }}">{{ topic.updated|day }}</time> · {{ minutes }} min read</p>
+        <div class="help-body">{{ body }}</div>
+      </article>
+      {% if support_email %}<p class="help-footer" id="help-support">Still stuck? <a href="mailto:{{ support_email }}">E-mail {{ support_email }}</a></p>{% endif %}
+    </div>
+  </div>
 {% endblock %}
+{% block scripts %}<script src="{% static 'finance/help_filter.js' %}" defer></script>{% endblock %}

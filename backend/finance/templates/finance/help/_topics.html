@@ -1,0 +1,8 @@
+{% comment %}The help frame's topic card (PLAN-012f-b E-3, DESIGN-SPEC §4 Help): a search field that filters the list in the browser (finance/help_filter.js; hidden until the script runs, so without it the full list shows), then the topics of finance.help.TOPICS in their order, the open one ("current", None on the index) marked aria-current="page". Context: topics, current.{% endcomment %}
+<nav class="card help-nav" id="help-topics-card" aria-label="Help topics">
+  <input type="search" class="help-search" id="help-search" placeholder="Search help…" aria-label="Search help" aria-controls="help-topics" autocomplete="off" hidden>
+  <ul id="help-topics" class="help-topics">
+    {% for item in topics %}<li><a href="{% url 'finance:help_topic' slug=item.slug %}" id="help-nav-{{ item.slug }}"{% if item == current %} aria-current="page"{% endif %}>{{ item.title }}</a></li>{% endfor %}
+  </ul>
+  <p class="help-no-match" id="help-no-match" hidden>No topic matches.</p>
+</nav>

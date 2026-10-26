@@ -1168,6 +1168,49 @@ td.row-open a { text-decoration: none; }
   .run-strip { flex-wrap: wrap; }
 }
 
+/* --- Help (PLAN-012f-b E-3) -------------------------------------------------------------------
+   DESIGN-SPEC §4 Help, help-laptop.png. .help-layout: the 240 px topic card (.help-nav: the
+   search field, shown by finance/help_filter.js, over the list; the open topic in the
+   sidebar's active style on white: the link colour, 600, on the current month's tint, the
+   measured pair of PLAN-012f-a D7 in place of the drawing's lighter tint) beside the article
+   column (.help-main: one .help-topic card, then the muted .help-footer line). The article:
+   the 22/700 .help-title, the muted .help-meta line, the body at 15/1.65 with 18 px h3s,
+   lists with 8 px gaps; .help-tip: the tinted "Tip" box (--surface-2, a 3 px teal left
+   border). On a phone one column, the article first and the topic card after (§6). */
+.help-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--space-6); align-items: start; max-width: 1080px; }
+.help-nav { grid-column: 1; grid-row: 1; margin: 0; padding: var(--space-3); }
+.help-main { grid-column: 2; grid-row: 1; min-width: 0; }
+.help-search { display: block; box-sizing: border-box; width: 100%; margin: 0 0 var(--space-2); }
+.help-search[hidden], .help-topics li[hidden], .help-no-match[hidden] { display: none; }
+.help-topics { margin: 0; padding: 0; list-style: none; }
+.help-topics a { display: block; padding: 8px 12px; border-radius: var(--radius-ctl); color: var(--text-2); font-size: var(--fs-base); line-height: 1.35; text-decoration: none; }
+.help-topics a:hover { background: var(--surface-2); color: var(--text); }
+.help-topics a[aria-current="page"] { background: var(--month-current); color: var(--link); font-weight: 600; }
+.help-no-match { margin: var(--space-2) 12px; color: var(--muted); font-size: var(--fs-base); }
+.help-topic { margin: 0; padding: 28px 28px 24px; }
+.help-topic .help-title { margin: 0 0 var(--space-2); font-size: 22px; font-weight: 700; line-height: 1.25; }
+.help-meta { margin: 0 0 var(--space-5); color: var(--muted); font-size: var(--fs-base); }
+.help-body { font-size: var(--fs-lg); line-height: 1.65; color: var(--text); }
+.help-body > :first-child { margin-top: 0; }
+.help-body > :last-child { margin-bottom: 0; }
+.help-body p, .help-body ul, .help-body ol, .help-body dl { margin: 0 0 var(--space-4); }
+.help-body h3 { margin: var(--space-6) 0 var(--space-2); font-size: 18px; font-weight: 600; line-height: 1.35; }
+.help-body ul, .help-body ol { padding-left: 20px; }
+.help-body li + li { margin-top: var(--space-2); }
+.help-body dt { font-weight: 600; }
+.help-body dd { margin: 0 0 var(--space-2); }
+.help-body dd:last-child { margin-bottom: 0; }
+.help-tip { padding: 12px 16px; border: 1px solid var(--border-soft); border-left: 3px solid var(--teal); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-md); }
+.help-footer { margin: var(--space-4) 0 0; color: var(--muted); font-size: var(--fs-base); text-align: right; }
+@media (max-width: 768px) {
+  .help-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  .help-nav, .help-main { grid-column: 1; grid-row: auto; }
+  .help-main { order: -1; }
+  .help-topic { padding: 18px 16px; }
+  .help-topics a { padding: 12px; }
+  .help-footer { text-align: left; }
+}
+
 /* --- Detail family (PLAN-012f-a D4) ----------------------------------------------------------
    DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png; the rent charge, payment, sent invoice,
    lease and calendar entry pages follow. The header (.detail-head) holds the breadcrumb, the

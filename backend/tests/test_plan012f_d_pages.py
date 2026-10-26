@@ -650,7 +650,6 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     # PLAN-012f-b E-4: Delete contact entry is its dialog over the operator page, whose own
     # breadcrumb ends in a link (tests/test_states.py checks the page behind).
     "ledger:contacts:outcome": lambda w: (["Operators", "Walk Co"], "Kept"),
-    "finance:help_topic": lambda w: (["Help"], "Promises to pay"),
 }
 #: The pages with no parent: the lists, the dashboard, the pages of the navigation.
 NO_PARENT = (
@@ -669,6 +668,9 @@ NO_PARENT = (
     "ledger:search",
     "finance:settings",
     "finance:help",
+    # PLAN-012f-b E-3: a help topic's header holds the title only (DESIGN-SPEC §4 Help); the
+    # topic card beside the article links the other topics.
+    "finance:help_topic",
 )
 
 
