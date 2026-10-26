@@ -28,14 +28,17 @@ open, Settings, Help and Sign out as a POST form; the item that holds the page i
 without script; the script below closes an open one on a click outside it and on Escape.
 
 The tab title is "<short name> · <page>" (finance.context_processors.company): each page's
-title block holds the page part only. Flash messages are .toast items (PLAN-012c D5): a
+title block holds the page part only. Flash messages are .toast items (PLAN-012c D5): the
+level's icon (.toast-icon: check, alert, dot, info; PLAN-012f-b E-4), the text, a
 dismiss button (the script below removes the message), a CSS fade (opacity) after 8 s for
 success and information, the text kept in the page. print.css (media="print") drops the
 sidebar, the phone bars and the messages and shows the print header (the company name and
 the date) and footer ("Printed <date>") (D6). The SANDBOX banner and the title prefix are
 injected by finance.middleware.SandboxBannerMiddleware; app.css places the banner above the
 page header. finance/dialog.js runs the {% dialog %} component (PLAN-012f-b D2) on every
-page. The sign-in pages keep their own base, two_factor/_base.html.
+page. The dialog block, after the content, holds a confirmation page's open {% dialog %}: the
+confirmation template extends its parent page's template and fills only this block (and its
+title), so the parent page shows behind the dialog (PLAN-012f-b E-4). The sign-in pages keep their own base, two_factor/_base.html.
 {% endcomment %}{% load icons roles shell static %}<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -108,10 +111,11 @@ page. The sign-in pages keep their own base, two_factor/_base.html.
       {% now "M j, Y" as printed_on %}<div class="print-only print-header" id="print-header"><span class="print-company">{{ company.name }}</span> <span class="print-date">{{ printed_on }}</span></div>
       {% if messages %}
         <ul class="toasts" id="toasts" aria-live="polite">
-          {% for message in messages %}<li class="toast {{ message.tags }}" role="status"><span class="toast-text">{{ message }}</span><button type="button" class="toast-dismiss" aria-label="Dismiss this message">&times;</button></li>{% endfor %}
+          {% for message in messages %}<li class="toast {{ message.tags }}" role="status"><span class="toast-icon">{% if message.level_tag == "success" %}{% icon "check" 16 %}{% elif message.level_tag == "warning" %}{% icon "alert" 16 %}{% elif message.level_tag == "error" %}{% icon "dot" 16 %}{% else %}{% icon "info" 16 %}{% endif %}</span><span class="toast-text">{{ message }}</span><button type="button" class="toast-dismiss" aria-label="Dismiss this message">&times;</button></li>{% endfor %}
         </ul>
       {% endif %}
       {% block content %}{% endblock %}
+      {% block dialog %}{% endblock %}
       <div class="print-only print-footer" id="print-footer">Printed {{ printed_on }}</div>
     </main>
   </div>

@@ -163,9 +163,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 /* A radio group's name (B2-2): a span.label, drawn as the field's label. */
 .field > span.label { display: block; margin: var(--space-3) 0 var(--space-1); font-size: var(--fs-base); font-weight: 600; }
 .field .help { display: block; color: var(--muted); font-size: var(--fs-sm); margin-top: var(--space-1); }
-.field .errorlist { list-style: none; margin: var(--space-1) 0 0; padding: 0; font-size: var(--fs-sm); font-weight: 600; }
+.field .errorlist { list-style: none; margin: var(--space-1) 0 0; padding: 0; color: var(--unpaid-text); font-size: var(--fs-sm); font-weight: 400; line-height: 1.35; }
 .field .field-error { display: block; margin-top: var(--space-1); color: var(--unpaid-text); font-size: var(--fs-sm); }
-.field.has-error input, .field.has-error select, .field.has-error textarea { border: 2px solid var(--unpaid-text); }
+/* The inline form error (DESIGN-SPEC §4 States, PLAN-012f-b E-4): a 1 px red border on the
+   control and the 12 px red line under it. */
+.field.has-error input:not([type=checkbox]):not([type=radio]), .field.has-error select, .field.has-error textarea { border: 1px solid var(--unpaid-text); }
 .required { font-weight: 700; }
 
 /* --- Help line ---------------------------------------------------------------------------
@@ -353,6 +355,15 @@ table.grid col.month-current, table.grid .month-current { background: var(--mont
 .empty { color: var(--muted); }
 .empty .empty-next { margin-left: var(--space-2); }
 p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-border); border-radius: var(--radius-card); background: var(--surface); }
+/* .empty-state (finance/_empty_state.html, DESIGN-SPEC §4 States, PLAN-012f-b E-4): a card's
+   empty list: the 48 px grey circle with its icon, the 15px/600 line, one muted sentence and
+   one link (a secondary button), centred. */
+.empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding: var(--space-6) var(--space-4); text-align: center; }
+.empty-state p { margin: 0; }
+.empty-state-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin-bottom: var(--space-2); border-radius: 50%; background: var(--bg); color: var(--muted); }
+.empty-state-title { color: var(--text); font-size: var(--fs-lg); font-weight: 600; }
+.empty-state-text { max-width: 36em; color: var(--muted); font-size: var(--fs-base); line-height: 1.45; }
+.empty-state-action { margin-top: var(--space-3); }
 
 /* --- Confirmation page ---------------------------------------------------------------------
    .confirm: a page that asks before an action that cannot be taken back, a card. The
@@ -371,13 +382,17 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
    button (.toast-dismiss). A success or information message fades after 8 s (CSS only,
    opacity alone): its text stays in the page for screen readers; a warning or an error (a
    refusal) stays until it is dismissed. Dismissing removes it (the script in base.html):
-   the reader chose to. */
+   the reader chose to. The spec's four pairs (DESIGN-SPEC §4 States, PLAN-012f-b E-4):
+   success, warning and error on the status pairs (error text --error-text), information
+   --navy on --neutral-bg; 10 px radius; the level's icon (.toast-icon) before the text. */
 .toasts { list-style: none; margin: 0 0 var(--space-4); padding: 0; }
-.toast { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); border-radius: var(--radius-ctl); border: 1px solid var(--border); background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-base); overflow: hidden; }
+.toast { display: flex; align-items: flex-start; gap: 10px; padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); border-radius: 10px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); background: var(--neutral-bg); color: var(--navy); font-size: var(--fs-base); line-height: 1.4; overflow: hidden; }
+.toast-icon { flex: 0 0 auto; display: inline-flex; padding-top: 1px; }
 .toast-text { flex: 1 1 auto; }
 .toast.success { background: var(--paid-bg); color: var(--paid-text); }
 .toast.warning { background: var(--pending-bg); color: var(--pending-text); }
-.toast.error { background: var(--unpaid-bg); color: var(--unpaid-text); }
+.toast.error { background: var(--unpaid-bg); color: var(--error-text); }
+.toast.error .toast-icon { color: var(--unpaid-text); }
 .toast-dismiss { flex: 0 0 auto; background: none; border: 0; padding: 0 var(--space-1); font: inherit; font-size: var(--fs-lg); line-height: 1; color: inherit; cursor: pointer; }
 .toast:not(.warning):not(.error) { animation: toast-fade 600ms ease-in 8s forwards; }
 @keyframes toast-fade { to { opacity: 0; } }
@@ -621,8 +636,15 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
 .steps-progress::-webkit-progress-bar { background: var(--border-soft); border-radius: var(--radius-pill); }
 .steps-progress::-webkit-progress-value { background: var(--teal); border-radius: var(--radius-pill); }
 .steps-progress::-moz-progress-bar { background: var(--teal); border-radius: var(--radius-pill); }
-/* The error pages (404, 403) in the shell: one card with the sentence and the way back. */
-.error-card { max-width: 640px; }
+/* The error pages (404, 403) in the shell: one card with the sentence and the way back
+   (finance/_error_card.html; DESIGN-SPEC §4 States, PLAN-012f-b E-4): the large faint code
+   (decoration, hidden from screen readers, in --input-border: the faint token is never text),
+   the 20px/600 line, the muted sentence, the two buttons, centred. */
+.error-card { max-width: 640px; padding: var(--space-8) var(--space-6); text-align: center; }
+.error-card .error-code { margin: 0; color: var(--input-border); font-size: 44px; font-weight: 700; line-height: 1.1; letter-spacing: .02em; }
+.error-card .error-line { margin: var(--space-2) 0 var(--space-1); font-size: var(--fs-h1); font-weight: 600; }
+.error-card .error-sentence { margin: 0; color: var(--muted); font-size: var(--fs-base); }
+.error-card .error-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin: var(--space-5) 0 0; }
 
 /* --- The sign-in pages (PLAN-012f D13; DESIGN-SPEC §4 Login, login-laptop.png) ---------------
    two_factor/_base.html: body.auth is two columns. Left, .auth-brand on --login-gradient (the
@@ -867,6 +889,13 @@ fieldset.card > legend + * { clear: both; }
 .dialog-body { padding: var(--space-4) var(--space-6) var(--space-6); }
 .dialog-body > p:first-child { margin-top: 0; }
 .dialog-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
+/* A confirmation page in its dialog (PLAN-012f-b E-4): the question's card loses its frame
+   (the dialog is the card), its "Are you sure?" line reads as the one sentence under the
+   title, and the foot ("Keep …", then the primary or the red button) closes the form. */
+.dialog .confirm { margin: 0; padding: 0; border: 0; border-radius: 0; background: none; }
+.dialog .confirm .confirm-question { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--fs-md); font-weight: 400; }
+.dialog .confirm-what h2, .dialog .confirm-what h3 { margin-top: var(--space-2); }
+.dialog .confirm form { margin: 0; }
 .dialog-lg { max-height: 90vh; overflow: auto; }
 .dialog-form { margin: 0; }
 .dialog-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--space-3); }

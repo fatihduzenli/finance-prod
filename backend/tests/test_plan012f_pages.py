@@ -126,15 +126,22 @@ def test_the_four_kpis_read_the_seeded_figures() -> None:
     assert 'not created yet · <a href="/run/">details</a>' in run
 
 
+def empty_title(html: str, block_id: str) -> str:
+    """The line of the empty state whose block has ``block_id``."""
+    block = html[html.index(f'<div class="empty-state" id="{block_id}">') :]
+    return block.split('<p class="empty-state-title">', 1)[1].split("</p>", 1)[0]
+
+
 def test_an_empty_dashboard_has_its_dashes_and_sentences() -> None:
     html = page(client_for(Role.BILLING)[0], "/")
     assert '<span class="kpi-note">0 stores · 0 overdue</span>' in html
     assert '<span class="kpi-note">—</span>' in html  # nothing billed this month
     assert '<span class="kpi-note">0 debits</span>' in html
-    assert 'id="collection-none">No rent billed for Oct 2026 yet.</p>' in html
+    # PLAN-012f-b E-4: the empty cards are the empty state (finance/_empty_state.html).
+    assert empty_title(html, "collection-none") == "No rent billed for Oct 2026 yet."
     assert 'class="progress' not in html
-    assert 'id="coming-up-none">Nothing scheduled.</p>' in html
-    assert 'id="recent-payments-none">No settled payments yet.</p>' in html
+    assert empty_title(html, "coming-up-none") == "Nothing scheduled."
+    assert empty_title(html, "recent-payments-none") == "No settled payments yet."
     assert 'id="attention-none"' in html
 
 

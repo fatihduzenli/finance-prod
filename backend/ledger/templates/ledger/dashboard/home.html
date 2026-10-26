@@ -54,7 +54,7 @@ last nightly check, each a card. Phones: one column in that order.{% endcomment 
           </table>
           {% endresponsive_table %}
         {% else %}
-          <p class="muted" id="recent-payments-none">No settled payments yet.</p>
+          {% include "finance/_empty_state.html" with id="recent-payments-none" icon="banknote" title="No settled payments yet." text="A payment shows here once it settles." only %}
         {% endif %}
       </section>
     </div>
@@ -66,7 +66,7 @@ last nightly check, each a card. Phones: one column in that order.{% endcomment 
           <p class="collection-total"><span class="collection-percent" id="collection-percent">{{ collection.percent }}%</span> <span class="muted" id="collection-billed">of {{ collection.billed|money }}</span></p>
           {% progress collection.segments %}
         {% else %}
-          <p class="muted" id="collection-none">No rent billed for {{ collection.month|month }} yet.</p>
+          {% with billed_month=collection.month|month %}{% include "finance/_empty_state.html" with id="collection-none" icon="reports" title="No rent billed for "|add:billed_month|add:" yet." text="The bar fills in as the month's rent is billed and paid." only %}{% endwith %}
         {% endif %}
       </section>
       <section class="card" id="coming-up" aria-labelledby="coming-up-heading">
@@ -76,7 +76,7 @@ last nightly check, each a card. Phones: one column in that order.{% endcomment 
             {% for item in coming_up %}<li class="coming-item">{% date_chip item.on %}<span class="coming-text"><span class="coming-title">{{ item.title }}</span><span class="coming-note">{{ item.note }}</span></span></li>{% endfor %}
           </ul>
         {% else %}
-          <p class="muted" id="coming-up-none">Nothing scheduled.</p>
+          {% include "finance/_empty_state.html" with id="coming-up-none" icon="calendar" title="Nothing scheduled." text="Rent days, debit settlements and insurance renewals show here." only %}
         {% endif %}
       </section>
     </div>
@@ -112,7 +112,7 @@ last nightly check, each a card. Phones: one column in that order.{% endcomment 
       {% endresponsive_table %}
       {% if data.failed_attempts_count > failed_attempts|length %}<p class="muted">The {{ failed_attempts|length }} most recent are shown.</p>{% endif %}
     {% else %}
-      <p class="muted">None. Invoices {{ company.provider_name }} could not collect are listed here.</p>
+      {% include "finance/_empty_state.html" with id="failed-attempts-none" icon="check" title="No failed attempts." text="Invoices "|add:company.provider_name|add:" could not collect are listed here." only %}
     {% endif %}
   </section>
   {% if data.waived_live %}
@@ -147,7 +147,7 @@ last nightly check, each a card. Phones: one column in that order.{% endcomment 
     </table>
     {% endresponsive_table %}
   {% else %}
-    <p class="muted">None.</p>
+    {% include "finance/_empty_state.html" with id="not-sent-none" icon="file" title="Nothing waiting to be sent." text="An invoice created but not sent shows here." only %}
   {% endif %}
   </section>
   <section class="card" id="last-reconciliation-card" aria-label="Last nightly check">

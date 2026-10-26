@@ -1,8 +1,7 @@
-{% extends "finance/base.html" %}
-{% load money %}
+{% extends "ledger/one_off_charges/detail.html" %}
+{% load components money %}
 {% block title %}Charge now {{ charge.label }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if charge.lease %}{% include "ledger/_store_crumb.html" with crumb_store=charge.lease.store %}{% elif charge.operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=charge.operator.pk %}">{{ charge.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Charge now</span></nav><h1>Charge now</h1></div></div>{% endblock %}
-{% block content %}
+{% block dialog %}{% url 'ledger:one_off_charges:detail' pk=charge.pk as back_url %}{% dialog id="charge-now-dialog" title="Charge now" size="sm" open=True return_url=back_url %}
   <section class="confirm" aria-labelledby="confirm-what-heading">
   <div class="confirm-what">
   <h2 id="confirm-what-heading">What will happen</h2>
@@ -21,6 +20,9 @@
     <p id="charge-now-busy"><strong>{{ busy_text }}</strong></p>
   {% elif wait_text %}
     <p id="charge-now-wait"><strong>{{ wait_text }}</strong></p>
+  {% endif %}
+  {% if details.refusal or busy or wait_text %}
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="charge-now-keep">Keep the charge</a></div>
   {% else %}
     <p id="charge-now-one-attempt"><strong>{{ one_attempt }}</strong></p>
     <form method="post" class="js-single-submit" autocomplete="off" id="charge-now-form">
@@ -31,9 +33,8 @@
           {% for error in form.confirm.errors %}<br><strong class="field-error">{{ error }}</strong>{% endfor %}
         </p>
       {% endif %}
-      <p class="actions"><button class="btn btn-primary" type="submit" id="charge-now-submit">Charge {{ details.amount|money }} now</button> <a class="btn" href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">Back</a></p>
+      <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="charge-now-keep">Keep the charge</a> <button class="btn btn-primary" type="submit" id="charge-now-submit">Charge {{ details.amount|money }} now</button></div>
     </form>
   {% endif %}
   </section>
-{% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% enddialog %}{% endblock %}

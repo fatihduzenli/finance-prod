@@ -77,6 +77,7 @@ from ledger.views.operators import (
     csv_response,
     role_required,
 )
+from ledger.views.operators import _detail_context as _operator_page
 from ledger.views.run import _billing_only
 from ledger.views.store_context import StoreContext, local_next
 from ledger.wording import format_amount
@@ -412,14 +413,23 @@ def _log_url(entry: ContactEntry) -> str:
 
 
 def _entry_page(
-    request: HttpRequest, template: str, entry: ContactEntry, form: forms.Form
+    request: HttpRequest,
+    template: str,
+    entry: ContactEntry,
+    form: forms.Form,
+    *,
+    over_log: bool = False,
 ) -> HttpResponse:
+    """An entry's form page; with ``over_log`` (Delete's confirmation, PLAN-012f-b E-4) the
+    operator page, whose contact log the entry is in, is the page behind the dialog."""
     if request.method == "POST":
         drop_payment_data(form)
+    behind = _operator_page(request, entry.operator) if over_log else {}
     return render(
         request,
         template,
         {
+            **behind,
             "entry": entry,
             "form": form,
             "back_url": _log_url(entry),
@@ -514,7 +524,9 @@ def contact_delete(request: HttpRequest, pk: str) -> HttpResponseBase:
     if entry.deleted_at is not None:
         return _refused(request, entry, contacts.DELETED)
     if request.method != "POST":
-        return _entry_page(request, "ledger/contacts/delete.html", entry, ContactDeleteForm())
+        return _entry_page(
+            request, "ledger/contacts/delete.html", entry, ContactDeleteForm(), over_log=True
+        )
     form = ContactDeleteForm(request.POST)
     if form.is_valid():
         outcome = contacts.delete_entry(entry, form.cleaned_data["reason"], actor=_actor(request))
@@ -524,7 +536,7 @@ def contact_delete(request: HttpRequest, pk: str) -> HttpResponseBase:
         if outcome.field is None:
             return _refused(request, entry, outcome.message)
         form.add_error("reason", outcome.message)
-    return _entry_page(request, "ledger/contacts/delete.html", entry, form)
+    return _entry_page(request, "ledger/contacts/delete.html", entry, form, over_log=True)
 
 
 # --- Kept, Reschedule, Broken on one promise (PLAN-012c-b D2) -------------------------------

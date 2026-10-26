@@ -238,7 +238,9 @@ def test_the_day_panel_follows_on_and_moves_the_month(today: date) -> None:
 def test_an_empty_day_and_another_years_day_and_a_bad_day(today: date) -> None:
     panel = part(page("/calendar/?on=2027-02-02"), "calendar-day-panel")
     assert "Tuesday, Feb 2, 2027" in panel
-    assert 'id="calendar-day-empty">Nothing on this day.</p>' in panel
+    # PLAN-012f-b E-4: the empty state (finance/_empty_state.html).
+    assert '<div class="empty-state" id="calendar-day-empty">' in panel
+    assert '<p class="empty-state-title">Nothing on this day.</p>' in panel
     for raw in ("nonsense", "2026-13-01", "1999-12-31"):
         body = page(f"/calendar/?on={raw}")
         assert calendar_views.BAD_DAY in body, raw
@@ -293,7 +295,8 @@ def test_next_seven_days_crosses_the_months_end(monkeypatch: pytest.MonkeyPatch)
 
 def test_next_seven_days_says_when_nothing_is_due(today: date) -> None:
     card = part(page(), "calendar-next-days")
-    assert 'id="calendar-next-empty">Nothing in the next 7 days.</p>' in card
+    assert '<div class="empty-state" id="calendar-next-empty">' in card
+    assert '<p class="empty-state-title">Nothing in the next 7 days.</p>' in card
 
 
 @pytest.mark.parametrize("role", [Role.VIEWER, Role.BILLING, Role.ADMIN])

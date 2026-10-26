@@ -38,6 +38,8 @@
    pair: --partial-text on --partial-bg
    pair: --waived-text on --waived-bg
    pair: --neutral-text on --neutral-bg
+   pair: --error-text on --unpaid-bg
+   pair: --navy on --neutral-bg
    pair: --surface on --btn-primary-bg
    pair: --surface on --unpaid-text
    pair: --surface on --navy
@@ -140,4 +142,8 @@
   /* the sign-in pages' brand panel (PLAN-012f D13; DESIGN-SPEC §4 Login): the sidebar's two
      stops at 160 degrees */
   --login-gradient: linear-gradient(160deg, #0B2545 0%, #0E4A5C 100%);
+
+  /* the error flash message's text (PLAN-012f-b E-4; DESIGN-SPEC §4 States: #8A1C14 on the
+     unpaid background); no other token carries this value */
+  --error-text: #8A1C14;
 }

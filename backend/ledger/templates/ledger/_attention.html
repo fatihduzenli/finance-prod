@@ -32,7 +32,7 @@ On the dashboard (PLAN-012f D7) the "Needs attention" card: its count, "All unpa
     {% endresponsive_table %}
     {% for label, count in attention.more_lines %}<p class="muted attention-more">And {{ count }} more {{ label }}.</p>{% endfor %}
     {% else %}
-    <p class="muted" id="attention-none">Nothing needs attention.</p>
+    {% include "finance/_empty_state.html" with id="attention-none" icon="check" title="Nothing needs attention." text="Anything that needs a person shows here." only %}
     {% endif %}
   </section>
 {% endif %}

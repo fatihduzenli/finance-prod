@@ -1,0 +1,6 @@
+{% load icons %}{% comment %}The empty state (DESIGN-SPEC §4 States, states-laptop.png; PLAN-012f-b E-4): what a card shows instead of a list: a 48 px grey circle with a stroke icon ("icon", a name from finance.templatetags.icons; "inbox" when none is given), the 15px/600 line ("title"), one muted sentence ("text", optional) and one link ("action_url" with "action_label", optional; "action_id" its id). "id" is the block's id (the id the replaced paragraph carried). Include it with "only" so a page's own "title" or "text" never leaks in: {% include "finance/_empty_state.html" with id="…" icon="…" title="…" text="…" action_url=… action_label="…" only %}. Every value is escaped.{% endcomment %}<div class="empty-state"{% if id %} id="{{ id }}"{% endif %}>
+  <span class="empty-state-icon">{% icon icon|default:"inbox" 20 %}</span>
+  <p class="empty-state-title">{{ title }}</p>
+  {% if text %}<p class="empty-state-text">{{ text }}</p>{% endif %}
+  {% if action_url and action_label %}<a class="btn empty-state-action" href="{{ action_url }}"{% if action_id %} id="{{ action_id }}"{% endif %}>{{ action_label }}</a>{% endif %}
+</div>

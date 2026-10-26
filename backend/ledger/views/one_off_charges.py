@@ -192,6 +192,12 @@ def charge_export(request: HttpRequest) -> StreamingHttpResponse:
 @require_safe
 def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
     charge = _load(pk)
+    return render(request, "ledger/one_off_charges/detail.html", _detail_context(request, charge))
+
+
+def _detail_context(request: HttpRequest, charge: OneOffCharge) -> dict[str, Any]:
+    """The charge page's context (read only); a confirmation page (Waive, Cancel, Charge
+    now) shows over it in its dialog (PLAN-012f-b E-4)."""
     billing = meets(_role(request), Role.BILLING)
     admin = meets(_role(request), Role.ADMIN)
     closed = charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
@@ -214,109 +220,101 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
     schedule = service.provider_schedule(charge)
     # A setup charge billed on an invoice (PLAN-012 D6) is not edited here.
     setup = charge.category == OneOffCategory.SETUP and charge.collection == CollectionMethod.NONE
-    return render(
-        request,
-        "ledger/one_off_charges/detail.html",
-        {
-            **jobs,
-            "charge": charge,
-            "lease": charge.lease,
-            # PLAN-012d D5: "← Store NNNN".
-            "crumb_store": charge.lease.store if charge.lease is not None else None,
-            "operator": operator,
-            "invoices": invoices,
-            "invoice_rows": invoice_rows,
-            "can_open_invoice": billing,
-            # PLAN-012b-a D5: an invoice released for the installment plan.
-            "released_invoices": service.released_invoices(charge),
-            "provider_invoice_masked": mask_identifier(linked[1]) if linked else "",
-            "schedule_masked": mask_identifier(schedule) if schedule else "",
-            "payments": payments,
-            "review_message": service.review_message(charge),
-            # Any line of a builder invoice takes a payment of its own (PLAN-012c-a D2).
-            "can_record": billing
-            and not closed
-            and charge.balance > 0
-            and not rent_run.on_live_plan(one_off_charge=charge),
-            "can_link_invoice": billing and not closed and not invoices,
-            "can_edit": billing and not closed and setup,
-            "can_waive": admin
-            and not closed
-            and charge.category != OneOffCategory.INSTALLMENT
-            and not service.has_settled_payment(charge)
-            and not rent_run.on_live_plan(one_off_charge=charge),
-            "waive_refusal": (
-                service.WAIVE_LIVE_INVOICE
-                if not closed and service.live_provider_invoice(charge) is not None
-                else ""
-            ),
-            "cancel_meaning": service.CANCEL_MEANING,
-            "waive_meaning": service.WAIVE_MEANING,
-            "delete_invoice_hint": service.DELETE_INVOICE_HINT,
-            "can_delete_invoice": admin
-            and not jobs["job_refresh"]
-            and not service.delete_invoice_refusal(charge),
-            "can_cancel": billing
-            and not service.cancel_refusal(charge)
-            and not jobs["job_refresh"],
-            "can_retry_provider": billing
-            and not jobs["job_refresh"]
-            and service.retry_kind(charge) is not None,
-            "can_retry_mark": retry_wait == 0 and not jobs["job_refresh"],
-            "retry_wait_message": (
-                operator_sync.retry_wait_message(retry_wait) if retry_wait else ""
-            ),
-            **_charge_now_context(charge, admin, closed, jobs["job_refresh"]),
-            # PLAN-012e D9, D10: an installment's plan, or the parent's plan and Split.
-            "installment_plan": charge.plan,
-            # PLAN-012f-b D16: "Installment 3 of 10", or "Settlement plan · 3 of 10".
-            "installment_label": (
-                plan_label(charge.plan, charge.installment_no)
-                if charge.plan is not None and charge.installment_no is not None
-                else ""
-            ),
-            **(
-                {}
-                if charge.plan_id is not None
-                else parent_context(
-                    charge,
-                    billing=billing,
-                    admin=admin,
-                    split_url=reverse("ledger:one_off_charges:split", kwargs={"pk": charge.pk}),
-                )
-            ),
-            "resolution": resolution,
-            # PLAN-012f-a D4: the header's kind badge and muted line, the tiles' tone, the
-            # open promise of the charge's store and the Activity card.
-            "kind_badge": detail_service.kind_words(charge, resolution),
-            "header_line": detail_service.header_line(
-                store=store_service.title(store) if store is not None else "",
-                operator=operator.display_name if operator is not None else "",
-                created=charge.created_at,
-                source=detail_service.one_off_source(charge, invoice_rows),
-                due=charge.due_date,
-            ),
-            "balance_open": balance_open,
-            "promise": contacts.open_promise(operator, charge.lease) if balance_open else None,
-            "can_record_outcome": billing and operator is not None and operator.archived_at is None,
-            **activity_context(
-                [
-                    *((rent_run.ENTITY_INVOICE, row.pk) for row in invoices),
-                    *((rent_run.ENTITY_PAYMENT, row.pk) for row in payments),
-                ],
-                admin=admin,
-                store=store,
-                record=(service.ENTITY_ONE_OFF_CHARGE, charge.pk),
-            ),
-            # PLAN-011b D4: the charge's collection e-mails and the hand send.
-            **collections.charge_context(
-                ChargeEntityType.ONE_OFF_CHARGE,
-                charge.pk,
+    return {
+        **jobs,
+        "charge": charge,
+        "lease": charge.lease,
+        # PLAN-012d D5: "← Store NNNN".
+        "crumb_store": charge.lease.store if charge.lease is not None else None,
+        "operator": operator,
+        "invoices": invoices,
+        "invoice_rows": invoice_rows,
+        "can_open_invoice": billing,
+        # PLAN-012b-a D5: an invoice released for the installment plan.
+        "released_invoices": service.released_invoices(charge),
+        "provider_invoice_masked": mask_identifier(linked[1]) if linked else "",
+        "schedule_masked": mask_identifier(schedule) if schedule else "",
+        "payments": payments,
+        "review_message": service.review_message(charge),
+        # Any line of a builder invoice takes a payment of its own (PLAN-012c-a D2).
+        "can_record": billing
+        and not closed
+        and charge.balance > 0
+        and not rent_run.on_live_plan(one_off_charge=charge),
+        "can_link_invoice": billing and not closed and not invoices,
+        "can_edit": billing and not closed and setup,
+        "can_waive": admin
+        and not closed
+        and charge.category != OneOffCategory.INSTALLMENT
+        and not service.has_settled_payment(charge)
+        and not rent_run.on_live_plan(one_off_charge=charge),
+        "waive_refusal": (
+            service.WAIVE_LIVE_INVOICE
+            if not closed and service.live_provider_invoice(charge) is not None
+            else ""
+        ),
+        "cancel_meaning": service.CANCEL_MEANING,
+        "waive_meaning": service.WAIVE_MEANING,
+        "delete_invoice_hint": service.DELETE_INVOICE_HINT,
+        "can_delete_invoice": admin
+        and not jobs["job_refresh"]
+        and not service.delete_invoice_refusal(charge),
+        "can_cancel": billing and not service.cancel_refusal(charge) and not jobs["job_refresh"],
+        "can_retry_provider": billing
+        and not jobs["job_refresh"]
+        and service.retry_kind(charge) is not None,
+        "can_retry_mark": retry_wait == 0 and not jobs["job_refresh"],
+        "retry_wait_message": (operator_sync.retry_wait_message(retry_wait) if retry_wait else ""),
+        **_charge_now_context(charge, admin, closed, jobs["job_refresh"]),
+        # PLAN-012e D9, D10: an installment's plan, or the parent's plan and Split.
+        "installment_plan": charge.plan,
+        # PLAN-012f-b D16: "Installment 3 of 10", or "Settlement plan · 3 of 10".
+        "installment_label": (
+            plan_label(charge.plan, charge.installment_no)
+            if charge.plan is not None and charge.installment_no is not None
+            else ""
+        ),
+        **(
+            {}
+            if charge.plan_id is not None
+            else parent_context(
+                charge,
                 billing=billing,
-                url=reverse("ledger:one_off_charges:send_step", kwargs={"pk": charge.pk}),
-            ),
-        },
-    )
+                admin=admin,
+                split_url=reverse("ledger:one_off_charges:split", kwargs={"pk": charge.pk}),
+            )
+        ),
+        "resolution": resolution,
+        # PLAN-012f-a D4: the header's kind badge and muted line, the tiles' tone, the
+        # open promise of the charge's store and the Activity card.
+        "kind_badge": detail_service.kind_words(charge, resolution),
+        "header_line": detail_service.header_line(
+            store=store_service.title(store) if store is not None else "",
+            operator=operator.display_name if operator is not None else "",
+            created=charge.created_at,
+            source=detail_service.one_off_source(charge, invoice_rows),
+            due=charge.due_date,
+        ),
+        "balance_open": balance_open,
+        "promise": contacts.open_promise(operator, charge.lease) if balance_open else None,
+        "can_record_outcome": billing and operator is not None and operator.archived_at is None,
+        **activity_context(
+            [
+                *((rent_run.ENTITY_INVOICE, row.pk) for row in invoices),
+                *((rent_run.ENTITY_PAYMENT, row.pk) for row in payments),
+            ],
+            admin=admin,
+            store=store,
+            record=(service.ENTITY_ONE_OFF_CHARGE, charge.pk),
+        ),
+        # PLAN-011b D4: the charge's collection e-mails and the hand send.
+        **collections.charge_context(
+            ChargeEntityType.ONE_OFF_CHARGE,
+            charge.pk,
+            billing=billing,
+            url=reverse("ledger:one_off_charges:send_step", kwargs={"pk": charge.pk}),
+        ),
+    }
 
 
 def jobs_active(charge: OneOffCharge) -> bool:
@@ -414,6 +412,10 @@ def charge_now(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/one_off_charges/charge_now.html",
         {
+            **_detail_context(request, charge),
+            # The dialog says why Charge now cannot go ahead; the page behind does not
+            # repeat it (PLAN-012f-b E-4).
+            "charge_now_shown": False,
             "form": form,
             "charge": charge,
             "details": details,
@@ -693,6 +695,7 @@ def charge_waive(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/one_off_charges/waive.html",
         {
+            **_detail_context(request, charge),
             "form": form,
             "charge": charge,
             "waive_meaning": service.WAIVE_MEANING,
@@ -749,7 +752,12 @@ def charge_cancel(request: HttpRequest, pk: str) -> HttpResponse:
     return render(
         request,
         "ledger/one_off_charges/cancel.html",
-        {"form": form, "charge": charge, "refusal": service.cancel_refusal(charge)},
+        {
+            **_detail_context(request, charge),
+            "form": form,
+            "charge": charge,
+            "refusal": service.cancel_refusal(charge),
+        },
     )
 
 

@@ -202,6 +202,12 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
     switch, autopay and its controls, notes and documents. Its charges, invoices and
     payments are on the store page, which the page links."""
     lease = _load(pk)
+    return render(request, "ledger/leases/detail.html", _detail_context(request, lease))
+
+
+def _detail_context(request: HttpRequest, lease: Lease) -> dict[str, Any]:
+    """The lease page's context (read only); Turn off autopay shows over it in its dialog
+    (PLAN-012f-b E-4)."""
     admin = meets(_role(request), Role.ADMIN)
     provider_ach = lease.payment_channel == PaymentChannel.PROVIDER_ACH
     now = timezone.now()
@@ -230,51 +236,47 @@ def lease_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 "review_message": service.schedule_review_message(lease, row, today),
             }
         )
-    return render(
-        request,
-        "ledger/leases/detail.html",
-        {
-            **job_context(lease),
-            "lease": lease,
-            # PLAN-012f-a D4: the header's line, the Open balance and Deposit tiles and the
-            # Activity card (the lease's rows and its live schedules').
-            "header_line": detail_cards.header_line(
-                store=store_service.title(lease.store),
-                operator=lease.operator.display_name if lease.operator is not None else "",
-            ),
-            "open_balance": detail_cards.lease_open_balance(lease, today),
-            # The store page's DEPOSIT line (one query), as the workspace header reads it.
-            "deposit_text": workspace._deposit_text(lease),
-            **activity_context(
-                [(service.ENTITY_SCHEDULE, row.pk) for row in live],
-                admin=admin,
-                store=lease.store,
-                record=(service.ENTITY_LEASE, lease.pk),
-            ),
-            "rent": service.current_rent(lease, today),
-            "upcoming": service.upcoming_rent(lease, today),
-            "history": lease.rent_history.order_by("-effective_from"),
-            "schedules": schedules,
-            "autopay_moved": moved.text if moved is not None else "",
-            "blockers": service.autopay_blockers(lease),
-            "notes_info": service.enrolment_notes(lease),
-            "notes": Note.objects.filter(
-                entity_type=NoteEntityType.LEASE, entity_id=lease.pk
-            ).order_by("-created_at"),
-            "can_edit": admin,
-            "can_end": admin and lease.ended_on is None,
-            # PLAN-012c D8: autopay is set up only on a provider-ACH lease; the enrol
-            # page and the service keep their own refusal. Pause, resume and stop follow
-            # the live schedules, so a schedule left after a channel change stays
-            # stoppable.
-            "provider_ach": provider_ach,
-            "can_enrol": admin and provider_ach,
-            "can_pause": admin and ScheduleState.ACTIVE in linked_states,
-            "can_resume": admin and ScheduleState.PAUSED in linked_states,
-            "can_stop": admin and bool(service.stoppable_schedules(lease)),
-            **documents.section_context(request, lease),
-        },
-    )
+    return {
+        **job_context(lease),
+        "lease": lease,
+        # PLAN-012f-a D4: the header's line, the Open balance and Deposit tiles and the
+        # Activity card (the lease's rows and its live schedules').
+        "header_line": detail_cards.header_line(
+            store=store_service.title(lease.store),
+            operator=lease.operator.display_name if lease.operator is not None else "",
+        ),
+        "open_balance": detail_cards.lease_open_balance(lease, today),
+        # The store page's DEPOSIT line (one query), as the workspace header reads it.
+        "deposit_text": workspace._deposit_text(lease),
+        **activity_context(
+            [(service.ENTITY_SCHEDULE, row.pk) for row in live],
+            admin=admin,
+            store=lease.store,
+            record=(service.ENTITY_LEASE, lease.pk),
+        ),
+        "rent": service.current_rent(lease, today),
+        "upcoming": service.upcoming_rent(lease, today),
+        "history": lease.rent_history.order_by("-effective_from"),
+        "schedules": schedules,
+        "autopay_moved": moved.text if moved is not None else "",
+        "blockers": service.autopay_blockers(lease),
+        "notes_info": service.enrolment_notes(lease),
+        "notes": Note.objects.filter(entity_type=NoteEntityType.LEASE, entity_id=lease.pk).order_by(
+            "-created_at"
+        ),
+        "can_edit": admin,
+        "can_end": admin and lease.ended_on is None,
+        # PLAN-012c D8: autopay is set up only on a provider-ACH lease; the enrol
+        # page and the service keep their own refusal. Pause, resume and stop follow
+        # the live schedules, so a schedule left after a channel change stays
+        # stoppable.
+        "provider_ach": provider_ach,
+        "can_enrol": admin and provider_ach,
+        "can_pause": admin and ScheduleState.ACTIVE in linked_states,
+        "can_resume": admin and ScheduleState.PAUSED in linked_states,
+        "can_stop": admin and bool(service.stoppable_schedules(lease)),
+        **documents.section_context(request, lease),
+    }
 
 
 # --- Write --------------------------------------------------------------------------
@@ -569,9 +571,8 @@ def lease_stop_autopay(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/leases/stop_autopay.html",
         {
-            **job_context(lease),
-            "lease": lease,
-            "schedules": [
+            **_detail_context(request, lease),
+            "stop_schedules": [
                 {"row": row, "schedule_masked": mask_identifier(ref)} for row, ref in rows
             ],
             "nothing_to_stop": service.NOTHING_TO_STOP,

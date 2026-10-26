@@ -1,0 +1,6 @@
+{% comment %}The 404 / 403 card (DESIGN-SPEC §4 States, states-laptop.png; PLAN-012f-b E-4): the status code large and faint (decoration: the line says it in words, so the code is hidden from screen readers), the 20px/600 line, one sentence and, for a signed-in user, "Go to the dashboard" (the primary) and a Search link. Context: code, line, sentence, request.{% endcomment %}<section class="card error-card" id="error-page">
+  <p class="error-code" aria-hidden="true">{{ code }}</p>
+  <h2 class="error-line">{{ line }}</h2>
+  <p class="error-sentence">{{ sentence }}</p>
+  {% if request.user.is_authenticated %}<p class="error-actions"><a class="btn btn-primary" id="error-dashboard" href="{% url 'ledger:home' %}">Go to the dashboard</a> <a class="btn" id="error-search" href="{% url 'ledger:search' %}">Search</a></p>{% endif %}
+</section>

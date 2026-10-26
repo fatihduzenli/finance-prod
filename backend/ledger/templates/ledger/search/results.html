@@ -17,7 +17,7 @@
   {% if not query %}
     <p class="muted" id="search-empty">Type a store number, a store name, a city or an operator's name.</p>
   {% elif results.empty %}
-    <p class="muted empty" id="search-no-match">No match for '{{ query }}'.</p>
+    {% include "finance/_empty_state.html" with id="search-no-match" icon="search" title="No match for '"|add:query|add:"'." text="Try a store number, a store name, a city or an operator's name." only %}
   {% else %}
     <section class="card" id="search-stores-card">
     <h2>Stores</h2>
@@ -39,7 +39,7 @@
       {% endresponsive_table %}
       {% if results.more_stores %}<p class="muted">The first {{ results.stores|length }} stores are shown; add a word to narrow the search.</p>{% endif %}
     {% else %}
-      <p class="muted empty" id="search-no-store">No store matches.</p>
+      {% include "finance/_empty_state.html" with id="search-no-store" icon="stores" title="No store matches." only %}
     {% endif %}
     </section>
     {% if not new_invoice %}
@@ -62,7 +62,7 @@
       {% endresponsive_table %}
       {% if results.more_operators %}<p class="muted">The first {{ operators|length }} operators are shown; add a word to narrow the search.</p>{% endif %}
     {% else %}
-      <p class="muted empty" id="search-no-operator">No operator matches.</p>
+      {% include "finance/_empty_state.html" with id="search-no-operator" icon="operators" title="No operator matches." only %}
     {% endif %}
     </section>
     {% endif %}
