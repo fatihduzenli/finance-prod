@@ -1879,3 +1879,13 @@ save-and-confirm race included; e2e 31 passed on each of four runs; the visual c
 (F-2, a three-line helper written in two views) to Step 13 with B-3, C-5, the feed-test failure, the
 migration job's time and the GUARD_TRIGGERS lists missing 0046, 0048 and 0050. QA-012f-a slice F
 PASS; the Publish Request goes to the owner.
+
+## Update, 2026-10-25, slice F pushed; staging on cccc008; Step 12f-a complete
+
+Pushed on the owner's authorisation (2e82377..cccc008). CI run 40148766645 green on every job: lint
+and types 0:35, e2e 2:40, visual 2:27, unit A 11:13, unit B 12:16, migration tests 29:40, deploy
+3:26. The deploy job's check found web, worker, reconcile and daily revisions live on cccc008,
+Healthy and Running; `/healthz` answers 200 and reports the sandbox environment. The migration job
+finished 20 seconds under its 30-minute limit: the next push may time out, so Step 13 must start
+with that job (two jobs, or fewer round trips) before any other work lands. Step 12f-a (Batches A–E
+and slice F) is complete and on staging.

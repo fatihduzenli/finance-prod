@@ -37,38 +37,56 @@ ROUND_TRIP = (
     ("migrate", "payments", "zero"),
     ("migrate",),
 )
+#: Every migration since the guards began that may add a guarded column, in both apps, from
+#: ledger 0041 and payments 0018 on without exception (a migration that adds nothing is listed
+#: with an empty ``GUARDED_COLUMNS`` or none at all): tests/test_card_number_guard.py keeps the
+#: two lists complete (PLAN-012f-b Batch 0).
+GUARD_MODULES = (
+    "ledger.migrations.0002_postgresql_guards",
+    "ledger.migrations.0014_store_costs_deposit_resolutions",
+    "ledger.migrations.0019_one_off_charges_constraints",
+    "ledger.migrations.0023_contacts_and_calendar",
+    "ledger.migrations.0028_contact_log_maturity",
+    "ledger.migrations.0029_invoice_builder",
+    "ledger.migrations.0030_disputes",
+    "ledger.migrations.0031_line_kind_fees_consent",
+    "ledger.migrations.0032_builder_item",
+    "ledger.migrations.0034_proration",
+    "ledger.migrations.0035_lease_end_transfer",
+    "ledger.migrations.0037_transfer_fields",
+    "ledger.migrations.0038_installments",
+    "ledger.migrations.0039_transfer_debt_override",
+    "ledger.migrations.0040_lease_end_statement_opened",
+    "ledger.migrations.0041_rent_lines",
+    "ledger.migrations.0042_payment_allocation_and_credits",
+    "ledger.migrations.0043_fee_type_show_in_setup",
+    "ledger.migrations.0044_draft_existing_charge",
+    "ledger.migrations.0045_company_settings",
+    "ledger.migrations.0046_copy_labels",
+    "ledger.migrations.0047_store_address",
+    "ledger.migrations.0048_check_method",
+    "ledger.migrations.0049_autopay_plans",
+    "ledger.migrations.0050_rename_statement_saved_at",
+    "payments.migrations.0002_postgresql_guards",
+    "payments.migrations.0005_jobs",
+    "payments.migrations.0018_copy_labels",
+)
+
+
+def guarded_columns(module: str) -> dict[str, tuple[str, ...]]:
+    """The ``GUARDED_COLUMNS`` a migration module declares; none when it declares nothing."""
+    loaded = importlib.import_module(module)
+    found: dict[str, tuple[str, ...]] = getattr(loaded, "GUARDED_COLUMNS", {})
+    return found
+
+
 GUARD_TRIGGERS = {
     "invoices_provider_status_guard",
     "audit_log_append_only",
     *(
         f"{table}_payment_data_guard"
-        for module in (
-            "ledger.migrations.0002_postgresql_guards",
-            "payments.migrations.0002_postgresql_guards",
-            "payments.migrations.0005_jobs",
-            "ledger.migrations.0014_store_costs_deposit_resolutions",
-            "ledger.migrations.0019_one_off_charges_constraints",
-            "ledger.migrations.0023_contacts_and_calendar",
-            "ledger.migrations.0028_contact_log_maturity",
-            "ledger.migrations.0029_invoice_builder",
-            "ledger.migrations.0030_disputes",
-            "ledger.migrations.0031_line_kind_fees_consent",
-            "ledger.migrations.0032_builder_item",
-            "ledger.migrations.0034_proration",
-            "ledger.migrations.0035_lease_end_transfer",
-            "ledger.migrations.0037_transfer_fields",
-            "ledger.migrations.0038_installments",
-            "ledger.migrations.0039_transfer_debt_override",
-            "ledger.migrations.0040_lease_end_statement_opened",
-            "ledger.migrations.0041_rent_lines",
-            "ledger.migrations.0042_payment_allocation_and_credits",
-            "ledger.migrations.0043_fee_type_show_in_setup",
-            "ledger.migrations.0044_draft_existing_charge",
-            "ledger.migrations.0045_company_settings",
-            "ledger.migrations.0047_store_address",
-            "ledger.migrations.0049_autopay_plans",
-        )
-        for table in importlib.import_module(module).GUARDED_COLUMNS
+        for module in GUARD_MODULES
+        for table in guarded_columns(module)
     ),
 }
 #: The trigger ledger 0017 dropped and 0019 replaced (``setup_charges`` became
