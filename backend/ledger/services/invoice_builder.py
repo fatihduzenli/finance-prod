@@ -452,6 +452,18 @@ SETTLEMENT_TOTAL = "Enter the invoice total first."
 SETTLEMENT_TOO_SMALL = (
     "The total cannot be split into that many debits of at least one cent. Nothing was scheduled."
 )
+#: The live preview's own short sentence for each refusal of the form (PLAN-012f-b D16,
+#: finding D2-2): nothing is scheduled by a preview, so it does not say so.
+SETTLEMENT_PREVIEW_SENTENCES: dict[str, str] = {
+    SETTLEMENT_COUNT: f"Choose {INSTALLMENTS_MIN} to {INSTALLMENTS_MAX} payments.",
+    SETTLEMENT_CADENCE: "Choose monthly, weekly or yearly.",
+    SETTLEMENT_FIRST_REQUIRED: "Choose a first debit date from today on.",
+    SETTLEMENT_FIRST_IN_PAST: "Choose a first debit date from today on.",
+    SETTLEMENT_FIRST_TOO_FAR: (
+        f"Choose a first debit date at most {SCHEDULE_HORIZON_DAYS} days from today."
+    ),
+    SETTLEMENT_TOO_SMALL: "The total cannot be split into that many debits of at least one cent.",
+}
 #: The internal note of a settlement's charge (the installments carry their own).
 SETTLEMENT_NOTE = "Settlement scheduled with the invoice builder from {draft}: {item}."
 SETTLEMENT_SCHEDULED = "{count} debits scheduled; the first on {date}."

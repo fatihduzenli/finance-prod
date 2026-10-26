@@ -462,7 +462,10 @@ def test_the_preview_route_refuses_a_viewer_and_a_signed_out_visitor() -> None:
 def test_the_preview_route_refuses_each_bad_parameter(params: dict[str, str], message: str) -> None:
     response = client_for(Role.BILLING)[0].get(preview_query(**params))
     assert response.status_code == 400
-    assert response.json() == {"ok": False, "message": message}
+    # The preview answers its own short sentence for the form's (finding D2-2, slice D-3).
+    short = invoice_builder.SETTLEMENT_PREVIEW_SENTENCES.get(message, message)
+    assert response.json() == {"ok": False, "message": short}
+    assert "Nothing was scheduled" not in short
 
 
 # --- The page ---------------------------------------------------------------------------------

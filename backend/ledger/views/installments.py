@@ -9,10 +9,12 @@ lock. A refused confirm returns to the preview with the edited values in the que
 string and the reason as a message.
 
 The plan page (``ledger:plans:detail``) is read by any role. Reschedule
-(``ledger:plans:reschedule``) needs ``billing``, Cancel (``ledger:plans:cancel``) needs
-``admin``; the registry refuses a POST below the role first, and these views refuse
-the GET of their forms below it too. No view calls the payment provider: the service
-queues the provider work. Every POST ends in a redirect.
+(``ledger:plans:reschedule``) needs ``billing``, Cancel (``ledger:plans:cancel``, "Stop
+this plan?" on screen, PLAN-012f-b D16) needs ``admin``; the registry refuses a POST
+below the role first, and these views refuse the GET of their forms below it too. Pause
+and Resume (``ledger:plans:pause``, ``ledger:plans:resume``; billing, POST only, D16)
+show the service's sentence and go back to the store's Autopay tab. No view calls the
+payment provider: the service queues the provider work. Every POST ends in a redirect.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_http_methods, require_safe
+from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
@@ -42,7 +44,7 @@ from ledger.models import (
     RentCharge,
 )
 from ledger.services import installments as service
-from ledger.services import leases
+from ledger.services import leases, workspace
 from ledger.views.operators import _actor, _held, _hold, _role, role_required
 
 #: The preview's confirmation of a large debit (autopay installments above the threshold).
@@ -78,14 +80,20 @@ def _load_plan(pk: str) -> InstallmentPlan:
 # --- The parent's pages ------------------------------------------------------------------
 
 
-def parent_context(parent: service.Parent, *, billing: bool, split_url: str) -> dict[str, Any]:
+def parent_context(
+    parent: service.Parent, *, billing: bool, split_url: str, admin: bool = False
+) -> dict[str, Any]:
     """What a parent's page shows of installments (D9, D10): its plan's progress and
-    installments, and the Split button or why it is not offered (billing only)."""
+    installments, the actions on the plan the role may take (PLAN-012f-b D16), and the
+    Split button or why it is not offered (billing only)."""
     plan = service.plan_of(parent)
     refusal = service.split_refusal(parent) if billing else ""
     return {
         "plan_progress": service.progress(plan) if plan is not None else None,
         "plan_live": plan is not None and plan.status in LIVE_PLAN_STATUSES,
+        "plan_actions": (
+            service.plan_actions(plan, billing=billing, admin=admin) if plan is not None else {}
+        ),
         "can_split": billing and not refusal,
         "split_refusal": refusal if billing and plan is None else "",
         "split_url": split_url,
@@ -251,9 +259,13 @@ def plan_detail(request: HttpRequest, pk: str) -> HttpResponse:
             "parent_url": service.parent_url(plan.parent),
             "can_reschedule": live and meets(_role(request), Role.BILLING),
             "can_cancel": live and meets(_role(request), Role.ADMIN),
+            # PLAN-012f-b D16: "Installment plan" or "Settlement plan".
+            "plan_name": service.plan_name(plan.origin),
             "plan_help": service.PLAN_HELP,
             # PLAN-012b-a D3: the release of the parent's provider object waits or failed.
             "release_pending": service.release_pending(plan),
+            # PLAN-012f-b D3-1: a debit Pause could not stop.
+            "debits_out": service.debits_out_while_paused(plan),
         },
     )
 
@@ -298,6 +310,42 @@ def plan_reschedule(request: HttpRequest, pk: str) -> HttpResponse:
     )
 
 
+def _to_autopay_tab(
+    request: HttpRequest, plan: InstallmentPlan, outcome: service.Outcome
+) -> HttpResponse:
+    if outcome.ok:
+        messages.success(request, outcome.message)
+    else:
+        messages.error(request, outcome.message)
+    if plan.lease is None:
+        return redirect("ledger:plans:detail", pk=plan.pk)
+    return redirect(workspace.tab_url(plan.lease.store_id, workspace.TAB_SCHEDULES))
+
+
+@role_required
+@require_POST
+def plan_pause(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:plans:pause`` (billing; PLAN-012f-b D16): the next debit's schedule is
+    released and the plan is paused."""
+    refused = _refuse_below(request, Role.BILLING)
+    if refused is not None:
+        return refused
+    plan = _load_plan(pk)
+    return _to_autopay_tab(request, plan, service.pause(plan, _actor(request)))
+
+
+@role_required
+@require_POST
+def plan_resume(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:plans:resume`` (billing; PLAN-012f-b D16): the unpaid debits are set up
+    again and the plan is active."""
+    refused = _refuse_below(request, Role.BILLING)
+    if refused is not None:
+        return refused
+    plan = _load_plan(pk)
+    return _to_autopay_tab(request, plan, service.resume(plan, _actor(request)))
+
+
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
 def plan_cancel(request: HttpRequest, pk: str) -> HttpResponse:
@@ -326,6 +374,7 @@ def plan_cancel(request: HttpRequest, pk: str) -> HttpResponse:
             "form": form,
             # The screen label, under the key the templates read (PLAN-012f-a B4).
             "parent_label": service.parent_screen_label(plan.parent),
+            "plan_name": service.plan_name(plan.origin),
             "help": service.CANCEL_HELP,
         },
     )

@@ -1,6 +1,6 @@
 {% extends "finance/base.html" %}
-{% block title %}Cancel the installment plan of {{ parent_label }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if plan.lease %}{% include "ledger/_store_crumb.html" with crumb_store=plan.lease.store %}{% endif %}<a href="{% url 'ledger:plans:detail' pk=plan.pk %}">Installment plan</a> <span aria-hidden="true">›</span> <span aria-current="page">Cancel the installment plan</span></nav><h1>Cancel the installment plan of {{ parent_label }}</h1></div></div>{% endblock %}
+{% block title %}Stop this plan?{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if plan.lease %}{% include "ledger/_store_crumb.html" with crumb_store=plan.lease.store %}{% endif %}<a href="{% url 'ledger:plans:detail' pk=plan.pk %}">{{ plan_name }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Stop this plan?</span></nav><h1>Stop this plan?</h1><p class="muted" id="stop-plan-of">{{ plan_name }}, {{ parent_label }}</p></div></div>{% endblock %}
 {% block content %}
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
@@ -12,7 +12,7 @@
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% include "ledger/stores/_form_field.html" with field=form.note label="Note" mark=True %}
-    <p class="actions"><button class="btn btn-danger" type="submit" id="cancel-submit">Cancel the plan</button> <a class="btn" href="{% url 'ledger:plans:detail' pk=plan.pk %}">Back</a></p>
+    <p class="actions"><button class="btn btn-danger" type="submit" id="cancel-submit">Stop the plan</button> <a class="btn" href="{% url 'ledger:plans:detail' pk=plan.pk %}">Back</a></p>
   </form>
   </section>
 {% endblock %}

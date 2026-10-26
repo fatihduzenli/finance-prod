@@ -223,6 +223,9 @@ plan_patterns = (
         path("<str:pk>/", installments.plan_detail, name="detail"),
         path("<str:pk>/reschedule/", installments.plan_reschedule, name="reschedule"),
         path("<str:pk>/cancel/", installments.plan_cancel, name="cancel"),
+        # PLAN-012f-b D16: Pause and Resume (POST only).
+        path("<str:pk>/pause/", installments.plan_pause, name="pause"),
+        path("<str:pk>/resume/", installments.plan_resume, name="resume"),
     ],
     "plans",
 )

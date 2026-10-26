@@ -281,6 +281,7 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
                 else parent_context(
                     charge,
                     billing=billing,
+                    admin=admin,
                     split_url=reverse("ledger:one_off_charges:split", kwargs={"pk": charge.pk}),
                 )
             ),

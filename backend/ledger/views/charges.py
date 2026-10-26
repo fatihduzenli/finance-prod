@@ -215,6 +215,7 @@ def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
             **parent_context(
                 charge,
                 billing=billing,
+                admin=meets(role, Role.ADMIN),
                 split_url=reverse("ledger:charges:split", kwargs={"pk": charge.pk}),
             ),
             "can_retry_mark": retry_wait == 0 and not jobs["job_refresh"],

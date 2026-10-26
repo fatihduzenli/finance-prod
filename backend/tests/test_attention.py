@@ -461,6 +461,28 @@ def test_items_are_ordered_by_severity_and_limited_per_kind(today: date) -> None
     assert ranks == sorted(ranks)
 
 
+def paused_plan(lease: Lease) -> InstallmentPlan:
+    """A plan paused 40 days ago (PLAN-012f-b D16), with no pause audit row: the item's
+    day is the plan's last change."""
+    assert lease.operator is not None
+    parent = a_one_off_charge(
+        lease.operator, "600.00", date(2026, 8, 1), lease=lease, description="Paused damage"
+    )
+    plan = InstallmentPlan.objects.create(
+        one_off_charge=parent,
+        operator=lease.operator,
+        lease=lease,
+        count=2,
+        first_due=date(2026, 9, 1),
+        cadence="monthly",
+        collection="manual",
+        status="paused",
+        confirmed_at=datetime(2026, 8, 1, tzinfo=UTC),
+    )
+    InstallmentPlan.objects.filter(pk=plan.pk).update(updated_at=NOW - timedelta(days=40))
+    return plan
+
+
 def build(n: int) -> None:
     """``n`` of every kind of item."""
     InsurancePremium.objects.get_or_create(policy_year=2026, defaults={"amount": D("600.00")})
@@ -474,6 +496,7 @@ def build(n: int) -> None:
         returned_installment(lease)
         split_paid(lease)
         rent_split_paid(lease, date(2026, 11, 1))
+        paused_plan(lease)
         LeaseEnd.objects.create(
             lease=lease,
             ended_on=TODAY - timedelta(days=1),

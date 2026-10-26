@@ -80,7 +80,25 @@ A plan splits the open balance of one charge, a rent charge or a one-off charge 
   bank debits monthly, weekly or yearly (:data:`SETTLEMENT_CADENCES`; Split's form does
   not offer yearly, :data:`SPLIT_CADENCES`); :func:`settlement_preview` words them and
   :func:`plan_label` names such a plan's installments "Settlement plan · 3 of 10" on
-  every page.
+  every page, :func:`plan_name` the plan itself.
+- **Pause, Resume, Stop** (PLAN-012f-b D16, every plan): a paused plan moves no money
+  (D3-1). :func:`pause` (billing, an ``active`` plan) queues, in the transaction that
+  makes the plan ``paused``, one release job per unpaid installment whose schedule is
+  live and has not fired (:func:`release_kind`, :func:`_request_release`; the worker
+  deletes the schedule and supersedes its reference,
+  :func:`payments.one_off_invoices.release_schedule`); a schedule that had already made
+  its invoice is audited :data:`PAUSE_FIRED_ACTION` and the plan page says so
+  (:func:`debits_out_while_paused`). Refused while a provider request of an installment
+  or the parent's release waits (the busy guard). A paused plan still carries the
+  balance (:data:`ledger.models.LIVE_PLAN_STATUSES`) but sets up no schedule: the
+  parent's release queues nothing for it and a reschedule moves the dates only.
+  :func:`resume` (billing, a ``paused`` plan) queues one ``schedule_create`` for each
+  unpaid autopay installment without a schedule; those whose dates passed are moved first,
+  as :func:`reschedule` moves them (audited), to the business days after today, one
+  business day apart in their order; the plan is ``active`` again (or ``attention``,
+  :func:`ledger.services.one_off_charges.apply_plan_status`).
+  Stop is :func:`cancel` (the screens say Stop). Each takes the row locks of
+  :func:`_lock_plan` in one transaction; a refusal writes nothing.
 
 Money is ``Decimal`` throughout; nothing here calls the payment provider.
 """
@@ -153,6 +171,9 @@ SPLIT_ACTION = "split_into_installments"
 RELEASE_REQUESTED_ACTION = "one_off_charge.release_requested"
 RENT_RELEASE_REQUESTED_ACTION = "rent_charge.release_requested"
 RELEASED_ACTION = "installment_plan.released"
+PAUSED_ACTION = "installment_plan.paused"
+PAUSE_FIRED_ACTION = "one_off_charge.pause_release_fired"
+RESUMED_ACTION = "installment_plan.resumed"
 
 # --- Fixed sentences ------------------------------------------------------------------
 
@@ -174,6 +195,9 @@ SETTLEMENT_CADENCES: tuple[str, ...] = (
 #: A settlement plan's name with the installment's number (or the paid count) (D16).
 SETTLEMENT_LABEL = "{origin} · {number} of {count}"
 INSTALLMENT_LABEL = "Installment {number} of {count}"
+INSTALLMENT_PLAN = "Installment plan"
+#: The Charges tab's badge of a charge on a live plan (D16): "On settlement plan".
+ON_PLAN_BADGE = "On {name}"
 CHOOSE_CADENCE = "Choose weekly, every two weeks or monthly."
 FIRST_REQUIRED = "Enter the first installment's date."
 FIRST_IN_PAST = "The first installment's date must be today or later."
@@ -249,9 +273,23 @@ SHIFT_BUSY = provider_sentence(
     "A change is still in progress in {provider}: try again in a minute. Nothing was changed."
 )
 RESCHEDULED = "{count} installments moved; the first is now due {date}."
-NOTE_REQUIRED = "A note is required: say why the plan is cancelled."
+#: Pause and Resume (PLAN-012f-b D16).
+PAUSE_BILLING = "Only billing or an admin can pause or resume a plan. Nothing was changed."
+PAUSE_NOT_ACTIVE = "This plan is not active. Nothing was changed."
+RESUME_NOT_PAUSED = "This plan is not paused. Nothing was changed."
+PAUSED = "Plan paused; the debits not yet made are cancelled."
+PAUSED_NO_DEBIT = "Plan paused; no debit was set up to cancel."
+#: A released installment whose schedule had already made its invoice (D3-1): the
+#: release job's outcome, and the plan page's sentence while the plan is paused.
+PAUSE_FIRED = "This debit had already gone out before the pause; it is collected as usual."
+PAUSE_DEBIT_OUT = "One debit had already gone out: {label}, {date}."
+RESUMED = "Plan resumed; the next debit is on {date}."
+RESUMED_NO_DEBIT = "Plan resumed."
+#: The release job's outcome on an installment of a paused plan.
+PAUSE_RELEASED = provider_sentence("Cancelled in {provider}; the plan is paused.")
+NOTE_REQUIRED = "A note is required: say why the plan is stopped."
 NOTE_PAYMENT_DATA = "This text may not contain card or account numbers."
-CANCEL_ADMIN = "Only an admin can cancel an installment plan."
+CANCEL_ADMIN = "Only an admin can stop an installment plan."
 CANCEL_PENDING = (
     "A payment on an installment is pending: wait until it settles or is returned. Nothing "
     "was changed."
@@ -262,7 +300,7 @@ CANCEL_REDEBIT = (
     "first. Nothing was changed."
 )
 CANCELLED = provider_sentence(
-    "Plan cancelled. The unpaid installments are cancelled in {provider}; the charge is open "
+    "Plan stopped. The unpaid installments are cancelled in {provider}; the charge is open "
     "again for {balance}."
 )
 
@@ -279,8 +317,8 @@ PREVIEW_HELP = (
 PLAN_HELP = (
     "Each installment is collected on its own date. A returned installment puts the plan "
     "on the attention list until it is dealt with on the Returned payments page. Reschedule moves "
-    "the installments not yet paid; Cancel (admin) stops the plan and leaves the charge "
-    "open for what was not paid."
+    "the installments not yet paid; Pause holds the next debit until Resume; Stop (admin) "
+    "ends the plan and leaves the charge open for what was not paid."
 )
 RESCHEDULE_HELP = provider_sentence(
     "Only installments with no payment move; paid ones keep their dates. Autopay and "
@@ -326,9 +364,7 @@ class Progress:
     @property
     def title(self) -> str:
         """The plan card's heading: "Installment plan", or "Settlement plan" (D16)."""
-        if self.plan.origin == InstallmentOrigin.SETTLEMENT:
-            return str(InstallmentOrigin.SETTLEMENT.label)
-        return "Installment plan"
+        return plan_name(self.plan.origin)
 
     @property
     def text(self) -> str:
@@ -343,6 +379,12 @@ class Progress:
             f"Installment plan: {self.paid_count} of {self.count} paid, "
             f"{format_amount(self.paid)} of {format_amount(self.total)}"
         )
+
+    @property
+    def labelled(self) -> list[tuple[OneOffCharge, str]]:
+        """Each installment with its name (:func:`plan_label`, D16): the plan tables'
+        first column."""
+        return [(row, plan_label(self.plan, row.installment_no or 0)) for row in self.installments]
 
     @property
     def short_text(self) -> str:
@@ -447,6 +489,35 @@ def parent_screen_label(parent: Parent) -> str:
             f" (debit {parent.seq})" if parent.seq > 1 else ""
         )
     return parent.label
+
+
+def plan_name(origin: str) -> str:
+    """What a plan of ``origin`` is called on every page (D16): "Settlement plan" for
+    Schedule settlement's, else "Installment plan"."""
+    if origin == InstallmentOrigin.SETTLEMENT:
+        return str(InstallmentOrigin.SETTLEMENT.label)
+    return INSTALLMENT_PLAN
+
+
+def on_plan_badge(origin: str) -> str:
+    """The Charges tab's badge of a parent on a live plan of ``origin`` (D16): "On
+    installment plan" or "On settlement plan"."""
+    name = plan_name(origin)
+    return ON_PLAN_BADGE.format(name=name[:1].lower() + name[1:])
+
+
+def plan_actions(plan: InstallmentPlan, *, billing: bool, admin: bool) -> dict[str, bool]:
+    """What a role may do to the plan on the Autopay tab and the parent's card (D16):
+    billing pauses an active plan, resumes a paused one and reschedules a live one; an
+    admin stops a live one (its confirmation page). The views and the services check
+    again."""
+    live = plan.status in LIVE_PLAN_STATUSES
+    return {
+        "can_pause": billing and plan.status == InstallmentPlanStatus.ACTIVE,
+        "can_resume": billing and plan.status == InstallmentPlanStatus.PAUSED,
+        "can_reschedule": billing and live,
+        "can_stop": admin and live,
+    }
 
 
 def plan_label(plan: InstallmentPlan, number: int) -> str:
@@ -1057,7 +1128,8 @@ def after_release(
     asked = Job.objects.filter(
         entity_type=JobEntity.ONE_OFF_CHARGE, entity_id__in=[row.pk for row in rows]
     )
-    if not asked.exists():
+    if not asked.exists() and plan.status != InstallmentPlanStatus.PAUSED:
+        # A paused plan sets up no schedule; Resume does (PLAN-012f-b D16).
         for row in rows:
             if row.status == OneOffChargeStatus.OWED and _queue_provider_job(row, actor):
                 queued += 1
@@ -1129,8 +1201,9 @@ def reschedule(
             return Outcome(False, SHIFT_BUSY)
         before = plan_state(locked)
         dates = schedule_dates(first_due, cadence, len(moving))
+        paused = locked.status == InstallmentPlanStatus.PAUSED
         for row, due in zip(moving, dates, strict=True):
-            _move(row, due, actor)
+            _move(row, due, actor, create=not paused)
         locked.first_due = min(row.due_date for row in rows)
         locked.cadence = cadence
         locked.save(update_fields=["first_due", "cadence", "updated_at"])
@@ -1153,9 +1226,11 @@ def reschedule(
     )
 
 
-def _move(row: OneOffCharge, due: date, actor: User | None) -> None:
+def _move(row: OneOffCharge, due: date, actor: User | None, *, create: bool = True) -> None:
     """One installment's new date, its local invoice's, and the job that moves its
-    provider object (none for a manual one, or when no provider object exists yet)."""
+    provider object (none for a manual one, or when no provider object exists yet).
+    Without ``create`` (a paused plan, PLAN-012f-b D16) an autopay installment without a
+    schedule gets none: Resume sets it up."""
     before = one_off_charges.charge_state(row)
     row.due_date = due
     row.save(update_fields=["due_date", "updated_at"])
@@ -1166,7 +1241,8 @@ def _move(row: OneOffCharge, due: date, actor: User | None) -> None:
     job_kind, moves = "", False
     if row.collection == CollectionMethod.AUTOPAY_DUE:
         # A schedule that was never made (its create failed) is made for the new date.
-        job_kind, moves = JobKind.SCHEDULE_CREATE, bool(one_off_charges.provider_schedule(row))
+        moves = bool(one_off_charges.provider_schedule(row))
+        job_kind = JobKind.SCHEDULE_CREATE if moves or create else ""
     elif row.collection == CollectionMethod.EMAIL and rent_run.provider_invoice(row) is not None:
         job_kind, moves = JobKind.INVOICE_CREATE, True
     _audit(
@@ -1179,6 +1255,156 @@ def _move(row: OneOffCharge, due: date, actor: User | None) -> None:
     )
     if job_kind:
         jobs.enqueue(job_kind, row, {RESCHEDULE_PARAM: True} if moves else None, actor)
+
+
+# --- Pause and Resume (PLAN-012f-b D16) -------------------------------------------------------
+
+
+def _is_billing(actor: User | None) -> bool:
+    return actor is not None and meets(role_of(actor), Role.BILLING)
+
+
+def _busy(plan: InstallmentPlan, rows: list[OneOffCharge]) -> bool:
+    """A provider request of an installment (a release, a schedule being set up or
+    moved) or the parent's release still waits: Pause and Resume are refused."""
+    if release_pending(plan):
+        return True
+    return any(jobs.is_active(jobs.latest_for(row)) for row in rows)
+
+
+def _releasable(rows: list[OneOffCharge]) -> list[OneOffCharge]:
+    """The unpaid installments, nothing paid on them, whose schedule is live and has not
+    fired: every debit Pause releases (D3-1: a paused plan moves no money)."""
+    return [
+        row
+        for row in rows
+        if row.status == OneOffChargeStatus.OWED
+        and row.amount_paid == 0
+        and release_kind(row) == JobKind.SCHEDULE_DELETE
+    ]
+
+
+def _business_days_after(day: date, count: int) -> list[date]:
+    """The ``count`` business days after ``day``, one apart (Monday to Friday)."""
+    # Imported here: the dashboard reads the grid, which reads this module.
+    from ledger.services.dashboard import add_business_days
+
+    return [add_business_days(day, number) for number in range(1, count + 1)]
+
+
+def pause(plan: InstallmentPlan, actor: User | None) -> Outcome:
+    """Pause an active plan (billing; see the module docstring)."""
+    if not _is_billing(actor):
+        return Outcome(False, PAUSE_BILLING)
+    with transaction.atomic():
+        locked, rows = _lock_plan(plan.pk)
+        if locked.status != InstallmentPlanStatus.ACTIVE:
+            return Outcome(False, PAUSE_NOT_ACTIVE)
+        if _busy(locked, rows):
+            return Outcome(False, SHIFT_BUSY)
+        before = plan_state(locked)
+        released = _releasable(rows)
+        locked.status = InstallmentPlanStatus.PAUSED
+        locked.save(update_fields=["status", "updated_at"])
+        _audit(
+            actor,
+            PAUSED_ACTION,
+            ENTITY_PLAN,
+            locked.pk,
+            before,
+            {
+                **plan_state(locked),
+                "released_installments": [row.installment_no for row in released],
+            },
+        )
+        for row in released:
+            _request_release(row, locked, JobKind.SCHEDULE_DELETE, actor)
+    return Outcome(True, PAUSED if released else PAUSED_NO_DEBIT, plan=locked)
+
+
+def debits_out_while_paused(plan: InstallmentPlan) -> list[str]:
+    """What the plan page says of a paused plan's installments whose schedule had already
+    made its invoice when Pause released it (D3-1): one sentence each, from the audit
+    rows the release job wrote since the latest pause."""
+    if plan.status != InstallmentPlanStatus.PAUSED:
+        return []
+    paused = (
+        AuditLog.objects.filter(
+            action=PAUSED_ACTION, entity_type=ENTITY_PLAN, entity_id=str(plan.pk)
+        )
+        .order_by("-at", "-id")
+        .first()
+    )
+    if paused is None:
+        return []
+    rows = {str(row.pk): row for row in installments_of(plan)}
+    fired = set(
+        AuditLog.objects.filter(
+            action=PAUSE_FIRED_ACTION,
+            entity_type=one_off_charges.ENTITY_ONE_OFF_CHARGE,
+            entity_id__in=list(rows),
+            at__gte=paused.at,
+        ).values_list("entity_id", flat=True)
+    )
+    return [
+        PAUSE_DEBIT_OUT.format(
+            label=plan_label(plan, row.installment_no or 0), date=day_text(row.due_date)
+        )
+        for key, row in rows.items()
+        if key in fired
+    ]
+
+
+def resume(plan: InstallmentPlan, actor: User | None, *, today: date | None = None) -> Outcome:
+    """Resume a paused plan (billing; see the module docstring)."""
+    if not _is_billing(actor):
+        return Outcome(False, PAUSE_BILLING)
+    day = today or timezone.localdate()
+    with transaction.atomic():
+        locked, rows = _lock_plan(plan.pk)
+        if locked.status != InstallmentPlanStatus.PAUSED:
+            return Outcome(False, RESUME_NOT_PAUSED)
+        if _busy(locked, rows):
+            return Outcome(False, SHIFT_BUSY)
+        before = plan_state(locked)
+        locked.status = InstallmentPlanStatus.ACTIVE
+        waiting = [
+            row
+            for row in rows
+            if row.collection == CollectionMethod.AUTOPAY_DUE
+            and _shiftable(row)
+            and not one_off_charges.provider_schedule(row)
+        ]
+        passed = [row for row in waiting if row.due_date < day]
+        moved: list[dict[str, object]] = []
+        # The passed ones from the next business day on, one business day apart, in order.
+        for row, due in zip(passed, _business_days_after(day, len(passed)), strict=True):
+            _move(row, due, actor)
+            moved.append({"installment_no": row.installment_no, "due": due.isoformat()})
+        for row in waiting:
+            if row not in passed:
+                jobs.enqueue(JobKind.SCHEDULE_CREATE, row, None, actor)
+        if moved:
+            locked.first_due = min(row.due_date for row in rows)
+        locked.save(update_fields=["status", "first_due", "updated_at"])
+        _audit(
+            actor,
+            RESUMED_ACTION,
+            ENTITY_PLAN,
+            locked.pk,
+            before,
+            {
+                **plan_state(locked),
+                "queued": [row.installment_no for row in waiting],
+                "moved": moved,
+            },
+        )
+        # A return or a payment on the parent left unresolved meanwhile: ``attention``.
+        one_off_charges.apply_plan_status(locked, actor=actor)
+    owed = [row.due_date for row in rows if row.status == OneOffChargeStatus.OWED]
+    if not owed:
+        return Outcome(True, RESUMED_NO_DEBIT, plan=locked)
+    return Outcome(True, RESUMED.format(date=day_text(min(owed))), plan=locked)
 
 
 # --- Cancel (D11) -----------------------------------------------------------------------------

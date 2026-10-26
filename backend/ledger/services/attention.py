@@ -25,6 +25,11 @@ page that deals with it and ``since``, the day it began:
   <amount> paid before its invoice was released; cancel or reschedule the plan"`` with
   the parent's label (``Rent 2026-10`` for a rent parent), linking to the plan; cleared
   once the plan is cancelled or completed;
+- ``installment_plan_paused`` (PLAN-012f-b D16): one ``low`` item per installment plan
+  paused more than :data:`PLAN_PAUSED_DAYS` days, ``"Installment plan paused for <n>
+  days: <store>, <parent>"`` (``Settlement plan`` for a settlement's,
+  :func:`ledger.services.installments.plan_name`), since its latest pause, linking to the
+  plan; cleared on Resume or Stop;
 - ``lease_end_balance`` (PLAN-012e D14): one item per confirmed lease end whose
   "Lease-end balance" charge is still open (not paid, waived or voided, a balance above
   zero), ``"Lease-end balance: <operator> on store <label>, <amount> open since
@@ -88,10 +93,12 @@ from finance.dates import day_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
     ZERO,
+    AuditLog,
     CollectionSchedule,
     CollectionStatus,
     ContactEntry,
     InstallmentPlan,
+    InstallmentPlanStatus,
     InsuranceCharge,
     InsurancePremium,
     Lease,
@@ -117,6 +124,7 @@ from ledger.services import (
     returns,
     workspace,
 )
+from ledger.services.one_off_charges import ENTITY_PLAN
 from ledger.wording import format_amount, provider_name, provider_sentence
 from payments.models import ReconciliationMismatch, WebhookEvent, WebhookOutcome
 
@@ -129,6 +137,7 @@ OVERDUE = "overdue"
 RETURNED_DEBIT = "returned_debit"
 INSTALLMENT_RETURNED = "installment_returned"
 SPLIT_CHARGE_PAID = "split_charge_paid"
+INSTALLMENT_PLAN_PAUSED = "installment_plan_paused"
 LEASE_END_BALANCE = "lease_end_balance"
 BROKEN_PROMISE = "broken_promise"
 INSURANCE_DUE = "insurance_due"
@@ -153,6 +162,7 @@ KINDS: tuple[str, ...] = (
     BROKEN_PROMISE,
     INSURANCE_PREMIUM_MISSING,
     INSURANCE_DUE,
+    INSTALLMENT_PLAN_PAUSED,
     LEASE_ENDING,
     LANDLORD_LEASE_ENDING,
     SCHEDULE_REVIEW,
@@ -169,6 +179,7 @@ KIND_LABELS: dict[str, str] = {
     RETURNED_DEBIT: "returned debits",
     INSTALLMENT_RETURNED: "installment plans with a returned debit",
     SPLIT_CHARGE_PAID: "split charges paid before their invoice was released",
+    INSTALLMENT_PLAN_PAUSED: "installment plans paused for a month",
     LEASE_END_BALANCE: "lease-end balances open",
     BROKEN_PROMISE: "broken promises",
     INSURANCE_PREMIUM_MISSING: "insurance premiums missing",
@@ -194,6 +205,7 @@ WHY_BADGES: dict[str, str] = {
     RETURNED_DEBIT: "returned",
     INSTALLMENT_RETURNED: "returned",
     SPLIT_CHARGE_PAID: "partial",
+    INSTALLMENT_PLAN_PAUSED: "pending",
     LEASE_END_BALANCE: "attention",
     BROKEN_PROMISE: "pending",
     INSURANCE_PREMIUM_MISSING: "needs premium",
@@ -216,6 +228,8 @@ INSURANCE_DAYS = 30
 LEASE_END_DAYS = 60
 LANDLORD_END_DAYS = 90
 VACANT_DAYS = 30
+#: An installment plan paused more than this many days is listed (PLAN-012f-b D16).
+PLAN_PAUSED_DAYS = 30
 #: Most items of one kind the dashboard lists.
 KIND_LIMIT = 25
 RETURNED_TEXT = "Returned debit not rescheduled: {store}, {amount}, returned {date}"
@@ -224,6 +238,7 @@ SPLIT_CHARGE_PAID_TEXT = (
     "Payment on a split charge: {store}, {parent}, {amount} paid before its invoice was "
     "released; cancel or reschedule the plan"
 )
+PLAN_PAUSED_TEXT = "{name} paused for {days} days: {store}, {parent}"
 LEASE_END_BALANCE_TEXT = (
     "Lease-end balance: {operator} on store {label}, {amount} open since {ended_on}"
 )
@@ -494,6 +509,54 @@ def _split_item(
         amount=paid,
     )
     return plan.updated_at, plan.pk, item
+
+
+def _plans_paused(today: date, operator: uuid.UUID | None) -> list[Item]:
+    """One item per plan paused more than :data:`PLAN_PAUSED_DAYS` days, since its
+    latest pause (its audit row; the plan's last change without one), longest paused
+    first (two queries)."""
+    plans = InstallmentPlan.objects.filter(status=InstallmentPlanStatus.PAUSED).select_related(
+        "lease__store", "operator", "rent_charge", "one_off_charge__fee_type"
+    )
+    if operator is not None:
+        plans = plans.filter(operator=operator)
+    found = {str(plan.pk): plan for plan in plans}
+    paused_at: dict[str, datetime] = {}
+    for entity_id, at in (
+        AuditLog.objects.filter(
+            action=installments.PAUSED_ACTION,
+            entity_type=ENTITY_PLAN,
+            entity_id__in=list(found),
+        )
+        .order_by("at", "id")
+        .values_list("entity_id", "at")
+    ):
+        paused_at[entity_id] = at
+    rows = []
+    for key, plan in found.items():
+        since = timezone.localdate(paused_at.get(key, plan.updated_at))
+        days = (today - since).days
+        if days <= PLAN_PAUSED_DAYS:
+            continue
+        store = plan.lease.store if plan.lease is not None else None
+        item = Item(
+            kind=INSTALLMENT_PLAN_PAUSED,
+            severity=LOW,
+            text=PLAN_PAUSED_TEXT.format(
+                name=installments.plan_name(plan.origin),
+                days=days,
+                store=store.external_label if store is not None else "No store",
+                parent=installments.parent_screen_label(plan.parent),
+            ),
+            url=reverse("ledger:plans:detail", kwargs={"pk": plan.pk}),
+            since=since,
+            operator_id=plan.operator_id,
+            store=store.external_label if store is not None else "",
+            store_id=store.pk if store is not None else None,
+            operator_name=plan.operator.display_name if plan.operator is not None else "",
+        )
+        rows.append((since, key, item))
+    return [item for _, _, item in sorted(rows, key=lambda row: (row[0], row[1]))]
 
 
 def _lease_end_balances(operator: uuid.UUID | None) -> list[Item]:
@@ -934,6 +997,7 @@ def attention(
         lambda: _returned(today, operator),
         lambda: _installments_returned(operator),
         lambda: _split_charges_paid(operator),
+        lambda: _plans_paused(today, operator),
         lambda: _lease_end_balances(operator),
         lambda: _promises(today, operator, balances),
         lambda: _insurance(today, leases),

@@ -71,6 +71,7 @@ GUARD_MODULES = (
     "ledger.migrations.0052_operator_kind",
     "ledger.migrations.0053_cash_method",
     "ledger.migrations.0054_installment_settlement",
+    "ledger.migrations.0055_installment_plan_paused",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",

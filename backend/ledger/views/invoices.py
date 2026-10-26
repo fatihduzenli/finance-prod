@@ -1119,7 +1119,9 @@ ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _preview_refused(message: str) -> JsonResponse:
-    return JsonResponse({"ok": False, "message": message}, status=400)
+    """A 400 with the preview's own short sentence for ``message`` (finding D2-2)."""
+    short = invoice_builder.SETTLEMENT_PREVIEW_SENTENCES.get(message, message)
+    return JsonResponse({"ok": False, "message": short}, status=400)
 
 
 @role_required

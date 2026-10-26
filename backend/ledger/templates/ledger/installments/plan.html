@@ -1,11 +1,12 @@
 {% extends "finance/base.html" %}
 {% load responsive dates %}
-{% block title %}Installment plan, {{ parent_label }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" %}<a href="{{ parent_url }}">{{ parent_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Installment plan</span></nav><h1>Installment plan, {{ parent_label }} <span class="badge" id="plan-status">{{ plan.get_status_display }}</span></h1></div>{% if can_reschedule or can_cancel %}<div class="page-actions">{% if can_reschedule %}<a class="btn" href="{% url 'ledger:plans:reschedule' pk=plan.pk %}" id="plan-reschedule">Reschedule</a>{% endif %}{% if can_cancel %}<a class="btn" href="{% url 'ledger:plans:cancel' pk=plan.pk %}" id="plan-cancel">Cancel plan</a>{% endif %}</div>{% endif %}</div>{% endblock %}
+{% block title %}{{ plan_name }}, {{ parent_label }}{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% include "ledger/_store_crumb.html" %}<a href="{{ parent_url }}">{{ parent_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ plan_name }}</span></nav><h1>{{ plan_name }}, {{ parent_label }} <span class="badge" id="plan-status">{{ plan.get_status_display }}</span></h1></div>{% if can_reschedule or can_cancel %}<div class="page-actions">{% if can_reschedule %}<a class="btn" href="{% url 'ledger:plans:reschedule' pk=plan.pk %}" id="plan-reschedule">Reschedule</a>{% endif %}{% if can_cancel %}<a class="btn" href="{% url 'ledger:plans:cancel' pk=plan.pk %}" id="plan-cancel">Stop plan</a>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
   <p class="muted" id="page-help">{{ plan_help }}</p>
   <p id="plan-progress"><strong>{{ progress.text }}</strong></p>
   {% if release_pending %}<p id="release-pending"><strong>{{ release_pending }}</strong></p>{% endif %}
+  {% for text in debits_out %}<p class="debit-out" id="debit-out-{{ forloop.counter }}"><strong>{{ text }}</strong></p>{% endfor %}
   <section class="card" id="plan-card">
   <dl id="plan-summary" class="detail-list">
     <dt>Operator</dt><dd>{{ plan.operator.display_name }}</dd>
@@ -15,6 +16,6 @@
     <dt>Created</dt><dd>{{ plan.confirmed_at|day }}{% if plan.created_by %} by {{ plan.created_by }}{% endif %}</dd>
     {% if plan.cancelled_at %}<dt>Cancelled</dt><dd id="plan-cancelled">{{ plan.cancelled_at|day }}: <span style="white-space:pre-wrap;">{{ plan.note }}</span></dd>{% endif %}
   </dl>
-  {% include "ledger/installments/_installments.html" with installments=progress.installments count=plan.count %}
+  {% include "ledger/installments/_installments.html" with progress=progress %}
   </section>
 {% endblock %}

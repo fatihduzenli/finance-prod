@@ -84,14 +84,15 @@
 {% endresponsive_table %}
 
 <h2>Installment plans</h2>
+{% comment %}PLAN-012f-b D16: each live plan (active, needs attention or paused) with its status word and the actions row.actions allows (ledger.services.installments.plan_actions), as the "Repeating debits" card: Pause and Resume (billing), Reschedule (billing), Stop (admin, its confirmation page).{% endcomment %}
 {% responsive_table %}
 <table id="store-plans">
-  <thead><tr><th>Plan</th><th>Installments</th><th>First due</th><th>Status</th></tr></thead>
+  <thead><tr><th>Plan</th><th>Installments</th><th>First due</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
   <tbody>
     {% for row in live_plans %}{% with plan=row.plan %}
-      <tr><td><a href="{% url 'ledger:plans:detail' pk=plan.pk %}">{% if plan.rent_charge %}Rent {{ plan.rent_charge.period_month|month }}{% elif plan.one_off_charge %}{{ plan.one_off_charge.label }}{% else %}Plan{% endif %}</a></td><td>{% if row.label %}{{ row.label }}{% else %}{{ plan.count }}{% endif %}, {{ plan.get_cadence_display|lower }}</td><td>{{ plan.first_due|day }}</td><td>{{ plan.get_status_display }}</td></tr>
+      <tr id="store-plan-{{ plan.pk }}"><td><a href="{% url 'ledger:plans:detail' pk=plan.pk %}">{% if plan.rent_charge %}Rent {{ plan.rent_charge.period_month|month }}{% elif plan.one_off_charge %}{{ plan.one_off_charge.label }}{% else %}Plan{% endif %}</a></td><td>{% if row.label %}{{ row.label }}{% else %}{{ plan.count }}{% endif %}, {{ plan.get_cadence_display|lower }}</td><td>{{ plan.first_due|day }}</td><td>{{ plan.get_status_display }}</td><td>{% include "ledger/installments/_plan_actions.html" with plan=plan actions=row.actions %}</td></tr>
     {% endwith %}{% empty %}
-      <tr><td colspan="4" class="muted empty">No live plan.</td></tr>
+      <tr><td colspan="5" class="muted empty">No live plan.</td></tr>
     {% endfor %}
   </tbody>
 </table>

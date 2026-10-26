@@ -1198,19 +1198,25 @@ class OneOffCharge(GuardedModel):
 
 class InstallmentPlanStatus(models.TextChoices):
     """``active`` while installments are open; ``attention`` while one of them has a
-    returned payment not resolved; ``completed`` once every installment is paid;
-    ``cancelled`` by an admin (the unpaid installments are cancelled)."""
+    returned payment not resolved; ``paused`` by billing (PLAN-012f-b D16: the next
+    debit's schedule released, set up again on Resume); ``completed`` once every
+    installment is paid; ``cancelled`` by an admin (the unpaid installments are
+    cancelled; the screens say Stop)."""
 
     ACTIVE = "active", "Active"
     ATTENTION = "attention", "Needs attention"
+    PAUSED = "paused", "Paused"
     COMPLETED = "completed", "Completed"
     CANCELLED = "cancelled", "Cancelled"
 
 
-#: The plan statuses in which the plan, not its parent, carries the balance.
+#: The plan statuses in which the plan, not its parent, carries the balance. A paused
+#: plan still does (its installments stay owed); what sets up or shows its debits leaves
+#: it out (PLAN-012f-b D16).
 LIVE_PLAN_STATUSES: list[str] = [
     InstallmentPlanStatus.ACTIVE.value,
     InstallmentPlanStatus.ATTENTION.value,
+    InstallmentPlanStatus.PAUSED.value,
 ]
 
 

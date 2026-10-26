@@ -358,6 +358,9 @@ NOT_PAGES: dict[str, str] = {
     "ledger:calendar:delete": POST_ONLY,
     "ledger:statement_link": "the operator's own signed statement page (out of scope, §2)",
     "ledger:invoices:rent_amount": "the builder's rent amount (JSON for its script)",
+    "ledger:invoices:settlement_preview": (
+        "Schedule settlement's preview sentence (JSON for the builder's script)"
+    ),
     "ledger:search_stores": "the store picker's rows (JSON for the picker's script)",
     "ledger:invoices:print": "the invoice document's print page (its own layout)",
     "ledger:lease_ends:pdf": "the statement PDF",
@@ -383,6 +386,8 @@ for _name in (
     "ledger:stores:plan_pause",
     "ledger:stores:plan_resume",
     "ledger:stores:plan_end",
+    "ledger:plans:pause",
+    "ledger:plans:resume",
     "ledger:leases:pause",
     "ledger:leases:resume",
     "ledger:lease_ends:cancel",
@@ -626,7 +631,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     ),
     "ledger:plans:cancel": lambda w: (
         [*_store(w), "Installment plan"],
-        "Cancel the installment plan",
+        "Stop this plan?",
     ),
     "ledger:invoices:new_store": lambda w: (_store(w), "New invoice"),
     "ledger:invoices:new_operator": lambda w: (["Operators", "Walk Co"], "New invoice"),
