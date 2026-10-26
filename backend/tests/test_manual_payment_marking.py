@@ -639,10 +639,10 @@ def test_the_run_and_charge_pages_show_the_carried_balance(billing: Client) -> N
         amount_paid=D("1000.00"), status=RentChargeStatus.PARTIAL
     )
     page = billing.get("/run/").content.decode()
-    assert (
-        '<td class="money carried-balance" data-role="meta" data-label="Carried balance">'
-        "$500.00</td>" in page
-    )
+    # PLAN-012f-b Batch E: the Due today row's carried balance, red when owed (its roles
+    # come from the responsive-table tag).
+    cell = page[page.index('class="money carried-balance tone-unpaid"') :]
+    assert "$500.00" in cell[: cell.index("</td>")]
     rent_run.create_charges(DAY, actor=None)
     detail = billing.get(f"/charges/{charge_of(row).pk}/").content.decode()
     assert '<dd id="carried-balance">$500.00' in detail
