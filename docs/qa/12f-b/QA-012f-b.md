@@ -84,3 +84,55 @@ signed out and 403 to a viewer; markup in a store, operator or note name is data
 surface.
 
 **Verdict (A):** **PASS.** Every gate clean on both engines; one MAJOR and two MINOR resolved; A3-1 deferred to Batch B's pull request by written decision; the departures listed for the checkpoint.
+
+
+
+## Batch B — stores and operators (branch `step-12f-b/batch-b`, findings 3 and 7)
+
+**Scope.** Opus, four briefs, four commits (734eb9b, a4b5bec, 423153f, 8254a4f). B-1: New / Edit
+store and New / Edit operator as 640 px dialogs over the list or the record page (a full-screen
+sheet on phones), the old URLs rendering the page with the dialog open, POST-redirect-GET kept, a
+refused form re-opening the dialog with the errors under the fields; a new record lands on its own
+page with "… added." B-3: `StoreType` (five seeded, edited in the admin on the audited pattern, the
+admin group granted view/add/change in the migration) and the grey pill on the store header, the
+Stores list, the Monthly rent overview and the operator's store cards; the State select (50 states
+and DC by name, codes stored; migration 0051 maps the free text, keeps an audit row for what it
+could not map; "State needs choosing" in Needs review); landlord rent optional (empty writes no cost
+row: unknown, never zero; "Not entered" on the store page). B-2: `Operator.kind` with company,
+contact person, first and last name (migration 0052, the operators trigger recreated over the three
+text columns); the display name derived on save and kept for existing operators, who become Person
+with empty names; the search matches first and last names. B-4: the USPS address check
+(`finance/usps.py`, a bounded httpx client with no retry; `USPS_CLIENT_ID` / `USPS_CLIENT_SECRET`
+optional as a pair in `env_guard`, redacted from logs and Sentry; `ledger:stores:check_address`,
+POST, billing, JSON; "Use this / Keep mine"; the form saves without it); the Type pair as a
+segmented control; the transfer page's company shown once. Fable:
+`tests/test_plan012fb_b_adversarial.py` (34 cases), the route and choice digests re-pinned (268
+routes; `OperatorKind`), the Batch A MINOR A3-1 closed here (the phone chart's labels).
+
+**Findings.** B1-1 (MAJOR, resolved): a new operator or store landed on the list, hiding the
+operator's sync state and the store's setup checklist; both land on the new record's page (a
+departure from "the list behind it refreshes in place", for the checkpoint). B1-2 (MINOR, resolved):
+the form dialogs are full-screen on phones. B3-1 (MAJOR, pre-existing, resolved): Django's default
+refusal of a wrong select value repeated the posted value in the page, so a posted card number came
+back on the store, lease and calendar forms (Fable's probe); every select in the forms module now
+refuses with one fixed sentence, with a test that posts a card number to every form. B2-1 / B2-2 /
+B2-3 (MINOR, resolved): the transfer page's "Acme (Acme)", the unstyled Type pair, the other kind's
+names kept on a scripts-off save. Opus's own finding on B-3 (the state select's refusal echoed the
+value) was fixed in the slice. A3-1 from Batch A (MINOR, resolved here).
+
+**Departures from the owner's message, for the checkpoint.** New records land on their own page, not
+the list (B1-1). The full state name is shown wherever a store's state is printed, including the
+address line. The USPS token's scope and the type of `expires_in` are unconfirmed without
+credentials (TODO-VERIFY-065); no real USPS call was made. The provider still receives the display
+name as the customer's first name (the PLAN-006 contract), not the new first and last fields. Five
+admin routes and one JSON route were added (the owner's "no new URLs" cannot hold with a registered
+admin list).
+
+**Gate.** ruff, `ruff format --check` (501 files), mypy strict (501 files), `uv lock --check`, `makemigrations --check` after 0051 and 0052: clean; the pattern scan's only hits are the two route digests. sqlite: full suite 7,381 passed, 690 skipped, 104 deselected in 951 s; three pins moved by design and re-pinned by Fable (the full state name in the address line, the empty landlord rent allowed, the address-check route POST-only), their files re-run: 45 passed. PostgreSQL 16: migration selection 36 passed in 902 s (the round trips of 0051 and 0052 included), unit selection 8,031 passed, 3 skipped, 107 deselected with four failures: the three pins (re-run on the container after the re-pin, 70 passed) and the grid's query budget (20 queries for 19: the new state filter's distinct-states query, finding B3-2 below; after the fix the budget test and the grid's file passed on the container, 50 passed); e2e: the operator double-click test could not click the Type radio, which the segmented control keeps unseen by design, so the test clicks its label (7265b9e); the shell's sidebar test failed once in four runs with the machine at a load average of 19 and passed on every re-run; after the fix the full browser suite passed twice on the container (35 and 35). Visual: every baseline regenerated in the Playwright image against PostgreSQL and the suite compared on PostgreSQL (56 passed) and on sqlite (56 passed); twenty-four baselines changed: dashboard (the phone chart's labels), grid, stores, the six store tabs (the state name in the header), new-store and operator-form (the dialogs), search-new-invoice (the state name) at both widths; the other thirty-two unchanged. Shots: `docs/qa/12f-b/shots/b/`: the twenty-four changed baselines (1280 and 390), reviewed at both widths; one pre-existing copy nit noted for Batch E (the Status select's blank label reads "---------"). Secret
+scans clean over the diff and the new files; `.env.example` names the two USPS variables with no
+values; no secret-store read; no credential value anywhere (placeholders only in the tests); the
+USPS module logs the host, status and latency only; no provider name in the new files; every new GET
+writes nothing; the check route refuses GET (405), a viewer (403) and no session (401); a card
+number posted to any form never comes back.
+
+**Verdict (B):** **PASS.** Every gate clean on both engines after the re-pins and B3-2; two MAJOR and six MINOR resolved; the departures listed for the checkpoint; residual: the shell's sidebar browser test failed once in four runs on a saturated machine and passed on every re-run (recorded, not reproduced); no real USPS call (TODO-VERIFY-065); PostgreSQL ran the migrations' round trips but not the USPS client against the live service.
