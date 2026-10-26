@@ -166,6 +166,26 @@ def test_the_pending_payment_of_another_fee_leaves_this_one_alone() -> None:
     assert result.pending == 0
 
 
+@pytest.mark.parametrize(
+    ("due", "box", "balance"),
+    [(date(2026, 10, 2), "overdue", "250.00"), (NEXT_WEEK, "upcoming", "250.00")],
+)
+def test_a_pending_refund_does_not_make_a_fee_pending(due: date, box: str, balance: str) -> None:
+    """Fable's MINOR on A5: an owed fee whose payment was refunded, half settled and half
+    still in flight, is owed by its date, not pending: nothing is being collected on it.
+    The card reads the fee's stored status and amount paid (owed, nothing paid) and the
+    payments only for one in flight that is not a refund."""
+    fee = a_fee("250.00", due)
+    paid = a_one_off_payment(fee, "100.00", PaymentStatus.SETTLED)
+    for status in (PaymentStatus.SETTLED, PaymentStatus.PENDING):
+        refund = a_one_off_payment(fee, "50.00", status)
+        refund.is_refund, refund.parent_payment = True, paid
+        refund.save(update_fields=["is_refund", "parent_payment"])
+    result = card()
+    assert boxes(result)[box] == (1, D(balance))
+    assert result.pending == 0
+
+
 @pytest.mark.parametrize("status", [OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
 @pytest.mark.parametrize("due", [date(2026, 10, 2), NEXT_WEEK])
 def test_a_waived_or_voided_fee_is_nowhere(status: str, due: date) -> None:

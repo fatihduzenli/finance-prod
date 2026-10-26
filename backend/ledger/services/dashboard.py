@@ -606,8 +606,8 @@ PAYMENT_STATUS_SKIPPED_CATEGORIES: tuple[str, ...] = (
 
 def _one_off_family(status: str, amount_paid: Decimal, has_pending: bool) -> str:
     """A one-off charge's status in the grid's words (D20): paid; waived or voided as
-    waived (nowhere); a pending payment as pending; else partly paid when anything is paid,
-    unpaid otherwise."""
+    waived (nowhere); a pending payment (not a refund) as pending; else partly paid when
+    anything is paid, unpaid otherwise."""
     if status == OneOffChargeStatus.PAID:
         return grid.STATUS_PAID
     if status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
@@ -633,7 +633,7 @@ def payment_status(selected: Range, today: date) -> PaymentStatusCard:
         due_on__gte=selected.from_month, due_on__lte=selected.end
     ).values_list("status", "due_on", "amount_due", "amount_paid")
     pending_payment = Payment.objects.filter(
-        one_off_charge=OuterRef("pk"), status=PaymentStatus.PENDING
+        one_off_charge=OuterRef("pk"), status=PaymentStatus.PENDING, is_refund=False
     )
     one_off_rows = (
         OneOffCharge.objects.filter(due_date__gte=selected.from_month, due_date__lte=selected.end)
