@@ -223,3 +223,40 @@ def test_the_strip_before_any_run_is_quiet_and_names_no_processor_in_source() ->
     assert "stax" not in template.lower().replace(
         "stax_", ""
     )  # the processor's name comes from the settings
+
+
+# --- Slice E-3: Help ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "slug", ["no-such-topic", MARKUP, "..%2F..%2Fetc", "store-costs%00", "A" * 300]
+)
+def test_an_unknown_help_topic_answers_404_in_the_shell_and_writes_nothing(slug: str) -> None:
+    billing, _ = client_for(Role.BILLING)
+    before = row_counts()
+    response = billing.get(f"/help/{slug}/")
+    assert response.status_code in (400, 404)
+    body = response.content.decode()
+    assert MARKUP not in body and "Traceback" not in body
+    assert row_counts() == before
+
+
+def test_every_help_page_is_a_read_for_every_role_and_the_filter_script_sends_nothing() -> None:
+    from pathlib import Path
+
+    from finance.help import TOPICS
+
+    viewer, _ = client_for(Role.VIEWER)
+    before = row_counts()
+    assert viewer.get("/help/").status_code == 200
+    for topic in TOPICS:
+        page = viewer.get(f"/help/{topic.slug}/")
+        assert page.status_code == 200, topic.slug
+        body = page.content.decode()
+        assert "min read" in body and "Was this helpful" not in body
+    assert row_counts() == before
+    script = (
+        Path(__file__).resolve().parents[1] / "finance" / "static" / "finance" / "help_filter.js"
+    ).read_text(encoding="utf-8")
+    for forbidden in ("fetch(", "XMLHttpRequest", "innerHTML", "insertAdjacentHTML", "eval("):
+        assert forbidden not in script, forbidden
