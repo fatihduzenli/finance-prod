@@ -75,6 +75,6 @@
     </div>
     <p class="muted pnl-foot" id="pnl-foot">Deposits are money held for operators, not revenue; only the part withheld at a lease end counts as collected. <a href="{% url 'finance:help_topic' slug='store-costs' %}" id="pnl-help">How this report is built</a></p>
   </section>
-  <p class="muted pnl-explained" id="pnl-explained">Billed: rent charges by rent month (waived ones left out), setup fees by due date and insurance by due date. Collected: settled payments by settled date, less their settled refunds, plus withheld deposits by resolution date. Landlord rent and other costs are the store's cost row in effect on the first of the month, counted once per store and month. A margin is "unknown" when a cost is not known: a store whose landlord rent is not entered is never counted as zero. A cost-only row is a month in which the store is held and no lease is active. Credits are money received and not yet applied to a charge, held for operators, not revenue: a credit counts as collected only when it is applied to a charge, in the month applied.</p>
+  <p class="muted pnl-explained" id="pnl-explained">A margin is "unknown" when a cost is not known: a store whose landlord rent is not entered is never counted as zero.</p>
   {% endif %}
 {% endblock %}

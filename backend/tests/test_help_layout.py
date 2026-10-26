@@ -223,3 +223,19 @@ def test_a_topic_costs_no_query_beyond_the_index(viewer: Client) -> None:
     with CaptureQueriesContext(connection) as topic:
         viewer.get("/help/store-costs/")
     assert len(topic.captured_queries) == len(index.captured_queries)
+
+
+def test_the_pnl_method_is_on_the_store_costs_topic(viewer: Client) -> None:
+    # PLAN-012f-b E1-2: the report keeps one short line; the explanation is here, where its
+    # "How this report is built" points.
+    html = page(viewer, "/help/store-costs/")
+    method = text_of(between(html, 'id="help-pnl-method">', "</p>")).replace("&amp;", "&")
+    assert method.startswith("How the P&L is built.")
+    for text in (
+        "Billed: rent charges by rent month",
+        "plus withheld deposits by resolution date",
+        "counted once per store and month",
+        "A cost-only row is a month in which the store is held",
+        "A credit counts as collected only when it is applied to a charge, in the month applied.",
+    ):
+        assert text in method, text
