@@ -543,7 +543,9 @@ def test_two_pauses_at_the_same_moment_leave_one_release(fake: FakeProvider, wor
         thread.join(timeout=60)
     assert not errors, errors
     assert sorted(outcome.ok for outcome in outcomes) == [False, True]
-    assert len(releases()) == 1
+    # D3-1: the winning pause released every unfired schedule, one per installment; the
+    # losing one released nothing.
+    assert len(releases()) == 3
     assert AuditLog.objects.filter(action=installments.PAUSED_ACTION).count() == 1
 
 
@@ -652,12 +654,16 @@ def test_a_stopped_plan_leaves_the_tab_and_offers_nothing(fake: FakeProvider) ->
 
 @pytest.mark.parametrize(("days", "listed"), [(30, False), (31, True), (90, True)])
 def test_a_plan_paused_over_30_days_lands_in_needs_review(
-    fake: FakeProvider, days: int, listed: bool
+    fake: FakeProvider, days: int, listed: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lease = a_store_lease(fake)
     plan = plan_for(a_one_off(op(lease), lease=lease))
-    assert installments.pause(plan, a_user(Role.BILLING)).ok
-    AuditLog.objects.filter(action=installments.PAUSED_ACTION).update(at=NOW - timedelta(days=days))
+    # The pause happened ``days`` ago: the clock is turned back for it (the audit log is
+    # append-only on PostgreSQL, so its rows are never updated by hand).
+    then = NOW - timedelta(days=days)
+    with monkeypatch.context() as clock:
+        clock.setattr("django.utils.timezone.now", lambda: then)
+        assert installments.pause(plan, a_user(Role.BILLING)).ok
     found = [
         item
         for item in attention.attention(TODAY).items

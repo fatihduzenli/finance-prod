@@ -1175,9 +1175,10 @@ def test_the_installments_migration_over_an_existing_row_on_postgresql(
             scratch.execute("UPDATE one_off_charges SET category = 'installment'")
     plan = (
         "INSERT INTO installment_plans (id, one_off_charge_id, operator_id, count, "
-        "first_due, cadence, collection, status, confirmed_at, note, created_at, updated_at) "
+        "first_due, cadence, collection, status, confirmed_at, note, created_at, updated_at, "
+        "origin) "  # origin since PLAN-012f-b Batch D (0054)
         "VALUES (%s, %s, %s, 3, '2026-11-01', 'monthly', 'manual', 'active', now(), %s, "
-        "now(), now())"
+        "now(), now(), 'split')"
     )
     # The plan's note is guarded by the trigger.
     with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
