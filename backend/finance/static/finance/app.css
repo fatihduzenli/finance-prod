@@ -1105,6 +1105,32 @@ th.cell-chevron, td.cell-chevron { width: 1%; padding-left: 0; text-align: right
 td.cell-chevron a { display: inline-flex; color: var(--muted); }
 td.cell-chevron a:hover { color: var(--text); }
 
+/* --- Report family (PLAN-012f-b E-1) ---------------------------------------------------------
+   DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png. The filter card's one row with
+   the navy Show at its right (.pnl-show); the four .kpi cards (.tone-paid: a green figure);
+   the table card: its header (the title, the muted count line, the held pills at the right,
+   .pnl-held), the two-row header with its group heads centred (.grp-head) and a hairline at
+   the left of each column group (.grp-start), the margins bold, a negative in the unpaid text
+   colour (.negative), an unknown amount as a muted "unknown" (the faint token is decoration
+   only, §1), the muted footer sentence; the method under the card (.pnl-explained). The table
+   scrolls sideways inside its card when the window is narrow; the phone draws the rows as
+   the two-line cards of the cards tables. */
+.pnl-filters .pnl-detail-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+.pnl-filters .pnl-show { margin-left: auto; }
+.kpi-value.tone-paid { color: var(--paid-text); }
+.kpi .unknown { color: var(--muted); font-weight: 600; }
+.pnl-held { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); margin-left: auto; }
+.pnl-card .table-cards { overflow-x: auto; }
+.pnl-table th.grp-head { text-align: center; }
+.pnl-table .grp-start { border-left: 1px solid var(--border-soft); }
+.pnl-table td.money, .pnl-table th.money { padding-left: 10px; padding-right: 10px; }
+.pnl-table td.margin-billed, .pnl-table td.margin-collected { font-weight: 700; }
+.pnl-table .negative { color: var(--unpaid-text); }
+.pnl-table .unknown { color: var(--muted); font-weight: 400; }
+.pnl-table tr.totals .unknown { font-weight: 600; }
+.pnl-foot { font-size: var(--fs-sm); }
+.pnl-explained { font-size: var(--fs-sm); }
+
 /* --- Detail family (PLAN-012f-a D4) ----------------------------------------------------------
    DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png; the rent charge, payment, sent invoice,
    lease and calendar entry pages follow. The header (.detail-head) holds the breadcrumb, the
@@ -1410,6 +1436,16 @@ p.detail-more-notes { padding-left: 0; }
   .table-cards > table.role-cards tr.totals > th, .table-cards > table.role-cards tr.totals > td { width: auto; padding-left: 0; background: transparent; }
   .table-cards > table.role-cards tr.totals > td::before { content: none; }
   .table-cards > table.role-cards tr.totals > td.money { text-align: right; }
+  /* Report family (PLAN-012f-b E-1): no column-group hairlines, the held pills and Show at the
+     left; the P&L's total has ten figures, so its card lists them "Label value", wrapping like
+     a row's meta line, under the word Total. */
+  .pnl-table .grp-start { border-left: 0; }
+  .pnl-held { margin-left: 0; }
+  .pnl-filters .pnl-show { margin-left: 0; flex: 1 0 100%; }
+  .table-cards > table.pnl-table.role-cards tr.totals { flex-wrap: wrap; justify-content: flex-start; column-gap: var(--space-3); }
+  .table-cards > table.pnl-table.role-cards tr.totals > th { flex: 0 0 100%; }
+  .table-cards > table.pnl-table.role-cards tr.totals > td.money { text-align: left; }
+  .table-cards > table.pnl-table.role-cards tr.totals > td[data-label]::before { content: attr(data-label) " "; position: static; width: auto; color: var(--muted); font-size: var(--fs-sm); font-weight: 500; }
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
   /* The phone keeps the sideways scroll and the fixed store column, narrower. */
   table.grid th.store-col { width: 8rem !important; min-width: 8rem !important; max-width: 9rem !important; white-space: normal !important; }

@@ -643,6 +643,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:reports:revenue": lambda w: (["Reports"], "Revenue by month"),
     "ledger:reports:payments_by_method": lambda w: (["Reports"], "Payments by method"),
     "ledger:reports:deposits": lambda w: (["Reports"], "Bank account check"),
+    # PLAN-012f-b E-1: the report family's header (DESIGN-SPEC §4 Profit and loss).
+    "ledger:reports:pnl": lambda w: (["Reports"], "Profit and loss"),
     "ledger:contacts:edit": lambda w: (["Contact log"], "Edit contact entry"),
     "ledger:contacts:correct": lambda w: (["Contact log"], "Add a correction"),
     # PLAN-012f-b E-4: Delete contact entry is its dialog over the operator page, whose own
@@ -660,7 +662,6 @@ NO_PARENT = (
     "ledger:returns:list",
     "ledger:arrears:page",
     "ledger:reports:index",
-    "ledger:reports:pnl",
     "ledger:webhooks:list",
     "ledger:disputes:page",
     "ledger:reconciliation:page",

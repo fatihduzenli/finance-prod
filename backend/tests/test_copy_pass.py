@@ -492,7 +492,9 @@ PAIRS: list[tuple[str, str, str]] = [
         "nightly reconciliation's deposit step",
         "nightly check's bank-deposit step",
     ),
-    ("reports/pnl.html", "<th>Flags</th>", "<th>Notes</th>"),
+    # PLAN-012f-b E-1: DESIGN-SPEC §4 Profit and loss (the owner's copy of 2026-10-24) names
+    # the column Flags again; its header cell carries attributes now.
+    ("reports/pnl.html", "<th>Notes</th>", ">Flags</th>"),
     ("run/today.html", "dead-lettered", f"from {P}"),
     (
         "run/today.html",

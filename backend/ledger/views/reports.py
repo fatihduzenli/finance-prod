@@ -100,7 +100,6 @@ def _too_slow(request: HttpRequest, query: pnl.PnlQuery) -> HttpResponse:
             "group_choices": pnl.GROUP_CHOICES,
             "group_label": dict(pnl.GROUP_CHOICES)[query.group],
             "export_query": urlencode(query.as_query()),
-            "toggle_query": _toggle(query),
             "picker_months": grid.picker_months(query),
         },
     )
@@ -124,13 +123,16 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
         rows, groups, held, credits_held = bounded(compute)
     except ReportTooSlow:
         return _too_slow(request, query)
+    total = pnl.total(rows)
     return render(
         request,
         "ledger/reports/pnl.html",
         {
             "query": query,
             "groups": groups,
-            "total": pnl.total(rows),
+            "group_lines": _group_lines(groups, query.group),
+            "total": total,
+            "kpis": _kpis(total, rows),
             "row_count": len(rows),
             "cost_only_count": sum(1 for row in rows if row.cost_only),
             "deposits_held": held,
@@ -138,18 +140,36 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
             "group_choices": pnl.GROUP_CHOICES,
             "group_label": dict(pnl.GROUP_CHOICES)[query.group],
             "export_query": urlencode(query.as_query()),
-            "toggle_query": _toggle(query),
             "picker_months": grid.picker_months(query),
         },
     )
 
 
-def _toggle(query: pnl.PnlQuery) -> str:
-    """The same query with the breakdown switched."""
-    values = {name: value for name, value in query.as_query().items() if name != "detail"}
-    if not query.detail:
-        values["detail"] = "1"
-    return urlencode(values)
+def _kpis(total: pnl.Figures, rows: list[pnl.PnlRow]) -> dict[str, Any]:
+    """The four cards over the table (DESIGN-SPEC §4 Profit and loss), from the total: Billed
+    and Collected are its rent and fees summed (Costs and Margin are the total's own, unknown
+    when any input is); ``unknown_stores`` counts the stores with an unknown input, for the
+    Margin card's "why" line."""
+    return {
+        "billed": total.rent_billed + total.fees_billed,
+        "collected": total.rent_collected + total.fees_collected,
+        "unknown_stores": len({row.store_id for row in rows if row.unknown}),
+    }
+
+
+def _group_lines(groups: list[pnl.PnlGroup], group: str) -> list[tuple[pnl.PnlGroup, str]]:
+    """Each group with its first cell's second line: by store, the operators of its rows that
+    are not cost-only, each once in order ("—" when there are none: a vacant store); by
+    operator or month, none."""
+    if group != pnl.GROUP_STORE:
+        return [(item, "") for item in groups]
+    return [
+        (
+            item,
+            ", ".join(dict.fromkeys(row.operator for row in item.rows if not row.cost_only)) or "—",
+        )
+        for item in groups
+    ]
 
 
 @role_required

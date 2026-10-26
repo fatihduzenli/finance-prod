@@ -1,24 +1,20 @@
 {% extends "finance/base.html" %}
 {% load money responsive dates %}
 {% block title %}Profit and loss{% endblock %}
-{% block header %}<div class="page-header"><h1>Profit and loss</h1></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Profit and loss</span></nav><h1>Profit and loss</h1></div><div class="page-actions no-print"><button class="btn" type="button" id="pnl-print" onclick="window.print()">Print</button><a class="btn" id="export-csv" href="{% url 'ledger:reports:pnl_export' %}?{{ export_query }}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
-  {% comment %}print.css (base.html, PLAN-012c D6): with the rows shown (.pnl-detail), each store group starts a new page.{% endcomment %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:reports:pnl' %}" id="pnl-filters" role="search">
-    <div class="actions">
-      <label for="from" style="margin:0;">From</label>
-      {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}
-      <label for="to" style="margin:0;">To</label>
-      {% include "ledger/_month_select.html" with name="to" months=picker_months selected=query.to_month %}
-      <label for="group" style="margin:0;">Group by</label>
-      <select name="group" id="group">
-        {% for value, label in group_choices %}<option value="{{ value }}"{% if value == query.group %} selected{% endif %}>{{ label }}</option>{% endfor %}
-      </select>
-      <label style="margin:0;font-weight:normal;"><input type="checkbox" name="detail" value="1" id="detail"{% if query.detail %} checked{% endif %}> Show the rows</label>
-      <button class="btn" type="submit">Show</button>
-      <a class="btn" id="export-csv" href="{% url 'ledger:reports:pnl_export' %}?{{ export_query }}">Download spreadsheet</a>
-      <a class="btn" id="toggle-detail" href="?{{ toggle_query }}">{% if query.detail %}Hide the rows{% else %}Show the rows{% endif %}</a>
-    </div>
+  {% comment %}The report family (DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png; PLAN-012f-b E-1): the filter card, the four figures, the table card. No State filter or grouping (the owner's exclusion, plan D17). print.css (base.html, PLAN-012c D6): with the rows shown (.pnl-detail), each store group starts a new page.{% endcomment %}
+  <div class="card filter-card"><form method="get" action="{% url 'ledger:reports:pnl' %}" id="pnl-filters" class="actions list-filters pnl-filters" role="search">
+    <span class="filter-field"><label for="from">From</label>
+    {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}</span>
+    <span class="filter-field"><label for="to">To</label>
+    {% include "ledger/_month_select.html" with name="to" months=picker_months selected=query.to_month %}</span>
+    <span class="filter-field"><label for="group">Group by</label>
+    <select name="group" id="group">
+      {% for value, label in group_choices %}<option value="{{ value }}"{% if value == query.group %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></span>
+    <label class="pnl-detail-check" for="detail"><input type="checkbox" name="detail" value="1" id="detail"{% if query.detail %} checked{% endif %}> Show the rows</label>
+    <button class="btn btn-dark pnl-show" type="submit">Show</button>
   </form></div>
   {% if query.messages %}
     <ul class="messages" id="pnl-messages">{% for text in query.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
@@ -27,48 +23,58 @@
   {% if too_slow %}
     <p class="warning" id="pnl-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted">{{ query.from_month|month }} to {{ query.to_month|month }}, by {{ group_label|lower }}; {{ row_count }} store, operator and month row{{ row_count|pluralize }}{% if cost_only_count %}, {{ cost_only_count }} cost-only{% endif %}. Amounts in US dollars. Billed: rent charges by rent month (waived ones left out), setup fees by due date and insurance by due date. Collected: settled payments by settled date, less their settled refunds, plus withheld deposits by resolution date. Landlord rent and other costs are the store's cost row in effect on the first of the month, counted once per store and month. A margin is "unknown" when a cost is not known. A cost-only row is a month in which the store is held and no lease is active.</p>
-
-  <div class="card table-card"><div class="pnl-print{% if query.detail %} pnl-detail{% endif %}">
-  {% responsive_table "scroll" %}
-  <table id="pnl">
-    <thead>
-      <tr><th>{{ group_label }}</th><th class="money">Rent billed</th><th class="money">Rent collected</th><th class="money">Fees billed</th><th class="money">Fees collected</th><th class="money">Landlord rent</th><th class="money">Other costs</th><th class="money">Fee costs</th><th class="money">Margin (billed)</th><th class="money">Margin (collected)</th><th>Notes</th></tr>
-    </thead>
-    <tbody>
-      {% for group in groups %}
-        <tr class="pnl-group">
-          <th scope="row">{{ group.label }}</th>
-          {% include "ledger/reports/_figures.html" with item=group %}
-          <td>{% if group.unknown %}<span class="badge unknown-flag">Unknown: {{ group.unknown|join:", " }}</span> {% endif %}{% if group.cost_only_count %}<span class="badge cost-only-flag">{{ group.cost_only_count }} cost-only</span>{% endif %}</td>
-        </tr>
-        {% if query.detail %}
-          {% for row in group.rows %}
-            <tr class="pnl-row{% if row.cost_only %} cost-only{% endif %}"{% if row.cost_only %} style="background:var(--pending-bg);"{% endif %}>
-              <td style="padding-left:1.5rem;">{{ row.store }} · {{ row.operator }} · {{ row.month|month }}</td>
-              {% include "ledger/reports/_figures.html" with item=row %}
-              <td>{% if row.cost_only %}<span class="badge">Cost only</span> {% endif %}{% if row.unknown %}<span class="badge">Unknown: {{ row.unknown|join:", " }}</span>{% endif %}</td>
-            </tr>
-          {% endfor %}
-        {% endif %}
-      {% empty %}
-        <tr><td colspan="11" class="muted empty">Nothing billed, collected or held in these months.</td></tr>
-      {% endfor %}
-    </tbody>
-    <tfoot>
-      <tr class="totals" id="pnl-total">
-        <th scope="row">Total</th>
-        {% include "ledger/reports/_figures.html" with item=total %}
-        <td>{% if total.unknown %}<span class="badge">Unknown: {{ total.unknown|join:", " }}</span>{% endif %}</td>
-      </tr>
-    </tfoot>
-  </table>
-  {% endresponsive_table %}
-  </div></div>
-
-  <section class="card" id="held-card">
-  <p id="deposits-held"><strong>Deposits held</strong> at {{ query.end|day }}: <span id="deposits-held-amount">{{ deposits_held|money }}</span>. <span class="muted">Deposits are money held for operators, not revenue: they are in no figure above except the part withheld at the end of a lease.</span></p>
-  <p id="credits-held"><strong>Credits held</strong> at {{ query.end|day }}: <span id="credits-held-amount">{{ credits_held|money }}</span>. <span class="muted">Credits are money received and not yet applied to a charge, held for operators, not revenue: a credit counts as collected only when it is applied to a charge, in the month applied.</span></p>
+  <section class="kpi-row pnl-kpis" id="pnl-kpis" aria-label="Figures">
+    <div class="kpi" id="kpi-billed"><span class="kpi-label">Billed</span><span class="kpi-value">{{ kpis.billed|money }}</span><span class="kpi-note">rent {{ total.rent_billed|money }} · fees {{ total.fees_billed|money }}</span></div>
+    <div class="kpi" id="kpi-collected"><span class="kpi-label">Collected</span><span class="kpi-value tone-paid">{{ kpis.collected|money }}</span>{% if total.withheld_deposits %}<span class="kpi-note">incl. {{ total.withheld_deposits|money }} withheld deposit</span>{% endif %}</div>
+    <div class="kpi" id="kpi-costs"><span class="kpi-label">Costs</span><span class="kpi-value">{% if total.costs is None %}<span class="unknown">unknown</span>{% else %}{{ total.costs|money }}{% endif %}</span><span class="kpi-note">landlord {% if total.landlord_rent is None %}unknown{% else %}{{ total.landlord_rent|money }}{% endif %}{% if total.other_costs is None or total.other_costs %} · other {% if total.other_costs is None %}unknown{% else %}{{ total.other_costs|money }}{% endif %}{% endif %} · fee costs {% if total.fee_costs is None %}unknown{% else %}{{ total.fee_costs|money }}{% endif %}</span></div>
+    <div class="kpi" id="kpi-margin"><span class="kpi-label">Margin (collected)</span><span class="kpi-value{% if total.margin_collected is None %}{% elif total.margin_collected < 0 %} tone-unpaid{% else %} tone-paid{% endif %}">{% if total.margin_collected is None %}<span class="unknown">unknown</span>{% else %}{{ total.margin_collected|money }}{% endif %}</span>{% if kpis.unknown_stores %}<span class="kpi-note" id="kpi-unknown">{{ kpis.unknown_stores }} store{{ kpis.unknown_stores|pluralize }} unknown · <a href="#pnl-explained">why</a></span>{% endif %}</div>
   </section>
+
+  <section class="card table-card pnl-card" id="pnl-card" aria-labelledby="pnl-title">
+    <div class="card-header pnl-card-header">
+      <h2 id="pnl-title">{{ query.from_month|month }}{% if query.to_month != query.from_month %} to {{ query.to_month|month }}{% endif %} · by {{ group_label|lower }}</h2>
+      <span class="list-counts" id="pnl-count">{{ groups|length }} {{ group_label|lower }}{{ groups|length|pluralize }} · {{ row_count }} row{{ row_count|pluralize }}{% if cost_only_count %}, {{ cost_only_count }} cost-only{% endif %} · amounts in US dollars</span>
+      <span class="pnl-held"><span class="badge" id="deposits-held">Deposits held at {{ query.end|day }}: <span id="deposits-held-amount">{{ deposits_held|money }}</span></span> <span class="badge" id="credits-held">Credits held at {{ query.end|day }}: <span id="credits-held-amount">{{ credits_held|money }}</span></span></span>
+    </div>
+    <div class="pnl-print{% if query.detail %} pnl-detail{% endif %}">
+    {% responsive_table %}
+    <table id="pnl" class="pnl-table">
+      <thead>
+        <tr><th rowspan="2" scope="col">{{ group_label }}</th><th colspan="2" scope="colgroup" class="grp-head grp-start">Rent</th><th colspan="2" scope="colgroup" class="grp-head grp-start">Fees</th><th colspan="3" scope="colgroup" class="grp-head grp-start">Costs</th><th colspan="2" scope="colgroup" class="grp-head grp-start">Margin</th><th rowspan="2" scope="col" class="grp-start">Flags</th></tr>
+        <tr><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th><th scope="col" class="money grp-start">Landlord</th><th scope="col" class="money">Other</th><th scope="col" class="money">Fee costs</th><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th></tr>
+      </thead>
+      <tbody>
+        {% for group, subline in group_lines %}
+          <tr class="pnl-group">
+            <td data-label="{{ group_label }}" data-role="title">{% include "ledger/_cell_title.html" with title=group.label subline=subline %}</td>
+            {% include "ledger/reports/_figures.html" with item=group %}
+            <td class="grp-start" data-label="Flags" data-role="meta-badge">{% if group.unknown %}<span class="badge unknown-flag">Unknown: {{ group.unknown|join:", " }}</span>{% endif %}{% if group.unknown and group.cost_only_count %} {% endif %}{% if group.cost_only_count %}<span class="badge cost-only-flag">{% if query.group == "store" and group.cost_only_count == group.rows|length %}Vacant{% else %}{{ group.cost_only_count }} cost-only{% endif %}</span>{% endif %}</td>
+          </tr>
+          {% if query.detail %}
+            {% for row in group.rows %}
+              <tr class="pnl-row{% if row.cost_only %} cost-only{% endif %}"{% if row.cost_only %} style="background:var(--pending-bg);"{% endif %}>
+                <td class="pnl-row-label" data-label="{{ group_label }}" data-role="title">{{ row.store }} · {{ row.operator }} · {{ row.month|month }}</td>
+                {% include "ledger/reports/_figures.html" with item=row %}
+                <td class="grp-start" data-label="Flags" data-role="meta-badge">{% if row.cost_only %}<span class="badge">Cost only</span>{% endif %}{% if row.cost_only and row.unknown %} {% endif %}{% if row.unknown %}<span class="badge">Unknown: {{ row.unknown|join:", " }}</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          {% endif %}
+        {% empty %}
+          <tr><td colspan="11" class="muted empty">Nothing billed, collected or held in these months.</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="totals" id="pnl-total">
+          <th scope="row">Total</th>
+          {% include "ledger/reports/_figures.html" with item=total %}
+          <td class="grp-start" data-label="Flags">{% if total.unknown %}<span class="badge">Unknown: {{ kpis.unknown_stores }} store{{ kpis.unknown_stores|pluralize }}</span>{% endif %}</td>
+        </tr>
+      </tfoot>
+    </table>
+    {% endresponsive_table %}
+    </div>
+    <p class="muted pnl-foot" id="pnl-foot">Deposits are money held for operators, not revenue; only the part withheld at a lease end counts as collected. <a href="{% url 'finance:help_topic' slug='store-costs' %}" id="pnl-help">How this report is built</a></p>
+  </section>
+  <p class="muted pnl-explained" id="pnl-explained">Billed: rent charges by rent month (waived ones left out), setup fees by due date and insurance by due date. Collected: settled payments by settled date, less their settled refunds, plus withheld deposits by resolution date. Landlord rent and other costs are the store's cost row in effect on the first of the month, counted once per store and month. A margin is "unknown" when a cost is not known: a store whose landlord rent is not entered is never counted as zero. A cost-only row is a month in which the store is held and no lease is active. Credits are money received and not yet applied to a charge, held for operators, not revenue: a credit counts as collected only when it is applied to a charge, in the month applied.</p>
   {% endif %}
 {% endblock %}

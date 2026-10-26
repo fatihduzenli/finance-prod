@@ -31,8 +31,12 @@ APP_CSS = BACKEND / "finance" / "static" / "finance" / "app.css"
 #: Python; labelling them would cost the page's 2 s and the grid is never shown as cards).
 OWN_SCROLL = {"grid/page.html"}
 #: PLAN-012e-3 D5: the builder's lines table scrolls in its region as the reports do.
+#: The reports scroll sideways, except the P&L, whose rows are the phone's two-line cards since
+#: PLAN-012f-b E-1 (DESIGN-SPEC §4 Profit and loss, §6).
 SCROLL_TEMPLATES = {"audit/page.html", "invoices/_draft_form.html"} | {
-    f"reports/{path.name}" for path in (TEMPLATES / "reports").glob("*.html")
+    f"reports/{path.name}"
+    for path in (TEMPLATES / "reports").glob("*.html")
+    if path.name != "pnl.html"
 }
 
 
@@ -198,13 +202,21 @@ def test_the_reconciliation_page_renders_as_cards() -> None:
         "/reports/revenue/",
         "/reports/payments-by-method/",
         "/reports/deposits/",
-        "/reports/pnl/",
     ],
 )
 def test_the_reports_scroll_sideways(path: str) -> None:
     page = client_for(Role.ADMIN).get(path).content.decode()
     assert '<div class="table-scroll" tabindex="0">' in page, path
     assert '<div class="table-cards">' not in page, path
+
+
+def test_the_pnl_draws_its_rows_as_cards() -> None:
+    """PLAN-012f-b E-1: the P&L's rows are the phone's two-line cards (DESIGN-SPEC §6)."""
+    page = client_for(Role.ADMIN).get("/reports/pnl/").content.decode()
+    assert re.search(
+        r'<div class="table-cards">\s*<table id="pnl" class="pnl-table role-cards">', page
+    )
+    assert '<div class="table-scroll"' not in page
 
 
 def test_the_audit_page_scrolls_sideways() -> None:
