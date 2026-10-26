@@ -170,3 +170,56 @@ def test_a_store_without_a_cost_row_never_reads_zero_on_the_report() -> None:
     body = billing.get("/reports/pnl/?from=2026-10&to=2026-10&detail=1").content.decode()
     assert "unknown" in body
     assert "Unknown: landlord rent" in body
+
+
+# --- Slice E-2: Daily charges ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "due", ["all", "debit", "email", "catchup", MARKUP, "4111111111111111", "%00", ""]
+)
+def test_the_daily_charges_page_takes_any_filter_value_and_writes_nothing(due: str) -> None:
+    a_world()
+    billing, _ = client_for(Role.BILLING)
+    before = row_counts()
+    response = billing.get(f"/run/?due={due}")
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert MARKUP not in body and "4111111111111111" not in body
+    assert "Due today" in body and 'id="page-header"' in body
+    assert "Istanbul &lt;script&gt;" in body or "No " in body
+    assert row_counts() == before
+
+
+def test_a_viewer_reads_the_daily_charges_page_without_its_buttons_and_cannot_press_them() -> None:
+    a_world()
+    viewer, _ = client_for(Role.VIEWER)
+    before = row_counts()
+    # The page is a read for every role; its two buttons are billing's.
+    page = viewer.get("/run/")
+    assert page.status_code == 200
+    body = page.content.decode()
+    assert 'id="create-charges"' not in body and 'id="match-invoices"' not in body
+    for name in ("create_charges", "match"):
+        assert viewer.post(reverse(f"ledger:run:{name}")).status_code in (302, 403), name
+    assert row_counts() == before
+
+
+def test_the_strip_before_any_run_is_quiet_and_names_no_processor_in_source() -> None:
+    from pathlib import Path
+
+    a_world()
+    billing, _ = client_for(Role.BILLING)
+    body = billing.get("/run/").content.decode()
+    assert "No run yet." in body
+    template = (
+        Path(__file__).resolve().parents[1]
+        / "ledger"
+        / "templates"
+        / "ledger"
+        / "run"
+        / "today.html"
+    ).read_text(encoding="utf-8")
+    assert "stax" not in template.lower().replace(
+        "stax_", ""
+    )  # the processor's name comes from the settings
