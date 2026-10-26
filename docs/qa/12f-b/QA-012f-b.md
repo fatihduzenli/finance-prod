@@ -248,3 +248,49 @@ nor stop; a pause never queues a pay call; hostile counts, dates, cadences and a
 with nothing written; no provider name in the new files.
 
 **Verdict (D):** **PASS.** Every gate clean on both engines after the re-pins; two MAJOR and seven MINOR resolved, one MINOR closed by written decision (D3-2, a re-pin for a new review rule); the departures listed for the checkpoint; residual: the settlement debits settling across months and the pause's provider releases were exercised against the fake provider only (TODO-VERIFY for the checkpoint).
+
+
+
+## Batch E — the remaining pages to the spec (branch `step-12f-b/batch-e`)
+
+**Scope.** Opus, four briefs. E-4, the States: the empty-state partial on the dashboard's cards, the
+calendar's panels, the search results and the Autopay tab (tables keep a plain empty row); the flash
+messages with their icon and the spec's four pairs (an `--error-text` token); the inline form error
+as a 1 px border and a 12 px line; ten confirmation pages rendered as the 440 px dialog over their
+parent page with "Keep …" beside the primary, each view building its parent's context through a read
+helper and no POST handler changed; the 404 and 403 pages in the shell. E-1, Profit and loss on the
+report frame (KPI cards from the totals, the two-row header, amounts without the dollar sign, a true
+minus, the Flags column — the owner's spec name over the older "Notes" pin — the Total row, the
+footer sentence; the empty landlord rent proven in the unknown path on the page and the CSV; the
+first cell as "#no Name" from the row's own query). E-2, Daily charges: the header with the date, the result strip grey / green / yellow when a lease was skipped / red when the last update from the processor failed, with the next automatic run and the Nightly check link; four KPI cards; the Due today card with its segmented filter as a GET parameter, the store with its operator, the debit day or catch-up, Collected by, the bold amount, the carried balance red when owed, the status badges and one Open per row; Skipped today and Recent runs side by side; read helpers only (`rent_run.recent_runs`, one query). E-3, Help:
+the 240 px topic card with a client-side filter in the spec's order, the open topic in the sidebar's active style; the article card with its title, "Updated … · n min read" (the date a constant per topic, the minutes from the word count) and the body at the spec's sizes; "Still stuck? E-mail …" from the company settings; no helpful vote; the P&L's longer explanation moved to the Store costs topic (E1-2). Fable: `tests/test_plan012fb_e_adversarial.py` (35 cases).
+
+**Findings.** E4-1 (MAJOR, resolved): the slices added phone rules in new `@media` blocks, one at
+768 px, while the stylesheet keeps one phone block at 719.98 px where every phone and role rule
+lives; the tests that pin it read the first block as the phone block and failed; every Batch E phone
+rule now sits in the one block and no 768 px breakpoint exists (between 720 and 768 px the Help page
+keeps two columns). E4-1b (MAJOR, resolved): the Daily charges context key `figures` inside a class
+attribute matched the retired-class guard; renamed `run_figures`. E1-1 (MINOR, resolved): the P&L's
+first cell reads "#no Name" from the row's own query. E1-2 (MINOR, resolved): the P&L's
+180-character explanation broke the one-short-line help rule; it lives on the Store costs topic now.
+Two of Fable's own pins moved by design (the not-found page answers 404; the Daily charges row's
+carried balance in its new markup).
+
+**Departures from the owner's message, for the checkpoint.** Not built, by the owner's exclusion:
+the P&L State filter and grouping, the Daily charges per-row Confirm and row actions, Help's "Was
+this helpful?". The result strip is red only after a failed update from the processor: a failed
+daily run leaves no record (red for a failed run needs a stored value, excluded here), so Recent
+runs never shows "Failed" and "0 errors" is always true for a recorded run. The next automatic run's
+time is a code constant (13:00 UTC) mirroring the Bicep cron. The "Flags" column follows the spec's
+name over the earlier "Notes" copy pin. The Help index shows the topic card alone (no article
+invented); the search sits in the topic card; "No topic matches." is new copy; the "Updated" dates
+are the templates' last commit dates. Tables keep a plain empty row where the header must stay. Each
+confirmation GET now also builds its parent page's context (more queries than before; no budget pins
+those pages).
+
+**Gate.** ruff, `ruff format --check` (516 files), mypy strict (516 files), `uv lock --check`, `makemigrations --check` (no migration in this batch): clean; pattern scan and provider fence clean over the diff and the ten new files; re-run clean after the E4-1 rework (one phone block in the stylesheet). sqlite: full suite 7,764 passed and 8 failed on the first run (six the E4-1 stylesheet pins, two of Fable's own moved by design and re-pinned), then after the rework the whole suite again: 7,772 passed, 691 skipped, 114 deselected in 1,610 s. PostgreSQL 16 (a throwaway container, the CI split): `makemigrations --check` no changes; the migration selection 36 passed in 1,479 s; the unit selection 8,424 passed, 3 skipped, 117 deselected in 1,614 s; the e2e suite 35 passed four times over (86, 83, 82 and 81 s) — all on the final tree (the rework commit e5469b1 at 02:10 precedes the unit selection's start at 02:27). Visual: every baseline regenerated in the Playwright image against PostgreSQL (one full pass, then the not-found page again after the suite learnt that it answers 404 by design — a test-helper change, Fable's); eighteen baselines changed or new (dashboard, calendar, store Autopay tab, Profit and loss and Daily charges at both widths; help, help-topic, void-payment and not-found new at both widths); the whole suite 66 passed on PostgreSQL and 66 passed, pixel-identical, on sqlite; the 36 other baselines unchanged. Shots: `docs/qa/12f-b/shots/e/` holds the eighteen (laptop 1280 and phone 390 of every changed page); checked against `docs/design/profit-and-loss-laptop.png`, `daily-charges-laptop.png`, `help-laptop.png` and `states-laptop.png` at both widths. Two notes from the shots, neither a defect: the Help footer "Still stuck? E-mail …" renders only when the company settings carry a support e-mail (the visual world has none); the void-payment dialog in the visual world shows its refusal variant ("This payment is not in {processor}.", Keep only) because the world's payment has no provider reference — the confirm variant with the red primary is covered by the pages tests. Secret
+scans clean; no secret-store read; every confirmation GET writes nothing and refuses a viewer; the
+error pages leak no path or stack and escape what the URL carried; the empty state and the toasts
+escape their text; a hostile report query never breaks the page.
+
+**Verdict (E):** PASS — four findings resolved (two MAJOR, two MINOR), none deferred; residual risk: the red strip for a failed daily run is not built (no stored value; excluded), the Help "Updated" dates are constants that need a hand edit when a topic changes, and the confirmation pages' query counts are not pinned.
