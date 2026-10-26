@@ -28,10 +28,10 @@
   {% endif %}
 
   <section class="kpi-row run-kpis" id="run-kpis" aria-label="Figures">
-    <div class="kpi" id="kpi-created"><span class="kpi-label">Created today</span><span class="kpi-value">{{ figures.created }}</span><span class="kpi-note">{{ figures.created_today }} today · {{ figures.caught_up }} catch-up</span></div>
-    <div class="kpi" id="kpi-due"><span class="kpi-label">Due today</span><span class="kpi-value">{{ figures.due_amount|money }}</span><span class="kpi-note">{{ figures.debits }} bank debit{{ figures.debits|pluralize }} · {{ figures.others }} e-mail</span></div>
-    <div class="kpi" id="kpi-skipped"><span class="kpi-label">Skipped</span><span class="kpi-value{% if figures.skipped %} tone-pending{% endif %}">{{ figures.skipped }}</span>{% if figures.reasons %}<span class="kpi-note">{{ figures.reasons|join:" · " }}</span>{% endif %}</div>
-    <div class="kpi" id="kpi-large"><span class="kpi-label">Large debits</span><span class="kpi-value{% if figures.large %} tone-unpaid{% endif %}">{{ figures.large }}</span><span class="kpi-note">above {{ threshold|money }} · needs admin</span></div>
+    <div class="kpi" id="kpi-created"><span class="kpi-label">Created today</span><span class="kpi-value">{{ run_figures.created }}</span><span class="kpi-note">{{ run_figures.created_today }} today · {{ run_figures.caught_up }} catch-up</span></div>
+    <div class="kpi" id="kpi-due"><span class="kpi-label">Due today</span><span class="kpi-value">{{ run_figures.due_amount|money }}</span><span class="kpi-note">{{ run_figures.debits }} bank debit{{ run_figures.debits|pluralize }} · {{ run_figures.others }} e-mail</span></div>
+    <div class="kpi" id="kpi-skipped"><span class="kpi-label">Skipped</span><span class="kpi-value{% if run_figures.skipped %} tone-pending{% endif %}">{{ run_figures.skipped }}</span>{% if run_figures.reasons %}<span class="kpi-note">{{ run_figures.reasons|join:" · " }}</span>{% endif %}</div>
+    <div class="kpi" id="kpi-large"><span class="kpi-label">Large debits</span><span class="kpi-value{% if run_figures.large %} tone-unpaid{% endif %}">{{ run_figures.large }}</span><span class="kpi-note">above {{ threshold|money }} · needs admin</span></div>
   </section>
 
   <section class="card table-card" id="due-today-card" aria-labelledby="due-today-title">

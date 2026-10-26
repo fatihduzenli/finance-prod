@@ -1163,10 +1163,6 @@ td.row-open a { text-decoration: none; }
 .run-list > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
 .run-list > li:last-child { border-bottom: 0; }
 .run-list-end { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-2); }
-@media (max-width: 719.98px) {
-  .run-pair { grid-template-columns: minmax(0, 1fr); }
-  .run-strip { flex-wrap: wrap; }
-}
 
 /* --- Help (PLAN-012f-b E-3) -------------------------------------------------------------------
    DESIGN-SPEC §4 Help, help-laptop.png. .help-layout: the 240 px topic card (.help-nav: the
@@ -1202,14 +1198,6 @@ td.row-open a { text-decoration: none; }
 .help-body dd:last-child { margin-bottom: 0; }
 .help-tip { padding: 12px 16px; border: 1px solid var(--border-soft); border-left: 3px solid var(--teal); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-md); }
 .help-footer { margin: var(--space-4) 0 0; color: var(--muted); font-size: var(--fs-base); text-align: right; }
-@media (max-width: 768px) {
-  .help-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
-  .help-nav, .help-main { grid-column: 1; grid-row: auto; }
-  .help-main { order: -1; }
-  .help-topic { padding: 18px 16px; }
-  .help-topics a { padding: 12px; }
-  .help-footer { text-align: left; }
-}
 
 /* --- Detail family (PLAN-012f-a D4) ----------------------------------------------------------
    DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png; the rent charge, payment, sent invoice,
@@ -1544,6 +1532,16 @@ p.detail-more-notes { padding-left: 0; }
   .calendar-filters select { max-width: none; width: 100%; }
   .calendar-filters #operator, .calendar-filters .badge, .calendar-filters button { grid-column: 1 / -1; }
   .calendar-legend { padding: var(--space-3) var(--space-4); }
+  /* Daily charges (PLAN-012f-b E-2): the two cards below in one column; the strip wraps. */
+  .run-pair { grid-template-columns: minmax(0, 1fr); }
+  .run-strip { flex-wrap: wrap; }
+  /* Help (PLAN-012f-b E-3): one column, the article first and the topic card after (§6). */
+  .help-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  .help-nav, .help-main { grid-column: 1; grid-row: auto; }
+  .help-main { order: -1; }
+  .help-topic { padding: 18px 16px; }
+  .help-topics a { padding: 12px; }
+  .help-footer { text-align: left; }
 }
 
 /* --- Print ---------------------------------------------------------------------------------- */

@@ -396,6 +396,9 @@ def test_the_style_sheet_carries_the_strip_colours_and_the_phone_rule() -> None:
         ".badge.run-created { background: var(--month-current); color: var(--link); }",
     ):
         assert rule in css, rule
-    phone = css.split("/* --- Daily charges (PLAN-012f-b E-2)", 1)[1].split("/* ---", 1)[0]
-    assert "@media (max-width: 719.98px)" in phone
+    # The phone rule lives in the stylesheet's one phone block (PLAN-012f-b E4-1).
+    section = css.split("/* --- Daily charges (PLAN-012f-b E-2)", 1)[1].split("/* ---", 1)[0]
+    assert "@media" not in section
+    start = css.index("@media (max-width: 719.98px) {")
+    phone = css[start : css.index("\n}\n", start)]
     assert ".run-pair { grid-template-columns: minmax(0, 1fr); }" in phone

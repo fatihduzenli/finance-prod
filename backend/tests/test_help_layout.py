@@ -211,7 +211,11 @@ def test_the_style_sheet_carries_the_frame_and_the_phone_rule() -> None:
     ):
         assert rule in section, rule
     assert "#" not in re.sub(r"/\*.*?\*/", "", section, flags=re.S)  # tokens, no raw colour
-    phone = section.split("@media (max-width: 768px) {", 1)[1]
+    # The phone's rules live in the stylesheet's one phone block (PLAN-012f-b E4-1), none here.
+    assert "@media" not in section
+    phone_start = css.index("@media (max-width: 719.98px) {")
+    assert css.count("@media (max-width: 719.98px) {") == 1
+    phone = css[phone_start : css.index("\n}\n", phone_start)]
     assert ".help-layout { grid-template-columns: minmax(0, 1fr);" in phone
     assert ".help-main { order: -1; }" in phone  # the article first, the topics after (§6)
 

@@ -271,7 +271,7 @@ def run_today(request: HttpRequest) -> HttpResponse:
             # PLAN-012f-b E-2: the strip, the four figures, the filtered card, the last runs.
             "strip": _strip(last_run, match["job"]),
             "next_run": f"{next_word} {next_clock}",
-            "figures": _figures(run, caught_up),
+            "run_figures": _figures(run, caught_up),
             "due_filters": DUE_FILTERS,
             "due_filter": chosen,
             "due_rows": _filtered(rows, chosen),
