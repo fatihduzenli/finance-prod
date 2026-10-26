@@ -34,8 +34,10 @@ with the current one, or a custom From to To of at most :data:`MAX_RANGE_MONTHS`
 - :func:`cashflow` (the P&L's rows, :func:`ledger.services.pnl.rows`): per month the
   collected income, the known costs and the net, totalled over the range; a store whose
   costs are not entered is left out of the expenses and counted, never read as zero;
-- :func:`payment_status` (one query): the rent charges due in the range as Overdue, Paid
-  and Upcoming by the grid's status rule, the pending ones counted apart;
+- :func:`payment_status` (two queries): the rent charges and the one-off charges due in the
+  range as Overdue, Paid and Upcoming by the grid's status rule, the pending ones counted
+  apart (D20: an installment, an autopay-plan occurrence and a re-debit count through their
+  parent or source, never on their own);
 - :func:`mini_calendar` (the Calendar page's three queries): a month's days and items.
 
 Money is ``Decimal``; dates are the project's ``TIME_ZONE`` days.
@@ -50,7 +52,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_FLOOR, Decimal
 
-from django.db.models import Count, F, Max, Sum
+from django.db.models import Count, Exists, F, Max, OuterRef, Sum
 from django.db.models.functions import Least
 from django.utils import timezone
 
@@ -59,6 +61,9 @@ from ledger.models import (
     ZERO,
     CollectionStatus,
     Lease,
+    OneOffCategory,
+    OneOffCharge,
+    OneOffChargeStatus,
     Payment,
     PaymentChannel,
     PaymentMethod,
@@ -589,23 +594,65 @@ STATUS_PAID_PART = "paid"
 STATUS_UPCOMING = "upcoming"
 
 
+#: The one-off categories the Payment status card never counts on their own (PLAN-012f-b
+#: §10 D20): an installment and an autopay-plan occurrence count through their parent charge,
+#: a re-debit through its source.
+PAYMENT_STATUS_SKIPPED_CATEGORIES: tuple[str, ...] = (
+    OneOffCategory.INSTALLMENT.value,
+    OneOffCategory.AUTOPAY_PLAN.value,
+    OneOffCategory.REDEBIT.value,
+)
+
+
+def _one_off_family(status: str, amount_paid: Decimal, has_pending: bool) -> str:
+    """A one-off charge's status in the grid's words (D20): paid; waived or voided as
+    waived (nowhere); a pending payment as pending; else partly paid when anything is paid,
+    unpaid otherwise."""
+    if status == OneOffChargeStatus.PAID:
+        return grid.STATUS_PAID
+    if status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
+        return grid.STATUS_WAIVED
+    if has_pending:
+        return grid.STATUS_PENDING
+    if status == OneOffChargeStatus.PARTIAL or amount_paid > 0:
+        return grid.STATUS_PARTIAL
+    return grid.STATUS_UNPAID
+
+
 def payment_status(selected: Range, today: date) -> PaymentStatusCard:
-    """The rent charges due in the range (by due date, for every box), by the grid's status
-    of each (:func:`ledger.services.grid.combined_status`; one query). Overdue: open
-    (unpaid, due or partly paid) and due before today, by balance. Paid: paid in full,
-    however it was paid (its own payments, an invoice line, an installment plan, a credit)
-    and whenever, by the amount paid. Upcoming: unpaid or due, due today or later, by
-    balance. Pending charges and the partly paid ones not yet due are counted apart; waived
-    ones nowhere."""
-    rows = RentCharge.objects.filter(
+    """The charges due in the range (by due date, for every box), by the grid's status of
+    each (two queries): the rent charges by :func:`ledger.services.grid.combined_status`,
+    and the one-off charges (PLAN-012f-b §10 D20) but an installment, an autopay-plan
+    occurrence and a re-debit (:data:`PAYMENT_STATUS_SKIPPED_CATEGORIES`), by
+    :func:`_one_off_family`. Overdue: open (unpaid, due or partly paid) and due before
+    today, by balance. Paid: paid in full, however it was paid (its own payments, an invoice
+    line, an installment plan, a credit) and whenever, by the amount paid. Upcoming: unpaid
+    or due, due today or later, by balance. Pending charges and the partly paid ones not
+    yet due are counted apart; waived (and voided) ones nowhere."""
+    rent_rows = RentCharge.objects.filter(
         due_on__gte=selected.from_month, due_on__lte=selected.end
     ).values_list("status", "due_on", "amount_due", "amount_paid")
+    pending_payment = Payment.objects.filter(
+        one_off_charge=OuterRef("pk"), status=PaymentStatus.PENDING
+    )
+    one_off_rows = (
+        OneOffCharge.objects.filter(due_date__gte=selected.from_month, due_date__lte=selected.end)
+        .exclude(category__in=PAYMENT_STATUS_SKIPPED_CATEGORIES)
+        .annotate(has_pending=Exists(pending_payment))
+        .values_list("status", "due_date", "price", "amount_paid", "has_pending")
+    )
+    charges: list[tuple[str, date, Decimal, Decimal]] = [
+        (grid.combined_status([status], Decimal(paid)), due_on, Decimal(due), Decimal(paid))
+        for status, due_on, due, paid in rent_rows
+    ]
+    charges += [
+        (_one_off_family(status, Decimal(paid), has_pending), due_on, Decimal(price), Decimal(paid))
+        for status, due_on, price, paid, has_pending in one_off_rows
+    ]
     counts: dict[str, int] = defaultdict(int)
     amounts: dict[str, Decimal] = defaultdict(lambda: ZERO)
     pending = 0
-    for status, due_on, amount_due, amount_paid in rows:
-        due, paid = Decimal(amount_due), Decimal(amount_paid)
-        family = grid.combined_status([status], paid)
+    for family, due_on, due, paid in charges:
         if family == grid.STATUS_PAID:
             counts[STATUS_PAID_PART] += 1
             amounts[STATUS_PAID_PART] += paid
