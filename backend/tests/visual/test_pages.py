@@ -123,6 +123,8 @@ def settled_payment_of(site: Site) -> Payment:
 AS_ADMIN = {"lease-end-statement", "new-store", "new-lease", "void-payment"}
 #: Seen signed out, in a context of its own (the sign-in page, PLAN-012f-a D9).
 SIGNED_OUT = {"login"}
+#: Pages that answer something other than 200 by design (PLAN-012f-b Batch E: the not-found page).
+STATUS: dict[str, int] = {"not-found": 404}
 
 
 def differing_pixels(actual: Image.Image, expected: Image.Image) -> Image.Image:
@@ -215,7 +217,7 @@ def test_the_page_looks_as_its_baseline(
     name = f"{page_name}-{width}"
     page = page_for(page_name, visual_pages, anonymous_page)
     page.set_viewport_size(VIEWPORTS[width])
-    open_still(page, visual_site.url + PAGES[page_name](visual_site))
+    open_still(page, visual_site.url + PAGES[page_name](visual_site), STATUS.get(page_name, 200))
     shot = page.screenshot(full_page=True, animations="disabled", caret="hide")
     target = baseline.folder / f"{name}.png"
     if baseline.update:

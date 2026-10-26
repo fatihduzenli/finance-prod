@@ -196,10 +196,13 @@ def visual_pages(visual_site: Site, visual_browser: Browser) -> Iterator[Callabl
         context.close()
 
 
-def open_still(page: Page, url: str) -> None:
-    """Open ``url``, wait for the network and the fonts, and stop anything that moves."""
+def open_still(page: Page, url: str, status: int = 200) -> None:
+    """Open ``url``, wait for the network and the fonts, and stop anything that moves.
+
+    ``status`` is the response status the page must answer (the not-found page answers 404 by
+    design)."""
     response = page.goto(url, wait_until="networkidle")
-    assert response is not None and response.status == 200, (url, response and response.status)
+    assert response is not None and response.status == status, (url, response and response.status)
     page.add_style_tag(content=STILL)
     page.evaluate("document.fonts.ready.then(() => true)")
     page.mouse.move(0, 0)
