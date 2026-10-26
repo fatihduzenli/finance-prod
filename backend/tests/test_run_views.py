@@ -220,8 +220,10 @@ def test_the_run_page_shows_last_months_status_and_balance(billing: Client) -> N
     RentCharge.objects.filter(lease=row).update(
         status=RentChargeStatus.PARTIAL, amount_paid=D("1000.00")
     )
-    page = billing.get(RUN).content.decode()
-    assert "Partially paid</a>, balance $500.00" in page
+    # PLAN-012f-b E-2: the card's columns are the spec's; last month's status and balance
+    # stay in the spreadsheet.
+    lines = billing.get("/run/export.csv").getvalue().decode().splitlines()
+    assert "Partially paid,500.00" in lines[1]
 
 
 # --- Rows 6 and 9 through the screen ------------------------------------------------------------
@@ -314,7 +316,9 @@ def test_the_run_page_tags_large_debits_and_those_above_the_confirmed_limit(
         LARGE_DEBIT_WARNING_AMOUNT=D("2000.00"), PROVIDER_MAX_TXN_AMOUNT=D("3000.00")
     ):
         page = billing.get(RUN).content.decode()
-    assert ('<strong class="large-debit">Large debit</strong>' in page) is large
+    # PLAN-012f-b E-2: the red "Large debit · confirm" status badge.
+    assert ('<span class="large-debit"><span class="badge badge-unpaid">' in page) is large
+    assert ("Large debit · confirm" in page) is large
     assert ('<strong class="over-limit">exceeds confirmed limit</strong>' in page) is over
 
 

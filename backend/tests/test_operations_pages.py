@@ -136,7 +136,8 @@ def test_the_daily_tick_writes_its_row_and_the_run_page_shows_its_list() -> None
     assert run.actor is None and run.after is not None
     assert run.after["caught_up"] == 2 and len(run.after["caught_up_ids"]) == 2
     html = body(client_for(Role.VIEWER)[0], reverse("ledger:run:today"))
-    assert "by the daily run" in html
+    # PLAN-012f-b E-2: the daily tick is "automatic" in the Recent runs card.
+    assert re.search(r"Oct 15 · \d\d:\d\d · automatic</span>", html)
     table = created_table(html)
     assert reverse("ledger:stores:detail", kwargs={"pk": lease.store_id}) in table
     assert "Sep 2026" in table and "Oct 2026" in table

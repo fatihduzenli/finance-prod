@@ -951,11 +951,7 @@ def last_run() -> RunRecord | None:
     row = _run_rows().select_related("actor").order_by("-at", "-id").first()
     if row is None:
         return None
-    after = row.after if isinstance(row.after, dict) else {}
-    try:
-        day = date.fromisoformat(row.entity_id)
-    except ValueError:
-        day = timezone.localdate(row.at)
+    after = _after(row)
     wanted = [(pk, WHEN_TODAY) for pk in _ids(after, "created_ids")] + [
         (pk, WHEN_CATCH_UP) for pk in _ids(after, "caught_up_ids")
     ]
@@ -965,6 +961,31 @@ def last_run() -> RunRecord | None:
         if wanted
         else {}
     )
+    return _record(
+        row, tuple(CreatedCharge(charges[pk], when) for pk, when in wanted if pk in charges)
+    )
+
+
+#: Most runs the run page's "Recent runs" card lists (PLAN-012f-b E-2).
+RECENT_RUNS = 5
+
+
+def recent_runs(limit: int = RECENT_RUNS) -> list[RunRecord]:
+    """The latest ``limit`` runs' counts, newest first (one query; no charge is read)."""
+    rows = _run_rows().select_related("actor").order_by("-at", "-id")[:limit]
+    return [_record(row, ()) for row in rows]
+
+
+def _after(row: AuditLog) -> dict[str, Any]:
+    return row.after if isinstance(row.after, dict) else {}
+
+
+def _record(row: AuditLog, charges: tuple[CreatedCharge, ...]) -> RunRecord:
+    after = _after(row)
+    try:
+        day = date.fromisoformat(row.entity_id)
+    except ValueError:
+        day = timezone.localdate(row.at)
     return RunRecord(
         day=day,
         at=row.at,
@@ -973,7 +994,7 @@ def last_run() -> RunRecord | None:
         caught_up=_count(after, "caught_up"),
         already=_count(after, "already"),
         skipped=_count(after, "skipped"),
-        charges=tuple(CreatedCharge(charges[pk], when) for pk, when in wanted if pk in charges),
+        charges=charges,
     )
 
 

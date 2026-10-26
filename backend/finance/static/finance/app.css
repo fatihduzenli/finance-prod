@@ -1131,6 +1131,43 @@ td.cell-chevron a:hover { color: var(--text); }
 .pnl-foot { font-size: var(--fs-sm); }
 .pnl-explained { font-size: var(--fs-sm); }
 
+/* --- Daily charges (PLAN-012f-b E-2) --------------------------------------------------------
+   DESIGN-SPEC §4 Daily charges, daily-charges-laptop.png. The result strip (.run-strip): the
+   icon, the sentence and "Nightly check →" at the right on a 10 px tinted bar, green
+   (.run-strip-ok), yellow when the latest run skipped a lease (.run-strip-warn), red when the
+   latest "Update from …" failed (.run-strip-error), grey before the first run; the Skipped
+   figure in the pending text colour; the "Due today" card's header (the title, the segmented
+   filter beside it, "Download spreadsheet" at the right; the amount bold, a carried balance owed in
+   red, "Open ›" at the right); the teal Created badge
+   (.badge.run-created, the link colour on the current month's tint, a measured pair); the two
+   cards below side by side (.run-pair; one column on phones), each a list of lines with the
+   counts and the badge at the right (.run-list). */
+.run-strip { display: flex; align-items: center; gap: var(--space-3); margin: 0 0 var(--space-4); padding: 12px 16px; border: 1px solid transparent; border-radius: 10px; }
+.run-strip-ok { background: var(--paid-bg); color: var(--paid-text); border-color: var(--paid-bg); }
+.run-strip-warn { background: var(--pending-bg); color: var(--pending-text); border-color: var(--pending-bg); }
+.run-strip-error { background: var(--unpaid-bg); color: var(--error-text); border-color: var(--unpaid-bg); }
+.run-strip-none { background: var(--neutral-bg); color: var(--neutral-text); border-color: var(--neutral-bg); }
+.run-strip-icon { display: inline-flex; flex: 0 0 auto; }
+.run-strip-text { flex: 1 1 auto; margin: 0; min-width: 0; }
+.run-strip-link { flex: 0 0 auto; color: inherit; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.run-strip-link:hover { text-decoration: underline; }
+.kpi-value.tone-pending { color: var(--pending-text); }
+.run-due-header .segmented { margin-left: var(--space-2); }
+.badge.run-created { background: var(--month-current); color: var(--link); }
+td.money.tone-unpaid { color: var(--unpaid-text); }
+td.run-amount { font-weight: 700; }
+td.row-open { text-align: right; white-space: nowrap; }
+td.row-open a { text-decoration: none; }
+.run-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); align-items: start; }
+.run-list { margin: 0; padding: 0; list-style: none; }
+.run-list > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+.run-list > li:last-child { border-bottom: 0; }
+.run-list-end { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-2); }
+@media (max-width: 719.98px) {
+  .run-pair { grid-template-columns: minmax(0, 1fr); }
+  .run-strip { flex-wrap: wrap; }
+}
+
 /* --- Detail family (PLAN-012f-a D4) ----------------------------------------------------------
    DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png; the rent charge, payment, sent invoice,
    lease and calendar entry pages follow. The header (.detail-head) holds the breadcrumb, the

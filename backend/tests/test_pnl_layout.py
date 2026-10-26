@@ -235,6 +235,22 @@ def test_a_row_shows_the_store_bold_with_its_operator_and_amounts_without_the_do
     assert '<td class="money margin-collected" data-label="Margin collected"' in row
 
 
+def test_the_first_cell_reads_number_and_name_and_the_csv_keeps_the_label() -> None:
+    # PLAN-012f-b E1-1: "#no Name" as the spec draws it; the label alone without a number.
+    numbered = a_store("Istanbul")
+    Store.objects.filter(pk=numbered.pk).update(store_number=1991)
+    rent(a_lease(numbered), JULY)
+    rent(a_lease(a_store("No Number Plaza"), an_operator("Plain Co")), JULY)
+    page = page_of()
+    assert '<span class="cell-title">#1991 Istanbul</span>' in page
+    assert '<span class="cell-title">No Number Plaza</span>' in page
+    records = csv_rows(get(EXPORT, JULY_ONLY))
+    assert {item["Store"] for item in records if item["Level"] == "store"} == {
+        "Istanbul",
+        "No Number Plaza",
+    }
+
+
 def test_a_negative_amount_has_a_true_minus_in_the_unpaid_colour() -> None:
     known_store()
     row = group_row(page_of())

@@ -44,9 +44,9 @@
         <tr><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th><th scope="col" class="money grp-start">Landlord</th><th scope="col" class="money">Other</th><th scope="col" class="money">Fee costs</th><th scope="col" class="money grp-start">Billed</th><th scope="col" class="money">Collected</th></tr>
       </thead>
       <tbody>
-        {% for group, subline in group_lines %}
+        {% for group, title, subline in group_lines %}
           <tr class="pnl-group">
-            <td data-label="{{ group_label }}" data-role="title">{% include "ledger/_cell_title.html" with title=group.label subline=subline %}</td>
+            <td data-label="{{ group_label }}" data-role="title">{% include "ledger/_cell_title.html" with title=title subline=subline %}</td>
             {% include "ledger/reports/_figures.html" with item=group %}
             <td class="grp-start" data-label="Flags" data-role="meta-badge">{% if group.unknown %}<span class="badge unknown-flag">Unknown: {{ group.unknown|join:", " }}</span>{% endif %}{% if group.unknown and group.cost_only_count %} {% endif %}{% if group.cost_only_count %}<span class="badge cost-only-flag">{% if query.group == "store" and group.cost_only_count == group.rows|length %}Vacant{% else %}{{ group.cost_only_count }} cost-only{% endif %}</span>{% endif %}</td>
           </tr>

@@ -45,7 +45,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_safe
 
 from ledger.models import Operator
-from ledger.services import credits, grid, pnl, receivables, reports
+from ledger.services import credits, grid, pnl, receivables, reports, stores
 from ledger.views.operators import csv_response, role_required
 
 logger = logging.getLogger(__name__)
@@ -157,15 +157,17 @@ def _kpis(total: pnl.Figures, rows: list[pnl.PnlRow]) -> dict[str, Any]:
     }
 
 
-def _group_lines(groups: list[pnl.PnlGroup], group: str) -> list[tuple[pnl.PnlGroup, str]]:
-    """Each group with its first cell's second line: by store, the operators of its rows that
-    are not cost-only, each once in order ("—" when there are none: a vacant store); by
-    operator or month, none."""
+def _group_lines(groups: list[pnl.PnlGroup], group: str) -> list[tuple[pnl.PnlGroup, str, str]]:
+    """Each group with its first cell's title and second line: by store, the store's title
+    ("#1991 Istanbul", PLAN-012f-b E1-1) and the operators of its rows that are not
+    cost-only, each once in order ("—" when there are none: a vacant store); by operator or
+    month, the group's label and no second line."""
     if group != pnl.GROUP_STORE:
-        return [(item, "") for item in groups]
+        return [(item, item.label, "") for item in groups]
     return [
         (
             item,
+            stores.title_of(item.rows[0].store_number, item.label),
             ", ".join(dict.fromkeys(row.operator for row in item.rows if not row.cost_only)) or "—",
         )
         for item in groups

@@ -665,7 +665,6 @@ NO_PARENT = (
     "ledger:webhooks:list",
     "ledger:disputes:page",
     "ledger:reconciliation:page",
-    "ledger:run:today",
     "ledger:audit:page",
     "ledger:search",
     "finance:settings",
@@ -692,6 +691,19 @@ def test_the_pages_without_a_parent_have_no_breadcrumb(world: World) -> None:
     for name in NO_PARENT:
         body = client.get(path_of(world, name)).content.decode()
         assert 'class="breadcrumb"' not in header_of(body), name
+
+
+def test_daily_charges_names_its_section_without_a_link(world: World) -> None:
+    # PLAN-012f-b E-2: the spec draws "Admin ›" before the title; Admin is a group of the
+    # navigation, not a page, so the crumb is text.
+    client = client_for(Role.ADMIN)[0]
+    header = header_of(client.get(path_of(world, "ledger:run:today")).content.decode())
+    match = re.search(
+        r'<nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">(.*?)</nav>', header, re.S
+    )
+    assert match is not None
+    assert "<a " not in match.group(1)
+    assert re.sub(r"<[^>]+>", "", match.group(1)).split() == ["Admin", "›"]
 
 
 def test_a_store_parent_is_named_by_its_number_or_its_label() -> None:

@@ -1,9 +1,10 @@
 {% extends "finance/base.html" %}
-{% load components money dates %}
+{% load components money dates icons %}
 {% load responsive %}
 {% block title %}Daily charges, {{ run.day|day }}{% endblock %}
-{% block header %}<div class="page-header"><h1>Daily charges, {{ run.day|day }}</h1>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form><form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button></form></div>{% endif %}</div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><span>Admin</span> <span aria-hidden="true">›</span></nav><h1>Daily charges</h1><span class="page-date" id="run-date">{{ run.day|day_long }}</span></div>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form><form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
+  {% comment %}The page's frame (DESIGN-SPEC §4 Daily charges, daily-charges-laptop.png; PLAN-012f-b E-2): the result strip of the latest run (green; yellow when it skipped a lease; red when the latest "Update from …" failed), the four figures, the "Due today" card with its read-only filter (?due=), "Skipped today" beside "Recent runs", then the latest run's created charges, the repeating debits and the insurance due. No per-row Confirm and no row actions (the owner's exclusion, plan D17).{% endcomment %}
   {% if not health.ok %}
     <ul class="messages" id="provider-banner">
       {% for text in health.messages %}<li class="error" role="alert">{{ text }}</li>{% endfor %}
@@ -16,12 +17,75 @@
     </ul>
   {% endif %}
 
-  <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. {{ company.provider_name }}'s autopay makes the invoices; "Update from {{ company.provider_name }}" links them to these charges. Nothing here debits anyone. Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
+  <div class="run-strip run-strip-{{ strip }}" id="run-strip" role="status">
+    <span class="run-strip-icon" aria-hidden="true">{% if strip == "ok" %}{% icon "check" 16 %}{% elif strip == "none" %}{% icon "info" 16 %}{% else %}{% icon "alert" 16 %}{% endif %}</span>
+    <p class="run-strip-text">{% if last_run %}<strong id="last-run">Run at {{ last_run_clock }} {% if last_run.day == run.day %}today{% else %}on {{ last_run.day|day }}{% endif %}.</strong> {{ last_run.total_created }} charge{{ last_run.total_created|pluralize }} created ({{ last_run.caught_up }} catch-up), {{ last_run.skipped }} lease{{ last_run.skipped|pluralize }} skipped, 0 errors.{% else %}<strong id="last-run">No run yet.</strong>{% endif %} Next automatic run {{ next_run }}.{% if strip == "error" %} <span id="strip-failure">"Update from {{ company.provider_name }}" failed: {{ job_text }}</span>{% endif %}</p>
+    <a class="run-strip-link" href="{% url 'ledger:reconciliation:page' %}">Nightly check →</a>
+  </div>
+  {% include "ledger/_job_status.html" %}
+  {% if match_lines %}
+    <ul id="match-report">{% for line in match_lines %}<li>{{ line }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  <section class="kpi-row run-kpis" id="run-kpis" aria-label="Figures">
+    <div class="kpi" id="kpi-created"><span class="kpi-label">Created today</span><span class="kpi-value">{{ figures.created }}</span><span class="kpi-note">{{ figures.created_today }} today · {{ figures.caught_up }} catch-up</span></div>
+    <div class="kpi" id="kpi-due"><span class="kpi-label">Due today</span><span class="kpi-value">{{ figures.due_amount|money }}</span><span class="kpi-note">{{ figures.debits }} bank debit{{ figures.debits|pluralize }} · {{ figures.others }} e-mail</span></div>
+    <div class="kpi" id="kpi-skipped"><span class="kpi-label">Skipped</span><span class="kpi-value{% if figures.skipped %} tone-pending{% endif %}">{{ figures.skipped }}</span>{% if figures.reasons %}<span class="kpi-note">{{ figures.reasons|join:" · " }}</span>{% endif %}</div>
+    <div class="kpi" id="kpi-large"><span class="kpi-label">Large debits</span><span class="kpi-value{% if figures.large %} tone-unpaid{% endif %}">{{ figures.large }}</span><span class="kpi-note">above {{ threshold|money }} · needs admin</span></div>
+  </section>
+
+  <section class="card table-card" id="due-today-card" aria-labelledby="due-today-title">
+  <div class="card-header run-due-header"><h2 id="due-today-title">Due today</h2><nav class="segmented" aria-label="Show" id="due-filter">{% for value, label in due_filters %}<a href="{% url 'ledger:run:today' %}{% if value != 'all' %}?due={{ value }}{% endif %}" id="due-filter-{{ value }}"{% if value == due_filter %} aria-current="page"{% endif %}>{{ label }}{% if value == "all" %} {{ due_count }}{% endif %}</a>{% endfor %}</nav><a class="card-link" id="export-csv" href="{% url 'ledger:run:export' %}">Download spreadsheet</a></div>
+  {% responsive_table %}
+  <table id="due-today">
+    <thead><tr><th>Store</th><th>Debit</th><th>Collected by</th><th class="money">Amount</th><th class="money">Carried balance</th><th>Status</th><th><span class="visually-hidden">Open</span></th></tr></thead>
+    <tbody>
+      {% for row in due_rows %}
+        <tr>
+          <td>{% url 'ledger:stores:detail' pk=row.lease.store.pk as store_url %}{% include "ledger/_cell_title.html" with title=row.title link=store_url subline=row.lease.operator.display_name|default:"—" %}</td>
+          <td>{% if row.catch_up %}{{ row.catch_up_on|day_short }} · catch-up{% elif row.debit_day %}Day {{ row.debit_day }}{% if row.seq > 1 %} · debit {{ row.seq }}{% endif %}{% else %}—{% endif %}</td>
+          <td>{{ row.lease.get_payment_channel_display }}</td>
+          <td class="money run-amount">{% if row.amount is not None %}{{ row.amount|money }}{% if row.over_limit %} <strong class="over-limit">exceeds confirmed limit</strong>{% endif %}{% else %}—{% endif %}</td>
+          <td class="money carried-balance{% if row.carried %} tone-unpaid{% endif %}">{% if row.carried is None %}—{% else %}{{ row.carried|money }}{% endif %}</td>
+          <td>{% if row.status == "created" %}<span class="badge run-created">Created</span>{% elif row.status == "large" %}<span class="large-debit">{% status_badge "Large debit · confirm" "due" %}</span>{% elif row.status == "tonight" %}{% status_badge "Debit tonight" "pending" %}{% elif row.status == "skipped" %}{% status_badge "Skipped · "|add:row.reason "neutral" %}{% elif row.status == "own" %}{% status_badge row.charge.get_status_display row.charge.status %}{% else %}{% status_badge "Not created" "neutral" %}{% endif %}{% if row.charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</td>
+          <td class="row-open" data-role="actions">{% if row.charge %}<a href="{% url 'ledger:charges:detail' pk=row.charge.pk %}">Open ›</a>{% else %}<a href="{{ store_url }}">Open ›</a>{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7" class="muted empty">{% if due_filter == "all" %}No debit is due today.{% else %}Nothing due today matches this filter.{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  <p class="muted" id="carried-balance-note">"Carried balance" is what earlier charges of the lease still owe. It is not added to today's amount.</p>
+  </section>
+
+  <div class="run-pair">
+  <section class="card" id="skipped-today-card" aria-labelledby="skipped-today-title">
+  <h2 id="skipped-today-title">Skipped today</h2>
+  {% if skipped_rows %}
+    <ul class="run-list" id="skipped-today">
+      {% for row in skipped_rows %}<li><a class="cell-title" href="{% url 'ledger:stores:detail' pk=row.lease.store.pk %}">{{ row.title }}</a> · {{ row.reason }}</li>{% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted empty" id="skipped-today">No lease due today was skipped.</p>
+  {% endif %}
+  </section>
+
+  <section class="card" id="recent-runs-card" aria-labelledby="recent-runs-title">
+  <h2 id="recent-runs-title">Recent runs</h2>
+  {% if recent_runs %}
+    <ul class="run-list" id="recent-runs">
+      {% for record, clock in recent_runs %}<li><span>{{ record.day|day_short }} · {{ clock }} · {% if record.actor %}by {{ record.actor.get_username }}{% else %}automatic{% endif %}</span><span class="run-list-end">{{ record.total_created }} created{% if record.caught_up %} ({{ record.caught_up }} catch-up){% endif %} · {{ record.skipped }} skipped {% status_badge "OK" "paid" %}</span></li>{% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted empty" id="recent-runs">No run yet.</p>
+  {% endif %}
+  </section>
+  </div>
 
   {% if last_run %}
     <section class="card" id="last-run-card">
-    <h2>Last run</h2>
-    <p id="last-run">{{ last_run.day|day }}, {% if last_run.actor %}by {{ last_run.actor.get_username }}{% else %}by the daily run{% endif %}: {{ last_run.created }} created today, {{ last_run.caught_up }} by the catch-up, {{ last_run.already }} already created, {{ last_run.skipped }} skipped.</p>
+    <h2>Created by the last run</h2>
     {% responsive_table %}
     <table id="created-charges">
       <thead><tr><th>Store</th><th>Month</th><th class="money">Amount</th><th>Created</th><th>Charge</th></tr></thead>
@@ -43,36 +107,6 @@
     {% if last_run.not_listed %}<p class="muted" id="created-not-listed">{{ last_run.not_listed }} more not listed.</p>{% endif %}
     </section>
   {% endif %}
-  {% include "ledger/_job_status.html" %}
-  {% if match_lines %}
-    <ul id="match-report">{% for line in match_lines %}<li>{{ line }}</li>{% endfor %}</ul>
-  {% endif %}
-
-  <section class="card" id="due-today-card">
-  <div class="card-header"><h2>Due today</h2><a class="btn card-link" id="export-csv" href="{% url 'ledger:run:export' %}">Download spreadsheet</a></div>
-  {% responsive_table %}
-  <table id="due-today">
-    <thead><tr><th>Store</th><th>Operator</th><th>Debit</th><th>Channel</th><th class="money">Amount</th><th>Carried balance</th><th>This month</th><th>Last month</th></tr></thead>
-    <tbody>
-      {% for item in run.due %}
-        <tr>
-          <td><a href="{% url 'ledger:stores:detail' pk=item.lease.store.pk %}">{{ item.lease.store.external_label }}</a></td>
-          <td>{{ item.lease.operator.display_name|default:"—" }}</td>
-          <td>{{ item.seq }} (day {{ item.debit_day }})</td>
-          <td>{{ item.lease.get_payment_channel_display }}</td>
-          <td class="money">{{ item.amount|money }}{% if item.large %} <strong class="large-debit">Large debit</strong>{% endif %}{% if item.over_limit %} <strong class="over-limit">exceeds confirmed limit</strong>{% endif %}</td>
-          <td class="money carried-balance">{% if item.carried_balance %}{{ item.carried_balance|money }}{% else %}<span class="muted">$0.00</span>{% endif %}</td>
-          <td>{% if item.charge %}<a href="{% url 'ledger:charges:detail' pk=item.charge.pk %}">{% status_badge item.charge.get_status_display item.charge.status %}</a>{% if item.charge.needs_review %} {% status_badge "Needs review" %}{% endif %}{% else %}<span class="muted">Not created</span>{% endif %}</td>
-          <td>{% if item.last_month %}<a href="{% url 'ledger:charges:detail' pk=item.last_month.pk %}">{{ item.last_month.get_status_display }}</a>, balance {{ item.last_month.balance|money }}{% else %}<span class="muted">No charge</span>{% endif %}</td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="8" class="muted empty">No debit is due today.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endresponsive_table %}
-  <p class="muted" id="carried-balance-note">"Carried balance" is what earlier charges of the lease still owe. It is not added to today's amount.</p>
-  </section>
 
   <section class="card" id="autopay-charges-card">
   <h2>Repeating debits created today</h2>
@@ -90,27 +124,6 @@
         </tr>
       {% empty %}
         <tr><td colspan="5" class="muted empty">No repeating debit was created today.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endresponsive_table %}
-  </section>
-
-  <section class="card" id="skipped-today-card">
-  <h2>Skipped today</h2>
-  {% responsive_table %}
-  <table id="skipped-today">
-    <thead><tr><th>Store</th><th>Status</th><th>Channel</th><th>Reason</th></tr></thead>
-    <tbody>
-      {% for item in run.skipped %}
-        <tr>
-          <td><a href="{% url 'ledger:stores:detail' pk=item.lease.store.pk %}">{{ item.lease.store.external_label }}</a></td>
-          <td>{{ item.lease.get_collection_status_display }}</td>
-          <td>{{ item.lease.get_payment_channel_display }}</td>
-          <td>{{ item.reason }}</td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="4" class="muted empty">None.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -139,5 +152,7 @@
   {% endresponsive_table %}
   <p class="muted">Insurance charges are created by the yearly insurance charges run on or after each anniversary. Insurance autopay is a later step.</p>
   </section>
+
+  <p class="muted">Charges are created here, once per lease, month and debit; running again creates nothing new. {{ company.provider_name }}'s autopay makes the invoices; "Update from {{ company.provider_name }}" links them to these charges. Nothing here debits anyone. Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}

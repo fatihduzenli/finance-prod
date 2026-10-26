@@ -360,6 +360,8 @@ class Figures:
 class PnlRow(Figures):
     store_id: uuid.UUID | None = None
     store: str = ""
+    #: The store's number, for the screen's "#1991 Istanbul" (PLAN-012f-b E1-1); not in the CSV.
+    store_number: int | None = None
     operator_id: uuid.UUID | None = None
     operator: str = NO_OPERATOR
     month: date = date.min
@@ -914,11 +916,15 @@ def rows(query: PnlQuery) -> list[PnlRow]:
     placed = _place_store_costs(
         acc, query.months, _lease_spans(start, end), _cost_rows(start, end), names
     )
-    labels = dict(Store.objects.values_list("id", "external_label"))
+    labels = {
+        pk: (label, number)
+        for pk, label, number in Store.objects.values_list("id", "external_label", "store_number")
+    }
     known_zero = _StoreCosts(ZERO, ZERO)
     result = []
     for k, item in acc.items():
         store_costs = placed.get(k, known_zero)
+        label, number = labels.get(k[0], ("", None)) if k[0] is not None else (NO_STORE, None)
         result.append(
             PnlRow(
                 rent_billed=item.rent_billed,
@@ -932,7 +938,8 @@ def rows(query: PnlQuery) -> list[PnlRow]:
                 other_costs=store_costs.other_costs,
                 fee_costs=None if item.fee_costs_unknown else item.fee_costs,
                 store_id=k[0],
-                store=labels.get(k[0], "") if k[0] is not None else NO_STORE,
+                store=label,
+                store_number=number,
                 operator_id=k[1],
                 operator=names.get(k[1], NO_OPERATOR) if k[1] is not None else NO_OPERATOR,
                 month=k[2],
