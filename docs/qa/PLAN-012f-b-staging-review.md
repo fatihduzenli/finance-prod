@@ -369,6 +369,27 @@ sentences. The confirmation for today's debit: the existing Charge now confirmat
 the rent charge (a `rent` parameter or a sibling route `ledger:charges:debit_confirm` — Opus
 chooses the smaller change and says why; one new URL at most, registry rules, admin).
 
+**Amendments after Opus's step-3 report (Fable, 2026-10-26).** (a) Today's path cannot use the
+one-off Charge now path (it needs a provider invoice already linked), so it runs the invoice
+builder's existing Charge now path on the NSF local-invoice pattern: the confirm POST creates the
+re-debit, a local one-line invoice for it as `nsf.reschedule` does, and queues `invoice_create`
+with the charge-now parameter so the worker queues `invoice_pay` after a successful create;
+eligibility widens only to a re-debit with `source_rent_charge`. The acceptance line reads "no
+provider call outside the existing jobs: invoice_create with charge now, invoice_pay,
+schedule_create". The confirmation is the sibling route `ledger:charges:debit_confirm` (admin). (b)
+Live rule: any open (`owed` / `partial`) debit sourced by the rent charge is live, whatever its
+collection or payments — consistent with the unique constraint; after a refused or failed debit
+the card stays greyed until staff cancel that re-debit with the existing cancel action. A rent
+charge on a live installment plan is not offered either (`DEBIT_ON_PLAN`, "This charge is collected
+by its installment plan."), and splitting a rent charge that has an open debit is refused ("A bank
+debit is pending on this charge."). (c) Wording where a re-debit is named: "Bank debit of …" on
+the detail card, "Bank debit: …" on the calendar, "Carried by bank debit" on the rent row, the kind
+badge "Bank debit" through one helper `one_off_charges.kind_label`. (d) The amount is checked in
+the view (a posted amount other than the balance is refused with the one-off page's sentence); the
+service takes no amount. (e) P&L: the debit's money is rent collected in the month it settles, as
+every rent payment. (f) The rent card's sentence is `RENT_DEBIT_PENDING`; the one-off card keeps
+its own.
+
 **Out of scope.** Insurance charges; a partial debit; a debit while the lease's own autopay is in
 flight (that is the `pending` rule); changing the lease's autopay; any provider call beyond the
 existing Charge now and schedule jobs.
