@@ -206,7 +206,7 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:one_off_charges:charge_now": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Today's bank debit of a rent charge from Add payment (PLAN-012f-b §10 D19): admin.
     # The view refuses the confirmation page's GET below admin too.
-    "ledger:charges:debit_confirm": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:charges:charge_now": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Deposit resolution at lease end (PLAN-010b D7, D12): admin. The view refuses the
     # form's GET below admin too.
     "ledger:leases:resolve_deposit": RouteRule(min_role=Role.ADMIN, methods=POST),

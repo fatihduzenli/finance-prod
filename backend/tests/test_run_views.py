@@ -60,7 +60,11 @@ POST_ROUTES = (
     "ledger:charges:split",
     # PLAN-012b-b D13: repeat a failed release of a rent charge's Stax invoice or autopay move.
     "ledger:charges:retry_release",
+    # PLAN-012f-b §10 D19: today's bank debit of a rent charge (admin), as the one-off's.
+    "ledger:charges:charge_now",
 )
+#: The POST routes above that need an admin (today's debit, as the one-off's Charge now).
+ADMIN_POST_ROUTES = ("ledger:charges:charge_now",)
 READ_ROUTES = (
     "ledger:run:today",
     "ledger:charges:detail",
@@ -134,7 +138,8 @@ def test_every_new_route_is_classified_with_the_planned_roles() -> None:
     assert set(READ_ROUTES) <= registry.READ_ONLY_ROUTE_NAMES
     for name in POST_ROUTES:
         rule = registry.rule_for(name)
-        assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+        role = Role.ADMIN if name in ADMIN_POST_ROUTES else Role.BILLING
+        assert rule is not None and rule.min_role is role and rule.methods == {"POST"}
 
 
 def test_a_viewer_reads_and_changes_nothing(fake: FakeProvider) -> None:

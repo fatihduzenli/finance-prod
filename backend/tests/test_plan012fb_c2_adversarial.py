@@ -396,7 +396,7 @@ def test_the_add_payment_page_greys_the_card_with_the_autopay_sentence(
 def test_the_confirmation_route_is_registered_as_an_admins_post(fake: FakeProvider) -> None:
     from accounts.registry import rule_for
 
-    rule = rule_for("ledger:charges:debit_confirm")
+    rule = rule_for("ledger:charges:charge_now")
     assert rule is not None and rule.min_role == Role.ADMIN
     assert "POST" in rule.methods
 
@@ -404,5 +404,5 @@ def test_the_confirmation_route_is_registered_as_an_admins_post(fake: FakeProvid
 def test_an_unknown_charge_is_not_found_on_both_routes(fake: FakeProvider) -> None:
     client, _ = client_for(Role.ADMIN)
     missing = uuid.uuid4()
-    for name in ("ledger:charges:debit_confirm", "ledger:charges:record_payment"):
+    for name in ("ledger:charges:charge_now", "ledger:charges:record_payment"):
         assert client.get(reverse(name, kwargs={"pk": missing})).status_code == 404

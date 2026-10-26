@@ -434,7 +434,7 @@ def _debit(
         # The note waits in the session for the confirmation's POST, never in the URL.
         if data["note"]:
             request.session[_note_key(charge, key)] = data["note"]
-        url = reverse("ledger:charges:debit_confirm", kwargs={"pk": charge.pk})
+        url = reverse("ledger:charges:charge_now", kwargs={"pk": charge.pk})
         return redirect(f"{url}?{urlencode({'key': str(key)})}")
     outcome = one_off_service.rent_debit(
         charge,
@@ -465,8 +465,8 @@ def _page_key(request: HttpRequest) -> uuid.UUID:
 
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
-def charge_debit_confirm(request: HttpRequest, pk: str) -> HttpResponse:
-    """``ledger:charges:debit_confirm`` (admin; D19): the confirmation of today's bank
+def charge_now(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:charges:charge_now`` (admin; D19): the confirmation of today's bank
     debit of the rent charge, over its page (the amount, the bank method's last four, the
     large-debit box). The GET writes nothing; the POST runs
     :func:`ledger.services.one_off_charges.rent_debit`, which creates the debit and queues
@@ -505,7 +505,7 @@ def charge_debit_confirm(request: HttpRequest, pk: str) -> HttpResponse:
     )
     return render(
         request,
-        "ledger/charges/debit_confirm.html",
+        "ledger/charges/charge_now.html",
         {
             **_detail_context(request, charge),
             "form": form,

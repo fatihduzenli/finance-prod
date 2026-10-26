@@ -938,7 +938,7 @@ def page(rent: RentCharge) -> str:
 
 
 def confirm_page(rent: RentCharge) -> str:
-    return reverse("ledger:charges:debit_confirm", kwargs={"pk": rent.pk})
+    return reverse("ledger:charges:charge_now", kwargs={"pk": rent.pk})
 
 
 def detail(rent: RentCharge) -> str:
@@ -1036,7 +1036,7 @@ def test_another_stores_charge_is_404(fake: FakeProvider) -> None:
     admin_client = client(Role.ADMIN)
     assert admin_client.get(page(rent) + query).status_code == 404
     assert admin_client.get(confirm_page(rent) + query).status_code == 404
-    missing = reverse("ledger:charges:debit_confirm", kwargs={"pk": uuid.uuid4()})
+    missing = reverse("ledger:charges:charge_now", kwargs={"pk": uuid.uuid4()})
     assert admin_client.get(missing).status_code == 404
 
 
