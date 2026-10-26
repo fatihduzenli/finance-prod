@@ -12,7 +12,8 @@ a sentence, never an error. The page's month pickers are plain selects (PLAN-012
 not HTML month inputs, which Safari does not render) offering the current month and the
 :data:`PICKER_MONTHS` before and after it, with the shown range's months added
 (:func:`picker_months`). The filters are
-``operator`` (an operator's id), ``state`` (the store's state, any case), ``channel`` (a
+``operator`` (an operator's id), ``state`` (the store's state code, any case; the page's
+select offers :func:`state_choices`, the codes by name, PLAN-012f-b D11), ``channel`` (a
 lease payment channel) and ``status`` (a cell status); an unusable one is dropped with a
 sentence. ``q`` (PLAN-012d D16) keeps the stores whose number, name, city or operator
 matches every word (:func:`ledger.services.search.filter_stores`, in the stores query);
@@ -234,7 +235,7 @@ def parse_query(params: Mapping[str, str], today: date | None = None) -> GridQue
             operator = uuid.UUID(raw_operator)
         except ValueError:
             messages.append(BAD_OPERATOR)
-    state = (params.get("state", "") or "").strip()[:STATE_MAX_LENGTH]
+    state = (params.get("state", "") or "").strip()[:STATE_MAX_LENGTH].upper()
     channel = (params.get("channel", "") or "").strip()
     if channel and channel not in PaymentChannel.values:
         messages.append(BAD_CHANNEL)
@@ -416,6 +417,8 @@ class Grid:
     months: list[date]
     rows: list[GridRow]
     columns: list[ColumnTotal]
+    #: The State filter's choices (:func:`state_choices`), from the stores loaded.
+    states: list[tuple[str, str]] = field(default_factory=list)
 
 
 def current_lease(leases: list[Lease], today: date) -> Lease | None:
@@ -466,10 +469,19 @@ def _lease_span(leases: list[Lease]) -> _LeaseSpan | None:
 
 def _stores(q: str, today: date) -> list[Store]:
     return list(
-        search.filter_stores(Store.objects.all(), q, today)
+        search.filter_stores(Store.objects.select_related("store_type"), q, today)
         .prefetch_related(Prefetch("leases", queryset=Lease.objects.select_related("operator")))
         .order_by("store_number", "external_label", "id")
     )
+
+
+def state_choices(built: Grid | None, query: GridQuery) -> list[tuple[str, str]]:
+    """The State filter's choices: (code, name) of the state of every store the grid
+    loaded (before the operator, state, channel and status filters), by name; no query of
+    its own. Without a grid (too slow) only the state asked for, so it stays chosen."""
+    if built is not None:
+        return built.states
+    return stores.state_choices([query.state])
 
 
 def _store_order(store: Store) -> tuple[int, int, str, str]:
@@ -565,7 +577,8 @@ def build(query: GridQuery, today: date | None = None) -> Grid:
     pending = _pending_since(start, end)
     rows: list[GridRow] = []
     columns = {month: ColumnTotal(month) for month in months}
-    for store in sorted(_stores(query.q, day), key=_store_order):
+    loaded = sorted(_stores(query.q, day), key=_store_order)
+    for store in loaded:
         leases = list(store.leases.all())
         current = current_lease(leases, day)
         operator = current.operator if current is not None else None
@@ -589,7 +602,13 @@ def build(query: GridQuery, today: date | None = None) -> Grid:
             if cell.status:
                 column.counts[cell.status] = column.counts.get(cell.status, 0) + 1
             column.collected += cell.amount_paid
-    return Grid(query, months, rows, [columns[month] for month in months])
+    return Grid(
+        query,
+        months,
+        rows,
+        [columns[month] for month in months],
+        stores.state_choices(store.state.strip() for store in loaded),
+    )
 
 
 def _cell(

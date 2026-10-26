@@ -17,7 +17,9 @@ with its description. :func:`create_store` writes that row through
 without one); a row the cost service refuses saves no store either (:class:`CostRefused`).
 
 :func:`address_line` is the store's address on one line and :func:`status_badge` the
-badge status of its status (D7).
+badge status of its status (D7). A store's ``state`` is a two-letter code (PLAN-012f-b D11):
+:func:`state_text` is what a screen shows (the full name), :func:`state_choices` a filter's
+choices; CSV exports keep the code.
 
 :func:`store_list` reads the stores list (PLAN-012f-a D3; DESIGN-SPEC §4 Stores list): one row
 per store with its current lease's operator, rent and channel, its open balance as a badge
@@ -43,6 +45,7 @@ from django.db import transaction
 from django.db.models import Case, Exists, F, OuterRef, Q, Subquery, Value, When
 from django.utils import timezone
 
+from finance.us_states import state_name
 from ledger.models import (
     AuditLog,
     CollectionStatus,
@@ -65,6 +68,7 @@ CREATION_LOCK = "store_creation_lock"
 STORE_FIELDS: tuple[str, ...] = (
     "store_number",
     "external_label",
+    "store_type",
     "address_line1",
     "city",
     "state",
@@ -92,13 +96,28 @@ class CostRefused(Exception):  # noqa: N818 (reads as an outcome, like FileRefus
         self.outcome = outcome
 
 
+def state_text(code: str) -> str:
+    """A store's state as a screen shows it: the full name of its code ("TX" is "Texas"),
+    the stored value itself when it is not a code (nothing is hidden), "" for none."""
+    cleaned = " ".join(str(code or "").split())
+    return state_name(cleaned) or cleaned
+
+
+def state_choices(codes: Iterable[str]) -> list[tuple[str, str]]:
+    """(code, name) of each distinct non-empty code, sorted by name: a State filter's
+    choices."""
+    found = {code: state_text(code) for code in codes if code}
+    return sorted(found.items(), key=lambda item: (item[1].casefold(), item[0]))
+
+
 def address_line(store: Store) -> str:
-    """Street, city and "state ZIP" joined with ", "; missing parts are left out, and
-    "\u2014" stands for an address with no part at all."""
-    street, city, state, postal = (
+    """Street, city and "state ZIP" joined with ", " (the state by its full name); missing
+    parts are left out, and "\u2014" stands for an address with no part at all."""
+    street, city, postal = (
         " ".join(str(part or "").split())
-        for part in (store.address_line1, store.city, store.state, store.postal_code)
+        for part in (store.address_line1, store.city, store.postal_code)
     )
+    state = state_text(store.state)
     region = " ".join(part for part in (state, postal) if part)
     return ", ".join(part for part in (street, city, region) if part) or NO_ADDRESS
 
@@ -216,6 +235,7 @@ def _snapshot(store: Store) -> dict[str, Any]:
     return {
         "store_number": store.store_number,
         "external_label": store.external_label,
+        "store_type": str(store.store_type_id) if store.store_type_id else None,
         "address_line1": store.address_line1,
         "city": store.city,
         "state": store.state,
@@ -339,7 +359,8 @@ class ListBalance:
 class ListRow:
     store: Store
     title: str
-    #: "City, ST" (either alone when the other is missing; "" without both).
+    #: "City, State" by the state's full name (either alone when the other is missing; ""
+    #: without both).
     place: str
     operator_id: uuid.UUID | None
     operator_name: str
@@ -361,8 +382,9 @@ class StoreList:
     #: Every store, before any filter; those with a lease in effect or to come.
     total: int
     with_lease: int
-    #: The distinct states of every store, sorted: the State filter's choices.
-    states: list[str]
+    #: (code, name) of the distinct states of every store, by name: the State filter's
+    #: choices.
+    states: list[tuple[str, str]]
 
     @property
     def vacant(self) -> int:
@@ -370,7 +392,7 @@ class StoreList:
 
 
 def _place(store: Store) -> str:
-    return ", ".join(part for part in (store.city.strip(), store.state.strip()) if part)
+    return ", ".join(part for part in (store.city.strip(), state_text(store.state)) if part)
 
 
 def _list_stores(query: str, today: date) -> list[Store]:
@@ -396,13 +418,17 @@ def _list_stores(query: str, today: date) -> list[Store]:
     last_ended = Lease.objects.filter(store=OuterRef("pk"), ended_on__isnull=False).order_by(
         "-ended_on"
     )
-    stores = Store.objects.annotate(
-        list_lease=Subquery(current.values("pk")[:1]),
-        list_operator=Subquery(current.values("operator")[:1]),
-        list_operator_name=Subquery(current.values("operator__display_name")[:1]),
-        list_channel=Subquery(current.values("payment_channel")[:1]),
-        list_last_ended=Subquery(last_ended.values("ended_on")[:1]),
-    ).annotate(list_rent=Subquery(rent.values("amount")[:1]))
+    stores = (
+        Store.objects.select_related("store_type")
+        .annotate(
+            list_lease=Subquery(current.values("pk")[:1]),
+            list_operator=Subquery(current.values("operator")[:1]),
+            list_operator_name=Subquery(current.values("operator__display_name")[:1]),
+            list_channel=Subquery(current.values("payment_channel")[:1]),
+            list_last_ended=Subquery(last_ended.values("ended_on")[:1]),
+        )
+        .annotate(list_rent=Subquery(rent.values("amount")[:1]))
+    )
     if search.words(query):
         stores = stores.annotate(
             list_matched=Exists(
@@ -519,8 +545,8 @@ def store_list(params: Mapping[str, str], today: date) -> StoreList:
     charge). The counts and the states are of every store; the filters, the Balance among
     them, apply to every store before the sort, never to one page."""
     stores = _list_stores(search.clean_query(params.get("q")), today)
-    states = sorted({store.state for store in stores if store.state})
-    filters = parse_list_filter(params, states)
+    states = state_choices(store.state for store in stores)
+    filters = parse_list_filter(params, (code for code, _ in states))
     balances = _store_balances(today)
     rows = [
         _row(store, balances.get(store.pk), today)

@@ -51,12 +51,15 @@ def block(html: str, marker: str, end: str = "</section>") -> str:
 @pytest.mark.parametrize(
     ("parts", "line"),
     [
-        (("12 Main Street", "Springfield", "IL", "62701"), "12 Main Street, Springfield, IL 62701"),
-        (("", "Springfield", "IL", "62701"), "Springfield, IL 62701"),
+        (
+            ("12 Main Street", "Springfield", "IL", "62701"),
+            "12 Main Street, Springfield, Illinois 62701",
+        ),
+        (("", "Springfield", "IL", "62701"), "Springfield, Illinois 62701"),
         (("12 Main Street", "", "", "62701"), "12 Main Street, 62701"),
         (("12 Main Street", "Springfield", "", ""), "12 Main Street, Springfield"),
-        (("", "", "IL", ""), "IL"),
-        (("  12   Main St ", " Springfield ", "IL", ""), "12 Main St, Springfield, IL"),
+        (("", "", "IL", ""), "Illinois"),
+        (("  12   Main St ", " Springfield ", "IL", ""), "12 Main St, Springfield, Illinois"),
         (("", "", "", ""), "—"),
     ],
 )
@@ -72,7 +75,7 @@ def test_the_page_shows_one_address_line_escaped_and_no_city_or_state_rows() -> 
     )
     html = page(client_for(Role.VIEWER)[0], store)
     assert (
-        '<dd id="store-address">12 &lt;b&gt;Main&lt;/b&gt; Street, Springfield, IL 62701</dd>'
+        '<dd id="store-address">12 &lt;b&gt;Main&lt;/b&gt; Street, Springfield, Illinois 62701</dd>'
         in (html)
     )
     details = block(html, 'id="store-details-card"')
@@ -215,10 +218,11 @@ def test_the_other_cost_shows_only_when_set_with_its_description() -> None:
     assert '<dt>Other monthly cost</dt><dd id="other-cost">$50.00 (bins)</dd>' in cost
 
 
-def test_unknown_without_a_row_and_no_cost_at_zero() -> None:
+def test_not_entered_without_a_row_and_no_cost_at_zero() -> None:
     store = a_store()
     cost = block(page(client_for(Role.VIEWER)[0], store), 'id="store-cost"')
-    assert '<dd id="landlord-rent">unknown</dd>' in cost
+    # PLAN-012f-b D12: no row reads "Not entered" (was "unknown").
+    assert '<dd id="landlord-rent">Not entered</dd>' in cost
     assert '<dd id="landlord-lease-end">unknown</dd>' in cost
     set_cost(store, "0.00")
     cost = block(page(client_for(Role.VIEWER)[0], store), 'id="store-cost"')
@@ -326,22 +330,25 @@ def test_a_cost_row_the_service_refuses_saves_no_store() -> None:
     assert not AuditLog.objects.filter(entity_type__in=("store", "store_cost")).exists()
 
 
-def test_the_landlord_rent_is_required_on_the_new_store_form() -> None:
-    form = StoreCreateForm(data=form_data(landlord_rent=""))
-    assert not form.is_valid() and "landlord_rent" in form.errors
+def test_the_landlord_rent_is_optional_on_the_new_store_form() -> None:
+    # PLAN-012f-b D12 (was required, PLAN-012e-2 D9): empty saves the store, no cost row.
+    assert StoreCreateForm(data=form_data(landlord_rent="")).is_valid()
     assert StoreCreateForm(data=form_data(landlord_rent="0.00")).is_valid()
+    assert not StoreCreateForm(data=form_data(landlord_rent="-1.00")).is_valid()
     admin, _ = client_for(Role.ADMIN)
     response = admin.post(NEW, form_data(landlord_rent=""))
-    assert (response.status_code, response["Location"]) == (302, NEW)
-    assert not Store.objects.exists() and not StoreCost.objects.exists()
-    assert "This field is required." in admin.get(NEW).content.decode()
+    store = Store.objects.get()
+    assert (response.status_code, response["Location"]) == (302, f"/stores/{store.pk}/")
+    assert not StoreCost.objects.exists()
 
 
 def test_the_new_store_form_groups_the_cost_fields_and_the_edit_form_has_none() -> None:
     admin, _ = client_for(Role.ADMIN)
     new = admin.get(NEW).content.decode()
-    # PLAN-012f-a D5: the group is one of the form's cards.
-    fieldset = block(new, '<fieldset id="store-cost-fields" class="card form-card">', "</fieldset>")
+    # PLAN-012f-b Batch B: the group is its own fieldset in the New store dialog.
+    fieldset = block(
+        new, '<fieldset id="store-cost-fields" class="dialog-fieldset">', "</fieldset>"
+    )
     assert "<legend>Store cost</legend>" in fieldset
     for name in StoreCreateForm.COST_FIELDS:
         assert f'name="{name}"' in fieldset, name

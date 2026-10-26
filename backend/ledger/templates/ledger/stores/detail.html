@@ -7,7 +7,7 @@
 {% block header %}<div class="page-header workspace-head">
   <div class="page-title-block">
     <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:stores:list' %}">Stores</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:stores:detail' pk=store.pk %}" aria-current="page">{{ store_crumb }}</a></nav>
-    <h1 class="store-title" id="store-title">{{ store_title }} {% status_badge store.get_status_display status_value %}{% if store.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>
+    <h1 class="store-title" id="store-title">{{ store_title }}{% include "ledger/stores/_type_pill.html" %} {% status_badge store.get_status_display status_value %}{% if store.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>
     {% if store_line %}<p class="store-line" id="store-line">{{ store_line }}</p>{% endif %}
     {% if phone_line %}<p class="store-line-phone" id="store-line-phone">{{ phone_line }}</p>{% endif %}
   </div>
@@ -83,5 +83,6 @@
     {% include "ledger/stores/_header.html" %}
   </aside>
   </div>
+  {% if form_dialog %}{% include "ledger/stores/_form_dialog.html" with dialog=form_dialog open=True %}{% endif %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if space.actions %}{% include "ledger/_menu_script.html" %}{% endif %}{% if space.tab == "documents" and documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

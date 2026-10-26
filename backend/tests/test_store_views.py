@@ -67,7 +67,7 @@ def form_data(**overrides: Any) -> dict[str, Any]:
         "open_date": "2025-03-01",
         "closed_at": "",
         "status": StoreStatus.ACTIVE,
-        # PLAN-012e-2 D9: the New store form's first cost row (the rent is required).
+        # PLAN-012e-2 D9: the New store form's first cost row (optional since PLAN-012f-b D12).
         "landlord_rent": "0.00",
         "landlord_lease_end": "",
         "other_monthly_cost": "",
@@ -126,7 +126,10 @@ def test_admin_creates_a_store_with_an_audit_row(admin: Client, fake: FakeProvid
     assert row.after["external_label"] == "Store 0202"
     assert row.actor is not None and row.actor.username == "admin-store-views"
     page = admin.get(response["Location"]).content.decode()
-    assert "Store saved." in page and "Springfield" in page and "Mar 1, 2025" in page
+    # PLAN-012f-b Batch B: the owner's wording for a new store.
+    assert (
+        "Store #202 Store 0202 added." in page and "Springfield" in page and "Mar 1, 2025" in page
+    )
     assert fake.calls == []
 
 
@@ -204,7 +207,7 @@ def test_an_edit_that_changes_nothing_writes_no_audit_row(admin: Client) -> None
         ({"closed_at": "2025-02-28"}, "The closed date cannot be before the open date."),
         ({"external_label": "   "}, "This field is required."),
         ({"external_label": ""}, "This field is required."),
-        ({"status": "demolished"}, "Select a valid choice."),
+        ({"status": "demolished"}, "Choose one of the options."),
         ({"store_number": "abc"}, "Enter a whole number."),
         ({"store_number": "0"}, "greater than or equal to 1"),
         ({"open_date": "2025-02-30"}, "Enter a valid date."),
@@ -358,6 +361,8 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
     # PLAN-012f-a Batch E (ADR-0014): a repeating debit plan's Pause and Resume (billing),
     # Stop and its end rule (admin); all POST, Stop asks first on its GET (E-4).
     plans = ("plan_pause", "plan_resume", "plan_stop", "plan_end")
+    # PLAN-012f-b D13: the store form's "Check address" (billing, POST only; writes nothing).
+    address_check = ("check_address",)
     assert names == {
         f"ledger:stores:{short}"
         for short in (
@@ -372,8 +377,11 @@ def test_every_store_route_is_classified_with_the_planned_roles() -> None:
             *workspace_bar,
             *schedule,
             *plans,
+            *address_check,
         )
     }
+    rule = registry.rule_for("ledger:stores:check_address")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
     for short in ("plan_pause", "plan_resume"):
         rule = registry.rule_for(f"ledger:stores:{short}")
         assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
@@ -477,6 +485,8 @@ PLAN_010B_ADMIN_MODELS = (
     "collectionstep",
     "messagetemplate",
     "companysettings",
+    # PLAN-012f-b D10: ledger 0051 gives the admin group view, add and change on store types.
+    "storetype",
 )
 
 

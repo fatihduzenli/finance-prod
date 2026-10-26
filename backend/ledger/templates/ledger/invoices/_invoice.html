@@ -1,5 +1,5 @@
 {% comment %}The invoice as the operator reads it (PLAN-012 D7): the preview and the print view.{% endcomment %}
-{% load responsive money dates %}
+{% load components responsive money dates %}
 <section class="invoice-document" id="invoice-document">
   <header class="invoice-header">
     <p class="invoice-company" id="invoice-company"><strong>{{ preview.company }}</strong></p>
@@ -19,7 +19,7 @@
     </div>
     <div id="invoice-store">
       <h2>Store</h2>
-      <p>{% if preview.store %}{{ preview.store.external_label }}{% if preview.store.city or preview.store.state %}<br>{{ preview.store.city }}{% if preview.store.city and preview.store.state %}, {% endif %}{{ preview.store.state }}{% endif %}{% else %}Operator account (no store){% endif %}</p>
+      <p>{% if preview.store %}{{ preview.store.external_label }}{% if preview.store.city or preview.store.state %}<br>{{ preview.store.city }}{% if preview.store.city and preview.store.state %}, {% endif %}{{ preview.store.state|state_name }}{% endif %}{% else %}Operator account (no store){% endif %}</p>
     </div>
   </div>
   {% responsive_table %}

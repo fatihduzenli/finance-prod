@@ -337,6 +337,18 @@ def test_landlord_leases_ending_in_90_days(today: date) -> None:
     assert item.url == f"/stores/{store.pk}/"
 
 
+def test_a_store_without_a_state_needs_choosing_and_a_closed_one_does_not(today: date) -> None:
+    """PLAN-012f-b D11."""
+    store = a_store("No state", state="")
+    Store.objects.create(external_label="Closed", status=StoreStatus.CLOSED)
+    a_store("Has state")
+    [item] = of_kind(attention.STORE_STATE_MISSING)
+    assert item.text == "State needs choosing: No state"
+    assert (item.why, item.severity) == ("State needs choosing", attention.LOW)
+    assert item.url == f"/stores/{store.pk}/edit/"
+    assert of_kind(attention.STORE_STATE_MISSING, an_operator("Someone")) == []
+
+
 def test_stores_without_an_open_date_and_operators_without_an_email(today: date) -> None:
     store = a_store("No date")
     Store.objects.create(external_label="Closed", status=StoreStatus.CLOSED)
@@ -500,6 +512,7 @@ def build(n: int) -> None:
             source=StoreCostSource.STAFF,
         )
         a_store(f"No date {n}-{i}")
+        a_store(f"No state {n}-{i}", state="")
         vacant = opened(a_store(f"Vacant {n}-{i}"), date(2020, 1, 1))
         assert vacant.pk
         CalendarEntry.objects.create(kind="note", on=TODAY, title=f"Today {i}", operator=operator)

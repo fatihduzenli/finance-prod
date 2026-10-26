@@ -37,7 +37,9 @@ def header_lines(store: Store, operator: Operator | None) -> dict[str, str]:
     """The breadcrumb's store, the title, the address line and the phone's line."""
     address = store_service.address_line(store)
     opened = f"Open since {day_text(store.open_date)}" if store.open_date else ""
-    place = ", ".join(part for part in (store.city.strip(), store.state.strip()) if part)
+    place = ", ".join(
+        part for part in (store.city.strip(), store_service.state_text(store.state)) if part
+    )
     return {
         "store_crumb": store_service.crumb(store),
         "store_title": store_service.title(store),

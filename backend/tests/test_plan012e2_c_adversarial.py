@@ -64,7 +64,8 @@ def test_an_address_with_markup_is_escaped_in_the_line_the_title_and_the_list() 
     assert MARKUP not in body
     assert "&lt;script&gt;" in body
     line = body.split('id="store-address"')[1].split("</dd>")[0]
-    assert "Street" in line and "field" in line and "IL 62701" in line
+    # PLAN-012f-b B-3: the state shows by its full name.
+    assert "Street" in line and "field" in line and "Illinois 62701" in line
     assert MARKUP not in body.split("<title>")[1].split("</title>")[0]
     stores = admin.get(reverse("ledger:stores:list")).content.decode()
     assert MARKUP not in stores
@@ -94,7 +95,9 @@ def test_a_hostile_address_part_is_refused_and_nothing_is_created(field: str, va
 
 @pytest.mark.parametrize(
     "rent",
-    ["-1", "abc", "1e400", "99999999999999", "NaN", "Infinity", MARKUP, "", "1,000"],
+    # An empty rent is allowed since PLAN-012f-b D12 (no cost row, never zero): see the
+    # Batch B adversarial file.
+    ["-1", "abc", "1e400", "99999999999999", "NaN", "Infinity", MARKUP, "1,000"],
 )
 def test_a_hostile_landlord_rent_refuses_the_whole_new_store(rent: str) -> None:
     admin, _ = client_for(Role.ADMIN)

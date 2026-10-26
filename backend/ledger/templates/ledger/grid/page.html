@@ -60,7 +60,10 @@
         {% for operator in operators %}<option value="{{ operator.pk }}"{% if operator.pk == query.operator %} selected{% endif %}>{{ operator.display_name }}</option>{% endfor %}
       </select></span>
       <span class="filter-field"><label for="state" style="margin:0;">State</label>
-      <input type="text" name="state" id="state" value="{{ query.state }}" maxlength="50" style="width:5rem;"></span>
+      <select name="state" id="state">
+        <option value="">All</option>
+        {% for code, name in states %}<option value="{{ code }}"{% if code == query.state %} selected{% endif %}>{{ name }}</option>{% endfor %}
+      </select></span>
       <span class="filter-field"><label for="channel" style="margin:0;">Channel</label>
       <select name="channel" id="channel">
         <option value="">All</option>
@@ -97,7 +100,7 @@
       <tbody>
         {% for row, cells in rows %}
           <tr class="grid-row" data-store="{{ row.store.pk }}">
-            <th scope="row" class="store-col">{% url 'ledger:stores:detail' pk=row.store.pk as store_url %}{% include "ledger/_cell_title.html" with title=row.store_title link=store_url subline=row.operator.display_name|default:"No operator" %}</th>
+            <th scope="row" class="store-col">{% url 'ledger:stores:detail' pk=row.store.pk as store_url %}{% include "ledger/_cell_title.html" with title=row.store_title link=store_url subline=row.operator.display_name|default:"No operator" pill_store=row.store %}</th>
             {{ cells }}
           </tr>
         {% empty %}

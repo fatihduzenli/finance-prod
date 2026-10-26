@@ -832,11 +832,12 @@ def cost_form(**overrides: str) -> dict[str, str]:
     return {**values, **overrides}
 
 
-def test_the_store_page_shows_unknown_until_a_cost_is_set_then_the_cost() -> None:
+def test_the_store_page_shows_not_entered_until_a_cost_is_set_then_the_cost() -> None:
     lease = leased("3500.00")
     client, user = client_for(Role.BILLING)
     shown = page(client, lease.store)
-    assert '<dd id="landlord-rent">unknown</dd>' in shown
+    # PLAN-012f-b D12: no cost row reads "Not entered" (was "unknown").
+    assert '<dd id="landlord-rent">Not entered</dd>' in shown
     # PLAN-012e-2 D8: the Store cost block shows no margin and no operator rent (the P&L
     # has the margin).
     assert 'id="store-margin"' not in shown and 'id="operator-rent"' not in shown

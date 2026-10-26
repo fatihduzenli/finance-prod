@@ -33,4 +33,5 @@
   {% endresponsive_table %}
   {% include "ledger/_list_footer.html" with page=page pager_query=pager_query %}
   </div>
+  {% if form_dialog %}{% include "ledger/operators/_form_dialog.html" with dialog=form_dialog open=True scripts=True %}{% endif %}
 {% endblock %}

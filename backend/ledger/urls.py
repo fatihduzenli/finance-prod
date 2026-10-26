@@ -91,6 +91,8 @@ store_patterns = (
         path("", stores.store_list, name="list"),
         path("export.csv", stores.store_export, name="export"),
         path("new/", stores.store_create, name="create"),
+        # Before "<str:pk>/", which would otherwise take "check-address" as a store ID.
+        path("check-address/", stores.check_address, name="check_address"),
         path("<str:pk>/", stores.store_detail, name="detail"),
         path("<str:pk>/edit/", stores.store_edit, name="edit"),
         path("<str:pk>/cost/", stores.store_set_cost, name="set_cost"),

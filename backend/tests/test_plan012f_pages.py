@@ -359,11 +359,11 @@ def test_the_store_header_has_the_crumb_title_line_tabs_and_strip() -> None:
     assert '<a href="/stores/">Stores</a>' in header and 'aria-current="page">#1991</a>' in header
     assert re.search(r'id="store-title">#1991 Istanbul <span class="badge badge-paid">', header)
     assert (
-        '<p class="store-line" id="store-line">221 Ridge Rd, North Arlington, NJ 07031 · '
+        '<p class="store-line" id="store-line">221 Ridge Rd, North Arlington, New Jersey 07031 · '
         "Open since Oct 20, 2024</p>"
     ) in header
     assert (
-        '<p class="store-line-phone" id="store-line-phone">fatih · North Arlington, NJ</p>'
+        '<p class="store-line-phone" id="store-line-phone">fatih · North Arlington, New Jersey</p>'
         in header
     )
     assert 'id="action-bar"' in header

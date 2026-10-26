@@ -280,6 +280,7 @@ def _grid_page(
                 {name: value for name, value in query.as_query().items() if name != "q"}
             ),
             "operators": receivables.arrears_operators(),
+            "states": grid.state_choices(built, query),
             "channels": PaymentChannel.choices,
             "statuses": grid.CELL_STATUSES,
             "note_marker": grid.NOTE_MARKER,

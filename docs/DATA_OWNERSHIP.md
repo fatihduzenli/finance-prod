@@ -359,6 +359,23 @@ scans are covered by the stated policy, not by a check.
 | `fee_types.show_in_setup` | App | Whether the catalogue item appears in the setup checklist (migration 0043 set it for the seeded items; builder-saved items start off) |
 | `invoice_draft_lines.existing_charge_id` | App | An "Existing open charge" line: the open one-off charge of the lease the invoice will bill instead of creating one (CHECK: never with a rent line or a fee type) |
 
+### store_types, stores.store_type_id, stores.state as a code (PLAN-012f-b)
+| Field | Owner | Note |
+|---|---|---|
+| `store_types.id`, `created_at`, `updated_at` | System | |
+| `store_types.name`, `sort_order`, `active` | App | Admin only, in the Django admin (add and change, never delete; audited `store_type.*_in_admin`). Migration 0051 seeds Inline store, Kiosk, Cart, Pop-up, Warehouse. `name` is unique, not blank and guarded text |
+| `stores.store_type_id` | App | Optional; a type in use cannot be deleted. Shown as a grey pill after the store's name |
+| `stores.state` | App | The two-letter code of one of the 50 states or DC, or empty; screens show the full name, CSV exports the code. Migration 0051 mapped the free-text values (a code or a full name, any case); an unmatched value became empty, its raw value in a `store.state_unmapped` audit row, and the store is listed as "State needs choosing" |
+| `store_costs` (none for a store) | App | Since PLAN-012f-b the New store form's landlord rent is optional: empty writes no cost row ("Not entered", unknown in the P&L and the Cashflow card), `0.00` writes a row with no cost |
+
+### operators — `kind`, `first_name`, `last_name`, `contact_person` (PLAN-012f-b)
+| Field | Owner | Note |
+|---|---|---|
+| `kind` | App | D9: `company` or `person` (CHECK), chosen on the operator form as Type. Migration 0052 made every existing operator `person` (nothing guessed); staff change it |
+| `company`, `contact_person` | App | A company's name (the existing `company` column) and its optional contact person; guarded text |
+| `first_name`, `last_name` | App | A person's names, at most 99 characters each; guarded text; searched with the display name |
+| `display_name` | App | No longer typed on the form: derived on save from the kind's name fields (the company name, or "First Last"); kept as it is while they are empty (the rows before 0052). Still the name sent to the provider, as before; `first_name`, `last_name` and `contact_person` are not sent |
+
 ### lease_credits, payments.allocation_group / credit_id, payment method `credit` (PLAN-012d, ADR-0013)
 | Field | Owner | Note |
 |---|---|---|

@@ -1,0 +1,20 @@
+{% comment %}New store / Edit store as a modal (docs/qa/PLAN-012f-b-staging-review.md Batch B; DESIGN-SPEC §4a): the {% dialog %} frame at 640 px (a sheet on phones), the title and ×, the fields in two columns (one on phones; the "wide" ones across both), the first cost row (New store only) as its own fieldset and the optional file, then Cancel and Save. "dialog" is the view's form_dialog; "open" opens it with the page (the create and edit URLs render the page behind it so). The form posts to the URL it was opened from; a refused form comes back here with its errors under the fields. "scripts" loads the form's scripts on a page that does not have them. Under the ZIP field (PLAN-012f-b D13): "Check address" (ledger/address_check.js) when the USPS check is set up; otherwise, on a saved store, the muted "Address not verified". The check never blocks Save.{% endcomment %}{% load components static %}{% dialog id="store-form" title=dialog.title size="lg" open=open return_url=dialog.return_url %}
+<form method="post" action="{% if dialog.store %}{% url 'ledger:stores:edit' pk=dialog.store.pk %}{% else %}{% url 'ledger:stores:create' %}{% endif %}" id="store-save-form" class="js-single-submit dialog-form"{% if not dialog.store %} enctype="multipart/form-data"{% endif %}>
+  {% csrf_token %}
+  {% for field in dialog.form.hidden_fields %}{{ field }}{% endfor %}
+  {{ dialog.form.non_field_errors }}
+  <div class="dialog-form-grid" id="store-fields">
+    {% for field in dialog.form.store_fields %}{% if field.name in dialog.wide %}<div class="span-2">{% include "ledger/stores/_form_field.html" %}</div>{% elif field.name == "postal_code" %}<div class="address-zip">{% include "ledger/stores/_form_field.html" %}{% if dialog.address_check %}<button type="button" class="link-action" id="check-address" data-url="{% url 'ledger:stores:check_address' %}">Check address</button><div id="address-check" class="address-check" aria-live="polite"></div>{% elif dialog.store %}<span class="help muted" id="address-not-verified">Address not verified</span>{% endif %}</div>{% else %}{% include "ledger/stores/_form_field.html" %}{% endif %}{% endfor %}
+  </div>
+  {% if dialog.form.cost_fields %}
+    <fieldset id="store-cost-fields" class="dialog-fieldset">
+      <legend>Store cost</legend>
+      <div class="dialog-form-grid">
+        {% for field in dialog.form.cost_fields %}{% if field.name in dialog.wide %}<div class="span-2">{% include "ledger/stores/_form_field.html" %}</div>{% else %}{% include "ledger/stores/_form_field.html" %}{% endif %}{% endfor %}
+      </div>
+    </fieldset>
+  {% endif %}
+  {% if not dialog.store %}<fieldset id="documents-fields" class="dialog-fieldset"><legend>Documents</legend>{% include "ledger/documents/_create_upload.html" with document_form=dialog.document_form %}</fieldset>{% endif %}
+  <div class="dialog-foot"><a class="btn" id="cancel-store" href="{{ dialog.return_url }}">Cancel</a><button class="btn btn-primary" type="submit" id="save-store">Save</button></div>
+</form>
+{% enddialog %}{% if scripts %}{% include "ledger/operators/single_submit.html" %}{% endif %}{% if dialog.document_form %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% if dialog.address_check %}<script src="{% static 'ledger/address_check.js' %}" defer></script>{% endif %}

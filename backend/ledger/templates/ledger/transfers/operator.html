@@ -1,4 +1,4 @@
-{% extends "ledger/lease_ends/_wizard.html" %}
+{% extends "ledger/lease_ends/_wizard.html" %}{% load static %}
 {% block title %}Transfer store {{ store.external_label }}: incoming operator{% endblock %}
 {% block step_title %}Incoming operator{% endblock %}
 {% block step_body %}
@@ -12,7 +12,7 @@
   {% if query %}
     <ul id="operator-results">
       {% for row in results %}
-        <li>{{ row.display_name }}{% if row.company %} ({{ row.company }}){% endif %}
+        <li>{{ row.display_name }}{% if row.company and row.company != row.display_name %} ({{ row.company }}){% endif %}
           <form method="post" class="js-single-submit inline-form">
             {% csrf_token %}
             <input type="hidden" name="action" value="pick">
@@ -38,4 +38,5 @@
     <div class="form-actions"><button class="btn{% if not transfer.incoming_operator %} btn-primary{% endif %}" type="submit" id="create-operator">Save and choose</button></div>
   </form>
 {% endblock %}
+{% block step_scripts %}<script src="{% static 'ledger/shown_when.js' %}" defer></script>{% endblock %}
 {% block step_primary %}{% if transfer.incoming_operator %}<a class="btn btn-primary" href="{% url 'ledger:transfers:end' pk=transfer.pk %}" id="continue">Continue →</a>{% endif %}{% endblock %}

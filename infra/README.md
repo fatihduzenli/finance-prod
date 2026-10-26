@@ -484,6 +484,20 @@ If whitelisting turns out not to be worth it, the NAT gateway is the single
 largest line item here (~$35/month per environment, ADR-0002). Removing it is a
 change to `network.bicep`, at the cost of a dynamic egress IP.
 
+### Outbound hosts
+
+The address check of the store form (PLAN-012f-b D13) adds one outbound host, on 443
+through the NAT gateway above: **`apis.usps.com:443`** (the OAuth token and the Addresses
+API). `apis-tem.usps.com:443` is USPS's test environment; the app reaches it only through a
+local `USPS_API_BASE_URL` override, never from staging or production. If an egress
+allow-list is ever put in front of the environment, it must include this host beside the
+Stax, Google mail, storage and Sentry endpoints.
+
+The address check stays off until the owner registers the USPS app and stores the two Key
+Vault secrets `usps-client-id` and `usps-client-secret`. The container apps' `secretRef`
+lines for `USPS_CLIENT_ID` and `USPS_CLIENT_SECRET` are a later, owner-authorised infra
+slice; no `.bicep` file references them yet.
+
 ## 10. Step 10 (Celery) is already covered by this platform
 
 Nothing has to be re-planned for the worker and beat:

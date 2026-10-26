@@ -47,7 +47,7 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import QuerySet
 from django.db.models.functions import Lower
-from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -55,6 +55,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from finance import usps
 from ledger.forms import (
     ALLOCATION_PREFIX,
     CREDIT_PREFIX,
@@ -128,26 +129,28 @@ def store_list(request: HttpRequest) -> HttpResponse:
     """The stores list (PLAN-012f-a D3): the counts line, the filters (search, State, Status,
     Balance, Sort; :func:`ledger.services.stores.store_list`) over every store, then the page.
     The spreadsheet keeps the search only (its rows are PLAN-011 D5's)."""
+    return render(request, "ledger/stores/list.html", _list_context(request))
+
+
+def _list_context(request: HttpRequest) -> dict[str, Any]:
+    """The Stores list page's context, for the list and for New store's page behind its
+    dialog (PLAN-012f-b Batch B)."""
     listed = service.store_list(request.GET, timezone.localdate())
     filters = listed.filters
     page = Paginator(listed.rows, PAGE_SIZE).get_page(request.GET.get("page"))
-    return render(
-        request,
-        "ledger/stores/list.html",
-        {
-            "page": page,
-            "listed": listed,
-            "filters": filters,
-            "query": filters.query,
-            "status_choices": service.LIST_STATUSES,
-            "balance_choices": service.LIST_BALANCES,
-            "sort_choices": service.LIST_SORTS,
-            "can_create": meets(_role(request), Role.ADMIN),
-            "export_query": urlencode({"q": filters.query}) if filters.query else "",
-            "pager_query": urlencode(filters.as_query()),
-            "filtered_from": listed.total if filters.narrowed else None,
-        },
-    )
+    return {
+        "page": page,
+        "listed": listed,
+        "filters": filters,
+        "query": filters.query,
+        "status_choices": service.LIST_STATUSES,
+        "balance_choices": service.LIST_BALANCES,
+        "sort_choices": service.LIST_SORTS,
+        "can_create": meets(_role(request), Role.ADMIN),
+        "export_query": urlencode({"q": filters.query}) if filters.query else "",
+        "pager_query": urlencode(filters.as_query()),
+        "filtered_from": listed.total if filters.narrowed else None,
+    }
 
 
 EXPORT_HEADER = (
@@ -191,7 +194,12 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
     """The store page as the workspace (PLAN-012d D1 to D3): the header card, the action
     bar (billing and admin), the open tab (``?tab=``, Charges by default; a document
     preview opens Documents), then the store's details, costs and leases."""
-    store = _load(pk)
+    return render(request, "ledger/stores/detail.html", _detail_context(request, _load(pk)))
+
+
+def _detail_context(request: HttpRequest, store: Store) -> dict[str, Any]:
+    """The store page's context, for the page and for Edit store's page behind its dialog
+    (PLAN-012f-b Batch B)."""
     today = timezone.localdate()
     role = _role(request)
     admin = meets(role, Role.ADMIN)
@@ -245,7 +253,7 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
         )
     if tab == workspace.TAB_DOCUMENTS:
         context.update(documents.section_context(request, store))
-    return render(request, "ledger/stores/detail.html", context)
+    return context
 
 
 @role_required
@@ -449,6 +457,31 @@ def store_charge_now_pick(request: HttpRequest, pk: str) -> HttpResponse:
 
 # --- Write --------------------------------------------------------------------------
 
+#: The New / Edit store dialog's fields that take both columns (PLAN-012f-b Batch B).
+WIDE_FIELDS: tuple[str, ...] = ("address_line1", "other_cost_description")
+
+
+def _form_dialog(
+    form: StoreForm,
+    title: str,
+    return_url: str,
+    *,
+    store: Store | None = None,
+    document_form: Any = None,
+) -> dict[str, Any]:
+    """The New / Edit store dialog (PLAN-012f-b Batch B; ledger/stores/_form_dialog.html),
+    open over the page behind it; closing it goes to ``return_url``."""
+    return {
+        "form": form,
+        "title": title,
+        "return_url": return_url,
+        "store": store,
+        "document_form": document_form,
+        "wide": WIDE_FIELDS,
+        # PLAN-012f-b D13: "Check address" only when the USPS credentials are set.
+        "address_check": usps.is_configured(),
+    }
+
 
 @role_required
 @require_http_methods(["GET", "HEAD", "POST"])
@@ -475,22 +508,25 @@ def store_create(request: HttpRequest) -> HttpResponse:
                     field if field in form.fields else None, cost_refused.outcome.message
                 )
             else:
-                if created:
-                    messages.success(request, "Store saved.")
-                    documents.upload_after_create(request, store, "store")
-                else:
+                if not created:
                     messages.info(request, ALREADY_SAVED)
+                    return redirect("ledger:stores:detail", pk=store.pk)
+                messages.success(request, f"Store {service.title(store)} added.")
+                documents.upload_after_create(request, store, "store")
                 return redirect("ledger:stores:detail", pk=store.pk)
         _hold(request, "store-create", form)
         return redirect("ledger:stores:create")
     form = _held(request, "store-create", StoreCreateForm) or StoreCreateForm(
         initial={"creation_key": uuid.uuid4()}
     )
-    return render(
-        request,
-        "ledger/stores/form.html",
-        {"form": form, "store": None, "document_form": documents.create_form(DocumentKind.OTHER)},
+    context = _list_context(request)
+    context["form_dialog"] = _form_dialog(
+        form,
+        "New store",
+        reverse("ledger:stores:list"),
+        document_form=documents.create_form(DocumentKind.OTHER),
     )
+    return render(request, "ledger/stores/list.html", context)
 
 
 @role_required
@@ -512,7 +548,14 @@ def store_edit(request: HttpRequest, pk: str) -> HttpResponse:
     form = _held(request, target, lambda data: StoreForm(data, instance=store)) or StoreForm(
         instance=store
     )
-    return render(request, "ledger/stores/form.html", {"form": form, "store": store})
+    context = _detail_context(request, store)
+    context["form_dialog"] = _form_dialog(
+        form,
+        f"Edit store {service.title(store)}",
+        reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
+        store=store,
+    )
+    return render(request, "ledger/stores/detail.html", context)
 
 
 @role_required
@@ -654,3 +697,49 @@ def store_close_cost(request: HttpRequest, pk: str) -> HttpResponse:
     else:
         messages.error(request, outcome.message)
     return redirect(destination)
+
+
+# --- The address check (PLAN-012f-b D13) ---------------------------------------------
+
+CHECK_OFF = "The address check is not set up."
+CHECK_FAILED = "The address service did not answer."
+CHECK_NO_MATCH = "No match for this address."
+STREET_REQUIRED = "Enter a street to check."
+
+
+@role_required
+@require_POST
+def check_address(request: HttpRequest) -> HttpResponse:
+    """``ledger:stores:check_address`` (POST, billing): the USPS standardised form of the
+    posted street, city, state and ZIP, as JSON, for the store form's "Check address".
+    Advice only: nothing is written, and the form saves without it."""
+    if not meets(_role(request), Role.BILLING):
+        return forbidden(request)
+    limit = usps.FIELD_MAX_LENGTH
+    address = usps.Address(
+        street=request.POST.get("street", "")[:limit].strip(),
+        city=request.POST.get("city", "")[:limit].strip(),
+        state=request.POST.get("state", "")[:limit].strip(),
+        zip=request.POST.get("zip", "")[:limit].strip(),
+    )
+    if not address.street:
+        return JsonResponse({"verified": False, "reason": STREET_REQUIRED}, status=400)
+    if not usps.is_configured():
+        return JsonResponse({"verified": False, "reason": CHECK_OFF})
+    result = usps.check(address)
+    if isinstance(result, usps.Checked):
+        return JsonResponse(
+            {
+                "verified": True,
+                "address": {
+                    "street": result.street,
+                    "city": result.city,
+                    "state": result.state,
+                    "zip5": result.zip5,
+                    "zip4": result.zip4,
+                    "dpv_confirmed": result.dpv_confirmed,
+                },
+            }
+        )
+    reason = CHECK_NO_MATCH if isinstance(result, usps.NoMatch) else CHECK_FAILED
+    return JsonResponse({"verified": False, "reason": reason})

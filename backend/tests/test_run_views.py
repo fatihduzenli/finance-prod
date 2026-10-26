@@ -362,7 +362,7 @@ def test_a_replayed_payment_form_records_once(billing: Client) -> None:
         ({"amount": "0"}, "greater than or equal to 0.01"),
         ({"amount": "-1"}, "greater than or equal to 0.01"),
         ({"paid_on": "2026-10-16"}, rent_run.PAY_FUTURE),
-        ({"method": "ach"}, "Select a valid choice"),
+        ({"method": "ach"}, "Choose one of the options."),
         ({"note": "card 4111 1111 1111 1111"}, "may not contain card or account numbers"),
     ],
 )

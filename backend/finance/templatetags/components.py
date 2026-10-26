@@ -27,6 +27,9 @@ pending or the neutral colours.
 
 ``page|page_numbers``: the list footer's page numbers, gaps as "…" (PLAN-012f-a D3).
 
+``store.state|state_name``: a store's two-letter state code as its full name ("TX" is
+"Texas"; PLAN-012f-b D11); a value that is not a code is shown as stored.
+
 ``actions|action_named:"key"`` finds a workspace action (ledger.services.workspace.Action)
 by its key, or ``None``: an empty state names it as its next step.
 
@@ -57,6 +60,7 @@ from django.template.context import Context
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString, mark_safe
 
+from ledger.services.stores import state_text
 from ledger.wording import format_amount
 
 register = template.Library()
@@ -287,6 +291,12 @@ def step_line(steps: Iterable[Sequence[Any]] | None) -> SafeString:
         position,
         len(listed),
     )
+
+
+@register.filter
+def state_name(code: object) -> str:
+    """The full name of a state code; a value that is not a code as stored, "" for none."""
+    return state_text(code if isinstance(code, str) else "")
 
 
 @register.filter

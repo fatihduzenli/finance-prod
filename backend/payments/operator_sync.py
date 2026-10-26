@@ -82,9 +82,16 @@ IDENTIFIER = re.compile(r"\A[A-Za-z0-9_-]{1,255}\Z")
 
 #: The operator fields staff edit, in form order.
 OPERATOR_FIELDS: tuple[str, ...] = (
+    # PLAN-012f-b D9: the form sends the kind and its name fields, never the display
+    # name, which ``Operator.save`` derives from them; a caller that sets the display
+    # name directly still can.
+    "kind",
+    "company",
+    "contact_person",
+    "first_name",
+    "last_name",
     "display_name",
     "legal_name",
-    "company",
     "email",
     "phone",
     "address_line1",
@@ -272,6 +279,8 @@ def update_operator(
         payload = _payload(operator)
         for name, value in _editable(fields).items():
             setattr(operator, name, value)
+        # The display name the save will store, so a renamed operator is pushed.
+        operator.derive_display_name()
         if _current_ref(operator, KIND_CUSTOMER) is not None:
             if _payload(operator) != payload:
                 operator.sync_status = SyncStatus.PENDING

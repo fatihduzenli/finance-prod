@@ -48,7 +48,7 @@
   <h2 id="workspace" class="visually-hidden">Stores</h2>
   {% if store_cards %}<ul class="store-strip" id="store-strip" aria-label="Stores of this operator">
     {% for card in store_cards %}<li class="store-card" id="store-card-{{ card.store.pk }}"{% if card.store == store %} aria-current="true"{% endif %}>
-      <a class="store-card-title" href="{% url 'ledger:stores:detail' pk=card.store.pk %}">{{ card.title }}</a>
+      <span><a class="store-card-title" href="{% url 'ledger:stores:detail' pk=card.store.pk %}">{{ card.title }}</a>{% include "ledger/stores/_type_pill.html" with store=card.store %}</span>
       <span class="store-card-line">{% if card.rent is not None %}{{ card.rent|money }} / month · {% endif %}{{ card.collect_line }}</span>
       <span class="store-card-balance {% if card.balance > 0 %}tone-unpaid{% else %}tone-paid{% endif %}">{{ card.balance|money }} open{% if card.overdue %} · overdue{% endif %}</span>
     </li>{% endfor %}
@@ -195,6 +195,7 @@
     {% endif %}
   </aside>
   </div>
+  {% if form_dialog %}{% include "ledger/operators/_form_dialog.html" with dialog=form_dialog open=True %}{% endif %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}<script>
   (function () {

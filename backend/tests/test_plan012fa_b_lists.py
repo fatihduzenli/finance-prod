@@ -169,7 +169,7 @@ def test_the_columns_read_operator_rent_channel_and_place(viewer: Client) -> Non
     assert f'<a href="/operators/{operator.pk}/">Owing Co</a>' in owing
     assert '<td class="money" data-role="amount" data-label="Rent">$2,000.00</td>' in owing
     assert ">Bank debit</td>" in owing and ">Zelle</td>" in found["Part"]
-    assert '<span class="cell-subline">Newark, NJ</span>' in owing
+    assert '<span class="cell-subline">Newark, New Jersey</span>' in owing
     assert ">—</td>" in found["Empty"]  # no rent, no channel
 
 

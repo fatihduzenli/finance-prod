@@ -76,7 +76,11 @@ def billing() -> Client:
 
 
 def form_data(**overrides: Any) -> dict[str, Any]:
+    """The operator form's post: a company named as ``fields()``'s display name (PLAN-012f-b
+    D9: the form has Type and the kind's name fields, never ``display_name``)."""
     data = {name: ("" if value is None else value) for name, value in fields().items()}
+    data["kind"] = "company"
+    data["company"] = data.pop("display_name")
     data["creation_key"] = str(uuid.uuid4())
     return {**data, **overrides}
 
@@ -107,7 +111,7 @@ def test_two_posts_with_one_creation_key_make_one_operator_and_one_customer(
 ) -> None:
     data = form_data()
     first = billing.post(NEW, data)
-    second = billing.post(NEW, {**data, "display_name": "Different on replay"})
+    second = billing.post(NEW, {**data, "company": "Different on replay"})
 
     operator = Operator.objects.get()
     assert first.status_code == second.status_code == 302
@@ -158,7 +162,7 @@ def test_the_create_form_carries_a_fresh_creation_key_and_csrf(billing: Client) 
         page = billing.get(NEW).content.decode()
         assert 'name="csrfmiddlewaretoken"' in page
         assert 'type="email"' in page
-        assert 'id="id_display_name"' in page and "required" in page
+        assert 'id="id_company"' in page and 'id="id_kind_1"' in page and "required" in page
         start = page.index('name="creation_key" value="') + len('name="creation_key" value="')
         keys.add(uuid.UUID(page[start : start + 36]))
     assert len(keys) == 2
@@ -665,10 +669,10 @@ def test_every_post_route_redirects_on_failure(fake: FakeProvider) -> None:
     operator = new_operator()
     paths = _paths(operator)
 
-    invalid_create = client.post(NEW, form_data(display_name="  ", email="bad"))
+    invalid_create = client.post(NEW, form_data(company="  ", email="bad"))
     assert (invalid_create.status_code, invalid_create["Location"]) == (302, NEW)
 
-    invalid_edit = client.post(paths["edit"], form_data(display_name=""))
+    invalid_edit = client.post(paths["edit"], form_data(company=""))
     assert (invalid_edit.status_code, invalid_edit["Location"]) == (302, paths["edit"])
 
     invalid_link = client.post(paths["link"], {"customer_id": "bad id", "payment_method_id": ""})
@@ -703,7 +707,7 @@ def test_errors_are_shown_on_the_next_get_only(
     invalid: dict[str, Any] = (
         {"customer_id": "bad id", "payment_method_id": "pm_1"}
         if route == "link"
-        else form_data(display_name="", legal_name="Kept Legal Name")
+        else form_data(company="", legal_name="Kept Legal Name")
     )
 
     posted = billing.post(path, invalid)
@@ -712,7 +716,7 @@ def test_errors_are_shown_on_the_next_get_only(
     first = billing.get(path).content.decode()
     assert 'class="errorlist' in first
     if route != "link":
-        assert "This field is required." in first
+        assert "Enter the company name." in first
         assert 'value="Kept Legal Name"' in first
     else:
         assert 'value="bad id"' in first
@@ -726,7 +730,7 @@ def test_errors_are_shown_on_the_next_get_only(
 def test_the_create_form_keeps_its_creation_key_across_the_redirect(
     billing: Client, fake: FakeProvider
 ) -> None:
-    data = form_data(display_name="")
+    data = form_data(company="")
     billing.post(NEW, data)
     page = billing.get(NEW).content.decode()
     assert f'value="{data["creation_key"]}"' in page
@@ -735,7 +739,7 @@ def test_the_create_form_keeps_its_creation_key_across_the_redirect(
 def test_a_held_form_is_not_shown_on_another_form(billing: Client, fake: FakeProvider) -> None:
     first = new_operator(email=None)
     second = new_operator(email=None, display_name="Second")
-    billing.post(_paths(first)["edit"], form_data(display_name=""))
+    billing.post(_paths(first)["edit"], form_data(company=""))
     other = billing.get(_paths(second)["edit"]).content.decode()
     assert 'class="errorlist' not in other
     # Consumed by that GET: the first form's page no longer shows it either.
