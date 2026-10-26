@@ -150,8 +150,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: The route names as one digest (sorted, newline-joined, sha256): 255 before Batch D of
 #: PLAN-012c; 257 since PLAN-012e-2 Batch C; 261 since PLAN-012f-a Batch E; 262 since
 #: PLAN-012f-b Batch A; 268 since Batch B; 272 since Batch D (ledger:invoices:saved and
-#: settlement_preview, ledger:plans:pause and resume; checked by hand on 2026-10-25).
-FROZEN_ROUTES = (272, "44c558cedfe2afe2995dce7d1c03edb1fd8feb351bd98633a9483f2c39409760")
+#: settlement_preview, ledger:plans:pause and resume; checked by hand on 2026-10-25); 273
+#: since slice C2 (ledger:charges:debit_confirm, PLAN-012f-b §10 D19).
+FROZEN_ROUTES = (273, "34b48ba91ee9fa128d9e72a5ef0a98b097c6a433aab3c401d2d97379ef8b5535")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

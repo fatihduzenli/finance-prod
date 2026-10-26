@@ -61,14 +61,13 @@ from finance.dates import month_text
 from ledger.models import (
     ZERO,
     MoneyMethod,
-    OneOffCategory,
     Operator,
     Payment,
     PaymentKind,
     PaymentMethod,
     PaymentStatus,
 )
-from ledger.services import pnl, receivables
+from ledger.services import one_off_charges, pnl, receivables
 from ledger.services.csv_export import CsvWriter
 from ledger.services.payments_ledger import charge_lease, invoice_line_parts
 from ledger.wording import provider_sentence
@@ -570,7 +569,7 @@ def _charge_description(payment: Payment, *, export: bool = False) -> str:
         return f"Insurance, policy year {payment.insurance_charge.policy_year}"
     if payment.one_off_charge is not None:
         one_off = payment.one_off_charge
-        label = OneOffCategory(one_off.category).label
+        label = one_off_charges.kind_label(one_off)
         detail = one_off.fee_type.name if one_off.fee_type is not None else one_off.description
         return f"{label}: {detail}" if detail else str(label)
     return ""

@@ -95,6 +95,7 @@ from ledger.services import (
     installments,
     lease_end,
     leases,
+    one_off_charges,
     payments_ledger,
     receivables,
 )
@@ -144,6 +145,8 @@ NEXT_RENT = "Rent debit"
 NEXT_REDEBIT = "Re-debit of a returned payment"
 #: The status of a charge whose balance a live re-debit collects (finding 12d-2).
 CARRIED_BY_REDEBIT = "Carried by re-debit"
+#: A rent charge whose open bank debit from Add payment carries it (PLAN-012f-b §10 D19).
+CARRIED_BY_BANK_DEBIT = "Carried by bank debit"
 
 _CLOSED_ONE_OFF = (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
 
@@ -827,7 +830,7 @@ def _one_off_row(charge: OneOffCharge, role: Role | None, back: str) -> ChargeRo
         kind_label=(
             installments.plan_label(charge.plan, charge.installment_no)
             if charge.plan is not None and charge.installment_no is not None
-            else charge.get_category_display()
+            else one_off_charges.kind_label(charge)
         ),
         description=charge.label,
         due=charge.due_date,
@@ -859,16 +862,20 @@ def _one_off_row(charge: OneOffCharge, role: Role | None, back: str) -> ChargeRo
     )
 
 
-def _as_receivables(row: ChargeRow, balances: StoreBalances) -> None:
+def _as_receivables(
+    row: ChargeRow, balances: StoreBalances, debited: frozenset[uuid.UUID] = frozenset()
+) -> None:
     """Give an open rent or one-off row the balance the header counts (finding 12d-2):
-    less what a live re-debit carries, "Carried by re-debit" once that is all of it."""
+    less what a live re-debit carries, "Carried by re-debit" once that is all of it ("Carried
+    by bank debit" for a rent charge in ``debited``, whose open bank debit carries it,
+    PLAN-012f-b D19)."""
     key = (row.kind, row.charge_id)
     if key in balances.owed:
         row.balance = balances.owed[key]
     elif key in balances.carried:
         row.balance = ZERO
     if key in balances.carried and row.balance <= 0:
-        row.status = CARRIED_BY_REDEBIT
+        row.status = CARRIED_BY_BANK_DEBIT if row.charge_id in debited else CARRIED_BY_REDEBIT
 
 
 def charges_tab(
@@ -882,7 +889,8 @@ def charges_tab(
     :func:`ledger.services.receivables.open_balances` (a rescheduled return's carried
     amount subtracted, finding 12d-2), as the insurance row does, so the open charges
     total the header's balance; ``balances`` is the header's, read here when not given.
-    Seven queries whatever the number of charges, besides ``balances``."""
+    Seven queries whatever the number of charges, besides ``balances``; an eighth when a
+    rent row is carried (whether a bank debit carries it, PLAN-012f-b D19)."""
     billing = meets(role, Role.BILLING)
     back = _back(owner, TAB_PAYMENTS)
     if balances is None:
@@ -893,10 +901,25 @@ def charges_tab(
             else store_balances(owner, owner.leases.all(), today)
         )
     rows: list[ChargeRow] = []
-    for rent in _rent_rows(owner, chosen):
+    rents = list(_rent_rows(owner, chosen))
+    carried_rents = [
+        rent.pk for rent in rents if (receivables.KIND_RENT, rent.pk) in balances.carried
+    ]
+    # PLAN-012f-b D19: one more query, only when a rent row is carried at all.
+    debited = (
+        frozenset(
+            OneOffCharge.objects.filter(
+                source_rent_charge__in=carried_rents,
+                status__in=one_off_charges.OPEN_STATUSES,
+            ).values_list("source_rent_charge", flat=True)
+        )
+        if carried_rents
+        else frozenset()
+    )
+    for rent in rents:
         rent_row = _rent_row(rent, billing, back)
         if rent.balance > 0 and rent.status != RentChargeStatus.WAIVED:
-            _as_receivables(rent_row, balances)
+            _as_receivables(rent_row, balances, debited)
         rows.append(rent_row)
     for one_off in _one_off_rows(owner, chosen):
         one_off_row = _one_off_row(one_off, role, back)

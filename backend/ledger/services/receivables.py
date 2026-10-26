@@ -76,6 +76,7 @@ from django.db.models.functions import Coalesce
 
 from finance.dates import month_text
 from ledger.models import (
+    BANK_DEBIT_LABEL,
     LIVE_PLAN_STATUSES,
     ZERO,
     InstallmentPlanStatus,
@@ -333,6 +334,7 @@ def _one_off_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
         "category",
         "description",
         "lease",
+        "source_rent_charge",
         fee_name=F("fee_type__name"),
         billed=Coalesce("operator", "lease__operator"),
         billed_name=Coalesce("operator__display_name", "lease__operator__display_name"),
@@ -362,7 +364,11 @@ def _one_off_balances(operator: uuid.UUID | None) -> list[OpenBalance]:
 
 
 def _one_off_description(categories: Mapping[str, object], row: Mapping[str, object]) -> str:
-    label = str(categories.get(str(row["category"]), row["category"]))
+    if row["source_rent_charge"] is not None:
+        # PLAN-012f-b D19: a rent charge's bank debit reads as one, not as a re-debit.
+        label = BANK_DEBIT_LABEL
+    else:
+        label = str(categories.get(str(row["category"]), row["category"]))
     detail = str(row["fee_name"] or row["description"] or "")
     return f"{label}: {detail}" if detail else label
 
@@ -374,9 +380,12 @@ def carried_by_redebits(
     charges have still to collect again for the charge a returned payment was for; and
     per insurance charge, what its re-debits collected (each up to its price, whatever
     its status since), as :func:`ledger.services.rent_run.redebit_collected` counts it
-    for the charges that store their paid amount."""
+    for the charges that store their paid amount. A rent charge's bank debit from Add
+    payment (``source_rent_charge``, PLAN-012f-b D19) carries its amount under the rent
+    charge as a re-debit of a rent payment does."""
     rows = OneOffCharge.objects.filter(
-        category=OneOffCategory.REDEBIT, source_payment__isnull=False
+        Q(source_payment__isnull=False) | Q(source_rent_charge__isnull=False),
+        category=OneOffCategory.REDEBIT,
     )
     if operator is not None:
         rows = rows.filter(
@@ -408,14 +417,16 @@ def _redebit_amounts(
 ) -> tuple[dict[tuple[str, uuid.UUID], Decimal], dict[uuid.UUID, Decimal]]:
     carried: dict[tuple[str, uuid.UUID], Decimal] = {}
     insurance_collected: dict[uuid.UUID, Decimal] = {}
-    for status, price, paid, rent, insurance, one_off in rows.values_list(
+    for status, price, paid, rent, debited, insurance, one_off in rows.values_list(
         "status",
         "price",
         "amount_paid",
         "source_payment__rent_charge",
+        "source_rent_charge",
         "source_payment__insurance_charge",
         "source_payment__one_off_charge",
     ).order_by():
+        rent = rent or debited
         collected = min(max(_money(paid), ZERO), _money(price))
         if insurance is not None:
             insurance_collected[insurance] = insurance_collected.get(insurance, ZERO) + collected

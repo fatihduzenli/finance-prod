@@ -170,7 +170,7 @@ def charge_export(request: HttpRequest) -> StreamingHttpResponse:
             billed.display_name if (billed := _operator(charge)) is not None else "",
             charge.lease.store.external_label if charge.lease is not None else "",
             charge.label,
-            charge.get_category_display(),
+            service.kind_label(charge),
             charge.get_collection_display(),
             charge.due_date,
             charge.price,
@@ -205,7 +205,7 @@ def _detail_context(request: HttpRequest, charge: OneOffCharge) -> dict[str, Any
     jobs = job_context(charge)
     # Every line of a builder invoice has the invoice (PLAN-012c-a D1); PLAN-012f-a D4: each
     # with its subline and the builder draft that sent it.
-    invoice_rows = detail_service.invoice_rows(charge, str(charge.get_category_display()))
+    invoice_rows = detail_service.invoice_rows(charge, service.kind_label(charge))
     invoices = [row.invoice for row in invoice_rows]
     payments = list(charge.payments.order_by("-settled_on", "-created_at"))
     operator = _operator(charge)

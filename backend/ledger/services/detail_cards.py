@@ -39,7 +39,7 @@ from ledger.models import (
     OneOffCharge,
     RentCharge,
 )
-from ledger.services import audit, receivables, rent_run
+from ledger.services import audit, one_off_charges, receivables, rent_run
 
 #: The newest rows the Activity card shows; older ones are on the store page's History tab.
 ACTIVITY_SIZE = 20
@@ -185,7 +185,7 @@ def kind_words(charge: OneOffCharge, resolution: DepositResolution | None) -> st
         if charge.amount_paid > 0:
             return "Deposit · held, refundable"
         return "Deposit · refundable"
-    return str(charge.get_category_display())
+    return one_off_charges.kind_label(charge)
 
 
 def one_off_source(charge: OneOffCharge, invoices: Sequence[InvoiceRow]) -> str:
@@ -194,6 +194,9 @@ def one_off_source(charge: OneOffCharge, invoices: Sequence[InvoiceRow]) -> str:
         return SOURCE_SPREADSHEET
     if charge.category == OneOffCategory.INSTALLMENT:
         return SOURCE_PLAN
+    if charge.source_rent_charge is not None:
+        # PLAN-012f-b D19: a rent charge's bank debit from Add payment, not a return.
+        return one_off_charges.rent_debit_description(charge.source_rent_charge)
     if charge.category in (OneOffCategory.REDEBIT, OneOffCategory.NSF_FEE):
         return SOURCE_RETURN
     if any(row.draft_id is not None for row in invoices):

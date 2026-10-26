@@ -1,6 +1,6 @@
 {% extends "finance/base.html" %}
 {% load components money dates %}
-{% load responsive %}
+{% load responsive charge_kinds %}
 {% load static %}
 {% block title %}{{ preview.number }}{% endblock %}
 {% comment %}The invoice builder's page: the draft's form while it is a draft (the builder of PLAN-012f-a D5, _builder.html: its header is the new draft's, with Preview and Print view; Discard opens the draft's delete page); once sent, the invoice in the detail family (PLAN-012f-a D4): the tiles Total / Paid / Balance (its charges' figures), the Lines, Charges and Activity cards beside DETAILS and MORE (Cancel).{% endcomment %}
@@ -45,7 +45,7 @@
       <thead><tr><th>Line</th><th>Charge</th><th>Category</th><th class="money">Amount</th><th class="money">Paid</th><th>Status</th></tr></thead>
       <tbody>
         {% for charge in charges %}
-          <tr class="sent-charge"><td>{{ forloop.counter }}</td><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge.get_category_display }}</td><td class="money">{{ charge.price|money }}</td><td class="money">{{ charge.amount_paid|money }}</td><td>{% status_badge charge.get_status_display charge.status %}</td></tr>
+          <tr class="sent-charge"><td>{{ forloop.counter }}</td><td><a href="{% url 'ledger:one_off_charges:detail' pk=charge.pk %}">{{ charge.label }}</a></td><td>{{ charge|kind_label }}</td><td class="money">{{ charge.price|money }}</td><td class="money">{{ charge.amount_paid|money }}</td><td>{% status_badge charge.get_status_display charge.status %}</td></tr>
         {% endfor %}
         {% for rent in rent_charges %}
           <tr class="sent-rent-charge"><td>Rent</td><td><a href="{% url 'ledger:charges:detail' pk=rent.pk %}">Rent {{ rent.period_month|month }}, store {{ rent.lease.store.external_label }}</a></td><td>Rent</td><td class="money">{{ rent.amount_due|money }}</td><td class="money">{{ rent.amount_paid|money }}</td><td>{% status_badge rent.get_status_display rent.status %}</td></tr>

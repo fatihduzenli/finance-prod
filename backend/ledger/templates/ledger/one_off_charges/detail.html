@@ -1,6 +1,6 @@
 {% extends "finance/base.html" %}
 {% load components money dates %}
-{% load responsive %}
+{% load responsive charge_kinds %}
 {% block title %}{{ charge.label }}{% if lease %} {{ lease.store.external_label }}{% endif %}{% endblock %}
 {% comment %}The one-off charge page (PLAN-012f-a D4; DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png): the header (breadcrumb, title with the status and kind badges, the muted line, Add payment / Charge now, Split into installments, More ▾), then the two-thirds column (the Amount, Paid and Balance tiles, Invoices, Payments, Activity and the charge's other cards) beside the one-third column (DETAILS, the open promise, MORE). The More menu and the MORE card hold the same actions by role.{% endcomment %}
 {% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=charges#tab-charges" id="charges-crumb">Charges</a> <span aria-hidden="true">›</span> {% elif operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{{ charge.label }}</span></nav><h1 class="store-title">{{ charge.label }} <span id="charge-status">{% status_badge charge.get_status_display charge.status %}</span> <span class="badge kind-badge" id="charge-kind">{{ kind_badge }}</span>{% if charge.legacy %} <span class="badge">From the spreadsheet</span>{% endif %}{% if charge.needs_review %} {% status_badge "Needs review" %}{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if can_record or can_charge_now or can_split or can_link_invoice or can_edit or can_waive or can_cancel or can_delete_invoice %}<div class="page-actions" id="charge-actions">{% if can_record %}<a class="btn btn-primary" href="{% url 'ledger:one_off_charges:payment' pk=charge.pk %}" id="record-payment">Add payment</a>{% endif %}{% if can_charge_now %}<a class="btn{% if not can_record %} btn-primary{% endif %}" href="{% url 'ledger:one_off_charges:charge_now' pk=charge.pk %}" id="charge-now">Charge now</a>{% endif %}{% if can_split %}<a class="btn" href="{{ split_url }}" id="split-installments">Split into installments</a>{% endif %}{% if can_link_invoice or can_edit or can_waive or can_cancel or can_delete_invoice %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
@@ -103,7 +103,7 @@
   <section class="card" id="charge-summary" aria-label="Charge">
   <h2 class="section-label">Details</h2>
   <dl class="detail-list side-list">
-    <dt>Category</dt><dd id="category">{{ charge.get_category_display }}</dd>
+    <dt>Category</dt><dd id="category">{{ charge|kind_label }}</dd>
     {% if charge.category != "setup" %}<dt>Description</dt><dd id="description">{{ charge.description }}</dd>
     <dt>Collected by</dt><dd id="collection">{{ charge.get_collection_display }}</dd>{% endif %}
     <dt>Due</dt><dd id="due-date">{{ charge.due_date|day }}</dd>

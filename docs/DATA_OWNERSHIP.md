@@ -192,6 +192,7 @@ unit amount, audited `fee_type.created`. Everything else about the catalogue sta
 | `waived_at`, `waived_by_id`, `waive_note` | App | Admin; note mandatory |
 | `voided_at`, `voided_by_id`, `void_note` | App | Billing, after the provider confirmed the invoice is deleted; note mandatory |
 | `charge_now_key` | System | The idempotency ID of the single "Charge now" attempt; set once, never changed |
+| `source_rent_charge_id` | App | PLAN-012f-b §10 D19, migration 0056: the rent charge a `redebit` charge debits from Add payment (no returned payment behind it). A `redebit` charge has exactly one of `source_payment_id` and this (CHECK `one_off_charges_redebit_one_source`); at most one open (`owed`/`partial`) debit per rent charge (partial unique index `one_off_charges_one_open_debit_per_rent_charge`). What it collects is paid on the rent charge; a foreign key, outside the guard |
 | `review_message`, `needs_review` | App / Stax | Provider refusal text (class names only), reference conflicts |
 | `legacy` | Import | Step 13 opening balances |
 
