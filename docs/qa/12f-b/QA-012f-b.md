@@ -347,3 +347,32 @@ secret-store read; the provider fence clean over the new non-test files; no new 
 new environment variable.
 
 **Verdict (C2):** PASS — four findings resolved (two MAJOR: the lease's own autopay, the route name against the re-debit tripwire; two MINOR), one MINOR deferred by written decision (the session note); residual risk: the live-Stax path of today's debit (invoice_create with charge now, then invoice_pay) is proven against the fake only — TODO-VERIFY with the Add payment ACH item on live Stax; the autopay rule reads the local schedule state (what "Pause autopay" reads), a schedule active at the provider but not mirrored locally would not grey the card.
+
+## Slice A5 — Payment status over all charges (branch `step-12f-b/batch-a5`, plan §10 D20)
+
+**Scope.** The owner's checkpoint decision of 2026-10-26: the dashboard's Payment status card counts
+every charge due in the range, rent and fees. Opus, one brief: `dashboard.payment_status` adds one
+query over the one-off charges due in the range, excluding installments, autopay-plan occurrences
+and re-debits (they count through their parent or source), with an `Exists` for a pending payment
+that is not a refund; the families follow D20 (paid by the amount paid; waived and voided nowhere;
+a pending payment → pending; partly paid not yet due → pending; owed → Overdue or Upcoming by the
+balance); the one tally loop feeds on both sources; no template, model, URL or copy change (the
+card's comment names rent and fees). Budget pins 80 → 81 (`tests/test_dashboard_cards.py`
+`MAX_DASHBOARD_QUERIES`, 76 measured on sqlite, 75 before; Fable's `test_plan012fb_a_adversarial.py`,
+re-pinned by Fable). Opus's `tests/test_payment_status_all_charges.py` (27 cases incl. a
+hand-computed mixed set and an exact two-query assertion; mutation-checked: the exclusion and the
+refund filter each break tests when removed).
+
+**Findings.** A5-1 (MINOR, resolved): a pending refund made a fee read "pending"; the `Exists`
+counts only a pending payment that is not a refund. A5-2 (MINOR, resolved): the card's template
+comment still said "rent charges".
+
+**Cost, as the owner asked.** One extra query per dashboard render, a range scan of
+`one_off_charges.due_date` (no index; thousands of rows at most). No concern at today's sizes; a
+`due_date` index joins Step 13's index work if the dashboard's time rises on staging.
+
+**Gate.** ruff, `ruff format --check` (522 files), mypy strict (522 files), `uv lock --check`, `makemigrations --check` (no migration): clean on 5651beb (A5 on C2's tip). sqlite: the full suite 7,906 passed, 692 skipped, 116 deselected in 980 s. PostgreSQL 16 (a throwaway container, the CI split): `makemigrations --check` no changes; the migration selection 36 passed in 965 s; the unit selection 8,559 passed, 3 skipped, 119 deselected in 1,235 s; the e2e suite 37 passed four times over (89, 89, 89 and 88 s). Visual: VISUAL_A5 (the dashboard
+baselines unchanged: the visual world has no fee due in the range). Secret scans clean; no
+secret-store read; no new file outside tests; no new dependency or environment variable.
+
+**Verdict (A5):** PASS — two MINOR findings resolved, none deferred; residual risk: the card is not exercised on staging data with fees in the range until the deploy (the figures are hand-checked in the tests).
