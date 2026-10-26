@@ -81,6 +81,14 @@ PAGES: dict[str, Callable[[Site], str]] = {
     "payment-detail": lambda site: reverse(
         "ledger:payments:detail", kwargs={"pk": settled_payment_of(site).pk}
     ),
+    # PLAN-012f-b Batch E: a confirmation as a dialog over its parent, the Help pages, the
+    # not-found page in the shell.
+    "void-payment": lambda site: reverse(
+        "ledger:payments:void", kwargs={"pk": settled_payment_of(site).pk}
+    ),
+    "help": lambda site: "/help/",
+    "help-topic": lambda site: "/help/collecting-an-invoice/",
+    "not-found": lambda site: "/no-such-page/",
     "new-store": lambda site: reverse("ledger:stores:create"),
     "new-lease": lambda site: reverse("ledger:leases:create"),
     "operator-form": lambda site: reverse(
@@ -112,7 +120,7 @@ def settled_payment_of(site: Site) -> Payment:
 
 
 #: The lease-end wizard and the New store and New lease forms are for admins only.
-AS_ADMIN = {"lease-end-statement", "new-store", "new-lease"}
+AS_ADMIN = {"lease-end-statement", "new-store", "new-lease", "void-payment"}
 #: Seen signed out, in a context of its own (the sign-in page, PLAN-012f-a D9).
 SIGNED_OUT = {"login"}
 
