@@ -399,6 +399,8 @@ urlpatterns = [
     path("", dashboard.home, name="home"),
     # The top-bar search (PLAN-012d D17): any verified role, read only.
     path("search/", search.search_page, name="search"),
+    # The "Which store?" picker's type-ahead (PLAN-012f-b D7): JSON, billing, read only.
+    path("search/stores.json", search.stores_json, name="search_stores"),
     path("calendar/", include(calendar_patterns)),
     path("grid/", include(grid_patterns)),
     path("arrears/", include(arrears_patterns)),

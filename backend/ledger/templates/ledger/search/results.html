@@ -1,12 +1,16 @@
 {% extends "finance/base.html" %}
 {% load responsive %}
-{% load icons %}
-{% block title %}Search{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title"><h1>Search</h1>{% if query and not results.empty %}<span class="list-counts" id="list-counts">{{ results.stores|length }}{% if results.more_stores %}+{% endif %} store{{ results.stores|length|pluralize }} · {{ operators|length }}{% if results.more_operators %}+{% endif %} operator{{ operators|length|pluralize }}</span>{% endif %}</div></div>{% endblock %}
+{% load icons static %}
+{% block title %}{% if new_invoice %}New invoice — which store?{% else %}Search{% endif %}{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>{% if new_invoice %}New invoice — which store?{% else %}Search{% endif %}</h1>{% if query and not results.empty %}<span class="list-counts" id="list-counts">{{ results.stores|length }}{% if results.more_stores %}+{% endif %} store{{ results.stores|length|pluralize }}{% if not new_invoice %} · {{ operators|length }}{% if results.more_operators %}+{% endif %} operator{{ operators|length|pluralize }}{% endif %}</span>{% endif %}</div>{% if can_act %}<div class="page-actions"><a class="btn" id="new-invoice-for" href="{% url 'ledger:search' %}?intent=new_invoice" data-dialog-open="store-picker">{% icon "plus" 16 %}New invoice for…</a></div>{% endif %}</div>{% endblock %}
 {% block content %}
   {% comment %}The top-bar search's results (PLAN-012d D17): the stores and the operators matching every word;
-  an archived operator is listed and marked, never jumped to.{% endcomment %}
+  an archived operator is listed and marked, never jumped to. With intent=new_invoice (PLAN-012f-b D7, the
+  "Which store?" picker without its script) the stores only, each leading to its Create invoice page, and the
+  box keeps the intent. "New invoice for…" opens the picker (billing and above).{% endcomment %}
+  {% if can_act %}{% include "ledger/_store_picker.html" %}{% endif %}
   <div class="card filter-card"><form method="get" action="{% url 'ledger:search' %}" class="actions list-filters" role="search" id="search-form">
+    {% if new_invoice %}<input type="hidden" name="intent" value="new_invoice">{% endif %}
     <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store, city or operator" aria-label="Search stores and operators" class="list-search">
     <button class="btn btn-dark" type="submit">Search</button>
   </form></div>
@@ -22,12 +26,12 @@
       <table id="search-stores">
         <thead><tr><th>Store</th><th>Store number</th><th>Operator</th><th class="cell-chevron"><span class="visually-hidden">Open</span></th></tr></thead>
         <tbody>
-          {% for hit in results.stores %}{% url 'ledger:stores:detail' pk=hit.store.pk as store_url %}
+          {% for hit in results.stores %}{% if new_invoice %}{% url 'ledger:invoices:new_store' pk=hit.store.pk as store_url %}{% else %}{% url 'ledger:stores:detail' pk=hit.store.pk as store_url %}{% endif %}
             <tr>
               <td>{% include "ledger/_cell_title.html" with title=hit.store.external_label link=store_url subline=hit.store.city %}</td>
               <td>{{ hit.store.store_number|default_if_none:"—" }}</td>
               <td>{% if hit.operator %}<a href="{% url 'ledger:operators:detail' pk=hit.operator.pk %}">{{ hit.operator.display_name }}</a>{% else %}<span class="muted">No operator</span>{% endif %}</td>
-              <td class="cell-chevron" data-role="meta"><a href="{{ store_url }}" aria-label="Open {{ hit.store.external_label }}">{% icon "chevron-right" 16 %}</a></td>
+              <td class="cell-chevron" data-role="meta"><a href="{{ store_url }}" aria-label="{% if new_invoice %}New invoice for{% else %}Open{% endif %} {{ hit.store.external_label }}">{% icon "chevron-right" 16 %}</a></td>
             </tr>
           {% endfor %}
         </tbody>
@@ -38,6 +42,7 @@
       <p class="muted empty" id="search-no-store">No store matches.</p>
     {% endif %}
     </section>
+    {% if not new_invoice %}
     <section class="card" id="search-operators-card">
     <h2>Operators</h2>
     {% if operators %}
@@ -60,5 +65,7 @@
       <p class="muted empty" id="search-no-operator">No operator matches.</p>
     {% endif %}
     </section>
+    {% endif %}
   {% endif %}
 {% endblock %}
+{% block scripts %}{% if can_act %}<script src="{% static 'ledger/store_picker.js' %}" defer></script>{% endif %}{% endblock %}

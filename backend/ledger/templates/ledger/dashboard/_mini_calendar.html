@@ -1,0 +1,16 @@
+{% load dates %}
+{% comment %}The mini calendar (PLAN-012f-b D6; DESIGN-SPEC §4a): the title links to Reports › Calendar; ‹ › step the
+month (?cal=YYYY-MM beside the range); a 7-column grid, Sunday first, today in a teal circle, a dot under a day
+with items. Each such day is a button over a hidden popover listing its items as links in the Calendar
+page's chip colours (.calendar-item kind-…), shown on hover and focus (CSS) and toggled by a tap
+(ledger/static/ledger/dashboard.js). Built from the Calendar page's own reads.{% endcomment %}
+<section class="card mini-calendar" id="mini-calendar" aria-labelledby="mini-calendar-heading">
+  <div class="card-header mini-head">
+    <h2 id="mini-calendar-heading"><a href="{% url 'ledger:calendar:page' %}?month={{ mini_calendar.month|date:'Y-m' }}">Calendar</a></h2>
+    <div class="mini-nav"><a class="btn btn-sm mini-step" id="mini-previous" href="?cal={{ mini_calendar.previous|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Previous month">‹</a><span class="mini-month" id="mini-month">{{ mini_calendar.month|month }}</span><a class="btn btn-sm mini-step" id="mini-next" href="?cal={{ mini_calendar.next|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Next month">›</a></div>
+  </div>
+  <div class="mini-grid" id="mini-grid">
+    <span class="mini-weekday">Su</span><span class="mini-weekday">Mo</span><span class="mini-weekday">Tu</span><span class="mini-weekday">We</span><span class="mini-weekday">Th</span><span class="mini-weekday">Fr</span><span class="mini-weekday">Sa</span>
+    {% for week in mini_calendar.weeks %}{% for cell in week %}<div class="mini-day{% if not cell.in_month %} other-month{% endif %}{% if cell.today %} is-today{% endif %}{% if cell.items %} has-items{% endif %}" data-day="{{ cell.day|date:'Y-m-d' }}">{% if cell.items %}<button type="button" class="mini-num" aria-label="{{ cell.day|day }}: {{ cell.items|length }} item{{ cell.items|length|pluralize }}"{% if cell.today %} aria-current="date"{% endif %}>{{ cell.day.day }}</button><span class="mini-dot" aria-hidden="true"></span><ul class="mini-popover">{% for item in cell.items %}<li class="calendar-item kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a href="{{ item.url }}">{{ item.title }}</a></li>{% endfor %}</ul>{% else %}<span class="mini-num"{% if cell.today %} aria-current="date"{% endif %}>{{ cell.day.day }}</span>{% endif %}</div>{% endfor %}{% endfor %}
+  </div>
+</section>

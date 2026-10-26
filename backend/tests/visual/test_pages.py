@@ -49,6 +49,8 @@ def store_tab(site: Site, tab: str) -> str:
 #: :data:`AS_ADMIN`.
 PAGES: dict[str, Callable[[Site], str]] = {
     "dashboard": lambda site: "/",
+    # PLAN-012f-b Batch A: the picker's scripts-off page (the search results for a new invoice).
+    "search-new-invoice": lambda site: "/search/?q=0&intent=new_invoice",
     "stores": lambda site: "/stores/",
     **{f"store-{tab}": partial(store_tab, tab=tab) for tab in STORE_TABS},
     "operator": lambda site: f"/operators/{site.world.operator.pk}/",

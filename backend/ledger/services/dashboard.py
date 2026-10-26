@@ -27,12 +27,25 @@ none when it reads what the page already loaded:
   title, "#1991 Istanbul", :func:`ledger.services.stores.title`), what it
   paid for, the method and the amount.
 
+The cards of the owner's staging review (docs/qa/PLAN-012f-b-staging-review.md D3 to D6)
+share one range of whole months (:func:`parse_range`: this month, the last 3 or 12 months
+with the current one, or a custom From to To of at most :data:`MAX_RANGE_MONTHS` months):
+
+- :func:`cashflow` (the P&L's rows, :func:`ledger.services.pnl.rows`): per month the
+  collected income, the known costs and the net, totalled over the range; a store whose
+  costs are not entered is left out of the expenses and counted, never read as zero;
+- :func:`payment_status` (one query): the rent charges due in the range as Overdue, Paid
+  and Upcoming by the grid's status rule, the pending ones counted apart;
+- :func:`mini_calendar` (the Calendar page's three queries): a month's days and items.
+
 Money is ``Decimal``; dates are the project's ``TIME_ZONE`` days.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import uuid
+from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_FLOOR, Decimal
@@ -54,7 +67,7 @@ from ledger.models import (
     RentChargeStatus,
     StoreStatus,
 )
-from ledger.services import insurance, rent_run, stores
+from ledger.services import calendar, grid, insurance, pnl, rent_run, stores
 from ledger.wording import format_amount
 
 #: Business days an ACH debit takes to settle (docs/CLAUDE.md §10, the provider's ACH page).
@@ -338,3 +351,325 @@ def recent_payments(today: date, limit: int = RECENT_LIMIT) -> list[RecentPaymen
             )
         )
     return found
+
+
+# --- The cards' date range (PLAN-012f-b Batch A) ---------------------------------------------
+
+RANGE_THIS = "this"
+RANGE_3M = "3m"
+RANGE_12M = "12m"
+RANGE_CUSTOM = "custom"
+#: The range select's choices, in its order.
+RANGE_CHOICES: tuple[tuple[str, str], ...] = (
+    (RANGE_THIS, "This month"),
+    (RANGE_3M, "Last 3 months"),
+    (RANGE_12M, "Last 12 months"),
+    (RANGE_CUSTOM, "Custom"),
+)
+#: The months each preset range covers, the current month last.
+_PRESET_MONTHS: dict[str, int] = {RANGE_THIS: 1, RANGE_3M: 3, RANGE_12M: 12}
+#: The longest custom range, in months.
+MAX_RANGE_MONTHS = 36
+RANGE_MESSAGE = "Choose a range of whole months, the earlier month first, at most three years."
+
+
+@dataclass(frozen=True, slots=True)
+class Range:
+    """The months the Cashflow and Payment status cards cover, both included."""
+
+    key: str
+    label: str
+    from_month: date
+    to_month: date
+
+    @property
+    def months(self) -> list[date]:
+        count = (self.to_month.year - self.from_month.year) * 12
+        count += self.to_month.month - self.from_month.month + 1
+        return [pnl.add_months(self.from_month, n) for n in range(count)]
+
+    @property
+    def end(self) -> date:
+        """The range's last day."""
+        return pnl.month_end(self.to_month)
+
+    def as_query(self) -> dict[str, str]:
+        """The range as the card's GET form writes it (``YYYY-MM`` months)."""
+        values = {"range": self.key}
+        if self.key == RANGE_CUSTOM:
+            values["from"] = f"{self.from_month:%Y-%m}"
+            values["to"] = f"{self.to_month:%Y-%m}"
+        return values
+
+
+def _custom_label(start: date, end: date) -> str:
+    return month_text(start) if start == end else f"{month_text(start)} to {month_text(end)}"
+
+
+def parse_range(params: Mapping[str, str], today: date) -> Range | None:
+    """``?range=this|3m|12m|custom&from=YYYY-MM&to=YYYY-MM``; ``this`` when empty. ``None``
+    (the page shows :data:`RANGE_MESSAGE`) for an unknown key, or a custom range without
+    both months, with ``to`` before ``from`` or longer than :data:`MAX_RANGE_MONTHS`."""
+    key = (params.get("range", "") or "").strip() or RANGE_THIS
+    current = today.replace(day=1)
+    if key in _PRESET_MONTHS:
+        first = pnl.add_months(current, -(_PRESET_MONTHS[key] - 1))
+        return Range(key, dict(RANGE_CHOICES)[key], first, current)
+    if key != RANGE_CUSTOM:
+        return None
+    start = pnl._parse_month(params.get("from", "") or "")
+    end = pnl._parse_month(params.get("to", "") or "")
+    if start is None or end is None or end < start:
+        return None
+    found = Range(key, _custom_label(start, end), start, end)
+    return found if len(found.months) <= MAX_RANGE_MONTHS else None
+
+
+def form_months(params: Mapping[str, str], today: date) -> tuple[date, date]:
+    """The months the custom From and To selects show: the ones asked for when readable,
+    else the current month."""
+    current = today.replace(day=1)
+    start = pnl._parse_month(params.get("from", "") or "") or current
+    end = pnl._parse_month(params.get("to", "") or "") or current
+    return start, end
+
+
+def picker_months(selected: Range | None, start: date, end: date, today: date) -> list[date]:
+    """The months the custom From and To selects offer: the grid's window around the current
+    month (:func:`ledger.services.grid.picker_months`) with the range's months, or with the
+    two months asked for when the range could not be used."""
+    current = today.replace(day=1)
+    window = grid.picker_months(selected or Range(RANGE_CUSTOM, "", current, current), today)
+    return sorted(set(window) | {start, end})
+
+
+# --- Cashflow (D3, D4) -----------------------------------------------------------------------
+
+#: The bars the Cashflow card draws at most.
+CASHFLOW_BARS = 12
+
+
+@dataclass(frozen=True, slots=True)
+class CashflowMonth:
+    """One month's bars: collected income, the known costs and their difference."""
+
+    month: date
+    income: Decimal
+    #: ``None``: no store of the month has its costs entered while some store lacks them.
+    expenses: Decimal | None
+    net: Decimal | None
+    #: ``False`` for the months before the range that pad the chart to twelve bars.
+    in_range: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Cashflow:
+    range: Range
+    #: The chart's bars, oldest first (at most :data:`CASHFLOW_BARS`).
+    months: tuple[CashflowMonth, ...]
+    #: The range's totals (the padding months never count).
+    income: Decimal
+    expenses: Decimal | None
+    net: Decimal | None
+    #: The stores left out of Expenses in at least one month of the range.
+    stores_without_cost: int
+
+    @property
+    def without_cost_line(self) -> str:
+        """The muted line: "2 stores without a cost entered"; empty when every cost is in."""
+        if not self.stores_without_cost:
+            return ""
+        return f"{_plural(self.stores_without_cost, 'store')} without a cost entered"
+
+
+def _chart_months(selected: Range) -> list[date]:
+    """The bars' months: the range's last twelve, or the range padded to the left."""
+    last = selected.to_month
+    return [pnl.add_months(last, n) for n in range(-(CASHFLOW_BARS - 1), 1)]
+
+
+def _month_figures(
+    rows: list[pnl.PnlRow],
+) -> tuple[Decimal, Decimal | None, set[uuid.UUID]]:
+    """A month's (income, expenses, stores without their costs) from its P&L rows. A store
+    whose costs are unknown (no cost row in effect, or a fee cost not entered) is left out
+    of the expenses whole, never counted as zero; the P&L's rows of no store (one-off
+    charges without a lease) count when their fee costs are known."""
+    income = pnl.total(rows)
+    by_store: dict[uuid.UUID | None, list[pnl.PnlRow]] = defaultdict(list)
+    for row in rows:
+        by_store[row.store_id].append(row)
+    known: list[pnl.PnlRow] = []
+    without: set[uuid.UUID] = set()
+    for store_id, members in by_store.items():
+        if all(row.costs is not None for row in members):
+            known.extend(members)
+        elif store_id is not None:
+            without.add(store_id)
+    costs = pnl.total(known).costs if known or not without else None
+    return income.rent_collected + income.fees_collected, costs, without
+
+
+def cashflow(selected: Range) -> Cashflow:
+    """The Cashflow card from the P&L's rows (:func:`ledger.services.pnl.rows`, one call over
+    the chart's months and the range together), so that its totals are the P&L's for the
+    same months: income = rent collected + fees collected; expenses = landlord rent + other
+    costs + fee costs of the stores whose costs are known that month; net = the
+    difference."""
+    shown = _chart_months(selected)
+    start = min(shown[0], selected.from_month)
+    query = pnl.PnlQuery(from_month=start, to_month=selected.to_month)
+    by_month: dict[date, list[pnl.PnlRow]] = defaultdict(list)
+    for row in pnl.rows(query):
+        by_month[row.month].append(row)
+    in_range = set(selected.months)
+    figures = {month: _month_figures(by_month[month]) for month in set(shown) | in_range}
+    bars = []
+    for month in shown:
+        income, expenses, _ = figures[month]
+        bars.append(
+            CashflowMonth(
+                month=month,
+                income=income,
+                expenses=expenses,
+                net=income - expenses if expenses is not None else None,
+                in_range=month in in_range,
+            )
+        )
+    income_total = sum((figures[month][0] for month in in_range), ZERO)
+    known_costs = [cost for month in in_range if (cost := figures[month][1]) is not None]
+    expenses_total = sum(known_costs, ZERO) if known_costs else None
+    without: set[uuid.UUID] = set()
+    for month in in_range:
+        without |= figures[month][2]
+    return Cashflow(
+        range=selected,
+        months=tuple(bars),
+        income=income_total,
+        expenses=expenses_total,
+        net=income_total - expenses_total if expenses_total is not None else None,
+        stores_without_cost=len(without),
+    )
+
+
+# --- Payment status (D5) ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class StatusPart:
+    """One box under the donut: its charges' count and amount."""
+
+    key: str
+    label: str
+    count: int
+    amount: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentStatusCard:
+    range: Range
+    overdue: StatusPart
+    paid: StatusPart
+    upcoming: StatusPart
+    #: Pending charges and the partly paid ones not yet due: never in the donut.
+    pending: int
+
+    @property
+    def parts(self) -> tuple[StatusPart, StatusPart, StatusPart]:
+        """The donut's parts, in its order."""
+        return self.overdue, self.paid, self.upcoming
+
+    @property
+    def total(self) -> Decimal:
+        return self.overdue.amount + self.paid.amount + self.upcoming.amount
+
+
+STATUS_OVERDUE = "overdue"
+STATUS_PAID_PART = "paid"
+STATUS_UPCOMING = "upcoming"
+
+
+def payment_status(selected: Range, today: date) -> PaymentStatusCard:
+    """The rent charges due in the range (by due date, for every box), by the grid's status
+    of each (:func:`ledger.services.grid.combined_status`; one query). Overdue: open
+    (unpaid, due or partly paid) and due before today, by balance. Paid: paid in full,
+    however it was paid (its own payments, an invoice line, an installment plan, a credit)
+    and whenever, by the amount paid. Upcoming: unpaid or due, due today or later, by
+    balance. Pending charges and the partly paid ones not yet due are counted apart; waived
+    ones nowhere."""
+    rows = RentCharge.objects.filter(
+        due_on__gte=selected.from_month, due_on__lte=selected.end
+    ).values_list("status", "due_on", "amount_due", "amount_paid")
+    counts: dict[str, int] = defaultdict(int)
+    amounts: dict[str, Decimal] = defaultdict(lambda: ZERO)
+    pending = 0
+    for status, due_on, amount_due, amount_paid in rows:
+        due, paid = Decimal(amount_due), Decimal(amount_paid)
+        family = grid.combined_status([status], paid)
+        if family == grid.STATUS_PAID:
+            counts[STATUS_PAID_PART] += 1
+            amounts[STATUS_PAID_PART] += paid
+            continue
+        if family == grid.STATUS_WAIVED:
+            continue
+        if family == grid.STATUS_PENDING or (family == grid.STATUS_PARTIAL and due_on >= today):
+            pending += 1
+            continue
+        part = STATUS_OVERDUE if due_on < today else STATUS_UPCOMING
+        counts[part] += 1
+        amounts[part] += max(due - paid, ZERO)
+    return PaymentStatusCard(
+        range=selected,
+        overdue=StatusPart(
+            STATUS_OVERDUE, "Overdue", counts[STATUS_OVERDUE], amounts[STATUS_OVERDUE]
+        ),
+        paid=StatusPart(
+            STATUS_PAID_PART, "Paid", counts[STATUS_PAID_PART], amounts[STATUS_PAID_PART]
+        ),
+        upcoming=StatusPart(
+            STATUS_UPCOMING, "Upcoming", counts[STATUS_UPCOMING], amounts[STATUS_UPCOMING]
+        ),
+        pending=pending,
+    )
+
+
+# --- The mini calendar (D6) ------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class MiniDay:
+    day: date
+    today: bool
+    in_month: bool
+    items: tuple[calendar.CalendarItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MiniCalendar:
+    month: date
+    previous: date
+    next: date
+    weeks: list[list[MiniDay]]
+
+
+def parse_cal(raw: str, today: date) -> date:
+    """``?cal=YYYY-MM``: the mini calendar's month; the current month when unreadable."""
+    return pnl._parse_month(raw or "") or today.replace(day=1)
+
+
+def mini_calendar(month: date, today: date) -> MiniCalendar:
+    """The month's weeks (Sunday first) with each day's items: the Calendar page's own
+    reads (:func:`ledger.services.calendar.items_in` over the month, every kind, no store
+    or operator filter, three queries; :func:`ledger.services.calendar.month_weeks`)."""
+    first, last = calendar.month_bounds(month)
+    found = calendar.items_in(((first, last),), calendar.Filters())
+    weeks = [
+        [MiniDay(cell.day, cell.day == today, cell.in_month, cell.items) for cell in week]
+        for week in calendar.month_weeks(first, found)
+    ]
+    return MiniCalendar(
+        month=first,
+        previous=pnl.add_months(first, -1),
+        next=pnl.add_months(first, 1),
+        weeks=weeks,
+    )

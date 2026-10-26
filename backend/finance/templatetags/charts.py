@@ -1,0 +1,254 @@
+"""The dashboard's charts as inline SVG (docs/qa/PLAN-012f-b-staging-review.md D3;
+docs/design/DESIGN-SPEC.md §4a): no chart library and no script.
+
+``{% bars rows %}`` draws the Cashflow card's months: ``rows`` are objects with ``month``,
+``income``, ``expenses`` (``None``: unknown, no bar), ``net`` (``None``: no point) and
+``in_range`` (``False``: a month before the range, its bars faded, its label kept legible).
+Each month is a pair of bars, Income teal and Expenses muted blue, each with a ``<title>``
+holding its figure, and the net is a navy line through the months it is known in. The scale
+holds zero and every figure, so a negative month reads below the zero line. The ``<svg>`` is
+``role="img"`` with a sentence as its ``aria-label``.
+
+``{% donut parts total %}`` draws the Payment status card's ring: ``parts`` are objects
+with ``key`` (``overdue``, ``paid`` or ``upcoming``), ``label`` and ``amount``; each part
+with an amount above zero is an arc (``stroke-dasharray`` over a ``pathLength`` of 100) in
+its colour, and the total is written in the middle through :func:`format_amount`. A zero
+total draws the empty ring.
+
+``{% chart_key key %}`` draws the 8 px key of a chart colour (``income``, ``expenses``,
+``net``, ``overdue``, ``paid``, ``upcoming``) for a legend or a box beside its word: the
+colours live here, beside the charts that use them, not in the style sheets (which hold
+tokens only).
+
+Coordinates are computed in ``Decimal`` and written with one decimal; money is written by
+:func:`ledger.wording.format_amount`, months by :func:`finance.dates.month_text`. Every text
+is escaped.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
+
+from django import template
+from django.utils.html import format_html, format_html_join
+from django.utils.safestring import SafeString, mark_safe
+
+from finance.dates import month_text
+from ledger.wording import format_amount
+
+register = template.Library()
+
+INCOME_FILL = "#0E8F86"
+EXPENSES_FILL = "#8FA3BF"
+NET_STROKE = "#0B2545"
+AXIS_STROKE = "#E3E8EF"
+LABEL_FILL = "#5F6E85"
+#: The donut's colours (DESIGN-SPEC §4a).
+DONUT_COLOURS: dict[str, str] = {
+    "overdue": "#8A1C14",
+    "paid": "#176B33",
+    "upcoming": "#0B2545",
+}
+RING_EMPTY = "#E8ECF2"
+#: Every chart colour by its key (``{% chart_key %}``).
+KEY_COLOURS: dict[str, str] = {
+    "income": INCOME_FILL,
+    "expenses": EXPENSES_FILL,
+    "net": NET_STROKE,
+    **DONUT_COLOURS,
+}
+
+#: The chart's frame, in viewBox units.
+WIDTH = Decimal(720)
+PLOT_TOP = Decimal(8)
+PLOT_HEIGHT = Decimal(172)
+LABEL_Y = Decimal(200)
+HEIGHT = Decimal(208)
+BAR_WIDTH = Decimal(16)
+BAR_GAP = Decimal(3)
+OUTSIDE_OPACITY = "0.4"
+
+_TENTH = Decimal("0.1")
+
+
+def _coord(value: Decimal) -> str:
+    return str(value.quantize(_TENTH, rounding=ROUND_HALF_UP))
+
+
+def _amount(value: object) -> Decimal | None:
+    return value if isinstance(value, Decimal) and value.is_finite() else None
+
+
+def _figures(row: Any) -> list[Decimal]:
+    found = [_amount(row.income), _amount(row.expenses), _amount(row.net)]
+    return [value for value in found if value is not None]
+
+
+def _bar(x: Decimal, value: Decimal, zero: Decimal, scale: Decimal, fill: str, title: str) -> str:
+    top = zero - value * scale
+    y, height = (top, zero - top) if value >= 0 else (zero, top - zero)
+    return format_html(
+        '<rect x="{}" y="{}" width="{}" height="{}" fill="{}"><title>{}</title></rect>',
+        _coord(x),
+        _coord(y),
+        _coord(BAR_WIDTH),
+        _coord(height),
+        fill,
+        title,
+    )
+
+
+@register.simple_tag
+def bars(rows: Iterable[Any]) -> SafeString:
+    """The Cashflow chart (see the module docstring)."""
+    items = list(rows)
+    if not items:
+        return mark_safe("")  # noqa: S308 - the empty string
+    values = [value for row in items for value in _figures(row)]
+    high = max([Decimal(0), *values])
+    low = min([Decimal(0), *values])
+    spread = high - low or Decimal(1)
+    scale = PLOT_HEIGHT / spread
+    zero = PLOT_TOP + high * scale
+    step = WIDTH / len(items)
+    groups: list[str] = []
+    runs: list[list[str]] = [[]]
+    for index, row in enumerate(items):
+        centre = step * index + step / 2
+        label = month_text(row.month)
+        income = _amount(row.income) or Decimal(0)
+        expenses = _amount(row.expenses)
+        parts = [
+            _bar(
+                centre - BAR_WIDTH - BAR_GAP / 2,
+                income,
+                zero,
+                scale,
+                INCOME_FILL,
+                f"Income {label}: {format_amount(income)}",
+            )
+        ]
+        if expenses is not None:
+            parts.append(
+                _bar(
+                    centre + BAR_GAP / 2,
+                    expenses,
+                    zero,
+                    scale,
+                    EXPENSES_FILL,
+                    f"Expenses {label}: {format_amount(expenses)}",
+                )
+            )
+        groups.append(
+            format_html(
+                '<g class="bar-month"><g class="bar-pair"{}>{}</g><text x="{}" y="{}" '
+                'text-anchor="middle" font-size="11" fill="{}">{}</text></g>',
+                format_html(' opacity="{}"', OUTSIDE_OPACITY) if not row.in_range else "",
+                format_html_join("", "{}", ((part,) for part in parts)),
+                _coord(centre),
+                _coord(LABEL_Y),
+                LABEL_FILL,
+                label,
+            )
+        )
+        net = _amount(row.net)
+        if net is None:
+            runs.append([])
+        else:
+            runs[-1].append(f"{_coord(centre)},{_coord(zero - net * scale)}")
+    lines = format_html_join(
+        "",
+        '<polyline points="{}" fill="none" stroke="{}" stroke-width="2" />',
+        ((" ".join(run), NET_STROKE) for run in runs if run),
+    )
+    sentence = (
+        f"Income and expenses by month from {month_text(items[0].month)} to "
+        f"{month_text(items[-1].month)}, with the net as a line."
+    )
+    return format_html(
+        '<svg class="bars-chart" viewBox="0 0 {} {}" role="img" aria-label="{}">'
+        '<line x1="0" y1="{}" x2="{}" y2="{}" stroke="{}" />{}{}</svg>',
+        _coord(WIDTH),
+        _coord(HEIGHT),
+        sentence,
+        _coord(zero),
+        _coord(WIDTH),
+        _coord(zero),
+        AXIS_STROKE,
+        format_html_join("", "{}", ((group,) for group in groups)),
+        lines,
+    )
+
+
+#: The donut's ring, in viewBox units (a 120 square).
+RING_RADIUS = 48
+RING_WIDTH = 14
+
+
+@register.simple_tag
+def donut(parts: Iterable[Any], total: object) -> SafeString:
+    """The Payment status ring with the total in the middle (see the module docstring)."""
+    shown: list[tuple[str, str, Decimal]] = []
+    for part in parts:
+        value = _amount(part.amount)
+        if value is not None and value > 0 and part.key in DONUT_COLOURS:
+            shown.append((str(part.key), str(part.label), value))
+    whole = sum((amount for _, _, amount in shown), Decimal(0))
+    arcs: list[tuple[str, str, str, str, str, str, str]] = []
+    offset = Decimal(0)
+    for key, label, amount in shown:
+        length = amount * 100 / whole
+        arcs.append(
+            (
+                str(RING_RADIUS),
+                DONUT_COLOURS[key],
+                str(RING_WIDTH),
+                f"{_coord(length)} {_coord(Decimal(100) - length)}",
+                _coord(-offset),
+                label,
+                format_amount(amount),
+            )
+        )
+        offset += length
+    circles = format_html_join(
+        "",
+        '<circle cx="60" cy="60" r="{}" fill="none" stroke="{}" stroke-width="{}" '
+        'pathLength="100" stroke-dasharray="{}" stroke-dashoffset="{}" '
+        'transform="rotate(-90 60 60)"><title>{}: {}</title></circle>',
+        arcs,
+    )
+    described = ", ".join(f"{label} {format_amount(amount)}" for _, label, amount in shown)
+    middle = format_amount(_amount(total) or Decimal(0))
+    return format_html(
+        '<div class="donut"><svg viewBox="0 0 120 120" role="img" aria-label="{}">'
+        '<circle cx="60" cy="60" r="{}" fill="none" stroke="{}" stroke-width="{}" />{}</svg>'
+        '<span class="donut-total"><span class="donut-amount">{}</span>'
+        '<span class="donut-label">Total</span></span></div>',
+        f"Total {middle}" + (f": {described}" if described else ""),
+        RING_RADIUS,
+        RING_EMPTY,
+        RING_WIDTH,
+        circles,
+        middle,
+    )
+
+
+@register.simple_tag
+def chart_key(key: str) -> SafeString:
+    """The 8 px key of a chart colour (a short line for ``net``); a template mistake (an
+    unknown key) raises ``ValueError``."""
+    if key not in KEY_COLOURS:
+        raise ValueError(f"unknown chart key {key!r}")
+    if key == "net":
+        return format_html(
+            '<svg class="chart-key" width="12" height="8" viewBox="0 0 12 8" aria-hidden="true">'
+            '<line x1="0" y1="4" x2="12" y2="4" stroke="{}" stroke-width="2" /></svg>',
+            KEY_COLOURS[key],
+        )
+    return format_html(
+        '<svg class="chart-key" width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">'
+        '<rect width="8" height="8" rx="2" fill="{}" /></svg>',
+        KEY_COLOURS[key],
+    )

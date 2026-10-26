@@ -30,6 +30,16 @@ pending or the neutral colours.
 ``actions|action_named:"key"`` finds a workspace action (ledger.services.workspace.Action)
 by its key, or ``None``: an empty state names it as its next step.
 
+``{% dialog id="…" title="…" size="sm" open=False return_url="" %} … {% enddialog %}``
+(PLAN-012f-b D2; DESIGN-SPEC §4 States, the confirmation dialog, and §4a): a ``<dialog
+class="dialog dialog-<size>">`` (``sm`` 440 px, ``lg`` 640 px; a sheet on phones) with its
+head (the title as an ``h2`` and a "×" close button), the content in ``.dialog-body``. The
+caller writes its buttons in a ``<div class="dialog-foot">`` inside the content (so that a
+form can hold its fields and its buttons). ``open=True`` gives the dialog the ``open``
+attribute, so that it shows with scripts off, and ``data-open``: the script
+(finance/static/finance/dialog.js) makes it modal on load and, when ``return_url`` is a path
+on this site, goes there on close; any other ``return_url`` is dropped.
+
 Every helper works on what the view already passed: no query, no setting. Every text is
 escaped.
 """
@@ -42,6 +52,8 @@ from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from typing import Any
 
 from django import template
+from django.template.base import FilterExpression, NodeList, Parser, Token, token_kwargs
+from django.template.context import Context
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString, mark_safe
 
@@ -298,3 +310,62 @@ def page_numbers(page: Any) -> list[tuple[str, int | None, bool]]:
         else:
             found.append((str(number), None, False))
     return found
+
+
+#: The dialog's sizes (D2): the confirmation frame and the form frame.
+DIALOG_SIZES: tuple[str, ...] = ("sm", "lg")
+_DIALOG_ARGUMENTS: frozenset[str] = frozenset({"id", "title", "size", "open", "return_url"})
+
+
+def _local_path(url: object) -> str:
+    """``url`` when it is a path on this site ("/…", not "//…"), else ``""``."""
+    text = str(url or "")
+    if text.startswith("/") and not text.startswith("//") and "\\" not in text:
+        return text
+    return ""
+
+
+class DialogNode(template.Node):
+    def __init__(self, nodelist: NodeList, arguments: dict[str, FilterExpression]) -> None:
+        self.nodelist = nodelist
+        self.arguments = arguments
+
+    def render(self, context: Context) -> SafeString:
+        values = {name: value.resolve(context) for name, value in self.arguments.items()}
+        size = str(values.get("size") or "sm")
+        if size not in DIALOG_SIZES:
+            raise template.TemplateSyntaxError(f"unknown dialog size {size!r}")
+        element_id = str(values.get("id") or "")
+        if not element_id:
+            raise template.TemplateSyntaxError("a dialog needs an id")
+        return_url = _local_path(values.get("return_url"))
+        return format_html(
+            '<dialog class="dialog dialog-{size}" id="{id}" aria-labelledby="{id}-title"'
+            "{shown}{ret}{op}>"
+            '<div class="dialog-head"><h2 id="{id}-title">{title}</h2>'
+            '<button type="button" class="dialog-close" aria-label="Close">&times;</button></div>'
+            '<div class="dialog-body">{body}</div></dialog>',
+            size=size,
+            id=element_id,
+            title=values.get("title") or "",
+            ret=format_html(' data-return-url="{}"', return_url) if return_url else "",
+            # PLAN-012f-b D2: a server-opened dialog shows without the script as well.
+            shown=mark_safe(" open") if values.get("open") else "",  # noqa: S308 - a constant
+            op=mark_safe(" data-open") if values.get("open") else "",  # noqa: S308 - a constant
+            body=self.nodelist.render(context),
+        )
+
+
+@register.tag("dialog")
+def dialog(parser: Parser, token: Token) -> DialogNode:
+    """``{% dialog id="…" title="…" size="sm|lg" open=… return_url=… %}…{% enddialog %}``."""
+    bits = token.split_contents()[1:]
+    arguments = token_kwargs(bits, parser)
+    if bits:
+        raise template.TemplateSyntaxError("dialog takes keyword arguments only")
+    unknown = set(arguments) - _DIALOG_ARGUMENTS
+    if unknown:
+        raise template.TemplateSyntaxError(f"unknown dialog arguments {sorted(unknown)}")
+    nodelist = parser.parse(("enddialog",))
+    parser.delete_first_token()
+    return DialogNode(nodelist, arguments)
