@@ -223,6 +223,9 @@ plan_patterns = (
         path("<str:pk>/", installments.plan_detail, name="detail"),
         path("<str:pk>/reschedule/", installments.plan_reschedule, name="reschedule"),
         path("<str:pk>/cancel/", installments.plan_cancel, name="cancel"),
+        # PLAN-012f-b D16: Pause and Resume (POST only).
+        path("<str:pk>/pause/", installments.plan_pause, name="pause"),
+        path("<str:pk>/resume/", installments.plan_resume, name="resume"),
     ],
     "plans",
 )
@@ -256,11 +259,17 @@ invoice_patterns = (
         path("new/store/<str:pk>/", invoices.new_store, name="new_store"),
         path("new/operator/<str:pk>/", invoices.new_operator, name="new_operator"),
         path("rent-amount/", invoices.rent_amount, name="rent_amount"),
+        path(
+            "settlement-preview.json",
+            invoices.settlement_preview,
+            name="settlement_preview",
+        ),
         path("drafts/<str:pk>/", invoices.draft_page, name="draft"),
         path("drafts/<str:pk>/edit/", invoices.draft_edit, name="edit"),
         path("drafts/<str:pk>/preview/", invoices.draft_preview, name="preview"),
         path("drafts/<str:pk>/print/", invoices.draft_print, name="print"),
         path("drafts/<str:pk>/send/", invoices.draft_send, name="send"),
+        path("drafts/<str:pk>/saved/", invoices.draft_saved, name="saved"),
         path("drafts/<str:pk>/charge-now/", invoices.draft_charge_now, name="charge_now"),
         path("drafts/<str:pk>/cancel/", invoices.draft_cancel, name="cancel"),
         path("drafts/<str:pk>/delete/", invoices.draft_delete, name="delete_draft"),

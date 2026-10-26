@@ -38,7 +38,11 @@ class and the field names it rejected (never provider text).
   gone and only completes the plan's side. The job's entity may be a rent charge
   (PLAN-012b-b D13): its own live invoice of rent alone is released the same way, and
   its ``schedule_delete`` moves the lease's rent autopay past the charge's month
-  (:func:`release_rent_autopay`) before the plan's side.
+  (:func:`release_rent_autopay`) before the plan's side. Pause (PLAN-012f-b D16) queues
+  the same ``schedule_delete`` on an installment: its schedule is deleted the same way and
+  its reference superseded, with no plan side (the plan is already ``paused``); one
+  whose schedule had already made its invoice is audited
+  (:data:`ledger.services.installments.PAUSE_FIRED_ACTION`) for the plan page.
 - :func:`schedule` (``schedule_create``): the one-occurrence schedule of an
   ``autopay_due`` charge on its due date with the operator's linked bank method, its
   reference ``OOC-<first 8 of the charge id>``; a re-debit's schedule (PLAN-011b D5)
@@ -885,12 +889,15 @@ Parent = OneOffCharge | RentCharge
 
 def _release_target(charge_id: uuid.UUID, entity_type: str) -> Parent | Result:
     """The parent of an installment plan named by the job's entity (a one-off or a rent
-    charge, PLAN-012b-b D13), or the job's outcome when it is not one."""
+    charge, PLAN-012b-b D13), or an installment whose schedule Pause releases
+    (PLAN-012f-b D16), or the job's outcome when it is neither."""
     charge: Parent | None = (
         _rent_charge(charge_id) if entity_type == JobEntity.RENT_CHARGE else _charge(charge_id)
     )
     if charge is None:
         return False, NO_CHARGE
+    if isinstance(charge, OneOffCharge) and charge.plan_id is not None:
+        return charge
     if not charge.installment_plans.exists():
         return False, installments.RELEASE_NO_PLAN
     return charge
@@ -901,7 +908,8 @@ def _released(
 ) -> Result:
     """The local side of a release, in one transaction under the parent's row lock:
     ``mark`` (which returns the audit context), then the plan's side
-    (:func:`ledger.services.installments.after_release`)."""
+    (:func:`ledger.services.installments.after_release`); an installment's release (a
+    paused plan's next debit, PLAN-012f-b D16) has no plan side beyond ``mark``."""
     with transaction.atomic():
         locked: Parent
         if isinstance(parent, RentCharge):
@@ -909,6 +917,8 @@ def _released(
         else:
             locked = OneOffCharge.objects.select_for_update().get(pk=parent.pk)
         context = mark(locked)
+        if isinstance(locked, OneOffCharge) and locked.plan_id is not None:
+            return True, str(installments.PAUSE_RELEASED)
         return installments.after_release(locked, actor, context)
 
 
@@ -981,6 +991,22 @@ def release_invoice(
     return _released(charge, actor, mark)
 
 
+def _release_fired(charge: OneOffCharge, actor: User | None) -> Result:
+    """A schedule that made its invoice before its release: a split parent's refusal, or,
+    for an installment Pause released (PLAN-012f-b D3-1), an audit row the plan page reads
+    ("one debit had already gone out") and the job's own sentence."""
+    if charge.plan_id is None:
+        return False, RELEASE_SCHEDULE_FIRED
+    _audit(
+        actor,
+        installments.PAUSE_FIRED_ACTION,
+        ENTITY_CHARGE,
+        charge.pk,
+        {"plan": str(charge.plan_id), "installment_no": charge.installment_no},
+    )
+    return False, installments.PAUSE_FIRED
+
+
 def release_schedule(
     charge_id: uuid.UUID, actor: User | None, entity_type: str = JobEntity.ONE_OFF_CHARGE
 ) -> Result:
@@ -998,7 +1024,7 @@ def release_schedule(
         return target if isinstance(target, tuple) else (False, NO_CHARGE)
     charge = target
     if one_off_charges.invoices_of(charge).exists():
-        return False, RELEASE_SCHEDULE_FIRED
+        return _release_fired(charge, actor)
     ref = _schedule_ref(charge)
     if not ref:
         return _released(charge, actor, lambda parent: {})
@@ -1018,7 +1044,7 @@ def release_schedule(
     except ProviderError as error:
         return _release_failed(charge, actor, error, SCHEDULE_DELETE_FAILED)
     if generated:
-        return False, RELEASE_SCHEDULE_FIRED
+        return _release_fired(charge, actor)
     if still is not None:
         return False, str(SCHEDULE_NOT_CONFIRMED)
 

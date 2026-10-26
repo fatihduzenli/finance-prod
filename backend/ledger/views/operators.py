@@ -319,22 +319,26 @@ def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
     return render(request, "ledger/operators/detail.html", _detail_context(request, _load(pk)))
 
 
-def _detail_context(request: HttpRequest, operator: Operator) -> dict[str, Any]:
+def _detail_context(
+    request: HttpRequest, operator: Operator, *, forced_tab: str | None = None
+) -> dict[str, Any]:
     """The operator page's context, for the page and for Edit operator's page behind its
-    dialog (PLAN-012f-b Batch B)."""
+    dialog (PLAN-012f-b Batch B). ``forced_tab`` opens that tab across the operator's stores
+    whatever the query says, without its filter (PLAN-012f-b D15: the "Invoice saved"
+    dialog over the Invoices tab)."""
     refs = operator_sync.current_refs(operator)
     customer = refs.get(operator_sync.KIND_CUSTOMER, "")
     method = refs.get(operator_sync.KIND_PAYMENT_METHOD, "")
     role = _role(request)
     today = timezone.localdate()
-    tab = workspace.chosen_tab(request.GET.get("tab"), role)
+    tab = workspace.chosen_tab(forced_tab or request.GET.get("tab"), role)
     space = workspace.operator_workspace(
         operator,
         today,
         role,
         tab=tab,
-        store=request.GET.get("store"),
-        chosen=request.GET.get("filter", ""),
+        store=None if forced_tab else request.GET.get("store"),
+        chosen="" if forced_tab else request.GET.get("filter", ""),
     )
     selected = space.space.store if space.space is not None else None
     tab_context: dict[str, Any] = {}

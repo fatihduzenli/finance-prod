@@ -197,17 +197,19 @@ def store_detail(request: HttpRequest, pk: str) -> HttpResponse:
     return render(request, "ledger/stores/detail.html", _detail_context(request, _load(pk)))
 
 
-def _detail_context(request: HttpRequest, store: Store) -> dict[str, Any]:
+def _detail_context(
+    request: HttpRequest, store: Store, *, forced_tab: str | None = None
+) -> dict[str, Any]:
     """The store page's context, for the page and for Edit store's page behind its dialog
-    (PLAN-012f-b Batch B)."""
+    (PLAN-012f-b Batch B). ``forced_tab`` opens that tab whatever the query says, without its
+    filter (PLAN-012f-b D15: the "Invoice saved" dialog over the Invoices tab)."""
     today = timezone.localdate()
     role = _role(request)
     admin = meets(role, Role.ADMIN)
     default = workspace.TAB_DOCUMENTS if request.GET.get("preview") else workspace.TAB_CHARGES
-    tab = workspace.chosen_tab(request.GET.get("tab"), role, default=default)
-    space = workspace.store_workspace(
-        store, today, role, tab=tab, chosen=request.GET.get("filter", "")
-    )
+    tab = workspace.chosen_tab(forced_tab or request.GET.get("tab"), role, default=default)
+    chosen = "" if forced_tab else request.GET.get("filter", "")
+    space = workspace.store_workspace(store, today, role, tab=tab, chosen=chosen)
     in_progress = lease_end.store_in_progress(store)
     context: dict[str, Any] = {
         "store": store,

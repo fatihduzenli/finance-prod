@@ -26,12 +26,14 @@ from django.urls import reverse
 from accounts.roles import Role
 from finance.templatetags.builder import line_total
 from ledger.forms import InvoiceLineForm, InvoiceLineFormSet
-from ledger.models import InvoiceDraft, Lease, PaymentChannel
+from ledger.models import InvoiceDraft, Lease, Operator, PaymentChannel
 from ledger.services import invoice_builder
 from ledger.services.invoice_builder import LineInput
 from ledger.views.invoices import _lines_total
 from payments.fake import FakeProvider
 from tests.receivables_helpers import a_lease, a_one_off_charge, a_rent_charge, a_store, an_operator
+from tests.test_charge_now import store_methods
+from tests.test_one_off_charges import an_operator as one_off_operator
 from tests.test_operator_views import client_for
 
 pytestmark = pytest.mark.django_db
@@ -67,6 +69,13 @@ def a_draft(lease: Lease) -> InvoiceDraft:
     outcome = invoice_builder.create_draft(lease.operator, lease, "", None, lines, actor)
     assert outcome.ok and outcome.draft is not None, outcome.message
     return outcome.draft
+
+
+def banked_operator() -> Operator:
+    """An operator with a provider customer and a usable bank account on file."""
+    operator = one_off_operator()
+    store_methods(operator)
+    return operator
 
 
 def get(role: Role, path: str) -> str:
@@ -182,14 +191,17 @@ def test_the_summary_holds_one_button_per_choice_and_discard() -> None:
     actions = element(summary, '<div class="form-actions" id="collect-actions">', "div")
     buttons = re.findall(r"<button ([^>]*)>", actions)
     ids = [re.search(r'id="([^"]+)"', attributes).group(1) for attributes in buttons]  # type: ignore[union-attr]
-    radios = re.findall(r'<input type="radio" name="collect" value="([^"]+)"', body)
+    # PLAN-012f-b D15: a button per tile on offer (a greyed tile's radio is disabled and has
+    # no button); no Send by e-mail.
+    radios = re.findall(
+        r'<input type="radio" name="collect" value="([^"]+)" id="[^"]+"(?: checked)?>', body
+    )
     named = {
         "draft": "save-draft",
-        "email": "send-draft",
         "charge_now": "draft-charge-now",
         "schedule": "schedule-draft",
         "record": "record-draft",
-        "autopay": "autopay-draft",  # PLAN-012f-a Batch E: the sixth choice
+        "autopay": "autopay-draft",  # PLAN-012f-a Batch E
     }
     assert ids == [named[value] for value in radios]
     for attributes, value in zip(buttons, radios, strict=True):
@@ -216,7 +228,7 @@ def test_the_summary_holds_one_button_per_choice_and_discard() -> None:
 # --- How to collect ------------------------------------------------------------------------
 
 
-TILE = r'<div class="collect-tile(?: is-chosen)?" id="tile-[^"]+">'
+TILE = r'<div class="collect-tile(?: is-chosen)?(?: is-unavailable)?" id="tile-[^"]+">'
 
 
 def tiles(body: str) -> list[str]:
@@ -226,18 +238,19 @@ def tiles(body: str) -> list[str]:
 
 def test_one_tile_per_choice_each_with_its_radio_name_and_sentence() -> None:
     lease = a_world()
-    for role, count in ((Role.BILLING, 5), (Role.ADMIN, 6)):
+    for role in (Role.BILLING, Role.ADMIN):
         body = get(role, new_store_path(lease))
         found = tiles(body)
         radios = re.findall(r'type="radio" name="collect"', body)
         assert len(found) == len(radios), role
-        # Charge now is an admin's choice only while the pay-invoice switch is on.
-        # Six choices for an admin (Charge now included), five for billing (PLAN-012f-a E).
-        assert len(found) == (count if 'id="collect-charge_now"' in body else 5), role
+        # PLAN-012f-b D15: a tile for every choice and every role, a tile not on offer
+        # greyed (never hidden) with its one line in place of its sentence; D16: six, with
+        # Schedule settlement.
+        assert len(found) == 6, role
         for tile in found:
             assert tile.count('type="radio" name="collect"') == 1
             assert tile.count('<span class="collect-name">') == 1
-            assert tile.count('<span class="collect-note">') == 1
+            assert tile.count('<span class="collect-note') == 1
     assert "<legend>How to collect</legend>" in body
     assert body.count('id="collect-help"') == 1
 
@@ -264,16 +277,20 @@ def test_the_chosen_tile_is_marked_and_holds_its_fields() -> None:
 
 
 def test_the_schedule_tile_holds_the_debit_date_when_schedule_is_offered() -> None:
-    lease = a_lease(a_store("1992"), an_operator("Debit Co"), started=date(2026, 1, 1))
+    # PLAN-012f-b D15: Schedule for a date is offered with a bank account on file.
+    operator = banked_operator()
+    lease = a_lease(a_store("1992"), operator, started=date(2026, 1, 1))
     body = get(Role.BILLING, new_store_path(lease))
     schedule = [tile for tile in tiles(body) if 'id="tile-schedule"' in tile]
     assert len(schedule) == 1  # an active lease: Schedule for a date is offered
-    # Without a lease there is no Schedule tile: one line under the tiles says why.
-    assert lease.operator is not None
-    path = reverse("ledger:invoices:new_operator", kwargs={"pk": lease.operator.pk})
+    assert "is-unavailable" not in schedule[0]
+    # Without a lease the Schedule tile is greyed with its one line, without its fields.
+    path = reverse("ledger:invoices:new_operator", kwargs={"pk": operator.pk})
     body = get(Role.BILLING, path)
-    assert not [tile for tile in tiles(body) if 'id="tile-schedule"' in tile]
-    assert 'id="collect-schedule-note"' in body and 'name="schedule_on"' not in body
+    [greyed] = [tile for tile in tiles(body) if 'id="tile-schedule"' in tile]
+    assert "is-unavailable" in greyed and 'id="collect-schedule" disabled>' in greyed
+    assert f'id="schedule-reason">{invoice_builder.SCHEDULE_NOT_OFFERED}</span>' in greyed
+    assert 'name="schedule_on"' not in body
     assert 'id="collect-schedule-fields"' in schedule[0] and 'name="schedule_on"' in schedule[0]
     assert 'name="confirm_large_debit"' in schedule[0]
 

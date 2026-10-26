@@ -70,6 +70,8 @@ GUARD_MODULES = (
     "ledger.migrations.0051_store_type_and_state_codes",
     "ledger.migrations.0052_operator_kind",
     "ledger.migrations.0053_cash_method",
+    "ledger.migrations.0054_installment_settlement",
+    "ledger.migrations.0055_installment_plan_paused",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",
@@ -1173,9 +1175,10 @@ def test_the_installments_migration_over_an_existing_row_on_postgresql(
             scratch.execute("UPDATE one_off_charges SET category = 'installment'")
     plan = (
         "INSERT INTO installment_plans (id, one_off_charge_id, operator_id, count, "
-        "first_due, cadence, collection, status, confirmed_at, note, created_at, updated_at) "
+        "first_due, cadence, collection, status, confirmed_at, note, created_at, updated_at, "
+        "origin) "  # origin since PLAN-012f-b Batch D (0054)
         "VALUES (%s, %s, %s, 3, '2026-11-01', 'monthly', 'manual', 'active', now(), %s, "
-        "now(), now())"
+        "now(), now(), 'split')"
     )
     # The plan's note is guarded by the trigger.
     with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):

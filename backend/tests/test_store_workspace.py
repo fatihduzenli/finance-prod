@@ -67,7 +67,9 @@ from tests.receivables_helpers import (
     an_invoice,
     an_operator,
 )
+from tests.test_charge_now import store_methods
 from tests.test_invoice_builder import page_data
+from tests.test_one_off_charges import BANK
 from tests.test_operator_views import client_for
 
 pytestmark = pytest.mark.django_db
@@ -362,6 +364,17 @@ def test_charge_now_opens_the_builder_with_charge_now_chosen_for_admins(
     # PLAN-012e-2 D4: the store's Charge now list moved into the invoice builder.
     settings.STAX_PAY_INVOICE_ENABLED = True
     lease = a_world()
+    # PLAN-012f-b D15: Charge now is on offer with a bank account on file.
+    assert lease.operator is not None
+    with_customer(lease.operator)
+    ExternalRef.objects.create(
+        entity_type="operator",
+        entity_id=lease.operator.pk,
+        provider="stax_pay",
+        external_kind="payment_method",
+        external_id=BANK,
+    )
+    store_methods(lease.operator)
     url = reverse("ledger:stores:charge_now_pick", kwargs={"pk": lease.store_id})
     assert client_for(Role.BILLING)[0].get(url).status_code == 403
     admin = client_for(Role.ADMIN)[0]
@@ -406,7 +419,8 @@ def test_add_setup_charge_from_the_store_opens_the_builder_with_the_line_and_the
         page_data([{"item": "Sign", "unit_amount": "75.00"}], lease=str(lease.pk), collect="draft"),
     )
     draft = InvoiceDraft.objects.get()
-    assert saved["Location"] == f"/invoices/drafts/{draft.pk}/{known(lease)}"
+    # PLAN-012f-b D15: Save opens its e-mail prompt over the store's Invoices tab.
+    assert saved["Location"] == f"/invoices/drafts/{draft.pk}/saved/"
     # A refusal keeps the context on the form.
     again = billing.post(builder, page_data([{"item": "Sign", "unit_amount": "-1"}]))
     assert again["Location"] == builder
@@ -542,8 +556,11 @@ def test_a_new_invoice_from_the_store_keeps_the_context_to_the_draft() -> None:
         ),
     )
     draft = InvoiceDraft.objects.get()
-    assert response["Location"] == f"/invoices/drafts/{draft.pk}/{known(lease)}"
-    draft_page = page(billing, response["Location"])
+    # PLAN-012f-b D15: Save opens its prompt, the store page itself; the draft page opened
+    # from the store keeps the context.
+    assert response["Location"] == f"/invoices/drafts/{draft.pk}/saved/"
+    assert 'id="invoice-saved"' in page(billing, response["Location"])
+    draft_page = page(billing, f"/invoices/drafts/{draft.pk}/{known(lease)}")
     # PLAN-012e-2 D3: the draft form saves and collects; it keeps the context.
     assert f'action="/invoices/drafts/{draft.pk}/edit/?store={lease.store_id}' in draft_page
     assert 'id="store-crumb"' in draft_page

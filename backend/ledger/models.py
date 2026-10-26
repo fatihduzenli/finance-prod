@@ -1198,19 +1198,25 @@ class OneOffCharge(GuardedModel):
 
 class InstallmentPlanStatus(models.TextChoices):
     """``active`` while installments are open; ``attention`` while one of them has a
-    returned payment not resolved; ``completed`` once every installment is paid;
-    ``cancelled`` by an admin (the unpaid installments are cancelled)."""
+    returned payment not resolved; ``paused`` by billing (PLAN-012f-b D16: the next
+    debit's schedule released, set up again on Resume); ``completed`` once every
+    installment is paid; ``cancelled`` by an admin (the unpaid installments are
+    cancelled; the screens say Stop)."""
 
     ACTIVE = "active", "Active"
     ATTENTION = "attention", "Needs attention"
+    PAUSED = "paused", "Paused"
     COMPLETED = "completed", "Completed"
     CANCELLED = "cancelled", "Cancelled"
 
 
-#: The plan statuses in which the plan, not its parent, carries the balance.
+#: The plan statuses in which the plan, not its parent, carries the balance. A paused
+#: plan still does (its installments stay owed); what sets up or shows its debits leaves
+#: it out (PLAN-012f-b D16).
 LIVE_PLAN_STATUSES: list[str] = [
     InstallmentPlanStatus.ACTIVE.value,
     InstallmentPlanStatus.ATTENTION.value,
+    InstallmentPlanStatus.PAUSED.value,
 ]
 
 
@@ -1218,6 +1224,16 @@ class InstallmentCadence(models.TextChoices):
     WEEKLY = "weekly", "Weekly"
     BIWEEKLY = "biweekly", "Every two weeks"
     MONTHLY = "monthly", "Monthly"
+    #: Schedule settlement's (PLAN-012f-b D16); Split into installments does not offer it.
+    YEARLY = "yearly", "Yearly"
+
+
+class InstallmentOrigin(models.TextChoices):
+    """Where a plan was made (PLAN-012f-b D16): a charge's Split into installments, or the
+    invoice builder's Schedule settlement (the charge then reads "Settlement plan")."""
+
+    SPLIT = "split", "Split into installments"
+    SETTLEMENT = "settlement", "Settlement plan"
 
 
 class InstallmentCollection(models.TextChoices):
@@ -1261,6 +1277,7 @@ class InstallmentPlan(GuardedModel):
     cadence = _choice(InstallmentCadence)
     collection = _choice(InstallmentCollection)
     status = _choice(InstallmentPlanStatus, default=InstallmentPlanStatus.ACTIVE)
+    origin = _choice(InstallmentOrigin, default=InstallmentOrigin.SPLIT)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
@@ -1301,6 +1318,7 @@ class InstallmentPlan(GuardedModel):
             _valid_choice("installment_plans", "cadence", InstallmentCadence),
             _valid_choice("installment_plans", "collection", InstallmentCollection),
             _valid_choice("installment_plans", "status", InstallmentPlanStatus),
+            _valid_choice("installment_plans", "origin", InstallmentOrigin),
         ]
 
     def __str__(self) -> str:

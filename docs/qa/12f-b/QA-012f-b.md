@@ -193,3 +193,58 @@ the settle webhook marks it Paid within five business days; then the same with a
 watch the schedule fire.
 
 **Verdict (C):** **PASS.** Every gate clean on both engines after the re-pins; two MINOR resolved, two MINOR deferred by written decision (C2-3 to Step 13, C2-4 to Batch D's pull request); the departures and the TODO-VERIFY listed for the checkpoint; no real ACH debit was made (the sandbox has no tokenization gateway).
+
+
+
+## Batch D — Create invoice: Save, the e-mail prompt, Schedule settlement, the plan actions (branch `step-12f-b/batch-d`, finding 6)
+
+**Scope.** Opus, three briefs and two reworks, rebased onto Batch C. D-1: How to collect reads Save
+· Charge now · Schedule for a date · Record payment now · Set up autopay · Schedule settlement (Send
+by e-mail is no longer a tile); Save keeps the draft and opens "Invoice saved. Send it to {operator}
+by e-mail now?" over the store's Invoices tab (`ledger:invoices:saved`, a read; Send e-mail posts to
+the existing send, due in 15 days unless set; Not now leaves the draft under Drafts with its own
+Send by e-mail); the bank-debit tiles greyed with one reason, never hidden (Charge now: an admin,
+the processor's debit flag, a bank account on file; Schedule, Set up autopay and Schedule
+settlement: a bank account on file and the lease rule); a posted greyed choice refused; the native
+radios unseen behind the card style; dates in the builder read "Nov 1, 2026" live and server-side;
+the help page follows. D-2: Schedule settlement — the invoice's one line split into 2–12 equal bank
+debits monthly, weekly or yearly from a first date through the installment engine (a manual charge
+with no invoice, then the plan, in one transaction; the rounding difference on the last), the
+preview sentence live (`ledger:invoices:settlement_preview`, JSON, read-only) and server-side,
+"Settlement plan · k of N" from one label helper; `InstallmentCadence.yearly`,
+`InstallmentPlan.origin`, migration 0054. D-3: Pause, Resume and Stop for installment plans on the
+Autopay tab and the parent's card (Pause releases every unfired installment schedule in one
+transaction and the plan is paused at once, a schedule that had already fired is recorded and shown;
+Resume sets a schedule up for every unpaid installment and moves the passed ones to the business
+days after today, one apart; Stop is the cancel behind its confirmation page; a paused plan keeps
+its balance, is skipped by every debit path and lands in Needs review after thirty days; migration
+0055). Fable: `tests/test_plan012fb_d_adversarial.py` (27 cases), the route digest (272) and the
+stored choices re-pinned, one D-3 test rewritten for the new rule.
+
+**Findings.** D1-4 (MAJOR, resolved): Schedule for a date was greyed by the pay-invoice flag, which
+gates Charge now alone — staging runs with it off and would have lost scheduling; the schedule-based
+tiles now look at the bank account and the lease only. D3-1 (MAJOR, resolved): a pause released only
+the next schedule while an installment plan's schedules all exist up front, so later debits would
+have run during a pause; every unfired schedule is released and recreated on resume. D1-1, D1-2,
+D1-3, D1-5, D2-1, D2-2 (MINOR, resolved): the live date's format, the saved prompt's tab argument,
+the autopay tile's bank reason, the help text, one label helper everywhere a plan is named, the
+preview's own short refusals. C2-4 from Batch C (MINOR, resolved here): the Add payment primary
+drops its figure until an amount is typed. Opus's own finding on D-2: the brief's conversion path
+would have put a full invoice at the processor beside the schedules (double billing); the settlement
+makes a manual charge with no invoice instead.
+
+**Departures from the owner's message, for the checkpoint (plan D16, §9 items 5 and 6).** A
+settlement takes an invoice with one line (the message speaks of "the invoice total"; two or more
+lines are refused before any write). `InstallmentPlan.origin` is the one small column behind the
+"Settlement plan" label. Pause / Resume / Stop apply to every installment plan, not only
+settlements, with one rule for the table. The first settlement debit may be today for billing: it is
+a schedule that fires tonight, not the pay call. Split keeps its three cadences on its own form; the
+engine accepts yearly everywhere.
+
+**Gate.** ruff, `ruff format --check` (511 files), mypy strict (511 files), `uv lock --check`, `makemigrations --check` after 0054 and 0055: clean; the pattern scan's only hits are the two route digests. sqlite: full suite 7,614 passed, 691 skipped, 106 deselected in 1,571 s; eight failures: six pins moved by design and re-pinned by Fable (the schedule tests of the allocation file now give their operator a bank account on file and expect the greyed tile's refusal before any write; the summary's send-button copy pair is gone), their files re-run 240 passed; and the operator page's query budget (52 for 51, 63 for 62), finding D3-2 below. PostgreSQL 16: migration selection 35 passed and 1 failed in 1,504 s (the round trip over an existing installment row: the test's raw insert predated the plan's `origin` column; the insert names it now, re-run on the container 1 passed), unit selection 8,269 passed, 3 skipped, 109 deselected with four PostgreSQL-only failures, all test-side and re-pinned by Fable (4edbc85: the pause race test still expected one release — it is one per installment now; the thirty-day review test updated an audit row, which PostgreSQL's append-only trigger refuses, so it turns the clock back for the pause instead), the six sqlite re-pins and the three new ones re-run on the container (257 and 4 passed); e2e 35 passed on each of four runs. Visual: every baseline regenerated in the Playwright image against PostgreSQL and the suite compared on PostgreSQL (58 passed) and on sqlite (58 passed); fourteen baselines changed: invoice-builder (the tiles' card style and Save), add-payment (the label without a figure), operator and operator-form (the hidden radios and the one label helper), store-charges, store-invoices (Send by e-mail) and store-schedules (the plan actions and the Status column) at both widths. Shots: `docs/qa/12f-b/shots/d/`: the fourteen changed baselines (1280 and 390), reviewed at both widths. Secret
+scans clean; no secret-store read; no new file type; every new GET writes nothing (the prompt, the
+preview, the Stop page); a viewer can neither open the prompt, post a greyed choice, pause, resume
+nor stop; a pause never queues a pay call; hostile counts, dates, cadences and amounts are refused
+with nothing written; no provider name in the new files.
+
+**Verdict (D):** **PASS.** Every gate clean on both engines after the re-pins; two MAJOR and seven MINOR resolved, one MINOR closed by written decision (D3-2, a re-pin for a new review rule); the departures listed for the checkpoint; residual: the settlement debits settling across months and the pause's provider releases were exercised against the fake provider only (TODO-VERIFY for the checkpoint).

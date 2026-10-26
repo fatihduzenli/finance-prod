@@ -344,8 +344,9 @@ scans are covered by the stated policy, not by a check.
 | Field | Owner | Note |
 |---|---|---|
 | `installment_plans.rent_charge_id` / `one_off_charge_id`, `operator_id`, `lease_id`, `count`, `first_due`, `cadence`, `collection` | App | Set once at confirm from the parent charge (exactly one parent; count 2–12; collection as the parent's); `first_due` and `cadence` follow a reschedule |
-| `installment_plans.status`, `confirmed_at`, `cancelled_at`, `created_by_id` | System | `active` / `attention` (a returned installment unresolved) / `completed` / `cancelled`; derived from the installments' payments on every recompute; at most one plan that is not cancelled per parent (partial unique indexes) |
+| `installment_plans.status`, `confirmed_at`, `cancelled_at`, `created_by_id` | System | `active` / `attention` (a returned installment unresolved) / `paused` / `completed` / `cancelled`; derived from the installments' payments on every recompute, except `paused`, which only billing's Pause sets and Resume clears (PLAN-012f-b D16, migration 0055; a paused plan still carries the balance, its next debit's schedule released) and which a recompute keeps until the plan is completed; `cancelled` is shown as Stop; at most one plan that is not cancelled per parent (partial unique indexes) |
 | `installment_plans.note` | App | The admin's cancel note; guarded text (PostgreSQL trigger) |
+| `installment_plans.origin` | App | Set once at confirm (PLAN-012f-b D16, migration 0054): `split` (a charge's Split into installments; every plan before 0054) or `settlement` (the invoice builder's Schedule settlement, whose installments are bank debits; the charge then reads "Settlement plan · k of N"); a choice, outside the guard. The same migration lets `cadence` be `yearly` (Schedule settlement only) |
 | `one_off_charges.plan_id`, `installment_no` | System | Set exactly for category `installment` (CHECK); an installment's description, price and due date come from the confirmed preview; its payments are its own, counted under the parent in reports |
 
 ### company_settings (PLAN-012c)

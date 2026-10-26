@@ -47,7 +47,7 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
-from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery, Sum
+from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Subquery, Sum
 from django.urls import reverse
 from django.utils import timezone
 
@@ -65,7 +65,9 @@ from ledger.models import (
     ContactEntry,
     DepositResolution,
     DepositResolutionKind,
+    InstallmentOrigin,
     InstallmentPlan,
+    InstallmentPlanStatus,
     InsuranceCharge,
     Invoice,
     InvoiceDraft,
@@ -90,6 +92,7 @@ from ledger.services import (
     audit,
     contacts,
     credits,
+    installments,
     lease_end,
     leases,
     payments_ledger,
@@ -269,6 +272,8 @@ def _next_one_off(lease: Lease, today: date) -> tuple[date, str] | None:
         OneOffCharge.objects.filter(lease=lease, balance__gt=0, due_date__gte=today)
         .exclude(status__in=_CLOSED_ONE_OFF)
         .filter(Q(collection=CollectionMethod.AUTOPAY_DUE) | Q(plan__status__in=LIVE_PLAN_STATUSES))
+        # A paused plan debits nothing until Resume (PLAN-012f-b D16).
+        .exclude(plan__status=InstallmentPlanStatus.PAUSED)
         .select_related("fee_type")
         .order_by("due_date", "created_at", "id")
         .first()
@@ -602,8 +607,28 @@ def _on_live_plan(column: str) -> Exists:
     )
 
 
+def _live_plan_origin(column: str) -> Subquery:
+    """The origin of the charge's live plan (its badge's name, PLAN-012f-b D16)."""
+    return Subquery(
+        InstallmentPlan.objects.filter(
+            **{column: OuterRef("pk")}, status__in=LIVE_PLAN_STATUSES
+        ).values("origin")[:1]
+    )
+
+
+def _on_plan_badges(charge: RentCharge | OneOffCharge) -> list[str]:
+    """``["On installment plan"]`` or ``["On settlement plan"]`` for a charge on a live
+    plan (:func:`ledger.services.installments.on_plan_badge`), else ``[]``."""
+    if not getattr(charge, "on_plan", False):
+        return []
+    origin = getattr(charge, "plan_origin", None) or InstallmentOrigin.SPLIT
+    return [installments.on_plan_badge(origin)]
+
+
 def _rent_rows(owner: Owner, chosen: str) -> QuerySet[RentCharge]:
-    rows = RentCharge.objects.filter(_owned(owner)).annotate(on_plan=_on_live_plan("rent_charge"))
+    rows = RentCharge.objects.filter(_owned(owner)).annotate(
+        on_plan=_on_live_plan("rent_charge"), plan_origin=_live_plan_origin("rent_charge")
+    )
     if chosen == FILTER_OPEN:
         rows = rows.filter(balance__gt=0).exclude(status=RentChargeStatus.WAIVED)
     elif chosen == FILTER_PAID:
@@ -617,6 +642,7 @@ _resolution = DepositResolution.objects.filter(setup_charge=OuterRef("pk"))
 def _one_off_rows(owner: Owner, chosen: str) -> QuerySet[OneOffCharge]:
     rows = OneOffCharge.objects.filter(_owned(owner, direct=True)).annotate(
         on_plan=_on_live_plan("one_off_charge"),
+        plan_origin=_live_plan_origin("one_off_charge"),
         resolution_kind=Subquery(_resolution.values("kind")[:1]),
         resolution_amount=Subquery(_resolution.values("amount")[:1]),
     )
@@ -624,7 +650,7 @@ def _one_off_rows(owner: Owner, chosen: str) -> QuerySet[OneOffCharge]:
         rows = rows.filter(balance__gt=0).exclude(status__in=_CLOSED_ONE_OFF)
     elif chosen == FILTER_PAID:
         rows = rows.filter(status=OneOffChargeStatus.PAID)
-    return rows.select_related("fee_type", "lease__operator", "lease__store").order_by(
+    return rows.select_related("fee_type", "lease__operator", "lease__store", "plan").order_by(
         "-due_date", "-created_at", "id"
     )
 
@@ -769,7 +795,7 @@ def _rent_row(charge: RentCharge, billing: bool, back: str) -> ChargeRow:
             else ""
         ),
         badges=[
-            *(["On installment plan"] if on_plan else []),
+            *_on_plan_badges(charge),
             *(["Needs review"] if charge.needs_review else []),
         ],
     )
@@ -797,7 +823,12 @@ def _one_off_row(charge: OneOffCharge, role: Role | None, back: str) -> ChargeRo
     return ChargeRow(
         kind=KIND_ONE_OFF,
         charge_id=charge.pk,
-        kind_label=charge.get_category_display(),
+        # An installment names its plan (PLAN-012f-b D16: "Settlement plan · 3 of 10").
+        kind_label=(
+            installments.plan_label(charge.plan, charge.installment_no)
+            if charge.plan is not None and charge.installment_no is not None
+            else charge.get_category_display()
+        ),
         description=charge.label,
         due=charge.due_date,
         billed=charge.price,
@@ -822,7 +853,7 @@ def _one_off_row(charge: OneOffCharge, role: Role | None, back: str) -> ChargeRo
         resolution=resolution,
         badges=[
             *(["Deposit"] if deposit else []),
-            *(["On installment plan"] if on_plan else []),
+            *_on_plan_badges(charge),
             *(["Needs review"] if charge.needs_review else []),
         ],
     )
@@ -1150,6 +1181,7 @@ def schedules_tab(
         "plan_end_rules": AutopayEndRule.choices,
         "schedule_rows": rows,
         "autopay_moved": [move.text for move in moves.values() if move is not None],
+        # A paused plan's installments are not collected while it is paused (D16).
         "autopay_charges": list(
             OneOffCharge.objects.filter(
                 _owned(owner, direct=True),
@@ -1157,16 +1189,36 @@ def schedules_tab(
                 balance__gt=0,
             )
             .exclude(status__in=_CLOSED_ONE_OFF)
+            .exclude(plan__status=InstallmentPlanStatus.PAUSED)
             .select_related("fee_type", "lease__store")
             .order_by("due_date", "created_at", "id")
         ),
-        "live_plans": list(
-            InstallmentPlan.objects.filter(
+        # Each live plan with a settlement plan's "Settlement plan · 3 of 10" (paid of
+        # its count; PLAN-012f-b D16), "" for a split's, and what ``role`` may do to it
+        # (Pause, Resume, Reschedule, Stop; D16).
+        "live_plans": [
+            {
+                "plan": plan,
+                "label": (
+                    installments.plan_label(plan, plan.paid_installments)
+                    if plan.origin == InstallmentOrigin.SETTLEMENT
+                    else ""
+                ),
+                "actions": installments.plan_actions(
+                    plan, billing=meets(role, Role.BILLING), admin=meets(role, Role.ADMIN)
+                ),
+            }
+            for plan in InstallmentPlan.objects.filter(
                 _owned(owner, direct=True), status__in=LIVE_PLAN_STATUSES
+            )
+            .annotate(
+                paid_installments=Count(
+                    "installments", filter=Q(installments__status=OneOffChargeStatus.PAID)
+                )
             )
             .select_related("rent_charge", "one_off_charge__fee_type", "lease__store")
             .order_by("first_due", "id")
-        ),
+        ],
         "lease_page_leases": sorted(
             {row.lease for row in schedules},
             key=lambda lease: (str(lease.started_on), str(lease.pk)),

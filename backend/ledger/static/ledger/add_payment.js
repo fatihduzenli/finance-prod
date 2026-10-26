@@ -2,7 +2,9 @@
 // and the amount in the primary button follow the amount typed in the card chosen (the
 // radio "how": the bank debit's #id_debit_amount, the record card's #id_amount). Which
 // words the button shows is ledger/shown_when.js's. The server renders the same figures,
-// so the page reads right without this script; nothing is sent from here.
+// so the page reads right without this script; nothing is sent from here. While the amount
+// is empty or not a number the button reads "Record as paid" / "Charge by ACH" and This
+// payment "—" (C2-4).
 (function () {
   "use strict";
   var summary = document.getElementById("payment-summary");
@@ -28,12 +30,14 @@
       chosen && chosen.value === "debit" ? "id_debit_amount" : "id_amount"
     );
     var amount = input ? cents(input.value) : 0;
-    var text = money(amount);
+    // No amount, or not a number: no figure in the button, "—" in This payment.
+    var text = amount > 0 ? money(amount) : "";
     if (tile) {
-      tile.textContent = text;
+      tile.textContent = text || "—";
     }
     summary.querySelectorAll(".payment-amount").forEach(function (span) {
       span.textContent = text;
+      span.hidden = !text;
     });
     if (after) {
       after.textContent = amount > 0 && amount >= balance

@@ -559,8 +559,9 @@ def test_a_setup_charge_through_the_builder(fake: FakeProvider) -> None:
 def test_a_scheduled_payment_through_the_builder(fake: FakeProvider) -> None:
     """``ledger:stores:schedule_payment`` (the store form before Batch A) now opens the
     builder with Schedule for a date chosen; the rows are the form's, the draft's own
-    rows apart."""
+    rows apart. PLAN-012f-b D15: the tile is offered with a bank account on file."""
     operator, lease = a_world(fake)
+    store_methods(operator)
     billing = client_for(Role.BILLING)[0]
     base = baseline()
     response = billing.get(reverse("ledger:stores:schedule_payment", kwargs={"pk": lease.store_id}))

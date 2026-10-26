@@ -35,15 +35,18 @@ Invoices tab.
 **How to collect** (docs/qa/PLAN-012e2-fewer-actions.md D3): both forms end with the
 choice (:class:`~ledger.forms.CollectForm`). The draft is saved first (a new one created,
 an existing one updated), then :func:`ledger.services.invoice_builder.collect` runs the
-choice: Save draft opens the draft; Send by e-mail and Record payment now return to the
-store page's Invoices tab when opened from it, else to the draft; Schedule for a date
+choice: Save opens the Invoices tab with the "Invoice saved" dialog, which asks whether to
+e-mail the draft now (``invoices:saved``, PLAN-012f-b D15; Send e-mail posts to
+``invoices:send``); Record payment now returns to the store page's Invoices tab when
+opened from it, else to the draft; Schedule for a date
 returns to the store page's Charges tab (the draft became the charge), else to the
 operator page; Set up autopay returns to the store page's Autopay tab (the draft became
 the plan); Charge now opens its confirmation page (admin; 10d D4). A refusal of the
 choice keeps the saved draft and shows the sentence on its page with the choice's fields.
-``?collect=<choice>`` pre-selects the radio (anything else, or Charge now for billing:
-Save draft); ``?item=<catalogue code>`` fills line 1 of a new draft with that offered
-catalogue item and its default price (anything else is ignored).
+Every tile shows; one not on offer is greyed with its reason and refused when posted
+(:func:`ledger.forms.unavailable_choices`). ``?collect=<choice>`` pre-selects the radio
+(anything else, or a greyed tile: Save); ``?item=<catalogue code>`` fills line 1 of a new
+draft with that offered catalogue item and its default price (anything else is ignored).
 """
 
 from __future__ import annotations
@@ -54,6 +57,7 @@ from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlencode
 
 from django import forms
 from django.contrib import messages
@@ -89,7 +93,14 @@ from ledger.models import (
     Operator,
     Store,
 )
-from ledger.services import contacts, detail_cards, invoice_builder, one_off_charges, workspace
+from ledger.services import (
+    contacts,
+    detail_cards,
+    installments,
+    invoice_builder,
+    one_off_charges,
+    workspace,
+)
 from ledger.services import stores as store_service
 from ledger.services.invoice_builder import CollectChoice
 from ledger.services.rent_run import ENTITY_CHARGE as ENTITY_RENT_CHARGE
@@ -99,7 +110,9 @@ from ledger.views import store_context
 from ledger.views.detail_cards import activity_context
 from ledger.views.jobs import job_context
 from ledger.views.operators import _actor, _role, role_required
+from ledger.views.operators import _detail_context as _operator_page
 from ledger.views.store_context import StoreContext
+from ledger.views.stores import _detail_context as _store_page
 
 #: The session key of a draft form held with its errors.
 HELD_KEY = "invoice_draft_form"
@@ -287,21 +300,54 @@ COLLECTION_LABELS = {
 }
 
 
-def _can_charge_now(request: HttpRequest) -> bool:
-    return meets(_role(request), Role.ADMIN) and one_off_charges.charge_now_enabled()
+#: The large-debit tick of each choice that debits (the others share Schedule's).
+CONFIRM_FIELDS = {
+    CollectChoice.AUTOPAY: "autopay_confirm_large_debit",
+    CollectChoice.SETTLEMENT: "settlement_confirm_large_debit",
+}
 
 
-def _collect_form(request: HttpRequest, data: Any = None, *, can_schedule: bool) -> CollectForm:
+def _settlement_context(collect_form: CollectForm | None, total: Decimal | None) -> dict[str, Any]:
+    """Schedule settlement's preview sentence as the page opens (PLAN-012f-b D16; the
+    script fetches it again from ``settlement_preview_url`` as the fields change)."""
+    sentence = ""
+    if collect_form is not None and total is not None:
+        sentence = collect_form.settlement_sentence(total)
+    return {
+        "settlement_sentence": sentence,
+        "settlement_preview_url": reverse("ledger:invoices:settlement_preview"),
+    }
+
+
+def _collect_form(
+    request: HttpRequest,
+    data: Any = None,
+    *,
+    can_schedule: bool,
+    operator: Operator | None,
+) -> CollectForm:
     """How to collect, bound to ``data`` (a POST or a held form), else with the radio
-    ``?collect=`` names (:func:`~ledger.forms.initial_choice`). Schedule for a date is
-    offered only where ``can_schedule`` (:func:`ledger.services.invoice_builder.can_schedule`)."""
-    can = _can_charge_now(request)
+    ``?collect=`` names (:func:`~ledger.forms.initial_choice`). Every tile shows (PLAN-012f-b
+    D15): Charge now greyed below admin, with the pay-an-invoice flag off or no bank account
+    on file (:func:`ledger.services.invoice_builder.charge_now_unavailable`); Schedule for a
+    date and Set up autopay greyed with no bank account on file
+    (:func:`ledger.services.invoice_builder.bank_unavailable`) or where ``can_schedule`` is
+    false."""
+    greyed: dict[str, Any] = {
+        "can_charge_now": meets(_role(request), Role.ADMIN),
+        "can_schedule": can_schedule,
+        "charge_now_why": invoice_builder.charge_now_unavailable(operator),
+        "bank_why": invoice_builder.bank_unavailable(operator),
+    }
     if data is not None:
-        return CollectForm(data, can_charge_now=can, can_schedule=can_schedule)
-    chosen = initial_choice(
-        request.GET.get("collect"), can_charge_now=can, can_schedule=can_schedule
-    )
-    return CollectForm(initial={"collect": chosen}, can_charge_now=can, can_schedule=can_schedule)
+        return CollectForm(data, **greyed)
+    chosen = initial_choice(request.GET.get("collect"), **greyed)
+    return CollectForm(initial={"collect": chosen}, **greyed)
+
+
+def _billed(operator: Operator | None, lease: Lease | None) -> Operator | None:
+    """Whom a new draft bills: the operator page's operator, else the lease's."""
+    return operator or (lease.operator if lease is not None else None)
 
 
 def _posted_lease(data: Any, leases: Iterable[Lease], default: Lease | None) -> Lease | None:
@@ -336,28 +382,28 @@ def _collected(
         messages.success(request, saved)
         if choice == CollectChoice.CHARGE_NOW:
             return redirect("ledger:invoices:charge_now", pk=draft.pk)
-        return redirect(_draft_url(draft, context))
+        # PLAN-012f-b D15: Save asks whether to e-mail the saved draft now.
+        return redirect("ledger:invoices:saved", pk=draft.pk)
     lease = draft.lease
     data = collect_form.cleaned_data
     outcome = invoice_builder.collect(
         draft.pk,
         choice,
         actor=_actor(request),
-        confirmed=data.get(
-            "autopay_confirm_large_debit"
-            if choice == CollectChoice.AUTOPAY
-            else "confirm_large_debit"
-        )
-        is True,
+        confirmed=data.get(CONFIRM_FIELDS.get(choice, "confirm_large_debit")) is True,
         due_date=data.get("schedule_on"),
         payment=collect_form.payment(),
         autopay=collect_form.autopay() if choice == CollectChoice.AUTOPAY else None,
+        settlement=collect_form.settlement() if choice == CollectChoice.SETTLEMENT else None,
     )
     if not outcome.ok:
         messages.success(request, saved)
         _hold(request, f"invoice-edit:{draft.pk}", [str(outcome.message)])
         return redirect(_draft_url(draft, context))
     messages.success(request, outcome.message)
+    if choice == CollectChoice.SETTLEMENT and outcome.charges:
+        # PLAN-012f-b D16: the charge the draft became, with its settlement plan.
+        return redirect("ledger:one_off_charges:detail", pk=outcome.charges[0].pk)
     if choice == CollectChoice.AUTOPAY:
         if context is not None:
             return redirect(context.tab_url(workspace.TAB_SCHEDULES))
@@ -372,9 +418,6 @@ def _collected(
         return redirect("ledger:operators:detail", pk=draft.operator_id)
     if context is not None:
         return redirect(context.tab_url(workspace.TAB_INVOICES))
-    back = store_context.local_next(request.GET.get("next"))
-    if choice == CollectChoice.EMAIL and back:
-        return redirect(back)
     return redirect(_draft_url(draft, context))
 
 
@@ -495,16 +538,16 @@ def _new(
         formset = _formset(
             request.POST, rent_leases=rent_leases, default_lease=preselected, existing=existing
         )
+        posted = _posted_lease(request.POST, leases, None if allow_none else preselected)
         collect_form = _collect_form(
             request,
             request.POST,
-            can_schedule=invoice_builder.can_schedule(
-                _posted_lease(request.POST, leases, None if allow_none else preselected)
-            ),
+            can_schedule=invoice_builder.can_schedule(posted),
+            operator=_billed(operator, posted),
         )
         if form.is_valid() and formset.is_valid() and collect_form.is_valid():
             lease = form.chosen_lease()
-            billed = operator or (lease.operator if lease is not None else None)
+            billed = _billed(operator, lease)
             if billed is None:
                 outcome = invoice_builder.Outcome(False, one_off_charges.NO_OPERATOR)
             else:
@@ -529,10 +572,12 @@ def _new(
         formset = _formset(
             data, rent_leases=rent_leases, default_lease=preselected, existing=existing
         )
+        held_lease = _posted_lease(data, leases, preselected)
         collect_form = _collect_form(
             request,
             data,
-            can_schedule=invoice_builder.can_schedule(_posted_lease(data, leases, preselected)),
+            can_schedule=invoice_builder.can_schedule(held_lease),
+            operator=_billed(operator, held_lease),
         )
         form.is_valid()
         formset.is_valid()
@@ -553,7 +598,9 @@ def _new(
             existing=existing,
         )
         collect_form = _collect_form(
-            request, can_schedule=invoice_builder.can_schedule(preselected)
+            request,
+            can_schedule=invoice_builder.can_schedule(preselected),
+            operator=_billed(operator, preselected),
         )
     if context is not None and context.lease is not None:
         _hide_lease(form)
@@ -579,6 +626,7 @@ def _new(
             "due_days": invoice_builder.DUE_DAYS,
             "collect_form": collect_form,
             "collect_total": _lines_total(formset),
+            **_settlement_context(collect_form, _lines_total(formset)),
         },
     )
 
@@ -741,7 +789,9 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
         formset = _formset(
             data, rent_leases=rent_leases, default_lease=draft.lease, existing=existing
         )
-        collect_form = _collect_form(request, data, can_schedule=schedulable)
+        collect_form = _collect_form(
+            request, data, can_schedule=schedulable, operator=draft.operator
+        )
         form.is_valid()
         formset.is_valid()
         collect_form.is_valid()
@@ -751,7 +801,7 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
         formset = _formset(
             initial=lines, rent_leases=rent_leases, default_lease=draft.lease, existing=existing
         )
-        collect_form = _collect_form(request, can_schedule=schedulable)
+        collect_form = _collect_form(request, can_schedule=schedulable, operator=draft.operator)
     if form is not None and context is not None:
         _hide_lease(form)
     sent = _sent_context(draft) if draft.status == InvoiceDraftStatus.SENT else {}
@@ -780,6 +830,7 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
             "crumb_store": draft.lease.store if draft.lease is not None else None,
             "collect_form": collect_form,
             "collect_total": preview_total if editable else None,
+            **_settlement_context(collect_form, preview_total if editable else None),
             "can_cancel": draft.status == InvoiceDraftStatus.DRAFT
             or (draft.status == InvoiceDraftStatus.SENT and not sent.get("cancel_refusal")),
             "due_days": invoice_builder.DUE_DAYS,
@@ -810,6 +861,7 @@ def draft_edit(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         request.POST,
         can_schedule=invoice_builder.can_schedule(_posted_lease(request.POST, leases, None)),
+        operator=draft.operator,
     )
     if form.is_valid() and formset.is_valid() and collect_form.is_valid():
         outcome = invoice_builder.update_draft(
@@ -851,6 +903,52 @@ def draft_send(request: HttpRequest, pk: str) -> HttpResponse:
     else:
         messages.error(request, outcome.message)
     return redirect(_draft_url(draft, context))
+
+
+#: The dialog Save opens over the Invoices tab (PLAN-012f-b D15).
+SAVED_TITLE = "Invoice saved"
+SAVED_QUESTION = "Send it to {operator} by e-mail now?"
+
+
+@role_required
+@require_safe
+def draft_saved(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:invoices:saved`` (billing; PLAN-012f-b D15): after Save, the Invoices tab of
+    the draft's store page (of the operator page for a draft without a lease) with the
+    "Invoice saved" dialog open: Not now goes back to the tab (the draft stays under
+    Drafts), Send e-mail posts to ``ledger:invoices:send``. A draft that is no longer a
+    draft goes to the tab with the refusal. Writes nothing."""
+    refused = _refuse_below(request, Role.BILLING)
+    if refused is not None:
+        return refused
+    draft = _load(pk)
+    lease = draft.lease
+    if lease is not None:
+        tab_url = workspace.tab_url(lease.store_id, workspace.TAB_INVOICES)
+        send_query = "?" + urlencode({"store": str(lease.store_id)})
+    else:
+        tab_url = workspace.operator_tab_url(draft.operator_id, workspace.TAB_INVOICES)
+        send_query = "?" + urlencode({"next": tab_url})
+        tab_url += f"#tab-{workspace.TAB_INVOICES}"
+    kept = invoice_builder.collect(draft.pk, CollectChoice.DRAFT, actor=_actor(request))
+    if not kept.ok:
+        messages.error(request, kept.message)
+        return redirect(tab_url)
+    # The page behind the dialog is the Invoices tab whatever the query says.
+    if lease is not None:
+        template = "ledger/stores/detail.html"
+        context = _store_page(request, lease.store, forced_tab=workspace.TAB_INVOICES)
+    else:
+        template = "ledger/operators/detail.html"
+        context = _operator_page(request, draft.operator, forced_tab=workspace.TAB_INVOICES)
+    context["saved_dialog"] = {
+        "draft": draft,
+        "title": SAVED_TITLE,
+        "question": SAVED_QUESTION.format(operator=draft.operator.display_name),
+        "return_url": tab_url,
+        "send_url": reverse("ledger:invoices:send", kwargs={"pk": draft.pk}) + send_query,
+    }
+    return render(request, template, context)
 
 
 @role_required
@@ -1008,6 +1106,67 @@ def rent_amount(request: HttpRequest) -> HttpResponse:
             "message": message,
         }
     )
+
+
+# --- Schedule settlement's preview sentence (PLAN-012f-b D16) ---------------------------------
+
+#: A total the preview reads: digits with at most two decimals.
+TOTAL = re.compile(r"^\d{1,9}(\.\d{1,2})?$")
+#: A number of payments the preview reads (the range is the service's).
+COUNT = re.compile(r"^\d{1,2}$")
+#: A first debit date the preview reads.
+ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _preview_refused(message: str) -> JsonResponse:
+    """A 400 with the preview's own short sentence for ``message`` (finding D2-2)."""
+    short = invoice_builder.SETTLEMENT_PREVIEW_SENTENCES.get(message, message)
+    return JsonResponse({"ok": False, "message": short}, status=400)
+
+
+@role_required
+@require_safe
+def settlement_preview(request: HttpRequest) -> HttpResponse:
+    """``ledger:invoices:settlement_preview`` (billing; read-only JSON): Schedule
+    settlement's preview sentence (:func:`ledger.services.installments.settlement_preview`)
+    of ``?total=`` (dollars, at most two decimals, up to the one-off maximum), ``?count=``
+    (2 to 12), ``?first=`` (an ISO date, today or later within the horizon) and
+    ``?cadence=`` (monthly, weekly or yearly): ``{"ok": true, "sentence": ...}``, or 400
+    with ``{"ok": false, "message": ...}`` naming the first parameter refused. Pure
+    arithmetic on the parameters: nothing is read from or written to the database."""
+    refused = _refuse_below(request, Role.BILLING)
+    if refused is not None:
+        return refused
+    text = request.GET.get("total", "")
+    if not TOTAL.fullmatch(text):
+        return _preview_refused(invoice_builder.SETTLEMENT_TOTAL)
+    total = Decimal(text)
+    if total <= 0 or total > one_off_charges.AMOUNT_MAX:
+        return _preview_refused(invoice_builder.SETTLEMENT_TOTAL)
+    count_text = request.GET.get("count", "")
+    count = int(count_text) if COUNT.fullmatch(count_text) else None
+    first_text = request.GET.get("first", "")
+    try:
+        first = date.fromisoformat(first_text) if ISO_DAY.fullmatch(first_text) else None
+    except ValueError:
+        first = None
+    if first is None and first_text:
+        return _preview_refused(invoice_builder.SETTLEMENT_FIRST_REQUIRED)
+    entered = invoice_builder.SettlementInput(
+        count=count,
+        first_on=first,
+        cadence=request.GET.get("cadence", ""),
+    )
+    rule = invoice_builder.settlement_refusal(entered, timezone.localdate())
+    if rule is not None:
+        return _preview_refused(rule.message)
+    lines, too_small = invoice_builder.settlement_lines(total, entered)
+    if too_small is not None:
+        return _preview_refused(too_small.message)
+    if not lines or count is None or first is None:  # pragma: no cover (refused above)
+        return _preview_refused(invoice_builder.SETTLEMENT_TOTAL)
+    sentence = installments.settlement_preview(total, count, first, entered.cadence)
+    return JsonResponse({"ok": True, "sentence": sentence})
 
 
 # --- Preview and print view (D7) ------------------------------------------------------

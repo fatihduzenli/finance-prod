@@ -136,12 +136,14 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:run:match": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:charges:record_payment": RouteRule(min_role=Role.BILLING, methods=POST),
     # Installment plans (PLAN-012e D10, D11): Split into installments and Reschedule need
-    # billing, Cancel needs admin. The views refuse the GET of their forms below the same
-    # role.
+    # billing, Cancel (Stop on screen) needs admin. The views refuse the GET of their forms
+    # below the same role. Pause and Resume (PLAN-012f-b D16): billing, POST only.
     "ledger:charges:split": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:split": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:plans:reschedule": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:plans:cancel": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:plans:pause": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:plans:resume": RouteRule(min_role=Role.BILLING, methods=POST),
     # Linking an unlinked invoice to a rent charge (PLAN-008a §2 rule 4): admin or
     # billing. The view refuses the GET of the form below billing too.
     "ledger:charges:link_invoice": RouteRule(min_role=Role.BILLING, methods=POST),
@@ -419,9 +421,15 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:invoices:draft",
         "ledger:invoices:preview",
         "ledger:invoices:print",
+        # PLAN-012f-b D15: the "Invoice saved" dialog over the Invoices tab (billing,
+        # checked by the view); GET only, it writes nothing.
+        "ledger:invoices:saved",
         # PLAN-012d D10: a Rent line's default amount as JSON (billing, checked by the
         # view); GET only.
         "ledger:invoices:rent_amount",
+        # PLAN-012f-b D16: Schedule settlement's preview sentence as JSON (billing,
+        # checked by the view); GET only, it reads and writes nothing.
+        "ledger:invoices:settlement_preview",
         # The calendar page and an entry's page (PLAN-011b D8): any verified role.
         "ledger:calendar:page",
         "ledger:calendar:detail",

@@ -1,0 +1,9 @@
+{% comment %}An installment plan's actions (PLAN-012f-b D16), from ledger.services.installments.plan_actions: Pause and Resume POSTs with the single-submit guard (billing), Reschedule (billing) and Stop (admin) links to their pages.{% endcomment %}
+{% if actions.can_pause or actions.can_resume or actions.can_reschedule or actions.can_stop %}
+<div class="plan-actions">
+  {% if actions.can_pause %}<form method="post" action="{% url 'ledger:plans:pause' pk=plan.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="installment-plan-pause-{{ plan.pk }}">Pause</button></form>{% endif %}
+  {% if actions.can_resume %}<form method="post" action="{% url 'ledger:plans:resume' pk=plan.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="installment-plan-resume-{{ plan.pk }}">Resume</button></form>{% endif %}
+  {% if actions.can_reschedule %}<a class="btn" href="{% url 'ledger:plans:reschedule' pk=plan.pk %}" id="installment-plan-reschedule-{{ plan.pk }}">Reschedule</a>{% endif %}
+  {% if actions.can_stop %}<a class="btn btn-danger" href="{% url 'ledger:plans:cancel' pk=plan.pk %}" id="installment-plan-stop-{{ plan.pk }}">Stop</a>{% endif %}
+</div>
+{% endif %}

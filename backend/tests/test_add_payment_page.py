@@ -486,9 +486,39 @@ def test_the_button_and_the_after_line_follow_the_card(fake: FakeProvider) -> No
     with override_settings(STAX_PAY_INVOICE_ENABLED=False):
         record_body = get(Role.ADMIN, page_of(charge))
     side = summary(record_body)
-    assert 'Record <span class="payment-amount">$0.00</span> as paid' in side
+    # C2-4 (PLAN-012f-b Batch C): no amount typed, no figure in the button.
+    assert 'Record <span class="payment-amount" hidden></span> as paid' in side
     assert "$5,000.00 still owed" in side
     assert "ledger/add_payment.js" in record_body
+
+
+def test_with_no_amount_the_button_has_no_figure_and_this_payment_shows_a_dash(
+    fake: FakeProvider,
+) -> None:
+    """Fable's C2-4: while the amount is empty (or not a number: the script's rule) the
+    primary reads "Record as paid" / "Charge by ACH" and This payment "—"; the figure
+    appears once one is typed."""
+    charge = invoiced(fake, "75.00")
+    with override_settings(STAX_PAY_INVOICE_ENABLED=False):
+        # The record card is chosen and its amount is empty.
+        side = summary(get(Role.ADMIN, page_of(charge)))
+    assert 'Record <span class="payment-amount" hidden></span> as paid' in side
+    assert 'Charge <span class="payment-amount" hidden></span> by ACH' in side
+    this_payment = element(side, '<div id="tile-this-payment">', "div></div")
+    assert '<span class="kpi-value">—</span>' in this_payment
+    script = (
+        Path(__file__).resolve().parents[1] / "ledger" / "static" / "ledger" / "add_payment.js"
+    ).read_text(encoding="utf-8")
+    assert 'var text = amount > 0 ? money(amount) : "";' in script
+    assert 'tile.textContent = text || "—";' in script and "span.hidden = !text;" in script
+
+
+def test_with_an_amount_the_button_names_it(fake: FakeProvider) -> None:
+    charge = invoiced(fake, "75.00")
+    side = summary(get(Role.ADMIN, page_of(charge)))
+    assert 'Charge <span class="payment-amount">$75.00</span> by ACH' in side
+    assert 'Record <span class="payment-amount">$75.00</span> as paid' in side
+    assert '<span class="kpi-value">$75.00</span>' in side
 
 
 def test_the_phone_rules_one_column_and_the_summary_above_the_full_width_button() -> None:

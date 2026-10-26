@@ -28,11 +28,13 @@ from playwright.sync_api import Browser, BrowserContext, Page
 from pytest_django.live_server_helper import LiveServer
 
 from accounts.roles import Role
-from ledger.models import PaymentChannel
+from ledger.models import Operator, PaymentChannel
 from ledger.services import invoice_builder, lease_end
 from ledger.services.invoice_builder import LineInput
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.receivables_helpers import a_lease, a_one_off_charge, a_store, an_operator
+from tests.test_charge_now import store_methods
+from tests.test_one_off_charges import an_operator as one_off_operator
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
 
@@ -155,54 +157,66 @@ def test_without_javascript_every_dependent_field_stays_visible(
     assert page.locator("#keep-credit-field").is_visible()
 
 
+# PLAN-012f-b D15: the How to collect radio is unseen (the tile is the control), so a test
+# picks a choice by clicking its tile's label, as a person does.
+
+
+def _banked() -> Operator:
+    """An operator with a usable bank account on file (PLAN-012f-b D15: Schedule for a
+    date is on offer only then)."""
+    operator = one_off_operator()
+    store_methods(operator)
+    return operator
+
+
 def test_how_to_collect_shows_the_chosen_choices_fields_and_button(
     live_server: LiveServer, page: Page
 ) -> None:
     """PLAN-012e-2 D3: the builder's How to collect shows the debit date only for
     Schedule for a date, the received payment only for Record payment now, and the one
     button of the chosen choice, which names the live total."""
-    lease = a_lease(a_store("E2E-12E2-1"), an_operator("Collect Co"), started=date(2026, 1, 1))
+    lease = a_lease(a_store("E2E-12E2-1"), _banked(), started=date(2026, 1, 1))
     _sign_in(page, live_server, "e2e-12e2-collect")
     page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/")
     date_field, method = page.locator("#id_schedule_on"), page.locator("#id_method")
-    save, send = page.locator("#save-draft"), page.locator("#send-draft")
+    save = page.locator("#save-draft")
     schedule, record = page.locator("#schedule-draft"), page.locator("#record-draft")
     assert page.locator("#collect-draft").is_checked()
     assert not date_field.is_visible() and date_field.is_disabled()
     assert not method.is_visible() and method.is_disabled()
-    assert save.is_visible() and not send.is_visible() and not record.is_visible()
+    assert save.is_visible() and not record.is_visible()
+    assert page.locator("#send-draft").count() == 0  # PLAN-012f-b D15: Save asks instead
     page.fill("#id_lines-0-item", "Sign repair")
     page.fill("#id_lines-0-unit_amount", "125.50")
-    page.check("#collect-schedule")
+    page.click('label[for="collect-schedule"]')
     assert date_field.is_visible() and date_field.is_enabled()
     assert not method.is_visible()
     assert schedule.is_visible() and not save.is_visible()
     # The button is a flex box since PLAN-012f (its spans read as lines in innerText).
     assert "Schedule $125.50 for" in " ".join(schedule.inner_text().split())
     page.fill("#id_schedule_on", "2026-12-01")
-    assert " ".join(schedule.inner_text().split()) == "Schedule $125.50 for 2026-12-01"
-    page.check("#collect-record")
+    # PLAN-012f-b D15: the picked date reads as the page prints dates.
+    assert " ".join(schedule.inner_text().split()) == "Schedule $125.50 for Dec 1, 2026"
+    page.click('label[for="collect-record"]')
     assert method.is_visible() and page.locator("#id_payment_note").is_visible()
     assert not date_field.is_visible() and date_field.is_disabled()
     assert " ".join(record.inner_text().split()) == "Record $125.50 received"
-    page.check("#collect-email")
-    assert " ".join(send.inner_text().split()) == "Send $125.50 by e-mail"
+    page.click('label[for="collect-draft"]')
+    assert " ".join(save.inner_text().split()) == "Save"
     assert not record.is_visible()
 
 
 def test_without_javascript_how_to_collect_shows_every_field_and_button(
     live_server: LiveServer, no_script: BrowserContext
 ) -> None:
-    lease = a_lease(
-        a_store("E2E-12E2-2"), an_operator("No Script Collect"), started=date(2026, 1, 1)
-    )
+    lease = a_lease(a_store("E2E-12E2-2"), _banked(), started=date(2026, 1, 1))
     page = no_script.new_page()
     _sign_in(page, live_server, "e2e-12e2-noscript")
     page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/?collect=schedule")
     assert page.locator("#collect-schedule").is_checked()
     for control in ("#id_schedule_on", "#id_method", "#id_paid_on", "#id_payment_note"):
         assert page.locator(control).is_visible(), control
-    for button in ("#save-draft", "#send-draft", "#schedule-draft", "#record-draft"):
+    for button in ("#save-draft", "#schedule-draft", "#record-draft"):
         assert page.locator(button).is_visible(), button
     # Without the script a row's Rent selects stay visible under its Item box (PLAN-012f-a
     # D5; the Rent columns of PLAN-012e-3 before it).
@@ -213,7 +227,8 @@ def test_without_javascript_how_to_collect_shows_every_field_and_button(
 def test_set_up_autopay_shows_its_fields_by_the_choice_and_the_end_rule(
     live_server: LiveServer, page: Page
 ) -> None:
-    lease = a_lease(a_store("E2E-12FA-E2-1"), an_operator("Repeat Co"), started=date(2026, 1, 1))
+    # PLAN-012f-b D15: Set up autopay is on offer with a bank account on file.
+    lease = a_lease(a_store("E2E-12FA-E2-1"), _banked(), started=date(2026, 1, 1))
     _sign_in(page, live_server, "e2e-12fa-e2-autopay")
     page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/")
     cadence, first = page.locator("#id_autopay_cadence"), page.locator("#id_autopay_first_on")
@@ -225,7 +240,7 @@ def test_set_up_autopay_shows_its_fields_by_the_choice_and_the_end_rule(
     assert not button.is_visible()
     page.fill("#id_lines-0-item", "Storage bin")
     page.fill("#id_lines-0-unit_amount", "40.00")
-    page.check("#collect-autopay")
+    page.click('label[for="collect-autopay"]')
     for control in (cadence, first, rule, count, tick):
         assert control.is_visible() and control.is_enabled()
     assert not last.is_visible() and last.is_disabled()
@@ -243,7 +258,7 @@ def test_set_up_autopay_shows_its_fields_by_the_choice_and_the_end_rule(
     page.select_option("#id_autopay_end_rule", "count")
     assert count.is_visible() and not last.is_visible()
     # Another choice hides the tile's fields again, whatever the end rule says.
-    page.check("#collect-schedule")
+    page.click('label[for="collect-schedule"]')
     for control in (cadence, first, rule, count, last, tick):
         assert not control.is_visible() and control.is_disabled()
     assert not button.is_visible()
@@ -252,9 +267,8 @@ def test_set_up_autopay_shows_its_fields_by_the_choice_and_the_end_rule(
 def test_without_javascript_set_up_autopay_shows_every_field(
     live_server: LiveServer, no_script: BrowserContext
 ) -> None:
-    lease = a_lease(
-        a_store("E2E-12FA-E2-2"), an_operator("No Script Repeat"), started=date(2026, 1, 1)
-    )
+    # PLAN-012f-b D15: Set up autopay is on offer with a bank account on file.
+    lease = a_lease(a_store("E2E-12FA-E2-2"), _banked(), started=date(2026, 1, 1))
     page = no_script.new_page()
     _sign_in(page, live_server, "e2e-12fa-e2-noscript")
     page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/?collect=autopay")
@@ -298,7 +312,7 @@ def test_the_reference_label_reads_check_number_while_check_is_chosen(
     assert _reference_label(page) == "Check number"
     # The builder's Record payment now.
     page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/")
-    page.check("#collect-record")
+    page.click('label[for="collect-record"]')
     assert _reference_label(page) == "Reference"
     page.select_option("#id_method", "check")
     assert _reference_label(page) == "Check number"

@@ -733,12 +733,15 @@ fieldset.card > legend + * { clear: both; }
 .collect-tile { box-sizing: border-box; min-width: 0; padding: var(--space-3) 14px; border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); }
 .collect-tile:has(input[type=radio]:checked) { background: var(--surface-2); border-color: var(--teal); }
 @supports not selector(:has(*)) { .collect-tile.is-chosen { background: var(--surface-2); border-color: var(--teal); } }
-.collect-option { display: flex; align-items: flex-start; gap: 10px; margin: 0; font-weight: 400; cursor: pointer; }
-.collect-option input[type=radio] { flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--btn-primary-bg); }
+.collect-option { position: relative; display: flex; align-items: flex-start; gap: 10px; margin: 0; font-weight: 400; cursor: pointer; }
+/* PLAN-012f-b D15: the tile is the radio; the native one stays in the page for the keyboard
+   (the .radio-segmented input rule's pattern), the focus ring on the tile. */
+.collect-option input[type=radio] { position: absolute; opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; margin: 0; pointer-events: none; }
+.collect-tile:has(input[type=radio]:focus-visible) { outline: 2px solid var(--link); outline-offset: 1px; }
 .collect-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .collect-name { color: var(--text); font-size: var(--fs-md); font-weight: 700; }
 .collect-note { color: var(--muted); font-size: var(--fs-sm); }
-.collect-fields { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); margin: 0 0 0 23px; }
+.collect-fields { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); margin: 0; }
 .collect-fields .field { flex: 1 1 8rem; min-width: 0; margin: var(--space-2) 0 0; }
 .collect-fields .field:has(textarea), .collect-fields .field:has(input[type=checkbox]) { flex-basis: 100%; }
 .collect-fields .field > label { margin: 0 0 var(--space-1); font-size: var(--fs-sm); }

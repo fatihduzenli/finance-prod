@@ -2682,7 +2682,8 @@ def plan_status(plan: InstallmentPlan) -> str:
     installment that is not voided is paid, ``attention`` while one has a returned
     payment not resolved or a payment on the parent lowered its balance below the plan's
     total (:func:`plan_attention_reason`, PLAN-012b-a D4), ``active`` otherwise;
-    ``cancelled`` stays."""
+    ``cancelled`` stays, and so does ``paused`` until the plan is completed (Resume
+    brings it back, PLAN-012f-b D16)."""
     if plan.status == InstallmentPlanStatus.CANCELLED:
         return InstallmentPlanStatus.CANCELLED
     statuses = list(
@@ -2692,6 +2693,8 @@ def plan_status(plan: InstallmentPlan) -> str:
     )
     if statuses and all(status == OneOffChargeStatus.PAID for status in statuses):
         return InstallmentPlanStatus.COMPLETED
+    if plan.status == InstallmentPlanStatus.PAUSED:
+        return InstallmentPlanStatus.PAUSED
     if plan_attention_reason(plan):
         return InstallmentPlanStatus.ATTENTION
     return InstallmentPlanStatus.ACTIVE

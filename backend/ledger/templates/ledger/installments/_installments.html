@@ -1,11 +1,12 @@
 {% load components money dates %}
 {% load responsive %}
+{% comment %}A plan's installments (PLAN-012e D9): ledger.services.installments.Progress.labelled, each named by plan_label ("Installment 3 of 10", "Settlement plan · 3 of 10"; PLAN-012f-b D16).{% endcomment %}
 {% responsive_table %}
 <table id="plan-installments">
   <thead><tr><th>Installment</th><th>Due</th><th class="money">Amount</th><th class="money">Paid</th><th>Status</th></tr></thead>
   <tbody>
-    {% for installment in installments %}
-      <tr class="plan-installment"><td><a href="{% url 'ledger:one_off_charges:detail' pk=installment.pk %}">{{ installment.installment_no }} of {{ count }}</a></td><td>{{ installment.due_date|day }}</td><td class="money">{{ installment.price|money }}</td><td class="money">{{ installment.amount_paid|money }}</td><td>{% status_badge installment.get_status_display installment.status %}</td></tr>
+    {% for installment, label in progress.labelled %}
+      <tr class="plan-installment"><td><a href="{% url 'ledger:one_off_charges:detail' pk=installment.pk %}">{{ label }}</a></td><td>{{ installment.due_date|day }}</td><td class="money">{{ installment.price|money }}</td><td class="money">{{ installment.amount_paid|money }}</td><td>{% status_badge installment.get_status_display installment.status %}</td></tr>
     {% endfor %}
   </tbody>
 </table>

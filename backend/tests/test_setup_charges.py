@@ -35,6 +35,7 @@ from ledger.models import (
     FeeType,
     InsurancePremium,
     Invoice,
+    InvoiceDraft,
     Lease,
     OneOffCharge,
     OneOffChargeStatus,
@@ -1234,13 +1235,19 @@ def test_billing_links_edits_and_adds_through_the_pages() -> None:
     builder = opened["Location"]
     assert "collect=draft" in builder and "item=access_fee" in builder
     assert 'value="Access fee"' in client.get(builder).content.decode()
-    data = builder_form(lease_of(charge), "Access fee", "250.00", collect="email")
-    added = client.post(builder, data)
-    new = OneOffCharge.objects.get(lease=lease_of(charge), fee_type=access)
-    assert (new.price, new.collection) == (D("250.00"), "email")
+    # PLAN-012f-b D15: Save, then Send e-mail from its prompt (the Drafts table's send).
     lease = lease_of(charge)
-    assert added["Location"] == f"/stores/{lease.store_id}/?tab=invoices#tab-invoices"
-    duplicate = client.post(builder, {**data, "creation_key": str(uuid.uuid4())})
+    data = builder_form(lease, "Access fee", "250.00", collect="draft")
+    added = client.post(builder, data)
+    draft = InvoiceDraft.objects.get()
+    assert added["Location"] == f"/invoices/drafts/{draft.pk}/saved/"
+    sent = client.post(f"/invoices/drafts/{draft.pk}/send/?store={lease.store_id}")
+    new = OneOffCharge.objects.get(lease=lease, fee_type=access)
+    assert (new.price, new.collection) == (D("250.00"), "email")
+    assert sent["Location"] == f"/stores/{lease.store_id}/?tab=invoices#tab-invoices"
+    client.post(builder, {**data, "creation_key": str(uuid.uuid4())})
+    second = InvoiceDraft.objects.exclude(pk=draft.pk).get()
+    duplicate = client.post(f"/invoices/drafts/{second.pk}/send/?store={lease.store_id}")
     assert duplicate["Location"].startswith("/invoices/drafts/")
     page = client.get(duplicate["Location"]).content.decode()
     assert "already has a charge for Access fee" in page

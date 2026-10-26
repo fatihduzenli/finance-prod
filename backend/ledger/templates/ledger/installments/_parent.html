@@ -1,8 +1,10 @@
 {% if plan_progress %}
-  <h2>Installment plan</h2>
+  <h2>{{ plan_progress.title }}</h2>
   <p id="parent-plan-progress"><a href="{% url 'ledger:plans:detail' pk=plan_progress.plan.pk %}">{{ plan_progress.text }}</a> <span class="badge">{{ plan_progress.plan.get_status_display }}</span></p>
   {% if plan_live %}<p class="muted">While the plan runs, this charge is paid through its installments; record payments on them.</p>{% endif %}
-  {% include "ledger/installments/_installments.html" with installments=plan_progress.installments count=plan_progress.count %}
+  {% comment %}PLAN-012f-b D16: the plan's actions as on the store's Autopay tab (ledger.services.installments.plan_actions); the views and the services check again.{% endcomment %}
+  {% include "ledger/installments/_plan_actions.html" with plan=plan_progress.plan actions=plan_actions %}
+  {% include "ledger/installments/_installments.html" with progress=plan_progress %}
 {% endif %}
 {% comment %}PLAN-012f-a D4: "Split into installments" is in the page header's actions; its help is on the split page.{% endcomment %}
 {% if split_refusal %}

@@ -21,8 +21,13 @@
 // - "Add line" copies the last row, blank, under the next index of the management form
 //   (at most its MAX_NUM_FORMS), its labels' for renamed with its controls' ids;
 // - the "How to collect" buttons name the live total (.collect-amount) and the Schedule
-//   button the debit date (.collect-date; PLAN-012e-2 D3).
-// Nothing is sent from here but the read of the rent amount.
+//   button the debit date (.collect-date; PLAN-012e-2 D3), as "Nov 1, 2026" (PLAN-012f-b D15);
+// - Schedule settlement (PLAN-012f-b D16): its button names the number of payments
+//   (.collect-count) and its preview sentence (#settlement-preview) is read again from the
+//   settlement-preview endpoint (read-only, same origin) as the total, the count, the
+//   first debit or the cadence change, a moment after the last change; a refused value
+//   shows the endpoint's message. Put as text, never as markup.
+// Nothing is sent from here but the reads of the rent amount and the settlement preview.
 (function () {
   "use strict";
   var table = document.getElementById("draft-lines");
@@ -36,6 +41,7 @@
   }
   var body = table.querySelector("tbody");
   var amountUrl = table.dataset.rentAmountUrl || "";
+  var lastTotal = 0;
 
   function key(text) {
     return String(text || "").trim().toLowerCase();
@@ -122,6 +128,10 @@
     document.querySelectorAll(".collect-amount").forEach(function (span) {
       span.textContent = money(sum);
     });
+    if (sum !== lastTotal) {
+      lastTotal = sum;
+      settlementPreview();
+    }
   }
 
   function field(row, suffix) {
@@ -241,14 +251,66 @@
     update(false);
   }
 
+  // The picked date as the page prints dates ("Nov 1, 2026", the |day filter; PLAN-012f-b
+  // D15); a value that is not an ISO date reads as the button's empty words.
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function dayText(value) {
+    var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+    if (!match) { return ""; }
+    var month = parseInt(match[2], 10), day = parseInt(match[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) { return ""; }
+    return MONTHS[month - 1] + " " + day + ", " + match[1];
+  }
   var debitOn = document.getElementById("id_schedule_on");
   if (debitOn) {
     debitOn.addEventListener("input", function () {
       document.querySelectorAll(".collect-date").forEach(function (span) {
-        span.textContent = debitOn.value || span.dataset.empty || "";
+        span.textContent = dayText(debitOn.value) || span.dataset.empty || "";
       });
     });
   }
+
+  // Schedule settlement's count and preview sentence (PLAN-012f-b D16).
+  var settlementOut = document.getElementById("settlement-preview");
+  var settlementCount = document.getElementById("id_settlement_count");
+  var settlementFirst = document.getElementById("id_settlement_first_on");
+  var settlementCadence = document.getElementById("id_settlement_cadence");
+  var settlementTimer = null;
+  function settlementPreview() {
+    if (!settlementOut || !settlementCount || !settlementFirst || !settlementCadence) {
+      return;
+    }
+    var count = parseInt(settlementCount.value, 10);
+    if (count >= 2 && count <= 12) {
+      document.querySelectorAll(".collect-count").forEach(function (span) {
+        span.textContent = String(count);
+      });
+    }
+    window.clearTimeout(settlementTimer);
+    settlementTimer = window.setTimeout(function () {
+      var url = settlementOut.dataset.previewUrl || "";
+      if (!url || !settlementCount.value || !settlementFirst.value) {
+        settlementOut.textContent = "";
+        return;
+      }
+      url += "?total=" + encodeURIComponent(lastTotal.toFixed(2)) +
+        "&count=" + encodeURIComponent(settlementCount.value) +
+        "&first=" + encodeURIComponent(settlementFirst.value) +
+        "&cadence=" + encodeURIComponent(settlementCadence.value);
+      fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (response) { return response.json(); })
+        .then(function (data) {
+          settlementOut.textContent = data && data.ok ? (data.sentence || "") : ((data && data.message) || "");
+        })
+        .catch(function () { settlementOut.textContent = ""; });
+    }, 300);
+  }
+  [settlementCount, settlementFirst, settlementCadence].forEach(function (control) {
+    if (control) {
+      control.addEventListener("input", settlementPreview);
+      control.addEventListener("change", settlementPreview);
+    }
+  });
 
   rows().forEach(watch);
   refresh();
