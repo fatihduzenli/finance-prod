@@ -352,6 +352,7 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
             data,
             debit_reason=options.reason,
             debit_reason_more=options.reason_more,
+            debit_reason_url=options.reason_url,
             balance=options.balance,
             admin=admin,
             **kwargs,

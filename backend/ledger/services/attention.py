@@ -15,8 +15,8 @@ page that deals with it and ``since``, the day it began:
 - ``invoice_marked_paid_void`` (PLAN-012f-c D3): one ``high`` item per payment recorded
   outside the processor that billing voided after a marking job had marked its charge's
   provider invoice paid (the ``payment.voided_manual`` audit row carries
-  ``provider_marking: "to unmark"`` and the invoice), ``"Invoice <number> is marked paid in
-  <provider> for a voided payment — unmark it in the <provider> dashboard"``, linking to the
+  ``provider_marking: "to unmark"`` and the invoice), ``"Unmark invoice <number> in
+  <provider> by hand; this payment was voided"`` (PLAN-012f-c §11 E1), linking to the
   charge; cleared by itself once the invoice refresh (webhook or nightly check,
   :func:`payments.invoice_sync.record_provider_state`) copies a status other than paid;
 - ``installment_returned`` (PLAN-012e D11): one item per installment plan while one of
@@ -255,8 +255,7 @@ SPLIT_CHARGE_PAID_TEXT = (
     "released; cancel or reschedule the plan"
 )
 MARKED_PAID_VOID_TEXT = provider_sentence(
-    "Invoice {number} is marked paid in {provider} for a voided payment — unmark it in the "
-    "{provider} dashboard"
+    "Unmark invoice {number} in {provider} by hand; this payment was voided"
 )
 PLAN_PAUSED_TEXT = "{name} paused for {days} days: {store}, {parent}"
 LEASE_END_BALANCE_TEXT = (

@@ -654,7 +654,10 @@ def test_the_flag_off_greys_the_card(fake: FakeProvider) -> None:
 def test_no_bank_method_greys_the_card(fake: FakeProvider) -> None:
     rent = a_rent(fake, bank=False)
     options = service.rent_debit_options(fresh_rent(rent))
-    assert (options.reason, options.method) == (str(service.DEBIT_NO_METHOD), None)
+    owner = rent.lease.operator
+    assert owner is not None
+    reason = service.DEBIT_NO_ACCOUNT.format(operator=owner.display_name)
+    assert (options.reason, options.method) == (reason, None)
 
 
 def test_the_reasons_come_in_the_order_of_d19(fake: FakeProvider) -> None:
@@ -678,7 +681,7 @@ def test_the_reasons_come_in_the_order_of_d19(fake: FakeProvider) -> None:
         assert reason(on_plan) == service.DEBIT_ON_PLAN
         assert reason(live) == service.RENT_DEBIT_PENDING
         both = service.rent_debit_options(fresh_rent(off))
-        assert both.reason == str(service.DEBIT_NO_METHOD_SEND).format(operator=owner.display_name)
+        assert both.reason == service.DEBIT_NO_ACCOUNT.format(operator=owner.display_name)
         assert both.reason_more == str(service.DEBIT_ALSO_OFF)
 
 
@@ -856,7 +859,7 @@ REFUSALS = {
     "past": lambda: service.DEBIT_DATE_PAST,
     "card": lambda: service.TEXT_PAYMENT_DATA,
     "waived": lambda: service.DEBIT_CLOSED,
-    "no bank": lambda: str(service.DEBIT_NO_METHOD),
+    "no bank": lambda: service.DEBIT_NO_ACCOUNT,
     "flag off": lambda: str(service.DEBIT_OFF),
     "ended": lambda: service.LEASE_ENDED,
 }
@@ -870,6 +873,9 @@ def test_a_refusal_leaves_no_debit_behind(fake: FakeProvider, case: str) -> None
         bank=case != "no bank",
         status=RentChargeStatus.WAIVED if case == "waived" else RentChargeStatus.DUE,
     )
+    if case == "no bank":
+        assert rent.lease.operator is not None
+        message = message.format(operator=rent.lease.operator.display_name)
     on = today() + timedelta(days=3)
     kwargs: dict[str, Any] = {"actor": admin()}
     if case == "past":

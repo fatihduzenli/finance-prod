@@ -27,6 +27,7 @@ over the payment page; ``?store=`` naming another store than the payment's is a 
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import cast
 from urllib.parse import urlencode
 
@@ -41,8 +42,16 @@ from django.views.decorators.http import require_http_methods, require_safe
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from ledger.forms import RefundForm, VoidForm, VoidManualForm
-from ledger.models import Operator, Payment, PaymentMethod, Store
-from ledger.services import detail_cards, one_off_charges, refunds
+from ledger.models import (
+    MANUAL_PAYMENT_METHODS,
+    Operator,
+    Payment,
+    PaymentKind,
+    PaymentMethod,
+    PaymentStatus,
+    Store,
+)
+from ledger.services import detail_cards, installments, one_off_charges, refunds
 from ledger.services import payments_ledger as ledger
 from ledger.services import stores as store_service
 from ledger.services.rent_run import PARTIAL_NOTICE, charge_review_message, partial_marking
@@ -161,6 +170,7 @@ def _detail_context(request: HttpRequest, payment: Payment) -> dict[str, object]
         "refunds": payment_refunds,
         "charge_review": _charge_review(payment),
         "partial_notice": _partial_notice(payment),
+        "applied_tile": _applied_tile(payment),
         # PLAN-012f-a D4: the header's line and the Activity card (the payment's rows
         # and its refunds').
         "header_line": detail_cards.header_line(
@@ -184,6 +194,32 @@ def _detail_context(request: HttpRequest, payment: Payment) -> dict[str, object]
             else ""
         ),
     }
+
+
+#: The kinds of money paid back to the operator: never "applied to" a charge.
+_PAID_BACK_KINDS = (PaymentKind.REFUND_DEPOSIT, PaymentKind.CREDIT_REFUND)
+
+
+def _applied_tile(payment: Payment) -> dict[str, object] | None:
+    """The second tile of a payment recorded outside the processor on a rent or one-off
+    charge (PLAN-012f-c §11 E3): ``label`` the charge's screen label and ``amount`` what
+    the payment applied to it, the payment's whole amount (a manual payment is refused
+    above the balance, ``rent_run.PAY_OVER_BALANCE``, and a store entry keeps what is left
+    as a separate credit payment, so it never differs); a voided one applies nothing
+    (``0.00``, the label "{charge} · voided": the charge owes it again). ``None`` for every
+    other payment: a processor payment, a refund or money paid back, or a manual payment
+    on no rent or one-off charge keeps Amount / Refunded / Remaining."""
+    if payment.method not in MANUAL_PAYMENT_METHODS or payment.is_refund:
+        return None
+    if payment.kind in _PAID_BACK_KINDS:
+        return None
+    charge = payment.rent_charge or payment.one_off_charge
+    if charge is None:
+        return None
+    label = installments.parent_screen_label(charge)
+    if payment.status == PaymentStatus.VOIDED:
+        return {"label": f"{label} · voided", "amount": Decimal("0.00")}
+    return {"label": label, "amount": payment.amount}
 
 
 def _partial_open(payment: Payment) -> bool:

@@ -162,14 +162,16 @@ def test_options_without_a_provider_customer_say_no_bank_account(fake: FakeProvi
     charge = created(operator, item(CollectionMethod.MANUAL, "80.00"))
     options = service.bank_debit_options(charge)
     assert options.method is None
-    assert options.reason == str(service.DEBIT_NO_METHOD)
+    assert options.reason == service.DEBIT_NO_ACCOUNT.format(operator=operator.display_name)
     assert options.reason.startswith("No bank account on file")
 
 
 def test_options_without_a_linked_method_say_no_bank_account(fake: FakeProvider) -> None:
-    charge = invoiced(fake, operator=an_operator(fake, bank=None))
+    operator = an_operator(fake, bank=None)
+    charge = invoiced(fake, operator=operator)
     options = service.bank_debit_options(charge)
-    assert (options.method, options.reason) == (None, str(service.DEBIT_NO_METHOD))
+    reason = service.DEBIT_NO_ACCOUNT.format(operator=operator.display_name)
+    assert (options.method, options.reason) == (None, reason)
 
 
 def test_options_for_a_card_method_say_no_bank_account(fake: FakeProvider) -> None:
@@ -177,7 +179,8 @@ def test_options_for_a_card_method_say_no_bank_account(fake: FakeProvider) -> No
     store_methods(operator, method="card")
     charge = invoiced(fake, operator=operator)
     options = service.bank_debit_options(charge)
-    assert (options.method, options.reason) == (None, str(service.DEBIT_NO_METHOD))
+    reason = service.DEBIT_NO_ACCOUNT.format(operator=operator.display_name)
+    assert (options.method, options.reason) == (None, reason)
 
 
 def test_options_with_the_flag_off_say_bank_debits_are_off(fake: FakeProvider) -> None:

@@ -791,7 +791,8 @@ class AddPaymentForm(ManualPaymentForm):
     """The Add payment page (PLAN-012f-b D14): ``how`` picks the bank-debit card
     (``debit_amount``, ``debit_on``, ``confirm_large_debit``) or the record card (today's
     :class:`ManualPaymentForm` fields). ``debit_reason`` is why the debit card is greyed
-    (``""``: offered) and ``debit_reason_more`` its second line (PLAN-012f-c D7);
+    (``""``: offered), ``debit_reason_more`` its second line (PLAN-012f-c D7) and
+    ``debit_reason_url`` the operator page linked after the first line (§11 E2);
     ``balance`` what a debit takes; ``admin`` whether today may be the debit date (else
     Debit on starts tomorrow, C2-1). A post without ``how`` is the record card (the shape
     of the page before). Each card's fields carry ``data-shown-when``
@@ -825,6 +826,7 @@ class AddPaymentForm(ManualPaymentForm):
         today: date | None = None,
         admin: bool = True,
         debit_reason_more: str = "",
+        debit_reason_url: str = "",
         **kwargs: Any,
     ) -> None:
         if data is not None and not data.get("how"):
@@ -833,6 +835,7 @@ class AddPaymentForm(ManualPaymentForm):
         super().__init__(data, *args, **kwargs)
         self.debit_reason = debit_reason
         self.debit_reason_more = debit_reason_more if debit_reason else ""
+        self.debit_reason_url = debit_reason_url if debit_reason else ""
         self.balance = balance
         self.today = today or timezone.localdate()
         self.admin = admin
@@ -880,6 +883,7 @@ class AddPaymentForm(ManualPaymentForm):
                 "checked": value == chosen,
                 "reason": self.debit_reason if value == HOW_DEBIT else "",
                 "reason_more": self.debit_reason_more if value == HOW_DEBIT else "",
+                "reason_url": self.debit_reason_url if value == HOW_DEBIT else "",
             }
             for value, label in HOW_CHOICES
         ]

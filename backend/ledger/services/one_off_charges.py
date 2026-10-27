@@ -168,6 +168,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet, Sum
 from django.db.models.functions import Trim, Upper
+from django.urls import reverse
 from django.utils import timezone
 
 import payments
@@ -1573,11 +1574,12 @@ DEBIT_NO_METHOD = provider_sentence(
     "No bank account on file — add one in the {provider} dashboard, then Update from {provider}."
 )
 DEBIT_OFF = provider_sentence("Bank debits are off at {provider}.")
-#: Both reasons at once (PLAN-012f-c D7, the owner's sentences): the first line names the
-#: operator (``{operator}``), the second says the flag is off too.
-DEBIT_NO_METHOD_SEND = provider_sentence(
-    "No bank account on file — send {operator} the {provider} link to add one"
-)
+#: The Add payment card's first line when no bank method is on file, the flag on or off
+#: (PLAN-012f-c §11 E2, the owner's sentence): it names the operator (``{operator}``) and
+#: the page links that operator's page under it; how to add one is in the Payments help
+#: topic. How to collect keeps :data:`DEBIT_NO_METHOD`.
+DEBIT_NO_ACCOUNT = "No bank account on file for {operator}."
+#: The second line when the flag is off as well (PLAN-012f-c D7).
 DEBIT_ALSO_OFF = provider_sentence("Bank debits are also off at {provider}.")
 #: Who the first line names when the charge has no operator.
 DEBIT_OPERATOR_FALLBACK = "the operator"
@@ -1633,7 +1635,8 @@ class BankDebitOptions:
     invoice or schedule still bills; ``large`` the large-debit confirmation applies;
     ``reason`` the sentence of the greyed card (``""``: offered); ``reason_more`` its
     second line, set only when the operator has no bank method and the flag is off as well
-    (PLAN-012f-c D7)."""
+    (PLAN-012f-c D7); ``reason_url`` the operator page the card links after its first line,
+    set only when no bank method is on file and the charge has an operator (§11 E2)."""
 
     enabled: bool
     method: BankMethod | None
@@ -1641,6 +1644,7 @@ class BankDebitOptions:
     large: bool
     reason: str
     reason_more: str = ""
+    reason_url: str = ""
 
     @property
     def allowed(self) -> bool:
@@ -1666,18 +1670,24 @@ def _bank_method(operator: Operator | None) -> BankMethod | None:
 
 def _setup_reasons(
     enabled: bool, method: BankMethod | None, operator: Operator | None
-) -> tuple[str, str]:
-    """The greyed card's two lines for the flag and the bank method (PLAN-012f-c D7):
-    both missing, the owner's two sentences; one missing, its one line as before; neither,
-    ``("", "")``."""
-    if not enabled and method is None:
-        name = operator.display_name if operator is not None else DEBIT_OPERATOR_FALLBACK
-        return str(DEBIT_NO_METHOD_SEND).format(operator=name), str(DEBIT_ALSO_OFF)
-    if not enabled:
-        return str(DEBIT_OFF), ""
+) -> tuple[str, str, str]:
+    """The greyed card's two lines and link for the flag and the bank method (PLAN-012f-c
+    D7, §11 E2): no bank method, :data:`DEBIT_NO_ACCOUNT` naming the operator and the
+    operator page's URL (``""`` without an operator), with :data:`DEBIT_ALSO_OFF` under it
+    when the flag is off as well; the flag off alone, :data:`DEBIT_OFF`; neither,
+    ``("", "", "")``."""
     if method is None:
-        return str(DEBIT_NO_METHOD), ""
-    return "", ""
+        name = operator.display_name if operator is not None else DEBIT_OPERATOR_FALLBACK
+        url = (
+            reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
+            if operator is not None
+            else ""
+        )
+        more = "" if enabled else str(DEBIT_ALSO_OFF)
+        return DEBIT_NO_ACCOUNT.format(operator=name), more, url
+    if not enabled:
+        return str(DEBIT_OFF), "", ""
+    return "", "", ""
 
 
 def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
@@ -1686,7 +1696,7 @@ def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
     operator = _charge_operator(charge)
     method = _bank_method(operator)
     balance = open_balance(charge)
-    reason_more = ""
+    reason_more = reason_url = ""
     if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
         reason = DEBIT_CLOSED
     elif charge.status == OneOffChargeStatus.PAID or balance <= 0:
@@ -1694,7 +1704,7 @@ def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
     elif has_pending_payment(charge):
         reason = DEBIT_PENDING
     else:
-        reason, reason_more = _setup_reasons(enabled, method, operator)
+        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator)
     return BankDebitOptions(
         enabled=enabled,
         method=method,
@@ -1702,6 +1712,7 @@ def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
         large=leases.is_large_debit(balance),
         reason=reason,
         reason_more=reason_more,
+        reason_url=reason_url,
     )
 
 
@@ -1773,7 +1784,7 @@ def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDeb
     operator = charge.lease.operator
     method = _bank_method(operator)
     balance = max(Decimal(charge.balance), ZERO).quantize(CENT)
-    reason_more = ""
+    reason_more = reason_url = ""
     if charge.status == RentChargeStatus.WAIVED:
         reason = DEBIT_CLOSED
     elif charge.status == RentChargeStatus.PAID or balance <= 0:
@@ -1789,7 +1800,7 @@ def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDeb
     elif rent_debit_live(charge):
         reason = RENT_DEBIT_PENDING
     else:
-        reason, reason_more = _setup_reasons(enabled, method, operator)
+        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator)
     return BankDebitOptions(
         enabled=enabled,
         method=method,
@@ -1797,6 +1808,7 @@ def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDeb
         large=leases.is_large_debit(balance),
         reason=reason,
         reason_more=reason_more,
+        reason_url=reason_url,
     )
 
 

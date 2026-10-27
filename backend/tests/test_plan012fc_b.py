@@ -104,15 +104,16 @@ def test_no_bank_and_the_flag_off_give_the_owners_two_lines(fake: FakeProvider) 
     charge = invoiced(fake, operator=Operator.objects.get(pk=operator.pk))
     with override_settings(STAX_PAY_INVOICE_ENABLED=False):
         options = service.bank_debit_options(charge)
-    assert options.reason == "No bank account on file — send Fatih Co the PayCo link to add one"
+    assert options.reason == "No bank account on file for Fatih Co."
     assert options.reason_more == "Bank debits are also off at PayCo."
+    assert options.reason_url == reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
     assert not options.allowed
 
 
 @pytest.mark.parametrize(
     ("bank", "flag", "reason"),
     [
-        (False, True, service.DEBIT_NO_METHOD),
+        (False, True, service.DEBIT_NO_ACCOUNT),
         (True, False, service.DEBIT_OFF),
         (True, True, ""),
     ],
@@ -124,7 +125,7 @@ def test_one_reason_or_none_keeps_one_line(
     charge = invoiced(fake, operator=operator)
     with override_settings(STAX_PAY_INVOICE_ENABLED=flag):
         options = service.bank_debit_options(charge)
-    assert options.reason == str(reason)
+    assert options.reason == str(reason).format(operator=operator.display_name)
     assert options.reason_more == ""
 
 
@@ -150,11 +151,14 @@ def test_a_rent_charge_gets_the_two_lines_too() -> None:
     charge = a_rent_charge(lease, date(2026, 10, 1), RentChargeStatus.UNPAID, "2000.00")
     with override_settings(STAX_PAY_INVOICE_ENABLED=False):
         both = service.rent_debit_options(charge)
-    assert both.reason == "No bank account on file — send Rent Ops the PayCo link to add one"
+    assert both.reason == "No bank account on file for Rent Ops."
     assert both.reason_more == "Bank debits are also off at PayCo."
     with override_settings(STAX_PAY_INVOICE_ENABLED=True):
         one = service.rent_debit_options(charge)
-    assert (one.reason, one.reason_more) == (str(service.DEBIT_NO_METHOD), "")
+    assert (one.reason, one.reason_more) == ("No bank account on file for Rent Ops.", "")
+    assert lease.operator is not None
+    page = reverse("ledger:operators:detail", kwargs={"pk": lease.operator.pk})
+    assert both.reason_url == one.reason_url == page
 
 
 def test_a_rent_charge_with_a_bank_and_the_flag_off_keeps_one_line(fake: FakeProvider) -> None:
@@ -174,20 +178,25 @@ def test_the_page_prints_the_second_line_muted_under_the_first(fake: FakeProvide
         card = tiles(admin_get(page_of(charge)))["debit"]
     first = (
         '<span class="collect-note unavailable-reason" id="debit-reason">No bank account on '
-        "file — send Fatih &lt;Co&gt; the PayCo link to add one</span>"
+        "file for Fatih &lt;Co&gt;.</span>"
+    )
+    link = (
+        f'<a class="collect-link" id="debit-reason-link" href="'
+        f'{reverse("ledger:operators:detail", kwargs={"pk": operator.pk})}">Operator page</a>'
     )
     second = (
         '<span class="collect-note" id="debit-reason-more">'
         "Bank debits are also off at PayCo.</span>"
     )
-    assert first + second in card
+    assert first + link + second in card
     assert "Fatih <Co>" not in card
 
 
 def test_one_reason_on_the_page_has_no_second_line(fake: FakeProvider) -> None:
-    charge = invoiced(fake, operator=an_operator(fake, bank=None))
+    operator = an_operator(fake, bank=None)
+    charge = invoiced(fake, operator=operator)
     card = tiles(admin_get(page_of(charge)))["debit"]
-    assert escape(str(service.DEBIT_NO_METHOD)) in card
+    assert escape(service.DEBIT_NO_ACCOUNT.format(operator=operator.display_name)) in card
     assert "debit-reason-more" not in card
 
 
@@ -197,14 +206,17 @@ def test_the_rent_page_prints_both_lines() -> None:
     charge = a_rent_charge(lease, date(2026, 10, 1), RentChargeStatus.UNPAID, "2000.00")
     with override_settings(STAX_PAY_INVOICE_ENABLED=False):
         card = tiles(admin_get(rent_page(charge.pk)))["debit"]
-    assert "send Rent Ops the PayCo link to add one</span>" in card
+    assert 'id="debit-reason">No bank account on file for Rent Ops.</span>' in card
+    assert 'id="debit-reason-link"' in card
     assert 'id="debit-reason-more">Bank debits are also off at PayCo.</span>' in card
 
 
 def test_the_second_line_is_dropped_without_a_first() -> None:
-    form = AddPaymentForm(debit_reason="", debit_reason_more="stray", balance=D("10.00"))
+    form = AddPaymentForm(
+        debit_reason="", debit_reason_more="stray", debit_reason_url="/stray/", balance=D("10.00")
+    )
     debit = next(option for option in form.options() if option["value"] == "debit")
-    assert (debit["reason"], debit["reason_more"]) == ("", "")
+    assert (debit["reason"], debit["reason_more"], debit["reason_url"]) == ("", "", "")
 
 
 # --- D8: the Add payment badge --------------------------------------------------------------
@@ -604,12 +616,15 @@ def test_a_voided_manual_payment_has_nothing_refundable_and_its_tile_says_so() -
     assert facts.refund_refusal and facts.void_refusal
     html = payment_page(payment)
     tiles_html = element(html, '<section class="kpi-row detail-tiles"', "section")
+    # PLAN-012f-c §11 E3: a payment recorded outside the processor, voided or not, shows
+    # Amount and Applied to; nothing about refunds.
+    assert 'id="tile-applied"' in tiles_html
     assert (
-        '<span class="kpi-value">$0.00</span><span class="kpi-note">nothing refundable</span>'
-        in (tiles_html)
+        '<span class="kpi-value">$0.00</span><span class="kpi-note">Rent Oct 2026 · voided</span>'
+        in tiles_html
     )
-    assert '<span class="kpi-note">refundable</span>' not in tiles_html
-    assert '<span class="kpi-note">pending and settled refunds</span>' in tiles_html
+    assert 'id="tile-remaining"' not in tiles_html and 'id="tile-refunded"' not in tiles_html
+    assert "refundable" not in tiles_html
 
 
 def test_a_voided_processor_payment_has_nothing_refundable_and_keeps_its_refusals(
