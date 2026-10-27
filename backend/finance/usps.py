@@ -6,16 +6,18 @@ answer, or without one ("Address not verified").
 
 What the USPS documentation states, read 2026-10-25:
 
-- The Addresses 3.0 OpenAPI file, version 3.2.3
-  (https://developers.usps.com/sites/default/files/apidoc_specs/addresses-v3r2_4.yaml,
-  linked from https://developers.usps.com/addressesv3): servers
+- The Addresses 3.0 OpenAPI file, version 3.3.1, committed at
+  ``docs/integrations/usps/addresses-v3r2_0.yaml`` (the owner's copy; pinned by
+  ``tests/test_usps_spec.py``, PLAN-012f-c D14): servers
   ``https://apis.usps.com/addresses/v3`` and ``https://apis-tem.usps.com/addresses/v3``
-  (the test environment); ``GET /address`` with ``streetAddress`` and ``state`` (two
-  letters) required, ``city`` and ``ZIPCode`` (five digits) optional but one of them
-  needed; a 200 answers ``address`` (``streetAddress``, ``secondaryAddress``, ``city``,
-  ``state``, ``ZIPCode``, ``ZIPPlus4``, which may be null) and ``additionalInfo``
+  (the test environment); ``GET /address`` with ``streetAddress`` required and either
+  ``city`` and ``state`` (two letters) or ``ZIPCode`` (five digits); this client always
+  sends ``state`` with a city, a ZIP or both; a 200 answers ``address``
+  (``streetAddress``, ``secondaryAddress``, ``city``, ``state``, ``ZIPCode``,
+  ``ZIPPlus4``, which may be null) and ``additionalInfo``
   (``DPVConfirmation``: ``Y`` confirmed, ``D`` / ``S`` the primary number only, ``N``
-  not confirmed); a 404 is "Address Not Found"; the security scheme is OAuth 2.0 client
+  not confirmed); a 404 is "Address Not Found" (its examples include no match, an invalid
+  city or state, and multiple addresses found); the security scheme is OAuth 2.0 client
   credentials with ``tokenUrl: /oauth2/v3/token`` and the scope ``addresses``.
 - The OAuth page (https://developers.usps.com/oauth) renders in the browser only; the
   token request is taken from USPS's own examples

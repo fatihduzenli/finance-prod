@@ -39,6 +39,14 @@ param staxWebhookUrlTokenSecretName = 'stax-webhook-url-token-staging'
 // from it through the managed identity. Alerts: level fatal emails the owner.
 param sentryDsnSecretName = 'sentry-dsn'
 
+// The USPS address check (PLAN-012f-c D14): the web app reads USPS_CLIENT_ID and
+// USPS_CLIENT_SECRET from the vault secrets usps-client-id and usps-client-secret.
+// Uncomment both lines after the secrets exist in finance-sandbox-kv: a reference to a
+// missing secret stops the revision from starting. Until then the check is off and the
+// store form saves with "Address not verified".
+// param uspsClientIdSecretName = 'usps-client-id'
+// param uspsClientSecretSecretName = 'usps-client-secret'
+
 // appBaseUrl is derived: it becomes https://<customHostname> when a custom
 // hostname is set, and the default ingress host name otherwise. Override it
 // only if the app is fronted by something else, such as a CDN or WAF.
