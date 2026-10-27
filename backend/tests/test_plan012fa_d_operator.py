@@ -665,9 +665,11 @@ def test_the_page_renders_within_a_fixed_number_of_queries(selected: bool) -> No
     # statement link's last open (1); the selected store adds its bar and side cards. Three
     # more stores change nothing. PLAN-012f-b Batch D (D-3) adds one: Needs review's rule for
     # plans paused over thirty days reads the operator's paused plans (one query, no audit
-    # read while none is paused): 52 and 63.
+    # read while none is paused): 52 and 63. PLAN-012f-c Batch A (D3) adds one: Needs
+    # review's rule for voided payments whose invoice stays marked paid reads the void audit
+    # rows (one query, nothing more while there is none): 53 and 64.
     assert large == small, (small, large)
-    assert small <= (63 if selected else 52), small
+    assert small <= (64 if selected else 53), small
 
 
 def test_the_page_writes_nothing() -> None:
