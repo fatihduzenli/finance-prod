@@ -199,7 +199,8 @@ def test_the_operator_csv_neutralises_the_plus_and_the_viewer_reads_consent_with
     )
     viewer, _ = client_for(Role.VIEWER)
     page = viewer.get(f"/operators/{operator.pk}/").content.decode()
-    assert "+14045551234" in page and 'name="sms_phone"' not in page
+    # PLAN-012f-c D9: the screen formats the stored "+14045551234" as a person reads it.
+    assert "(404) 555-1234" in page and 'name="sms_phone"' not in page
     export = b"".join(viewer.get("/operators/export.csv")).decode()
     assert "'+14045551234" in export and ",+14045551234" not in export
 
