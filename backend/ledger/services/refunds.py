@@ -10,9 +10,14 @@ Rules kept here, not in the views:
 - **Void**: only a ``pending`` or ``settled`` ACH payment that is not a refund, holds a
   reference and has no refund that is not voided. The whole amount; the payment
   itself becomes ``voided`` (no new row, as the webhook handlers model a void).
-- Manual payments (wire, Zelle, other) were never provider transactions and have no
-  refund or void here. A deposit refund (``refund_deposit``, PLAN-010b D4) is money
-  paid back by hand and is never refunded or voided.
+- Manual payments (wire, Zelle, check, cash, other) were never provider transactions and
+  have no refund or processor void here; billing voids one locally with a reason
+  (:func:`void_manual_payment`, PLAN-012f-c D2): nothing is sent to the provider, the
+  charge is recomputed and ``payment.voided_manual`` is audited, with
+  ``provider_marking: "to unmark"`` when a marking of the charge's provider invoice by
+  this payment succeeded (D3: the provider has no unmark call). A deposit refund
+  (``refund_deposit``, PLAN-010b D4) is money paid back by hand and is never refunded or
+  voided.
 - A payment on a one-off charge (kind ``one_off``) made by ACH follows the rent rules; its
   charge is locked and recomputed as a rent charge is.
 - The admin's confirmation (the exact-value checkbox) is required; without it nothing
@@ -43,17 +48,23 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
+from django.utils import timezone
 
 import payments
+from accounts.roles import Role, meets, role_of
 from ledger.models import (
+    MANUAL_PAYMENT_METHODS,
     ZERO,
     AuditLog,
+    Invoice,
     OneOffCharge,
     Payment,
     PaymentKind,
@@ -62,7 +73,8 @@ from ledger.models import (
     RentCharge,
     SyncFailure,
 )
-from ledger.services import one_off_charges, rent_run
+from ledger.services import installments, one_off_charges, rent_run
+from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_sentence
 from payments import invoice_sync, operator_sync
 from payments.errors import ProviderError, ProviderUnavailable
@@ -85,6 +97,17 @@ VOIDED_ACTION = "payment.voided"
 VOID_FAILED_ACTION = "payment.void_failed"
 _REFUND_ACTIONS = (REFUNDED_ACTION, REFUND_FAILED_ACTION)
 _VOID_ACTIONS = (VOIDED_ACTION, VOID_FAILED_ACTION)
+#: The void of a payment recorded outside the processor (PLAN-012f-c D2).
+VOIDED_MANUAL_ACTION = "payment.voided_manual"
+#: A successful marking of the charge's provider invoice paid by a payment (its audit row's
+#: ``after.payment``), rent or one-off (PLAN-009 D1, PLAN-012f-c D3).
+_MARKED_ACTIONS = (
+    rent_run.RENT.action("provider_marked"),
+    one_off_charges.ONE_OFF.action("provider_marked"),
+)
+#: The manual void's audit value when the provider invoice stays marked paid (D3).
+PROVIDER_MARKING_TO_UNMARK = "to unmark"
+VOID_REASON_MAX_LENGTH = 200
 
 #: Statuses of a refund that count against the refundable amount.
 _OPEN_REFUND = (PaymentStatus.PENDING, PaymentStatus.SETTLED)
@@ -132,6 +155,36 @@ VOID_SENTENCE = provider_sentence(
     "undone here."
 )
 REFUND_CONFIRMATION = "I confirm this refund of the amount entered above."
+
+#: The void of a payment recorded outside the processor (PLAN-012f-c D2 to D5).
+VOID_NOT_ALLOWED = "Voiding a payment needs the billing role or above. Nothing was changed."
+MANUAL_IS_PROCESSOR = provider_sentence(
+    "A bank debit made through {provider} is voided with Void, by an admin."
+)
+MANUAL_IS_CREDIT = "A credit applied from the lease cannot be voided here."
+MANUAL_CREDIT_REFUND = "A credit refund was paid back by hand; it cannot be voided."
+ALREADY_VOIDED = "This payment is already voided."
+MANUAL_NOT_SETTLED = "Only a settled payment can be voided; this one is {status}."
+MANUAL_NO_CHARGE = "Only a payment on a rent or one-off charge can be voided here."
+REASON_REQUIRED = "A reason is required: say why the payment is voided."
+REASON_TOO_LONG = "The reason must be at most 200 characters."
+ALREADY_SUBMITTED_VOID = "This void was already submitted. Nothing was changed again."
+VOIDED_MANUAL = (
+    "Payment voided: {amount} is owed on the charge again. The record stays, marked void."
+)
+VOIDED_MANUAL_UNMARK = provider_sentence(
+    " Invoice {number} is still marked paid in {provider}: unmark it in the {provider} dashboard."
+)
+#: The dialog's sentences (D4, D5).
+VOID_MANUAL_SENTENCE = "Voiding returns {amount} to {charge}; the record stays, marked void."
+VOID_MANUAL_MARKED = provider_sentence(
+    "The {provider} invoice {number} was marked paid by this payment; after the void, unmark "
+    "it in the {provider} dashboard."
+)
+VOID_MANUAL_PLAN = (
+    "The installment plan was built on the remaining balance; voiding adds {amount} back to "
+    "the charge, not to the plan."
+)
 VOID_CONFIRMATION = "I confirm the void of this whole payment of {amount}."
 
 
@@ -370,6 +423,11 @@ def void_payment(
         except ProviderError as error:
             refetch_failure = operator_sync.failure_name(error)
         transaction_handler.record_void(payment, record)
+        # PLAN-012f-c D2: both voids read alike under the payment page's DETAILS.
+        voided_at = timezone.now()
+        Payment.objects.filter(pk=payment.pk).update(
+            voided_at=voided_at, voided_by=actor, updated_at=voided_at
+        )
         invoice_changes, invoice_failure = _refresh_invoice(payment)
         refetch_failure = refetch_failure or invoice_failure
         _recompute(charge)
@@ -387,6 +445,150 @@ def void_payment(
     if refetch_failure:
         message += REFETCH_FAILED
     return Outcome(True, message, incomplete=bool(refetch_failure))
+
+
+# --- Void of a payment recorded outside the processor (PLAN-012f-c D2 to D4) ---------------
+
+
+def _manual_refusal(payment: Payment) -> str:
+    """Why ``payment`` cannot be voided as a manual payment; ``""`` when it can."""
+    if payment.kind == PaymentKind.REFUND_DEPOSIT:
+        return IS_DEPOSIT_REFUND
+    if payment.is_refund:
+        return IS_REFUND
+    if payment.kind == PaymentKind.CREDIT_REFUND:
+        return MANUAL_CREDIT_REFUND
+    if payment.method == PaymentMethod.ACH:
+        return MANUAL_IS_PROCESSOR
+    if payment.method not in MANUAL_PAYMENT_METHODS:
+        return MANUAL_IS_CREDIT
+    if payment.status == PaymentStatus.VOIDED:
+        return ALREADY_VOIDED
+    if payment.status != PaymentStatus.SETTLED:
+        return MANUAL_NOT_SETTLED.format(status=payment.get_status_display().lower())
+    if payment.rent_charge_id is None and payment.one_off_charge_id is None:
+        return MANUAL_NO_CHARGE
+    return ""
+
+
+def manual_void_refusal(payment: Payment) -> str:
+    """Why the payment page offers no "Void payment" for ``payment`` (``""``: it does)."""
+    return _manual_refusal(payment)
+
+
+def _reason_refusal(reason: str) -> str:
+    if not reason:
+        return REASON_REQUIRED
+    if len(reason) > VOID_REASON_MAX_LENGTH:
+        return REASON_TOO_LONG
+    try:
+        validate_no_payment_data(reason)
+    except ValidationError:
+        return PAYMENT_DATA_MESSAGE
+    return ""
+
+
+def marked_invoice(payment: Payment) -> Invoice | None:
+    """The invoice a marking job for ``payment`` marked paid at the provider: the payment's
+    charge's provider invoice when a ``<charge>.provider_marked`` audit row names this
+    payment (its ``after.payment``); ``None`` when no marking succeeded."""
+    charge = payment.rent_charge or payment.one_off_charge
+    if charge is None:
+        return None
+    marked = AuditLog.objects.filter(
+        action__in=_MARKED_ACTIONS, after__payment=str(payment.pk)
+    ).exists()
+    if not marked:
+        return None
+    linked = rent_run.provider_invoice(charge)
+    return linked[0] if linked is not None else None
+
+
+def _paid_day(payment: Payment) -> date | None:
+    return payment.settled_on or payment.initiated_on
+
+
+def _plan_after(payment: Payment) -> bool:
+    """Whether an installment plan on the payment's charge (any status) was created after
+    the payment's day (``settled_on``, else ``initiated_on``; D4)."""
+    charge = payment.rent_charge or payment.one_off_charge
+    day = _paid_day(payment)
+    if charge is None or day is None:
+        return False
+    for created_at in charge.installment_plans.values_list("created_at", flat=True):
+        created_on = timezone.localdate(created_at)
+        if created_on > day or (created_on == day and created_at > payment.created_at):
+            return True
+    return False
+
+
+def void_manual_facts(payment: Payment) -> list[str]:
+    """The dialog's sentences (D4, D5): the consequence; the marked invoice's when a marking
+    succeeded; the installment plan's when a plan on the charge came after the payment."""
+    charge = payment.rent_charge or payment.one_off_charge
+    label = installments.parent_screen_label(charge) if charge is not None else "the charge"
+    amount = format_amount(payment.amount)
+    sentences = [VOID_MANUAL_SENTENCE.format(amount=amount, charge=label)]
+    invoice = marked_invoice(payment)
+    if invoice is not None:
+        sentences.append(VOID_MANUAL_MARKED.format(number=invoice.invoice_number))
+    if _plan_after(payment):
+        sentences.append(VOID_MANUAL_PLAN.format(amount=amount))
+    return sentences
+
+
+def void_manual_payment(
+    payment_id: uuid.UUID,
+    *,
+    reason: str,
+    actor: User | None,
+    creation_key: uuid.UUID | None = None,
+) -> Outcome:
+    """Void a payment recorded outside the processor (D2): billing and above, a settled
+    Zelle, wire, check, cash or other payment on a rent or one-off charge, with a reason.
+    Nothing is sent to the provider; the charge is recomputed under its row lock and one
+    audit row ``payment.voided_manual`` is written."""
+    if actor is None or not meets(role_of(actor), Role.BILLING):
+        return Outcome(False, VOID_NOT_ALLOWED)
+    reason = visible_text(reason or "")
+    refusal = _reason_refusal(reason)
+    if refusal:
+        return Outcome(False, refusal, "reason")
+    with transaction.atomic():
+        payment = Payment.objects.select_for_update().get(pk=payment_id)
+        charge = _lock_charge(payment)
+        if creation_key is not None and _key_used(payment, (VOIDED_MANUAL_ACTION,), creation_key):
+            return Outcome(True, ALREADY_SUBMITTED_VOID, replayed=True)
+        refusal = _manual_refusal(payment)
+        if refusal:
+            return Outcome(False, refusal)
+        invoice = marked_invoice(payment)
+        before = {**_payment_state(payment), "charge": _charge_state(charge)}
+        payment.status = PaymentStatus.VOIDED
+        payment.voided_at = timezone.now()
+        payment.voided_by = actor
+        payment.void_reason = reason
+        payment.save(
+            update_fields=["status", "voided_at", "voided_by", "void_reason", "updated_at"]
+        )
+        _recompute(charge)
+        after: dict[str, Any] = {
+            **_payment_state(payment),
+            "reason": reason,
+            "charge": _charge_state(charge),
+            "creation_key": str(creation_key) if creation_key is not None else None,
+        }
+        if invoice is not None:
+            after |= {
+                "provider_marking": PROVIDER_MARKING_TO_UNMARK,
+                "marked_invoice": str(invoice.pk),
+                "invoice_number": invoice.invoice_number,
+            }
+        _audit(actor, VOIDED_MANUAL_ACTION, payment.pk, before, after)
+    message = VOIDED_MANUAL.format(amount=format_amount(payment.amount))
+    if invoice is not None:
+        message += VOIDED_MANUAL_UNMARK.format(number=invoice.invoice_number)
+    return Outcome(True, message)
 
 
 # --- Helpers ---------------------------------------------------------------------------

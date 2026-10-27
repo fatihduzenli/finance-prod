@@ -2075,6 +2075,14 @@ class Payment(GuardedModel):
     credit = models.ForeignKey(
         LeaseCredit, on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
     )
+    #: PLAN-012f-c D2: the void of a payment recorded outside the processor (billing) keeps
+    #: its reason; both voids, that one and the processor's, stamp who and when. Rows voided
+    #: before have no stamp.
+    void_reason = guarded_char(200, blank=True, default="")
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -386,6 +386,12 @@ scans are covered by the stated policy, not by a check.
 | `payments.allocation_group` | System | One UUID per payment-entry form: the parts of one received amount |
 | `payments.credit_id` | System | Set on a payment of method `credit`: the credit it applied |
 
+### payments — `void_reason`, `voided_at`, `voided_by` (PLAN-012f-c D2, migration 0057)
+| Field | Owner | Note |
+|---|---|---|
+| `void_reason` | App | Why billing voided a payment recorded outside the processor (Zelle, wire, check, cash, other); required for that void, at most 200 characters; guarded text. Empty on a processor void and on rows voided before 0057 |
+| `voided_at`, `voided_by_id` | System | When and by whom the payment was voided: set by the manual void and, from 0057 on, by the processor void as well; null on rows voided before. The status `voided` is the processor's for an ACH payment and ours for a manual one; nothing is sent to the processor by a manual void |
+
 ### deposit_resolutions — `offset_amount` (PLAN-012e)
 | Field | Owner | Note |
 |---|---|---|

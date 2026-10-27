@@ -286,6 +286,7 @@ payment_patterns = (
         path("<str:pk>/", payments.payment_detail, name="detail"),
         path("<str:pk>/refund/", payments.payment_refund, name="refund"),
         path("<str:pk>/void/", payments.payment_void, name="void"),
+        path("<str:pk>/void-manual/", payments.payment_void_manual, name="void_manual"),
     ],
     "payments",
 )

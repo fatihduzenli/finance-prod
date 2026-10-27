@@ -278,10 +278,11 @@ def test_the_ledger_routes_are_read_only_for_every_role(book: dict[str, Any]) ->
         "ledger:payments:detail",
         "ledger:payments:refund",
         "ledger:payments:void",
+        # PLAN-012f-c D5: billing's void of a payment recorded outside the processor.
+        "ledger:payments:void_manual",
     }
-    assert names - {"ledger:payments:refund", "ledger:payments:void"} <= (
-        registry.READ_ONLY_ROUTE_NAMES
-    )
+    unsafe = {"ledger:payments:refund", "ledger:payments:void", "ledger:payments:void_manual"}
+    assert names - unsafe <= (registry.READ_ONLY_ROUTE_NAMES)
     for role in (Role.VIEWER, Role.BILLING, Role.ADMIN):
         client, _ = client_for(role)
         for path in (LIST, EXPORT):

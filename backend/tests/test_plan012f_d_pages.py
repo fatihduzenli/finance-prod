@@ -347,6 +347,9 @@ FORM_PAGES = (
     "ledger:invoices:cancel",
     "ledger:payments:refund",
     "ledger:payments:void",
+    # PLAN-012f-c D5: over the payment page (the world's payment is a bank debit, so billing
+    # sees its refusal; tests/test_void_manual_payment.py opens it on a manual payment).
+    "ledger:payments:void_manual",
 )
 
 POST_ONLY = "a POST-only action (405 to a GET)"
@@ -634,6 +637,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:payments:detail": lambda w: ([*_store(w), "Payments"], "Payment of $100.00"),
     "ledger:payments:refund": lambda w: BREADCRUMBS["ledger:payments:detail"](w),
     "ledger:payments:void": lambda w: BREADCRUMBS["ledger:payments:detail"](w),
+    "ledger:payments:void_manual": lambda w: BREADCRUMBS["ledger:payments:detail"](w),
     "ledger:calendar:page": lambda w: (["Reports"], "Calendar"),
     "ledger:calendar:detail": lambda w: (["Calendar: Oct 2026"], "Walk note"),
     "ledger:calendar:add": lambda w: (["Calendar"], "New calendar entry"),

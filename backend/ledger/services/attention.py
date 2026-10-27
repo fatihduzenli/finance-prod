@@ -12,6 +12,13 @@ page that deals with it and ``since``, the day it began:
   return the returns queue still holds (``status = returned``, ``resolved_at`` null) is
   listed: ``payments.resolution_kind`` does not exist yet, so no return counts as
   rescheduled;
+- ``invoice_marked_paid_void`` (PLAN-012f-c D3): one ``high`` item per payment recorded
+  outside the processor that billing voided after a marking job had marked its charge's
+  provider invoice paid (the ``payment.voided_manual`` audit row carries
+  ``provider_marking: "to unmark"`` and the invoice), ``"Invoice <number> is marked paid in
+  <provider> for a voided payment — unmark it in the <provider> dashboard"``, linking to the
+  charge; cleared by itself once the invoice refresh (webhook or nightly check,
+  :func:`payments.invoice_sync.record_provider_state`) copies a status other than paid;
 - ``installment_returned`` (PLAN-012e D11): one item per installment plan while one of
   its installments has a returned payment not resolved (the plan's status is then
   ``attention``), ``"Installment returned: <store>, <parent>, plan <n> of <N> paid"``,
@@ -101,6 +108,7 @@ from ledger.models import (
     InstallmentPlanStatus,
     InsuranceCharge,
     InsurancePremium,
+    Invoice,
     Lease,
     LeaseEnd,
     LeaseEndStatus,
@@ -121,11 +129,13 @@ from ledger.services import (
     installments,
     insurance,
     receivables,
+    refunds,
     returns,
     workspace,
 )
 from ledger.services.one_off_charges import ENTITY_PLAN
 from ledger.wording import format_amount, provider_name, provider_sentence
+from payments.invoice_sync import PROVIDER_PAID
 from payments.models import ReconciliationMismatch, WebhookEvent, WebhookOutcome
 
 HIGH = "high"
@@ -135,6 +145,7 @@ _SEVERITY_RANK = {HIGH: 0, MEDIUM: 1, LOW: 2}
 
 OVERDUE = "overdue"
 RETURNED_DEBIT = "returned_debit"
+INVOICE_MARKED_PAID_VOID = "invoice_marked_paid_void"
 INSTALLMENT_RETURNED = "installment_returned"
 SPLIT_CHARGE_PAID = "split_charge_paid"
 INSTALLMENT_PLAN_PAUSED = "installment_plan_paused"
@@ -156,6 +167,7 @@ CALENDAR_TODAY = "calendar_today"
 KINDS: tuple[str, ...] = (
     OVERDUE,
     RETURNED_DEBIT,
+    INVOICE_MARKED_PAID_VOID,
     INSTALLMENT_RETURNED,
     SPLIT_CHARGE_PAID,
     LEASE_END_BALANCE,
@@ -177,6 +189,9 @@ KINDS: tuple[str, ...] = (
 KIND_LABELS: dict[str, str] = {
     OVERDUE: "overdue charges",
     RETURNED_DEBIT: "returned debits",
+    INVOICE_MARKED_PAID_VOID: provider_sentence(
+        "invoices marked paid in {provider} for a voided payment"
+    ),
     INSTALLMENT_RETURNED: "installment plans with a returned debit",
     SPLIT_CHARGE_PAID: "split charges paid before their invoice was released",
     INSTALLMENT_PLAN_PAUSED: "installment plans paused for a month",
@@ -203,6 +218,7 @@ KIND_LABELS: dict[str, str] = {
 WHY_BADGES: dict[str, str] = {
     OVERDUE: "overdue",
     RETURNED_DEBIT: "returned",
+    INVOICE_MARKED_PAID_VOID: "attention",
     INSTALLMENT_RETURNED: "returned",
     SPLIT_CHARGE_PAID: "partial",
     INSTALLMENT_PLAN_PAUSED: "pending",
@@ -237,6 +253,10 @@ INSTALLMENT_RETURNED_TEXT = "Installment returned: {store}, {parent}, plan {paid
 SPLIT_CHARGE_PAID_TEXT = (
     "Payment on a split charge: {store}, {parent}, {amount} paid before its invoice was "
     "released; cancel or reschedule the plan"
+)
+MARKED_PAID_VOID_TEXT = provider_sentence(
+    "Invoice {number} is marked paid in {provider} for a voided payment — unmark it in the "
+    "{provider} dashboard"
 )
 PLAN_PAUSED_TEXT = "{name} paused for {days} days: {store}, {parent}"
 LEASE_END_BALANCE_TEXT = (
@@ -366,6 +386,84 @@ def _returned(today: date, operator: uuid.UUID | None) -> list[Item]:
                 store_id=row.store.pk if row.store is not None else None,
                 operator_name=row.operator.display_name if row.operator is not None else "",
                 amount=row.amount,
+            )
+        )
+    return found
+
+
+def _marked_paid_voids(operator: uuid.UUID | None) -> list[Item]:
+    """One item per manual payment voided while its charge's provider invoice stays marked
+    paid by it (PLAN-012f-c D3), earliest void first (three queries): the void's audit
+    rows that name a marked invoice, those invoices still shown paid, their payments."""
+    voids = (
+        AuditLog.objects.filter(
+            action=refunds.VOIDED_MANUAL_ACTION,
+            after__provider_marking=refunds.PROVIDER_MARKING_TO_UNMARK,
+        )
+        .order_by("at", "id")
+        .values_list("entity_id", "after", "at")
+    )
+    wanted: dict[str, tuple[str, datetime]] = {}
+    for entity_id, after, at in voids:
+        invoice_id = str((after or {}).get("marked_invoice") or "")
+        if invoice_id:
+            wanted.setdefault(entity_id, (invoice_id, at))
+    if not wanted:
+        return []
+    paid = {
+        str(invoice.pk): invoice
+        for invoice in Invoice.objects.filter(
+            pk__in={invoice_id for invoice_id, _ in wanted.values()}
+        )
+        if (invoice.provider_status or "").strip().upper() == PROVIDER_PAID
+    }
+    if not paid:
+        return []
+    voided = Payment.objects.filter(
+        pk__in=[key for key, (invoice_id, _) in wanted.items() if invoice_id in paid],
+        status=PaymentStatus.VOIDED,
+    ).select_related(
+        "rent_charge__lease__store",
+        "rent_charge__lease__operator",
+        "one_off_charge__lease__store",
+        "one_off_charge__operator",
+    )
+    by_pk = {str(payment.pk): payment for payment in voided}
+    # The processor's name is read once (the company settings row), not per item.
+    template = str(MARKED_PAID_VOID_TEXT)
+    found = []
+    for key, (invoice_id, at) in wanted.items():
+        payment = by_pk.get(key)
+        if payment is None or invoice_id not in paid:
+            continue
+        lease: Lease | None
+        if payment.rent_charge is not None:
+            lease = payment.rent_charge.lease
+            charge_operator = lease.operator
+            url = reverse("ledger:charges:detail", kwargs={"pk": payment.rent_charge.pk})
+        elif payment.one_off_charge is not None:
+            lease = payment.one_off_charge.lease
+            charge_operator = payment.one_off_charge.operator or (
+                lease.operator if lease is not None else None
+            )
+            url = reverse("ledger:one_off_charges:detail", kwargs={"pk": payment.one_off_charge.pk})
+        else:
+            continue
+        if operator is not None and (charge_operator is None or charge_operator.pk != operator):
+            continue
+        store = lease.store if lease is not None else None
+        found.append(
+            Item(
+                kind=INVOICE_MARKED_PAID_VOID,
+                severity=HIGH,
+                text=template.format(number=paid[invoice_id].invoice_number),
+                url=url,
+                since=timezone.localdate(at),
+                operator_id=charge_operator.pk if charge_operator is not None else None,
+                store=store.external_label if store is not None else "",
+                store_id=store.pk if store is not None else None,
+                operator_name=charge_operator.display_name if charge_operator is not None else "",
+                amount=payment.amount,
             )
         )
     return found
@@ -995,6 +1093,7 @@ def attention(
     sources: list[Callable[[], list[Item]]] = [
         lambda: _overdue(today, balances),
         lambda: _returned(today, operator),
+        lambda: _marked_paid_voids(operator),
         lambda: _installments_returned(operator),
         lambda: _split_charges_paid(operator),
         lambda: _plans_paused(today, operator),
