@@ -256,6 +256,12 @@ param djangoSecretKeySecretName string = 'django-secret-key'
 @description('Vault secret name for the Sentry DSN. Empty means Sentry stays off and SENTRY_DSN is not set at all; set it once the secret exists in the vault.')
 param sentryDsnSecretName string = ''
 
+@description('Vault secret name for the USPS Addresses API OAuth client ID (PLAN-012f-c D14), e.g. usps-client-id. Empty, with uspsClientSecretSecretName, means the address check stays off and USPS_CLIENT_ID / USPS_CLIENT_SECRET are not set; set both only once the secrets exist in the vault. Passed to the web app only.')
+param uspsClientIdSecretName string = ''
+
+@description('Vault secret name for that client\'s secret, e.g. usps-client-secret. Wired only together with uspsClientIdSecretName.')
+param uspsClientSecretSecretName string = ''
+
 // ---------------------------------------------------------------------------
 // Deployment
 // ---------------------------------------------------------------------------
@@ -461,6 +467,8 @@ module web 'modules/containerAppWeb.bicep' = {
     mailCatchAll: mailCatchAll
     companyName: companyName
     gmailServiceAccountSecretName: gmailServiceAccountSecretName
+    uspsClientIdSecretName: uspsClientIdSecretName
+    uspsClientSecretSecretName: uspsClientSecretSecretName
     // Reading the storage module's outputs makes the web app depend on the whole
     // module, so the role assignment exists before the revision that uses it.
     documentsStorageAccountUrl: storage.outputs.blobEndpoint

@@ -493,10 +493,30 @@ local `USPS_API_BASE_URL` override, never from staging or production. If an egre
 allow-list is ever put in front of the environment, it must include this host beside the
 Stax, Google mail, storage and Sentry endpoints.
 
-The address check stays off until the owner registers the USPS app and stores the two Key
-Vault secrets `usps-client-id` and `usps-client-secret`. The container apps' `secretRef`
-lines for `USPS_CLIENT_ID` and `USPS_CLIENT_SECRET` are a later, owner-authorised infra
-slice; no `.bicep` file references them yet.
+The web container app is the only caller and the only app wired for it (PLAN-012f-c D14,
+on the Sentry optional pattern in `modules/containerAppWeb.bicep`). It always sets
+`USPS_API_BASE_URL = https://apis.usps.com` (the production host; the lookups are
+read-only). The two `main.bicep` parameters `uspsClientIdSecretName` and
+`uspsClientSecretSecretName` (default empty, passed to the web module only) name the Key
+Vault secrets; while either is empty nothing is referenced, `USPS_CLIENT_ID` and
+`USPS_CLIENT_SECRET` are not set, and the check is off (the store form saves with
+"Address not verified"). When both are set, the app references the vault secrets as
+`usps-client-id` and `usps-client-secret` and sets the two variables from them by
+`secretRef`. The worker and the jobs get none of this.
+
+The vault secrets are named **`usps-client-id`** and **`usps-client-secret`** (lower case
+with hyphens, like the others; Key Vault names are case-insensitive). The parameter files
+ship both lines **commented out**, because a reference to a missing secret stops the
+revision from starting. To turn the check on:
+
+1. The owner registers the USPS app and stores the two secrets in the environment's vault
+   (`finance-sandbox-kv` for staging, `finance-kv` for production). No value is ever
+   written to a file here.
+2. Uncomment `param uspsClientIdSecretName = 'usps-client-id'` and
+   `param uspsClientSecretSecretName = 'usps-client-secret'` in
+   `parameters/staging.bicepparam` (or `production.bicepparam`).
+3. Redeploy the infrastructure. That apply is a Publish action (root `CLAUDE.md` section
+   6) and runs only on the owner's explicit authorisation.
 
 ## 10. Step 10 (Celery) is already covered by this platform
 

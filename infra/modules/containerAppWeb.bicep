@@ -95,6 +95,12 @@ param companyName string = 'Global Retail Groups'
 @description('Vault secret name for the Gmail service-account key (JSON). Referenced only when mailEnabled is true.')
 param gmailServiceAccountSecretName string = 'gmail-service-account-key'
 
+@description('Vault secret name for the USPS Addresses API OAuth client ID (PLAN-012f-c D14), e.g. usps-client-id. Leave empty, with uspsClientSecretSecretName, to run without the address check; USPS_CLIENT_ID and USPS_CLIENT_SECRET are then not set at all.')
+param uspsClientIdSecretName string = ''
+
+@description('Vault secret name for that client\'s secret, e.g. usps-client-secret. Wired only together with uspsClientIdSecretName.')
+param uspsClientSecretSecretName string = ''
+
 @description('Custom hostname to bind, e.g. staging.monvera.io. Empty means the app is reachable on its default ingress host name only.')
 param customDomainName string = ''
 
@@ -122,6 +128,10 @@ param tags object = {}
 var appBaseHost = split(replace(replace(appBaseUrl, 'https://', ''), 'http://', ''), '/')[0]
 
 var wireSentry = !empty(sentryDsnSecretName)
+
+// PLAN-012f-c D14: the USPS pair is wired only when both names are set (the env guard
+// refuses one alone). The web app is the only caller (the store form's "Check address").
+var wireUsps = !empty(uspsClientIdSecretName) && !empty(uspsClientSecretSecretName)
 
 // Pass 1 binds the hostname without a certificate, which is what lets the
 // environment issue one. Pass 2 supplies the certificate ID and switches the
@@ -170,6 +180,19 @@ var sentrySecrets = [
   {
     name: 'sentry-dsn'
     keyVaultUrl: '${keyVaultUri}secrets/${sentryDsnSecretName}'
+    identity: identityResourceId
+  }
+]
+
+var uspsSecrets = [
+  {
+    name: 'usps-client-id'
+    keyVaultUrl: '${keyVaultUri}secrets/${uspsClientIdSecretName}'
+    identity: identityResourceId
+  }
+  {
+    name: 'usps-client-secret'
+    keyVaultUrl: '${keyVaultUri}secrets/${uspsClientSecretSecretName}'
     identity: identityResourceId
   }
 ]
@@ -232,6 +255,12 @@ var baseEnv = [
     value: companyName
   }
   {
+    // The USPS production host (read-only lookups); the env guard accepts no other
+    // value outside APP_ENV=local.
+    name: 'USPS_API_BASE_URL'
+    value: 'https://apis.usps.com'
+  }
+  {
     name: 'STAX_API_KEY'
     secretRef: 'stax-api-key'
   }
@@ -253,6 +282,17 @@ var sentryEnv = [
   {
     name: 'SENTRY_DSN'
     secretRef: 'sentry-dsn'
+  }
+]
+
+var uspsEnv = [
+  {
+    name: 'USPS_CLIENT_ID'
+    secretRef: 'usps-client-id'
+  }
+  {
+    name: 'USPS_CLIENT_SECRET'
+    secretRef: 'usps-client-secret'
   }
 ]
 
@@ -307,7 +347,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
           identity: identityResourceId
         }
       ]
-      secrets: concat(baseSecrets, wireSentry ? sentrySecrets : [], mailEnabled ? mailSecrets : [])
+      secrets: concat(baseSecrets, wireSentry ? sentrySecrets : [], mailEnabled ? mailSecrets : [], wireUsps ? uspsSecrets : [])
     }
     template: {
       containers: [
@@ -318,7 +358,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json(cpuCores)
             memory: memory
           }
-          env: concat(baseEnv, wireSentry ? sentryEnv : [], mailEnabled ? mailSecretEnv : [])
+          env: concat(baseEnv, wireSentry ? sentryEnv : [], mailEnabled ? mailSecretEnv : [], wireUsps ? uspsEnv : [])
           probes: [
             {
               type: 'Readiness'
