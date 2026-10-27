@@ -45,7 +45,7 @@ from ledger.models import Operator, Payment, PaymentMethod, Store
 from ledger.services import detail_cards, one_off_charges, refunds
 from ledger.services import payments_ledger as ledger
 from ledger.services import stores as store_service
-from ledger.services.rent_run import charge_review_message
+from ledger.services.rent_run import PARTIAL_NOTICE, charge_review_message, partial_marking
 from ledger.validators import PAYMENT_DATA_MESSAGE
 from ledger.views import store_context
 from ledger.views.detail_cards import activity_context
@@ -160,6 +160,7 @@ def _detail_context(request: HttpRequest, payment: Payment) -> dict[str, object]
         **job_context(payment),
         "refunds": payment_refunds,
         "charge_review": _charge_review(payment),
+        "partial_notice": _partial_notice(payment),
         # PLAN-012f-a D4: the header's line and the Activity card (the payment's rows
         # and its refunds').
         "header_line": detail_cards.header_line(
@@ -185,12 +186,28 @@ def _detail_context(request: HttpRequest, payment: Payment) -> dict[str, object]
     }
 
 
+def _partial_open(payment: Payment) -> bool:
+    """Whether the Charge card shows the partial-payment notice (PLAN-012f-c D12): the
+    charge is flagged for a manual payment of part of the amount and a balance is still
+    owed. Once the rest is paid the invoice is still not marked, so the strong line shows."""
+    charge = payment.rent_charge or payment.one_off_charge
+    return charge is not None and partial_marking(charge) and charge.balance > 0
+
+
 def _charge_review(payment: Payment) -> str:
+    """The Charge card's review reasons; the partial payment's is left out while its
+    notice shows (D12)."""
+    with_partial = not _partial_open(payment)
     if payment.rent_charge is not None:
-        return charge_review_message(payment.rent_charge)
+        return charge_review_message(payment.rent_charge, with_partial=with_partial)
     if payment.one_off_charge is not None:
-        return one_off_charges.review_message(payment.one_off_charge)
+        return one_off_charges.review_message(payment.one_off_charge, with_partial=with_partial)
     return ""
+
+
+def _partial_notice(payment: Payment) -> str:
+    """The Charge card's information notice (D12), or ``""``."""
+    return str(PARTIAL_NOTICE) if _partial_open(payment) else ""
 
 
 def _admin_only(request: HttpRequest) -> HttpResponse | None:

@@ -396,6 +396,9 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .toast-dismiss { flex: 0 0 auto; background: none; border: 0; padding: 0 var(--space-1); font: inherit; font-size: var(--fs-lg); line-height: 1; color: inherit; cursor: pointer; }
 .toast:not(.warning):not(.error) { animation: toast-fade 600ms ease-in 8s forwards; }
 @keyframes toast-fade { to { opacity: 0; } }
+/* An information notice inside a card (PLAN-012f-c D12): the toast's info look, in the flow,
+   never fading, with no dismiss button (as specific as the fade rule above, and later). */
+.toast.info.is-inline { animation: none; }
 
 /* --- Pager -------------------------------------------------------------------------------
    .pager: a paged list's Previous and Next links (.btn) around the page count. */

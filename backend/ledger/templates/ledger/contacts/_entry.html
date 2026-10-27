@@ -1,4 +1,4 @@
-{% load money dates %}
+{% load money dates people %}
 <dl id="contact-entry-summary">
   <dt>Operator</dt><dd><a href="{% url 'ledger:operators:detail' pk=entry.operator_id %}">{{ entry.operator.display_name }}</a></dd>
   <dt>Store</dt><dd>{% if entry.lease %}{{ entry.lease.store.external_label }}{% else %}—{% endif %}</dd>
@@ -6,5 +6,5 @@
   <dt>Kind</dt><dd>{{ entry.get_kind_display }}</dd>
   {% if entry.kind == "promise" %}<dt>Promise</dt><dd>{{ entry.promised_amount|money }} by {{ entry.promised_date|day }} ({{ entry.get_status_display }})</dd>{% endif %}
   <dt>Note</dt><dd style="white-space:pre-wrap;">{{ entry.body }}</dd>
-  <dt>Recorded</dt><dd>{{ entry.created_at|moment }} by {{ entry.author.get_username|default:"—" }}</dd>
+  <dt>Recorded</dt><dd>{{ entry.created_at|moment }} by {{ entry.author|staff|default:"—" }}</dd>
 </dl>

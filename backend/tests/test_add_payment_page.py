@@ -21,6 +21,7 @@ from django.utils.html import escape
 
 from accounts.roles import Role
 from ledger.forms import (
+    ADD_PAYMENT_REFERENCE_HELP,
     DEBIT_TODAY_NEEDS_ADMIN,
     NOTE_OPTIONAL_LABEL,
     NOTE_REQUIRED_LABEL,
@@ -121,8 +122,9 @@ def test_the_one_off_route_renders_the_frame_with_the_debit_card_chosen(fake: Fa
     charge = invoiced(fake, "100.00")
     body = get(Role.ADMIN, page_of(charge))
     assert '<h1 class="store-title">Add payment <span id="charge-status">' in body
-    # The charge page's status words (a one-off charge is "Owed"), with the balance due.
-    assert "Owed · $100.00 due" in body
+    # The charge page's status words (a one-off charge is "Owed"), with the balance due:
+    # "● Owed · $100.00", no trailing "due" (PLAN-012f-c D8).
+    assert "</span> Owed · $100.00</span>" in body and "$100.00 due" not in body
     line = element(body, '<p class="store-line" id="add-payment-line">', "p")
     assert charge.operator is not None
     assert f"{charge.label} · {charge.operator.display_name} · due " in line
@@ -138,8 +140,9 @@ def test_the_one_off_route_renders_the_frame_with_the_debit_card_chosen(fake: Fa
     assert "the charge shows Pending until the bank settles" in cards["debit"]
     for name in ("method", "amount", "paid_on", "reference"):
         assert f'name="{name}"' in cards["record"], name
-    # The reference's help as before: it names the check number, never an account number.
-    assert REFERENCE_HELP in cards["record"]
+    # The reference's help is one short sentence (PLAN-012f-c D10); the longer one, which
+    # names the check number, is in the help topic "Payments".
+    assert ADD_PAYMENT_REFERENCE_HELP in cards["record"] and REFERENCE_HELP not in cards["record"]
     assert '<option value="cash">Cash</option>' in cards["record"]
     side = summary(body)
     for tile_id in ("tile-charge", "tile-paid", "tile-balance", "tile-this-payment"):
@@ -163,7 +166,7 @@ def test_the_rent_route_renders_the_frame_with_the_debit_card_greyed() -> None:
     assert escape(reason) in cards["debit"] and 'name="debit_amount"' not in cards["debit"]
     assert 'id="how-record" checked' in cards["record"]
     assert "Rent Oct 2026, debit 1 · #1991 Istanbul · Fatih Co · due" in body
-    assert "Unpaid · $2,000.00 due" in body
+    assert "</span> Unpaid · $2,000.00</span>" in body and "$2,000.00 due" not in body
     side = summary(body)
     assert side.count("btn-primary") == 1
     assert 'id="operator-card"' in side and "no bank account on file" in side

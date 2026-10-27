@@ -358,7 +358,8 @@ def test_a_run_by_a_person_names_them_with_its_catch_up(billing: Client) -> None
     lease(started_on=date(2026, 9, 1), payment_channel=PaymentChannel.WIRE)
     billing.post(CREATE)
     card = between(page(billing), 'id="recent-runs-card"', "</section>")
-    assert "· by billing-layout</span>" in card
+    # PLAN-012f-c D11: the staff name (the username here), the e-mail as its title.
+    assert '· by <span title="billing-layout@example.com">billing-layout</span></span>' in card
     assert "2 created (1 catch-up) · 0 skipped" in text_of(card)
     assert '<span class="badge badge-paid">' in card
 

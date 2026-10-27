@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components responsive money dates %}
+{% load components responsive money dates people icons %}
 {% block title %}Payment{% endblock %}
 {% comment %}The payment page, in the detail family (PLAN-012f-a D4): the header (breadcrumb, title with the status badge, the muted line, Refund, More ▾ with Void; admin; for a settled payment recorded outside the processor More ▾ with "Void payment", billing, PLAN-012f-c D6), the tiles Amount / Refunded / Remaining (a refund: its amount), the Refunds (or "Refunds payment"), Invoice, Charge and Activity cards beside DETAILS and MORE.{% endcomment %}
 {% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=payments#tab-payments" id="payments-crumb">Payments</a> <span aria-hidden="true">›</span> {% else %}<a href="{% url 'ledger:payments:list' %}">Payments</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</span></nav><h1 class="store-title">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }} <span id="payment-status">{% status_badge payment.get_status_display payment.status %}</span>{% if payment.is_refund %} <span class="badge kind-badge">Refund</span>{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if can_refund or can_void or can_void_manual %}<div class="page-actions" id="payment-actions">{% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}{% if can_void %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><a class="menu-danger" href="{% url 'ledger:payments:void' pk=payment.pk %}" id="void-payment">Void</a></li></ul></details>{% endif %}{% if can_void_manual %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><a class="menu-danger" href="{% url 'ledger:payments:void_manual' pk=payment.pk %}" id="void-manual-payment">Void payment</a></li></ul></details>{% endif %}</div>{% endif %}</div>{% endblock %}
@@ -70,6 +70,7 @@
       <dt>Balance</dt><dd id="charge-balance">{{ charge.balance|money }}</dd>
       <dt>Status</dt><dd id="charge-status">{% status_badge charge.get_status_display charge.status %}</dd>
     </dl>
+    {% if partial_notice %}<p class="toast info is-inline" id="partial-notice"><span class="toast-icon">{% icon "info" 16 %}</span><span class="toast-text">{{ partial_notice }}</span></p>{% endif %}
     {% if charge_review %}<p><strong>{{ charge_review }}</strong></p>{% endif %}
   {% elif one_off_charge %}
     <dl id="payment-setup-charge" class="detail-list">
@@ -79,6 +80,7 @@
       <dt>Balance</dt><dd id="charge-balance">{{ one_off_charge.balance|money }}</dd>
       <dt>Status</dt><dd id="charge-status">{% status_badge one_off_charge.get_status_display one_off_charge.status %}</dd>
     </dl>
+    {% if partial_notice %}<p class="toast info is-inline" id="partial-notice"><span class="toast-icon">{% icon "info" 16 %}</span><span class="toast-text">{{ partial_notice }}</span></p>{% endif %}
     {% if charge_review %}<p><strong>{{ charge_review }}</strong></p>{% endif %}
   {% elif payment.insurance_charge %}
     <p>Insurance {{ payment.policy_year }}: {{ payment.insurance_charge.amount|money }}</p>
@@ -103,8 +105,8 @@
     {% if payment.return_code %}<dt>Return</dt><dd>{{ payment.return_code }} {{ payment.return_reason }}</dd>{% endif %}
     <dt>Reference</dt><dd>{{ payment.reference|default:"—" }}</dd>
     <dt>Note</dt><dd style="white-space:pre-wrap;">{{ payment.note|default:"—" }}</dd>
-    <dt>Recorded by</dt><dd>{{ payment.recorded_by|default:"—" }}</dd>
-    {% if payment.voided_at %}<dt>Voided</dt><dd id="summary-voided">{{ payment.voided_at|day }} by {{ payment.voided_by|default:"—" }}</dd>{% endif %}
+    <dt>Recorded by</dt><dd>{{ payment.recorded_by|staff|default:"—" }}</dd>
+    {% if payment.voided_at %}<dt>Voided</dt><dd id="summary-voided">{{ payment.voided_at|day }} by {{ payment.voided_by|staff|default:"—" }}</dd>{% endif %}
     {% if payment.void_reason %}<dt>Reason</dt><dd id="summary-void-reason" style="white-space:pre-wrap;">{{ payment.void_reason }}</dd>{% endif %}
   </dl>
   </section>

@@ -659,7 +659,7 @@ def test_no_bank_method_greys_the_card(fake: FakeProvider) -> None:
 
 def test_the_reasons_come_in_the_order_of_d19(fake: FakeProvider) -> None:
     # Waived beats everything; paid beats a live debit; a live debit beats the flag; the
-    # flag beats the bank method.
+    # flag off and no bank method give both lines (PLAN-012f-c D7).
     owner = an_operator(fake, bank=None)
     waived = a_rent(fake, status=RentChargeStatus.WAIVED, operator=owner)
     a_payment(waived, PaymentStatus.PENDING)
@@ -677,7 +677,9 @@ def test_the_reasons_come_in_the_order_of_d19(fake: FakeProvider) -> None:
         assert reason(paid) == service.DEBIT_PAID
         assert reason(on_plan) == service.DEBIT_ON_PLAN
         assert reason(live) == service.RENT_DEBIT_PENDING
-        assert reason(off) == str(service.DEBIT_OFF)
+        both = service.rent_debit_options(fresh_rent(off))
+        assert both.reason == str(service.DEBIT_NO_METHOD_SEND).format(operator=owner.display_name)
+        assert both.reason_more == str(service.DEBIT_ALSO_OFF)
 
 
 def test_the_large_debit_rule_follows_the_balance(fake: FakeProvider) -> None:

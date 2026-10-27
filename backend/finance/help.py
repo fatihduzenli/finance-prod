@@ -55,6 +55,7 @@ class Topic:
 TOPICS: tuple[Topic, ...] = (
     Topic("store-costs", "Store costs and margin", date(2026, 10, 26)),
     Topic("collecting-an-invoice", "How an invoice is collected", date(2026, 10, 25)),
+    Topic("payments", "Payments", date(2026, 10, 27)),
     Topic("invoice-lines", "The lines of an invoice", date(2026, 10, 22)),
     Topic("autopay-and-daily-charges", "Autopay and the daily charges", date(2026, 10, 24)),
     Topic("promises-to-pay", "Promises to pay", date(2026, 10, 22)),

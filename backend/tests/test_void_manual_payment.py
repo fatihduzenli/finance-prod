@@ -740,7 +740,9 @@ def test_a_voided_payment_has_no_actions_and_shows_who_when_and_the_reason(
         assert 'id="payment-actions"' not in body and 'id="more-card"' not in body
         assert "Voided" in body
         voided = re.search(r'<dd id="summary-voided">(.*?)</dd>', body)
-        assert voided is not None and voided.group(1).endswith(f"by {actor.username}")
+        # PLAN-012f-c D11: the staff name with the e-mail as its title.
+        shown = f'<span title="{actor.email}">{actor.username}</span>'
+        assert voided is not None and voided.group(1).endswith(f"by {shown}")
         assert f'<dd id="summary-void-reason" style="white-space:pre-wrap;">{REASON}</dd>' in body
 
 

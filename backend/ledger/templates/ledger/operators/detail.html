@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components icons responsive dates money %}
+{% load components icons responsive dates money phones people %}
 {% load static %}
 {% load tz %}
 {% block title %}{{ operator.display_name }}{% endblock %}
@@ -69,8 +69,8 @@
     <dt>Legal name</dt><dd>{{ operator.legal_name|default:"—" }}</dd>
     <dt>Company</dt><dd>{{ operator.company|default:"—" }}</dd>
     <dt>E-mail</dt><dd>{{ operator.email|default:"—" }}</dd>
-    <dt>Phone</dt><dd>{{ operator.phone|default:"—" }}</dd>
-    <dt>Text-message phone</dt><dd id="sms-phone">{{ operator.sms_phone|default:"—" }}</dd>
+    <dt>Phone</dt><dd>{{ operator.phone|phone|default:"—" }}</dd>
+    <dt>Text-message phone</dt><dd id="sms-phone">{{ operator.sms_phone|phone|default:"—" }}</dd>
     <dt>Text-message consent given on</dt><dd id="sms-consent">{{ operator.sms_consent_at|moment|default:"—" }}</dd>
     <dt>E-mail consent given on</dt><dd id="email-consent">{{ operator.email_consent_at|moment|default:"—" }}</dd>
     <dt>Address</dt>
@@ -150,7 +150,7 @@
     <section class="card" id="contact-card" aria-labelledby="contact-card-heading">
       <h2 class="section-label" id="contact-card-heading">Contact</h2>
       <dl class="side-list">
-        <dt>Phone</dt><dd id="side-phone">{{ operator.phone|default:"—" }}</dd>
+        <dt>Phone</dt><dd id="side-phone">{{ operator.phone|phone|default:"—" }}</dd>
         <dt>E-mail</dt><dd id="side-email">{{ operator.email|default:"—" }}</dd>
         <dt>SMS</dt><dd id="side-sms">{% if operator.sms_consent_at %}{% status_badge "Consent" "paid" %}{% else %}{% status_badge "No consent" "neutral" %}{% endif %}</dd>
       </dl>

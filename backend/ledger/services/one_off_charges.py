@@ -642,8 +642,10 @@ def _flagged_by(charge: OneOffCharge, action: str) -> bool:
     ).exists()
 
 
-def review_message(charge: OneOffCharge) -> str:
-    """Why a flagged charge needs review, or ``""`` when it is not flagged."""
+def review_message(charge: OneOffCharge, *, with_partial: bool = True) -> str:
+    """Why a flagged charge needs review, or ``""`` when it is not flagged.
+    ``with_partial=False`` leaves out the partial-payment reason (the payment page shows it
+    as ``rent_run.PARTIAL_NOTICE``, PLAN-012f-c D12)."""
     if not charge.needs_review:
         return ""
     parts = []
@@ -652,7 +654,7 @@ def review_message(charge: OneOffCharge) -> str:
         parts.append(TOTAL_MISMATCH)
     if _flagged_by(charge, ONE_OFF.action("linked_total_differs")):
         parts.append(rent_run.LINKED_TOTAL_DIFFERS)
-    if charge.review_message:
+    if charge.review_message and (with_partial or not rent_run.partial_marking(charge)):
         parts.append(f"{offline_marking.shown(charge.review_message)}.")
     if charge.payments.filter(status=PaymentStatus.RETURNED).exists():
         parts.append(RETURNED)
@@ -1571,6 +1573,14 @@ DEBIT_NO_METHOD = provider_sentence(
     "No bank account on file — add one in the {provider} dashboard, then Update from {provider}."
 )
 DEBIT_OFF = provider_sentence("Bank debits are off at {provider}.")
+#: Both reasons at once (PLAN-012f-c D7, the owner's sentences): the first line names the
+#: operator (``{operator}``), the second says the flag is off too.
+DEBIT_NO_METHOD_SEND = provider_sentence(
+    "No bank account on file — send {operator} the {provider} link to add one"
+)
+DEBIT_ALSO_OFF = provider_sentence("Bank debits are also off at {provider}.")
+#: Who the first line names when the charge has no operator.
+DEBIT_OPERATOR_FALLBACK = "the operator"
 DEBIT_PAID = "This charge is already paid."
 DEBIT_CLOSED = "This charge is waived or voided."
 DEBIT_PENDING = "A payment on this charge is pending."
@@ -1621,13 +1631,16 @@ class BankDebitOptions:
     ``enabled`` is the pay-an-invoice flag; ``method`` the linked usable bank method
     (``None``: none, or not a usable bank account); ``balance`` what the charge's
     invoice or schedule still bills; ``large`` the large-debit confirmation applies;
-    ``reason`` the sentence of the greyed card (``""``: offered)."""
+    ``reason`` the sentence of the greyed card (``""``: offered); ``reason_more`` its
+    second line, set only when the operator has no bank method and the flag is off as well
+    (PLAN-012f-c D7)."""
 
     enabled: bool
     method: BankMethod | None
     balance: Decimal
     large: bool
     reason: str
+    reason_more: str = ""
 
     @property
     def allowed(self) -> bool:
@@ -1651,29 +1664,44 @@ def _bank_method(operator: Operator | None) -> BankMethod | None:
     )
 
 
+def _setup_reasons(
+    enabled: bool, method: BankMethod | None, operator: Operator | None
+) -> tuple[str, str]:
+    """The greyed card's two lines for the flag and the bank method (PLAN-012f-c D7):
+    both missing, the owner's two sentences; one missing, its one line as before; neither,
+    ``("", "")``."""
+    if not enabled and method is None:
+        name = operator.display_name if operator is not None else DEBIT_OPERATOR_FALLBACK
+        return str(DEBIT_NO_METHOD_SEND).format(operator=name), str(DEBIT_ALSO_OFF)
+    if not enabled:
+        return str(DEBIT_OFF), ""
+    if method is None:
+        return str(DEBIT_NO_METHOD), ""
+    return "", ""
+
+
 def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
     """The bank-debit card of Add payment (D14). Local data only; no provider call."""
     enabled = charge_now_enabled()
-    method = _bank_method(_charge_operator(charge))
+    operator = _charge_operator(charge)
+    method = _bank_method(operator)
     balance = open_balance(charge)
+    reason_more = ""
     if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
         reason = DEBIT_CLOSED
     elif charge.status == OneOffChargeStatus.PAID or balance <= 0:
         reason = DEBIT_PAID
     elif has_pending_payment(charge):
         reason = DEBIT_PENDING
-    elif not enabled:
-        reason = str(DEBIT_OFF)
-    elif method is None:
-        reason = str(DEBIT_NO_METHOD)
     else:
-        reason = ""
+        reason, reason_more = _setup_reasons(enabled, method, operator)
     return BankDebitOptions(
         enabled=enabled,
         method=method,
         balance=balance,
         large=leases.is_large_debit(balance),
         reason=reason,
+        reason_more=reason_more,
     )
 
 
@@ -1742,8 +1770,10 @@ def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDeb
     call."""
     day = today or timezone.localdate()
     enabled = charge_now_enabled()
-    method = _bank_method(charge.lease.operator)
+    operator = charge.lease.operator
+    method = _bank_method(operator)
     balance = max(Decimal(charge.balance), ZERO).quantize(CENT)
+    reason_more = ""
     if charge.status == RentChargeStatus.WAIVED:
         reason = DEBIT_CLOSED
     elif charge.status == RentChargeStatus.PAID or balance <= 0:
@@ -1758,18 +1788,15 @@ def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDeb
         reason = DEBIT_BY_AUTOPAY.format(date=day_text(charge.due_on))
     elif rent_debit_live(charge):
         reason = RENT_DEBIT_PENDING
-    elif not enabled:
-        reason = str(DEBIT_OFF)
-    elif method is None:
-        reason = str(DEBIT_NO_METHOD)
     else:
-        reason = ""
+        reason, reason_more = _setup_reasons(enabled, method, operator)
     return BankDebitOptions(
         enabled=enabled,
         method=method,
         balance=balance,
         large=leases.is_large_debit(balance),
         reason=reason,
+        reason_more=reason_more,
     )
 
 

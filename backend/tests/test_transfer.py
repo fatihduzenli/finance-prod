@@ -1012,7 +1012,8 @@ def test_the_confirm_page_shows_the_balance_the_form_and_then_the_allowance(
     assert response["Location"] == f"{base}/confirm/"
     at = fresh(row).debt_override_at
     day = day_text(at)
-    allowed = f"Allowed by {user.get_username()} on {day}: "
+    # PLAN-012f-c D11: the staff name with the e-mail as its title.
+    allowed = f'Allowed by <span title="{user.email}">{user.get_username()}</span> on {day}: '
     page = client.get(f"{base}/confirm/").content.decode()
     assert 'id="debt-allowed"' in page and allowed in page and REASON in page
     assert 'id="confirm-transfer"' in page and 'id="debt-override-form"' not in page

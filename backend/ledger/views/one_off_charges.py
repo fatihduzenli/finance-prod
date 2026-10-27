@@ -450,7 +450,12 @@ def charge_payment(request: HttpRequest, pk: str) -> HttpResponse:
 
     def build(data: Any = None, **kwargs: Any) -> AddPaymentForm:
         return AddPaymentForm(
-            data, debit_reason=options.reason, balance=options.balance, admin=admin, **kwargs
+            data,
+            debit_reason=options.reason,
+            debit_reason_more=options.reason_more,
+            balance=options.balance,
+            admin=admin,
+            **kwargs,
         )
 
     if request.method == "POST":

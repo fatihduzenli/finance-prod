@@ -279,7 +279,8 @@ def render_add_payment(
     typed = form["debit_amount" if chosen == HOW_DEBIT else "amount"].value()
     this_payment = _typed_amount(typed)
     left = balance - this_payment
-    badge = f"{status_label} · {format_amount(balance)} due" if balance > 0 else status_label
+    # PLAN-012f-c D8: "● Due · $2,100.00", the badge's dot and label, then the amount.
+    badge = f"{status_label} · {format_amount(balance)}" if balance > 0 else status_label
     line = detail_service.header_line(
         store=store_service.title(store) if store is not None else "",
         operator=operator.display_name if operator is not None else "",
@@ -348,7 +349,12 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
 
     def build(data: Any = None, **kwargs: Any) -> AddPaymentForm:
         return AddPaymentForm(
-            data, debit_reason=options.reason, balance=options.balance, admin=admin, **kwargs
+            data,
+            debit_reason=options.reason,
+            debit_reason_more=options.reason_more,
+            balance=options.balance,
+            admin=admin,
+            **kwargs,
         )
 
     if request.method == "POST":
