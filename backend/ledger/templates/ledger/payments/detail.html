@@ -11,7 +11,7 @@
     <div id="tile-amount">{% kpi "Amount" payment.amount|money %}</div>
     {% if not payment.is_refund %}
     <div id="tile-refunded">{% kpi "Refunded" facts.refunded|money "pending and settled refunds" %}</div>
-    <div id="tile-remaining">{% kpi "Remaining" facts.refundable|money "refundable" %}</div>
+    <div id="tile-remaining">{% if payment.status == "voided" %}{% kpi "Remaining" facts.refundable|money "nothing refundable" %}{% else %}{% kpi "Remaining" facts.refundable|money "refundable" %}{% endif %}</div>
     {% endif %}
   </section>
 

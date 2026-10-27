@@ -33,9 +33,10 @@ from ledger.models import (
     Operator,
     Payment,
     PaymentMethod,
+    PaymentStatus,
     RentChargeStatus,
 )
-from ledger.services import detail_cards, rent_run
+from ledger.services import detail_cards, refunds, rent_run
 from ledger.services import one_off_charges as service
 from ledger.validators import contains_card_number, validate_no_payment_data
 from ledger.views.operators import HELD_FORM_KEY
@@ -49,6 +50,10 @@ from tests.test_manual_payment_marking import invoiced as invoiced_rent
 from tests.test_manual_payment_marking import pay
 from tests.test_one_off_charges import an_operator
 from tests.test_operator_views import client_for
+from tests.test_refunds_voids import ach
+from tests.test_refunds_voids import void as processor_void
+from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
+from tests.test_webhook_handlers import make_world
 
 pytestmark = pytest.mark.django_db
 
@@ -581,3 +586,46 @@ def test_the_inline_notice_never_fades() -> None:
     fade = text.index(".toast:not(.warning):not(.error) { animation: toast-fade")
     rule = text.index(".toast.info.is-inline { animation: none; }")
     assert rule > fade
+
+
+# --- A-2 (deferred MINOR): a voided payment has nothing refundable -------------------------
+
+
+def test_a_voided_manual_payment_has_nothing_refundable_and_its_tile_says_so() -> None:
+    payment = a_recorded_payment(named_user("void-desk"))
+    assert refunds.payment_facts(payment).refundable == D("500.00")
+    outcome = refunds.void_manual_payment(
+        payment.pk, reason="Recorded twice.", actor=client_for(Role.BILLING)[1]
+    )
+    assert outcome.ok, outcome.message
+    payment.refresh_from_db()
+    facts = refunds.payment_facts(payment)
+    assert (facts.refundable, facts.refunded) == (D("0.00"), D("0.00"))
+    assert facts.refund_refusal and facts.void_refusal
+    html = payment_page(payment)
+    tiles_html = element(html, '<section class="kpi-row detail-tiles"', "section")
+    assert (
+        '<span class="kpi-value">$0.00</span><span class="kpi-note">nothing refundable</span>'
+        in (tiles_html)
+    )
+    assert '<span class="kpi-note">refundable</span>' not in tiles_html
+    assert '<span class="kpi-note">pending and settled refunds</span>' in tiles_html
+
+
+def test_a_voided_processor_payment_has_nothing_refundable_and_keeps_its_refusals(
+    fake: FakeProvider,
+) -> None:
+    make_world(fake)
+    payment = ach(fake, "1500.00")
+    before = refunds.payment_facts(payment)
+    assert before.refundable == D("1500.00")
+    assert processor_void(payment).ok
+    payment.refresh_from_db()
+    assert payment.status == PaymentStatus.VOIDED
+    after = refunds.payment_facts(payment)
+    assert after.refundable == D("0.00")
+    assert (after.reference, after.refunded) == (before.reference, before.refunded)
+    assert after.refund_refusal == refunds.REFUND_NOT_SETTLED
+    assert after.void_refusal == refunds.VOID_NOT_OPEN.format(status="voided")
+    tiles_html = element(payment_page(payment), '<section class="kpi-row detail-tiles"', "section")
+    assert '<span class="kpi-note">nothing refundable</span>' in tiles_html
