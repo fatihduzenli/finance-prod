@@ -208,6 +208,8 @@ charge_patterns = (
         path("export.csv", charges.charge_export, name="export"),
         path("<str:pk>/", charges.charge_detail, name="detail"),
         path("<str:pk>/payments/new/", charges.charge_record_payment, name="record_payment"),
+        # PLAN-012f-b §10 D19: today's bank debit of the rent charge, its confirmation.
+        path("<str:pk>/charge-now/", charges.charge_now, name="charge_now"),
         path("<str:pk>/retry-mark/", charges.charge_retry_mark, name="retry_mark"),
         path("<str:pk>/retry-release/", charges.charge_retry_release, name="retry_release"),
         path("<str:pk>/link-invoice/", charges.charge_link_invoice, name="link_invoice"),

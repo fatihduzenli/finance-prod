@@ -25,7 +25,6 @@ from ledger.forms import (
     NOTE_OPTIONAL_LABEL,
     NOTE_REQUIRED_LABEL,
     REFERENCE_HELP,
-    RENT_DEBIT_REASON,
 )
 from ledger.models import AuditLog, CollectionMethod, OneOffCharge, Payment, PaymentMethod
 from ledger.services import one_off_charges as service
@@ -158,9 +157,10 @@ def test_the_rent_route_renders_the_frame_with_the_debit_card_greyed() -> None:
     body = get(Role.ADMIN, reverse("ledger:charges:record_payment", kwargs={"pk": charge.pk}))
     cards = tiles(body)
     assert "is-unavailable" in cards["debit"] and 'id="how-debit" disabled' in cards["debit"]
-    assert (
-        escape(RENT_DEBIT_REASON) in cards["debit"] and 'name="debit_amount"' not in cards["debit"]
-    )
+    # PLAN-012f-b §10 D19: the rent card is greyed with its own reason (here no bank method).
+    reason = service.rent_debit_options(charge).reason
+    assert reason == str(service.DEBIT_NO_METHOD)
+    assert escape(reason) in cards["debit"] and 'name="debit_amount"' not in cards["debit"]
     assert 'id="how-record" checked' in cards["record"]
     assert "Rent Oct 2026, debit 1 · #1991 Istanbul · Fatih Co · due" in body
     assert "Unpaid · $2,000.00 due" in body

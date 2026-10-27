@@ -1,0 +1,33 @@
+{% extends "ledger/charges/detail.html" %}
+{% load components money dates %}
+{% block title %}Charge now Rent {{ charge.period_month|month }}, debit {{ charge.seq }}{% endblock %}
+{% block dialog %}{% url 'ledger:charges:detail' pk=charge.pk as back_url %}{% dialog id="charge-now-dialog" title="Charge now" size="sm" open=True return_url=back_url %}
+  <section class="confirm" aria-labelledby="confirm-what-heading">
+  <div class="confirm-what">
+  <h2 id="confirm-what-heading">What will happen</h2>
+  <dl id="charge-now-details">
+    <dt>Operator</dt><dd id="charge-now-operator">{{ details.operator.display_name|default:"—" }}</dd>
+    <dt>Store</dt><dd id="charge-now-store">{{ details.store_label|default:"—" }}</dd>
+    <dt>Amount</dt><dd id="charge-now-amount">{{ details.amount|money }}</dd>
+    <dt>Bank method</dt><dd id="charge-now-method">{% if details.last_four %}ending {{ details.last_four }}{% if details.nickname %} ({{ details.nickname }}){% endif %}{% else %}—{% endif %}</dd>
+  </dl>
+  <p class="muted">The bank method is read from the operator's stored list of payment methods, not from {{ company.provider_name }}. A bank debit of the rent's whole balance is created with its invoice; the invoice is created in {{ company.provider_name }} first, and the single debit is made as soon as {{ company.provider_name }} has it.</p>
+  </div>
+  {% if details.refusal %}
+    <p id="charge-now-refusal"><strong>{{ details.refusal }}</strong></p>
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="charge-now-keep">Keep the charge</a></div>
+  {% else %}
+    <p id="charge-now-one-attempt"><strong>{{ one_attempt }}</strong></p>
+    <form method="post" class="js-single-submit" autocomplete="off" id="charge-now-form">
+      {% csrf_token %}{{ form.key }}
+      {% if form.non_field_errors %}<p class="errorlist">{{ form.non_field_errors|join:" " }}</p>{% endif %}
+      {% if details.large_debit %}
+        <p id="charge-now-large-debit"><label style="font-weight:normal;"><input type="checkbox" name="confirm" value="true" id="confirm-large-debit"> {{ details.large_debit }}</label>
+          {% for error in form.confirm.errors %}<br><strong class="field-error">{{ error }}</strong>{% endfor %}
+        </p>
+      {% endif %}
+      <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="charge-now-keep">Keep the charge</a> <button class="btn btn-primary" type="submit" id="charge-now-submit">Charge {{ details.amount|money }} now</button></div>
+    </form>
+  {% endif %}
+  </section>
+{% enddialog %}{% endblock %}

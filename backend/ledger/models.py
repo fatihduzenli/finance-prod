@@ -924,7 +924,9 @@ class OneOffCategory(models.TextChoices):
     ADJUSTMENT = "adjustment", "Adjustment"
     DAMAGE = "damage", "Damage"
     OTHER = "other", "Other"
-    #: The re-collection of a returned debit (PLAN-011b D5); ``source_payment`` names it.
+    #: The re-collection of a returned debit (PLAN-011b D5), ``source_payment`` naming it;
+    #: or a rent charge's bank debit from Add payment (PLAN-012f-b D19),
+    #: ``source_rent_charge`` naming it.
     REDEBIT = "redebit", "Re-debit"
     #: The fee for a returned debit, made with its re-debit (``companion_of``).
     NSF_FEE = "nsf_fee", "Returned payment (NSF) fee"
@@ -933,6 +935,11 @@ class OneOffCategory(models.TextChoices):
     #: One occurrence of an autopay plan (PLAN-012f-a D11); ``autopay_plan`` and
     #: ``period_no`` name it.
     AUTOPAY_PLAN = "autopay_plan", "Autopay plan"
+
+
+#: What staff call a ``redebit`` charge sourced by a rent charge (PLAN-012f-b §10 D19)
+#: wherever a charge's kind is printed; every other charge reads its category's label.
+BANK_DEBIT_LABEL = "Bank debit"
 
 
 class CollectionMethod(models.TextChoices):
@@ -1040,6 +1047,16 @@ class OneOffCharge(GuardedModel):
     companion_of = models.ForeignKey(
         "self", on_delete=models.PROTECT, null=True, blank=True, related_name="companions"
     )
+    #: PLAN-012f-b D19: the rent charge a ``redebit`` charge debits from Add payment (no
+    #: returned payment): exactly one of ``source_payment`` and this is set on a re-debit,
+    #: and a rent charge has at most one open (``owed``/``partial``) such debit.
+    source_rent_charge = models.ForeignKey(
+        RentCharge,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="bank_debits",
+    )
     #: PLAN-012e D9: the plan an ``installment`` charge belongs to, and its place in it
     #: (1 to the plan's count); both set exactly for that category.
     plan = models.ForeignKey(
@@ -1110,9 +1127,21 @@ class OneOffCharge(GuardedModel):
                 name="one_off_charges_lease_fee_type_unique",
             ),
             models.CheckConstraint(
-                condition=Q(category="redebit", source_payment__isnull=False)
-                | (~Q(category="redebit") & Q(source_payment__isnull=True)),
-                name="one_off_charges_source_payment_iff_redebit",
+                condition=Q(
+                    category="redebit",
+                    source_payment__isnull=False,
+                    source_rent_charge__isnull=True,
+                )
+                | Q(
+                    category="redebit",
+                    source_payment__isnull=True,
+                    source_rent_charge__isnull=False,
+                )
+                | (
+                    ~Q(category="redebit")
+                    & Q(source_payment__isnull=True, source_rent_charge__isnull=True)
+                ),
+                name="one_off_charges_redebit_one_source",
             ),
             models.CheckConstraint(
                 condition=Q(category="nsf_fee", companion_of__isnull=False)
@@ -1124,6 +1153,11 @@ class OneOffCharge(GuardedModel):
             ),
             models.UniqueConstraint(
                 fields=["companion_of"], name="one_off_charges_one_fee_per_redebit"
+            ),
+            models.UniqueConstraint(
+                fields=["source_rent_charge"],
+                condition=Q(status__in=["owed", "partial"]),
+                name="one_off_charges_one_open_debit_per_rent_charge",
             ),
             models.CheckConstraint(
                 condition=Q(

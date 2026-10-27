@@ -773,12 +773,6 @@ HOW_CHOICES: tuple[tuple[str, str], ...] = (
     (HOW_DEBIT, provider_sentence("Charge the operator's bank account (ACH via {provider})")),
     (HOW_RECORD, provider_sentence("Record a payment received outside {provider}")),
 )
-#: Why the bank-debit card is greyed on a rent charge (PLAN-012f-b D14): no re-debit path
-#: exists without a returned payment.
-RENT_DEBIT_REASON = (
-    "Rent is collected by the lease's autopay; a returned debit is re-debited from "
-    "Returned payments."
-)
 #: Billing debits from tomorrow on: today goes through Charge now, an admin's (PLAN-012f-b
 #: C2-1). The line under Debit on, and the refusal of today's date.
 DEBIT_TODAY_NEEDS_ADMIN = "A debit today needs an admin."

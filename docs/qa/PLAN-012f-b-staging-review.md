@@ -295,3 +295,148 @@ months) and every departure from the message with its reason; then the Publish R
    credentials), store the two values in `finance-kv` as `usps-client-id` and `usps-client-secret`;
    the Bicep `secretRef` lines are an infra slice you authorise separately. Egress host
    `apis.usps.com:443` (and `apis-tem.usps.com` for the test environment).
+
+---
+
+## 10. Owner decisions of 2026-10-26 (the checkpoint) — slices C2 and A5
+
+The owner reviewed the checkpoint and decided: (1) the rent-charge bank debit is approved as a
+schema change, with the rule below, as **slice C2** (own branch, own PR, after Batch C); (2)
+"Flags" replaces "Notes" on the P&L for good; (3) existing operators keep their display name
+(verified: `Operator.save` keeps `display_name` while the kind's name fields are empty, the
+`operators_display_name` CHECK refuses a blank one); (4) a payment received outside the processor
+stays partial up to the balance (verified: `test_posting_record_records_the_payment_as_before`
+records $40 of $100); (5) Payment status extends to all charges as **slice A5** after Batch E; (6)
+one-line settlements stand, multi-line goes to Step 13; (7) recording failed daily runs goes to
+Step 13. Both slices are built on the rebased Batch E tip (`167b72d`) so that nothing earlier is
+rebased again; their PRs follow Batch E in the merge order.
+
+### D19. Rent-charge bank debit from Add payment (slice C2)
+
+**Objective.** On a rent charge's Add payment page the bank-debit card works as it does on a
+one-off charge: a billing user schedules the charge's whole open balance as one bank debit
+through the processor, for today (an admin, behind the Charge now confirmation) or a later
+date; the operator's bank method is the one on file at the processor; nothing is stored about
+the bank account beyond the snapshot. The card is greyed with "A debit is already pending." while
+the charge has a live debit.
+
+**Mechanism (the schema change).** A rent charge has no provider invoice of its own, so the debit
+is a `redebit` one-off charge sourced by the rent charge, exactly as a returned payment's re-debit
+is sourced by the payment: `OneOffCharge.source_rent_charge` (FK `RentCharge`, null, PROTECT,
+`related_name="bank_debits"`). The CHECK `one_off_charges_source_payment_iff_redebit` becomes
+`one_off_charges_redebit_one_source`: `category = redebit` ⇔ exactly one of `source_payment`,
+`source_rent_charge` is set; a new conditional unique constraint
+`one_off_charges_one_open_debit_per_rent_charge` (`source_rent_charge` where `status in (owed,
+partial)`) keeps one open debit per rent charge. Migration **0056**, `GUARDED_COLUMNS` empty, both
+guard lists, a `docs/DATA_OWNERSHIP.md` row. The charge reads "Bank debit of Rent {Month YYYY}"
+(the rent charge's existing label), price = the balance at creation, `due_date` = the debit date,
+lease and operator from the rent charge, `collection = autopay_due` once scheduled.
+
+**Every reader of `source_payment__rent_charge` learns the second source**: `rent_run.redebit_collected`
+(what the debit collected counts as paid on the rent charge — this is what makes the rent charge
+Paid when the debit settles), `receivables.carried_by_redebits` / `_redebit_amounts` (the Unpaid
+balances carry the amount under the rent charge, not twice), `one_off_charges` ~2804 (the chain
+walk ends at the rent charge), `pnl` ~733–751 (the money is rent income of the rent charge's
+month), `nsf.source_description` (what the debit pays), the charge page and the statement labels
+("Bank debit of …", never "Re-debit of …" when there is no returned payment), the daily run's Due
+today (an `autopay_due` one-off with a schedule qualifies as any other). Opus greps `REDEBIT` and
+`source_payment` and reports every site with its treatment: changed, or unaffected and why.
+
+**Availability** — `one_off_charges.rent_debit_options(charge) -> BankDebitOptions`, local data,
+reasons in this order: waived → `DEBIT_CLOSED`; paid or balance ≤ 0 → `DEBIT_PAID`; **live
+debit** → `DEBIT_PENDING` ("A debit is already pending."); charge-now flag off → `DEBIT_OFF`; no bank
+method → `DEBIT_NO_METHOD`. A debit is live when the rent charge's status is `pending`, or a
+payment on it is `pending`, or an open (`owed`/`partial`) re-debit of it — sourced by the charge
+or by one of its returned payments — is `autopay_due` or has a pending payment. So the card is
+offered when the charge was never debited, is collected by e-mail, or its last debit returned or
+failed and no re-debit is open (the owner's rule); the returns queue's Reschedule stays as it is.
+
+**Action** — `one_off_charges.rent_debit(charge, on, *, actor, confirmed, key, today=None, note="") -> Outcome`:
+the input refusals first (`_debit_input_refusal`, the role rules of `debit`, the availability
+rule re-checked under the rent charge's row lock), then in **one transaction**: the re-debit
+created, the audit row `rent_charge.debit_started` on the rent charge with the actor, the amount,
+the date and the new charge's id, then the existing `debit()` path on the new charge (today →
+the Charge now path with its confirmation and large-debit rule; later → the single-occurrence
+schedule). **Invariant:** a refused, abandoned or replayed request leaves no re-debit charge
+behind — for today's path the re-debit is created at confirmation time, in the confirm POST,
+never on the GET of the confirmation page. The replay key is the form's `creation_key` and is
+stored on the re-debit (`charge_now_key`) as today.
+
+**View.** `charges.charge_record_payment` builds the form with `debit_reason =
+rent_debit_options(charge).reason` (`RENT_DEBIT_REASON` retired) and handles `how = debit` as
+`one_off_charges` view does, redirecting to the rent charge's page with the one-off view's
+sentences. The confirmation for today's debit: the existing Charge now confirmation page over
+the rent charge (a `rent` parameter or a sibling route `ledger:charges:debit_confirm` — Opus
+chooses the smaller change and says why; one new URL at most, registry rules, admin).
+
+**Amendments after Opus's step-3 report (Fable, 2026-10-26).** (a) Today's path cannot use the
+one-off Charge now path (it needs a provider invoice already linked), so it runs the invoice
+builder's existing Charge now path on the NSF local-invoice pattern: the confirm POST creates the
+re-debit, a local one-line invoice for it as `nsf.reschedule` does, and queues `invoice_create`
+with the charge-now parameter so the worker queues `invoice_pay` after a successful create;
+eligibility widens only to a re-debit with `source_rent_charge`. The acceptance line reads "no
+provider call outside the existing jobs: invoice_create with charge now, invoice_pay,
+schedule_create". The confirmation is the sibling route `ledger:charges:debit_confirm` (admin). (b)
+Live rule: any open (`owed` / `partial`) debit sourced by the rent charge is live, whatever its
+collection or payments — consistent with the unique constraint; after a refused or failed debit
+the card stays greyed until staff cancel that re-debit with the existing cancel action. A rent
+charge on a live installment plan is not offered either (`DEBIT_ON_PLAN`, "This charge is collected
+by its installment plan."), and splitting a rent charge that has an open debit is refused ("A bank
+debit is pending on this charge."). (c) Wording where a re-debit is named: "Bank debit of …" on
+the detail card, "Bank debit: …" on the calendar, "Carried by bank debit" on the rent row, the kind
+badge "Bank debit" through one helper `one_off_charges.kind_label`. (d) The amount is checked in
+the view (a posted amount other than the balance is refused with the one-off page's sentence); the
+service takes no amount. (e) P&L: the debit's money is rent collected in the month it settles, as
+every rent payment. (f) The rent card's sentence is `RENT_DEBIT_PENDING`; the one-off card keeps
+its own.
+
+**Out of scope.** Insurance charges; a partial debit; a debit while the lease's own autopay is in
+flight (that is the `pending` rule); changing the lease's autopay; any provider call beyond the
+existing Charge now and schedule jobs.
+
+**Test plan (D19).** The migration round trip and both guard lists; the CHECK refuses a re-debit
+with two sources or none; the unique constraint refuses a second open debit; the availability
+rule for each state (never debited; e-mail; last returned with no re-debit; last failed; `pending`
+status; a pending payment; an open re-debit sourced by the charge; one sourced by its returned
+payment; waived; paid; flag off; no bank method); today's path: admin only, the confirmation,
+the re-debit created only on confirm, the audit row names the actor, one provider attempt, a
+replayed key writes nothing; later path: one `schedule_create` job, the charge `autopay_due`, the
+rent charge's balance unchanged until settlement; settlement of the debit's payment marks the
+rent charge paid through `redebit_collected`; Unpaid balances carry the amount once; P&L counts it
+as rent of the charge's month; the charge page's label; viewer 403, another store's charge 404;
+nothing written on GET; the pages tests' pins by name. Adversarial (Fable): a race of two
+debits leaves one re-debit (PostgreSQL); a debit on a charge whose lease ended; a debit the
+provider refuses leaves the re-debit `owed` with the refusal in the audit and the card offered
+again; a posted amount other than the balance refused.
+
+### D20. Payment status for all charges (slice A5)
+
+**Objective.** The dashboard's Payment status card counts every charge due in the range: rent
+charges as today plus one-off charges (fees), same date range, same three boxes.
+
+**Rule.** One more query: `OneOffCharge` due in the range, **excluding** `installment` and
+`autopay_plan` (they count through their parent charge) and `redebit` (it counts through its
+source), `values_list(status, due_date, price, amount_paid)` with an `Exists` annotation for a
+pending payment. Families: `paid` → Paid by `amount_paid`; `waived` / `voided` nowhere; a pending
+payment → the pending count; `owed` / `partial` due before today → Overdue by the balance, else
+Upcoming by the balance (a partly paid one not yet due counts as pending, as a rent charge does).
+The card's copy is unchanged; its key reads the same three words.
+
+**Cost.** One extra query, a range scan over `one_off_charges.due_date` (no index; the table is
+thousands of rows at most); the dashboard budget pins move 80 → 81 (`tests/test_dashboard_cards.py`
+`MAX_DASHBOARD_QUERIES`, Fable's `test_plan012fb_a_adversarial.py`), re-pinned by name. If the
+dashboard's time rises on staging, a `due_date` index joins Step 13's index work; not now.
+
+**Test plan (D20).** A fee due last week unpaid → Overdue; a fee paid → Paid by its amount; a fee
+due next week → Upcoming; an installment line and an autopay-plan occurrence due in range count
+nothing beside their parent; a re-debit counts nothing beside its source; a fee with a pending
+payment → pending; a voided and a waived fee nowhere; the range edges; the query budget.
+
+### Acceptance (§10)
+
+- C2: every D19 test passes on sqlite and PostgreSQL; the migration round trip holds; no
+  orphan re-debit after any refused or abandoned request (asserted); the card's reason text
+  matches the owner's sentence; no provider call outside the two existing jobs; the audit row
+  names the actor.
+- A5: the three boxes equal the hand-computed figures of the test data set; the budget pin holds
+  at 81; no template change beyond the card's figures.

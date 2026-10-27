@@ -330,6 +330,8 @@ FORM_PAGES = (
     "ledger:charges:record_payment",
     "ledger:charges:link_invoice",
     "ledger:charges:split",
+    # PLAN-012f-b §10 D19: today's bank debit of a rent charge, as the one-off's Charge now.
+    "ledger:charges:charge_now",
     "ledger:one_off_charges:payment",
     "ledger:one_off_charges:link",
     "ledger:one_off_charges:edit",
@@ -616,6 +618,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:one_off_charges:waive": lambda w: BREADCRUMBS["ledger:one_off_charges:detail"](w),
     "ledger:one_off_charges:cancel": lambda w: BREADCRUMBS["ledger:one_off_charges:detail"](w),
     "ledger:one_off_charges:charge_now": lambda w: BREADCRUMBS["ledger:one_off_charges:detail"](w),
+    "ledger:charges:charge_now": lambda w: BREADCRUMBS["ledger:charges:detail"](w),
     "ledger:one_off_charges:split": lambda w: ([w.one_off.label], "Split into installments"),
     "ledger:plans:detail": lambda w: ([*_store(w), "Rent Oct 2026"], "Installment plan"),
     "ledger:plans:reschedule": lambda w: (

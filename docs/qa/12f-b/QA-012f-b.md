@@ -294,3 +294,56 @@ error pages leak no path or stack and escape what the URL carried; the empty sta
 escape their text; a hostile report query never breaks the page.
 
 **Verdict (E):** PASS — four findings resolved (two MAJOR, two MINOR), none deferred; residual risk: the red strip for a failed daily run is not built (no stored value; excluded), the Help "Updated" dates are constants that need a hand edit when a topic changes, and the confirmation pages' query counts are not pinned.
+
+## Slice C2 — the bank debit on a rent charge from Add payment (branch `step-12f-b/batch-c2`, plan §10 D19)
+
+**Scope.** The owner's checkpoint decision of 2026-10-26 (a schema change approved). Opus, one
+brief in two rounds (stopped at step 4 to report that today's debit cannot run through the
+one-off Charge now path, which needs a provider invoice already linked; Fable chose the
+invoice builder's charge-now path on the NSF local-invoice pattern). Built: `OneOffCharge.source_rent_charge`
+(migration 0056: the CHECK `one_off_charges_redebit_one_source` — a re-debit has exactly one
+source — and the conditional unique constraint `one_off_charges_one_open_debit_per_rent_charge`;
+no guarded column); `one_off_charges.rent_debit_options` (waived · paid · a live installment plan
+· the lease's own autopay about to debit a due charge · a live debit · the flag off · no bank
+method, in that order; the owner's sentence "A debit is already pending."), `rent_debit` (one
+transaction under the rent charge's row lock: the re-debit created with the balance as its
+price, the audit row `rent_charge.debit_started` naming the actor, the amount, the date and the
+charge; today → a local one-line invoice and `invoice_create` with the charge-now parameter so the
+worker queues the single `invoice_pay`; a later date → `debit()`'s single-occurrence schedule; a
+refusal, an abandoned confirmation or a replayed key leaves no charge behind), the sibling route
+`ledger:charges:debit_confirm` (admin; the Charge now dialog over the rent charge page; GET
+writes nothing); `charges.charge_record_payment` handles the debit card; every reader of a
+re-debit's source learned the second one (`rent_run.redebit_collected`, `receivables`, the chain
+walk, the P&L, the labels: "Bank debit" through `one_off_charges.kind_label`, the calendar, the
+Unpaid balances, the Charges tab's "Carried by bank debit", the source line "as a bank debit of
+Rent …"); splitting a rent charge with an open debit is refused. Fable: `tests/test_plan012fb_c2_adversarial.py`
+(22 cases: two debits at the same moment on PostgreSQL, the ended lease on each path, forged and
+missing keys and hostile parameters on the confirmation, what a provider refusal leaves, no
+payment state written by the action, carried once with mixed sources, the lease's own autopay).
+
+**Findings.** C2-1 (MAJOR, resolved): a `due` rent charge of a lease whose autopay is on was
+offered a manual debit before the schedule's own debit — two debits of one rent; the card is now
+greyed with "The lease's autopay debits this charge on {date}." while the charge is `due`, not yet
+past its due date and the autopay active (a passed due date, an `unpaid` charge or a paused
+autopay keep the card). C2-2 (MINOR, resolved): the debit page's source line read "from Bank debit
+of …"; it reads "as a bank debit of Rent …". C2-4 (MAJOR, resolved): the route `ledger:charges:debit_confirm` at `/charges/<pk>/debit/` tripped the guard that no route name or path says "debit" (no route re-debits on its own); the route is `ledger:charges:charge_now` at `charge-now/`, as the one-off charge's, and the guard is untouched. C2-3 (MINOR, deferred by written decision): the note
+of an abandoned today's-debit confirmation stays in the admin's own session until the next
+attempt or the session's end; it never leaves the session and is removed on success.
+
+**Departures from the plan's first text, with reasons.** Today's debit runs through the
+builder's charge-now path (local invoice + `invoice_create` with charge now + `invoice_pay`) rather
+than the one-off Charge now path, which needs a provider invoice already linked; the acceptance
+line reads "no provider call outside the existing jobs". Any open debit sourced by the charge is
+live (consistent with the unique constraint): a refused or failed debit keeps the card greyed until
+staff cancel that re-debit from its page. A live installment plan and the lease's own autopay are
+two more reasons the card is not offered (double collection otherwise). `reports.py` and a new
+template filter `charge_kinds.py` joined the file list so "Bank debit" prints wherever the
+category label did. The rent charge page's query budget moved 28 → 30 (the open-debit line and the
+split guard), re-pinned by name in `tests/test_plan012fa_b_detail.py`; the route digest 272 → 273.
+
+**Gate.** ruff, `ruff format --check` (520 files), mypy strict (520 files), `uv lock --check`, `makemigrations --check` on sqlite: clean on the first tip and again after each rework. sqlite: the full suite on c51cfc4 found three route pins (C2-4, the tripwire and two enumerations) — 7,876 passed, 3 failed; after the rename, on 40a1a77, 7,879 passed, 692 skipped, 114 deselected in 968 s. PostgreSQL 16 (a throwaway container, the CI split, on 40a1a77): `makemigrations --check` no changes; the migration selection 36 passed in 937 s (0056's round trip included); the unit selection 8,532 passed, 3 skipped, 117 deselected in 1,121 s (the two-debits race ran here); the e2e suite 35 passed four times over (67, 64, 63 and 63 s). Visual: every baseline compared in the Playwright image, 66 passed on PostgreSQL and 66 on sqlite, none changed (the slice adds a dialog and a line that the visual world never shows). Shots: `docs/qa/12f-b/shots/c2/` — Add payment with the card offered, the Charge now dialog over the rent charge, the rent charge with its open debit, laptop 1280 and phone 390, from the browser test `tests/e2e/test_rent_debit_12fb_c2.py` run in the Playwright image against PostgreSQL. One note from the shots, not a defect: while the debit is open the Payments card shows the debit's line above the "No payment yet · Add a payment" empty state, which is true (no payment exists until the bank answers); the Add payment page then greys the card. Secret scans
+clean (pattern scan of the diff and the five new files; `scripts/check-no-secrets.sh`); no
+secret-store read; the provider fence clean over the new non-test files; no new dependency; no
+new environment variable.
+
+**Verdict (C2):** PASS — four findings resolved (two MAJOR: the lease's own autopay, the route name against the re-debit tripwire; two MINOR), one MINOR deferred by written decision (the session note); residual risk: the live-Stax path of today's debit (invoice_create with charge now, then invoice_pay) is proven against the fake only — TODO-VERIFY with the Add payment ACH item on live Stax; the autopay rule reads the local schedule state (what "Pause autopay" reads), a schedule active at the provider but not mirrored locally would not grey the card.

@@ -683,6 +683,21 @@ def _second_redebit(*, same_payment: bool) -> ledger.OneOffCharge:
     return new_one_off_charge(category="redebit", description="Re-debit", source_payment=other)
 
 
+def _second_rent_debit(*, first_status: str) -> ledger.OneOffCharge:
+    """Save a bank debit of a rent charge (PLAN-012f-b D19) in ``first_status``; return an
+    unsaved open debit of the same rent charge."""
+    rent = saved(new_rent_charge())
+    first: dict[str, Any] = {"status": first_status}
+    if first_status == "paid":
+        first["amount_paid"] = D("300.00")
+    insert(
+        new_one_off_charge(
+            category="redebit", description="Bank debit", source_rent_charge=rent, **first
+        )
+    )
+    return new_one_off_charge(category="redebit", description="Bank debit", source_rent_charge=rent)
+
+
 def _second_fee(*, same_redebit: bool) -> ledger.OneOffCharge:
     """Save an NSF fee of one charge; return an unsaved fee of the same or another."""
     first = saved(new_one_off_charge())
@@ -1861,14 +1876,44 @@ LEDGER_CASES: list[ConstraintCase] = [
         unique_pair(new_legacy_record, {}, {}),
     ),
     # PLAN-011b D5: re-debit and NSF fee charges, the NSF counter, the resolution kind.
+    # PLAN-012f-b D19 (migration 0056): the CHECK renamed from
+    # ``one_off_charges_source_payment_iff_redebit``; a re-debit has exactly one source.
     ConstraintCase(
-        "one_off_charges_source_payment_iff_redebit",
+        "one_off_charges_redebit_one_source",
         lambda: new_one_off_charge(
             category="redebit",
             description="Re-debit of Rent 2026-09",
             source_payment=saved(new_payment()),
         ),
         lambda: new_one_off_charge(source_payment=saved(new_payment())),
+    ),
+    ConstraintCase(
+        "one_off_charges_redebit_one_source",
+        lambda: new_one_off_charge(
+            category="redebit",
+            description="Bank debit of Rent Sep 2026",
+            source_rent_charge=saved(new_rent_charge()),
+        ),
+        lambda: new_one_off_charge(
+            category="redebit",
+            description="Bank debit of Rent Sep 2026",
+            source_payment=saved(new_payment()),
+            source_rent_charge=saved(new_rent_charge()),
+        ),
+    ),
+    ConstraintCase(
+        "one_off_charges_redebit_one_source",
+        lambda: new_one_off_charge(
+            category="redebit",
+            description="Bank debit of Rent Sep 2026",
+            source_rent_charge=saved(new_rent_charge()),
+        ),
+        lambda: new_one_off_charge(category="redebit", description="Re-debit"),
+    ),
+    ConstraintCase(
+        "one_off_charges_one_open_debit_per_rent_charge",
+        lambda: _second_rent_debit(first_status="paid"),
+        lambda: _second_rent_debit(first_status="owed"),
     ),
     ConstraintCase(
         "one_off_charges_companion_iff_nsf_fee",

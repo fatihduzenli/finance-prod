@@ -328,9 +328,9 @@ def _lease_ends(leases: Iterable[Lease], start: date, end: date, host: str) -> l
 
 
 def _redebits(windows: Windows, host: str) -> list[CalendarItem]:
-    """The re-debit dates of rescheduled returns (PLAN-011b D5): one item per re-debit
-    charge due in the range and not voided; the title names the store and the operator,
-    never the amount."""
+    """The re-debit dates of rescheduled returns (PLAN-011b D5), and of rent charges' bank
+    debits (PLAN-012f-b D19): one item per re-debit charge due in the range and not
+    voided; the title names the store and the operator, never the amount."""
     found = []
     for charge in (
         OneOffCharge.objects.select_related("lease__store", "lease__operator", "operator")
@@ -348,7 +348,12 @@ def _redebits(windows: Windows, host: str) -> list[CalendarItem]:
                 uid=f"redebit-{charge.pk}@{host}",
                 kind=KIND_REDEBIT,
                 on=charge.due_date,
-                title=f"Re-debit: {where}",
+                # PLAN-012f-b D19: a rent charge's bank debit from Add payment.
+                title=(
+                    f"Bank debit: {where}"
+                    if charge.source_rent_charge_id is not None
+                    else f"Re-debit: {where}"
+                ),
                 body="",
                 url=reverse("ledger:one_off_charges:detail", kwargs={"pk": charge.pk}),
                 store_id=lease.store_id if lease is not None else None,

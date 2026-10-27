@@ -209,6 +209,8 @@ LINES_ORDER = "The installments' dates must be in order, each after the one befo
 NOTHING_DUE = "Nothing is owed on this charge."
 CLOSED = "This charge is waived or voided."
 HAS_PLAN = "This charge already has an installment plan."
+#: A rent charge with an open bank debit from Add payment (PLAN-012f-b §10 D19).
+BANK_DEBIT_OPEN = "A bank debit is pending on this charge."
 NOT_SPLITTABLE = "A re-debit, an NSF fee or an installment is not split into installments."
 DEPOSIT = "A deposit is not split into installments."
 PENDING = "A payment on this charge is pending: wait until it settles or is returned."
@@ -642,6 +644,8 @@ def _rent_refusal(charge: RentCharge, today: date) -> str:
         return CLOSED
     if charge.status == RentChargeStatus.PENDING:
         return PENDING
+    if one_off_charges.open_debit(charge) is not None:
+        return BANK_DEBIT_OPEN
     invoice = _live_invoice(charge)
     if invoice is not None:
         if invoice.rent_charge_id != charge.pk or one_off_charges.invoice_line_count(invoice) > 1:

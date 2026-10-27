@@ -2040,11 +2040,16 @@ def redebit_collected(**source: RentCharge | InsuranceCharge | OneOffCharge) -> 
     (PLAN-011b D5): each re-debit's paid amount up to its price, so its NSF fee never
     counts. ``source`` names the charge: ``rent_charge=``, ``insurance_charge=`` or
     ``one_off_charge=``. A re-debit's paid amount already follows its settled payments,
-    returns, refunds and voids (and the re-debits of its own returned payments)."""
+    returns, refunds and voids (and the re-debits of its own returned payments). A rent
+    charge's bank debits from Add payment (``source_rent_charge``, PLAN-012f-b D19) count
+    the same way: what they collected is paid on the rent charge."""
     [(field, charge)] = source.items()
-    rows = OneOffCharge.objects.filter(
-        category=OneOffCategory.REDEBIT, **{f"source_payment__{field}": charge}
-    ).values_list("amount_paid", "price")
+    sourced = Q(**{f"source_payment__{field}": charge})
+    if field == "rent_charge":
+        sourced |= Q(source_rent_charge=charge)
+    rows = OneOffCharge.objects.filter(sourced, category=OneOffCategory.REDEBIT).values_list(
+        "amount_paid", "price"
+    )
     return sum(
         (min(max(Decimal(paid), ZERO), Decimal(price)) for paid, price in rows), ZERO
     ).quantize(CENT)

@@ -174,6 +174,7 @@ import payments
 from accounts.roles import Role, meets, role_of
 from finance.dates import day_text
 from ledger.models import (
+    BANK_DEBIT_LABEL,
     DESCRIPTION_MAX_LENGTH,
     LIVE_PLAN_STATUSES,
     NSF_FEE_CODES,
@@ -1445,6 +1446,12 @@ def charge_now_wait(charge: OneOffCharge, now: datetime | None = None) -> int:
     return rent_run.retry_wait_after(last, now)
 
 
+def _debit_eligible(charge: OneOffCharge) -> bool:
+    """The categories Charge now and Add payment's bank debit may take: a form category or
+    a setup charge, and a rent charge's bank debit (PLAN-012f-b §10 D19) alone besides."""
+    return charge.category in (*FORM_CATEGORIES, OneOffCategory.SETUP) or is_rent_debit(charge)
+
+
 def charge_now_refusal(charge: OneOffCharge) -> str:
     """The first rule that stops Charge now on this charge, or ``""``. Local data only;
     the role, the large-debit box, a waiting job and the one-minute lock are checked by
@@ -1453,7 +1460,7 @@ def charge_now_refusal(charge: OneOffCharge) -> str:
         return CHARGE_NOW_DISABLED
     if (
         charge.collection != CollectionMethod.CHARGE_NOW
-        or charge.category not in (*FORM_CATEGORIES, OneOffCategory.SETUP)
+        or not _debit_eligible(charge)
         or is_later_line(charge)
     ):
         return CHARGE_NOW_NOT_ELIGIBLE
@@ -1567,6 +1574,14 @@ DEBIT_OFF = provider_sentence("Bank debits are off at {provider}.")
 DEBIT_PAID = "This charge is already paid."
 DEBIT_CLOSED = "This charge is waived or voided."
 DEBIT_PENDING = "A payment on this charge is pending."
+#: A rent charge's live debit (PLAN-012f-b §10 D19, the owner's sentence).
+RENT_DEBIT_PENDING = "A debit is already pending."
+#: A rent charge whose balance a live installment plan collects (D19, Fable 2026-10-26).
+DEBIT_ON_PLAN = "This charge is collected by its installment plan."
+#: A ``due`` rent charge the lease's active autopay will debit (D19, Fable's finding).
+DEBIT_BY_AUTOPAY = "The lease's autopay debits this charge on {date}."
+#: How a rent charge's bank debit's description begins (D19).
+BANK_DEBIT_PREFIX = "Bank debit of "
 DEBIT_NOT_ELIGIBLE = "This charge cannot be debited from here. Nothing was charged."
 DEBIT_DATE_REQUIRED = "Choose the date of the debit. Nothing was charged."
 DEBIT_DATE_PAST = "The debit date must be today or later. Nothing was charged."
@@ -1585,6 +1600,8 @@ DEBIT_SCHEDULED = provider_sentence("{provider} will debit {amount} on {date}.")
 
 DEBIT_NOW_ACTION = "one_off_charge.debit_requested"
 DEBIT_SCHEDULED_ACTION = "one_off_charge.debit_scheduled"
+#: The audit row on the rent charge of a bank debit from Add payment (D19).
+RENT_DEBIT_ACTION = "rent_charge.debit_started"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1645,6 +1662,102 @@ def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
         reason = DEBIT_PAID
     elif has_pending_payment(charge):
         reason = DEBIT_PENDING
+    elif not enabled:
+        reason = str(DEBIT_OFF)
+    elif method is None:
+        reason = str(DEBIT_NO_METHOD)
+    else:
+        reason = ""
+    return BankDebitOptions(
+        enabled=enabled,
+        method=method,
+        balance=balance,
+        large=leases.is_large_debit(balance),
+        reason=reason,
+    )
+
+
+#: The statuses of an open one-off charge: what the one-open-debit index counts (D19).
+OPEN_STATUSES: tuple[str, ...] = (OneOffChargeStatus.OWED, OneOffChargeStatus.PARTIAL)
+
+
+def is_rent_debit(charge: OneOffCharge) -> bool:
+    """A rent charge's bank debit from Add payment (D19): a re-debit sourced by the rent
+    charge, with no returned payment behind it."""
+    return charge.category == OneOffCategory.REDEBIT and charge.source_rent_charge_id is not None
+
+
+def kind_label(charge: OneOffCharge) -> str:
+    """What a charge's kind reads wherever it is printed: "Bank debit" for a rent
+    charge's bank debit (D19), the category's label otherwise."""
+    return BANK_DEBIT_LABEL if is_rent_debit(charge) else str(charge.get_category_display())
+
+
+def rent_debit_description(charge: RentCharge) -> str:
+    """The description of a rent charge's bank debit: ``Bank debit of Rent Oct 2026``
+    (``(debit 2)`` for a second debit of the month), the rent charge's screen label."""
+    from ledger.services import installments  # installments imports this module
+
+    return f"{BANK_DEBIT_PREFIX}{installments.parent_screen_label(charge)}"[:DESCRIPTION_MAX_LENGTH]
+
+
+def open_debit(charge: RentCharge) -> OneOffCharge | None:
+    """The rent charge's open bank debit (at most one: the unique index), or ``None``."""
+    return OneOffCharge.objects.filter(source_rent_charge=charge, status__in=OPEN_STATUSES).first()
+
+
+def rent_debit_live(charge: RentCharge) -> bool:
+    """Whether a debit of the rent charge is in flight (PLAN-012f-b §10 D19): the charge
+    reads ``pending``; a payment on it is pending; an open (``owed``/``partial``) bank
+    debit sourced by the charge exists, whatever its collection or payments (one open
+    debit per rent charge: a refused or failed one is cancelled from its page first); or
+    an open re-debit of one of its returned payments is ``autopay_due`` or has a pending
+    payment. Local data only."""
+    if charge.status == RentChargeStatus.PENDING:
+        return True
+    if Payment.objects.filter(rent_charge=charge, status=PaymentStatus.PENDING).exists():
+        return True
+    pending = Payment.objects.filter(one_off_charge=OuterRef("pk"), status=PaymentStatus.PENDING)
+    return (
+        OneOffCharge.objects.filter(category=OneOffCategory.REDEBIT, status__in=OPEN_STATUSES)
+        .filter(
+            Q(source_rent_charge=charge)
+            | Q(
+                Q(collection=CollectionMethod.AUTOPAY_DUE) | Q(Exists(pending)),
+                source_payment__rent_charge=charge,
+            )
+        )
+        .exists()
+    )
+
+
+def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDebitOptions:
+    """The bank-debit card of Add payment on a rent charge (PLAN-012f-b §10 D19): the
+    whole open balance, as one bank debit. Greyed, in this order: waived; paid or nothing
+    owed; a live installment plan collects it; the lease's active autopay will debit it (a
+    ``due`` charge due ``today`` or later: a debit here would charge the operator twice);
+    a debit in flight (:func:`rent_debit_live`); the pay-an-invoice flag off; no usable
+    linked bank method. A ``due`` charge past its due date (the schedule did not fire), an
+    ``unpaid`` one, and autopay off or paused keep the card. Local data only; no provider
+    call."""
+    day = today or timezone.localdate()
+    enabled = charge_now_enabled()
+    method = _bank_method(charge.lease.operator)
+    balance = max(Decimal(charge.balance), ZERO).quantize(CENT)
+    if charge.status == RentChargeStatus.WAIVED:
+        reason = DEBIT_CLOSED
+    elif charge.status == RentChargeStatus.PAID or balance <= 0:
+        reason = DEBIT_PAID
+    elif rent_run.on_live_plan(rent_charge=charge):
+        reason = DEBIT_ON_PLAN
+    elif (
+        charge.status == RentChargeStatus.DUE
+        and charge.due_on >= day
+        and leases.autopay_on(charge.lease)
+    ):
+        reason = DEBIT_BY_AUTOPAY.format(date=day_text(charge.due_on))
+    elif rent_debit_live(charge):
+        reason = RENT_DEBIT_PENDING
     elif not enabled:
         reason = str(DEBIT_OFF)
     elif method is None:
@@ -1740,7 +1853,7 @@ def debit(
         options = bank_debit_options(locked)
         if options.reason:
             return Outcome(False, options.reason)
-        if locked.category not in (*FORM_CATEGORIES, OneOffCategory.SETUP) or is_later_line(locked):
+        if not _debit_eligible(locked) or is_later_line(locked):
             return Outcome(False, DEBIT_NOT_ELIGIBLE)
         if amount > options.balance:
             return Outcome(False, DEBIT_OVER_BALANCE, "amount")
@@ -1839,6 +1952,182 @@ def _debit_on(
     job = jobs.enqueue(JobKind.SCHEDULE_CREATE, charge, None, actor)
     text = DEBIT_SCHEDULED.format(amount=format_amount(amount), date=day_text(on))
     return Outcome(True, text, charge=charge, job=job)
+
+
+def rent_debit_request(charge: RentCharge, actor: User | None) -> ChargeNowDetails:
+    """The confirmation page of today's bank debit of a rent charge (admin; D19): the
+    whole balance, the stored bank method, the large-debit sentence. Local data only;
+    nothing is written and the provider is never called."""
+    options = rent_debit_options(charge)
+    admin = actor is not None and meets(role_of(actor), Role.ADMIN)
+    method = options.method
+    return ChargeNowDetails(
+        refusal=options.reason if admin else CHARGE_NOW_ADMIN,
+        operator=charge.lease.operator,
+        store_label=charge.lease.store.external_label,
+        amount=options.balance,
+        invoice_number="",
+        last_four=method.last_four if method is not None else "",
+        nickname=method.nickname if method is not None else "",
+        large_debit=leases.large_debit_confirmation([options.balance]),
+        wait_seconds=0,
+    )
+
+
+def rent_debit(
+    charge: RentCharge,
+    on: date | None,
+    *,
+    actor: User | None,
+    confirmed: bool,
+    key: uuid.UUID | None,
+    today: date | None = None,
+    note: str = "",
+) -> Outcome:
+    """Debit the rent charge's whole open balance from the operator's linked bank account
+    (Add payment, PLAN-012f-b §10 D19).
+
+    The input refusals first: the note (card or account data), the date (today or later,
+    a later date within the horizon), the role (an admin for today, billing for a later
+    date). Then, under the rent charge's row lock and in **one transaction**: a replay of
+    ``key`` changes nothing; :func:`rent_debit_options` must offer the debit; the
+    operator is not archived; the large-debit confirmation and the provider limit; a
+    later date needs a lease that has not ended. The ``redebit`` charge is created
+    (sourced by the rent charge, the balance as its price, due on ``on``, ``key`` as its
+    ``charge_now_key``) and ``rent_charge.debit_started`` is audited on the rent charge.
+    **Today**: the charge is ``charge_now`` with a local one-line invoice, as
+    :func:`ledger.services.nsf.reschedule` makes one, and ``invoice_create`` is queued with
+    :data:`CHARGE_NOW_PARAM`, so the worker queues the single ``invoice_pay`` once the
+    invoice exists (the invoice builder's path). **A later date**: the charge is created
+    ``email`` (no invoice is made) and :func:`debit` schedules it, which makes it
+    ``autopay_due`` and queues ``schedule_create``. A refusal at any step leaves no charge
+    behind. No payment state is written here (Rule 2)."""
+    day = today or timezone.localdate()
+    note = visible_text(note or "")
+    # The amount is the balance, read under the lock: only the note and the date here.
+    refused = _text_refusal(note, "note") or _debit_input_refusal(CENT, on, day)
+    if refused is not None or on is None:
+        return refused or Outcome(False, DEBIT_DATE_REQUIRED, "on")
+    role = role_of(actor) if actor is not None else None
+    if on == day and not (role is not None and meets(role, Role.ADMIN)):
+        return Outcome(False, CHARGE_NOW_ADMIN)
+    if on > day and not (role is not None and meets(role, Role.BILLING)):
+        return Outcome(False, DEBIT_SCHEDULE_ROLE)
+    with transaction.atomic():
+        locked = (
+            RentCharge.objects.select_for_update(of=("self",))
+            .select_related("lease__operator", "lease__store")
+            .get(pk=charge.pk)
+        )
+        earlier = (
+            OneOffCharge.objects.filter(charge_now_key=key).first() if key is not None else None
+        )
+        if earlier is not None:
+            return Outcome(True, DEBIT_ALREADY, charge=earlier)
+        options = rent_debit_options(locked, today=day)
+        if options.reason:
+            return Outcome(False, options.reason)
+        operator = locked.lease.operator
+        if operator is None or operator.archived_at is not None:
+            return Outcome(False, OPERATOR_ARCHIVED)
+        amount = options.balance
+        if options.large and confirmed is not True:
+            return Outcome(False, leases.large_debit_confirmation([amount]), "confirm")
+        limit = leases.provider_limit_refusal([amount])
+        if limit:
+            return Outcome(False, limit, "amount")
+        now = on == day
+        if not now and _lease_ended(locked.lease, day):
+            return Outcome(False, LEASE_ENDED, "on")
+        redebit = OneOffCharge(
+            operator=operator,
+            lease=locked.lease,
+            category=OneOffCategory.REDEBIT,
+            collection=CollectionMethod.CHARGE_NOW if now else CollectionMethod.EMAIL,
+            description=rent_debit_description(locked),
+            price=amount,
+            due_date=on,
+            note=note,
+            status=OneOffChargeStatus.OWED,
+            source_rent_charge=locked,
+            charge_now_key=key or uuid.uuid4(),
+        )
+        try:
+            with transaction.atomic():
+                redebit.save()
+        except IntegrityError:
+            # Another debit of this rent charge (or of this key) committed first.
+            return Outcome(False, RENT_DEBIT_PENDING)
+        invoice = None
+        if now:
+            invoice = Invoice.objects.create(
+                invoice_number=numbering.next_invoice_number(day.year),
+                operator=operator,
+                one_off_charge=redebit,
+                issue_date=day,
+                due_date=day,
+                memo=redebit.description,
+                subtotal=amount,
+                tax=ZERO,
+                fees=ZERO,
+                surcharge=ZERO,
+                total=amount,
+                internal_status=InvoiceStatus.DRAFT,
+                allow_card=False,
+                allow_ach=True,
+                legacy=False,
+            )
+        number = invoice.invoice_number if invoice is not None else None
+        _audit(
+            actor,
+            CREATED_ACTION,
+            redebit,
+            None,
+            {
+                **charge_state(redebit),
+                "note": note,
+                "source_rent_charge": str(locked.pk),
+                "invoice_number": number,
+                "creation_key": str(key) if key is not None else None,
+            },
+        )
+        AuditLog.objects.create(
+            actor=actor,
+            action=RENT_DEBIT_ACTION,
+            entity_type=rent_run.ENTITY_CHARGE,
+            entity_id=str(locked.pk),
+            before=None,
+            after={
+                "amount": str(amount),
+                "on": on.isoformat(),
+                "charge": str(redebit.pk),
+                "debit_key": str(key) if key is not None else None,
+                "note": note,
+            },
+        )
+        if now:
+            _audit(
+                actor,
+                CHARGE_NOW_REQUESTED_ACTION,
+                redebit,
+                None,
+                {
+                    "amount": str(amount),
+                    "invoice_number": number,
+                    "large_debit_confirmed": options.large,
+                },
+            )
+            if options.large:
+                _audit_large_debit(actor, redebit, amount)
+            params = {CHARGE_NOW_PARAM: True, "confirmed": confirmed is True}
+            job = jobs.enqueue(JobKind.INVOICE_CREATE, redebit, params, actor)
+            return Outcome(True, CHARGE_NOW_REQUESTED, charge=redebit, job=job)
+        outcome = debit(
+            redebit, amount, on, actor=actor, confirmed=confirmed, key=key, today=day, note=note
+        )
+        if not outcome.ok:
+            transaction.set_rollback(True)
+    return outcome
 
 
 #: The provider requests of a one-off charge that the page's single retry repeats (D3).
@@ -2797,11 +3086,19 @@ class SourceChange:
 def redebit_sources(charge: OneOffCharge) -> list[tuple[Source, dict[str, Any]]]:
     """The charges a re-debit collects again for, nearest first (the charge its
     returned payment was for; when that is itself a re-debit, that one's source too),
-    each under its row lock with its state now. Empty for any other charge. Taken
-    before the re-debit's payments are recomputed; :func:`refresh_sources` after."""
+    each under its row lock with its state now. A rent charge's bank debit
+    (``source_rent_charge``, PLAN-012f-b D19) ends the walk at its rent charge. Empty for
+    any other charge. Taken before the re-debit's payments are recomputed;
+    :func:`refresh_sources` after."""
     found: list[tuple[Source, dict[str, Any]]] = []
     current = charge
-    while current.category == OneOffCategory.REDEBIT and current.source_payment_id is not None:
+    while current.category == OneOffCategory.REDEBIT:
+        if current.source_rent_charge_id is not None:
+            rent = RentCharge.objects.select_for_update().get(pk=current.source_rent_charge_id)
+            found.append((rent, source_state(rent)))
+            break
+        if current.source_payment_id is None:
+            break
         payment = Payment.objects.get(pk=current.source_payment_id)
         source: Source
         if payment.rent_charge_id is not None:

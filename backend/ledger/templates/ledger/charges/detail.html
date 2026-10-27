@@ -38,6 +38,7 @@
 
   <section class="card" id="payments-card">
   <h2>Payments</h2>
+  {% if open_debit %}<p id="open-debit">{{ open_debit.label }} · {{ open_debit.price|money }} on {{ open_debit.due_date|day }} {% status_badge open_debit.get_status_display open_debit.status %} <a href="{% url 'ledger:one_off_charges:detail' pk=open_debit.pk %}" id="open-debit-link">Open ›</a></p>{% endif %}
   {% if payments %}
   {% responsive_table %}
   <table id="payments">

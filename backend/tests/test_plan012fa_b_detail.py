@@ -584,10 +584,12 @@ def test_the_calendar_entry_page_has_the_family_frame() -> None:
 #: (the same two, less the invoices read twice), payment 17 → 17 (the Activity rows replace the
 #: audit rows), sent invoice 25 → 26 (the Activity rows), lease 24 → 30 (the receivables read
 #: of the Open balance tile, four to six queries, and the Activity rows), calendar entry
-#: 10 → 11 (the Activity rows). None grows with the rows.
+#: 10 → 11 (the Activity rows). None grows with the rows. PLAN-012f-b §10 D19 (slice C2):
+#: rent 28 → 30 (the open bank debit shown beside the payments, and the split refusal's
+#: open-debit guard).
 BUDGETS = {
     "one_off": 37,
-    "rent": 28,
+    "rent": 30,
     "payment": 17,
     "invoice": 26,
     "lease": 30,

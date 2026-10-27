@@ -72,9 +72,10 @@ payment was for is billed already); the settled payments on it are collected, by
 ``settled_on`` month: the part that pays the re-debit's price (payments in settled
 order, refunds taken back from that part first) counts as **rent collected** when the
 re-collected payment was rent (a rent payment, a payment on an ``arrears`` charge, or on a
-re-debit of either, two levels deep) and as **fees collected** otherwise; the part beyond
-the price pays the NSF fee and counts as fees collected (:func:`_add_redebits`, one
-query).
+re-debit of either, two levels deep), or the re-debit is a rent charge's bank debit from
+Add payment (PLAN-012f-b D19; or a re-debit of a returned payment on one), and as **fees
+collected** otherwise; the part beyond the price pays the NSF fee and counts as fees
+collected (:func:`_add_redebits`, one query).
 
 **Multi-line invoices** (the invoice builder, PLAN-012 D6): each line is a one-off charge
 billed by its own category as above; a payment on the invoice is a payment of its first
@@ -715,13 +716,17 @@ def _rent_like(kind: object, category: object) -> bool:
 def _re_collects_rent(row: Mapping[str, Any]) -> bool:
     """Whether a re-debit charge collects rent again: its returned payment was rent, or
     was a payment on a re-debit of rent (two levels; deeper counts as fees), or on an
-    installment of a rent charge or of an ``arrears`` charge (PLAN-012e D12)."""
+    installment of a rent charge or of an ``arrears`` charge (PLAN-012e D12). A rent
+    charge's bank debit from Add payment (``source_rent_charge``, PLAN-012f-b D19) collects
+    rent, and so does a re-debit of a returned payment on one."""
+    if row["rent_debit"] is not None:
+        return True
     if _rent_like(row["kind_1"], row["category_1"]):
         return True
     if row["category_1"] == OneOffCategory.INSTALLMENT:
         return row["plan_rent"] is not None or row["plan_category"] == OneOffCategory.ARREARS
-    return row["category_1"] == OneOffCategory.REDEBIT and _rent_like(
-        row["kind_2"], row["category_2"]
+    return row["category_1"] == OneOffCategory.REDEBIT and (
+        _rent_like(row["kind_2"], row["category_2"]) or row["rent_debit_2"] is not None
     )
 
 
@@ -752,6 +757,8 @@ def _add_redebits(acc: dict[_Key, _Acc], start: date, end: date) -> None:
             category_2=F(f"{source}__one_off_charge__source_payment__one_off_charge__category"),
             plan_rent=F(f"{source}__one_off_charge__plan__rent_charge"),
             plan_category=F(f"{source}__one_off_charge__plan__one_off_charge__category"),
+            rent_debit=F("one_off_charge__source_rent_charge"),
+            rent_debit_2=F(f"{source}__one_off_charge__source_rent_charge"),
         )
         .order_by("settled_on", "created_at", "id")
     )
