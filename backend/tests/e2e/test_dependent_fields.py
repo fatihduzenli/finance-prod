@@ -331,7 +331,9 @@ def test_without_javascript_the_reference_stays_reference_and_its_help_names_the
     page.goto(f"{live_server.url}/one-off-charges/{charge.pk}/payments/new/")
     page.select_option("#id_method", "check")
     assert _reference_label(page) == "Reference"
-    assert "a check number" in page.locator("#id_reference + .help").inner_text()
+    # PLAN-012f-c D10: Add payment's help is the one line; the check-number sentence lives on
+    # the Payments help topic.
+    assert page.locator("#id_reference + .help").inner_text() == "Never an account number."
 
 
 def test_the_draft_page_is_no_wider_than_a_laptop_viewport(
