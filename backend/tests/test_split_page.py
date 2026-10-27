@@ -686,3 +686,35 @@ def test_every_two_weeks_is_refused_on_the_page_and_on_its_confirm(
     response = billing.post(page_url(parent), posted)
     assert response.status_code == 302 and response["Location"] == page_url(parent)
     assert not InstallmentPlan.objects.exists()
+
+
+# --- The store context (Fable's finding on Batch C) -------------------------------------------
+
+
+def test_the_page_and_its_confirm_answer_404_for_another_store_as_add_payment_does(
+    fake: FakeProvider, billing: Client
+) -> None:
+    parent = a_rent(an_operator(fake))
+    other = make_lease(operator=an_operator(fake, customer="cus-other", bank="pm-other"))
+    url = page_url(parent)
+    own = billing.get(url, {"store": str(parent.lease.store_id)})
+    assert own.status_code == 200
+    assert billing.get(url, {"store": str(other.store_id)}).status_code == 404
+    assert (
+        billing.get(url, {"store": str(parent.lease.store_id), "lease": str(other.pk)}).status_code
+        == 404
+    )
+    posted = {"count": "2", "first_due": "2026-10-20", "cadence": "monthly"}
+    posted |= {"due_1": "2026-10-20", "amount_1": "500.00", "due_2": "2026-11-20"}
+    posted |= {"amount_2": "500.00"}
+    assert billing.post(f"{url}?store={other.store_id}", posted).status_code == 404
+    assert not InstallmentPlan.objects.exists()
+    # A one-off charge with no lease: naming any store is a 404, on the page and its confirm.
+    loose = a_one_off(an_operator(fake, customer="cus-loose", bank="pm-loose"))
+    loose_url = page_url(loose)
+    assert billing.get(loose_url, {"store": str(other.store_id)}).status_code == 404
+    assert billing.post(f"{loose_url}?store={other.store_id}", posted).status_code == 404
+    assert not InstallmentPlan.objects.exists()
+    # The confirm without a store still works.
+    assert billing.post(url, posted).status_code == 302
+    assert InstallmentPlan.objects.count() == 1

@@ -156,6 +156,18 @@ def _store_of(parent: service.Parent) -> Store | None:
     return parent.lease.store if parent.lease is not None else None
 
 
+def _store_check(request: HttpRequest, parent: service.Parent) -> None:
+    """The store context check of every charge page (Add payment's): 404 when ``?store=``
+    or ``?lease=`` names another store or lease than the charge's, or names any for a
+    one-off charge without a lease (PLAN-012f-c D13)."""
+    lease = parent.lease
+    if lease is None:
+        if request.GET.get("store") or request.GET.get("lease"):
+            raise Http404
+        return
+    store_context.for_lease(request, lease)
+
+
 def parent_key(parent: service.Parent) -> str:
     """``rent:<pk>`` or ``one_off:<pk>``: the preview route's ``parent`` (D13)."""
     kind = PARENT_RENT if isinstance(parent, RentCharge) else PARENT_ONE_OFF
@@ -228,6 +240,7 @@ def _split_page(request: HttpRequest, parent: service.Parent, url: str) -> HttpR
     refused = _refuse_below(request, Role.BILLING)
     if refused is not None:
         return refused
+    _store_check(request, parent)
     if request.method == "POST":
         return _confirm(request, parent, url)
     refusal = service.split_refusal(parent)
@@ -314,12 +327,7 @@ def split_preview(request: HttpRequest) -> HttpResponse:
     parent = _preview_parent(request.GET.get("parent", ""))
     if parent is None:
         return _preview_refused(PARENT_MISSING)
-    store = _store_of(parent)
-    if store is None:
-        if request.GET.get("store") or request.GET.get("lease"):
-            raise Http404
-    else:
-        store_context.from_request(request, store=store)
+    _store_check(request, parent)
     refusal = service.split_refusal(parent)
     if refusal:
         return _preview_refused(refusal)
