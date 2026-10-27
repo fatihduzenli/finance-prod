@@ -125,3 +125,21 @@ after Batch A plus this route).
 
 **Verdict (C):** PASS — C-1 (MAJOR) and C-2 (MINOR) resolved, none deferred; residual risk: the script's failed-fetch path (the Preview button returning) was exercised only by Opus's throwaway probe, not by a committed test; the page's query count is not pinned.
 
+## Batch D — the USPS infra slice (branch `step-12f-c/batch-d`, plan D14)
+
+**Scope.** Opus, one brief. Built: `tests/test_usps_spec.py` (18 cases) reads the committed OpenAPI file `docs/integrations/usps/addresses-v3r2_0.yaml` (version 3.3.1) with a small strict reader (PyYAML is not a dependency) and proves the client's path and method, its four query parameters against the operation's declared parameters, patterns and lengths and the "city and state, or ZIPCode" rule, the 200 answer's fields the client reads, the 404 and 401, and the token URL and scope — no code mismatch; the client's docstring cited an older file version and said `state` was required, corrected. Bicep: `containerAppWeb.bicep` gains the optional parameters `uspsClientIdSecretName` and `uspsClientSecretSecretName` on the Sentry pattern (the Key Vault references `usps-client-id` and `usps-client-secret`, env `USPS_CLIENT_ID` / `USPS_CLIENT_SECRET` from `secretRef`, `USPS_API_BASE_URL` = `https://apis.usps.com` always set); `main.bicep` passes them to the web module alone; both parameter files carry the two lines commented out with the uncomment note; `infra/README.md`'s procedure. `az bicep build` passes. Fable: the two web/worker parity pins re-pinned (the USPS settings and secrets are the web app's alone).
+
+**Findings.** None. Two parity pins moved by design (re-pinned by Fable): `test_infra_mail` and `test_jobs` assert the worker carries every web secret and setting except the documents' — the USPS ones join that exception.
+
+**Departures and notes.** The OpenAPI file is `docs/integrations/usps/addresses-v3r2_0.yaml` (the
+owner's message said `addresses-v3.yaml`); the Key Vault secret names the parameters expect are
+`usps-client-id` and `usps-client-secret` in `finance-sandbox-kv` (and `finance-kv` for
+production), shipped commented out until the secrets exist, because a Key Vault reference to a
+missing secret stops the revision from starting. The Bicep deploys only on an owner-authorised
+infra apply (Section 6); this PR carries the files. The form keeps saving with "Address not
+verified" until then.
+
+**Gate.** ruff, `ruff format --check` (536 files), mypy strict (536 files), `uv lock --check`, `makemigrations --check` (no migration), `az bicep build` (no cloud call): clean on 44a3584; the USPS and infra test files 198 passed. sqlite: the full suite 8,147 passed, 697 skipped, 122 deselected in 1,003 s, no failure. PostgreSQL 16 (a throwaway container, the CI split, on 44a3584): `makemigrations --check` no changes; the migration selection 36 passed in 954 s; the unit selection 8,805 passed, 3 skipped, 125 deselected in 1,151 s; the e2e suite 43 passed four times over (80, 78, 80 and 78 s). Visual: no baseline regenerated (no page changed); every baseline compared: 66 passed on PostgreSQL and 66 on sqlite. Shots: none (no page changed). Secret scans clean (the pattern scan of the diff and the two new files, `scripts/check-no-secrets.sh`); no secret-store read; no vault read; no `az deployment` of any kind; no new dependency; no secret value anywhere (names only).
+
+**Verdict (D):** PASS — no findings; residual risk: the wired branch of the Bicep (the two Key Vault references resolving at deploy time) is untested until the owner stores the secrets, uncomments the parameters and authorises the infra apply; the live USPS API was not called (TODO-VERIFY-065 stands).
+
