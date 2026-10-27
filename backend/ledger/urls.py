@@ -222,6 +222,8 @@ charge_patterns = (
 # Installment plans (PLAN-012e D10, D11).
 plan_patterns = (
     [
+        # PLAN-012f-c D13: Split into installments' live preview (read-only JSON).
+        path("split-preview.json", installments.split_preview, name="split_preview"),
         path("<str:pk>/", installments.plan_detail, name="detail"),
         path("<str:pk>/reschedule/", installments.plan_reschedule, name="reschedule"),
         path("<str:pk>/cancel/", installments.plan_cancel, name="cancel"),

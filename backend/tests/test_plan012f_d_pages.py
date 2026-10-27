@@ -366,6 +366,8 @@ NOT_PAGES: dict[str, str] = {
     "ledger:invoices:settlement_preview": (
         "Schedule settlement's preview sentence (JSON for the builder's script)"
     ),
+    # PLAN-012f-c D13: opened without its charge it answers a refusal.
+    "ledger:plans:split_preview": "Split into installments' preview (JSON for the page's script)",
     "ledger:search_stores": "the store picker's rows (JSON for the picker's script)",
     "ledger:invoices:print": "the invoice document's print page (its own layout)",
     "ledger:lease_ends:pdf": "the statement PDF",
@@ -607,7 +609,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
         [*_store(w), f"Rent Oct 2026, {w.store.external_label}"],
         "Attach Stax invoice",
     ),
-    "ledger:charges:split": lambda w: (["Rent Oct 2026"], "Split into installments"),
+    # PLAN-012f-c D13: the Add payment family's breadcrumb, Stores › store › charge.
+    "ledger:charges:split": lambda w: ([*_store(w), "Rent Oct 2026"], "Split into installments"),
     "ledger:one_off_charges:detail": lambda w: ([*_store(w), "Charges"], w.one_off.label),
     "ledger:one_off_charges:payment": lambda w: ([*_store(w), w.one_off.label], "Add payment"),
     "ledger:one_off_charges:link": lambda w: (
@@ -622,7 +625,10 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:one_off_charges:cancel": lambda w: BREADCRUMBS["ledger:one_off_charges:detail"](w),
     "ledger:one_off_charges:charge_now": lambda w: BREADCRUMBS["ledger:one_off_charges:detail"](w),
     "ledger:charges:charge_now": lambda w: BREADCRUMBS["ledger:charges:detail"](w),
-    "ledger:one_off_charges:split": lambda w: ([w.one_off.label], "Split into installments"),
+    "ledger:one_off_charges:split": lambda w: (
+        [*_store(w), w.one_off.label],
+        "Split into installments",
+    ),
     "ledger:plans:detail": lambda w: ([*_store(w), "Rent Oct 2026"], "Installment plan"),
     "ledger:plans:reschedule": lambda w: (
         [*_store(w), "Installment plan"],

@@ -2745,13 +2745,20 @@ class CalendarEntryForm(forms.Form):
 
 def _cadence_field(*, split: bool = False) -> forms.ChoiceField:
     """The cadence select: every cadence (a plan's reschedule), or Split into
-    installments' own, without Schedule settlement's yearly (PLAN-012f-b D16)."""
+    installments' own: the autopay control's Monthly, Weekly, Yearly, as Schedule
+    settlement's (PLAN-012f-c D13; every two weeks is not offered there, existing
+    biweekly plans keep it)."""
+    if split:
+        return _QuietChoiceField(
+            choices=SETTLEMENT_CADENCE_CHOICES,
+            initial=InstallmentCadence.MONTHLY,
+            error_messages={
+                "required": autopay_plans.CHOOSE_CADENCE,
+                "invalid_choice": autopay_plans.CHOOSE_CADENCE,
+            },
+        )
     return _QuietChoiceField(
-        choices=[
-            (value, label)
-            for value, label in InstallmentCadence.choices
-            if not split or value in installments.SPLIT_CADENCES
-        ],
+        choices=InstallmentCadence.choices,
         initial=InstallmentCadence.MONTHLY,
         error_messages={
             "required": "Choose weekly, every two weeks or monthly.",
