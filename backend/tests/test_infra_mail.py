@@ -26,6 +26,8 @@ MAIL_SECRET_ENV = "GMAIL_SERVICE_ACCOUNT_JSON"
 MAIL_SECRET_REF = "gmail-service-account-json"
 VAULT_SECRET_NAME = "gmail-service-account-key"
 DOCUMENT_ENV = ("DOCUMENTS_STORAGE_ACCOUNT_URL", "DOCUMENTS_CONTAINER", "AZURE_CLIENT_ID")
+#: The USPS address check is the web app's alone too (PLAN-012f-c D14).
+USPS_ENV = ("USPS_API_BASE_URL", "USPS_CLIENT_ID", "USPS_CLIENT_SECRET")
 MAIL_PARAMS = {
     "mailEnabled": "bool = false",
     "gmailSender": "string = ''",
@@ -142,8 +144,9 @@ def test_web_and_worker_carry_the_same_mail_settings() -> None:
     mail = {*MAIL_PLAIN, MAIL_SECRET_ENV}
     assert mail <= _env_names(web) and mail <= _env_names(worker)
     assert MAIL_SECRET_REF in _secret_names(web) & _secret_names(worker)
-    # The documents settings stay the web app's alone.
-    assert _env_names(web) - _env_names(worker) == set(DOCUMENT_ENV)
+    # The documents settings stay the web app's alone, and so do the USPS address check's
+    # (PLAN-012f-c D14: the store form is the only caller).
+    assert _env_names(web) - _env_names(worker) == set(DOCUMENT_ENV) | set(USPS_ENV)
     assert _env_names(worker) <= _env_names(web)
 
 

@@ -1392,11 +1392,24 @@ def test_the_worker_app_is_one_replica_without_ingress_running_the_worker() -> N
     assert "minReplicas: 1\n        maxReplicas: 1\n" in module
     assert "name: 'STAX_CALLER'\n    value: 'worker'\n" in module
     web = (REPO / "infra/modules/containerAppWeb.bicep").read_text()
+    # The USPS address check's secrets are the web app's alone (PLAN-012f-c D14).
+    web_only_secrets = {"usps-client-id", "usps-client-secret"}
     for secret in re.findall(r"name: '([a-z-]+)'\n    keyVaultUrl", web):
+        if secret in web_only_secrets:
+            assert f"name: '{secret}'" not in module
+            continue
         assert f"name: '{secret}'\n    keyVaultUrl" in module
     # The document store is the web app's alone (PLAN-010c D1): the worker and the job
-    # never touch a file, so they carry none of its settings.
-    web_only = {"DOCUMENTS_STORAGE_ACCOUNT_URL", "DOCUMENTS_CONTAINER", "AZURE_CLIENT_ID"}
+    # never touch a file, so they carry none of its settings; nor does the USPS check's
+    # (PLAN-012f-c D14: the store form is the only caller).
+    web_only = {
+        "DOCUMENTS_STORAGE_ACCOUNT_URL",
+        "DOCUMENTS_CONTAINER",
+        "AZURE_CLIENT_ID",
+        "USPS_API_BASE_URL",
+        "USPS_CLIENT_ID",
+        "USPS_CLIENT_SECRET",
+    }
     names = set(re.findall(r"name: '([A-Z_]+)'\n", web))
     assert web_only <= names
     for name in names - web_only:
