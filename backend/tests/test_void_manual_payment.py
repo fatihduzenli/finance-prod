@@ -42,6 +42,7 @@ from ledger.models import (
 )
 from ledger.services import attention, one_off_charges, refunds, rent_run
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data
+from ledger.wording import provider_name
 from payments import invoice_sync
 from payments.fake import FakeProvider
 from payments.models import Job
@@ -417,6 +418,9 @@ def test_a_marked_invoice_is_named_and_flagged_until_the_refresh_shows_it_open(
     [item] = marked_items()
     assert item.severity == attention.HIGH
     assert item.text == attention.MARKED_PAID_VOID_TEXT.format(number=number)
+    # PLAN-012f-c §11 E1: the owner's one line.
+    unmark = f"Unmark invoice {number} in {provider_name()} by hand; this payment was voided"
+    assert item.text == unmark
     assert item.url == reverse("ledger:charges:detail", kwargs={"pk": charge.pk})
     assert item.amount == D("1500.00")
     assert [

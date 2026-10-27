@@ -162,7 +162,7 @@ def test_the_rent_route_renders_the_frame_with_the_debit_card_greyed() -> None:
     assert "is-unavailable" in cards["debit"] and 'id="how-debit" disabled' in cards["debit"]
     # PLAN-012f-b §10 D19: the rent card is greyed with its own reason (here no bank method).
     reason = service.rent_debit_options(charge).reason
-    assert reason == str(service.DEBIT_NO_METHOD)
+    assert reason == "No bank account on file for Fatih Co."
     assert escape(reason) in cards["debit"] and 'name="debit_amount"' not in cards["debit"]
     assert 'id="how-record" checked' in cards["record"]
     assert "Rent Oct 2026, debit 1 · #1991 Istanbul · Fatih Co · due" in body
@@ -178,8 +178,9 @@ def test_the_debit_card_is_greyed_with_its_reason_and_the_record_card_chosen(
 ) -> None:
     role = Role.ADMIN
     if case == "no bank":
-        charge = invoiced(fake, operator=an_operator(fake, bank=None))
-        reason = str(service.DEBIT_NO_METHOD)
+        operator = an_operator(fake, bank=None)
+        charge = invoiced(fake, operator=operator)
+        reason = service.DEBIT_NO_ACCOUNT.format(operator=operator.display_name)
     else:
         charge = invoiced(fake)
         reason = str(service.DEBIT_OFF)
@@ -317,7 +318,8 @@ def test_a_debit_on_a_later_date_schedules_and_lands_on_the_charge(fake: FakePro
 def test_a_forced_debit_without_a_bank_account_is_refused_with_the_reason(
     fake: FakeProvider,
 ) -> None:
-    charge = created(an_operator(fake, bank=None), item(CollectionMethod.MANUAL, "80.00"))
+    operator = an_operator(fake, bank=None)
+    charge = created(operator, item(CollectionMethod.MANUAL, "80.00"))
     admin = client(Role.ADMIN)
     before = written()
     response = admin.post(page_of(charge), debit_post(charge, today()))
@@ -325,7 +327,8 @@ def test_a_forced_debit_without_a_bank_account_is_refused_with_the_reason(
     assert written() == before
     body = admin.get(page_of(charge)).content.decode()
     # Once on the greyed card, once as the refusal under the card.
-    assert body.count(str(service.DEBIT_NO_METHOD)) == 2
+    reason = escape(service.DEBIT_NO_ACCOUNT.format(operator=operator.display_name))
+    assert body.count(reason) == 2
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,7 @@
 {% extends "finance/base.html" %}
 {% load components responsive money dates people icons %}
 {% block title %}Payment{% endblock %}
-{% comment %}The payment page, in the detail family (PLAN-012f-a D4): the header (breadcrumb, title with the status badge, the muted line, Refund, More ▾ with Void; admin; for a settled payment recorded outside the processor More ▾ with "Void payment", billing, PLAN-012f-c D6), the tiles Amount / Refunded / Remaining (a refund: its amount), the Refunds (or "Refunds payment"), Invoice, Charge and Activity cards beside DETAILS and MORE.{% endcomment %}
+{% comment %}The payment page, in the detail family (PLAN-012f-a D4): the header (breadcrumb, title with the status badge, the muted line, Refund, More ▾ with Void; admin; for a settled payment recorded outside the processor More ▾ with "Void payment", billing, PLAN-012f-c D6), the tiles Amount / Refunded / Remaining (a refund: its amount; a payment recorded outside the processor on a rent or one-off charge: Amount / Applied to, its charge's screen label under the amount, and the "Paid outside" line under the row, PLAN-012f-c §11 E3), the Refunds (or "Refunds payment"), Invoice, Charge and Activity cards beside DETAILS and MORE.{% endcomment %}
 {% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}<a href="{% url 'ledger:stores:detail' pk=crumb_store.pk %}?tab=payments#tab-payments" id="payments-crumb">Payments</a> <span aria-hidden="true">›</span> {% else %}<a href="{% url 'ledger:payments:list' %}">Payments</a> <span aria-hidden="true">›</span> {% endif %}<span aria-current="page">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</span></nav><h1 class="store-title">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }} <span id="payment-status">{% status_badge payment.get_status_display payment.status %}</span>{% if payment.is_refund %} <span class="badge kind-badge">Refund</span>{% endif %}</h1>{% if header_line %}<p class="store-line" id="detail-line">{{ header_line }}</p>{% endif %}</div>{% if can_refund or can_void or can_void_manual %}<div class="page-actions" id="payment-actions">{% if can_refund %}<a class="btn btn-primary" href="{% url 'ledger:payments:refund' pk=payment.pk %}" id="refund-payment">Refund</a>{% endif %}{% if can_void %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><a class="menu-danger" href="{% url 'ledger:payments:void' pk=payment.pk %}" id="void-payment">Void</a></li></ul></details>{% endif %}{% if can_void_manual %}<details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><a class="menu-danger" href="{% url 'ledger:payments:void_manual' pk=payment.pk %}" id="void-manual-payment">Void payment</a></li></ul></details>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
   {% include "ledger/_job_status.html" %}
@@ -9,11 +9,14 @@
   <div class="detail-main">
   <section class="kpi-row detail-tiles" id="detail-tiles" aria-label="Amounts">
     <div id="tile-amount">{% kpi "Amount" payment.amount|money %}</div>
-    {% if not payment.is_refund %}
+    {% if applied_tile %}
+    <div id="tile-applied">{% kpi "Applied to" applied_tile.amount|money applied_tile.label %}</div>
+    {% elif not payment.is_refund %}
     <div id="tile-refunded">{% kpi "Refunded" facts.refunded|money "pending and settled refunds" %}</div>
     <div id="tile-remaining">{% if payment.status == "voided" %}{% kpi "Remaining" facts.refundable|money "nothing refundable" %}{% else %}{% kpi "Remaining" facts.refundable|money "refundable" %}{% endif %}</div>
     {% endif %}
   </section>
+  {% if applied_tile %}<p class="muted" id="paid-outside">Paid outside {{ company.provider_name }}: void it to undo, it cannot be refunded here.</p>{% endif %}
 
   {% if payment.parent_payment %}
     <section class="card" id="parent-payment-card">
