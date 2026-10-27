@@ -1904,6 +1904,16 @@ class VoidManualForm(forms.Form):
             raise forms.ValidationError(self.fields["reason"].error_messages["required"])
         return reason
 
+    def holds_payment_data(self) -> bool:
+        """Whether the posted reason holds a card or account number (Rule 1): the held
+        form then keeps its error but never its value (the Add payment ``reference``
+        precedent, :meth:`AddPaymentForm._holds_payment_data`)."""
+        try:
+            validate_no_payment_data(str(self.data.get("reason") or ""))
+        except forms.ValidationError:
+            return True
+        return False
+
 
 # --- Store costs (PLAN-010b D8) ------------------------------------------------------------
 

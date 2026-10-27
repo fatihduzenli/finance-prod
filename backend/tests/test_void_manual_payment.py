@@ -41,7 +41,7 @@ from ledger.models import (
     RentChargeStatus,
 )
 from ledger.services import attention, one_off_charges, refunds, rent_run
-from ledger.validators import validate_no_payment_data
+from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data
 from payments import invoice_sync
 from payments.fake import FakeProvider
 from payments.models import Job
@@ -612,6 +612,35 @@ def test_a_missing_reason_comes_back_on_the_dialog_with_nothing_written(
     body = client.get(dialog_path(payment)).content.decode()
     assert "A reason is required: say why the payment is voided." in body
     assert written() == before
+
+
+def test_a_reason_refused_for_payment_data_never_comes_back_but_its_error_does(
+    fake: FakeProvider,
+) -> None:
+    """Rule 1 (the B3-1 class): the held dialog keeps the error, not the value."""
+    charge = rent_charge()
+    payment = manual(charge, "1500.00")
+    client = client_for(Role.BILLING)[0]
+    routing, account = "021000021", "000123456789"
+    reason = f"Routing {routing} account {account} was wrong"
+    before = written()
+    response = client.post(dialog_path(payment), {"creation_key": uuid.uuid4(), "reason": reason})
+    assert response.status_code == 302 and response["Location"] == dialog_path(payment)
+    body = client.get(dialog_path(payment)).content.decode()
+    assert PAYMENT_DATA_MESSAGE in body
+    assert routing not in body and account not in body
+    assert re.search(r'<textarea name="reason"[^>]*>\s*</textarea>', body)
+    assert written() == before
+
+
+def test_a_reason_refused_for_its_length_keeps_its_value(fake: FakeProvider) -> None:
+    charge = rent_charge()
+    payment = manual(charge, "1500.00")
+    client = client_for(Role.BILLING)[0]
+    reason = "Recorded twice " * 20
+    client.post(dialog_path(payment), {"creation_key": uuid.uuid4(), "reason": reason})
+    body = client.get(dialog_path(payment)).content.decode()
+    assert "Recorded twice Recorded twice" in body
 
 
 def test_a_refused_void_is_flashed_on_the_payment_page(fake: FakeProvider) -> None:

@@ -46,6 +46,7 @@ from ledger.services import detail_cards, one_off_charges, refunds
 from ledger.services import payments_ledger as ledger
 from ledger.services import stores as store_service
 from ledger.services.rent_run import charge_review_message
+from ledger.validators import PAYMENT_DATA_MESSAGE
 from ledger.views import store_context
 from ledger.views.detail_cards import activity_context
 from ledger.views.jobs import already_submitted, job_context, submit
@@ -333,6 +334,11 @@ def payment_void_manual(request: HttpRequest, pk: str) -> HttpResponse:
                 messages.error(request, outcome.message)
                 return redirect("ledger:payments:detail", pk=payment.pk)
             form.add_error("reason", outcome.message)
+        if form.holds_payment_data() or PAYMENT_DATA_MESSAGE in form.errors.get("reason", []):
+            # Rule 1: a reason refused for payment data comes back empty, with its error.
+            form.data = {
+                name: "" if name == "reason" else form.data.get(name, "") for name in form.fields
+            }
         _hold(request, target, form)
         return redirect(request.get_full_path())
     form = _held(request, target, VoidManualForm) or VoidManualForm(
