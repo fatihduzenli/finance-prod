@@ -49,6 +49,10 @@ Zelle, wire, check or cash record has **never existed**: it is new in this batch
   the card and account guard, at most 200 characters) and stored on the payment
   (`Payment.void_reason`, migration **0057**, guarded short text, `GUARDED_COLUMNS` names it;
   `void_note` exists on one-off charges — the payment gets its own column, nothing is reused).
+  **Amended after Opus's reading (Fable, 2026-10-27):** `Payment` had no `voided_at` / `voided_by`
+  (only one-off charges have them; the processor void set the status alone and the audit row held
+  who and when), so 0057 adds `voided_at` and `voided_by` too, no CHECK (older voided rows carry no
+  stamp), and the processor void stamps them from now on.
   One transaction under the payment's and the charge's row locks: status `voided`, `voided_at`,
   `voided_by`, the reason; the charge recomputed (`rent_run.recompute_charge` /
   `one_off_charges.recompute`, which already fold `voided` payments out of the paid amount), so
@@ -69,7 +73,7 @@ Zelle, wire, check or cash record has **never existed**: it is new in this batch
   and (c) the audit row carries `provider_marking: "to unmark"`. The processor's name comes from
   the company settings. §9 asks the owner to confirm.
 - **D4. The installment-plan sentence (A).** When an installment plan on the charge was created
-  after the payment's `paid_on` (any plan status), the dialog adds the owner's sentence with the
+  after the payment's `settled_on` (or `initiated_on` when unsettled; `Payment` has no `paid_on`) (any plan status), the dialog adds the owner's sentence with the
   amount: "The installment plan was built on the remaining balance; voiding adds {amount} back to
   the charge, not to the plan." The plan is untouched (its lines keep their amounts); the charge's
   balance rises; `rent_run.own_paid` / `one_off_charges` recompute as today.
@@ -77,8 +81,9 @@ Zelle, wire, check or cash record has **never existed**: it is new in this batch
   spec's confirmation dialog over the payment page (`{% dialog size="sm" open=True
   return_url=… %}`, the one sentence of consequence "Voiding returns {amount} to {charge}; the
   record stays, marked void.", the Reason field, "Keep the payment" and the red "Void payment").
-  The processor void (`ledger:payments:void`) and Refund (`ledger:payments:refund`) move into the
-  same frame (they are plain pages today): their forms and POST handlers are unchanged. Route
+  The processor void (`ledger:payments:void`) and Refund (`ledger:payments:refund`) are already in
+  this frame (12f-b E-4; the plan's first text was out of date): only the void button's class
+  becomes the destructive one; their forms and POST handlers are unchanged. Route
   `ledger:payments:void_manual` (`<pk>/void-manual/`, billing, POST; GET renders over the page,
   writes nothing); the registry; the route digest re-pinned (274).
 - **D6. The header actions (A).** For a manual settled payment: "More ▾" with the red item
@@ -159,7 +164,7 @@ Zelle, wire, check or cash record has **never existed**: it is new in this batch
 ## 4. Interface contract
 
 - `refunds.void_manual_payment(payment_id, *, reason: str, actor, creation_key=None) -> Outcome`.
-- `Payment.void_reason: CharField(200, blank)`; migration 0057 (`GUARDED_COLUMNS = {"payments":
+- `Payment.void_reason: CharField(200, blank)`, `voided_at: DateTimeField(null)`, `voided_by: FK(User, null)`; migration 0057 (`GUARDED_COLUMNS = {"payments":
   (..., "void_reason")}`, both guard lists).
 - `attention` kind `invoice_marked_paid_void` (HIGH).
 - Route `ledger:payments:void_manual` (POST billing); JSON route `ledger:plans:split_preview` (GET
