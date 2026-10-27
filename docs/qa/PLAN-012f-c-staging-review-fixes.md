@@ -232,3 +232,32 @@ the QA file holds each batch's section with laptop and phone shots.
    and the 2026-09-29 decision keeps operators off processor pages. Confirm the wording.
 3. D14: the Key Vault secret names `usps-client-id` / `usps-client-secret`, shipped commented
    out in the parameters until the secrets exist. Confirm.
+
+---
+
+## 11. Slice E — the owner's checkpoint decisions of 2026-10-27
+
+Three small changes on one branch, `step-12f-c/batch-e` from `main` (`05f8fd4`), the usual gate,
+then push, PR and merge under the standing authorisation.
+
+- **E1 (decision 1).** The Needs review item for a voided payment whose processor invoice stays
+  marked paid reads, in one line: "Unmark invoice {number} in {provider} by hand; this payment was
+  voided" (`attention.MARKED_PAID_VOID_TEXT`; the kind, its priority and its link unchanged).
+- **E2 (decision 2).** The greyed bank-debit card's first line when no bank method is on file
+  reads "No bank account on file for {operator}." followed by a link "Operator page" to that
+  operator's page; the processor reason stays under it when the flag is off as well ("Bank debits
+  are also off at {provider}."). `BankDebitOptions` gains `reason_url` (the operator page's URL, or
+  `""`); `_how.html` renders the link after the first line. The single-reason case with the flag on
+  reads the same new sentence with its link (the dashboard instruction moves to the Payments help
+  topic). The sentence `DEBIT_NO_METHOD_SEND` is deleted.
+- **E3 (decision 4).** On the payment page, a payment recorded outside the processor (method in
+  `MANUAL_PAYMENT_METHODS`, not a refund) shows two tiles — "Amount" and "Applied to {charge}"
+  (the charge's screen label as the sub-line, the applied amount as the value; the amount itself
+  for a payment that is wholly applied) — and the muted line "Paid outside {provider}: void it to
+  undo, it cannot be refunded here." under the tiles. Processor payments keep Amount / Refunded /
+  Remaining. A voided manual payment keeps the two tiles (the line stays true).
+- **Tests.** The item's exact sentence; the card's sentence, link and second line in each
+  combination; the two tiles and the line for a Zelle payment, the three tiles for an ACH payment,
+  the voided manual payment; re-pins by name (`test_plan012fc_b.py`'s reason cases,
+  `test_void_manual_payment.py`'s attention sentence, the pages tests, the visual `add-payment`
+  and `payment-detail` baselines regenerated).
