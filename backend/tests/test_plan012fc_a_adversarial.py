@@ -180,7 +180,9 @@ def test_a_reason_with_payment_data_is_refused_by_the_form_and_the_service(
     )
     assert response.status_code == 302 and response["Location"].startswith(dialog_path(payment))
     body = client.get(response["Location"]).content.decode()
-    assert "4111" not in body and "000123456789" not in body
+    # The digits as typed, with and without their spaces (a hex id may hold "4111").
+    for digits in ("4111 1111 1111 1111", "4111111111111111", "000123456789"):
+        assert digits not in body, digits
     assert written() == before
     payment.refresh_from_db()
     assert payment.status == PaymentStatus.SETTLED
