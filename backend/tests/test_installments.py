@@ -1177,7 +1177,8 @@ def test_split_from_the_charge_page_preview_edit_and_confirm(fake: FakeProvider)
     assert 'id="split-form"' in form and 'id="page-help"' in form
     params = {"count": "3", "first_due": FIRST.isoformat(), "cadence": "monthly"}
     preview = client.get(url, params).content.decode()
-    assert preview.count('class="split-line"') == 3
+    # PLAN-012f-c D13: the last row also carries is-rounding when it holds the rounding cent.
+    assert preview.count('<tr class="split-line') == 3
     assert 'value="333.34"' in preview and 'id="preview-help"' in preview
     assert not InstallmentPlan.objects.exists()
     posted = {

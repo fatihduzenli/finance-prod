@@ -1,54 +1,81 @@
 {% extends "finance/base.html" %}
-{% load responsive money %}
+{% load static responsive money dates components icons %}
 {% block title %}Split {{ parent_label }} into installments{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ parent_url }}">{{ parent_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Split into installments</span></nav><h1>Split {{ parent_label }} into installments</h1></div></div>{% endblock %}
+{% comment %}Split into installments (PLAN-012f-c D13; PLAN-012e D10), in the Add payment family's frame: the header (breadcrumb Stores › store › charge › Split into installments, the title with the charge's status badge and its balance, one muted line: charge · store · operator · balance left to pay); the two-thirds column with the Plan card (the GET form #split-form: Number of installments as the − / + stepper around the number input, 2 to 12, the buttons shown by ledger/split.js; First installment date, its label echoing the chosen date; Cadence as the segmented control, the form's cadences; the info line "Collected by"; the Preview button, hidden by the script) and the Installments card (the confirm form #confirm-form: the plan's values hidden, the table of number · date · amount, each date and amount editable, the last row marked when it carries the rounding cent; the large-debit tick for autopay installments); the one-third sticky Summary (Balance to split, "n × share", the last payment date, the returned-installment line, the one primary "Create n installments", which submits #confirm-form, and Cancel → the charge). The server renders the table from the query string (or the first values); the script reads ledger:plans:split_preview again as the fields change. On a phone one column, the primary fixed above the tab bar.{% endcomment %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if crumb_store %}{% include "ledger/_store_crumb.html" %}{% elif operator %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{{ parent_url }}">{{ parent_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Split into installments</span></nav><h1 class="store-title">Split {{ parent_label }} into installments <span id="charge-status">{% status_badge status_badge_label status %}</span></h1><p class="store-line" id="split-line">{{ header_line }}</p></div></div>{% endblock %}
 {% block content %}
-  <section class="card form-card">
-  <p class="muted" id="page-help">{{ split_help }}</p>
-  <dl id="split-summary">
-    <dt>Balance to split</dt><dd id="split-balance">{{ balance|money }}</dd>
-    <dt>Each installment collected by</dt><dd id="split-collection">{{ collection }}</dd>
-  </dl>
   {% if refusal %}
+  <section class="card form-card" id="plan-card">
+    <p class="muted" id="page-help">{{ split_line }} Learn more: <a href="{% url 'finance:help_topic' slug='payments' %}#help-payments-installments">Payments</a></p>
     <p id="split-refusal"><strong>{{ refusal }}</strong></p>
+  </section>
   {% else %}
-    {% if release_notice %}<p id="release-notice"><strong>{{ release_notice }}</strong></p>{% endif %}
-    <form method="get" action="{{ action }}" id="split-form" autocomplete="off">
-      {{ form.non_field_errors }}
-      {% for field in form %}
-        {% include "ledger/stores/_form_field.html" with field=field no_mark=True hide_help=True %}
-      {% endfor %}
-      <p class="actions"><button class="btn" type="submit" id="split-preview">Preview</button></p>
-    </form>
-    {% if lines %}
-      <h2>Preview</h2>
+  <div class="form-layout">
+  <div class="form-main">
+    <section class="card form-card plan-card" id="plan-card" aria-labelledby="plan-card-heading">
+      <h2 id="plan-card-heading">Plan</h2>
+      <p class="muted" id="page-help">{{ split_line }} Learn more: <a href="{% url 'finance:help_topic' slug='payments' %}#help-payments-installments">Payments</a></p>
+      {% if release_notice %}<p id="release-notice"><strong>{{ release_notice }}</strong></p>{% endif %}
+      <form method="get" action="{{ action }}" id="split-form" autocomplete="off" data-preview-url="{{ preview_url }}" data-parent="{{ parent_key }}">
+        {{ form.non_field_errors }}
+        <div class="field{% if form.count.errors %} has-error{% endif %}">
+          <label for="id_count">Number of installments</label>
+          <div class="stepper" id="count-stepper"><button class="btn stepper-step" type="button" id="count-less" data-step="-1" aria-label="One installment fewer" aria-controls="id_count" hidden>−</button><input type="number" name="count" id="id_count" value="{{ count_value|default_if_none:'' }}" min="{{ count_min }}" max="{{ count_max }}" step="1" inputmode="numeric" required><button class="btn stepper-step" type="button" id="count-more" data-step="1" aria-label="One installment more" aria-controls="id_count" hidden>+</button></div>
+          {{ form.count.errors }}
+        </div>
+        {% include "ledger/stores/_form_field.html" with field=form.first_due label=first_due_label no_mark=True hide_help=True %}
+        <div class="field{% if form.cadence.errors %} has-error{% endif %}">
+          <span class="label" id="id_cadence-label">Cadence</span>
+          <div class="radio-segmented" id="id_cadence" role="radiogroup" aria-labelledby="id_cadence-label">{% for value, label in cadence_choices %}<div><label for="id_cadence_{{ forloop.counter0 }}"><input type="radio" name="cadence" value="{{ value }}" id="id_cadence_{{ forloop.counter0 }}" required{% if value == cadence_value %} checked{% endif %}> {{ label }}</label></div>{% endfor %}</div>
+          {{ form.cadence.errors }}
+        </div>
+        <p class="toast info is-inline" id="split-collection"><span class="toast-icon">{% icon "info" 16 %}</span><span class="toast-text">Collected by: {{ collection }}</span></p>
+        <p class="actions" id="split-preview-row"><button class="btn" type="submit" id="split-preview">Preview</button></p>
+      </form>
+    </section>
+    <section class="card preview-card" id="preview-card" aria-labelledby="preview-card-heading">
+      <h2 id="preview-card-heading">Installments</h2>
       <p class="muted" id="preview-help">{{ preview_help }}</p>
+      <p class="help" id="split-preview-message" aria-live="polite">{{ preview_message }}</p>
       <form method="post" action="{{ action }}" id="confirm-form" class="js-single-submit" autocomplete="off">
         {% csrf_token %}
-        <input type="hidden" name="count" value="{{ count }}">
-        <input type="hidden" name="first_due" value="{{ first_due }}">
-        <input type="hidden" name="cadence" value="{{ cadence }}">
+        <input type="hidden" name="count" value="{{ count }}" id="confirm-count">
+        <input type="hidden" name="first_due" value="{{ first_due }}" id="confirm-first-due">
+        <input type="hidden" name="cadence" value="{{ cadence }}" id="confirm-cadence">
         {% responsive_table %}
         <table id="split-lines">
           <thead><tr><th>Installment</th><th>Due</th><th>Amount (USD)</th></tr></thead>
-          <tbody>
-            {% for number, due, amount in lines %}
-              <tr class="split-line">
-                <td>{{ number }} of {{ count }}</td>
-                <td><input type="date" name="due_{{ number }}" value="{{ due }}" required aria-label="Installment {{ number }} due date"></td>
-                <td><input type="text" inputmode="decimal" name="amount_{{ number }}" value="{{ amount }}" required maxlength="10" aria-label="Installment {{ number }} amount"></td>
+          <tbody id="split-rows">
+            {% for row in rows %}
+              <tr class="split-line{% if row.rounding %} is-rounding{% endif %}">
+                <td>{{ row.number }} of {{ count }}</td>
+                <td><input type="date" name="due_{{ row.number }}" value="{{ row.due }}" required aria-label="Installment {{ row.number }} due date"></td>
+                <td><input type="text" inputmode="decimal" name="amount_{{ row.number }}" value="{{ row.amount }}" required maxlength="10" aria-label="Installment {{ row.number }} amount">{% if row.rounding %} <span class="help muted split-rounding" id="split-rounding">Carries the rounding cent</span>{% endif %}</td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
         {% endresponsive_table %}
-        {% if large_debit %}
-          <p><label><input type="checkbox" name="{{ confirm_field }}" id="split-confirmed"> I confirm the large autopay debits.</label></p>
+        {% if autopay %}
+          <p id="split-large" data-threshold="{{ large_threshold }}"{% if not large_debit %} hidden{% endif %}><label><input type="checkbox" name="{{ confirm_field }}" id="split-confirmed"> I confirm the large autopay debits.</label></p>
         {% endif %}
-        <div class="form-actions"><button class="btn btn-primary" type="submit" id="split-confirm">Create the plan</button></div>
       </form>
-    {% endif %}
-  {% endif %}
+    </section>
+  </div>
+  <aside class="form-summary" aria-label="Summary">
+  <section class="card summary-card" id="split-summary" data-balance="{{ balance }}">
+    <h2 class="section-label">Summary</h2>
+    <div class="summary-tiles" id="summary-tiles">
+      <div id="split-balance">{% kpi "Balance to split" balance|money %}</div>
+      <div id="split-installments">{% if rows %}{% kpi "Installments" installments_text %}{% else %}{% kpi "Installments" "—" %}{% endif %}</div>
+    </div>
+    <p class="after-payment" id="split-last"><span>Last payment</span> <strong id="split-last-value">{{ last_due|day|default:"—" }}</strong></p>
+    <p class="help" id="split-nsf">{{ nsf_line }}</p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit" form="confirm-form" id="split-confirm"{% if not rows %} disabled{% endif %}>Create <span class="split-count">{% if rows %}{{ count }} {% endif %}</span>installments</button></div>
+    <a class="btn summary-discard" href="{{ parent_url }}" id="split-cancel">Cancel</a>
   </section>
+  </aside>
+  </div>
+  {% endif %}
 {% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% if not refusal %}<script src="{% static 'ledger/split.js' %}" defer></script>{% endif %}{% endblock %}

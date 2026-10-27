@@ -77,8 +77,8 @@ A plan splits the open balance of one charge, a rent charge or a one-off charge 
 - **Schedule settlement** (PLAN-012f-b D16): the invoice builder's choice makes a
   ``manual`` one-off charge of the invoice's one line and gives it, through
   :func:`create_plan` (``collection`` ``autopay_due``, ``origin`` ``settlement``), equal
-  bank debits monthly, weekly or yearly (:data:`SETTLEMENT_CADENCES`; Split's form does
-  not offer yearly, :data:`SPLIT_CADENCES`); :func:`settlement_preview` words them and
+  bank debits monthly, weekly or yearly (:data:`SETTLEMENT_CADENCES`; Split's form offers
+  the same choices, PLAN-012f-c D13); :func:`settlement_preview` words them and
   :func:`plan_label` names such a plan's installments "Settlement plan · 3 of 10" on
   every page, :func:`plan_name` the plan itself.
 - **Pause, Resume, Stop** (PLAN-012f-b D16, every plan): a paused plan moves no money
@@ -178,15 +178,9 @@ RESUMED_ACTION = "installment_plan.resumed"
 # --- Fixed sentences ------------------------------------------------------------------
 
 COUNT_RANGE = f"Choose between {INSTALLMENTS_MIN} and {INSTALLMENTS_MAX} installments."
-#: The cadences Split into installments' form offers (PLAN-012e D10); ``yearly`` is
-#: Schedule settlement's (PLAN-012f-b D16). The engine itself takes every cadence.
-SPLIT_CADENCES: tuple[str, ...] = (
-    InstallmentCadence.WEEKLY.value,
-    InstallmentCadence.BIWEEKLY.value,
-    InstallmentCadence.MONTHLY.value,
-)
-#: The cadences Schedule settlement offers, in the order of the autopay control (D16):
-#: ``biweekly`` stays for existing plans but is not offered there.
+#: The cadences Schedule settlement and Split into installments offer, in the order of the
+#: autopay control (D16; PLAN-012f-c D13): ``biweekly`` stays for existing plans but is not
+#: offered there. The engine itself takes every cadence.
 SETTLEMENT_CADENCES: tuple[str, ...] = (
     InstallmentCadence.MONTHLY.value,
     InstallmentCadence.WEEKLY.value,
@@ -306,12 +300,8 @@ CANCELLED = provider_sentence(
     "again for {balance}."
 )
 
-#: The help text of each page (D10, D11).
-SPLIT_HELP = (
-    "Split what is still owed on this charge into equal installments, the last one "
-    "carrying the rounding cent. Each installment is a charge of its own, collected the "
-    "way this charge is; while the plan runs, this charge is paid through them."
-)
+#: The help text of each page (D10, D11); Split's longer help is on the Payments help topic
+#: (PLAN-012f-c D13).
 PREVIEW_HELP = (
     "Check each installment before confirming. You may change any date or amount, as long "
     "as the amounts still add up to the balance and the dates stay in order."
@@ -825,6 +815,24 @@ def preview(
         return [], Outcome(False, str(error), "count")
     dates = schedule_dates(first_due, cadence, count)
     return [Line(due, amount) for due, amount in zip(dates, amounts, strict=True)], None
+
+
+def preview_payload(lines: list[Line]) -> dict[str, object]:
+    """What Split into installments' live preview reads of :func:`preview`'s ``lines``
+    (PLAN-012f-c D13; ``ledger:plans:split_preview``, the page's server-rendered table):
+    each installment's number, ISO date and amount, the equal share, the last date, and
+    whether the last installment carries the rounding cent. ``lines`` is not empty."""
+    share = lines[0].amount
+    return {
+        "ok": True,
+        "lines": [
+            {"number": number, "due": line.due.isoformat(), "amount": str(line.amount)}
+            for number, line in enumerate(lines, start=1)
+        ],
+        "share": str(share),
+        "last_due": lines[-1].due.isoformat(),
+        "cent_on_last": lines[-1].amount != share,
+    }
 
 
 def lines_refusal(lines: list[Line], balance: Decimal, count: int, today: date) -> Outcome | None:

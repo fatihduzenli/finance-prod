@@ -91,3 +91,37 @@ notice shows only while a balance remains (see h). The CSV exports keep stored p
 
 **Verdict (B):** PASS — no new findings; the two items carried from Batch A resolved; residual risk: the one unexplained PostgreSQL failure of the breadcrumb pages test in the first unit run (passes everywhere since; the pipeline now keeps tracebacks), the "refundable" tile wording on non-processor payments, and the three username cells left for Step 13.
 
+## Batch C — Split into installments to the spec (branch `step-12f-c/batch-c`, plan D13)
+
+**Scope.** Opus, one brief in three rounds. Built: the page in the Add payment family — the full
+breadcrumb, the title with the charge's status badge, the muted line "{charge} · #no Name ·
+operator · {balance} left to pay"; the Plan card (the − / + stepper around a number input 2–12,
+the first installment date echoed as "Oct 26, 2026", the Monthly / Weekly / Yearly segmented
+control, "Collected by"); the live preview from the read-only JSON route `ledger:plans:split_preview`
+(billing; every parameter validated; refusals as `{"ok": false, "message"}`; the server renders
+the same table from the query string with scripts off), the rounding cent marked on the last row,
+the editable dates and amounts kept under the engine's rules; the sticky Summary (Balance to
+split, "n × share", Last payment, the returned-payment fee line, "Create n installments", Cancel);
+phone: one column, the Summary above the primary. The three-line help moved to the Payments
+topic; `SPLIT_HELP` and `SPLIT_CADENCES` removed as dead code. DESIGN-SPEC §4 gains "Split into
+installments" (Fable, from the built page). Opus's `tests/test_split_page.py` (59). Fable:
+`tests/test_plan012fc_c_adversarial.py` (28) and the browser test `tests/e2e/test_split_page_12fc_c.py`
+(the QA shots).
+
+**Findings.** C-1 (MAJOR, the owner's words, resolved): the control offered the old split
+cadences (Weekly / Every two weeks / Monthly); it offers Monthly / Weekly / Yearly as asked —
+"Every two weeks" is no longer offered on this form (existing plans untouched; the reschedule
+form unchanged). C-2 (MINOR, resolved): the page answered 200 for another store's `?store=`; it
+answers 404 as Add payment does, and the preview route shares the rule.
+
+**Departures from the owner's message, with reasons.** The breadcrumb keeps the family's store
+crumb ("#909"); "#no Name" is in the muted line. The first values (3, today, monthly) are previewed
+on open so the table and Summary are filled without the script. The large-debit tick is always in
+the markup for autopay collection and shown by the script only above the threshold. The
+returned-payment fee line is Opus's wording from the Autopay help. The route digest is 275 (274
+after Batch A plus this route).
+
+**Gate.** ruff, `ruff format --check` (535 files), mypy strict (535 files), `uv lock --check`, `makemigrations --check` (no migration): clean on 80ecffb. sqlite: the full suite 8,126 passed, 3 failed — two settlement pins moved by C-1 (re-pinned by Fable: Split offers Monthly / Weekly / Yearly and refuses every two weeks) and one flaky assertion in `test_operator_workspace` that matched the digits "9009" inside a random hex id (hardened to a number boundary) — then the two files 96 passed on ad87b2a. PostgreSQL 16 (a throwaway container, the CI split, on ad87b2a): `makemigrations --check` no changes; the migration selection 36 passed in 975 s; the unit selection 8,787 passed, 3 skipped, 125 deselected in 1,192 s; the e2e suite 43 passed four times over (81, 78, 77 and 78 s). Visual: no baseline regenerated (the split page is not a visual-suite page and no shot page changed); every baseline compared: 66 passed on PostgreSQL and 66 on sqlite. Shots: `docs/qa/12f-c/shots/c/` — the page as it opens (3 × $333.33, the rounding cent on the last row) and after one press of + (4 × $250.00), laptop 1280 and phone 390, from the browser test run in the Playwright image against PostgreSQL. Secret scans clean (the pattern scan of the diff and the four new files, `scripts/check-no-secrets.sh`); no secret-store read; the provider fence clean; no new dependency, model, migration or environment variable; one new read-only URL.
+
+**Verdict (C):** PASS — C-1 (MAJOR) and C-2 (MINOR) resolved, none deferred; residual risk: the script's failed-fetch path (the Preview button returning) was exercised only by Opus's throwaway probe, not by a committed test; the page's query count is not pinned.
+

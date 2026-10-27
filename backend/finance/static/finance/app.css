@@ -802,6 +802,14 @@ fieldset.card > legend + * { clear: both; }
 .after-payment { display: flex; justify-content: space-between; gap: var(--space-3); margin: 0; padding: var(--space-3) 0 0; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: var(--fs-base); }
 .after-payment strong { color: var(--text); }
 .operator-summary-line { margin: 0 0 2px; font-size: var(--fs-base); }
+/* Split into installments (PLAN-012f-c D13): Number of installments as a − / + stepper, the
+   number input between the two buttons (ledger/split.js shows them; without it the input
+   alone); the Preview row the script hides. The rest is Add payment's frame and the tiles. */
+.stepper { display: flex; align-items: stretch; gap: var(--space-1); max-width: 14rem; }
+.stepper input[type=number] { flex: 1 1 4.5rem; width: 4.5rem; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
+/* .stepper .stepper-step outweighs the phone's full-width form buttons (form .btn). */
+.stepper .stepper-step { flex: 0 0 auto; width: auto; min-width: 44px; padding: 0 var(--space-3); font-size: var(--fs-lg); line-height: 1; }
+.stepper-step[hidden], #split-preview-row[hidden] { display: none; }
 
 /* --- Wizard frame (PLAN-012f-a D8) -------------------------------------------------------------
    DESIGN-SPEC §4 Transfer wizard, transfer-wizard-laptop.png; End lease on the same frame

@@ -219,9 +219,11 @@ def test_the_cadences_offered_and_the_split_page_unchanged() -> None:
         WEEKLY,
         YEARLY,
     ]
-    # Split into installments offers what it did: no yearly there.
+    # Split into installments offers the same three since PLAN-012f-c D13 (the owner's
+    # words: the autopay control's Monthly / Weekly / Yearly); every two weeks stays in the
+    # engine for existing plans and the reschedule form.
     split = ledger_forms.SplitForm().fields["cadence"]
-    assert [value for value, _ in split.choices] == ["weekly", "biweekly", "monthly"]  # type: ignore[attr-defined]
+    assert [value for value, _ in split.choices] == [MONTHLY, WEEKLY, YEARLY]  # type: ignore[attr-defined]
     assert InstallmentCadence.YEARLY.label == "Yearly"
     refused = invoice_builder.settlement_refusal(
         SettlementInput(3, NOV_1, InstallmentCadence.BIWEEKLY), TODAY
@@ -665,9 +667,12 @@ def test_a_split_plan_keeps_its_words(fake: FakeProvider) -> None:
         .content.decode()
     )
     assert "<h2>Installment plan</h2>" in page and "Installment plan: 0 of 3 paid" in page
-    # Split's form does not offer yearly (Schedule settlement's).
-    form = ledger_forms.SplitForm({"count": "3", "first_due": "2026-11-01", "cadence": YEARLY})
+    # Split's form no longer offers every two weeks (PLAN-012f-c D13); yearly is offered.
+    form = ledger_forms.SplitForm({"count": "3", "first_due": "2026-11-01", "cadence": "biweekly"})
     assert not form.is_valid() and "cadence" in form.errors
+    assert ledger_forms.SplitForm(
+        {"count": "3", "first_due": "2026-11-01", "cadence": YEARLY}
+    ).is_valid()
 
 
 # --- The migration and the guard lists ----------------------------------------------------------
