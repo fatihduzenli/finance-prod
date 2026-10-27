@@ -1,11 +1,11 @@
 {% extends "finance/base.html" %}
-{% comment %}The help index (docs/qa/PLAN-012e2-fewer-actions.md D10): the topics of finance.help.TOPICS, static.{% endcomment %}
+{% load static %}
+{% comment %}The help index (docs/qa/PLAN-012e2-fewer-actions.md D10; the frame, PLAN-012f-b E-3): the header's title, then the topic card of finance.help.TOPICS, static.{% endcomment %}
 {% block title %}Help{% endblock %}
 {% block header %}<div class="page-header"><h1>Help</h1></div>{% endblock %}
 {% block content %}
-  <section class="card" id="help-topics-card">
-  <ul id="help-topics">
-    {% for topic in topics %}<li><a href="{% url 'finance:help_topic' slug=topic.slug %}" id="help-{{ topic.slug }}">{{ topic.title }}</a></li>{% endfor %}
-  </ul>
-  </section>
+  <div class="help-layout" id="help-layout">
+    {% include "finance/help/_topics.html" %}
+  </div>
 {% endblock %}
+{% block scripts %}<script src="{% static 'finance/help_filter.js' %}" defer></script>{% endblock %}

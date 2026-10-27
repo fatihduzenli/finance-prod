@@ -40,7 +40,7 @@
     {% endfor %}
   </ul>
   {% else %}
-  <p class="muted empty" id="plan-rows-empty">No repeating debit. Set one up from New invoice: How to collect, Set up autopay.</p>
+  {% with next=space.actions|action_named:"create_invoice" %}{% include "finance/_empty_state.html" with id="plan-rows-empty" icon="calendar" title="No repeating debit." text="Set one up from New invoice: How to collect, Set up autopay." action_url=next.url action_label=next.label only %}{% endwith %}
   {% endif %}
 </section>
 

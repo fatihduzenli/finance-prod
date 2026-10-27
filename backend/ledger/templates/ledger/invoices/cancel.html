@@ -1,12 +1,12 @@
-{% extends "finance/base.html" %}
-{% block title %}{% if sent %}Cancel {{ draft.number }}{% else %}Delete draft {{ draft.number }}{% endif %}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">{% if draft.lease %}{% include "ledger/_store_crumb.html" with crumb_store=draft.lease.store %}{% else %}<a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=draft.operator.pk %}">{{ draft.operator.display_name }}</a> <span aria-hidden="true">›</span> {% endif %}<a href="{% url 'ledger:invoices:draft' pk=draft.pk %}">{{ draft.number }}</a> <span aria-hidden="true">›</span> <span aria-current="page">{% if sent %}Cancel invoice {{ draft.sent_invoice.invoice_number }}{% else %}Delete draft {{ draft.number }}{% endif %}</span></nav><h1>{% if sent %}Cancel invoice {{ draft.sent_invoice.invoice_number }}{% else %}Delete draft {{ draft.number }}{% endif %}</h1></div></div>{% endblock %}
-{% block content %}
+{% extends "ledger/invoices/draft.html" %}
+{% load components %}
+{% block title %}{% if cancel_sent %}Cancel {{ draft.number }}{% else %}Delete draft {{ draft.number }}{% endif %}{% endblock %}
+{% block dialog %}{% url 'ledger:invoices:draft' pk=draft.pk as back_url %}{% dialog id="cancel-dialog" title=cancel_title size="sm" open=True return_url=back_url %}
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
   <div class="confirm-what">
   <h3>What will happen</h3>
-  {% if sent %}
+  {% if cancel_sent %}
     <ul><li>The invoice is cancelled in {{ company.provider_name }}; every line's charge is voided here only once {{ company.provider_name }} confirms. An invoice with money received follows the refund path and cannot be cancelled.</li></ul>
     {% if refusal %}<p id="cancel-refusal"><strong>{{ refusal }}</strong></p>{% endif %}
   {% else %}
@@ -15,11 +15,10 @@
   </div>
   <form method="post" id="cancel-form" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
-    {% if sent %}
-      {% include "ledger/stores/_form_field.html" with field=form.note label="Note" mark=True %}
+    {% if cancel_sent %}
+      {% include "ledger/stores/_form_field.html" with field=cancel_form.note label="Note" mark=True %}
     {% endif %}
-    <p class="actions"><button class="btn btn-danger" type="submit" id="cancel-submit">{% if sent %}Cancel invoice{% else %}Cancel draft{% endif %}</button> <a class="btn" href="{% url 'ledger:invoices:draft' pk=draft.pk %}">Back</a></p>
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="cancel-keep">{% if cancel_sent %}Keep the invoice{% else %}Keep the draft{% endif %}</a> <button class="btn btn-danger" type="submit" id="cancel-submit">{% if cancel_sent %}Cancel invoice{% else %}Cancel draft{% endif %}</button></div>
   </form>
   </section>
-{% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% enddialog %}{% endblock %}

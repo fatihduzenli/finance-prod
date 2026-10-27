@@ -453,7 +453,12 @@ PAIRS: list[tuple[str, str, str]] = [
     ),
     # §4.6 template sentences
     ("_job_status.html", " UTC", "started {{ job.created_at|moment }}"),
-    ("dashboard/home.html", "ATTEMPTED", f"Invoices {P} could not collect are listed here."),
+    # PLAN-012f-b E-4: the sentence is the failed-attempts empty state's line.
+    (
+        "dashboard/home.html",
+        "ATTEMPTED",
+        'text="Invoices "|add:company.provider_name|add:" could not collect are listed here."',
+    ),
     ("dashboard/home.html", "Last reconciliation", "Last nightly check"),
     ("disputes/page.html", "Last synced", f"Last updated from {P}"),
     ("disputes/page.html", "Not synced yet.", "Not updated yet."),
@@ -487,7 +492,9 @@ PAIRS: list[tuple[str, str, str]] = [
         "nightly reconciliation's deposit step",
         "nightly check's bank-deposit step",
     ),
-    ("reports/pnl.html", "<th>Flags</th>", "<th>Notes</th>"),
+    # PLAN-012f-b E-1: DESIGN-SPEC §4 Profit and loss (the owner's copy of 2026-10-24) names
+    # the column Flags again; its header cell carries attributes now.
+    ("reports/pnl.html", "<th>Notes</th>", ">Flags</th>"),
     ("run/today.html", "dead-lettered", f"from {P}"),
     (
         "run/today.html",

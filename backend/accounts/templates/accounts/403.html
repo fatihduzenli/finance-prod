@@ -1,10 +1,8 @@
 {% extends request.user.is_authenticated|yesno:"finance/base.html,two_factor/_base.html" %}
-{% comment %}Status 403 from accounts.middleware.RoleEnforcementMiddleware and the views that refuse a role (accounts.views.forbidden). A signed-in user sees it in the staff shell (PLAN-012f D10); the sign-in pages' panel otherwise.{% endcomment %}
+{% comment %}Status 403 from accounts.middleware.RoleEnforcementMiddleware and the views that refuse a role (accounts.views.forbidden). A signed-in user sees it in the staff shell (PLAN-012f D10); the sign-in pages' panel otherwise. The card (DESIGN-SPEC §4 States, PLAN-012f-b E-4; finance/_error_card.html): the large faint code, the 20px/600 line, the sentence, and for a signed-in user "Go to the dashboard" and Search.{% endcomment %}
 {% block title %}Not allowed{% endblock %}
 {% block header %}<div class="page-header"><h1>Not allowed</h1></div>{% endblock %}
 {% block content %}
   {% if not request.user.is_authenticated %}<h1>Not allowed</h1>{% endif %}
-  <section class="card error-card" id="error-page">
-    <p>Your role does not allow this action.</p>
-  </section>
+  {% include "finance/_error_card.html" with code="403" line="Not open to your role" sentence="Your role does not allow this action." %}
 {% endblock %}

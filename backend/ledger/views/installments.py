@@ -245,29 +245,31 @@ def charge_split(request: HttpRequest, pk: str) -> HttpResponse:
 def plan_detail(request: HttpRequest, pk: str) -> HttpResponse:
     """``ledger:plans:detail`` (any role)."""
     plan = _load_plan(pk)
+    return render(request, "ledger/installments/plan.html", _plan_context(request, plan))
+
+
+def _plan_context(request: HttpRequest, plan: InstallmentPlan) -> dict[str, Any]:
+    """The plan page's context (read only); Stop shows over it in its dialog
+    (PLAN-012f-b E-4)."""
     live = plan.status in LIVE_PLAN_STATUSES
-    return render(
-        request,
-        "ledger/installments/plan.html",
-        {
-            "plan": plan,
-            # PLAN-012d D5: "← Store NNNN".
-            "crumb_store": plan.lease.store if plan.lease is not None else None,
-            "progress": service.progress(plan),
-            # The screen label, under the key the templates read (PLAN-012f-a B4).
-            "parent_label": service.parent_screen_label(plan.parent),
-            "parent_url": service.parent_url(plan.parent),
-            "can_reschedule": live and meets(_role(request), Role.BILLING),
-            "can_cancel": live and meets(_role(request), Role.ADMIN),
-            # PLAN-012f-b D16: "Installment plan" or "Settlement plan".
-            "plan_name": service.plan_name(plan.origin),
-            "plan_help": service.PLAN_HELP,
-            # PLAN-012b-a D3: the release of the parent's provider object waits or failed.
-            "release_pending": service.release_pending(plan),
-            # PLAN-012f-b D3-1: a debit Pause could not stop.
-            "debits_out": service.debits_out_while_paused(plan),
-        },
-    )
+    return {
+        "plan": plan,
+        # PLAN-012d D5: "← Store NNNN".
+        "crumb_store": plan.lease.store if plan.lease is not None else None,
+        "progress": service.progress(plan),
+        # The screen label, under the key the templates read (PLAN-012f-a B4).
+        "parent_label": service.parent_screen_label(plan.parent),
+        "parent_url": service.parent_url(plan.parent),
+        "can_reschedule": live and meets(_role(request), Role.BILLING),
+        "can_cancel": live and meets(_role(request), Role.ADMIN),
+        # PLAN-012f-b D16: "Installment plan" or "Settlement plan".
+        "plan_name": service.plan_name(plan.origin),
+        "plan_help": service.PLAN_HELP,
+        # PLAN-012b-a D3: the release of the parent's provider object waits or failed.
+        "release_pending": service.release_pending(plan),
+        # PLAN-012f-b D3-1: a debit Pause could not stop.
+        "debits_out": service.debits_out_while_paused(plan),
+    }
 
 
 @role_required
@@ -370,6 +372,7 @@ def plan_cancel(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/installments/cancel.html",
         {
+            **_plan_context(request, plan),
             "plan": plan,
             "form": form,
             # The screen label, under the key the templates read (PLAN-012f-a B4).

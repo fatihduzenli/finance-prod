@@ -52,13 +52,13 @@
     <section class="card" id="calendar-day-panel" aria-labelledby="calendar-day-title">
       <h2 class="section-label" id="calendar-day-title">{% if day.year == today.year %}{{ day|date:"l" }}, {{ day|day_short }}{% else %}{{ day|day_long }}{% endif %}</h2>
       {% if day_items %}<ul class="day-entries">{% for item in day_items %}<li class="day-entry kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a class="day-entry-title" href="{{ item.url }}">{{ item.title }}</a><span class="day-entry-meta">{{ item.kind_label }}</span></li>{% endfor %}</ul>
-      {% else %}<p class="muted" id="calendar-day-empty">Nothing on this day.</p>{% endif %}
+      {% else %}{% include "finance/_empty_state.html" with id="calendar-day-empty" icon="calendar" title="Nothing on this day." text="Debit days, insurance anniversaries, lease ends and notes show here." only %}{% endif %}
       {% if can_add %}<p class="card-note"><a id="calendar-add" href="{% url 'ledger:calendar:add' %}?on={{ day|date:'Y-m-d' }}">Add note or reminder</a></p>{% endif %}
     </section>
     <section class="card" id="calendar-next-days" aria-labelledby="calendar-next-title">
       <h2 class="section-label" id="calendar-next-title">Next 7 days</h2>
       {% if next_days %}<ul class="next-days">{% for group in next_days %}<li class="next-day kind-{{ group.kind }}" data-day="{{ group.day|date:'Y-m-d' }}" data-kind="{{ group.kind }}">{% if group.count == 1 %}{% with item=group.items.0 %}<span class="next-day-text">{{ group.day|day_short }} · <a href="{{ item.url }}">{{ item.title }}</a></span>{% endwith %}{% else %}<span class="next-day-text">{{ group.day|day_short }} · <a href="?month={{ group.day|date:'Y-m' }}&amp;on={{ group.day|date:'Y-m-d' }}{% if keep %}&amp;{{ keep }}{% endif %}">{{ group.kind_label }}</a></span><span class="next-day-count">{{ group.count }}</span>{% endif %}</li>{% endfor %}</ul>
-      {% else %}<p class="muted" id="calendar-next-empty">Nothing in the next 7 days.</p>{% endif %}
+      {% else %}{% include "finance/_empty_state.html" with id="calendar-next-empty" icon="calendar" title="Nothing in the next 7 days." only %}{% endif %}
     </section>
     <section class="card" id="calendar-feed-card" aria-labelledby="calendar-feed-title">
       <h2 class="section-label" id="calendar-feed-title">Feed</h2>

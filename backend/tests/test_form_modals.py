@@ -223,10 +223,9 @@ def test_a_new_store_lands_on_its_page_with_the_flash() -> None:
     store = Store.objects.get()
     assert (response.status_code, response["Location"]) == (302, f"/stores/{store.pk}/")
     body = page(admin, response["Location"])
-    assert (
-        '<li class="toast success" role="status"><span class="toast-text">'
-        "Store #5151 Rome added.</span>"
-    ) in body
+    # PLAN-012f-b E-4: the level's icon sits before the text.
+    assert '<span class="toast-text">Store #5151 Rome added.</span>' in body
+    assert body.index('<li class="toast success" role="status">') < body.index("Rome added.")
     assert 'id="store-form"' not in body and 'id="store-title"' in body
     assert store.external_label == "Rome"
 

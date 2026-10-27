@@ -273,7 +273,8 @@ def test_several_or_mixed_matches_are_listed(viewer: Client) -> None:
 def test_no_match_and_an_empty_query(viewer: Client) -> None:
     world()
     page = text(viewer.get("/search/", {"q": "<b>zzz</b>"}))
-    assert "No match for '&lt;b&gt;zzz&lt;/b&gt;'." in page
+    # PLAN-012f-b E-4: the line of the empty state, escaped whole (its quotes too).
+    assert "No match for &#x27;&lt;b&gt;zzz&lt;/b&gt;&#x27;." in page
     assert 'value="&lt;b&gt;zzz&lt;/b&gt;"' in page and "<b>zzz" not in page
     empty = viewer.get("/search/", {"q": "   "})
     assert empty.status_code == 200 and "No match" not in text(empty)

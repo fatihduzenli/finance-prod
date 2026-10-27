@@ -163,9 +163,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 /* A radio group's name (B2-2): a span.label, drawn as the field's label. */
 .field > span.label { display: block; margin: var(--space-3) 0 var(--space-1); font-size: var(--fs-base); font-weight: 600; }
 .field .help { display: block; color: var(--muted); font-size: var(--fs-sm); margin-top: var(--space-1); }
-.field .errorlist { list-style: none; margin: var(--space-1) 0 0; padding: 0; font-size: var(--fs-sm); font-weight: 600; }
+.field .errorlist { list-style: none; margin: var(--space-1) 0 0; padding: 0; color: var(--unpaid-text); font-size: var(--fs-sm); font-weight: 400; line-height: 1.35; }
 .field .field-error { display: block; margin-top: var(--space-1); color: var(--unpaid-text); font-size: var(--fs-sm); }
-.field.has-error input, .field.has-error select, .field.has-error textarea { border: 2px solid var(--unpaid-text); }
+/* The inline form error (DESIGN-SPEC §4 States, PLAN-012f-b E-4): a 1 px red border on the
+   control and the 12 px red line under it. */
+.field.has-error input:not([type=checkbox]):not([type=radio]), .field.has-error select, .field.has-error textarea { border: 1px solid var(--unpaid-text); }
 .required { font-weight: 700; }
 
 /* --- Help line ---------------------------------------------------------------------------
@@ -353,6 +355,15 @@ table.grid col.month-current, table.grid .month-current { background: var(--mont
 .empty { color: var(--muted); }
 .empty .empty-next { margin-left: var(--space-2); }
 p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-border); border-radius: var(--radius-card); background: var(--surface); }
+/* .empty-state (finance/_empty_state.html, DESIGN-SPEC §4 States, PLAN-012f-b E-4): a card's
+   empty list: the 48 px grey circle with its icon, the 15px/600 line, one muted sentence and
+   one link (a secondary button), centred. */
+.empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding: var(--space-6) var(--space-4); text-align: center; }
+.empty-state p { margin: 0; }
+.empty-state-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin-bottom: var(--space-2); border-radius: 50%; background: var(--bg); color: var(--muted); }
+.empty-state-title { color: var(--text); font-size: var(--fs-lg); font-weight: 600; }
+.empty-state-text { max-width: 36em; color: var(--muted); font-size: var(--fs-base); line-height: 1.45; }
+.empty-state-action { margin-top: var(--space-3); }
 
 /* --- Confirmation page ---------------------------------------------------------------------
    .confirm: a page that asks before an action that cannot be taken back, a card. The
@@ -371,13 +382,17 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
    button (.toast-dismiss). A success or information message fades after 8 s (CSS only,
    opacity alone): its text stays in the page for screen readers; a warning or an error (a
    refusal) stays until it is dismissed. Dismissing removes it (the script in base.html):
-   the reader chose to. */
+   the reader chose to. The spec's four pairs (DESIGN-SPEC §4 States, PLAN-012f-b E-4):
+   success, warning and error on the status pairs (error text --error-text), information
+   --navy on --neutral-bg; 10 px radius; the level's icon (.toast-icon) before the text. */
 .toasts { list-style: none; margin: 0 0 var(--space-4); padding: 0; }
-.toast { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); border-radius: var(--radius-ctl); border: 1px solid var(--border); background: var(--neutral-bg); color: var(--neutral-text); font-size: var(--fs-base); overflow: hidden; }
+.toast { display: flex; align-items: flex-start; gap: 10px; padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); border-radius: 10px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); background: var(--neutral-bg); color: var(--navy); font-size: var(--fs-base); line-height: 1.4; overflow: hidden; }
+.toast-icon { flex: 0 0 auto; display: inline-flex; padding-top: 1px; }
 .toast-text { flex: 1 1 auto; }
 .toast.success { background: var(--paid-bg); color: var(--paid-text); }
 .toast.warning { background: var(--pending-bg); color: var(--pending-text); }
-.toast.error { background: var(--unpaid-bg); color: var(--unpaid-text); }
+.toast.error { background: var(--unpaid-bg); color: var(--error-text); }
+.toast.error .toast-icon { color: var(--unpaid-text); }
 .toast-dismiss { flex: 0 0 auto; background: none; border: 0; padding: 0 var(--space-1); font: inherit; font-size: var(--fs-lg); line-height: 1; color: inherit; cursor: pointer; }
 .toast:not(.warning):not(.error) { animation: toast-fade 600ms ease-in 8s forwards; }
 @keyframes toast-fade { to { opacity: 0; } }
@@ -621,8 +636,15 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
 .steps-progress::-webkit-progress-bar { background: var(--border-soft); border-radius: var(--radius-pill); }
 .steps-progress::-webkit-progress-value { background: var(--teal); border-radius: var(--radius-pill); }
 .steps-progress::-moz-progress-bar { background: var(--teal); border-radius: var(--radius-pill); }
-/* The error pages (404, 403) in the shell: one card with the sentence and the way back. */
-.error-card { max-width: 640px; }
+/* The error pages (404, 403) in the shell: one card with the sentence and the way back
+   (finance/_error_card.html; DESIGN-SPEC §4 States, PLAN-012f-b E-4): the large faint code
+   (decoration, hidden from screen readers, in --input-border: the faint token is never text),
+   the 20px/600 line, the muted sentence, the two buttons, centred. */
+.error-card { max-width: 640px; padding: var(--space-8) var(--space-6); text-align: center; }
+.error-card .error-code { margin: 0; color: var(--input-border); font-size: 44px; font-weight: 700; line-height: 1.1; letter-spacing: .02em; }
+.error-card .error-line { margin: var(--space-2) 0 var(--space-1); font-size: var(--fs-h1); font-weight: 600; }
+.error-card .error-sentence { margin: 0; color: var(--muted); font-size: var(--fs-base); }
+.error-card .error-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin: var(--space-5) 0 0; }
 
 /* --- The sign-in pages (PLAN-012f D13; DESIGN-SPEC §4 Login, login-laptop.png) ---------------
    two_factor/_base.html: body.auth is two columns. Left, .auth-brand on --login-gradient (the
@@ -867,6 +889,13 @@ fieldset.card > legend + * { clear: both; }
 .dialog-body { padding: var(--space-4) var(--space-6) var(--space-6); }
 .dialog-body > p:first-child { margin-top: 0; }
 .dialog-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
+/* A confirmation page in its dialog (PLAN-012f-b E-4): the question's card loses its frame
+   (the dialog is the card), its "Are you sure?" line reads as the one sentence under the
+   title, and the foot ("Keep …", then the primary or the red button) closes the form. */
+.dialog .confirm { margin: 0; padding: 0; border: 0; border-radius: 0; background: none; }
+.dialog .confirm .confirm-question { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--fs-md); font-weight: 400; }
+.dialog .confirm-what h2, .dialog .confirm-what h3 { margin-top: var(--space-2); }
+.dialog .confirm form { margin: 0; }
 .dialog-lg { max-height: 90vh; overflow: auto; }
 .dialog-form { margin: 0; }
 .dialog-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--space-3); }
@@ -1075,6 +1104,100 @@ a.pager-page:hover { background: var(--surface-2); }
 th.cell-chevron, td.cell-chevron { width: 1%; padding-left: 0; text-align: right; white-space: nowrap; }
 td.cell-chevron a { display: inline-flex; color: var(--muted); }
 td.cell-chevron a:hover { color: var(--text); }
+
+/* --- Report family (PLAN-012f-b E-1) ---------------------------------------------------------
+   DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png. The filter card's one row with
+   the navy Show at its right (.pnl-show); the four .kpi cards (.tone-paid: a green figure);
+   the table card: its header (the title, the muted count line, the held pills at the right,
+   .pnl-held), the two-row header with its group heads centred (.grp-head) and a hairline at
+   the left of each column group (.grp-start), the margins bold, a negative in the unpaid text
+   colour (.negative), an unknown amount as a muted "unknown" (the faint token is decoration
+   only, §1), the muted footer sentence; the method under the card (.pnl-explained). The table
+   scrolls sideways inside its card when the window is narrow; the phone draws the rows as
+   the two-line cards of the cards tables. */
+.pnl-filters .pnl-detail-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+.pnl-filters .pnl-show { margin-left: auto; }
+.kpi-value.tone-paid { color: var(--paid-text); }
+.kpi .unknown { color: var(--muted); font-weight: 600; }
+.pnl-held { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); margin-left: auto; }
+.pnl-card .table-cards { overflow-x: auto; }
+.pnl-table th.grp-head { text-align: center; }
+.pnl-table .grp-start { border-left: 1px solid var(--border-soft); }
+.pnl-table td.money, .pnl-table th.money { padding-left: 10px; padding-right: 10px; }
+.pnl-table td.margin-billed, .pnl-table td.margin-collected { font-weight: 700; }
+.pnl-table .negative { color: var(--unpaid-text); }
+.pnl-table .unknown { color: var(--muted); font-weight: 400; }
+.pnl-table tr.totals .unknown { font-weight: 600; }
+.pnl-foot { font-size: var(--fs-sm); }
+.pnl-explained { font-size: var(--fs-sm); }
+
+/* --- Daily charges (PLAN-012f-b E-2) --------------------------------------------------------
+   DESIGN-SPEC §4 Daily charges, daily-charges-laptop.png. The result strip (.run-strip): the
+   icon, the sentence and "Nightly check →" at the right on a 10 px tinted bar, green
+   (.run-strip-ok), yellow when the latest run skipped a lease (.run-strip-warn), red when the
+   latest "Update from …" failed (.run-strip-error), grey before the first run; the Skipped
+   figure in the pending text colour; the "Due today" card's header (the title, the segmented
+   filter beside it, "Download spreadsheet" at the right; the amount bold, a carried balance owed in
+   red, "Open ›" at the right); the teal Created badge
+   (.badge.run-created, the link colour on the current month's tint, a measured pair); the two
+   cards below side by side (.run-pair; one column on phones), each a list of lines with the
+   counts and the badge at the right (.run-list). */
+.run-strip { display: flex; align-items: center; gap: var(--space-3); margin: 0 0 var(--space-4); padding: 12px 16px; border: 1px solid transparent; border-radius: 10px; }
+.run-strip-ok { background: var(--paid-bg); color: var(--paid-text); border-color: var(--paid-bg); }
+.run-strip-warn { background: var(--pending-bg); color: var(--pending-text); border-color: var(--pending-bg); }
+.run-strip-error { background: var(--unpaid-bg); color: var(--error-text); border-color: var(--unpaid-bg); }
+.run-strip-none { background: var(--neutral-bg); color: var(--neutral-text); border-color: var(--neutral-bg); }
+.run-strip-icon { display: inline-flex; flex: 0 0 auto; }
+.run-strip-text { flex: 1 1 auto; margin: 0; min-width: 0; }
+.run-strip-link { flex: 0 0 auto; color: inherit; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.run-strip-link:hover { text-decoration: underline; }
+.kpi-value.tone-pending { color: var(--pending-text); }
+.run-due-header .segmented { margin-left: var(--space-2); }
+.badge.run-created { background: var(--month-current); color: var(--link); }
+td.money.tone-unpaid { color: var(--unpaid-text); }
+td.run-amount { font-weight: 700; }
+td.row-open { text-align: right; white-space: nowrap; }
+td.row-open a { text-decoration: none; }
+.run-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); align-items: start; }
+.run-list { margin: 0; padding: 0; list-style: none; }
+.run-list > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+.run-list > li:last-child { border-bottom: 0; }
+.run-list-end { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-2); }
+
+/* --- Help (PLAN-012f-b E-3) -------------------------------------------------------------------
+   DESIGN-SPEC §4 Help, help-laptop.png. .help-layout: the 240 px topic card (.help-nav: the
+   search field, shown by finance/help_filter.js, over the list; the open topic in the
+   sidebar's active style on white: the link colour, 600, on the current month's tint, the
+   measured pair of PLAN-012f-a D7 in place of the drawing's lighter tint) beside the article
+   column (.help-main: one .help-topic card, then the muted .help-footer line). The article:
+   the 22/700 .help-title, the muted .help-meta line, the body at 15/1.65 with 18 px h3s,
+   lists with 8 px gaps; .help-tip: the tinted "Tip" box (--surface-2, a 3 px teal left
+   border). On a phone one column, the article first and the topic card after (§6). */
+.help-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--space-6); align-items: start; max-width: 1080px; }
+.help-nav { grid-column: 1; grid-row: 1; margin: 0; padding: var(--space-3); }
+.help-main { grid-column: 2; grid-row: 1; min-width: 0; }
+.help-search { display: block; box-sizing: border-box; width: 100%; margin: 0 0 var(--space-2); }
+.help-search[hidden], .help-topics li[hidden], .help-no-match[hidden] { display: none; }
+.help-topics { margin: 0; padding: 0; list-style: none; }
+.help-topics a { display: block; padding: 8px 12px; border-radius: var(--radius-ctl); color: var(--text-2); font-size: var(--fs-base); line-height: 1.35; text-decoration: none; }
+.help-topics a:hover { background: var(--surface-2); color: var(--text); }
+.help-topics a[aria-current="page"] { background: var(--month-current); color: var(--link); font-weight: 600; }
+.help-no-match { margin: var(--space-2) 12px; color: var(--muted); font-size: var(--fs-base); }
+.help-topic { margin: 0; padding: 28px 28px 24px; }
+.help-topic .help-title { margin: 0 0 var(--space-2); font-size: 22px; font-weight: 700; line-height: 1.25; }
+.help-meta { margin: 0 0 var(--space-5); color: var(--muted); font-size: var(--fs-base); }
+.help-body { font-size: var(--fs-lg); line-height: 1.65; color: var(--text); }
+.help-body > :first-child { margin-top: 0; }
+.help-body > :last-child { margin-bottom: 0; }
+.help-body p, .help-body ul, .help-body ol, .help-body dl { margin: 0 0 var(--space-4); }
+.help-body h3 { margin: var(--space-6) 0 var(--space-2); font-size: 18px; font-weight: 600; line-height: 1.35; }
+.help-body ul, .help-body ol { padding-left: 20px; }
+.help-body li + li { margin-top: var(--space-2); }
+.help-body dt { font-weight: 600; }
+.help-body dd { margin: 0 0 var(--space-2); }
+.help-body dd:last-child { margin-bottom: 0; }
+.help-tip { padding: 12px 16px; border: 1px solid var(--border-soft); border-left: 3px solid var(--teal); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-md); }
+.help-footer { margin: var(--space-4) 0 0; color: var(--muted); font-size: var(--fs-base); text-align: right; }
 
 /* --- Detail family (PLAN-012f-a D4) ----------------------------------------------------------
    DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png; the rent charge, payment, sent invoice,
@@ -1381,6 +1504,16 @@ p.detail-more-notes { padding-left: 0; }
   .table-cards > table.role-cards tr.totals > th, .table-cards > table.role-cards tr.totals > td { width: auto; padding-left: 0; background: transparent; }
   .table-cards > table.role-cards tr.totals > td::before { content: none; }
   .table-cards > table.role-cards tr.totals > td.money { text-align: right; }
+  /* Report family (PLAN-012f-b E-1): no column-group hairlines, the held pills and Show at the
+     left; the P&L's total has ten figures, so its card lists them "Label value", wrapping like
+     a row's meta line, under the word Total. */
+  .pnl-table .grp-start { border-left: 0; }
+  .pnl-held { margin-left: 0; }
+  .pnl-filters .pnl-show { margin-left: 0; flex: 1 0 100%; }
+  .table-cards > table.pnl-table.role-cards tr.totals { flex-wrap: wrap; justify-content: flex-start; column-gap: var(--space-3); }
+  .table-cards > table.pnl-table.role-cards tr.totals > th { flex: 0 0 100%; }
+  .table-cards > table.pnl-table.role-cards tr.totals > td.money { text-align: left; }
+  .table-cards > table.pnl-table.role-cards tr.totals > td[data-label]::before { content: attr(data-label) " "; position: static; width: auto; color: var(--muted); font-size: var(--fs-sm); font-weight: 500; }
   .table-scroll > table th:first-child, .table-scroll > table td:first-child { max-width: 9rem; }
   /* The phone keeps the sideways scroll and the fixed store column, narrower. */
   table.grid th.store-col { width: 8rem !important; min-width: 8rem !important; max-width: 9rem !important; white-space: normal !important; }
@@ -1399,6 +1532,16 @@ p.detail-more-notes { padding-left: 0; }
   .calendar-filters select { max-width: none; width: 100%; }
   .calendar-filters #operator, .calendar-filters .badge, .calendar-filters button { grid-column: 1 / -1; }
   .calendar-legend { padding: var(--space-3) var(--space-4); }
+  /* Daily charges (PLAN-012f-b E-2): the two cards below in one column; the strip wraps. */
+  .run-pair { grid-template-columns: minmax(0, 1fr); }
+  .run-strip { flex-wrap: wrap; }
+  /* Help (PLAN-012f-b E-3): one column, the article first and the topic card after (§6). */
+  .help-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  .help-nav, .help-main { grid-column: 1; grid-row: auto; }
+  .help-main { order: -1; }
+  .help-topic { padding: 18px 16px; }
+  .help-topics a { padding: 12px; }
+  .help-footer { text-align: left; }
 }
 
 /* --- Print ---------------------------------------------------------------------------------- */

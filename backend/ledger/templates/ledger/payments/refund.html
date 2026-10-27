@@ -1,8 +1,7 @@
-{% extends "finance/base.html" %}
-{% load money %}
+{% extends "ledger/payments/detail.html" %}
+{% load components money %}
 {% block title %}Refund a payment{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:payments:list' %}">Payments</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:payments:detail' pk=payment.pk %}">{% if payment.is_refund %}Refund{% else %}Payment{% endif %} of {{ payment.amount|money }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Refund a payment</span></nav><h1>Refund a payment</h1></div></div>{% endblock %}
-{% block content %}
+{% block dialog %}{% url 'ledger:payments:detail' pk=payment.pk as back_url %}{% dialog id="refund-dialog" title="Refund a payment" size="sm" open=True return_url=back_url %}
   <section class="confirm" aria-labelledby="confirm-what-heading">
   <div class="confirm-what">
   <h2 id="confirm-what-heading">What will happen</h2>
@@ -10,6 +9,7 @@
   </div>
   {% if facts.refund_refusal %}
     <p id="refund-refusal"><strong>{{ facts.refund_refusal }}</strong></p>
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="refund-keep">Keep the payment</a></div>
   {% else %}
     <p id="refund-sentence"><strong>{{ sentence }}</strong></p>
     <form method="post" class="js-single-submit" autocomplete="off" id="refund-form">
@@ -25,9 +25,9 @@
       <p id="refund-confirmation"><label style="font-weight:normal;"><input type="checkbox" name="confirm" value="true" id="confirm-refund"> {{ confirmation }}</label>
         {% for error in form.confirm.errors %}<br><strong class="field-error">{{ error }}</strong>{% endfor %}
       </p>
-      <p class="actions"><button class="btn btn-primary" type="submit" id="confirm-refund-button">Refund through {{ company.provider_name }}</button> <a class="btn" href="{% url 'ledger:payments:detail' pk=payment.pk %}">Back</a></p>
+      <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="refund-keep">Keep the payment</a> <button class="btn btn-primary" type="submit" id="confirm-refund-button">Refund through {{ company.provider_name }}</button></div>
     </form>
   {% endif %}
   </section>
-{% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% enddialog %}{% endblock %}
+{% block scripts %}{{ block.super }}{% include "ledger/operators/single_submit.html" %}{% endblock %}

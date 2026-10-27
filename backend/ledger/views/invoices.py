@@ -771,13 +771,23 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
     if refused is not None:
         return refused
     draft = _load(pk)
+    data, errors = _held(request, f"invoice-edit:{draft.pk}")
+    return render(
+        request, "ledger/invoices/draft.html", _draft_page_context(request, draft, data, errors)
+    )
+
+
+def _draft_page_context(
+    request: HttpRequest, draft: InvoiceDraft, data: dict[str, Any] | None, errors: list[str]
+) -> dict[str, Any]:
+    """The draft page's context: the builder (with the held form ``data`` and its
+    ``errors`` after a refused save) while a draft, the sent invoice after. Charge now and
+    Cancel show over it in their dialog (PLAN-012f-b E-4), without a held form."""
     context = _draft_context(request, draft)
     editable = draft.status == InvoiceDraftStatus.DRAFT
-    target = f"invoice-edit:{draft.pk}"
     leases = _operator_leases(draft.operator)
     rent_leases = _rent_leases([draft.operator], draft)
     existing = invoice_builder.open_charges(draft.lease) if editable else []
-    data, errors = _held(request, target)
     schedulable = editable and invoice_builder.can_schedule(
         draft.lease, invoice_builder.lines_of(draft)
     )
@@ -809,33 +819,29 @@ def draft_page(request: HttpRequest, pk: str) -> HttpResponse:
         sent.update(_sent_detail(request, draft, sent))
     preview = invoice_builder.preview(draft)
     preview_total = _lines_total(formset) if formset is not None else preview.total
-    return render(
-        request,
-        "ledger/invoices/draft.html",
-        {
-            **sent,
-            "draft": draft,
-            "preview": preview,
-            "form": form,
-            "formset": formset,
-            "item_options": _item_options(existing) if editable else [],
-            "items_list_id": ITEMS_LIST_ID,
-            "lines_total": _lines_total(formset) if formset is not None else None,
-            "line_rows": _line_rows(formset) if formset is not None else [],
-            "rent_amount_url": _rent_amount_url([draft.operator], draft),
-            "errors": _error_items(errors, [draft.operator]),
-            "editable": editable,
-            "store_context": context,
-            "context_query": context.query if context is not None else "",
-            "crumb_store": draft.lease.store if draft.lease is not None else None,
-            "collect_form": collect_form,
-            "collect_total": preview_total if editable else None,
-            **_settlement_context(collect_form, preview_total if editable else None),
-            "can_cancel": draft.status == InvoiceDraftStatus.DRAFT
-            or (draft.status == InvoiceDraftStatus.SENT and not sent.get("cancel_refusal")),
-            "due_days": invoice_builder.DUE_DAYS,
-        },
-    )
+    return {
+        **sent,
+        "draft": draft,
+        "preview": preview,
+        "form": form,
+        "formset": formset,
+        "item_options": _item_options(existing) if editable else [],
+        "items_list_id": ITEMS_LIST_ID,
+        "lines_total": _lines_total(formset) if formset is not None else None,
+        "line_rows": _line_rows(formset) if formset is not None else [],
+        "rent_amount_url": _rent_amount_url([draft.operator], draft),
+        "errors": _error_items(errors, [draft.operator]),
+        "editable": editable,
+        "store_context": context,
+        "context_query": context.query if context is not None else "",
+        "crumb_store": draft.lease.store if draft.lease is not None else None,
+        "collect_form": collect_form,
+        "collect_total": preview_total if editable else None,
+        **_settlement_context(collect_form, preview_total if editable else None),
+        "can_cancel": draft.status == InvoiceDraftStatus.DRAFT
+        or (draft.status == InvoiceDraftStatus.SENT and not sent.get("cancel_refusal")),
+        "due_days": invoice_builder.DUE_DAYS,
+    }
 
 
 @role_required
@@ -1003,6 +1009,7 @@ def draft_charge_now(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/invoices/charge_now.html",
         {
+            **_draft_page_context(request, draft, None, []),
             "draft": draft,
             "details": invoice_builder.charge_now_details(draft, _actor(request)),
             "one_attempt": one_off_charges.CHARGE_NOW_ONE_ATTEMPT,
@@ -1037,9 +1044,16 @@ def draft_cancel(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/invoices/cancel.html",
         {
+            **_draft_page_context(request, draft, None, []),
             "draft": draft,
-            "sent": sent,
-            "form": CancelChargeForm(),
+            "cancel_sent": sent,
+            # PLAN-012f-b E-4: the dialog's title, the page's former heading.
+            "cancel_title": (
+                f"Cancel invoice {draft.sent_invoice.invoice_number}"
+                if sent and draft.sent_invoice is not None
+                else f"Delete draft {draft.number}"
+            ),
+            "cancel_form": CancelChargeForm(),
             "refusal": one_off_charges.cancel_refusal(first) if first is not None else "",
         },
     )

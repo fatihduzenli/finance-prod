@@ -26,6 +26,7 @@ from accounts.views import forbidden
 from ledger.models import LIVE_AUTOPAY_STATES, AutopayEndRule, AutopayPlan
 from ledger.services import autopay_plans, workspace
 from ledger.views.operators import _actor, _role, role_required
+from ledger.views.stores import _detail_context as _store_page
 from ledger.views.stores import _load
 
 #: The Change end form's words when a value does not parse.
@@ -97,15 +98,16 @@ def plan_stop(request: HttpRequest, pk: str, plan: str) -> HttpResponse:
             return redirect("ledger:stores:plan_stop", pk=found.store_id, plan=found.pk)
         return _done(request, found, outcome)
     live = found.state in LIVE_AUTOPAY_STATES
-    return render(
-        request,
-        "ledger/stores/plan_stop.html",
+    # PLAN-012f-b E-4: the question shows in its dialog over the store's Autopay tab.
+    context = _store_page(request, found.store, forced_tab=workspace.TAB_SCHEDULES)
+    context.update(
         {
-            "plan": found,
-            "line": workspace.plan_line(found),
-            "refusal": "" if live else autopay_plans.NOT_LIVE,
-        },
+            "stop_plan": found,
+            "stop_line": workspace.plan_line(found),
+            "stop_refusal": "" if live else autopay_plans.NOT_LIVE,
+        }
     )
+    return render(request, "ledger/stores/plan_stop.html", context)
 
 
 @role_required

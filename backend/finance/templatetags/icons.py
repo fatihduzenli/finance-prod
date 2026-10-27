@@ -86,6 +86,14 @@ ICONS: dict[str, str] = {
     "trash": (
         '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>'
     ),
+    # PLAN-012f-b E-4 (DESIGN-SPEC §4 States): the flash messages' warning, error and
+    # information marks, and the empty state's default.
+    "alert": '<path d="M12 5v9"/><path d="M12 19h.01"/>',
+    "dot": '<circle cx="12" cy="12" r="5" fill="currentColor"/>',
+    "info": '<path d="M12 11v8"/><path d="M12 6h.01"/>',
+    "inbox": (
+        '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 12h5l1.5 2h5l1.5-2h5"/>'
+    ),
 }
 
 

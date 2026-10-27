@@ -555,6 +555,8 @@ def _store(world: World) -> list[str]:
 
 #: Page → (its parents' titles in the breadcrumb, the page's own words in it).
 BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
+    # PLAN-012f-b E-4: a confirmation page is its dialog over the page it returns to, so it
+    # carries that page's breadcrumb (the dialog's title names the question).
     # PLAN-012f-b Batch B: New / Edit store and operator are dialogs over the list or the
     # page (tests/test_form_modals.py); the page behind keeps its own header.
     "ledger:stores:set_cost": lambda w: (_store(w), "Set landlord rent"),
@@ -577,10 +579,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
         ["Leases", f"Lease {w.store.external_label}"],
         "Set up autopay",
     ),
-    "ledger:leases:stop_autopay": lambda w: (
-        ["Leases", f"Lease {w.store.external_label}"],
-        "Turn off autopay",
-    ),
+    "ledger:leases:stop_autopay": lambda w: BREADCRUMBS["ledger:leases:detail"](w),
     "ledger:leases:resolve_deposit": lambda w: (
         ["Leases", f"Lease {deposit_store(w)}"],
         "Return deposit",
@@ -614,37 +613,24 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
         [*_store(w), w.one_off.label],
         f"Edit {w.one_off.label}",
     ),
-    "ledger:one_off_charges:waive": lambda w: (
-        [*_store(w), w.one_off.label],
-        f"Waive {w.one_off.label}",
-    ),
-    "ledger:one_off_charges:cancel": lambda w: (
-        [*_store(w), w.one_off.label],
-        f"Cancel {w.one_off.label}",
-    ),
-    "ledger:one_off_charges:charge_now": lambda w: ([*_store(w), w.one_off.label], "Charge now"),
+    "ledger:one_off_charges:waive": lambda w: BREADCRUMBS["ledger:one_off_charges:detail"](w),
+    "ledger:one_off_charges:cancel": lambda w: BREADCRUMBS["ledger:one_off_charges:detail"](w),
+    "ledger:one_off_charges:charge_now": lambda w: BREADCRUMBS["ledger:one_off_charges:detail"](w),
     "ledger:one_off_charges:split": lambda w: ([w.one_off.label], "Split into installments"),
     "ledger:plans:detail": lambda w: ([*_store(w), "Rent Oct 2026"], "Installment plan"),
     "ledger:plans:reschedule": lambda w: (
         [*_store(w), "Installment plan"],
         "Reschedule",
     ),
-    "ledger:plans:cancel": lambda w: (
-        [*_store(w), "Installment plan"],
-        "Stop this plan?",
-    ),
+    "ledger:plans:cancel": lambda w: BREADCRUMBS["ledger:plans:detail"](w),
     "ledger:invoices:new_store": lambda w: (_store(w), "New invoice"),
     "ledger:invoices:new_operator": lambda w: (["Operators", "Walk Co"], "New invoice"),
     "ledger:invoices:draft": lambda w: (_store(w), f"Invoice draft {w.draft.number}"),
-    "ledger:invoices:charge_now": lambda w: ([*_store(w), w.draft.number], "Charge now"),
-    "ledger:invoices:cancel": lambda w: (
-        [*_store(w), w.draft.number],
-        f"Delete draft {w.draft.number}",
-    ),
+    "ledger:invoices:charge_now": lambda w: BREADCRUMBS["ledger:invoices:draft"](w),
+    "ledger:invoices:cancel": lambda w: BREADCRUMBS["ledger:invoices:draft"](w),
     "ledger:payments:detail": lambda w: ([*_store(w), "Payments"], "Payment of $100.00"),
-    "ledger:payments:refund": lambda w: (["Payments", "Payment of $100.00"], "Refund a payment"),
-    "ledger:payments:void": lambda w: (["Payments", "Payment of $100.00"], "Void a payment"),
-    # PLAN-012f-a D6: the calendar page's header carries "Reports ›" (calendar-laptop.png).
+    "ledger:payments:refund": lambda w: BREADCRUMBS["ledger:payments:detail"](w),
+    "ledger:payments:void": lambda w: BREADCRUMBS["ledger:payments:detail"](w),
     "ledger:calendar:page": lambda w: (["Reports"], "Calendar"),
     "ledger:calendar:detail": lambda w: (["Calendar: Oct 2026"], "Walk note"),
     "ledger:calendar:add": lambda w: (["Calendar"], "New calendar entry"),
@@ -657,11 +643,13 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:reports:revenue": lambda w: (["Reports"], "Revenue by month"),
     "ledger:reports:payments_by_method": lambda w: (["Reports"], "Payments by method"),
     "ledger:reports:deposits": lambda w: (["Reports"], "Bank account check"),
+    # PLAN-012f-b E-1: the report family's header (DESIGN-SPEC §4 Profit and loss).
+    "ledger:reports:pnl": lambda w: (["Reports"], "Profit and loss"),
     "ledger:contacts:edit": lambda w: (["Contact log"], "Edit contact entry"),
     "ledger:contacts:correct": lambda w: (["Contact log"], "Add a correction"),
-    "ledger:contacts:delete": lambda w: (["Contact log"], "Delete contact entry"),
+    # PLAN-012f-b E-4: Delete contact entry is its dialog over the operator page, whose own
+    # breadcrumb ends in a link (tests/test_states.py checks the page behind).
     "ledger:contacts:outcome": lambda w: (["Operators", "Walk Co"], "Kept"),
-    "finance:help_topic": lambda w: (["Help"], "Promises to pay"),
 }
 #: The pages with no parent: the lists, the dashboard, the pages of the navigation.
 NO_PARENT = (
@@ -673,15 +661,16 @@ NO_PARENT = (
     "ledger:returns:list",
     "ledger:arrears:page",
     "ledger:reports:index",
-    "ledger:reports:pnl",
     "ledger:webhooks:list",
     "ledger:disputes:page",
     "ledger:reconciliation:page",
-    "ledger:run:today",
     "ledger:audit:page",
     "ledger:search",
     "finance:settings",
     "finance:help",
+    # PLAN-012f-b E-3: a help topic's header holds the title only (DESIGN-SPEC §4 Help); the
+    # topic card beside the article links the other topics.
+    "finance:help_topic",
 )
 
 
@@ -704,6 +693,19 @@ def test_the_pages_without_a_parent_have_no_breadcrumb(world: World) -> None:
     for name in NO_PARENT:
         body = client.get(path_of(world, name)).content.decode()
         assert 'class="breadcrumb"' not in header_of(body), name
+
+
+def test_daily_charges_names_its_section_without_a_link(world: World) -> None:
+    # PLAN-012f-b E-2: the spec draws "Admin ›" before the title; Admin is a group of the
+    # navigation, not a page, so the crumb is text.
+    client = client_for(Role.ADMIN)[0]
+    header = header_of(client.get(path_of(world, "ledger:run:today")).content.decode())
+    match = re.search(
+        r'<nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">(.*?)</nav>', header, re.S
+    )
+    assert match is not None
+    assert "<a " not in match.group(1)
+    assert re.sub(r"<[^>]+>", "", match.group(1)).split() == ["Admin", "›"]
 
 
 def test_a_store_parent_is_named_by_its_number_or_its_label() -> None:
@@ -745,10 +747,12 @@ def test_every_form_card_ends_in_one_primary_button(world: World) -> None:
             for block in actions:
                 found += 1
                 assert block.count("btn-primary") == 1, (name, block)
-        # PLAN-012f-b Batch B: a form dialog's primary is in its foot.
+        # PLAN-012f-b Batch B: a form dialog's primary is in its foot. E-4: a confirmation's
+        # primary is red when it ends or removes something; a refusal's foot is "Keep …" alone.
         for foot in re.findall(r'<div class="dialog-foot">(.*?)</div>', body, re.S):
             found += 1
-            assert foot.count("btn-primary") == 1, (name, foot)
+            primaries = len(re.findall(r'class="btn btn-(?:primary|danger)"', foot))
+            assert primaries == (1 if 'type="submit"' in foot else 0), (name, foot)
     assert found >= 20
 
 

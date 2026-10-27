@@ -1,7 +1,7 @@
-{% extends "finance/base.html" %}
+{% extends "ledger/operators/detail.html" %}
+{% load components %}
 {% block title %}Delete contact entry{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ back_url }}">Contact log</a> <span aria-hidden="true">›</span> <span aria-current="page">Delete contact entry</span></nav><h1>Delete contact entry</h1></div></div>{% endblock %}
-{% block content %}
+{% block dialog %}{% dialog id="delete-contact-dialog" title="Delete contact entry" size="sm" open=True return_url=back_url %}
   <section class="confirm" aria-labelledby="confirm-question">
   <h2 class="confirm-question" id="confirm-question">Are you sure?</h2>
   {% include "ledger/contacts/_entry.html" %}
@@ -13,8 +13,7 @@
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% include "ledger/stores/_form_field.html" with field=form.reason mark=True %}
-    <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-delete-contact">Delete</button> <a class="btn" href="{{ back_url }}">Back</a></p>
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="delete-contact-keep">Keep the entry</a> <button class="btn btn-danger" type="submit" id="confirm-delete-contact">Delete</button></div>
   </form>
   </section>
-{% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% enddialog %}{% endblock %}

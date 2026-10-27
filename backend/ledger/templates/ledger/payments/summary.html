@@ -1,12 +1,9 @@
-{% load money %}
+{% load money %}{% comment %}What Refund and Void show in their dialog (PLAN-012f-b E-4): the payment's facts that the payment page behind does not; its operator, store and transaction are on that page.{% endcomment %}
 <dl id="payment-summary" class="detail-list">
-  <dt>Operator</dt><dd id="summary-operator">{{ row.operator.display_name|default:"—" }}</dd>
-  <dt>Store</dt><dd id="summary-store">{{ row.store.external_label|default:"—" }}</dd>
   <dt>Invoice number</dt><dd id="summary-invoice">{{ invoice.invoice_number|default:"—" }}</dd>
   <dt>Charge</dt><dd id="summary-charge">{% include "ledger/payments/_charge.html" %}</dd>
   <dt>Method</dt><dd>{{ payment.get_method_display }}</dd>
   <dt>Status</dt><dd id="summary-status">{% if payment.is_refund %}<span class="badge">Refund</span> {% endif %}{{ payment.get_status_display }}</dd>
-  <dt>Transaction</dt><dd id="summary-transaction">{{ row.transaction|default:"—" }}</dd>
   <dt>Original amount</dt><dd id="summary-amount">{{ payment.amount|money }}</dd>
   {% if not payment.is_refund %}
     <dt>Already refunded</dt><dd id="summary-refunded">{{ facts.refunded|money }} <span class="muted">pending and settled refunds</span></dd>

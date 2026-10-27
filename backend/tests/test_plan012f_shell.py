@@ -119,12 +119,22 @@ BATCH_C_TOKENS = {"--progress-pending": "#E5B800", "--progress-partial": "#F08A2
 #: The token Batch D adds (PLAN-012f D13): the sign-in pages' brand panel, the sidebar
 #: gradient's two stops at the 160 degrees DESIGN-SPEC §4 Login writes.
 BATCH_D_TOKENS = {"--login-gradient": "linear-gradient(160deg, #0B2545 0%, #0E4A5C 100%)"}
+#: The token Batch E adds (PLAN-012f-b E-4): the error flash message's text, DESIGN-SPEC §4
+#: States' #8A1C14.
+BATCH_E_TOKENS = {"--error-text": "#8A1C14"}
 
 
 def test_the_tokens_file_holds_the_spec_block_name_for_name_and_value_for_value() -> None:
     spec = declarations(spec_block())
     assert len(spec) >= 50  # the parse found the spec's block
-    expected = {**spec, **OWNER_TOKENS, **BATCH_B_TOKENS, **BATCH_C_TOKENS, **BATCH_D_TOKENS}
+    expected = {
+        **spec,
+        **OWNER_TOKENS,
+        **BATCH_B_TOKENS,
+        **BATCH_C_TOKENS,
+        **BATCH_D_TOKENS,
+        **BATCH_E_TOKENS,
+    }
     assert spec["--teal"] == "#13A89E" and expected["--teal"] == "#13A89E"  # --teal unchanged
     assert "#EEF6F5" in SPEC.read_text(encoding="utf-8")  # the spec's value for the tint
     tokens_css = TOKENS_CSS.read_text(encoding="utf-8")
@@ -159,6 +169,7 @@ def test_the_comparison_sees_a_changed_value() -> None:
         **BATCH_B_TOKENS,
         **BATCH_C_TOKENS,
         **BATCH_D_TOKENS,
+        **BATCH_E_TOKENS,
     }
     assert declarations(root) == expected
     assert changed != root and declarations(changed) != expected
@@ -556,6 +567,10 @@ ICON_NAMES = (
     "x",
     "banknote",  # PLAN-012f-a D4: the Payments card's empty state
     "trash",  # PLAN-012f-a D5: the builder's remove-line button
+    "alert",  # PLAN-012f-b E-4: the warning flash message
+    "dot",  # PLAN-012f-b E-4: the error flash message
+    "info",  # PLAN-012f-b E-4: the information flash message
+    "inbox",  # PLAN-012f-b E-4: the empty state's default icon
 )
 
 

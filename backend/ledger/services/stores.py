@@ -128,13 +128,16 @@ def title(store: Store) -> str:
     hyphen, or nothing) shows the rest once ("2922 TUCSON" is "#2922 TUCSON"); a name that is
     only the number (the sheet's imported stores) shows the city after it, if any ("#2475
     CONYERS", else "#2475"); a store without a number shows its name only."""
-    number = store.store_number
-    name = store.external_label
+    return title_of(store.store_number, store.external_label, store.city)
+
+
+def title_of(number: int | None, name: str, city: str = "") -> str:
+    """:func:`title` from the values a query read (the P&L's rows, PLAN-012f-b E1-1)."""
     if number is None:
         return name
     rest = re.match(rf"{number}(?!\d)[ -]?(.*)\Z", name, re.S)
     if rest is not None:
-        name = rest.group(1).strip() or store.city.strip()
+        name = rest.group(1).strip() or city.strip()
     return f"#{number} {name}" if name else f"#{number}"
 
 

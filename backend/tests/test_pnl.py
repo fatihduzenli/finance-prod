@@ -697,7 +697,9 @@ def test_the_page_shows_the_known_store_with_its_margin() -> None:
     response = get(PAGE, {"from": "2026-07", "to": "2026-07"})
     assert response.status_code == 200
     page = response.content.decode()
-    assert "Store 1796" in page and "$1,500.00" in page
+    # PLAN-012f-b E-1: the table's amounts carry no "$" (its header says "amounts in US dollars").
+    assert "Store 1796" in page and '<td class="money grp-start margin-billed"' in page
+    assert "1,500.00" in page.split('margin-billed"', 1)[1].split("</td>", 1)[0]
     [group] = response.context["groups"]
     assert (group.label, group.margin_billed) == ("Store 1796", D("1500.00"))
     assert 'id="deposits-held-amount">$0.00<' in page

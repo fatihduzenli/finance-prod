@@ -69,7 +69,9 @@ def test_a_get_and_a_head_of_every_page_in_the_suite_write_nothing(
         path = path_of(site)
         for method in (client.get, client.head):
             response = method(path)
-            assert response.status_code == 200, (name, method.__name__, response.status_code)
+            # The not-found page (PLAN-012f-b Batch E) answers 404 by design; still a read.
+            expected = 404 if name == "not-found" else 200
+            assert response.status_code == expected, (name, method.__name__, response.status_code)
     assert row_counts() == before
     assert AuditLog.objects.count() == audit_before
 

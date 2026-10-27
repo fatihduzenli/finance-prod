@@ -133,41 +133,43 @@ def _summary(payment: Payment, facts: refunds.PaymentFacts) -> dict[str, object]
 @require_safe
 def payment_detail(request: HttpRequest, pk: str) -> HttpResponse:
     payment = _load(pk)
+    return render(request, "ledger/payments/detail.html", _detail_context(request, payment))
+
+
+def _detail_context(request: HttpRequest, payment: Payment) -> dict[str, object]:
+    """The payment page's context (read only); Refund and Void show over it in their
+    dialog (PLAN-012f-b E-4)."""
     admin = meets(_role(request), Role.ADMIN)
     facts = refunds.payment_facts(payment)
     summary = _summary(payment, facts)
     row = cast(ledger.LedgerRow, summary["row"])
     payment_refunds = list(payment.refunds.order_by("created_at", "id"))
-    return render(
-        request,
-        "ledger/payments/detail.html",
-        {
-            **summary,
-            **job_context(payment),
-            "refunds": payment_refunds,
-            "charge_review": _charge_review(payment),
-            # PLAN-012f-a D4: the header's line and the Activity card (the payment's rows
-            # and its refunds').
-            "header_line": detail_cards.header_line(
-                store=store_service.title(row.store) if row.store is not None else "",
-                operator=row.operator.display_name if row.operator is not None else "",
-                created=payment.created_at,
-            ),
-            **activity_context(
-                [(ENTITY_PAYMENT, refund.pk) for refund in payment_refunds],
-                admin=admin,
-                store=row.store,
-                record=(ENTITY_PAYMENT, payment.pk),
-            ),
-            "can_refund": admin and facts.can_refund,
-            "can_void": admin and facts.can_void,
-            "parent_transaction": (
-                mask_identifier(refunds.transaction_reference(payment.parent_payment))
-                if payment.parent_payment is not None
-                else ""
-            ),
-        },
-    )
+    return {
+        **summary,
+        **job_context(payment),
+        "refunds": payment_refunds,
+        "charge_review": _charge_review(payment),
+        # PLAN-012f-a D4: the header's line and the Activity card (the payment's rows
+        # and its refunds').
+        "header_line": detail_cards.header_line(
+            store=store_service.title(row.store) if row.store is not None else "",
+            operator=row.operator.display_name if row.operator is not None else "",
+            created=payment.created_at,
+        ),
+        **activity_context(
+            [(ENTITY_PAYMENT, refund.pk) for refund in payment_refunds],
+            admin=admin,
+            store=row.store,
+            record=(ENTITY_PAYMENT, payment.pk),
+        ),
+        "can_refund": admin and facts.can_refund,
+        "can_void": admin and facts.can_void,
+        "parent_transaction": (
+            mask_identifier(refunds.transaction_reference(payment.parent_payment))
+            if payment.parent_payment is not None
+            else ""
+        ),
+    }
 
 
 def _charge_review(payment: Payment) -> str:
@@ -232,6 +234,7 @@ def payment_refund(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/payments/refund.html",
         {
+            **_detail_context(request, payment),
             **_summary(payment, facts),
             "form": form,
             "sentence": refunds.REFUND_SENTENCE,
@@ -277,6 +280,7 @@ def payment_void(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/payments/void.html",
         {
+            **_detail_context(request, payment),
             **_summary(payment, refunds.payment_facts(payment)),
             "form": form,
             "sentence": refunds.VOID_SENTENCE,

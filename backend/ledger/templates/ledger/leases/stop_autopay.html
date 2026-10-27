@@ -1,19 +1,17 @@
-{% extends "finance/base.html" %}
-{% load responsive money %}
+{% extends "ledger/leases/detail.html" %}
+{% load components responsive money %}
 {% block title %}Turn off autopay: lease {{ lease.store.external_label }}{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:leases:list' %}">Leases</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:leases:detail' pk=lease.pk %}">Lease {{ lease.store.external_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Turn off autopay</span></nav><h1>Turn off autopay</h1></div></div>{% endblock %}
-{% block content %}
-  {% include "ledger/_job_status.html" %}
+{% block dialog %}{% url 'ledger:leases:detail' pk=lease.pk as back_url %}{% dialog id="stop-autopay-dialog" title="Turn off autopay" size="sm" open=True return_url=back_url %}
   <section class="confirm" aria-labelledby="confirm-what-heading">
   <div class="confirm-what">
   <h2 id="confirm-what-heading">What will happen</h2>
   <p id="stop-warning"><strong>Turn off autopay: autopay is cancelled in {{ company.provider_name }}; set it up again to restart.</strong></p>
-  {% if schedules %}
+  {% if stop_schedules %}
     {% responsive_table %}
     <table id="stop-schedules">
       <thead><tr><th>Kind</th><th>Debit</th><th>Day</th><th class="money">Amount</th><th>State</th><th>Autopay in {{ company.provider_name }}</th></tr></thead>
       <tbody>
-        {% for item in schedules %}
+        {% for item in stop_schedules %}
           <tr>
             <td>{{ item.row.get_kind_display }}</td>
             <td>{{ item.row.seq }}</td>
@@ -28,14 +26,14 @@
     {% endresponsive_table %}
   {% endif %}
   </div>
-  {% if schedules %}
+  {% if stop_schedules %}
     <form method="post" class="js-single-submit">
       {% csrf_token %}
-      <p class="actions"><button class="btn btn-danger" type="submit" id="confirm-stop-autopay">Turn off autopay</button> <a class="btn" href="{% url 'ledger:leases:detail' pk=lease.pk %}">Back</a></p>
+      <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="stop-autopay-keep">Keep autopay</a> <button class="btn btn-danger" type="submit" id="confirm-stop-autopay">Turn off autopay</button></div>
     </form>
   {% else %}
     <p id="nothing-to-stop" class="muted">{{ nothing_to_stop }}</p>
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="stop-autopay-keep">Keep autopay</a></div>
   {% endif %}
   </section>
-{% endblock %}
-{% block scripts %}{% include "ledger/operators/single_submit.html" %}{% endblock %}
+{% enddialog %}{% endblock %}

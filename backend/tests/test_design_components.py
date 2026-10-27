@@ -179,7 +179,9 @@ def test_every_staff_template_with_a_title_wraps_it_in_the_page_header() -> None
             assert header != -1 and "{% endblock %}" not in text[header:at], relative
             assert PAGE_HEADER.search(text[header:at] + "<h1>"), relative
     # PLAN-012f-b C-2: the two payment_form.html pages became one add_payment.html.
-    assert found >= 69
+    # PLAN-012f-b E-4: the eleven confirmation pages lost their own header (their dialog's
+    # title names them over the parent page's header).
+    assert found >= 58
 
 
 def test_a_list_page_puts_its_primary_action_in_the_header() -> None:
@@ -566,11 +568,20 @@ def test_each_confirmation_template_is_a_confirm_component(relative: str) -> Non
     section = text[text.index('<section class="confirm"') : text.index("</section>")]
     assert "What will happen" in section
     assert 'class="confirm-what"' in section
-    # One primary action (filled, or the danger one) and one secondary .btn.
+    # One primary action (filled, or the danger one) and one secondary .btn. PLAN-012f-b E-4:
+    # in a dialog the secondary is "Keep …" back to the parent page, also under a refusal
+    # (the branch without the form), so a page with a refusal branch writes it twice.
     primaries = re.findall(r'class="btn (?:btn-primary|btn-danger)"', section)
     assert len(primaries) == 1, primaries
-    secondary = re.findall(r'<a class="btn" href=|"ledger/lease_ends/_cancel.html"', section)
-    assert len(secondary) == 1, secondary
+    if "{% dialog " in text:
+        keeps = re.findall(
+            r'<a class="btn" href="\{\{ back_url \}\}" id="([a-z-]+)">[^<]*Keep ', section
+        )
+        assert 1 <= len(keeps) <= 2 and len(set(keeps)) == 1, keeps
+        assert len(re.findall(r'<a class="btn" href=', section)) == len(keeps)
+    else:
+        secondary = re.findall(r'<a class="btn" href=|"ledger/lease_ends/_cancel.html"', section)
+        assert len(secondary) == 1, secondary
 
 
 def _confirm_of(html: str) -> str:
@@ -660,15 +671,19 @@ def _with_messages(*items: tuple[int, str]) -> str:
 def test_a_flash_message_is_a_dismissable_toast_in_a_polite_live_region() -> None:
     html = _with_messages((constants.SUCCESS, "Saved."), (constants.ERROR, "Refused <b>x</b>."))
     assert '<ul class="toasts" id="toasts" aria-live="polite">' in html
-    assert (
-        '<li class="toast success" role="status"><span class="toast-text">Saved.</span>'
-        '<button type="button" class="toast-dismiss" aria-label="Dismiss this message">&times;'
-        "</button></li>"
-    ) in html
-    assert (
-        '<li class="toast error" role="status"><span class="toast-text">'
-        "Refused &lt;b&gt;x&lt;/b&gt;.</span>" in html
+    # PLAN-012f-b E-4: the level's icon before the text (tests/test_states.py has each level).
+    success = html[html.index('<li class="toast success" role="status">') :].split("</li>", 1)[0]
+    assert success.startswith(
+        '<li class="toast success" role="status"><span class="toast-icon"><svg class="icon '
+        'icon-check" width="16"'
     )
+    assert success.endswith(
+        '</span><span class="toast-text">Saved.</span>'
+        '<button type="button" class="toast-dismiss" aria-label="Dismiss this message">&times;'
+        "</button>"
+    )
+    error = html[html.index('<li class="toast error" role="status">') :].split("</li>", 1)[0]
+    assert '<span class="toast-text">Refused &lt;b&gt;x&lt;/b&gt;.</span>' in error
     assert 'document.querySelectorAll(".toast-dismiss")' in html
 
 
@@ -927,7 +942,11 @@ def test_the_cancel_and_delete_pages_render_as_confirmations() -> None:
     section = _confirm_of(html)
     assert '<h2 class="confirm-question" id="confirm-question">Are you sure?</h2>' in section
     assert "<h3>What will happen</h3>" in section
-    assert 'id="confirm-delete-contact">Delete</button> <a class="btn" href=' in section
+    assert (
+        '<div class="dialog-foot"><a class="btn" href="/operators/'
+        f'{operator.pk}/#contact-{entry.pk}" id="delete-contact-keep">Keep the entry</a> '
+        '<button class="btn btn-danger" type="submit" id="confirm-delete-contact">Delete</button>'
+    ) in section
     assert '<div class="field">' in section
 
 
