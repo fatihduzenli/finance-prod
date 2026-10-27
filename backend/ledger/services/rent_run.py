@@ -210,6 +210,11 @@ SECOND_INVOICE = provider_sentence(
     "{provider} generated more than one invoice for this charge. Only the first is linked; "
     "review the others in {provider}."
 )
+#: The payment page's Charge card for a manual payment of part of the amount (PLAN-012f-c
+#: D12): an information notice, not a failure.
+PARTIAL_NOTICE = provider_sentence(
+    "Partial payment — the {provider} invoice stays open until the rest is paid."
+)
 
 PAY_METHOD = "Choose Zelle, wire, check, cash or other."
 PAY_NOT_POSITIVE = "The amount must be more than zero."
@@ -1219,10 +1224,20 @@ def _match_one(
     return line(MatchAction.LINKED, MATCH_LINKED.format(**words))
 
 
-def charge_review_message(charge: RentCharge) -> str:
-    """Why a flagged charge needs review, or ``""`` when it is not flagged."""
+def partial_marking(charge: RentCharge | OneOffCharge) -> bool:
+    """Whether the charge is flagged because a manual payment paid part of the amount, so
+    its provider invoice was not marked paid (PLAN-012f-c D12)."""
+    return charge.needs_review and charge.review_message.startswith(offline_marking.PARTIAL_AMOUNT)
+
+
+def charge_review_message(charge: RentCharge, *, with_partial: bool = True) -> str:
+    """Why a flagged charge needs review, or ``""`` when it is not flagged.
+    ``with_partial=False`` leaves out the partial-payment reason (the payment page shows it
+    as :data:`PARTIAL_NOTICE`, D12); a charge flagged for that reason alone then reads
+    ``""``, never the second-invoice fallback."""
     if not charge.needs_review:
         return ""
+    partial = partial_marking(charge)
     parts = []
     if charge.invoices.exclude(total=charge.amount_due).exists():
         parts.append(TOTAL_MISMATCH)
@@ -1230,8 +1245,10 @@ def charge_review_message(charge: RentCharge) -> str:
         entity_type=ENTITY_CHARGE, entity_id=str(charge.pk), action=LINKED_TOTAL_DIFFERS_ACTION
     ).exists():
         parts.append(LINKED_TOTAL_DIFFERS)
-    if charge.review_message:
+    if charge.review_message and (with_partial or not partial):
         parts.append(f"{offline_marking.shown(charge.review_message)}.")
+    if not parts and partial:
+        return ""
     # A sentence naming the processor is lazy (wording.provider_sentence): str() it.
     return " ".join(str(part) for part in parts) or str(SECOND_INVOICE)
 

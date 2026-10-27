@@ -1064,7 +1064,8 @@ def test_billing_saves_an_sms_phone_and_two_consent_times_without_a_provider_cal
     )
     assert operator.sync_status == SyncStatus.LINKED
     page = response.content.decode()
-    assert '<dd id="sms-phone">+14045551234</dd>' in page
+    # Shown as "(404) 555-1234" (PLAN-012f-c D9); stored as typed (above).
+    assert '<dd id="sms-phone">(404) 555-1234</dd>' in page
     shown = moment_text(sms_at)
     assert f'<dd id="sms-consent">{shown}</dd>' in page
     after = (

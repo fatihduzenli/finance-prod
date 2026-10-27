@@ -417,9 +417,16 @@ def test_every_manual_payment_page_switches_the_reference_label_with_the_script(
     else:
         url = f"/invoices/new/store/{lease.store_id}/"
     html = billing().get(url).content.decode()
-    # Without script the label reads "Reference"; the help names the check number.
+    # Without script the label reads "Reference"; the help names the check number — on Add
+    # payment (the charge and one-off routes) it is the one line "Never an account number."
+    # and the longer sentence lives on the Payments help topic (PLAN-012f-c D10).
     assert '<label for="id_reference">Reference</label>' in html
-    assert ledger_forms.REFERENCE_HELP in html
+    expected = (
+        ledger_forms.ADD_PAYMENT_REFERENCE_HELP
+        if page in ("charge", "one_off")
+        else ledger_forms.REFERENCE_HELP
+    )
+    assert expected in html
     # The script switches it while Check is chosen in the method select.
     tag = re.search(r"<input[^>]*name=\"reference\"[^>]*>", html)
     assert tag is not None and LABEL_SWITCH in tag.group(0)

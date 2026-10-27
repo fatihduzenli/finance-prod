@@ -713,6 +713,9 @@ MANUAL_METHOD_CHOICES = tuple(
 REFERENCE_HELP = (
     "A Zelle confirmation, a wire reference or a check number; never an account number."
 )
+#: The reference's help on Add payment (PLAN-012f-c D10): what it is for is in the help
+#: topic "Payments".
+ADD_PAYMENT_REFERENCE_HELP = "Never an account number."
 #: The reference's label while Check is the method chosen (PLAN-012e-3 D3).
 REFERENCE_LABEL_CHECK = "Check number"
 
@@ -788,9 +791,10 @@ class AddPaymentForm(ManualPaymentForm):
     """The Add payment page (PLAN-012f-b D14): ``how`` picks the bank-debit card
     (``debit_amount``, ``debit_on``, ``confirm_large_debit``) or the record card (today's
     :class:`ManualPaymentForm` fields). ``debit_reason`` is why the debit card is greyed
-    (``""``: offered); ``balance`` what a debit takes; ``admin`` whether today may be the
-    debit date (else Debit on starts tomorrow, C2-1). A post without ``how`` is the record
-    card (the shape of the page before). Each card's fields carry ``data-shown-when``
+    (``""``: offered) and ``debit_reason_more`` its second line (PLAN-012f-c D7);
+    ``balance`` what a debit takes; ``admin`` whether today may be the debit date (else
+    Debit on starts tomorrow, C2-1). A post without ``how`` is the record card (the shape
+    of the page before). Each card's fields carry ``data-shown-when``
     (``ledger/shown_when.js``) and count only for their card; the note is required only
     for ``record``. The services check every rule again."""
 
@@ -820,6 +824,7 @@ class AddPaymentForm(ManualPaymentForm):
         balance: Decimal,
         today: date | None = None,
         admin: bool = True,
+        debit_reason_more: str = "",
         **kwargs: Any,
     ) -> None:
         if data is not None and not data.get("how"):
@@ -827,12 +832,14 @@ class AddPaymentForm(ManualPaymentForm):
             data["how"] = HOW_RECORD
         super().__init__(data, *args, **kwargs)
         self.debit_reason = debit_reason
+        self.debit_reason_more = debit_reason_more if debit_reason else ""
         self.balance = balance
         self.today = today or timezone.localdate()
         self.admin = admin
         earliest = self.today if admin else self.today + timedelta(days=1)
         for name in ("method", "amount", "paid_on", "note"):
             self.fields[name].required = False
+        self.fields["reference"].help_text = ADD_PAYMENT_REFERENCE_HELP
         self.fields["how"].initial = HOW_RECORD if debit_reason else HOW_DEBIT
         self.fields["debit_amount"].initial = balance
         self.fields["debit_amount"].widget.attrs["max"] = str(balance)
@@ -872,6 +879,7 @@ class AddPaymentForm(ManualPaymentForm):
                 "id": f"how-{value}",
                 "checked": value == chosen,
                 "reason": self.debit_reason if value == HOW_DEBIT else "",
+                "reason_more": self.debit_reason_more if value == HOW_DEBIT else "",
             }
             for value, label in HOW_CHOICES
         ]

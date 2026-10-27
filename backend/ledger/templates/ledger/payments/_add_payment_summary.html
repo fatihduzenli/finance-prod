@@ -1,5 +1,5 @@
 {% comment %}Add payment's right column (PLAN-012f-b D14, add-payment-laptop.png): the SUMMARY card (the tiles Charge, Paid, Balance due in red, This payment in teal; the "After this payment" line; the one primary, its words following the card chosen: both texts are in the button, the other card's hidden, and ledger/add_payment.js keeps the amount and the line with what is typed; while no amount is typed, or what is typed is not one, the button reads "Record as paid" / "Charge by ACH" with no figure, its amount hidden, and This payment shows "—" (Fable's C2-4); Cancel), then the OPERATOR card (name · phone; connected or not; the bank ···· last four; the returns this year). Context: chosen, how_debit, how_record, amount, paid, balance, this_payment, paid_in_full, still_owed, operator, connected, bank, returns_this_year, cancel_url, company.{% endcomment %}
-{% load money components %}
+{% load money components phones %}
 <aside class="form-summary" aria-label="Summary">
 <section class="card summary-card" id="payment-summary" data-balance="{{ balance }}">
   <h2 class="section-label">Summary</h2>
@@ -15,7 +15,7 @@
 </section>
 {% if operator %}<section class="card operator-summary" id="operator-card" aria-labelledby="operator-card-heading">
   <h2 class="section-label" id="operator-card-heading">Operator</h2>
-  <p class="operator-summary-line"><strong id="operator-name">{{ operator.display_name }}</strong>{% if operator.phone %} · <span id="operator-phone">{{ operator.phone }}</span>{% endif %}</p>
+  <p class="operator-summary-line"><strong id="operator-name">{{ operator.display_name }}</strong>{% if operator.phone %} · <span id="operator-phone">{{ operator.phone|phone }}</span>{% endif %}</p>
   <p class="muted operator-summary-line" id="operator-payment">{% if connected %}Connected to {{ company.provider_name }}{% else %}Not connected to {{ company.provider_name }}{% endif %} · {% if bank %}bank ····{{ bank.last_four }}{% else %}no bank account on file{% endif %} · {% if returns_this_year %}{{ returns_this_year }} returned payment{{ returns_this_year|pluralize }} this year{% else %}no returned payments this year{% endif %}</p>
 </section>{% endif %}
 </aside>

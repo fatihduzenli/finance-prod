@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components money dates %}
+{% load components money dates people %}
 {% load responsive charge_kinds %}
 {% block title %}{{ charge.label }}{% if lease %} {{ lease.store.external_label }}{% endif %}{% endblock %}
 {% comment %}The one-off charge page (PLAN-012f-a D4; DESIGN-SPEC §4 Charge detail, charge-detail-laptop.png): the header (breadcrumb, title with the status and kind badges, the muted line, Add payment / Charge now, Split into installments, More ▾), then the two-thirds column (the Amount, Paid and Balance tiles, Invoices, Payments, Activity and the charge's other cards) beside the one-third column (DETAILS, the open promise, MORE). The More menu and the MORE card hold the same actions by role.{% endcomment %}
@@ -67,7 +67,7 @@
           <td>{% if payment.is_refund %}<span class="badge">Refund</span> {% endif %}{% status_badge payment.get_status_display payment.status %}</td>
           <td>{{ payment.reference|default:"—" }}</td>
           <td style="white-space:pre-wrap;">{{ payment.note }}</td>
-          <td>{{ payment.recorded_by|default:"—" }}</td>
+          <td>{{ payment.recorded_by|staff|default:"—" }}</td>
         </tr>
       {% endfor %}
     </tbody>
@@ -86,7 +86,7 @@
     <section class="card" id="deposit-resolution-card">
     <h2>Deposit resolution</h2>
     <dl id="deposit-resolution" class="detail-list">
-      <dt>Resolved</dt><dd id="resolution-kind">{{ resolution.get_kind_display }} on {{ resolution.resolved_on|day }}{% if resolution.created_by %} by {{ resolution.created_by }}{% endif %}</dd>
+      <dt>Resolved</dt><dd id="resolution-kind">{{ resolution.get_kind_display }} on {{ resolution.resolved_on|day }}{% if resolution.created_by %} by {{ resolution.created_by|staff }}{% endif %}</dd>
       <dt>Amount</dt><dd id="resolution-amount">{{ resolution.amount|money }}</dd>
       {% if resolution.method %}<dt>Method</dt><dd id="resolution-method">{{ resolution.get_method_display }}</dd>{% endif %}
       {% if resolution.to_lease %}<dt>Transferred to</dt><dd id="resolution-to-lease"><a href="{% url 'ledger:leases:detail' pk=resolution.to_lease.pk %}">Lease {{ resolution.to_lease.store.external_label }}</a></dd>{% endif %}
@@ -113,8 +113,8 @@
     {% if charge.category != "setup" %}<dt>Internal note</dt><dd id="note" style="white-space:pre-wrap;">{{ charge.note|default:"—" }}</dd>{% endif %}
     {% if schedule_masked %}<dt>Autopay in {{ company.provider_name }}</dt><dd id="schedule">{{ schedule_masked }}</dd>{% endif %}
     {% if provider_invoice_masked %}<dt>{{ company.provider_name }} invoice</dt><dd id="provider-invoice">{{ provider_invoice_masked }}</dd>{% endif %}
-    {% if charge.voided_at %}<dt>Voided</dt><dd id="voided">{{ charge.voided_at|day }} by {{ charge.voided_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.void_note }}</span></dd>{% endif %}
-    {% if charge.waived_at %}<dt>Waived</dt><dd id="waived">{{ charge.waived_at|day }} by {{ charge.waived_by|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.waive_note }}</span></dd>{% endif %}
+    {% if charge.voided_at %}<dt>Voided</dt><dd id="voided">{{ charge.voided_at|day }} by {{ charge.voided_by|staff|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.void_note }}</span></dd>{% endif %}
+    {% if charge.waived_at %}<dt>Waived</dt><dd id="waived">{{ charge.waived_at|day }} by {{ charge.waived_by|staff|default:"—" }}: <span style="white-space:pre-wrap;">{{ charge.waive_note }}</span></dd>{% endif %}
   </dl>
   </section>
 

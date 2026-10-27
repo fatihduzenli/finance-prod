@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive dates %}
+{% load responsive dates people %}
 {% block title %}Nightly check{% endblock %}
 {% block header %}<div class="page-header"><h1>Nightly check</h1>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:reconciliation:run' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="run-now"{% if job_refresh %} disabled{% endif %}>Run the nightly check now</button></form></div>{% endif %}</div>{% endblock %}
 {% block content %}
@@ -52,7 +52,7 @@
           <td>{{ item.mismatch.get_kind_display }}</td>
           <td>{{ item.mismatch.entity_type }} {{ item.entity_masked }}</td>
           <td>{{ item.mismatch.detail }}</td>
-          <td>{% if item.mismatch.resolved_at %}{{ item.mismatch.resolved_at|moment }}{% if item.mismatch.resolved_by %} by {{ item.mismatch.resolved_by.get_username }}{% endif %}: {{ item.mismatch.resolution_note }}{% else %}<span class="muted">Open</span>{% endif %}</td>
+          <td>{% if item.mismatch.resolved_at %}{{ item.mismatch.resolved_at|moment }}{% if item.mismatch.resolved_by %} by {{ item.mismatch.resolved_by|staff }}{% endif %}: {{ item.mismatch.resolution_note }}{% else %}<span class="muted">Open</span>{% endif %}</td>
           <td>
             {% if not item.mismatch.resolved_at %}
               <form method="post" action="{% url 'ledger:reconciliation:resolve' pk=item.mismatch.pk %}" class="js-single-submit">

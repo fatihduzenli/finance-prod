@@ -54,3 +54,40 @@ as a processor void does. Promises closed by the payment are not reopened by its
 
 **Verdict (A):** PASS — A-1 (MAJOR) resolved; A-2 (MINOR) deferred to Batch B; residual risk: the void never reaches the processor by design, so a marked-paid invoice stays paid there until a person unmarks it (the Needs review item carries it); the processor dialogs' GET paths were not re-shot beyond the regenerated baseline.
 
+## Batch B — six copy and small-UI fixes (branch `step-12f-c/batch-b`, plan D7–D12)
+
+**Scope.** Opus, one brief in two rounds (item h needed two files outside the first list; Fable
+approved its approach), plus two items from Batch A's review. Built: (a) the greyed bank-debit
+card shows the actionable reason first — "No bank account on file — send {operator} the
+{processor} link to add one" — and "Bank debits are also off at {processor}." under it when both
+apply; one line otherwise; (b) the Add payment badge reads "● Due · $2,100.00"; (c) phone numbers
+read "(123) 456-7822" on screen through the `phone` filter (eleven digits with a leading 1 too;
+another country code as "+CC …"; anything the filter does not understand as stored; the stored
+value unchanged) on the operator page and side card, the Add payment summary and the operator
+header line; (d) the Reference help reads "Never an account number." and the longer sentence
+moved to the new Payments help topic, which also carries the void, partial-payment and
+installment rules; (g) "Recorded by" and every "by {user}" cell show the staff member's name
+through the `staff` filter (full name, else username, never the e-mail; the e-mail as the hover
+title) on fourteen templates; (h) the payment page's Charge card shows "Partial payment — the
+{processor} invoice stays open until the rest is paid." as an inline info notice while a balance
+remains (the review message's second-invoice fallback never shown for it; a charge completed by a
+later partial payment keeps the strong line, since its invoice is still not marked); from Batch
+A's review: the shared held-form helper drops any value the payment-data guard refuses (a routing
+number beside an account number, not only a card number) across every held form, and a voided
+payment has nothing refundable ("$0.00 · nothing refundable"). Opus's `tests/test_plan012fc_b.py`
+(58). Fable: `tests/test_plan012fc_b_adversarial.py` (18) and the browser test
+`tests/e2e/test_copy_fixes_12fc_b.py` (the QA shots).
+
+**Findings.** None beyond the two carried in from Batch A's review (the held-form guard, the voided payment's tile), both resolved here. Two pins moved by design and were re-pinned by Fable: `test_check_method` (Add payment's Reference help is the one line) and `test_plan012a_adversarial` (the operator page formats the SMS phone).
+
+**Departures from the owner's message, with reasons.** The "send {operator} the {processor} link"
+sentence is built as written though the app sends no link and the 2026-09-29 decision keeps
+operators off processor pages (plan §9 asks). Three "by {user}" cells still show usernames (the
+store cost history, the collections log's "Sent by", the audit and History "User" columns): their
+services pass usernames as strings and were outside the batch; recorded for Step 13. The partial
+notice shows only while a balance remains (see h). The CSV exports keep stored phone values.
+
+**Gate.** ruff, `ruff format --check` (531 files), mypy strict (531 files), `uv lock --check`, `makemigrations --check` (no migration): clean on 1ec012c. sqlite: the full suite 8,039 passed, 3 failed (the two re-pins above, one of them twice) in 1,677 s; the two files 30 passed on 63b3ed5. PostgreSQL 16 (a throwaway container, the CI split): `makemigrations --check` no changes; the migration selection 36 passed in 1,528 s; the unit selection's first run 8,699 passed and 1 failed — `test_plan012f_d_pages::test_the_pages_with_a_parent_carry_its_breadcrumb`, whose traceback the pipeline script did not keep (it kept summary lines only; it keeps the raw output now); the test passed alone three times and in its file three times in random order on PostgreSQL, and the whole unit selection run again passed 8,700 (1,133 s) — recorded as unexplained rather than fixed; the e2e suite's first four passes each had the one browser pin of the old Reference help (re-pinned ecf46cd), then 41 passed four times over (77, 75, 76 and 74 s). Visual: six baselines regenerated in the Playwright image against PostgreSQL (`add-payment` ×2: the badge and the two-line reason; `help` and `help-topic` ×2: the Payments topic in the list), then every baseline compared: 66 passed on PostgreSQL and 66 on sqlite. Shots: `docs/qa/12f-c/shots/b/` — Add payment with the two reasons and the badge, the payment page with the partial notice and the staff name, the operator page with the formatted phone, the Payments help topic, laptop 1280 and phone 390, from the browser test run in the Playwright image against PostgreSQL. One note from the shots, not fixed: a settled Zelle payment's third tile reads "Remaining $600.00 refundable" though refunds apply to processor payments only (Batch A's A-2 covered the voided case); recorded for the owner. Secret scans clean (the pattern scan of the diff and the six new files, `scripts/check-no-secrets.sh`); no secret-store read; the provider fence clean; no new dependency, URL, model or environment variable.
+
+**Verdict (B):** PASS — no new findings; the two items carried from Batch A resolved; residual risk: the one unexplained PostgreSQL failure of the breadcrumb pages test in the first unit run (passes everywhere since; the pipeline now keeps tracebacks), the "refundable" tile wording on non-processor payments, and the three username cells left for Step 13.
+

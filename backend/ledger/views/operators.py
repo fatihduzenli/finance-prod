@@ -34,7 +34,7 @@ from urllib.parse import urlencode
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError
 from django.db.models import Count, Q, QuerySet
@@ -53,6 +53,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.roles import Role, meets, role_of
 from accounts.views import forbidden
+from finance.templatetags.phones import phone_text
 from ledger.forms import LinkForm, OperatorCreateForm, OperatorForm
 from ledger.models import Note, NoteEntityType, Operator, SyncStatus
 from ledger.services import (
@@ -65,7 +66,7 @@ from ledger.services import (
 )
 from ledger.services import workspace_cards as operator_cards
 from ledger.services.csv_export import CsvWriter
-from ledger.validators import contains_card_number
+from ledger.validators import validate_no_payment_data
 from ledger.views import contact_log, workspace_cards
 from ledger.views.jobs import busy, job_context, submit
 from payments import operator_sync
@@ -159,16 +160,27 @@ def _load(pk: str) -> Operator:
     return get_object_or_404(Operator, pk=key)
 
 
+def _holds_payment_data(value: str) -> bool:
+    """Whether the forms' own guard (Rule 1) refuses ``value``."""
+    try:
+        validate_no_payment_data(value)
+    except ValidationError:
+        return True
+    return False
+
+
 def _hold(request: HttpRequest, target: str, form: forms.BaseForm) -> None:
     """Keep a form with errors for the next GET of ``target``.
 
-    Only the form's own fields are kept, and a value holding a card number is dropped
-    (its error message is kept), so the session never stores one.
+    Only the form's own fields are kept, and a value that
+    :func:`~ledger.validators.validate_no_payment_data` refuses (a card number, or a
+    routing number beside an account number) is dropped (its error message is kept), so
+    the session never stores one.
     """
     data = {}
     for name in form.fields:
-        value = form.data.get(name, "")
-        data[name] = "" if contains_card_number(str(value)) else str(value)
+        value = str(form.data.get(name, ""))
+        data[name] = "" if _holds_payment_data(value) else value
     errors = {
         field: [str(error["message"]) for error in field_errors]
         for field, field_errors in form.errors.get_json_data().items()
@@ -437,7 +449,7 @@ def _detail_context(
         "operator_line": " · ".join(
             part
             for part in (
-                operator.phone,
+                phone_text(operator.phone),
                 operator.email or "",
                 "SMS consent given" if operator.sms_consent_at else "no SMS consent",
                 f"{store_count} store" if store_count == 1 else f"{store_count} stores",

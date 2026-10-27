@@ -27,10 +27,11 @@ pytestmark = pytest.mark.django_db
 
 STATIC = Path(__file__).resolve().parents[1] / "finance/static/finance"
 #: DESIGN-SPEC §4 Help's order, as the existing topics fill it (no "Getting around" and no
-#: "Reports" topic exists).
+#: "Reports" topic exists); "payments" after "collecting-an-invoice" (PLAN-012f-c D10).
 SPEC_ORDER = [
     "store-costs",
     "collecting-an-invoice",
+    "payments",
     "invoice-lines",
     "autopay-and-daily-charges",
     "promises-to-pay",

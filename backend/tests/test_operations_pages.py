@@ -126,7 +126,10 @@ def test_the_button_lists_what_it_created_with_links_and_writes_one_run_row() ->
         str(pk)
         for pk in RentCharge.objects.exclude(pk=today_charge.pk).values_list("pk", flat=True)
     }
-    assert f"by {user.get_username()}" in response.content.decode()
+    # PLAN-012f-c D11: the staff name (no first or last name: the username), the e-mail as
+    # its title.
+    shown = f'<span title="{user.email}">{user.get_username()}</span>'
+    assert f"by {shown}" in response.content.decode()
 
 
 def test_the_daily_tick_writes_its_row_and_the_run_page_shows_its_list() -> None:

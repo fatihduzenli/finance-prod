@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components money dates icons %}
+{% load components money dates icons people %}
 {% load responsive %}
 {% block title %}Daily charges, {{ run.day|day }}{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><span>Admin</span> <span aria-hidden="true">›</span></nav><h1>Daily charges</h1><span class="page-date" id="run-date">{{ run.day|day_long }}</span></div>{% if can_run %}<div class="page-actions"><form method="post" action="{% url 'ledger:run:match' %}" class="js-single-submit">{% csrf_token %}<button class="btn" type="submit" id="match-invoices"{% if not health.ok or job_refresh %} disabled{% endif %}>Update from {{ company.provider_name }}</button></form><form method="post" action="{% url 'ledger:run:create_charges' %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-primary" type="submit" id="create-charges">Create today's charges</button></form></div>{% endif %}</div>{% endblock %}
@@ -75,7 +75,7 @@
   <h2 id="recent-runs-title">Recent runs</h2>
   {% if recent_runs %}
     <ul class="run-list" id="recent-runs">
-      {% for record, clock in recent_runs %}<li><span>{{ record.day|day_short }} · {{ clock }} · {% if record.actor %}by {{ record.actor.get_username }}{% else %}automatic{% endif %}</span><span class="run-list-end">{{ record.total_created }} created{% if record.caught_up %} ({{ record.caught_up }} catch-up){% endif %} · {{ record.skipped }} skipped {% status_badge "OK" "paid" %}</span></li>{% endfor %}
+      {% for record, clock in recent_runs %}<li><span>{{ record.day|day_short }} · {{ clock }} · {% if record.actor %}by {{ record.actor|staff }}{% else %}automatic{% endif %}</span><span class="run-list-end">{{ record.total_created }} created{% if record.caught_up %} ({{ record.caught_up }} catch-up){% endif %} · {{ record.skipped }} skipped {% status_badge "OK" "paid" %}</span></li>{% endfor %}
     </ul>
   {% else %}
     <p class="muted empty" id="recent-runs">No run yet.</p>

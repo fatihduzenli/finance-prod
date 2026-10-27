@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components money dates %}
+{% load components money dates people %}
 {% load responsive %}
 {% block title %}Rent {{ charge.period_month|month }}, debit {{ charge.seq }}{% endblock %}
 {% comment %}The rent charge page, in the detail family (PLAN-012f-a D4; DESIGN-SPEC §4 Charge detail): the header (breadcrumb, title with the status badge, the muted line, Add payment, Split into installments, More ▾), the tiles, Invoices, Payments, Activity and the charge's other cards beside DETAILS, the open promise and MORE.{% endcomment %}
@@ -52,7 +52,7 @@
           <td>{% if payment.is_refund %}<span class="badge">Refund</span> {% endif %}{% status_badge payment.get_status_display payment.status %}</td>
           <td>{{ payment.reference|default:"—" }}</td>
           <td style="white-space:pre-wrap;">{{ payment.note }}</td>
-          <td>{{ payment.recorded_by|default:"—" }}</td>
+          <td>{{ payment.recorded_by|staff|default:"—" }}</td>
         </tr>
       {% endfor %}
     </tbody>

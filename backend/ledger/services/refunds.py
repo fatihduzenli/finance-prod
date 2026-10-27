@@ -269,7 +269,12 @@ def _void_refusal(payment: Payment, reference: str) -> str:
 def payment_facts(payment: Payment) -> PaymentFacts:
     reference = transaction_reference(payment)
     refunded = refunded_amount(payment)
-    refundable = max(ZERO, payment.amount - refunded).quantize(CENT)
+    # A voided payment (a processor void or a manual one, PLAN-012f-c) has nothing left
+    # to refund.
+    if payment.status == PaymentStatus.VOIDED:
+        refundable = ZERO.quantize(CENT)
+    else:
+        refundable = max(ZERO, payment.amount - refunded).quantize(CENT)
     return PaymentFacts(
         reference=reference,
         refunded=refunded,

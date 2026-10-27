@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
+from django.contrib.auth.models import User
 from django.db.models import Count, OuterRef, Q, Subquery
 
 from finance.dates import day_text
@@ -76,7 +77,9 @@ SOURCE_BANK_DEBIT = SOURCE_AS + "a bank debit of {rent}"
 class ActivityRow:
     at: datetime
     action: str
-    user: str
+    #: Who acted (``None``: the system); the card prints it with the ``staff`` filter
+    #: (PLAN-012f-c D11).
+    user: User | None
     note: str
 
 
@@ -127,7 +130,7 @@ def activity(records: Iterable[tuple[str, object]]) -> Activity:
             ActivityRow(
                 at=row.at,
                 action=action_words(row.action),
-                user=row.actor.get_username() if row.actor is not None else "",
+                user=row.actor,
                 note=_note(row.after),
             )
             for row in found[:ACTIVITY_SIZE]

@@ -1,4 +1,4 @@
-{% extends "finance/base.html" %}{% load dates %}
+{% extends "finance/base.html" %}{% load dates people %}
 {% block title %}{{ entry.title }}{% endblock %}
 {% comment %}A calendar entry's page, in the detail family (PLAN-012f-a D4): the header (breadcrumb, title with the kind badge, the muted line, Edit and More ▾ with Delete), the entry's text and its Activity beside DETAILS and MORE.{% endcomment %}
 {% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:calendar:page' %}?month={{ entry.on|date:'Y-m' }}">Calendar: {{ entry.on|month }}</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ entry.title }}</span></nav><h1 class="store-title">{{ entry.title }} <span class="badge kind-badge" id="entry-kind">{{ entry.get_kind_display }}</span></h1><p class="store-line" id="detail-line">{{ entry.on|day_long }}</p></div>{% if can_change %}<div class="page-actions"><a class="btn" id="calendar-edit" href="{% url 'ledger:calendar:edit' pk=entry.pk %}">Edit</a><details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul><li><form method="post" action="{% url 'ledger:calendar:delete' pk=entry.pk %}" onsubmit="return window.confirm('Delete this calendar entry?');">{% csrf_token %}<button class="menu-danger" type="submit" id="calendar-delete">Delete</button></form></li></ul></details></div>{% endif %}</div>{% endblock %}
@@ -22,7 +22,7 @@
     <dt>Operator</dt><dd>{% if entry.operator %}<a href="{% url 'ledger:operators:detail' pk=entry.operator.pk %}">{{ entry.operator.display_name }}</a>{% else %}—{% endif %}</dd>
     <dt>Lease</dt><dd>{% if entry.lease %}<a href="{% url 'ledger:leases:detail' pk=entry.lease.pk %}">{{ entry.lease.store.external_label }}</a>{% else %}—{% endif %}</dd>
     <dt>Morning e-mail</dt><dd>{% if entry.email_morning %}Yes: e-mailed to the author on the morning of that day{% else %}No{% endif %}</dd>
-    <dt>Author</dt><dd>{{ entry.author.get_username|default:"—" }}, {{ entry.created_at|moment }}</dd>
+    <dt>Author</dt><dd>{{ entry.author|staff|default:"—" }}, {{ entry.created_at|moment }}</dd>
   </dl>
   </section>
 
