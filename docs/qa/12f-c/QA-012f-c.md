@@ -143,3 +143,20 @@ verified" until then.
 
 **Verdict (D):** PASS — no findings; residual risk: the wired branch of the Bicep (the two Key Vault references resolving at deploy time) is untested until the owner stores the secrets, uncomments the parameters and authorises the infra apply; the live USPS API was not called (TODO-VERIFY-065 stands).
 
+## Slice E — the owner's checkpoint decisions (branch `step-12f-c/batch-e`, plan §11)
+
+**Scope.** Opus, one brief. E1: the Needs review item for a voided payment whose processor invoice
+stays marked paid reads "Unmark invoice {number} in {processor} by hand; this payment was voided".
+E2: the greyed bank-debit card's first line is "No bank account on file for {operator}." with an
+"Operator page" link to the operator's page; "Bank debits are also off at {processor}." under it
+when the flag is off as well; the dashboard instruction moved to the Payments help topic. E3: a
+payment recorded outside the processor shows two tiles, Amount and "Applied to {charge}", and the
+muted line "Paid outside {processor}: void it to undo, it cannot be refunded here."; processor
+payments keep Amount / Refunded / Remaining. Opus's `tests/test_plan012fc_e.py` (21) and the re-pins by name in `test_plan012fc_b.py`, `test_void_manual_payment.py`, `test_add_payment_page.py`, `test_bank_debit.py`, `test_rent_debit.py`. Fable: the Batch A and B adversarial and browser files re-run; the Batch B browser test takes slice E's shots.
+
+**Findings.** E-1 (MINOR, resolved): a voided manual payment's "Applied to" tile still showed the full amount; it reads $0.00 with "{charge} · voided". Departures, with reasons: How to collect (the invoice builder) keeps its "add one in the {processor} dashboard" sentence — the owner's decision named the Add payment card, and the builder's shared constant would print a literal placeholder; the tile reads "Applied to" with the charge as its sub-line (the KPI pattern); manual payments on insurance or adjustment charges keep the three tiles, since "void it to undo" would be false for them. Also fixed: Fable's own card-number assertion matched the digits "4111" inside a random hex id once (the class of the "9009" flake), hardened.
+
+**Gate.** ruff, `ruff format --check` (537 files), mypy strict (537 files), `uv lock --check`, `makemigrations --check` (no migration): clean on 68e64d4. sqlite: the full suite 8,168 passed, 697 skipped, 122 deselected in 1,006 s on d24baee. PostgreSQL 16 (a throwaway container, the CI split, on d24baee): `makemigrations --check` no changes; the migration selection 36 passed in 1,582 s; the unit selection 8,826 passed, 3 skipped, 125 deselected in 1,756 s; the e2e suite 43 passed four times over (107, 105, 103 and 104 s). Visual: the `add-payment` baselines regenerated in the Playwright image against PostgreSQL (the sentence and the link; `payment-detail` regenerated and unchanged, its payment being ACH), then every baseline compared: 66 passed on PostgreSQL and 66 on sqlite. Shots: `docs/qa/12f-c/shots/e/` — Add payment with the new sentence, the Operator page link and the second line; the Zelle payment's page with Amount and "Applied to" and the "Paid outside" line, laptop 1280 and phone 390, from the Batch B browser test run in the Playwright image against PostgreSQL. One observation, not changed: the manual payment's page still shows the empty Refunds card ("No refunds."); the owner's decision replaced the tiles only. Secret scans clean (the pattern scan of the diff and the one new file, `scripts/check-no-secrets.sh`); no secret-store read; no new dependency, URL, model or environment variable.
+
+**Verdict (E):** PASS — E-1 (MINOR) resolved; residual risk: none beyond the How to collect sentence left as is (noted for the owner).
+
