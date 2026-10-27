@@ -19,7 +19,7 @@
       <p id="void-confirmation"><label style="font-weight:normal;"><input type="checkbox" name="confirm" value="true" id="confirm-void"> {{ confirmation }}</label>
         {% for error in form.confirm.errors %}<br><strong class="field-error">{{ error }}</strong>{% endfor %}
       </p>
-      <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="void-keep">Keep the payment</a> <button class="btn btn-primary" type="submit" id="confirm-void-button">Void through {{ company.provider_name }}</button></div>
+      <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="void-keep">Keep the payment</a> <button class="btn btn-danger" type="submit" id="confirm-void-button">Void through {{ company.provider_name }}</button></div>
     </form>
   {% endif %}
   </section>

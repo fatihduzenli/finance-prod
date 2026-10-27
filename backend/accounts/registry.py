@@ -162,6 +162,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # GET of the confirmation pages below admin too.
     "ledger:payments:refund": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:payments:void": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # PLAN-012f-c D5: the void of a payment recorded outside the processor.
+    "ledger:payments:void_manual": RouteRule(min_role=Role.BILLING, methods=POST),
     # Reconciliation (PLAN-010 D10): "Run now" needs admin; resolving a mismatch needs
     # billing. The view refuses the page's GET below billing too.
     "ledger:reconciliation:run": RouteRule(min_role=Role.ADMIN, methods=POST),

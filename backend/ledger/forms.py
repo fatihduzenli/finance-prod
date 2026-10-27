@@ -1884,6 +1884,27 @@ class VoidForm(forms.Form):
     confirm = forms.BooleanField(required=False, widget=_ExactCheckboxInput)
 
 
+class VoidManualForm(forms.Form):
+    """Billing's void of a payment recorded outside the processor (PLAN-012f-c D2): the
+    reason and the one-time key; the service re-checks every rule under the row locks."""
+
+    creation_key = forms.UUIDField(widget=forms.HiddenInput)
+    reason = forms.CharField(
+        label="Reason",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=200,
+        validators=[validate_no_payment_data],
+        help_text="Required: why the payment is voided. Never an account number.",
+        error_messages={"required": "A reason is required: say why the payment is voided."},
+    )
+
+    def clean_reason(self) -> str:
+        reason = visible_text(self.cleaned_data["reason"])
+        if not reason:
+            raise forms.ValidationError(self.fields["reason"].error_messages["required"])
+        return reason
+
+
 # --- Store costs (PLAN-010b D8) ------------------------------------------------------------
 
 

@@ -64,6 +64,7 @@ from tests.receivables_helpers import (
 )
 from tests.test_operator_views import client_for
 from tests.test_setup_charges import pay
+from tests.test_void_manual_payment import marked_paid_void
 
 pytestmark = pytest.mark.django_db
 
@@ -497,6 +498,8 @@ def build(n: int) -> None:
         split_paid(lease)
         rent_split_paid(lease, date(2026, 11, 1))
         paused_plan(lease)
+        # PLAN-012f-c D3: a manual payment voided while its invoice reads paid.
+        marked_paid_void(lease, 9000 + n * 10 + i)
         LeaseEnd.objects.create(
             lease=lease,
             ended_on=TODAY - timedelta(days=1),

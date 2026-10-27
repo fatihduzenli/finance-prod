@@ -16,6 +16,12 @@ payment page shows the latest one. What can be refused from local data (no
 confirmation, nothing refundable, an amount above the refundable one) is refused here
 before anything is queued; the service checks it again under the row lock. Every POST
 ends in a redirect; a form with errors is held in the session for the next GET.
+
+"Void payment" of a payment recorded outside the processor (PLAN-012f-c D2, D5) needs
+``billing``: the registry refuses a POST below billing and the view refuses its GET as well.
+Nothing is queued and nothing is sent to the provider: the POST calls
+:func:`ledger.services.refunds.void_manual_payment` and flashes its outcome. Its dialog shows
+over the payment page; ``?store=`` naming another store than the payment's is a 404.
 """
 
 from __future__ import annotations
@@ -34,16 +40,18 @@ from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
-from ledger.forms import RefundForm, VoidForm
+from ledger.forms import RefundForm, VoidForm, VoidManualForm
 from ledger.models import Operator, Payment, PaymentMethod, Store
 from ledger.services import detail_cards, one_off_charges, refunds
 from ledger.services import payments_ledger as ledger
 from ledger.services import stores as store_service
 from ledger.services.rent_run import charge_review_message
+from ledger.views import store_context
 from ledger.views.detail_cards import activity_context
 from ledger.views.jobs import already_submitted, job_context, submit
 from ledger.views.operators import (
     PAGE_SIZE,
+    _actor,
     _held,
     _hold,
     _role,
@@ -109,6 +117,7 @@ def _load(pk: str) -> Payment:
             "one_off_charge__operator",
             "parent_payment",
             "recorded_by",
+            "voided_by",
         ),
         pk=key,
     )
@@ -139,7 +148,8 @@ def payment_detail(request: HttpRequest, pk: str) -> HttpResponse:
 def _detail_context(request: HttpRequest, payment: Payment) -> dict[str, object]:
     """The payment page's context (read only); Refund and Void show over it in their
     dialog (PLAN-012f-b E-4)."""
-    admin = meets(_role(request), Role.ADMIN)
+    role = _role(request)
+    admin = meets(role, Role.ADMIN)
     facts = refunds.payment_facts(payment)
     summary = _summary(payment, facts)
     row = cast(ledger.LedgerRow, summary["row"])
@@ -164,6 +174,8 @@ def _detail_context(request: HttpRequest, payment: Payment) -> dict[str, object]
         ),
         "can_refund": admin and facts.can_refund,
         "can_void": admin and facts.can_void,
+        # PLAN-012f-c D6: a payment recorded outside the processor, settled: billing.
+        "can_void_manual": meets(role, Role.BILLING) and not refunds.manual_void_refusal(payment),
         "parent_transaction": (
             mask_identifier(refunds.transaction_reference(payment.parent_payment))
             if payment.parent_payment is not None
@@ -285,5 +297,54 @@ def payment_void(request: HttpRequest, pk: str) -> HttpResponse:
             "form": form,
             "sentence": refunds.VOID_SENTENCE,
             "confirmation": refunds.void_confirmation(payment),
+        },
+    )
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def payment_void_manual(request: HttpRequest, pk: str) -> HttpResponse:
+    """Void a payment recorded outside the processor (PLAN-012f-c D2, D5): the reason in
+    the dialog over the payment page; the POST voids it locally and flashes the outcome."""
+    if not meets(_role(request), Role.BILLING):
+        return forbidden(request)
+    payment = _load(pk)
+    [row] = ledger.rows_for([payment])
+    if row.store is None:
+        if request.GET.get("store") or request.GET.get("lease"):
+            raise Http404
+    else:
+        store_context.from_request(request, store=row.store)
+    target = f"payment-void-manual:{payment.pk}"
+    if request.method == "POST":
+        form = VoidManualForm(request.POST)
+        if form.is_valid():
+            data = form.cleaned_data
+            outcome = refunds.void_manual_payment(
+                payment.pk,
+                reason=data["reason"],
+                actor=_actor(request),
+                creation_key=data["creation_key"],
+            )
+            if outcome.ok:
+                (messages.info if outcome.replayed else messages.success)(request, outcome.message)
+                return redirect("ledger:payments:detail", pk=payment.pk)
+            if outcome.field != "reason":
+                messages.error(request, outcome.message)
+                return redirect("ledger:payments:detail", pk=payment.pk)
+            form.add_error("reason", outcome.message)
+        _hold(request, target, form)
+        return redirect(request.get_full_path())
+    form = _held(request, target, VoidManualForm) or VoidManualForm(
+        initial={"creation_key": uuid.uuid4()}
+    )
+    return render(
+        request,
+        "ledger/payments/void_manual.html",
+        {
+            **_detail_context(request, payment),
+            "form": form,
+            "refusal": refunds.manual_void_refusal(payment),
+            "sentences": refunds.void_manual_facts(payment),
         },
     )

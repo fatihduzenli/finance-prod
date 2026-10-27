@@ -1,0 +1,30 @@
+{% extends "ledger/payments/detail.html" %}
+{% load components money dates %}
+{% block title %}Void payment{% endblock %}
+{% comment %}The void of a payment recorded outside the processor (PLAN-012f-c D5), in the confirmation dialog over the payment page: the sentences of refunds.void_manual_facts (the consequence; the marked invoice; the installment plan), the Reason, "Keep the payment" and the red "Void payment". Nothing is sent to the processor.{% endcomment %}
+{% block dialog %}{% url 'ledger:payments:detail' pk=payment.pk as back_url %}{% dialog id="void-manual-dialog" title="Void payment" size="sm" open=True return_url=back_url %}
+  <section class="confirm" aria-labelledby="confirm-what-heading">
+  <div class="confirm-what">
+  <h2 id="confirm-what-heading">What will happen</h2>
+  <dl id="void-manual-summary" class="detail-list">
+    <dt>Method</dt><dd>{{ payment.get_method_display }}</dd>
+    <dt>Amount</dt><dd id="void-manual-amount">{{ payment.amount|money }}</dd>
+    <dt>Paid on</dt><dd>{{ payment.settled_on|day|default:"—" }}</dd>
+  </dl>
+  </div>
+  {% if refusal %}
+    <p id="void-manual-refusal"><strong>{{ refusal }}</strong></p>
+    <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="void-manual-keep">Keep the payment</a></div>
+  {% else %}
+    {% for sentence in sentences %}<p class="void-manual-sentence"{% if forloop.first %} id="void-manual-sentence"{% endif %}>{% if forloop.first %}<strong>{{ sentence }}</strong>{% else %}{{ sentence }}{% endif %}</p>{% endfor %}
+    <form method="post" class="js-single-submit" autocomplete="off" id="void-manual-form">
+      {% csrf_token %}
+      {{ form.creation_key }}
+      {% if form.non_field_errors %}<p class="errorlist">{{ form.non_field_errors|join:" " }}</p>{% endif %}
+      {% include "ledger/stores/_form_field.html" with field=form.reason %}
+      <div class="dialog-foot"><a class="btn" href="{{ back_url }}" id="void-manual-keep">Keep the payment</a> <button class="btn btn-danger" type="submit" id="void-manual-submit">Void payment</button></div>
+    </form>
+  {% endif %}
+  </section>
+{% enddialog %}{% endblock %}
+{% block scripts %}{{ block.super }}{% include "ledger/operators/single_submit.html" %}{% endblock %}

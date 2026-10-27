@@ -151,8 +151,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: PLAN-012c; 257 since PLAN-012e-2 Batch C; 261 since PLAN-012f-a Batch E; 262 since
 #: PLAN-012f-b Batch A; 268 since Batch B; 272 since Batch D (ledger:invoices:saved and
 #: settlement_preview, ledger:plans:pause and resume; checked by hand on 2026-10-25); 273
-#: since slice C2 (ledger:charges:charge_now, PLAN-012f-b §10 D19).
-FROZEN_ROUTES = (273, "2e31da22621a0ea90de62a340a0dea045eacc87eb2995f49a514fba07e50326f")
+#: since slice C2 (ledger:charges:charge_now, PLAN-012f-b §10 D19); 274 since PLAN-012f-c
+#: Batch A (ledger:payments:void_manual).
+FROZEN_ROUTES = (274, "eac89c8bb507ada6d4478b873113ea11178c9c9f9e9cc94944b910607d025732")
 
 
 # --- what is stored or addressed never changes ------------------------------------------
