@@ -70,6 +70,7 @@ from tests.test_webhook_handlers import (
     provider_txn,
     settle,
 )
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -616,7 +617,7 @@ def test_the_re_debit_date_is_a_calendar_item_without_an_amount(fake: FakeProvid
     )
     assert [entry.kind for entry in only] == [calendar.KIND_REDEBIT]
     ics = calendar.ics(found, now=NOW, base_url="https://example.com")
-    assert f"UID:redebit-{redebit.pk}@" in ics and "1234" not in ics
+    assert f"UID:redebit-{redebit.pk}@" in ics and not has_token(ics, "1234")
     OneOffCharge.objects.filter(pk=redebit.pk).update(
         status=OneOffChargeStatus.VOIDED, voided_at=NOW, void_note="Cancelled."
     )

@@ -14,6 +14,7 @@ from ledger.models import PaymentChannel
 from tests.receivables_helpers import a_lease, a_payment, a_rent_charge, a_store, an_operator
 from tests.test_lease_end_drafts import row_counts
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -70,10 +71,12 @@ def test_the_not_found_page_is_in_the_shell_and_leaks_nothing(path: str) -> None
     assert response.status_code in (400, 404)
     body = response.content.decode()
     assert MARKUP not in body
-    assert "Traceback" not in body and "/Users/" not in body and "django" not in body.lower()
+    assert (
+        "Traceback" not in body and "/Users/" not in body and not has_token(body.lower(), "django")
+    )
     if response.status_code == 404:
         assert "Go to the dashboard" in body
-        assert 'id="page-header"' in body or "Not" in body
+        assert 'id="page-header"' in body or has_token(body, "Not")
 
 
 def test_the_forbidden_page_names_the_role_rule_and_offers_the_dashboard() -> None:
@@ -168,7 +171,7 @@ def test_a_store_without_a_cost_row_never_reads_zero_on_the_report() -> None:
     payment, lease = a_world()  # the store has no cost row
     billing, _ = client_for(Role.BILLING)
     body = billing.get("/reports/pnl/?from=2026-10&to=2026-10&detail=1").content.decode()
-    assert "unknown" in body
+    assert has_token(body, "unknown")
     assert "Unknown: landlord rent" in body
 
 

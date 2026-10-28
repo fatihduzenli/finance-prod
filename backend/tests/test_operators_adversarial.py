@@ -31,6 +31,7 @@ from tests.test_operator_sync import (
     requires_postgresql,
 )
 from tests.test_operator_views import form_data
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -123,7 +124,7 @@ def test_paging_past_the_end_or_nonsense_still_renders(billing: Client, page: st
         Operator.objects.create(display_name=f"Operator {index:02d}")
     response = billing.get("/operators/", {"page": page})
     assert response.status_code == 200
-    assert "Operator" in response.content.decode()
+    assert has_token(response.content.decode(), "Operator")
 
 
 def test_an_archived_operator_refuses_edit_retry_and_link_through_every_route(
@@ -422,7 +423,7 @@ def test_a_rejected_update_whose_body_names_the_token_leaves_no_trace_of_it(
     page = billing.get(f"/operators/{operator.pk}/").content.decode()
     for text in (page, caplog.text, operator.sync_failure, operator.sync_failure_fields):
         assert "FAKE-CI-KEY-XYZ123" not in text
-        assert "leaked" not in text
+        assert not has_token(text, "leaked")
     from ledger.models import AuditLog
 
     for row in AuditLog.objects.filter(entity_type="operator"):

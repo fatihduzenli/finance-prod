@@ -17,6 +17,7 @@ from accounts.roles import Role
 from ledger.models import Lease, PaymentChannel
 from tests.receivables_helpers import a_lease, a_store, an_operator
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -146,7 +147,7 @@ def test_the_operator_more_menu_holds_archive_as_the_danger_item_and_a_viewer_se
     body = viewer.get(
         reverse("ledger:operators:detail", kwargs={"pk": lease.operator_id})
     ).content.decode()
-    assert 'id="more-menu"' not in body and "Archive" not in body
+    assert 'id="more-menu"' not in body and not has_token(body, "Archive")
     assert 'id="new-invoice"' not in body
 
 

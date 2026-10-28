@@ -61,6 +61,7 @@ from tests.test_lease_services import make_lease
 from tests.test_one_off_charges import an_operator, calls
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -531,7 +532,7 @@ def test_an_unknown_collect_value_opens_save_draft_and_is_not_echoed(
     assert response.status_code == 200
     html = response.content.decode()
     assert 'id="collect-draft" checked' in html
-    assert "<script>alert(1)</script>" not in html and "bogus" not in html
+    assert "<script>alert(1)</script>" not in html and not has_token(html, "bogus")
 
 
 def test_item_prefills_line_one_with_a_catalogue_item_else_nothing(fake: FakeProvider) -> None:

@@ -15,6 +15,7 @@ from accounts.display import staff_name
 from accounts.roles import Role
 from finance.templatetags.phones import phone_text
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -102,7 +103,7 @@ def test_the_payments_topic_is_read_by_a_viewer_and_refused_signed_out() -> None
     response = viewer.get(reverse("finance:help_topic", kwargs={"slug": "payments"}))
     assert response.status_code == 200
     body = response.content.decode()
-    assert "account number" in body and "Zelle" in body
+    assert "account number" in body and has_token(body, "Zelle")
     anonymous = Client()
     response = anonymous.get(reverse("finance:help_topic", kwargs={"slug": "payments"}))
     assert response.status_code in (302, 401, 403)

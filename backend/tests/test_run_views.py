@@ -40,6 +40,7 @@ from tests.auth_helpers import iter_routes, make_user, verified_client
 from tests.job_helpers import run_queued_jobs
 from tests.test_operator_views import client_for
 from tests.test_rent_run import enrolled, invoice, lease
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -456,7 +457,7 @@ def test_the_link_list_shows_only_the_operators_unlinked_invoices(billing: Clien
     assert mine.invoice_number in page
     assert linked.invoice_number not in page and foreign.invoice_number not in page
     assert "dashboard-invoice-0001" not in page and "dash…0001" in page
-    assert "Oct 14, 2026" in page and "$1,500.00" in page and "DRAFT" in page
+    assert "Oct 14, 2026" in page and "$1,500.00" in page and has_token(page, "DRAFT")
     assert f'value="{mine.pk}"' in page
     assert 'id="balance">$1,500.00<' in page
 

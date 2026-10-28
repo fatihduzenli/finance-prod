@@ -59,6 +59,7 @@ from tests.receivables_helpers import (
 from tests.test_manual_payment_marking import INVOICE_REF, invoiced, local_invoice, pay
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -632,7 +633,7 @@ def test_a_reason_refused_for_payment_data_never_comes_back_but_its_error_does(
     assert response.status_code == 302 and response["Location"] == dialog_path(payment)
     body = client.get(dialog_path(payment)).content.decode()
     assert PAYMENT_DATA_MESSAGE in body
-    assert routing not in body and account not in body
+    assert not has_token(body, routing) and not has_token(body, account)
     assert re.search(r'<textarea name="reason"[^>]*>\s*</textarea>', body)
     assert written() == before
 
@@ -742,7 +743,7 @@ def test_a_voided_payment_has_no_actions_and_shows_who_when_and_the_reason(
     for role in (Role.BILLING, Role.ADMIN):
         body = client_for(role)[0].get(detail_path(payment)).content.decode()
         assert 'id="payment-actions"' not in body and 'id="more-card"' not in body
-        assert "Voided" in body
+        assert has_token(body, "Voided")
         voided = re.search(r'<dd id="summary-voided">(.*?)</dd>', body)
         # PLAN-012f-c D11: the staff name with the e-mail as its title.
         shown = f'<span title="{actor.email}">{actor.username}</span>'

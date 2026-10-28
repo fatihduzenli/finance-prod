@@ -65,6 +65,7 @@ from tests.receivables_helpers import (
 from tests.test_operator_views import client_for
 from tests.test_setup_charges import pay
 from tests.test_void_manual_payment import marked_paid_void
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -690,7 +691,7 @@ def test_the_operator_page_shows_its_own_items_as_banners(today: date) -> None:
     page = client.get(f"/operators/{operator.pk}/").content.decode()
     assert 'class="attention attention-banners"' in page
     assert "Returned debit not rescheduled: Mine" in page
-    assert "Theirs" not in page
+    assert not has_token(page, "Theirs")
 
 
 # --- PLAN-012e D14: lease-end balances ----------------------------------------------------

@@ -39,6 +39,7 @@ from ledger.services import dashboard as blocks
 from tests.receivables_helpers import a_lease, a_payment, a_rent_charge, a_store
 from tests.test_operator_views import client_for
 from tests.test_pnl import a_cost, a_setup, paid, rent
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -590,7 +591,7 @@ def test_the_mini_calendar_steps_months_keeps_the_range_and_lists_items(today: d
     assert "Call &lt;b&gt;landlord&lt;/b&gt;" in html and "<b>landlord" not in html
     assert 'aria-label="Oct 12, 2026: 1 item"' in html
     assert 'class="mini-day is-today"' in html
-    assert 'data-day="2026-10-05"' in html and lease.store.external_label in html
+    assert 'data-day="2026-10-05"' in html and has_token(html, lease.store.external_label)
     november = page(client, cal="2026-11")
     assert 'id="mini-month">Nov 2026<' in november
     assert '<input type="hidden" name="cal" value="2026-11">' in november

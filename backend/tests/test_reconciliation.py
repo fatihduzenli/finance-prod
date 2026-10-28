@@ -92,6 +92,7 @@ from tests.test_webhook_handlers import (
     provider_txn,
     settle,
 )
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -498,7 +499,7 @@ def test_the_second_firing_while_the_job_still_waits_queues_nothing(
     page = billing.get("/reconciliation/").content.decode()
     assert NOT_DUE not in page
     assert "No runs yet." in page
-    assert "Queued" in page or "Running" in page
+    assert has_token(page, "Queued") or has_token(page, "Running")
     with override_settings(STAX_CALLER="worker"):
         if state == "running":
             done = jobs.run(Job.objects.get())

@@ -20,6 +20,7 @@ from payments.models import Job
 from tests.receivables_helpers import a_lease, a_one_off_charge, a_rent_charge, a_store, an_operator
 from tests.test_one_off_charges import an_operator as a_linked_operator
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -194,7 +195,7 @@ def test_a_two_cent_balance_cannot_be_split_and_the_page_says_so_once() -> None:
     client, _ = client_for(Role.BILLING)
     body = client.get(reverse("ledger:charges:split", kwargs={"pk": rent.pk})).content.decode()
     assert 'id="split-refusal"' in body or 'id="split-preview-message"' in body
-    assert 'id="split-confirm"' not in body or "disabled" in body
+    assert 'id="split-confirm"' not in body or has_token(body, "disabled")
 
 
 def test_a_one_off_charge_of_another_operator_is_not_previewed_under_this_store() -> None:

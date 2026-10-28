@@ -37,6 +37,7 @@ from tests.test_bank_debit import enabled, fake, invoiced, setup_charge, today
 from tests.test_charge_now import LAST_FOUR, NICKNAME
 from tests.test_one_off_charges import an_operator, created, fresh, item
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -435,7 +436,7 @@ def test_todays_debit_carries_the_note_to_the_confirmation_and_its_audit_row(
     admin = client(Role.ADMIN)
     response = admin.post(page_of(charge), debit_post(charge, today(), note=NOTE))
     location = response["Location"]
-    assert NOTE.split()[0] not in location  # never in the URL
+    assert not has_token(location, NOTE.split()[0])  # never in the URL
     key = location.split("key=", 1)[1]
     assert admin.post(location, {"key": key}).status_code == 302
     [audit] = _with_note(service.DEBIT_NOW_ACTION)

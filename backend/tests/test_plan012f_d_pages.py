@@ -72,6 +72,7 @@ from tests.test_plan012f_components import OLD_COMPONENT
 from tests.test_pnl import a_cost
 from tests.test_store_workspace import a_draft
 from tests.test_transfer import begin
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -860,7 +861,11 @@ def test_the_login_form_keeps_its_fields_names_and_flow(login_page: str) -> None
     assert actions.count("<button") == 1  # no disabled Back on the first step
     assert '<button type="submit" class="btn btn-primary">Next</button>' in actions
     lowered = login_page.lower()
-    assert "forgot" not in lowered and "keep me" not in lowered and "remember" not in lowered
+    assert (
+        not has_token(lowered, "forgot")
+        and "keep me" not in lowered
+        and not has_token(lowered, "remember")
+    )
     assert "<script" not in lowered and "http://" not in lowered.replace("http://www.w3.org", "")
 
 

@@ -19,6 +19,7 @@ from tests.test_collect_parity import builder_data
 from tests.test_how_to_collect import a_draft, one_line
 from tests.test_lease_end_drafts import row_counts
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -276,5 +277,5 @@ def test_the_stop_page_is_a_read_that_escapes_markup(
     page = admin.get(plan_url("cancel", plan))
     assert page.status_code == 200
     body = page.content.decode()
-    assert "Stop" in body and MARKUP not in body
+    assert has_token(body, "Stop") and MARKUP not in body
     assert (written(), row_counts()) == before

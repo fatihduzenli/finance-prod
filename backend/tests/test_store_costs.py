@@ -44,6 +44,7 @@ from ledger.services import store_costs as service
 from tests.conftest import REPO_ROOT
 from tests.test_lease_services import _race, make_lease, make_operator
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -849,7 +850,7 @@ def test_the_store_page_shows_not_entered_until_a_cost_is_set_then_the_cost() ->
     assert '<dd id="landlord-rent">$2,500.00 a month from Jan 1, 2026</dd>' in shown
     assert '<dd id="other-cost">$50.00 (dumpster)</dd>' in shown
     assert '<dd id="landlord-lease-end">Dec 31, 2030</dd>' in shown
-    assert "Margin" not in shown and "$950.00" not in shown
+    assert not has_token(shown, "Margin") and "$950.00" not in shown
     assert 'id="cost-history"' in shown
     entry = AuditLog.objects.get(action="store_cost.created")
     assert entry.actor == user
