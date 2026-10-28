@@ -38,7 +38,6 @@ ALLOWED: dict[str, set[int | str]] = {
     "test_seed_demo.py": {
         'u.email.endswith("@example.com") for u in User.objects.filter(username__contains="seed")'
     },
-    "test_documents.py": {'docx = Document.objects.get(content_type__contains="word")'},
     # Fee type names are typed by staff; "4111" against them is the card-number rule itself.
     "test_plan012b_adversarial.py": {
         'assert not FeeType.objects.filter(name__contains="4111").exists()'
@@ -54,8 +53,13 @@ ALLOWED: dict[str, set[int | str]] = {
     # A CSV export: no ids in its columns.
     "test_contact_log.py": {1570},
     "test_store_form_fields.py": {191},
-    # Text extracted from an uploaded document, not a page.
-    "test_documents.py": {337, 1796, 1811},
+    # Text extracted from an uploaded document, not a page; a content-type lookup (a fixed string).
+    "test_documents.py": {
+        337,
+        1796,
+        1811,
+        'docx = Document.objects.get(content_type__contains="word")',
+    },
     # A Bicep file, lowercased.
     "test_infra_storage.py": {163},
     # The message shown to staff: a fixed string, no ids.
