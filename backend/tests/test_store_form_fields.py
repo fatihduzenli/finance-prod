@@ -168,7 +168,9 @@ def test_anything_but_a_code_is_refused_without_echo(value: str) -> None:
     field = response.content.decode().split('id="id_state"', 1)[1].split("</select>", 1)[1]
     assert STATE_REFUSED in field.split("</div>", 1)[0]
     if value != "Texas":  # "Texas" is an option's label; the rest are never on the page
-        assert value not in response.content.decode()
+        # As a token of its own: a CSRF token or a hex id may hold "tx" inside a longer run.
+        as_a_token = rf"(?<![A-Za-z0-9]){re.escape(value)}(?![A-Za-z0-9])"
+        assert not re.search(as_a_token, response.content.decode())
 
 
 def test_an_empty_state_is_allowed() -> None:

@@ -317,9 +317,9 @@ The numbered questions are in the Prompt 1 reply and copied to `docs/COLUMN_MAPP
 
 - **Payment channel is unknown for 453 of 532 rows** (neither STAX nor WIRE in NOTES). The mapping now imports those leases with `payment_channel = unknown` and paused; none is enrolled in a Stax schedule until the owner answers Q7 or names a channel source. **This joins Q16 (contacts) and Q25 (ACH limit) as a go-live blocker.**
 - Blank debit day (92 leases): 21 WIRE, 13 no rent, 9 closed, 12 collected in Aug 2026, ~50 unexplained (Q29).
-- Twice-monthly leases are stores 3409 LEICESTER and 2629 Northbridge; 3409 shows exactly half rent in Aug 2026 (Q28).
-- History before Mar 2025 is 10 cells across 5 stores, including a −$3,800 arrear for store 2922 Tucson in Nov 2024. Recommendation: import everything (Q12).
-- Store 2204 FOREST PARK pays a flat $500 a month (new Q30).
+- Twice-monthly leases are two stores (named in the owner's private inputs); one shows exactly half rent in Aug 2026 (Q28).
+- History before Mar 2025 is 10 cells across 5 stores, including one negative arrear in Nov 2024 (the stores and amounts are in the owner's private inputs). Recommendation: import everything (Q12).
+- One store (named in the owner's private inputs) pays a flat $500 a month (new Q30).
 - The owner's answer sheet is stored at `docs/inputs/ANSWER_SHEET_round2.md` with a numbering crosswalk; it uses different question numbers from this document.
 
 ### Round 1c — 2026-09-27, evidence-based answers to all open questions (data-derived and recommendations, **not owner statements**)
@@ -339,7 +339,7 @@ Full text: `docs/inputs/ANSWERS_evidence_2026-09-27.md`. Session numbering below
 | 11 | PARTIAL | Now 63: 18 closed, 16 not open, 10 wire, 3 started Sep 2026, 16 no signal | the 16 |
 | 12 | Recommendation | Import all 10 pre-Mar-2025 cells | yes/no; store 2204 flat $500 (Q30) |
 | 13 | OWNER | Colours invisible; app status replaces them | colour scheme |
-| 14 | OWNER | Roles: admin / billing / viewer | assign Ahmed, Zahir, Fatih |
+| 14 | OWNER | Roles: admin / billing / viewer | assign the three staff members |
 | 15 | OWNER | Data argues against formulas | check five cells |
 | 16 | PARTIAL | ~12 of 174 emails in sheet; Stax export is the likely source; the rest is a campaign starting now | where the rest live |
 | 18 | SETTLED / OWNER | B is current in all six "A -> B" rows; three of them terminated June 2026 | transfer dates |
@@ -353,7 +353,7 @@ Full text: `docs/inputs/ANSWERS_evidence_2026-09-27.md`. Session numbering below
 | 27 | OWNER | Version history unchecked; current sheet clean | do the check |
 | 28 | SETTLED | 50/50; two charge rows per period, grid shows the sum | — |
 | 29 | PARTIAL | 21 wire, 13 dormant, 9 closed, 1 STAX, ~50 unknown; import paused with a review reason | the ~50 |
-| 30 | OWNER | Store 2204 FOREST PARK flat $500 | rent or other arrangement? |
+| 30 | OWNER | One store's flat $500 | rent or other arrangement? |
 
 **Go-live blockers after Round 1c:** Q7 (channel unknown for 453 leases), Q16 (operator contacts), Q25 (ACH limit). Q6 blocks only the one-time balance reports, not rent collection.
 
@@ -387,7 +387,7 @@ Full text: `docs/inputs/ANSWERS_evidence_2026-09-27.md`. Session numbering below
 | 11 | The 63 Aug-2026 blanks import in the five groups of Round 1c; the 16 with no signal are paused with `review_reason = unknown`. |
 | 12 | Import all history including the 10 pre-Mar-2025 cells. |
 | 13 | Cell colours are ignored; the app's status fields replace them. Owner may still describe the scheme; if so it is checked against the import, not used by it. |
-| 14 / 32 | Roles: `admin` (rent, debit day, channel, schedule changes; audited), `billing` (payments, notes, pause/resume), `viewer`. Assignment of Ahmed, Zahir and Fatih to roles is an owner action at go-live. |
+| 14 / 32 | Roles: `admin` (rent, debit day, channel, schedule changes; audited), `billing` (payments, notes, pause/resume), `viewer`. Assignment of the three staff members to roles is an owner action at go-live. |
 | 15 | Assume no formulas. Owner's five-cell check stays on the checkpoint list; if a formula is found, the import script re-reads through the Sheets API. |
 | 16 | Operator contacts come first from the Stax customer export; the remainder is a collection campaign that starts now and runs alongside the build. `operators.enrolment_status` tracks it. |
 | 18 | B is the current operator in all six transfer rows; A's lease is ended with unknown date and a review flag; the three rows noted "terminated June 2026" end B's lease on 2026-06-30. |
@@ -395,7 +395,7 @@ Full text: `docs/inputs/ANSWERS_evidence_2026-09-27.md`. Session numbering below
 | 23 | Wire, check and cash payments are also marked paid in Stax through the "mark paid in cash or check" call so Stax stays the single payment ledger (TODO-VERIFY-016 on the method value). |
 | 27 | **Owner action:** search the sheet's version history for card and bank numbers before cutover. |
 | 29 | The ~50 blank-debit-day leases with no signal are paused with `review_reason = unknown`. |
-| 30 | Store 2204 FOREST PARK imports as rent at $500 with a review flag. |
+| 30 | That store imports as rent at $500 with a review flag. |
 | 25 | **Stax action, unchanged:** ACH per-transaction limit must exceed $12,581; also ask about daily caps. Monthly run does not go live until answered. |
 
 **Note on the customer export:** it will contain operator emails and phone numbers. Store it outside the repository or add `docs/inputs/private/` to `.gitignore` before saving it. It is personal data under root `CLAUDE.md` §5.2.
@@ -455,7 +455,7 @@ date: export the sheet as a spreadsheet file with cell notes into `docs/inputs/p
 5. Click five cells for formulas (Q15) and, optionally, describe the colour scheme (Q13).
 6. State the sign convention for Ins, Sign and Deposit (Q6) whenever convenient; nothing in rent collection waits on it.
 7. Supply the payment channel for the 453 unmarked leases (Q7), most likely via item 3.
-8. Assign Ahmed, Zahir and Fatih to roles (Q32) before go-live.
+8. Assign the three staff members to roles (Q32) before go-live.
 9. Get Stax's answer on the ACH limit and any daily cap (Q25).
 
 Everything else in this document is decided. It is ready for sign-off (§10) subject to those actions.

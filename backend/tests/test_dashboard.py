@@ -68,13 +68,13 @@ def today(monkeypatch: pytest.MonkeyPatch) -> date:
 def build_mix() -> dict[str, object]:
     """One of every kind of open and closed charge, with known amounts."""
     operator = an_operator("Acme Stores")
-    lease = a_lease(a_store("2204 FOREST PARK", 2204), operator, debit_day=5)
+    lease = a_lease(a_store("2204 ELM PARK", 2204), operator, debit_day=5)
     a_rent_charge(lease, SEP, RentChargeStatus.UNPAID, "3500.00")  # overdue
     a_rent_charge(lease, OCT, RentChargeStatus.PARTIAL, "3500.00", "1200.00")  # overdue 2300
     paid = a_rent_charge(lease, date(2026, 8, 1), RentChargeStatus.PAID, "3500.00", "3500.00")
     a_payment(paid, "3500.00", date(2026, 8, 7))  # last month: not this month
     a_rent_charge(lease, date(2026, 7, 1), RentChargeStatus.WAIVED, "3500.00")  # not owed
-    second = a_lease(a_store("3409 LEICESTER", 3409), an_operator("Beta"), debit_day=6)
+    second = a_lease(a_store("3409 OAKFIELD", 3409), an_operator("Beta"), debit_day=6)
     pending = a_rent_charge(second, OCT, RentChargeStatus.PENDING, "1850.00", day=6)
     a_payment(pending, "1850.00", None, PaymentStatus.PENDING, initiated_on=TODAY)
     future = a_rent_charge(second, date(2026, 11, 1), RentChargeStatus.DUE, "1850.00", day=6)
@@ -125,7 +125,7 @@ def build_mix() -> dict[str, object]:
     )
     # Settled this month: a rent payment, less a refund; the deposit payment left out.
     october = a_rent_charge(
-        a_lease(a_store("5300 GIBSONTON", 5300), operator, debit_day=2),
+        a_lease(a_store("5300 PINEHURST", 5300), operator, debit_day=2),
         OCT,
         RentChargeStatus.PAID,
         "3831.25",
@@ -230,7 +230,7 @@ def test_invoices_not_sent_need_a_provider_reference(today: date) -> None:
 
 def test_failed_attempts_list_attempted_invoices_with_operator_and_store(today: date) -> None:
     operator = an_operator("Delta Retail")
-    lease = a_lease(a_store("1444 JACKSONVILLE", 1444), operator)
+    lease = a_lease(a_store("1444 RIVERTON", 1444), operator)
     charge = a_rent_charge(lease, SEP)
     failed = an_invoice(operator, 7, "3740.00", rent_charge=charge)
     invoice_sync.record_provider_status(failed.pk, "ATTEMPTED")
@@ -242,7 +242,7 @@ def test_failed_attempts_list_attempted_invoices_with_operator_and_store(today: 
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
     assert "Failed payment attempts: 1" in page
-    assert "INV-2026-0007" in page and "Delta Retail" in page and "1444 JACKSONVILLE" in page
+    assert "INV-2026-0007" in page and "Delta Retail" in page and "1444 RIVERTON" in page
     assert "$3,740.00" in page
     assert f'href="/charges/{charge.pk}/"' in page
     # PLAN-012f D7: the failed attempts are a card below the figures.

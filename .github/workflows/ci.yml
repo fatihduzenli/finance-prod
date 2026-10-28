@@ -1,12 +1,13 @@
 name: CI
 
-# Every push and every pull request runs the full check suite from
-# docs/qa/PLAN-002-scaffolding.md section 3. Pushes to main additionally deploy
-# the staging environment. Deployment is a Publish action under root CLAUDE.md
-# section 6: it runs only from CI, after the test job, and only for main.
+# Every push to main and every pull request (any base) runs the full check suite from
+# docs/qa/PLAN-002-scaffolding.md section 3, one run per PR commit (PLAN-013a A2). Pushes
+# to main additionally deploy the staging environment. Deployment is a Publish action under
+# root CLAUDE.md section 6: it runs only from CI, after the test job, and only for main.
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -256,14 +257,18 @@ jobs:
 
   migrations:
     # The seeded migration round trips (PLAN-012b-a part 1): every migration applied and
-    # reversed on PostgreSQL, apart from the unit tests and in parallel with them. Measured
-    # 8 to 12 minutes at first; 29:40 on 2026-10-25 with fifty migrations. TEMPORARY: the
-    # limit is 45 minutes for Step 12f-b, which adds several migrations (PLAN-012f-b Batch 0);
-    # the permanent fix, a split or a squash, is Step 13's. The job's time is reported at the
-    # step's checkpoint.
-    name: Migration tests
+    # reversed on PostgreSQL, apart from the unit tests and in parallel with them, in three
+    # shards (PLAN-013a A1). Measured 27:37 for the whole selection on 2026-10-27; three
+    # shards of 490 to 545 s of tests each locally, 11 to 14 minutes on CI. The shard of each
+    # test is the table ROUNDTRIP_SHARDS in backend/tests/conftest.py, applied as the markers
+    # shard1 to shard3 at collection.
+    name: Migration tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
 
     services:
       postgres:
@@ -307,12 +312,28 @@ jobs:
 
       - name: Migration tests
         run: >-
-          uv run pytest -m "not e2e" -q -o faulthandler_timeout=300
+          uv run pytest -m "shard${{ matrix.shard }}" -q -o faulthandler_timeout=300
+          -p no:cacheprovider
           backend/tests/test_migrations_roundtrip.py
           backend/tests/test_report_indexes.py
-          "backend/tests/test_one_off_charges.py::test_the_rename_migration_rewrites_rows_and_reverses"
-          "backend/tests/test_one_off_charges.py::test_the_rename_migration_refuses_to_reverse_over_a_one_off_charge"
-          "backend/tests/test_staging_defects_adversarial.py::test_two_concurrent_runs_both_succeed_and_migrate_once"
+          backend/tests/test_one_off_charges.py
+          backend/tests/test_staging_defects_adversarial.py
+
+  # One check that stands for the three migration shards, so the deploy job (and a branch
+  # rule) names a single job; it fails unless every shard succeeded.
+  migrations-complete:
+    name: Migration tests complete
+    needs: [migrations]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check that every migration shard passed
+        env:
+          RESULT: ${{ needs.migrations.result }}
+        run: |
+          echo "migration shards: $RESULT"
+          test "$RESULT" = "success"
 
   visual:
     # PLAN-012c D10: the ten pages at two widths against the committed baselines
@@ -380,7 +401,7 @@ jobs:
   deploy-staging:
     name: Deploy staging
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [checks, unit-a, unit-b, migrations, e2e, visual]
+    needs: [checks, unit-a, unit-b, migrations-complete, e2e, visual]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: staging

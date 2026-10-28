@@ -39,7 +39,7 @@ BACKEND = Path(__file__).resolve().parents[1]
         (D("1234.5"), "1234.50"),
         (D("-12"), "-12.00"),
         (D("0.10") + D("0.20"), "0.30"),
-        (D("1470001.57"), "1470001.57"),
+        (D("1466000.57"), "1466000.57"),
         (D("0.005"), "0.00"),  # banker's rounding of a half cent, never a float
         (None, ""),
         (True, "yes"),

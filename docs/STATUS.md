@@ -763,8 +763,7 @@ the login page myself." The condition for starting Prompt 4 is met.
   `INV-2026-0004`); the dashboard as home; the month grid with the sheet's CSV order; arrears;
   the reports menu (aging equal to the dashboard's outstanding by construction, revenue, payments
   by method, deposits vs transactions, printable statement, P&L); CSV on every list with
-  accountant-readable headers; five indexes; the August 2026 fixture (392 / $1,470,001.57 / 47 /
-  13) reproduced; phone layout, manifest, static-only service worker (executed under Node in QA),
+  accountant-readable headers; five indexes; the August 2026 fixture (the audit's four figures) reproduced; phone layout, manifest, static-only service worker (executed under Node in QA),
   camera capture, MFA on a 390 px viewport in Playwright. QA report
   `docs/qa/QA-011-dashboard-reports-mobile.md`: PASS, 4,246 tests on PostgreSQL.
 - Rollout: one "push" (migration ledger 0022, indexes only). No infrastructure change.

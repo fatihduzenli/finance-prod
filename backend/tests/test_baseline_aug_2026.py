@@ -1,6 +1,7 @@
 """The August 2026 baseline (docs/qa/PLAN-011-dashboard-reports-mobile.md D8): the grid, the
 arrears list, the dashboard and the run summary reproduce the sheet's column sums,
-392 collected for $1,470,001.57, 47 unpaid, 13 pending (docs/COLUMN_MAPPING.md §3)."""
+392 collected for $1,466,000.00 (an invented total), 47 unpaid, 13 pending
+(docs/COLUMN_MAPPING.md §3)."""
 
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ def test_the_amounts_follow_the_rule_and_are_not_uniform() -> None:
     collected = collected_amounts()
     assert len(collected) == COLLECTED_COUNT
     assert sum(collected, D("0.00")) == COLLECTED_TOTAL
-    assert collected[-1] == D("9652.92")
+    assert collected[-1] == D("5651.35")
     assert len(set(collected)) > 300
     assert all(amount == amount.quantize(D("0.01")) and amount > 0 for amount in collected)
     assert len(unpaid_amounts()) == UNPAID_COUNT and len(pending_amounts()) == PENDING_COUNT
@@ -68,7 +69,7 @@ def test_the_grid_page_and_csv_show_the_same_column(baseline: Baseline) -> None:
     assert html.count('class="cell cell-paid"') == COLLECTED_COUNT
     assert html.count('class="cell cell-unpaid"') == UNPAID_COUNT
     assert html.count('class="cell cell-pending"') == PENDING_COUNT
-    assert "$1,470,001.57" in html
+    assert "$1,466,000.00" in html
     response = client.get("/grid/export.csv?from=2026-08&to=2026-08")
     rows = list(csv.reader(io.StringIO(b"".join(response.streaming_content).decode())))  # type: ignore[attr-defined]
     cells = [row[5] for row in rows[1:]]
@@ -102,7 +103,7 @@ def test_the_dashboard_figures(baseline: Baseline) -> None:
     assert data.paid_this_month == COLLECTED_TOTAL
     client, _ = client_for(Role.VIEWER)
     html = client.get("/").content.decode()
-    assert "$1,470,001.57" in html and "$228,116.93" in html
+    assert "$1,466,000.00" in html and "$228,116.93" in html
 
 
 def test_the_run_summary_on_the_pending_day(baseline: Baseline) -> None:
