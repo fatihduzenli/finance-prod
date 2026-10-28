@@ -5,7 +5,8 @@ series amendments, and the real store-cost rows that once sat here and in `docs/
 business data: store numbers with their towns,
 monthly figures and totals, operator nicknames and staff names. Since Step 13a (2026-10-27) they
 are kept in the private Blob container **`owner-inputs`** of the staging documents storage
-account in resource group `finance-sandbox`, under `inputs/<date>/`, readable by the owner's
+account in resource group `finance-sandbox`, under `inputs/2026-10-27/` (uploaded and verified by
+listing on 2026-10-28; ten files), readable by the owner's
 account alone (one Storage Blob Data Contributor role assignment; public access is off at the
 account). Nothing in that container is needed to build, test or deploy the app.
 

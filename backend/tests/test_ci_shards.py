@@ -1,6 +1,6 @@
 """The migration-test job's shards (PLAN-013a A1): every test of the five files the job runs is
 in exactly one shard, no shard is empty, the marker reaches each test, and the workflow runs the
-three shards and needs them before deploying."""
+four shards and needs them before deploying."""
 
 from __future__ import annotations
 
@@ -43,10 +43,10 @@ def test_every_round_trip_test_is_in_exactly_one_shard() -> None:
     assert seen == set(ROUNDTRIP_SHARDS), set(ROUNDTRIP_SHARDS) - seen
 
 
-def test_the_shards_are_three_and_none_is_empty() -> None:
-    assert set(ROUNDTRIP_SHARDS.values()) == {1, 2, 3}
-    for shard in (1, 2, 3):
-        assert sum(1 for value in ROUNDTRIP_SHARDS.values() if value == shard) >= 9
+def test_the_shards_are_four_and_none_is_empty() -> None:
+    assert set(ROUNDTRIP_SHARDS.values()) == {1, 2, 3, 4}
+    for shard in (1, 2, 3, 4):
+        assert sum(1 for value in ROUNDTRIP_SHARDS.values() if value == shard) >= 7
 
 
 def test_the_markers_reach_the_tests(pytestconfig: pytest.Config) -> None:
@@ -76,9 +76,9 @@ def test_the_markers_reach_the_tests(pytestconfig: pytest.Config) -> None:
     assert names == expected
 
 
-def test_the_workflow_runs_the_three_shards_and_deploys_after_all() -> None:
+def test_the_workflow_runs_the_four_shards_and_deploys_after_all() -> None:
     workflow = (REPO / ".github/workflows/ci.yml").read_text()
-    assert re.search(r"shard:\s*\[1, 2, 3\]", workflow)
+    assert re.search(r"shard:\s*\[1, 2, 3, 4\]", workflow)
     assert '-m "shard${{ matrix.shard }}"' in workflow or "-m shard${{ matrix.shard }}" in workflow
     assert "timeout-minutes: 30" in workflow.split("name: Migration tests")[1].split("steps:")[0]
     assert "TEMPORARY" not in workflow

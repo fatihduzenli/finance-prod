@@ -82,5 +82,6 @@ markers = [
     "shard1: the migration-test job's first shard (PLAN-013a A1; backend/tests/conftest.py ROUNDTRIP_SHARDS)",
     "shard2: the migration-test job's second shard",
     "shard3: the migration-test job's third shard",
+    "shard4: the migration-test job's fourth shard",
 ]
 filterwarnings = ["error"]
