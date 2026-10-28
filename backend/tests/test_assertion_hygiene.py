@@ -26,9 +26,10 @@ HAYSTACK = (
 # A dict or a method call after the name is a JSON body or a lookup, not a page.
 BARE = re.compile(rf"\bassert\b[^\n]*?{NEEDLE} (?:not )?in {HAYSTACK}\b(?!\[|\.get\()")
 
-# Sites reviewed on 2026-10-28 and left as they are, with the reason. A new line here needs the
-# same review: can an id, a token or an attribute value supply the needle?
-ALLOWED: dict[str, set[int]] = {
+# Sites reviewed on 2026-10-28 and left as they are, with the reason: a line number, or the
+# stripped line's text where the file is edited often. A new entry needs the same review: can an
+# id, a token or an attribute value supply the needle?
+ALLOWED: dict[str, set[int | str]] = {
     # The body's computed font-family string, not a page.
     "test_shell_12f.py": {147},
     # A template's source text, not a rendered page: no token, no id.
@@ -50,8 +51,10 @@ ALLOWED: dict[str, set[int]] = {
     "test_operator_sync.py": {890, 1247},
     "test_plan012a_adversarial.py": {58},
     "test_stax_adapter.py": {289, 290, 368},
-    # The money filter's output for one value.
-    "test_plan012c_design_d_adversarial.py": {229},
+    # The money filter's output for one value (listed by text: the file moves with route pins).
+    "test_plan012c_design_d_adversarial.py": {
+        'assert "nan" not in lowered and "inf" not in lowered, rendered'
+    },
     # A redirect URL built by the app, no token in it.
     "test_plan012e2_a_adversarial.py": {223},
     # One section's slice; "Margin" cannot come from a UUID.
@@ -79,7 +82,8 @@ def sites() -> list[tuple[str, int, str]]:
         if path.name == Path(__file__).name:
             continue
         for number, line in enumerate(path.read_text().splitlines(), start=1):
-            if BARE.search(line) and number not in ALLOWED.get(path.name, set()):
+            allowed = ALLOWED.get(path.name, set())
+            if BARE.search(line) and number not in allowed and line.strip() not in allowed:
                 found.append((str(path.relative_to(TESTS)), number, line.strip()))
     return found
 
