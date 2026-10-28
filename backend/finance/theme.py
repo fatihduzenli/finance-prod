@@ -3,7 +3,9 @@ DESIGN-SPEC §7.1).
 
 ``finance:theme`` (``POST /settings/theme/``, every signed-in role, CSRF-protected) stores
 ``theme`` for the signed-in user (:func:`accounts.themes.set_theme`) and redirects to ``next``
-when it is a path of this site (``url_has_allowed_host_and_scheme``), else to the dashboard. A
+(or, without one, to the ``Referer``: the control does not write the page's own address into
+the page) when it is on this site (``url_has_allowed_host_and_scheme`` with this host), else to
+the dashboard. A
 value outside :data:`accounts.themes.THEMES` is a 400 with a fixed message that does not echo
 it, and nothing is saved. No audit row: a display preference. The form
 (``finance/_theme_switch.html``) works without script.
@@ -30,7 +32,7 @@ def set_theme_view(request: HttpRequest) -> HttpResponse:
     if chosen not in THEMES:
         return HttpResponseBadRequest(UNKNOWN_THEME, content_type="text/plain; charset=utf-8")
     set_theme(_actor(request), chosen)
-    target = request.POST.get("next", "")
+    target = request.POST.get("next", "") or request.headers.get("referer", "")
     if url_has_allowed_host_and_scheme(
         target, allowed_hosts={request.get_host()}, require_https=request.is_secure()
     ):
