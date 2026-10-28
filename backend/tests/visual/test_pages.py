@@ -178,44 +178,67 @@ def write_out(
 
 
 @pytest.fixture
-def anonymous_page(visual_browser: Browser) -> Iterator[Page]:
-    """A page in a fresh context with the suite's settings and no sign-in (the login page)."""
-    context: BrowserContext = visual_browser.new_context(
-        viewport=DESKTOP,
-        device_scale_factor=1,
-        locale="en-US",
-        timezone_id="America/New_York",
-        reduced_motion="reduce",
-        color_scheme="light",
-        service_workers="block",
-    )
-    context.clock.set_fixed_time(world.NOON)
-    page = context.new_page()
-    yield page
-    context.close()
+def anonymous_page(visual_browser: Browser) -> Iterator[Callable[[str], Page]]:
+    """``anonymous(scheme)``: a page in a fresh context with the suite's settings and no sign-in
+    (the login page); the browser's colour scheme is ``light`` or ``dark`` (the page follows
+    System)."""
+    opened: list[BrowserContext] = []
+
+    def anonymous(scheme: str) -> Page:
+        context: BrowserContext = visual_browser.new_context(
+            viewport=DESKTOP,
+            device_scale_factor=1,
+            locale="en-US",
+            timezone_id="America/New_York",
+            reduced_motion="reduce",
+            color_scheme=scheme,  # type: ignore[arg-type]
+            service_workers="block",
+        )
+        context.clock.set_fixed_time(world.NOON)
+        opened.append(context)
+        return context.new_page()
+
+    yield anonymous
+    for context in opened:
+        context.close()
 
 
-def page_for(page_name: str, signed_in: Callable[[str], Page], anonymous: Page) -> Page:
+THEMES = ("light", "dark")
+
+
+def page_for(
+    page_name: str,
+    signed_in: Callable[[str], Page],
+    anonymous: Callable[[str], Page],
+    theme: str = "light",
+) -> Page:
+    """The page to shoot: the signed-out context for the sign-in page (its theme is System, so
+    the browser's colour scheme sets it), else the role's user — the one with Dark stored for the
+    dark set (PLAN-012g D1)."""
     if page_name in SIGNED_OUT:
-        return anonymous
-    return signed_in("admin" if page_name in AS_ADMIN else "billing")
+        return anonymous(theme)
+    role = "admin" if page_name in AS_ADMIN else "billing"
+    return signed_in(role if theme == "light" else f"{role}-dark")
 
 
 # The django_db mark makes pytest-django create the test database (it creates only the
 # databases a collected test asks for); the rows are the session's (conftest.py).
 @pytest.mark.django_db
+@pytest.mark.parametrize("theme", THEMES)
 @pytest.mark.parametrize("width", sorted(VIEWPORTS, reverse=True))
 @pytest.mark.parametrize("page_name", list(PAGES))
 def test_the_page_looks_as_its_baseline(
     page_name: str,
     width: int,
+    theme: str,
     visual_site: Site,
     visual_pages: Callable[[str], Page],
-    anonymous_page: Page,
+    anonymous_page: Callable[[str], Page],
     baseline: Baseline,
 ) -> None:
-    name = f"{page_name}-{width}"
-    page = page_for(page_name, visual_pages, anonymous_page)
+    # The light set keeps its names (<page>-<width>.png); the dark set adds "-dark" (PLAN-012g D1).
+    name = f"{page_name}-{width}" + ("" if theme == "light" else "-dark")
+    page = page_for(page_name, visual_pages, anonymous_page, theme)
     page.set_viewport_size(VIEWPORTS[width])
     open_still(page, visual_site.url + PAGES[page_name](visual_site), STATUS.get(page_name, 200))
     shot = page.screenshot(full_page=True, animations="disabled", caret="hide")
@@ -234,32 +257,38 @@ def test_the_page_looks_as_its_baseline(
 # --- The report shots (PLAN-012f D12): beside the references, not baselines ------------------
 
 REPORT_VIEWPORTS: dict[int, ViewportSize] = {**VIEWPORTS, 1440: {"width": 1440, "height": 900}}
-#: (page, width) → the reference file name under docs/design/.
-REPORT_SHOTS: dict[tuple[str, int], str] = {
-    ("dashboard", 1440): "dashboard-laptop",
-    ("store-charges", 1440): "store-workspace-laptop",
-    ("grid", 1440): "monthly-rent-overview-laptop",
-    ("store-charges", 390): "store-workspace-phone",
+#: (page, width, theme) → the reference file name under docs/design/.
+REPORT_SHOTS: dict[tuple[str, int, str], str] = {
+    # PLAN-012g (the four dark references, DESIGN-SPEC §7).
+    ("dashboard", 1440, "dark"): "dashboard-dark-laptop",
+    ("dashboard", 390, "dark"): "dashboard-dark-phone",
+    ("store-charges", 1440, "dark"): "store-workspace-dark-laptop",
+    ("grid", 1440, "dark"): "monthly-rent-overview-dark-laptop",
+    ("dashboard", 1440, "light"): "dashboard-laptop",
+    ("store-charges", 1440, "light"): "store-workspace-laptop",
+    ("grid", 1440, "light"): "monthly-rent-overview-laptop",
+    ("store-charges", 390, "light"): "store-workspace-phone",
     # PLAN-012f-a (the seven references of Step 12f-a; the lease-end statement stands for the
     # transfer wizard's frame, the same frame with five steps).
-    ("operator", 1440): "operator-workspace-laptop",
-    ("lease-end-statement", 1440): "transfer-wizard-laptop",
-    ("stores", 1440): "stores-list-laptop",
-    ("calendar", 1440): "calendar-laptop",
-    ("invoice-builder", 1440): "create-invoice-laptop",
-    ("charge-detail", 1440): "charge-detail-laptop",
-    ("login", 1440): "login-laptop",
+    ("operator", 1440, "light"): "operator-workspace-laptop",
+    ("lease-end-statement", 1440, "light"): "transfer-wizard-laptop",
+    ("stores", 1440, "light"): "stores-list-laptop",
+    ("calendar", 1440, "light"): "calendar-laptop",
+    ("invoice-builder", 1440, "light"): "create-invoice-laptop",
+    ("charge-detail", 1440, "light"): "charge-detail-laptop",
+    ("login", 1440, "light"): "login-laptop",
 }
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize(("page_name", "width"), sorted(REPORT_SHOTS))
+@pytest.mark.parametrize(("page_name", "width", "theme"), sorted(REPORT_SHOTS))
 def test_the_report_shot_is_written_when_asked(
     page_name: str,
     width: int,
+    theme: str,
     visual_site: Site,
     visual_pages: Callable[[str], Page],
-    anonymous_page: Page,
+    anonymous_page: Callable[[str], Page],
     request: pytest.FixtureRequest,
 ) -> None:
     """With ``--report-dir``, the page at the reference's width goes into that folder as
@@ -267,11 +296,11 @@ def test_the_report_shot_is_written_when_asked(
     folder = request.config.getoption("--report-dir")
     if not folder:
         pytest.skip("report shots are written only with --report-dir")
-    page = page_for(page_name, visual_pages, anonymous_page)
+    page = page_for(page_name, visual_pages, anonymous_page, theme)
     page.set_viewport_size(REPORT_VIEWPORTS[width])
     open_still(page, visual_site.url + PAGES[page_name](visual_site))
     shot = page.screenshot(full_page=True, animations="disabled", caret="hide")
-    target = Path(folder) / f"{REPORT_SHOTS[(page_name, width)]}-built.png"
+    target = Path(folder) / f"{REPORT_SHOTS[(page_name, width, theme)]}-built.png"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(shot)
     assert target.stat().st_size > 10_000

@@ -30,6 +30,7 @@ from django.contrib.auth.models import User
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from accounts.roles import Role
+from accounts.themes import set_theme
 from ledger.models import (
     CalendarEntry,
     ContactKind,
@@ -67,6 +68,8 @@ NOON = datetime(2026, 10, 20, 16, 0, tzinfo=UTC)
 SEEDING_FROM = datetime(2026, 10, 20, 13, 0, tzinfo=UTC)
 USERNAME = "visual-billing"
 ADMIN_USERNAME = "visual-admin"
+DARK_USERNAME = "visual-billing-dark"
+DARK_ADMIN_USERNAME = "visual-admin-dark"
 #: The grid's twelve months end with this one; one status per month, oldest first.
 MONTHS = [date(2025, 11, 1)] + [date(2026, month, 1) for month in range(1, 11)]
 CYCLE = (
@@ -269,11 +272,20 @@ def _build() -> World:
     # Last, so that the rows above keep their ids whoever else signs in.
     _, admin_device = make_user(ADMIN_USERNAME, Role.ADMIN)
     assert admin_device is not None
+    # PLAN-012g Batch D: the same two roles with the Dark appearance stored (DESIGN-SPEC §7.1),
+    # for the dark baseline set; after the admin so every other row keeps its id.
+    dark_billing, dark_billing_device = make_user(DARK_USERNAME, Role.BILLING)
+    dark_admin, dark_admin_device = make_user(DARK_ADMIN_USERNAME, Role.ADMIN)
+    assert dark_billing_device is not None and dark_admin_device is not None
+    set_theme(dark_billing, "dark")
+    set_theme(dark_admin, "dark")
     return World(
         user=user,
         sign_ins={
             "billing": SignIn(USERNAME, device),
             "admin": SignIn(ADMIN_USERNAME, admin_device),
+            "billing-dark": SignIn(DARK_USERNAME, dark_billing_device),
+            "admin-dark": SignIn(DARK_ADMIN_USERNAME, dark_admin_device),
         },
         operator=operator,
         store=store,
