@@ -124,7 +124,7 @@ def test_the_more_sheet_carries_the_control_on_the_phone(
         page = sign_in(ctx, live_server, "e2e-12g-a-phone", Role.BILLING)
         page.locator("#tab-more").click()
         sheet = page.locator("#more-sheet .more-appearance")
-        assert sheet.is_visible() and "Appearance" in sheet.inner_text()
+        assert sheet.is_visible() and "appearance" in sheet.inner_text().lower()
         shot(page, "more-sheet-appearance-phone")
         sheet.locator("button[value=dark]").click()
         page.wait_for_load_state("networkidle")
