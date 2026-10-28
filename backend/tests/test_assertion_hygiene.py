@@ -29,6 +29,8 @@ BARE = re.compile(rf"\bassert\b[^\n]*?{NEEDLE} (?:not )?in {HAYSTACK}\b(?!\[|\.g
 # Sites reviewed on 2026-10-28 and left as they are, with the reason. A new line here needs the
 # same review: can an id, a token or an attribute value supply the needle?
 ALLOWED: dict[str, set[int]] = {
+    # The body's computed font-family string, not a page.
+    "test_shell_12f.py": {147},
     # A template's source text, not a rendered page: no token, no id.
     "test_add_payment_page.py": {553},
     # The /healthz JSON body.
