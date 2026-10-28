@@ -127,9 +127,10 @@ def test_the_segmented_filter_keeps_the_tab_and_the_grid_block_carries_no_raw_am
     tab = viewer.get(
         reverse("ledger:stores:detail", kwargs={"pk": lease.store_id}), {"tab": "charges"}
     ).content.decode()
-    segmented = tab[
-        tab.index('class="segmented') : tab.index("</span>", tab.index('class="segmented') + 40)
-    ]
+    # The charges filter by its id: since PLAN-012g A3 the sidebar's theme switch is a
+    # .segmented too, and it comes first on the page.
+    start = tab.index('id="charge-filters"')
+    segmented = tab[start : tab.index("</span>", start)]
     assert "tab=charges" in segmented
     grid = viewer.get(
         reverse("ledger:grid:page"), {"from": "2026-01", "to": "2026-12"}
