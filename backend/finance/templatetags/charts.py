@@ -13,8 +13,9 @@ holds zero and every figure, so a negative month reads below the zero line. The 
 ``role="img"`` with a sentence as its ``aria-label``. Every month's label is written, as a
 ``<text class="bar-label">``; the labels kept where the chart is narrow (a phone) are every
 third month counting back from the last, the first month of the range and today's month
-(``{% bars rows today %}``); the others carry ``bar-label-minor``, which the phone's style
-hides (:func:`major_months`). A bar's ``<title>`` names its month either way.
+(``{% bars rows today %}``), or every month on a chart of six or fewer; the others carry
+``bar-label-minor``, which the phone's style hides (:func:`major_months`). A bar's
+``<title>`` names its month either way.
 
 ``{% donut parts total %}`` draws the Payment status card's ring: ``parts`` are objects
 with ``key`` (``overdue``, ``paid`` or ``upcoming``), ``label`` and ``amount``; each part
@@ -86,6 +87,8 @@ MAX_BAR_WIDTH = Decimal(48)
 OUTSIDE_OPACITY = "0.4"
 #: On a narrow chart a label every this many months, counted back from the last (A3-1).
 LABEL_EVERY = 3
+#: A chart of at most this many months labels every one of them (PLAN-012g C2).
+LABEL_ALL_UP_TO = 6
 
 _TENTH = Decimal("0.1")
 
@@ -123,7 +126,10 @@ def major_months(items: list[Any], today: date | None = None) -> set[int]:
     """The indexes of the months whose label stays on a narrow chart: the first month of
     the range (the first row ``in_range``) and today's month, when it is drawn, then every
     :data:`LABEL_EVERY`th month counted back from the last that is not beside one of those
-    (two labels side by side would overlap)."""
+    (two labels side by side would overlap). A chart of at most :data:`LABEL_ALL_UP_TO` months
+    keeps every label."""
+    if len(items) <= LABEL_ALL_UP_TO:
+        return set(range(len(items)))
     kept: set[int] = set()
     first = next((index for index, row in enumerate(items) if row.in_range), None)
     if first is not None:
