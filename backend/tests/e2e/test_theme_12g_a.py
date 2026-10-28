@@ -60,7 +60,7 @@ def sign_in(ctx: BrowserContext, live_server: LiveServer, username: str, role: R
 
 
 def body_bg(page: Page) -> str:
-    return page.evaluate("getComputedStyle(document.body).backgroundColor")
+    return str(page.evaluate("getComputedStyle(document.body).backgroundColor"))
 
 
 @pytest.fixture
