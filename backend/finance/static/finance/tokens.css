@@ -52,6 +52,8 @@
    pair: --sidebar-text on --login-gradient[end]
    pair: --sidebar-active-text on --login-gradient[start]
    pair: --sidebar-active-text on --login-gradient[end]
+   pair: --sidebar-text on --sidebar-bg
+   pair: --sidebar-active-text on --sidebar-bg
    pair: --btn-primary-text on --btn-primary-bg
    pair: --on-accent on --btn-primary-bg
    pair: --on-accent on --btn-danger-bg
@@ -79,6 +81,7 @@
    pair[dark]: --link on --bg
    pair[dark]: --sidebar-text on --sidebar-bg
    pair[dark]: --sidebar-text on --sidebar-card-bg
+   pair[dark]: --sidebar-active-text on --sidebar-bg
    pair[dark]: --sidebar-active-text on --sidebar-active-bg over --sidebar-bg
    pair[dark]: --paid-text on --paid-bg
    pair[dark]: --unpaid-text on --unpaid-bg
