@@ -7,7 +7,7 @@ creates the row on the first choice.
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Literal
 
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 
@@ -23,7 +23,7 @@ def theme_for(user: AbstractBaseUser | AnonymousUser) -> ThemeName:
     if not user.is_authenticated:
         return DEFAULT_THEME
     stored = UserPreference.objects.filter(user_id=user.pk).values_list("theme", flat=True).first()
-    return cast(ThemeName, stored) if stored in THEMES else DEFAULT_THEME
+    return stored if stored in THEMES else DEFAULT_THEME
 
 
 def set_theme(user: AbstractBaseUser, theme: str) -> None:
