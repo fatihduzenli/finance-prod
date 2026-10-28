@@ -592,18 +592,20 @@ def test_the_mini_calendar_steps_months_keeps_the_range_and_lists_items(today: d
     )
     client, _ = client_for(Role.VIEWER)
     html = page(client, range="12m")
-    assert 'href="/calendar/?month=2026-10">Calendar</a>' in html
+    # PLAN-012g C3: the month's name is the link; a dot per kind, coloured by its kind class.
+    assert '<a id="mini-month" href="/calendar/?month=2026-10">October 2026</a>' in html
     assert 'id="mini-previous" href="?cal=2026-09&amp;range=12m"' in html
     assert 'id="mini-next" href="?cal=2026-11&amp;range=12m"' in html
-    assert 'id="mini-month">Oct 2026<' in html
-    assert html.count('class="mini-dot"') == 2  # the 5th (debit day) and the 12th (note)
+    assert html.count('class="mini-dot kind-debit"') == 1  # the 5th
+    assert html.count('class="mini-dot kind-note"') == 1  # the 12th
+    assert html.count('class="mini-dot ') == 2
     assert 'class="calendar-item kind-debit"' in html and 'class="calendar-item kind-note"' in html
     assert "Call &lt;b&gt;landlord&lt;/b&gt;" in html and "<b>landlord" not in html
     assert 'aria-label="Oct 12, 2026: 1 item"' in html
     assert 'class="mini-day is-today"' in html
     assert 'data-day="2026-10-05"' in html and has_token(html, lease.store.external_label)
     november = page(client, cal="2026-11")
-    assert 'id="mini-month">Nov 2026<' in november
+    assert 'href="/calendar/?month=2026-11">November 2026</a>' in november
     assert '<input type="hidden" name="cal" value="2026-11">' in november
 
 

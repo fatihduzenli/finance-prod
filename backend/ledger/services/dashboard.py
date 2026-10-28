@@ -59,7 +59,7 @@ from django.db.models import Count, Exists, F, Max, OuterRef, Sum
 from django.db.models.functions import Least
 from django.utils import timezone
 
-from finance.dates import day_text, month_text
+from finance.dates import day_short_text, day_text, month_text
 from ledger.models import (
     ZERO,
     CollectionStatus,
@@ -726,12 +726,43 @@ def payment_status(selected: Range, today: date) -> PaymentStatusCard:
 # --- The mini calendar (D6) ------------------------------------------------------------------
 
 
+#: The order of a day's dots and of the legend (PLAN-012g C3): the debit day, the re-debit, the
+#: lease end, then the insurance anniversary, the reminder and the note.
+DOT_ORDER: tuple[str, ...] = (
+    calendar.KIND_DEBIT,
+    calendar.KIND_REDEBIT,
+    calendar.KIND_LEASE_END,
+    calendar.KIND_INSURANCE,
+    calendar.KIND_REMINDER,
+    calendar.KIND_NOTE,
+)
+#: The dots a day shows at most, one per kind present.
+MAX_DOTS = 3
+_WEEKDAYS_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _kinds_of(items: Iterable[calendar.CalendarItem]) -> list[str]:
+    present = {item.kind for item in items}
+    return [kind for kind in DOT_ORDER if kind in present]
+
+
 @dataclass(frozen=True, slots=True)
 class MiniDay:
     day: date
     today: bool
     in_month: bool
     items: tuple[calendar.CalendarItem, ...]
+
+    @property
+    def kinds(self) -> list[str]:
+        """The day's dots: one per kind present, in :data:`DOT_ORDER`, at most
+        :data:`MAX_DOTS`."""
+        return _kinds_of(self.items)[:MAX_DOTS]
+
+    @property
+    def label(self) -> str:
+        """The phone panel's heading: "Wed, Oct 28"."""
+        return f"{_WEEKDAYS_SHORT[self.day.weekday()]}, {day_short_text(self.day)}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -740,6 +771,18 @@ class MiniCalendar:
     previous: date
     next: date
     weeks: list[list[MiniDay]]
+
+    @property
+    def days_with_items(self) -> list[MiniDay]:
+        """The days that have items, in date order (the list under the grid without a script)."""
+        return [cell for week in self.weeks for cell in week if cell.items]
+
+    @property
+    def legend(self) -> list[tuple[str, str]]:
+        """``(kind, label)`` of every kind present in the month, in :data:`DOT_ORDER`
+        (the legend under the grid; empty when the month has no items)."""
+        items = [item for cell in self.days_with_items for item in cell.items]
+        return [(kind, calendar.KIND_LABELS[kind]) for kind in _kinds_of(items)]
 
 
 def parse_cal(raw: str, today: date) -> date:
