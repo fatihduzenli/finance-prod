@@ -270,9 +270,7 @@ def donut(parts: Iterable[Any], total: object, count: int | None = None) -> Safe
     described = ", ".join(f"{label} {format_amount(amount)}" for _, label, amount in shown)
     amount = format_amount(_amount(total) or Decimal(0))
     middle, word = (
-        (amount, "Total")
-        if count is None
-        else (str(count), "charge" if count == 1 else "charges")
+        (amount, "Total") if count is None else (str(count), "charge" if count == 1 else "charges")
     )
     return format_html(
         '<div class="donut"><svg viewBox="0 0 120 120" role="img" aria-label="{}">'
