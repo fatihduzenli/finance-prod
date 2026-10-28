@@ -521,3 +521,53 @@ def test_c7_the_statement_step_loads_the_total_script_for_its_deductions_tile(
     assert 'id="deduction-rows"' in page
     script = (BACKEND / "ledger" / "static" / "ledger" / "table_total.js").read_text()
     assert "out.classList.toggle(out.dataset.toneAboveZero, sum > 0);" in script
+
+
+def test_c7_the_kpi_component_is_byte_identical_without_the_new_keywords() -> None:
+    from finance.templatetags.components import kpi
+
+    # The output every other caller gets, as before PLAN-013a C7.
+    assert str(kpi("Paid", "$5.00")) == (
+        '<div class="kpi"><span class="kpi-label">Paid</span>'
+        '<span class="kpi-value">$5.00</span></div>'
+    )
+    assert str(kpi("Due", "$9.00", "2 lines", "unpaid")) == (
+        '<div class="kpi"><span class="kpi-label">Due</span>'
+        '<span class="kpi-value tone-unpaid">$9.00</span>'
+        '<span class="kpi-note">2 lines</span></div>'
+    )
+    assert str(kpi("x", "1", "", "bogus")) == (
+        '<div class="kpi"><span class="kpi-label">x</span><span class="kpi-value">1</span></div>'
+    )
+    live = kpi(
+        "Deductions",
+        "$0.00",
+        "0 lines",
+        "",
+        value_class="js-total-out",
+        value_attrs='data-total-for="deduction-rows" data-tone-above-zero="tone-unpaid"',
+    )
+    assert str(live) == (
+        '<div class="kpi"><span class="kpi-label">Deductions</span>'
+        '<span class="kpi-value js-total-out" data-total-for="deduction-rows" '
+        'data-tone-above-zero="tone-unpaid">$0.00</span><span class="kpi-note">0 lines</span></div>'
+    )
+
+
+@pytest.mark.parametrize(
+    ("value_class", "value_attrs"),
+    [
+        ('a" onclick="x', ""),
+        ("", 'onclick="alert(1)"'),
+        ("", 'data-x="a b"'),
+        ("", 'data-x="<b>"'),
+        ("", 'data-x="1"><script>'),
+    ],
+)
+def test_c7_the_kpi_component_refuses_anything_but_classes_and_plain_data_attributes(
+    value_class: str, value_attrs: str
+) -> None:
+    from finance.templatetags.components import kpi
+
+    with pytest.raises(ValueError):
+        kpi("x", "1", value_class=value_class, value_attrs=value_attrs)

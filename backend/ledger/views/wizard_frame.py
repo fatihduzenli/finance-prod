@@ -74,6 +74,8 @@ def statement_notes(figures: statements.Final) -> dict[str, Any]:
         "open_note": open_note,
         "deposit_note": deposit_note,
         "deductions_note": f"{count} line" if count == 1 else f"{count} lines",
+        #: The Deductions tile's tone: red above zero.
+        "deductions_tone": "unpaid" if figures.deductions_total > 0 else "",
         "kept_for_deductions": figures.withheld - figures.offset_applied,
         "credit_paid_back": figures.credit + figures.lease_credit,
     }

@@ -14,6 +14,7 @@ their headings, the context line in the header, the one primary in the summary c
 
 from __future__ import annotations
 
+import html as html_lib
 import re
 from datetime import date
 from decimal import Decimal
@@ -27,7 +28,7 @@ from accounts.roles import Role
 from finance.templatetags.builder import line_total
 from ledger.forms import InvoiceLineForm, InvoiceLineFormSet
 from ledger.models import InvoiceDraft, Lease, Operator, PaymentChannel
-from ledger.services import invoice_builder
+from ledger.services import invoice_builder, one_off_charges
 from ledger.services.invoice_builder import LineInput
 from ledger.views.invoices import _lines_total
 from payments.fake import FakeProvider
@@ -247,10 +248,24 @@ def test_one_tile_per_choice_each_with_its_radio_name_and_sentence() -> None:
         # greyed (never hidden) with its one line in place of its sentence; D16: six, with
         # Schedule settlement.
         assert len(found) == 6, role
+        # PLAN-013a C3: the operator has no bank account on file and bank debits are off,
+        # so an admin's Charge now carries a second note, the "also off" line, under its
+        # reason (and the Operator page link); every other tile has its one note.
+        also_off = invoice_builder.bank_tiles(lease.operator).charge_now_more
+        assert also_off == str(one_off_charges.DEBIT_ALSO_OFF)
         for tile in found:
             assert tile.count('type="radio" name="collect"') == 1
             assert tile.count('<span class="collect-name">') == 1
-            assert tile.count('<span class="collect-note') == 1
+            notes = re.findall(r'<span class="collect-note[^"]*"[^>]*>([^<]*)</span>', tile)
+            if role is Role.ADMIN and 'id="tile-charge_now"' in tile:
+                assert notes == [
+                    html_lib.escape(invoice_builder.charge_now_unavailable(lease.operator)),
+                    html_lib.escape(also_off),
+                ]
+                assert 'id="charge_now-reason-more"' in tile
+            else:
+                assert len(notes) == 1, (role, tile[:60])
+                assert "reason-more" not in tile
     assert "<legend>How to collect</legend>" in body
     assert body.count('id="collect-help"') == 1
 

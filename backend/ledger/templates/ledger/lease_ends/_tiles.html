@@ -2,5 +2,5 @@
 <div class="kpi-row wizard-tiles" id="statement-tiles">
   {% kpi "Open balance" figures.open_total|money open_note %}
   {% kpi "Deposit held" figures.deposit_held|money deposit_note %}
-  {% if live_deductions %}<div class="kpi"><span class="kpi-label">Deductions</span><span class="kpi-value{% if figures.deductions_total > 0 %} tone-unpaid{% endif %} js-total-out" data-total-for="deduction-rows" data-tone-above-zero="tone-unpaid">{{ figures.deductions_total|money }}</span>{% if deductions_note %}<span class="kpi-note">{{ deductions_note }}</span>{% endif %}</div>{% elif figures.deductions_total > 0 %}{% kpi "Deductions" figures.deductions_total|money deductions_note "unpaid" %}{% else %}{% kpi "Deductions" figures.deductions_total|money deductions_note %}{% endif %}
+  {% if live_deductions %}{% kpi "Deductions" figures.deductions_total|money deductions_note deductions_tone value_class="js-total-out" value_attrs='data-total-for="deduction-rows" data-tone-above-zero="tone-unpaid"' %}{% else %}{% kpi "Deductions" figures.deductions_total|money deductions_note deductions_tone %}{% endif %}
 </div>
