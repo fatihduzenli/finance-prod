@@ -86,11 +86,11 @@ def ics_events(body: str) -> list[dict[str, str]]:
 
 
 def test_debit_days_insurance_anniversaries_and_lease_ends_are_generated() -> None:
-    store = a_store("2204 FOREST PARK", 2204)
+    store = a_store("2204 ELM PARK", 2204)
     Store.objects.filter(pk=store.pk).update(open_date=date(2023, 10, 14), needs_open_date=False)
     operator = an_operator("Acme")
     lease = a_lease(store, operator, debit_day=5, second_debit_day=20, started=date(2024, 1, 1))
-    ended = a_lease(a_store("3409 LEICESTER", 3409), an_operator("Beta"), debit_day=1)
+    ended = a_lease(a_store("3409 OAKFIELD", 3409), an_operator("Beta"), debit_day=1)
     Lease.objects.filter(pk=ended.pk).update(ended_on=date(2026, 10, 25))
     found = calendar.items(date(2026, 10, 1), date(2026, 10, 31))
     by_kind = {(item.kind, item.on) for item in found}
@@ -101,9 +101,9 @@ def test_debit_days_insurance_anniversaries_and_lease_ends_are_generated() -> No
     # The ended lease's debit day before its end is shown; none after it (November).
     assert (calendar.KIND_DEBIT, date(2026, 10, 1)) in by_kind
     titles = {item.title for item in found}
-    assert "Debit day: 2204 FOREST PARK (Acme), debit 1" in titles
-    assert "Insurance anniversary: 2204 FOREST PARK (Acme)" in titles
-    assert "Lease ends: 3409 LEICESTER (Beta)" in titles
+    assert "Debit day: 2204 ELM PARK (Acme), debit 1" in titles
+    assert "Insurance anniversary: 2204 ELM PARK (Acme)" in titles
+    assert "Lease ends: 3409 OAKFIELD (Beta)" in titles
     assert all("$" not in item.title for item in found)
     debit = next(item for item in found if item.on == date(2026, 10, 5))
     assert debit.url == f"/leases/{lease.pk}/"

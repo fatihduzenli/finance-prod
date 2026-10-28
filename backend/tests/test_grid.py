@@ -150,10 +150,10 @@ def test_blank_before_the_lease_started_and_not_yet_due_only_in_a_future_month(
     # PLAN-012e-4 D3: June and July are before the lease's start month (blank, the label the
     # month only); August (started mid-month) and October (today's month) are inside the
     # lease without a charge (blank, "no charge"); November is in the future: "Not yet due".
-    lease = a_lease(a_store("1083 JACKSONVILLE", 1083), started=date(2026, 8, 15))
+    lease = a_lease(a_store("1083 RIVERTON", 1083), started=date(2026, 8, 15))
     a_rent_charge(lease, SEP, RentChargeStatus.PAID, "3740.00", "3740.00")
     result = built(**{"from": "2026-06", "to": "2026-11"})
-    cells = row_of(result, "1083 JACKSONVILLE").cells
+    cells = row_of(result, "1083 RIVERTON").cells
     assert [item.status for item in cells] == ["", "", "", "paid", "", "not_due"]
     assert [item.text for item in cells] == ["", "", "", "Paid $3,740.00", "", "Not yet due"]
     assert [item.label for item in cells] == [
@@ -241,14 +241,14 @@ def test_a_month_without_any_charge_is_blank_in_every_row(today: date) -> None:
 
 def test_two_charges_of_one_month_make_one_cell_with_their_sums(today: date) -> None:
     """Twice-monthly lease (owner, Q28: the grid shows the sum)."""
-    lease = a_lease(a_store("3409 LEICESTER", 3409), debit_day=1, second_debit_day=15)
+    lease = a_lease(a_store("3409 OAKFIELD", 3409), debit_day=1, second_debit_day=15)
     a_rent_charge(lease, AUG, RentChargeStatus.PAID, "1850.00", "1850.00", seq=1, day=1)
     a_rent_charge(lease, AUG, RentChargeStatus.UNPAID, "1850.00", seq=2, day=15)
     a_rent_charge(lease, SEP, RentChargeStatus.PAID, "1850.00", "1850.00", seq=1, day=1)
     a_rent_charge(lease, SEP, RentChargeStatus.PAID, "1850.00", "1850.00", seq=2, day=15)
     result = built(**{"from": "2026-08", "to": "2026-09"})
-    assert cell(result, "3409 LEICESTER", AUG).text == "Partly paid $1,850.00 of $3,700.00"
-    assert cell(result, "3409 LEICESTER", SEP).text == "Paid $3,700.00"
+    assert cell(result, "3409 OAKFIELD", AUG).text == "Partly paid $1,850.00 of $3,700.00"
+    assert cell(result, "3409 OAKFIELD", SEP).text == "Paid $3,700.00"
 
 
 @pytest.mark.parametrize(

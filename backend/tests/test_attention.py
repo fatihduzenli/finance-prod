@@ -223,15 +223,15 @@ def returned_payment(lease: Lease, amount: str = "3500.00") -> Payment:
 
 
 def test_overdue_charges_worst_first_with_links(today: date) -> None:
-    lease = a_lease(a_store("2204 FOREST PARK", 2204), an_operator("Acme"), debit_day=5)
+    lease = a_lease(a_store("2204 ELM PARK", 2204), an_operator("Acme"), debit_day=5)
     old = a_rent_charge(lease, date(2026, 8, 1), RentChargeStatus.UNPAID, "3500.00")
     recent = a_rent_charge(lease, date(2026, 10, 1), RentChargeStatus.PARTIAL, "3500.00", "1000.00")
     a_rent_charge(lease, date(2026, 11, 1), RentChargeStatus.DUE, "3500.00")  # not yet due
     items = of_kind(attention.OVERDUE)
     assert [item.url for item in items] == [f"/charges/{old.pk}/", f"/charges/{recent.pk}/"]
-    assert items[0].text == "Overdue 62 days: 2204 FOREST PARK, Rent Aug 2026, $3,500.00"
+    assert items[0].text == "Overdue 62 days: 2204 ELM PARK, Rent Aug 2026, $3,500.00"
     assert items[0].severity == attention.HIGH
-    assert items[1].text == "Overdue 1 day: 2204 FOREST PARK, Rent Oct 2026, $2,500.00"
+    assert items[1].text == "Overdue 1 day: 2204 ELM PARK, Rent Oct 2026, $2,500.00"
     assert items[1].severity == attention.MEDIUM
 
 
@@ -242,12 +242,12 @@ def test_a_charge_due_today_is_not_overdue(today: date) -> None:
 
 
 def test_a_returned_debit_reads_exactly_as_planned(today: date) -> None:
-    lease = a_lease(a_store("3409 LEICESTER", 3409), an_operator("Beta"))
+    lease = a_lease(a_store("3409 OAKFIELD", 3409), an_operator("Beta"))
     payment = returned_payment(lease, "1850.00")
     [item] = of_kind(attention.RETURNED_DEBIT)
     assert (
         item.text
-        == "Returned debit not rescheduled: 3409 LEICESTER, $1,850.00, returned Oct 3, 2026"
+        == "Returned debit not rescheduled: 3409 OAKFIELD, $1,850.00, returned Oct 3, 2026"
     )
     assert item.url == f"/returns/#return-{payment.pk}"
     assert item.severity == attention.HIGH and item.since == date(2026, 10, 3)
@@ -570,11 +570,11 @@ def test_the_list_reads_a_fixed_number_of_queries(today: date) -> None:
 
 def test_a_payment_on_a_split_parent_is_one_item_per_plan_until_it_ends(today: date) -> None:
     """PLAN-012b-a D4."""
-    lease = a_lease(a_store("2204 FOREST PARK", 2204), an_operator("Acme"))
+    lease = a_lease(a_store("2204 ELM PARK", 2204), an_operator("Acme"))
     plan = split_paid(lease)
     [item] = of_kind(attention.SPLIT_CHARGE_PAID)
     assert item.text == (
-        "Payment on a split charge: 2204 FOREST PARK, Damage to the shelving, $400.00 paid "
+        "Payment on a split charge: 2204 ELM PARK, Damage to the shelving, $400.00 paid "
         "before its invoice was released; cancel or reschedule the plan"
     )
     assert item.url == f"/plans/{plan.pk}/" and item.severity == attention.HIGH
@@ -598,11 +598,11 @@ def test_a_payment_on_a_split_rent_parent_is_one_item_until_the_plan_is_cancelle
     today: date,
 ) -> None:
     """PLAN-012b-b D13: a rent parent's plan with a payment on the parent itself."""
-    lease = a_lease(a_store("2204 FOREST PARK", 2204), an_operator("Acme"))
+    lease = a_lease(a_store("2204 ELM PARK", 2204), an_operator("Acme"))
     plan = rent_split_paid(lease)
     [item] = of_kind(attention.SPLIT_CHARGE_PAID)
     assert item.text == (
-        "Payment on a split charge: 2204 FOREST PARK, Rent 2026-10, $1,000.00 paid "
+        "Payment on a split charge: 2204 ELM PARK, Rent 2026-10, $1,000.00 paid "
         "before its invoice was released; cancel or reschedule the plan"
     )
     assert item.url == f"/plans/{plan.pk}/" and item.severity == attention.HIGH
@@ -626,7 +626,7 @@ def test_a_payment_on_a_split_rent_parent_is_one_item_until_the_plan_is_cancelle
 
 
 def test_a_returned_installment_is_one_item_per_plan_linking_to_it(today: date) -> None:
-    lease = a_lease(a_store("2204 FOREST PARK", 2204), an_operator("Acme"))
+    lease = a_lease(a_store("2204 ELM PARK", 2204), an_operator("Acme"))
     plan = returned_installment(lease)
     items = [
         item
@@ -635,7 +635,7 @@ def test_a_returned_installment_is_one_item_per_plan_linking_to_it(today: date) 
     ]
     assert [(item.text, item.url, item.since, item.severity) for item in items] == [
         (
-            "Installment returned: 2204 FOREST PARK, Rent 2026-07, plan 0 of 2 paid",
+            "Installment returned: 2204 ELM PARK, Rent 2026-07, plan 0 of 2 paid",
             f"/plans/{plan.pk}/",
             date(2026, 9, 4),
             attention.HIGH,
@@ -658,7 +658,7 @@ def test_a_returned_installment_is_one_item_per_plan_linking_to_it(today: date) 
 
 
 def test_the_dashboard_shows_the_list_under_the_figures(today: date) -> None:
-    lease = a_lease(a_store("2204 FOREST PARK", 2204), an_operator("Acme"))
+    lease = a_lease(a_store("2204 ELM PARK", 2204), an_operator("Acme"))
     returned_payment(lease)
     client, _ = client_for(Role.VIEWER)
     page = client.get("/").content.decode()
@@ -668,7 +668,7 @@ def test_the_dashboard_shows_the_list_under_the_figures(today: date) -> None:
     row = page[page.index('data-kind="returned_debit"') :].split("</tr>", 1)[0]
     assert "</span> Returned debit not rescheduled</span>" in row
     assert re.search(
-        r'<a href="/returns/#return-[^"]+">2204 FOREST PARK, \$3,500\.00, returned Oct 3, 2026</a>',
+        r'<a href="/returns/#return-[^"]+">2204 ELM PARK, \$3,500\.00, returned Oct 3, 2026</a>',
         row,
     )
     assert "Acme" in row and "$3,500.00" in row
