@@ -10,7 +10,8 @@ no setting.
 
 :func:`company` exposes the company settings row's display values (``company.name``,
 ``short_name``, ``provider_name``, ``logo_url``, ``logo_is_override``) and the shell's
-theme colour to every template. ``logo_url`` is the brand's dark logo unless the row names
+theme colours (light and dark) to every template; :func:`theme` exposes the user's stored
+theme (PLAN-012g A2: ``light``, ``dark`` or ``system``) for ``<html data-theme>``. ``logo_url`` is the brand's dark logo unless the row names
 a live PNG or JPEG document, then that document's preview route: always a path of this
 app, never a URL taken from the row. ``logo_is_override`` is true for such a document: the
 bar then shows the company name as text beside it (the brand logo carries the wordmark
@@ -28,6 +29,7 @@ from django.http import HttpRequest
 from django.templatetags.static import static
 from django.urls import reverse
 
+from accounts.themes import DEFAULT_THEME, theme_for
 from finance import pwa
 from ledger.models import LOGO_CONTENT_TYPES, CompanySettings, Document
 
@@ -38,6 +40,8 @@ BRAND_LOGO = "finance/brand/monvera_logo_dark_transparent.svg"
 #: Where a request keeps its company settings row and its :class:`Company`.
 _ROW_ATTRIBUTE = "_company_settings"
 _COMPANY_ATTRIBUTE = "_company"
+#: Where a request keeps its user's theme.
+_THEME_ATTRIBUTE = "_theme"
 
 #: Sections named by a whole view name; checked before the namespaces.
 _VIEW_SECTIONS: dict[str, str] = {
@@ -145,7 +149,8 @@ def company_settings(request: HttpRequest) -> CompanySettings:
 
 
 def company(request: HttpRequest) -> dict[str, object]:
-    """``company`` (:class:`Company`) and ``theme_color`` (the shell's navy)."""
+    """``company`` (:class:`Company`), ``theme_color`` (the shell's navy) and
+    ``theme_color_dark`` (the dark theme's canvas)."""
     shown: Company | None = getattr(request, _COMPANY_ATTRIBUTE, None)
     if shown is None:
         row = company_settings(request)
@@ -158,4 +163,19 @@ def company(request: HttpRequest) -> dict[str, object]:
             logo_is_override=url != static(BRAND_LOGO),
         )
         setattr(request, _COMPANY_ATTRIBUTE, shown)
-    return {"company": shown, "theme_color": pwa.THEME_COLOR}
+    return {
+        "company": shown,
+        "theme_color": pwa.THEME_COLOR,
+        "theme_color_dark": pwa.THEME_COLOR_DARK,
+    }
+
+
+def theme(request: HttpRequest) -> dict[str, str]:
+    """``theme``: the user's stored choice, ``"system"`` when signed out or never chosen.
+    Read once per request (one query at most) and kept on the request."""
+    chosen: str | None = getattr(request, _THEME_ATTRIBUTE, None)
+    if chosen is None:
+        user = getattr(request, "user", None)
+        chosen = theme_for(user) if user is not None else DEFAULT_THEME
+        setattr(request, _THEME_ATTRIBUTE, chosen)
+    return {"theme": chosen}

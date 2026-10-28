@@ -53,6 +53,9 @@ WORKER_CONTENT_TYPE = "application/javascript"
 WORKER_TEMPLATE = "finance/sw.js"
 #: ``--navy`` in finance/static/finance/tokens.css: the phone bar's gradient starts on it.
 THEME_COLOR = "#0b2545"
+#: ``--bg`` of the dark theme (PLAN-012g A2): the page's theme-color meta in dark; the manifest
+#: stays light.
+THEME_COLOR_DARK = "#171721"
 #: ``--bg`` in finance/static/finance/tokens.css: the content's background.
 BACKGROUND_COLOR = "#f4f6f9"
 #: (static path, sizes, type) of each icon in the manifest.
