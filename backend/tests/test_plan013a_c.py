@@ -189,12 +189,12 @@ def test_c1_the_message_log_names_who_sent_by_hand_and_keeps_ladder(
 
 def test_c1_the_activity_log_user_column_shows_the_name() -> None:
     client, user = named(Role.ADMIN)
-    moment = datetime.now(UTC)
+    # The row's `at` is set on create; the audit table is append-only on PostgreSQL (a trigger
+    # refuses UPDATE), so nothing rewrites it.
     row = AuditLog.objects.create(
         action="operator.updated", entity_type="operator", entity_id=str(uuid.uuid4()), actor=user
     )
-    AuditLog.objects.filter(pk=row.pk).update(at=moment)
-    today = moment.date()
+    today = datetime.now(UTC).date()
     page = body(
         client,
         f"/audit/?from={(today - timedelta(days=1)).isoformat()}&to={today.isoformat()}",
