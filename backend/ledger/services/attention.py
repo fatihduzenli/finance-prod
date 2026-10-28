@@ -96,6 +96,7 @@ from django.db.models import Count, F, Min, Q, Sum
 from django.urls import reverse
 from django.utils import timezone
 
+from accounts.display import staff_name
 from finance.dates import day_text
 from ledger.models import (
     LIVE_PLAN_STATUSES,
@@ -689,7 +690,7 @@ def _lease_end_balances(operator: uuid.UUID | None) -> list[Item]:
         held_by = getattr(end, "transfer", None)
         if held_by is not None and held_by.debt_override_at is not None:
             by = held_by.debt_override_by
-            text += LEASE_END_BALANCE_ALLOWED.format(name=by.get_username() if by else "unknown")
+            text += LEASE_END_BALANCE_ALLOWED.format(name=staff_name(by) if by else "unknown")
         found.append(
             Item(
                 kind=LEASE_END_BALANCE,

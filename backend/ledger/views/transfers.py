@@ -163,13 +163,8 @@ def _needs_statement(request: HttpRequest, transfer: LeaseTransfer) -> HttpRespo
     if end is None:
         raise Http404
     if end.statement_saved_at is None:
-        return _statement_first(request, end)
+        return wizard_frame.statement_first(request, end)
     return None
-
-
-def _statement_first(request: HttpRequest, end: LeaseEnd) -> HttpResponse:
-    messages.error(request, lease_end.STATEMENT_REQUIRED)
-    return redirect("ledger:lease_ends:statement", pk=end.pk)
 
 
 def _needs_operator(request: HttpRequest, transfer: LeaseTransfer) -> HttpResponse | None:
@@ -464,7 +459,7 @@ def confirm(request: HttpRequest, pk: str) -> HttpResponse:
                 messages.success(request, outcome.message)
                 return redirect("ledger:transfers:confirm", pk=transfer.pk)
             if outcome.field == "statement" and transfer.lease_end is not None:
-                return _statement_first(request, transfer.lease_end)
+                return wizard_frame.statement_first(request, transfer.lease_end)
             form.add_error(None, outcome.message)
         _hold(request, target, form)
         return redirect("ledger:transfers:confirm", pk=transfer.pk)

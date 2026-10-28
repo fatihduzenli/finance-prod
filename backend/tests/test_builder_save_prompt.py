@@ -287,12 +287,11 @@ def test_the_prompt_is_billings_and_get_only(fake: FakeProvider) -> None:
 def test_no_bank_account_on_file_greys_every_bank_debit_tile_with_one_line(
     fake: FakeProvider, enabled: None
 ) -> None:
-    no_bank = str(one_off_service.DEBIT_NO_METHOD)
-    assert no_bank == (
-        "No bank account on file — add one in the Stax dashboard, then Update from Stax."
-    )
     for operator in (an_operator(fake, customer="cus-nb", bank=None), an_operator(fake)):
-        # No linked method; a linked method the stored list does not show.
+        # No linked method; a linked method the stored list does not show. The line is Add
+        # payment's, naming the operator (PLAN-013a C3).
+        no_bank = f"No bank account on file for {operator.display_name}."
+        assert no_bank == one_off_service.DEBIT_NO_ACCOUNT.format(operator=operator.display_name)
         lease = make_lease(operator=operator)
         assert invoice_builder.bank_unavailable(operator) == no_bank
         assert invoice_builder.charge_now_unavailable(operator) == no_bank
@@ -361,7 +360,7 @@ def test_no_lease_or_more_than_one_line_greys_schedule_and_autopay(
     unbanked = an_operator(fake, customer="cus-nb2", bank=None)
     with override_settings(STAX_PAY_INVOICE_ENABLED=False):
         html = draft_html(a_draft(unbanked, None, one_line()))
-    no_bank = str(one_off_service.DEBIT_NO_METHOD)
+    no_bank = one_off_service.DEBIT_NO_ACCOUNT.format(operator=unbanked.display_name)
     assert greyed(html, "schedule") == greyed(html, "autopay") == no_bank
     with override_settings(STAX_PAY_INVOICE_ENABLED=False):
         html = draft_html(a_draft(operator, None, one_line()))
@@ -402,12 +401,12 @@ def test_a_posted_greyed_choice_is_refused_with_its_line_and_nothing_is_written(
     bank: bool,
     sentence: str,
 ) -> None:
-    # The sentences are read inside the test: the provider's name comes from the database.
+    operator = an_operator(fake) if bank else an_operator(fake, bank=None)
+    # The sentences are read inside the test: the no-bank line names the operator.
     sentence = {
         "admin": ledger_forms.CHARGE_NOW_NEEDS_ADMIN,
-        "no_bank": str(one_off_service.DEBIT_NO_METHOD),
+        "no_bank": one_off_service.DEBIT_NO_ACCOUNT.format(operator=operator.display_name),
     }[sentence]
-    operator = an_operator(fake) if bank else an_operator(fake, bank=None)
     if bank:
         store_methods(operator)
     lease = make_lease(operator=operator)

@@ -520,7 +520,8 @@ class LogRow:
     error: str
     charge_type: str
     charge_id: uuid.UUID
-    sent_by: str
+    #: Who sent it by hand, or ``None`` for the ladder; shown through ``|staff``.
+    sent_by: User | None
 
 
 def _rows(found: Iterable[OutboundMessage]) -> list[LogRow]:
@@ -536,7 +537,7 @@ def _rows(found: Iterable[OutboundMessage]) -> list[LogRow]:
             error=message.error,
             charge_type=message.charge_entity_type,
             charge_id=message.charge_entity_id,
-            sent_by=message.sent_by.get_username() if message.sent_by is not None else "",
+            sent_by=message.sent_by,
         )
         for message in found
     ]

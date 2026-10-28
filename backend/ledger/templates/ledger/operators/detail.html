@@ -140,7 +140,7 @@
   <h2>Notes</h2>
   {% if operator.notes %}<p style="white-space:pre-wrap;">{{ operator.notes }}</p>{% endif %}
   {% for note in notes %}
-    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{{ note.author_label|default:note.author|default:"" }} {{ note.created_at|day }}</span></p>
+    <p style="white-space:pre-wrap;">{{ note.body }}<br><span class="muted">{% if note.author_label %}{{ note.author_label }}{% else %}{{ note.author|staff }}{% endif %} {{ note.created_at|day }}</span></p>
   {% empty %}
     {% if not operator.notes %}<p class="muted">No notes.</p>{% endif %}
   {% endfor %}

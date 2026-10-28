@@ -4,7 +4,7 @@
 {% block step_title %}Statement for {{ lease.operator.display_name|default:"the operator" }}{% endblock %}
 {% block step_body %}
   <p class="muted wizard-help" id="step-help">Check the figures and list what is kept from the deposit. The unpaid balance offset pays the open charges from the deposit; it can be lowered, never raised above the open balance. A charge marked "not created yet" is created when you save this step.</p>
-  {% include "ledger/lease_ends/_tiles.html" %}
+  {% include "ledger/lease_ends/_tiles.html" with live_deductions=True %}
   {% include "ledger/lease_ends/_figures.html" with compact=True %}
   <h2 class="section-label" id="deductions-label">Deductions</h2>
   <form method="post" id="lease-end-deductions" class="js-single-submit" autocomplete="off">

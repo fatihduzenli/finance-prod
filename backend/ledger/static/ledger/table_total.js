@@ -3,7 +3,9 @@
 // lease end's deductions. Every "span.js-total-out[data-total-for=<table id>]" shows the
 // sum of the table's "input.js-total" amounts as they are typed; an empty or invalid
 // amount counts as nothing. The server renders the same line, so the page reads right
-// without this script; nothing is sent from here.
+// without this script; nothing is sent from here. An output with
+// "data-tone-above-zero=<class>" carries that class while the sum is above zero (the
+// statement step's Deductions tile, red above zero; PLAN-013a C7).
 (function () {
   "use strict";
   function cents(text) {
@@ -29,6 +31,9 @@
         }
       });
       out.textContent = money(sum);
+      if (out.dataset.toneAboveZero) {
+        out.classList.toggle(out.dataset.toneAboveZero, sum > 0);
+      }
     }
     table.addEventListener("input", update);
     table.addEventListener("change", update);

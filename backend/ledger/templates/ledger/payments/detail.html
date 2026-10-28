@@ -25,7 +25,7 @@
     </section>
   {% endif %}
 
-  {% if not payment.is_refund %}
+  {% if not payment.is_refund and not applied_tile %}
     <section class="card" id="refunds-card">
     <h2>Refunds</h2>
     {% responsive_table %}

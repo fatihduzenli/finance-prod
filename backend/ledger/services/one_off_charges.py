@@ -1570,14 +1570,11 @@ def record_charge_now(
 # --- Bank debit from Add payment (PLAN-012f-b D14) ------------------------------------
 
 #: Why the bank-debit card of Add payment is greyed (one plain sentence each).
-DEBIT_NO_METHOD = provider_sentence(
-    "No bank account on file — add one in the {provider} dashboard, then Update from {provider}."
-)
 DEBIT_OFF = provider_sentence("Bank debits are off at {provider}.")
 #: The Add payment card's first line when no bank method is on file, the flag on or off
 #: (PLAN-012f-c §11 E2, the owner's sentence): it names the operator (``{operator}``) and
 #: the page links that operator's page under it; how to add one is in the Payments help
-#: topic. How to collect keeps :data:`DEBIT_NO_METHOD`.
+#: topic. How to collect's greyed bank tiles read it too, with the same link (PLAN-013a C3).
 DEBIT_NO_ACCOUNT = "No bank account on file for {operator}."
 #: The second line when the flag is off as well (PLAN-012f-c D7).
 DEBIT_ALSO_OFF = provider_sentence("Bank debits are also off at {provider}.")
@@ -1668,6 +1665,18 @@ def _bank_method(operator: Operator | None) -> BankMethod | None:
     )
 
 
+def no_account_line(operator: Operator | None) -> tuple[str, str]:
+    """:data:`DEBIT_NO_ACCOUNT` naming ``operator`` (:data:`DEBIT_OPERATOR_FALLBACK` without
+    one) and the operator page's URL (``""`` without an operator): the first line of a card
+    or tile greyed for no bank method on file and the "Operator page" link under it."""
+    if operator is None:
+        return DEBIT_NO_ACCOUNT.format(operator=DEBIT_OPERATOR_FALLBACK), ""
+    return (
+        DEBIT_NO_ACCOUNT.format(operator=operator.display_name),
+        reverse("ledger:operators:detail", kwargs={"pk": operator.pk}),
+    )
+
+
 def _setup_reasons(
     enabled: bool, method: BankMethod | None, operator: Operator | None
 ) -> tuple[str, str, str]:
@@ -1677,14 +1686,9 @@ def _setup_reasons(
     when the flag is off as well; the flag off alone, :data:`DEBIT_OFF`; neither,
     ``("", "", "")``."""
     if method is None:
-        name = operator.display_name if operator is not None else DEBIT_OPERATOR_FALLBACK
-        url = (
-            reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
-            if operator is not None
-            else ""
-        )
+        line, url = no_account_line(operator)
         more = "" if enabled else str(DEBIT_ALSO_OFF)
-        return DEBIT_NO_ACCOUNT.format(operator=name), more, url
+        return line, more, url
     if not enabled:
         return str(DEBIT_OFF), "", ""
     return "", "", ""

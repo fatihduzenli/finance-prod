@@ -552,8 +552,8 @@ def test_the_page_refuses_a_count_outside_the_range_before_anything_is_converted
 
 
 def test_the_tile_is_greyed_with_no_bank_and_not_by_the_pay_flag(fake: FakeProvider) -> None:
-    no_bank = str(one_off_service.DEBIT_NO_METHOD)
     operator = an_operator(fake, customer="cus-nb", bank=None)
+    no_bank = one_off_service.DEBIT_NO_ACCOUNT.format(operator=operator.display_name)
     lease = make_lease(operator=operator)
     html = draft_html(a_draft(operator, lease, one_line()))
     assert greyed(html, "settlement") == no_bank
