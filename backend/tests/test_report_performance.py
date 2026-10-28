@@ -248,15 +248,15 @@ def test_every_page_answers_under_two_seconds_on_volume(monkeypatch: pytest.Monk
     pages: dict[str, tuple[str, dict[str, str], int]] = {
         # +1 since PLAN-012g A2: the theme row read on every page.
         "dashboard": ("/", {}, 26 + 3 * due_today),
-        "grid (500 x 24)": ("/grid/", span, 20),
+        "grid (500 x 24)": ("/grid/", span, 21),
         # PLAN-012d D16: the words filter keeps the grid's query count.
-        "grid filtered": ("/grid/", {**span, "q": "store 1"}, 20),
-        "arrears": ("/arrears/", {}, 20),
-        "aging": ("/reports/aging/", {}, 20),
-        "revenue": ("/reports/revenue/", span, 30),
-        "payments by method": ("/reports/payments-by-method/", span, 20),
-        "deposits": ("/reports/deposits/", span, 20),
-        "statement": (f"/operators/{operator.pk}/statement/", span, 20),
+        "grid filtered": ("/grid/", {**span, "q": "store 1"}, 21),
+        "arrears": ("/arrears/", {}, 21),
+        "aging": ("/reports/aging/", {}, 21),
+        "revenue": ("/reports/revenue/", span, 31),
+        "payments by method": ("/reports/payments-by-method/", span, 21),
+        "deposits": ("/reports/deposits/", span, 21),
+        "statement": (f"/operators/{operator.pk}/statement/", span, 21),
     }
     client, _ = client_for(Role.VIEWER)
     client.get("/reports/")  # warm the session and the template loaders
