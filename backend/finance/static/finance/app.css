@@ -496,17 +496,18 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
 /* --- Dashboard (PLAN-012f D7) -----------------------------------------------------------------
    The header's .page-title (the title, then the long date in .page-date). Row 1, .kpi-row: the
    four KPI cards. Row 2, .dashboard-cashflow: the Cashflow card, full width (PLAN-012f-b D3).
-   Rows 3 and 4, .dashboard-row-thirds (two thirds | one third): the Needs attention card
+   Rows 3 to 5 (PLAN-012g C1; DESIGN-SPEC §7.5), .dashboard-row-thirds (two thirds | one
+   third), the two cards of a row as tall as each other: the Needs attention card
    (.attention-table: the store, the why badge with the rest of the item's text, the amount,
-   the row's button) beside Payment status; Recent payments beside the mini calendar, the
-   month's collection (.collection-total: the 28/700 percentage and "of $X") and Coming up
-   (.coming-list: a date chip beside each item's title and its muted note). Then the other
-   cards. */
+   the row's button) beside the mini calendar; Recent payments beside Payment status; Coming up
+   (.coming-list: a date chip beside each item's title and its muted note) beside the month's
+   collection (.collection-total: the 28/700 percentage and "of $X"). Then the other cards. */
 .page-header .page-actions .nav-search { flex: 0 0 320px; }
 .page-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-4); }
 .page-date { color: var(--muted); font-size: var(--fs-base); }
-.dashboard-row-thirds { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
-.dashboard-main, .dashboard-side { min-width: 0; }
+.dashboard-row-thirds { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-5); align-items: stretch; }
+.dashboard-main, .dashboard-side { display: flex; flex-direction: column; min-width: 0; }
+.dashboard-main > .card, .dashboard-side > .card { flex: 1 1 auto; }
 .count-pill-alert { background: var(--unpaid-bg); color: var(--unpaid-text); }
 .attention-table td { vertical-align: middle; }
 .attention-table .badge { white-space: normal; }

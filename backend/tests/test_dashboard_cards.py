@@ -528,11 +528,11 @@ def test_the_cards_are_in_the_owners_order(today: date) -> None:
         'id="figures-card"',
         'id="cashflow-card"',
         'id="attention"',
-        'id="payment-status"',
-        'id="recent-payments"',
         'id="mini-calendar"',
-        'id="collection-card"',
+        'id="recent-payments"',
+        'id="payment-status"',
         'id="coming-up"',
+        'id="collection-card"',
         'id="today-run"',
         'id="failed-attempts"',
         'id="not-sent-card"',
@@ -540,7 +540,7 @@ def test_the_cards_are_in_the_owners_order(today: date) -> None:
     ]
     positions = [html.index(marker) for marker in order]
     assert positions == sorted(positions)
-    assert html.count('class="dashboard-row-thirds"') == 2
+    assert html.count('class="dashboard-row-thirds"') == 3  # PLAN-012g C1
     assert 'src="/static/ledger/dashboard.js"' in html
 
 
