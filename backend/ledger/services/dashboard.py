@@ -28,12 +28,15 @@ none when it reads what the page already loaded:
   paid for, the method and the amount.
 
 The cards of the owner's staging review (docs/qa/PLAN-012f-b-staging-review.md D3 to D6)
-share one range of whole months (:func:`parse_range`: this month, the last 3 or 12 months
-with the current one, or a custom From to To of at most :data:`MAX_RANGE_MONTHS` months):
+share one range of whole months (:func:`parse_range`: this month, the last 3, 6 or 12 months
+with the current one, or a custom From to To of at most :data:`MAX_RANGE_MONTHS` months; the
+last 12 by default, PLAN-012g C2):
 
 - :func:`cashflow` (the P&L's rows, :func:`ledger.services.pnl.rows`): per month the
   collected income, the known costs and the net, totalled over the range; a store whose
   costs are not entered is left out of the expenses and counted, never read as zero;
+  :func:`cashflows` builds several ranges' cards from one read of the P&L's rows (the
+  dashboard's laptop and phone defaults, PLAN-012g C2);
 - :func:`payment_status` (two queries): the rent charges and the one-off charges due in the
   range as Overdue, Paid and Upcoming by the grid's status rule, the pending ones counted
   apart (D20: an installment, an autopay-plan occurrence and a re-debit count through their
@@ -47,7 +50,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_FLOOR, Decimal
@@ -362,17 +365,23 @@ def recent_payments(today: date, limit: int = RECENT_LIMIT) -> list[RecentPaymen
 
 RANGE_THIS = "this"
 RANGE_3M = "3m"
+RANGE_6M = "6m"
 RANGE_12M = "12m"
 RANGE_CUSTOM = "custom"
 #: The range select's choices, in its order.
 RANGE_CHOICES: tuple[tuple[str, str], ...] = (
     (RANGE_THIS, "This month"),
     (RANGE_3M, "Last 3 months"),
+    (RANGE_6M, "Last 6 months"),
     (RANGE_12M, "Last 12 months"),
     (RANGE_CUSTOM, "Custom"),
 )
 #: The months each preset range covers, the current month last.
-_PRESET_MONTHS: dict[str, int] = {RANGE_THIS: 1, RANGE_3M: 3, RANGE_12M: 12}
+_PRESET_MONTHS: dict[str, int] = {RANGE_THIS: 1, RANGE_3M: 3, RANGE_6M: 6, RANGE_12M: 12}
+#: The range when ``?range=`` is absent (the laptop's, DESIGN-SPEC §7.5) and the phone's own
+#: default, which the dashboard computes beside it (PLAN-012g C2).
+RANGE_DEFAULT = RANGE_12M
+RANGE_DEFAULT_NARROW = RANGE_6M
 #: The longest custom range, in months.
 MAX_RANGE_MONTHS = 36
 RANGE_MESSAGE = "Choose a range of whole months, the earlier month first, at most three years."
@@ -412,10 +421,11 @@ def _custom_label(start: date, end: date) -> str:
 
 
 def parse_range(params: Mapping[str, str], today: date) -> Range | None:
-    """``?range=this|3m|12m|custom&from=YYYY-MM&to=YYYY-MM``; ``this`` when empty. ``None``
+    """``?range=this|3m|6m|12m|custom&from=YYYY-MM&to=YYYY-MM``; :data:`RANGE_DEFAULT`
+    (``12m``) when empty. ``None``
     (the page shows :data:`RANGE_MESSAGE`) for an unknown key, or a custom range without
     both months, with ``to`` before ``from`` or longer than :data:`MAX_RANGE_MONTHS`."""
-    key = (params.get("range", "") or "").strip() or RANGE_THIS
+    key = (params.get("range", "") or "").strip() or RANGE_DEFAULT
     current = today.replace(day=1)
     if key in _PRESET_MONTHS:
         first = pnl.add_months(current, -(_PRESET_MONTHS[key] - 1))
@@ -450,8 +460,11 @@ def picker_months(selected: Range | None, start: date, end: date, today: date) -
 
 # --- Cashflow (D3, D4) -----------------------------------------------------------------------
 
-#: The bars the Cashflow card draws at most.
+#: The bars the Cashflow card draws for the last 12 months and a custom range; the shorter
+#: presets draw their own months (PLAN-012g C2).
 CASHFLOW_BARS = 12
+#: The presets drawn as their own months, without the padding to twelve bars.
+_UNPADDED = frozenset({RANGE_THIS, RANGE_3M, RANGE_6M})
 
 
 @dataclass(frozen=True, slots=True)
@@ -463,14 +476,15 @@ class CashflowMonth:
     #: ``None``: no store of the month has its costs entered while some store lacks them.
     expenses: Decimal | None
     net: Decimal | None
-    #: ``False`` for the months before the range that pad the chart to twelve bars.
+    #: ``False`` for the months before a custom range that pad the chart to twelve bars.
     in_range: bool
 
 
 @dataclass(frozen=True, slots=True)
 class Cashflow:
     range: Range
-    #: The chart's bars, oldest first (at most :data:`CASHFLOW_BARS`).
+    #: The chart's bars, oldest first (at most :data:`CASHFLOW_BARS`; a short preset's own
+    #: months).
     months: tuple[CashflowMonth, ...]
     #: The range's totals (the padding months never count).
     income: Decimal
@@ -488,7 +502,10 @@ class Cashflow:
 
 
 def _chart_months(selected: Range) -> list[date]:
-    """The bars' months: the range's last twelve, or the range padded to the left."""
+    """The bars' months: a short preset's own months (this month, the last 3 or 6); else the
+    range's last twelve, or the range padded to the left."""
+    if selected.key in _UNPADDED:
+        return selected.months
     last = selected.to_month
     return [pnl.add_months(last, n) for n in range(-(CASHFLOW_BARS - 1), 1)]
 
@@ -521,14 +538,40 @@ def cashflow(selected: Range) -> Cashflow:
     same months: income = rent collected + fees collected; expenses = landlord rent + other
     costs + fee costs of the stores whose costs are known that month; net = the
     difference."""
-    shown = _chart_months(selected)
-    start = min(shown[0], selected.from_month)
-    query = pnl.PnlQuery(from_month=start, to_month=selected.to_month)
+    return cashflows((selected,))[0]
+
+
+def cashflows(ranges: Sequence[Range]) -> list[Cashflow]:
+    """:func:`cashflow` for each range, in order, from one call of the P&L's rows over every
+    month any of them shows or totals (the dashboard's two default cards, PLAN-012g C2: the
+    last 6 months are within the last 12, so the phone's card costs no query)."""
+    shown_by = [_chart_months(selected) for selected in ranges]
+    start = min(
+        min(shown[0], selected.from_month) for shown, selected in zip(shown_by, ranges, strict=True)
+    )
+    end = max(selected.to_month for selected in ranges)
+    query = pnl.PnlQuery(from_month=start, to_month=end)
     by_month: dict[date, list[pnl.PnlRow]] = defaultdict(list)
     for row in pnl.rows(query):
         by_month[row.month].append(row)
+    figures: dict[date, tuple[Decimal, Decimal | None, set[uuid.UUID]]] = {}
+    return [
+        _cashflow_card(selected, shown, by_month, figures)
+        for selected, shown in zip(ranges, shown_by, strict=True)
+    ]
+
+
+def _cashflow_card(
+    selected: Range,
+    shown: list[date],
+    by_month: Mapping[date, list[pnl.PnlRow]],
+    figures: dict[date, tuple[Decimal, Decimal | None, set[uuid.UUID]]],
+) -> Cashflow:
+    """One range's card from the months' P&L rows (``figures`` caches each month's)."""
     in_range = set(selected.months)
-    figures = {month: _month_figures(by_month[month]) for month in set(shown) | in_range}
+    for month in set(shown) | in_range:
+        if month not in figures:
+            figures[month] = _month_figures(by_month.get(month, []))
     bars = []
     for month in shown:
         income, expenses, _ = figures[month]

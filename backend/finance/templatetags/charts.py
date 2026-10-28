@@ -4,7 +4,10 @@ docs/design/DESIGN-SPEC.md §4a): no chart library and no script.
 ``{% bars rows %}`` draws the Cashflow card's months: ``rows`` are objects with ``month``,
 ``income``, ``expenses`` (``None``: unknown, no bar), ``net`` (``None``: no point) and
 ``in_range`` (``False``: a month before the range, its bars faded, its label kept legible).
-Each month is a pair of bars, Income and Expenses, each with a ``<title>`` holding its figure,
+Each month is a pair of bars, Income and Expenses, each with a ``<title>`` holding its figure;
+the frame is the same for any number of months and the bars widen with their month's share
+of it (twelve months: :data:`BAR_WIDTH`; fewer: wider, at most :data:`MAX_BAR_WIDTH`;
+PLAN-012g C2),
 and the net is a line through the months it is known in. The scale
 holds zero and every figure, so a negative month reads below the zero line. The ``<svg>`` is
 ``role="img"`` with a sentence as its ``aria-label``. Every month's label is written, as a
@@ -76,6 +79,9 @@ LABEL_Y = Decimal(200)
 HEIGHT = Decimal(208)
 BAR_WIDTH = Decimal(16)
 BAR_GAP = Decimal(3)
+#: The months :data:`BAR_WIDTH` and :data:`BAR_GAP` are drawn for; fewer months widen both.
+BAR_MONTHS = 12
+MAX_BAR_WIDTH = Decimal(48)
 OUTSIDE_OPACITY = "0.4"
 #: On a narrow chart a label every this many months, counted back from the last (A3-1).
 LABEL_EVERY = 3
@@ -96,14 +102,16 @@ def _figures(row: Any) -> list[Decimal]:
     return [value for value in found if value is not None]
 
 
-def _bar(x: Decimal, value: Decimal, zero: Decimal, scale: Decimal, fill: str, title: str) -> str:
+def _bar(
+    x: Decimal, width: Decimal, value: Decimal, zero: Decimal, scale: Decimal, fill: str, title: str
+) -> str:
     top = zero - value * scale
     y, height = (top, zero - top) if value >= 0 else (zero, top - zero)
     return format_html(
         '<rect x="{}" y="{}" width="{}" height="{}" fill="{}"><title>{}</title></rect>',
         _coord(x),
         _coord(y),
-        _coord(BAR_WIDTH),
+        _coord(width),
         _coord(height),
         fill,
         title,
@@ -146,6 +154,8 @@ def bars(rows: Iterable[Any], today: date | None = None) -> SafeString:
     scale = PLOT_HEIGHT / spread
     zero = PLOT_TOP + high * scale
     step = WIDTH / len(items)
+    widen = min(step * BAR_MONTHS / WIDTH, MAX_BAR_WIDTH / BAR_WIDTH)
+    bar_width, bar_gap = BAR_WIDTH * widen, BAR_GAP * widen
     groups: list[str] = []
     runs: list[list[str]] = [[]]
     for index, row in enumerate(items):
@@ -155,7 +165,8 @@ def bars(rows: Iterable[Any], today: date | None = None) -> SafeString:
         expenses = _amount(row.expenses)
         parts = [
             _bar(
-                centre - BAR_WIDTH - BAR_GAP / 2,
+                centre - bar_width - bar_gap / 2,
+                bar_width,
                 income,
                 zero,
                 scale,
@@ -166,7 +177,8 @@ def bars(rows: Iterable[Any], today: date | None = None) -> SafeString:
         if expenses is not None:
             parts.append(
                 _bar(
-                    centre + BAR_GAP / 2,
+                    centre + bar_gap / 2,
+                    bar_width,
                     expenses,
                     zero,
                     scale,

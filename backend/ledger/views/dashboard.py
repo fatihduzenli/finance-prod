@@ -46,19 +46,35 @@ def home(request: HttpRequest) -> HttpResponse:
     failed attempts, the waived charges, the invoices not sent and the last nightly check.
     ``?range=`` (with ``from`` and ``to``) is the Cashflow and Payment status cards' shared
     range and ``?cal=`` the mini calendar's month; an unusable range computes neither card
-    and says so. The Cashflow card runs inside the reports' statement timeout."""
+    and says so. Without ``?range=`` (PLAN-012g C2; DESIGN-SPEC §7.5) the range is the last
+    12 months, and the Cashflow card is computed for the last 6 months as well
+    (``cashflow_narrow``, the phone's card, shown by the style sheet at 768 px and under);
+    both come from one read of the P&L's rows. The Cashflow cards run inside the reports'
+    statement timeout."""
     today = timezone.localdate()
     selected = dashboard_blocks.parse_range(request.GET, today)
     range_from, range_to = dashboard_blocks.form_months(request.GET, today)
     cal_month = dashboard_blocks.parse_cal(request.GET.get("cal", "") or "", today)
+    narrow = (
+        dashboard_blocks.parse_range({"range": dashboard_blocks.RANGE_DEFAULT_NARROW}, today)
+        if "range" not in request.GET
+        else None
+    )
     cashflow: dashboard_blocks.Cashflow | None = None
+    cashflow_narrow: dashboard_blocks.Cashflow | None = None
     cashflow_message = ""
     if selected is not None:
+        ranges = (selected,) if narrow is None else (selected, narrow)
         try:
-            cashflow = bounded(lambda: dashboard_blocks.cashflow(selected))
+            found = bounded(lambda: dashboard_blocks.cashflows(ranges))
         except ReportTooSlow:
             cashflow_message = TOO_SLOW
-    range_query = urlencode(selected.as_query()) if selected is not None else ""
+        else:
+            cashflow = found[0]
+            cashflow_narrow = found[1] if narrow is not None else None
+    # The mini calendar's ‹ › keep an explicit range only: without one the page stays on the
+    # two default cards.
+    range_query = urlencode(selected.as_query()) if selected is not None and narrow is None else ""
     role = role_of(request.user)
     data = receivables.dashboard(today)
     leases = attention.dashboard_leases()
@@ -109,6 +125,7 @@ def home(request: HttpRequest) -> HttpResponse:
             "range_message": dashboard_blocks.RANGE_MESSAGE if selected is None else "",
             "range_query": range_query,
             "cashflow": cashflow,
+            "cashflow_narrow": cashflow_narrow,
             "cashflow_message": cashflow_message,
             "payment_status": (
                 dashboard_blocks.payment_status(selected, today) if selected is not None else None

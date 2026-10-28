@@ -525,31 +525,39 @@ td.attention-action { text-align: right; }
 .recent-when { color: var(--muted); text-decoration: none; }
 .recent-when:hover { text-decoration: underline; }
 .badge.promise-open { background: var(--pending-bg); color: var(--pending-text); }
-/* The Cashflow card (PLAN-012f-b D3, D4): .cashflow-head holds the title with the three totals
-   (.cashflow-totals; Net green or red, its sign in the figure) and the range form at the right
-   (.range-form; .range-custom shows when Custom is chosen); .cashflow-chart holds the
-   {% bars %} SVG (a sideways scroll under 36rem so the month labels stay legible; on a phone
-   it fits the card with fewer, larger labels, see the phone block), then the
-   legend ({% chart_key %} beside each word) and the muted line of stores without a cost. */
-.cashflow-head { align-items: flex-start; }
-.cashflow-title { display: flex; flex-direction: column; gap: var(--space-1); }
-.cashflow-totals { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 0; color: var(--muted); font-size: var(--fs-base); }
-.total-income strong { color: var(--link); }
-.total-expenses strong { color: var(--text-2); }
+/* The Cashflow card (PLAN-012f-b D3, D4; PLAN-012g C2, DESIGN-SPEC §7.5): a wrapping flex row.
+   Line 1 the title, the legend ({% chart_key %} beside each word) and the range form at the
+   right (.range-form; .range-custom shows when Custom is chosen); then, each the full width,
+   the three totals (.cashflow-totals: the word over the figure; Net green or red, its sign in
+   the figure), a custom range's label, the {% bars %} SVG in .cashflow-chart (a sideways
+   scroll under 36rem so the month labels stay legible; on a phone it fits the card with fewer,
+   larger labels, see the phone block) and the muted footnote (.cashflow-note). On a phone the
+   legend moves under the chart. Without ?range= the page holds two cards: .cashflow-wide
+   (.has-narrow) above 768 px, .cashflow-narrow at 768 px and under. */
+.dashboard-cashflow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.dashboard-cashflow > * { flex: 0 0 100%; order: 4; min-width: 0; margin: 0; }
+.dashboard-cashflow > .cashflow-heading { flex: 1 1 auto; order: 1; margin: 0; }
+.dashboard-cashflow > .cashflow-legend { flex: 0 1 auto; order: 2; }
+.dashboard-cashflow > .range-form { flex: 0 1 auto; order: 3; }
+.dashboard-cashflow > .cashflow-note { order: 6; }
+.cashflow-narrow { display: none; }
+.cashflow-totals { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-6); color: var(--muted); font-size: var(--fs-sm); }
+.cashflow-total { display: inline-flex; flex-direction: column; }
+.cashflow-total strong { color: var(--text); font-size: var(--fs-lg); font-weight: 600; }
 .total-net.is-positive strong { color: var(--paid-text); }
 .total-net.is-negative strong { color: var(--unpaid-text); }
-.range-form { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin: 0 0 0 auto; }
+.range-form { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .range-form label { margin: 0 0 0 4px; color: var(--muted); font-size: var(--fs-base); font-weight: 400; }
 .range-form select { width: auto; padding: 7px 10px; font-size: var(--fs-base); }
 .range-custom { display: none; align-items: center; gap: 6px; flex-wrap: wrap; }
-.range-form.is-custom .range-custom, .range-form:has(#range-select option[value="custom"]:checked) .range-custom { display: inline-flex; }
-.cashflow-range-label { margin: 0 0 var(--space-2); font-size: var(--fs-sm); }
+.range-form.is-custom .range-custom, .range-form:has(select[name="range"] option[value="custom"]:checked) .range-custom { display: inline-flex; }
+.cashflow-range-label { font-size: var(--fs-sm); }
 .cashflow-chart { overflow-x: auto; }
 .cashflow-chart .bars-chart { display: block; width: 100%; min-width: 36rem; height: auto; }
-.cashflow-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: var(--space-2) 0 0; padding: 0; list-style: none; color: var(--text-2); font-size: var(--fs-sm); }
+.cashflow-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); padding: 0; list-style: none; color: var(--text-2); font-size: var(--fs-sm); }
 .cashflow-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .chart-key { flex: 0 0 auto; }
-#cashflow-without-cost { margin: var(--space-2) 0 0; font-size: var(--fs-sm); }
+.cashflow-note { font-size: var(--fs-sm); }
 /* The Payment status card (D5): the {% donut %} ring with the total in its middle
    (.donut-total), "+ n pending", then the three boxes, each its colour's key
    ({% chart_key %}: the colours are the charts tag's) beside its word, the count and the
@@ -1024,7 +1032,11 @@ fieldset.card > legend + * { clear: both; }
   .kpi { padding: var(--space-3) 14px; }
   .kpi-value { font-size: 20px; }
   .dashboard-row-thirds, .workspace-grid { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
-  .range-form { margin: 0; justify-content: flex-start; }
+  /* The Cashflow card (PLAN-012g C2): the phone's card when there are two; the range select at
+     the right of the title, the legend under the chart. */
+  .cashflow-wide.has-narrow { display: none; }
+  .cashflow-narrow { display: flex; }
+  .dashboard-cashflow > .cashflow-legend { order: 5; }
   .page-header .page-actions .nav-search { display: none; }
   /* The store page (DESIGN-SPEC §6): the operator and the city in place of the address, the
      summary strip, a full-width primary action over two half-width secondaries, the tabs
@@ -1476,6 +1488,8 @@ p.detail-more-notes { padding-left: 0; }
      (every third month, the range's first, today's), larger; the end labels inside the frame. */
   .cashflow-chart { overflow-x: visible; }
   .cashflow-chart .bars-chart { min-width: 0; }
+  .range-form select { width: auto !important; }
+  .range-form.is-custom select, .range-form:has(select[name="range"] option[value="custom"]:checked) select { width: 100% !important; }
   .bars-chart .bar-label-minor { display: none; }
   .bars-chart .bar-label { font-size: 26px; }
   .bars-chart .bar-month:first-of-type .bar-label { text-anchor: start; }

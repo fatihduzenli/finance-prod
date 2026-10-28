@@ -1,0 +1,31 @@
+{% load charts money %}
+{% comment %}One Cashflow card (dashboard/_cashflow.html): "block" (ledger.services.dashboard.Cashflow or None), "suffix"
+(the ids' suffix), "variant" (cashflow-wide or cashflow-narrow), "has_narrow" (the wide card's phone twin
+exists), "card_key", "card_from" and "card_to" (the form's range). The title, the legend ({% chart_key %}:
+an 8 px square for Income and Expenses, a short line for Net) and the range select (a GET form: the five
+choices; Custom shows the From and To month selects, ledger/_month_select.html, and Show) on one line; the
+range's three totals under them (Income, Expenses, Net in green or red); the months as paired bars with the
+net as a line ({% bars %}, finance/templatetags/charts.py; twelve bars, or a short preset's own months); the
+muted footnote. On a phone the legend moves under the chart (app.css). An unusable range computes nothing and
+says so once.{% endcomment %}
+<section class="card dashboard-cashflow {{ variant }}{% if has_narrow %} has-narrow{% endif %}" id="cashflow-card{{ suffix }}" aria-labelledby="cashflow-heading{{ suffix }}">
+  <h2 class="cashflow-heading" id="cashflow-heading{{ suffix }}">Cashflow</h2>
+  {% if block %}<ul class="cashflow-legend" aria-hidden="true"><li>{% chart_key "income" %}Income</li><li>{% chart_key "expenses" %}Expenses</li><li>{% chart_key "net" %}Net</li></ul>{% endif %}
+  <form class="range-form{% if card_key == 'custom' %} is-custom{% endif %}" id="cashflow-range{{ suffix }}" method="get" action="">
+    <input type="hidden" name="cal" value="{{ mini_calendar.month|date:'Y-m' }}">
+    <label class="visually-hidden" for="range-select{{ suffix }}">Range</label>
+    <select name="range" id="range-select{{ suffix }}">{% for value, label in range_choices %}<option value="{{ value }}"{% if value == card_key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <span class="range-custom" id="range-custom{{ suffix }}"><label for="from{{ suffix }}">From</label>{% include "ledger/_month_select.html" with name="from" select_id="from"|add:suffix months=range_months selected=card_from %}<label for="to{{ suffix }}">To</label>{% include "ledger/_month_select.html" with name="to" select_id="to"|add:suffix months=range_months selected=card_to %}<button class="btn btn-sm" type="submit" id="range-show{{ suffix }}">Show</button></span>
+    <noscript><button class="btn btn-sm" type="submit">Show</button></noscript>
+  </form>
+  {% if range_message %}
+    <p class="warning" id="range-message" role="status">{{ range_message }}</p>
+  {% elif cashflow_message %}
+    <p class="warning" id="cashflow-too-slow" role="status">{{ cashflow_message }}</p>
+  {% elif block %}
+    <p class="cashflow-totals" id="cashflow-totals{{ suffix }}"><span class="cashflow-total total-income">Income <strong id="cashflow-income{{ suffix }}">{{ block.income|money }}</strong></span><span class="cashflow-total total-expenses">Expenses <strong id="cashflow-expenses{{ suffix }}">{% if block.expenses is not None %}{{ block.expenses|money }}{% else %}—{% endif %}</strong></span><span class="cashflow-total total-net{% if block.net is not None and block.net < 0 %} is-negative{% elif block.net is not None %} is-positive{% endif %}">Net <strong id="cashflow-net{{ suffix }}">{% if block.net is not None %}{{ block.net|money }}{% else %}—{% endif %}</strong></span></p>
+    {% if card_key == 'custom' %}<p class="muted cashflow-range-label" id="cashflow-range-label{{ suffix }}">{{ block.range.label }}</p>{% endif %}
+    <div class="cashflow-chart">{% bars block.months data.today %}</div>
+    <p class="muted cashflow-note" id="cashflow-note{{ suffix }}">Deposits are not income.{% if block.without_cost_line %} <span id="cashflow-without-cost{{ suffix }}">{{ block.without_cost_line }}</span> {{ block.stores_without_cost|pluralize:"is,are" }} left out of expenses.{% endif %}</p>
+  {% endif %}
+</section>
