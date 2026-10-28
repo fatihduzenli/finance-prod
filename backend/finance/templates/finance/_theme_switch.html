@@ -1,0 +1,8 @@
+{% comment %}
+The Light · Dark · System control (PLAN-012g A3; DESIGN-SPEC §7.1, §7.4): one form, three
+submit buttons styled as the segmented control, the current choice aria-pressed="true". It posts
+to finance:theme with the page to come back to (next: the current path and query string of a
+GET, else nothing, so the view falls back to the dashboard; a caller may pass "next_url"). No
+script. Included in the sidebar, in the phone's More sheet and on the settings page; "switch_id"
+names each form (ids stay unique on the page).
+{% endcomment %}<form method="post" action="{% url 'finance:theme' %}" class="segmented theme-switch" id="{{ switch_id|default:'theme-switch' }}"{% if label_id %} aria-labelledby="{{ label_id }}"{% endif %}>{% csrf_token %}<input type="hidden" name="next" value="{% if next_url %}{{ next_url }}{% elif request.method == 'GET' %}{{ request.get_full_path }}{% endif %}"><button type="submit" name="theme" value="light" aria-pressed="{% if theme == 'light' %}true{% else %}false{% endif %}">Light</button><button type="submit" name="theme" value="dark" aria-pressed="{% if theme == 'dark' %}true{% else %}false{% endif %}">Dark</button><button type="submit" name="theme" value="system" aria-pressed="{% if theme == 'light' or theme == 'dark' %}false{% else %}true{% endif %}">System</button></form>

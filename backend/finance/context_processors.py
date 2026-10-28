@@ -9,14 +9,14 @@ bottom bar marks the item that holds it (PLAN-012f D4). It reads the request onl
 no setting.
 
 :func:`company` exposes the company settings row's display values (``company.name``,
-``short_name``, ``provider_name``, ``logo_url``, ``logo_is_override``) and the shell's
-theme colours (light and dark) to every template; :func:`theme` exposes the user's stored
-theme (PLAN-012g A2: ``light``, ``dark`` or ``system``) for ``<html data-theme>``. ``logo_url`` is the brand's dark logo unless the row names
-a live PNG or JPEG document, then that document's preview route: always a path of this
-app, never a URL taken from the row. ``logo_is_override`` is true for such a document: the
-bar then shows the company name as text beside it (the brand logo carries the wordmark
-already, so the bar shows the name once, as the image's text alternative). No setting
-reaches the page. The row is read once per request, with one plain query (and the
+``short_name``, ``provider_name``, ``logo_url``, ``logo_is_override``) and the shell's theme
+colours (light and dark) to every template; :func:`theme` exposes the user's stored theme
+(PLAN-012g A2: ``light``, ``dark`` or ``system``) for ``<html data-theme>``. ``logo_url`` is the
+brand's dark logo unless the row names a live PNG or JPEG document, then that document's preview
+route: always a path of this app, never a URL taken from the row. ``logo_is_override`` is true
+for such a document: the bar then shows the company name as text beside it (the brand logo
+carries the wordmark already, so the bar shows the name once, as the image's text alternative).
+No setting reaches the page. The row is read once per request, with one plain query (and the
 logo's document with one more, only when the row names one), and kept on the request
 (:func:`company_settings`), so the shell and the manifest of the same request share it.
 """

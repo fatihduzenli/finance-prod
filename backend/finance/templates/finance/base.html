@@ -104,6 +104,10 @@ above the user card, under "Appearance", and as the first row of the More sheet.
         </li>
       </ul>
     </nav>
+    <div class="sidebar-appearance" id="sidebar-appearance">
+      <p class="sidebar-label" id="appearance-label">Appearance</p>
+      {% include "finance/_theme_switch.html" with switch_id="theme-switch" label_id="appearance-label" %}
+    </div>
     <div class="user-card" id="user-card">
       <span class="user-name" id="user-menu-name"{% if nav_section == "settings" or nav_section == "help" %} aria-current="true"{% endif %}>{{ request.user.get_full_name|default:request.user.get_username }}</span>
       <div class="user-meta">{% with role=request.user|role_label %}{% if role %}<span class="user-role" id="user-role">{{ role }}</span> · {% endif %}{% endwith %}<a href="{% url 'finance:settings' %}" id="nav-settings"{% if nav_section == "settings" %} aria-current="page"{% endif %}>Settings</a> · <a href="{% url 'finance:help' %}" id="nav-help"{% if nav_section == "help" %} aria-current="page"{% endif %}>Help</a> · <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="link-button" id="nav-sign-out">Sign out</button></form></div>
@@ -133,6 +137,7 @@ above the user card, under "Appearance", and as the first row of the More sheet.
       <summary class="tab-item" id="tab-more"{% if nav_tab == "more" %} aria-current="page"{% endif %}>{% icon "more" 22 %}<span>More</span></summary>
       <div class="more-sheet-panel">
         <ul class="more-list">
+          <li class="more-appearance"><p class="more-group" id="more-appearance-label">Appearance</p>{% include "finance/_theme_switch.html" with switch_id="more-theme-switch" label_id="more-appearance-label" %}</li>
           <li><a href="{% url 'ledger:operators:list' %}">{% icon "operators" %}Operators</a></li>
           <li><a href="{% url 'ledger:reports:index' %}">{% icon "reports" %}Reports</a></li>
           <li><span class="more-group">Admin</span>

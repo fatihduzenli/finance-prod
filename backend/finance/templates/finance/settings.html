@@ -2,6 +2,11 @@
 {% block title %}Settings{% endblock %}
 {% block header %}<div class="page-header"><h1>Settings</h1></div>{% endblock %}
 {% block content %}
+  <section class="card" id="appearance-card">
+  <h2 id="appearance">Appearance</h2>
+  <p>Light, Dark, or System to follow this device. The choice is kept on your account, so it follows you to every device.</p>
+  {% url 'finance:settings' as settings_url %}{% include "finance/_theme_switch.html" with switch_id="settings-theme-switch" label_id="appearance" next_url=settings_url %}
+  </section>
   <section class="card" id="calendar-feed-card">
   <h2 id="calendar-feed">Calendar feed</h2>
   <p>Subscribe to the staff calendar from Google Calendar or another calendar app: debit days, insurance anniversaries, lease ends and the shared notes and reminders, from 30 days ago to 180 days ahead. The address is yours: anyone who has it can read the calendar, so keep it private, and revoke it if it leaks.</p>

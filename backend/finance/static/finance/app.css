@@ -49,6 +49,16 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 .nav-disclosure > summary::-webkit-details-marker { display: none; }
 .nav-disclosure > summary .icon-chevron-down { margin-left: auto; transition: transform 120ms; }
 .nav-disclosure[open] > summary .icon-chevron-down { transform: rotate(180deg); }
+/* The Appearance control above the user card (PLAN-012g A3; DESIGN-SPEC §7.1, §7.6): a muted
+   12 px label, then the Light · Dark · System segmented form across the sidebar's width, its
+   track one step lighter than the sidebar (--sidebar-card-bg), the unpressed segments in
+   --sidebar-text. */
+.sidebar-appearance { margin-top: auto; margin-bottom: var(--space-3); }
+.sidebar-label { margin: 0 0 6px; padding: 0 2px; color: var(--sidebar-text); opacity: .7; font-size: var(--fs-sm); }
+.sidebar .theme-switch { display: flex; flex-wrap: nowrap; background: var(--sidebar-card-bg); }
+.sidebar .theme-switch button { flex: 1 1 0; justify-content: center; padding: 5px 6px; }
+.sidebar .theme-switch button[aria-pressed="false"] { color: var(--sidebar-text); }
+.sidebar-appearance + .user-card { margin-top: 0; }
 /* The user card: name, then role · Settings · Help · Sign out (a POST form). */
 .user-card { margin-top: auto; padding: 12px; border-radius: var(--radius-ctl); background: color-mix(in srgb, var(--surface) 8%, transparent); color: var(--sidebar-text); font-size: var(--fs-sm); }
 .user-name { display: block; margin-bottom: 2px; color: var(--sidebar-active-text); font-size: var(--fs-base); font-weight: 600; overflow-wrap: anywhere; }
@@ -177,18 +187,22 @@ p.help { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-sm
 
 /* --- Segmented filter --------------------------------------------------------------------
    .segmented: a few links that filter one list (the Charges tab's Open / Paid / All and the
-   Invoices tab's filter): a grey track on --bg, radius 8; the current segment (aria-current
-   "page") white with a 1 px ring. The grid's status filter stays a select. */
-.segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--bg); }
-.segmented a { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; }
-.segmented a[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+   Invoices tab's filter): a grey track (--seg-track, --bg), radius 8; the current segment
+   (aria-current "page") on the thumb (--seg-thumb, white) with a 1 px ring (--seg-thumb-ring).
+   The grid's status filter stays a select. The segments may be buttons of one form (the
+   Light · Dark · System control, PLAN-012g A3): the pressed one (aria-pressed "true") takes
+   the thumb. */
+.segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--seg-track); }
+.segmented a, .segmented button { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; }
+.segmented button { margin: 0; border: 0; background: none; font-family: inherit; line-height: inherit; cursor: pointer; }
+.segmented a[aria-current="page"], .segmented button[aria-pressed="true"] { background: var(--seg-thumb); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--seg-thumb-ring); }
 /* .radio-segmented: a radio group drawn as the same track (the operator form's Type,
    PLAN-012f-b D9, B2-2): each option's label a segment, the chosen one white with the 1 px
    ring; the radio itself stays in the page for the keyboard and screen readers, unseen. */
-.radio-segmented:not(input) { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--bg); }
+.radio-segmented:not(input) { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--seg-track); }
 .radio-segmented > div { display: flex; }
 .radio-segmented > div > label { position: relative; display: inline-flex; align-items: center; margin: 0; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; cursor: pointer; }
-.radio-segmented > div > label:has(input:checked) { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+.radio-segmented > div > label:has(input:checked) { background: var(--seg-thumb); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--seg-thumb-ring); }
 .radio-segmented > div > label:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 1px; }
 .radio-segmented input[type=radio] { position: absolute; opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; margin: 0; pointer-events: none; }
 
@@ -992,6 +1006,11 @@ fieldset.card > legend + * { clear: both; }
   .more-list a, .more-list button { display: flex; align-items: center; gap: var(--space-3); box-sizing: border-box; width: 100%; min-height: var(--tap); padding: 0 var(--space-2); background: none; border: 0; color: var(--text); font: inherit; font-size: var(--fs-md); text-align: left; text-decoration: none; cursor: pointer; }
   .more-list form { margin: 0; }
   .more-list .more-group { padding: var(--space-2) var(--space-2) 0; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .more-list .more-appearance { padding: 0 0 var(--space-2); }
+  .more-list .more-appearance .more-group { margin: 0 0 var(--space-2); }
+  .more-list .theme-switch { display: flex; }
+  .more-list .theme-switch button { flex: 1 1 0; justify-content: center; width: auto; padding: 0 var(--space-3); font-size: var(--fs-base); }
+  .more-list .theme-switch button[aria-pressed="false"] { color: var(--muted); }
   .more-list .more-sublist { list-style: none; margin: 0; padding: 0 0 0 var(--space-6); }
   /* The dashboard (DESIGN-SPEC §6): KPI cards two per row, the rest stacked. */
   .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
