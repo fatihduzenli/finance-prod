@@ -79,5 +79,8 @@ markers = [
     "e2e: end-to-end browser test; needs chromium (uv run playwright install chromium)",
     "sandbox: real call to the Stax sandbox; deselected unless -m names it, skipped without STAX_SANDBOX_TESTS=1",
     "visual: visual regression screenshots (backend/tests/visual); deselected unless -m names it, skipped without chromium",
+    "shard1: the migration-test job's first shard (PLAN-013a A1; backend/tests/conftest.py ROUNDTRIP_SHARDS)",
+    "shard2: the migration-test job's second shard",
+    "shard3: the migration-test job's third shard",
 ]
 filterwarnings = ["error"]
