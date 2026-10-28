@@ -436,7 +436,9 @@ def test_a_required_column_twice_refuses_the_whole_file(tmp_path: Path) -> None:
 
 
 def test_the_rents_tab_is_refused_by_its_header(tmp_path: Path) -> None:
-    path = write_csv(tmp_path / "rents.csv", [["1796", "RASHAD", "3500"]], ["Store", "Op", "Rent"])
+    path = write_csv(
+        tmp_path / "rents.csv", [["1796", "Operator A", "3500"]], ["Store", "Op", "Rent"]
+    )
     assert refused_file(path).startswith("The header has no column store_no, ")
 
 

@@ -1,6 +1,7 @@
 """August 2026 as the Rents sheet shows it (docs/qa/PLAN-011-dashboard-reports-mobile.md D8;
 docs/COLUMN_MAPPING.md §3 "Post-import check"): 392 rent charges collected for exactly
-$1,470,001.57, 47 unpaid, 13 pending. A builder, not committed data: every row is made
+$1,466,000.00 (an invented total; the sheet's real figure lives in the owner's private
+inputs), 47 unpaid, 13 pending. A builder, not committed data: every row is made
 by :func:`build_baseline` in the test's own database, until Step 13 brings the migrated
 rows.
 
@@ -8,7 +9,7 @@ rows.
 
 - collected charge ``i`` (0 to 390): ``2000 + (i × 7919 mod 3500)`` dollars and
   ``(i × 37 mod 100)`` cents; the 392nd is the remainder that makes the total exactly
-  $1,470,001.57 (it comes to $9,652.92, a mall-sized rent);
+  $1,466,000.00 (it comes to $5,651.35);
 - unpaid charge ``j`` (0 to 46): ``1800 + (j × 613 mod 4200)`` dollars and
   ``(j × 53 mod 100)`` cents;
 - pending charge ``k`` (0 to 12): ``2500 + (k × 389 mod 3000)`` dollars.
@@ -55,7 +56,7 @@ PERIOD = date(2026, 8, 1)
 AS_OF = date(2026, 8, 31)
 LEASE_START = date(2025, 3, 1)
 COLLECTED_COUNT = 392
-COLLECTED_TOTAL = Decimal("1470001.57")
+COLLECTED_TOTAL = Decimal("1466000.00")
 UNPAID_COUNT = 47
 PENDING_COUNT = 13
 OPERATOR_COUNT = 150
