@@ -62,51 +62,55 @@ def repo_root() -> Path:
 # --- The migration-test job's shards (PLAN-013a A1) -----------------------------------------
 #: Which CI shard runs each test of the migration selection (the round-trip file, the report
 #: indexes, the two rename cases and the concurrency case): balanced from the durations measured
-#: on 2026-10-27 (27:37 in all; three shards of 490 to 545 s), keyed by the test's name (unique
+#: on 2026-10-27 (27:37 in all; four shards of 407 to 423 s since 2026-10-28, three of 490 to
+#: 545 s before), keyed by the test's name (unique
 #: across those files). `tests/test_ci_shards.py` proves every test of those files is here
 #: exactly once. `-m shardN` selects one shard.
 ROUNDTRIP_SHARDS: dict[str, int] = {
-    # shard 1: the fresh round trips, the rename and concurrency cases, the index round trip,
-    # the kind, item-on-sqlite and promise cases, the fast checks.
-    "test_models_and_migrations_agree": 1,
-    "test_the_check_method_migration_alters_choices_only": 1,
-    "test_round_trip_on_a_fresh_sqlite_database": 1,
+    # shard 1 (410 s measured): the fresh PostgreSQL round trip, lease end on sqlite, check method,
+    # item, company settings and kind on PostgreSQL, the index round trip.
     "test_round_trip_on_a_fresh_postgresql_database": 1,
-    "test_the_rename_migrates_over_existing_rows_and_back": 1,
-    "test_the_kind_migration_over_existing_rows_on_sqlite": 1,
+    "test_the_lease_end_migrations_over_existing_rows_on_sqlite": 1,
+    "test_the_check_method_migration_over_existing_rows_on_postgresql": 1,
+    "test_the_item_migration_over_existing_rows_on_postgresql": 1,
+    "test_the_company_settings_migration_over_existing_rows_on_postgresql": 1,
     "test_the_kind_migration_over_existing_rows_on_postgresql": 1,
-    "test_the_item_migration_over_existing_rows_on_sqlite": 1,
-    "test_the_one_open_promise_migration_over_existing_rows_on_sqlite": 1,
-    "test_the_one_open_promise_migration_over_existing_rows_on_postgresql": 1,
-    "test_sqlmigrate_of_the_check_method_migration_touches_only_its_checks": 1,
-    "test_payments_initial_migration_depends_on_ledger": 1,
-    "test_the_five_indexes_exist_with_their_columns": 1,
     "test_the_migration_reverses": 1,
-    "test_the_rename_migration_rewrites_rows_and_reverses": 1,
-    "test_the_rename_migration_refuses_to_reverse_over_a_one_off_charge": 1,
-    "test_two_concurrent_runs_both_succeed_and_migrate_once": 1,
-    # shard 2: lease end, transfer, installments, debt override, statement opened, rent lines,
-    # credits, item-on-PostgreSQL.
-    "test_the_item_migration_over_existing_rows_on_postgresql": 2,
-    "test_the_lease_end_migrations_over_existing_rows_on_sqlite": 2,
-    "test_the_lease_end_migrations_over_existing_rows_on_postgresql": 2,
-    "test_the_transfer_fields_migration_over_an_existing_row_on_postgresql": 2,
-    "test_the_installments_migration_over_an_existing_row_on_postgresql": 2,
+    # shard 2 (423 s): the rename over rows, debt override, check method, company settings and
+    # store address on sqlite, rent lines, the concurrency case, promise on sqlite, the model check.
+    "test_the_rename_migration_rewrites_rows_and_reverses": 2,
     "test_the_debt_override_migration_over_an_existing_row_on_postgresql": 2,
-    "test_the_statement_opened_migration_over_an_existing_row_on_postgresql": 2,
+    "test_the_check_method_migration_over_existing_rows_on_sqlite": 2,
+    "test_the_company_settings_migration_over_existing_rows_on_sqlite": 2,
+    "test_the_store_address_migration_over_existing_rows_on_sqlite": 2,
     "test_the_rent_lines_migration_over_existing_rows_on_postgresql": 2,
-    "test_the_credits_migration_over_existing_rows_on_postgresql": 2,
-    # shard 3: setup flag, company settings, store address, check method, autopay plans.
-    "test_the_setup_flag_and_existing_charge_migrations_over_existing_rows_on_sqlite": 3,
-    "test_the_setup_flag_and_existing_charge_migrations_over_existing_rows_on_postgresql": 3,
-    "test_the_company_settings_migration_over_existing_rows_on_sqlite": 3,
-    "test_the_company_settings_migration_over_existing_rows_on_postgresql": 3,
-    "test_the_store_address_migration_over_existing_rows_on_sqlite": 3,
+    "test_two_concurrent_runs_both_succeed_and_migrate_once": 2,
+    "test_the_one_open_promise_migration_over_existing_rows_on_sqlite": 2,
+    "test_models_and_migrations_agree": 2,
+    # shard 3 (411 s): the fresh sqlite round trip, installments, store address, lease end, autopay
+    # plans and statement opened on PostgreSQL, kind on sqlite, the rename refusal.
+    "test_round_trip_on_a_fresh_sqlite_database": 3,
+    "test_the_installments_migration_over_an_existing_row_on_postgresql": 3,
     "test_the_store_address_migration_over_existing_rows_on_postgresql": 3,
-    "test_the_check_method_migration_over_existing_rows_on_sqlite": 3,
-    "test_the_check_method_migration_over_existing_rows_on_postgresql": 3,
-    "test_the_autopay_plans_migration_over_existing_rows_on_sqlite": 3,
+    "test_the_lease_end_migrations_over_existing_rows_on_postgresql": 3,
     "test_the_autopay_plans_migration_over_existing_rows_on_postgresql": 3,
+    "test_the_statement_opened_migration_over_an_existing_row_on_postgresql": 3,
+    "test_the_kind_migration_over_existing_rows_on_sqlite": 3,
+    "test_the_rename_migration_refuses_to_reverse_over_a_one_off_charge": 3,
+    # shard 4 (407 s): transfer, setup flag (both), the rename round trip, autopay plans on sqlite,
+    # credits, item on sqlite, promise on PostgreSQL, the four fast checks.
+    "test_the_transfer_fields_migration_over_an_existing_row_on_postgresql": 4,
+    "test_the_setup_flag_and_existing_charge_migrations_over_existing_rows_on_postgresql": 4,
+    "test_the_rename_migrates_over_existing_rows_and_back": 4,
+    "test_the_setup_flag_and_existing_charge_migrations_over_existing_rows_on_sqlite": 4,
+    "test_the_autopay_plans_migration_over_existing_rows_on_sqlite": 4,
+    "test_the_credits_migration_over_existing_rows_on_postgresql": 4,
+    "test_the_item_migration_over_existing_rows_on_sqlite": 4,
+    "test_the_one_open_promise_migration_over_existing_rows_on_postgresql": 4,
+    "test_sqlmigrate_of_the_check_method_migration_touches_only_its_checks": 4,
+    "test_the_check_method_migration_alters_choices_only": 4,
+    "test_the_five_indexes_exist_with_their_columns": 4,
+    "test_payments_initial_migration_depends_on_ledger": 4,
 }
 SHARD_FILES = (
     "test_migrations_roundtrip.py",

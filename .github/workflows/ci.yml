@@ -257,18 +257,18 @@ jobs:
 
   migrations:
     # The seeded migration round trips (PLAN-012b-a part 1): every migration applied and
-    # reversed on PostgreSQL, apart from the unit tests and in parallel with them, in three
-    # shards (PLAN-013a A1). Measured 27:37 for the whole selection on 2026-10-27; three
-    # shards of 490 to 545 s of tests each locally, 11 to 14 minutes on CI. The shard of each
-    # test is the table ROUNDTRIP_SHARDS in backend/tests/conftest.py, applied as the markers
-    # shard1 to shard3 at collection.
+    # reversed on PostgreSQL, apart from the unit tests and in parallel with them, in four
+    # shards (PLAN-013a A1). Measured 27:37 for the whole selection on 2026-10-27; four
+    # shards of 407 to 423 s of tests each locally, expected 8 to 13 minutes on CI. The shard
+    # of each test is the table ROUNDTRIP_SHARDS in backend/tests/conftest.py, applied as the
+    # markers shard1 to shard4 at collection.
     name: Migration tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
 
     services:
       postgres:
@@ -319,7 +319,7 @@ jobs:
           backend/tests/test_one_off_charges.py
           backend/tests/test_staging_defects_adversarial.py
 
-  # One check that stands for the three migration shards, so the deploy job (and a branch
+  # One check that stands for the four migration shards, so the deploy job (and a branch
   # rule) names a single job; it fails unless every shard succeeded.
   migrations-complete:
     name: Migration tests complete
