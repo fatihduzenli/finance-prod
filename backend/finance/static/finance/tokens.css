@@ -55,9 +55,9 @@
    pair: --sidebar-text on --sidebar-bg
    pair: --sidebar-active-text on --sidebar-bg
    pair: --btn-primary-text on --btn-primary-bg
-   pair: --on-accent on --btn-primary-bg
-   pair: --on-accent on --btn-danger-bg
-   pair: --on-accent on --navy
+   pair: --text-on-accent on --btn-primary-bg
+   pair: --text-on-accent on --btn-danger-bg
+   pair: --text-on-accent on --navy
    pair: --sandbox-text on --sandbox-bg
    pair: --sidebar-text on --sidebar-card-bg over --sidebar-gradient[start]
    pair: --sidebar-text on --sidebar-card-bg over --sidebar-gradient[end]
@@ -93,12 +93,11 @@
    pair[dark]: --error-text on --unpaid-bg
    pair[dark]: --sandbox-text on --sandbox-bg
    pair[dark]: --btn-primary-text on --btn-primary-bg
-   pair[dark]: --on-accent on --btn-primary-bg
-   pair[dark]: --on-accent on --btn-danger-bg
-   pair[dark]: --on-accent on --navy
+   pair[dark]: --text-on-accent on --btn-primary-bg
+   pair[dark]: --text-on-accent on --btn-danger-bg
+   pair[dark]: --text-on-accent on --navy
    pair[dark]: --text on --month-current over --surface
    pair[dark]: --link on --month-current over --surface
-   pair[dark]: --text on --selected-bg over --surface
    pair[dark]: --chart-label on --surface
    pair[dark]: --flash-success-text on --flash-success-bg
    pair[dark]: --flash-warning-text on --flash-warning-bg
@@ -214,10 +213,9 @@
   --sidebar-bg: #0B2545;  --sidebar-border: transparent;  --sidebar-card-bg: rgba(255,255,255,.08);
   --phone-bar-button-bg: rgba(255,255,255,.10);
   --header-bg: var(--surface);  --card-border: var(--border);
-  --on-accent: #FFFFFF;  --btn-primary-text: #FFFFFF;  --btn-danger-bg: #B42318;
+  --text-on-accent: #FFFFFF;  --btn-primary-text: #FFFFFF;  --btn-danger-bg: #B42318;
   --sandbox-bg: #FFF3C4;  --sandbox-text: #6B4E00;
   --seg-track: var(--bg);  --seg-thumb: var(--surface);  --seg-thumb-ring: var(--border);
-  --selected-bg: #E0F4F2;
   --popover-border: var(--border);  --popover-shadow: none;
   --flash-success-bg: #E3F5E8;  --flash-success-text: #176B33;
   --flash-warning-bg: #FFF3C4;  --flash-warning-text: #6B4E00;
@@ -253,7 +251,7 @@
 
     /* the primary button: the light theme's teal (§7.2 --primary-*); white text */
     --btn-primary-bg: #0E8F86;  --btn-primary-border: #0A6B64;  --btn-primary-text: #FFFFFF;
-    --on-accent: #FFFFFF;  --btn-danger-bg: #B42318;
+    --text-on-accent: #FFFFFF;  --btn-danger-bg: #B42318;
 
     /* status (bg / text) */
     --paid-bg: #1F3A2C;      --paid-text: #7FDCA4;
@@ -270,7 +268,6 @@
 
     /* components */
     --seg-track: var(--bg);  --seg-thumb: var(--surface);  --seg-thumb-ring: transparent;
-    --selected-bg: rgba(46,196,166,.18);
     --popover-border: #3A3A4C;  --popover-shadow: 0 12px 32px rgba(0,0,0,.45);
     --month-current: rgba(46,196,166,.08);
     --progress-pending: #E5B84D;  --progress-partial: #F5B98A;
@@ -307,7 +304,7 @@
 
       /* the primary button: the light theme's teal (§7.2 --primary-*); white text */
       --btn-primary-bg: #0E8F86;  --btn-primary-border: #0A6B64;  --btn-primary-text: #FFFFFF;
-      --on-accent: #FFFFFF;  --btn-danger-bg: #B42318;
+      --text-on-accent: #FFFFFF;  --btn-danger-bg: #B42318;
 
       /* status (bg / text) */
       --paid-bg: #1F3A2C;      --paid-text: #7FDCA4;
@@ -324,7 +321,6 @@
 
       /* components */
       --seg-track: var(--bg);  --seg-thumb: var(--surface);  --seg-thumb-ring: transparent;
-      --selected-bg: rgba(46,196,166,.18);
       --popover-border: #3A3A4C;  --popover-shadow: 0 12px 32px rgba(0,0,0,.45);
       --month-current: rgba(46,196,166,.08);
       --progress-pending: #E5B84D;  --progress-partial: #F5B98A;

@@ -388,7 +388,7 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .confirm .confirm-question { margin-top: 0; font-size: var(--fs-lg); }
 .confirm-what h2, .confirm-what h3 { font-size: var(--fs-md); margin: var(--space-4) 0 var(--space-2); }
 .confirm-what ul { margin: 0 0 var(--space-3); padding-left: var(--space-6); }
-.confirm .btn-danger { background: var(--btn-danger-bg); border-color: var(--btn-danger-bg); color: var(--on-accent); }
+.confirm .btn-danger { background: var(--btn-danger-bg); border-color: var(--btn-danger-bg); color: var(--text-on-accent); }
 
 /* --- Flash messages ----------------------------------------------------------------------
    .toasts: the list of flash messages; .toast: one message (role "status" in an
@@ -427,7 +427,7 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .steps li { counter-increment: step; display: inline-flex; align-items: center; gap: var(--space-1); padding: 6px var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); font-size: var(--fs-base); }
 .steps li::before { content: counter(step) "."; color: var(--text-2); }
 .steps li.step-done::before { content: "\2713"; content: "\2713" / ""; color: var(--paid-text); font-weight: 700; }
-.steps li[aria-current="step"] { background: var(--navy); border-color: var(--navy); color: var(--on-accent); }
+.steps li[aria-current="step"] { background: var(--navy); border-color: var(--navy); color: var(--text-on-accent); }
 .steps li[aria-current="step"]::before { color: var(--sidebar-text); }
 
 /* --- Workspace (the store and operator pages: PLAN-012d D1, the approved design's layout
@@ -579,7 +579,7 @@ td.attention-action { text-align: right; }
 .mini-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font: inherit; }
 button.mini-num { cursor: pointer; font-weight: 600; }
 button.mini-num:hover { background: var(--month-current); }
-.mini-day.is-today .mini-num { background: var(--btn-primary-bg); color: var(--on-accent); font-weight: 700; }
+.mini-day.is-today .mini-num { background: var(--btn-primary-bg); color: var(--text-on-accent); font-weight: 700; }
 .mini-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
 /* The dot's colour is the day's first item's kind (PLAN-012g A4; DESIGN-SPEC §7.3): the debit
    day --dot-rent, a lease end --dot-lease-end, any other kind --muted. */
@@ -858,7 +858,7 @@ fieldset.card > legend + * { clear: both; }
 .wizard-steps-card .steps li.step-done { color: var(--text-2); }
 .wizard-steps-card .steps li.step-done::before { content: "\2713"; content: "\2713" / ""; border-color: var(--paid-text); background: var(--paid-bg); color: var(--paid-text); font-weight: 700; }
 .wizard-steps-card .steps li[aria-current="step"] { background: none; color: var(--text); }
-.wizard-steps-card .steps li[aria-current="step"]::before { border-color: var(--btn-primary-border); background: var(--btn-primary-bg); color: var(--on-accent); }
+.wizard-steps-card .steps li[aria-current="step"]::before { border-color: var(--btn-primary-border); background: var(--btn-primary-bg); color: var(--text-on-accent); }
 .wizard-steps-card .steps li strong { font-weight: 700; }
 .wizard-steps-card .steps li a { color: inherit; text-decoration: none; }
 .wizard-steps-card .steps li a:hover { text-decoration: underline; }
@@ -872,7 +872,7 @@ fieldset.card > legend + * { clear: both; }
 .wizard-help { margin: 0 0 var(--space-5); font-size: var(--fs-base); }
 .wizard-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-2); }
 .confirm > .wizard-footer { margin: var(--space-5) 0 0; }
-.wizard-footer .btn-danger { background: var(--btn-danger-bg); border-color: var(--btn-danger-bg); color: var(--on-accent); }
+.wizard-footer .btn-danger { background: var(--btn-danger-bg); border-color: var(--btn-danger-bg); color: var(--text-on-accent); }
 .wizard-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin: 0 0 var(--space-5); }
 .wizard-tiles .kpi { gap: 2px; padding: var(--space-3) 14px; background: var(--surface-2); }
 .wizard-tiles .kpi-value { font-size: 20px; }
@@ -1124,7 +1124,7 @@ fieldset.card > legend + * { clear: both; }
 .list-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 .list-filters label { margin: 0; }
 .list-filters .list-search { flex: 1 1 18rem; min-width: 12rem; max-width: none; }
-.btn-dark { background: var(--navy); border-color: var(--navy); color: var(--on-accent); }
+.btn-dark { background: var(--navy); border-color: var(--navy); color: var(--text-on-accent); }
 .btn-dark:hover { border-color: var(--navy); opacity: .92; }
 .list-card > .table-cards > table td, .list-card > .table-cards > table th { vertical-align: middle; }
 .list-card > .table-cards > table > tbody > tr:last-child > td { border-bottom: 1px solid var(--border); }
@@ -1135,7 +1135,7 @@ fieldset.card > legend + * { clear: both; }
 .pager-pages .pager-off:hover { border-color: var(--input-border); }
 .pager-page { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; box-sizing: border-box; padding: 0 var(--space-2); border-radius: var(--radius-ctl); color: var(--text); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
 a.pager-page:hover { background: var(--surface-2); }
-.pager-page[aria-current="page"] { background: var(--navy); color: var(--on-accent); }
+.pager-page[aria-current="page"] { background: var(--navy); color: var(--text-on-accent); }
 .pager-gap { color: var(--muted); }
 th.cell-chevron, td.cell-chevron { width: 1%; padding-left: 0; text-align: right; white-space: nowrap; }
 td.cell-chevron a { display: inline-flex; color: var(--muted); }
@@ -1372,7 +1372,7 @@ p.detail-more-notes { padding-left: 0; }
 .calendar-num-link:hover { color: var(--link); }
 .calendar-weekday { display: none; }
 .calendar-num { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 50%; }
-.calendar-day.today .calendar-num { background: var(--btn-primary-bg); color: var(--on-accent); }
+.calendar-day.today .calendar-num { background: var(--btn-primary-bg); color: var(--text-on-accent); }
 .calendar-add-day { padding: 0 4px; color: var(--muted); font-weight: 400; text-decoration: none; }
 .calendar-add-day:hover { color: var(--link); }
 @media (hover: hover) {
