@@ -69,6 +69,7 @@ from tests.test_lease_services import make_lease, make_operator
 from tests.test_operator_views import client_for
 from tests.test_rent_run import charge_of, enrolled, health  # noqa: F401 (autouse fixture)
 from tests.test_rent_run import invoice as schedule_invoice
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -1298,7 +1299,7 @@ def test_the_queue_lists_unresolved_returns_with_their_details(fake: FakeProvide
     assert f'id="return-{payment.pk}"' in page
     for text in (world.operator.display_name, "Store 0101", "$1,500.00", "R01", "Insufficient"):
         assert text in page
-    assert "Resolve" not in page.split('id="returns"')[1]  # a viewer sees no form
+    assert not has_token(page.split('id="returns"')[1], "Resolve")  # a viewer sees no form
 
 
 def test_billing_resolves_a_return_with_a_note(fake: FakeProvider) -> None:

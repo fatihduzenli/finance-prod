@@ -74,6 +74,7 @@ from tests.test_one_off_charges import CUSTOMER, an_operator, calls
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 from tests.test_webhook_handlers import ach_return, deliver, provider_txn, settle
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -1042,7 +1043,7 @@ def test_the_preview_and_the_print_view_render_for_a_viewer(fake: FakeProvider) 
     for text in (preview.content.decode(), printed.content.decode()):
         assert draft.number in text and settings.COMPANY_NAME in text
         assert operator.display_name in text and lease.store.external_label in text
-        assert "Poster" in text and "$99.99" in text and MEMO in text
+        assert has_token(text, "Poster") and "$99.99" in text and MEMO in text
         assert day_text(TODAY + timedelta(days=15)) in text
     page = printed.content.decode()
     assert "<nav" not in page and 'id="save-as-pdf"' in page and "@media print" in page
@@ -1512,7 +1513,7 @@ def test_the_owners_invoice_paid_line_by_line_marks_it_once_and_clears_both_flag
     assert receivables.open_balances(TODAY, operator=fresh(draft).operator_id) == []
     # The late fee's page shows the invoice and its provider status.
     page = client_for(Role.BILLING)[0].get(f"/one-off-charges/{late_fee.pk}/").content.decode()
-    assert invoice.invoice_number in page and "PAID" in page
+    assert invoice.invoice_number in page and has_token(page, "PAID")
 
 
 def test_the_late_fee_first_then_the_repair_marks_once(fake: FakeProvider, worker: None) -> None:

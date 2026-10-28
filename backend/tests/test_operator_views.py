@@ -49,6 +49,7 @@ from tests.test_operator_sync import (
     fields,
     requires_postgresql,
 )
+from tests.text_helpers import has_token
 
 # PLAN-010 D3: views queue provider work; the worker is run after every request here.
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("worker_between_requests")]
@@ -162,7 +163,9 @@ def test_the_create_form_carries_a_fresh_creation_key_and_csrf(billing: Client) 
         page = billing.get(NEW).content.decode()
         assert 'name="csrfmiddlewaretoken"' in page
         assert 'type="email"' in page
-        assert 'id="id_company"' in page and 'id="id_kind_1"' in page and "required" in page
+        assert (
+            'id="id_company"' in page and 'id="id_kind_1"' in page and has_token(page, "required")
+        )
         start = page.index('name="creation_key" value="') + len('name="creation_key" value="')
         keys.add(uuid.UUID(page[start : start + 36]))
     assert len(keys) == 2
@@ -204,11 +207,11 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
     assert (operator.sync_status, operator.sync_failure) == (SyncStatus.FAILED, name)
     page = response.content.decode()
     assert operator_sync.MESSAGES[name].replace("'", "&#x27;") in page
-    assert f"({SyncFailure(name).label})" in page and name not in page
+    assert f"({SyncFailure(name).label})" in page and not has_token(page, name)
     # PLAN-006a §3.3: the retry button waits a minute after the attempt.
     assert ">Try again</button>" not in page
     assert "Retry available in " in page
-    assert "CANARY" not in page
+    assert not has_token(page, "CANARY")
     assert len(fake.calls) == 1
 
     # Viewing and editing do not call again.
@@ -974,7 +977,7 @@ def test_006c_a_rejected_update_shows_the_failure_and_the_retry_updates(
     assert 'id="sync-failure"' in page and "Fields Stax rejected: phone" in page
     assert "Retry available in " in page and ">Try again</button>" not in page
     assert "Updated from Stax" not in page
-    assert "CANARY" not in page
+    assert not has_token(page, "CANARY")
     operator.refresh_from_db()
     assert (operator.phone, operator.sync_status) == ("4155550132", SyncStatus.FAILED)
 

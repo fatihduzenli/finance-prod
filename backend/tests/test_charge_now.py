@@ -58,6 +58,7 @@ from tests.test_one_off_charges import (
 )
 from tests.test_operator_views import client_for
 from tests.test_webhook_handlers import deliver
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -199,7 +200,7 @@ def test_charge_now_makes_one_pay_call_with_the_stored_key_and_a_pending_payment
     assert charged.after["payment"] == str(payment.pk)
     assert ref not in str(charged.after) and BANK not in str(charged.after)
     page = admin()[0].get(f"/one-off-charges/{charge.pk}/").content.decode()
-    assert "Pending" in page
+    assert has_token(page, "Pending")
     assert 'id="charge-now"' not in page  # a pending payment stops a second charge
     assert service.CHARGE_NOW_HAS_PAYMENT in page
 
@@ -269,7 +270,7 @@ def test_the_confirmation_page_repeats_the_details_and_never_calls_the_provider(
     page = client.get(f"/one-off-charges/{charge.pk}/charge-now/").content.decode()
     assert fake.calls == []
     assert charge.lease is not None
-    assert charge.lease.store.external_label in page
+    assert has_token(page, charge.lease.store.external_label)
     assert "Northwind Stores" in page
     assert "$100.00" in page
     assert invoice_of(charge).invoice_number in page

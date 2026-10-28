@@ -22,6 +22,7 @@ from tests import test_plan012d_b_adversarial as payment_tests
 from tests.test_invoice_builder import TODAY, a_draft, a_world, line, user
 from tests.test_lease_services import make_lease
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -90,7 +91,7 @@ def test_a_check_number_with_markup_is_escaped_on_the_payment_page_and_the_ledge
     ):
         body = billing.get(path).content.decode()
         assert MARKUP not in body, path
-        assert "Check" in body, path
+        assert has_token(body, "Check"), path
 
 
 # --- the builder's record path treats a check like any manual payment --------------------

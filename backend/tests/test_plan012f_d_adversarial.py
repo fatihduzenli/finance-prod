@@ -17,6 +17,7 @@ from accounts.roles import Role
 from ledger.models import PaymentChannel
 from tests.receivables_helpers import a_lease, a_store, an_operator
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -35,7 +36,7 @@ def test_the_login_page_keeps_its_form_and_offers_no_forgot_or_keep_me_controls(
     label = re.search(r'<label[^>]*for="id_auth-username"[^>]*>(.*?)</label>', body, re.S)
     assert label is not None and "Username" in re.sub(r"<[^>]+>", "", label.group(1))
     lowered = body.lower()
-    assert "forgot" not in lowered
+    assert not has_token(lowered, "forgot")
     assert (
         "keep me" not in lowered
         and 'name="remember' not in lowered

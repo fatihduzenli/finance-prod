@@ -44,6 +44,7 @@ from tests.test_setup_charges import (
     lease_of,
     pay,
 )
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -440,7 +441,7 @@ def test_billing_and_viewer_cannot_resolve_a_deposit(role: Role) -> None:
     client, _ = client_for(role)
     store = lease_of(charge).store_id
     lease_page = client.get(f"/stores/{store}/?tab=charges&filter=all").content.decode()
-    assert "Deposit" in lease_page  # the row is listed (PLAN-012d D4) ...
+    assert has_token(lease_page, "Deposit")  # the row is listed (PLAN-012d D4) ...
     assert "Resolve deposit" not in lease_page and "resolve-deposit" not in lease_page
     assert client.get(resolve_path(charge)).status_code == 403
     assert client.post(resolve_path(charge), form()).status_code == 403

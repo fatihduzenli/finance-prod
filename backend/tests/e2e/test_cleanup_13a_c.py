@@ -23,6 +23,7 @@ from ledger.services import rent_run
 from payments.fake import FakeProvider
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
+from tests.text_helpers import has_token
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
 
@@ -101,7 +102,7 @@ def walk(page: Page, live_server: LiveServer, width: str) -> None:
     store, payment = a_world()
     # C6: the stores list's phone meta line.
     page.goto(live_server.url + reverse("ledger:stores:list"))
-    assert "Istanbul" in page.content()
+    assert has_token(page.content(), "Istanbul")
     shot(page, f"stores-list-{width}")
     # C2: the Zelle payment's page has no Refunds card.
     page.goto(live_server.url + reverse("ledger:payments:detail", kwargs={"pk": payment.pk}))

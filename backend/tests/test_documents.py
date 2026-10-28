@@ -70,6 +70,7 @@ from tests.document_files import (
 from tests.test_lease_services import _race
 from tests.test_ledger_models import new_lease, new_store, saved
 from tests.test_operator_sync import requires_postgresql
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -807,7 +808,7 @@ def test_billing_uploads_from_the_page_and_the_list_shows_it(owner_kind: str) ->
     page = page_messages(client, detail)
     assert "Document uploaded." in page
     assert 'id="documents-list"' in page
-    assert "Floor plan.png" in page and "Floor plan" in page and "Ground" in page
+    assert "Floor plan.png" in page and "Floor plan" in page and has_token(page, "Ground")
     document = Document.objects.get()
     assert reverse("ledger:documents:download", kwargs={"pk": document.pk}) in page
     assert f"?preview={document.pk}" in page
@@ -862,7 +863,7 @@ def test_a_viewer_sees_the_list_but_no_upload_box_and_cannot_post() -> None:
     page = page_messages(viewer, store_documents(store))
     assert "a.png" in page
     assert 'id="document-upload"' not in page
-    assert "Delete" not in page.split('id="documents-list"')[1]
+    assert not has_token(page.split('id="documents-list"')[1], "Delete")
     assert post_file(viewer, store, "b.jpg", JPEG).status_code == 403
     assert Document.objects.count() == 1
 

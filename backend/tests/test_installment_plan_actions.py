@@ -54,6 +54,7 @@ from tests.test_installments import a_one_off, a_user, calls, pay, plan_for, row
 from tests.test_one_off_charges import an_operator
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -625,7 +626,7 @@ def test_the_tab_and_the_parent_card_show_the_actions_by_role_and_status(
     ]
     for body in pages:
         assert {name for name, marker in _ids(plan).items() if marker in body} == shown
-        assert ("Paused" in body) is paused
+        assert has_token(body, "Paused") is paused
     tab = pages[0]
     row = tab[tab.index(f'id="store-plan-{plan.pk}"') :].split("</tr>", 1)[0]
     assert (">Paused</td>" in row) is paused

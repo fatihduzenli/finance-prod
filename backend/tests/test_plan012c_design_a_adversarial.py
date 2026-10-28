@@ -16,6 +16,7 @@ from django.urls import reverse
 from accounts.roles import Role
 from ledger.models import CompanySettings
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -107,12 +108,12 @@ def test_the_phone_menu_works_without_javascript_and_the_banner_stays() -> None:
     body = viewer.get("/").content.decode()
     assert 'id="nav-toggle"' in body and 'type="checkbox"' in body
     assert 'for="nav-toggle"' in body  # the label toggles it: no script needed
-    assert "SANDBOX" in body
+    assert has_token(body, "SANDBOX")
     # PLAN-012f D11: the sidebar item reads "Monthly rent" (the page title keeps "overview").
     for label in ("Dashboard", "Stores", "Operators", "Monthly rent", "Reports", "Admin"):
         assert label in body, label
     assert "Rent run" not in body and ">Grid<" not in body
     anonymous = Client().get("/account/login/").content.decode()
-    assert "SANDBOX" in anonymous
+    assert has_token(anonymous, "SANDBOX")
     title = anonymous.split("<title>")[1].split("</title>")[0]
     assert "Monvera" in title

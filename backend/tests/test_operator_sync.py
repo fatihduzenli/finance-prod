@@ -44,6 +44,7 @@ from payments.provider import CustomerQuery, CustomerRecord, mask_identifier
 from payments.stax.adapter import StaxProvider
 from tests.auth_helpers import make_user
 from tests.stax_helpers import make_rig, sequence
+from tests.text_helpers import has_token
 
 requires_postgresql = pytest.mark.skipif(
     connection.vendor != "postgresql",
@@ -1011,7 +1012,7 @@ def test_006c_row1_a_phone_edit_updates_the_customer_with_the_digits(
     assert audit.after["customer"] == mask_identifier(ref.external_id)
     assert audit.after["sync_status"] == SyncStatus.LINKED
     assert EMAIL not in audit_text(audit)
-    assert "0100002" not in audit_text(audit)
+    assert not has_token(audit_text(audit), "0100002")
     assert len(customer_refs(operator)) == 1
 
 

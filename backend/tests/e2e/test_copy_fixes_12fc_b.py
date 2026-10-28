@@ -25,6 +25,7 @@ from payments import offline_marking
 from payments.fake import FakeProvider
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
+from tests.text_helpers import has_token
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
 
@@ -139,7 +140,7 @@ def walk(page: Page, live_server: LiveServer, width: str) -> None:
     shot(page, f"operator-phone-{width}")
     # The Payments help topic.
     page.goto(live_server.url + reverse("finance:help_topic", kwargs={"slug": "payments"}))
-    assert "Payments" in page.content()
+    assert has_token(page.content(), "Payments")
     shot(page, f"help-payments-{width}")
 
 

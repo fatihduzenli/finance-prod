@@ -32,6 +32,7 @@ from tests.test_invoice_builder import TODAY as BUILDER_TODAY
 from tests.test_invoice_builder import a_world, user
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -114,7 +115,7 @@ def test_the_search_never_jumps_to_an_archived_operator() -> None:
     response = viewer.get(reverse("ledger:search"), {"q": "Zebra"})
     assert response.status_code == 200  # a results page, not a redirect
     body = response.content.decode()
-    assert "Zebra Holdings" in body and "archived" in body.lower()
+    assert "Zebra Holdings" in body and has_token(body.lower(), "archived")
     # A single live store match still jumps.
     jump = viewer.get(reverse("ledger:search"), {"q": "2477"})
     assert jump.status_code == 302
@@ -130,7 +131,7 @@ def test_the_filter_is_kept_through_the_grid_form_and_the_exports() -> None:
     first, second = _two_stores()
     viewer, _ = client_for(Role.VIEWER)
     page = viewer.get(reverse("ledger:grid:page"), {"q": "Acme"}).content.decode()
-    assert "2477" in page.split("<thead")[1] if "<thead" in page else "2477" in page
+    assert has_token(page.split("<thead")[1] if "<thead" in page else page, "2477")
     assert 'name="q"' in page and 'value="Acme"' in page
     assert "q=Acme" in page  # the export link keeps it
     export = viewer.get(reverse("ledger:grid:export"), {"q": "Acme"})

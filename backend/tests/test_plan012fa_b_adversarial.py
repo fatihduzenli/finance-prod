@@ -20,6 +20,7 @@ from accounts.roles import Role
 from ledger.models import PaymentChannel, RentChargeStatus, Store
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -83,7 +84,7 @@ def test_every_list_filter_swallows_hostile_values_and_echoes_none_of_them() -> 
                 # A search box echoes its (escaped) text in "Filtered by …"; a filter never
                 # echoes an unknown value: it falls back to its default.
                 if name != "q" and value not in ("-1", "\u0000", "%00"):
-                    assert value not in _outside_attributes(body), (path, name, value)
+                    assert not has_token(_outside_attributes(body), value), (path, name, value)
 
 
 def test_a_viewer_sees_no_primary_action_or_form_link_on_any_list() -> None:

@@ -17,6 +17,7 @@ from ledger.models import PaymentChannel, Store
 from tests.receivables_helpers import a_lease, a_store, an_operator
 from tests.test_lease_end_drafts import row_counts
 from tests.test_operator_views import client_for
+from tests.text_helpers import assert_absent
 
 pytestmark = pytest.mark.django_db
 
@@ -177,7 +178,7 @@ def test_a_hostile_store_form_value_is_refused_without_echo_and_writes_nothing(
     assert response.status_code == 302
     body = admin.get(url).content.decode()
     if field != "landlord_rent":  # a number field re-fills its held value; the selects never do
-        assert value not in body, (field, value)
+        assert_absent(body, value, (field, value))
     assert "4111111111111111" not in body
     assert not Store.objects.filter(external_label="Probe").exists()
     assert (row_counts(), StoreCost.objects.count()) == before

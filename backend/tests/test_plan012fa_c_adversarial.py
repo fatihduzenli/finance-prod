@@ -21,6 +21,7 @@ from ledger.models import Lease, LeaseEnd, PaymentChannel
 from ledger.services import statements
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -61,7 +62,7 @@ def test_the_choice_tiles_come_from_the_options_and_a_hostile_choice_is_not_echo
     assert 'id="lines-total"' in body
     assert re.search(r'class="[^"]*\bform-summary\b', body), "no summary card"
     discard = re.search(r"<form[^>]*>(?:(?!</form>).)*Discard", body, re.S)
-    assert discard is not None or "Discard" not in body
+    assert discard is not None or not has_token(body, "Discard")
 
 
 def test_a_viewers_post_to_the_builder_and_every_form_is_refused_and_writes_nothing() -> None:

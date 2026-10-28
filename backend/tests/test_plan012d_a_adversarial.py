@@ -25,6 +25,7 @@ from ledger.models import (
 )
 from tests.receivables_helpers import a_lease, a_one_off_charge, a_rent_charge, a_store, an_operator
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -79,7 +80,7 @@ def test_a_form_opened_from_a_store_never_pre_fills_a_lease_of_another_store() -
         if response.status_code == 200:
             body = response.content.decode()
             assert str(theirs.pk) not in body, url
-            assert theirs.store.external_label not in body, url
+            assert not has_token(body, theirs.store.external_label), url
             assert theirs.operator.display_name not in body, url
         elif response.status_code == 302:
             assert str(theirs.pk) not in response["Location"]
@@ -133,7 +134,9 @@ def test_a_viewer_sees_no_bar_and_gets_403_on_every_bar_action() -> None:
         assert viewer.post(url, {}).status_code in (403, 405), route
     assert "tab=history" not in page
     assert viewer.get(_store_page(lease, tab="history")).status_code in (200, 403)
-    assert "audit" not in viewer.get(_store_page(lease, tab="history")).content.decode().lower()
+    assert not has_token(
+        viewer.get(_store_page(lease, tab="history")).content.decode().lower(), "audit"
+    )
     assert Client().get(_store_page(lease)).status_code == 401
 
 

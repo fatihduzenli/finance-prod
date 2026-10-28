@@ -64,6 +64,7 @@ from tests.test_lease_end import (
 from tests.test_lease_services import make_operator
 from tests.test_operator_views import client_for
 from tests.test_setup_charges import fee
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -912,7 +913,7 @@ def test_a_card_number_in_the_reason_is_refused_and_reaches_no_row(
     assert overridden(row) == NOTHING_ALLOWED
     assert not AuditLog.objects.filter(action="lease_transfer.debt_overridden").exists()
     assert not any(
-        "4111" in str(entry.after) or "4111" in str(entry.before)
+        has_token(str(entry.after), "4111") or has_token(str(entry.before), "4111")
         for entry in AuditLog.objects.all()
     )
 

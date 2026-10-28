@@ -23,6 +23,7 @@ from ledger.services import rent_run
 from payments.fake import FakeProvider
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
+from tests.text_helpers import has_token
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
 
@@ -121,7 +122,7 @@ def void_through_the_browser(page: Page, live_server: LiveServer, width: str) ->
     assert payment.status == PaymentStatus.VOIDED
     assert payment.void_reason == "Recorded twice by mistake."
     body = page.content()
-    assert "Voided" in body and "Recorded twice by mistake." in body
+    assert has_token(body, "Voided") and "Recorded twice by mistake." in body
     assert "void-manual-payment" not in body  # no action left
     shot(page, f"payment-voided-{width}")
 

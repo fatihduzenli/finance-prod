@@ -71,6 +71,7 @@ from tests.test_charge_now import store_methods
 from tests.test_invoice_builder import page_data
 from tests.test_one_off_charges import BANK
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -321,7 +322,7 @@ def test_create_missing_charges_is_a_link_under_the_charges_filters_for_billing(
         '<button class="link-action" type="submit" id="create-missing-charges">'
         "Create missing charges</button>"
     ) in form
-    assert "btn" not in form
+    assert not has_token(form, "btn")
     viewer = page(client_for(Role.VIEWER)[0], store_page(lease.store_id, tab="charges"))
     assert url not in viewer and "Create missing charges" not in viewer
     vacant = a_store("3101")
@@ -761,7 +762,7 @@ def test_the_schedules_tab_lists_schedules_autopay_charges_and_live_plans() -> N
     )
     html = page(client_for(Role.VIEWER)[0], store_page(lease.store_id, tab="schedules"))
     assert 'id="tab-schedules"' in html
-    assert "Nov 5, 2026" in html and "Insurance" in html and "Paused" in html
+    assert "Nov 5, 2026" in html and "Insurance" in html and has_token(html, "Paused")
     assert "Key copy" in html and f"/plans/{plan.pk}/" in html
 
 

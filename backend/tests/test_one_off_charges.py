@@ -66,6 +66,7 @@ from tests.stax_helpers import always, make_rig
 from tests.test_lease_services import make_lease, make_operator
 from tests.test_operator_views import client_for
 from tests.test_webhook_handlers import deliver
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -496,7 +497,7 @@ def test_an_arrears_email_charge_is_created_sent_and_shown_linked(
     assert "sent by e-mail" in job.result
     client, _ = client_for(Role.VIEWER)
     page = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
-    assert invoice.invoice_number in page and "Sent" in page and ">SENT<" in page
+    assert invoice.invoice_number in page and has_token(page, "Sent") and ">SENT<" in page
     assert ref not in page  # the provider ID is masked
     assert f"{ref[:4]}…{ref[-4:]}" in page
 
@@ -886,7 +887,7 @@ def test_cancel_deletes_the_invoice_and_voids_the_charge_after_the_provider_conf
     invoice = invoice_of(charge)
     assert (invoice.internal_status, invoice.provider_status) == (InvoiceStatus.VOID, "DELETED")
     page = client.get(f"/one-off-charges/{charge.pk}/").content.decode()
-    assert "Voided" in page and 'id="cancel-charge"' not in page
+    assert has_token(page, "Voided") and 'id="cancel-charge"' not in page
     assert actions(charge)[-2:] == ["one_off_charge.cancel_requested", "one_off_charge.voided"]
 
 

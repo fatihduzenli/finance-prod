@@ -33,6 +33,7 @@ from tests.test_lease_views import NEW as LEASE_NEW
 from tests.test_lease_views import form_data as lease_form_data
 from tests.test_operator_sync import requires_postgresql
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -266,7 +267,7 @@ def test_a_closed_store_is_saved_and_listed_with_its_status(admin: Client) -> No
     assert "Closed One" in page and status is not None
     assert 'class="badge badge-unpaid"' in status.group(1) and "Closed" in status.group(1)
     detail = admin.get(paths(store)["detail"]).content.decode()
-    assert "Jun 30, 2026" in detail and "Closed" in detail
+    assert "Jun 30, 2026" in detail and has_token(detail, "Closed")
 
 
 def test_every_post_ends_in_a_redirect(admin: Client) -> None:
