@@ -65,6 +65,7 @@ from tests.receivables_helpers import (
     an_operator,
 )
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -977,7 +978,7 @@ def test_an_archived_operator_still_has_a_statement(today: date) -> None:
     operator.save(update_fields=["archived_at"])
     client = viewer()
     page = client.get(f"/operators/{operator.pk}/statement/")
-    assert page.status_code == 200 and "Archived" in page.content.decode()
+    assert page.status_code == 200 and has_token(page.content.decode(), "Archived")
     assert rows_of(client.get(f"/operators/{operator.pk}/statement/export.csv"))
 
 

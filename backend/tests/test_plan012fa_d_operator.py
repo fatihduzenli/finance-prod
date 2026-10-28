@@ -52,6 +52,7 @@ from tests.receivables_helpers import (
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 from tests.test_store_workspace import page, with_customer
+from tests.text_helpers import assert_absent
 
 pytestmark = pytest.mark.django_db
 
@@ -292,7 +293,8 @@ def test_the_strip_has_one_card_per_store_with_rent_collection_and_balance() -> 
     strip = by_id(html, "store-strip", "ul")
     assert strip.count('class="store-card"') == 3
     assert strip.index(">1991</a>") < strip.index(">1999</a>") < strip.index(">2475</a>")
-    assert "9009" not in strip and "4,321.00" not in strip
+    assert_absent(strip, "9009")
+    assert "4,321.00" not in strip
     one, two, three = re.findall(r'<li class="store-card".*?</li>', strip, re.S)
     assert reverse("ledger:stores:detail", kwargs={"pk": first.store_id}) in one
     assert "$2,000.00 / month · autopay not set up" in one

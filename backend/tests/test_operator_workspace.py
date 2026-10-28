@@ -43,6 +43,7 @@ from tests.receivables_helpers import (
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 from tests.test_store_workspace import a_draft, page
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -103,12 +104,12 @@ def test_the_default_is_all_stores_and_the_selector_lists_the_operators_stores()
     assert options.index("All stores (2)") < options.index("1001") < options.index("1002")
     assert '<option value="" selected>All stores (2)</option>' in options
     assert options.count(" selected") == 1
-    assert str(other.store_id) not in html and "3001" not in options
+    assert str(other.store_id) not in html and not has_token(options, "3001")
     assert 'id="workspace-header"' not in html and bar(html) == ""
     html = page(client, operator_page(operator, store=str(first.store_id)))
     assert f'value="{first.store_id}" selected' in html
     header = section(html, "workspace-header")
-    assert "1001" in header and "1002" not in header
+    assert has_token(header, "1001") and not has_token(header, "1002")
     assert re.search(r'id="header-open-balance">\$1,000\.00<', header)
     assert re.search(r'id="header-operator-balance">\$1,250\.00<', header)
     actions = bar(html)
@@ -135,7 +136,7 @@ def test_the_store_parameter_switches_the_store_and_the_bar() -> None:
     html = page(client_for(Role.BILLING)[0], operator_page(operator, store=str(second.store_id)))
     assert f'value="{second.store_id}" selected' in html
     header = section(html, "workspace-header")
-    assert "1002" in header and re.search(r'id="header-open-balance">\$250\.00<', header)
+    assert has_token(header, "1002") and re.search(r'id="header-open-balance">\$250\.00<', header)
     assert re.search(r'id="header-operator-balance">\$1,250\.00<', header)
     actions = bar(html)
     assert f"lease={second.pk}" in actions and f"lease={first.pk}" not in actions
@@ -155,7 +156,7 @@ def test_another_operators_store_or_a_bad_value_falls_back_to_all_stores(raw: st
     assert f'value="{first.store_id}" selected' not in html
     assert 'id="choose-store"' in section(html, "tab-history")
     # The other store's number must not appear as a number (a hex id may hold "9009").
-    assert re.search(r"(?<![0-9a-f])9009(?![0-9a-f])", html) is None
+    assert not has_token(html, "9009")
     assert "4,321.00" not in html and str(theirs.pk) not in html
 
 
@@ -175,7 +176,7 @@ def test_a_store_now_leased_to_another_operator_shows_no_lease_and_no_bar() -> N
     assert f'value="{store.pk}" selected' in html
     assert "No current lease of this operator" in section(html, "workspace-header")
     assert bar(html) == "" and 'id="no-operator-lease"' in html
-    assert str(incoming.pk) not in html and "Incoming" not in html
+    assert str(incoming.pk) not in html and not has_token(html, "Incoming")
 
 
 def test_an_operator_without_a_store_has_tabs_and_no_header() -> None:
@@ -199,9 +200,9 @@ def test_the_charges_tab_lists_every_store_of_the_operator_with_a_store_column()
     a_rent_charge(other, OCTOBER, due="4321.00")
     html = section(page(client_for(Role.BILLING)[0], operator_page(operator)), "tab-charges")
     assert "<th>Store</th>" in html
-    assert "1001" in html and "1002" in html and "Broken shelf" in html
+    assert has_token(html, "1001") and has_token(html, "1002") and "Broken shelf" in html
     # The other store's number must not appear as a number (a hex id may hold "9009").
-    assert re.search(r"(?<![0-9a-f])9009(?![0-9a-f])", html) is None
+    assert not has_token(html, "9009")
     assert "4,321.00" not in html
     assert 'id="charges-balance">$1,325.00<' in html
     assert f"?operator={operator.pk}" in html
@@ -228,7 +229,7 @@ def test_the_other_tabs_list_the_operators_rows() -> None:
     an_invoice(other_operator, 78, "10.00")
     client = client_for(Role.BILLING)[0]
     payments = section(page(client, operator_page(operator, tab="payments")), "tab-payments")
-    assert "1002" in payments and "$100.00" in payments
+    assert has_token(payments, "1002") and "$100.00" in payments
     assert f"operator={operator.pk}" in payments
     invoices = section(page(client, operator_page(operator, tab="invoices")), "tab-invoices")
     assert "INV-2026-0077" in invoices and "INV-2026-0078" not in invoices

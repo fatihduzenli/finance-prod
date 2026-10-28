@@ -78,6 +78,7 @@ from payments.provider import ScheduleRecord
 from tests.job_helpers import run_queued_jobs
 from tests.test_operator_views import client_for
 from tests.test_setup_charges import a_lease, deposit_type, item, pay
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -1260,7 +1261,7 @@ def test_an_admin_walks_the_wizard_from_the_store_page(admin: Any, pinned: None)
     page = client.get(store_page).content.decode()
     assert f'href="/stores/{lease.store_id}/end-lease/"' in page and "Vacant since" not in page
     start = client.get(f"/stores/{lease.store_id}/end-lease/").content.decode()
-    assert "Start" in start and "The wizard takes you" in start
+    assert has_token(start, "Start") and "The wizard takes you" in start
     response = client.post(f"/stores/{lease.store_id}/end-lease/")
     end = LeaseEnd.objects.get(lease=lease)
     base = f"/lease-ends/{end.pk}"

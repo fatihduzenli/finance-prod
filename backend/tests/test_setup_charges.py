@@ -59,6 +59,7 @@ from tests.job_helpers import run_queued_jobs
 from tests.test_lease_services import _race, lease_fields, make_lease, make_operator
 from tests.test_operator_views import client_for
 from tests.test_webhook_handlers import deliver
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -1175,7 +1176,7 @@ def test_billing_records_a_wire_through_the_page_and_a_resubmission_records_noth
     client.post(paths["ledger:one_off_charges:payment"], data)
     assert Payment.objects.count() == 1
     page = client.get(paths["ledger:one_off_charges:detail"]).content.decode()
-    assert "Paid" in page and "W-1" in page
+    assert has_token(page, "Paid") and "W-1" in page
     assert not Job.objects.exists()  # no invoice, nothing to mark
 
 

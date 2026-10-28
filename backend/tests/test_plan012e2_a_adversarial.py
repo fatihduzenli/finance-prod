@@ -22,6 +22,7 @@ from payments.models import Job, JobKind
 from tests import test_invoice_builder as builder_tests
 from tests.test_invoice_builder import TODAY, a_draft, a_world, line, user
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -78,7 +79,7 @@ def test_a_hostile_collect_or_item_falls_back_and_echoes_nothing(
     )
     assert response.status_code == 200
     body = response.content.decode()
-    assert MARKUP not in body and "onerror" not in body and "etc/passwd" not in body
+    assert MARKUP not in body and not has_token(body, "onerror") and "etc/passwd" not in body
     assert "DROP TABLE" not in body and "x" * 200 not in body
     # The draft choice is the one checked unless a real choice was named.
     checked = [

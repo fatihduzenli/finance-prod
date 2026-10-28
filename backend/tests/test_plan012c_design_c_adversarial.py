@@ -32,6 +32,7 @@ from tests.test_documents import post_file
 from tests.test_lease_end import deductions, draft, figures, fresh, october, saved
 from tests.test_lease_views import edit_data
 from tests.test_operator_views import client_for, form_data
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -58,7 +59,7 @@ def _refused_on_the_form(client: Client, path: str, data: dict[str, str]) -> str
         assert response.status_code == 200
     body = response.content.decode()
     assert MARKUP not in body
-    assert "errorlist" in body or "field-error" in body or "error" in body.lower(), path
+    assert "errorlist" in body or "field-error" in body or has_token(body.lower(), "error"), path
     return body
 
 

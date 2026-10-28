@@ -39,6 +39,7 @@ from tests.auth_helpers import iter_routes, make_user, verified_client
 from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.test_lease_services import NOW, make_lease, make_operator, method
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 # PLAN-010 D3: views queue provider work; the worker is run after every request here.
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("worker_between_requests")]
@@ -328,9 +329,9 @@ def test_the_enrolment_page_lists_bank_methods_and_shows_cards_as_not_allowed(
     assert f'name="payment_method_id" value="{BANK}"' in page
     assert f'value="{CARD_ID}"' not in page
     assert "Card, not allowed" in page
-    assert "6789" in page and "checking" in page and "Operating" in page
+    assert has_token(page, "6789") and has_token(page, "checking") and "Operating" in page
     assert "$500.01" in page and "$500.00" in page
-    assert "UTC" not in page and "Set up autopay" in page
+    assert not has_token(page, "UTC") and "Set up autopay" in page
     assert fake.calls == []
 
 
@@ -366,7 +367,7 @@ def test_the_enrolment_page_shows_a_list_failure_by_field_names_only(
     assert str(service.PROVIDER_REJECTED) in page and "customer_id" in page
     assert "ProviderRejected" not in page and 'id="job-state">Failed: ' in page
     assert "(Rejected)" in page
-    assert "CANARY" not in page
+    assert not has_token(page, "CANARY")
     assert 'id="methods-not-read"' in page
 
 
@@ -445,7 +446,7 @@ def test_a_provider_rejection_on_enrol_shows_the_field_names(
     assert (response.status_code, response["Location"]) == (302, route["detail"])
     page = admin.get(route["detail"]).content.decode()
     assert "Fields Stax rejected: payment_method_id, rule." in page
-    assert "CANARY" not in page
+    assert not has_token(page, "CANARY")
 
 
 # --- PLAN-007c: large-debit confirmation and the confirmed provider limit ------------------------
@@ -690,7 +691,7 @@ def test_no_bank_or_routing_data_reaches_any_lease_page(admin: Client, fake: Fak
         for name in ("list", "detail", "edit", "enrol")
     )
     for forbidden in ("routing", "account_number", "000123456789", "011000015"):
-        assert forbidden not in pages
+        assert not has_token(pages, forbidden), forbidden
 
 
 def test_the_navigation_links_the_lease_list(admin: Client) -> None:

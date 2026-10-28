@@ -63,6 +63,8 @@ Reference screenshots in this folder are the source of truth for the look. Where
 
 Sandbox banner: `#FFF3C4` background, `#6B4E00` text, 12px, 600, letter-spacing .04em, centred, full width, above the page header.
 
+The dark values of these tokens, and the names the dark theme adds, are in §7.2; the chart colours of both themes in §7.3.
+
 ## 2. Shell
 
 - **Sidebar**, 232px, `--sidebar-gradient`, padding 20px 14px. Logo (transparent dark variant) 48px tall at the top with 26px below. Items: 10px 12px padding, radius 8px, `--sidebar-text`, weight 500; active item `--sidebar-active-bg` + white, weight 600. Order: Dashboard, Stores, Operators, Monthly rent, Reports, Admin. Bottom: user card (name, role, Sign out) on `rgba(255,255,255,.08)`.
@@ -90,7 +92,7 @@ Sandbox banner: `#FFF3C4` background, `#6B4E00` text, 12px, 600, letter-spacing 
 ## 4. Pages
 
 ### Dashboard (`dashboard-*.png`)
-Header: title + date, search box, "+ New invoice". Row 1: four KPI cards (Unpaid balances, Collected this month, Pending bank debits, Today's daily charges). Row 2: "Needs attention" table spanning two thirds (store, why-badge, amount, one action button per row) + right column with "October collection" progress card and "Coming up" list. Row 3: "Recent payments" table.
+Header: title + date, search box, "+ New invoice". Four KPI cards (Unpaid balances, Collected this month, Pending bank debits, Today's daily charges); then the rows of §7.5 (Cashflow; Needs attention two thirds with the Mini calendar; Recent payments two thirds with Payment status; the Collection progress card and the Coming up list under them, §7.6). Needs attention: store, why-badge, amount, one action button per row.
 
 ### Store workspace (`store-workspace-*.png`)
 Header: breadcrumb, "#1991 Istanbul" + green Active badge, one address line + open date; actions Create invoice (primary), Add payment, Lease ▾; tabs Charges · Invoices · Payments · Autopay · Documents · Contact log · Activity. Body: two-thirds column = Charges card (segmented filter, table, open-balance total, "Create missing charges" text link) and Contact log card; one-third column = LEASE, NEXT, STORE COST (with Change), DOCUMENTS (with Upload) cards. Operator workspace uses the same layout with a store selector.
@@ -144,9 +146,9 @@ Header: full breadcrumb (Stores › store › charge › Split into installments
 ## 4a. Additions from the owner's staging review (12f-b)
 Not rendered as artboards; they follow the components in §3 and the pages above.
 
-- **Dashboard · Cashflow card** (full width, below the KPI row): title "Cashflow", a date-range select at the right (This month / Last 3 months / Last 12 months / Custom From–To); a 12-bar monthly chart — Income (collected rent + fees, teal `#0E8F86`) and Expenses (landlord rent + other store costs + fee costs, muted `#8FA3BF`) as paired bars with a Net line in navy; three small totals under the title (Income, Expenses, Net in green/red). Deposits are not income (ADR-0012 §7). Inline SVG, no new chart library.
-- **Dashboard · Payment status card** (one third width, same row as the mini calendar): a donut with the total in the centre, three boxes under it — Overdue (dark red `#8A1C14`), Paid (green `#176B33`), Upcoming (navy `#0B2545`) — each with count and amount, following the same date range as Cashflow.
-- **Dashboard · Mini calendar card** (one third width): month name with ‹ › arrows, 7-column grid, today in a teal circle, a dot under a day that has anything (rent day, debit settles, promise due, installment, lease end, note); hovering (tapping on phones) opens a popover listing that day's items in the Calendar page's chip colours; the title links to Reports › Calendar.
+- **Dashboard · Cashflow card** (full width, below the KPI row): title "Cashflow", a date-range select at the right (This month / Last 3 months / Last 6 months / Last 12 months / Custom From–To; the default Last 12 months on the laptop, Last 6 months on the phone — §7.5); a 12-bar monthly chart — Income (collected rent + fees) and Expenses (landlord rent + other store costs + fee costs) as paired bars with a Net line, colours per theme in §7.3; three small totals under the title (Income, Expenses, Net in green/red); one muted footnote. Deposits are not income (ADR-0012 §7). Inline SVG, no new chart library.
+- **Dashboard · Payment status card** (one third width, beside Recent payments — §7.5): a donut with the total in the centre, three boxes under it — Overdue, Paid, Upcoming, colours per theme in §7.3, each with a 3px top border in its colour, count and amount, "+ n pending · rent and fees" under them — following the same date range as Cashflow. Phone: donut at the left, the three as a list at the right.
+- **Dashboard · Mini calendar card** (one third width, beside Needs attention — §7.5): month name (a link to Reports › Calendar) with ‹ › arrows, 7-column grid, today in a teal circle, the selected day ringed, coloured dots under days with items (rent day, debit settles, promise due, lease end; colours per theme in §7.3), a legend under the grid; hovering opens a popover listing that day's items; on phones a tap opens them in a panel under the grid (no popover).
 - **Dashboard · "+ New invoice"** opens a small modal "Which store?" with a search field (type-ahead on number, name, operator) and a result list; choosing a store goes straight to that store's Create invoice page.
 - **New store / Edit store / New operator / Edit operator as modals**: the confirmation-dialog frame at 640 px (full-screen sheet on phones), title + ×, fields in two columns (one on phones), Cancel (secondary) and Save (primary) right-aligned; on success the modal closes, the list behind it refreshes in place and a green flash confirms ("Store #5151 Rome added."). The operator form gets a **Type** control (Company / Person) that switches the name fields (Company name + Contact person · First name + Last name).
 - **Store form fields**: Store number · Name · **Type** (optional select: Inline store, Kiosk, Cart, Pop-up, Warehouse — editable list in Admin › Settings; shown as a grey pill after the name everywhere the store is named, hidden when empty) · Street · City · **State as a select** (50 states + DC, two-letter code stored, full name shown) · ZIP · Open date · Closed date · Status · Store cost block (Landlord rent **optional**, Landlord lease end, Other monthly cost). A "Check address" link under the address fields runs the address check (USPS Addresses API) and offers the standardised address — "Use this / Keep mine" — filling City and State; when the service is unavailable the form still saves with an "Address not verified" note.
@@ -170,3 +172,95 @@ This is the installed-app (PWA) layout, not a shrunken laptop page.
 - **Tables become cards** on phones: one card per row, title and amount on the first line, meta and status badge on the second; totals as a final card. The monthly rent overview keeps the table in a horizontal scroll box with the store column sticky.
 - **Dashboard**: KPI cards two per row, Needs attention as cards with the action button full width, the rest stacked.
 - Forms: one field per row, sticky primary button at the bottom; wizards show the step list as "Step 2 of 7".
+
+## 7. Dark theme (owner-approved 2026-10-27, merged 2026-10-28)
+
+Reference screenshots: `dashboard-dark-laptop.png` (1440), `dashboard-dark-phone.png` (390), `store-workspace-dark-laptop.png` and `monthly-rent-overview-dark-laptop.png` (1440). Where this section and a screenshot differ, the screenshot wins; §7.6 records what the screenshots settled.
+
+Direction: the dark layout of Mercury (styles.refero.design) — onyx canvas, graphite cards one step lighter, ivory text, no drop shadows — with Monvera's own teal for actions. The theme changes colours only; layout, spacing, type sizes and components stay as in §1–§6, except the shape change in 7.4.
+
+### 7.1 Switching
+
+- Three choices: **Light · Dark · System**. Default **System** (follows `prefers-color-scheme`).
+- Stored per user on the user record (not in browser storage), so the choice follows the person to every device.
+- The server renders `<html data-theme="light|dark">` from the stored choice (System resolves on the client before first paint with a one-line inline script) — no white flash on load.
+- Laptop: a three-way segmented control at the bottom of the sidebar, under "Appearance". Phone: inside the **More** tab.
+- The login page follows System (no user yet).
+- Never themed: PDF statements and invoices, e-mails, the print stylesheet, invoice previews, exported spreadsheets. They stay light.
+
+### 7.2 Dark tokens
+
+```css
+:root[data-theme="dark"] {
+  /* shell */
+  --sidebar-gradient: none;  --sidebar-bg: #171721;  --sidebar-border: #2E2E3D;
+  --sidebar-text: #A3A3B3;  --sidebar-active-bg: rgba(46,196,166,.18);  --sidebar-active-text: #FFFFFF;
+
+  /* surfaces */
+  --bg: #171721;  --surface: #1E1E2A;  --surface-2: #272735;
+  --border: #2E2E3D;  --border-soft: #26263A;  --input-border: #70707D;
+
+  /* text */
+  --text: #EDEDF3;  --text-2: #C3C3CC;  --muted: #A3A3B3;  --faint: #70707D;
+  --link: #2EC4A6;
+
+  /* primary action — the same teal button as the light theme */
+  --primary-bg: #0E8F86;  --primary-border: #0A6B64;  --primary-text: #FFFFFF;
+
+  /* status (bg / text) — always with an icon or word */
+  --paid-bg: #1F3A2C;      --paid-text: #7FDCA4;
+  --unpaid-bg: #3A2226;    --unpaid-text: #F2A3A8;
+  --overdue-bg: #5A1D24;   --overdue-text: #FFD6D9;
+  --pending-bg: #3A3420;   --pending-text: #F0D68A;
+  --partial-bg: #3D2A1A;   --partial-text: #F5B98A;
+  --waived-bg: #2E2E3D;    --waived-text: #C3C3CC;
+  --neutral-bg: #2E2E3D;   --neutral-text: #C3C3CC;
+
+  /* sandbox banner */
+  --sandbox-bg: #3A3420;   --sandbox-text: #F0D68A;
+}
+```
+
+- Cards in dark have **no border**; the tone step from `--bg` to `--surface` separates them. Table rows and dividers keep `--border`.
+- The sidebar in dark is flat `--sidebar-bg` with a 1px `--sidebar-border` on its right; the gradient is light-theme only. The logo is the existing transparent dark variant; the wordmark may be tinted `#2EC4A6`.
+- Monthly rent overview cells use the status pairs above; the current-month column tint becomes `rgba(46,196,166,.08)`.
+- Every text/background pair above meets WCAG AA (4.5:1 for body text, 3:1 for large text and badges); add an automated contrast check over the token table for both themes.
+
+### 7.3 Chart colours (both themes)
+
+| Series | Light | Dark |
+|---|---|---|
+| Cashflow — Income bars | `#5B6BE8` | `#7C8CF8` |
+| Cashflow — Expenses bars | `#C9CEDD` | `#3E4460` |
+| Cashflow — Net line + dots | `#0E8F86` | `#2EC4A6` |
+| Gridlines / axis labels | `--border` / `--faint` | `--border` / `--faint` |
+| Payment status — Overdue | `#B42318` | `#E5484D` |
+| Payment status — Paid | `#1B7F3B` | `#46C47E` |
+| Payment status — Upcoming | `#0B2545` | `#8FA3BF` |
+| Mini calendar dots — rent day / settles / promise / lease end | `#13A89E` / `#1B7F3B` / `#B7791F` / `#B42318` | `#2EC4A6` / `#46C47E` / `#E5B84D` / `#E5484D` |
+
+Expenses are deliberately quiet and never red: red stays reserved for overdue and problems.
+
+### 7.4 Shape (both themes)
+
+Buttons, text inputs, selects and status badges become **pill-shaped** (`--radius-ctl: 99px` for these controls) in both themes, as in the approved screenshots. Cards keep 12px, the calendar day cells and popovers keep 10–12px. Segmented controls (Light/Dark/System, Monthly/Weekly/Yearly, list filters) are pills with a raised `--surface` thumb.
+
+### 7.5 Dashboard layout (replaces the 12f-b order in §4a)
+
+Laptop: KPI row (4) · **Cashflow** (full width) · [**Needs attention** ⅔ | **Mini calendar** ⅓] · [**Recent payments** ⅔ | **Payment status** ⅓].
+
+- Cashflow: three totals (Income, Expenses, Net — Net green when positive, red when negative), legend and range select at the right, 12 monthly paired bars with the Net line over them, one muted footnote ("Deposits are not income. n stores without a cost entered are left out of expenses.").
+- Mini calendar: month title (link to Reports › Calendar), ‹ › round buttons, today filled teal, selected day ringed teal, coloured dots under days with items, legend under the grid; hover shows a popover (`--surface-2`, 1px `#3A3A4C` in dark, 12px radius, the one allowed shadow `0 12px 32px rgba(0,0,0,.45)` in dark only) listing the day's items with a 4px coloured bar each.
+- Payment status: donut with the total in the centre, three boxes (Overdue, Paid, Upcoming) each with a 3px top border in its colour, count and amount, "+ n pending · rent and fees" under them.
+
+Phone (`dashboard-dark-phone.png`): one column in the order KPI 2×2 · Cashflow (default range **last 6 months**) · Needs attention as two-line cards with "All n ›" · Mini calendar (tap a day: its items open in a panel **under** the grid, no popover) · Recent payments as two-line rows · Payment status (donut left, list right). Top bar with menu, logo, search; bottom tab bar Home · Stores · Monthly rent · More.
+
+### 7.6 What the screenshots settled (measured on the approved PNGs, 2026-10-28; PLAN-012g §3.0)
+
+- The page header in dark sits on the canvas (`--bg`, `#171721`) with its 1px `--border` bottom; light keeps `--surface`.
+- Cards in dark have no border (`--surface` on `--bg` separates them); table rows and dividers keep `--border`.
+- The sidebar in dark is flat `#171721` with a 1px `#2E2E3D` right border; the transparent dark logo stays (the teal tint of the wordmark is optional).
+- The segmented control's thumb in dark is `--surface`; its track is one step lighter than what it sits on (`--surface-2` on the sidebar, `--bg` in a card). Light keeps the `--bg` track and the white thumb.
+- Secondary buttons in dark are `--surface` with a `--border` edge and `--text`; the primary button is the light theme's teal with white text.
+- The popover is `--surface-2`, 1px `#3A3A4C`, 12px radius, with the one allowed dark shadow.
+- Kept as built, reported at the 12g checkpoint: the phone tab bar's first label stays "Dashboard" (the mock says "Home"); amounts stay full through the `money` filter (the mock abbreviates "$1.21M"); the Needs attention rows keep their small button (the mock shows text links); the Collection and Coming up cards, absent from the mock, move to a fifth row under Payment status.

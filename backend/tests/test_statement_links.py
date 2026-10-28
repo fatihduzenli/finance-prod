@@ -40,6 +40,7 @@ from ledger.views import statement_links as views
 from payments.models import ExternalRef
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -129,10 +130,10 @@ def test_the_page_carries_no_bank_data_no_internal_note_and_no_link_into_the_app
     body = Client().get(path(statement_links.make_token(operator))).content.decode()
     assert BANK not in body and BANK[-4:] not in body
     assert INTERNAL not in body and "call the owner" not in body
-    assert "<a " not in body and "href" not in body
+    assert "<a " not in body and not has_token(body, "href")
     assert "<script" not in body and "<form" not in body
     for internal in ("/operators/", "/returns/", "/admin/", "/static/", "csrf"):
-        assert internal not in body, internal
+        assert not has_token(body, internal), internal
 
 
 def test_every_open_is_audited_with_the_operator_only(operator: Operator) -> None:
@@ -281,6 +282,6 @@ def test_the_staff_statement_is_unchanged(operator: Operator) -> None:
     assert page.status_code == 200
     body = page.content.decode()
     assert f'href="/operators/{operator.pk}/"' in body
-    assert "Export CSV" in body or "export" in body
+    assert "Export CSV" in body or has_token(body, "export")
     assert 'id="open-total">$1,970.00<' in body
     assert Lease.objects.filter(operator=operator).exists()

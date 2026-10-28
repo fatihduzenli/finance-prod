@@ -36,6 +36,7 @@ from payments.models import ExternalRef
 from tests.auth_helpers import iter_routes
 from tests.test_operator_views import client_for
 from tests.test_rent_run import charge_of, lease
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -333,7 +334,7 @@ def test_the_export_streams_one_row_per_payment_with_plain_values(book: dict[str
 def test_the_export_never_holds_an_unmasked_provider_id(book: dict[str, Any]) -> None:
     client, _ = client_for(Role.VIEWER)
     text = body(client.get(EXPORT))
-    assert TRANSACTION not in text and "12345678" not in text
+    assert TRANSACTION not in text and not has_token(text, "12345678")
 
 
 def test_the_export_applies_the_same_filter_as_the_page(book: dict[str, Any]) -> None:

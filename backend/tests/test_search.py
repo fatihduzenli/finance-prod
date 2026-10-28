@@ -28,6 +28,7 @@ from ledger.models import Lease, Operator, Store
 from ledger.services import grid, search
 from tests.receivables_helpers import a_lease, a_store, an_operator
 from tests.test_operator_views import client_for
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -260,7 +261,7 @@ def test_several_or_mixed_matches_are_listed(viewer: Client) -> None:
         page.index('id="search-stores"') : page.index("</table>", page.index('id="search-stores"'))
     ]
     assert "North Plaza" in stores and "Lake Mall" in stores and "South Plaza" not in stores
-    assert "2477" in stores and "Austin" in stores and "Acme Stores" in stores
+    assert has_token(stores, "2477") and has_token(stores, "Austin") and "Acme Stores" in stores
     assert f'href="/stores/{leases["2477"].store_id}/"' in stores
     operators = page[page.index('id="search-operators"') :]
     assert "Acme Stores" in operators and "b***@example.com" in operators

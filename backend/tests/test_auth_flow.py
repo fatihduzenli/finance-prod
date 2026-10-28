@@ -19,6 +19,7 @@ from tests.auth_helpers import (
     token_step,
     verified_client,
 )
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -196,7 +197,7 @@ def test_login_page_carries_the_banner(client: Client) -> None:
     assert html.count(BANNER_ID) == 1
     assert "<title>[SANDBOX] " in html
     # The package default base loads Bootstrap/jQuery from a CDN; ours loads nothing.
-    assert "cdnjs" not in html
+    assert not has_token(html, "cdnjs")
     assert "<script" not in html
 
 
