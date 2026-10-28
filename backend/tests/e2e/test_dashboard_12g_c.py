@@ -85,10 +85,13 @@ def test_the_laptop_dashboard_hover_opens_a_popover_and_the_wide_card_shows(
     assert page.locator("#range-select").input_value() == "12m"
     day = page.locator("#mini-grid .mini-day.has-items").first
     if day.count():
+        # Hover opens the popover (CSS); a click keeps it open and marks the day selected.
         day.locator(".mini-num").hover()
         popover = day.locator(".mini-popover")
         popover.wait_for(state="visible")
+        day.locator(".mini-num").click()
         assert "is-selected" in (day.get_attribute("class") or "")
+        assert "is-open" in (day.get_attribute("class") or "")
     assert (
         not page.locator("#mini-calendar .mini-panel").is_visible()
         if page.locator("#mini-calendar .mini-panel").count()
