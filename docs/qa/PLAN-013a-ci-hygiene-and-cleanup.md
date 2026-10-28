@@ -33,7 +33,7 @@ rewrite; the data migration itself (13b); the USPS apply (waits for the owner's 
 ### A — CI
 
 - **A1. The migration job: split, not squash.** Measured on PostgreSQL 16 locally (the same split
-  CI runs): MEASURED_TOTAL for the selection, of which MEASURED_TOP. Every "over existing rows"
+  CI runs): 36 tests in 1,657 s (27:37) for the job's selection, of which 26 measured one by one: twenty-two "over existing rows" tests at 21 to 57 s each (most 44 to 57 s), the three rename and concurrency tests at 32 to 36 s, the index round trip at 30 s, and four tests under two seconds; the ten others (the two fresh-database round trips, the rename over rows, the lease-end, transfer, installments, debt-override and setup-flag cases) take the remaining 570 s, about 60 s each. Every "over existing rows"
   test re-runs `manage.py migrate` from an empty database to its target and back, so the cost is
   (number of tests) × (full forward migration of 59 + 20 files); a squash to a checkpoint would cut
   each forward run but break the tests that target intermediate migrations by name (they exist to
@@ -45,7 +45,7 @@ rewrite; the data migration itself (13b); the USPS apply (waits for the owner's 
   report-indexes file and the three rename/concurrency tests in shard 1; the job's name stays
   "Migration tests" with the shard in the matrix title, `timeout-minutes: 30`, the TEMPORARY comment
   gone, the comment stating the measured per-shard time. A fourth check, `migrations-complete`,
-  needs the three shards so the deploy job's `needs` keeps one name. Expected: SHARD_EXPECTED.
+  needs the three shards so the deploy job's `needs` keeps one name. Expected: three shards of 490 to 545 s of tests each locally (shard 1: the fresh round trips, the rename and concurrency cases, the index round trip, the kind, item-on-sqlite and promise cases, the fast checks; shard 2: lease end, transfer, installments, debt override, statement opened, rent lines, credits, item-on-PostgreSQL; shard 3: setup flag, company settings, store address, check method, autopay plans), so 9 to 10 minutes of tests plus about two minutes of setup per shard on CI, which ran 10 to 25 percent slower than this Mac — 11 to 14 minutes a shard against the 20-minute target and the 30-minute limit. The assignment lives in one table in `backend/tests/conftest.py` (`ROUNDTRIP_SHARDS`), applied as the markers `shard1` … `shard3` at collection; a completeness test asserts every test of the five files is in exactly one shard.
 - **A2. One run per PR.** `on: push: branches: [main]` and `on: pull_request:` (any base); the
   deploy job's condition is unchanged (`push` to `main`). The concurrency group keeps superseding
   in-flight runs of the same ref. Expected: one run per PR commit, one per merge.
