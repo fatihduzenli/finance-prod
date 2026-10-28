@@ -631,6 +631,11 @@ class PaymentStatusCard:
     def total(self) -> Decimal:
         return self.overdue.amount + self.paid.amount + self.upcoming.amount
 
+    @property
+    def count(self) -> int:
+        """The charges in the donut (the pending ones are counted apart)."""
+        return self.overdue.count + self.paid.count + self.upcoming.count
+
 
 STATUS_OVERDUE = "overdue"
 STATUS_PAID_PART = "paid"

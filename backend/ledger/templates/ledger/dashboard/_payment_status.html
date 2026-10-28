@@ -1,18 +1,23 @@
 {% load charts money %}
-{% comment %}The Payment status card (PLAN-012f-b D5; DESIGN-SPEC §4a): the range's charges, rent and fees (D20:
-installments, autopay-plan occurrences and re-debits count through their parent or source), as a
-donut with the total in the middle ({% donut %}, finance/templatetags/charts.py) and three boxes under it, Overdue, Paid and
-Upcoming, each with its count and amount; "+ n pending" under the donut for the charges it leaves out
-(pending, and partly paid not yet due). The range is the Cashflow card's.{% endcomment %}
-<section class="card" id="payment-status" aria-labelledby="payment-status-heading">
-  <h2 id="payment-status-heading">Payment status</h2>
+{% comment %}The Payment status card (PLAN-012f-b D5; PLAN-012g C4; DESIGN-SPEC §4a, §7.5): the range's charges, rent and
+fees (D20: installments, autopay-plan occurrences and re-debits count through their parent or source), as a
+donut with their count and the word "charges" in the middle ({% donut %}, finance/templatetags/charts.py),
+the range's label muted at the right of the title, and three boxes, Overdue, Paid and Upcoming, each with a
+3 px top border in its colour, its count and amount; "+ n pending · rent and fees" under them for the charges
+the donut leaves out (pending, and partly paid not yet due). On a phone the donut is at the left and the same
+boxes a list at the right, a dot in place of the border (app.css). The range is the Cashflow card's.{% endcomment %}
+<section class="card payment-status" id="payment-status" aria-labelledby="payment-status-heading">
+  <div class="card-header"><h2 id="payment-status-heading">Payment status</h2>{% if payment_status %}<span class="muted status-range" id="payment-status-range">{{ payment_status.range.label }}</span>{% endif %}</div>
   {% if payment_status %}
-    <p class="muted" id="payment-status-range">{{ payment_status.range.label }}</p>
-    {% donut payment_status.parts payment_status.total %}
-    {% if payment_status.pending %}<p class="muted status-pending" id="payment-status-pending">+ {{ payment_status.pending }} pending</p>{% endif %}
-    <ul class="status-boxes">
-      {% for part in payment_status.parts %}<li class="status-box status-{{ part.key }}" id="status-{{ part.key }}"><span class="status-box-label">{% chart_key part.key %}{{ part.label }}</span><span class="status-box-count">{{ part.count }}</span><span class="status-box-amount">{{ part.amount|money }}</span></li>{% endfor %}
-    </ul>
+    <div class="status-layout">
+      {% donut payment_status.parts payment_status.total payment_status.count %}
+      <div class="status-detail">
+        <ul class="status-boxes">
+          {% for part in payment_status.parts %}<li class="status-box status-{{ part.key }}" id="status-{{ part.key }}"><span class="status-box-label">{{ part.label }}</span><span class="status-box-count">{{ part.count }}</span><span class="status-box-amount">{{ part.amount|money }}</span></li>{% endfor %}
+        </ul>
+        {% if payment_status.pending %}<p class="muted status-pending" id="payment-status-pending">+ {{ payment_status.pending }} pending · rent and fees</p>{% endif %}
+      </div>
+    </div>
   {% else %}
     <p class="muted" id="payment-status-none">Choose a range above.</p>
   {% endif %}

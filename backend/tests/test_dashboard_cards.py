@@ -563,7 +563,9 @@ def test_a_viewer_reads_every_card_and_nothing_is_written(today: date) -> None:
     assert 'id="cashflow-expenses">—<' in html and 'id="cashflow-net">—<' in html
     assert 'role="img"' in html and 'class="bars-chart"' in html
     assert '<span class="donut-amount">' in html
-    assert 'id="payment-status-pending">+ 1 pending<' in html
+    # PLAN-012g C4: the count and "charges" in the middle; the pending line names its charges.
+    assert 'id="payment-status-pending">+ 1 pending · rent and fees<' in html
+    assert '<span class="donut-label">charges</span>' in html
     assert 'id="status-overdue"' in html and 'id="status-paid"' in html
     assert 'id="status-upcoming"' in html
     form = html[

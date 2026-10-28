@@ -19,8 +19,9 @@ hides (:func:`major_months`). A bar's ``<title>`` names its month either way.
 ``{% donut parts total %}`` draws the Payment status card's ring: ``parts`` are objects
 with ``key`` (``overdue``, ``paid`` or ``upcoming``), ``label`` and ``amount``; each part
 with an amount above zero is an arc (``stroke-dasharray`` over a ``pathLength`` of 100) in
-its colour, and the total is written in the middle through :func:`format_amount`. A zero
-total draws the empty ring.
+its colour, and the total is written in the middle through :func:`format_amount` over the
+word "Total"; ``{% donut parts total count %}`` writes the charges' count over the word
+"charges" instead (the Payment status card, PLAN-012g C4). A zero total draws the empty ring.
 
 ``{% chart_key key %}`` draws the 8 px key of a chart colour (``income``, ``expenses``,
 ``net``, ``overdue``, ``paid``, ``upcoming``) for a legend or a box beside its word.
@@ -234,8 +235,9 @@ RING_WIDTH = 14
 
 
 @register.simple_tag
-def donut(parts: Iterable[Any], total: object) -> SafeString:
-    """The Payment status ring with the total in the middle (see the module docstring)."""
+def donut(parts: Iterable[Any], total: object, count: int | None = None) -> SafeString:
+    """The Payment status ring with the total, or the count, in the middle (see the module
+    docstring)."""
     shown: list[tuple[str, str, Decimal]] = []
     for part in parts:
         value = _amount(part.amount)
@@ -266,18 +268,24 @@ def donut(parts: Iterable[Any], total: object) -> SafeString:
         arcs,
     )
     described = ", ".join(f"{label} {format_amount(amount)}" for _, label, amount in shown)
-    middle = format_amount(_amount(total) or Decimal(0))
+    amount = format_amount(_amount(total) or Decimal(0))
+    middle, word = (
+        (amount, "Total")
+        if count is None
+        else (str(count), "charge" if count == 1 else "charges")
+    )
     return format_html(
         '<div class="donut"><svg viewBox="0 0 120 120" role="img" aria-label="{}">'
         '<circle cx="60" cy="60" r="{}" fill="none" stroke="{}" stroke-width="{}" />{}</svg>'
         '<span class="donut-total"><span class="donut-amount">{}</span>'
-        '<span class="donut-label">Total</span></span></div>',
-        f"Total {middle}" + (f": {described}" if described else ""),
+        '<span class="donut-label">{}</span></span></div>',
+        f"Total {amount}" + (f": {described}" if described else ""),
         RING_RADIUS,
         RING_EMPTY,
         RING_WIDTH,
         circles,
         middle,
+        word,
     )
 
 

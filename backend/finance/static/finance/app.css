@@ -558,19 +558,25 @@ td.attention-action { text-align: right; }
 .cashflow-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .chart-key { flex: 0 0 auto; }
 .cashflow-note { font-size: var(--fs-sm); }
-/* The Payment status card (D5): the {% donut %} ring with the total in its middle
-   (.donut-total), "+ n pending", then the three boxes, each its colour's key
-   ({% chart_key %}: the colours are the charts tag's) beside its word, the count and the
-   amount. */
-.donut { position: relative; width: 168px; max-width: 100%; margin: var(--space-2) auto; }
+/* The Payment status card (D5; PLAN-012g C4, DESIGN-SPEC §7.5): the range's label muted at the
+   right of the title (.status-range); the {% donut %} ring with the charges' count over the word
+   "charges" in its middle (.donut-total); the three boxes, each with a 3 px top border in its
+   colour (--status-colour, the donut's), its word, its count bold and its amount; "+ n pending ·
+   rent and fees" under them. On a phone the donut is at the left and the boxes a list at the
+   right (see the phone block). */
+.status-range { margin-left: auto; font-size: var(--fs-sm); }
+.status-overdue { --status-colour: var(--chart-overdue); }
+.status-paid { --status-colour: var(--chart-paid); }
+.status-upcoming { --status-colour: var(--chart-upcoming); }
+.donut { position: relative; width: 168px; max-width: 100%; margin: var(--space-2) auto var(--space-4); }
 .donut svg { display: block; width: 100%; height: auto; }
 .donut-total { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
-.donut-amount { color: var(--text); font-size: var(--fs-md); font-weight: 700; }
+.donut-amount { color: var(--text); font-size: var(--fs-kpi); font-weight: 600; line-height: 1.1; }
 .donut-label { color: var(--muted); font-size: var(--fs-xs); }
-.status-pending { margin: 0 0 var(--space-3); font-size: var(--fs-sm); text-align: center; }
+.status-pending { margin: var(--space-3) 0 0; font-size: var(--fs-sm); }
 .status-boxes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
-.status-box { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-ctl); }
-.status-box-label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: var(--fs-sm); font-weight: 600; }
+.status-box { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--space-2); border: 1px solid var(--border); border-top: 3px solid var(--status-colour); border-radius: var(--radius-ctl); }
+.status-box-label { color: var(--text-2); font-size: var(--fs-sm); }
 .status-box-count { color: var(--text); font-size: var(--fs-lg); font-weight: 700; }
 .status-box-amount { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 /* The mini calendar (D6; PLAN-012g C3, DESIGN-SPEC §7.5): the month's name (a link to the
@@ -1060,6 +1066,16 @@ fieldset.card > legend + * { clear: both; }
      without the script the days' lists are the details under the grid. */
   .mini-day .mini-popover { display: none !important; }
   html:not(.js) .mini-days-list { display: block; }
+  /* Payment status (PLAN-012g C4): the donut at the left, the boxes a list at the right (a dot,
+     the word, the count, the amount at the right), the pending line under the list. */
+  .status-layout { display: grid; grid-template-columns: 116px minmax(0, 1fr); align-items: center; gap: var(--space-4); }
+  .status-layout .donut { width: 116px; margin: 0; }
+  .status-boxes { grid-template-columns: 8px minmax(0, 1fr) auto minmax(0, auto); align-items: center; gap: var(--space-2); }
+  .status-box { display: contents; }
+  .status-box::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--status-colour); }
+  .status-box-label { color: var(--text); }
+  .status-box-count { font-size: var(--fs-base); text-align: right; }
+  .status-box-amount { text-align: right; }
   .page-header .page-actions .nav-search { display: none; }
   /* The store page (DESIGN-SPEC §6): the operator and the city in place of the address, the
      summary strip, a full-width primary action over two half-width secondaries, the tabs
