@@ -244,7 +244,11 @@ def test_the_feed_never_carries_a_card_number_or_a_private_marker(settings: Any)
         kind="note", on=timezone.localdate(), title="Call Sam", body="about rent", author=user
     )
     body = Client().get(feed_path(token)).content.decode()
-    assert "Call Sam" in body and "4111" not in body
+    # The card number as typed and without its spaces: the feed's UIDs are random hex, so a
+    # bare "4111" matched one UID in a thousand (the once-failed PostgreSQL run of 12f-a,
+    # closed by PLAN-013a C8).
+    assert "Call Sam" in body
+    assert CARD not in body and CARD.replace(" ", "") not in body
 
 
 # --- statement links --------------------------------------------------------------------

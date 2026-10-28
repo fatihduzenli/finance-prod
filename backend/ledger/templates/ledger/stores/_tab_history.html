@@ -1,5 +1,5 @@
 {% comment %}The History tab (docs/qa/PLAN-012d D3; admin): ledger.services.audit.rows_for_store.{% endcomment %}
-{% load responsive %}
+{% load responsive people %}
 <h2>Activity</h2>
 <p class="actions"><a class="btn" id="history-all" href="{{ history_url }}">Open in the activity log</a></p>
 {% responsive_table %}
@@ -10,7 +10,7 @@
       <tr class="history-row">
         <td>{{ row.at_new_york }}</td>
         <td>{{ row.action }}</td>
-        <td>{{ row.user|default:"—" }}</td>
+        <td>{{ row.user|staff|default:"—" }}</td>
         <td>{{ row.entity_type }} {{ row.entity_id }}</td>
         <td>{% for name, value in row.after %}{{ name }}: {{ value }}{% if not forloop.last %}; {% endif %}{% endfor %}</td>
       </tr>

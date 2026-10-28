@@ -3,10 +3,11 @@
 
 :func:`frame` gives the header's "Step N of M" and the footer's "← Back" (the step before
 the current one, or the store's page on the first step) from the step links the views
-already build. :func:`statement_notes` gives the statement tiles' notes and the SETTLEMENT
-box's derived rows from the figures (``statements.final`` or the stored statement): read
-only, one query for the day the deposit was collected. Every value is text the template
-escapes.
+already build. :func:`statement_first` sends a confirm made before the statement step was
+saved back to that step, for both wizards (PLAN-013a C5). :func:`statement_notes` gives the
+statement tiles' notes and the SETTLEMENT box's derived rows from the figures
+(``statements.final`` or the stored statement): read only, one query for the day the
+deposit was collected. Every value is text the template escapes.
 """
 
 from __future__ import annotations
@@ -14,12 +15,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from django.contrib import messages
 from django.db.models import Max
+from django.http import HttpRequest, HttpResponse
+from django.shortcuts import redirect
 from django.urls import reverse
 
 from finance.dates import day_text
-from ledger.models import Payment, PaymentKind, PaymentStatus, Store
-from ledger.services import statements
+from ledger.models import LeaseEnd, Payment, PaymentKind, PaymentStatus, Store
+from ledger.services import lease_end, statements
 from ledger.services import stores as store_service
 
 
@@ -33,6 +37,13 @@ def frame(steps: Sequence[tuple[str, str, bool]], store: Store) -> dict[str, Any
         "step_back": back or reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
         "store_title": store_service.title(store),
     }
+
+
+def statement_first(request: HttpRequest, end: LeaseEnd) -> HttpResponse:
+    """PLAN-012f-a §10: confirm needs the statement step saved in this wizard (End lease or
+    Transfer); without it, the message and the lease end's statement step."""
+    messages.error(request, lease_end.STATEMENT_REQUIRED)
+    return redirect("ledger:lease_ends:statement", pk=end.pk)
 
 
 def statement_notes(figures: statements.Final) -> dict[str, Any]:
@@ -63,6 +74,8 @@ def statement_notes(figures: statements.Final) -> dict[str, Any]:
         "open_note": open_note,
         "deposit_note": deposit_note,
         "deductions_note": f"{count} line" if count == 1 else f"{count} lines",
+        #: The Deductions tile's tone: red above zero.
+        "deductions_tone": "unpaid" if figures.deductions_total > 0 else "",
         "kept_for_deductions": figures.withheld - figures.offset_applied,
         "credit_paid_back": figures.credit + figures.lease_credit,
     }

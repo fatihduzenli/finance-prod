@@ -106,7 +106,14 @@ def two_line_card(row: Locator, page: Page) -> None:
     if status.count():
         status_box = box(status)
         assert status_box["y"] >= title["y"] + title["height"] - 2
-        if meta.count():
+        balance = row.locator('td[data-role="meta-badge"] .badge')
+        if balance.count():
+            # PLAN-013a C6: the two badges head line 2 together; the meta cells follow on or
+            # below that line (the stores list).
+            assert abs(status_box["y"] - box(balance)["y"]) <= 2, (status_box, box(balance))
+            if meta.count():
+                assert box(meta)["y"] >= status_box["y"] - 2
+        elif meta.count():
             assert abs(status_box["y"] - box(meta)["y"]) <= 14
     actions = row.locator('td[data-role="actions"] .btn')
     if actions.count():

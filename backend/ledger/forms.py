@@ -1644,6 +1644,8 @@ class CollectForm(forms.Form):
         can_schedule: bool = True,
         charge_now_why: str = "",
         bank_why: str = "",
+        bank_url: str = "",
+        charge_now_more: str = "",
         **kwargs: Any,
     ) -> None:
         if data is not None and data.get(COLLECT_SUBMIT):
@@ -1657,6 +1659,9 @@ class CollectForm(forms.Form):
             charge_now_why=charge_now_why,
             bank_why=bank_why,
         )
+        #: Under a tile greyed by ``bank_why`` (no bank account on file): the operator page's
+        #: link, and on Charge now ``charge_now_more`` (the flag off as well; PLAN-013a C3).
+        self.bank_why, self.bank_url, self.charge_now_more = bank_why, bank_url, charge_now_more
         field = self.fields["collect"]
         if isinstance(field, forms.ChoiceField):
             field.choices = list(COLLECT_CHOICES)
@@ -1829,22 +1834,30 @@ class CollectForm(forms.Form):
 
     def options(self) -> list[dict[str, Any]]:
         """The tiles as the fieldset renders them, with their ids (``collect-<value>``), each
-        ``available`` or greyed with ``why`` (PLAN-012f-b D15). A greyed tile is never the
-        chosen one."""
+        ``available`` or greyed with ``why`` (PLAN-012f-b D15); a tile greyed for no bank
+        account on file carries ``why_url`` (the operator page) and, on Charge now,
+        ``why_more`` (PLAN-013a C3). A greyed tile is never the chosen one."""
         chosen = self["collect"].value() or invoice_builder.CollectChoice.DRAFT.value
         if chosen in self.unavailable:
             chosen = invoice_builder.CollectChoice.DRAFT.value
-        return [
-            {
-                "value": value,
-                "label": label,
-                "id": f"collect-{value}",
-                "checked": value == chosen,
-                "available": value not in self.unavailable,
-                "why": self.unavailable.get(value, ""),
-            }
-            for value, label in COLLECT_CHOICES
-        ]
+        options = []
+        for value, label in COLLECT_CHOICES:
+            why = self.unavailable.get(value, "")
+            no_bank = bool(self.bank_why) and why == self.bank_why
+            charge_now = value == invoice_builder.CollectChoice.CHARGE_NOW.value
+            options.append(
+                {
+                    "value": value,
+                    "label": label,
+                    "id": f"collect-{value}",
+                    "checked": value == chosen,
+                    "available": value not in self.unavailable,
+                    "why": why,
+                    "why_url": self.bank_url if no_bank else "",
+                    "why_more": self.charge_now_more if no_bank and charge_now else "",
+                }
+            )
+        return options
 
     def debit_on(self) -> date | None:
         """Schedule for a date's debit date as entered, for the button's words (``|day``),

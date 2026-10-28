@@ -1,4 +1,4 @@
-{% load money responsive dates %}{% comment %}The store's cost rows, behind a details element under the STORE COST card (the store page's History, moved there by PLAN-012f D8): the admin closes the current row and corrects a row here.{% endcomment %}
+{% load money responsive dates people %}{% comment %}The store's cost rows, behind a details element under the STORE COST card (the store page's History, moved there by PLAN-012f D8): the admin closes the current row and corrects a row here.{% endcomment %}
 <div class="card" id="cost-history-card">
   <details id="cost-history">
     <summary>History</summary>
@@ -22,11 +22,11 @@
           <tr id="cost-row-{{ row.pk }}"{% if row.superseded_at %} class="cost-superseded"{% endif %}>
             {% if row.superseded_at %}
               <td class="money"><s>{{ row.landlord_rent|money }}</s></td><td class="money"><s>{% if row.other_monthly_cost is not None %}{{ row.other_monthly_cost|money }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</s></td><td><s>{{ row.effective_from|day }}</s></td><td><s>{{ row.effective_to|day|default:"open" }}</s></td><td><s>{{ row.landlord_lease_end|day|default:"—" }}</s></td><td><s>{{ row.get_source_display }}</s></td>
-              <td style="white-space:pre-wrap;"><s>{{ row.notes }}</s>{% if row.notes %}<br>{% endif %}<span class="badge">Superseded</span> {{ row.superseded_at|moment }} by {{ entry.superseded_by_user|default:"—" }}: {{ row.change_note }}</td>
+              <td style="white-space:pre-wrap;"><s>{{ row.notes }}</s>{% if row.notes %}<br>{% endif %}<span class="badge">Superseded</span> {{ row.superseded_at|moment }} by {{ entry.superseded_by_user|staff|default:"—" }}: {{ row.change_note }}</td>
               <td></td>
             {% else %}
               <td class="money">{{ row.landlord_rent|money }}</td><td class="money">{% if row.other_monthly_cost is not None %}{{ row.other_monthly_cost|money }}{% if row.other_cost_description %} ({{ row.other_cost_description }}){% endif %}{% else %}—{% endif %}</td><td>{{ row.effective_from|day }}</td><td>{{ row.effective_to|day|default:"open" }}</td><td>{{ row.landlord_lease_end|day|default:"—" }}</td><td>{{ row.get_source_display }}</td>
-              <td style="white-space:pre-wrap;">{{ row.notes }}{% if row.change_note %}{% if row.notes %}<br>{% endif %}<span class="badge">{% if entry.closed_by_user %}Closed{% else %}Correction{% endif %}</span>{% if entry.closed_by_user %} by {{ entry.closed_by_user }}{% endif %}: {{ row.change_note }}{% endif %}</td>
+              <td style="white-space:pre-wrap;">{{ row.notes }}{% if row.change_note %}{% if row.notes %}<br>{% endif %}<span class="badge">{% if entry.closed_by_user %}Closed{% else %}Correction{% endif %}</span>{% if entry.closed_by_user %} by {{ entry.closed_by_user|staff }}{% endif %}: {{ row.change_note }}{% endif %}</td>
               <td>{% if can_correct_cost %}<a class="btn btn-sm cost-correct" href="{% url 'ledger:stores:correct_cost' pk=store.pk row=row.pk %}">Correct</a>{% endif %}</td>
             {% endif %}
           </tr>

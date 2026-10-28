@@ -108,7 +108,7 @@ def test_a_replayed_key_on_a_later_date_writes_one_schedule(
 
 def test_the_sentences_name_the_processor_from_the_settings_never_the_provider() -> None:
     source = (BACKEND / "ledger" / "services" / "one_off_charges.py").read_text(encoding="utf-8")
-    debit_block = source[source.index("DEBIT_NO_METHOD") : source.index("def bank_debit_options")]
+    debit_block = source[source.index("DEBIT_OFF") : source.index("def bank_debit_options")]
     assert not re.search(r"stax", debit_block, re.I)
     assert "provider_sentence(" in debit_block
 

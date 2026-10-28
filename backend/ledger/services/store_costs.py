@@ -188,32 +188,32 @@ class HistoryEntry:
     """One row of the store page's cost history, with who superseded or closed it."""
 
     row: StoreCost
-    #: The username of the admin whose correction superseded the row, or "".
-    superseded_by_user: str = ""
-    #: The username of the admin who closed the row, or "".
-    closed_by_user: str = ""
+    #: The admin whose correction superseded the row, or ``None``; shown through ``|staff``.
+    superseded_by_user: User | None = None
+    #: The admin who closed the row, or ``None``; shown through ``|staff``.
+    closed_by_user: User | None = None
 
 
 def history_entries(store: Store) -> list[HistoryEntry]:
     """:func:`history` with the admin of each correction and close, read from the audit
     log (2 queries)."""
     rows = history(store)
-    actors: dict[tuple[str, str], str] = {}
-    for action, entity_id, username in (
+    actors: dict[tuple[str, str], User | None] = {}
+    for logged in (
         AuditLog.objects.filter(
             entity_type=ENTITY_STORE_COST,
             action__in=(ACTION_AUDIT_SUPERSEDED, ACTION_AUDIT_CLOSED_BY_ADMIN),
             entity_id__in=[str(row.pk) for row in rows],
         )
+        .select_related("actor")
         .order_by("at")
-        .values_list("action", "entity_id", "actor__username")
     ):
-        actors[(action, entity_id)] = username or ""
+        actors[(logged.action, logged.entity_id)] = logged.actor
     return [
         HistoryEntry(
             row=row,
-            superseded_by_user=actors.get((ACTION_AUDIT_SUPERSEDED, str(row.pk)), ""),
-            closed_by_user=actors.get((ACTION_AUDIT_CLOSED_BY_ADMIN, str(row.pk)), ""),
+            superseded_by_user=actors.get((ACTION_AUDIT_SUPERSEDED, str(row.pk))),
+            closed_by_user=actors.get((ACTION_AUDIT_CLOSED_BY_ADMIN, str(row.pk))),
         )
         for row in rows
     ]

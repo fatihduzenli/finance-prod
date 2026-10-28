@@ -163,6 +163,7 @@ def charge_export(request: HttpRequest) -> StreamingHttpResponse:
 @require_safe
 def charge_detail(request: HttpRequest, pk: str) -> HttpResponse:
     charge = _load(pk)
+    _drop_debit_notes(request, charge)
     return render(request, "ledger/charges/detail.html", _detail_context(request, charge))
 
 
@@ -396,6 +397,7 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
             form.add_error(outcome.field, outcome.message)
         _hold(request, target, form)
         return redirect(request.get_full_path())
+    _drop_debit_notes(request, charge)
     form = _held(request, target, build) or build(initial={"creation_key": uuid.uuid4()})
     lease = charge.lease
     month = month_text(charge.period_month)
@@ -427,6 +429,15 @@ def _note_key(charge: RentCharge, key: uuid.UUID) -> str:
     """The session entry holding Add payment's note for today's debit until the
     confirmation's POST passes it to :func:`ledger.services.one_off_charges.rent_debit`."""
     return f"rent-debit-note:{charge.pk}:{key}"
+
+
+def _drop_debit_notes(request: HttpRequest, charge: RentCharge) -> None:
+    """Forget every today's-debit note of ``charge`` (PLAN-013a C4): the note lives for one
+    request, the confirmation's; a GET of the rent charge page or of Add payment means
+    the confirmation was left, so nothing stays behind in the session."""
+    prefix = f"rent-debit-note:{charge.pk}:"
+    for name in [name for name in request.session.keys() if name.startswith(prefix)]:
+        request.session.pop(name, None)
 
 
 def _debit(

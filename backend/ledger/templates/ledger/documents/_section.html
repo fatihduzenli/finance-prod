@@ -78,7 +78,7 @@ other input when one is chosen.
         <tr class="document-activity">
           <td>{{ entry.at_new_york }}</td>
           <td class="activity-action">{{ entry.action }}</td>
-          <td>{{ entry.user|default:"—" }}</td>
+          <td>{{ entry.user|staff|default:"—" }}</td>
           <td>{{ entry.kind|default:"—" }}</td>
           <td class="activity-outcome">{{ entry.outcome|default:"—" }}</td>
         </tr>

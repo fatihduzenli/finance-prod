@@ -1,4 +1,4 @@
-{% load responsive dates %}{% responsive_table %}
+{% load responsive dates people %}{% responsive_table %}
 <table class="message-log" id="message-log">
   <thead><tr><th>When</th><th>Step</th><th>Status</th><th>To</th>{% if show_charge %}<th>Charge</th>{% endif %}<th>Sent by</th></tr></thead>
   <tbody>
@@ -9,7 +9,7 @@
         <td>{{ row.status_label }}{% if row.error %} <span class="muted">({{ row.error }})</span>{% endif %}</td>
         <td>{{ row.to }}</td>
         {% if show_charge %}<td>{% if row.charge_type == "rent_charge" %}<a href="{% url 'ledger:charges:detail' pk=row.charge_id %}">Rent charge</a>{% elif row.charge_type == "lease_end" %}<a href="{% url 'ledger:lease_ends:confirm' pk=row.charge_id %}">Lease end</a>{% else %}<a href="{% url 'ledger:one_off_charges:detail' pk=row.charge_id %}">One-off charge</a>{% endif %}</td>{% endif %}
-        <td>{% if row.manual %}<span class="badge">Manual</span> {% endif %}{{ row.sent_by|default:"Ladder" }}</td>
+        <td>{% if row.manual %}<span class="badge">Manual</span> {% endif %}{{ row.sent_by|staff|default:"Ladder" }}</td>
       </tr>
     {% empty %}
       <tr><td colspan="{% if show_charge %}6{% else %}5{% endif %}" class="muted empty">No collection e-mails.</td></tr>

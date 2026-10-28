@@ -468,7 +468,7 @@ def test_the_activity_list_shows_uploads_downloads_and_refusals_of_that_record_o
     assert [entry.action for entry in entries] == ["upload_refused", "downloaded", "uploaded"]
     assert entries[0].outcome == documents_service.TYPE_NOT_ACCEPTED
     assert entries[1].outcome == "ok"
-    assert all(entry.user == billing.get_username() for entry in entries)
+    assert all(entry.user == billing for entry in entries)
     assert [entry.action for entry in audit.activity_for(lease)] == ["uploaded"]
     assert [entry.action for entry in audit.activity_for(other)] == [
         "upload_refused",

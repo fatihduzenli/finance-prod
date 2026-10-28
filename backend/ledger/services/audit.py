@@ -393,7 +393,8 @@ class AuditRow:
     at_utc: str
     at_new_york: str
     action: str
-    user: str
+    #: The admin who acted, or ``None``; a page shows it through ``|staff``.
+    user: User | None
     entity_type: str
     entity_id: str
     before: list[tuple[str, str]]
@@ -459,7 +460,7 @@ def _row(row: AuditLog, owners: Mapping[str, tuple[str, str]]) -> AuditRow:
         at_utc=utc_text(row.at),
         at_new_york=new_york_text(row.at),
         action=row.action,
-        user=row.actor.get_username() if row.actor is not None else "",
+        user=row.actor,
         entity_type=row.entity_type,
         entity_id=mask_identifier(row.entity_id),
         before=pairs(row.before),
@@ -569,7 +570,8 @@ def csv_lines_of(records: Iterable[list[object]]) -> Iterator[str]:
 class Activity:
     at_new_york: str
     action: str
-    user: str
+    #: The staff member, or ``None``; a page shows it through ``|staff``.
+    user: User | None
     kind: str
     outcome: str
 
@@ -598,7 +600,7 @@ def _activity(row: AuditLog) -> Activity:
     return Activity(
         at_new_york=new_york_text(row.at),
         action=row.action.removeprefix(DOCUMENT_ACTIONS),
-        user=row.actor.get_username() if row.actor is not None else "",
+        user=row.actor,
         kind=str(kind) if isinstance(kind, str) else "",
         outcome=outcome,
     )

@@ -263,7 +263,11 @@ def test_the_tiles_read_a_prorated_month_a_collected_deposit_and_one_deduction(a
     )
     assert collected is not None
     assert f'<span class="kpi-note">collected {day_text(collected)}</span>' in held
-    assert '<span class="kpi-value tone-unpaid">$150.00</span>' in deducted
+    # PLAN-013a C7: the value is also table_total.js's output (it follows the typed rows).
+    assert (
+        '<span class="kpi-value tone-unpaid js-total-out" data-total-for="deduction-rows" '
+        'data-tone-above-zero="tone-unpaid">$150.00</span>'
+    ) in deducted
     assert '<span class="kpi-note">1 line</span>' in deducted
 
 
@@ -276,7 +280,9 @@ def test_the_tiles_of_a_full_month_without_a_deposit_or_deduction(admin: Any) ->
     opened, held, deducted = tiles_of(html)
     assert "kpi-note" not in opened and "kpi-note" not in held
     assert '<span class="kpi-value">$0.00</span>' in held
-    assert '<span class="kpi-value">$0.00</span>' in deducted and "tone-unpaid" not in deducted
+    assert '<span class="kpi-value js-total-out" data-total-for="deduction-rows" ' in deducted
+    assert 'data-tone-above-zero="tone-unpaid">$0.00</span>' in deducted
+    assert "kpi-value tone-unpaid" not in deducted
     assert '<span class="kpi-note">0 lines</span>' in deducted
 
 

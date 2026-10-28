@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load responsive %}
+{% load responsive people %}
 {% block title %}Activity log{% endblock %}
 {% block header %}<div class="page-header"><h1>Activity log</h1></div>{% endblock %}
 {% block content %}
@@ -40,7 +40,7 @@
         <tr class="audit-row" id="audit-{{ row.id }}">
           <td class="audit-new-york">{{ row.at_new_york }}</td>
           <td class="audit-action">{{ row.action }}</td>
-          <td class="audit-user">{{ row.user|default:"—" }}</td>
+          <td class="audit-user">{{ row.user|staff|default:"—" }}</td>
           <td class="audit-entity">{{ row.entity_type }} {% if link %}<a href="{{ link }}">{{ row.entity_id }}</a>{% else %}{{ row.entity_id }}{% endif %}</td>
           <td class="audit-before">{% for key, value in row.before %}<div>{% if key %}<strong>{{ key }}</strong>: {% endif %}<span style="white-space:pre-wrap;">{{ value }}</span></div>{% empty %}—{% endfor %}</td>
           <td class="audit-after">{% for key, value in row.after %}<div>{% if key %}<strong>{{ key }}</strong>: {% endif %}<span style="white-space:pre-wrap;">{{ value }}</span></div>{% empty %}—{% endfor %}</td>

@@ -143,13 +143,8 @@ def _needs_terms(end: LeaseEnd) -> HttpResponse | None:
 def _needs_statement(request: HttpRequest, end: LeaseEnd) -> HttpResponse | None:
     """PLAN-012f-a §10: confirm needs the statement step saved in this wizard."""
     if end.statement_saved_at is None:
-        return _statement_first(request, end)
+        return wizard_frame.statement_first(request, end)
     return None
-
-
-def _statement_first(request: HttpRequest, end: LeaseEnd) -> HttpResponse:
-    messages.error(request, service.STATEMENT_REQUIRED)
-    return redirect("ledger:lease_ends:statement", pk=end.pk)
 
 
 def _needs_clear(request: HttpRequest, end: LeaseEnd) -> HttpResponse | None:
@@ -414,7 +409,7 @@ def confirm(request: HttpRequest, pk: str) -> HttpResponse:
                 messages.success(request, outcome.message)
                 return redirect("ledger:lease_ends:confirm", pk=end.pk)
             if outcome.field == "statement":
-                return _statement_first(request, end)
+                return wizard_frame.statement_first(request, end)
             form.add_error(None, outcome.message)
         _hold(request, target, form)
         return redirect("ledger:lease_ends:confirm", pk=end.pk)

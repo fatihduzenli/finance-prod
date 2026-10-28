@@ -275,11 +275,11 @@ def test_the_link_is_on_the_debit_card_only(fake: FakeProvider) -> None:
 
 def test_the_old_send_sentence_is_gone_and_the_builder_keeps_its_own() -> None:
     assert not hasattr(service, "DEBIT_NO_METHOD_SEND")
-    # How to collect (the invoice builder) still greys its tiles with DEBIT_NO_METHOD.
+    # PLAN-013a C3: How to collect greys its tiles with the Add payment card's sentence too; the
+    # dashboard instruction lives on the Payments help topic and no constant carries it.
+    assert not hasattr(service, "DEBIT_NO_METHOD")
     name_provider()
-    assert str(service.DEBIT_NO_METHOD) == (
-        "No bank account on file — add one in the PayCo dashboard, then Update from PayCo."
-    )
+    assert service.DEBIT_NO_ACCOUNT == "No bank account on file for {operator}."
 
 
 def test_the_payments_help_topic_says_how_to_add_a_bank_account() -> None:

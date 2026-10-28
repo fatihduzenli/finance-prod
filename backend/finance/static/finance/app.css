@@ -1509,6 +1509,13 @@ p.detail-more-notes { padding-left: 0; }
   .list-card > .table-cards > table > tbody > tr:last-child > td { border-bottom: 0; }
   .table-cards > table td.cell-chevron, .table-cards > table th.cell-chevron { display: none; }
   .table-cards > table#stores.role-cards > tbody > tr > td[data-role=status] { order: 3; margin-left: 0; text-align: left; }
+  /* PLAN-013a C6 (12f-a B-3): the list family's meta line. Its inline links (the stores list's
+     Operator) at text height, not the 44 px of a cell's link, so they no longer stretch the
+     line; the row itself stays at least 44 px tall (its title link is). The stores list's
+     Status badge joins the Balance badge at the head of line 2, so the two stay on one line. */
+  .list-card > .table-cards > table.role-cards > tbody > tr { min-height: var(--tap); }
+  .list-card > .table-cards > table.role-cards > tbody > tr > td[data-role^=meta] a { display: inline; min-height: 0; }
+  .table-cards > table#stores.role-cards > tbody > tr > td[data-role=meta-badge] { order: 3; }
   .table-cards > table.role-cards > tbody > tr > td[data-role=actions] { order: 6; flex: 0 0 100%; }
   .table-cards > table.role-cards td[data-role=actions] .btn, .table-cards > table.role-cards td[data-role=actions] button { display: flex; justify-content: center; align-items: center; width: 100%; min-height: var(--tap); box-sizing: border-box; }
   .table-cards > table.role-cards td[data-role=actions] > * + * { margin-top: var(--space-2); }

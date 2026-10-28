@@ -329,20 +329,21 @@ def _collect_form(
     """How to collect, bound to ``data`` (a POST or a held form), else with the radio
     ``?collect=`` names (:func:`~ledger.forms.initial_choice`). Every tile shows (PLAN-012f-b
     D15): Charge now greyed below admin, with the pay-an-invoice flag off or no bank account
-    on file (:func:`ledger.services.invoice_builder.charge_now_unavailable`); Schedule for a
-    date and Set up autopay greyed with no bank account on file
-    (:func:`ledger.services.invoice_builder.bank_unavailable`) or where ``can_schedule`` is
-    false."""
+    on file; Schedule for a date and Set up autopay greyed with no bank account on file or
+    where ``can_schedule`` is false (:func:`ledger.services.invoice_builder.bank_tiles`, with
+    the "Operator page" link and Charge now's second line, PLAN-013a C3)."""
+    bank = invoice_builder.bank_tiles(operator)
     greyed: dict[str, Any] = {
         "can_charge_now": meets(_role(request), Role.ADMIN),
         "can_schedule": can_schedule,
-        "charge_now_why": invoice_builder.charge_now_unavailable(operator),
-        "bank_why": invoice_builder.bank_unavailable(operator),
+        "charge_now_why": bank.charge_now_why,
+        "bank_why": bank.bank_why,
     }
+    lines: dict[str, Any] = {"bank_url": bank.bank_url, "charge_now_more": bank.charge_now_more}
     if data is not None:
-        return CollectForm(data, **greyed)
+        return CollectForm(data, **greyed, **lines)
     chosen = initial_choice(request.GET.get("collect"), **greyed)
-    return CollectForm(initial={"collect": chosen}, **greyed)
+    return CollectForm(initial={"collect": chosen}, **greyed, **lines)
 
 
 def _billed(operator: Operator | None, lease: Lease | None) -> Operator | None:

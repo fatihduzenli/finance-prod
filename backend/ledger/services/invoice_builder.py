@@ -1525,23 +1525,43 @@ def _charge_now_refusal(operator: Operator, total: Decimal) -> str:
     return leases.provider_limit_refusal([total])
 
 
-def bank_unavailable(operator: Operator | None) -> str:
-    """Why How to collect greys the tiles that debit the bank account on file (Charge now,
-    Schedule for a date, Set up autopay; PLAN-012f-b D15) for ``operator``: no usable bank
-    method on file (Add payment's sentence, D14), or ``""``. Local data only."""
+@dataclass(frozen=True, slots=True)
+class BankTiles:
+    """How to collect's greyed bank-debit tiles for one operator (PLAN-012f-b D15; PLAN-013a
+    C3, as on Add payment). ``bank_why``: the one line of Schedule for a date, Set up autopay
+    and Schedule settlement, no usable bank method on file
+    (:data:`~ledger.services.one_off_charges.DEBIT_NO_ACCOUNT` naming the operator), or
+    ``""``; ``bank_url``: the "Operator page" link under it (``""`` without an operator);
+    ``charge_now_why``: Charge now's line, ``bank_why`` first, then the pay-an-invoice flag
+    off (it gates that call only; schedules work without it); ``charge_now_more``: Charge
+    now's second line when no bank method is on file and the flag is off as well."""
+
+    bank_why: str
+    bank_url: str
+    charge_now_why: str
+    charge_now_more: str
+
+
+def bank_tiles(operator: Operator | None) -> BankTiles:
+    """:class:`BankTiles` for ``operator``. Local data only."""
     method = leases.linked_method_record(operator) if leases.customer_ref(operator) else None
-    if method is None or not method.is_usable_bank:
-        return str(one_off_charges.DEBIT_NO_METHOD)
-    return ""
+    enabled = one_off_charges.charge_now_enabled()
+    if method is not None and method.is_usable_bank:
+        off = "" if enabled else str(one_off_charges.DEBIT_OFF)
+        return BankTiles(bank_why="", bank_url="", charge_now_why=off, charge_now_more="")
+    line, url = one_off_charges.no_account_line(operator)
+    more = "" if enabled else str(one_off_charges.DEBIT_ALSO_OFF)
+    return BankTiles(bank_why=line, bank_url=url, charge_now_why=line, charge_now_more=more)
+
+
+def bank_unavailable(operator: Operator | None) -> str:
+    """:attr:`BankTiles.bank_why` of ``operator``."""
+    return bank_tiles(operator).bank_why
 
 
 def charge_now_unavailable(operator: Operator | None) -> str:
-    """Why How to collect greys Charge now for ``operator`` (PLAN-012f-b D15), or ``""``:
-    the pay-an-invoice flag off (it gates that call only; schedules work without it), then
-    :func:`bank_unavailable`."""
-    if not one_off_charges.charge_now_enabled():
-        return str(one_off_charges.DEBIT_OFF)
-    return bank_unavailable(operator)
+    """:attr:`BankTiles.charge_now_why` of ``operator``."""
+    return bank_tiles(operator).charge_now_why
 
 
 def charge_now_details(draft: InvoiceDraft, actor: User | None) -> ChargeNowDetails:

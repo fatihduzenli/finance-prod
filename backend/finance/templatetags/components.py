@@ -49,6 +49,7 @@ escaped.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 from datetime import date
 from decimal import ROUND_FLOOR, Decimal, InvalidOperation
@@ -159,15 +160,44 @@ def status_badge(label: object, value: object = None) -> SafeString:
     )
 
 
+#: What ``kpi``'s ``value_attrs`` may hold: ``data-*`` attributes with plain values only.
+_VALUE_ATTRS_RE = re.compile(r'(?: data-[a-z][a-z-]*="[A-Za-z0-9_-]*")*')
+#: What ``kpi``'s ``value_class`` may hold: class names separated by spaces.
+_VALUE_CLASS_RE = re.compile(r"(?:[A-Za-z][A-Za-z0-9_-]*(?: [A-Za-z][A-Za-z0-9_-]*)*)?")
+
+
 @register.simple_tag
-def kpi(label: object, value: object, note: object = "", tone: str = "") -> SafeString:
-    """A KPI card: the label, the value (red for ``tone="unpaid"``), the third line."""
-    value_class = f"kpi-value tone-{tone}" if tone in KPI_TONES else "kpi-value"
+def kpi(
+    label: object,
+    value: object,
+    note: object = "",
+    tone: str = "",
+    *,
+    value_class: str = "",
+    value_attrs: str = "",
+) -> SafeString:
+    """A KPI card: the label, the value (red for ``tone="unpaid"``), the third line.
+
+    ``value_class`` adds class names to the value and ``value_attrs`` gives it ``data-*``
+    attributes (a script's hooks, as the statement step's live Deductions tile, PLAN-013a
+    C7); both are template literals, and anything else is a template mistake
+    (``ValueError``). Without them the output is unchanged."""
+    if not _VALUE_CLASS_RE.fullmatch(value_class):
+        raise ValueError(f"kpi value_class {value_class!r} is not class names")
+    attrs = f" {value_attrs.strip()}" if value_attrs.strip() else ""
+    if not _VALUE_ATTRS_RE.fullmatch(attrs):
+        raise ValueError(f"kpi value_attrs {value_attrs!r} are not plain data- attributes")
+    value_class = " ".join(
+        part
+        for part in ("kpi-value", f"tone-{tone}" if tone in KPI_TONES else "", value_class)
+        if part
+    )
     third = format_html('<span class="kpi-note">{}</span>', note) if note not in ("", None) else ""
     return format_html(
-        '<div class="kpi"><span class="kpi-label">{}</span><span class="{}">{}</span>{}</div>',
+        '<div class="kpi"><span class="kpi-label">{}</span><span class="{}"{}>{}</span>{}</div>',
         label,
         value_class,
+        mark_safe(attrs),  # noqa: S308 (checked above: data- attributes with plain values)
         value,
         third,
     )
