@@ -69,10 +69,9 @@ def test_the_markers_reach_the_tests(pytestconfig: pytest.Config) -> None:
         check=False,
     ).stdout
     names = {line.split("::", 1)[1] for line in out.splitlines() if "::" in line}
+    round_trip = set(_collected("backend/tests/test_migrations_roundtrip.py"))
     expected = {
-        key.split("::", 1)[1]
-        for key, shard in ROUNDTRIP_SHARDS.items()
-        if shard == 2 and key.startswith("test_migrations_roundtrip.py")
+        test for test, shard in ROUNDTRIP_SHARDS.items() if shard == 2 and test in round_trip
     }
     assert names == expected
 
