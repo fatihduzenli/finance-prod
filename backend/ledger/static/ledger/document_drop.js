@@ -2,7 +2,8 @@
 // (docs/qa/PLAN-010c D7, PLAN-011 D9). A dropped file goes into the file input. The box
 // has two inputs (a file, or a photo from the camera) and the server takes one file per
 // submit, so choosing in one input clears the other. The form is a plain multipart post
-// and works without this script. No file content is read here.
+// and works without this script. No file content is read here. While a file is dragged over
+// the box it carries the class is-dragover (app.css colours it from the tokens, PLAN-012g A5).
 (function () {
   "use strict";
   document.querySelectorAll(".js-document-drop").forEach(function (zone) {
@@ -32,14 +33,14 @@
     });
     zone.addEventListener("dragover", function (event) {
       event.preventDefault();
-      zone.style.background = "#eef4ff";
+      zone.classList.add("is-dragover");
     });
     zone.addEventListener("dragleave", function () {
-      zone.style.background = "";
+      zone.classList.remove("is-dragover");
     });
     zone.addEventListener("drop", function (event) {
       event.preventDefault();
-      zone.style.background = "";
+      zone.classList.remove("is-dragover");
       var files = event.dataTransfer ? event.dataTransfer.files : null;
       if (!files || files.length !== 1) {
         if (hint) {

@@ -29,7 +29,7 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 .phone-bar, .phone-search, .sheet-close, .tab-bar { display: none; }
 
 /* --- Sidebar: the logo, the navigation, the user card ------------------------------------- */
-.sidebar { grid-column: 1; grid-row: 1 / span 2; position: sticky; top: 0; height: 100vh; box-sizing: border-box; overflow-y: auto; display: flex; flex-direction: column; padding: 20px 14px; background: var(--sidebar-gradient); color: var(--sidebar-text); }
+.sidebar { grid-column: 1; grid-row: 1 / span 2; position: sticky; top: 0; height: 100vh; box-sizing: border-box; overflow-y: auto; display: flex; flex-direction: column; padding: 20px 14px; background: var(--sidebar-bg); background-image: var(--sidebar-gradient); box-shadow: inset -1px 0 0 var(--sidebar-border); color: var(--sidebar-text); }
 .sidebar :focus-visible, .phone-bar :focus-visible { box-shadow: 0 0 0 2px var(--navy), 0 0 0 4px var(--green); }
 .sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); margin: 0 0 26px; }
 .sidebar-logo { display: inline-flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); color: var(--sidebar-active-text); text-decoration: none; font-weight: 600; font-size: var(--fs-md); }
@@ -37,7 +37,7 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 .nav-list, .nav-sublist, .more-list { list-style: none; margin: 0; padding: 0; }
 .nav-list > li + li { margin-top: 2px; }
 .nav-item { display: flex; align-items: center; gap: var(--space-3); box-sizing: border-box; width: 100%; padding: 10px 12px; border-radius: var(--radius-ctl); color: var(--sidebar-text); font-size: var(--fs-md); font-weight: 500; text-decoration: none; cursor: pointer; }
-.nav-item:hover, .nav-sublist a:hover { background: color-mix(in srgb, var(--surface) 8%, transparent); }
+.nav-item:hover, .nav-sublist a:hover { background: var(--sidebar-card-bg); }
 .nav-item[aria-current="page"], .nav-sublist a[aria-current="page"] { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); font-weight: 600; }
 .nav-item[aria-current="true"] { color: var(--sidebar-active-text); font-weight: 600; }
 /* Reports and Admin: their pages in a nested list, open under the active group (Reports on its
@@ -49,8 +49,18 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 .nav-disclosure > summary::-webkit-details-marker { display: none; }
 .nav-disclosure > summary .icon-chevron-down { margin-left: auto; transition: transform 120ms; }
 .nav-disclosure[open] > summary .icon-chevron-down { transform: rotate(180deg); }
+/* The Appearance control above the user card (PLAN-012g A3; DESIGN-SPEC §7.1, §7.6): a muted
+   12 px label, then the Light · Dark · System segmented form across the sidebar's width, its
+   track one step lighter than the sidebar (--sidebar-card-bg), the unpressed segments in
+   --sidebar-text. */
+.sidebar-appearance { margin-top: auto; margin-bottom: var(--space-3); }
+.sidebar-label { margin: 0 0 6px; padding: 0 2px; color: var(--sidebar-text); opacity: .7; font-size: var(--fs-sm); }
+.sidebar .theme-switch { display: flex; flex-wrap: nowrap; background: var(--sidebar-card-bg); }
+.sidebar .theme-switch button { flex: 1 1 0; justify-content: center; padding: 5px 6px; }
+.sidebar .theme-switch button[aria-pressed="false"] { color: var(--sidebar-text); }
+.sidebar-appearance + .user-card { margin-top: 0; }
 /* The user card: name, then role · Settings · Help · Sign out (a POST form). */
-.user-card { margin-top: auto; padding: 12px; border-radius: var(--radius-ctl); background: color-mix(in srgb, var(--surface) 8%, transparent); color: var(--sidebar-text); font-size: var(--fs-sm); }
+.user-card { margin-top: auto; padding: 12px; border-radius: var(--radius-ctl); background: var(--sidebar-card-bg); color: var(--sidebar-text); font-size: var(--fs-sm); }
 .user-name { display: block; margin-bottom: 2px; color: var(--sidebar-active-text); font-size: var(--fs-base); font-weight: 600; overflow-wrap: anywhere; }
 .user-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-1); }
 .user-meta form { margin: 0; display: inline; }
@@ -59,7 +69,7 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 
 /* --- Content column: the page header, then the page --------------------------------------- */
 .content { grid-column: 2; grid-row: 2; min-width: 0; }
-.page-header-bar { background: var(--surface); border-bottom: 1px solid var(--border); }
+.page-header-bar { background: var(--header-bg); border-bottom: 1px solid var(--border); }
 .page-header-inner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-4); box-sizing: border-box; min-height: 64px; padding: var(--space-3) var(--space-8); }
 .page-header-bar h1 { margin: 0; color: var(--text); font-size: var(--fs-h1); font-weight: 600; }
 /* The header's search box (the dashboard, the stores list and the grid; PLAN-012d D17): a GET
@@ -105,7 +115,7 @@ img, iframe { max-width: 100%; }
    (h2) is the card's 15/600 title. .card-header: a header row (the title, an optional
    .count-pill, a right-aligned .card-link such as "All payments →"). .section-label: the
    13/600 muted uppercase label of a right-column card (LEASE, NEXT, STORE COST, DOCUMENTS). */
-.card { margin: 0 0 var(--space-5); padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.card { margin: 0 0 var(--space-5); padding: 18px 20px; border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface); }
 .card h2 { margin: 0 0 var(--space-3); font-size: var(--fs-lg); font-weight: 600; }
 .card > * + h2, .card > section + section > h2 { margin-top: var(--space-5); }
 .card-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); }
@@ -122,7 +132,7 @@ img, iframe { max-width: 100%; }
    and More menus), its label ending with "▾". */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box; padding: 10px 16px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-base); font-weight: 600; line-height: 1.2; text-decoration: none; white-space: nowrap; cursor: pointer; }
 .btn:hover { border-color: var(--muted); }
-.btn-primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-border); color: var(--surface); font-weight: 600; }
+.btn-primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-border); color: var(--btn-primary-text); font-weight: 600; }
 .btn-sm { padding: 6px 12px; font-size: var(--fs-sm); font-weight: 500; }
 .btn-danger { color: var(--unpaid-text); }
 .btn-menu { list-style: none; }
@@ -177,18 +187,22 @@ p.help { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-sm
 
 /* --- Segmented filter --------------------------------------------------------------------
    .segmented: a few links that filter one list (the Charges tab's Open / Paid / All and the
-   Invoices tab's filter): a grey track on --bg, radius 8; the current segment (aria-current
-   "page") white with a 1 px ring. The grid's status filter stays a select. */
-.segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--bg); }
-.segmented a { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; }
-.segmented a[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+   Invoices tab's filter): a grey track (--seg-track, --bg), radius 8; the current segment
+   (aria-current "page") on the thumb (--seg-thumb, white) with a 1 px ring (--seg-thumb-ring).
+   The grid's status filter stays a select. The segments may be buttons of one form (the
+   Light · Dark · System control, PLAN-012g A3): the pressed one (aria-pressed "true") takes
+   the thumb. */
+.segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--seg-track); }
+.segmented a, .segmented button { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; }
+.segmented button { margin: 0; border: 0; background: none; font-family: inherit; line-height: inherit; cursor: pointer; }
+.segmented a[aria-current="page"], .segmented button[aria-pressed="true"] { background: var(--seg-thumb); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--seg-thumb-ring); }
 /* .radio-segmented: a radio group drawn as the same track (the operator form's Type,
    PLAN-012f-b D9, B2-2): each option's label a segment, the chosen one white with the 1 px
    ring; the radio itself stays in the page for the keyboard and screen readers, unseen. */
-.radio-segmented:not(input) { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--bg); }
+.radio-segmented:not(input) { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--seg-track); }
 .radio-segmented > div { display: flex; }
 .radio-segmented > div > label { position: relative; display: inline-flex; align-items: center; margin: 0; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; cursor: pointer; }
-.radio-segmented > div > label:has(input:checked) { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+.radio-segmented > div > label:has(input:checked) { background: var(--seg-thumb); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--seg-thumb-ring); }
 .radio-segmented > div > label:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 1px; }
 .radio-segmented input[type=radio] { position: absolute; opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; margin: 0; pointer-events: none; }
 
@@ -269,7 +283,7 @@ td.line-number { white-space: nowrap; color: var(--muted); }
    its value (.kpi-value, 28/700; .tone-unpaid red) and a third line (.kpi-note, 12 px
    muted). .kpi-row: the cards in a row; .kpi-link: a card that is a link. */
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-4); margin: 0 0 var(--space-5); }
-.kpi { display: flex; flex-direction: column; gap: var(--space-1); height: 100%; box-sizing: border-box; padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.kpi { display: flex; flex-direction: column; gap: var(--space-1); height: 100%; box-sizing: border-box; padding: 18px 20px; border: 1px solid var(--card-border); border-radius: var(--radius-card); background: var(--surface); }
 .kpi-label { color: var(--muted); font-size: var(--fs-sm); }
 .kpi-value { color: var(--text); font-size: var(--fs-kpi); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .kpi-value.tone-unpaid { color: var(--unpaid-text); }
@@ -374,7 +388,7 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .confirm .confirm-question { margin-top: 0; font-size: var(--fs-lg); }
 .confirm-what h2, .confirm-what h3 { font-size: var(--fs-md); margin: var(--space-4) 0 var(--space-2); }
 .confirm-what ul { margin: 0 0 var(--space-3); padding-left: var(--space-6); }
-.confirm .btn-danger { background: var(--unpaid-text); border-color: var(--unpaid-text); color: var(--surface); }
+.confirm .btn-danger { background: var(--btn-danger-bg); border-color: var(--btn-danger-bg); color: var(--text-on-accent); }
 
 /* --- Flash messages ----------------------------------------------------------------------
    .toasts: the list of flash messages; .toast: one message (role "status" in an
@@ -386,12 +400,12 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
    success, warning and error on the status pairs (error text --error-text), information
    --navy on --neutral-bg; 10 px radius; the level's icon (.toast-icon) before the text. */
 .toasts { list-style: none; margin: 0 0 var(--space-4); padding: 0; }
-.toast { display: flex; align-items: flex-start; gap: 10px; padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); border-radius: 10px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); background: var(--neutral-bg); color: var(--navy); font-size: var(--fs-base); line-height: 1.4; overflow: hidden; }
+.toast { display: flex; align-items: flex-start; gap: 10px; padding: var(--space-3) var(--space-4); margin-bottom: var(--space-2); border-radius: 10px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); background: var(--flash-info-bg); color: var(--flash-info-text); font-size: var(--fs-base); line-height: 1.4; overflow: hidden; }
 .toast-icon { flex: 0 0 auto; display: inline-flex; padding-top: 1px; }
 .toast-text { flex: 1 1 auto; }
-.toast.success { background: var(--paid-bg); color: var(--paid-text); }
-.toast.warning { background: var(--pending-bg); color: var(--pending-text); }
-.toast.error { background: var(--unpaid-bg); color: var(--error-text); }
+.toast.success { background: var(--flash-success-bg); color: var(--flash-success-text); }
+.toast.warning { background: var(--flash-warning-bg); color: var(--flash-warning-text); }
+.toast.error { background: var(--flash-error-bg); color: var(--flash-error-text); }
 .toast.error .toast-icon { color: var(--unpaid-text); }
 .toast-dismiss { flex: 0 0 auto; background: none; border: 0; padding: 0 var(--space-1); font: inherit; font-size: var(--fs-lg); line-height: 1; color: inherit; cursor: pointer; }
 .toast:not(.warning):not(.error) { animation: toast-fade 600ms ease-in 8s forwards; }
@@ -413,7 +427,7 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 .steps li { counter-increment: step; display: inline-flex; align-items: center; gap: var(--space-1); padding: 6px var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); font-size: var(--fs-base); }
 .steps li::before { content: counter(step) "."; color: var(--text-2); }
 .steps li.step-done::before { content: "\2713"; content: "\2713" / ""; color: var(--paid-text); font-weight: 700; }
-.steps li[aria-current="step"] { background: var(--navy); border-color: var(--navy); color: var(--surface); }
+.steps li[aria-current="step"] { background: var(--navy); border-color: var(--navy); color: var(--text-on-accent); }
 .steps li[aria-current="step"]::before { color: var(--sidebar-text); }
 
 /* --- Workspace (the store and operator pages: PLAN-012d D1, the approved design's layout
@@ -565,9 +579,13 @@ td.attention-action { text-align: right; }
 .mini-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font: inherit; }
 button.mini-num { cursor: pointer; font-weight: 600; }
 button.mini-num:hover { background: var(--month-current); }
-.mini-day.is-today .mini-num { background: var(--btn-primary-bg); color: var(--surface); font-weight: 700; }
-.mini-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--teal); }
-.mini-popover { display: none; position: absolute; top: 100%; left: 50%; z-index: 20; width: 14rem; margin: 2px 0 0; padding: var(--space-2); transform: translateX(-50%); border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); list-style: none; text-align: left; }
+.mini-day.is-today .mini-num { background: var(--btn-primary-bg); color: var(--text-on-accent); font-weight: 700; }
+.mini-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+/* The dot's colour is the day's first item's kind (PLAN-012g A4; DESIGN-SPEC §7.3): the debit
+   day --dot-rent, a lease end --dot-lease-end, any other kind --muted. */
+.mini-day:has(.mini-popover > .calendar-item:first-child.kind-debit) .mini-dot { background: var(--dot-rent); }
+.mini-day:has(.mini-popover > .calendar-item:first-child.kind-lease_end) .mini-dot { background: var(--dot-lease-end); }
+.mini-popover { display: none; position: absolute; top: 100%; left: 50%; z-index: 20; width: 14rem; margin: 2px 0 0; padding: var(--space-2); transform: translateX(-50%); border: 1px solid var(--popover-border); border-radius: var(--radius-ctl); background: var(--surface-2); box-shadow: var(--popover-shadow); list-style: none; text-align: left; }
 .mini-day:nth-child(7n + 1) .mini-popover, .mini-day:nth-child(7n + 2) .mini-popover { left: 0; transform: none; }
 .mini-day:nth-child(7n) .mini-popover, .mini-day:nth-child(7n + 6) .mini-popover { left: auto; right: 0; transform: none; }
 .mini-day:hover .mini-popover, .mini-day:focus-within .mini-popover, .mini-day.is-open .mini-popover { display: block; }
@@ -660,7 +678,7 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
    and under the panel is a short gradient header (the logo and the headline) and the form takes
    the width. */
 body.auth { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 1fr auto auto 1fr; min-height: 100vh; padding-top: 0 !important; background: var(--bg); }
-.auth-brand { grid-column: 1; grid-row: 1 / -1; position: relative; overflow: hidden; display: flex; flex-direction: column; gap: var(--space-6); box-sizing: border-box; min-height: 100vh; padding: 56px 56px 48px; background: var(--login-gradient); color: var(--sidebar-text); }
+.auth-brand { grid-column: 1; grid-row: 1 / -1; position: relative; overflow: hidden; display: flex; flex-direction: column; gap: var(--space-6); box-sizing: border-box; min-height: 100vh; padding: 56px 56px 48px; background: var(--login-gradient); background-color: var(--sidebar-bg); color: var(--sidebar-text); }
 .auth-shape { position: absolute; pointer-events: none; }
 .auth-shape-1 { top: 0; right: 0; width: 280px; height: 300px; border-radius: 0 0 0 80px; background: color-mix(in srgb, var(--teal) 12%, transparent); }
 .auth-shape-2 { bottom: 0; right: 60px; width: 360px; height: 160px; border-radius: 80px 80px 0 0; background: color-mix(in srgb, var(--teal) 10%, transparent); }
@@ -840,7 +858,7 @@ fieldset.card > legend + * { clear: both; }
 .wizard-steps-card .steps li.step-done { color: var(--text-2); }
 .wizard-steps-card .steps li.step-done::before { content: "\2713"; content: "\2713" / ""; border-color: var(--paid-text); background: var(--paid-bg); color: var(--paid-text); font-weight: 700; }
 .wizard-steps-card .steps li[aria-current="step"] { background: none; color: var(--text); }
-.wizard-steps-card .steps li[aria-current="step"]::before { border-color: var(--btn-primary-border); background: var(--btn-primary-bg); color: var(--surface); }
+.wizard-steps-card .steps li[aria-current="step"]::before { border-color: var(--btn-primary-border); background: var(--btn-primary-bg); color: var(--text-on-accent); }
 .wizard-steps-card .steps li strong { font-weight: 700; }
 .wizard-steps-card .steps li a { color: inherit; text-decoration: none; }
 .wizard-steps-card .steps li a:hover { text-decoration: underline; }
@@ -854,7 +872,7 @@ fieldset.card > legend + * { clear: both; }
 .wizard-help { margin: 0 0 var(--space-5); font-size: var(--fs-base); }
 .wizard-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-2); }
 .confirm > .wizard-footer { margin: var(--space-5) 0 0; }
-.wizard-footer .btn-danger { background: var(--unpaid-text); border-color: var(--unpaid-text); color: var(--surface); }
+.wizard-footer .btn-danger { background: var(--btn-danger-bg); border-color: var(--btn-danger-bg); color: var(--text-on-accent); }
 .wizard-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin: 0 0 var(--space-5); }
 .wizard-tiles .kpi { gap: 2px; padding: var(--space-3) 14px; background: var(--surface-2); }
 .wizard-tiles .kpi-value { font-size: 20px; }
@@ -958,8 +976,8 @@ fieldset.card > legend + * { clear: both; }
 @media (max-width: 768px) {
   body.app { display: flex; flex-direction: column; }
   body.app > #sandbox-banner { order: -2; top: var(--phone-bar-h) !important; }
-  .phone-bar { order: -3; display: flex; align-items: center; gap: var(--space-3); position: sticky; top: 0; z-index: 30; box-sizing: border-box; height: var(--phone-bar-h); padding: 0 var(--space-4); background: var(--sidebar-gradient); color: var(--sidebar-active-text); }
-  .phone-bar-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: var(--tap); height: var(--tap); border-radius: var(--radius-ctl); background: color-mix(in srgb, var(--surface) 10%, transparent); cursor: pointer; }
+  .phone-bar { order: -3; display: flex; align-items: center; gap: var(--space-3); position: sticky; top: 0; z-index: 30; box-sizing: border-box; height: var(--phone-bar-h); padding: 0 var(--space-4); background: var(--sidebar-bg); background-image: var(--sidebar-gradient); color: var(--sidebar-active-text); }
+  .phone-bar-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: var(--tap); height: var(--tap); border-radius: var(--radius-ctl); background: var(--phone-bar-button-bg); cursor: pointer; }
   .phone-bar-logo { margin-right: auto; display: inline-flex; align-items: center; }
   .phone-bar-logo img { height: 30px; width: auto; display: block; }
   #nav-toggle:focus-visible ~ .phone-bar #nav-menu, #search-toggle:focus-visible ~ .phone-bar #phone-search-button { box-shadow: 0 0 0 2px var(--navy), 0 0 0 4px var(--green); }
@@ -992,6 +1010,11 @@ fieldset.card > legend + * { clear: both; }
   .more-list a, .more-list button { display: flex; align-items: center; gap: var(--space-3); box-sizing: border-box; width: 100%; min-height: var(--tap); padding: 0 var(--space-2); background: none; border: 0; color: var(--text); font: inherit; font-size: var(--fs-md); text-align: left; text-decoration: none; cursor: pointer; }
   .more-list form { margin: 0; }
   .more-list .more-group { padding: var(--space-2) var(--space-2) 0; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .more-list .more-appearance { padding: 0 0 var(--space-2); }
+  .more-list .more-appearance .more-group { margin: 0 0 var(--space-2); }
+  .more-list .theme-switch { display: flex; }
+  .more-list .theme-switch button { flex: 1 1 0; justify-content: center; width: auto; padding: 0 var(--space-3); font-size: var(--fs-base); }
+  .more-list .theme-switch button[aria-pressed="false"] { color: var(--muted); }
   .more-list .more-sublist { list-style: none; margin: 0; padding: 0 0 0 var(--space-6); }
   /* The dashboard (DESIGN-SPEC §6): KPI cards two per row, the rest stacked. */
   .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
@@ -1101,7 +1124,7 @@ fieldset.card > legend + * { clear: both; }
 .list-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 .list-filters label { margin: 0; }
 .list-filters .list-search { flex: 1 1 18rem; min-width: 12rem; max-width: none; }
-.btn-dark { background: var(--navy); border-color: var(--navy); color: var(--surface); }
+.btn-dark { background: var(--navy); border-color: var(--navy); color: var(--text-on-accent); }
 .btn-dark:hover { border-color: var(--navy); opacity: .92; }
 .list-card > .table-cards > table td, .list-card > .table-cards > table th { vertical-align: middle; }
 .list-card > .table-cards > table > tbody > tr:last-child > td { border-bottom: 1px solid var(--border); }
@@ -1112,7 +1135,7 @@ fieldset.card > legend + * { clear: both; }
 .pager-pages .pager-off:hover { border-color: var(--input-border); }
 .pager-page { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; box-sizing: border-box; padding: 0 var(--space-2); border-radius: var(--radius-ctl); color: var(--text); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
 a.pager-page:hover { background: var(--surface-2); }
-.pager-page[aria-current="page"] { background: var(--navy); color: var(--surface); }
+.pager-page[aria-current="page"] { background: var(--navy); color: var(--text-on-accent); }
 .pager-gap { color: var(--muted); }
 th.cell-chevron, td.cell-chevron { width: 1%; padding-left: 0; text-align: right; white-space: nowrap; }
 td.cell-chevron a { display: inline-flex; color: var(--muted); }
@@ -1349,7 +1372,7 @@ p.detail-more-notes { padding-left: 0; }
 .calendar-num-link:hover { color: var(--link); }
 .calendar-weekday { display: none; }
 .calendar-num { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 50%; }
-.calendar-day.today .calendar-num { background: var(--btn-primary-bg); color: var(--surface); }
+.calendar-day.today .calendar-num { background: var(--btn-primary-bg); color: var(--text-on-accent); }
 .calendar-add-day { padding: 0 4px; color: var(--muted); font-weight: 400; text-decoration: none; }
 .calendar-add-day:hover { color: var(--link); }
 @media (hover: hover) {
@@ -1423,6 +1446,10 @@ p.detail-more-notes { padding-left: 0; }
 .plan-end-form fieldset { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: 0; padding: 0; border: 0; }
 .plan-end-form legend { margin-bottom: var(--space-1); font-weight: 700; }
 .plan-end-rule { display: inline-flex; align-items: center; gap: var(--space-1); }
+
+/* The document upload box while a file is dragged over it (ledger/static/ledger/document_drop.js,
+   PLAN-012g A5). */
+.js-document-drop.is-dragover { background: var(--surface-2); }
 
 /* --- Tablet and phone: touch targets ---------------------------------------------------- */
 @media (max-width: 1023.98px), (pointer: coarse) {

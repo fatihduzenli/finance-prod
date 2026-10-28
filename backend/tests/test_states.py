@@ -215,14 +215,19 @@ def test_each_flash_message_carries_its_level_s_icon_before_the_text(
 def test_the_flash_styles_are_the_spec_s_four_pairs() -> None:
     toast = _rule(".toast")
     assert "border-radius: 10px;" in toast
-    assert "background: var(--neutral-bg); color: var(--navy);" in toast  # information
-    assert _rule(".toast.success").strip() == "background: var(--paid-bg); color: var(--paid-text);"
+    # The four pairs are the --flash-* tokens since PLAN-012g A1 (the light values unchanged).
+    assert "background: var(--flash-info-bg); color: var(--flash-info-text);" in toast
     assert (
-        _rule(".toast.warning").strip()
-        == "background: var(--pending-bg); color: var(--pending-text);"
+        _rule(".toast.success").strip()
+        == "background: var(--flash-success-bg); color: var(--flash-success-text);"
     )
     assert (
-        _rule(".toast.error").strip() == "background: var(--unpaid-bg); color: var(--error-text);"
+        _rule(".toast.warning").strip()
+        == "background: var(--flash-warning-bg); color: var(--flash-warning-text);"
+    )
+    assert (
+        _rule(".toast.error").strip()
+        == "background: var(--flash-error-bg); color: var(--flash-error-text);"
     )
     tokens = (STATIC / "tokens.css").read_text(encoding="utf-8")
     assert "--error-text: #8A1C14;" in tokens

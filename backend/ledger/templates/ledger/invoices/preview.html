@@ -1,5 +1,7 @@
 {% extends "finance/base.html" %}
 {% block title %}Preview {{ preview.number }}{% endblock %}
+{% block theme %}light{% endblock %}{# DESIGN-SPEC §7.1: invoice previews stay light (PLAN-012g A2) #}
+{% block theme_color %}{% include "finance/_theme_color.html" with theme="light" %}{% endblock %}
 {% block head %}<style>
   @media print {
     nav, .no-print, ul.messages { display: none !important; }

@@ -4,8 +4,8 @@ docs/design/DESIGN-SPEC.md §4a): no chart library and no script.
 ``{% bars rows %}`` draws the Cashflow card's months: ``rows`` are objects with ``month``,
 ``income``, ``expenses`` (``None``: unknown, no bar), ``net`` (``None``: no point) and
 ``in_range`` (``False``: a month before the range, its bars faded, its label kept legible).
-Each month is a pair of bars, Income teal and Expenses muted blue, each with a ``<title>``
-holding its figure, and the net is a navy line through the months it is known in. The scale
+Each month is a pair of bars, Income and Expenses, each with a ``<title>`` holding its figure,
+and the net is a line through the months it is known in. The scale
 holds zero and every figure, so a negative month reads below the zero line. The ``<svg>`` is
 ``role="img"`` with a sentence as its ``aria-label``. Every month's label is written, as a
 ``<text class="bar-label">``; the labels kept where the chart is narrow (a phone) are every
@@ -20,9 +20,10 @@ its colour, and the total is written in the middle through :func:`format_amount`
 total draws the empty ring.
 
 ``{% chart_key key %}`` draws the 8 px key of a chart colour (``income``, ``expenses``,
-``net``, ``overdue``, ``paid``, ``upcoming``) for a legend or a box beside its word: the
-colours live here, beside the charts that use them, not in the style sheets (which hold
-tokens only).
+``net``, ``overdue``, ``paid``, ``upcoming``) for a legend or a box beside its word.
+
+Every colour is a ``var(--chart-*)`` reference to a token of ``tokens.css`` (PLAN-012g A4;
+DESIGN-SPEC §7.3, both themes); no literal colour is written.
 
 Coordinates are computed in ``Decimal`` and written with one decimal; money is written by
 :func:`ledger.wording.format_amount`, months by :func:`finance.dates.month_text`. Every text
@@ -45,18 +46,20 @@ from ledger.wording import format_amount
 
 register = template.Library()
 
-INCOME_FILL = "#0E8F86"
-EXPENSES_FILL = "#8FA3BF"
-NET_STROKE = "#0B2545"
-AXIS_STROKE = "#E3E8EF"
-LABEL_FILL = "#5F6E85"
-#: The donut's colours (DESIGN-SPEC §4a).
+#: The chart colours are tokens (tokens.css, DESIGN-SPEC §7.3; PLAN-012g A4), written verbatim
+#: into the SVG attributes so each theme resolves its own value.
+INCOME_FILL = "var(--chart-income)"
+EXPENSES_FILL = "var(--chart-expenses)"
+NET_STROKE = "var(--chart-net)"
+AXIS_STROKE = "var(--chart-axis)"
+LABEL_FILL = "var(--chart-label)"
+#: The donut's colours by part.
 DONUT_COLOURS: dict[str, str] = {
-    "overdue": "#8A1C14",
-    "paid": "#176B33",
-    "upcoming": "#0B2545",
+    "overdue": "var(--chart-overdue)",
+    "paid": "var(--chart-paid)",
+    "upcoming": "var(--chart-upcoming)",
 }
-RING_EMPTY = "#E8ECF2"
+RING_EMPTY = "var(--chart-ring-empty)"
 #: Every chart colour by its key (``{% chart_key %}``).
 KEY_COLOURS: dict[str, str] = {
     "income": INCOME_FILL,

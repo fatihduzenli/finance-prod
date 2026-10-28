@@ -359,6 +359,7 @@ NOT_PAGES: dict[str, str] = {
     "finance:manifest": "the PWA manifest (JSON)",
     "finance:service_worker": "the service worker (JavaScript)",
     "finance:feed_create": POST_ONLY,
+    "finance:theme": POST_ONLY,  # the appearance choice (PLAN-012g A3)
     "finance:feed_revoke": POST_ONLY,
     "ledger:calendar:feed": "the public calendar feed (iCalendar; its token is the credential)",
     "ledger:calendar:delete": POST_ONLY,

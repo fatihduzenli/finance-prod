@@ -58,8 +58,9 @@ def test_banner_is_fixed_full_width_and_yellow(client: Client) -> None:
     assert "top:0" in element
     assert "width:100%" in element
     # The approved design (docs/design/DESIGN-SPEC.md §1, PLAN-012f D3): #6B4E00 on #FFF3C4,
-    # 12 px, 600, letter-spacing .04em, upper case.
-    assert "background:#FFF3C4;color:#6B4E00;" in element
+    # 12 px, 600, letter-spacing .04em, upper case. PLAN-012g A5: the sandbox tokens, with the
+    # light values as fallbacks for the pages that never load tokens.css (this admin page).
+    assert "background:var(--sandbox-bg,#FFF3C4);color:var(--sandbox-text,#6B4E00);" in element
     assert "font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;" in (
         element
     )

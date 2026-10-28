@@ -39,14 +39,20 @@ page header. finance/dialog.js runs the {% dialog %} component (PLAN-012f-b D2) 
 page. The dialog block, after the content, holds a confirmation page's open {% dialog %}: the
 confirmation template extends its parent page's template and fills only this block (and its
 title), so the parent page shows behind the dialog (PLAN-012f-b E-4). The sign-in pages keep their own base, two_factor/_base.html.
+The theme (PLAN-012g A2, A3; DESIGN-SPEC §7.1): <html data-theme> is the user's stored choice
+(finance.context_processors.theme: light, dark or system; tokens.css resolves System through
+prefers-color-scheme, so no script and no flash); a page that must stay light (the invoice
+preview) overrides {% block theme %} and {% block theme_color %}. The theme-color meta follows it (finance/_theme_color.html).
+The Light · Dark · System control (finance/_theme_switch.html) sits at the bottom of the sidebar
+above the user card, under "Appearance", and as the first row of the More sheet.
 {% endcomment %}{% load icons roles shell static %}<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="{% block theme %}{{ theme }}{% endblock %}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   {% if job_refresh %}<meta http-equiv="refresh" content="5">{% endif %}
   <title>{{ company.short_name }} · {% block title %}{% endblock %}</title>
-  <meta name="theme-color" content="{{ theme_color }}">
+  {% block theme_color %}{% include "finance/_theme_color.html" %}{% endblock %}
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'finance/app.css' %}">
   <link rel="stylesheet" href="{% static 'finance/print.css' %}" media="print">
@@ -98,6 +104,10 @@ title), so the parent page shows behind the dialog (PLAN-012f-b E-4). The sign-i
         </li>
       </ul>
     </nav>
+    <div class="sidebar-appearance" id="sidebar-appearance">
+      <p class="sidebar-label" id="appearance-label">Appearance</p>
+      {% include "finance/_theme_switch.html" with switch_id="theme-switch" label_id="appearance-label" %}
+    </div>
     <div class="user-card" id="user-card">
       <span class="user-name" id="user-menu-name"{% if nav_section == "settings" or nav_section == "help" %} aria-current="true"{% endif %}>{{ request.user.get_full_name|default:request.user.get_username }}</span>
       <div class="user-meta">{% with role=request.user|role_label %}{% if role %}<span class="user-role" id="user-role">{{ role }}</span> · {% endif %}{% endwith %}<a href="{% url 'finance:settings' %}" id="nav-settings"{% if nav_section == "settings" %} aria-current="page"{% endif %}>Settings</a> · <a href="{% url 'finance:help' %}" id="nav-help"{% if nav_section == "help" %} aria-current="page"{% endif %}>Help</a> · <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="link-button" id="nav-sign-out">Sign out</button></form></div>
@@ -127,6 +137,7 @@ title), so the parent page shows behind the dialog (PLAN-012f-b E-4). The sign-i
       <summary class="tab-item" id="tab-more"{% if nav_tab == "more" %} aria-current="page"{% endif %}>{% icon "more" 22 %}<span>More</span></summary>
       <div class="more-sheet-panel">
         <ul class="more-list">
+          <li class="more-appearance"><p class="more-group" id="more-appearance-label">Appearance</p>{% include "finance/_theme_switch.html" with switch_id="more-theme-switch" label_id="more-appearance-label" %}</li>
           <li><a href="{% url 'ledger:operators:list' %}">{% icon "operators" %}Operators</a></li>
           <li><a href="{% url 'ledger:reports:index' %}">{% icon "reports" %}Reports</a></li>
           <li><span class="more-group">Admin</span>

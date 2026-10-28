@@ -165,7 +165,13 @@ def pair_ratio(pair: Pair, defined: dict[str, str]) -> float:
 #: The one pair the owner accepted under AA (decision of 2026-10-22, PLAN-012f Batch A): the
 #: primary button keeps the fill #0E8F86 with a dark border; white on it measures 3.97:1. Any
 #: other pair under its threshold, or this pair moving, fails the test.
-ACCEPTED_UNDER_AA: dict[str, tuple[float, float]] = {"--surface on --btn-primary-bg": (3.9, 4.1)}
+ACCEPTED_UNDER_AA: dict[str, tuple[float, float]] = {
+    # The owner accepted white on the primary button's fill at 3.97 (2026-10-22); the same pair
+    # under its 12g names, in both themes.
+    "--surface on --btn-primary-bg": (3.9, 4.1),
+    "--btn-primary-text on --btn-primary-bg": (3.9, 4.1),
+    "--text-on-accent on --btn-primary-bg": (3.9, 4.1),
+}
 
 
 def contrast_failures(
@@ -562,7 +568,7 @@ def test_every_control_on_the_sign_in_and_error_pages_has_a_label() -> None:
     for name, status, response in sign_in_and_error_pages():
         assert response.status_code == status, (name, response.status_code)
         page = response.content.decode()
-        assert '<html lang="en">' in page, name
+        assert '<html lang="en" data-theme="system">' in page, name  # PLAN-012g A2
         assert page.count("<h1") == 1, name  # one heading names the page
         findings += [f"{name}: {c}" for c in unlabelled_controls(page)]
     assert findings == [], "controls without a label:\n" + "\n".join(findings)

@@ -294,7 +294,8 @@ def test_the_list_keeps_its_query_budget(viewer: Client) -> None:
     # 11 before PLAN-012f-a D3 (the session and the shell, the count and the page); +3: the
     # page's one query became one over every store (its lease, operator, rent and the counts
     # line from the same rows), and the balances are receivables.open_balances' four queries.
-    assert small <= 14
+    # +1 since PLAN-012g A2: the theme row.
+    assert small <= 15
     for number in range(25):
         store = a_numbered_store(f"More {number}", 7000 + number)
         lease = a_lease(store, an_operator(f"M{number}"))

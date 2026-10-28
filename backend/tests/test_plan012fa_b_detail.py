@@ -587,13 +587,13 @@ def test_the_calendar_entry_page_has_the_family_frame() -> None:
 #: 10 → 11 (the Activity rows). None grows with the rows. PLAN-012f-b §10 D19 (slice C2):
 #: rent 28 → 30 (the open bank debit shown beside the payments, and the split refusal's
 #: open-debit guard).
-BUDGETS = {
-    "one_off": 37,
-    "rent": 30,
-    "payment": 17,
-    "invoice": 26,
-    "lease": 30,
-    "calendar": 11,
+BUDGETS = {  # +1 on every page since PLAN-012g A2: the theme row
+    "one_off": 38,
+    "rent": 31,
+    "payment": 18,
+    "invoice": 27,
+    "lease": 31,
+    "calendar": 12,
 }
 
 

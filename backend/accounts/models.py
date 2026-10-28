@@ -1,4 +1,5 @@
-"""Sign-in bookkeeping. No IP address is stored (personal data); user agent only."""
+"""Sign-in bookkeeping (no IP address is stored, personal data; user agent only) and the
+user's display preference (PLAN-012g A2: the theme, Light, Dark or System)."""
 
 from __future__ import annotations
 
@@ -24,3 +25,25 @@ class UserSession(models.Model):
 
     def __str__(self) -> str:
         return f"Session of user {self.user_id} since {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class Theme(models.TextChoices):
+    """The appearance a user chose (DESIGN-SPEC §7.1); System follows the device."""
+
+    LIGHT = "light", "Light"
+    DARK = "dark", "Dark"
+    SYSTEM = "system", "System"
+
+
+class UserPreference(models.Model):
+    """One row per user who has chosen a display preference; no row reads as the defaults
+    (:func:`accounts.themes.theme_for`)."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="preference"
+    )
+    theme = models.CharField(max_length=6, choices=Theme.choices, default=Theme.SYSTEM)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"Preference of user {self.user_id}"

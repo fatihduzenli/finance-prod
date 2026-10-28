@@ -52,9 +52,60 @@
    pair: --sidebar-text on --login-gradient[end]
    pair: --sidebar-active-text on --login-gradient[start]
    pair: --sidebar-active-text on --login-gradient[end]
-   The sandbox banner (finance/templates/finance/banner.html) carries #6B4E00 on #FFF3C4 as
-   literals, the pending pair's values: it is injected into the Django admin too, which never
-   loads this file. White on --btn-primary-bg is the primary button's label, white on #B42318 the confirming
+   pair: --sidebar-text on --sidebar-bg
+   pair: --sidebar-active-text on --sidebar-bg
+   pair: --btn-primary-text on --btn-primary-bg
+   pair: --text-on-accent on --btn-primary-bg
+   pair: --text-on-accent on --btn-danger-bg
+   pair: --text-on-accent on --navy
+   pair: --sandbox-text on --sandbox-bg
+   pair: --sidebar-text on --sidebar-card-bg over --sidebar-gradient[start]
+   pair: --sidebar-text on --sidebar-card-bg over --sidebar-gradient[end]
+   pair: --chart-label on --surface
+   pair: --flash-success-text on --flash-success-bg
+   pair: --flash-warning-text on --flash-warning-bg
+   pair: --flash-error-text on --flash-error-bg
+   pair: --flash-info-text on --flash-info-bg
+   The same pairs in the dark theme (PLAN-012g A1, A6; DESIGN-SPEC §7.2), each measured with
+   the values of the dark blocks below (a name the dark blocks do not set keeps its light
+   value). The sidebar is flat --sidebar-bg in dark, so its pairs name that, not a gradient.
+   pair[dark]: --text on --bg
+   pair[dark]: --text on --surface
+   pair[dark]: --text on --surface-2
+   pair[dark]: --text-2 on --surface
+   pair[dark]: --text-2 on --surface-2
+   pair[dark]: --muted on --surface
+   pair[dark]: --muted on --bg
+   pair[dark]: --muted on --surface-2
+   pair[dark]: --link on --surface
+   pair[dark]: --link on --bg
+   pair[dark]: --sidebar-text on --sidebar-bg
+   pair[dark]: --sidebar-text on --sidebar-card-bg
+   pair[dark]: --sidebar-active-text on --sidebar-bg
+   pair[dark]: --sidebar-active-text on --sidebar-active-bg over --sidebar-bg
+   pair[dark]: --paid-text on --paid-bg
+   pair[dark]: --unpaid-text on --unpaid-bg
+   pair[dark]: --overdue-text on --overdue-bg
+   pair[dark]: --pending-text on --pending-bg
+   pair[dark]: --partial-text on --partial-bg
+   pair[dark]: --waived-text on --waived-bg
+   pair[dark]: --neutral-text on --neutral-bg
+   pair[dark]: --error-text on --unpaid-bg
+   pair[dark]: --sandbox-text on --sandbox-bg
+   pair[dark]: --btn-primary-text on --btn-primary-bg
+   pair[dark]: --text-on-accent on --btn-primary-bg
+   pair[dark]: --text-on-accent on --btn-danger-bg
+   pair[dark]: --text-on-accent on --navy
+   pair[dark]: --text on --month-current over --surface
+   pair[dark]: --link on --month-current over --surface
+   pair[dark]: --chart-label on --surface
+   pair[dark]: --flash-success-text on --flash-success-bg
+   pair[dark]: --flash-warning-text on --flash-warning-bg
+   pair[dark]: --flash-error-text on --flash-error-bg
+   pair[dark]: --flash-info-text on --flash-info-bg
+   The sandbox banner (finance/templates/finance/banner.html) takes --sandbox-text on
+   --sandbox-bg (PLAN-012g A5; before 12g it carried the pending pair's values as literals).
+   White on --btn-primary-bg is the primary button's label, white on #B42318 the confirming
    button of a destructive action, white on the navy the open tab and the current wizard step
    (until the components of PLAN-012f D6); --green is the focus ring on the sidebar and the phone bar,
    --link the focus ring on light surfaces. --faint is decoration only (rules, placeholder
@@ -87,7 +138,18 @@
    sidebar gradient's two stops at 160 degrees (DESIGN-SPEC §4 Login), so its text pairs measure
    as the sidebar's (sidebar-text 11.5 and 7.3, white 15.4 and 9.8); its two soft teal shapes
    (teal at 12 % and 10 % over the panel, color-mix in app.css) are decoration and sit beside
-   the text, not under it. */
+   the text, not under it.
+   PLAN-012g Batch A (the dark theme, DESIGN-SPEC §7) adds the names the dark theme needs, each
+   with its light value in the sub-block marked below, so every colour resolves through a token
+   in both themes; light looks as before except the dashboard's chart palette (§7.3 light). Two
+   values differ from the batch brief to keep light pixel-identical: --flash-success-bg is the
+   paid background #E3F5E8 and --flash-info-bg the neutral #E8ECF2 (the flash messages' colours
+   as built). --btn-danger-bg (#B42318, the filled destructive button) is added beside the
+   brief's names: in dark --unpaid-text is a light pink, under which white text would fail AA.
+   The dark values sit in two identical blocks inside @media screen, so print never sees them:
+   :root[data-theme="dark"] (the stored choice) and :root[data-theme="system"] under
+   prefers-color-scheme: dark (System resolves in CSS, no script; PLAN-012g A1). A test holds
+   the two blocks identical. */
 
 @font-face {
   font-family: Inter;
@@ -146,4 +208,133 @@
   /* the error flash message's text (PLAN-012f-b E-4; DESIGN-SPEC §4 States: #8A1C14 on the
      unpaid background); no other token carries this value */
   --error-text: #8A1C14;
+
+  /* added by 12g for the dark theme (PLAN-012g A1): the light values; the dark ones below */
+  --sidebar-bg: #0B2545;  --sidebar-border: transparent;  --sidebar-card-bg: rgba(255,255,255,.08);
+  --phone-bar-button-bg: rgba(255,255,255,.10);
+  --header-bg: var(--surface);  --card-border: var(--border);
+  --text-on-accent: #FFFFFF;  --btn-primary-text: #FFFFFF;  --btn-danger-bg: #B42318;
+  --sandbox-bg: #FFF3C4;  --sandbox-text: #6B4E00;
+  --seg-track: var(--bg);  --seg-thumb: var(--surface);  --seg-thumb-ring: var(--border);
+  --popover-border: var(--border);  --popover-shadow: none;
+  --flash-success-bg: #E3F5E8;  --flash-success-text: #176B33;
+  --flash-warning-bg: #FFF3C4;  --flash-warning-text: #6B4E00;
+  --flash-error-bg: #FDE8E6;    --flash-error-text: #8A1C14;
+  --flash-info-bg: #E8ECF2;     --flash-info-text: #0B2545;
+  --chart-income: #5B6BE8;  --chart-expenses: #C9CEDD;  --chart-net: #0E8F86;
+  --chart-axis: var(--border);  --chart-label: var(--muted);
+  --chart-overdue: #B42318;  --chart-paid: #1B7F3B;  --chart-upcoming: #0B2545;  --chart-ring-empty: var(--neutral-bg);
+  --dot-rent: #13A89E;  --dot-settles: #1B7F3B;  --dot-promise: #B7791F;  --dot-lease-end: #B42318;
 }
+
+/* The dark theme (PLAN-012g A1; DESIGN-SPEC §7.2, §7.3, §7.6). Screen only: print resolves the
+   light values above. The two blocks declare the same names and values (a test compares them):
+   the stored choice "dark", and "system" when the device prefers dark. */
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    /* shell */
+    --sidebar-gradient: none;  --login-gradient: none;
+    --sidebar-bg: #171721;  --sidebar-border: #2E2E3D;  --sidebar-card-bg: var(--surface-2);
+    --phone-bar-button-bg: var(--surface-2);
+    --sidebar-text: #A3A3B3;  --sidebar-active-bg: rgba(46,196,166,.18);  --sidebar-active-text: #FFFFFF;
+    --header-bg: var(--bg);  --card-border: transparent;
+
+    /* surfaces */
+    --bg: #171721;  --surface: #1E1E2A;  --surface-2: #272735;
+    --border: #2E2E3D;  --border-soft: #26263A;  --input-border: #70707D;
+
+    /* text */
+    --text: #EDEDF3;  --text-2: #C3C3CC;  --muted: #A3A3B3;  --faint: #70707D;
+    --link: #2EC4A6;
+
+    /* the primary button: the light theme's teal (§7.2 --primary-*); white text */
+    --btn-primary-bg: #0E8F86;  --btn-primary-border: #0A6B64;  --btn-primary-text: #FFFFFF;
+    --text-on-accent: #FFFFFF;  --btn-danger-bg: #B42318;
+
+    /* status (bg / text) */
+    --paid-bg: #1F3A2C;      --paid-text: #7FDCA4;
+    --unpaid-bg: #3A2226;    --unpaid-text: #F2A3A8;
+    --overdue-bg: #5A1D24;   --overdue-text: #FFD6D9;
+    --pending-bg: #3A3420;   --pending-text: #F0D68A;
+    --partial-bg: #3D2A1A;   --partial-text: #F5B98A;
+    --waived-bg: #2E2E3D;    --waived-text: #C3C3CC;
+    --neutral-bg: #2E2E3D;   --neutral-text: #C3C3CC;
+    --error-text: #F2A3A8;
+
+    /* sandbox banner */
+    --sandbox-bg: #3A3420;  --sandbox-text: #F0D68A;
+
+    /* components */
+    --seg-track: var(--bg);  --seg-thumb: var(--surface);  --seg-thumb-ring: transparent;
+    --popover-border: #3A3A4C;  --popover-shadow: 0 12px 32px rgba(0,0,0,.45);
+    --month-current: rgba(46,196,166,.08);
+    --progress-pending: #E5B84D;  --progress-partial: #F5B98A;
+    --flash-success-bg: #1F3A2C;  --flash-success-text: #7FDCA4;
+    --flash-warning-bg: #3A3420;  --flash-warning-text: #F0D68A;
+    --flash-error-bg: #3A2226;    --flash-error-text: #F2A3A8;
+    --flash-info-bg: #1E2A3A;     --flash-info-text: #C3D3EE;
+
+    /* charts (§7.3 dark) and the mini calendar's dots */
+    --chart-income: #7C8CF8;  --chart-expenses: #3E4460;  --chart-net: #2EC4A6;
+    --chart-axis: var(--border);  --chart-label: var(--muted);
+    --chart-overdue: #E5484D;  --chart-paid: #46C47E;  --chart-upcoming: #8FA3BF;  --chart-ring-empty: #2E2E3D;
+    --dot-rent: #2EC4A6;  --dot-settles: #46C47E;  --dot-promise: #E5B84D;  --dot-lease-end: #E5484D;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root[data-theme="system"] {
+      color-scheme: dark;
+
+      /* shell */
+      --sidebar-gradient: none;  --login-gradient: none;
+      --sidebar-bg: #171721;  --sidebar-border: #2E2E3D;  --sidebar-card-bg: var(--surface-2);
+      --phone-bar-button-bg: var(--surface-2);
+      --sidebar-text: #A3A3B3;  --sidebar-active-bg: rgba(46,196,166,.18);  --sidebar-active-text: #FFFFFF;
+      --header-bg: var(--bg);  --card-border: transparent;
+
+      /* surfaces */
+      --bg: #171721;  --surface: #1E1E2A;  --surface-2: #272735;
+      --border: #2E2E3D;  --border-soft: #26263A;  --input-border: #70707D;
+
+      /* text */
+      --text: #EDEDF3;  --text-2: #C3C3CC;  --muted: #A3A3B3;  --faint: #70707D;
+      --link: #2EC4A6;
+
+      /* the primary button: the light theme's teal (§7.2 --primary-*); white text */
+      --btn-primary-bg: #0E8F86;  --btn-primary-border: #0A6B64;  --btn-primary-text: #FFFFFF;
+      --text-on-accent: #FFFFFF;  --btn-danger-bg: #B42318;
+
+      /* status (bg / text) */
+      --paid-bg: #1F3A2C;      --paid-text: #7FDCA4;
+      --unpaid-bg: #3A2226;    --unpaid-text: #F2A3A8;
+      --overdue-bg: #5A1D24;   --overdue-text: #FFD6D9;
+      --pending-bg: #3A3420;   --pending-text: #F0D68A;
+      --partial-bg: #3D2A1A;   --partial-text: #F5B98A;
+      --waived-bg: #2E2E3D;    --waived-text: #C3C3CC;
+      --neutral-bg: #2E2E3D;   --neutral-text: #C3C3CC;
+      --error-text: #F2A3A8;
+
+      /* sandbox banner */
+      --sandbox-bg: #3A3420;  --sandbox-text: #F0D68A;
+
+      /* components */
+      --seg-track: var(--bg);  --seg-thumb: var(--surface);  --seg-thumb-ring: transparent;
+      --popover-border: #3A3A4C;  --popover-shadow: 0 12px 32px rgba(0,0,0,.45);
+      --month-current: rgba(46,196,166,.08);
+      --progress-pending: #E5B84D;  --progress-partial: #F5B98A;
+      --flash-success-bg: #1F3A2C;  --flash-success-text: #7FDCA4;
+      --flash-warning-bg: #3A3420;  --flash-warning-text: #F0D68A;
+      --flash-error-bg: #3A2226;    --flash-error-text: #F2A3A8;
+      --flash-info-bg: #1E2A3A;     --flash-info-text: #C3D3EE;
+
+      /* charts (§7.3 dark) and the mini calendar's dots */
+      --chart-income: #7C8CF8;  --chart-expenses: #3E4460;  --chart-net: #2EC4A6;
+      --chart-axis: var(--border);  --chart-label: var(--muted);
+      --chart-overdue: #E5484D;  --chart-paid: #46C47E;  --chart-upcoming: #8FA3BF;  --chart-ring-empty: #2E2E3D;
+      --dot-rent: #2EC4A6;  --dot-settles: #46C47E;  --dot-promise: #E5B84D;  --dot-lease-end: #E5484D;
+    }
+  }
+}
+

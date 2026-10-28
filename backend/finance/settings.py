@@ -152,6 +152,8 @@ TEMPLATES = [
                 "finance.context_processors.navigation",
                 # PLAN-012c D2: the company's names and logo (company.name, ...).
                 "finance.context_processors.company",
+                # PLAN-012g A2: the user's theme (<html data-theme>).
+                "finance.context_processors.theme",
             ],
         },
     },

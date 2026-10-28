@@ -16,6 +16,7 @@ from two_factor.urls import urlpatterns as two_factor_urlpatterns
 
 from finance import help as help_pages
 from finance import pwa
+from finance import theme as theme_views
 from ledger.views import calendar as calendar_views
 
 
@@ -54,6 +55,8 @@ urlpatterns = [
                         calendar_views.feed_revoke,
                         name="feed_revoke",
                     ),
+                    # The user's theme, Light, Dark or System (PLAN-012g A3).
+                    path("settings/theme/", theme_views.set_theme_view, name="theme"),
                     # The help pages (PLAN-012e-2 D10): static, signed in, every role.
                     path("help/", help_pages.index, name="help"),
                     path("help/<slug:slug>/", help_pages.topic, name="help_topic"),

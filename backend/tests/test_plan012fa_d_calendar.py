@@ -30,7 +30,7 @@ TODAY = date(2026, 10, 6)  # a Tuesday
 #: role and the shell's reads, the three calendar reads, the stores and operators selects),
 #: one more for the user's feed on the FEED card. The month, the selected day and the next
 #: seven days share the three calendar reads.
-PAGE_QUERIES = 15
+PAGE_QUERIES = 16  # +1 since PLAN-012g A2: the theme row
 
 
 @pytest.fixture

@@ -269,6 +269,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # One's own calendar feed (PLAN-011b D8, D10): any role, for their own feed only.
     "finance:feed_create": RouteRule(min_role=Role.VIEWER, methods=POST),
     "finance:feed_revoke": RouteRule(min_role=Role.VIEWER, methods=POST),
+    # One's own theme (PLAN-012g A3): any role, for their own preference only.
+    "finance:theme": RouteRule(min_role=Role.VIEWER, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every

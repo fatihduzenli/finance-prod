@@ -17,13 +17,16 @@ brand's own file, never the company row's override (a stored document needs a se
 colours and sizes are app.css's (tokens.css first); the forms and their flow are the
 package's own. The tab title is "<short name> · <page>" from the company settings (PLAN-012c
 D2).
+The theme (PLAN-012g A2; DESIGN-SPEC §7.1): no user yet, so the pages follow the device
+(data-theme="system", resolved by tokens.css through prefers-color-scheme, with no script) and
+carry the two System theme-color metas.
 {% endcomment %}{% load icons static %}<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="system">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ company.short_name }} · {% block title %}{% endblock %}</title>
-  <meta name="theme-color" content="{{ theme_color }}">
+  {% include "finance/_theme_color.html" with theme="system" %}
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'finance/app.css' %}">
   <link rel="icon" href="{% static 'finance/brand/monvera_icon_192.png' %}" type="image/png" sizes="192x192">
