@@ -165,7 +165,13 @@ def pair_ratio(pair: Pair, defined: dict[str, str]) -> float:
 #: The one pair the owner accepted under AA (decision of 2026-10-22, PLAN-012f Batch A): the
 #: primary button keeps the fill #0E8F86 with a dark border; white on it measures 3.97:1. Any
 #: other pair under its threshold, or this pair moving, fails the test.
-ACCEPTED_UNDER_AA: dict[str, tuple[float, float]] = {"--surface on --btn-primary-bg": (3.9, 4.1)}
+ACCEPTED_UNDER_AA: dict[str, tuple[float, float]] = {
+    # The owner accepted white on the primary button's fill at 3.97 (2026-10-22); the same pair
+    # under its 12g names, in both themes.
+    "--surface on --btn-primary-bg": (3.9, 4.1),
+    "--btn-primary-text on --btn-primary-bg": (3.9, 4.1),
+    "--text-on-accent on --btn-primary-bg": (3.9, 4.1),
+}
 
 
 def contrast_failures(

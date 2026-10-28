@@ -368,11 +368,11 @@ def test_the_charges_filter_is_a_segmented_control() -> None:
     assert links == [("open", ""), ("paid", ' aria-current="page"'), ("all", "")]
     assert "btn" not in control  # segments, not buttons
     track = rule(".segmented")
-    assert "background: var(--bg);" in track and "border-radius: var(--radius-ctl);" in track
-    active = rule('.segmented a[aria-current="page"]')
-    assert "background: var(--surface);" in active and "box-shadow: 0 0 0 1px var(--border);" in (
-        active
-    )
+    assert "background: var(--seg-track);" in track and "border-radius: var(--radius-ctl);" in track
+    # Since PLAN-012g A3 the thumb is a token and a pressed button is a segment too.
+    active = rule('.segmented a[aria-current="page"], .segmented button[aria-pressed="true"]')
+    assert "background: var(--seg-thumb);" in active
+    assert "box-shadow: 0 0 0 1px var(--seg-thumb-ring);" in active
     # The grid's status filter stays a select.
     grid = page(client_for(Role.VIEWER)[0], "/grid/")
     assert '<select name="status" id="status">' in grid
@@ -470,7 +470,7 @@ def test_the_card_buttons_and_inputs_follow_the_spec() -> None:
     card = rule(".card")
     for declaration in (
         "padding: 18px 20px;",
-        "border: 1px solid var(--border);",
+        "border: 1px solid var(--card-border);",
         "border-radius: var(--radius-card);",
         "background: var(--surface);",
     ):
