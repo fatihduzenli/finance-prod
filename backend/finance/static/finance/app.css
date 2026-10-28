@@ -75,7 +75,7 @@ body.app > #sandbox-banner { grid-column: 2; grid-row: 1; position: sticky !impo
 /* The header's search box (the dashboard, the stores list and the grid; PLAN-012d D17): a GET
    form to the search page on --surface-2 with its icon. */
 .nav-search { position: relative; margin: 0; flex: 0 1 320px; }
-.nav-search input[type=search] { width: 100%; box-sizing: border-box; padding: 9px 12px 9px 36px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--fs-base); }
+.nav-search input[type=search] { width: 100%; box-sizing: border-box; padding: 9px 14px 9px 36px; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--fs-base); }
 .nav-search .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 
 /* --- Page --------------------------------------------------------------------------- */
@@ -125,15 +125,15 @@ img, iframe { max-width: 100%; }
 .section-label { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-base); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 
 /* --- Buttons -----------------------------------------------------------------------------
-   .btn: the secondary button, white with --input-border, 10/16, radius 8, 600.
+   .btn: the secondary button, white with --input-border, 10/18, a pill (DESIGN-SPEC §7.4), 600.
    .btn-primary: the page's one primary action on the button tokens, white text.
-   .btn-sm: a row's small button, 6/12 at 12 px. .btn-danger: a destructive action, its text
+   .btn-sm: a row's small button, 6/14 at 12 px. .btn-danger: a destructive action, its text
    red (a confirmation page fills it, below). .btn-menu: the summary of a drop-down (the Lease
    and More menus), its label ending with "▾". */
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box; padding: 10px 16px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-base); font-weight: 600; line-height: 1.2; text-decoration: none; white-space: nowrap; cursor: pointer; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box; padding: 10px 18px; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-base); font-weight: 600; line-height: 1.2; text-decoration: none; white-space: nowrap; cursor: pointer; }
 .btn:hover { border-color: var(--muted); }
 .btn-primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-border); color: var(--btn-primary-text); font-weight: 600; }
-.btn-sm { padding: 6px 12px; font-size: var(--fs-sm); font-weight: 500; }
+.btn-sm { padding: 6px 14px; font-size: var(--fs-sm); font-weight: 500; }
 .btn-danger { color: var(--unpaid-text); }
 .btn-menu { list-style: none; }
 .btn-menu::-webkit-details-marker { display: none; }
@@ -155,11 +155,13 @@ img, iframe { max-width: 100%; }
 .menu .menu-danger { color: var(--unpaid-text); }
 
 /* --- Inputs and selects ------------------------------------------------------------------
-   Every text field, select and text area: 9/12, --input-border, radius 8, on --surface; a
-   search field on --surface-2. The focus ring is --link's (the :focus-visible rule above),
+   Every text field and select: 9/14, --input-border, a pill (DESIGN-SPEC §7.4), on --surface;
+   a text area keeps 9/12 and radius 8 (no pill text area in the mock); a search field on
+   --surface-2. The focus ring is --link's (the :focus-visible rule above),
    and the border takes --link too. */
-input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=tel], input[type=url], select, textarea { box-sizing: border-box; max-width: 100%; padding: 9px 12px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-md); }
+input[type=text], input[type=email], input[type=search], input[type=number], input[type=password], input[type=date], input[type=month], input[type=tel], input[type=url], select, textarea { box-sizing: border-box; max-width: 100%; padding: 9px 14px; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-md); }
 input[type=text], input[type=email], input[type=search], textarea { width: 100%; }
+textarea { padding: 9px 12px; border-radius: var(--radius-ctl); }
 input[type=search] { background: var(--surface-2); }
 input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--link); }
 
@@ -187,21 +189,21 @@ p.help { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-sm
 
 /* --- Segmented filter --------------------------------------------------------------------
    .segmented: a few links that filter one list (the Charges tab's Open / Paid / All and the
-   Invoices tab's filter): a grey track (--seg-track, --bg), radius 8; the current segment
-   (aria-current "page") on the thumb (--seg-thumb, white) with a 1 px ring (--seg-thumb-ring).
+   Invoices tab's filter): a grey pill track (--seg-track, --bg); the current segment
+   (aria-current "page") on the pill thumb (--seg-thumb, white) with a 1 px ring (--seg-thumb-ring).
    The grid's status filter stays a select. The segments may be buttons of one form (the
    Light · Dark · System control, PLAN-012g A3): the pressed one (aria-pressed "true") takes
    the thumb. */
-.segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--seg-track); }
-.segmented a, .segmented button { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; }
+.segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--seg-track); }
+.segmented a, .segmented button { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: var(--radius-pill); color: var(--muted); font-size: var(--fs-base); font-weight: 500; text-decoration: none; }
 .segmented button { margin: 0; border: 0; background: none; font-family: inherit; line-height: inherit; cursor: pointer; }
 .segmented a[aria-current="page"], .segmented button[aria-pressed="true"] { background: var(--seg-thumb); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--seg-thumb-ring); }
 /* .radio-segmented: a radio group drawn as the same track (the operator form's Type,
    PLAN-012f-b D9, B2-2): each option's label a segment, the chosen one white with the 1 px
    ring; the radio itself stays in the page for the keyboard and screen readers, unseen. */
-.radio-segmented:not(input) { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--seg-track); }
+.radio-segmented:not(input) { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--seg-track); }
 .radio-segmented > div { display: flex; }
-.radio-segmented > div > label { position: relative; display: inline-flex; align-items: center; margin: 0; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: var(--fs-base); font-weight: 500; cursor: pointer; }
+.radio-segmented > div > label { position: relative; display: inline-flex; align-items: center; margin: 0; padding: 5px 12px; border-radius: var(--radius-pill); color: var(--muted); font-size: var(--fs-base); font-weight: 500; cursor: pointer; }
 .radio-segmented > div > label:has(input:checked) { background: var(--seg-thumb); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--seg-thumb-ring); }
 .radio-segmented > div > label:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 1px; }
 .radio-segmented input[type=radio] { position: absolute; opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; margin: 0; pointer-events: none; }
@@ -232,7 +234,7 @@ p.help { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--fs-sm
 .badge-waived { background: var(--waived-bg); color: var(--waived-text); }
 .badge-neutral { background: var(--neutral-bg); color: var(--neutral-text); }
 /* The store's type after its name (PLAN-012f-b D10): a grey pill, 12/600. */
-.pill-type { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--neutral-bg); color: var(--neutral-text); font-size: 12px; font-weight: 600; line-height: 1.3; white-space: nowrap; vertical-align: middle; }
+.pill-type { display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--neutral-bg); color: var(--neutral-text); font-size: 12px; font-weight: 600; line-height: 1.3; white-space: nowrap; vertical-align: middle; }
 
 /* --- Tables ------------------------------------------------------------------------------
    .table: a list. The regions of {% responsive_table %} (.table-cards and .table-scroll)
@@ -537,7 +539,7 @@ td.attention-action { text-align: right; }
 .total-net.is-negative strong { color: var(--unpaid-text); }
 .range-form { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin: 0 0 0 auto; }
 .range-form label { margin: 0 0 0 4px; color: var(--muted); font-size: var(--fs-base); font-weight: 400; }
-.range-form select { width: auto; padding: 7px 8px; font-size: var(--fs-base); }
+.range-form select { width: auto; padding: 7px 10px; font-size: var(--fs-base); }
 .range-custom { display: none; align-items: center; gap: 6px; flex-wrap: wrap; }
 .range-form.is-custom .range-custom, .range-form:has(#range-select option[value="custom"]:checked) .range-custom { display: inline-flex; }
 .cashflow-range-label { margin: 0 0 var(--space-2); font-size: var(--fs-sm); }
@@ -673,8 +675,8 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
    aria-hidden), the logo 52 px, the 34/700 headline, one sentence, three check-marked lines
    (.auth-points) and the company's name · Monvera at the bottom. Right, on --bg: the sandbox
    banner (injected first in the body) as a rounded strip, then .auth-main, 400 px: "Sign in"
-   26/700, the muted sub-line (.auth-sub), the fields at 12/14 padding and radius 10, the full-
-   width primary button (13 px padding, radius 10) and the muted note (.auth-note). At 768 px
+   26/700, the muted sub-line (.auth-sub), the fields at 12/16 padding as pills, the full-
+   width primary button (13 px padding, a pill) and the muted note (.auth-note). At 768 px
    and under the panel is a short gradient header (the logo and the headline) and the form takes
    the width. */
 body.auth { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 1fr auto auto 1fr; min-height: 100vh; padding-top: 0 !important; background: var(--bg); }
@@ -698,8 +700,8 @@ body.auth > #sandbox-banner { grid-column: 2; grid-row: 2; justify-self: center;
 .auth-main p { color: var(--text-2); font-size: var(--fs-md); }
 .auth-main .field { margin: 0 0 var(--space-4); }
 .auth-main label { margin: 0 0 6px; color: var(--text); font-size: var(--fs-base); font-weight: 600; }
-.auth-main input[type=text], .auth-main input[type=password], .auth-main input[type=number], .auth-main input[type=email], .auth-main input[type=tel] { width: 100%; padding: 12px 14px; border-radius: 10px; font-size: var(--fs-md); }
-.auth-main .btn { padding: 13px; border-radius: 10px; font-size: var(--fs-md); }
+.auth-main input[type=text], .auth-main input[type=password], .auth-main input[type=number], .auth-main input[type=email], .auth-main input[type=tel] { width: 100%; padding: 12px 16px; border-radius: var(--radius-pill); font-size: var(--fs-md); }
+.auth-main .btn { padding: 13px; border-radius: var(--radius-pill); font-size: var(--fs-md); }
 .auth-main .auth-actions { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-6) 0 0; }
 .auth-main .auth-actions .btn { width: 100%; }
 .auth-main .auth-actions .btn-primary { order: -1; }
@@ -756,7 +758,7 @@ fieldset.card > legend + * { clear: both; }
 #draft-lines td.line-description input, #draft-lines td.line-quantity input, #draft-lines td.line-unit input { width: 100%; }
 #draft-lines td.line-quantity input, #draft-lines td.line-unit input { text-align: right; font-variant-numeric: tabular-nums; }
 #draft-lines input[readonly] { background: var(--surface-2); color: var(--muted); }
-#draft-lines input[type=number] { padding: 9px 10px; -moz-appearance: textfield; appearance: textfield; }
+#draft-lines input[type=number] { padding: 9px 12px; -moz-appearance: textfield; appearance: textfield; }
 #draft-lines input[type=number]::-webkit-inner-spin-button, #draft-lines input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 #draft-lines td.line-total { width: 6.5rem; padding-top: 16px; font-weight: 700; }
 #draft-lines td.line-remove { width: 1%; }
@@ -983,7 +985,7 @@ fieldset.card > legend + * { clear: both; }
   #nav-toggle:focus-visible ~ .phone-bar #nav-menu, #search-toggle:focus-visible ~ .phone-bar #phone-search-button { box-shadow: 0 0 0 2px var(--navy), 0 0 0 4px var(--green); }
   .phone-search { order: -1; }
   #search-toggle:checked ~ .phone-search { display: block; padding: var(--space-2) var(--space-4); background: var(--surface); border-bottom: 1px solid var(--border); }
-  .phone-search input[type=search] { width: 100%; box-sizing: border-box; min-height: var(--tap); padding: 9px 12px; border: 1px solid var(--input-border); border-radius: var(--radius-ctl); background: var(--surface-2); color: var(--text); font: inherit; font-size: 16px; }
+  .phone-search input[type=search] { width: 100%; box-sizing: border-box; min-height: var(--tap); padding: 9px 14px; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text); font: inherit; font-size: 16px; }
   .content { padding-bottom: 90px; }
   .page-header-inner { min-height: 0; padding: var(--space-3) var(--space-4); }
   .page-header-bar .nav-search { display: none; } /* the phone bar's search button opens the same search */
@@ -1359,7 +1361,7 @@ p.detail-more-notes { padding-left: 0; }
 .calendar-step { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 1; }
 .calendar-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin: 0 0 0 auto; }
 .calendar-filters label { margin: 0 0 0 4px; color: var(--muted); font-size: var(--fs-base); font-weight: 400; }
-.calendar-filters select { width: auto; max-width: 7.5rem; padding: 7px 8px; font-size: var(--fs-base); }
+.calendar-filters select { width: auto; max-width: 7.5rem; padding: 7px 10px; font-size: var(--fs-base); }
 .calendar-month { border-top: 1px solid var(--border-soft); }
 .calendar-head, .calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .calendar-head span { padding: 6px var(--space-2); border-bottom: 1px solid var(--border-soft); color: var(--muted); font-size: var(--fs-base); font-weight: 600; text-align: center; }
