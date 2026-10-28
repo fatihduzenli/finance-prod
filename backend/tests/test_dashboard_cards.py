@@ -385,14 +385,17 @@ def test_the_bars_are_a_pair_per_month_with_a_line_and_an_accessible_name() -> N
     html = render("{% bars rows %}", rows=months())
     assert html.startswith('<svg class="bars-chart" viewBox="0 0 720.0 208.0" role="img"')
     assert 'aria-label="Income and expenses by month from Nov 2025 to Oct 2026' in html
-    assert html.count('fill="#0E8F86"') == 12
-    assert html.count('fill="#8FA3BF"') == 11  # the month without its costs has no bar
+    # PLAN-012g A4: the colours are tokens, written as var() references.
+    assert html.count('fill="var(--chart-income)"') == 12
+    assert (
+        html.count('fill="var(--chart-expenses)"') == 11
+    )  # the month without its costs has no bar
     assert html.count("<rect") == 23
     assert html.count('<g class="bar-month"') == 12
     # The nine months before the range have their bars faded, never their labels.
     assert html.count('<g class="bar-pair" opacity="0.4">') == 9
     assert html.count("<polyline") == 2  # the unknown month breaks the net line
-    assert 'stroke="#0B2545"' in html
+    assert 'stroke="var(--chart-net)"' in html
     assert "<title>Income Oct 2026: $1,100.00</title>" in html
     assert "<title>Expenses Feb 2026" not in html
     assert ">Oct 2026</text>" in html and "<script" not in html
@@ -495,8 +498,8 @@ def test_the_donut_draws_an_arc_per_part_and_the_total_in_the_middle() -> None:
         Part("upcoming", "Upcoming", D("0")),
     ]
     html = render("{% donut parts total %}", parts=parts, total=D("400.00"))
-    assert 'stroke="#8A1C14"' in html and 'stroke="#176B33"' in html
-    assert 'stroke="#0B2545"' not in html  # a zero part draws nothing
+    assert 'stroke="var(--chart-overdue)"' in html and 'stroke="var(--chart-paid)"' in html
+    assert 'stroke="var(--chart-upcoming)"' not in html  # a zero part draws nothing
     assert 'stroke-dasharray="25.0 75.0"' in html and 'stroke-dasharray="75.0 25.0"' in html
     assert 'stroke-dashoffset="-25.0"' in html
     assert '<span class="donut-amount">$400.00</span>' in html
@@ -605,9 +608,11 @@ def test_the_dashboard_script_toggles_and_submits_without_markup() -> None:
 
 
 def test_the_chart_keys_carry_the_colours_and_an_unknown_key_is_a_mistake() -> None:
-    assert 'fill="#8FA3BF"' in render('{% chart_key "expenses" %}')
-    assert 'fill="#8A1C14"' in render('{% chart_key "overdue" %}')
-    assert '<line x1="0" y1="4" x2="12" y2="4" stroke="#0B2545"' in render('{% chart_key "net" %}')
+    assert 'fill="var(--chart-expenses)"' in render('{% chart_key "expenses" %}')
+    assert 'fill="var(--chart-overdue)"' in render('{% chart_key "overdue" %}')
+    assert '<line x1="0" y1="4" x2="12" y2="4" stroke="var(--chart-net)"' in render(
+        '{% chart_key "net" %}'
+    )
     with pytest.raises(ValueError):
         render('{% chart_key "nope" %}')
 

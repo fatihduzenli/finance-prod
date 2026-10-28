@@ -122,6 +122,53 @@ BATCH_D_TOKENS = {"--login-gradient": "linear-gradient(160deg, #0B2545 0%, #0E4A
 #: The token Batch E adds (PLAN-012f-b E-4): the error flash message's text, DESIGN-SPEC §4
 #: States' #8A1C14.
 BATCH_E_TOKENS = {"--error-text": "#8A1C14"}
+#: The names PLAN-012g Batch A adds for the dark theme, with their light values (A1).
+BATCH_12G_TOKENS = {
+    "--sidebar-bg": "#0B2545",
+    "--sidebar-border": "transparent",
+    "--sidebar-card-bg": "rgba(255,255,255,.08)",
+    "--phone-bar-button-bg": "rgba(255,255,255,.10)",
+    "--header-bg": "var(--surface)",
+    "--card-border": "var(--border)",
+    "--on-accent": "#FFFFFF",
+    "--btn-primary-text": "#FFFFFF",
+    "--btn-danger-bg": "#B42318",
+    "--sandbox-bg": "#FFF3C4",
+    "--sandbox-text": "#6B4E00",
+    "--seg-track": "var(--bg)",
+    "--seg-thumb": "var(--surface)",
+    "--seg-thumb-ring": "var(--border)",
+    "--selected-bg": "#E0F4F2",
+    "--popover-border": "var(--border)",
+    "--popover-shadow": "none",
+    "--flash-success-bg": "#E3F5E8",
+    "--flash-success-text": "#176B33",
+    "--flash-warning-bg": "#FFF3C4",
+    "--flash-warning-text": "#6B4E00",
+    "--flash-error-bg": "#FDE8E6",
+    "--flash-error-text": "#8A1C14",
+    "--flash-info-bg": "#E8ECF2",
+    "--flash-info-text": "#0B2545",
+    "--chart-income": "#5B6BE8",
+    "--chart-expenses": "#C9CEDD",
+    "--chart-net": "#0E8F86",
+    "--chart-axis": "var(--border)",
+    "--chart-label": "var(--muted)",
+    "--chart-overdue": "#B42318",
+    "--chart-paid": "#1B7F3B",
+    "--chart-upcoming": "#0B2545",
+    "--chart-ring-empty": "var(--neutral-bg)",
+    "--dot-rent": "#13A89E",
+    "--dot-settles": "#1B7F3B",
+    "--dot-promise": "#B7791F",
+    "--dot-lease-end": "#B42318",
+}
+
+
+def light_block(css: str) -> str:
+    """The light ``:root { … }`` block of ``css`` (the dark blocks follow it, PLAN-012g A1)."""
+    start = css.index(":root {")
+    return css[start : css.index("}", start) + 1]
 
 
 def test_the_tokens_file_holds_the_spec_block_name_for_name_and_value_for_value() -> None:
@@ -134,14 +181,15 @@ def test_the_tokens_file_holds_the_spec_block_name_for_name_and_value_for_value(
         **BATCH_C_TOKENS,
         **BATCH_D_TOKENS,
         **BATCH_E_TOKENS,
+        **BATCH_12G_TOKENS,
     }
     assert spec["--teal"] == "#13A89E" and expected["--teal"] == "#13A89E"  # --teal unchanged
     assert "#EEF6F5" in SPEC.read_text(encoding="utf-8")  # the spec's value for the tint
     tokens_css = TOKENS_CSS.read_text(encoding="utf-8")
-    root = tokens_css[tokens_css.index(":root {") :]
-    assert declarations(root) == expected
-    # Nothing outside the block defines a token (the @font-face rule declares none).
-    assert declarations(tokens_css) == expected
+    assert declarations(light_block(tokens_css)) == expected
+    # Nothing outside the light block defines a new name (the @font-face rule declares none;
+    # the dark blocks of PLAN-012g redefine names of the light block only).
+    assert set(declarations(tokens_css)) == set(expected)
 
 
 def test_faint_is_never_text() -> None:
@@ -155,13 +203,13 @@ def test_the_primary_button_takes_its_tokens() -> None:
     css = APP_CSS.read_text(encoding="utf-8")
     assert (
         ".btn-primary { background: var(--btn-primary-bg); border-color: "
-        "var(--btn-primary-border); color: var(--surface); font-weight: 600; }"
+        "var(--btn-primary-border); color: var(--btn-primary-text); font-weight: 600; }"
     ) in css
     assert "pair: --surface on --btn-primary-bg\n" in TOKENS_CSS.read_text(encoding="utf-8")
 
 
 def test_the_comparison_sees_a_changed_value() -> None:
-    root = TOKENS_CSS.read_text(encoding="utf-8").split(":root {", 1)[1]
+    root = light_block(TOKENS_CSS.read_text(encoding="utf-8"))
     changed = root.replace("--teal: #13A89E;", "--teal: #13A89F;")
     expected = {
         **declarations(spec_block()),
@@ -170,6 +218,7 @@ def test_the_comparison_sees_a_changed_value() -> None:
         **BATCH_C_TOKENS,
         **BATCH_D_TOKENS,
         **BATCH_E_TOKENS,
+        **BATCH_12G_TOKENS,
     }
     assert declarations(root) == expected
     assert changed != root and declarations(changed) != expected
@@ -344,7 +393,7 @@ def test_the_banner_comes_first_and_the_page_header_follows_on_every_page(path: 
 def test_the_page_header_and_the_content_follow_the_spec() -> None:
     css = APP_CSS.read_text(encoding="utf-8")
     assert (
-        ".page-header-bar { background: var(--surface); border-bottom: 1px solid var(--border); }"
+        ".page-header-bar { background: var(--header-bg); border-bottom: 1px solid var(--border); }"
         in css
     )
     assert (
@@ -361,8 +410,9 @@ def test_the_page_header_and_the_content_follow_the_spec() -> None:
         in css
     )
     assert (
-        "padding: 20px 14px; background: var(--sidebar-gradient); color: var(--sidebar-text); }"
-        in css
+        "padding: 20px 14px; background: var(--sidebar-bg); background-image: "
+        "var(--sidebar-gradient); box-shadow: inset -1px 0 0 var(--sidebar-border); "
+        "color: var(--sidebar-text); }" in css
     )
     assert (
         ".nav-item { display: flex; align-items: center; gap: var(--space-3); box-sizing: "
@@ -373,7 +423,8 @@ def test_the_page_header_and_the_content_follow_the_spec() -> None:
         '.nav-item[aria-current="page"], .nav-sublist a[aria-current="page"] { background: '
         "var(--sidebar-active-bg); color: var(--sidebar-active-text); font-weight: 600; }" in css
     )
-    assert "background: color-mix(in srgb, var(--surface) 8%, transparent);" in css  # the user card
+    # The user card: white at 8 % on the gradient, a token since PLAN-012g A5.
+    assert "background: var(--sidebar-card-bg);" in css
 
 
 @pytest.mark.django_db
