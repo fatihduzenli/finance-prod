@@ -95,6 +95,9 @@ def home(request: HttpRequest) -> HttpResponse:
         {
             "data": data,
             "attention": needs,
+            # PLAN-012g C5: "All n ›" counts the whole list, the items the per-kind limit left
+            # out included.
+            "attention_total": len(needs.items) + sum(needs.more.values()),
             # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
             "can_record_outcome": meets(role, Role.BILLING),
             # PLAN-012f D7: a row's action button and "+ New invoice" are billing's; a viewer

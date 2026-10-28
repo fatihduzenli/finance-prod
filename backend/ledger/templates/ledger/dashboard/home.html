@@ -43,10 +43,10 @@ the last nightly check, each a card. Phones: one column in that order (§7.5's p
             <tbody>
               {% for row in recent_payments %}
                 <tr class="recent-payment">
-                  <td><a class="recent-when" href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.when }}</a></td>
-                  <td>{{ row.store|default:"—" }}</td>
-                  <td>{{ row.paid_for|default:"—" }}</td>
-                  <td>{{ row.method }}</td>
+                  <td class="recent-on" data-role="meta"><a class="recent-when" href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.when }}</a></td>
+                  <td class="recent-store" data-role="title">{{ row.store|default:"—" }}</td>
+                  <td class="recent-for" data-role="meta">{{ row.paid_for|default:"—" }}</td>
+                  <td class="recent-method" data-role="meta">{{ row.method }}</td>
                   <td class="money"><strong>{{ row.amount|money }}</strong></td>
                 </tr>
               {% endfor %}

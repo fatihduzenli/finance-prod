@@ -1095,7 +1095,10 @@ fieldset.card > legend + * { clear: both; }
      the promise's three) full width under the rest. */
   .attention-table td.attention-action { padding-left: 0 !important; text-align: left; }
   .attention-table td.attention-action::before { content: none !important; }
-  .attention-table td.attention-action > .btn { display: flex; width: 100%; }
+  .attention-table td.attention-action > .btn { display: inline-flex; width: auto; }
+  /* PLAN-012g C5: the first three rows; "All n ›" in the header leads to the rest. */
+  .attention-table > tbody > tr:nth-child(n+4) { display: none !important; }
+  .attention .attention-note { display: none; }
   .attention-table td.attention-action .promise-outcomes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
   .attention-table td.attention-action .promise-outcomes .btn { width: 100%; }
   /* Forms (DESIGN-SPEC §6): one field per row, the primary button kept in view at the bottom,
@@ -1602,6 +1605,21 @@ p.detail-more-notes { padding-left: 0; }
   .table-cards > table.role-cards > tbody > tr > td[data-role=actions] { order: 6; flex: 0 0 100%; }
   .table-cards > table.role-cards td[data-role=actions] .btn, .table-cards > table.role-cards td[data-role=actions] button { display: flex; justify-content: center; align-items: center; width: 100%; min-height: var(--tap); box-sizing: border-box; }
   .table-cards > table.role-cards td[data-role=actions] > * + * { margin-top: var(--space-2); }
+  /* The dashboard's Needs attention (PLAN-012g C5): line 2 the why badge and, at its right, the
+     row's small button (a promise's three stay full width under it). */
+  .table-cards > table.attention-table.role-cards > tbody > tr > td[data-role=meta-badge] { align-self: center; }
+  .table-cards > table.attention-table.role-cards > tbody > tr > td[data-role=actions]:not(.is-promise) { order: 5; flex: 0 0 auto; margin-left: auto; }
+  .table-cards > table.attention-table.role-cards td[data-role=actions]:not(.is-promise) .btn { display: inline-flex; width: auto; padding: 6px 14px; }
+  /* The dashboard's Recent payments (PLAN-012g C5): line 2 "{method} · {date}", no labels; what
+     the payment was for is the payment page's. */
+  #recent-payments-table.role-cards td[data-role=meta]::before { content: none; }
+  #recent-payments-table.role-cards td.recent-method { order: 4; }
+  #recent-payments-table.role-cards td.recent-on { order: 5; }
+  #recent-payments-table.role-cards td.recent-on::before { content: "\00B7  "; position: static; }
+  #recent-payments-table.role-cards td.recent-for { display: none; }
+  #recent-payments-table.role-cards .recent-when { display: inline; min-height: 0; color: inherit; }
+  #recent-payments-table.role-cards td.recent-store { font-weight: 600; }
+  #recent-payments-table.role-cards td[data-role=amount] { min-height: 0; }
   /* The totals row: one line, the label at the left and the sum at the right. */
   .table-cards > table.role-cards tr.totals { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); background: var(--surface-2); }
   .table-cards > table.role-cards tr.totals > th, .table-cards > table.role-cards tr.totals > td { width: auto; padding-left: 0; background: transparent; }
