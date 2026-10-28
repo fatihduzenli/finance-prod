@@ -809,7 +809,8 @@ def test_the_dashboards_attention_rows_are_cards_with_a_full_width_button_on_a_p
     block = phone_block(APP_CSS.read_text(encoding="utf-8"))
     assert ".kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr));" in block
     # PLAN-012g C5: the row's button sits at the right of the why badge, its own width.
-    assert ".attention-table td.attention-action > .btn { display: inline-flex; width: auto; }" in block
+    button = ".attention-table td.attention-action > .btn { display: inline-flex; width: auto; }"
+    assert button in block
     # PLAN-012f-b A-3: the dashboard's two-thirds rows are .dashboard-row-thirds.
     thirds = ".dashboard-row-thirds, .workspace-grid { grid-template-columns: minmax(0, 1fr);"
     assert thirds in block
