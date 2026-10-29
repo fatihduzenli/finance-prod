@@ -14,7 +14,7 @@
     {% if notes_info or lease.operator.email %}<ul id="enrolment-notes" class="muted">{% if lease.operator.email %}<li id="receipts-email">Receipts go to {{ lease.operator.email }}</li>{% endif %}{% for text in notes_info %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}
     {% responsive_table %}
     <table id="debits">
-      <thead><tr><th>Debit</th><th>Day</th><th>Amount per debit</th><th>First debit</th></tr></thead>
+      <thead><tr><th>Debit</th><th>Day</th><th class="money">Amount per debit</th><th>First debit</th></tr></thead>
       <tbody>
         {% for item in debits %}
           <tr>

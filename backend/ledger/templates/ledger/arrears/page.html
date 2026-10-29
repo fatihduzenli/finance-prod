@@ -36,7 +36,7 @@
       {% for bucket, label, count, owed in report.bucket_totals %}
         <tr class="bucket-total" data-bucket="{{ bucket }}"><td>{{ label }}</td><td class="bucket-count">{{ count }}</td><td class="money bucket-owed">{{ owed|money }}</td></tr>
       {% endfor %}
-      <tr id="overall-total"><th>All</th><th id="arrears-count">{{ report.count }}</th><th id="arrears-owed">{{ report.total_owed|money }}</th></tr>
+      <tr id="overall-total"><th>All</th><th id="arrears-count">{{ report.count }}</th><th id="arrears-owed" class="money">{{ report.total_owed|money }}</th></tr>
     </tbody>
   </table>
   {% endresponsive_table %}

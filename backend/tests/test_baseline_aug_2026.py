@@ -92,7 +92,7 @@ def test_the_arrears_count_and_total(baseline: Baseline) -> None:
     client, _ = client_for(Role.VIEWER)
     html = client.get("/arrears/").content.decode()
     assert f'<th id="arrears-count">{UNPAID_OPERATOR_COUNT}</th>' in html
-    assert '<th id="arrears-owed">$180,274.93</th>' in html
+    assert '<th id="arrears-owed" class="money">$180,274.93</th>' in html
 
 
 def test_the_dashboard_figures(baseline: Baseline) -> None:
