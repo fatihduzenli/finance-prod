@@ -368,7 +368,9 @@ def test_the_charges_filter_is_a_segmented_control() -> None:
     assert links == [("open", ""), ("paid", ' aria-current="page"'), ("all", "")]
     assert "btn" not in control  # segments, not buttons
     track = rule(".segmented")
-    assert "background: var(--seg-track);" in track and "border-radius: var(--radius-ctl);" in track
+    # PLAN-012g B1 (DESIGN-SPEC §7.4): the track and the thumb are pills.
+    assert "background: var(--seg-track);" in track
+    assert "border-radius: var(--radius-pill);" in track
     # Since PLAN-012g A3 the thumb is a token and a pressed button is a segment too.
     active = rule('.segmented a[aria-current="page"], .segmented button[aria-pressed="true"]')
     assert "background: var(--seg-thumb);" in active
@@ -491,15 +493,15 @@ def test_the_card_buttons_and_inputs_follow_the_spec() -> None:
         assert declaration in label, declaration
     button = rule(".btn")
     for declaration in (
-        "padding: 10px 16px;",
+        "padding: 10px 18px;",  # PLAN-012g B1: a pill, 2 px more each side
         "border: 1px solid var(--input-border);",
-        "border-radius: var(--radius-ctl);",
+        "border-radius: var(--radius-pill);",
         "background: var(--surface);",
         "font-weight: 600;",
     ):
         assert declaration in button, declaration
     small = rule(".btn-sm")
-    assert "padding: 6px 12px;" in small and "font-size: var(--fs-sm);" in small
+    assert "padding: 6px 14px;" in small and "font-size: var(--fs-sm);" in small
     assert rule(".btn-danger").strip() == "color: var(--unpaid-text);"
     field = rule(
         "input[type=text], input[type=email], input[type=search], input[type=number], "
@@ -507,9 +509,9 @@ def test_the_card_buttons_and_inputs_follow_the_spec() -> None:
         "input[type=url], select, textarea"
     )
     for declaration in (
-        "padding: 9px 12px;",
+        "padding: 9px 14px;",  # PLAN-012g B1: a pill; the textarea keeps 9/12 and radius 8
         "border: 1px solid var(--input-border);",
-        "border-radius: var(--radius-ctl);",
+        "border-radius: var(--radius-pill);",
     ):
         assert declaration in field, declaration
     assert rule("input[type=search]").strip() == "background: var(--surface-2);"

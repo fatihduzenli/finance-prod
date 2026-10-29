@@ -894,8 +894,9 @@ def test_the_login_layout_rules() -> None:
     )
     title = css.split(".auth-main h1 {", 1)[1].split("}", 1)[0]
     assert "font-size: 26px; font-weight: 700;" in title
-    assert "padding: 12px 14px; border-radius: 10px;" in css
-    assert ".auth-main .btn { padding: 13px; border-radius: 10px;" in css
+    # PLAN-012g B1 (DESIGN-SPEC §7.4): the fields and the button are pills.
+    assert "padding: 12px 16px; border-radius: var(--radius-pill);" in css
+    assert ".auth-main .btn { padding: 13px; border-radius: var(--radius-pill);" in css
     # The banner as a rounded strip over the form, never the fixed full-width bar.
     banner = css.split("body.auth > #sandbox-banner {", 1)[1].split("}", 1)[0]
     assert (
