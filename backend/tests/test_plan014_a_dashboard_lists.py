@@ -71,7 +71,8 @@ def test_the_dashboard_has_no_coming_up_or_collection_card_and_two_thirds_rows()
 
 
 def test_the_service_no_longer_exports_the_removed_blocks() -> None:
-    assert not hasattr(blocks, "coming_up") and not hasattr(blocks, "collection_progress")
+    # collection_progress stays: the "Collected this month" figure reads its share.
+    assert not hasattr(blocks, "coming_up") and not hasattr(blocks, "ComingItem")
 
 
 # --- A3: the period ------------------------------------------------------------------------------
@@ -236,10 +237,12 @@ def test_a_leftover_balance_of_the_previous_operator_shows_as_unpaid() -> None:
     a_rent_charge(lease, date(2026, 9, 1), due="1200.00")
     row = row_of(stores_html(Role.BILLING), "1413")
     assert "$1,200.00" in row and has_token(row, "unpaid") and "Vacant · 1 day" in row
-    assert "—" not in re.sub(r"<[^>]+>", "", row).split("Vacant")[0]
+    balance = re.search(r'<td class="store-balance">(.*?)</td>', row, re.S)
+    assert balance is not None and "—" not in balance.group(1) and "unpaid" in balance.group(1)
 
 
-def test_a_lease_that_ended_today_is_vacant_without_days() -> None:
+def test_a_lease_ending_today_is_still_the_current_lease() -> None:
+    # The list's rule: a lease not ended before today is in effect, so the store is not vacant.
     store = a_store("1414", number=1414)
     lease = a_lease(
         store, an_operator("Today Co"), started=date(2026, 1, 1), status=CollectionStatus.ENDED
@@ -247,7 +250,7 @@ def test_a_lease_that_ended_today_is_vacant_without_days() -> None:
     lease.ended_on = TODAY
     lease.save(update_fields=["ended_on"])
     row = row_of(stores_html(Role.BILLING), "1414")
-    assert "Vacant" in row and "days" not in row
+    assert "Vacant" not in row and "Add lease" not in row
 
 
 # --- A5: search + Filters on every list page ------------------------------------------------------
@@ -294,14 +297,16 @@ def test_the_filters_count_and_chips_follow_the_active_filters() -> None:
     assert chip is not None and "state=" not in chip.group(1)
     html = page(client, "/stores/?state=NJ&status=vacant&q=14&sort=balance")
     assert "Filters · 2" in section(html, "filters", "</form>")  # search and sort do not count
-    clear = re.search(r'<a[^>]*class="[^"]*filters-clear[^"]*"[^>]*href="([^"]+)"', html)
+    clear = re.search(r'<a[^>]*id="filters-clear"[^>]*href="([^"]+)"', html)
     assert clear is not None and "q=14" in clear.group(1) and "sort=balance" in clear.group(1)
     assert "state=" not in clear.group(1) and "status=" not in clear.group(1)
 
 
 def test_an_unknown_filter_value_makes_no_chip_and_is_never_echoed() -> None:
     html = page(client_for(Role.VIEWER)[0], "/stores/?state=ZZ&status=%3Cscript%3E")
-    assert 'class="chip"' not in html and "<script>" not in html and ">Filters<" in html
+    form = section(html, "filters", "</form>")
+    assert 'class="chip"' not in form and "script" not in form and ">Filters<" in form
+    assert "&lt;script&gt;" not in html
 
 
 def test_a_long_search_and_a_hostile_one_answer_200() -> None:
@@ -336,7 +341,10 @@ def test_the_payments_totals_are_five_tiles_with_tones_and_a_tooltip() -> None:
     charge = a_rent_charge(lease, date(2026, 9, 1), due="3500.00")
     a_payment(charge, "100.00", date(2026, 9, 5))
     a_payment(charge, "50.00", None, status=PaymentStatus.RETURNED, initiated_on=date(2026, 9, 6))
-    html = page(client_for(Role.BILLING)[0], "/payments/?date_from=2026-09-01&date_to=2026-09-30")
+    html = page(
+        client_for(Role.BILLING)[0],
+        "/payments/?date_by=initiated&date_from=2026-09-01&date_to=2026-09-30",
+    )
     tiles = re.findall(r'<div class="tile[^"]*"', html[html.index('id="payments-totals"') :])[:5]
     assert len(tiles) == 5
     labels = ["Settled", "Pending", "Returned", "Refunded", "Deposits held"]

@@ -138,7 +138,13 @@ def test_the_phone_panel_is_a_bottom_sheet_with_clear_and_apply(
     panel = page.locator("#filters-panel")
     expect(panel).to_be_visible()
     box = panel.bounding_box()
-    assert box is not None and box["y"] + box["height"] >= PHONE["height"] - 2  # sits at the bottom
+    # A sheet: fixed over the page, its bottom edge on the phone's tab bar.
+    assert box is not None and box["y"] + box["height"] >= PHONE["height"] - 120
+    assert (
+        page.evaluate("getComputedStyle(document.getElementById('filters-panel')).position")
+        == "fixed"
+    )
+    assert page.locator("#filters-backdrop").is_visible()
     shot(page, f"stores-filters-sheet-{theme}-phone")
     clear = panel.locator("a", has_text="Clear")
     href = clear.get_attribute("href") or ""
@@ -166,7 +172,7 @@ def test_the_payment_status_pill_saves_the_choice_and_steps(
         card.locator("button[aria-pressed]", has_text="Monthly").get_attribute("aria-pressed")
         == "true"
     )
-    label = card.locator(".period-label").inner_text()
+    label = card.locator("#payment-status-label").inner_text()
     assert label.endswith(str(date.today().year)) or label  # "October 2026"
     shot(page, f"dashboard-period-monthly-{theme}-laptop")
     page.goto(f"{live_server.url}/")  # remembered without the query
@@ -174,10 +180,10 @@ def test_the_payment_status_pill_saves_the_choice_and_steps(
         card.locator("button[aria-pressed]", has_text="Monthly").get_attribute("aria-pressed")
         == "true"
     )
-    card.locator("a.mini-step", has_text="›").click()
+    card.locator("#payment-status-next").click()
     page.wait_for_load_state("networkidle")
     assert "ps_at=" in page.url
-    assert card.locator(".period-label").inner_text() != label
+    assert card.locator("#payment-status-label").inner_text() != label
 
 
 def test_the_tiles_tooltip_opens_on_focus(live_server: LiveServer, laptop: BrowserContext) -> None:
