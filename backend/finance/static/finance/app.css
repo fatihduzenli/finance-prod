@@ -181,6 +181,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
    control and the 12 px red line under it. */
 .field.has-error input:not([type=checkbox]):not([type=radio]), .field.has-error select, .field.has-error textarea { border: 1px solid var(--unpaid-text); }
 .required { font-weight: 700; }
+/* A file input's button (PLAN-012g Batch D): the small secondary pill (.btn-sm's shape) in both
+   themes, in place of the browser's own grey button; 8 px before the file's name. */
+input[type=file]::file-selector-button { margin-right: var(--space-2); padding: 6px 14px; border: 1px solid var(--input-border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer; }
 
 /* --- Help line ---------------------------------------------------------------------------
    p.help: at most one 12 px muted line under a block (the one-line rule, PLAN-012e-2 D10);
