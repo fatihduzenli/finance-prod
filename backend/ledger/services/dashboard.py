@@ -21,20 +21,21 @@ none when it reads what the page already loaded:
   title, "#1991 Istanbul", :func:`ledger.services.stores.title`), what it
   paid for, the method and the amount.
 
-The cards of the owner's staging review (docs/qa/PLAN-012f-b-staging-review.md D3 to D6)
-share one range of whole months (:func:`parse_range`: this month, the last 3, 6 or 12 months
-with the current one, or a custom From to To of at most :data:`MAX_RANGE_MONTHS` months; the
-last 12 by default, PLAN-012g C2):
+The cards of the owner's staging review (docs/qa/PLAN-012f-b-staging-review.md D3 to D6); the
+Cashflow card reads a range of whole months (:func:`parse_range`: this month, the last 3, 6 or
+12 months with the current one, or a custom From to To of at most :data:`MAX_RANGE_MONTHS`
+months; the last 12 by default, PLAN-012g C2):
 
 - :func:`cashflow` (the P&L's rows, :func:`ledger.services.pnl.rows`): per month the
   collected income, the known costs and the net, totalled over the range; a store whose
   costs are not entered is left out of the expenses and counted, never read as zero;
   :func:`cashflows` builds several ranges' cards from one read of the P&L's rows (the
   dashboard's laptop and phone defaults, PLAN-012g C2);
-- :func:`payment_status` (two queries): the rent charges and the one-off charges due in the
-  range as Overdue, Paid and Upcoming by the grid's status rule, the pending ones counted
-  apart (D20: an installment, an autopay-plan occurrence and a re-debit count through their
-  parent or source, never on their own);
+- :func:`payment_status` (two queries): the rent charges and the one-off charges due in its
+  own period (PLAN-014 A3, :func:`period_for`: a calendar week, Sunday to Saturday, or a
+  calendar month; not the Cashflow range) as Overdue, Paid and Upcoming by the grid's status
+  rule, the pending ones counted apart (D20: an installment, an autopay-plan occurrence and a
+  re-debit count through their parent or source, never on their own);
 - :func:`mini_calendar` (the Calendar page's three queries): a month's days and items.
 
 Money is ``Decimal``; dates are the project's ``TIME_ZONE`` days.
@@ -53,7 +54,7 @@ from django.db.models import Count, Exists, F, Max, OuterRef, Sum
 from django.db.models.functions import Least
 from django.utils import timezone
 
-from finance.dates import day_short_text, day_text, month_text
+from finance.dates import day_short_text, day_text, month_long_text, month_text
 from ledger.models import (
     ZERO,
     OneOffCategory,
@@ -280,7 +281,7 @@ RANGE_MESSAGE = "Choose a range of whole months, the earlier month first, at mos
 
 @dataclass(frozen=True, slots=True)
 class Range:
-    """The months the Cashflow and Payment status cards cover, both included."""
+    """The months the Cashflow card covers, both included."""
 
     key: str
     label: str
@@ -504,9 +505,77 @@ class StatusPart:
     amount: Decimal
 
 
+PERIOD_WEEKLY = "weekly"
+PERIOD_MONTHLY = "monthly"
+#: The pill's segments, in its order.
+PERIOD_CHOICES: tuple[tuple[str, str], ...] = (
+    (PERIOD_WEEKLY, "Weekly"),
+    (PERIOD_MONTHLY, "Monthly"),
+)
+#: How far from today ``?ps_at=`` may move the period, in years either way.
+PERIOD_MAX_YEARS = 5
+
+
+@dataclass(frozen=True, slots=True)
+class Period:
+    """The days the Payment status card covers, both included (PLAN-014 A3)."""
+
+    kind: str
+    start: date
+    end: date
+    #: "Oct 25 – 31", "Oct 25 – Nov 1" (a week across two months) or "October 2026".
+    label: str
+    #: A day of the previous and of the next period (``‹ ›``'s ``?ps_at=``).
+    prev_at: date
+    next_at: date
+
+
+def _years_from(day: date, years: int) -> date:
+    """``day`` moved by whole years (February 29 to February 28 in a common year)."""
+    try:
+        return day.replace(year=day.year + years)
+    except ValueError:
+        return day.replace(year=day.year + years, day=28)
+
+
+def _week_label(start: date, end: date) -> str:
+    if start.month == end.month:
+        return f"{day_short_text(start)} – {end.day}"
+    return f"{day_short_text(start)} – {day_short_text(end)}"
+
+
+def period_for(kind: str, at: date | None, today: date) -> Period:
+    """The week (Sunday to Saturday) or the month holding ``at``: an unknown ``kind`` is
+    weekly; ``at`` is today when ``None`` or more than :data:`PERIOD_MAX_YEARS` years from
+    today."""
+    day = at or today
+    if not _years_from(today, -PERIOD_MAX_YEARS) <= day <= _years_from(today, PERIOD_MAX_YEARS):
+        day = today
+    if kind == PERIOD_MONTHLY:
+        first = day.replace(day=1)
+        return Period(
+            kind=PERIOD_MONTHLY,
+            start=first,
+            end=pnl.month_end(first),
+            label=month_long_text(first),
+            prev_at=pnl.add_months(first, -1),
+            next_at=pnl.add_months(first, 1),
+        )
+    start = day - timedelta(days=(day.weekday() + 1) % 7)
+    end = start + timedelta(days=6)
+    return Period(
+        kind=PERIOD_WEEKLY,
+        start=start,
+        end=end,
+        label=_week_label(start, end),
+        prev_at=start - timedelta(days=7),
+        next_at=start + timedelta(days=7),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PaymentStatusCard:
-    range: Range
+    period: Period
     overdue: StatusPart
     paid: StatusPart
     upcoming: StatusPart
@@ -558,8 +627,8 @@ def _one_off_family(status: str, amount_paid: Decimal, has_pending: bool) -> str
     return grid.STATUS_UNPAID
 
 
-def payment_status(selected: Range, today: date) -> PaymentStatusCard:
-    """The charges due in the range (by due date, for every box), by the grid's status of
+def payment_status(period: Period, today: date) -> PaymentStatusCard:
+    """The charges due in the period (by due date, for every box), by the grid's status of
     each (two queries): the rent charges by :func:`ledger.services.grid.combined_status`,
     and the one-off charges (PLAN-012f-b §10 D20) but an installment, an autopay-plan
     occurrence and a re-debit (:data:`PAYMENT_STATUS_SKIPPED_CATEGORIES`), by
@@ -569,13 +638,13 @@ def payment_status(selected: Range, today: date) -> PaymentStatusCard:
     or due, due today or later, by balance. Pending charges and the partly paid ones not
     yet due are counted apart; waived (and voided) ones nowhere."""
     rent_rows = RentCharge.objects.filter(
-        due_on__gte=selected.from_month, due_on__lte=selected.end
+        due_on__gte=period.start, due_on__lte=period.end
     ).values_list("status", "due_on", "amount_due", "amount_paid")
     pending_payment = Payment.objects.filter(
         one_off_charge=OuterRef("pk"), status=PaymentStatus.PENDING, is_refund=False
     )
     one_off_rows = (
-        OneOffCharge.objects.filter(due_date__gte=selected.from_month, due_date__lte=selected.end)
+        OneOffCharge.objects.filter(due_date__gte=period.start, due_date__lte=period.end)
         .exclude(category__in=PAYMENT_STATUS_SKIPPED_CATEGORIES)
         .annotate(has_pending=Exists(pending_payment))
         .values_list("status", "due_date", "price", "amount_paid", "has_pending")
@@ -605,7 +674,7 @@ def payment_status(selected: Range, today: date) -> PaymentStatusCard:
         counts[part] += 1
         amounts[part] += max(due - paid, ZERO)
     return PaymentStatusCard(
-        range=selected,
+        period=period,
         overdue=StatusPart(
             STATUS_OVERDUE, "Overdue", counts[STATUS_OVERDUE], amounts[STATUS_OVERDUE]
         ),

@@ -271,6 +271,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "finance:feed_revoke": RouteRule(min_role=Role.VIEWER, methods=POST),
     # One's own theme (PLAN-012g A3): any role, for their own preference only.
     "finance:theme": RouteRule(min_role=Role.VIEWER, methods=POST),
+    # One's own Payment status period (PLAN-014 A3): any role, for their own preference only.
+    "finance:payment_status_period": RouteRule(min_role=Role.VIEWER, methods=POST),
 }
 
 #: Prefix rules for Django admin model routes (``admin:<app>_<model>_<action>``). Every

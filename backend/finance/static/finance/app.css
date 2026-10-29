@@ -553,13 +553,19 @@ td.attention-action { text-align: right; }
 .cashflow-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .chart-key { flex: 0 0 auto; }
 .cashflow-note { font-size: var(--fs-sm); }
-/* The Payment status card (D5; PLAN-012g C4, DESIGN-SPEC §7.5): the range's label muted at the
-   right of the title (.status-range); the {% donut %} ring with the charges' count over the word
+/* The Payment status card (D5; PLAN-012g C4, PLAN-014 A3, DESIGN-SPEC §7.5): the Weekly |
+   Monthly pill at the right of the title (.period-switch, the segmented control, one small form
+   per segment); under the title ‹ the period's label › (.status-period, the mini calendar's
+   .mini-step buttons); the {% donut %} ring with the charges' count over the word
    "charges" in its middle (.donut-total); the three boxes, each with a 3 px top border in its
    colour (--box-colour, the donut's), its word, its count bold and its amount; "+ n pending ·
    rent and fees" under them. On a phone the donut is at the left and the boxes a list at the
    right (see the phone block). */
-.status-range { margin-left: auto; font-size: var(--fs-sm); }
+.period-switch { margin-left: auto; }
+.period-switch form { display: contents; }
+.period-switch button { padding: 3px 10px; font-size: var(--fs-sm); }
+.status-period { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); }
+.status-period-label { color: var(--text-2); font-size: var(--fs-sm); font-weight: 500; }
 .status-overdue { --box-colour: var(--chart-overdue); }
 .status-paid { --box-colour: var(--chart-paid); }
 .status-upcoming { --box-colour: var(--chart-upcoming); }

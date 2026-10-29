@@ -57,6 +57,12 @@ urlpatterns = [
                     ),
                     # The user's theme, Light, Dark or System (PLAN-012g A3).
                     path("settings/theme/", theme_views.set_theme_view, name="theme"),
+                    # The dashboard Payment status card's period (PLAN-014 A3).
+                    path(
+                        "settings/payment-status/",
+                        theme_views.set_payment_status_period_view,
+                        name="payment_status_period",
+                    ),
                     # The help pages (PLAN-012e-2 D10): static, signed in, every role.
                     path("help/", help_pages.index, name="help"),
                     path("help/<slug:slug>/", help_pages.topic, name="help_topic"),

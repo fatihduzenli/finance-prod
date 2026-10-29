@@ -14,7 +14,9 @@ sentence :data:`ledger.views.reports.TOO_SLOW`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
+from datetime import date
 from urllib.parse import urlencode
 
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
@@ -26,6 +28,7 @@ from django.utils.safestring import SafeString
 from django.views.decorators.http import require_safe
 
 from accounts.roles import Role, meets, role_of
+from accounts.themes import PAYMENT_STATUS_PERIODS, payment_status_period_for
 from finance.dates import month_text
 from finance.templatetags.components import GLYPHS, badge_family
 from ledger.models import PaymentChannel, PaymentMethod, PaymentStatus, Store
@@ -44,11 +47,12 @@ def home(request: HttpRequest) -> HttpResponse:
     attention (PLAN-011b D6) beside the mini calendar, the recent payments beside the Payment
     status card (PLAN-014 A2: the Coming up and Collection cards are gone), then today's run,
     the failed attempts, the waived charges, the invoices not sent and the last nightly check.
-    ``?range=`` (with ``from`` and ``to``) is the Cashflow and Payment status cards' shared
-    range and ``?cal=`` the mini calendar's month; an unusable range computes neither card
-    and says so. Without ``?range=`` (PLAN-012g C2; DESIGN-SPEC §7.5) the range is the last
-    12 months, and the Cashflow card is computed for the last 6 months as well
-    (``cashflow_narrow``, the phone's card, shown by the style sheet at 768 px and under);
+    ``?range=`` (with ``from`` and ``to``) is the Cashflow card's range and ``?cal=`` the mini
+    calendar's month; an unusable range does not compute the card and says so. ``?ps=weekly|
+    monthly`` and ``?ps_at=YYYY-MM-DD`` are the Payment status card's own period (PLAN-014 A3,
+    :func:`_payment_status_period`). Without ``?range=`` (PLAN-012g C2; DESIGN-SPEC §7.5)
+    the range is the last 12 months, and the Cashflow card is computed for the last 6 months
+    as well (``cashflow_narrow``, the phone's card, shown by the style sheet at 768 px and under);
     both come from one read of the P&L's rows. The Cashflow cards run inside the reports'
     statement timeout."""
     today = timezone.localdate()
@@ -75,6 +79,7 @@ def home(request: HttpRequest) -> HttpResponse:
     # The mini calendar's ‹ › keep an explicit range only: without one the page stays on the
     # two default cards.
     range_query = urlencode(selected.as_query()) if selected is not None and narrow is None else ""
+    period = _payment_status_period(request, today)
     role = role_of(request.user)
     data = receivables.dashboard(today)
     leases = attention.dashboard_leases()
@@ -128,11 +133,62 @@ def home(request: HttpRequest) -> HttpResponse:
             "cashflow": cashflow,
             "cashflow_narrow": cashflow_narrow,
             "cashflow_message": cashflow_message,
-            "payment_status": (
-                dashboard_blocks.payment_status(selected, today) if selected is not None else None
-            ),
+            # PLAN-014 A3: the Payment status card's own period and its pill's and arrows' links.
+            "period": period,
+            "period_links": _period_links(request, period),
+            "payment_status": dashboard_blocks.payment_status(period, today),
             "mini_calendar": dashboard_blocks.mini_calendar(cal_month, today),
         },
+    )
+
+
+_ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
+
+
+def _payment_status_period(request: HttpRequest, today: date) -> dashboard_blocks.Period:
+    """The Payment status card's period (PLAN-014 A3): ``?ps=`` when it is ``weekly`` or
+    ``monthly``, else the user's stored choice (one query; a GET never writes it); ``?ps_at=``
+    when it is a ``YYYY-MM-DD`` day, else today."""
+    kind = request.GET.get("ps", "")
+    if kind not in PAYMENT_STATUS_PERIODS:
+        kind = payment_status_period_for(request.user)
+    raw = request.GET.get("ps_at", "")
+    at: date | None = None
+    if _ISO_DAY.fullmatch(raw):
+        try:
+            at = date.fromisoformat(raw)
+        except ValueError:  # 2026-02-30
+            at = None
+    return dashboard_blocks.period_for(kind, at, today)
+
+
+@dataclass(frozen=True, slots=True)
+class PeriodLinks:
+    """The Payment status card's links, each the page's own query string with ``ps`` (and
+    ``ps_at``) set, so the Cashflow range and the mini calendar's month stay as they were."""
+
+    #: ``(kind, label, query, pressed)`` per segment of the pill, in its order.
+    segments: list[tuple[str, str, str, bool]]
+    previous: str
+    next: str
+
+
+def _period_query(request: HttpRequest, **changes: str) -> str:
+    """``?…``: the page's query string with ``changes`` set."""
+    params = request.GET.copy()
+    for name, value in changes.items():
+        params[name] = value
+    return f"?{params.urlencode()}"
+
+
+def _period_links(request: HttpRequest, period: dashboard_blocks.Period) -> PeriodLinks:
+    return PeriodLinks(
+        segments=[
+            (kind, label, _period_query(request, ps=kind), kind == period.kind)
+            for kind, label in dashboard_blocks.PERIOD_CHOICES
+        ],
+        previous=_period_query(request, ps=period.kind, ps_at=period.prev_at.isoformat()),
+        next=_period_query(request, ps=period.kind, ps_at=period.next_at.isoformat()),
     )
 
 
