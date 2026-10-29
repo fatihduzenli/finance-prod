@@ -140,6 +140,12 @@ def test_the_pager_at_page_two_of_three(viewer: Client) -> None:
 # --- The table -----------------------------------------------------------------------------
 
 
+def balance(row: str) -> str:
+    match = re.search(r'<td class="store-balance"[^>]*>(.*?)</td>', row, re.S)
+    assert match is not None
+    return match.group(1)
+
+
 def test_each_balance_family_and_status_badge(viewer: Client) -> None:
     world()
     found = rows(page(viewer))
@@ -147,8 +153,10 @@ def test_each_balance_family_and_status_badge(viewer: Client) -> None:
     assert "badge-paid" in found["Paid"] and "Paid up" in found["Paid"]
     assert "badge-overdue" in found["Late"] and "$2,100.00 overdue" in found["Late"]
     assert "badge-partial" in found["Part"] and "$658.06 partly paid" in found["Part"]
-    assert "badge-neutral" in found["Ended"] and "Vacant 31 days" in found["Ended"]
-    assert "badge-neutral" in found["Empty"] and "> Vacant</span>" in found["Empty"]
+    # PLAN-014 A4: without a lease the Balance is "—" and the Status says how long it is vacant.
+    assert "badge" not in balance(found["Ended"]) and "—" in balance(found["Ended"])
+    assert "badge-neutral" in found["Ended"] and "Vacant · 31 days" in found["Ended"]
+    assert "badge-neutral" in found["Empty"] and "Vacant · never leased" in found["Empty"]
 
     def status(name: str) -> str:
         match = re.search(r'<td class="store-status"[^>]*>(.*?)</td>', found[name], re.S)

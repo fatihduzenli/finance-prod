@@ -1198,6 +1198,8 @@ a.pager-page:hover { background: var(--surface-2); }
 th.cell-chevron, td.cell-chevron { width: 1%; padding-left: 0; text-align: right; white-space: nowrap; }
 td.cell-chevron a { display: inline-flex; color: var(--muted); }
 td.cell-chevron a:hover { color: var(--text); }
+/* PLAN-014 A4: a vacant store's "+ Add lease" link after its Status badge (admins). */
+.row-add { margin-left: var(--space-2); color: var(--link); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; }
 
 /* --- Report family (PLAN-012f-b E-1) ---------------------------------------------------------
    DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png. The filter card's one row with

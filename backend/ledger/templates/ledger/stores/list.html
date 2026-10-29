@@ -4,7 +4,10 @@
 {% block header %}<div class="page-header"><div class="page-title"><h1>Stores</h1><span class="list-counts" id="list-counts">{{ listed.total }} store{{ listed.total|pluralize }} · {{ listed.with_lease }} with a lease · {{ listed.vacant }} vacant</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:stores:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:stores:create' %}">{% icon "plus" 16 %} New store</a>{% endif %}</div></div>{% endblock %}
 {% block header_search %}{% include "finance/_header_search.html" %}{% endblock %}
 {% block content %}
-  {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3; DESIGN-SPEC §4 Stores list, stores-list-laptop.png).{% endcomment %}
+  {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3; DESIGN-SPEC §4 Stores list, stores-list-laptop.png).
+  PLAN-014 A4: a store without a lease shows "—" (or the last lease's leftover "● $X unpaid") as its Balance, "○ Vacant · n
+  days" or "○ Vacant · never leased" as its Status and, for an admin (can_create; the New lease route is admin-only), a
+  small "+ Add lease" link to New lease for that store after the badge.{% endcomment %}
   <div class="card filter-card"><form method="get" action="{% url 'ledger:stores:list' %}" class="actions list-filters" role="search" id="store-filters">
     <input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Search stores" class="list-search">
     <span class="filter-field"><label for="state">State</label>
@@ -40,8 +43,8 @@
           <td>{% if row.operator_id %}<a href="{% url 'ledger:operators:detail' pk=row.operator_id %}">{{ row.operator_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
           <td class="money">{% if row.rent is not None %}{{ row.rent|money }}{% else %}—{% endif %}</td>
           <td>{{ row.channel|default:"—" }}</td>
-          <td class="store-balance">{% status_badge row.balance.label row.balance.value %}</td>
-          <td class="store-status">{% status_badge row.status_label row.status_value %}</td>
+          <td class="store-balance">{% if row.balance.label %}{% status_badge row.balance.label row.balance.value %}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="store-status">{% status_badge row.status_label row.status_value %}{% if can_create and row.status_key == "vacant" %} <a class="row-add" href="{% url 'ledger:leases:create' %}?store={{ row.store.pk }}">+ Add lease</a>{% endif %}</td>
           <td class="cell-chevron" data-role="meta"><a href="{{ store_url }}" aria-label="Open {{ row.title }}">{% icon "chevron-right" 16 %}</a></td>
         </tr>
       {% empty %}
