@@ -595,7 +595,7 @@ def test_the_mini_calendar_steps_months_keeps_the_range_and_lists_items(today: d
     client, _ = client_for(Role.VIEWER)
     html = page(client, range="12m")
     # PLAN-012g C3: the month's name is the link; a dot per kind, coloured by its kind class.
-    assert '<a id="mini-month" href="/calendar/?month=2026-10">October 2026</a>' in html
+    assert '<a id="mini-month" href="/calendar/?month=2026-10">Oct 2026</a>' in html
     assert 'id="mini-previous" href="?cal=2026-09&amp;range=12m"' in html
     assert 'id="mini-next" href="?cal=2026-11&amp;range=12m"' in html
     assert html.count('class="mini-dot kind-debit"') == 1  # the 5th
@@ -607,7 +607,7 @@ def test_the_mini_calendar_steps_months_keeps_the_range_and_lists_items(today: d
     assert 'class="mini-day is-today"' in html
     assert 'data-day="2026-10-05"' in html and has_token(html, lease.store.external_label)
     november = page(client, cal="2026-11")
-    assert 'href="/calendar/?month=2026-11">November 2026</a>' in november
+    assert 'href="/calendar/?month=2026-11">Nov 2026</a>' in november
     assert '<input type="hidden" name="cal" value="2026-11">' in november
 
 

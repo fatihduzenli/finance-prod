@@ -561,13 +561,13 @@ td.attention-action { text-align: right; }
 /* The Payment status card (D5; PLAN-012g C4, DESIGN-SPEC §7.5): the range's label muted at the
    right of the title (.status-range); the {% donut %} ring with the charges' count over the word
    "charges" in its middle (.donut-total); the three boxes, each with a 3 px top border in its
-   colour (--status-colour, the donut's), its word, its count bold and its amount; "+ n pending ·
+   colour (--box-colour, the donut's), its word, its count bold and its amount; "+ n pending ·
    rent and fees" under them. On a phone the donut is at the left and the boxes a list at the
    right (see the phone block). */
 .status-range { margin-left: auto; font-size: var(--fs-sm); }
-.status-overdue { --status-colour: var(--chart-overdue); }
-.status-paid { --status-colour: var(--chart-paid); }
-.status-upcoming { --status-colour: var(--chart-upcoming); }
+.status-overdue { --box-colour: var(--chart-overdue); }
+.status-paid { --box-colour: var(--chart-paid); }
+.status-upcoming { --box-colour: var(--chart-upcoming); }
 .donut { position: relative; width: 168px; max-width: 100%; margin: var(--space-2) auto var(--space-4); }
 .donut svg { display: block; width: 100%; height: auto; }
 .donut-total { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
@@ -575,7 +575,7 @@ td.attention-action { text-align: right; }
 .donut-label { color: var(--muted); font-size: var(--fs-xs); }
 .status-pending { margin: var(--space-3) 0 0; font-size: var(--fs-sm); }
 .status-boxes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
-.status-box { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--space-2); border: 1px solid var(--border); border-top: 3px solid var(--status-colour); border-radius: var(--radius-ctl); }
+.status-box { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--space-2); border: 1px solid var(--border); border-top: 3px solid var(--box-colour); border-radius: var(--radius-ctl); }
 .status-box-label { color: var(--text-2); font-size: var(--fs-sm); }
 .status-box-count { color: var(--text); font-size: var(--fs-lg); font-weight: 700; }
 .status-box-amount { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
@@ -585,14 +585,14 @@ td.attention-action { text-align: right; }
    focused), one dot per kind under a day with items (.mini-dots), whose .mini-popover lists
    them, each with a 4 px bar in its kind's colour; hover and focus show it, a tap toggles
    .is-open (ledger/static/ledger/dashboard.js). The two columns at each edge open their popover
-   inwards. A kind's colour is --kind-dot, set on its kind class inside the card: the debit day
+   inwards. A kind's colour is --dot-colour, set on its kind class inside the card: the debit day
    --dot-rent, the re-debit --dot-settles, the insurance anniversary, the note and the reminder
    --dot-promise, the lease end --dot-lease-end. The legend (.mini-legend) under the grid; the
    phone's panel (#mini-panel) and its script-free list (.mini-days-list) are the phone's. */
-.mini-calendar .kind-debit { --kind-dot: var(--dot-rent); }
-.mini-calendar .kind-redebit { --kind-dot: var(--dot-settles); }
-.mini-calendar .kind-insurance, .mini-calendar .kind-note, .mini-calendar .kind-reminder { --kind-dot: var(--dot-promise); }
-.mini-calendar .kind-lease_end { --kind-dot: var(--dot-lease-end); }
+.mini-calendar .kind-debit { --dot-colour: var(--dot-rent); }
+.mini-calendar .kind-redebit { --dot-colour: var(--dot-settles); }
+.mini-calendar .kind-insurance, .mini-calendar .kind-note, .mini-calendar .kind-reminder { --dot-colour: var(--dot-promise); }
+.mini-calendar .kind-lease_end { --dot-colour: var(--dot-lease-end); }
 .mini-head h2 a { color: inherit; text-decoration: none; }
 .mini-head h2 a:hover { color: var(--link); text-decoration: underline; }
 .mini-nav { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
@@ -608,12 +608,12 @@ button.mini-num:hover { background: var(--month-current); }
 .mini-day.is-today .mini-num { background: var(--btn-primary-bg); color: var(--text-on-accent); font-weight: 700; }
 .mini-day.is-selected .mini-num, .mini-day.has-items:hover .mini-num, .mini-day:focus-within .mini-num { box-shadow: 0 0 0 2px var(--teal); }
 .mini-dots { display: inline-flex; gap: 3px; }
-.mini-dot, .mini-key { width: 5px; height: 5px; border-radius: 50%; background: var(--kind-dot, var(--muted)); }
+.mini-dot, .mini-key { width: 5px; height: 5px; border-radius: 50%; background: var(--dot-colour, var(--muted)); }
 .mini-popover { display: none; position: absolute; top: 100%; left: 50%; z-index: 20; width: 14rem; margin: 2px 0 0; padding: var(--space-2); transform: translateX(-50%); border: 1px solid var(--popover-border); border-radius: var(--radius-ctl); background: var(--surface-2); box-shadow: var(--popover-shadow); list-style: none; text-align: left; }
 .mini-day:nth-child(7n + 1) .mini-popover, .mini-day:nth-child(7n + 2) .mini-popover { left: 0; transform: none; }
 .mini-day:nth-child(7n) .mini-popover, .mini-day:nth-child(7n + 6) .mini-popover { left: auto; right: 0; transform: none; }
 .mini-day:hover .mini-popover, .mini-day:focus-within .mini-popover, .mini-day.is-open .mini-popover { display: block; }
-.mini-popover .calendar-item, .mini-day-list .calendar-item { margin-bottom: 6px; padding-left: 8px; border-left: 4px solid var(--kind-dot, var(--muted)); }
+.mini-popover .calendar-item, .mini-day-list .calendar-item { margin-bottom: 6px; padding-left: 8px; border-left: 4px solid var(--dot-colour, var(--muted)); }
 .mini-popover .calendar-item:last-child, .mini-day-list .calendar-item:last-child { margin-bottom: 0; }
 .mini-calendar .mini-popover .calendar-item a, .mini-calendar .mini-day-list .calendar-item a { padding: 0; border-radius: 0; background: none; color: var(--text); font-size: var(--fs-sm); font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
 .mini-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: var(--space-3) 0 0; padding: 0; list-style: none; color: var(--text-2); font-size: var(--fs-sm); }
@@ -1072,7 +1072,7 @@ fieldset.card > legend + * { clear: both; }
   .status-layout .donut { width: 116px; margin: 0; }
   .status-boxes { grid-template-columns: 8px minmax(0, 1fr) auto minmax(0, auto); align-items: center; gap: var(--space-2); }
   .status-box { display: contents; }
-  .status-box::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--status-colour); }
+  .status-box::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--box-colour); }
   .status-box-label { color: var(--text); }
   .status-box-count { font-size: var(--fs-base); text-align: right; }
   .status-box-amount { text-align: right; }
