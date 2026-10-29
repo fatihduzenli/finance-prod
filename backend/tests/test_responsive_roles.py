@@ -390,15 +390,16 @@ def test_the_stores_list_carries_roles() -> None:
         for r in re.findall(r"<tr>.*?</tr>", table[table.index("<tbody>") :], re.S)
         if store.external_label in r
     )
-    # PLAN-012f-a D3: Store, Operator, Rent, Collected by, Balance (the first badge: status),
-    # Status (a second badge: meta-badge), the chevron (meta, written in the template).
+    # PLAN-012f-a D3: Store, Operator, Rent, Collected by, Balance, Status, the chevron (meta,
+    # written in the template). PLAN-014 A4: a vacant store's Balance is "—" (meta), so its
+    # Status ("Vacant · never leased") is the first badge: status.
     assert _roles(f"<tbody>{row}") == [
         "title",
         "meta",
         "amount",
         "meta",
+        "meta",
         "status",
-        "meta-badge",
         "meta",
     ]
 

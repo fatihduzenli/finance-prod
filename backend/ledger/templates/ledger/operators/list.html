@@ -1,14 +1,13 @@
 {% extends "finance/base.html" %}
-{% load components responsive icons %}
+{% load components responsive icons filters static %}
 {% block title %}Operators{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><h1>Operators</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} operator{{ page.paginator.count|pluralize }}{% if include_archived %}, archived included{% endif %}</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:operators:export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:operators:create' %}">{% icon "plus" 16 %} New operator</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
   {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3).{% endcomment %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:operators:list' %}" class="actions list-filters" role="search">
-    <input type="search" name="q" value="{{ query }}" maxlength="200" placeholder="Name, company or e-mail" aria-label="Search operators" class="list-search">
+  <div class="card filter-card">{% filters active=active_filters search_name="q" search_value=query search_maxlength=200 search_placeholder="Name, company or e-mail" search_label="Search operators" %}
     <label class="inline"><input type="checkbox" name="archived" value="1"{% if include_archived %} checked{% endif %}> Include archived</label>
-    <button class="btn btn-dark" type="submit">Filter</button>
-  </form></div>
+  {% endfilters %}</div>
+  <div id="results">
   <div class="card table-card list-card">
   {% responsive_table %}
   <table id="operators">
@@ -33,5 +32,7 @@
   {% endresponsive_table %}
   {% include "ledger/_list_footer.html" with page=page pager_query=pager_query %}
   </div>
+  </div>
   {% if form_dialog %}{% include "ledger/operators/_form_dialog.html" with dialog=form_dialog open=True scripts=True %}{% endif %}
 {% endblock %}
+{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script>{% endblock %}

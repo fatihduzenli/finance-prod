@@ -61,6 +61,7 @@ from ledger.services import (
     collections,
     contacts,
     csv_export,
+    list_filters,
     statement_links,
     workspace,
 )
@@ -264,6 +265,10 @@ def _list_context(request: HttpRequest) -> dict[str, Any]:
     return {
         "page": page,
         "query": query,
+        # PLAN-014 A5: the Filters button's count, the chip and Clear.
+        "active_filters": list_filters.active(
+            request, {"archived": ("Archived", {"1": "Included"})}
+        ),
         "include_archived": include_archived,
         "can_create": meets(_role(request), Role.BILLING),
         "export_query": export_query,

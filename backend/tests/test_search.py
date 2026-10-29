@@ -136,8 +136,10 @@ def test_the_stores_list_filters_and_says_so_with_a_clear_link(viewer: Client) -
     world()
     page = text(viewer.get("/stores/", {"q": "acme dallas"}))
     assert "Lake Mall" in page and "North Plaza" not in page and "South Plaza" not in page
-    assert "Filtered by 'acme dallas' · " in page
-    assert '<a href="/stores/" id="stores-clear">Clear</a>' in page
+    # PLAN-014 A5: the "Filtered by" line is gone; the search stays in its field, and the
+    # panel's Clear keeps it (it clears the filters).
+    assert "Filtered by" not in page and 'id="stores-clear"' not in page
+    assert 'id="filters-clear" href="/stores/?q=acme+dallas">Clear</a>' in page
     assert 'name="q" value="acme dallas"' in page
     assert 'href="/stores/export.csv?q=acme+dallas"' in page
     plain = text(viewer.get("/stores/", {"q": "  "}))
@@ -171,24 +173,20 @@ def test_the_grid_filters_its_rows_and_keeps_the_filter_in_the_form_and_export(
     rows = re.findall(r'class="grid-row" data-store="([^"]+)"', page)
     assert len(rows) == 2 and "North Plaza" not in page
     assert "2 stores." in page
-    filters = page[
-        page.index('id="grid-filters"') : page.index("</form>", page.index('id="grid-filters"'))
-    ]
-    assert '<input type="hidden" name="q" value="dallas">' in filters
-    box = page[
-        page.index('id="grid-search"') : page.index("</form>", page.index('id="grid-search"'))
-    ]
-    assert 'name="q" id="grid-q" value="dallas"' in box
-    assert '<input type="hidden" name="from" value="2026-01">' in box
-    assert '<input type="hidden" name="to" value="2026-12">' in box
+    # PLAN-014 A5: the words and the filters are one form (the search field keeps its id);
+    # the range is chosen in its panel; the "Filtered by" line is gone.
+    form = page[page.index('id="filters"') : page.index("</form>", page.index('id="filters"'))]
+    assert 'name="q" value="dallas" maxlength="100"' in form and 'id="grid-q"' in form
+    assert '<option value="2026-01" selected>' in form
+    assert '<option value="2026-12" selected>' in form
     assert 'href="/grid/export.csv?from=2026-01&amp;to=2026-12&amp;q=dallas"' in page
-    assert "Filtered by 'dallas' · " in page
-    assert 'href="/grid/?from=2026-01&amp;to=2026-12" id="grid-clear">Clear</a>' in page
+    assert "Filtered by" not in page and 'id="grid-clear"' not in page
+    assert 'id="filters-clear" href="/grid/?q=dallas">Clear</a>' in page
     export = text(viewer.get("/grid/export.csv", params))
     assert csv_numbers(export, "Store number") == {"2478", "3100"}
     plain = text(viewer.get("/grid/", {"from": "2026-01", "to": "2026-12"}))
     assert "3 stores." in plain and "Filtered by" not in plain
-    assert 'type="hidden" name="q"' not in plain
+    assert 'name="q" value=""' in plain
 
 
 def test_the_grid_query_reads_q_and_writes_it_back() -> None:
