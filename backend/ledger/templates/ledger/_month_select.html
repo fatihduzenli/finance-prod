@@ -1,4 +1,4 @@
 {% load responsive dates %}
-{% comment %}A month picker as a plain select (PLAN-012d D12 and the owner's Safari rule: no HTML month input, no script), shared by the grid and the reports. "name" (the field and its id), "months" (ledger.services.grid.picker_months) and "selected" (the month shown); values YYYY-MM, labels "October 2026".{% endcomment %}<select name="{{ name }}" id="{{ name }}">
+{% comment %}A month picker as a plain select (PLAN-012d D12 and the owner's Safari rule: no HTML month input, no script), shared by the grid and the reports. "name" (the field and its id; "select_id" when the page holds two, PLAN-012g C2), "months" (ledger.services.grid.picker_months) and "selected" (the month shown); values YYYY-MM, labels "October 2026".{% endcomment %}<select name="{{ name }}" id="{{ select_id|default:name }}">
         {% for month in months %}<option value="{{ month|date:'Y-m' }}"{% if month == selected %} selected{% endif %}>{{ month|month }}</option>{% endfor %}
       </select>

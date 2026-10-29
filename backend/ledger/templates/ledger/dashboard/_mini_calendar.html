@@ -1,16 +1,23 @@
 {% load dates %}
-{% comment %}The mini calendar (PLAN-012f-b D6; DESIGN-SPEC §4a): the title links to Reports › Calendar; ‹ › step the
-month (?cal=YYYY-MM beside the range); a 7-column grid, Sunday first, today in a teal circle, a dot under a day
-with items. Each such day is a button over a hidden popover listing its items as links in the Calendar
-page's chip colours (.calendar-item kind-…), shown on hover and focus (CSS) and toggled by a tap
-(ledger/static/ledger/dashboard.js). Built from the Calendar page's own reads.{% endcomment %}
+{% comment %}The mini calendar (PLAN-012f-b D6; PLAN-012g C3; DESIGN-SPEC §4a, §7.5): the month's name links to Reports ›
+Calendar for that month; ‹ › step the month (?cal=YYYY-MM beside an explicit range); a 7-column grid, Sunday
+first, today in a teal circle, under a day with items one dot per kind present (up to three, .mini-dot
+kind-…, coloured by app.css). Each such day is a button over a hidden popover listing its items as links,
+each with a bar in its kind's colour, shown on hover and focus (CSS) and toggled by a tap
+(ledger/static/ledger/dashboard.js), which also rings the day (.is-selected). The legend under the grid
+names the kinds present. On a phone the popover is not shown: the script moves the tapped day's list into
+#mini-panel under the legend; without the script the days' lists are the details under it
+(.mini-day-items, hidden once html.js is set). Built from the Calendar page's own reads.{% endcomment %}
 <section class="card mini-calendar" id="mini-calendar" aria-labelledby="mini-calendar-heading">
   <div class="card-header mini-head">
-    <h2 id="mini-calendar-heading"><a href="{% url 'ledger:calendar:page' %}?month={{ mini_calendar.month|date:'Y-m' }}">Calendar</a></h2>
-    <div class="mini-nav"><a class="btn btn-sm mini-step" id="mini-previous" href="?cal={{ mini_calendar.previous|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Previous month">‹</a><span class="mini-month" id="mini-month">{{ mini_calendar.month|month }}</span><a class="btn btn-sm mini-step" id="mini-next" href="?cal={{ mini_calendar.next|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Next month">›</a></div>
+    <h2 id="mini-calendar-heading"><a id="mini-month" href="{% url 'ledger:calendar:page' %}?month={{ mini_calendar.month|date:'Y-m' }}">{{ mini_calendar.month|month }}</a></h2>
+    <div class="mini-nav"><a class="btn btn-sm mini-step" id="mini-previous" href="?cal={{ mini_calendar.previous|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Previous month">‹</a><a class="btn btn-sm mini-step" id="mini-next" href="?cal={{ mini_calendar.next|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Next month">›</a></div>
   </div>
   <div class="mini-grid" id="mini-grid">
     <span class="mini-weekday">Su</span><span class="mini-weekday">Mo</span><span class="mini-weekday">Tu</span><span class="mini-weekday">We</span><span class="mini-weekday">Th</span><span class="mini-weekday">Fr</span><span class="mini-weekday">Sa</span>
-    {% for week in mini_calendar.weeks %}{% for cell in week %}<div class="mini-day{% if not cell.in_month %} other-month{% endif %}{% if cell.today %} is-today{% endif %}{% if cell.items %} has-items{% endif %}" data-day="{{ cell.day|date:'Y-m-d' }}">{% if cell.items %}<button type="button" class="mini-num" aria-label="{{ cell.day|day }}: {{ cell.items|length }} item{{ cell.items|length|pluralize }}"{% if cell.today %} aria-current="date"{% endif %}>{{ cell.day.day }}</button><span class="mini-dot" aria-hidden="true"></span><ul class="mini-popover">{% for item in cell.items %}<li class="calendar-item kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a href="{{ item.url }}">{{ item.title }}</a></li>{% endfor %}</ul>{% else %}<span class="mini-num"{% if cell.today %} aria-current="date"{% endif %}>{{ cell.day.day }}</span>{% endif %}</div>{% endfor %}{% endfor %}
+    {% for week in mini_calendar.weeks %}{% for cell in week %}<div class="mini-day{% if not cell.in_month %} other-month{% endif %}{% if cell.today %} is-today{% endif %}{% if cell.items %} has-items{% endif %}" data-day="{{ cell.day|date:'Y-m-d' }}"{% if cell.items %} data-label="{{ cell.label }}"{% endif %}>{% if cell.items %}<button type="button" class="mini-num" aria-label="{{ cell.day|day }}: {{ cell.items|length }} item{{ cell.items|length|pluralize }}"{% if cell.today %} aria-current="date"{% endif %}>{{ cell.day.day }}</button><span class="mini-dots" aria-hidden="true">{% for kind in cell.kinds %}<span class="mini-dot kind-{{ kind }}"></span>{% endfor %}</span><ul class="mini-popover">{% for item in cell.items %}<li class="calendar-item kind-{{ item.kind }}" data-kind="{{ item.kind }}"><a href="{{ item.url }}">{{ item.title }}</a></li>{% endfor %}</ul>{% else %}<span class="mini-num"{% if cell.today %} aria-current="date"{% endif %}>{{ cell.day.day }}</span>{% endif %}</div>{% endfor %}{% endfor %}
   </div>
+  {% if mini_calendar.legend %}<ul class="mini-legend" id="mini-legend">{% for kind, label in mini_calendar.legend %}<li><span class="mini-key kind-{{ kind }}" aria-hidden="true"></span>{{ label }}</li>{% endfor %}</ul>{% endif %}
+  <div class="mini-panel" id="mini-panel" aria-live="polite" hidden></div>
+  {% if mini_calendar.days_with_items %}<div class="mini-days-list">{% for cell in mini_calendar.days_with_items %}<details class="mini-day-items"><summary>{{ cell.label }}</summary><ul class="mini-day-list">{% for item in cell.items %}<li class="calendar-item kind-{{ item.kind }}"><a href="{{ item.url }}">{{ item.title }}</a></li>{% endfor %}</ul></details>{% endfor %}</div>{% endif %}
 </section>

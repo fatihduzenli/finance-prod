@@ -808,7 +808,9 @@ def test_the_step_line_escapes_its_label_and_is_empty_without_a_current_step() -
 def test_the_dashboards_attention_rows_are_cards_with_a_full_width_button_on_a_phone() -> None:
     block = phone_block(APP_CSS.read_text(encoding="utf-8"))
     assert ".kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr));" in block
-    assert ".attention-table td.attention-action > .btn { display: flex; width: 100%; }" in block
+    # PLAN-012g C5: the row's button sits at the right of the why badge, its own width.
+    button = ".attention-table td.attention-action > .btn { display: inline-flex; width: auto; }"
+    assert button in block
     # PLAN-012f-b A-3: the dashboard's two-thirds rows are .dashboard-row-thirds.
     thirds = ".dashboard-row-thirds, .workspace-grid { grid-template-columns: minmax(0, 1fr);"
     assert thirds in block

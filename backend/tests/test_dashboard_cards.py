@@ -68,9 +68,11 @@ def today(monkeypatch: pytest.MonkeyPatch) -> date:
 @pytest.mark.parametrize(
     ("params", "key", "start", "end", "label"),
     [
-        ({}, "this", OCT, OCT, "This month"),
+        # PLAN-012g C2: the default is the last 12 months; 6m joins the presets.
+        ({}, "12m", date(2025, 11, 1), OCT, "Last 12 months"),
         ({"range": "this"}, "this", OCT, OCT, "This month"),
         ({"range": "3m"}, "3m", AUG, OCT, "Last 3 months"),
+        ({"range": "6m"}, "6m", MAY, OCT, "Last 6 months"),
         ({"range": "12m"}, "12m", date(2025, 11, 1), OCT, "Last 12 months"),
         (
             {"range": "custom", "from": "2026-02", "to": "2026-04"},
@@ -82,7 +84,7 @@ def today(monkeypatch: pytest.MonkeyPatch) -> date:
         ({"range": "custom", "from": "2026-05", "to": "2026-05"}, "custom", MAY, MAY, "May 2026"),
     ],
 )
-def test_the_four_keys(
+def test_the_five_keys(
     params: dict[str, str], key: str, start: date, end: date, label: str
 ) -> None:
     found = blocks.parse_range(params, TODAY)
@@ -180,11 +182,15 @@ def test_an_empty_month_is_zero_and_says_nothing_about_costs() -> None:
     card = blocks.cashflow(blocks.Range("this", "This month", OCT, OCT))
     assert (card.income, card.expenses, card.net) == (D(0), D(0), D(0))
     assert card.without_cost_line == ""
-    assert len(card.months) == blocks.CASHFLOW_BARS
+    assert len(card.months) == 1  # PLAN-012g C2: a short preset draws its own months
 
 
 def test_a_short_range_is_padded_to_twelve_bars_on_the_left() -> None:
-    card = blocks.cashflow(blocks.Range("3m", "Last 3 months", AUG, OCT))
+    # PLAN-012g C2: a short custom range is padded; a short preset draws its own months.
+    preset = blocks.cashflow(blocks.Range("3m", "Last 3 months", AUG, OCT))
+    assert [bar.month for bar in preset.months] == [AUG, SEP, OCT]
+    assert all(bar.in_range for bar in preset.months)
+    card = blocks.cashflow(blocks.Range("custom", "", AUG, OCT))
     assert [bar.month for bar in card.months][0] == date(2025, 11, 1)
     assert [bar.month for bar in card.months][-1] == OCT
     assert [bar.in_range for bar in card.months] == [False] * 9 + [True] * 3
@@ -482,7 +488,8 @@ def test_on_a_phone_the_chart_fits_its_card_with_the_kept_labels() -> None:
 
 def test_the_dashboard_passes_today_to_the_chart() -> None:
     template = Path(__file__).resolve().parents[1] / "ledger/templates/ledger/dashboard"
-    assert "{% bars cashflow.months data.today %}" in (template / "_cashflow.html").read_text()
+    # PLAN-012g C2: each card's block, in the card template the two cards share.
+    assert "{% bars block.months data.today %}" in (template / "_cashflow_card.html").read_text()
 
 
 @dataclass
@@ -528,11 +535,11 @@ def test_the_cards_are_in_the_owners_order(today: date) -> None:
         'id="figures-card"',
         'id="cashflow-card"',
         'id="attention"',
-        'id="payment-status"',
-        'id="recent-payments"',
         'id="mini-calendar"',
-        'id="collection-card"',
+        'id="recent-payments"',
+        'id="payment-status"',
         'id="coming-up"',
+        'id="collection-card"',
         'id="today-run"',
         'id="failed-attempts"',
         'id="not-sent-card"',
@@ -540,7 +547,7 @@ def test_the_cards_are_in_the_owners_order(today: date) -> None:
     ]
     positions = [html.index(marker) for marker in order]
     assert positions == sorted(positions)
-    assert html.count('class="dashboard-row-thirds"') == 2
+    assert html.count('class="dashboard-row-thirds"') == 3  # PLAN-012g C1
     assert 'src="/static/ledger/dashboard.js"' in html
 
 
@@ -556,7 +563,9 @@ def test_a_viewer_reads_every_card_and_nothing_is_written(today: date) -> None:
     assert 'id="cashflow-expenses">—<' in html and 'id="cashflow-net">—<' in html
     assert 'role="img"' in html and 'class="bars-chart"' in html
     assert '<span class="donut-amount">' in html
-    assert 'id="payment-status-pending">+ 1 pending<' in html
+    # PLAN-012g C4: the count and "charges" in the middle; the pending line names its charges.
+    assert 'id="payment-status-pending">+ 1 pending · rent and fees<' in html
+    assert '<span class="donut-label">charges</span>' in html
     assert 'id="status-overdue"' in html and 'id="status-paid"' in html
     assert 'id="status-upcoming"' in html
     form = html[
@@ -585,18 +594,20 @@ def test_the_mini_calendar_steps_months_keeps_the_range_and_lists_items(today: d
     )
     client, _ = client_for(Role.VIEWER)
     html = page(client, range="12m")
-    assert 'href="/calendar/?month=2026-10">Calendar</a>' in html
+    # PLAN-012g C3: the month's name is the link; a dot per kind, coloured by its kind class.
+    assert '<a id="mini-month" href="/calendar/?month=2026-10">Oct 2026</a>' in html
     assert 'id="mini-previous" href="?cal=2026-09&amp;range=12m"' in html
     assert 'id="mini-next" href="?cal=2026-11&amp;range=12m"' in html
-    assert 'id="mini-month">Oct 2026<' in html
-    assert html.count('class="mini-dot"') == 2  # the 5th (debit day) and the 12th (note)
+    assert html.count('class="mini-dot kind-debit"') == 1  # the 5th
+    assert html.count('class="mini-dot kind-note"') == 1  # the 12th
+    assert html.count('class="mini-dot ') == 2
     assert 'class="calendar-item kind-debit"' in html and 'class="calendar-item kind-note"' in html
     assert "Call &lt;b&gt;landlord&lt;/b&gt;" in html and "<b>landlord" not in html
     assert 'aria-label="Oct 12, 2026: 1 item"' in html
     assert 'class="mini-day is-today"' in html
     assert 'data-day="2026-10-05"' in html and has_token(html, lease.store.external_label)
     november = page(client, cal="2026-11")
-    assert 'id="mini-month">Nov 2026<' in november
+    assert 'href="/calendar/?month=2026-11">Nov 2026</a>' in november
     assert '<input type="hidden" name="cal" value="2026-11">' in november
 
 

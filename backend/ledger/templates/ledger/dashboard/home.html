@@ -6,14 +6,14 @@
 dashboard-laptop.png). The header: the title with the long date, the search box and "+ New
 invoice" (billing: it opens the "Which store?" picker, ledger/_store_picker.html, PLAN-012f-b
 D7; without the script the link leads to the search page for a new invoice; no store-less
-builder route exists). Row 1: the four figures as KPI cards (ledger.views.dashboard
-._kpis). Row 2: the Cashflow card, full width (PLAN-012f-b D3, D4; dashboard/_cashflow.html).
-Row 3 (.dashboard-row-thirds): what needs attention (PLAN-011b D6; ledger/_attention.html) over
-two thirds, beside the Payment status card (D5). Row 4: the recent payments over two thirds,
-beside the mini calendar (D6), the month's collection
-(ledger.services.dashboard.collection_progress) and what is coming up. Then today's run, the
-failed payment attempts, the waived charges with a live invoice, the invoices not sent and the
-last nightly check, each a card. Phones: one column in that order.{% endcomment %}
+builder route exists). The rows of DESIGN-SPEC §7.5 (PLAN-012g C1): the four figures as KPI
+cards (ledger.views.dashboard._kpis); the Cashflow card, full width (dashboard/_cashflow.html);
+then three .dashboard-row-thirds (two thirds | one third): what needs attention (PLAN-011b D6;
+ledger/_attention.html) beside the mini calendar (dashboard/_mini_calendar.html); the recent
+payments beside the Payment status card (dashboard/_payment_status.html); what is coming up
+beside the month's collection (ledger.services.dashboard.collection_progress). Then today's run,
+the failed payment attempts, the waived charges with a live invoice, the invoices not sent and
+the last nightly check, each a card. Phones: one column in that order (§7.5's phone order).{% endcomment %}
 {% block header %}<div class="page-header"><div class="page-title"><h1>Dashboard</h1><span class="page-date" id="dashboard-date">{{ data.today|day_long }}</span></div><div class="page-actions">{% include "finance/_header_search.html" %}{% if can_act %}<a class="btn btn-primary" id="new-invoice" href="{% url 'ledger:search' %}?intent=new_invoice" data-dialog-open="store-picker">{% icon "plus" 16 %}New invoice</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
   {% if can_act %}{% include "ledger/_store_picker.html" %}{% endif %}
@@ -28,7 +28,7 @@ last nightly check, each a card. Phones: one column in that order.{% endcomment 
       {% include "ledger/_attention.html" with banners=False %}
     </div>
     <div class="dashboard-side">
-      {% include "ledger/dashboard/_payment_status.html" %}
+      {% include "ledger/dashboard/_mini_calendar.html" %}
     </div>
   </div>
 
@@ -43,10 +43,10 @@ last nightly check, each a card. Phones: one column in that order.{% endcomment 
             <tbody>
               {% for row in recent_payments %}
                 <tr class="recent-payment">
-                  <td><a class="recent-when" href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.when }}</a></td>
-                  <td>{{ row.store|default:"—" }}</td>
-                  <td>{{ row.paid_for|default:"—" }}</td>
-                  <td>{{ row.method }}</td>
+                  <td class="recent-on" data-role="meta"><a class="recent-when" href="{% url 'ledger:payments:detail' pk=row.payment.pk %}">{{ row.when }}</a></td>
+                  <td class="recent-store" data-role="title">{{ row.store|default:"—" }}</td>
+                  <td class="recent-for" data-role="meta">{{ row.paid_for|default:"—" }}</td>
+                  <td class="recent-method" data-role="meta">{{ row.method }}</td>
                   <td class="money"><strong>{{ row.amount|money }}</strong></td>
                 </tr>
               {% endfor %}
@@ -59,16 +59,12 @@ last nightly check, each a card. Phones: one column in that order.{% endcomment 
       </section>
     </div>
     <div class="dashboard-side">
-      {% include "ledger/dashboard/_mini_calendar.html" %}
-      <section class="card" id="collection-card" aria-labelledby="collection-heading">
-        <h2 id="collection-heading">{{ collection.month|month }} collection</h2>
-        {% if collection.percent is not None %}
-          <p class="collection-total"><span class="collection-percent" id="collection-percent">{{ collection.percent }}%</span> <span class="muted" id="collection-billed">of {{ collection.billed|money }}</span></p>
-          {% progress collection.segments %}
-        {% else %}
-          {% with billed_month=collection.month|month %}{% include "finance/_empty_state.html" with id="collection-none" icon="reports" title="No rent billed for "|add:billed_month|add:" yet." text="The bar fills in as the month's rent is billed and paid." only %}{% endwith %}
-        {% endif %}
-      </section>
+      {% include "ledger/dashboard/_payment_status.html" %}
+    </div>
+  </div>
+
+  <div class="dashboard-row-thirds" id="dashboard-row-coming">
+    <div class="dashboard-main">
       <section class="card" id="coming-up" aria-labelledby="coming-up-heading">
         <h2 id="coming-up-heading">Coming up</h2>
         {% if coming_up %}
@@ -77,6 +73,17 @@ last nightly check, each a card. Phones: one column in that order.{% endcomment 
           </ul>
         {% else %}
           {% include "finance/_empty_state.html" with id="coming-up-none" icon="calendar" title="Nothing scheduled." text="Rent days, debit settlements and insurance renewals show here." only %}
+        {% endif %}
+      </section>
+    </div>
+    <div class="dashboard-side">
+      <section class="card" id="collection-card" aria-labelledby="collection-heading">
+        <h2 id="collection-heading">{{ collection.month|month }} collection</h2>
+        {% if collection.percent is not None %}
+          <p class="collection-total"><span class="collection-percent" id="collection-percent">{{ collection.percent }}%</span> <span class="muted" id="collection-billed">of {{ collection.billed|money }}</span></p>
+          {% progress collection.segments %}
+        {% else %}
+          {% with billed_month=collection.month|month %}{% include "finance/_empty_state.html" with id="collection-none" icon="reports" title="No rent billed for "|add:billed_month|add:" yet." text="The bar fills in as the month's rent is billed and paid." only %}{% endwith %}
         {% endif %}
       </section>
     </div>

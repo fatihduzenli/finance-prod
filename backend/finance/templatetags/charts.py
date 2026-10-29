@@ -4,20 +4,26 @@ docs/design/DESIGN-SPEC.md §4a): no chart library and no script.
 ``{% bars rows %}`` draws the Cashflow card's months: ``rows`` are objects with ``month``,
 ``income``, ``expenses`` (``None``: unknown, no bar), ``net`` (``None``: no point) and
 ``in_range`` (``False``: a month before the range, its bars faded, its label kept legible).
-Each month is a pair of bars, Income and Expenses, each with a ``<title>`` holding its figure,
+Each month is a pair of bars, Income and Expenses, each with a ``<title>`` holding its figure;
+the frame is the same for any number of months and the bars widen with their month's share
+of it (twelve months: :data:`BAR_WIDTH`; fewer: wider, at most :data:`MAX_BAR_WIDTH`;
+PLAN-012g C2),
 and the net is a line through the months it is known in. The scale
 holds zero and every figure, so a negative month reads below the zero line. The ``<svg>`` is
 ``role="img"`` with a sentence as its ``aria-label``. Every month's label is written, as a
 ``<text class="bar-label">``; the labels kept where the chart is narrow (a phone) are every
 third month counting back from the last, the first month of the range and today's month
-(``{% bars rows today %}``); the others carry ``bar-label-minor``, which the phone's style
-hides (:func:`major_months`). A bar's ``<title>`` names its month either way.
+(``{% bars rows today %}``), or every month on a chart of six or fewer, whose labels drop
+the year ("May"; the ``aria-label`` and each bar's ``<title>`` keep it); the others carry
+``bar-label-minor``, which the phone's style hides (:func:`major_months`). A bar's
+``<title>`` names its month either way.
 
 ``{% donut parts total %}`` draws the Payment status card's ring: ``parts`` are objects
 with ``key`` (``overdue``, ``paid`` or ``upcoming``), ``label`` and ``amount``; each part
 with an amount above zero is an arc (``stroke-dasharray`` over a ``pathLength`` of 100) in
-its colour, and the total is written in the middle through :func:`format_amount`. A zero
-total draws the empty ring.
+its colour, and the total is written in the middle through :func:`format_amount` over the
+word "Total"; ``{% donut parts total count %}`` writes the charges' count over the word
+"charges" instead (the Payment status card, PLAN-012g C4). A zero total draws the empty ring.
 
 ``{% chart_key key %}`` draws the 8 px key of a chart colour (``income``, ``expenses``,
 ``net``, ``overdue``, ``paid``, ``upcoming``) for a legend or a box beside its word.
@@ -41,7 +47,7 @@ from django import template
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString, mark_safe
 
-from finance.dates import month_text
+from finance.dates import month_short_text, month_text
 from ledger.wording import format_amount
 
 register = template.Library()
@@ -76,9 +82,14 @@ LABEL_Y = Decimal(200)
 HEIGHT = Decimal(208)
 BAR_WIDTH = Decimal(16)
 BAR_GAP = Decimal(3)
+#: The months :data:`BAR_WIDTH` and :data:`BAR_GAP` are drawn for; fewer months widen both.
+BAR_MONTHS = 12
+MAX_BAR_WIDTH = Decimal(48)
 OUTSIDE_OPACITY = "0.4"
 #: On a narrow chart a label every this many months, counted back from the last (A3-1).
 LABEL_EVERY = 3
+#: A chart of at most this many months labels every one of them (PLAN-012g C2).
+LABEL_ALL_UP_TO = 6
 
 _TENTH = Decimal("0.1")
 
@@ -96,14 +107,16 @@ def _figures(row: Any) -> list[Decimal]:
     return [value for value in found if value is not None]
 
 
-def _bar(x: Decimal, value: Decimal, zero: Decimal, scale: Decimal, fill: str, title: str) -> str:
+def _bar(
+    x: Decimal, width: Decimal, value: Decimal, zero: Decimal, scale: Decimal, fill: str, title: str
+) -> str:
     top = zero - value * scale
     y, height = (top, zero - top) if value >= 0 else (zero, top - zero)
     return format_html(
         '<rect x="{}" y="{}" width="{}" height="{}" fill="{}"><title>{}</title></rect>',
         _coord(x),
         _coord(y),
-        _coord(BAR_WIDTH),
+        _coord(width),
         _coord(height),
         fill,
         title,
@@ -114,7 +127,10 @@ def major_months(items: list[Any], today: date | None = None) -> set[int]:
     """The indexes of the months whose label stays on a narrow chart: the first month of
     the range (the first row ``in_range``) and today's month, when it is drawn, then every
     :data:`LABEL_EVERY`th month counted back from the last that is not beside one of those
-    (two labels side by side would overlap)."""
+    (two labels side by side would overlap). A chart of at most :data:`LABEL_ALL_UP_TO` months
+    keeps every label."""
+    if len(items) <= LABEL_ALL_UP_TO:
+        return set(range(len(items)))
     kept: set[int] = set()
     first = next((index for index, row in enumerate(items) if row.in_range), None)
     if first is not None:
@@ -146,16 +162,21 @@ def bars(rows: Iterable[Any], today: date | None = None) -> SafeString:
     scale = PLOT_HEIGHT / spread
     zero = PLOT_TOP + high * scale
     step = WIDTH / len(items)
+    widen = min(step * BAR_MONTHS / WIDTH, MAX_BAR_WIDTH / BAR_WIDTH)
+    bar_width, bar_gap = BAR_WIDTH * widen, BAR_GAP * widen
+    short = len(items) <= LABEL_ALL_UP_TO
     groups: list[str] = []
     runs: list[list[str]] = [[]]
     for index, row in enumerate(items):
         centre = step * index + step / 2
         label = month_text(row.month)
+        shown = month_short_text(row.month) if short else label
         income = _amount(row.income) or Decimal(0)
         expenses = _amount(row.expenses)
         parts = [
             _bar(
-                centre - BAR_WIDTH - BAR_GAP / 2,
+                centre - bar_width - bar_gap / 2,
+                bar_width,
                 income,
                 zero,
                 scale,
@@ -166,7 +187,8 @@ def bars(rows: Iterable[Any], today: date | None = None) -> SafeString:
         if expenses is not None:
             parts.append(
                 _bar(
-                    centre + BAR_GAP / 2,
+                    centre + bar_gap / 2,
+                    bar_width,
                     expenses,
                     zero,
                     scale,
@@ -184,7 +206,7 @@ def bars(rows: Iterable[Any], today: date | None = None) -> SafeString:
                 _coord(centre),
                 _coord(LABEL_Y),
                 LABEL_FILL,
-                label,
+                shown,
             )
         )
         net = _amount(row.net)
@@ -222,8 +244,9 @@ RING_WIDTH = 14
 
 
 @register.simple_tag
-def donut(parts: Iterable[Any], total: object) -> SafeString:
-    """The Payment status ring with the total in the middle (see the module docstring)."""
+def donut(parts: Iterable[Any], total: object, count: int | None = None) -> SafeString:
+    """The Payment status ring with the total, or the count, in the middle (see the module
+    docstring)."""
     shown: list[tuple[str, str, Decimal]] = []
     for part in parts:
         value = _amount(part.amount)
@@ -254,18 +277,24 @@ def donut(parts: Iterable[Any], total: object) -> SafeString:
         arcs,
     )
     described = ", ".join(f"{label} {format_amount(amount)}" for _, label, amount in shown)
-    middle = format_amount(_amount(total) or Decimal(0))
+    total_text = format_amount(_amount(total) or Decimal(0))
+    middle, word = (
+        (total_text, "Total")
+        if count is None
+        else (str(count), "charge" if count == 1 else "charges")
+    )
     return format_html(
         '<div class="donut"><svg viewBox="0 0 120 120" role="img" aria-label="{}">'
         '<circle cx="60" cy="60" r="{}" fill="none" stroke="{}" stroke-width="{}" />{}</svg>'
         '<span class="donut-total"><span class="donut-amount">{}</span>'
-        '<span class="donut-label">Total</span></span></div>',
-        f"Total {middle}" + (f": {described}" if described else ""),
+        '<span class="donut-label">{}</span></span></div>',
+        f"Total {total_text}" + (f": {described}" if described else ""),
         RING_RADIUS,
         RING_EMPTY,
         RING_WIDTH,
         circles,
         middle,
+        word,
     )
 
 
