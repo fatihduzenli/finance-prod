@@ -31,8 +31,8 @@ from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Exists, OuterRef, Prefetch, Q, QuerySet
-from django.db.models.functions import Lower
+from django.db.models import CharField, Exists, OuterRef, Prefetch, Q, QuerySet
+from django.db.models.functions import Cast, Lower
 from django.http import Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -55,7 +55,14 @@ from ledger.models import (
     ScheduleState,
     Store,
 )
-from ledger.services import csv_export, detail_cards, list_filters, one_off_charges, workspace
+from ledger.services import (
+    csv_export,
+    detail_cards,
+    list_filters,
+    one_off_charges,
+    search,
+    workspace,
+)
 from ledger.services import leases as service
 from ledger.services import stores as store_service
 from ledger.services.csv_export import CsvWriter
@@ -110,8 +117,28 @@ def _operator_filter(raw: str | None) -> uuid.UUID | None:
         return None
 
 
-def _listed(request: HttpRequest) -> tuple[QuerySet[Lease], uuid.UUID | None]:
-    """The leases the list shows, with the rent in effect today and the note flag."""
+def _searched(leases: QuerySet[Lease], query: str) -> QuerySet[Lease]:
+    """``leases`` narrowed to those where every word of ``query`` matches the store's number
+    (as a prefix, as the stores list matches it) or name, or the operator's display name
+    (PLAN-014 A5; case-insensitive "contains"); unchanged when the query has no word."""
+    found = search.words(query)
+    if not found:
+        return leases
+    leases = leases.annotate(_search_number=Cast("store__store_number", CharField()))
+    for word in found:
+        condition = Q(store__external_label__icontains=word) | Q(
+            operator__display_name__icontains=word
+        )
+        number = search.number_prefix(word)
+        if number is not None:
+            condition |= Q(_search_number__startswith=number)
+        leases = leases.filter(condition)
+    return leases
+
+
+def _listed(request: HttpRequest) -> tuple[QuerySet[Lease], uuid.UUID | None, str]:
+    """The leases the list shows, with the rent in effect today and the note flag: of the
+    ``operator`` filter, and matching the search (``q``, cleaned as the search cleans it)."""
     today = timezone.localdate()
     in_effect = (
         LeaseRentHistory.objects.filter(effective_from__lte=today)
@@ -129,17 +156,20 @@ def _listed(request: HttpRequest) -> tuple[QuerySet[Lease], uuid.UUID | None]:
     )
     if operator is not None:
         leases = leases.filter(operator_id=operator)
-    return leases, operator
+    query = search.clean_query(request.GET.get("q"))
+    return _searched(leases, query), operator, query
 
 
 @role_required
 @require_safe
 def lease_list(request: HttpRequest) -> HttpResponse:
     """Every lease, optionally of one operator (PLAN-009 D9); a lease whose charges carry
-    a charge note is marked."""
-    leases, operator = _listed(request)
+    a charge note is marked; the search (PLAN-014 A5) is kept by the paging and export links."""
+    leases, operator, search_query = _listed(request)
     page = Paginator(leases, PAGE_SIZE).get_page(request.GET.get("page"))
     operators = list(Operator.objects.order_by(Lower("display_name"), "id"))
+    found = {"operator": str(operator) if operator else "", "q": search_query}
+    accepted = {name: value for name, value in found.items() if value}
     return render(
         request,
         "ledger/leases/list.html",
@@ -148,13 +178,14 @@ def lease_list(request: HttpRequest) -> HttpResponse:
             "active_filters": list_filters.active(
                 request,
                 {"operator": ("Operator", {str(item.pk): item.display_name for item in operators})},
-                accepted={"operator": str(operator)} if operator else {},
+                accepted=accepted,
             ),
             "page": page,
             "can_create": meets(_role(request), Role.ADMIN),
             "operators": operators,
             "operator": operator,
-            "query": urlencode({"operator": str(operator)}) if operator else "",
+            "search_query": search_query,
+            "query": urlencode(accepted),
         },
     )
 
@@ -179,7 +210,7 @@ EXPORT_HEADER = (
 @require_safe
 def lease_export(request: HttpRequest) -> StreamingHttpResponse:
     """``ledger:leases:export`` (PLAN-011 D5): the list's rows, every page."""
-    leases, _ = _listed(request)
+    leases, _, _ = _listed(request)
 
     def records() -> Iterator[list[object]]:
         for lease in leases[: csv_export.CSV_MAX_ROWS + 1].iterator(chunk_size=500):

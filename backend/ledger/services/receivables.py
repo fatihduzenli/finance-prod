@@ -51,7 +51,10 @@ before today. *Months behind* counts the distinct rent months of those rent char
 twice-monthly lease's two charges of one month are one month); the bucket is ``1``,
 ``2`` or ``3+`` (``0`` when only insurance or one-off charges are overdue). *Total
 owed* is every open balance of the operator, overdue or not. A charge whose payment is
-pending is owed but not behind: it never puts an operator on the list by itself.
+pending is owed but not behind: it never puts an operator on the list by itself. The
+search (``q``, PLAN-014 A5) keeps the rows where every word is in the operator's name or in
+the name of one of its stores, or starts one of its stores' numbers (case-insensitive; one
+query for the numbers, only when there is a word).
 
 **The dashboard** (D1) adds what is not a balance: payments settled this month net of
 their settled refunds (deposits and deposit refunds left out), invoices created but not
@@ -96,8 +99,9 @@ from ledger.models import (
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
+    Store,
 )
-from ledger.services import one_off_charges, rent_run, returns
+from ledger.services import one_off_charges, rent_run, returns, search
 from ledger.services.csv_export import CsvWriter
 from ledger.services.pnl import add_months
 from payments.models import ExternalRef, ReconciliationRun, ReconciliationStatus
@@ -559,6 +563,8 @@ class ArrearsFilter:
     descending: bool = True
     #: Why a value was not used, one sentence each.
     messages: tuple[str, ...] = ()
+    #: The search's words (``q``), cleaned.
+    query: str = ""
 
     def as_query(self) -> dict[str, str]:
         values = {
@@ -567,6 +573,7 @@ class ArrearsFilter:
             "bucket": self.bucket,
             "sort": self.sort,
             "dir": "desc" if self.descending else "asc",
+            "q": self.query,
         }
         return {name: value for name, value in values.items() if value}
 
@@ -592,7 +599,15 @@ def parse_arrears_filter(params: Mapping[str, str]) -> ArrearsFilter:
         messages.append(BAD_SORT)
         sort = SORT_MONTHS
     descending = (params.get("dir", "") or "desc") != "asc"
-    return ArrearsFilter(operator, state, bucket, sort, descending, tuple(messages))
+    return ArrearsFilter(
+        operator,
+        state,
+        bucket,
+        sort,
+        descending,
+        tuple(messages),
+        query=search.clean_query(params.get("q")),
+    )
 
 
 @dataclass(slots=True)
@@ -688,6 +703,37 @@ def _arrears_rows(today: date) -> list[ArrearsRow]:
     return behind
 
 
+def _store_numbers(rows: Iterable[ArrearsRow]) -> dict[uuid.UUID, str]:
+    """The store number, as text, of each store of ``rows`` that has one (one query)."""
+    ids = {store_id for row in rows for store_id in row.stores}
+    found = Store.objects.filter(pk__in=ids, store_number__isnull=False).values_list(
+        "pk", "store_number"
+    )
+    return {pk: str(number) for pk, number in found}
+
+
+def _row_matches(row: ArrearsRow, word: str, numbers: Mapping[uuid.UUID, str]) -> bool:
+    """``word`` is in the operator's name or a store's name, or starts a store's number."""
+    key = word.casefold()
+    if key in row.operator_name.casefold():
+        return True
+    if any(key in label.casefold() for label in row.stores.values()):
+        return True
+    number = search.number_prefix(word)
+    return number is not None and any(
+        numbers.get(store_id, "").startswith(number) for store_id in row.stores
+    )
+
+
+def _searched(rows: list[ArrearsRow], query: str) -> list[ArrearsRow]:
+    """The rows matching every word of ``query``; ``rows`` when it has no word."""
+    found = search.words(query)
+    if not found or not rows:
+        return rows
+    numbers = _store_numbers(rows)
+    return [row for row in rows if all(_row_matches(row, word, numbers) for word in found)]
+
+
 def _sort_key(row: ArrearsRow, sort: str) -> tuple[object, ...]:
     name = row.operator_name.casefold()
     if sort == SORT_OPERATOR:
@@ -710,6 +756,7 @@ def arrears(today: date, filters: ArrearsFilter | None = None) -> ArrearsReport:
         rows = [row for row in rows if wanted in row.states]
     if selected.bucket:
         rows = [row for row in rows if row.bucket == selected.bucket]
+    rows = _searched(rows, selected.query)
     rows.sort(key=lambda row: _sort_key(row, selected.sort), reverse=selected.descending)
     totals = [
         (

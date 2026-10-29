@@ -3,7 +3,7 @@
 {% block title %}Unpaid balances{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><h1>Unpaid balances</h1>{% if not too_slow %}<span class="list-counts" id="list-counts">{{ report.count }} operator{{ report.count|pluralize }} behind · {{ report.total_owed|money }} owed</span>{% endif %}</div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:arrears:export' %}?{{ export_query }}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
-  <div class="card filter-card">{% filters active=active_filters sort_options=sort_options %}
+  <div class="card filter-card">{% filters active=active_filters search_name="q" search_value=selected.query search_maxlength=100 search_placeholder="Operator, or a store's number or name" search_label="Search unpaid balances" sort_options=sort_options %}
       <span class="filter-field"><label for="operator">Operator</label>
       <select name="operator" id="operator">
         <option value="">All</option>

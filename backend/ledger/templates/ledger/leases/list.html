@@ -5,7 +5,7 @@
 {% block header %}<div class="page-header"><div class="page-title"><h1>Leases</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} lease{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:leases:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">{% icon "plus" 16 %} New lease</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
   {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3).{% endcomment %}
-  <div class="card filter-card">{% filters active=active_filters %}
+  <div class="card filter-card">{% filters active=active_filters search_name="q" search_value=search_query search_maxlength=100 search_placeholder="Store number or name, or operator" search_label="Search leases" %}
     <span class="filter-field"><label for="operator">Operator</label>
     <select name="operator" id="operator">
       <option value="">Any</option>

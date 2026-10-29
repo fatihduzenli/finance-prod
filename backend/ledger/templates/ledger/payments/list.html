@@ -4,7 +4,7 @@
 {% block title %}Payments{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><h1>Payments</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} payment{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:payments:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
-  <div class="card filter-card">{% filters active=active_filters %}
+  <div class="card filter-card">{% filters active=active_filters search_name="q" search_value=selected.query search_maxlength=100 search_placeholder="Store number or name, operator or reference" search_label="Search payments" %}
       <span class="filter-field"><label for="date_by">Date</label>
       <select name="date_by" id="date_by">
         {% for value, label in date_by_choices %}<option value="{{ value }}"{% if value == selected.date_by %} selected{% endif %}>{{ label }}</option>{% endfor %}

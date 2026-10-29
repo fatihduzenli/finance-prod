@@ -449,8 +449,8 @@ def _arrears_page(
         for sort in receivables.SORTS
     }
     operators = receivables.arrears_operators()
-    # PLAN-014 A5: the Filters button's count, the chips, Clear (keeping the sort) and the Sort
-    # menu (each option in its default direction).
+    # PLAN-014 A5: the Filters button's count, the chips, Clear (keeping the search and the
+    # sort) and the Sort menu (each option in its default direction).
     active_filters = list_filters.active(
         request,
         {
@@ -462,7 +462,7 @@ def _arrears_page(
             "bucket": ("Months behind", receivables.BUCKET_LABELS),
         },
         accepted=selected.as_query(),
-        keep=("sort", "dir"),
+        keep=("q", "sort", "dir"),
     )
     return render(
         request,
