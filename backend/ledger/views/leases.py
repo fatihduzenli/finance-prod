@@ -148,6 +148,7 @@ def lease_list(request: HttpRequest) -> HttpResponse:
             "active_filters": list_filters.active(
                 request,
                 {"operator": ("Operator", {str(item.pk): item.display_name for item in operators})},
+                accepted={"operator": str(operator)} if operator else {},
             ),
             "page": page,
             "can_create": meets(_role(request), Role.ADMIN),

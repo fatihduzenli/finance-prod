@@ -261,13 +261,14 @@ def _list_context(request: HttpRequest) -> dict[str, Any]:
     )
     page = Paginator(operators, PAGE_SIZE).get_page(request.GET.get("page"))
     export = {"q": query, "archived": "1" if include_archived else ""}
-    export_query = urlencode({k: v for k, v in export.items() if v})
+    accepted = {k: v for k, v in export.items() if v}
+    export_query = urlencode(accepted)
     return {
         "page": page,
         "query": query,
         # PLAN-014 A5: the Filters button's count, the chip and Clear.
         "active_filters": list_filters.active(
-            request, {"archived": ("Archived", {"1": "Included"})}
+            request, {"archived": ("Archived", {"1": "Included"})}, accepted=accepted
         ),
         "include_archived": include_archived,
         "can_create": meets(_role(request), Role.BILLING),

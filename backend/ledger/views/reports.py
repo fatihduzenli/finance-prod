@@ -90,7 +90,7 @@ def bounded[T](compute: Callable[[], T]) -> T:
         raise
 
 
-def _pnl_filters(request: HttpRequest) -> list_filters.ActiveFilters:
+def _pnl_filters(request: HttpRequest, query: pnl.PnlQuery) -> list_filters.ActiveFilters:
     """PLAN-014 A5: the Filters button's count, the chips and Clear of the P&L (the grouping
     and the rows box; the months are its range, never a chip)."""
     return list_filters.active(
@@ -99,6 +99,7 @@ def _pnl_filters(request: HttpRequest) -> list_filters.ActiveFilters:
             "group": ("Group by", dict(pnl.GROUP_CHOICES)),
             "detail": ("Rows", {"1": "Shown"}),
         },
+        accepted=query.as_query(),
         defaults={"group": pnl.GROUP_STORE},
     )
 
@@ -109,7 +110,7 @@ def _too_slow(request: HttpRequest, query: pnl.PnlQuery) -> HttpResponse:
         "ledger/reports/pnl.html",
         {
             "query": query,
-            "active_filters": _pnl_filters(request),
+            "active_filters": _pnl_filters(request, query),
             "too_slow": TOO_SLOW,
             "group_choices": pnl.GROUP_CHOICES,
             "group_label": dict(pnl.GROUP_CHOICES)[query.group],
@@ -143,7 +144,7 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
         "ledger/reports/pnl.html",
         {
             "query": query,
-            "active_filters": _pnl_filters(request),
+            "active_filters": _pnl_filters(request, query),
             "groups": groups,
             "group_lines": _group_lines(groups, query.group),
             "total": total,

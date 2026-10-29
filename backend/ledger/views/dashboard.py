@@ -365,6 +365,7 @@ def _grid_page(
                     "channel": ("Channel", dict(PaymentChannel.choices)),
                     "status": ("Status", dict(grid.CELL_STATUSES)),
                 },
+                accepted=query.as_query(),
             ),
             "query": query,
             # PLAN-012d D12: the month selects offer the current month +/- 24.
@@ -448,26 +449,28 @@ def _arrears_page(
         for sort in receivables.SORTS
     }
     operators = receivables.arrears_operators()
+    # PLAN-014 A5: the Filters button's count, the chips, Clear (keeping the sort) and the Sort
+    # menu (each option in its default direction).
+    active_filters = list_filters.active(
+        request,
+        {
+            "operator": (
+                "Operator",
+                {str(operator.pk): operator.display_name for operator in operators},
+            ),
+            "state": ("State", _state_choice(selected.state)),
+            "bucket": ("Months behind", receivables.BUCKET_LABELS),
+        },
+        accepted=selected.as_query(),
+        keep=("sort", "dir"),
+    )
     return render(
         request,
         "ledger/arrears/page.html",
         {
-            # PLAN-014 A5: the Filters button's count, the chips, Clear (keeping the sort) and
-            # the Sort menu (each option in its default direction).
-            "active_filters": list_filters.active(
-                request,
-                {
-                    "operator": (
-                        "Operator",
-                        {str(operator.pk): operator.display_name for operator in operators},
-                    ),
-                    "state": ("State", _state_choice(request.GET.get("state", ""))),
-                    "bucket": ("Months behind", receivables.BUCKET_LABELS),
-                },
-                keep=("sort", "dir"),
-            ),
+            "active_filters": active_filters,
             "sort_options": list_filters.sort_menu(
-                request, ARREARS_SORTS, selected.sort, drop=("dir",)
+                request, active_filters.params, ARREARS_SORTS, selected.sort, drop=("dir",)
             ),
             "selected": selected,
             "report": report,

@@ -104,6 +104,7 @@ def payment_list(request: HttpRequest) -> HttpResponse:
                     ),
                     "store": ("Store", {str(store.pk): store.external_label for store in stores}),
                 },
+                accepted=selected.as_query(),
                 defaults={"date_by": ledger.DATE_BY_PAID},
             ),
             "page": page,

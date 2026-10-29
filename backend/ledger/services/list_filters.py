@@ -3,9 +3,11 @@
 button counts, the chips under the search field and the panel's Clear link, from the request's
 query string and the fields each page declares once.
 
-Read only, no query. A field counts when its value is not empty, not the page's default and,
-when the page gives the field's choices, one of them (an unknown value is one the page's own
-parser dropped: it filters nothing, so it has no chip). The search and the sort never count.
+Read only, no query. Every link starts from ``accepted``, the parameters the page's own parser
+kept (its filter's ``as_query()``), never from the request as written, so a value the parser
+dropped appears in no link. A field counts when its value is not empty, not the page's default
+and, when the page gives the field's choices, one of them (a value outside them filters nothing
+known: it has no chip and is left out of every link too). The search and the sort never count.
 A chip's link is the same page without that parameter (and without ``page``: the rows change);
 Clear keeps only the parameters named in ``keep`` (the search and the sort).
 """
@@ -36,6 +38,9 @@ class ActiveFilters:
     count: int
     chips: list[Chip]
     clear_url: str
+    #: The page's accepted parameters without a field value outside its choices: what every
+    #: link starts from (:func:`sort_menu` takes it).
+    params: Mapping[str, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,56 +50,62 @@ class SortOption:
     current: bool
 
 
-def _url(request: HttpRequest, params: QueryDict) -> str:
-    query = params.urlencode()
-    return f"{request.path}?{query}" if query else request.path
+def _url(request: HttpRequest, params: Mapping[str, str]) -> str:
+    query = QueryDict(mutable=True)
+    for name, value in params.items():
+        query[name] = value
+    encoded = query.urlencode()
+    return f"{request.path}?{encoded}" if encoded else request.path
 
 
-def _without(request: HttpRequest, names: Iterable[str]) -> QueryDict:
-    params = request.GET.copy()
-    for name in (*names, PAGE_PARAM):
-        params.pop(name, None)
-    return params
+def _without(params: Mapping[str, str], names: Iterable[str]) -> dict[str, str]:
+    dropped = {*names, PAGE_PARAM}
+    return {name: value for name, value in params.items() if name not in dropped}
 
 
 def active(
     request: HttpRequest,
     fields: Mapping[str, FieldSpec],
     *,
+    accepted: Mapping[str, str],
     defaults: Mapping[str, str] | None = None,
     keep: Iterable[str] = ("q", "sort"),
 ) -> ActiveFilters:
-    """The active filters of ``request`` among ``fields``, in the fields' order."""
+    """The active filters among ``fields``, in the fields' order, from ``accepted`` (the page's
+    parsed filter as query values)."""
+    params = {
+        name: value
+        for name, value in accepted.items()
+        if name not in fields or fields[name][1] is None or value in (fields[name][1] or {})
+    }
     chips: list[Chip] = []
     for name, (label, choices) in fields.items():
-        value = (request.GET.get(name, "") or "").strip()
+        value = (params.get(name, "") or "").strip()
         if not value or value == (defaults or {}).get(name, ""):
             continue
-        if choices is not None and value not in choices:
-            continue
         words = choices[value] if choices is not None else value
-        chips.append(Chip(label, words, _url(request, _without(request, (name,)))))
-    kept = QueryDict(mutable=True)
-    for name in keep:
-        for value in request.GET.getlist(name):
-            if value:
-                kept.appendlist(name, value)
-    return ActiveFilters(count=len(chips), chips=chips, clear_url=_url(request, kept))
+        chips.append(Chip(label, words, _url(request, _without(params, (name,)))))
+    kept_names = set(keep)
+    kept = {name: value for name, value in params.items() if name in kept_names and value}
+    return ActiveFilters(
+        count=len(chips), chips=chips, clear_url=_url(request, kept), params=params
+    )
 
 
 def sort_menu(
     request: HttpRequest,
+    params: Mapping[str, str],
     choices: Iterable[tuple[str, str]],
     current: str,
     *,
     param: str = "sort",
     drop: Iterable[str] = (),
 ) -> list[SortOption]:
-    """The Sort menu's options: each the same page with ``param`` set (``drop`` removed, the
-    pager reset)."""
+    """The Sort menu's options: each the same page, from ``params`` (an
+    :attr:`ActiveFilters.params`), with ``param`` set (``drop`` removed, the pager reset)."""
     options = []
     for value, label in choices:
-        params = _without(request, (param, *drop))
-        params[param] = value
-        options.append(SortOption(label, _url(request, params), value == current))
+        option = _without(params, (param, *drop))
+        option[param] = value
+        options.append(SortOption(label, _url(request, option), value == current))
     return options

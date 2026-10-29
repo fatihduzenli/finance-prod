@@ -147,10 +147,13 @@ def _list_context(request: HttpRequest) -> dict[str, Any]:
             "status": ("Status", dict(service.LIST_STATUSES)),
             "balance": ("Balance", dict(service.LIST_BALANCES)),
         },
+        accepted=filters.as_query(),
     )
     return {
         "active_filters": active_filters,
-        "sort_options": list_filters.sort_menu(request, service.LIST_SORTS, filters.sort),
+        "sort_options": list_filters.sort_menu(
+            request, active_filters.params, service.LIST_SORTS, filters.sort
+        ),
         "page": page,
         "listed": listed,
         "filters": filters,
