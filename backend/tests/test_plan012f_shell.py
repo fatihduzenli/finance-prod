@@ -124,6 +124,10 @@ BATCH_D_TOKENS = {"--login-gradient": "linear-gradient(160deg, #0B2545 0%, #0E4A
 BATCH_E_TOKENS = {"--error-text": "#8A1C14"}
 #: The names PLAN-012g Batch A adds for the dark theme, with their light values (A1).
 BATCH_12G_TOKENS = {
+    # PLAN-012g Batch D (the dark walk): the navy button, the pager and the dialog backdrop.
+    "--btn-dark-bg": "#0B2545",
+    "--btn-dark-text": "#FFFFFF",
+    "--backdrop": "rgba(11,37,69,.45)",
     "--sidebar-bg": "#0B2545",
     "--sidebar-border": "transparent",
     "--sidebar-card-bg": "rgba(255,255,255,.08)",
