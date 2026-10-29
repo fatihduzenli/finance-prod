@@ -12,8 +12,7 @@ none when it reads what the page already loaded:
   month's rent charges, waived ones left out,
   by status: what was billed (``amount_due``), what was collected on them (``amount_paid``,
   at most each charge's amount, so the share never passes 100 %), the share as a whole
-  per cent rounded down (``None`` when nothing is billed) and the progress bar's segments
-  (Paid, Pending, Partly paid, Unpaid: the amounts billed of the charges in each status);
+  per cent rounded down (``None`` when nothing is billed);
 - :func:`recent_payments` (one query): the last :data:`RECENT_LIMIT` settled payments (not a
   refund, not a credit applied: no money came in), newest first, each with when it settled
   in words ("Today 14:02", "Yesterday", else the date; the time is the row's last change in
@@ -76,15 +75,6 @@ RECENT_LIMIT = 5
 TODAY_WORD = "Today"
 YESTERDAY_WORD = "Yesterday"
 
-#: The progress bar's families (finance.templatetags.components) of each rent status, in bar
-#: order: Paid, Pending, Partly paid, Unpaid (due and unpaid both).
-SEGMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("paid", (RentChargeStatus.PAID,)),
-    ("pending", (RentChargeStatus.PENDING,)),
-    ("partial", (RentChargeStatus.PARTIAL,)),
-    ("unpaid", (RentChargeStatus.DUE, RentChargeStatus.UNPAID)),
-)
-
 
 def _plural(count: int, word: str) -> str:
     return f"{count} {word}{'' if count == 1 else 's'}"
@@ -143,8 +133,6 @@ class Collection:
     collected: Decimal
     #: The whole per cent collected of billed, rounded down; ``None`` when nothing is billed.
     percent: int | None
-    #: ``(family, amount billed)`` per segment, in bar order (the progress tag's input).
-    segments: list[tuple[str, Decimal]]
 
 
 def collection_progress(month: date) -> Collection:
@@ -167,16 +155,11 @@ def collection_progress(month: date) -> Collection:
         if billed > 0
         else None
     )
-    segments = [
-        (family, sum((billed_by.get(status, ZERO) for status in statuses), ZERO))
-        for family, statuses in SEGMENTS
-    ]
     return Collection(
         month=month.replace(day=1),
         billed=billed,
         collected=collected,
         percent=min(percent, 100) if percent is not None else None,
-        segments=segments,
     )
 
 

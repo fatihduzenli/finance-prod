@@ -22,7 +22,6 @@ from django.test import Client
 from django.test.utils import CaptureQueriesContext
 
 from accounts.roles import Role
-from finance.templatetags.components import progress_widths
 from ledger.models import (
     FeeType,
     Lease,
@@ -161,7 +160,7 @@ def test_the_header_has_the_long_date_and_new_invoice_for_billing_only() -> None
     assert 'id="new-invoice"' not in viewer
 
 
-def test_the_month_s_collection_has_the_share_and_four_segments() -> None:
+def test_the_month_s_collection_has_the_share() -> None:
     # PLAN-014 A2: the card is gone; the share still feeds the "Collected this month" figure.
     seeded()
     collection = blocks.collection_progress(TODAY)
@@ -170,14 +169,6 @@ def test_the_month_s_collection_has_the_share_and_four_segments() -> None:
         D("1400.00"),
         46,
     )
-    assert collection.segments == [
-        ("paid", D("1000.00")),
-        ("pending", D("500.00")),
-        ("partial", D("800.00")),
-        ("unpaid", D("700.00")),
-    ]
-    widths = [width for _, _, width in progress_widths(collection.segments)]
-    assert sum(widths) <= 100
     html = page(client_for(Role.VIEWER)[0], "/")
     assert "46% of Oct 2026 rent" in kpi(html, "figure-paid")
     assert 'id="collection-card"' not in html
