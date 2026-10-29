@@ -31,6 +31,7 @@ from accounts.roles import Role, meets, role_of
 from accounts.themes import PAYMENT_STATUS_PERIODS, payment_status_period_for
 from finance.dates import month_text
 from finance.templatetags.components import GLYPHS, badge_family
+from finance.us_states import US_STATES
 from ledger.models import PaymentChannel, PaymentMethod, PaymentStatus, Store
 from ledger.services import (
     attention,
@@ -411,6 +412,14 @@ def grid_export(request: HttpRequest) -> HttpResponseBase:
     )
 
 
+def _state_choice(raw: str) -> dict[str, str]:
+    """The arrears State filter's chip: a US state code (in any case, as the filter reads it)
+    by its name; any other text filters to no row and is never echoed as a chip."""
+    value = (raw or "").strip()
+    name = dict(US_STATES).get(value.upper())
+    return {value: name} if name else {}
+
+
 #: The arrears Sort menu's options, in the order of the columns they sort.
 ARREARS_SORTS: tuple[tuple[str, str], ...] = (
     (receivables.SORT_OPERATOR, "Operator"),
@@ -452,7 +461,7 @@ def _arrears_page(
                         "Operator",
                         {str(operator.pk): operator.display_name for operator in operators},
                     ),
-                    "state": ("State", None),
+                    "state": ("State", _state_choice(request.GET.get("state", ""))),
                     "bucket": ("Months behind", receivables.BUCKET_LABELS),
                 },
                 keep=("sort", "dir"),
