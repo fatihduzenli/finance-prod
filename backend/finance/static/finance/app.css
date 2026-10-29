@@ -937,8 +937,8 @@ fieldset.card > legend + * { clear: both; }
 
 /* --- Dialog (PLAN-012f-b D2; DESIGN-SPEC §4 States, §4a) ----------------------------------
    .dialog: the {% dialog %} tag's <dialog>, the confirmation frame: 440 px (.dialog-sm) or
-   640 px for a form (.dialog-lg), radius 14, over the backdrop (--navy at 45 %, the spec's
-   rgba of it). .dialog-head: the 17/600 title and the × button; .dialog-body: the content;
+   640 px for a form (.dialog-lg), radius 14, over the backdrop (--backdrop: the navy at 45 %, the spec's
+   rgba of it, in light; black at 60 % in dark). .dialog-head: the 17/600 title and the × button; .dialog-body: the content;
    .dialog-foot: the caller's buttons, right-aligned. On phones a full-width sheet at the
    bottom (below). The "Which store?" picker's list (.store-picker-results): one link per
    store, the highlighted row tinted. A form dialog (New / Edit store and operator, Batch B)
@@ -948,7 +948,7 @@ fieldset.card > legend + * { clear: both; }
 .dialog { box-sizing: border-box; width: calc(100% - 2 * var(--space-4)); padding: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); }
 .dialog-sm { max-width: 440px; }
 .dialog-lg { max-width: 640px; }
-.dialog::backdrop { background: color-mix(in srgb, var(--navy) 45%, transparent); }
+.dialog::backdrop { background: var(--backdrop); }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-5) var(--space-6) 0; }
 .dialog-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .dialog-close { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; padding: 0; border: 0; border-radius: var(--radius-ctl); background: transparent; color: var(--muted); font: inherit; font-size: 22px; line-height: 1; cursor: pointer; }

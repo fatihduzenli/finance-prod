@@ -154,7 +154,9 @@
    the two blocks identical.
    PLAN-012g Batch D adds --btn-dark-bg and --btn-dark-text: the dark button (.btn-dark, the
    Filter, Show and Search buttons) and the pager's current page, the navy with white text in
-   light (as before), a raised #2E2E3D with --text's #EDEDF3 in dark. */
+   light (as before), a raised #2E2E3D with --text's #EDEDF3 in dark. It adds --backdrop too:
+   a modal dialog's backdrop, the navy at 45 % in light (as before), black at 60 % in dark; no
+   text sits on it, so it has no pair. */
 
 @font-face {
   font-family: Inter;
@@ -231,6 +233,7 @@
   --chart-overdue: #B42318;  --chart-paid: #1B7F3B;  --chart-upcoming: #0B2545;  --chart-ring-empty: var(--neutral-bg);
   --dot-rent: #13A89E;  --dot-settles: #1B7F3B;  --dot-promise: #B7791F;  --dot-lease-end: #B42318;
   --btn-dark-bg: #0B2545;  --btn-dark-text: #FFFFFF;
+  --backdrop: rgba(11,37,69,.45);
 }
 
 /* The dark theme (PLAN-012g A1; DESIGN-SPEC §7.2, §7.3, §7.6). Screen only: print resolves the
@@ -276,6 +279,7 @@
     /* components */
     --seg-track: var(--bg);  --seg-thumb: var(--surface);  --seg-thumb-ring: transparent;
     --popover-border: #3A3A4C;  --popover-shadow: 0 12px 32px rgba(0,0,0,.45);
+    --backdrop: rgba(0,0,0,.6);
     --month-current: rgba(46,196,166,.08);
     --progress-pending: #E5B84D;  --progress-partial: #F5B98A;
     --flash-success-bg: #1F3A2C;  --flash-success-text: #7FDCA4;
@@ -330,6 +334,7 @@
       /* components */
       --seg-track: var(--bg);  --seg-thumb: var(--surface);  --seg-thumb-ring: transparent;
       --popover-border: #3A3A4C;  --popover-shadow: 0 12px 32px rgba(0,0,0,.45);
+      --backdrop: rgba(0,0,0,.6);
       --month-current: rgba(46,196,166,.08);
       --progress-pending: #E5B84D;  --progress-partial: #F5B98A;
       --flash-success-bg: #1F3A2C;  --flash-success-text: #7FDCA4;
