@@ -82,6 +82,11 @@ def month_text(value: date | datetime) -> str:
     return f"{_MONTHS[day.month - 1]} {day.year}"
 
 
+def month_short_text(value: date | datetime) -> str:
+    """``Oct``: the year dropped, for text that names it already (a short chart's labels)."""
+    return _MONTHS[_day(value).month - 1]
+
+
 def moment_text(value: date | datetime) -> str:
     """``Nov 1, 2026 · 14:02``: a ``datetime`` in New York, 24-hour clock.
 
