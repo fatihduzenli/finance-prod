@@ -1,5 +1,5 @@
 {% extends "finance/base.html" %}
-{% load components money dates %}
+{% load components money dates filters static %}
 {% block title %}Monthly rent overview{% endblock %}
 {% block main_class %}wide grid-page{% endblock %}
 {% block head %}<style>
@@ -38,18 +38,9 @@
 </style>{% endblock %}
 {% block header %}<div class="page-header"><h1>Monthly rent overview</h1><div class="page-actions">{% include "finance/_header_search.html" %}<a class="btn" id="export-csv" href="{% url 'ledger:grid:export' %}?{{ export_query }}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
-  {% comment %}PLAN-012d D16: the words filter, its own box; it keeps the range and the other filters, and the
-  filters' form below keeps it (hidden).{% endcomment %}
-  <section class="card filter-card" id="grid-filter-card" aria-label="Filters">
-  <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-search" class="actions" role="search">
-    <input type="search" name="q" id="grid-q" value="{{ query.q }}" maxlength="100" placeholder="Store number, name, city or operator" aria-label="Filter stores">
-    {% for name, value in query.as_query.items %}{% if name != "q" %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
-    <button class="btn" type="submit">Filter</button>
-  </form>
-  {% if query.q %}<p class="muted" id="grid-filtered">Filtered by '{{ query.q }}' · <a href="{% url 'ledger:grid:page' %}{% if clear_query %}?{{ clear_query }}{% endif %}" id="grid-clear">Clear</a></p>{% endif %}
-  <form method="get" action="{% url 'ledger:grid:page' %}" id="grid-filters" role="search">
-    {% if query.q %}<input type="hidden" name="q" value="{{ query.q }}">{% endif %}
-    <div class="actions">
+  {% comment %}PLAN-014 A5: the words filter and the filters in one form (finance/_filters.html): the search field
+  (grid-q, its own id kept) and the Filters panel with the range and the other filters; the grid is #results.{% endcomment %}
+  <section class="card filter-card" id="grid-filter-card" aria-label="Filters">{% filters active=active_filters search_name="q" search_value=query.q search_maxlength=100 search_placeholder="Store number, name, city or operator" search_label="Filter stores" search_id="grid-q" %}
       <span class="filter-field"><label for="from" style="margin:0;">From</label>
       {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}</span>
       <span class="filter-field"><label for="to" style="margin:0;">To</label>
@@ -73,11 +64,9 @@
       <select name="status" id="status">
         <option value="">All</option>
         {% for value, label in statuses %}<option value="{{ value }}"{% if value == query.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
-      </select>
-      <button class="btn" type="submit">Show</button></span>
-    </div>
-  </form>
-  </section>
+      </select></span>
+  {% endfilters %}</section>
+  <div id="results">
   {% if query.messages %}
     <ul class="messages" id="grid-messages">{% for text in query.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}
@@ -117,12 +106,17 @@
   </div>
   </section>
   {% endif %}
+  </div>
 {% endblock %}
 {% block scripts %}
+<script src="{% static 'finance/filters.js' %}"></script>
 <script>
   // The scrollbar mirrored above the grid (PLAN-011b D2): as wide as the table, shown only
-  // when the table is wider than its region, and each bar moves the other.
+  // when the table is wider than its region, and each bar moves the other. Bound again when
+  // finance/filters.js replaces the grid as the search is typed (PLAN-014 A5).
   (function () {
+  var resizeGridMirror = null;
+  function mirrorGridScroll() {
     var region = document.getElementById("grid-scroll");
     var top = document.getElementById("grid-scroll-top");
     if (!region || !top) { return; }
@@ -137,8 +131,13 @@
     region.addEventListener("scroll", function () {
       if (top.scrollLeft !== region.scrollLeft) { top.scrollLeft = region.scrollLeft; }
     });
+    if (resizeGridMirror) { window.removeEventListener("resize", resizeGridMirror); }
+    resizeGridMirror = size;
     window.addEventListener("resize", size);
     size();
+  }
+  mirrorGridScroll();
+  document.addEventListener("filters:updated", mirrorGridScroll);
   })();
 </script>
 {% endblock %}

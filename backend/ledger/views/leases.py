@@ -55,7 +55,7 @@ from ledger.models import (
     ScheduleState,
     Store,
 )
-from ledger.services import csv_export, detail_cards, one_off_charges, workspace
+from ledger.services import csv_export, detail_cards, list_filters, one_off_charges, workspace
 from ledger.services import leases as service
 from ledger.services import stores as store_service
 from ledger.services.csv_export import CsvWriter
@@ -139,13 +139,19 @@ def lease_list(request: HttpRequest) -> HttpResponse:
     a charge note is marked."""
     leases, operator = _listed(request)
     page = Paginator(leases, PAGE_SIZE).get_page(request.GET.get("page"))
+    operators = list(Operator.objects.order_by(Lower("display_name"), "id"))
     return render(
         request,
         "ledger/leases/list.html",
         {
+            # PLAN-014 A5: the Filters button's count, the chip and Clear.
+            "active_filters": list_filters.active(
+                request,
+                {"operator": ("Operator", {str(item.pk): item.display_name for item in operators})},
+            ),
             "page": page,
             "can_create": meets(_role(request), Role.ADMIN),
-            "operators": Operator.objects.order_by(Lower("display_name"), "id"),
+            "operators": operators,
             "operator": operator,
             "query": urlencode({"operator": str(operator)}) if operator else "",
         },

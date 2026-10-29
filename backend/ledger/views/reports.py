@@ -45,7 +45,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_safe
 
 from ledger.models import Operator
-from ledger.services import credits, grid, pnl, receivables, reports, stores
+from ledger.services import credits, grid, list_filters, pnl, receivables, reports, stores
 from ledger.views.operators import csv_response, role_required
 
 logger = logging.getLogger(__name__)
@@ -90,12 +90,26 @@ def bounded[T](compute: Callable[[], T]) -> T:
         raise
 
 
+def _pnl_filters(request: HttpRequest) -> list_filters.ActiveFilters:
+    """PLAN-014 A5: the Filters button's count, the chips and Clear of the P&L (the grouping
+    and the rows box; the months are its range, never a chip)."""
+    return list_filters.active(
+        request,
+        {
+            "group": ("Group by", dict(pnl.GROUP_CHOICES)),
+            "detail": ("Rows", {"1": "Shown"}),
+        },
+        defaults={"group": pnl.GROUP_STORE},
+    )
+
+
 def _too_slow(request: HttpRequest, query: pnl.PnlQuery) -> HttpResponse:
     return render(
         request,
         "ledger/reports/pnl.html",
         {
             "query": query,
+            "active_filters": _pnl_filters(request),
             "too_slow": TOO_SLOW,
             "group_choices": pnl.GROUP_CHOICES,
             "group_label": dict(pnl.GROUP_CHOICES)[query.group],
@@ -129,6 +143,7 @@ def pnl_report(request: HttpRequest) -> HttpResponse:
         "ledger/reports/pnl.html",
         {
             "query": query,
+            "active_filters": _pnl_filters(request),
             "groups": groups,
             "group_lines": _group_lines(groups, query.group),
             "total": total,

@@ -32,7 +32,15 @@ from accounts.themes import PAYMENT_STATUS_PERIODS, payment_status_period_for
 from finance.dates import month_text
 from finance.templatetags.components import GLYPHS, badge_family
 from ledger.models import PaymentChannel, PaymentMethod, PaymentStatus, Store
-from ledger.services import attention, grid, one_off_charges, receivables, rent_run, stores
+from ledger.services import (
+    attention,
+    grid,
+    list_filters,
+    one_off_charges,
+    receivables,
+    rent_run,
+    stores,
+)
 from ledger.services import dashboard as dashboard_blocks
 from ledger.views.operators import csv_response, role_required
 from ledger.views.reports import TOO_SLOW, ReportTooSlow, bounded
@@ -338,10 +346,25 @@ def _grid_rows(built: grid.Grid) -> list[tuple[grid.GridRow, SafeString]]:
 def _grid_page(
     request: HttpRequest, query: grid.GridQuery, built: grid.Grid | None
 ) -> HttpResponse:
+    operators = receivables.arrears_operators()
+    states = grid.state_choices(built, query)
     return render(
         request,
         "ledger/grid/page.html",
         {
+            # PLAN-014 A5: the Filters button's count, the chips and Clear (keeping the words).
+            "active_filters": list_filters.active(
+                request,
+                {
+                    "operator": (
+                        "Operator",
+                        {str(operator.pk): operator.display_name for operator in operators},
+                    ),
+                    "state": ("State", dict(states)),
+                    "channel": ("Channel", dict(PaymentChannel.choices)),
+                    "status": ("Status", dict(grid.CELL_STATUSES)),
+                },
+            ),
             "query": query,
             # PLAN-012d D12: the month selects offer the current month +/- 24.
             "picker_months": grid.picker_months(query),
@@ -349,12 +372,8 @@ def _grid_page(
             "rows": _grid_rows(built) if built is not None else [],
             "too_slow": TOO_SLOW if built is None else "",
             "export_query": urlencode(query.as_query()),
-            # PLAN-012d D16: "Clear" drops the words filter and keeps the rest.
-            "clear_query": urlencode(
-                {name: value for name, value in query.as_query().items() if name != "q"}
-            ),
-            "operators": receivables.arrears_operators(),
-            "states": grid.state_choices(built, query),
+            "operators": operators,
+            "states": states,
             "channels": PaymentChannel.choices,
             "statuses": grid.CELL_STATUSES,
             "note_marker": grid.NOTE_MARKER,
@@ -392,6 +411,15 @@ def grid_export(request: HttpRequest) -> HttpResponseBase:
     )
 
 
+#: The arrears Sort menu's options, in the order of the columns they sort.
+ARREARS_SORTS: tuple[tuple[str, str], ...] = (
+    (receivables.SORT_OPERATOR, "Operator"),
+    (receivables.SORT_MONTHS, "Months behind"),
+    (receivables.SORT_OWED, "Total owed"),
+    (receivables.SORT_LAST_PAYMENT, "Last payment"),
+)
+
+
 def _arrears_page(
     request: HttpRequest,
     selected: receivables.ArrearsFilter,
@@ -410,16 +438,34 @@ def _arrears_page(
         )
         for sort in receivables.SORTS
     }
+    operators = receivables.arrears_operators()
     return render(
         request,
         "ledger/arrears/page.html",
         {
+            # PLAN-014 A5: the Filters button's count, the chips, Clear (keeping the sort) and
+            # the Sort menu (each option in its default direction).
+            "active_filters": list_filters.active(
+                request,
+                {
+                    "operator": (
+                        "Operator",
+                        {str(operator.pk): operator.display_name for operator in operators},
+                    ),
+                    "state": ("State", None),
+                    "bucket": ("Months behind", receivables.BUCKET_LABELS),
+                },
+                keep=("sort", "dir"),
+            ),
+            "sort_options": list_filters.sort_menu(
+                request, ARREARS_SORTS, selected.sort, drop=("dir",)
+            ),
             "selected": selected,
             "report": report,
             "too_slow": TOO_SLOW if report is None else "",
             "export_query": urlencode(selected.as_query()),
             "sort_links": sort_links,
-            "operators": receivables.arrears_operators(),
+            "operators": operators,
             "buckets": [
                 (bucket, receivables.BUCKET_LABELS[bucket]) for bucket in receivables.BUCKETS
             ],

@@ -27,6 +27,7 @@ over the payment page; ``?store=`` naming another store than the payment's is a 
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 from typing import cast
 from urllib.parse import urlencode
@@ -41,6 +42,7 @@ from django.views.decorators.http import require_http_methods, require_safe
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from finance.dates import day_text
 from ledger.forms import RefundForm, VoidForm, VoidManualForm
 from ledger.models import (
     MANUAL_PAYMENT_METHODS,
@@ -51,7 +53,7 @@ from ledger.models import (
     PaymentStatus,
     Store,
 )
-from ledger.services import detail_cards, installments, one_off_charges, refunds
+from ledger.services import detail_cards, installments, list_filters, one_off_charges, refunds
 from ledger.services import payments_ledger as ledger
 from ledger.services import stores as store_service
 from ledger.services.rent_run import PARTIAL_NOTICE, charge_review_message, partial_marking
@@ -81,10 +83,29 @@ def payment_list(request: HttpRequest) -> HttpResponse:
     rows = ledger.ledger_payments(selected)
     page = Paginator(rows, PAGE_SIZE).get_page(request.GET.get("page"))
     query = urlencode(selected.as_query())
+    operators = list(Operator.objects.order_by(Lower("display_name"), "id"))
+    stores = list(Store.objects.order_by("external_label", "id"))
     return render(
         request,
         "ledger/payments/list.html",
         {
+            # PLAN-014 A5: the Filters button's count, the chips and Clear.
+            "active_filters": list_filters.active(
+                request,
+                {
+                    "date_by": ("Date", dict(ledger.DATE_BY_CHOICES)),
+                    "date_from": ("From", _day_choice(selected.date_from)),
+                    "date_to": ("To", _day_choice(selected.date_to)),
+                    "method": ("Method", dict(PaymentMethod.choices)),
+                    "status": ("Status", dict(ledger.STATUS_CHOICES)),
+                    "operator": (
+                        "Operator",
+                        {str(operator.pk): operator.display_name for operator in operators},
+                    ),
+                    "store": ("Store", {str(store.pk): store.external_label for store in stores}),
+                },
+                defaults={"date_by": ledger.DATE_BY_PAID},
+            ),
             "page": page,
             "rows": ledger.rows_for(page),
             "totals": ledger.totals(rows),
@@ -93,10 +114,15 @@ def payment_list(request: HttpRequest) -> HttpResponse:
             "date_by_choices": ledger.DATE_BY_CHOICES,
             "method_choices": PaymentMethod.choices,
             "status_choices": ledger.STATUS_CHOICES,
-            "operators": Operator.objects.order_by(Lower("display_name"), "id"),
-            "stores": Store.objects.order_by("external_label", "id"),
+            "operators": operators,
+            "stores": stores,
         },
     )
+
+
+def _day_choice(day: date | None) -> dict[str, str]:
+    """A date filter's one known value, as its chip words it ("Oct 1, 2026")."""
+    return {day.isoformat(): day_text(day)} if day is not None else {}
 
 
 @role_required

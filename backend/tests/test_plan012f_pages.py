@@ -442,7 +442,7 @@ def test_the_grid_has_its_header_filter_card_legend_and_totals() -> None:
         'name="to"',
         'id="status"',
         'id="channel"',
-        ">Show</button>",
+        ">Apply</button>",  # PLAN-014 A5: the shared filters form's Apply
     ):
         assert marker in card, marker
     legend = section(html, '<p class="legend muted">', "</p>")
@@ -462,9 +462,10 @@ def test_the_grid_has_its_header_filter_card_legend_and_totals() -> None:
 
 def test_every_grid_filter_label_wraps_with_its_control() -> None:
     """Fable's review of Batch C: a label and its control are one .filter-field, so a wrap
-    moves them together; Show stays beside the last pair."""
+    moves them together. PLAN-014 A5: the fields are the shared filters panel's; Apply is in
+    its footer, no longer beside the last pair."""
     html = page(client_for(Role.VIEWER)[0], "/grid/")
-    form = section(html, 'id="grid-filters"', "</form>")
+    form = section(html, 'id="filters-panel"', "</form>")
     fields = re.findall(
         r'<span class="filter-field">(.*?)</span>\s*(?=<span class="filter|</div>)', form, re.S
     )
@@ -473,7 +474,7 @@ def test_every_grid_filter_label_wraps_with_its_control() -> None:
     assert len(fields) == len(labels)
     for name, field in zip(labels, fields, strict=True):
         assert f'<label for="{name}"' in field and f'id="{name}"' in field, name
-    assert '<button class="btn" type="submit">Show</button>' in fields[-1]
+    assert '<button class="btn btn-dark" type="submit" id="filters-apply">Apply</button>' in form
     from tests.test_plan012f_components import rule
 
     pair = rule(".filter-field")

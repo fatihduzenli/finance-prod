@@ -1,10 +1,10 @@
 {% extends "finance/base.html" %}
-{% load money responsive dates %}
+{% load money responsive dates filters static %}
 {% block title %}Profit and loss{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Profit and loss</span></nav><h1>Profit and loss</h1></div><div class="page-actions no-print"><button class="btn" type="button" id="pnl-print" onclick="window.print()">Print</button><a class="btn" id="export-csv" href="{% url 'ledger:reports:pnl_export' %}?{{ export_query }}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
   {% comment %}The report family (DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png; PLAN-012f-b E-1): the filter card, the four figures, the table card. No State filter or grouping (the owner's exclusion, plan D17). print.css (base.html, PLAN-012c D6): with the rows shown (.pnl-detail), each store group starts a new page.{% endcomment %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:reports:pnl' %}" id="pnl-filters" class="actions list-filters pnl-filters" role="search">
+  <div class="card filter-card pnl-filters">{% filters active=active_filters %}
     <span class="filter-field"><label for="from">From</label>
     {% include "ledger/_month_select.html" with name="from" months=picker_months selected=query.from_month %}</span>
     <span class="filter-field"><label for="to">To</label>
@@ -14,8 +14,8 @@
       {% for value, label in group_choices %}<option value="{{ value }}"{% if value == query.group %} selected{% endif %}>{{ label }}</option>{% endfor %}
     </select></span>
     <label class="pnl-detail-check" for="detail"><input type="checkbox" name="detail" value="1" id="detail"{% if query.detail %} checked{% endif %}> Show the rows</label>
-    <button class="btn btn-dark pnl-show" type="submit">Show</button>
-  </form></div>
+  {% endfilters %}</div>
+  <div id="results">
   {% if query.messages %}
     <ul class="messages" id="pnl-messages">{% for text in query.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}
@@ -77,4 +77,6 @@
   </section>
   <p class="muted pnl-explained" id="pnl-explained">A margin is "unknown" when a cost is not known: a store whose landlord rent is not entered is never counted as zero.</p>
   {% endif %}
+  </div>
 {% endblock %}
+{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script>{% endblock %}

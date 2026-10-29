@@ -1,11 +1,10 @@
 {% extends "finance/base.html" %}
-{% load components money dates icons %}
+{% load components money dates icons filters static %}
 {% load responsive %}
 {% block title %}Payments{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><h1>Payments</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} payment{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:payments:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:payments:list' %}" id="payment-filters" role="search">
-    <div class="actions list-filters">
+  <div class="card filter-card">{% filters active=active_filters %}
       <span class="filter-field"><label for="date_by">Date</label>
       <select name="date_by" id="date_by">
         {% for value, label in date_by_choices %}<option value="{{ value }}"{% if value == selected.date_by %} selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -34,10 +33,9 @@
         <option value="">Any</option>
         {% for store in stores %}<option value="{{ store.pk }}"{% if store.pk == selected.store %} selected{% endif %}>{{ store.external_label }}</option>{% endfor %}
       </select></span>
-      <button class="btn btn-dark" type="submit">Filter</button>
-    </div>
-  </form></div>
+  {% endfilters %}</div>
 
+  <div id="results">
   <section class="card" id="payment-totals-card">
   <h2>Totals of the {{ totals.count }} payment{{ totals.count|pluralize }} shown</h2>
   {% responsive_table %}
@@ -86,4 +84,6 @@
   {% endresponsive_table %}
   {% include "ledger/_list_footer.html" with page=page pager_query=query %}
   </div>
+  </div>
 {% endblock %}
+{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script>{% endblock %}

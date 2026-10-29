@@ -1,10 +1,9 @@
 {% extends "finance/base.html" %}
-{% load money responsive dates components icons %}
+{% load money responsive dates components icons filters static %}
 {% block title %}Unpaid balances{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><h1>Unpaid balances</h1>{% if not too_slow %}<span class="list-counts" id="list-counts">{{ report.count }} operator{{ report.count|pluralize }} behind · {{ report.total_owed|money }} owed</span>{% endif %}</div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:arrears:export' %}?{{ export_query }}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:arrears:page' %}" id="arrears-filters" role="search">
-    <div class="actions list-filters">
+  <div class="card filter-card">{% filters active=active_filters sort_options=sort_options %}
       <span class="filter-field"><label for="operator">Operator</label>
       <select name="operator" id="operator">
         <option value="">All</option>
@@ -19,9 +18,8 @@
       </select></span>
       <input type="hidden" name="sort" value="{{ selected.sort }}">
       <input type="hidden" name="dir" value="{% if selected.descending %}desc{% else %}asc{% endif %}">
-      <button class="btn btn-dark" type="submit">Show</button>
-    </div>
-  </form></div>
+  {% endfilters %}</div>
+  <div id="results">
   {% if selected.messages %}
     <ul class="messages" id="arrears-messages">{% for text in selected.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
   {% endif %}
@@ -78,4 +76,6 @@
   {% endresponsive_table %}
   </section>
   {% endif %}
+  </div>
 {% endblock %}
+{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script>{% endblock %}
