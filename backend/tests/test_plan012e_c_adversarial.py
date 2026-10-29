@@ -49,6 +49,7 @@ from ledger.services.installments import Line
 from tests.receivables_helpers import a_lease, a_one_off_charge, a_rent_charge, a_store, an_operator
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
+from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -500,7 +501,10 @@ def test_a_cancel_note_with_payment_data_is_refused_and_reaches_no_row() -> None
     plan.refresh_from_db()
     assert plan.status == InstallmentPlanStatus.ACTIVE and plan.note == ""
     assert AuditLog.objects.count() == before
-    assert not AuditLog.objects.filter(after__icontains=CARD[-4:]).exists()
+    # The whole card number, never a bare "1111": a UUID in any audit row's dict may hold the
+    # last four digits (the fifth instance of that class; PLAN-012g Batch 0's rule).
+    assert not AuditLog.objects.filter(after__icontains=CARD).exists()
+    assert not any(has_token(str(row.after), CARD[-4:]) for row in AuditLog.objects.all())
     assert OneOffCharge.objects.filter(plan=plan, status=OneOffChargeStatus.OWED).count() == 3
 
 

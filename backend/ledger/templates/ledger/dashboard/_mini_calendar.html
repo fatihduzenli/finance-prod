@@ -10,7 +10,7 @@ names the kinds present. On a phone the popover is not shown: the script moves t
 (.mini-day-items, hidden once html.js is set). Built from the Calendar page's own reads.{% endcomment %}
 <section class="card mini-calendar" id="mini-calendar" aria-labelledby="mini-calendar-heading">
   <div class="card-header mini-head">
-    <h2 id="mini-calendar-heading"><a id="mini-month" href="{% url 'ledger:calendar:page' %}?month={{ mini_calendar.month|date:'Y-m' }}">{{ mini_calendar.month|date:"F Y" }}</a></h2>
+    <h2 id="mini-calendar-heading"><a id="mini-month" href="{% url 'ledger:calendar:page' %}?month={{ mini_calendar.month|date:'Y-m' }}">{{ mini_calendar.month|month }}</a></h2>
     <div class="mini-nav"><a class="btn btn-sm mini-step" id="mini-previous" href="?cal={{ mini_calendar.previous|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Previous month">‹</a><a class="btn btn-sm mini-step" id="mini-next" href="?cal={{ mini_calendar.next|date:'Y-m' }}{% if range_query %}&amp;{{ range_query }}{% endif %}" aria-label="Next month">›</a></div>
   </div>
   <div class="mini-grid" id="mini-grid">

@@ -13,7 +13,8 @@ holds zero and every figure, so a negative month reads below the zero line. The 
 ``role="img"`` with a sentence as its ``aria-label``. Every month's label is written, as a
 ``<text class="bar-label">``; the labels kept where the chart is narrow (a phone) are every
 third month counting back from the last, the first month of the range and today's month
-(``{% bars rows today %}``), or every month on a chart of six or fewer; the others carry
+(``{% bars rows today %}``), or every month on a chart of six or fewer, whose labels drop
+the year ("May"; the ``aria-label`` and each bar's ``<title>`` keep it); the others carry
 ``bar-label-minor``, which the phone's style hides (:func:`major_months`). A bar's
 ``<title>`` names its month either way.
 
@@ -46,7 +47,7 @@ from django import template
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString, mark_safe
 
-from finance.dates import month_text
+from finance.dates import month_short_text, month_text
 from ledger.wording import format_amount
 
 register = template.Library()
@@ -163,11 +164,13 @@ def bars(rows: Iterable[Any], today: date | None = None) -> SafeString:
     step = WIDTH / len(items)
     widen = min(step * BAR_MONTHS / WIDTH, MAX_BAR_WIDTH / BAR_WIDTH)
     bar_width, bar_gap = BAR_WIDTH * widen, BAR_GAP * widen
+    short = len(items) <= LABEL_ALL_UP_TO
     groups: list[str] = []
     runs: list[list[str]] = [[]]
     for index, row in enumerate(items):
         centre = step * index + step / 2
         label = month_text(row.month)
+        shown = month_short_text(row.month) if short else label
         income = _amount(row.income) or Decimal(0)
         expenses = _amount(row.expenses)
         parts = [
@@ -203,7 +206,7 @@ def bars(rows: Iterable[Any], today: date | None = None) -> SafeString:
                 _coord(centre),
                 _coord(LABEL_Y),
                 LABEL_FILL,
-                label,
+                shown,
             )
         )
         net = _amount(row.net)
