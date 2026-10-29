@@ -37,22 +37,14 @@
 
   <div id="results">
   <section class="card" id="payment-totals-card">
-  <h2>Totals of the {{ totals.count }} payment{{ totals.count|pluralize }} shown</h2>
-  {% responsive_table %}
-  <table id="payment-totals">
-    <thead><tr><th>Settled (collected)</th><th>Pending (not collected yet)</th><th>Returned</th><th>Refunded</th><th>Deposits held</th></tr></thead>
-    <tbody>
-      <tr>
-        <td id="total-settled" class="money">{{ totals.settled|money }}</td>
-        <td id="total-pending" class="money">{{ totals.pending|money }}</td>
-        <td id="total-returned" class="money">{{ totals.returned|money }}</td>
-        <td id="total-refunded" class="money">{{ totals.refunded|money }}</td>
-        <td id="total-deposits-held" class="money">{{ totals.deposits_held|money }}</td>
-      </tr>
-    </tbody>
-  </table>
-  {% endresponsive_table %}
-  <p class="muted">Pending payments are never counted as collected. Refunds are shown as their own rows. Deposits are money held for the operator, not revenue: they are left out of the other totals. "Deposits held" is the settled deposit payments shown minus their refunds and the deposit refunds shown.</p>
+  <div class="card-header"><h2>Totals of the {{ totals.count }} payment{{ totals.count|pluralize }} shown</h2><span class="info-wrap"><button type="button" class="info" aria-label="About these totals" aria-describedby="totals-help">ⓘ</button><span role="tooltip" id="totals-help" class="tooltip">Pending payments are never counted as collected. Refunds are shown as their own rows. Deposits are money held for the operator, not revenue: they are left out of the other totals. "Deposits held" is the settled deposit payments shown minus their refunds and the deposit refunds shown.</span></span></div>
+  <div class="tile-row" id="payments-totals">
+    <div class="tile{% if not totals.settled %} is-zero{% else %} tone-paid{% endif %}"><span class="tile-label">Settled</span><span class="tile-value" id="total-settled">{{ totals.settled|money }}</span></div>
+    <div class="tile{% if not totals.pending %} is-zero{% endif %}"><span class="tile-label">Pending</span><span class="tile-value" id="total-pending">{{ totals.pending|money }}</span></div>
+    <div class="tile{% if totals.returned > 0 %} tone-unpaid{% elif not totals.returned %} is-zero{% endif %}"><span class="tile-label">Returned</span><span class="tile-value" id="total-returned">{{ totals.returned|money }}</span></div>
+    <div class="tile{% if not totals.refunded %} is-zero{% endif %}"><span class="tile-label">Refunded</span><span class="tile-value" id="total-refunded">{{ totals.refunded|money }}</span></div>
+    <div class="tile{% if not totals.deposits_held %} is-zero{% endif %}"><span class="tile-label">Deposits held</span><span class="tile-value" id="total-deposits-held">{{ totals.deposits_held|money }}</span></div>
+  </div>
   </section>
 
   <div class="card table-card list-card">
@@ -86,4 +78,21 @@
   </div>
   </div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script>{% endblock %}
+{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script>
+<script>
+  // PLAN-014 A6: the totals' ⓘ shows its tooltip on hover and focus (app.css); a tap toggles it,
+  // Escape and a tap elsewhere close it.
+  (function () {
+    var button = document.querySelector("#payment-totals-card .info");
+    if (!button) { return; }
+    var wrap = button.parentNode;
+    button.addEventListener("click", function (event) {
+      event.stopPropagation();
+      wrap.classList.toggle("is-open");
+    });
+    document.addEventListener("click", function () { wrap.classList.remove("is-open"); });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") { wrap.classList.remove("is-open"); }
+    });
+  })();
+</script>{% endblock %}

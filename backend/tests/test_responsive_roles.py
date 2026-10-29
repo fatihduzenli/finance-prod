@@ -415,9 +415,8 @@ def test_the_payments_list_carries_roles() -> None:
     # Paid on (the method under it, PLAN-012f-a D3), Initiated, Operator, Store, Charge,
     # Amount, Status, Reference, Transaction, Note, the chevron.
     assert roles == ["title", *["meta"] * 4, "amount", "status", "meta", "meta", "meta", "meta"]
-    # The totals table above it: five money cells, a summary: each "Label value".
-    totals = _section(page, '<table id="payment-totals" class="role-cards">')
-    assert _roles(totals) == ["meta"] * 5
+    # PLAN-014 A6: the totals above it are five tiles, no longer a table.
+    assert 'id="payment-totals"' not in page and 'id="payments-totals"' in page
 
 
 @pytest.mark.django_db
