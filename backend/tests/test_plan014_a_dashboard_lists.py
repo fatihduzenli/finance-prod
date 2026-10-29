@@ -237,7 +237,7 @@ def test_a_leftover_balance_of_the_previous_operator_shows_as_unpaid() -> None:
     a_rent_charge(lease, date(2026, 9, 1), due="1200.00")
     row = row_of(stores_html(Role.BILLING), "1413")
     assert "$1,200.00" in row and has_token(row, "unpaid") and "Vacant · 1 day" in row
-    balance = re.search(r'<td class="store-balance">(.*?)</td>', row, re.S)
+    balance = re.search(r'<td[^>]*class="[^"]*store-balance[^"]*"[^>]*>(.*?)</td>', row, re.S)
     assert balance is not None and "—" not in balance.group(1) and "unpaid" in balance.group(1)
 
 
@@ -363,8 +363,9 @@ def test_the_payments_totals_are_five_tiles_with_tones_and_a_tooltip() -> None:
     assert settled and "tone-paid" in settled.group(1)
     assert returned and "tone-unpaid" in returned.group(1) and "is-zero" not in returned.group(1)
     assert refunded and "is-zero" in refunded.group(1)
-    assert 'role="tooltip"' in totals and 'aria-describedby="totals-help"' in totals
-    assert "Pending payments are never counted as collected" in totals
+    card = section(html, "payment-totals-card")
+    assert 'role="tooltip"' in card and 'aria-describedby="totals-help"' in card
+    assert "Pending payments are never counted as collected" in card
     assert "$100.00" in totals and "$50.00" in totals
 
 

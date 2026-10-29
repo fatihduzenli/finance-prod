@@ -194,6 +194,6 @@ def test_the_tiles_tooltip_opens_on_focus(live_server: LiveServer, laptop: Brows
     assert tiles.count() == 5
     tooltip = page.locator("#totals-help")
     assert not tooltip.is_visible()
-    page.locator("#payments-totals button.info").focus()
+    page.locator("#payment-totals-card button.info").focus()
     expect(tooltip).to_be_visible()
     shot(page, "payments-tiles-light-laptop")
