@@ -8,18 +8,12 @@ none when it reads what the page already loaded:
   initiation day plus :data:`ACH_SETTLE_BUSINESS_DAYS` business days (the documented ACH
   window, docs/CLAUDE.md §10: settled or returned within about five business days; Saturdays
   and Sundays are skipped, bank holidays are not known here);
-- :func:`collection_progress` (one query): the month's rent charges, waived ones left out,
+- :func:`collection_progress` (one query; the "Collected this month" figure's share line): the
+  month's rent charges, waived ones left out,
   by status: what was billed (``amount_due``), what was collected on them (``amount_paid``,
   at most each charge's amount, so the share never passes 100 %), the share as a whole
   per cent rounded down (``None`` when nothing is billed) and the progress bar's segments
   (Paid, Pending, Partly paid, Unpaid: the amounts billed of the charges in each status);
-- :func:`coming_up` (no query: the leases the attention list already read, and
-  :func:`pending_debits`): up to three items in date order: the next rent debit day after
-  today with the number of stores debited that day (leases in collection, a known channel,
-  started by then and not ended; days 29 to 31 fall on a short month's last day, as the rent
-  run counts them), the ACH settlement of the pending debits, and the next insurance
-  renewals (the stores' open-date anniversaries from today, held by a lease that day and not
-  closed by then) with their count;
 - :func:`recent_payments` (one query): the last :data:`RECENT_LIMIT` settled payments (not a
   refund, not a credit applied: no money came in), newest first, each with when it settled
   in words ("Today 14:02", "Yesterday", else the date; the time is the row's last change in
@@ -62,36 +56,24 @@ from django.utils import timezone
 from finance.dates import day_short_text, day_text, month_text
 from ledger.models import (
     ZERO,
-    CollectionStatus,
-    Lease,
     OneOffCategory,
     OneOffCharge,
     OneOffChargeStatus,
     Payment,
-    PaymentChannel,
     PaymentMethod,
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
-    StoreStatus,
 )
-from ledger.services import calendar, grid, insurance, pnl, rent_run, stores
-from ledger.wording import format_amount
+from ledger.services import calendar, grid, pnl, stores
 
 #: Business days an ACH debit takes to settle (docs/CLAUDE.md §10, the provider's ACH page).
 ACH_SETTLE_BUSINESS_DAYS = 5
 #: Payments the Recent payments card lists.
 RECENT_LIMIT = 5
-#: Items the Coming up card lists.
-COMING_UP_LIMIT = 3
-#: How far ahead the next rent debit day is looked for (a month and a day).
-RENT_LOOKAHEAD_DAYS = 32
 
 TODAY_WORD = "Today"
 YESTERDAY_WORD = "Yesterday"
-ACH_SETTLEMENT = "ACH settlement"
-RENT_DAY = "Rent day"
-INSURANCE_RENEWALS = "Insurance renewals"
 
 #: The progress bar's families (finance.templatetags.components) of each rent status, in bar
 #: order: Paid, Pending, Partly paid, Unpaid (due and unpaid both).
@@ -195,97 +177,6 @@ def collection_progress(month: date) -> Collection:
         percent=min(percent, 100) if percent is not None else None,
         segments=segments,
     )
-
-
-# --- Coming up -------------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class ComingItem:
-    on: date
-    title: str
-    note: str
-
-
-def _debits_on(lease: Lease, day: date) -> bool:
-    """Whether a debit day of ``lease`` falls on ``day`` (29 to 31: a short month's last)."""
-    for debit_day in (lease.debit_day, lease.second_debit_day):
-        if debit_day is not None and rent_run.falls_on(debit_day, day.year, day.month) == day.day:
-            return True
-    return False
-
-
-def _in_collection(lease: Lease, day: date) -> bool:
-    return (
-        lease.collection_status == CollectionStatus.ACTIVE
-        and lease.payment_channel != PaymentChannel.UNKNOWN
-        and (lease.started_on is None or lease.started_on <= day)
-        and (lease.ended_on is None or lease.ended_on >= day)
-    )
-
-
-def next_rent_day(leases: Iterable[Lease], today: date) -> ComingItem | None:
-    """The next day after ``today`` a lease in collection is debited, with its store count."""
-    debited = [
-        lease
-        for lease in leases
-        if lease.collection_status == CollectionStatus.ACTIVE
-        and (lease.debit_day is not None or lease.second_debit_day is not None)
-    ]
-    for offset in range(1, RENT_LOOKAHEAD_DAYS + 1):
-        day = today + timedelta(days=offset)
-        due = {
-            lease.store_id
-            for lease in debited
-            if _in_collection(lease, day) and _debits_on(lease, day)
-        }
-        if due:
-            return ComingItem(day, RENT_DAY, _plural(len(due), "store"))
-    return None
-
-
-def _anniversary_from(open_date: date, today: date) -> date:
-    due = insurance.anniversary(open_date, today.year)
-    return due if due >= today else insurance.anniversary(open_date, today.year + 1)
-
-
-def next_renewals(leases: Iterable[Lease], today: date) -> ComingItem | None:
-    """The next day stores renew their insurance (their open-date anniversary, from today),
-    held by a lease that day, the store active and not closed by then; with the count."""
-    days: dict[object, date] = {}
-    for lease in leases:
-        store = lease.store
-        if store.open_date is None or store.status != StoreStatus.ACTIVE:
-            continue
-        due = _anniversary_from(store.open_date, today)
-        if store.closed_at is not None and due >= store.closed_at:
-            continue
-        if insurance.holds_on(lease, due):
-            days[store.pk] = due
-    if not days:
-        return None
-    first = min(days.values())
-    count = sum(1 for due in days.values() if due == first)
-    return ComingItem(first, INSURANCE_RENEWALS, _plural(count, "store"))
-
-
-def coming_up(leases: Iterable[Lease], today: date, debits: PendingDebits) -> list[ComingItem]:
-    """Up to :data:`COMING_UP_LIMIT` items in date order (see the module docstring)."""
-    rows = list(leases)
-    found: list[ComingItem] = []
-    if debits.count and debits.settle_by is not None:
-        found.append(
-            ComingItem(
-                debits.settle_by,
-                ACH_SETTLEMENT,
-                f"{_plural(debits.count, 'debit')} · {format_amount(debits.amount)}",
-            )
-        )
-    for item in (next_rent_day(rows, today), next_renewals(rows, today)):
-        if item is not None:
-            found.append(item)
-    found.sort(key=lambda item: (item.on, item.title))
-    return found[:COMING_UP_LIMIT]
 
 
 # --- Recent payments -------------------------------------------------------------------------

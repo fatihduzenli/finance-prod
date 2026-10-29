@@ -148,14 +148,11 @@ def test_the_dashboard_s_empty_cards_use_the_empty_state_and_keep_their_ids() ->
     for block_id, title in (
         ("attention-none", "Nothing needs attention."),
         ("recent-payments-none", "No settled payments yet."),
-        ("coming-up-none", "Nothing scheduled."),
         ("failed-attempts-none", "No failed attempts."),
         ("not-sent-none", "Nothing waiting to be sent."),
     ):
         block = html[html.index(f'<div class="empty-state" id="{block_id}">') :]
         assert f'<p class="empty-state-title">{title}</p>' in block.split("</div>", 1)[0]
-    collection = html[html.index('<div class="empty-state" id="collection-none">') :]
-    assert '<p class="empty-state-title">No rent billed for Oct 2026 yet.</p>' in collection
     failed = html[html.index('<div class="empty-state" id="failed-attempts-none">') :]
     assert "could not collect are listed here.</p>" in failed.split("</div>", 1)[0]
     # The dashboard's one primary is not an empty state's.

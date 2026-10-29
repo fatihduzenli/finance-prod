@@ -41,9 +41,9 @@ from ledger.wording import format_amount
 def home(request: HttpRequest) -> HttpResponse:
     """``ledger:home`` (D1; the approved design's layout, PLAN-012f D7, and the staging
     review's, PLAN-012f-b D3 to D6): the four figures, the Cashflow card, what needs
-    attention (PLAN-011b D6) beside the Payment status card, the recent payments beside the
-    mini calendar, the month's collection and what is coming up, then today's run, the
-    failed attempts, the waived charges, the invoices not sent and the last nightly check.
+    attention (PLAN-011b D6) beside the mini calendar, the recent payments beside the Payment
+    status card (PLAN-014 A2: the Coming up and Collection cards are gone), then today's run,
+    the failed attempts, the waived charges, the invoices not sent and the last nightly check.
     ``?range=`` (with ``from`` and ``to``) is the Cashflow and Payment status cards' shared
     range and ``?cal=`` the mini calendar's month; an unusable range computes neither card
     and says so. Without ``?range=`` (PLAN-012g C2; DESIGN-SPEC §7.5) the range is the last
@@ -105,8 +105,6 @@ def home(request: HttpRequest) -> HttpResponse:
             "can_act": meets(role, Role.BILLING),
             "payments_query": payments_query,
             "kpis": _kpis(data, collection, debits, run_line, payments_query),
-            "collection": collection,
-            "coming_up": dashboard_blocks.coming_up(leases, today, debits),
             "recent_payments": dashboard_blocks.recent_payments(today),
             # PLAN-012d D11: today's rent run in one line, from its audit rows.
             "run_line": run_line,
