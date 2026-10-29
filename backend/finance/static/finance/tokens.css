@@ -66,6 +66,7 @@
    pair: --flash-warning-text on --flash-warning-bg
    pair: --flash-error-text on --flash-error-bg
    pair: --flash-info-text on --flash-info-bg
+   pair: --btn-dark-text on --btn-dark-bg
    The same pairs in the dark theme (PLAN-012g A1, A6; DESIGN-SPEC §7.2), each measured with
    the values of the dark blocks below (a name the dark blocks do not set keeps its light
    value). The sidebar is flat --sidebar-bg in dark, so its pairs name that, not a gradient.
@@ -103,6 +104,7 @@
    pair[dark]: --flash-warning-text on --flash-warning-bg
    pair[dark]: --flash-error-text on --flash-error-bg
    pair[dark]: --flash-info-text on --flash-info-bg
+   pair[dark]: --btn-dark-text on --btn-dark-bg
    The sandbox banner (finance/templates/finance/banner.html) takes --sandbox-text on
    --sandbox-bg (PLAN-012g A5; before 12g it carried the pending pair's values as literals).
    White on --btn-primary-bg is the primary button's label, white on #B42318 the confirming
@@ -149,7 +151,10 @@
    The dark values sit in two identical blocks inside @media screen, so print never sees them:
    :root[data-theme="dark"] (the stored choice) and :root[data-theme="system"] under
    prefers-color-scheme: dark (System resolves in CSS, no script; PLAN-012g A1). A test holds
-   the two blocks identical. */
+   the two blocks identical.
+   PLAN-012g Batch D adds --btn-dark-bg and --btn-dark-text: the dark button (.btn-dark, the
+   Filter, Show and Search buttons) and the pager's current page, the navy with white text in
+   light (as before), a raised #2E2E3D with --text's #EDEDF3 in dark. */
 
 @font-face {
   font-family: Inter;
@@ -225,6 +230,7 @@
   --chart-axis: var(--border);  --chart-label: var(--muted);
   --chart-overdue: #B42318;  --chart-paid: #1B7F3B;  --chart-upcoming: #0B2545;  --chart-ring-empty: var(--neutral-bg);
   --dot-rent: #13A89E;  --dot-settles: #1B7F3B;  --dot-promise: #B7791F;  --dot-lease-end: #B42318;
+  --btn-dark-bg: #0B2545;  --btn-dark-text: #FFFFFF;
 }
 
 /* The dark theme (PLAN-012g A1; DESIGN-SPEC §7.2, §7.3, §7.6). Screen only: print resolves the
@@ -252,6 +258,7 @@
     /* the primary button: the light theme's teal (§7.2 --primary-*); white text */
     --btn-primary-bg: #0E8F86;  --btn-primary-border: #0A6B64;  --btn-primary-text: #FFFFFF;
     --text-on-accent: #FFFFFF;  --btn-danger-bg: #B42318;
+    --btn-dark-bg: #2E2E3D;  --btn-dark-text: #EDEDF3;
 
     /* status (bg / text) */
     --paid-bg: #1F3A2C;      --paid-text: #7FDCA4;
@@ -305,6 +312,7 @@
       /* the primary button: the light theme's teal (§7.2 --primary-*); white text */
       --btn-primary-bg: #0E8F86;  --btn-primary-border: #0A6B64;  --btn-primary-text: #FFFFFF;
       --text-on-accent: #FFFFFF;  --btn-danger-bg: #B42318;
+      --btn-dark-bg: #2E2E3D;  --btn-dark-text: #EDEDF3;
 
       /* status (bg / text) */
       --paid-bg: #1F3A2C;      --paid-text: #7FDCA4;

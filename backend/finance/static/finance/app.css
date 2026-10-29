@@ -1171,7 +1171,7 @@ fieldset.card > legend + * { clear: both; }
    DESIGN-SPEC §4 Stores list, stores-list-laptop.png; the Operators, Leases, Payments, Returned
    payments, Disputes, Unpaid balances and Search pages follow. The header's .page-title (the
    dashboard's) holds the title and its muted counts line (.list-counts). .list-filters: the filter card's one row, the search box
-   growing; .btn-dark: its Filter button. .list-footer: the footer inside the list's card, the
+   growing; .btn-dark: its Filter button (--btn-dark-bg, --btn-dark-text). .list-footer: the footer inside the list's card, the
    range ("1–7 of 7 · filtered from 517") at the left, "‹ Previous · 1 · Next ›" at the right
    with the current page a dark pill. .cell-chevron: the row's chevron at the right (the title
    links to the same page; the phone's card leaves it out). On the phone the stores list's
@@ -1181,8 +1181,8 @@ fieldset.card > legend + * { clear: both; }
 .list-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 .list-filters label { margin: 0; }
 .list-filters .list-search { flex: 1 1 18rem; min-width: 12rem; max-width: none; }
-.btn-dark { background: var(--navy); border-color: var(--navy); color: var(--text-on-accent); }
-.btn-dark:hover { border-color: var(--navy); opacity: .92; }
+.btn-dark { background: var(--btn-dark-bg); border-color: var(--btn-dark-bg); color: var(--btn-dark-text); }
+.btn-dark:hover { border-color: var(--btn-dark-bg); opacity: .92; }
 .list-card > .table-cards > table td, .list-card > .table-cards > table th { vertical-align: middle; }
 .list-card > .table-cards > table > tbody > tr:last-child > td { border-bottom: 1px solid var(--border); }
 .list-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); margin: 0; padding: var(--space-3) var(--space-5); }
@@ -1192,7 +1192,7 @@ fieldset.card > legend + * { clear: both; }
 .pager-pages .pager-off:hover { border-color: var(--input-border); }
 .pager-page { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; box-sizing: border-box; padding: 0 var(--space-2); border-radius: var(--radius-ctl); color: var(--text); font-size: var(--fs-sm); font-weight: 600; text-decoration: none; }
 a.pager-page:hover { background: var(--surface-2); }
-.pager-page[aria-current="page"] { background: var(--navy); color: var(--text-on-accent); }
+.pager-page[aria-current="page"] { background: var(--btn-dark-bg); color: var(--btn-dark-text); }
 .pager-gap { color: var(--muted); }
 th.cell-chevron, td.cell-chevron { width: 1%; padding-left: 0; text-align: right; white-space: nowrap; }
 td.cell-chevron a { display: inline-flex; color: var(--muted); }
