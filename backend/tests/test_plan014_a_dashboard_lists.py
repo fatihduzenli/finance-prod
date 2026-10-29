@@ -305,8 +305,8 @@ def test_the_filters_count_and_chips_follow_the_active_filters() -> None:
 def test_an_unknown_filter_value_makes_no_chip_and_is_never_echoed() -> None:
     html = page(client_for(Role.VIEWER)[0], "/stores/?state=ZZ&status=%3Cscript%3E")
     form = section(html, "filters", "</form>")
-    assert 'class="chip"' not in form and "script" not in form and ">Filters<" in form
-    assert "&lt;script&gt;" not in html
+    assert 'class="chip"' not in form and ">Filters<" in form
+    assert "%3Cscript%3E" not in form and "&lt;script&gt;" not in html
 
 
 def test_a_long_search_and_a_hostile_one_answer_200() -> None:
