@@ -486,12 +486,15 @@ def _balance(owed: tuple[Decimal, bool, bool] | None, has_lease: bool) -> ListBa
     return ListBalance(amount, False, "Paid up", "paid")
 
 
-def _status(store: Any, has_lease: bool, today: date) -> tuple[str, str, str]:
-    """(key, label, badge value) of the Status column."""
+def _status(
+    store: Store, has_lease: bool, last_ended: date | None, today: date
+) -> tuple[str, str, str]:
+    """(key, label, badge value) of the Status column; ``last_ended`` is the day the store's
+    last lease ended (the list's ``list_last_ended``), for a vacant store's label."""
     if store.status in CLOSED_STATUSES:
         return LIST_STATUS_CLOSED, store.get_status_display(), status_badge(store)
     if not has_lease:
-        return LIST_STATUS_VACANT, _vacant_label(store.list_last_ended, today), "neutral"
+        return LIST_STATUS_VACANT, _vacant_label(last_ended, today), "neutral"
     if store.status == StoreStatus.ACTIVE:
         return LIST_STATUS_ACTIVE, "Active", status_badge(store)
     return store.status, store.get_status_display(), "neutral"
@@ -499,7 +502,7 @@ def _status(store: Any, has_lease: bool, today: date) -> tuple[str, str, str]:
 
 def _row(store: Any, owed: tuple[Decimal, bool, bool] | None, today: date) -> ListRow:
     has_lease = store.list_lease is not None
-    key, label, value = _status(store, has_lease, today)
+    key, label, value = _status(store, has_lease, store.list_last_ended, today)
     channel = store.list_channel or ""
     return ListRow(
         store=store,
