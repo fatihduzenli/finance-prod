@@ -896,3 +896,31 @@ def lease_bank_attach(request: HttpRequest, pk: str) -> HttpResponse:
         submit(request, JobKind.LEASE_METHOD_ATTACH, lease, {"payment_method_id": value})
         messages.info(request, BANK_CHECKING)
     return redirect("ledger:leases:detail", pk=lease.pk)
+
+
+# --- Switch to own account (PLAN-014 C9) ------------------------------------------------
+
+SWITCH_KINDS = (JobKind.LEASE_ACCOUNT_SWITCH,)
+
+
+@role_required
+@require_POST
+def lease_switch_own(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:switch_own`` (billing; PLAN-014 C9): the LEASE card's "Switch to own
+    account". Refused with one sentence and nothing queued when the lease does not share
+    another lease's account, holds no customer of its own, its operator is archived, its
+    autopay is paused (:func:`ledger.services.leases.switch_refusal`) or a switch of it is
+    already waiting; otherwise it queues ``lease_account_switch`` with a fresh move key.
+    Returns to the lease page, which shows the job until it finishes."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    reason = service.switch_refusal(lease)
+    if not reason and jobs.is_active(jobs.latest_for(lease, SWITCH_KINDS)):
+        reason = service.SWITCH_WAITING
+    if reason:
+        messages.error(request, service.SWITCH_MESSAGES[reason])
+    elif submit(request, JobKind.LEASE_ACCOUNT_SWITCH, lease, {"move_key": uuid.uuid4()}):
+        messages.info(request, service.SWITCH_QUEUED)
+    return redirect("ledger:leases:detail", pk=lease.pk)

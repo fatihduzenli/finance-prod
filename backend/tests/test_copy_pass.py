@@ -269,6 +269,7 @@ def test_the_morning_e_mail_writes_the_promised_amount_with_its_separator() -> N
         (JobKind, JobKind.LEASE_LINK, "Connecting the lease"),
         (JobKind, JobKind.LEASE_METHODS_REFRESH, "Updating bank methods"),
         (JobKind, JobKind.LEASE_METHOD_ATTACH, "Connecting a bank account"),
+        (JobKind, JobKind.LEASE_ACCOUNT_SWITCH, "Switching to the lease's own account"),
         (JobKind, JobKind.PAYMENT_MARK, "Marking the invoice paid"),
         (JobKind, JobKind.INVOICE_CREATE, "Creating the invoice"),
         (JobKind, JobKind.SCHEDULE_CREATE, "Setting up autopay"),

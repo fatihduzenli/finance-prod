@@ -115,6 +115,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:leases:billing": RouteRule(min_role=Role.BILLING, methods=POST),
     # The bank-entry page's attach (PLAN-014 C7): billing; only the payment-method id.
     "ledger:leases:bank_attach": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The LEASE card's "Switch to own account" (PLAN-014 C9): billing; the view checks again.
+    "ledger:leases:switch_own": RouteRule(min_role=Role.BILLING, methods=POST),
     # Ending a lease (PLAN-010b Batch C): admin. The view refuses the form's GET below
     # admin too, and sends an admin to the end-of-lease wizard (PLAN-012e D4).
     "ledger:leases:end": RouteRule(min_role=Role.ADMIN, methods=POST),

@@ -81,6 +81,7 @@ GUARD_MODULES = (
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",
     "payments.migrations.0019_lease_job_kinds",
+    "payments.migrations.0020_lease_account_switch",
 )
 
 
@@ -166,6 +167,7 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0017_autopay_stop_job",
                 "[ ] 0018_copy_labels",
                 "[ ] 0019_lease_job_kinds",
+                "[ ] 0020_lease_account_switch",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):

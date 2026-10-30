@@ -180,6 +180,7 @@ lease_patterns = (
         path("<str:pk>/billing/", leases.lease_billing, name="billing"),
         path("<str:pk>/bank/", leases.lease_bank, name="bank"),
         path("<str:pk>/bank/attach/", leases.lease_bank_attach, name="bank_attach"),
+        path("<str:pk>/bank/switch-own/", leases.lease_switch_own, name="switch_own"),
         path(
             "<str:pk>/setup-charges/new/",
             one_off_charges.lease_add_setup_charge,
