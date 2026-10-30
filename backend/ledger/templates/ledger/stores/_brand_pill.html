@@ -1,0 +1,1 @@
+{% comment %}The store's brand as a grey pill right after its name (PLAN-014 B1, was the type pill of PLAN-012f-b D10; DESIGN-SPEC §4a): nothing when the store has none. The leading space keeps it apart from the name.{% endcomment %}{% if store.brand %} <span class="pill pill-type">{{ store.brand.name }}</span>{% endif %}

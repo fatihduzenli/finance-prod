@@ -826,7 +826,7 @@ def _promise_message(promise: ContactEntry, address: str) -> mail.Message:
     text = (
         f"{operator.display_name} promised to pay {amount} by "
         f"{by}.\n\n{promise.body}\n\n"
-        f"Contact log: {settings.APP_BASE_URL.rstrip('/')}{path}#contacts\n"
+        f"Notes & follow-ups: {settings.APP_BASE_URL.rstrip('/')}{path}#contacts\n"
     )
     subject = " ".join(f"Promise to pay due today: {operator.display_name}".split())
     return mail.Message(to=address, subject=subject[:SUBJECT_MAX_LENGTH], text=text)

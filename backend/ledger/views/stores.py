@@ -24,7 +24,7 @@ city or operator matches every word; it is kept by the paging and export links.
 The detail page is the store's workspace (docs/qa/PLAN-012d-store-workspace.md D1 to D3,
 :mod:`ledger.services.workspace`): a header card, the action bar for billing and admin,
 and tabs rendered one at a time (``?tab=``): Charges, Invoices (with the store's drafts),
-Payments, Schedules, Documents, Contact log (the entries about a lease of the store, with
+Payments, Schedules, Documents, Notes & follow-ups (the entries about a lease of the store, with
 **Add entry** for billing; PLAN-012 D3) and History (admin). ``stores:record_payment``
 (billing; one payment allocated over the open charges, PLAN-012d D6),
 ``stores:schedule_payment`` (billing) and ``stores:charge_now_pick`` (admin) are the bar's
@@ -60,6 +60,7 @@ from ledger.forms import (
     ALLOCATION_PREFIX,
     CREDIT_PREFIX,
     AllocationPaymentForm,
+    NoteForm,
     StoreCostCloseForm,
     StoreCostCorrectForm,
     StoreCostForm,
@@ -83,6 +84,7 @@ from ledger.services import (
     rent_run,
     search,
     store_costs,
+    timeline,
     workspace,
 )
 from ledger.services import stores as service
@@ -120,15 +122,16 @@ def _listed(request: HttpRequest) -> tuple[QuerySet[Store], str]:
     matches the store number as a prefix, the name, the city or an operator's name;
     :func:`ledger.services.search.filter_stores`), in its order."""
     query = search.clean_query(request.GET.get("q"))
-    stores = search.filter_stores(Store.objects.all(), query)
+    stores = search.filter_stores(Store.objects.select_related("brand"), query)
     return stores.order_by(Lower("external_label"), "id"), query
 
 
 @role_required
 @require_safe
 def store_list(request: HttpRequest) -> HttpResponse:
-    """The stores list (PLAN-012f-a D3): the counts line, the filters (search, State, Status,
-    Balance, Sort; :func:`ledger.services.stores.store_list`) over every store, then the page.
+    """The stores list (PLAN-012f-a D3): the counts line, the filters (search, State, Brand,
+    Status, Balance, Sort; :func:`ledger.services.stores.store_list`) over every store, then
+    the page.
     The spreadsheet keeps the search only (its rows are PLAN-011 D5's)."""
     return render(request, "ledger/stores/list.html", _list_context(request))
 
@@ -144,6 +147,7 @@ def _list_context(request: HttpRequest) -> dict[str, Any]:
         request,
         {
             "state": ("State", dict(listed.states)),
+            "brand": ("Brand", dict(listed.brands)),
             "status": ("Status", dict(service.LIST_STATUSES)),
             "balance": ("Balance", dict(service.LIST_BALANCES)),
         },
@@ -171,6 +175,7 @@ def _list_context(request: HttpRequest) -> dict[str, Any]:
 EXPORT_HEADER = (
     "Store",
     "Store number",
+    "Brand",
     "City",
     "State",
     "Open date",
@@ -190,6 +195,7 @@ def store_export(request: HttpRequest) -> StreamingHttpResponse:
         [
             store.external_label,
             store.store_number,
+            store.brand.name if store.brand is not None else "",
             store.city,
             store.state,
             store.open_date,
@@ -252,20 +258,43 @@ def _detail_context(
         **workspace_cards.side_cards(request, store, today),
     }
     if tab in (workspace.TAB_CONTACTS, workspace.TAB_CHARGES):
-        # PLAN-012 D3: the entries about a lease of this store, and Add entry.
+        # PLAN-012 D3: Add entry.
+        context["contact_add_url"] = contact_log.store_add_url(request, store, today)
+    if tab == workspace.TAB_CHARGES:
+        # PLAN-012 D3: the latest entries about a lease of this store, under the Charges tab.
+        context["contact_rows"] = contact_log.log_rows(
+            request,
+            list(
+                contacts.store_entries(store, include_deleted=contact_log.include_deleted(request))[
+                    : contacts.PAGE_LIMIT + 1
+                ]
+            ),
+            store=store,
+        )
+    if tab == workspace.TAB_CONTACTS:
+        # PLAN-014 B5, B6: the form to write a note (billing), then one list of the store's
+        # notes and contact entries, narrowed by ?show=.
+        show = timeline.parse_show(request.GET.get("show"))
+        found = timeline.entries(
+            store,
+            show,
+            include_deleted=contact_log.include_deleted(request),
+            limit=contacts.PAGE_LIMIT,
+        )
         context.update(
             {
-                "contact_rows": contact_log.log_rows(
-                    request,
-                    list(
-                        contacts.store_entries(
-                            store, include_deleted=contact_log.include_deleted(request)
-                        )[: contacts.PAGE_LIMIT + 1]
-                    ),
-                    store=store,
+                "note_form": NoteForm() if context["billing"] else None,
+                "timeline_rows": contact_log.timeline_rows(
+                    request, found[: contacts.PAGE_LIMIT], store=store
                 ),
-                "contact_limit": contacts.PAGE_LIMIT,
-                "contact_add_url": contact_log.store_add_url(request, store, today),
+                "timeline_more": len(found) > contacts.PAGE_LIMIT,
+                "timeline_show": show,
+                "timeline_filters": contact_log.timeline_filters(
+                    reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
+                    {"tab": workspace.TAB_CONTACTS},
+                    f"#tab-{workspace.TAB_CONTACTS}",
+                ),
+                "timeline_empty": timeline.empty_text(show),
             }
         )
     if tab == workspace.TAB_DOCUMENTS:

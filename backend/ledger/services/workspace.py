@@ -17,7 +17,7 @@
   lease instead (admin); a viewer gets none; Create missing charges (PLAN-012d D13) is a
   link on the Charges tab;
 - the **open tab** only (D3, ``?tab=``, Charges by default): Charges, Invoices, Payments,
-  Schedules and History are built here; Documents and Contact log are built by their own
+  Schedules and History are built here; Documents and Notes & follow-ups are built by their own
   view helpers (:mod:`ledger.views.documents`, :mod:`ledger.views.contact_log`). History
   is for admins; another role asking for it gets Charges. The Charges tab's open rows
   show the header's figures (:class:`StoreBalances`): a charge a live re-debit carries
@@ -92,6 +92,7 @@ from ledger.services import (
     audit,
     contacts,
     credits,
+    detail_cards,
     installments,
     lease_end,
     leases,
@@ -117,7 +118,7 @@ TABS: tuple[tuple[str, str], ...] = (
     (TAB_PAYMENTS, "Payments"),
     (TAB_SCHEDULES, "Autopay"),
     (TAB_DOCUMENTS, "Documents"),
-    (TAB_CONTACTS, "Contact log"),
+    (TAB_CONTACTS, "Notes & follow-ups"),
     (TAB_HISTORY, "Activity"),
 )
 #: The tabs only an admin sees.
@@ -240,10 +241,8 @@ class Header:
     deposit_text: str = ""
     next_rent: date | None = None
     next_insurance: date | None = None
-
-    @property
-    def lease_since(self) -> date | None:
-        return self.lease.started_on if self.lease is not None else None
+    #: The Sign fee and Insurance rows under Deposit (PLAN-014 B3), with a lease.
+    collections: detail_cards.LeaseCollections | None = None
 
 
 def _autopay_state(schedules: list[CollectionSchedule]) -> str:
@@ -463,6 +462,7 @@ def _header(
         deposit_text=_deposit_text(lease),
         next_rent=_next_rent(schedules, moved, now) or _next_debit_day(lease, today),
         next_insurance=_next_insurance(lease, today),
+        collections=detail_cards.lease_collections(lease, today),
     )
 
 
@@ -1275,7 +1275,7 @@ class Workspace:
     actions: list[Action]
     tabs: list[tuple[str, str]]
     tab: str
-    #: The open tab's data (empty for Documents and Contact log, built by their views).
+    #: The open tab's data (empty for Documents and Notes & follow-ups, built by their views).
     data: dict[str, Any]
     #: The Charges tab's Create missing charges (a POST), or "" (:func:`_create_charges_url`).
     create_charges_url: str = ""
@@ -1291,7 +1291,7 @@ def _tab_data(
     now: datetime,
 ) -> dict[str, Any]:
     """The open tab's data over the records of ``owner`` (a store, or an operator); empty
-    for the tabs built elsewhere (Documents, Contact log, History)."""
+    for the tabs built elsewhere (Documents, Notes & follow-ups, History)."""
     if tab == TAB_CHARGES:
         return charges_tab(owner, _chosen_filter(chosen, CHARGE_FILTERS), role, balances)
     if tab == TAB_INVOICES:
@@ -1369,7 +1369,7 @@ def operator_stores(operator: Operator) -> list[Store]:
     """The stores of the operator's leases, by label (the selector's choices)."""
     return list(
         Store.objects.filter(leases__operator=operator)
-        .select_related("store_type")
+        .select_related("brand")
         .distinct()
         .order_by("external_label", "id")
     )
@@ -1440,7 +1440,7 @@ def operator_workspace(
     operator's lease of it, and the open tab across all the operator's stores (Charges,
     Invoices, Payments, Schedules; the Charges tab the selected store's only, when one is
     selected; Documents and History are the selected store's, History with the operator's
-    own rows; the contact log is the page's). One receivables read gives the store's
+    own rows; the notes & follow-ups is the page's). One receivables read gives the store's
     figures, the operator's total and the rows the strip of store cards reads."""
     moment = now or timezone.now()
     stores = operator_stores(operator)

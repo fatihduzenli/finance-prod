@@ -32,8 +32,11 @@ from ledger.models import (
     INSTALLMENTS_MAX,
     INSTALLMENTS_MIN,
     NAME_MAX_LENGTH,
+    NOTE_BODY_MAX_LENGTH,
+    NOTE_DELETE_REASON_MAX_LENGTH,
     AutopayCadence,
     AutopayEndRule,
+    Brand,
     CalendarEntryKind,
     CollectionStatus,
     ContactKind,
@@ -52,7 +55,6 @@ from ledger.models import (
     PaymentMethod,
     RefundMethod,
     Store,
-    StoreType,
 )
 from ledger.services import autopay_plans, installments, invoice_builder, one_off_charges, rent_run
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
@@ -585,25 +587,25 @@ CLOSED_BEFORE_OPEN = "The closed date cannot be before the open date."
 #: the two-letter codes stored.
 STATE_CHOICES: tuple[tuple[str, str], ...] = (("", "\u2014"), *US_STATES)
 STATE_REFUSED = "Choose a state from the list."
-STORE_TYPE_REFUSED = "Choose a store type from the list."
+BRAND_REFUSED = "Choose a brand from the list."
 
 
 class StoreForm(_StoreFormBase):
     """Create and edit a store. The open date is required here (ADR-0005) although the
     model keeps it nullable for the import; ``needs_open_date`` follows the model.
 
-    PLAN-012f-b D10, D11: Type is optional, a select of the active store types (the store's
-    own type stays offered when it was made inactive since, so an edit keeps it); State is
-    a select of the 50 states and DC by name, the code stored, empty allowed."""
+    PLAN-012f-b D10, D11, PLAN-014 B1: Brand is optional, a select of the active brands (the
+    store's own brand stays offered when it was made inactive since, so an edit keeps it);
+    State is a select of the 50 states and DC by name, the code stored, empty allowed."""
 
     store_number = forms.IntegerField(min_value=1, max_value=2147483647, required=False)
     # The refusals never repeat the posted value (it may be anything, a card number too).
-    store_type = _QuietModelChoiceField(
-        queryset=StoreType.objects.none(),
+    brand = _QuietModelChoiceField(
+        queryset=Brand.objects.none(),
         required=False,
         empty_label="\u2014",
-        label="Type",
-        error_messages={"invalid_choice": STORE_TYPE_REFUSED},
+        label="Brand",
+        error_messages={"invalid_choice": BRAND_REFUSED},
     )
     state = _QuietChoiceField(
         choices=STATE_CHOICES,
@@ -623,7 +625,7 @@ class StoreForm(_StoreFormBase):
         fields = (
             "store_number",
             "external_label",
-            "store_type",
+            "brand",
             "address_line1",
             "city",
             "state",
@@ -646,11 +648,11 @@ class StoreForm(_StoreFormBase):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         offered = Q(active=True)
-        if self.instance.store_type_id is not None:
-            offered |= Q(pk=self.instance.store_type_id)
-        field = self.fields["store_type"]
+        if self.instance.brand_id is not None:
+            offered |= Q(pk=self.instance.brand_id)
+        field = self.fields["brand"]
         if isinstance(field, forms.ModelChoiceField):
-            field.queryset = StoreType.objects.filter(offered)
+            field.queryset = Brand.objects.filter(offered)
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
@@ -2516,7 +2518,7 @@ class DocumentDeleteForm(forms.Form):
         return note
 
 
-# --- Contact log and calendar (PLAN-011b D7, D8) -------------------------------------------
+# --- Notes & follow-ups and calendar (PLAN-011b D7, D8) -------------------------------------------
 
 #: The longest contact note accepted.
 CONTACT_BODY_MAX_LENGTH = 2000
@@ -2692,6 +2694,45 @@ class ContactDeleteForm(forms.Form):
         validators=[validate_no_payment_data],
         error_messages={"required": "A reason is required: say why this entry is deleted."},
     )
+
+
+class NoteForm(forms.Form):
+    """A store note's body (PLAN-014 B5): required, at most 2,000 characters, no card or
+    account number (:mod:`ledger.services.notes` checks the same)."""
+
+    body = forms.CharField(
+        label="Note",
+        widget=forms.Textarea(
+            attrs={"rows": 3, "placeholder": "Write a note about this store\u2026"}
+        ),
+        max_length=NOTE_BODY_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": "Write the note first."},
+    )
+
+    def clean_body(self) -> str:
+        body = visible_text(self.cleaned_data["body"])
+        if not body:
+            raise forms.ValidationError(self.fields["body"].error_messages["required"])
+        return body
+
+
+class NoteDeleteForm(forms.Form):
+    """Why a store note is deleted (PLAN-014 B5): required, at most 200 characters."""
+
+    reason = forms.CharField(
+        label="Reason",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=NOTE_DELETE_REASON_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": "A reason is required: say why this note is deleted."},
+    )
+
+    def clean_reason(self) -> str:
+        reason = visible_text(self.cleaned_data["reason"])
+        if not reason:
+            raise forms.ValidationError(self.fields["reason"].error_messages["required"])
+        return reason
 
 
 class CalendarEntryForm(forms.Form):

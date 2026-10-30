@@ -469,7 +469,7 @@ def _lease_span(leases: list[Lease]) -> _LeaseSpan | None:
 
 def _stores(q: str, today: date) -> list[Store]:
     return list(
-        search.filter_stores(Store.objects.select_related("store_type"), q, today)
+        search.filter_stores(Store.objects.select_related("brand"), q, today)
         .prefetch_related(Prefetch("leases", queryset=Lease.objects.select_related("operator")))
         .order_by("store_number", "external_label", "id")
     )

@@ -74,6 +74,7 @@ GUARD_MODULES = (
     "ledger.migrations.0055_installment_plan_paused",
     "ledger.migrations.0056_rent_charge_bank_debit",
     "ledger.migrations.0057_payment_void_fields",
+    "ledger.migrations.0058_brands_and_store_notes",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",
@@ -87,6 +88,15 @@ def guarded_columns(module: str) -> dict[str, tuple[str, ...]]:
     return found
 
 
+#: The triggers a later migration renamed with their table: ledger 0017 dropped the
+#: ``setup_charges`` one and 0019 replaced it (``setup_charges`` became ``one_off_charges``,
+#: PLAN-010d D1), and ledger 0058 renamed ``store_types`` to ``brands`` with its trigger
+#: (PLAN-014 B1): gone after the round trip, back only below the rename.
+RENAMED_TRIGGERS = {
+    f"{table}_payment_data_guard"
+    for table in importlib.import_module("ledger.migrations.0012_setup_charges").GUARDED_COLUMNS
+    if table == "setup_charges"
+} | {"store_types_payment_data_guard"}
 GUARD_TRIGGERS = {
     "invoices_provider_status_guard",
     "audit_log_append_only",
@@ -95,14 +105,7 @@ GUARD_TRIGGERS = {
         for module in GUARD_MODULES
         for table in guarded_columns(module)
     ),
-}
-#: The trigger ledger 0017 dropped and 0019 replaced (``setup_charges`` became
-#: ``one_off_charges``, PLAN-010d D1): gone after the round trip, back only below 0017.
-RENAMED_TRIGGERS = {
-    f"{table}_payment_data_guard"
-    for table in importlib.import_module("ledger.migrations.0012_setup_charges").GUARDED_COLUMNS
-    if table == "setup_charges"
-}
+} - RENAMED_TRIGGERS
 GUARD_FUNCTIONS = {
     "finance_contains_card_number",
     "finance_reject_payment_data",

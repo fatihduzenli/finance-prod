@@ -33,12 +33,13 @@ from ledger.models import (
     ContactKind,
     ContactStatus,
     Lease,
+    Note,
     Operator,
     PaymentMethod,
     RentChargeStatus,
     Store,
 )
-from ledger.services import attention, calendar, contacts, rent_run
+from ledger.services import attention, calendar, contacts, notes, rent_run
 from ledger.views.contacts import NO_STORE_LEASE
 from payments.fake import FakeProvider
 from tests.auth_helpers import make_user
@@ -1567,7 +1568,7 @@ def test_the_closing_entries_name_their_promise_on_every_page_and_in_the_csv(
     assert by_note["Paid in the office."] == "Closed $2,000.00 by 2026-10-01 as Kept"
     assert by_note["Will not pay."] == "Closed $300.00 by 2026-10-03 as Broken"
     assert by_note["New date."] == "Closed $400.00 by 2026-10-04 as Rescheduled"
-    assert by_note["Just a call."] == "" and "href" not in body
+    assert by_note["Just a call."] == "" and "href=" not in body
 
 
 def test_the_store_page_links_to_the_operator_page_for_a_promise_not_on_that_store(
@@ -1688,3 +1689,51 @@ def test_the_pages_read_the_closed_promises_in_their_own_queries(today: date) ->
     assert plain == one == many
     log = table_of(page_of(client, paths[0]))
     assert log.count('<div class="contact-closes">') == 6
+
+
+# --- PLAN-014 B6: the store's All entries page lists the tab's whole list -----------------
+
+
+def test_the_store_all_entries_page_lists_the_notes_the_tab_leaves_out() -> None:
+    """Fable's MINOR on Batch B: a note older than the tab's 20 newest rows is on the store's
+    All entries page, with the tab's filter, its row actions and the page's pager."""
+    operator = an_operator("Acme")
+    store = a_store("2477")
+    lease = a_lease(store, operator)
+    client, author = client_for(Role.BILLING)
+    calls = [entry(operator, lease=lease, body=f"Call {n}.") for n in range(25)]
+    old = notes.pin(notes.add(store, "Gate code changed in August.", author), author)
+    Note.objects.filter(pk=old.pk).update(
+        created_at=datetime.combine(date(2026, 9, 1), time(12), tzinfo=NEW_YORK)
+    )
+    gone = notes.add(store, "Wrong store.", author)
+    notes.delete(gone, "Wrong store.", author)
+    tab = page_of(client, f"/stores/{store.pk}/?tab=contacts")
+    assert f'id="note-{old.pk}"' not in table_of(tab) and "see every entry" in tab
+    path = f"/stores/{store.pk}/contacts/"
+    first = page_of(client, path)
+    assert "<h1>Notes &amp; follow-ups: store 2477</h1>" in first
+    assert f'id="note-{old.pk}"' not in table_of(first)
+    assert table_of(first).count('id="contact-') == 25
+    assert 'aria-current="page">All<' in first
+    assert 'href="?show=all&amp;page=2">Next<' in first
+    second = table_of(page_of(client, f"{path}?show=all&page=2"))
+    assert f'id="note-{old.pk}"' in second and "Gate code changed in August." in second
+    assert 'aria-pressed="true"' in second
+    assert f"/notes/{old.pk}/edit/" in second and f"/notes/{old.pk}/delete/" in second
+    assert "Wrong store." not in second
+    only_notes = page_of(client, f"{path}?show=notes")
+    assert 'id="timeline-show-notes" aria-current="page"' in only_notes
+    assert f'id="note-{old.pk}"' in table_of(only_notes) and 'id="contact-' not in table_of(
+        only_notes
+    )
+    assert "Page 1 of" not in only_notes
+    only_calls = table_of(page_of(client, f"{path}?show=contacts"))
+    assert f'id="note-{old.pk}"' not in only_calls and f'id="contact-{calls[0].pk}"' in only_calls
+    assert "No e-mails yet." in table_of(page_of(client, f"{path}?show=emails"))
+    unknown = page_of(client, f"{path}?show=bogus")
+    assert 'id="timeline-show-all" aria-current="page"' in unknown
+    viewer, _ = client_for(Role.VIEWER)
+    seen = table_of(page_of(viewer, f"{path}?show=notes"))
+    assert f'id="note-{old.pk}"' in seen
+    assert "/notes/" not in seen and "note-pin-glyph" in seen

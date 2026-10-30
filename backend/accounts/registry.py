@@ -225,7 +225,7 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:documents:upload_store": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:documents:upload_lease": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:documents:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
-    # The contact log (PLAN-011b D7): adding an entry needs billing. The view refuses the
+    # The notes & follow-ups (PLAN-011b D7): adding an entry needs billing. The view refuses the
     # form's GET below billing too.
     "ledger:operators:contacts_add": RouteRule(min_role=Role.BILLING, methods=POST),
     # PLAN-012 D2, D3, D9: adding an entry from the store page and appending a correction
@@ -247,6 +247,17 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:stores:plan_resume": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:stores:plan_stop": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:stores:plan_end": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # A store's notes (PLAN-014 B5): billing; editing and deleting is the author's or an
+    # admin's (ledger.services.notes.can_change). Edit and delete open their dialog on GET.
+    "ledger:notes:add": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:notes:edit": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:notes:pin": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:notes:delete": RouteRule(min_role=Role.BILLING, methods=POST),
+    # Admin › Settings' Brands card (PLAN-014 B2).
+    "ledger:settings:brand_add": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:settings:brand_save": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:settings:brand_toggle": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:settings:brand_move": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -299,8 +310,6 @@ ADMIN_MODEL_PREFIX_RULES: dict[str, RouteRule] = {
     "admin:ledger_messagetemplate_": RouteRule(min_role=Role.ADMIN, methods=POST),
     # The company settings row, changed in the admin (PLAN-012c D2).
     "admin:ledger_companysettings_": RouteRule(min_role=Role.ADMIN, methods=POST),
-    # The store types, edited in the admin (PLAN-012f-b D10).
-    "admin:ledger_storetype_": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
 
 #: Routes that take no unsafe method at all. GET is open to any verified user (the view
@@ -326,6 +335,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # Store screens that only read (PLAN-007b §1).
         "ledger:stores:list",
         "ledger:stores:detail",
+        # Admin › Settings (PLAN-014 B2); the view refuses below admin.
+        "ledger:settings:index",
         # Lease screens that only read (PLAN-007 §4.1).
         "ledger:leases:list",
         "ledger:leases:detail",
@@ -413,10 +424,10 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # The web app manifest and the service worker (PLAN-011 D9): any verified role.
         "finance:manifest",
         "finance:service_worker",
-        # The contact log page and its CSV export (PLAN-011b D7): any verified role.
+        # The notes & follow-ups page and its CSV export (PLAN-011b D7): any verified role.
         "ledger:operators:contacts",
         "ledger:operators:contacts_export",
-        # PLAN-012 D3: the store's contact log.
+        # PLAN-012 D3: the store's notes & follow-ups.
         "ledger:stores:contacts",
         # PLAN-012e-2 D4: the removed forms' routes redirect to the invoice builder with
         # the "How to collect" choice pre-selected, GET only (an unsafe method has no rule

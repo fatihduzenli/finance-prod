@@ -11,9 +11,9 @@ name as text beside it) with the company name as its text alternative, the navig
 (Dashboard, Stores, Operators, Monthly rent, Reports and Admin, each with its icon; Reports and
 Admin list their pages in a nested list open under the active group, each page only for the
 roles that may open it: Disputes, Daily charges and Nightly check billing and admin; Activity
-log and System settings admin; Messages from the processor every role, as its list is
-read-only) and the user card (#user-card: the name, the role, Settings, Help and Sign out, a
-POST form).
+log, Settings (PLAN-014 B2) and System settings admin; Messages from the processor every role, as its list is
+read-only) and the user card (#user-card: the name, the role, Preferences, Help and Sign out,
+a POST form).
 The content column holds the page header (#page-header: {% block header %}, which a page
 fills with its .page-header (title and actions); the default is the page's title block as
 the heading; {% block header_search %} adds the search box) and the page (main, 28/32 px
@@ -24,7 +24,7 @@ Phone (768 px and under): the top bar (#phone-bar: the menu button, a label of t
 checkbox that opens the sidebar as a sheet; the logo; the search button, a label of
 #search-toggle that opens #phone-search), and the bottom tab bar (#tab-bar: Dashboard, Stores,
 Monthly rent and More, a <details> sheet with Operators, Reports, the Admin pages the role may
-open, Settings, Help and Sign out as a POST form; the item that holds the page is marked). The sheets work
+open, Preferences, Help and Sign out as a POST form; the item that holds the page is marked). The sheets work
 without script; the script below closes an open one on a click outside it and on Escape.
 
 The tab title is "<short name> · <page>" (finance.context_processors.company): each page's
@@ -109,8 +109,8 @@ above the user card, under "Appearance", and as the first row of the More sheet.
       {% include "finance/_theme_switch.html" with switch_id="theme-switch" label_id="appearance-label" %}
     </div>
     <div class="user-card" id="user-card">
-      <span class="user-name" id="user-menu-name"{% if nav_section == "settings" or nav_section == "help" %} aria-current="true"{% endif %}>{{ request.user.get_full_name|default:request.user.get_username }}</span>
-      <div class="user-meta">{% with role=request.user|role_label %}{% if role %}<span class="user-role" id="user-role">{{ role }}</span> · {% endif %}{% endwith %}<a href="{% url 'finance:settings' %}" id="nav-settings"{% if nav_section == "settings" %} aria-current="page"{% endif %}>Settings</a> · <a href="{% url 'finance:help' %}" id="nav-help"{% if nav_section == "help" %} aria-current="page"{% endif %}>Help</a> · <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="link-button" id="nav-sign-out">Sign out</button></form></div>
+      <span class="user-name" id="user-menu-name"{% if nav_section == "preferences" or nav_section == "help" %} aria-current="true"{% endif %}>{{ request.user.get_full_name|default:request.user.get_username }}</span>
+      <div class="user-meta">{% with role=request.user|role_label %}{% if role %}<span class="user-role" id="user-role">{{ role }}</span> · {% endif %}{% endwith %}<a href="{% url 'finance:settings' %}" id="nav-preferences"{% if nav_section == "preferences" %} aria-current="page"{% endif %}>Preferences</a> · <a href="{% url 'finance:help' %}" id="nav-help"{% if nav_section == "help" %} aria-current="page"{% endif %}>Help</a> · <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="link-button" id="nav-sign-out">Sign out</button></form></div>
     </div>
   </aside>
   <div class="content" id="content">
@@ -145,7 +145,7 @@ above the user card, under "Appearance", and as the first row of the More sheet.
               {% include "finance/_admin_links.html" with ids="" %}
             </ul>
           </li>
-          <li><a href="{% url 'finance:settings' %}">{% icon "user" %}Settings</a></li>
+          <li><a href="{% url 'finance:settings' %}">{% icon "user" %}Preferences</a></li>
           <li><a href="{% url 'finance:help' %}">{% icon "file" %}Help</a></li>
           <li><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" id="more-sign-out">{% icon "arrow-right" %}Sign out</button></form></li>
         </ul>

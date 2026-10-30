@@ -1,5 +1,5 @@
 {% load components icons money dates %}
-{% comment %}The workspace's side cards (docs/qa/PLAN-012d D1; the approved design's right column, docs/qa/PLAN-012f-approved-design.md D8): ledger.services.workspace.Header and ledger.views.workspace_cards.side_cards. LEASE: the operator (on the operator page, "ows", the selected store), the lease, the rent, since when, the debit days, autopay (with "Set up" while none), the deposit, the open balance (and, on the operator page, that of all the operator's stores) and any credit. NEXT: the next scheduled payment, the next rent debit when that is something else, the open promise and the next insurance renewal. STORE COST: the cost in effect, with Change (billing). DOCUMENTS: the newest documents, with Upload (billing). The ids are the header card's (PLAN-012d D1).{% endcomment %}
+{% comment %}The workspace's side cards (docs/qa/PLAN-012d D1; the approved design's right column, docs/qa/PLAN-012f-approved-design.md D8): ledger.services.workspace.Header and ledger.views.workspace_cards.side_cards. LEASE: the operator (on the operator page, "ows", the selected store), the lease, the rent, the debit days, autopay (with "Set up" while none), the deposit, the sign fee and this policy year's insurance (PLAN-014 B3: ledger.services.detail_cards.lease_collections; "Bill now" for billing while the sign fee is not billed), the open balance in red, or "$0.00 ✓" in green (and, on the operator page, that of all the operator's stores) and any credit; under the list, the yellow note about last year's insurance. NOTES (PLAN-014 B5, ledger/stores/_notes_card.html): the pinned notes, when there are any. NEXT: the next scheduled payment, the next rent debit when that is something else, the open promise and the next insurance renewal. STORE COST: the cost in effect, with Change (billing). DOCUMENTS: the newest documents, with Upload (billing). The ids are the header card's (PLAN-012d D1).{% endcomment %}
 <section id="workspace-header" class="workspace-header" aria-label="Store summary">
   <div class="card" id="lease-card">
     <h2 class="section-label">Lease</h2>
@@ -7,15 +7,18 @@
       {% if ows %}<dt>Store</dt><dd id="header-store"><a href="{% url 'ledger:stores:detail' pk=store.pk %}">{{ store.external_label }}</a></dd>{% else %}<dt>Operator</dt><dd id="header-operator">{% if header.operator %}<a class="side-strong" href="{% url 'ledger:operators:detail' pk=header.operator.pk %}">{{ header.operator.display_name }}</a>{% else %}—{% endif %}</dd>{% endif %}
       <dt>Lease</dt><dd id="header-lease">{% if header.lease %}<a href="{% url 'ledger:leases:detail' pk=header.lease.pk %}">From {{ header.lease.started_on|day|default:"no start date" }}</a>{% if header.lease.ended_on %} to {{ header.lease.ended_on|day }}{% endif %}{% else %}No current lease{% if ows %} of this operator{% endif %}{% if vacant_since %}, vacant since {{ vacant_since|day }}{% endif %}{% endif %}</dd>
       {% if header.rent %}<dt>Rent</dt><dd id="header-rent"><strong>{{ header.rent.amount|money }}</strong> / month</dd>{% endif %}
-      {% if header.lease_since %}<dt>Since</dt><dd id="header-since">{{ header.lease_since|day }}</dd>{% endif %}
       {% if header.debit_day_text %}<dt>Debit day</dt><dd id="header-debit-day">{{ header.debit_day_text }}</dd>{% endif %}
       <dt>Autopay</dt><dd id="header-autopay">{% status_badge header.autopay %}{% if header.autopay_moved %} {{ header.autopay_moved }}{% endif %}{% if header.lease and header.autopay == "Not set up" %} <a href="{{ side_autopay_url }}" id="autopay-set-up">Set up</a>{% endif %}</dd>
       {% if header.deposit_text %}<dt>Deposit</dt><dd id="header-deposit">{{ header.deposit_text }}</dd>{% endif %}
-      <dt>Open balance</dt><dd id="header-open-balance">{{ header.open_balance|money }}</dd>
+      {% with rows=header.collections %}{% if rows %}<dt>Sign fee</dt><dd class="side-{{ rows.sign_fee.tone }}" id="header-sign-fee">{% if rows.sign_fee.url %}<a href="{{ rows.sign_fee.url }}">{{ rows.sign_fee.text }}</a>{% else %}{{ rows.sign_fee.text }}{% endif %}{% if can_bill and rows.sign_fee_bill_url %} <a class="card-link" id="sign-fee-bill" href="{{ rows.sign_fee_bill_url }}">Bill now</a>{% endif %}</dd>
+      {% if rows.insurance_label %}<dt>{{ rows.insurance_label }}</dt><dd class="side-{{ rows.insurance.tone }}" id="header-insurance-state">{% if rows.insurance.url %}<a href="{{ rows.insurance.url }}">{{ rows.insurance.text }}</a>{% else %}{{ rows.insurance.text }}{% endif %}</dd>{% endif %}{% endif %}{% endwith %}
+      <dt>Open balance</dt><dd class="{% if header.open_balance > 0 %}side-unpaid{% else %}side-paid{% endif %}" id="header-open-balance">{{ header.open_balance|money }}{% if header.open_balance <= 0 %} ✓{% endif %}</dd>
       {% if ows %}<dt>Open balance, all stores</dt><dd id="header-operator-balance">{{ ows.open_balance|money }}</dd>{% endif %}
       {% if header.credit > 0 %}<dt>Credit</dt><dd id="header-credit">{{ header.credit|money }}</dd>{% endif %}
     </dl>
+    {% if header.collections.insurance_note %}<p class="side-note warning" id="header-insurance-note">{{ header.collections.insurance_note }}</p>{% endif %}
   </div>
+  {% include "ledger/stores/_notes_card.html" %}
   <div class="card" id="next-card">
     <h2 class="section-label">Next</h2>
     <dl class="side-list side-list-dates">

@@ -1,9 +1,17 @@
-{% comment %}The Contact log tab (PLAN-012 D3, docs/qa/PLAN-012d D3).{% endcomment %}
-<h2 id="contacts">Contact log</h2>
-<p class="actions">
-  {% if contact_add_url %}<a class="btn" id="add-store-contact" href="{{ contact_add_url }}">Add entry</a>{% endif %}
-  <a class="btn" id="all-store-contacts" href="{% url 'ledger:stores:contacts' pk=store.pk %}">All entries</a>
-</p>
-<p class="muted">Entries about a lease of this store. Dates are New York days.</p>
-{% include "ledger/contacts/_log.html" with rows=contact_rows|slice:contact_limit empty_next_url=contact_add_url %}
-{% if contact_rows|length > contact_limit %}<p>The {{ contact_limit }} latest are shown; <a href="{% url 'ledger:stores:contacts' pk=store.pk %}">see every entry</a>.</p>{% endif %}
+{% comment %}The Notes & follow-ups tab (PLAN-012 D3, docs/qa/PLAN-012d D3; PLAN-014 B4 to B6): for billing, the note form (#note-form: "Write a note about this store…", at most 2,000 characters, Save); the filter (#timeline-filter, links: All · Notes · Calls & promises · E-mails, the current one aria-current); then one list, newest first (ledger.services.timeline.entries; ledger/stores/_timeline_list.html, which the store's All entries page also lists). E-mails lists nothing until Batch D ("No e-mails yet.").{% endcomment %}
+<h2 id="contacts">Notes &amp; follow-ups</h2>
+{% if note_form %}<form method="post" action="{% url 'ledger:notes:add' pk=store.pk %}" class="note-form js-single-submit" id="note-form" autocomplete="off">
+  {% csrf_token %}
+  <div class="field{% if note_form.body.errors %} has-error{% endif %}"><label class="visually-hidden" for="{{ note_form.body.id_for_label }}">Note</label>{{ note_form.body }}{{ note_form.body.errors }}</div>
+  <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" id="note-save">Save</button></div>
+</form>{% endif %}
+<div class="timeline-bar">
+  <nav class="segmented" id="timeline-filter" aria-label="Show">{% for value, label, url in timeline_filters %}<a href="{{ url }}" id="timeline-show-{{ value }}"{% if value == timeline_show %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
+  <p class="actions">
+    {% if contact_add_url %}<a class="btn" id="add-store-contact" href="{{ contact_add_url }}">Add entry</a>{% endif %}
+    <a class="btn" id="all-store-contacts" href="{% url 'ledger:stores:contacts' pk=store.pk %}">All entries</a>
+  </p>
+</div>
+<p class="muted">Notes about this store and entries about a lease of it. Dates are New York days.</p>
+{% include "ledger/stores/_timeline_list.html" %}
+{% if timeline_more %}<p>The latest are shown; <a href="{% url 'ledger:stores:contacts' pk=store.pk %}">see every entry</a>.</p>{% endif %}

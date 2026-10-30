@@ -357,7 +357,7 @@ def test_the_user_card_names_the_user_and_the_role(role: Role, label: str) -> No
     assert '<span class="user-name" id="user-menu-name">Fatih D.</span>' in card
     assert f'<span class="user-role" id="user-role">{label}</span> · ' in card
     assert (
-        '<a href="/settings/" id="nav-settings">Settings</a> · '
+        '<a href="/settings/" id="nav-preferences">Preferences</a> · '
         '<a href="/help/" id="nav-help">Help</a> · <form'
     ) in card
     assert re.search(
@@ -534,7 +534,7 @@ def test_the_bottom_bar_and_the_more_sheet(role: Role) -> None:
     ]
     sheet = element(html, "more-sheet", "</details>")
     assert sheet.startswith('<details class="more-sheet" id="more-sheet">')
-    for label in ("Operators", "Reports", "Admin", "Settings", "Help", "Messages from Stax"):
+    for label in ("Operators", "Reports", "Admin", "Preferences", "Help", "Messages from Stax"):
         assert re.search(rf">\s*(?:<svg[^>]*>.*?</svg>)?{label}<", sheet, re.S), label
     assert re.search(
         r'<form method="post" action="/account/logout/"><input type="hidden" '
@@ -620,6 +620,7 @@ ICON_NAMES = (
     "arrow-right",
     "x",
     "banknote",  # PLAN-012f-a D4: the Payments card's empty state
+    "pin",  # PLAN-014 B5: a note's pin
     "trash",  # PLAN-012f-a D5: the builder's remove-line button
     "alert",  # PLAN-012f-b E-4: the warning flash message
     "dot",  # PLAN-012f-b E-4: the error flash message

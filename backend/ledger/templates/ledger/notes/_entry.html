@@ -1,0 +1,11 @@
+{% load components dates icons people %}{% comment %}One store note on the Notes & follow-ups tab (docs/qa/PLAN-014 B5): the neutral round "N", the body (its line breaks kept), the muted meta line (the author, the day and time, "edited" when it was changed), the pin (billing: a toggle button, aria-pressed; a pinned note shows the pin to everyone) and Edit / Delete for its author or an admin. ``row``: a ledger.views.contact_log.NoteRow.{% endcomment %}{% with note=row.note %}<li class="contact-entry note{% if note.pinned %} note-pinned{% endif %}" id="note-{{ note.pk }}">
+    {% avatar "N" "neutral" %}
+    <div class="contact-body">
+      <p class="contact-text note-body">{{ note.body }}</p>
+      <p class="contact-meta note-meta">{{ note.author|staff|default:note.author_label|default:"—" }} · {{ note.created_at|moment }}{% if note.edited_at %} · edited{% endif %}</p>
+    </div>
+    <div class="contact-actions note-actions">
+      {% if row.can_pin %}<form method="post" action="{% url 'ledger:notes:pin' pk=note.pk %}">{% csrf_token %}<input type="hidden" name="pinned" value="{% if note.pinned %}0{% else %}1{% endif %}"><button class="btn btn-sm note-pin" type="submit" aria-pressed="{% if note.pinned %}true{% else %}false{% endif %}">{% icon "pin" 14 %}{% if note.pinned %}Pinned{% else %}Pin{% endif %}</button></form>{% elif note.pinned %}<span class="note-pin-glyph" title="Pinned">{% icon "pin" 14 %}<span class="visually-hidden">Pinned</span></span>{% endif %}
+      {% if row.can_change %}<a class="btn btn-sm note-edit" href="{% url 'ledger:notes:edit' pk=note.pk %}">Edit</a> <a class="btn btn-sm note-delete" href="{% url 'ledger:notes:delete' pk=note.pk %}">Delete</a>{% endif %}
+    </div>
+  </li>{% endwith %}

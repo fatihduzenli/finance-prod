@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import calendar
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -200,22 +201,42 @@ def balance(charge: InsuranceCharge) -> Decimal:
     """What ``charge`` still owes, as :func:`ledger.services.receivables.open_balances`
     lists it: its amount less its settled payments and what its re-debits collected, plus
     its settled refunds, less what its live re-debits have still to collect."""
+    return balances([charge])[charge.pk]
+
+
+def balances(charges: Sequence[InsuranceCharge]) -> dict[uuid.UUID, Decimal]:
+    """:func:`balance` of each of ``charges`` (by id), in two queries whatever their number
+    (PLAN-014 B3: the LEASE card reads this year's and last year's)."""
     from ledger.services import receivables  # receivables imports one_off_charges, this
 
-    settled = Payment.objects.filter(
-        insurance_charge=charge, kind=PaymentKind.INSURANCE, status=PaymentStatus.SETTLED
+    ids = [charge.pk for charge in charges]
+    if not ids:
+        return {}
+    paid: dict[uuid.UUID, Decimal] = {}
+    refunded: dict[uuid.UUID, Decimal] = {}
+    settled = (
+        Payment.objects.filter(
+            insurance_charge__in=ids, kind=PaymentKind.INSURANCE, status=PaymentStatus.SETTLED
+        )
+        .values("insurance_charge", "is_refund")
+        .annotate(total=Sum("amount"))
+        .order_by()
+        .values_list("insurance_charge", "is_refund", "total")
     )
-    paid = settled.filter(is_refund=False).aggregate(total=Sum("amount"))["total"]
-    refunded = settled.filter(is_refund=True).aggregate(total=Sum("amount"))["total"]
-    carried, collected = receivables.insurance_redebits([charge.pk])
-    return receivables.insurance_owed(
-        charge.amount,
-        paid=Decimal(paid or ZERO),
-        refunded=Decimal(refunded or ZERO),
-        collected=collected.get(charge.pk, ZERO),
-        carried=carried.get(charge.pk, ZERO),
-        legacy_status=charge.legacy_status,
-    )
+    for charge_id, is_refund, total in settled:
+        (refunded if is_refund else paid)[charge_id] = Decimal(total or ZERO)
+    carried, collected = receivables.insurance_redebits(ids)
+    return {
+        charge.pk: receivables.insurance_owed(
+            charge.amount,
+            paid=paid.get(charge.pk, ZERO),
+            refunded=refunded.get(charge.pk, ZERO),
+            collected=collected.get(charge.pk, ZERO),
+            carried=carried.get(charge.pk, ZERO),
+            legacy_status=charge.legacy_status,
+        )
+        for charge in charges
+    }
 
 
 def _provider_invoice(charge: InsuranceCharge) -> Invoice | None:

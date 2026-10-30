@@ -376,6 +376,7 @@ GUARD_MODULES = (
     "ledger.migrations.0055_installment_plan_paused",
     "ledger.migrations.0056_rent_charge_bank_debit",
     "ledger.migrations.0057_payment_void_fields",
+    "ledger.migrations.0058_brands_and_store_notes",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0003_webhook_event_processing",
     "payments.migrations.0005_jobs",
@@ -395,6 +396,8 @@ def test_guarded_columns_match_the_database_triggers() -> None:
     # ledger 0017 renamed ``setup_charges`` to ``one_off_charges`` and 0019 replaced its
     # trigger (PLAN-010d D1): the old table's entry names a table that no longer exists.
     del triggers["setup_charges"]
+    # ledger 0058 renamed ``store_types`` to ``brands`` with its trigger (PLAN-014 B1).
+    del triggers["store_types"]
     expected = {f"{table}.{column}" for table, columns in triggers.items() for column in columns}
     assert set(GUARDED_IDS) == expected
 
@@ -616,7 +619,12 @@ def _accepted_samples(model: type[models.Model], field: models.Field[Any, Any]) 
         ]
     # PLAN-012 D2: a delete reason is not blank, and only on a deleted entry (CHECK);
     # PLAN-012e D14: a debt-override reason is not blank (CHECK).
-    if column in {"contact_entries.delete_reason", "lease_transfers.debt_override_reason"}:
+    # PLAN-014 B5: a store note's delete reason, the same way.
+    if column in {
+        "contact_entries.delete_reason",
+        "notes.delete_reason",
+        "lease_transfers.debt_override_reason",
+    }:
         return [text for text in samples if re.search(r"\S", text)]
     # PLAN-012c D2: the company's names are not blank, and a logo override is a stored
     # document's path (CHECKs); the guard reads each UUID as one letter, so a path passes.
@@ -636,7 +644,7 @@ def _existing_row(model: type[models.Model], field: models.Field[Any, Any]) -> m
     exists on a deleted entry (PLAN-012 D2); a transfer's debt-override reason only with
     the override's amount and moment (PLAN-012e D14)."""
     column = f"{model._meta.db_table}.{field.column}"
-    if column == "contact_entries.delete_reason":
+    if column in {"contact_entries.delete_reason", "notes.delete_reason"}:
         return saved(
             FACTORIES[model](
                 deleted_at=timezone.now(), deleted_by=make_user(), delete_reason="Wrong shop."

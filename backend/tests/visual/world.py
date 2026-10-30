@@ -32,6 +32,7 @@ from django_otp.plugins.otp_totp.models import TOTPDevice
 from accounts.roles import Role
 from accounts.themes import set_theme
 from ledger.models import (
+    Brand,
     CalendarEntry,
     ContactKind,
     DeductionKind,
@@ -171,6 +172,10 @@ def build() -> World:
 
 
 def _build() -> World:
+    # PLAN-014 B2: the Settings page lists the three brands of ledger 0058; the suite's
+    # transaction tests flush them, so the world writes them again.
+    for order, name in enumerate(("iFixandRepair", "Techy", "Talk&Fix"), start=1):
+        Brand.objects.update_or_create(name=name, defaults={"active": True, "sort_order": order})
     user, device = make_user(USERNAME, Role.BILLING)
     assert device is not None
     operator = make_operator(email="northwind@example.com", customer="cus-visual-1")

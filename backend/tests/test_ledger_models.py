@@ -125,9 +125,9 @@ def new_insurance_charge(**fields: Any) -> ledger.InsuranceCharge:
     return ledger.InsuranceCharge(**{**values, **fields})
 
 
-def new_store_type(**fields: Any) -> ledger.StoreType:
+def new_brand(**fields: Any) -> ledger.Brand:
     values = {"name": f"Test type {next(_numbers)}", "sort_order": 900}
-    return ledger.StoreType(**{**values, **fields})
+    return ledger.Brand(**{**values, **fields})
 
 
 def new_fee_type(**fields: Any) -> ledger.FeeType:
@@ -567,7 +567,7 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.InsurancePremium: new_premium,
     ledger.InsuranceCharge: new_insurance_charge,
     ledger.FeeType: new_fee_type,
-    ledger.StoreType: new_store_type,
+    ledger.Brand: new_brand,
     ledger.OneOffCharge: new_setup_charge,
     ledger.StoreCost: new_store_cost,
     ledger.DepositResolution: new_deposit_resolution,
@@ -983,12 +983,12 @@ LEDGER_CASES: list[ConstraintCase] = [
     ),
     # fee_types (PLAN-010b D1)
     ConstraintCase("fee_types_name_not_blank", new_fee_type, lambda: new_fee_type(name=" ")),
-    # store_types (PLAN-012f-b D10)
-    ConstraintCase("store_types_name_not_blank", new_store_type, lambda: new_store_type(name=" ")),
+    # brands (PLAN-014 B1; store_types of PLAN-012f-b D10)
+    ConstraintCase("brands_name_not_blank", new_brand, lambda: new_brand(name=" ")),
     ConstraintCase(
-        "store_types.name",
-        unique_pair(new_store_type, {"name": "Kiosk A"}, {"name": "Kiosk B"}),
-        unique_pair(new_store_type, {"name": "Kiosk A"}, {"name": "Kiosk A"}),
+        "brands.name",
+        unique_pair(new_brand, {"name": "Kiosk A"}, {"name": "Kiosk B"}),
+        unique_pair(new_brand, {"name": "Kiosk A"}, {"name": "Kiosk A"}),
         column="name",
     ),
     ConstraintCase(
@@ -1245,6 +1245,23 @@ LEDGER_CASES: list[ConstraintCase] = [
     ),
     # notes
     ConstraintCase("notes_body_not_blank", new_note, lambda: new_note(body="")),
+    # PLAN-014 B5: a pinned note carries when it was pinned; a deleted one its trio.
+    ConstraintCase(
+        "notes_pinned_at_matches",
+        lambda: new_note(pinned=True, pinned_at=datetime(2026, 10, 7, tzinfo=UTC)),
+        lambda: new_note(pinned=True),
+    ),
+    ConstraintCase(
+        "notes_deleted_all_or_none",
+        lambda: new_note(
+            deleted_at=datetime(2026, 10, 7, tzinfo=UTC),
+            deleted_by=make_user(),
+            delete_reason="Wrong store.",
+        ),
+        lambda: new_note(
+            deleted_at=datetime(2026, 10, 7, tzinfo=UTC), delete_reason="Wrong store."
+        ),
+    ),
     # invoices
     ConstraintCase(
         "invoices_number_format",

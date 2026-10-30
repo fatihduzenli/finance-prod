@@ -52,6 +52,7 @@ HEADERS: frozenset[str] = frozenset(
         "Operator",
         "Store",
         "Store number",
+        "Brand",
         "State",
         "City",
         "Channel",
@@ -213,7 +214,7 @@ HEADERS: frozenset[str] = frozenset(
         "Uploaded at",
         "Uploaded by",
         "Deleted at",
-        # Contact log (PLAN-011b D7, PLAN-012 D2 to D5)
+        # Notes & follow-ups (PLAN-011b D7, PLAN-012 D2 to D5)
         "Promised date",
         "Promised amount (USD)",
         "Promise status",

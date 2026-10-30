@@ -46,7 +46,8 @@ _VIEW_SECTIONS: dict[str, str] = {
     "ledger:home": "home",
     "ledger:reports:pnl": "pnl",
     "ledger:reports:pnl_export": "pnl",
-    "finance:settings": "settings",
+    # The user's own page, "Preferences" (PLAN-014 B2: Admin › Settings is "settings").
+    "finance:settings": "preferences",
     "finance:help": "help",
     "finance:help_topic": "help",
 }
@@ -56,6 +57,7 @@ _NAMESPACE_SECTIONS: dict[str, str] = {
     "arrears": "arrears",
     "calendar": "calendar",
     "stores": "stores",
+    "notes": "stores",
     "operators": "operators",
     "leases": "leases",
     "run": "run",
@@ -66,6 +68,7 @@ _NAMESPACE_SECTIONS: dict[str, str] = {
     "webhooks": "webhooks",
     "reconciliation": "reconciliation",
     "audit": "audit",
+    "settings": "settings",
     "admin": "django_admin",
 }
 #: The navigation group of a section (PLAN-012c D3, copy list §4.2).
@@ -82,6 +85,7 @@ _SECTION_GROUPS: dict[str, str] = {
     "audit": "admin",
     "webhooks": "admin",
     "reconciliation": "admin",
+    "settings": "admin",
     "django_admin": "admin",
 }
 

@@ -7,8 +7,9 @@ the one line under it (the address and "Open since <date>", the parts that exist
 " · ") and the phone's line (the operator and the city, the same way). :func:`side_cards` gives
 what the side cards read besides the workspace header: the store's cost in effect (STORE COST),
 its newest documents (DOCUMENTS, at most :data:`DOCUMENTS_SHOWN`, one query), the Documents
-tab's link for Upload (billing, while document storage is configured) and the Autopay tab's
-link for "Set up". Every value is text the template escapes.
+tab's link for Upload (billing, while document storage is configured), the Autopay tab's
+link for "Set up", whether the LEASE card offers "Bill now" (billing), and the store's pinned
+notes for the NOTES card (PLAN-014 B5). Every value is text the template escapes.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from accounts.roles import Role, meets, role_of
 from finance.dates import day_text
 from ledger.models import Operator, Store
 from ledger.services import documents as document_service
-from ledger.services import store_costs, workspace
+from ledger.services import notes, store_costs, workspace
 from ledger.services import stores as store_service
 
 #: The newest documents the DOCUMENTS card lists; the Documents tab lists every one.
@@ -64,4 +65,9 @@ def side_cards(request: HttpRequest, store: Store, today: date) -> dict[str, Any
         ),
         "side_autopay_url": workspace.tab_url(store.pk, workspace.TAB_SCHEDULES),
         "can_set_cost": meets(role_of(request.user), Role.BILLING),
+        # PLAN-014 B3: the LEASE card's "Bill now" (the invoice builder is billing's).
+        "can_bill": meets(role_of(request.user), Role.BILLING),
+        # PLAN-014 B5: the NOTES card (one query), "All ›" to the Notes & follow-ups tab.
+        "pinned_notes": notes.pinned_for(store),
+        "notes_tab_url": workspace.tab_url(store.pk, workspace.TAB_CONTACTS),
     }

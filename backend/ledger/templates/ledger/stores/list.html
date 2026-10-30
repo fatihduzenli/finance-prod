@@ -15,6 +15,11 @@
       <option value="">All</option>
       {% for code, name in listed.states %}<option value="{{ code }}"{% if code == filters.state %} selected{% endif %}>{{ name }}</option>{% endfor %}
     </select></span>
+    {% if listed.brands %}<span class="filter-field"><label for="brand">Brand</label>
+    <select name="brand" id="brand">
+      <option value="">All</option>
+      {% for value, name in listed.brands %}<option value="{{ value }}"{% if value == filters.brand %} selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select></span>{% endif %}
     <span class="filter-field"><label for="status">Status</label>
     <select name="status" id="status">
       {% for value, label in status_choices %}<option value="{{ value }}"{% if value == filters.status %} selected{% endif %}>{{ label }}</option>{% endfor %}

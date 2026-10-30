@@ -45,6 +45,7 @@ from ledger.models import (
     Lease,
     LeaseEnd,
     LeaseTransfer,
+    Note,
     OneOffCharge,
     Operator,
     Payment,
@@ -53,6 +54,7 @@ from ledger.models import (
     Store,
     StoreCost,
 )
+from ledger.services import notes as note_service
 from payments.models import WebhookEvent, WebhookOutcome
 from tests.auth_helpers import iter_routes
 from tests.receivables_helpers import (
@@ -100,6 +102,8 @@ class World:
     autopay: AutopayPlan
     cost: StoreCost
     entry: ContactEntry
+    #: A store note the admin wrote (PLAN-014 B5): its Edit and Delete dialogs open.
+    note: Note
     calendar: CalendarEntry
     event: WebhookEvent
     deposit: OneOffCharge
@@ -121,6 +125,7 @@ class World:
             "operators": self.operator.pk,
             "stores": self.store.pk,
             "contacts": self.entry.pk,
+            "notes": self.note.pk,
             "leases": self.lease.pk,
             "lease_ends": self.end.pk,
             "transfers": self.transfer.pk,
@@ -209,6 +214,7 @@ def world() -> World:
             admin_user,
         ),
         transfer=begin(moving_lease(), admin_user),
+        note=note_service.add(store, "Walk store note.", admin_user),
     )
 
 
@@ -296,6 +302,8 @@ PAGES: dict[str, Role] = {
     "ledger:reports:payments_by_method": Role.VIEWER,
     "ledger:reports:deposits": Role.VIEWER,
     "ledger:audit:page": Role.ADMIN,
+    # PLAN-014 B2: Admin › Settings.
+    "ledger:settings:index": Role.ADMIN,
 }
 #: The routes whose GET renders a form, opened by the role the registry gives their POST.
 FORM_PAGES = (
@@ -351,6 +359,9 @@ FORM_PAGES = (
     # PLAN-012f-c D5: over the payment page (the world's payment is a bank debit, so billing
     # sees its refusal; tests/test_void_manual_payment.py opens it on a manual payment).
     "ledger:payments:void_manual",
+    # PLAN-014 B5: the Edit note and Delete note dialogs over the store page.
+    "ledger:notes:edit",
+    "ledger:notes:delete",
 )
 
 POST_ONLY = "a POST-only action (405 to a GET)"
@@ -426,6 +437,14 @@ for _name in (
     "ledger:documents:upload_store",
     "ledger:documents:upload_lease",
     "ledger:documents:delete",
+    # PLAN-014 B5: a store note is written and pinned by POST.
+    "ledger:notes:add",
+    "ledger:notes:pin",
+    # PLAN-014 B2: Admin › Settings' Brands card.
+    "ledger:settings:brand_add",
+    "ledger:settings:brand_save",
+    "ledger:settings:brand_toggle",
+    "ledger:settings:brand_move",
 ):
     NOT_PAGES[_name] = POST_ONLY
 
@@ -435,7 +454,14 @@ def is_export(name: str) -> bool:
 
 
 #: The pages only the author of the record (or an admin) may open; opened as its author.
-AUTHOR_PAGES = ("ledger:calendar:edit", "ledger:contacts:edit")
+#: Pages only their author (or an admin) may open: the world's author wrote them all
+#: (PLAN-014 B5 adds the note's Edit and Delete dialogs).
+AUTHOR_PAGES = (
+    "ledger:calendar:edit",
+    "ledger:contacts:edit",
+    "ledger:notes:edit",
+    "ledger:notes:delete",
+)
 
 
 def client_of(world: World, name: str, clients: dict[Role, Client]) -> Client:
@@ -574,10 +600,10 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:stores:record_payment": lambda w: (_store(w), "Add payment"),
     "ledger:stores:end_lease": lambda w: (_store(w), "End lease"),
     "ledger:stores:transfer": lambda w: (_store(w), "Transfer"),
-    "ledger:stores:contacts": lambda w: ([f"Store {w.store.external_label}"], "Contact log"),
+    "ledger:stores:contacts": lambda w: ([f"Store {w.store.external_label}"], "Notes & follow-ups"),
     "ledger:operators:link": lambda w: (["Operators", "Walk Co"], "Connect to Stax"),
     "ledger:operators:statement": lambda w: (["Operators", "Walk Co"], "Statement"),
-    "ledger:operators:contacts": lambda w: (["Walk Co"], "Contact log"),
+    "ledger:operators:contacts": lambda w: (["Walk Co"], "Notes & follow-ups"),
     "ledger:operators:contacts_add": lambda w: (["Walk Co"], "Add entry: Walk Co"),
     "ledger:leases:create": lambda w: (["Leases"], "New lease"),
     "ledger:leases:detail": lambda w: (["Leases"], f"Lease {w.store.external_label}"),
@@ -661,8 +687,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:reports:deposits": lambda w: (["Reports"], "Bank account check"),
     # PLAN-012f-b E-1: the report family's header (DESIGN-SPEC §4 Profit and loss).
     "ledger:reports:pnl": lambda w: (["Reports"], "Profit and loss"),
-    "ledger:contacts:edit": lambda w: (["Contact log"], "Edit contact entry"),
-    "ledger:contacts:correct": lambda w: (["Contact log"], "Add a correction"),
+    "ledger:contacts:edit": lambda w: (["Notes & follow-ups"], "Edit contact entry"),
+    "ledger:contacts:correct": lambda w: (["Notes & follow-ups"], "Add a correction"),
     # PLAN-012f-b E-4: Delete contact entry is its dialog over the operator page, whose own
     # breadcrumb ends in a link (tests/test_states.py checks the page behind).
     "ledger:contacts:outcome": lambda w: (["Operators", "Walk Co"], "Kept"),
@@ -681,6 +707,7 @@ NO_PARENT = (
     "ledger:disputes:page",
     "ledger:reconciliation:page",
     "ledger:audit:page",
+    "ledger:settings:index",
     "ledger:search",
     "finance:settings",
     "finance:help",

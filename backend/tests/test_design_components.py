@@ -504,8 +504,9 @@ def test_an_empty_store_tab_offers_its_action_bar_step() -> None:
     ].split("</td>", 1)[0]
     assert f'href="/stores/{lease.store_id}/payments/new/"' in row
     contacts = body(client.get(f"/stores/{lease.store_id}/?tab=contacts"))
-    row = contacts[contacts.index('class="muted empty">No entries yet. Add one.') :].split(
-        "</td>", 1
+    # PLAN-014 B6: the timeline's empty row (li#timeline-empty) keeps the sentence and the step.
+    row = contacts[contacts.index('id="timeline-empty">No entries yet. Add one.') :].split(
+        "</li>", 1
     )[0]
     assert ">Add entry</a>" in row
     # A viewer has no action bar: the empty tab names no step.

@@ -1,4 +1,4 @@
-"""The contact log as the operator page, the store page and the full lists show it
+"""The notes & follow-ups as the operator page, the store page and the full lists show it
 (docs/qa/PLAN-012 D2, D9): each entry with what the request's user may do on it.
 
 Kept apart from :mod:`ledger.views.contacts` so that the operator and store pages, which
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from urllib.parse import urlencode
 
 from django.contrib.auth.models import User
 from django.http import HttpRequest
@@ -16,8 +17,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
-from ledger.models import ContactEntry, ContactKind, ContactStatus, Store
-from ledger.services import contacts
+from ledger.models import ContactEntry, ContactKind, ContactStatus, Note, Store
+from ledger.services import contacts, notes, timeline
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,3 +99,70 @@ def store_add_url(request: HttpRequest, store: Store, today: date) -> str:
     if contacts.store_contact_lease(store, today) is None:
         return ""
     return reverse("ledger:stores:contacts_add", kwargs={"pk": store.pk})
+
+
+@dataclass(frozen=True, slots=True)
+class NoteRow:
+    """One store note as the tab shows it to the request's user (PLAN-014 B5): billing pins
+    it; its author or an admin edits and deletes it."""
+
+    note: Note
+    can_pin: bool
+    can_change: bool
+
+
+def note_rows(request: HttpRequest, found: list[Note]) -> list[NoteRow]:
+    billing = meets(role_of(request.user), Role.BILLING)
+    user = request.user if isinstance(request.user, User) else None
+    return [
+        NoteRow(note=note, can_pin=billing, can_change=billing and notes.can_change(note, user))
+        for note in found
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineRow:
+    """One row of the Notes & follow-ups list (PLAN-014 B6): ``kind`` as
+    :class:`ledger.services.timeline.TimelineEntry` names it and the row its template
+    reads (a :class:`NoteRow` for a note, a :class:`LogRow` for a contact entry)."""
+
+    kind: str
+    row: NoteRow | LogRow
+
+
+def timeline_rows(
+    request: HttpRequest, found: list[timeline.TimelineEntry], *, store: Store
+) -> list[TimelineRow]:
+    """The list's rows in their order, with what the request's user may do on each."""
+    notes_by_id = {
+        row.note.pk: row
+        for row in note_rows(
+            request, [entry.payload for entry in found if entry.kind == timeline.NOTE]
+        )
+    }
+    logs_by_id = {
+        row.entry.pk: row
+        for row in log_rows(
+            request,
+            [entry.payload for entry in found if entry.kind == timeline.CONTACT],
+            store=store,
+        )
+    }
+    rows: list[TimelineRow] = []
+    for entry in found:
+        if entry.kind == timeline.NOTE:
+            rows.append(TimelineRow(entry.kind, notes_by_id[entry.payload.pk]))
+        elif entry.kind == timeline.CONTACT:
+            rows.append(TimelineRow(entry.kind, logs_by_id[entry.payload.pk]))
+    return rows
+
+
+def timeline_filters(
+    url: str, query: dict[str, str], fragment: str = ""
+) -> list[tuple[str, str, str]]:
+    """The list's filter (All · Notes · Calls & promises · E-mails) as ``(value, label,
+    link)``: ``url`` with ``query`` and ``show=value``, then ``fragment``."""
+    return [
+        (value, label, f"{url}?{urlencode({**query, 'show': value})}{fragment}")
+        for value, label in timeline.SHOWS
+    ]

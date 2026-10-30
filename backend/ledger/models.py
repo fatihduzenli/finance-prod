@@ -387,9 +387,14 @@ class Store(GuardedModel):
     needs_open_date = models.BooleanField(default=True)
     closed_at = models.DateField(null=True, blank=True)
     status = _choice(StoreStatus)
-    #: The kind of store (PLAN-012f-b D10), from the admin's list; none is shown as nothing.
-    store_type = models.ForeignKey(
-        "StoreType", on_delete=models.PROTECT, null=True, blank=True, related_name="stores"
+    #: The store's brand (PLAN-014 B1), from Admin › Settings' list; none is shown as nothing.
+    brand = models.ForeignKey(
+        "Brand",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="stores",
+        verbose_name="Brand",
     )
     needs_review = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -821,16 +826,39 @@ class NoteEntityType(models.TextChoices):
     LEASE = "lease", "Lease"
 
 
+#: The longest note body and delete reason staff may save (PLAN-014 B5).
+NOTE_BODY_MAX_LENGTH = 2000
+NOTE_DELETE_REASON_MAX_LENGTH = 200
+
+
 class Note(GuardedModel):
+    """A note about a store, an operator or a lease. A store's note (PLAN-014 B5,
+    :mod:`ledger.services.notes`) also names the lease current when it was written; its
+    author or an admin edits it (``edited_at``) or soft deletes it with a reason
+    (``deleted_at``, ``deleted_by`` and ``delete_reason``: all three or none, CHECK); billing
+    pins it (``pinned`` and ``pinned_at``: both or neither, CHECK). Nothing removes a row."""
+
     entity_type = _choice(NoteEntityType)
     #: Generic reference, no foreign key; checked by reconciliation (PLAN-004 §7).
     entity_id = models.UUIDField()
+    lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="notes"
+    )
     body = free_text(blank=False)
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     author_label = guarded_char(NAME_MAX_LENGTH, blank=True)
+    pinned = models.BooleanField(default=False)
+    pinned_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    delete_reason = free_text()
 
     class Meta:
         db_table = "notes"
@@ -838,6 +866,19 @@ class Note(GuardedModel):
         constraints = [
             _not_blank("notes", "body"),
             _valid_choice("notes", "entity_type", NoteEntityType),
+            models.CheckConstraint(
+                condition=Q(pinned=False, pinned_at__isnull=True)
+                | Q(pinned=True, pinned_at__isnull=False),
+                name="notes_pinned_at_matches",
+            ),
+            models.CheckConstraint(
+                condition=Q(deleted_at__isnull=True, deleted_by__isnull=True, delete_reason="")
+                | (
+                    Q(deleted_at__isnull=False, deleted_by__isnull=False)
+                    & Q(delete_reason__regex=_NOT_BLANK)
+                ),
+                name="notes_deleted_all_or_none",
+            ),
         ]
 
 
@@ -884,11 +925,12 @@ class FeeType(GuardedModel):
         return self.name
 
 
-class StoreType(GuardedModel):
-    """A kind of store (PLAN-012f-b D10): Inline store, Kiosk, Cart, Pop-up, Warehouse,
-    seeded by ledger migration 0051. Edited by an admin in the Django admin: add and
-    change, never delete (a type no longer offered is made inactive). The store form
-    offers the active ones; a store's type shows as a grey pill after its name."""
+class Brand(GuardedModel):
+    """A store's brand (PLAN-014 B1; the kind of store of PLAN-012f-b D10 before):
+    iFixandRepair, Techy and Talk&Fix, seeded by ledger migration 0058. Edited by an admin on
+    Admin › Settings (PLAN-014 B2): add, rename, activate or deactivate and reorder, never
+    delete. The store form offers the active ones; a store's brand shows as a grey pill after
+    its name."""
 
     name = guarded_char(NAME_MAX_LENGTH, unique=True)
     sort_order = models.SmallIntegerField(default=0)
@@ -897,9 +939,11 @@ class StoreType(GuardedModel):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "store_types"
+        db_table = "brands"
         ordering = ("sort_order", "name")
-        constraints = [_not_blank("store_types", "name")]
+        verbose_name = "Brand"
+        verbose_name_plural = "Brands"
+        constraints = [_not_blank("brands", "name")]
 
     def __str__(self) -> str:
         return self.name
@@ -2715,7 +2759,7 @@ class OutboundMessage(GuardedModel):
         ]
 
 
-# --- Contact log and calendar (PLAN-011b D7, D8) ------------------------------------
+# --- Notes & follow-ups and calendar (PLAN-011b D7, D8) ------------------------------------
 
 
 class ContactKind(models.TextChoices):

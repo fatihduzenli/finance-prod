@@ -16,31 +16,41 @@ builder's draft that sent them (its page is the card's "view"), in the one query
 already ran. :func:`one_off_source` and :func:`rent_source` name where a charge came from, from
 fields that exist ("" when they do not say). :func:`header_line` joins the parts of a page's
 muted line that exist. :func:`lease_open_balance` is the lease page's Open balance tile.
+
+:func:`collection_state` says how much of a charge is collected (PLAN-014 B3) and
+:func:`lease_collections` gives the store workspace's LEASE card its Sign fee and Insurance rows
+and the note about last year's insurance.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
+from urllib.parse import urlencode
 
 from django.contrib.auth.models import User
 from django.db.models import Count, OuterRef, Q, Subquery
+from django.urls import reverse
 
 from finance.dates import day_text
 from ledger.models import (
+    ZERO,
     AuditLog,
     DepositResolution,
+    InsuranceCharge,
     Invoice,
     InvoiceDraft,
     Lease,
     OneOffCategory,
     OneOffCharge,
+    OneOffChargeStatus,
     RentCharge,
 )
-from ledger.services import audit, installments, one_off_charges, receivables, rent_run
+from ledger.services import audit, installments, insurance, one_off_charges, receivables, rent_run
+from ledger.wording import format_amount
 
 #: The newest rows the Activity card shows; older ones are on the store page's History tab.
 ACTIVITY_SIZE = 20
@@ -250,3 +260,148 @@ def lease_open_balance(lease: Lease, today: date) -> Decimal | None:
         return None
     rows = receivables.open_balances(today, operator=lease.operator_id)
     return sum((row.balance for row in rows if row.lease_id == lease.pk), Decimal("0.00"))
+
+
+# --- The LEASE card's collection rows (PLAN-014 B3) ------------------------------------------
+
+#: The catalogue code of the sign fee (ledger migration 0013).
+SIGN_FEE_CODE = "sign_fee"
+COLLECTED = "collected"
+PARTIAL = "partial"
+UNCOLLECTED = "uncollected"
+UNBILLED = "unbilled"
+#: The colour of each state (the card's ``side-<tone>`` class): green, orange, red, grey.
+TONES: dict[str, str] = {
+    COLLECTED: "paid",
+    PARTIAL: "partial",
+    UNCOLLECTED: "unpaid",
+    UNBILLED: "muted",
+}
+#: A one-off charge in one of these states is not billed any more.
+_NOT_BILLED = (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED)
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionState:
+    """How much of one charge is collected: ``code`` one of ``collected``, ``partial``,
+    ``uncollected``, ``unbilled``; ``text`` as the card reads it; ``tone`` its colour; what
+    was paid and what is due (``None``: an insurance charge still waiting for its premium);
+    ``url`` the charge's page ("" without a charge, or for an insurance charge, which has
+    none)."""
+
+    code: str
+    text: str
+    tone: str
+    paid: Decimal
+    due: Decimal | None
+    url: str
+
+
+def collection_state(
+    charge: OneOffCharge | InsuranceCharge | None, *, balance: Decimal | None = None
+) -> CollectionState:
+    """The state of ``charge``: ``✓ collected`` (nothing owed, something paid),
+    ``$x of $y · partly collected``, ``not collected`` (nothing paid) or ``not billed`` (no
+    charge). ``balance`` is an insurance charge's balance when the caller read it already
+    (:func:`ledger.services.insurance.balances`); a one-off charge carries its own."""
+    if charge is None:
+        return CollectionState(UNBILLED, "not billed", TONES[UNBILLED], ZERO, None, "")
+    if isinstance(charge, OneOffCharge):
+        due: Decimal | None = charge.price
+        owed = charge.balance
+        url = reverse("ledger:one_off_charges:detail", kwargs={"pk": charge.pk})
+    else:
+        due = charge.amount
+        owed = balance if balance is not None else insurance.balance(charge)
+        url = ""
+    paid = max((due or ZERO) - owed, ZERO)
+    if due is not None and owed <= 0 and paid > 0:
+        code, text = COLLECTED, "✓ collected"
+    elif due is not None and 0 < paid < due:
+        code = PARTIAL
+        text = f"{format_amount(paid)} of {format_amount(due)} · partly collected"
+    else:
+        code, text = UNCOLLECTED, "not collected"
+    return CollectionState(code, text, TONES[code], paid, due, url)
+
+
+def policy_year(open_date: date, today: date) -> int:
+    """The policy year ``today`` is in: the latest year whose anniversary (the store's open
+    date, :func:`ledger.services.insurance.anniversary`) is on or before ``today``."""
+    year = today.year
+    return year if insurance.anniversary(open_date, year) <= today else year - 1
+
+
+def policy_label(year: int) -> str:
+    """``Insurance 2026–27``."""
+    return f"Insurance {year}–{(year + 1) % 100:02d}"
+
+
+@dataclass(frozen=True, slots=True)
+class LeaseCollections:
+    """The LEASE card's rows under Deposit: the sign fee, with "Bill now" while it is not
+    billed (the invoice builder with the sign fee preselected); the insurance of the current
+    policy year (``insurance_label`` "" when the store has no open date) and the note about
+    the previous year ("" when it was collected, or the lease did not hold the store then)."""
+
+    sign_fee: CollectionState
+    sign_fee_bill_url: str
+    insurance_label: str = ""
+    insurance: CollectionState | None = None
+    insurance_note: str = ""
+
+
+def _sign_fee_bill_url(lease: Lease) -> str:
+    query = urlencode({"store": str(lease.store_id), "lease": str(lease.pk), "item": SIGN_FEE_CODE})
+    return f"{reverse('ledger:invoices:new_store', kwargs={'pk': lease.store_id})}?{query}"
+
+
+def _previous_year_note(
+    lease: Lease, year: int, charge: InsuranceCharge | None, owed: Decimal | None, today: date
+) -> str:
+    label = policy_label(year)
+    if charge is None:
+        return f"{label} never billed" if insurance.in_scope(lease, year, today) else ""
+    if collection_state(charge, balance=owed).code not in (UNCOLLECTED, PARTIAL):
+        return ""
+    premium = f" ({format_amount(charge.amount)})" if charge.amount is not None else ""
+    return f"{label}{premium} not collected"
+
+
+def lease_collections(lease: Lease, today: date) -> LeaseCollections:
+    """The LEASE card's collection rows of ``lease`` (whose store the caller read with it) in
+    three queries, four or five with insurance charges (their balances,
+    :func:`ledger.services.insurance.balances`)."""
+    sign_fee = (
+        OneOffCharge.objects.filter(lease=lease, fee_type__code=SIGN_FEE_CODE)
+        .exclude(status__in=_NOT_BILLED)
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    sign_state = collection_state(sign_fee)
+    found = LeaseCollections(
+        sign_fee=sign_state,
+        sign_fee_bill_url=_sign_fee_bill_url(lease) if sign_state.code == UNBILLED else "",
+    )
+    store = lease.store
+    if store.open_date is None:
+        return found
+    year = policy_year(store.open_date, today)
+    charges = {
+        charge.policy_year: charge
+        for charge in InsuranceCharge.objects.filter(lease=lease, policy_year__in=(year, year - 1))
+    }
+    owed = insurance.balances(list(charges.values()))
+    current, previous = charges.get(year), charges.get(year - 1)
+    return replace(
+        found,
+        insurance_label=policy_label(year),
+        insurance=collection_state(current, balance=owed.get(current.pk) if current else None),
+        insurance_note=(
+            _previous_year_note(
+                lease, year - 1, previous, owed.get(previous.pk) if previous else None, today
+            )
+            if year - 1 >= store.open_date.year
+            else ""
+        ),
+    )

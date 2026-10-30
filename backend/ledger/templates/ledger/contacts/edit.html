@@ -1,6 +1,6 @@
 {% extends "finance/base.html" %}{% load dates %}
 {% block title %}Edit contact entry{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ back_url }}">Contact log</a> <span aria-hidden="true">›</span> <span aria-current="page">Edit contact entry</span></nav><h1>Edit contact entry</h1></div></div>{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ back_url }}">Notes &amp; follow-ups</a> <span aria-hidden="true">›</span> <span aria-current="page">Edit contact entry</span></nav><h1>Edit contact entry</h1></div></div>{% endblock %}
 {% block content %}
   <section class="card form-card">
   <p id="edit-window">You recorded this entry; you can change it until {{ edit_until|moment }} (New York). After that, add a correction instead.</p>

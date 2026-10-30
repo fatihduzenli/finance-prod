@@ -1,13 +1,17 @@
-"""The contact log (docs/qa/PLAN-011b D7; PLAN-012 D2 to D5, D9).
+"""The notes & follow-ups (docs/qa/PLAN-011b D7; PLAN-012 D2 to D5, D9).
 
-- ``ledger:operators:contacts`` and ``ledger:stores:contacts`` (any role): every entry of
-  the operator, or about a lease of the store, newest first, paginated, filtered by a
-  promise's status (``?status=open|kept|rescheduled|broken``). A deleted entry is shown
-  struck through with its reason to billing and admin, and left out for a viewer.
+- ``ledger:operators:contacts`` (any role): every entry of the operator, newest first,
+  paginated, filtered by a promise's status (``?status=open|kept|rescheduled|broken``). A
+  deleted entry is shown struck through with its reason to billing and admin, and left out
+  for a viewer.
+- ``ledger:stores:contacts`` (any role; PLAN-014 B6): the store tab's list without its cap,
+  paginated: the store's live notes and the entries about a lease of it, newest first, with
+  the tab's filter (``?show=all|notes|contacts|emails``) and the tab's rows and actions;
+  deleted entries as above. It has no export.
 - ``ledger:operators:contacts_add`` and ``ledger:stores:contacts_add`` (billing; the
   registry refuses the POST below billing and the views refuse the form's GET too): add an
   entry. The store's form is the form of the operator of the store's lease in effect
-  today, with that lease chosen; it returns to the store page's Contact log tab, and
+  today, with that lease chosen; it returns to the store page's Notes & follow-ups tab, and
   opened from the store page (``?store=&lease=``, PLAN-012d D2) it hides the lease and
   shows the read-only line. When the operator has an open promise the form asks what
   happened to it (Still open, the default, Kept, Rescheduled or Broken), and warns when a
@@ -30,7 +34,7 @@ from datetime import date
 
 from django import forms
 from django.contrib import messages
-from django.core.paginator import Paginator
+from django.core.paginator import Page, Paginator
 from django.db.models import QuerySet
 from django.http import (
     Http404,
@@ -65,10 +69,16 @@ from ledger.models import (
     Operator,
     Store,
 )
-from ledger.services import contacts, workspace
+from ledger.services import contacts, timeline, workspace
 from ledger.validators import contains_bank_routing_pattern, contains_card_number
 from ledger.views import store_context
-from ledger.views.contact_log import include_deleted, log_rows, store_add_url
+from ledger.views.contact_log import (
+    include_deleted,
+    log_rows,
+    store_add_url,
+    timeline_filters,
+    timeline_rows,
+)
 from ledger.views.operators import (
     PAGE_SIZE,
     _actor,
@@ -110,10 +120,7 @@ def _status(request: HttpRequest) -> str:
 
 
 def _log_page(
-    request: HttpRequest,
-    rows: QuerySet[ContactEntry],
-    context: dict[str, object],
-    store: Store | None = None,
+    request: HttpRequest, rows: QuerySet[ContactEntry], context: dict[str, object]
 ) -> HttpResponse:
     status = _status(request)
     page = Paginator(contacts.with_status(rows, status), PAGE_SIZE).get_page(
@@ -125,7 +132,7 @@ def _log_page(
         {
             **context,
             "page": page,
-            "rows": log_rows(request, list(page.object_list), store=store),
+            "rows": log_rows(request, list(page.object_list)),
             "status": status,
             "statuses": ContactStatus.choices,
         },
@@ -166,17 +173,27 @@ def _store(pk: str) -> Store:
 @require_safe
 def store_contacts_page(request: HttpRequest, pk: str) -> HttpResponse:
     store = _store(pk)
-    return _log_page(
+    show = timeline.parse_show(request.GET.get("show"))
+    page: Page[timeline.TimelineEntry] = Paginator(
+        timeline.Listing(store, show, include_deleted=include_deleted(request)), PAGE_SIZE
+    ).get_page(request.GET.get("page"))
+    return render(
         request,
-        contacts.store_entries(store, include_deleted=include_deleted(request)),
+        "ledger/stores/contacts.html",
         {
+            "store": store,
             "title": f"store {store.external_label}",
             "back_label": f"Store {store.external_label}",
             "back_url": reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
-            "add_url": store_add_url(request, store, timezone.localdate()),
-            "export_url": "",
+            "contact_add_url": store_add_url(request, store, timezone.localdate()),
+            "page": page,
+            "timeline_rows": timeline_rows(request, list(page.object_list), store=store),
+            "timeline_show": show,
+            "timeline_filters": timeline_filters(
+                reverse("ledger:stores:contacts", kwargs={"pk": store.pk}), {}
+            ),
+            "timeline_empty": timeline.empty_text(show),
         },
-        store,
     )
 
 
@@ -374,7 +391,7 @@ def store_contacts_add(request: HttpRequest, pk: str) -> HttpResponse:
         back_url=reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
         title=f"{lease.operator.display_name}, store {store.external_label}"
         f"{_lease_state(lease, today)}",
-        # PLAN-012d D8: back to the store page's Contact log tab.
+        # PLAN-012d D8: back to the store page's Notes & follow-ups tab.
         done_url=tab,
         context=context,
     )
@@ -421,7 +438,7 @@ def _entry_page(
     over_log: bool = False,
 ) -> HttpResponse:
     """An entry's form page; with ``over_log`` (Delete's confirmation, PLAN-012f-b E-4) the
-    operator page, whose contact log the entry is in, is the page behind the dialog."""
+    operator page, whose notes & follow-ups the entry is in, is the page behind the dialog."""
     if request.method == "POST":
         drop_payment_data(form)
     behind = _operator_page(request, entry.operator) if over_log else {}

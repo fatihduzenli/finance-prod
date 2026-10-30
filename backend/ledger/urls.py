@@ -10,7 +10,7 @@ Every unsafe route here has a rule in ``accounts.registry``; the read-only ones 
 listed there too, so ``backend/tests/test_route_registry.py`` sees them classified.
 There is no delete route for a record: archiving is the only way to retire an operator,
 and a store is closed through its status. A document's delete is soft (PLAN-010c D7), and so
-is a contact log entry's (PLAN-012 D2).
+is a notes & follow-ups entry's (PLAN-012 D2).
 
 ``pk`` is matched as text, as the admin matches its object IDs, so every operator path
 resolves to its route and the role registry decides on an unsafe request before the
@@ -36,6 +36,7 @@ from ledger.views import (
     invoices,
     lease_ends,
     leases,
+    notes,
     one_off_charges,
     operators,
     payments,
@@ -44,6 +45,7 @@ from ledger.views import (
     returns,
     run,
     search,
+    settings,
     statement_links,
     stores,
     transfers,
@@ -66,7 +68,7 @@ operator_patterns = (
         path("<str:pk>/charges/new/", one_off_charges.create_form_gone, name="new_charge"),
         path("<str:pk>/statement/", reports.statement_page, name="statement"),
         path("<str:pk>/statement/export.csv", reports.statement_export, name="statement_export"),
-        # The contact log (PLAN-011b D7).
+        # The notes & follow-ups (PLAN-011b D7).
         path("<str:pk>/contacts/", contacts.contacts_page, name="contacts"),
         path("<str:pk>/contacts/new/", contacts.contacts_add, name="contacts_add"),
         path("<str:pk>/contacts/export.csv", contacts.contacts_export, name="contacts_export"),
@@ -98,7 +100,7 @@ store_patterns = (
         path("<str:pk>/cost/", stores.store_set_cost, name="set_cost"),
         path("<str:pk>/cost/close/", stores.store_close_cost, name="close_cost"),
         path("<str:pk>/costs/<str:row>/correct/", stores.store_correct_cost, name="correct_cost"),
-        # The store's contact log (PLAN-012 D3).
+        # The store's notes & follow-ups (PLAN-012 D3).
         path("<str:pk>/contacts/", contacts.store_contacts_page, name="contacts"),
         path("<str:pk>/contacts/new/", contacts.store_contacts_add, name="contacts_add"),
         # The end-of-lease wizard (PLAN-012e D4): start or resume.
@@ -149,7 +151,7 @@ transfer_patterns = (
     "transfers",
 )
 
-# One contact log entry (PLAN-012 D2): the author's edit, a correction, an admin's delete;
+# One notes & follow-ups entry (PLAN-012 D2): the author's edit, a correction, an admin's delete;
 # Kept, Reschedule or Broken on an open promise (PLAN-012c-b D2).
 contact_patterns = (
     [
@@ -411,6 +413,30 @@ calendar_patterns = (
     "calendar",
 )
 
+# A store's notes (PLAN-014 B5): add and pin (billing); edit and delete, the author or an
+# admin (their dialog over the store page on GET).
+note_patterns = (
+    [
+        path("stores/<str:pk>/notes/", notes.note_add, name="add"),
+        path("notes/<str:pk>/edit/", notes.note_edit, name="edit"),
+        path("notes/<str:pk>/pin/", notes.note_pin, name="pin"),
+        path("notes/<str:pk>/delete/", notes.note_delete, name="delete"),
+    ],
+    "notes",
+)
+
+# Admin › Settings (PLAN-014 B2): admin only.
+settings_patterns = (
+    [
+        path("", settings.settings_index, name="index"),
+        path("brands/new/", settings.brand_add, name="brand_add"),
+        path("brands/<str:pk>/save/", settings.brand_save, name="brand_save"),
+        path("brands/<str:pk>/toggle/", settings.brand_toggle, name="brand_toggle"),
+        path("brands/<str:pk>/move/", settings.brand_move, name="brand_move"),
+    ],
+    "settings",
+)
+
 urlpatterns = [
     path("", dashboard.home, name="home"),
     # The top-bar search (PLAN-012d D17): any verified role, read only.
@@ -441,4 +467,6 @@ urlpatterns = [
     path("reports/", include(report_patterns)),
     path("documents/", include(document_patterns)),
     path("audit/", include(audit_patterns)),
+    path("admin-settings/", include(settings_patterns)),
+    path("", include(note_patterns)),
 ]

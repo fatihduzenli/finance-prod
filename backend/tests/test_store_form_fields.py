@@ -20,7 +20,7 @@ from django.apps import apps as django_apps
 from accounts.roles import Role
 from finance.us_states import US_STATES, state_name
 from ledger.forms import STATE_REFUSED, StoreCreateForm, StoreForm
-from ledger.models import AuditLog, Store, StoreCost, StoreStatus, StoreType
+from ledger.models import AuditLog, Brand, Store, StoreCost, StoreStatus
 from ledger.services import attention, dashboard, pnl
 from ledger.services import stores as service
 from tests.receivables_helpers import a_lease, a_store, an_operator
@@ -35,13 +35,13 @@ MIGRATION = importlib.import_module("ledger.migrations.0051_store_type_and_state
 PILL = '<span class="pill pill-type">Kiosk</span>'
 
 
-def kiosk() -> StoreType:
-    return StoreType.objects.get(name="Kiosk")
+def kiosk() -> Brand:
+    return Brand.objects.get(name="Kiosk")
 
 
 def typed_store(**fields: Any) -> Store:
     store = a_store("Typed", 1991, **fields)
-    store.store_type = kiosk()
+    store.brand = kiosk()
     store.save()
     return store
 
@@ -60,45 +60,51 @@ def html(path: str, role: Role = Role.ADMIN) -> str:
 # --- D10: the store type ------------------------------------------------------------------
 
 
-def test_the_five_types_are_seeded_in_order_and_active() -> None:
-    assert list(StoreType.objects.values_list("name", "active")) == [
-        ("Inline store", True),
-        ("Kiosk", True),
-        ("Cart", True),
-        ("Pop-up", True),
-        ("Warehouse", True),
+def test_the_three_brands_are_seeded_in_order_and_the_old_kinds_are_inactive() -> None:
+    # PLAN-014 B1 (ledger 0058): exactly iFixandRepair, Techy and Talk&Fix are offered.
+    assert list(Brand.objects.filter(active=True).values_list("name", flat=True)) == [
+        "iFixandRepair",
+        "Techy",
+        "Talk&Fix",
     ]
+    assert set(Brand.objects.filter(active=False).values_list("name", flat=True)) >= {
+        "Inline store",
+        "Kiosk",
+        "Cart",
+        "Pop-up",
+        "Warehouse",
+    }
 
 
-def test_the_type_select_lists_the_active_types_and_keeps_a_stores_own_inactive_one() -> None:
-    StoreType.objects.filter(name="Cart").update(active=False)
-    labels = [label for _, label in choices(StoreForm(), "store_type")]
-    assert labels == ["—", "Inline store", "Kiosk", "Pop-up", "Warehouse"]
+def test_the_brand_select_lists_the_active_brands_and_keeps_a_stores_own_inactive_one() -> None:
+    labels = [label for _, label in choices(StoreForm(), "brand")]
+    assert labels == ["—", "iFixandRepair", "Techy", "Talk&Fix"]
     store = a_store("Cart store")
-    store.store_type = StoreType.objects.get(name="Cart")
+    store.brand = Brand.objects.get(name="Cart")
     store.save()
-    labels = [label for _, label in choices(StoreForm(instance=store), "store_type")]
+    labels = [label for _, label in choices(StoreForm(instance=store), "brand")]
     assert "Cart" in labels
 
 
 def test_an_inactive_or_unknown_type_is_refused_without_echo() -> None:
-    cart = StoreType.objects.get(name="Cart")
+    cart = Brand.objects.get(name="Cart")
     cart.active = False
     cart.save()
     for value in (str(cart.pk), "4111111111111111"):
-        form = StoreCreateForm(data=form_data(store_type=value))
-        assert not form.is_valid() and "store_type" in form.errors
+        form = StoreCreateForm(data=form_data(brand=value))
+        assert not form.is_valid() and form.errors.get("brand")
         assert value not in str(form.errors)
 
 
-def test_the_new_store_form_saves_the_type_and_audits_it() -> None:
+def test_the_new_store_form_saves_the_brand_and_audits_it() -> None:
     admin, _ = client_for(Role.ADMIN)
-    response = admin.post(NEW, form_data(store_type=str(kiosk().pk)))
+    techy = Brand.objects.get(name="Techy")
+    response = admin.post(NEW, form_data(brand=str(techy.pk)))
     assert response.status_code == 302
     store = Store.objects.get()
-    assert store.store_type == kiosk()
+    assert store.brand == techy
     created = AuditLog.objects.get(action="store.created")
-    assert created.after is not None and created.after["store_type"] == str(kiosk().pk)
+    assert created.after is not None and created.after["brand"] == str(techy.pk)
 
 
 def test_the_pill_shows_on_the_four_surfaces_when_set() -> None:
@@ -140,7 +146,7 @@ def test_the_list_and_the_grid_read_the_type_without_a_query_per_row() -> None:
     small = (count("/stores/"), count("/grid/"))
     for number in range(5):
         extra = a_store(f"More {number}", 3000 + number)
-        extra.store_type = kiosk()
+        extra.brand = kiosk()
         extra.save()
     assert (count("/stores/"), count("/grid/")) == small
 
