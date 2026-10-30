@@ -270,3 +270,49 @@ def test_the_outbox_and_the_timeline_link_the_store_and_the_charge_log_names_the
     assert "Rent October 2026" in operator_page
     assert f"/leases/{lease.pk}/" in operator_page
     assert f"/charges/{lease.pk}/" not in operator_page
+
+
+# --- The rework: B's amount is the first debit's, and the charge page shows the month's row -----
+
+
+def test_b_names_the_first_debits_amount_for_a_twice_monthly_lease() -> None:
+    lease = billed_lease(2401, debit_day=23)
+    Lease.objects.filter(pk=lease.pk).update(second_debit_day=28)
+    reminders.queue_due(TODAY)
+    message = OutboundMessage.objects.get(lease=lease, rule="B")
+    assert "$1,750.00" in message.rendered_body  # half of $3,500.00: the month's first debit
+    assert "$3,500.00" not in message.rendered_body
+
+
+def test_b_names_the_prorated_amount_in_the_leases_first_month() -> None:
+    # Started on the 13th with the debit on the 23rd: the first month's rent is prorated, and B
+    # names what the rent run will charge on the 23rd, not the full month.
+    lease = a_lease(
+        a_store("2402", number=2402),
+        an_operator("Operator 2402"),
+        started=date(2026, 10, 13),
+        debit_day=23,
+        rent="3500.00",
+    )
+    LeaseBilling.objects.update_or_create(lease=lease, defaults={"email": "store@example.com"})
+    reminders.queue_due(TODAY)
+    message = OutboundMessage.objects.get(lease=lease, rule="B")
+    assert "$3,500.00" not in message.rendered_body
+    from ledger.services import rent_run
+
+    charge, _ = rent_run.create_month(lease, MONTH, actor=None)
+    from ledger.wording import format_amount
+
+    assert format_amount(charge.amount_due) in message.rendered_body
+
+
+def test_the_rent_charge_page_lists_the_months_b_and_septembers_does_not() -> None:
+    lease = billed_lease(2403)
+    reminders.queue_due(TODAY)  # B for October
+    october = a_rent_charge(lease, MONTH, day=23)
+    september = a_rent_charge(lease, date(2026, 9, 1), day=23)
+    billing, _ = client_for(Role.BILLING)
+    page = billing.get(f"/charges/{october.pk}/").content.decode()
+    assert "Rent October 2026" in page and "B — payment due" in page
+    other = billing.get(f"/charges/{september.pk}/").content.decode()
+    assert "B — payment due" not in other
