@@ -826,16 +826,39 @@ class NoteEntityType(models.TextChoices):
     LEASE = "lease", "Lease"
 
 
+#: The longest note body and delete reason staff may save (PLAN-014 B5).
+NOTE_BODY_MAX_LENGTH = 2000
+NOTE_DELETE_REASON_MAX_LENGTH = 200
+
+
 class Note(GuardedModel):
+    """A note about a store, an operator or a lease. A store's note (PLAN-014 B5,
+    :mod:`ledger.services.notes`) also names the lease current when it was written; its
+    author or an admin edits it (``edited_at``) or soft deletes it with a reason
+    (``deleted_at``, ``deleted_by`` and ``delete_reason``: all three or none, CHECK); billing
+    pins it (``pinned`` and ``pinned_at``: both or neither, CHECK). Nothing removes a row."""
+
     entity_type = _choice(NoteEntityType)
     #: Generic reference, no foreign key; checked by reconciliation (PLAN-004 §7).
     entity_id = models.UUIDField()
+    lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="notes"
+    )
     body = free_text(blank=False)
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     author_label = guarded_char(NAME_MAX_LENGTH, blank=True)
+    pinned = models.BooleanField(default=False)
+    pinned_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    delete_reason = free_text()
 
     class Meta:
         db_table = "notes"
@@ -843,6 +866,19 @@ class Note(GuardedModel):
         constraints = [
             _not_blank("notes", "body"),
             _valid_choice("notes", "entity_type", NoteEntityType),
+            models.CheckConstraint(
+                condition=Q(pinned=False, pinned_at__isnull=True)
+                | Q(pinned=True, pinned_at__isnull=False),
+                name="notes_pinned_at_matches",
+            ),
+            models.CheckConstraint(
+                condition=Q(deleted_at__isnull=True, deleted_by__isnull=True, delete_reason="")
+                | (
+                    Q(deleted_at__isnull=False, deleted_by__isnull=False)
+                    & Q(delete_reason__regex=_NOT_BLANK)
+                ),
+                name="notes_deleted_all_or_none",
+            ),
         ]
 
 

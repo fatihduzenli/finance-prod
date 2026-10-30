@@ -32,6 +32,8 @@ from ledger.models import (
     INSTALLMENTS_MAX,
     INSTALLMENTS_MIN,
     NAME_MAX_LENGTH,
+    NOTE_BODY_MAX_LENGTH,
+    NOTE_DELETE_REASON_MAX_LENGTH,
     AutopayCadence,
     AutopayEndRule,
     Brand,
@@ -2692,6 +2694,45 @@ class ContactDeleteForm(forms.Form):
         validators=[validate_no_payment_data],
         error_messages={"required": "A reason is required: say why this entry is deleted."},
     )
+
+
+class NoteForm(forms.Form):
+    """A store note's body (PLAN-014 B5): required, at most 2,000 characters, no card or
+    account number (:mod:`ledger.services.notes` checks the same)."""
+
+    body = forms.CharField(
+        label="Note",
+        widget=forms.Textarea(
+            attrs={"rows": 3, "placeholder": "Write a note about this store\u2026"}
+        ),
+        max_length=NOTE_BODY_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": "Write the note first."},
+    )
+
+    def clean_body(self) -> str:
+        body = visible_text(self.cleaned_data["body"])
+        if not body:
+            raise forms.ValidationError(self.fields["body"].error_messages["required"])
+        return body
+
+
+class NoteDeleteForm(forms.Form):
+    """Why a store note is deleted (PLAN-014 B5): required, at most 200 characters."""
+
+    reason = forms.CharField(
+        label="Reason",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        max_length=NOTE_DELETE_REASON_MAX_LENGTH,
+        validators=[validate_no_payment_data],
+        error_messages={"required": "A reason is required: say why this note is deleted."},
+    )
+
+    def clean_reason(self) -> str:
+        reason = visible_text(self.cleaned_data["reason"])
+        if not reason:
+            raise forms.ValidationError(self.fields["reason"].error_messages["required"])
+        return reason
 
 
 class CalendarEntryForm(forms.Form):

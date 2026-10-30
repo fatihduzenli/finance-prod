@@ -1,4 +1,4 @@
-"""Brands (docs/qa/PLAN-014 Batch B, B1).
+"""Brands and store notes (docs/qa/PLAN-014 Batch B, B1 and B5).
 
 Schema: the table ``store_types`` becomes ``brands`` (model ``StoreType`` becomes ``Brand``,
 its rows kept) and ``stores.store_type_id`` becomes ``stores.brand_id`` (null; the foreign
@@ -17,22 +17,37 @@ brand and ``needs_review``, with one ``audit_log`` row ``store.brand_cleared`` (
 and ``needs_review`` true): the attention kind ``brand_needed`` lists it until a brand is
 chosen, and saving a brand clears the flag only when the brand was its one reason.
 
-The reverse renames everything back. Its data step first refuses (``CANNOT_REVERSE``, the
-pattern of ``0018``) when any ``store.brand_cleared`` row exists: the cleared stores' brands
-cannot be put back. Otherwise (no store was cleared) it makes every other row active again,
-except one an admin made inactive in the Django admin (its last ``store_type.*_in_admin`` row
-says so), and makes the three inactive when this step created them (no admin row created
-them).
+Notes (B5), on ``notes``: ``lease_id`` (null; a foreign key that refuses to delete a lease a
+note names), ``pinned`` (false) and ``pinned_at`` (null; both or neither, CHECK
+``notes_pinned_at_matches``), ``updated_at`` (now for the existing rows), ``edited_at``, and the
+soft delete of ``0028``'s contact entries: ``deleted_at``, ``deleted_by`` (FK ``auth_user``,
+PROTECT) and ``delete_reason`` (guarded text, "" by default; all three or none, CHECK
+``notes_deleted_all_or_none``). Adding the columns fills every existing row with false, nulls
+and "", which is the whole backfill. On PostgreSQL the notes trigger of
+``0002_postgresql_guards`` is recreated with ``delete_reason`` among its arguments; the reverse
+restores the columns of ``0002``.
+
+The reverse drops the note columns (the pins, edits and soft deletes made since are lost; the
+audit rows ``note.*`` keep them) and renames everything back. Its data step first refuses
+(``CANNOT_REVERSE``, the pattern of ``0018``) when any ``store.brand_cleared`` row exists: the
+cleared stores' brands cannot be put back. Otherwise (no store was cleared) it makes every
+other row active again, except one an admin made inactive in the Django admin (its last
+``store_type.*_in_admin`` row says so), and makes the three inactive when this step created
+them (no admin row created them).
 """
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 import django.db.models.deletion
 from django.apps.registry import Apps
+from django.conf import settings
 from django.db import migrations, models
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+
+import ledger.validators
 
 #: The brands this step seeds, in their order (``sort_order`` 1, 2, 3).
 SEEDED_BRANDS: tuple[str, ...] = ("iFixandRepair", "Techy", "Talk&Fix")
@@ -47,9 +62,16 @@ CANNOT_REVERSE = (
 
 OLD_TABLE = "store_types"
 NEW_TABLE = "brands"
+NOTES = "notes"
+_NOTES_BEFORE: tuple[str, ...] = importlib.import_module(
+    "ledger.migrations.0002_postgresql_guards"
+).GUARDED_COLUMNS[NOTES]
 #: Table -> guarded columns after this migration: the brands' name keeps the trigger 0051
-#: created on ``store_types``, renamed with its table.
-GUARDED_COLUMNS: dict[str, tuple[str, ...]] = {NEW_TABLE: ("name",)}
+#: created on ``store_types``, renamed with its table; the notes entry replaces ``0002``'s.
+GUARDED_COLUMNS: dict[str, tuple[str, ...]] = {
+    NEW_TABLE: ("name",),
+    NOTES: (*_NOTES_BEFORE, "delete_reason"),
+}
 
 
 def run_pending_checks(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
@@ -76,6 +98,31 @@ def rename_trigger(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
 def unrename_trigger(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     # Runs before the table is renamed back: the trigger is still on ``brands``.
     _rename_trigger(schema_editor, NEW_TABLE, NEW_TABLE, OLD_TABLE)
+
+
+def _replace_notes_trigger(
+    schema_editor: BaseDatabaseSchemaEditor, columns: tuple[str, ...]
+) -> None:
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    arguments = ", ".join(f"'{column}'" for column in columns)
+    schema_editor.execute(
+        f"DROP TRIGGER IF EXISTS {NOTES}_payment_data_guard ON {NOTES};", params=None
+    )
+    schema_editor.execute(
+        f"CREATE TRIGGER {NOTES}_payment_data_guard "
+        f"BEFORE INSERT OR UPDATE ON {NOTES} "
+        f"FOR EACH ROW EXECUTE FUNCTION finance_reject_payment_data({arguments});",
+        params=None,
+    )
+
+
+def guard_notes(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+    _replace_notes_trigger(schema_editor, GUARDED_COLUMNS[NOTES])
+
+
+def unguard_notes(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+    _replace_notes_trigger(schema_editor, _NOTES_BEFORE)
 
 
 def seed_brands(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
@@ -139,6 +186,7 @@ def unseed_brands(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
 class Migration(migrations.Migration):
     dependencies = [
         ("ledger", "0057_payment_void_fields"),
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
@@ -175,6 +223,88 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.RunPython(rename_trigger, unrename_trigger, elidable=False),
+        # PLAN-014 B5: the store notes.
+        migrations.AddField(
+            model_name="note",
+            name="lease",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="notes",
+                to="ledger.lease",
+            ),
+        ),
+        migrations.AddField(
+            model_name="note", name="pinned", field=models.BooleanField(default=False)
+        ),
+        migrations.AddField(
+            model_name="note",
+            name="pinned_at",
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name="note", name="updated_at", field=models.DateTimeField(auto_now=True)
+        ),
+        migrations.AddField(
+            model_name="note",
+            name="edited_at",
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name="note",
+            name="deleted_at",
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name="note",
+            name="deleted_by",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="+",
+                to=settings.AUTH_USER_MODEL,
+            ),
+        ),
+        migrations.AddField(
+            model_name="note",
+            name="delete_reason",
+            field=models.TextField(
+                blank=True, validators=[ledger.validators.validate_no_payment_data]
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="note",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    models.Q(("pinned", False), ("pinned_at__isnull", True)),
+                    models.Q(("pinned", True), ("pinned_at__isnull", False)),
+                    _connector="OR",
+                ),
+                name="notes_pinned_at_matches",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="note",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    models.Q(
+                        ("delete_reason", ""),
+                        ("deleted_at__isnull", True),
+                        ("deleted_by__isnull", True),
+                    ),
+                    models.Q(
+                        ("deleted_at__isnull", False),
+                        ("deleted_by__isnull", False),
+                        ("delete_reason__regex", "\\S"),
+                    ),
+                    _connector="OR",
+                ),
+                name="notes_deleted_all_or_none",
+            ),
+        ),
+        migrations.RunPython(guard_notes, unguard_notes, elidable=False),
         # Reversed after the data step: the rows it rewrote are checked before the ALTER
         # TABLE statements.
         migrations.RunPython(migrations.RunPython.noop, run_pending_checks, elidable=False),
