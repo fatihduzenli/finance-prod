@@ -111,7 +111,7 @@ def test_the_form_the_filter_and_the_csv_say_brand() -> None:
     store.brand = techy
     store.save()
     client, _ = client_for(Role.ADMIN)
-    assert "Brand" in page(client, "/stores/new/")
+    assert re.search(r">Brand</label>", page(client, "/stores/new/"))
     html = page(client, f"/stores/?brand={techy.pk}")
     assert "Brand: Techy" in html and "1501" in section(html, "results", "</table>")
     header = client.get("/stores/export.csv")
@@ -150,7 +150,10 @@ def test_0058_clears_retired_types_into_needs_review_and_refuses_to_reverse_over
     leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
     old = _migrate(LEDGER_BEFORE)
     try:
-        kiosk = old.get_model("ledger", "StoreType").objects.get(name="Kiosk")
+        # A transaction test before this one may have flushed 0051's rows: write the kind.
+        kiosk, _ = old.get_model("ledger", "StoreType").objects.get_or_create(
+            name="Kiosk", defaults={"sort_order": 20, "active": True}
+        )
         old_store = old.get_model("ledger", "Store").objects.create(
             external_label="Kiosk 0801", status="active", store_type=kiosk
         )
@@ -242,7 +245,7 @@ def test_settings_is_for_admins_and_lists_the_brands() -> None:
     html = page(admin, "/admin-settings/")
     for name in BRANDS:
         assert name.replace("&", "&amp;") in html, name
-    assert "Brands" in html
+    assert 'id="brands">Brands<' in html
     nav = page(admin, "/")
     assert 'id="nav-settings"' in nav and ">Preferences<" in nav
     assert 'id="nav-settings"' not in page(billing, "/")

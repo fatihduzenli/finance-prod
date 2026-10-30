@@ -156,8 +156,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: since PLAN-012g Batch A (finance:theme); 277 since PLAN-014 Batch A
 #: (finance:payment_status_period); 281 since Batch B (ledger:settings:index and the four brand
 #: actions, ledger:notes:add|edit|pin|delete; the five admin:ledger_storetype_* routes gone); 280
-#: since Batch C (ledger:leases:billing; ledger:operators:link and retry_sync gone; checked by
-#: hand: those three changes on the 281 set give its digest).
+#: since Batch C part 1 (ledger:leases:billing; ledger:operators:link and retry_sync gone;
+#: computed with _route_names after the merge of Batch B on 2026-10-30).
 FROZEN_ROUTES = (280, "81026fe08c6673f91f9aba80ae05defafe180edec2b72d0c1dc10a91c78a2f31")
 
 

@@ -655,6 +655,8 @@ def test_no_delete_route_exists() -> None:
         "ledger:calendar:delete",
         "ledger:contacts:delete",
         "ledger:invoices:delete_draft",
+        # PLAN-014 B5: a store note's delete is soft and audited with its body.
+        "ledger:notes:delete",
     }
     assert not any(
         "delete" in raw

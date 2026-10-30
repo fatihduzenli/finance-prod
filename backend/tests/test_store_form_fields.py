@@ -92,7 +92,7 @@ def test_an_inactive_or_unknown_type_is_refused_without_echo() -> None:
     cart.save()
     for value in (str(cart.pk), "4111111111111111"):
         form = StoreCreateForm(data=form_data(brand=value))
-        assert not form.is_valid() and "brand" in form.errors
+        assert not form.is_valid() and form.errors.get("brand")
         assert value not in str(form.errors)
 
 
