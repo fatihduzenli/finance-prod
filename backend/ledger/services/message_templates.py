@@ -75,8 +75,13 @@ class Preview:
 
 
 def rows() -> list[MessageTemplate]:
-    """Every template: the active first, then by name."""
-    return list(MessageTemplate.objects.order_by("-active", "internal", "name", "code"))
+    """Every template: the active first, then the operators' before the internal, then by
+    name (case-folded) and code. Sorted here, not in SQL, so the order does not follow the
+    database's collation (PostgreSQL and sqlite order "F —" and "Final" differently)."""
+    return sorted(
+        MessageTemplate.objects.all(),
+        key=lambda t: (not t.active, t.internal, t.display_name.casefold(), t.code),
+    )
 
 
 def get(pk: uuid.UUID) -> MessageTemplate | None:
