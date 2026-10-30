@@ -17,7 +17,7 @@ from pytest_django.live_server_helper import LiveServer
 
 from accounts.roles import Role
 from accounts.themes import set_theme
-from ledger.models import Store
+from ledger.models import Brand, Store
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.receivables_helpers import (
     a_lease,
@@ -117,8 +117,10 @@ def test_the_store_page_lease_card_notes_and_timeline_on_the_laptop(
     # Edit marks the note.
     page.locator("li.note a", has_text="Edit").first.click()
     page.wait_for_load_state("networkidle")
-    page.fill("textarea[name=body]", "Owner prefers e-mail after 7 pm.")
-    page.locator("form button[type=submit]", has_text=re.compile("Save|Edit")).first.click()
+    dialog = page.locator("#note-edit-dialog")
+    expect(dialog).to_be_visible()
+    dialog.locator("textarea[name=body]").fill("Owner prefers e-mail after 7 pm.")
+    dialog.locator("button[type=submit]").first.click()
     page.wait_for_load_state("networkidle")
     expect(page.locator("li.note").first).to_contain_text("edited")
 
@@ -140,13 +142,16 @@ def test_the_store_page_on_the_phone(
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_admin_settings_brands(live_server: LiveServer, laptop: BrowserContext, theme: str) -> None:
+    # A transaction test runs after a flush: the three brands of ledger 0058 are written again.
+    for order, name in enumerate(("iFixandRepair", "Techy", "Talk&Fix"), start=1):
+        Brand.objects.update_or_create(name=name, defaults={"active": True, "sort_order": order})
     page = signed_in(laptop, live_server, f"e2e-14b-settings-{theme}", theme, Role.ADMIN)
     page.goto(f"{live_server.url}/admin-settings/")
-    body = page.locator("main").inner_text()
-    for name in ("iFixandRepair", "Techy", "Talk&Fix"):
-        assert name in body
+    names = [field.input_value() for field in page.locator("#brands-table input[name=name]").all()]
+    assert names[:3] == ["iFixandRepair", "Techy", "Talk&Fix"]
     shot(page, f"admin-settings-brands-{theme}-laptop")
     page.fill("form[action$='/brands/add/'] input[name=name]", "Phone Hub")
     page.locator("form[action$='/brands/add/'] button[type=submit]").click()
     page.wait_for_load_state("networkidle")
-    assert "Phone Hub" in page.locator("main").inner_text()
+    names = [field.input_value() for field in page.locator("#brands-table input[name=name]").all()]
+    assert "Phone Hub" in names
