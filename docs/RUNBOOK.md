@@ -757,6 +757,19 @@ Batch E's and F's; today the engine carries the final statement of a lease end a
 message now** on a charge page (billing: an active template, the lease's billing e-mail, one
 row per send).
 
+**The reminder rules.** The daily job (09:00 New York) queues, for every open charge, the rule
+of that day only, counted from the due date: **A** three days before the debit of a rent charge
+on autopay (the lease's rent schedule is on; nothing else is sent for that charge unless a debit
+of it is returned or the schedule stops), **B** three days before any other charge is due, **C**
+five days after, **D** ten days after and again at 40, 50, 60 … days while it is owed, and **E**
+at 30 days, once, to the managers only. A day that has passed is never sent later: the first run,
+or the end of a pause, sends nothing for the days missed. An open promise to pay whose date has
+not passed pauses B to E for the charges of its lease (A still goes); the day after the promised
+date the promise is broken and the rules resume with the next rule day. Paid, waived and voided
+charges get nothing, each installment of a plan is reminded on its own due date, and no rule adds
+a fee. The job's line counts the messages queued per rule, the charges paused by a promise and
+the ones not queued (already queued that day, or no lease to bill).
+
 **Admin › Settings › Mail.** *Send as* (the company mailbox the Workspace key impersonates),
 *Reply-To*, *Managers* (one address per line; they receive the internal 30-days message) and the
 *Sandbox allowlist* (one address per line). The card says whether mail is set up here from three

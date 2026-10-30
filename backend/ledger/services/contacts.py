@@ -44,6 +44,10 @@ above, read again so that a payment the sweep has not reached yet still counts).
 the balance. It is an attention item (:mod:`ledger.services.attention`) from the day after
 its promised date until an outcome is recorded. The read is one query whatever the number
 of promises, and it keeps the most recently recorded broken promise per (operator, lease).
+
+**A promise pauses the reminders** (PLAN-014 E2): while a promise is open and its date is
+today or later (:func:`promises_pending`), the reminder rules B to E wait for the charges of
+its lease (:mod:`ledger.services.reminders`); once it is broken they resume.
 """
 
 from __future__ import annotations
@@ -751,6 +755,18 @@ def broken_promises(today: date, operator: uuid.UUID | None = None) -> list[Cont
     for row in rows:
         newest.setdefault((row.operator_id, row.lease_id), row)
     return sorted(newest.values(), key=lambda row: (row.promised_date, row.created_at, row.pk))
+
+
+def promises_pending(today: date) -> set[tuple[uuid.UUID, uuid.UUID | None]]:
+    """(operator, lease) of every open promise not deleted whose ``promised_date`` is
+    ``today`` or later: the promises that pause the reminder rules B to E
+    (:mod:`ledger.services.reminders`, PLAN-014 E2). A promise about no store is
+    ``(operator, None)``. A promise past its date is broken (:func:`broken_promises`) and
+    pauses nothing, so the rules resume the day after it. One query."""
+    rows = ContactEntry.objects.filter(_open_promise(), promised_date__gte=today).values_list(
+        "operator_id", "lease_id"
+    )
+    return set(rows)
 
 
 def _first_keeper(promise: ContactEntry, payments: QuerySet[Payment]) -> Payment | None:
