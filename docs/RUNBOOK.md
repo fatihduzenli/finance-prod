@@ -398,18 +398,11 @@ and records it in the audit log.
 
 ## 15. Collections e-mails, returns and NSF, attention list, contact log, calendar (PLAN-011b)
 
-**Collections e-mails.** Each morning (09:00 New York) the app looks at overdue rent and one-off
-charges and queues the next step for each: day 3 friendly reminder, day 10 formal notice, day 20
-final notice (steps and templates are edited in the Django admin by an admin; merge fields
-`{operator}`, `{store}`, `{amount}`, `{due_date}`, `{days_late}`, `{statement_link}`, `{company}`).
-The worker sends from the company mailbox through Google. One message per charge per step, one
-step per day, never to an operator marked **Handled personally** (operator page, with a note),
-never without an e-mail address, never for a paid, waived, voided or pending charge. Every message
-appears in the operator's and the charge's **Collection e-mails** log with its status: `sent`,
-`catch_all` (sandbox), `suppressed` (mail off or rule), `failed` (class name). Billing can send a
-step by hand from the charge page. **On staging every e-mail goes to the catch-all address** with
-the real recipient in the subject. Mail is off until the owner stores the Google key and enables
-it (§15.1).
+**Collections e-mails** (history; superseded by §21). Until PLAN-014 Batch D the app ran a
+collections ladder (day 3, 10, 20) from the Django admin and sent every staging e-mail to a
+catch-all address. Since Batch D every message goes through the messaging engine (§21): the
+ladder's steps are gone, its three templates stay inactive for their history, the staging
+safeguard is the sandbox allowlist and the Outbox, and the reminder rules are Batch E's.
 
 **Returns and NSF.** A returned ACH debit sits in the returns queue and on the dashboard
 ("Returned debit not rescheduled: store, amount, returned date") until staff resolve it. After
@@ -443,9 +436,10 @@ appear in the feed.
 
 Follow plan §9 of `docs/qa/PLAN-011b-collections-nsf-attention-calendar.md`: Cloud project and
 service account, Gmail API, domain-wide delegation with `gmail.send`, the key into Key Vault as
-`gmail-service-account-key`, DKIM published. Then the deployment is run with `mailEnabled=true`,
-`gmailSender=<the mailbox>` and `mailCatchAll=<staff address>` (staging). The first e-mail on
-staging arrives at the catch-all.
+`gmail-service-account-key`, DKIM published. Then the deployment is run with `mailEnabled=true`. The mailbox sent as, the Reply-To, the
+managers' list and the sandbox allowlist are set in Admin › Settings › Mail (§21), not in the
+deployment (the `gmailSender` and `mailCatchAll` parameters are unused since PLAN-014 D1 and
+leave in Step 16). The first e-mail on staging reaches only an allowlisted address.
 
 ### 15.2 Time zone
 
@@ -580,8 +574,8 @@ Stax), the date and a reference; an unpaid-balance offset pays the oldest open c
 deposit; what the deposit does not cover becomes one charge, "Lease-end balance", collected by
 hand. **Confirm** lists every effect and needs the box ticked. Then the lease is ended, the store
 shows "Vacant since <date>", the worker stores the final statement as a PDF under the store's
-documents (kind *Final statement*) and queues the e-mail to the operator (sent when mail is on,
-to the catch-all on staging, recorded as suppressed when mail is off). Every step is audited.
+documents (kind *Final statement*) and queues the e-mail to the operator through the messaging
+engine (§21: sent in the send window when mail is set up, held in the Outbox otherwise). Every step is audited.
 An installment plan that is live on a charge of the lease is a blocker too: let it complete or
 cancel it (admin) first. A lease end that never reached the statement step is not "in
 progress": the store shows no banner and a transfer simply takes the draft over; one that
@@ -752,3 +746,44 @@ command again queues it again.
 **Section 6.** The dry run reads only. The real run on staging (the sandbox) or production
 writes to Stax through the worker: it is a Publish Request of its own, after Batch C is merged
 (the live run is TODO-VERIFY-067). Record the dry run's counts in the request.
+
+## 21. Messages, the Outbox and the Mail card (PLAN-014 D, ADR-0016)
+
+**One engine.** Every e-mail to an operator or to the managers is a message: rendered when it is
+queued, stored with its subject and body, sent by the worker in the send window (9:00 to 18:00
+New York; a message queued outside it waits for the next 9:00) and listed on the store's
+**Notes & follow-ups** tab (filter *E-mails*) with its result. The reminder rules (A to F) are
+Batch E's and F's; today the engine carries the final statement of a lease end and **Send a
+message now** on a charge page (billing: an active template, the lease's billing e-mail, one
+row per send).
+
+**Admin › Settings › Mail.** *Send as* (the company mailbox the Workspace key impersonates),
+*Reply-To*, *Managers* (one address per line; they receive the internal 30-days message) and the
+*Sandbox allowlist* (one address per line). The card says whether mail is set up here from three
+facts: the key is present in the environment (its value is never shown), `MAIL_ENABLED` is true,
+and *Send as* is filled. Until all three hold, **nothing leaves the app**: every message is held
+in the Outbox as "not sent (mail not set up)". On the sandbox (staging) mail reaches only the
+allowlist's addresses; every other message is held as "held on sandbox". Add your own address to
+the allowlist on staging to see real deliveries; the list is empty by default and no address is
+written in source.
+
+**Admin › Settings › Message templates.** The subject and text of every template, with the
+placeholders each may use (`{operator_name} {store_number} {store_name} {amount} {charge_name}
+{due_date} {debit_date} {retry_date} {days_late} {bank_last4} {return_reason} {pay_link}
+{store_link} {support_email} {company_name}`). An unknown placeholder is refused on save with its
+name; nothing else of the text is repeated. **Preview** renders the text with a chosen store's
+current lease and sample amounts and queues nothing. Until the operator portal exists,
+`{pay_link}` is a signed link to the operator's statement. Every change is audited.
+
+**Admin › Outbox** (`/admin-settings/outbox/`). Every message, newest first, with its status and
+reason, recipient, template and the time the window lets it go; filters by status and by the days
+queued; each row opens its stored text. **Send now** sends a held message again, and is refused
+with a sentence while mail is not set up or, on the sandbox, while the address is not on the
+allowlist. A message to an operator marked *Handled personally* is held ("operator handled
+personally"); a lease without a billing e-mail holds its messages ("no billing e-mail"); an empty
+managers' list holds the internal message ("no manager list").
+
+**Held is not failed.** `failed` names an error class from the provider (the worker's log has
+the class name only); `suppressed` means the charge closed or the operator was archived between
+queueing and sending; `held` means the message waits for a setting. Nothing is ever retried by
+itself: Send now is the only way a held message goes out.
