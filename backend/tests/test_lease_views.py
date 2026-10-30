@@ -6,6 +6,8 @@ views run as deployed and no request leaves.
 
 from __future__ import annotations
 
+import html
+import re
 import uuid
 from datetime import date
 from decimal import Decimal
@@ -23,6 +25,7 @@ from ledger.models import (
     CollectionSchedule,
     CollectionStatus,
     Lease,
+    LeaseBilling,
     LeaseRentHistory,
     Operator,
     PaymentChannel,
@@ -712,3 +715,157 @@ def test_an_operator_is_not_offered_once_archived(admin: Client) -> None:
     assert "Gone Operator" not in admin.get(NEW).content.decode()
     lease = make_lease(operator=archived, collection_status=CollectionStatus.PROSPECTIVE)
     assert "Gone Operator" in admin.get(paths(lease)["edit"]).content.decode()
+
+
+# --- PLAN-014 C4: the Billing details of New lease ------------------------------------------------
+
+
+def tag_with(page: str, *parts: str) -> bool:
+    """Whether one HTML tag of the page holds every one of ``parts``."""
+    return any(all(part in tag for part in parts) for tag in re.findall(r"<[^>]+>", page))
+
+
+def test_new_lease_shows_empty_billing_details_and_the_copy_data_of_each_operator(
+    admin: Client,
+) -> None:
+    from ledger.views.leases import BANK_NOT_SET_UP
+
+    operator = make_operator(email="copy@example.com", customer=None)
+    operator.phone, operator.city = "4155550132", "Austin"
+    operator.save()
+    page = admin.get(NEW).content.decode()
+    assert 'id="billing-card"' in page and "<h2>Billing details</h2>" in page
+    assert tag_with(page, 'id="copy-from-operator"', 'data-from="id_operator"')
+    assert tag_with(page, f'value="{operator.pk}"', 'data-email="copy@example.com"')
+    assert 'data-phone="4155550132"' in page and 'data-city="Austin"' in page
+    # Nothing is copied by the server: the billing fields start empty.
+    assert tag_with(page, 'name="email"', 'id="id_email"', 'data-shown-when="id_operator"')
+    assert 'value="copy@example.com"' not in page
+    assert tag_with(page, 'name="account"', 'value="later"', "checked")
+    assert tag_with(page, 'value="enter"', "disabled")
+    assert str(BANK_NOT_SET_UP) in page
+    assert "leases_billing.js" in page
+
+
+def test_new_lease_saves_billing_details_as_posted_empty_stays_empty(
+    admin: Client, fake: FakeProvider
+) -> None:
+    data = form_data()
+    assert admin.post(NEW, data).status_code == 302
+    lease = Lease.objects.get()
+    billing = lease.billing
+    # The operator's e-mail is views@example.com; nothing was copied.
+    assert (billing.email, billing.phone, billing.company_name) == ("", "", "")
+    lease.refresh_from_db()
+    assert lease.sync_status == "awaiting_link"
+    assert fake.calls == []
+
+
+def test_new_lease_later_with_an_email_creates_the_customer_and_no_method(
+    admin: Client, fake: FakeProvider
+) -> None:
+    data = form_data(email="Billing@Example.com", company_name="Two LLC", account="later")
+    response = admin.post(NEW, data)
+    lease = Lease.objects.get()
+    assert response["Location"] == f"/leases/{lease.pk}/"
+    assert (lease.billing.email, lease.billing.company_name) == ("billing@example.com", "Two LLC")
+    refs = dict(
+        ExternalRef.objects.filter(entity_id=lease.pk).values_list("external_kind", "external_id")
+    )
+    assert set(refs) == {"customer"}
+    lease.refresh_from_db()
+    assert lease.sync_status == "linked"
+
+
+def test_new_lease_refuses_enter_while_hosted_fields_are_not_set_up(admin: Client) -> None:
+    from ledger.views.leases import BANK_NOT_SET_UP
+
+    response = admin.post(NEW, form_data(account="enter", email="a@example.com"))
+    assert (response.status_code, response["Location"]) == (302, NEW)
+    assert Lease.objects.count() == 0
+    assert str(BANK_NOT_SET_UP) in admin.get(NEW).content.decode()
+
+
+@override_settings(STAX_PROVIDER="fake")
+def test_new_lease_with_enter_continues_to_the_bank_entry_page(
+    admin: Client, fake: FakeProvider
+) -> None:
+    response = admin.post(NEW, form_data(account="enter", email="a@example.com"))
+    lease = Lease.objects.get()
+    assert response["Location"] == f"/leases/{lease.pk}/bank/"
+
+
+def _holder(fake: FakeProvider) -> Lease:
+    from tests.test_lease_services import account_holder
+
+    return account_holder(fake)
+
+
+def test_new_lease_offers_and_saves_the_same_account_of_the_operators_lease(
+    admin: Client, fake: FakeProvider
+) -> None:
+    holder = _holder(fake)
+    page = admin.get(NEW).content.decode()
+    assert tag_with(
+        page,
+        f'value="same:{holder.pk}"',
+        f'data-shown-when="id_operator={holder.operator_id}"',
+    )
+    assert f"Use the same account as #{holder.store.external_label} (····6789)" in page
+    data = form_data(operator=str(holder.operator_id), account=f"same:{holder.pk}")
+    assert admin.post(NEW, data).status_code == 302
+    lease = Lease.objects.exclude(pk=holder.pk).get()
+    assert lease.billing.shares_account_of == holder
+    assert service.customer_ref(lease) == CUSTOMER
+
+
+def test_new_lease_refuses_the_account_of_another_operators_lease(
+    admin: Client, fake: FakeProvider
+) -> None:
+    holder = _holder(fake)
+    response = admin.post(NEW, form_data(account=f"same:{holder.pk}"))
+    assert (response.status_code, response["Location"]) == (302, NEW)
+    assert list(Lease.objects.all()) == [holder]
+    assert html.escape(service.ACCOUNT_NOT_SHAREABLE) in admin.get(NEW).content.decode()
+
+
+def _store_page(client: Client, lease: Lease) -> str:
+    response = client.get(f"/stores/{lease.store_id}/")
+    assert response.status_code == 200
+    return response.content.decode()
+
+
+@override_settings(STAX_PROVIDER="fake")
+def test_the_lease_card_offers_the_bank_entry_and_names_a_shared_account(
+    admin: Client, fake: FakeProvider
+) -> None:
+    holder = _holder(fake)
+    LeaseBilling.objects.filter(lease=holder).update(bank_last4="6789")
+    page = _store_page(admin, holder)
+    assert tag_with(page, 'id="lease-bank-entry"', f'href="/leases/{holder.pk}/bank/"')
+    assert ">Replace</a>" in page
+    sharer = make_lease(
+        operator=holder.operator,
+        store=Store.objects.create(external_label="Store 0404", status=StoreStatus.ACTIVE),
+    )
+    LeaseBilling.objects.filter(lease=sharer).update(shares_account_of=holder)
+    page = _store_page(admin, sharer)
+    assert f"Shared with #{holder.store.external_label}" in page
+    assert 'id="lease-bank-entry"' not in page
+
+
+def test_the_lease_card_offers_no_bank_entry_without_hosted_fields(
+    admin: Client, fake: FakeProvider
+) -> None:
+    lease = make_lease()
+    page = _store_page(admin, lease)
+    assert 'id="edit-billing"' in page and 'id="lease-bank-entry"' not in page
+
+
+@override_settings(STAX_PROVIDER="fake")
+def test_the_lease_card_says_add_a_bank_account_without_one(
+    admin: Client, fake: FakeProvider
+) -> None:
+    lease = make_lease()
+    page = _store_page(admin, lease)
+    assert tag_with(page, 'id="lease-bank-entry"') and ">Add a bank account</a>" in page

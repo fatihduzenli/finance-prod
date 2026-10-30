@@ -324,6 +324,7 @@ def sync_lease(
     provider: PaymentProvider,
     actor: User | None,
     retry: bool = False,
+    own_customer: bool = False,
 ) -> SyncOutcome:
     """Link, create or update the lease's provider customer, one call path per row.
 
@@ -335,6 +336,14 @@ def sync_lease(
     call) while the last attempt is less than :data:`RETRY_LOCK_SECONDS` old. A stored
     phone that fails the provider's rule refuses the sync (``PHONE_INVALID``) before any
     call and writes nothing.
+
+    ``own_customer=True`` (PLAN-014 C9, the ``create_lease_customers`` command): a lease
+    that shares another lease's account gets a customer of its own, still sharing until
+    staff switch it (``shares_account_of`` is not changed). Only a lease without its own
+    customer reference is sent. The e-mail look-up never adopts a customer that any other
+    entity holds (the account it shares included): a match held elsewhere is skipped, and
+    when every match is held elsewhere the customer is created. A match no one holds is
+    linked as usual.
     """
     with transaction.atomic():
         lease = (
@@ -344,13 +353,13 @@ def sync_lease(
         status = lease.sync_status
         if retry and status == SyncStatus.FAILED:
             status = SyncStatus.PENDING
-        if (
-            _archived(lease)
-            or billing.shares_account_of_id is not None
-            or status != SyncStatus.PENDING
-        ):
+        sharer = billing.shares_account_of_id is not None
+        own = own_customer and sharer
+        if _archived(lease) or (sharer and not own) or status != SyncStatus.PENDING:
             return SyncOutcome(Action.NO_CALL, lease.sync_status)
         customer = _current_ref(lease, KIND_CUSTOMER)
+        if own and customer is not None:
+            return SyncOutcome(Action.NO_CALL, lease.sync_status)
         if customer is not None:
             refused = _refused_before_call(lease, billing, retry=retry)
             if refused is not None:
@@ -381,7 +390,10 @@ def sync_lease(
                 if not _linked_elsewhere(record.external_id, KIND_CUSTOMER, lease.pk)
             ]
             needs_review = len(matches) > 1 or len(free) != len(matches)
-            if matches and not free:
+            if own:
+                # A customer another entity holds is never adopted (PLAN-014 C9).
+                needs_review = len(free) > 1
+            if matches and not free and not own:
                 return _fail(
                     lease,
                     before,
@@ -404,7 +416,7 @@ def sync_lease(
                 fields=failure_fields(error),
             )
 
-        _add_ref(lease, KIND_CUSTOMER, chosen.external_id)
+        _add_ref(lease, KIND_CUSTOMER, chosen.external_id, own_customer=own)
         lease.sync_status = SyncStatus.LINKED
         lease.sync_failure = ""
         lease.sync_failure_fields = ""
@@ -413,6 +425,8 @@ def sync_lease(
         after = {**_snapshot(lease), "customer": mask_identifier(chosen.external_id)}
         if action is Action.LINKED_EXISTING:
             after["matches"] = len(matches)
+        if own:
+            after["own_customer"] = True
         audit_action = (
             "lease.sync_linked" if action is Action.LINKED_EXISTING else "lease.sync_created"
         )
@@ -710,10 +724,16 @@ def _linked_elsewhere(external_id: str, kind: str, lease_id: uuid.UUID) -> bool:
     )
 
 
-def _add_ref(lease: Lease, kind: str, external_id: str) -> None:
+def _add_ref(lease: Lease, kind: str, external_id: str, *, own_customer: bool = False) -> None:
     """Write a reference of the lease; refused (:class:`SharesAccount`) for a lease that
-    shares another lease's account (one hop, never a chain or a cycle)."""
-    if LeaseBilling.objects.filter(lease=lease, shares_account_of__isnull=False).exists():
+    shares another lease's account (one hop, never a chain or a cycle), except its own
+    customer reference when asked for explicitly (``own_customer``, PLAN-014 C9: the
+    references that bill it stay the shared account's until staff switch it)."""
+    allowed = own_customer and kind == KIND_CUSTOMER
+    if (
+        not allowed
+        and LeaseBilling.objects.filter(lease=lease, shares_account_of__isnull=False).exists()
+    ):
         raise SharesAccount
     ExternalRef.objects.create(
         entity_type=ENTITY_LEASE,

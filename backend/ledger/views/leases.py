@@ -355,9 +355,20 @@ def _create_context(request: HttpRequest) -> store_context.StoreContext | None:
     return store_context.from_request(request, store=get_object_or_404(Store, pk=key))
 
 
+def enter_refusal() -> str:
+    """Why "Enter a bank account" cannot be chosen here, or ``""`` (PLAN-014 C4)."""
+    return "" if get_hosted_fields().available() else str(BANK_NOT_SET_UP)
+
+
 def _create_form(data: Any, context: store_context.StoreContext | None) -> LeaseCreateForm:
     initial = {} if context is None else {"store": context.store.pk}
-    form = LeaseCreateForm(data, initial=initial)
+    operators = Operator.objects.filter(archived_at__isnull=True).values_list("pk", flat=True)
+    form = LeaseCreateForm(
+        data,
+        initial=initial,
+        accounts=service.shareable_accounts(operators),
+        enter_refusal=enter_refusal(),
+    )
     if context is not None:
         _lock_known(form, ("store",))
     return form
@@ -379,6 +390,10 @@ def lease_create(request: HttpRequest) -> HttpResponse:
             return redirect(_saved_url(request, existing, context))
         form = _create_form(request.POST, context)
         if form.is_valid():
+            # PLAN-014 C4: the billing details belong to a lease with an operator; without
+            # one they are not saved (the page hides them until an operator is chosen).
+            has_operator = form.cleaned_data.get("operator") is not None
+            account = form.cleaned_data["account"] if has_operator else service.ACCOUNT_LATER
             try:
                 lease, created, charges = one_off_charges.create_lease_with_checklist(
                     form.cleaned_data,
@@ -386,15 +401,23 @@ def lease_create(request: HttpRequest) -> HttpResponse:
                     creation_key=form.cleaned_data["creation_key"],
                     items=form.setup_items(),
                     actor=_actor(request),
+                    billing=form.billing_values() if has_operator else None,
+                    account=account,
                 )
             except SetupRefused as refusal:
                 form.add_error(None, _checklist_refusal(refusal))
+            except LeaseRefused as refusal:
+                form.add_error(
+                    refusal.field if refusal.field in form.fields else None, str(refusal)
+                )
             else:
                 if created:
                     messages.success(request, _saved_message(len(charges)))
                     documents.upload_after_create(request, lease, "lease")
                 else:
                     messages.info(request, ALREADY_SAVED)
+                if created and account == service.ACCOUNT_ENTER:
+                    return redirect("ledger:leases:bank", pk=lease.pk)
                 return redirect(_saved_url(request, lease, context))
         _hold(request, "lease-create", form)
         return redirect(request.get_full_path())

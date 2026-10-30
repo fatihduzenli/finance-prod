@@ -107,6 +107,10 @@ def _sync(job: Job, outcome: SyncOutcome) -> Result:
 
 
 def _refresh_methods_after(job: Job) -> None:
+    if job.params.get("own_customer") is True:
+        # A sharing lease's new own customer has no method yet, and the methods the lease
+        # bills with are the shared account's (PLAN-014 C9): nothing to read.
+        return
     lease = Lease.objects.filter(pk=job.entity_id).first()
     if lease is not None and lease_sync.current_refs(lease).get(lease_sync.KIND_CUSTOMER):
         jobs.refresh_methods(lease, job.requested_by)
@@ -139,7 +143,11 @@ def lease_sync_job(job: Job) -> Result:
     return _sync(
         job,
         lease_sync.sync_lease(
-            job.entity_id, provider=payments.get_provider(), actor=job.requested_by
+            job.entity_id,
+            provider=payments.get_provider(),
+            actor=job.requested_by,
+            # PLAN-014 C9: create_lease_customers asks for a sharing lease's own customer.
+            own_customer=job.params.get("own_customer") is True,
         ),
     )
 

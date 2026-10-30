@@ -43,11 +43,13 @@ from ledger.forms import (
     TransferDebtOverrideForm,
     TransferIncomingForm,
     TransferOperatorForm,
+    copied_attrs,
 )
 from ledger.models import LeaseEnd, LeaseTransfer, LeaseTransferStatus, Operator, Store
 from ledger.services import lease_end, leases, statements
 from ledger.services import operators as operator_service
 from ledger.services import transfer as service
+from ledger.views import leases as lease_views
 from ledger.views import wizard_frame
 from ledger.views.operators import (
     EMAIL_TAKEN,
@@ -332,8 +334,16 @@ def _incoming_form(
 ) -> TransferIncomingForm:
     fee_types = service.setup_types()
     offered = service.deposit_type() is not None
+    # PLAN-014 C4: the incoming lease's Billing details, over the incoming operator's leases.
+    operator = transfer.incoming_operator
+    billing_step: dict[str, Any] = {
+        "accounts": leases.shareable_accounts([operator.pk] if operator is not None else []),
+        "enter_refusal": lease_views.enter_refusal(),
+    }
     if data is not None:
-        return TransferIncomingForm(data, fee_types=fee_types, deposit_offered=offered)
+        return TransferIncomingForm(
+            data, fee_types=fee_types, deposit_offered=offered, **billing_step
+        )
     initial: dict[str, Any]
     if service.incoming_set(transfer):
         initial = {
@@ -349,6 +359,8 @@ def _incoming_form(
             # The items already chosen keep their price (PLAN-012d D9: a price means
             # charged).
             initial[f"setup_{line.fee_type.code}_price"] = line.price
+        initial.update(transfer.incoming_billing or {})
+        initial["account"] = transfer.incoming_account
     else:
         outgoing = transfer.outgoing_lease
         end = transfer.lease_end
@@ -365,7 +377,9 @@ def _incoming_form(
             "prorate_first_month": True,
             "deposit_amount": service.default_deposit(transfer),
         }
-    return TransferIncomingForm(initial=initial, fee_types=fee_types, deposit_offered=offered)
+    return TransferIncomingForm(
+        initial=initial, fee_types=fee_types, deposit_offered=offered, **billing_step
+    )
 
 
 @role_required
@@ -400,6 +414,8 @@ def incoming(request: HttpRequest, pk: str) -> HttpResponse:
                 deposit_amount=data["deposit_amount"],
                 setup=[service.SetupInput(fee, price) for fee, price in form.setup_items()],
                 actor=_actor(request),
+                billing=form.billing_values(),
+                account=data["account"],
             )
             if outcome.ok:
                 messages.success(request, outcome.message)
@@ -414,7 +430,9 @@ def incoming(request: HttpRequest, pk: str) -> HttpResponse:
     return render(
         request,
         "ledger/transfers/incoming.html",
-        _context(transfer, "incoming", form=form),
+        _context(
+            transfer, "incoming", form=form, copy_attrs=copied_attrs(transfer.incoming_operator)
+        ),
     )
 
 
@@ -454,6 +472,14 @@ def confirm(request: HttpRequest, pk: str) -> HttpResponse:
             outcome = service.confirm(transfer, _actor(request), confirmed=True)
             if outcome.ok:
                 messages.success(request, outcome.message)
+                confirmed = outcome.transfer
+                # PLAN-014 C4: "Enter a bank account" continues to the new lease's bank entry.
+                if (
+                    confirmed is not None
+                    and confirmed.incoming_lease_id is not None
+                    and confirmed.incoming_account == leases.ACCOUNT_ENTER
+                ):
+                    return redirect("ledger:leases:bank", pk=confirmed.incoming_lease_id)
                 return redirect("ledger:transfers:confirm", pk=transfer.pk)
             if outcome.field == "statement" and transfer.lease_end is not None:
                 return wizard_frame.statement_first(request, transfer.lease_end)

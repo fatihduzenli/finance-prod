@@ -1500,3 +1500,154 @@ def test_the_debit_instant_is_noon_utc_of_the_day() -> None:
     assert service.next_debit_at(15, service.debit_instant(date(2026, 10, 15))) == datetime(
         2026, 11, 15, 12, tzinfo=UTC
     )
+
+
+# --- PLAN-014 C4: a new lease's billing details and bank-account choice -------------------------
+
+BILLING_IN = {
+    "company_name": "Northwind Two LLC",
+    "email": "two@example.com",
+    "phone": "4155550132",
+    "address_line1": "1 Main St",
+    "address_line2": "",
+    "city": "Austin",
+    "state": "TX",
+    "postal_code": "78701",
+}
+
+
+def account_holder(fake: FakeProvider, *, kind: str = "bank", raw_status: str = "") -> Lease:
+    """A lease of a new operator holding its own customer, a linked method and the method
+    list read (the latest snapshot lists the method)."""
+    fake.add_payment_method(CUSTOMER, method(kind=kind, raw_status=raw_status))
+    lease = make_lease()
+    ExternalRef.objects.create(
+        entity_type="lease",
+        entity_id=lease.pk,
+        provider="stax_pay",
+        external_kind="payment_method",
+        external_id=BANK,
+    )
+    assert service.refresh_payment_methods(lease.pk).ok
+    return lease
+
+
+def operator_of(lease: Lease) -> list[uuid.UUID]:
+    assert lease.operator_id is not None
+    return [lease.operator_id]
+
+
+def new_lease(operator: Operator | None, billing: dict[str, Any] | None, account: str) -> Lease:
+    lease, created = service.create_lease(
+        lease_fields(
+            operator=operator,
+            store=Store.objects.create(external_label="Store 0303", status=StoreStatus.ACTIVE),
+        ),
+        rent=RENT,
+        creation_key=uuid.uuid4(),
+        actor=None,
+        today=date(2025, 12, 31),
+        billing=billing,
+        account=account,
+    )
+    assert created
+    return lease
+
+
+def test_a_new_lease_without_billing_details_keeps_no_billing_row() -> None:
+    lease = new_lease(make_operator(customer=None), None, service.ACCOUNT_LATER)
+    assert not LeaseBilling.objects.filter(lease=lease).exists()
+    assert lease.sync_status == "not_applicable"
+
+
+def test_later_with_an_email_saves_the_details_as_typed_and_queues_one_sync() -> None:
+    from payments.models import Job, JobKind
+
+    lease = new_lease(make_operator(customer=None), BILLING_IN, service.ACCOUNT_LATER)
+    billing = LeaseBilling.objects.get(lease=lease)
+    assert {name: getattr(billing, name) for name in BILLING_IN} == BILLING_IN
+    assert billing.shares_account_of is None and billing.bank_last4 == ""
+    lease.refresh_from_db()
+    assert lease.sync_status == "pending"
+    [job] = Job.objects.filter(entity_id=lease.pk)
+    assert job.kind == JobKind.LEASE_SYNC
+    [audit] = AuditLog.objects.filter(action="lease_billing.changed", entity_id=str(lease.pk))
+    assert audit.before is None and audit.after["email"] == "two@example.com"
+    assert ExternalRef.objects.filter(entity_id=lease.pk).count() == 0
+
+
+def test_later_without_an_email_waits_for_a_link_and_queues_nothing() -> None:
+    from payments.models import Job
+
+    lease = new_lease(make_operator(customer=None), {"company_name": ""}, service.ACCOUNT_LATER)
+    lease.refresh_from_db()
+    assert lease.sync_status == "awaiting_link"
+    assert LeaseBilling.objects.get(lease=lease).email == ""
+    assert not Job.objects.filter(entity_id=lease.pk).exists()
+
+
+def test_enter_is_later_for_the_service_the_page_continues_to_the_bank_entry() -> None:
+    from payments.models import Job
+
+    lease = new_lease(make_operator(customer=None), BILLING_IN, service.ACCOUNT_ENTER)
+    assert Job.objects.filter(entity_id=lease.pk).count() == 1
+
+
+def test_the_same_account_shares_a_usable_lease_of_the_operator(fake: FakeProvider) -> None:
+    from payments.models import Job
+
+    holder = account_holder(fake)
+    [found] = service.shareable_accounts(operator_of(holder))
+    assert (found.lease, found.last4, found.value) == (holder, "6789", f"same:{holder.pk}")
+    lease = new_lease(holder.operator, BILLING_IN, found.value)
+    billing = LeaseBilling.objects.get(lease=lease)
+    assert billing.shares_account_of == holder and billing.email == BILLING_IN["email"]
+    lease.refresh_from_db()
+    assert lease.sync_status == "not_applicable"
+    assert not Job.objects.filter(entity_id=lease.pk).exists()
+    assert service.customer_ref(lease) == CUSTOMER
+    assert service.linked_payment_method(lease) == BANK
+    assert service.shareable_accounts(operator_of(holder)) == [found]  # a sharer is not listed
+
+
+@pytest.mark.parametrize("why", ["card", "deleted", "other_operator", "sharer", "no_method"])
+def test_a_same_account_that_cannot_be_shared_is_refused_and_nothing_is_saved(
+    fake: FakeProvider, why: str
+) -> None:
+    holder = account_holder(
+        fake,
+        kind="card" if why == "card" else "bank",
+        raw_status=PAYMENT_METHOD_DELETED if why == "deleted" else "",
+    )
+    operator = holder.operator
+    target = holder
+    if why == "other_operator":
+        operator = make_operator(email="other@example.com", customer=None)
+    elif why == "sharer":
+        target = new_lease(holder.operator, BILLING_IN, f"same:{holder.pk}")
+    elif why == "no_method":
+        ExternalRef.objects.filter(external_kind="payment_method").update(superseded_at=NOW)
+    leases_before = Lease.objects.count()
+    if why in ("card", "deleted", "no_method"):
+        assert service.shareable_accounts(operator_of(holder)) == []
+    with pytest.raises(LeaseRefused) as refused:
+        new_lease(operator, BILLING_IN, f"same:{target.pk}")
+    assert (refused.value.field, str(refused.value)) == ("account", service.ACCOUNT_NOT_SHAREABLE)
+    assert Lease.objects.count() == leases_before
+    assert LeaseBilling.objects.filter(email=BILLING_IN["email"]).count() == (
+        1 if why == "sharer" else 0
+    )
+
+
+@pytest.mark.parametrize("account", ["", "same:", "same:not-a-uuid", "sometime", "SAME:x"])
+def test_an_unknown_account_choice_is_refused(account: str) -> None:
+    with pytest.raises(LeaseRefused) as refused:
+        new_lease(make_operator(customer=None), BILLING_IN, account)
+    assert str(refused.value) == service.ACCOUNT_INVALID
+    assert not Lease.objects.filter(store__external_label="Store 0303").exists()
+
+
+def test_a_same_account_of_an_unknown_lease_is_refused() -> None:
+    with pytest.raises(LeaseRefused) as refused:
+        new_lease(make_operator(customer=None), BILLING_IN, f"same:{uuid.uuid4()}")
+    assert str(refused.value) == service.ACCOUNT_NOT_SHAREABLE

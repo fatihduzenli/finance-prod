@@ -55,7 +55,7 @@ from payments.errors import (
 )
 from payments.fake import FakeProvider
 from payments.lease_sync import Action
-from payments.models import ExternalRef, Job, JobKind
+from payments.models import ExternalRef, Job, JobKind, JobStatus
 from payments.provider import CustomerQuery, CustomerRecord, mask_identifier
 from payments.stax.adapter import StaxProvider
 from tests.auth_helpers import make_user
@@ -1489,3 +1489,138 @@ def test_006c_row6_two_concurrent_edits_never_crash_and_stax_ends_on_the_saved_r
     assert sent[-1][1].phone == billing_row(lease).phone
     assert lease.sync_status == SyncStatus.LINKED
     assert len(customer_refs(lease)) == 1
+
+
+# --- PLAN-014 C9: a sharing lease's own customer ---------------------------------------------
+
+
+def primary_and_sharer(actor: User, provider: FakeProvider) -> tuple[Lease, Lease]:
+    """The primary lease, holding the customer ``cus_primary_0001`` (billing e-mail
+    :data:`EMAIL`, at the provider too), and a second lease of the same operator sharing
+    its account with the same billing e-mail, as ledger migration 0059 left them."""
+    primary = create(actor)
+    add_provider_customer(provider, "cus_primary_0001", EMAIL)
+    ExternalRef.objects.create(
+        entity_type="lease",
+        entity_id=primary.pk,
+        provider=lease_sync.PROVIDER_KEY,
+        external_kind="customer",
+        external_id="cus_primary_0001",
+    )
+    ExternalRef.objects.create(
+        entity_type="lease",
+        entity_id=primary.pk,
+        provider=lease_sync.PROVIDER_KEY,
+        external_kind="payment_method",
+        external_id="pm_primary_0001",
+    )
+    sharer = billed_lease(actor, operator=primary.operator)
+    LeaseBilling.objects.filter(lease=sharer).update(shares_account_of=primary)
+    Lease.objects.filter(pk=sharer.pk).update(sync_status="not_applicable")
+    return primary, Lease.objects.get(pk=sharer.pk)
+
+
+def pend(lease: Lease) -> None:
+    Lease.objects.filter(pk=lease.pk).update(sync_status="pending")
+
+
+@pytest.mark.django_db
+def test_a_sharing_lease_is_never_sent_without_own_customer(actor: User) -> None:
+    provider = FuzzyFakeProvider()
+    _, sharer = primary_and_sharer(actor, provider)
+    pend(sharer)
+    outcome = lease_sync.sync_lease(sharer.pk, provider=provider, actor=actor)
+    assert outcome.action is Action.NO_CALL and provider.calls == []
+
+
+@pytest.mark.django_db
+def test_own_customer_creates_a_customer_and_never_adopts_the_shared_one(actor: User) -> None:
+    from ledger.services import leases
+
+    provider = FuzzyFakeProvider()
+    primary, sharer = primary_and_sharer(actor, provider)
+    pend(sharer)
+    outcome = lease_sync.sync_lease(sharer.pk, provider=provider, actor=actor, own_customer=True)
+    assert outcome.action is Action.CREATED, outcome
+    assert call_names(provider) == ["find_customers", "create_customer"]
+    [own] = customer_refs(sharer)
+    assert own.external_id not in ("cus_primary_0001", "") and own.superseded_at is None
+    # Still sharing: the account that bills it is the primary's, its method untouched.
+    assert billing_row(sharer).shares_account_of_id == primary.pk
+    assert leases.customer_ref(sharer) == "cus_primary_0001"
+    assert leases.linked_payment_method(sharer) == "pm_primary_0001"
+    assert not ExternalRef.objects.filter(entity_id=sharer.pk, external_kind="payment_method")
+    sharer.refresh_from_db()
+    assert (sharer.sync_status, sharer.needs_review) == ("linked", False)
+    audit = AuditLog.objects.filter(entity_id=str(sharer.pk), action="lease.sync_created").get()
+    assert audit.after["own_customer"] is True
+    # A second run sends nothing.
+    provider.calls.clear()
+    pend(sharer)
+    again = lease_sync.sync_lease(sharer.pk, provider=provider, actor=actor, own_customer=True)
+    assert again.action is Action.NO_CALL and provider.calls == []
+
+
+@pytest.mark.django_db
+def test_own_customer_links_a_free_match_and_skips_the_held_one(actor: User) -> None:
+    provider = FuzzyFakeProvider()
+    _, sharer = primary_and_sharer(actor, provider)
+    add_provider_customer(provider, "cus_free_000001", EMAIL)
+    pend(sharer)
+    outcome = lease_sync.sync_lease(sharer.pk, provider=provider, actor=actor, own_customer=True)
+    assert outcome.action is Action.LINKED_EXISTING
+    assert [ref.external_id for ref in customer_refs(sharer)] == ["cus_free_000001"]
+    assert "create_customer" not in call_names(provider)
+
+
+def _queue(**options: Any) -> str:
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    out = StringIO()
+    call_command("create_lease_customers", stdout=out, **options)
+    return out.getvalue()
+
+
+@pytest.mark.django_db
+def test_the_command_counts_queues_once_and_honours_the_limit(actor: User) -> None:
+    provider = FuzzyFakeProvider()
+    primary, sharer = primary_and_sharer(actor, provider)
+    second = billed_lease(actor, operator=primary.operator)
+    LeaseBilling.objects.filter(lease=second).update(shares_account_of=primary)
+    no_email = billed_lease(actor, operator=primary.operator, email="")
+    LeaseBilling.objects.filter(lease=no_email).update(shares_account_of=primary)
+    Job.objects.all().delete()
+    assert _queue(dry_run=True) == "leases: 3, queued: 0\n"
+    assert not Job.objects.exists()
+    assert _queue(limit=1) == "leases: 3, queued: 1\n"
+    [job] = Job.objects.all()
+    assert (job.kind, job.entity_id, job.params) == (
+        JobKind.LEASE_SYNC,
+        sharer.pk,
+        {"own_customer": True},
+    )
+    # The waiting job is not queued again; the lease without an e-mail never is.
+    assert _queue() == "leases: 3, queued: 1\n"
+    assert sorted(Job.objects.values_list("entity_id", flat=True)) == sorted([sharer.pk, second.pk])
+    assert _queue() == "leases: 3, queued: 0\n"
+    assert LeaseBilling.objects.filter(shares_account_of=primary).count() == 3
+
+
+@pytest.mark.django_db
+def test_the_queued_jobs_give_each_sharing_lease_its_own_customer(
+    actor: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.job_helpers import run_queued_jobs
+
+    provider = FuzzyFakeProvider()
+    monkeypatch.setattr("payments.get_provider", lambda: provider)
+    primary, sharer = primary_and_sharer(actor, provider)
+    Job.objects.all().delete()
+    assert _queue() == "leases: 1, queued: 1\n"
+    [done] = run_queued_jobs()
+    assert done.status == JobStatus.DONE, done.result
+    assert len(customer_refs(sharer)) == 1 and "list_payment_methods" not in call_names(provider)
+    assert billing_row(sharer).shares_account_of_id == primary.pk
+    assert _queue() == "leases: 0, queued: 0\n"

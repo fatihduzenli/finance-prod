@@ -6,6 +6,10 @@ with the logo and the headline over the banner strip and the form, which takes t
 form's primary button stays in view above the tab bar on a phone while the form is longer than
 the screen. A wizard step shows its step pills on a laptop and "Step N of M" on a phone. Every
 other page fits a phone's width: nothing scrolls sideways but a scroll region.
+
+PLAN-014 C4 on the New lease page: the Billing details appear once an operator is chosen,
+"Copy from operator" fills the e-mail, phone and address from the chosen operator only when
+pressed, and a "same account" choice is shown only while its lease's operator is chosen.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from playwright.sync_api import Browser, BrowserContext, FloatRect, Page, Viewpo
 from pytest_django.live_server_helper import LiveServer
 
 from accounts.roles import Role
-from ledger.models import PaymentChannel
+from ledger.models import Lease, PaymentChannel
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.receivables_helpers import a_lease, a_payment, a_rent_charge, a_store, an_operator
 
@@ -175,3 +179,75 @@ def test_the_other_pages_fit_a_phones_width(live_server: LiveServer, phone: Brow
         page.goto(f"{live_server.url}{path}")
         assert page.locator("#breadcrumb, #page-header h1").first.is_visible(), path
         assert page.evaluate("document.documentElement.scrollWidth") <= PHONE["width"], path
+
+
+def _account_holder(operator_name: str) -> Lease:
+    """A lease with its own processor customer, a linked bank method and the method list
+    read (written directly: no provider call)."""
+    from django.utils import timezone
+
+    from ledger.models import LeaseBilling
+    from payments.models import ExternalRef, ProviderSnapshot
+
+    lease = a_lease(a_store("0914 HOLD", 914), an_operator(operator_name))
+    LeaseBilling.objects.create(lease=lease, email="hold@example.com", bank_last4="4821")
+    customer = ExternalRef.objects.create(
+        entity_type="lease",
+        entity_id=lease.pk,
+        provider="stax_pay",
+        external_kind="customer",
+        external_id="cus-e2e-hold",
+    )
+    ExternalRef.objects.create(
+        entity_type="lease",
+        entity_id=lease.pk,
+        provider="stax_pay",
+        external_kind="payment_method",
+        external_id="pm-e2e-hold",
+    )
+    ProviderSnapshot.objects.create(
+        external_ref=customer,
+        payload=[
+            {
+                "external_id": "pm-e2e-hold",
+                "raw_status": "",
+                "method": "bank",
+                "last_four": "4821",
+                "bank_type": "checking",
+                "nickname": "",
+                "is_default": True,
+            }
+        ],
+        fetched_at=timezone.now(),
+    )
+    return lease
+
+
+def test_new_lease_billing_details_follow_the_operator_and_copy_only_when_asked(
+    live_server: LiveServer, laptop: BrowserContext
+) -> None:
+    holder = _account_holder("Holder Co")
+    other = an_operator("Copy Co")
+    other.email, other.phone, other.city = "copy@example.com", "4155550132", "Austin"
+    other.save()
+    page = signed_in(laptop, live_server, Role.ADMIN)
+    page.goto(f"{live_server.url}{reverse('ledger:leases:create')}")
+    assert page.locator("#billing-card").is_visible()
+    # No operator yet: the billing fields and Copy are hidden; Later is chosen.
+    assert not page.locator("#id_email").is_visible()
+    assert not page.locator("#copy-from-operator").is_visible()
+    assert page.locator("#id_account_0").is_checked()
+    same = page.locator(f'input[name="account"][value="same:{holder.pk}"]')
+    assert not same.is_visible()
+    page.select_option("#id_operator", str(other.pk))
+    assert page.locator("#id_email").is_visible() and page.locator("#id_email").input_value() == ""
+    assert not same.is_visible()  # the holder's operator is not the one chosen
+    page.locator("#copy-from-operator").click()
+    assert page.locator("#id_email").input_value() == "copy@example.com"
+    assert page.locator("#id_phone").input_value() == "4155550132"
+    assert page.locator("#id_city").input_value() == "Austin"
+    assert page.locator("#id_company_name").input_value() == ""  # the company is not copied
+    page.select_option("#id_operator", str(holder.operator_id))
+    assert same.is_visible() and same.is_enabled()
+    card = page.locator("#billing-card").inner_text()
+    assert "Use the same account as #0914 HOLD (····4821)" in card

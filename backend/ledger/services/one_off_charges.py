@@ -832,16 +832,24 @@ def create_lease_with_checklist(
     creation_key: uuid.UUID,
     items: Sequence[ChargeInput],
     actor: User | None,
+    billing: Mapping[str, Any] | None = None,
+    account: str = leases.ACCOUNT_LATER,
 ) -> tuple[Lease, bool, list[OneOffCharge]]:
     """Save a new lease and the ticked setup charges in one transaction (D5).
 
     A resubmitted form (same ``creation_key``) returns the lease the first one made and
     creates nothing. A refused row raises :class:`SetupRefused` and nothing is saved,
-    the lease included.
+    the lease included; so does a refused bank-account choice
+    (:class:`~ledger.services.leases.LeaseRefused`, PLAN-014 C4).
     """
     with transaction.atomic():
         lease, created = leases.create_lease(
-            fields, rent=rent, creation_key=creation_key, actor=actor
+            fields,
+            rent=rent,
+            creation_key=creation_key,
+            actor=actor,
+            billing=billing,
+            account=account,
         )
         if not created:
             return lease, False, []
