@@ -434,6 +434,7 @@ def test_the_real_base_sender_is_built_once_from_the_settings(rsa_key: rsa.RSAPr
         assert mail._base_sender() is first
         company(sender_email="other@example.com")
         second = mail._base_sender()
+        assert isinstance(second, gmail.GmailApiSender)
         assert second is not first and second.sender == "other@example.com"
     with override_settings(GMAIL_SERVICE_ACCOUNT_JSON="not json"):
         with pytest.raises(mail.MailUnavailable) as raised:

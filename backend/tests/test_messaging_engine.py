@@ -91,9 +91,9 @@ def plan_templates() -> dict[str, tuple[str, str]]:
         found[CODES[match.group(1)]] = (match.group(2), "\n".join(body))
     swap = section[section.index("`returned_debit_no_retry`") :]
     old, new = re.findall(r'"([^"]+)"', " ".join(swap.split()))
-    subject, body = found["returned_debit"]
-    assert old in body
-    found["returned_debit_no_retry"] = (subject, body.replace(old, new))
+    f_subject, f_body = found["returned_debit"]
+    assert old in f_body
+    found["returned_debit_no_retry"] = (f_subject, f_body.replace(old, new))
     return found
 
 
