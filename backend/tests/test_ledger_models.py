@@ -726,14 +726,25 @@ def choice_cases(
 ) -> list[ConstraintCase]:
     """``<table>_<field>_valid`` for every field with choices."""
 
-    def with_bogus(factory: Callable[..., models.Model], name: str) -> Callable[[], models.Model]:
-        return lambda: factory(**{name: "bogus"})
+    # A bogus value that must travel with a companion so that only the choice CHECK can fail:
+    # PostgreSQL reports the first violated constraint by name, and a queued row with a held
+    # reason violates outbound_messages_held_has_reason before ..._held_reason_valid.
+    companions: dict[tuple[str, str], dict[str, Any]] = {
+        ("outbound_messages", "held_reason"): {"status": "held"},
+    }
+
+    def with_bogus(
+        factory: Callable[..., models.Model], name: str, extra: dict[str, Any]
+    ) -> Callable[[], models.Model]:
+        return lambda: factory(**{name: "bogus", **extra})
 
     return [
         ConstraintCase(
             f"{model._meta.db_table}_{field.name}_valid",
             factory,
-            with_bogus(factory, field.attname),
+            with_bogus(
+                factory, field.attname, companions.get((model._meta.db_table, field.name), {})
+            ),
         )
         for model, factory in factories.items()
         for field in model._meta.concrete_fields

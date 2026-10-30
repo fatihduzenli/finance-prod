@@ -22,6 +22,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 
 from ledger.models import (
+    CompanySettings,
     Document,
     MessageTemplate,
     Operator,
@@ -182,6 +183,8 @@ def test_the_database_trigger_refuses_a_card_number(table: str, column: str) -> 
         "outbound_messages": lambda: message(),
         "message_templates": lambda: MessageTemplate(code="t_guard", subject="S", body="B"),
         "operators": operator,
+        # PLAN-014 D1: ledger 0061 rebuilt the company settings' guard with the four mail columns.
+        "company_settings": CompanySettings.current,
     }
     row = rows[table]()
     row.save()
