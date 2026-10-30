@@ -225,6 +225,11 @@ class SharesAccount(Exception):  # noqa: N818 (reads as a state, like the provid
     """A lease that shares another lease's account may not hold references of its own."""
 
 
+class OperatorArchived(Exception):  # noqa: N818 (reads as a state, like the provider errors)
+    """The lease's operator is archived: its billing details may not change (the
+    :data:`ARCHIVED` state :func:`link_lease` answers with)."""
+
+
 # --- Local writes -------------------------------------------------------------------
 
 
@@ -247,12 +252,15 @@ def update_billing(
     customer; one without a reference and with an e-mail is marked ``pending`` (unless its
     last attempt failed: only the retry calls again), so the job links or creates its
     customer; one without an e-mail waits for a manual link. A lease that shares another
-    lease's account keeps its status: nothing is sent for it.
+    lease's account keeps its status: nothing is sent for it. A lease of an archived
+    operator raises :class:`OperatorArchived` and writes nothing.
     """
     with transaction.atomic():
         lease = (
             Lease.objects.select_for_update().select_related("operator", "store").get(pk=lease_id)
         )
+        if _archived(lease):
+            raise OperatorArchived
         billing = billing_of(lease)
         before = billing_snapshot(billing)
         payload = _payload(lease, billing)

@@ -685,9 +685,13 @@ def lease_billing(request: HttpRequest, pk: str) -> HttpResponse:
             return redirect("ledger:leases:billing", pk=lease.pk)
         form = LeaseBillingForm(request.POST, instance=lease_sync.billing_of(lease))
         if form.is_valid():
-            updated, _ = lease_sync.update_billing(
-                lease.pk, form.cleaned_data, actor=_actor(request)
-            )
+            try:
+                updated, _ = lease_sync.update_billing(
+                    lease.pk, form.cleaned_data, actor=_actor(request)
+                )
+            except lease_sync.OperatorArchived:  # archived since the check above
+                messages.error(request, lease_sync.MESSAGES[lease_sync.ARCHIVED])
+                return redirect("ledger:leases:billing", pk=lease.pk)
             messages.success(request, BILLING_SAVED)
             if updated.sync_status == SyncStatus.PENDING and not busy(request, updated):
                 submit(request, JobKind.LEASE_SYNC, updated)

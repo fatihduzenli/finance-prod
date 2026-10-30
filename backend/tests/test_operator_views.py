@@ -638,6 +638,34 @@ def test_an_archived_operator_cannot_be_edited_and_its_lease_not_billed_retried_
     assert Job.objects.count() == 0
 
 
+def test_a_billing_save_racing_an_archive_is_refused_by_the_service_with_the_message(
+    fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fable's C part 1 finding: the service refuses an archived operator's lease itself,
+    so an archive between the view's check and the save writes nothing either."""
+    from ledger.views import leases as lease_views
+
+    lease = awaiting_lease()
+    assert lease.operator is not None
+    operator_service.archive_operator(lease.operator.pk, actor=None)
+    real_load = lease_views._load
+
+    def loaded_before_the_archive(pk: str) -> Any:
+        row = real_load(pk)
+        assert row.operator is not None
+        row.operator.archived_at = None
+        return row
+
+    monkeypatch.setattr(lease_views, "_load", loaded_before_the_archive)
+    client, _ = client_for(Role.BILLING)
+    response = client.post(billing_url(lease), billing_data(city="Changed"), follow=True)
+    assert response.redirect_chain == [(billing_url(lease), 302)]
+    assert "This operator is archived." in response.content.decode()
+    assert "Billing details saved." not in response.content.decode()
+    assert billing_of(lease).city == "Testville"
+    assert fake.calls == [] and Job.objects.count() == 0
+
+
 def test_no_delete_route_exists() -> None:
     for name in ("delete", "remove", "destroy"):
         with pytest.raises(NoReverseMatch):

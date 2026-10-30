@@ -692,6 +692,15 @@ def test_archived_operator_cannot_be_updated_and_its_lease_not_synced_or_linked(
     operators.archive_operator(lease.operator.pk, actor=actor)
     with pytest.raises(operators.OperatorArchived):
         operators.update_operator(lease.operator.pk, fields(city="X"), actor=actor)
+    # Fable's C part 1 finding: the service refuses the billing edit too, whoever calls it.
+    status, audits = Lease.objects.get(pk=lease.pk).sync_status, AuditLog.objects.count()
+    with pytest.raises(lease_sync.OperatorArchived):
+        lease_sync.update_billing(
+            lease.pk, billing_fields(city="X", email="moved@example.com"), actor=actor
+        )
+    assert (billing_row(lease).city, billing_row(lease).email) == ("Testville", EMAIL)
+    assert Lease.objects.get(pk=lease.pk).sync_status == status
+    assert AuditLog.objects.count() == audits
     assert lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=True).action is (
         Action.NO_CALL
     )
