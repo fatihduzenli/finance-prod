@@ -1596,6 +1596,9 @@ p.detail-more-notes { padding-left: 0; }
   form input:not([type=checkbox]):not([type=radio]):not([type=hidden]), form select, form textarea { width: 100% !important; }
   form .btn, form button { width: 100%; }
   form button.link-action { width: auto; }
+  /* The Payment status card's Weekly | Monthly segments are form buttons too: they keep their
+     own width, side by side in the pill. */
+  .period-switch button { width: auto; }
   /* An open bar menu opens in the flow: nothing hangs past the screen's edge. */
   .menu ul { position: static; margin-top: var(--space-1); box-shadow: none; }
   /* A list's card gives way to its rows' cards. */
