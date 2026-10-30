@@ -8,9 +8,9 @@ a post that still sends them is not refused, and they are not written (the colum
 history). ``Operator.save`` derives the display name from the kind's name fields only while
 it is empty. Existing operators became people with empty names and their display name kept
 (ledger migration 0052, which reverses). The search finds an operator by its Full name or
-its e-mail address (PLAN-014 C1), never by the old name columns. Every select of the module refuses with its own words, never with
-the posted value: a card number posted to any of them is not in the response nor in the
-page that re-opens the form.
+its e-mail address (PLAN-014 C1), never by the old name columns. Every select of the module
+refuses with its own words, never with the posted value: a card number posted to any of them
+is not in the response nor in the page that re-opens the form.
 """
 
 from __future__ import annotations
