@@ -24,7 +24,7 @@
 <main>
   <p class="muted">{{ company }}</p>
   <h1>Statement: {{ operator.display_name }}</h1>
-  {% if operator.legal_name or operator.company %}<p>{{ operator.legal_name }}{% if operator.legal_name and operator.company %} · {% endif %}{{ operator.company }}</p>{% endif %}
+  {% with companies=bill_to %}{% if companies %}<ul class="statement-bill-to" id="statement-bill-to">{% for account in companies %}{% if account.company %}<li>{{ account.lease.store.external_label }}: {{ account.company }}</li>{% endif %}{% endfor %}</ul>{% endif %}{% endwith %}
   <p class="muted">As of {{ report.today|day }}; payment history {{ report.range.from_month|month }} to {{ report.range.to_month|month }} (the last {{ months }} months). Every store. Amounts in US dollars.</p>
 
   <h2>Open charges</h2>

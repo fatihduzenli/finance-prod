@@ -82,6 +82,7 @@ from ledger.models import (
 from ledger.services import one_off_charges, proration, receivables
 from ledger.services.leases import debit_amounts, rent_on
 from ledger.services.rent_run import falls_on, months_catch_up_would_create
+from payments import lease_sync
 
 #: What a new charge of the last month is named on the statement.
 NEW_CHARGE = "new charge"
@@ -262,6 +263,8 @@ class Final:
     #: PLAN-012d D6b: the credits held on the lease, refunded with the settlement.
     held_credits: tuple[CreditLine, ...] = ()
     lease_credit: Decimal = ZERO
+    #: PLAN-014 C6: the ended lease's billed company (its billing details), or "".
+    billed_company: str = ""
 
     @property
     def deductions_total(self) -> Decimal:
@@ -413,6 +416,8 @@ def from_json(data: Mapping[str, Any]) -> Final:
             for item in data.get("held_credits", ())
         ),
         lease_credit=_money(data.get("lease_credit", "0.00")),
+        # Statements kept before PLAN-014 C6 name no billed company.
+        billed_company=str(data.get("billed_company", "")),
     )
 
 
@@ -765,6 +770,7 @@ def final(lease_end: LeaseEnd, *, today: date | None = None) -> Final:
         prepared_on=day,
         held_credits=tuple(held_credits),
         lease_credit=lease_credit,
+        billed_company=lease_sync.billing_of(lease).company_name,
     )
 
 
@@ -790,6 +796,11 @@ def _lines(statement: Final) -> list[tuple[str, str, str]]:
     rows: list[tuple[str, str, str]] = [
         ("title", f"Final statement: store {statement.store}", ""),
         ("text", statement.company, ""),
+        *(
+            [("text", f"Billed to: {statement.billed_company}", "")]
+            if statement.billed_company
+            else []
+        ),
         ("text", f"Operator: {statement.operator or 'none'}", ""),
         ("text", f"Lease started: {long_date(statement.started_on)}", ""),
         ("text", f"Lease ended: {long_date(statement.ended_on)}", ""),

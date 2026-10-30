@@ -13,7 +13,7 @@
 </style>{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}">{{ operator.display_name }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Statement</span></nav><h1>Statement: {{ operator.display_name }}{% if operator.archived_at %} <span class="badge">Archived {{ operator.archived_at|day }}</span>{% endif %}</h1></div><div class="page-actions no-print"><button class="btn" type="button" onclick="window.print()">Print</button></div></div>{% endblock %}
 {% block content %}
-  {% if operator.legal_name or operator.company %}<p>{{ operator.legal_name }}{% if operator.legal_name and operator.company %} · {% endif %}{{ operator.company }}</p>{% endif %}
+  {% with companies=bill_to %}{% if companies %}<ul class="statement-bill-to" id="statement-bill-to">{% for account in companies %}{% if account.company %}<li>{{ account.lease.store.external_label }}: {{ account.company }}</li>{% endif %}{% endfor %}</ul>{% endif %}{% endwith %}
   {% url 'ledger:operators:statement' pk=operator.pk as action %}{% url 'ledger:operators:statement_export' pk=operator.pk as export %}
   <div class="no-print">{% include "ledger/reports/_range.html" with action=action export=export %}</div>
   {% if too_slow %}

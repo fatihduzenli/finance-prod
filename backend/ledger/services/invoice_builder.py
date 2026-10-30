@@ -241,7 +241,7 @@ from ledger.services.one_off_charges import (
 from ledger.services.rent_run import CENT
 from ledger.validators import validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_sentence
-from payments import jobs
+from payments import jobs, lease_sync
 from payments.models import Job, JobKind
 
 ENTITY_DRAFT = "invoice_draft"
@@ -605,6 +605,38 @@ class Outcome:
 
 
 @dataclass(frozen=True, slots=True)
+class BillTo:
+    """An invoice's "Billed to" (PLAN-014 C6): the lease's company (``""`` when it has
+    none), the operator's full name, the lease's billing address as lines and its billing
+    e-mail."""
+
+    company: str
+    name: str
+    address_lines: tuple[str, ...]
+    email: str
+
+
+def address_lines(row: Any) -> tuple[str, ...]:
+    """The address of anything with the five address fields, as printed lines: line 1,
+    line 2, then "City, ST 00000"; empty parts are left out."""
+    place = ", ".join(part for part in (row.city, row.state) if part)
+    last = " ".join(part for part in (place, row.postal_code) if part)
+    return tuple(line for line in (row.address_line1, row.address_line2, last) if line)
+
+
+def bill_to(lease: Lease | None, operator: Operator) -> BillTo:
+    """Whom an invoice bills (PLAN-014 C6): the billing details of ``lease`` (an empty
+    company, address and e-mail without one) and the operator's full name."""
+    billing = lease_sync.billing_of(lease) if lease is not None else None
+    return BillTo(
+        company=billing.company_name if billing is not None else "",
+        name=operator.display_name,
+        address_lines=address_lines(billing) if billing is not None else (),
+        email=billing.email if billing is not None else "",
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class Preview:
     """What the preview and print pages show (D7)."""
 
@@ -620,6 +652,9 @@ class Preview:
     due_date: date
     memo: str
     invoice: Invoice | None
+    #: PLAN-014 C6: the lease's billing details (else the operator's first active
+    #: lease's) under the operator's full name.
+    bill_to: BillTo
 
 
 @dataclass(frozen=True, slots=True)
@@ -706,6 +741,7 @@ def preview(draft: InvoiceDraft, today: date | None = None) -> Preview:
         due_date=invoice.due_date if invoice is not None else due_date_for(draft, day),
         memo=draft.memo,
         invoice=invoice,
+        bill_to=bill_to(billing_account(draft.operator, lease), draft.operator),
     )
 
 
