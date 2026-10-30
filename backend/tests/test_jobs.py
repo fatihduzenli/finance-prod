@@ -1575,9 +1575,13 @@ def test_both_updates_tolerate_an_error_and_the_check_comes_before_the_smoke_tes
     web = _step("Roll the web container app onto the new image")
     workers = _step("Roll the worker container app onto the new image")
     reconcile = _step("Roll the reconcile job onto the new image")
+    assert '|| echo "update returned an error; verifying the revision instead"' in web
     for step in (web, workers, reconcile):
-        assert '|| echo "update returned an error; verifying the revision instead"' in step
         assert '--image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG"' in step
+    # PLAN-014 D10: the worker and the jobs retry a transient error, then fall through.
+    for step in (workers, reconcile):
+        assert "for attempt in 1 2 3; do" in step and "sleep 30" in step
+        assert 'echo "update returned an error; verifying the revision instead"' in step
     assert "vars.WORKER_APP_NAME || 'finance-staging-worker'" in workers
     assert "az containerapp job update" in reconcile
     assert "vars.RECONCILE_JOB_NAME || 'finance-staging-reconcile'" in reconcile
@@ -1720,7 +1724,8 @@ def test_the_verification_fails_when_the_daily_job_is_on_another_image(tmp_path:
 def test_the_daily_job_is_rolled_after_the_reconcile_job_and_before_the_verification() -> None:
     text = CI.read_text()
     daily = _step("Roll the daily job onto the new image")
-    assert '|| echo "update returned an error; verifying the revision instead"' in daily
+    assert 'echo "update returned an error; verifying the revision instead"' in daily
+    assert "for attempt in 1 2 3; do" in daily and "sleep 30" in daily
     assert '--image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG"' in daily
     assert "az containerapp job update" in daily
     assert "vars.DAILY_JOB_NAME || 'finance-staging-daily'" in daily
@@ -1748,3 +1753,81 @@ def test_the_verification_fails_after_ten_minutes_when_a_revision_is_not_live(
     result = _run_verification(tmp_path, web, workers, job_tag)
     assert result.returncode == 1
     assert "not live after 10 minutes" in result.stderr
+
+
+# --- PLAN-014 D10: the worker and job updates retry a transient error -----------------------
+
+UPDATES = (
+    ("Roll the worker container app onto the new image", "worker-app"),
+    ("Roll the reconcile job onto the new image", "reconcile-job"),
+    ("Roll the daily job onto the new image", "daily-job"),
+)
+
+
+def _run_update(tmp_path: Path, step_name: str, failures: int) -> subprocess.CompletedProcess[str]:
+    """The update step with ``az`` failing ``failures`` times before it succeeds; each call
+    is logged with its arguments, and each ``sleep`` with its seconds."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls"
+    stubs = {
+        "az": f'echo "az $*" >> "{log}"\n'
+        f'n=$(grep -c "^az " "{log}")\n'
+        f'if [ "$n" -le {failures} ]; then echo "transient" >&2; exit 1; fi\nexit 0\n',
+        "sleep": f'echo "sleep $*" >> "{log}"\nexit 0\n',
+    }
+    for name, body in stubs.items():
+        path = bin_dir / name
+        path.write_text(f"#!/bin/bash\n{body}")
+        path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "ACR_NAME": "registry",
+        "WORKER_APP_NAME": "worker-app",
+        "RECONCILE_JOB_NAME": "reconcile-job",
+        "DAILY_JOB_NAME": "daily-job",
+        "RESOURCE_GROUP": "group",
+        "IMAGE_TAG": "0" * 40,
+    }
+    # The step's script only: the comment lines of the next step are not part of it.
+    script = _run_block(_step(step_name)).split("\n\n", 1)[0] + "\n"
+    return subprocess.run(  # noqa: S603 (a fixed interpreter and the repository's own script)
+        ["/bin/bash", "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+@pytest.mark.parametrize(("step_name", "app"), UPDATES)
+def test_an_update_that_fails_twice_is_tried_a_third_time_30_seconds_apart(
+    tmp_path: Path, step_name: str, app: str
+) -> None:
+    result = _run_update(tmp_path, step_name, failures=2)
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = (tmp_path / "calls").read_text().splitlines()
+    assert [line.split()[0] for line in calls] == ["az", "sleep", "az", "sleep", "az"]
+    assert all(line == "sleep 30" for line in calls if line.startswith("sleep"))
+    assert all(f"--name {app}" in line for line in calls if line.startswith("az"))
+    assert "verifying the revision instead" not in result.stdout
+
+
+@pytest.mark.parametrize(("step_name", "app"), UPDATES)
+def test_an_update_that_keeps_failing_falls_through_to_the_verification(
+    tmp_path: Path, step_name: str, app: str
+) -> None:
+    result = _run_update(tmp_path, step_name, failures=99)
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = (tmp_path / "calls").read_text().splitlines()
+    assert [line.split()[0] for line in calls] == ["az", "sleep", "az", "sleep", "az"]
+    assert "update returned an error; verifying the revision instead" in result.stdout
+
+
+def test_an_update_that_succeeds_at_once_is_not_retried(tmp_path: Path) -> None:
+    result = _run_update(tmp_path, UPDATES[0][0], failures=0)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "calls").read_text().splitlines() == [
+        "az containerapp update --name worker-app --resource-group group "
+        f"--image registry.azurecr.io/finance-web:{'0' * 40}"
+    ]
