@@ -390,10 +390,9 @@ def refusal(
     refused = end_refusal(item.first_on, item.end_rule, item.end_count, item.end_on)
     if refused is not None:
         return refused
-    operator = lease.operator
-    if not leases.customer_ref(operator):
+    if not leases.customer_ref(lease):
         return Outcome(False, NO_PROVIDER_CUSTOMER, "collection")
-    if not leases.linked_payment_method(operator):
+    if not leases.linked_payment_method(lease):
         return Outcome(False, NO_BANK_METHOD, "collection")
     quantity = Decimal(1) if item.quantity is None else item.quantity
     amount = amount_of(quantity, item.unit_amount or Decimal(0))

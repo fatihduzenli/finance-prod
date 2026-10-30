@@ -1511,15 +1511,24 @@ def charge_note(line: CleanLine, position: int, number: str, draft: InvoiceDraft
     return note
 
 
-def _charge_now_refusal(operator: Operator, total: Decimal) -> str:
+def billing_account(operator: Operator | None, lease: Lease | None) -> Lease | None:
+    """The lease whose account bills a draft (PLAN-014 C5): its lease, else the operator's
+    first active lease; ``None`` without either."""
+    return lease if lease is not None else leases.first_active_lease(operator)
+
+
+def _charge_now_refusal(operator: Operator, lease: Lease | None, total: Decimal) -> str:
     """Why the draft's total cannot be charged now, or ``""`` (10d D4; local data)."""
     if not one_off_charges.charge_now_enabled():
         return one_off_charges.CHARGE_NOW_DISABLED
-    if not leases.customer_ref(operator):
+    account = billing_account(operator, lease)
+    if account is None:
+        return leases.NO_LEASE_BILLING
+    if not leases.customer_ref(account):
         return NO_PROVIDER_CUSTOMER
-    if not leases.linked_payment_method(operator):
+    if not leases.linked_payment_method(account):
         return one_off_charges.CHARGE_NOW_NO_METHOD
-    method = leases.linked_method_record(operator)
+    method = leases.linked_method_record(account)
     if method is None or not method.is_usable_bank:
         return one_off_charges.CHARGE_NOW_METHOD_NOT_STORED
     return leases.provider_limit_refusal([total])
@@ -1542,9 +1551,11 @@ class BankTiles:
     charge_now_more: str
 
 
-def bank_tiles(operator: Operator | None) -> BankTiles:
-    """:class:`BankTiles` for ``operator``. Local data only."""
-    method = leases.linked_method_record(operator) if leases.customer_ref(operator) else None
+def bank_tiles(operator: Operator | None, lease: Lease | None = None) -> BankTiles:
+    """:class:`BankTiles` for ``operator`` billed through ``lease``'s account (else its first
+    active lease's, :func:`billing_account`). Local data only."""
+    account = billing_account(operator, lease)
+    method = leases.linked_method_record(account) if leases.customer_ref(account) else None
     enabled = one_off_charges.charge_now_enabled()
     if method is not None and method.is_usable_bank:
         off = "" if enabled else str(one_off_charges.DEBIT_OFF)
@@ -1554,14 +1565,14 @@ def bank_tiles(operator: Operator | None) -> BankTiles:
     return BankTiles(bank_why=line, bank_url=url, charge_now_why=line, charge_now_more=more)
 
 
-def bank_unavailable(operator: Operator | None) -> str:
-    """:attr:`BankTiles.bank_why` of ``operator``."""
-    return bank_tiles(operator).bank_why
+def bank_unavailable(operator: Operator | None, lease: Lease | None = None) -> str:
+    """:attr:`BankTiles.bank_why` of ``operator`` (and ``lease``)."""
+    return bank_tiles(operator, lease).bank_why
 
 
-def charge_now_unavailable(operator: Operator | None) -> str:
-    """:attr:`BankTiles.charge_now_why` of ``operator``."""
-    return bank_tiles(operator).charge_now_why
+def charge_now_unavailable(operator: Operator | None, lease: Lease | None = None) -> str:
+    """:attr:`BankTiles.charge_now_why` of ``operator`` (and ``lease``)."""
+    return bank_tiles(operator, lease).charge_now_why
 
 
 def charge_now_details(draft: InvoiceDraft, actor: User | None) -> ChargeNowDetails:
@@ -1572,8 +1583,8 @@ def charge_now_details(draft: InvoiceDraft, actor: User | None) -> ChargeNowDeta
     elif draft.status != InvoiceDraftStatus.DRAFT:
         refusal = NOT_A_DRAFT
     else:
-        refusal = _charge_now_refusal(draft.operator, total)
-    method = leases.linked_method_record(draft.operator)
+        refusal = _charge_now_refusal(draft.operator, draft.lease, total)
+    method = leases.linked_method_record(billing_account(draft.operator, draft.lease))
     return ChargeNowDetails(
         refusal=refusal,
         total=total,
@@ -2134,14 +2145,17 @@ def _convert(
         if collection == CollectionMethod.MANUAL and any(line.is_rent for line in lines):
             return Outcome(False, RECORD_RENT, draft=draft)
         total = total_of(lines)
-        if not leases.customer_ref(operator):
+        account = billing_account(operator, lease)
+        if account is None:
+            return Outcome(False, leases.NO_LEASE_BILLING, draft=draft)
+        if not leases.customer_ref(account):
             return Outcome(False, NO_PROVIDER_CUSTOMER, draft=draft)
         large = leases.is_large_debit(total)
         rent_alone = all(line.is_rent for line in lines)
         if collection == CollectionMethod.CHARGE_NOW:
             if rent_alone:
                 return Outcome(False, RENT_ALONE_CHARGE_NOW, draft=draft)
-            refusal = _charge_now_refusal(operator, total)
+            refusal = _charge_now_refusal(operator, lease, total)
             if refusal:
                 return Outcome(False, refusal, draft=draft)
             if large and not confirmed:

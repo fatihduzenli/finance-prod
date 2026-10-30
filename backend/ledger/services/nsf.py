@@ -203,7 +203,13 @@ def reschedule(
         operator = Operator.objects.select_for_update().get(pk=billed.pk)
         if operator.archived_at is not None:
             return Outcome(False, OPERATOR_ARCHIVED)
-        if not leases.customer_ref(operator):
+        # PLAN-014 C5: the re-debit bills through the account of the returned charge's
+        # lease (else the operator's first active lease's).
+        lease = charge_lease(payment)
+        account = lease if lease is not None else leases.first_active_lease(operator)
+        if account is None:
+            return Outcome(False, leases.NO_LEASE_BILLING)
+        if not leases.customer_ref(account):
             return Outcome(False, NO_PROVIDER_CUSTOMER)
         fee_type = fee_type_for(operator)
         if fee_type is None or fee_type.default_price is None:
@@ -211,7 +217,7 @@ def reschedule(
         fee_price = Decimal(fee_type.default_price)
         amount = Decimal(payment.amount)
         total = amount if waive_fee else amount + fee_price
-        debit = bool(leases.linked_payment_method(operator))
+        debit = bool(leases.linked_payment_method(account))
         if debit:
             limit = leases.provider_limit_refusal([total])
             if limit:
@@ -224,7 +230,6 @@ def reschedule(
                     needs_confirm=True,
                 )
         collection = CollectionMethod.AUTOPAY_DUE if debit else CollectionMethod.EMAIL
-        lease = charge_lease(payment)
         what = source_description(payment)
         charge_note = text or DEFAULT_NOTE.format(date=redebit_date.isoformat())
         moment = now or timezone.now()

@@ -68,6 +68,7 @@ from ledger.services import (
     contacts,
     csv_export,
     invoice_builder,
+    leases,
     rent_run,
     workspace,
 )
@@ -506,6 +507,7 @@ def charge_payment(request: HttpRequest, pk: str) -> HttpResponse:
         charge_url=detail_url,
         store=charge.lease.store if charge.lease is not None else None,
         operator=operator,
+        billing_lease=leases.billing_lease(charge),
         status=charge.status,
         status_label=str(charge.get_status_display()),
         amount=charge.price,

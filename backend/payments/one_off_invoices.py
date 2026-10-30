@@ -44,7 +44,8 @@ class and the field names it rejected (never provider text).
   whose schedule had already made its invoice is audited
   (:data:`ledger.services.installments.PAUSE_FIRED_ACTION`) for the plan page.
 - :func:`schedule` (``schedule_create``): the one-occurrence schedule of an
-  ``autopay_due`` charge on its due date with the operator's linked bank method, its
+  ``autopay_due`` charge on its due date with the linked bank method of the lease that
+  bills it (PLAN-014 C5: its lease, else its operator's first active lease), its
   reference ``OOC-<first 8 of the charge id>``; a re-debit's schedule (PLAN-011b D5)
   carries two lines, the re-debit and its NSF fee unless waived (:func:`charge_amounts`),
   and the invoice it generates links to the re-debit charge; :func:`delete_schedule`
@@ -103,6 +104,7 @@ from ledger.models import (
     Invoice,
     InvoiceLineItem,
     InvoiceStatus,
+    Lease,
     OneOffCharge,
     OneOffChargeStatus,
     Operator,
@@ -270,12 +272,6 @@ def _ref(invoice: Invoice) -> str:
     )
 
 
-def _operator(charge: OneOffCharge) -> Operator | None:
-    if charge.operator is not None:
-        return charge.operator
-    return charge.lease.operator if charge.lease is not None else None
-
-
 def _attempted(charge: OneOffCharge, action: str) -> bool:
     return AuditLog.objects.filter(
         entity_type=ENTITY_CHARGE, entity_id=str(charge.pk), action=action
@@ -341,16 +337,18 @@ def _failed(
 
 
 def find_provider_invoices(
-    provider: PaymentProvider, operator: Operator, customer: str, invoice: Invoice
+    provider: PaymentProvider, lease: Lease, customer: str, invoice: Invoice
 ) -> list[InvoiceRecord]:
     """The customer's unlinked, undeleted provider invoices of the last
     :data:`LOOKBACK_DAYS` days that are ``invoice``: those whose reference is its number,
-    else those without a reference whose total and date are its own. One call."""
-    if operator.email:
-        query = InvoiceQuery(operator_email=operator.email)
+    else those without a reference whose total and date are its own. One call, filtered
+    by the billing e-mail of the lease that holds the customer (PLAN-014 C5)."""
+    billing = lease_sync.billing_of(leases.account_lease(lease) or lease)
+    if billing.email:
+        query = InvoiceQuery(operator_email=billing.email)
     else:
         # TODO-VERIFY-021: no e-mail to filter on; the first page of the list is read.
-        query = InvoiceQuery(company_name=operator.company or "")
+        query = InvoiceQuery(company_name=billing.company_name)
     records = provider.list_invoices(query)
     linked = set(
         ExternalRef.objects.filter(
@@ -528,15 +526,17 @@ def create_provider_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
     ref = _ref(invoice)
     text = ALREADY_CREATED.format(number=number)
     if not ref:
-        operator = _operator(charge)
-        customer = leases.customer_ref(operator)
-        if operator is None or not customer:
+        lease = leases.billing_lease(charge)
+        if lease is None:
+            return False, leases.NO_LEASE_BILLING
+        customer = leases.customer_ref(lease)
+        if not customer:
             return False, str(NO_CUSTOMER)
         provider = payments.get_provider()
         try:
             found: list[InvoiceRecord] = []
             if _attempted(charge, INVOICE_ATTEMPT_ACTION):
-                found = find_provider_invoices(provider, operator, customer, invoice)
+                found = find_provider_invoices(provider, lease, customer, invoice)
             if len(found) > 1:
                 one_off_charges.flag(
                     charge.pk,
@@ -679,9 +679,8 @@ def create_rent_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
     ref = _ref(invoice)
     text = ALREADY_CREATED.format(number=number)
     if not ref:
-        operator = charge.lease.operator
-        customer = leases.customer_ref(operator)
-        if operator is None or not customer:
+        customer = leases.customer_ref(charge.lease)
+        if charge.lease.operator is None or not customer:
             return False, str(NO_CUSTOMER)
         provider = payments.get_provider()
         try:
@@ -691,7 +690,7 @@ def create_rent_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
                 entity_id=str(charge.pk),
                 action=RENT_INVOICE_ATTEMPT_ACTION,
             ).exists():
-                found = find_provider_invoices(provider, operator, customer, invoice)
+                found = find_provider_invoices(provider, charge.lease, customer, invoice)
             if len(found) > 1:
                 _flag_rent(charge, {"invoice_number": number, "candidates": len(found)})
                 return False, one_off_charges.SEVERAL_PROVIDER_INVOICES
@@ -791,11 +790,11 @@ def delete(charge_id: uuid.UUID, actor: User | None) -> Result:
     try:
         if invoice is not None and not ref and _attempted(charge, INVOICE_ATTEMPT_ACTION):
             # A create that timed out may have made it: look before voiding (Rule 5).
-            operator = _operator(charge)
-            customer = leases.customer_ref(operator)
+            lease = leases.billing_lease(charge)
+            customer = leases.customer_ref(lease)
             found = (
-                find_provider_invoices(provider, operator, customer, invoice)
-                if operator is not None and customer
+                find_provider_invoices(provider, lease, customer, invoice)
+                if lease is not None and customer
                 else []
             )
             if len(found) > 1:
@@ -1157,11 +1156,13 @@ def schedule(charge_id: uuid.UUID, actor: User | None, *, now: datetime | None =
     moment = now or timezone.now()
     if charge.due_date < timezone.localdate(moment):
         return False, DUE_PASSED
-    operator = _operator(charge)
-    customer = leases.customer_ref(operator)
-    if operator is None or not customer:
+    lease = leases.billing_lease(charge)
+    if lease is None:
+        return False, leases.NO_LEASE_BILLING
+    customer = leases.customer_ref(lease)
+    if not customer:
         return False, str(NO_CUSTOMER)
-    method = leases.linked_payment_method(operator)
+    method = leases.linked_payment_method(lease)
     if not method:
         return False, str(NO_BANK_METHOD)
     provider = payments.get_provider()
@@ -1171,7 +1172,7 @@ def schedule(charge_id: uuid.UUID, actor: User | None, *, now: datetime | None =
         payment_method_external_id=method,
         amounts=charge_amounts(charge),
         rule=rule,
-        email_notification=bool(operator.email),
+        email_notification=bool(lease_sync.billing_of(leases.account_lease(lease) or lease).email),
         reference=schedule_reference(charge),
     )
     try:
@@ -1229,8 +1230,7 @@ def delete_schedule(charge_id: uuid.UUID, actor: User | None) -> Result:
     provider = payments.get_provider()
     try:
         if not ref and _attempted(charge, SCHEDULE_ATTEMPT_ACTION):
-            operator = _operator(charge)
-            customer = leases.customer_ref(operator)
+            customer = leases.customer_ref(leases.billing_lease(charge))
             found = _adoptable(provider, customer, charge) if customer else []
             if len(found) > 1:
                 one_off_charges.flag(
@@ -1381,8 +1381,7 @@ def pay(charge_id: uuid.UUID, actor: User | None, *, confirmed: bool) -> Result:
     if refusal:
         return _pay_failed(charge, actor, {"refused": refusal}, refusal)
     linked = rent_run.provider_invoice(charge)
-    operator = _operator(charge)
-    method = leases.linked_payment_method(operator)
+    method = leases.linked_payment_method(leases.billing_lease(charge))
     if linked is None or not method or charge.charge_now_key is None:  # checked above
         return False, one_off_charges.CHARGE_NOW_NOT_LINKED
     invoice, ref = linked

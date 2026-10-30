@@ -44,6 +44,7 @@ from ledger.forms import (
 from ledger.models import (
     ChargeEntityType,
     ChargeNote,
+    Lease,
     Operator,
     RentCharge,
     RentChargeStatus,
@@ -262,6 +263,7 @@ def render_add_payment(
     charge_url: str,
     store: Store | None,
     operator: Operator | None,
+    billing_lease: Lease | None,
     status: str,
     status_label: str,
     amount: Decimal,
@@ -275,7 +277,8 @@ def render_add_payment(
     """The Add payment page of a rent or a one-off charge (PLAN-012f-b D14): the header
     (the status badge with the balance, the muted line), the two radio cards, the Note
     card, the SUMMARY (tiles, the "After this payment" line, the one primary whose words
-    follow the card) and the OPERATOR card. Local data only."""
+    follow the card) and the OPERATOR card, with the phone and the connection of the lease
+    that bills the charge (``billing_lease``, PLAN-014 C5). Local data only."""
     chosen = form.chosen()
     typed = form["debit_amount" if chosen == HOW_DEBIT else "amount"].value()
     this_payment = _typed_amount(typed)
@@ -311,7 +314,10 @@ def render_add_payment(
             "paid_in_full": this_payment > 0 and left <= 0,
             "still_owed": max(left, Decimal("0.00")),
             "bank": bank,
-            "connected": bool(leases.customer_ref(operator)),
+            "connected": bool(leases.customer_ref(billing_lease)),
+            "billing_phone": (
+                lease_sync.billing_of(billing_lease).phone if billing_lease is not None else ""
+            ),
             "returns_this_year": (
                 workspace_cards.returns_this_year(operator, timezone.localdate())
                 if operator is not None
@@ -323,10 +329,10 @@ def render_add_payment(
     )
 
 
-def usable_bank(operator: Operator | None) -> Any:
-    """The operator's linked bank method as stored, when it is a usable bank account
-    (the OPERATOR card's "bank ···· last 4"), or ``None``. No provider call."""
-    record = leases.linked_method_record(operator)
+def usable_bank(lease: Lease | None) -> Any:
+    """The linked bank method of the lease's account as stored, when it is a usable bank
+    account (the OPERATOR card's "bank ···· last 4"), or ``None``. No provider call."""
+    record = leases.linked_method_record(lease)
     return record if record is not None and record.is_usable_bank else None
 
 
@@ -409,13 +415,14 @@ def charge_record_payment(request: HttpRequest, pk: str) -> HttpResponse:
         charge_url=detail_url,
         store=lease.store,
         operator=lease.operator,
+        billing_lease=lease,
         status=charge.status,
         status_label=str(charge.get_status_display()),
         amount=charge.amount_due,
         paid=charge.amount_paid,
         balance=charge.balance,
         due=charge.due_on,
-        bank=usable_bank(lease.operator),
+        bank=usable_bank(lease),
         cancel_url=done,
         large_debit=options.large,
     )

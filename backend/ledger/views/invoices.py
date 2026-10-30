@@ -325,6 +325,7 @@ def _collect_form(
     *,
     can_schedule: bool,
     operator: Operator | None,
+    lease: Lease | None = None,
 ) -> CollectForm:
     """How to collect, bound to ``data`` (a POST or a held form), else with the radio
     ``?collect=`` names (:func:`~ledger.forms.initial_choice`). Every tile shows (PLAN-012f-b
@@ -332,7 +333,7 @@ def _collect_form(
     on file; Schedule for a date and Set up autopay greyed with no bank account on file or
     where ``can_schedule`` is false (:func:`ledger.services.invoice_builder.bank_tiles`, with
     the "Operator page" link and Charge now's second line, PLAN-013a C3)."""
-    bank = invoice_builder.bank_tiles(operator)
+    bank = invoice_builder.bank_tiles(operator, lease)
     greyed: dict[str, Any] = {
         "can_charge_now": meets(_role(request), Role.ADMIN),
         "can_schedule": can_schedule,
@@ -545,6 +546,7 @@ def _new(
             request.POST,
             can_schedule=invoice_builder.can_schedule(posted),
             operator=_billed(operator, posted),
+            lease=posted,
         )
         if form.is_valid() and formset.is_valid() and collect_form.is_valid():
             lease = form.chosen_lease()
@@ -579,6 +581,7 @@ def _new(
             data,
             can_schedule=invoice_builder.can_schedule(held_lease),
             operator=_billed(operator, held_lease),
+            lease=held_lease,
         )
         form.is_valid()
         formset.is_valid()
@@ -602,6 +605,7 @@ def _new(
             request,
             can_schedule=invoice_builder.can_schedule(preselected),
             operator=_billed(operator, preselected),
+            lease=preselected,
         )
     if context is not None and context.lease is not None:
         _hide_lease(form)
@@ -801,7 +805,7 @@ def _draft_page_context(
             data, rent_leases=rent_leases, default_lease=draft.lease, existing=existing
         )
         collect_form = _collect_form(
-            request, data, can_schedule=schedulable, operator=draft.operator
+            request, data, can_schedule=schedulable, operator=draft.operator, lease=draft.lease
         )
         form.is_valid()
         formset.is_valid()
@@ -812,7 +816,9 @@ def _draft_page_context(
         formset = _formset(
             initial=lines, rent_leases=rent_leases, default_lease=draft.lease, existing=existing
         )
-        collect_form = _collect_form(request, can_schedule=schedulable, operator=draft.operator)
+        collect_form = _collect_form(
+            request, can_schedule=schedulable, operator=draft.operator, lease=draft.lease
+        )
     if form is not None and context is not None:
         _hide_lease(form)
     sent = _sent_context(draft) if draft.status == InvoiceDraftStatus.SENT else {}
