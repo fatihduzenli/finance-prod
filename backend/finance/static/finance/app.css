@@ -679,6 +679,14 @@ label.inline { display: inline-flex; align-items: center; gap: 5px; margin: 0; f
 .table-card { padding: 0; overflow: clip; }
 .table-card > .table-cards > table > tbody > tr:last-child > td, .table-card > .table-scroll > table > tbody > tr:last-child > td, .table-card > table > tbody > tr:last-child > td { border-bottom: 0; }
 .table-card > p, .table-card > .card-header, .table-card > h2 { margin: 0; padding: 16px 20px 12px; }
+/* Admin › Settings (PLAN-014 B2): a row's inline form (a field and its small button), the row's
+   actions side by side, and the Add form under the table. */
+.settings-inline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; }
+.settings-inline input[type="text"] { width: auto; min-width: 0; flex: 1 1 10rem; max-width: 18rem; }
+.settings-inline label { margin: 0; }
+.settings-actions { white-space: nowrap; }
+.settings-actions form { display: inline-block; margin: 0; }
+.settings-add { padding: 12px 20px 16px; border-top: 1px solid var(--border); }
 .form-card { max-width: 760px; }
 .form-card .field:first-child > label, .form-card form > .field:first-of-type > label { margin-top: 0; }
 .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-5) 0 0; }

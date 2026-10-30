@@ -296,6 +296,8 @@ PAGES: dict[str, Role] = {
     "ledger:reports:payments_by_method": Role.VIEWER,
     "ledger:reports:deposits": Role.VIEWER,
     "ledger:audit:page": Role.ADMIN,
+    # PLAN-014 B2: Admin › Settings.
+    "ledger:settings:index": Role.ADMIN,
 }
 #: The routes whose GET renders a form, opened by the role the registry gives their POST.
 FORM_PAGES = (
@@ -426,6 +428,11 @@ for _name in (
     "ledger:documents:upload_store",
     "ledger:documents:upload_lease",
     "ledger:documents:delete",
+    # PLAN-014 B2: Admin › Settings' Brands card.
+    "ledger:settings:brand_add",
+    "ledger:settings:brand_save",
+    "ledger:settings:brand_toggle",
+    "ledger:settings:brand_move",
 ):
     NOT_PAGES[_name] = POST_ONLY
 
@@ -681,6 +688,7 @@ NO_PARENT = (
     "ledger:disputes:page",
     "ledger:reconciliation:page",
     "ledger:audit:page",
+    "ledger:settings:index",
     "ledger:search",
     "finance:settings",
     "finance:help",

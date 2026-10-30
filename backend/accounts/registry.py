@@ -247,6 +247,11 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:stores:plan_resume": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:stores:plan_stop": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:stores:plan_end": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Admin › Settings' Brands card (PLAN-014 B2).
+    "ledger:settings:brand_add": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:settings:brand_save": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:settings:brand_toggle": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:settings:brand_move": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -324,6 +329,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # Store screens that only read (PLAN-007b §1).
         "ledger:stores:list",
         "ledger:stores:detail",
+        # Admin › Settings (PLAN-014 B2); the view refuses below admin.
+        "ledger:settings:index",
         # Lease screens that only read (PLAN-007 §4.1).
         "ledger:leases:list",
         "ledger:leases:detail",

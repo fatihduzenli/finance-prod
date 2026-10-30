@@ -1,0 +1,33 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Settings{% endblock %}
+{% block header %}<div class="page-header"><h1>Settings</h1></div>{% endblock %}
+{% block content %}
+  {% comment %}Admin › Settings (docs/qa/PLAN-014 B2): one card per section. Brands: each row renames in place (the name and Save), makes the brand active or inactive and moves it up or down, each a small POST of its own; Add takes a name. Nothing deletes a brand; the Stores column says how many stores carry each one (an inactive brand stays on its stores, the store form stops offering it).{% endcomment %}
+  <section class="card table-card settings-card" id="brands-card">
+    <div class="card-header"><h2 id="brands">Brands</h2></div>
+    {% responsive_table %}
+    <table id="brands-table" aria-labelledby="brands">
+      <thead><tr><th>Name</th><th>Active</th><th class="money">Order</th><th class="money">Stores</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+      <tbody>
+        {% for row in brand_rows %}
+          <tr id="brand-{{ row.brand.pk }}">
+            <td><form method="post" action="{% url 'ledger:settings:brand_save' pk=row.brand.pk %}" class="settings-inline">{% csrf_token %}<label class="visually-hidden" for="brand-name-{{ row.brand.pk }}">Name</label><input type="text" name="name" id="brand-name-{{ row.brand.pk }}" value="{{ row.brand.name }}" maxlength="{{ name_max }}" required><button class="btn btn-sm" type="submit">Save</button></form></td>
+            <td>{% if row.brand.active %}Active{% else %}<span class="muted">Inactive</span>{% endif %}</td>
+            <td class="money">{{ forloop.counter }}</td>
+            <td class="money">{{ row.stores }}</td>
+            <td class="settings-actions">
+              <form method="post" action="{% url 'ledger:settings:brand_move' pk=row.brand.pk %}">{% csrf_token %}<input type="hidden" name="direction" value="up"><button class="btn btn-sm" type="submit" aria-label="Move {{ row.brand.name }} up"{% if forloop.first %} disabled{% endif %}>↑</button></form>
+              <form method="post" action="{% url 'ledger:settings:brand_move' pk=row.brand.pk %}">{% csrf_token %}<input type="hidden" name="direction" value="down"><button class="btn btn-sm" type="submit" aria-label="Move {{ row.brand.name }} down"{% if forloop.last %} disabled{% endif %}>↓</button></form>
+              <form method="post" action="{% url 'ledger:settings:brand_toggle' pk=row.brand.pk %}">{% csrf_token %}<button class="btn btn-sm" type="submit">{% if row.brand.active %}Deactivate{% else %}Activate{% endif %}</button></form>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="muted empty">No brands yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endresponsive_table %}
+    <form method="post" action="{% url 'ledger:settings:brand_add' %}" class="settings-inline settings-add" id="brand-add">{% csrf_token %}<label for="brand-add-name">New brand</label><input type="text" name="name" id="brand-add-name" maxlength="{{ name_max }}" required><button class="btn btn-primary btn-sm" type="submit">Add</button></form>
+  </section>
+{% endblock %}

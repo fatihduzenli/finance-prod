@@ -103,7 +103,7 @@ MAIN_PAGES: list[tuple[str, str, str | None, str | None]] = [
     ("/calendar/", "Calendar", "Calendar", "nav-reports"),
     ("/webhooks/", "Messages from Stax", "Messages from Stax", "nav-admin"),
     ("/reconciliation/", "Nightly check", "Nightly check", "nav-admin"),
-    ("/settings/", "Settings", "Settings", "user-menu-name"),
+    ("/settings/", "Preferences", "Preferences", "user-menu-name"),
     ("/search/?q=zzz", "Search", None, None),
 ]
 NAV_ITEMS = (

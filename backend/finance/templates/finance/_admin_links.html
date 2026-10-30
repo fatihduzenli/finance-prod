@@ -2,4 +2,5 @@
 {% if request.user|is_admin %}<li><a href="{% url 'ledger:audit:page' %}"{% if ids %} id="nav-audit"{% if nav_section == "audit" %} aria-current="page"{% endif %}{% endif %}>Activity log</a></li>{% endif %}
 <li><a href="{% url 'ledger:webhooks:list' %}"{% if ids and nav_section == "webhooks" %} aria-current="page"{% endif %}>Messages from {{ company.provider_name }}</a></li>
 {% if request.user|is_billing %}<li><a href="{% url 'ledger:reconciliation:page' %}"{% if ids and nav_section == "reconciliation" %} aria-current="page"{% endif %}>Nightly check</a></li>{% endif %}
+{% if request.user|is_admin %}<li><a href="{% url 'ledger:settings:index' %}"{% if ids %} id="nav-settings"{% if nav_section == "settings" %} aria-current="page"{% endif %}{% endif %}>Settings</a></li>{% endif %}
 {% if request.user|is_admin %}<li><a href="{% url 'admin:index' %}"{% if ids %} id="nav-django-admin"{% if nav_section == "django_admin" %} aria-current="page"{% endif %}{% endif %}>System settings</a></li>{% endif %}

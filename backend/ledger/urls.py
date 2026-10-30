@@ -44,6 +44,7 @@ from ledger.views import (
     returns,
     run,
     search,
+    settings,
     statement_links,
     stores,
     transfers,
@@ -411,6 +412,18 @@ calendar_patterns = (
     "calendar",
 )
 
+# Admin › Settings (PLAN-014 B2): admin only.
+settings_patterns = (
+    [
+        path("", settings.settings_index, name="index"),
+        path("brands/new/", settings.brand_add, name="brand_add"),
+        path("brands/<str:pk>/save/", settings.brand_save, name="brand_save"),
+        path("brands/<str:pk>/toggle/", settings.brand_toggle, name="brand_toggle"),
+        path("brands/<str:pk>/move/", settings.brand_move, name="brand_move"),
+    ],
+    "settings",
+)
+
 urlpatterns = [
     path("", dashboard.home, name="home"),
     # The top-bar search (PLAN-012d D17): any verified role, read only.
@@ -441,4 +454,5 @@ urlpatterns = [
     path("reports/", include(report_patterns)),
     path("documents/", include(document_patterns)),
     path("audit/", include(audit_patterns)),
+    path("admin-settings/", include(settings_patterns)),
 ]
