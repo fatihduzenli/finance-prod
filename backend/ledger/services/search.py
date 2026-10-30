@@ -15,9 +15,9 @@ repeated, in any case, counts once).
 number as a prefix (``24`` finds 2477; a leading ``#`` is allowed; digits only), its
 name, its city, or the display name of the operator of one of its leases in effect or to
 come (not ended before today); the text matches are case-insensitive "contains". **An
-operator matches** (:func:`filter_operators`) when every word is in its display name
-(a company's name, or a person's "First Last"; PLAN-012f-b D9), its first name or its last
-name, archived ones included (the search lists them and never jumps to them).
+operator matches** (:func:`filter_operators`) when every word is in its display name (the
+Full name, PLAN-014 C1) or its e-mail address, as the operators list matches, archived
+ones included (the search lists them and never jumps to them).
 
 Only ORM filters: the words reach SQL as bound parameters, never as SQL text. Each filter
 adds conditions to the one query it is given; it never adds a query.
@@ -98,14 +98,11 @@ def filter_stores(
 
 
 def filter_operators(operators: QuerySet[Operator], query: str) -> QuerySet[Operator]:
-    """``operators`` narrowed to those whose display name, first name or last name holds
-    each word of ``query``; unchanged when the query has no word."""
+    """``operators`` narrowed to those whose display name or e-mail address holds each word
+    of ``query``; unchanged when the query has no word. The first and last name columns no
+    form writes since PLAN-014 C1 are not searched."""
     for word in words(query):
-        operators = operators.filter(
-            Q(display_name__icontains=word)
-            | Q(first_name__icontains=word)
-            | Q(last_name__icontains=word)
-        )
+        operators = operators.filter(Q(display_name__icontains=word) | Q(email__icontains=word))
     return operators
 
 

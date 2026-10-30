@@ -7,8 +7,8 @@ form). The type, company, contact person, first and last name and legal name lef
 a post that still sends them is not refused, and they are not written (the columns stay as
 history). ``Operator.save`` derives the display name from the kind's name fields only while
 it is empty. Existing operators became people with empty names and their display name kept
-(ledger migration 0052, which reverses). The search finds a company by its name and a
-person by either name. Every select of the module refuses with its own words, never with
+(ledger migration 0052, which reverses). The search finds an operator by its Full name or
+its e-mail address (PLAN-014 C1), never by the old name columns. Every select of the module refuses with its own words, never with
 the posted value: a card number posted to any of them is not in the response nor in the
 page that re-opens the form.
 """
@@ -351,18 +351,31 @@ def test_a_rename_of_an_operator_with_a_linked_lease_queues_its_sync(fake: FakeP
 # --- The search ----------------------------------------------------------------------------
 
 
-def test_the_search_finds_a_company_by_its_name_and_a_person_by_either_name() -> None:
+def test_the_search_finds_an_operator_by_its_full_name_or_its_email_only() -> None:
+    """Fable's PLAN-014 C part 1 finding: the top-bar search matches the display name (the
+    Full name) and the e-mail address, as the operators list does; the company, first and
+    last name columns no form writes are not searched."""
     company = Operator.objects.create(kind=OperatorKind.COMPANY, company="Northwind Kiosks")
     person = Operator.objects.create(first_name="Grace", last_name="Hopper")
+    typed = Operator.objects.create(
+        display_name="Ada Lovelace",
+        first_name="Hidden",
+        last_name="Columns",
+        company="Unsearched Co",
+        email="ada.l@example.com",
+    )
     Operator.objects.create(first_name="Other", last_name="Person")
+    assert (company.display_name, person.display_name) == ("Northwind Kiosks", "Grace Hopper")
 
     def found(query: str) -> list[Operator]:
         return list(search.filter_operators(Operator.objects.order_by("display_name"), query))
 
     assert found("northwind") == [company]
-    assert found("Grace") == [person]
-    assert found("hopper") == [person]
     assert found("grace hopper") == [person]
+    assert found("lovelace") == [typed]
+    assert found("ada.l@example") == [typed]
+    assert found("ada example.com") == [typed]  # one word in the name, one in the e-mail
+    assert found("hidden") == [] and found("columns") == [] and found("unsearched") == []
     assert found("kiosks grace") == []
     # Only bound parameters: a quote or a percent sign is text, not SQL.
     assert found("' OR 1=1 --") == [] and found("%") == []
