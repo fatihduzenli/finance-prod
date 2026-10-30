@@ -262,6 +262,9 @@ param uspsClientIdSecretName string = ''
 @description('Vault secret name for that client\'s secret, e.g. usps-client-secret. Wired only together with uspsClientIdSecretName.')
 param uspsClientSecretSecretName string = ''
 
+@description('Vault secret name for the Stax web payments token of the hosted bank-account fields (PLAN-014 C7), e.g. stax-web-payments-token. Empty means bank entry is not set up and STAX_WEB_PAYMENTS_TOKEN is not set at all; set it only once the secret exists in the vault. Passed to the web app only.')
+param staxWebPaymentsTokenSecretName string = ''
+
 // ---------------------------------------------------------------------------
 // Deployment
 // ---------------------------------------------------------------------------
@@ -469,6 +472,7 @@ module web 'modules/containerAppWeb.bicep' = {
     gmailServiceAccountSecretName: gmailServiceAccountSecretName
     uspsClientIdSecretName: uspsClientIdSecretName
     uspsClientSecretSecretName: uspsClientSecretSecretName
+    staxWebPaymentsTokenSecretName: staxWebPaymentsTokenSecretName
     // Reading the storage module's outputs makes the web app depend on the whole
     // module, so the role assignment exists before the revision that uses it.
     documentsStorageAccountUrl: storage.outputs.blobEndpoint

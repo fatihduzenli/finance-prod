@@ -125,7 +125,7 @@ def test_enqueue_stores_a_queued_job_with_identifiers_and_amounts_as_text() -> N
         None,
     )
     job.refresh_from_db()
-    assert (job.kind, job.entity_type, job.entity_id) == ("operator_link", "lease", lease.pk)
+    assert (job.kind, job.entity_type, job.entity_id) == ("lease_link", "lease", lease.pk)
     assert job.status == JobStatus.QUEUED
     assert (job.attempts, job.max_attempts) == (0, 1)
     assert job.params == {"amount": "12.50", "key": str(key), "flag": True, "count": 2}
@@ -403,7 +403,7 @@ def test_the_worker_logs_one_line_per_item_with_the_masked_entity(
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Worker item")]
     # The lease kind keeps the stored value of the operator kind it replaced (PLAN-014 C3).
     assert lines == [
-        f"Worker item: kind=operator_sync entity={mask_identifier(str(lease.pk))} outcome=done"
+        f"Worker item: kind=lease_sync entity={mask_identifier(str(lease.pk))} outcome=done"
     ]
     assert str(lease.pk) not in caplog.text
 
@@ -1485,8 +1485,9 @@ def test_the_worker_app_is_one_replica_without_ingress_running_the_worker() -> N
     assert "minReplicas: 1\n        maxReplicas: 1\n" in module
     assert "name: 'STAX_CALLER'\n    value: 'worker'\n" in module
     web = (REPO / "infra/modules/containerAppWeb.bicep").read_text()
-    # The USPS address check's secrets are the web app's alone (PLAN-012f-c D14).
-    web_only_secrets = {"usps-client-id", "usps-client-secret"}
+    # The USPS address check's secrets are the web app's alone (PLAN-012f-c D14), as is the
+    # bank-entry page's web payments token (PLAN-014 C7).
+    web_only_secrets = {"usps-client-id", "usps-client-secret", "stax-web-payments-token"}
     for secret in re.findall(r"name: '([a-z-]+)'\n    keyVaultUrl", web):
         if secret in web_only_secrets:
             assert f"name: '{secret}'" not in module
@@ -1502,6 +1503,7 @@ def test_the_worker_app_is_one_replica_without_ingress_running_the_worker() -> N
         "USPS_API_BASE_URL",
         "USPS_CLIENT_ID",
         "USPS_CLIENT_SECRET",
+        "STAX_WEB_PAYMENTS_TOKEN",
     }
     names = set(re.findall(r"name: '([A-Z_]+)'\n", web))
     assert web_only <= names

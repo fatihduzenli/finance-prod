@@ -46,6 +46,10 @@ STAX_PAY_INVOICE_ENABLED = _config.stax_pay_invoice_enabled
 STAX_EXPECTED_MERCHANT_ID = _config.stax_expected_merchant_id
 #: "stax" (default) or "fake", the in-memory provider, local only (PLAN-006 §4.2).
 STAX_PROVIDER = _config.stax_provider
+#: PLAN-014 C7: the web payments token of the processor's hosted bank-account fields, from
+#: the vault secret stax-web-payments-token. Empty: bank entry is not set up here. Written
+#: into the bank-entry page only (payments.hosted_fields); never logged or exported.
+STAX_WEB_PAYMENTS_TOKEN = _config.stax_web_payments_token
 #: A Decimal; debits above it are flagged on the enrolment screen (PLAN-007 §4.3).
 #: A placeholder until Stax states the per-transaction limit (SCOPE Q25).
 LARGE_DEBIT_WARNING_AMOUNT = _config.large_debit_warning_amount
@@ -318,6 +322,7 @@ LOGGING = {
                 others=(
                     *log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
                     USPS_CLIENT_SECRET,
+                    STAX_WEB_PAYMENTS_TOKEN,
                 ),
             ),
         },
@@ -365,5 +370,6 @@ sentry.init(
     other_secrets=(
         *log_redaction.service_account_secrets(GMAIL_SERVICE_ACCOUNT_JSON),
         USPS_CLIENT_SECRET,
+        STAX_WEB_PAYMENTS_TOKEN,
     ),
 )
