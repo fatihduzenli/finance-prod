@@ -17,8 +17,8 @@ is never the only signal. A status this module does not know renders as a plain 
 sets the value in the unpaid red. ``{% progress segments %}``: a stacked bar of
 ``(family, amount)`` segments with its legend; the widths are rounded down to a tenth of a per
 cent, so they sum to at most 100 %, and a zero total draws nothing. ``{% date_chip day %}``:
-the month over the day. ``{% avatar letter family %}``: the notes & follow-ups's round letter, in the
-pending or the neutral colours.
+the month over the day. ``{% avatar letter family %}``: the Notes & follow-ups' round letter,
+in the pending or the neutral colours.
 
 ``step_links|with_done`` adds a fourth item to each wizard step (label, link, current):
 ``True`` for the steps before the current one, which ``.steps`` marks done.
@@ -128,7 +128,7 @@ _FAMILY_OF: dict[str, str] = {
 
 #: The families the KPI value may take (DESIGN-SPEC §3: red for unpaid balances).
 KPI_TONES: tuple[str, ...] = (UNPAID,)
-#: The families of the notes & follow-ups's avatar (DESIGN-SPEC §3: P pending, C neutral).
+#: The families of the Notes & follow-ups' avatar (DESIGN-SPEC §3: P pending, C neutral).
 AVATAR_FAMILIES: tuple[str, ...] = (PENDING, NEUTRAL)
 #: A tenth of a per cent: the progress bar's widths are rounded down to it.
 _TENTH = Decimal("0.1")
@@ -277,7 +277,7 @@ def date_chip(day: object) -> SafeString:
 
 @register.simple_tag
 def avatar(letter: object, family: str = NEUTRAL) -> SafeString:
-    """The notes & follow-ups's 34 px round letter in the ``family``'s colours (pending or
+    """The Notes & follow-ups' 34 px round letter in the ``family``'s colours (pending or
     neutral), hidden from screen readers: the entry's kind is its text."""
     if family not in AVATAR_FAMILIES:
         raise ValueError(f"unknown avatar family {family!r}")

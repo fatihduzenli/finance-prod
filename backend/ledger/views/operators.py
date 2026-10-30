@@ -322,7 +322,8 @@ def operator_export(request: HttpRequest) -> StreamingHttpResponse:
     return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("operators"))
 
 
-#: The entries the RECENT CONTACT card lists (PLAN-012f-a D7); the Notes & follow-ups card lists more.
+#: The entries the RECENT CONTACT card lists (PLAN-012f-a D7); the Notes & follow-ups card lists
+#: more.
 RECENT_CONTACTS = 2
 
 
