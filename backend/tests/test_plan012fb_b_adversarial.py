@@ -150,9 +150,9 @@ def test_the_state_mapping_never_invents_a_code() -> None:
         ("state", "ZZ"),
         ("state", MARKUP),
         ("state", "4111111111111111"),
-        ("store_type", "4111111111111111"),
-        ("store_type", MARKUP),
-        ("store_type", "00000000-0000-0000-0000-000000000000"),
+        ("brand", "4111111111111111"),
+        ("brand", MARKUP),
+        ("brand", "00000000-0000-0000-0000-000000000000"),
         ("landlord_rent", "-1"),
         ("landlord_rent", "1e9"),
         ("landlord_rent", MARKUP),
@@ -208,12 +208,12 @@ def test_an_empty_landlord_rent_writes_no_cost_row_and_zero_writes_one() -> None
 
 
 def test_markup_in_a_store_type_name_is_escaped_on_every_pill() -> None:
-    from ledger.models import StoreType
+    from ledger.models import Brand
 
     store = a_world()
-    kind = StoreType.objects.create(name=f"Kiosk {MARKUP}", sort_order=99)
-    store.store_type = kind
-    store.save(update_fields=["store_type"])
+    kind = Brand.objects.create(name=f"Kiosk {MARKUP}", sort_order=99)
+    store.brand = kind
+    store.save(update_fields=["brand"])
     operator = store.leases.get().operator
     assert operator is not None
     billing, _ = client_for(Role.BILLING)

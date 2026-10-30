@@ -376,6 +376,7 @@ GUARD_MODULES = (
     "ledger.migrations.0055_installment_plan_paused",
     "ledger.migrations.0056_rent_charge_bank_debit",
     "ledger.migrations.0057_payment_void_fields",
+    "ledger.migrations.0058_brands_and_store_notes",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0003_webhook_event_processing",
     "payments.migrations.0005_jobs",
@@ -395,6 +396,8 @@ def test_guarded_columns_match_the_database_triggers() -> None:
     # ledger 0017 renamed ``setup_charges`` to ``one_off_charges`` and 0019 replaced its
     # trigger (PLAN-010d D1): the old table's entry names a table that no longer exists.
     del triggers["setup_charges"]
+    # ledger 0058 renamed ``store_types`` to ``brands`` with its trigger (PLAN-014 B1).
+    del triggers["store_types"]
     expected = {f"{table}.{column}" for table, columns in triggers.items() for column in columns}
     assert set(GUARDED_IDS) == expected
 

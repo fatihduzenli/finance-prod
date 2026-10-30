@@ -52,6 +52,7 @@ HEADERS: frozenset[str] = frozenset(
         "Operator",
         "Store",
         "Store number",
+        "Brand",
         "State",
         "City",
         "Channel",

@@ -26,8 +26,8 @@ per store with its current lease's operator, rent and channel, its open balance 
 (:func:`ledger.services.receivables.open_balances` grouped by store) and its status (Closed
 for a closed or terminated store, Vacant without a lease in effect or to come, else Active);
 the counts line (every store, those with a lease, the rest vacant); the filters ``q``,
-``state``, ``status``, ``balance`` and ``sort``, each checked against its fixed list. Read
-only.
+``state``, ``brand`` (PLAN-014 B1), ``status``, ``balance`` and ``sort``, each checked against
+its fixed list. Read only.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ CREATION_LOCK = "store_creation_lock"
 STORE_FIELDS: tuple[str, ...] = (
     "store_number",
     "external_label",
-    "store_type",
+    "brand",
     "address_line1",
     "city",
     "state",
@@ -238,7 +238,7 @@ def _snapshot(store: Store) -> dict[str, Any]:
     return {
         "store_number": store.store_number,
         "external_label": store.external_label,
-        "store_type": str(store.store_type_id) if store.store_type_id else None,
+        "brand": str(store.brand_id) if store.brand_id else None,
         "address_line1": store.address_line1,
         "city": store.city,
         "state": store.state,
@@ -247,6 +247,7 @@ def _snapshot(store: Store) -> dict[str, Any]:
         "closed_at": store.closed_at.isoformat() if store.closed_at else None,
         "status": store.status,
         "needs_open_date": store.needs_open_date,
+        "needs_review": store.needs_review,
     }
 
 
@@ -309,6 +310,8 @@ class ListFilter:
 
     query: str = ""
     state: str = ""
+    #: A brand's id (PLAN-014 B1), one of the brands the stores carry.
+    brand: str = ""
     status: str = ""
     balance: str = ""
     sort: str = SORT_NUMBER
@@ -316,13 +319,14 @@ class ListFilter:
     @property
     def narrowed(self) -> bool:
         """A filter other than the sort is set: the footer says "filtered from"."""
-        return bool(self.query or self.state or self.status or self.balance)
+        return bool(self.query or self.state or self.brand or self.status or self.balance)
 
     def as_query(self) -> dict[str, str]:
         """The filters that differ from their default, for the pager's links."""
         found = {
             "q": self.query,
             "state": self.state,
+            "brand": self.brand,
             "status": self.status,
             "balance": self.balance,
             "sort": "" if self.sort == SORT_NUMBER else self.sort,
@@ -335,12 +339,16 @@ def _one_of(raw: object, allowed: Iterable[str]) -> str:
     return value if value in set(allowed) else ""
 
 
-def parse_list_filter(params: Mapping[str, str], states: Iterable[str]) -> ListFilter:
+def parse_list_filter(
+    params: Mapping[str, str], states: Iterable[str], brands: Iterable[str] = ()
+) -> ListFilter:
     """The filters of ``params`` (a request's GET): ``q`` cleaned as the search cleans it;
-    ``state`` one of ``states``; ``status``, ``balance`` and ``sort`` from their lists."""
+    ``state`` one of ``states``; ``brand`` one of ``brands`` (ids); ``status``, ``balance``
+    and ``sort`` from their lists."""
     return ListFilter(
         query=search.clean_query(params.get("q")),
         state=_one_of(params.get("state"), states),
+        brand=_one_of(params.get("brand"), brands),
         status=_one_of(params.get("status"), (value for value, _ in LIST_STATUSES)),
         balance=_one_of(params.get("balance"), (value for value, _ in LIST_BALANCES)),
         sort=_one_of(params.get("sort"), (value for value, _ in LIST_SORTS)) or SORT_NUMBER,
@@ -388,6 +396,9 @@ class StoreList:
     #: (code, name) of the distinct states of every store, by name: the State filter's
     #: choices.
     states: list[tuple[str, str]]
+    #: (id, name) of the distinct brands of every store, in the brands' order: the Brand
+    #: filter's choices (PLAN-014 B1).
+    brands: list[tuple[str, str]]
 
     @property
     def vacant(self) -> int:
@@ -422,7 +433,7 @@ def _list_stores(query: str, today: date) -> list[Store]:
         "-ended_on"
     )
     stores = (
-        Store.objects.select_related("store_type")
+        Store.objects.select_related("brand")
         .annotate(
             list_lease=Subquery(current.values("pk")[:1]),
             list_operator=Subquery(current.values("operator")[:1]),
@@ -521,8 +532,18 @@ def _row(store: Any, owed: tuple[Decimal, bool, bool] | None, today: date) -> Li
     )
 
 
+def brand_choices(stores: Iterable[Store]) -> list[tuple[str, str]]:
+    """(id, name) of each distinct brand of ``stores`` (read with their brand), in the
+    brands' order (``sort_order``, then name): a Brand filter's choices."""
+    found = {store.brand.pk: store.brand for store in stores if store.brand is not None}
+    ordered = sorted(found.values(), key=lambda brand: (brand.sort_order, brand.name.casefold()))
+    return [(str(brand.pk), brand.name) for brand in ordered]
+
+
 def _kept(row: ListRow, filters: ListFilter) -> bool:
     if filters.state and row.store.state != filters.state:
+        return False
+    if filters.brand and str(row.store.brand_id) != filters.brand:
         return False
     if filters.status and row.status_key != filters.status:
         return False
@@ -556,7 +577,10 @@ def store_list(params: Mapping[str, str], today: date) -> StoreList:
     them, apply to every store before the sort, never to one page."""
     stores = _list_stores(search.clean_query(params.get("q")), today)
     states = state_choices(store.state for store in stores)
-    filters = parse_list_filter(params, (code for code, _ in states))
+    brands = brand_choices(stores)
+    filters = parse_list_filter(
+        params, (code for code, _ in states), (value for value, _ in brands)
+    )
     balances = _store_balances(today)
     rows = [
         _row(store, balances.get(store.pk), today)
@@ -570,4 +594,5 @@ def store_list(params: Mapping[str, str], today: date) -> StoreList:
         total=len(stores),
         with_lease=sum(1 for store in stores if getattr(store, "list_lease", None) is not None),
         states=states,
+        brands=brands,
     )

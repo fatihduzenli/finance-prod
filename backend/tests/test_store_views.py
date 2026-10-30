@@ -486,8 +486,9 @@ PLAN_010B_ADMIN_MODELS = (
     "collectionstep",
     "messagetemplate",
     "companysettings",
-    # PLAN-012f-b D10: ledger 0051 gives the admin group view, add and change on store types.
-    "storetype",
+    # PLAN-012f-b D10: ledger 0051 gives the admin group view, add and change on store types
+    # (PLAN-014 B1: the model is Brand since ledger 0058, its content type renamed with it).
+    "brand",
 )
 
 

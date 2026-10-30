@@ -20,9 +20,8 @@ edited here the same way, by an admin only, add and change, never delete (a step
 longer used is made inactive). A template whose subject or text uses anything but the
 whitelisted merge fields is refused on save (``MessageTemplate.clean``, :mod:`ledger.merge`).
 
-The store types (docs/qa/PLAN-012f-b D10) are edited here the same way, by an admin only,
-add and change, never delete (a type no longer offered is made inactive); ledger migration
-0051 seeds the five.
+The brands (docs/qa/PLAN-014 B1, B2; the kinds of store of PLAN-012f-b D10 before) are not
+here: an admin edits them on Admin › Settings.
 
 The company settings row (docs/qa/PLAN-012c D2) is edited here by an admin only: change,
 never add or delete (the one row is seeded by ledger migration 0045, which gives the
@@ -50,7 +49,6 @@ from ledger.models import (
     MessageTemplate,
     Operator,
     Store,
-    StoreType,
 )
 
 if TYPE_CHECKING:
@@ -186,16 +184,6 @@ class FeeTypeAdmin(AuditedAdmin):
         "sort_order",
     )
     entity_type = "fee_type"
-
-
-@admin.register(StoreType)
-class StoreTypeAdmin(AuditedAdmin):
-    list_display = ("name", "active", "sort_order")
-    list_filter = ("active",)
-    ordering = ("sort_order", "name")
-    fields = ("name", "active", "sort_order")
-    audited_fields = fields
-    entity_type = "store_type"
 
 
 @admin.register(InsurancePremium)

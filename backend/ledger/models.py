@@ -387,9 +387,14 @@ class Store(GuardedModel):
     needs_open_date = models.BooleanField(default=True)
     closed_at = models.DateField(null=True, blank=True)
     status = _choice(StoreStatus)
-    #: The kind of store (PLAN-012f-b D10), from the admin's list; none is shown as nothing.
-    store_type = models.ForeignKey(
-        "StoreType", on_delete=models.PROTECT, null=True, blank=True, related_name="stores"
+    #: The store's brand (PLAN-014 B1), from Admin › Settings' list; none is shown as nothing.
+    brand = models.ForeignKey(
+        "Brand",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="stores",
+        verbose_name="Brand",
     )
     needs_review = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -884,11 +889,12 @@ class FeeType(GuardedModel):
         return self.name
 
 
-class StoreType(GuardedModel):
-    """A kind of store (PLAN-012f-b D10): Inline store, Kiosk, Cart, Pop-up, Warehouse,
-    seeded by ledger migration 0051. Edited by an admin in the Django admin: add and
-    change, never delete (a type no longer offered is made inactive). The store form
-    offers the active ones; a store's type shows as a grey pill after its name."""
+class Brand(GuardedModel):
+    """A store's brand (PLAN-014 B1; the kind of store of PLAN-012f-b D10 before):
+    iFixandRepair, Techy and Talk&Fix, seeded by ledger migration 0058. Edited by an admin on
+    Admin › Settings (PLAN-014 B2): add, rename, activate or deactivate and reorder, never
+    delete. The store form offers the active ones; a store's brand shows as a grey pill after
+    its name."""
 
     name = guarded_char(NAME_MAX_LENGTH, unique=True)
     sort_order = models.SmallIntegerField(default=0)
@@ -897,9 +903,11 @@ class StoreType(GuardedModel):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "store_types"
+        db_table = "brands"
         ordering = ("sort_order", "name")
-        constraints = [_not_blank("store_types", "name")]
+        verbose_name = "Brand"
+        verbose_name_plural = "Brands"
+        constraints = [_not_blank("brands", "name")]
 
     def __str__(self) -> str:
         return self.name

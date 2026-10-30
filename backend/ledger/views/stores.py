@@ -120,15 +120,16 @@ def _listed(request: HttpRequest) -> tuple[QuerySet[Store], str]:
     matches the store number as a prefix, the name, the city or an operator's name;
     :func:`ledger.services.search.filter_stores`), in its order."""
     query = search.clean_query(request.GET.get("q"))
-    stores = search.filter_stores(Store.objects.all(), query)
+    stores = search.filter_stores(Store.objects.select_related("brand"), query)
     return stores.order_by(Lower("external_label"), "id"), query
 
 
 @role_required
 @require_safe
 def store_list(request: HttpRequest) -> HttpResponse:
-    """The stores list (PLAN-012f-a D3): the counts line, the filters (search, State, Status,
-    Balance, Sort; :func:`ledger.services.stores.store_list`) over every store, then the page.
+    """The stores list (PLAN-012f-a D3): the counts line, the filters (search, State, Brand,
+    Status, Balance, Sort; :func:`ledger.services.stores.store_list`) over every store, then
+    the page.
     The spreadsheet keeps the search only (its rows are PLAN-011 D5's)."""
     return render(request, "ledger/stores/list.html", _list_context(request))
 
@@ -144,6 +145,7 @@ def _list_context(request: HttpRequest) -> dict[str, Any]:
         request,
         {
             "state": ("State", dict(listed.states)),
+            "brand": ("Brand", dict(listed.brands)),
             "status": ("Status", dict(service.LIST_STATUSES)),
             "balance": ("Balance", dict(service.LIST_BALANCES)),
         },
@@ -171,6 +173,7 @@ def _list_context(request: HttpRequest) -> dict[str, Any]:
 EXPORT_HEADER = (
     "Store",
     "Store number",
+    "Brand",
     "City",
     "State",
     "Open date",
@@ -190,6 +193,7 @@ def store_export(request: HttpRequest) -> StreamingHttpResponse:
         [
             store.external_label,
             store.store_number,
+            store.brand.name if store.brand is not None else "",
             store.city,
             store.state,
             store.open_date,

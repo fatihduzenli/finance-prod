@@ -28,10 +28,10 @@ from django.test import Client
 from accounts.roles import Role
 from ledger import forms as ledger_forms
 from ledger.forms import (
+    BRAND_REFUSED,
     CHOICE_REFUSED,
     KIND_RADIO_IDS,
     STATE_REFUSED,
-    STORE_TYPE_REFUSED,
     OperatorCreateForm,
     OperatorForm,
 )
@@ -443,7 +443,7 @@ def test_the_lease_forms_never_repeat_a_refused_select(field: str) -> None:
 
 @pytest.mark.parametrize(
     ("field", "refusal"),
-    [("store_type", STORE_TYPE_REFUSED), ("state", STATE_REFUSED), ("status", CHOICE_REFUSED)],
+    [("brand", BRAND_REFUSED), ("state", STATE_REFUSED), ("status", CHOICE_REFUSED)],
 )
 def test_the_store_form_never_repeats_a_refused_select(field: str, refusal: str) -> None:
     admin, _ = client_for(Role.ADMIN)

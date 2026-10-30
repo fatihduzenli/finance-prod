@@ -1369,7 +1369,7 @@ def operator_stores(operator: Operator) -> list[Store]:
     """The stores of the operator's leases, by label (the selector's choices)."""
     return list(
         Store.objects.filter(leases__operator=operator)
-        .select_related("store_type")
+        .select_related("brand")
         .distinct()
         .order_by("external_label", "id")
     )
