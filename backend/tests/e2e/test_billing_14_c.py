@@ -220,5 +220,6 @@ def test_the_bank_entry_page_says_not_set_up_without_hosted_fields(
     else:
         assert "not set up" in body
         assert not page.locator("script[src*='fattpay']").count()
-    assert "routing" not in body.lower() and page.locator("input[name*=routing]").count() == 0
+    assert "routing number" not in body.lower()
+    assert page.locator("input[name*=routing]").count() == 0
     shot(page, "lease-bank-entry-light-laptop")

@@ -12,6 +12,7 @@ already linked elsewhere, payment data in the company name, a 2-hop share)."""
 from __future__ import annotations
 
 import importlib
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -462,7 +463,7 @@ def test_the_operator_page_shows_no_connect_link_and_no_company() -> None:
     lease = connected_lease()
     html = page(client_for(Role.BILLING)[0], f"/operators/{lease.operator_id}/")
     assert "Connect to" not in html and "Legal name" not in html
-    assert "1901" in html and "····" in html or "no bank account" in html
+    assert re.search(r"\b1901\b", html) and ("····" in html or "no bank account" in html)
 
 
 # --- C6: Bill to -------------------------------------------------------------------------------
