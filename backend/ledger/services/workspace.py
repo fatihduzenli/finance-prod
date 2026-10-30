@@ -92,6 +92,7 @@ from ledger.services import (
     audit,
     contacts,
     credits,
+    detail_cards,
     installments,
     lease_end,
     leases,
@@ -240,10 +241,8 @@ class Header:
     deposit_text: str = ""
     next_rent: date | None = None
     next_insurance: date | None = None
-
-    @property
-    def lease_since(self) -> date | None:
-        return self.lease.started_on if self.lease is not None else None
+    #: The Sign fee and Insurance rows under Deposit (PLAN-014 B3), with a lease.
+    collections: detail_cards.LeaseCollections | None = None
 
 
 def _autopay_state(schedules: list[CollectionSchedule]) -> str:
@@ -463,6 +462,7 @@ def _header(
         deposit_text=_deposit_text(lease),
         next_rent=_next_rent(schedules, moved, now) or _next_debit_day(lease, today),
         next_insurance=_next_insurance(lease, today),
+        collections=detail_cards.lease_collections(lease, today),
     )
 
 
