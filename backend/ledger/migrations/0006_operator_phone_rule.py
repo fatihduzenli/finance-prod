@@ -3,8 +3,9 @@
 A stored phone that passes the rule is rewritten as its normalised digits; an operator
 whose stored phone fails it is flagged ``needs_review`` (the phone is kept, nothing is
 deleted). Empty phones are left alone. The rule is the one the form and the adapter
-use, :func:`payments.stax.validation.normalise_phone` (named through
-``payments.operator_sync`` until PLAN-014 C3). The reverse changes nothing.
+use, :func:`payments.lease_sync.normalise_phone` (``payments.operator_sync`` until
+PLAN-014 C3); the migration names the provider-neutral module only (docs/CLAUDE.md
+Rule 8). The reverse changes nothing.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from django.apps.registry import Apps
 from django.db import migrations
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
-from payments.stax.validation import normalise_phone
+from payments.lease_sync import normalise_phone
 
 
 def apply_phone_rule(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:

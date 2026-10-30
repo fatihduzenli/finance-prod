@@ -71,13 +71,13 @@ from django.db import migrations, models
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 import ledger.validators
+from payments.lease_sync import PROVIDER_KEY
 
 MIGRATED_ACTION = "lease_billing.migrated"
 REFS_KEPT_ACTION = "operator.refs_kept"
 REFS_KEPT_REASON = "Processor customer not moved: no active lease"
 ENTITY_LEASE = "lease"
 ENTITY_OPERATOR = "operator"
-PROVIDER_KEY = "stax_pay"
 KIND_CUSTOMER = "customer"
 KIND_PAYMENT_METHOD = "payment_method"
 OWN_CUSTOMER = "own_customer"
