@@ -525,7 +525,7 @@ class LeaseBilling(GuardedModel):
     holds no reference of its own (one hop; ``ledger.services.leases.customer_ref``).
     """
 
-    lease = models.OneToOneField(Lease, on_delete=models.PROTECT, related_name="billing")
+    lease = models.OneToOneField(Lease, on_delete=models.CASCADE, related_name="billing")
     company_name = guarded_char(120, blank=True, default="")
     email = models.EmailField(blank=True, default="", validators=[validate_no_payment_data])
     phone = guarded_char(50, blank=True, default="")
