@@ -1042,6 +1042,64 @@ def start_billing(
     return row
 
 
+# --- The per-lease customers of the sharing leases (PLAN-014 C9) ------------------------
+
+#: The jobs that already send a lease's customer (one of them waiting: nothing more queued).
+SYNC_KINDS = (JobKind.LEASE_SYNC, JobKind.LEASE_RETRY)
+
+
+@dataclass(frozen=True, slots=True)
+class OwnCustomers:
+    """What :func:`queue_own_customers` found and queued."""
+
+    leases: int
+    queued: int
+
+
+def own_customer_candidates() -> list[Lease]:
+    """The leases that share another lease's account and hold no customer of their own,
+    not ended, of an operator not archived, by store number."""
+    own = ExternalRef.objects.filter(
+        entity_type=lease_sync.ENTITY_LEASE,
+        provider=PROVIDER_KEY,
+        external_kind=lease_sync.KIND_CUSTOMER,
+        superseded_at__isnull=True,
+    ).values("entity_id")
+    return list(
+        Lease.objects.filter(
+            billing__shares_account_of__isnull=False,
+            ended_on__isnull=True,
+            operator__isnull=False,
+            operator__archived_at__isnull=True,
+        )
+        .exclude(collection_status=CollectionStatus.ENDED)
+        .exclude(pk__in=own)
+        .select_related("store", "billing")
+        .order_by(F("store__store_number").asc(nulls_last=True), "store__external_label", "id")
+    )
+
+
+def queue_own_customers(*, dry_run: bool, limit: int | None = None) -> OwnCustomers:
+    """Queue one ``lease_sync`` with ``own_customer`` for each candidate (at most
+    ``limit``) that has a billing e-mail and no sync waiting, marking it ``pending``;
+    ``shares_account_of`` and every bank method are left as they are. The dry run queues
+    and writes nothing. Running it again while the jobs wait queues nothing more."""
+    candidates = own_customer_candidates()
+    queued = 0
+    for lease in candidates:
+        if dry_run or (limit is not None and queued >= limit):
+            break
+        if not lease.billing.email or jobs.is_active(jobs.latest_for(lease, SYNC_KINDS)):
+            continue
+        with transaction.atomic():
+            locked = Lease.objects.select_for_update().get(pk=lease.pk)
+            locked.sync_status = SyncStatus.PENDING
+            locked.save(update_fields=["sync_status", "updated_at"])
+            jobs.enqueue(JobKind.LEASE_SYNC, locked, {"own_customer": True}, None)
+        queued += 1
+    return OwnCustomers(leases=len(candidates), queued=queued)
+
+
 # --- Lease writes ---------------------------------------------------------------------
 
 
