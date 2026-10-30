@@ -210,6 +210,31 @@ def test_claim_takes_the_oldest_queued_job_and_marks_it_running() -> None:
     assert jobs.claim_next(now=now) is None
 
 
+def test_a_job_with_run_after_ahead_is_skipped_until_its_time() -> None:
+    # PLAN-014 D7: the send window; a later job without run_after is taken first.
+    lease = new_lease()
+    now = timezone.now()
+    later = jobs.enqueue(JobKind.LEASE_SYNC, lease, None, None, run_after=now + timedelta(hours=2))
+    Job.objects.filter(pk=later.pk).update(created_at=now - timedelta(minutes=1))
+    plain = jobs.enqueue(JobKind.LEASE_RETRY, lease, None, None)
+    assert later.run_after == now + timedelta(hours=2) and plain.run_after is None
+
+    first = jobs.claim_next(now=now)
+    assert first is not None and first.pk == plain.pk
+    jobs.finish(first, JobStatus.DONE, "Done.")
+    assert jobs.claim_next(now=now + timedelta(hours=2) - timedelta(seconds=1)) is None
+    due = jobs.claim_next(now=now + timedelta(hours=2))
+    assert due is not None and due.pk == later.pk
+
+
+def test_a_job_with_run_after_in_the_past_runs_at_once() -> None:
+    job = jobs.enqueue(
+        JobKind.LEASE_SYNC, new_lease(), None, None, run_after=timezone.now() - timedelta(days=1)
+    )
+    claimed = jobs.claim_next()
+    assert claimed is not None and claimed.pk == job.pk
+
+
 def test_a_job_whose_worker_died_is_queued_again_once_then_dead() -> None:
     jobs.enqueue(JobKind.LEASE_SYNC, new_lease(), None, None)
     start = timezone.now()
