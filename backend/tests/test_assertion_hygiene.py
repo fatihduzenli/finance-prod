@@ -89,7 +89,7 @@ ALLOWED: dict[str, set[int | str]] = {
     # The service worker's JavaScript.
     "test_pwa.py": {123},
     # A PostgreSQL trigger's message.
-    "test_reserved_tables.py": {183},
+    "test_reserved_tables.py": {'assert "outbound" not in text, text'},
     # form.errors, a dict.
     "test_settlement.py": {672},
     # An error message's text.
