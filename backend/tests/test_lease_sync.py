@@ -715,6 +715,33 @@ def test_archived_operator_cannot_be_updated_and_its_lease_not_synced_or_linked(
     assert fake.calls == []
 
 
+@requires_postgresql
+@pytest.mark.django_db
+def test_a_billing_edit_on_a_lease_without_an_operator_locks_only_the_lease_row(
+    actor: User,
+) -> None:
+    """QA-014 Batch C: ``FOR UPDATE`` over the outer join to the nullable ``operator`` is
+    refused by PostgreSQL; the lock names the lease row only, so the edit goes through."""
+    number = next(_STORE_NUMBERS)
+    store = Store.objects.create(
+        external_label=f"Store {number}",
+        store_number=number,
+        open_date=date(2024, 1, 1),
+        needs_open_date=False,
+        status="active",
+    )
+    lease = Lease.objects.create(
+        store=store,
+        operator=None,
+        debit_day=5,
+        collection_status="prospective",
+        payment_channel="stax",
+    )
+    saved, billing = lease_sync.update_billing(lease.pk, billing_fields(), actor=actor)
+    assert (saved.pk, saved.operator_id) == (lease.pk, None)
+    assert billing_row(lease).email == billing.email == EMAIL
+
+
 @pytest.fixture(autouse=True)
 def _no_real_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Fail loudly if anything here reaches for the configured provider."""

@@ -842,7 +842,9 @@ def attach_bank_method(
     """
     with transaction.atomic():
         lease = (
-            Lease.objects.select_for_update().select_related("operator", "store").get(pk=lease_id)
+            Lease.objects.select_for_update(of=("self",))
+            .select_related("operator", "store")
+            .get(pk=lease_id)
         )
         reason = _attach_refusal(lease, payment_method_external_id)
         if reason:
