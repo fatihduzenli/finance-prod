@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import importlib
 import uuid
+from typing import Any
 
 import django.db.models.deletion
 from django.apps.registry import Apps
@@ -151,6 +152,173 @@ def drop_guards(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
         f"DROP TRIGGER IF EXISTS {BILLING}_payment_data_guard ON {BILLING};", params=None
     )
     _replace_trigger(schema_editor, LEASES, _LEASES_BEFORE)
+
+
+def _primary_key(lease: Any) -> tuple[bool, Any, bool, int, str]:
+    """The primary-lease order: earliest start (none last), lowest store number (none
+    last), then the lease id."""
+    number = lease.store.store_number
+    return (
+        lease.started_on is None,
+        lease.started_on,
+        number is None,
+        number if number is not None else 0,
+        str(lease.pk),
+    )
+
+
+def _is_active(lease: Any) -> bool:
+    return lease.collection_status in ACTIVE_STATUSES and lease.ended_on is None
+
+
+def _is_ended(lease: Any) -> bool:
+    return lease.collection_status == ENDED or lease.ended_on is not None
+
+
+def _billing_values(operator: Any) -> dict[str, Any]:
+    if operator is None:
+        return {}
+    return {
+        "company_name": (operator.company or "")[:120] if operator.kind == COMPANY else "",
+        "email": operator.email or "",
+        "phone": operator.phone or "",
+        **{name: getattr(operator, name) or "" for name in ADDRESS_COLUMNS},
+    }
+
+
+def copy_billing(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+    lease_model = apps.get_model("ledger", "Lease")
+    billing_model = apps.get_model("ledger", "LeaseBilling")
+    operator_model = apps.get_model("ledger", "Operator")
+    audit_log = apps.get_model("ledger", "AuditLog")
+    external_ref = apps.get_model("payments", "ExternalRef")
+
+    live_refs = external_ref.objects.filter(
+        entity_type=ENTITY_OPERATOR,
+        provider=PROVIDER_KEY,
+        external_kind__in=[KIND_CUSTOMER, KIND_PAYMENT_METHOD],
+        superseded_at__isnull=True,
+    )
+    with_customer = set(
+        live_refs.filter(external_kind=KIND_CUSTOMER).values_list("entity_id", flat=True)
+    )
+    leases = list(lease_model.objects.select_related("store", "operator").order_by("id"))
+    by_operator: dict[Any, list[Any]] = {}
+    for lease in leases:
+        if lease.operator_id is not None:
+            by_operator.setdefault(lease.operator_id, []).append(lease)
+
+    primary_of: dict[Any, Any] = {}
+    for operator_id in sorted(with_customer, key=str):
+        active = [lease for lease in by_operator.get(operator_id, []) if _is_active(lease)]
+        if active:
+            primary_of[operator_id] = min(active, key=_primary_key)
+            continue
+        operator = operator_model.objects.get(pk=operator_id)
+        audit_log.objects.create(
+            actor=None,
+            action=REFS_KEPT_ACTION,
+            entity_type=ENTITY_OPERATOR,
+            entity_id=str(operator_id),
+            before={"needs_review": operator.needs_review},
+            after={"needs_review": True, "reason": REFS_KEPT_REASON},
+        )
+        operator_model.objects.filter(pk=operator_id).update(needs_review=True)
+
+    for lease in leases:
+        operator = lease.operator
+        billing_model.objects.create(lease=lease, **_billing_values(operator))
+        primary = primary_of.get(lease.operator_id)
+        moved = primary is not None and primary.pk == lease.pk
+        shares = primary is not None and not moved
+        before = {"needs_review": lease.needs_review, "review_reason": lease.review_reason}
+        updates: dict[str, Any] = {}
+        if moved:
+            live_refs.filter(entity_id=lease.operator_id).update(
+                entity_type=ENTITY_LEASE, entity_id=lease.pk
+            )
+            updates.update({name: getattr(operator, name) for name in SYNC_COLUMNS})
+        if shares:
+            billing_model.objects.filter(lease=lease).update(shares_account_of=primary)
+            if not _is_ended(lease):
+                updates["needs_review"] = True
+                if not lease.review_reason:
+                    updates["review_reason"] = OWN_CUSTOMER
+        if updates:
+            lease_model.objects.filter(pk=lease.pk).update(**updates)
+        audit_log.objects.create(
+            actor=None,
+            action=MIGRATED_ACTION,
+            entity_type=ENTITY_LEASE,
+            entity_id=str(lease.pk),
+            before=before,
+            after={
+                "operator": str(lease.operator_id) if lease.operator_id else None,
+                "refs_moved": moved,
+                "shares": shares,
+                "shares_account_of": str(primary.pk) if shares else None,
+                "needs_review": updates.get("needs_review", lease.needs_review),
+                "review_reason": updates.get("review_reason", lease.review_reason),
+            },
+        )
+
+
+def _latest_before(audit_log: Any, action: str, entity_type: str) -> dict[str, dict[str, Any]]:
+    """The ``before`` of this migration's latest audit row per entity."""
+    latest: dict[str, dict[str, Any]] = {}
+    rows = audit_log.objects.filter(action=action, entity_type=entity_type).order_by("at", "id")
+    for entity_id, before in rows.values_list("entity_id", "before"):
+        if isinstance(before, dict):
+            latest[entity_id] = before
+    return latest
+
+
+def uncopy_billing(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+    lease_model = apps.get_model("ledger", "Lease")
+    billing_model = apps.get_model("ledger", "LeaseBilling")
+    operator_model = apps.get_model("ledger", "Operator")
+    audit_log = apps.get_model("ledger", "AuditLog")
+    external_ref = apps.get_model("payments", "ExternalRef")
+
+    lease_refs = external_ref.objects.filter(
+        entity_type=ENTITY_LEASE,
+        provider=PROVIDER_KEY,
+        external_kind__in=[KIND_CUSTOMER, KIND_PAYMENT_METHOD],
+        superseded_at__isnull=True,
+    )
+    holders = set(lease_refs.values_list("entity_id", flat=True))
+    operator_of = dict(lease_model.objects.filter(pk__in=holders).values_list("pk", "operator_id"))
+    owners = list(operator_of.values())
+    operators_with_refs = set(
+        external_ref.objects.filter(
+            entity_type=ENTITY_OPERATOR,
+            provider=PROVIDER_KEY,
+            external_kind__in=[KIND_CUSTOMER, KIND_PAYMENT_METHOD],
+            superseded_at__isnull=True,
+        ).values_list("entity_id", flat=True)
+    )
+    if (
+        len(operator_of) != len(holders)
+        or None in owners
+        or len(set(owners)) != len(owners)
+        or set(owners) & operators_with_refs
+    ):
+        raise RuntimeError(CANNOT_REVERSE)
+    for lease_id, operator_id in operator_of.items():
+        lease_refs.filter(entity_id=lease_id).update(
+            entity_type=ENTITY_OPERATOR, entity_id=operator_id
+        )
+
+    for entity_id, before in _latest_before(audit_log, MIGRATED_ACTION, ENTITY_LEASE).items():
+        lease_model.objects.filter(pk=entity_id).update(
+            needs_review=bool(before.get("needs_review")),
+            review_reason=str(before.get("review_reason") or ""),
+        )
+    for entity_id, before in _latest_before(audit_log, REFS_KEPT_ACTION, ENTITY_OPERATOR).items():
+        operator_model.objects.filter(pk=entity_id).update(
+            needs_review=bool(before.get("needs_review"))
+        )
+    billing_model.objects.all().delete()
 
 
 class Migration(migrations.Migration):
@@ -427,5 +595,8 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.RunPython(create_guards, drop_guards, elidable=False),
+        # Reversed after the data step: the rows it rewrote are checked before the ALTER
+        # TABLE statements.
         migrations.RunPython(migrations.RunPython.noop, run_pending_checks, elidable=False),
+        migrations.RunPython(copy_billing, uncopy_billing, elidable=False),
     ]
