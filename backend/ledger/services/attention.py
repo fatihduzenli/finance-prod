@@ -58,6 +58,10 @@ page that deals with it and ``since``, the day it began:
 - ``store_state_missing`` (PLAN-012f-b D11): an active or prospective store without a
   state ("State needs choosing: <store>", linking to its edit form), as ledger migration
   0051 leaves a state it could not match;
+- ``brand_needed`` (PLAN-014 B1): a store without a brand, flagged ``needs_review``, whose
+  brand ledger migration 0058 cleared (a ``store.brand_cleared`` audit row; a new store
+  without a brand is not listed): "Brand needs choosing: <store>", linking to its edit form;
+  cleared by saving a brand;
 - ``operator_no_email``: an operator, not archived, without an e-mail address;
 - ``vacant_store``: an active store with no lease in effect today (collection ``active``
   or ``paused``, started on or before today, not ended before today) whose last lease
@@ -135,6 +139,7 @@ from ledger.services import (
     workspace,
 )
 from ledger.services.one_off_charges import ENTITY_PLAN
+from ledger.services.stores import BRAND_CLEARED_ACTION, ENTITY_STORE
 from ledger.wording import format_amount, provider_name, provider_sentence
 from payments.invoice_sync import PROVIDER_PAID
 from payments.models import ReconciliationMismatch, WebhookEvent, WebhookOutcome
@@ -158,6 +163,7 @@ LEASE_ENDING = "lease_ending"
 LANDLORD_LEASE_ENDING = "landlord_lease_ending"
 STORE_NO_OPEN_DATE = "store_no_open_date"
 STORE_STATE_MISSING = "store_state_missing"
+BRAND_NEEDED = "brand_needed"
 OPERATOR_NO_EMAIL = "operator_no_email"
 VACANT_STORE = "vacant_store"
 SCHEDULE_REVIEW = "schedule_review"
@@ -184,6 +190,7 @@ KINDS: tuple[str, ...] = (
     VACANT_STORE,
     STORE_NO_OPEN_DATE,
     STORE_STATE_MISSING,
+    BRAND_NEEDED,
     OPERATOR_NO_EMAIL,
     CALENDAR_TODAY,
 )
@@ -208,6 +215,7 @@ KIND_LABELS: dict[str, str] = {
     VACANT_STORE: "vacant stores",
     STORE_NO_OPEN_DATE: "stores without an open date",
     STORE_STATE_MISSING: "stores whose state needs choosing",
+    BRAND_NEEDED: "stores whose brand needs choosing",
     OPERATOR_NO_EMAIL: "operators without an e-mail",
     CALENDAR_TODAY: "calendar entries today",
 }
@@ -235,6 +243,7 @@ WHY_BADGES: dict[str, str] = {
     VACANT_STORE: "neutral",
     STORE_NO_OPEN_DATE: "neutral",
     STORE_STATE_MISSING: "neutral",
+    BRAND_NEEDED: "neutral",
     OPERATOR_NO_EMAIL: "neutral",
     CALENDAR_TODAY: "neutral",
 }
@@ -945,6 +954,36 @@ def _stores_without_state() -> list[Item]:
     ]
 
 
+def _stores_without_brand() -> list[Item]:
+    """The stores ledger migration 0058 left without a brand and still flagged: one query,
+    and one more for their audit rows only when there are any."""
+    rows = list(
+        Store.objects.filter(brand__isnull=True, needs_review=True).order_by("external_label", "id")
+    )
+    if not rows:
+        return []
+    cleared = set(
+        AuditLog.objects.filter(
+            action=BRAND_CLEARED_ACTION,
+            entity_type=ENTITY_STORE,
+            entity_id__in=[str(store.pk) for store in rows],
+        ).values_list("entity_id", flat=True)
+    )
+    return [
+        Item(
+            kind=BRAND_NEEDED,
+            severity=LOW,
+            text=f"Brand needs choosing: {store.external_label}",
+            url=reverse("ledger:stores:edit", kwargs={"pk": store.pk}),
+            since=None,
+            store=store.external_label,
+            store_id=store.pk,
+        )
+        for store in rows
+        if str(store.pk) in cleared
+    ]
+
+
 def _operators_without_email(operator: uuid.UUID | None) -> list[Item]:
     rows = Operator.objects.filter(email__isnull=True, archived_at__isnull=True)
     if operator is not None:
@@ -1110,6 +1149,7 @@ def attention(
             lambda: _landlord(today),
             _stores_without_open_date,
             _stores_without_state,
+            _stores_without_brand,
             lambda: _vacant(today),
             _system_counts,
         ]

@@ -62,6 +62,9 @@ from ledger.wording import format_amount
 from payments.models import SyncState
 
 ENTITY_STORE = "store"
+#: The audit row ledger migration 0058 wrote for each store whose brand it cleared
+#: (PLAN-014 B1); ``before`` holds the brand's name and the store's ``needs_review`` then.
+BRAND_CLEARED_ACTION = "store.brand_cleared"
 #: The ``sync_state`` row locked while a store is created.
 CREATION_LOCK = "store_creation_lock"
 #: The store fields staff edit, in form order.
@@ -206,17 +209,43 @@ def _first_cost(store: Store, fields: Mapping[str, Any], actor: User | None) -> 
 
 
 def update_store(store_id: uuid.UUID, fields: Mapping[str, Any], *, actor: User | None) -> Store:
-    """Apply staff edits under a row lock; an edit that changes nothing writes no audit row."""
+    """Apply staff edits under a row lock; an edit that changes nothing writes no audit row.
+
+    Choosing a brand for a store ledger migration 0058 left without one (PLAN-014 B1) clears
+    its ``needs_review`` when the brand was the flag's one reason (:func:`review_was_brand`)."""
     with transaction.atomic():
         store = Store.objects.select_for_update().get(pk=store_id)
         before = _snapshot(store)
+        had_brand = store.brand_id is not None
         for name, value in _editable(fields).items():
             setattr(store, name, value)
+        if (
+            not had_brand
+            and store.brand_id is not None
+            and store.needs_review
+            and review_was_brand(store)
+        ):
+            store.needs_review = False
         store.save()
         after = _snapshot(store)
         if after != before:
             _audit(actor, "store.updated", store, before, after)
     return store
+
+
+def review_was_brand(store: Store) -> bool:
+    """Whether the store's ``needs_review`` was set by ledger migration 0058 alone: its last
+    ``store.brand_cleared`` row says the store was not flagged before the brand was cleared."""
+    cleared = (
+        AuditLog.objects.filter(
+            action=BRAND_CLEARED_ACTION, entity_type=ENTITY_STORE, entity_id=str(store.pk)
+        )
+        .order_by("-at", "-id")
+        .first()
+    )
+    if cleared is None or not isinstance(cleared.before, dict):
+        return False
+    return cleared.before.get("needs_review") is False
 
 
 def _by_creation_key(creation_key: uuid.UUID) -> Store | None:

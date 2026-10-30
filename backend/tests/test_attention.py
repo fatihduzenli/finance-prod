@@ -19,6 +19,7 @@ from django.utils.html import escape
 from accounts.roles import Role
 from finance.dates import day_text
 from ledger.models import (
+    AuditLog,
     CalendarEntry,
     CollectionSchedule,
     CollectionStatus,
@@ -540,6 +541,16 @@ def build(n: int) -> None:
         )
         a_store(f"No date {n}-{i}")
         a_store(f"No state {n}-{i}", state="")
+        # PLAN-014 B1: a store whose brand ledger migration 0058 cleared.
+        unbranded = a_store(f"No brand {n}-{i}")
+        Store.objects.filter(pk=unbranded.pk).update(needs_review=True)
+        AuditLog.objects.create(
+            action="store.brand_cleared",
+            entity_type="store",
+            entity_id=str(unbranded.pk),
+            before={"brand": "Kiosk", "needs_review": False},
+            after={"brand": None, "needs_review": True},
+        )
         vacant = opened(a_store(f"Vacant {n}-{i}"), date(2020, 1, 1))
         assert vacant.pk
         CalendarEntry.objects.create(kind="note", on=TODAY, title=f"Today {i}", operator=operator)

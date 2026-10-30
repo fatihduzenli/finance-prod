@@ -8,15 +8,42 @@ trigger of ``0051`` (``brands_payment_data_guard``, the same column). On Postgre
 CONSTRAINTS ALL IMMEDIATE`` runs any check this transaction queued before the ``ALTER TABLE``
 statements (the lesson of ``0018``), in either direction.
 
-The reverse renames everything back.
+Data (``seed_brands``): the three brands **iFixandRepair**, **Techy** and **Talk&Fix** are
+created (or, when a row of that name exists already, whatever its case, updated) active with
+``sort_order`` 1 to 3; every other row (0051's Inline store, Kiosk, Cart, Pop-up and Warehouse
+and any an admin added) is made inactive. Every store whose brand is now inactive gets no
+brand and ``needs_review``, with one ``audit_log`` row ``store.brand_cleared`` (actor none;
+``before`` the old brand's name and the store's ``needs_review`` until then, ``after`` no brand
+and ``needs_review`` true): the attention kind ``brand_needed`` lists it until a brand is
+chosen, and saving a brand clears the flag only when the brand was its one reason.
+
+The reverse renames everything back. Its data step first refuses (``CANNOT_REVERSE``, the
+pattern of ``0018``) when any ``store.brand_cleared`` row exists: the cleared stores' brands
+cannot be put back. Otherwise (no store was cleared) it makes every other row active again,
+except one an admin made inactive in the Django admin (its last ``store_type.*_in_admin`` row
+says so), and makes the three inactive when this step created them (no admin row created
+them).
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import django.db.models.deletion
 from django.apps.registry import Apps
 from django.db import migrations, models
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+
+#: The brands this step seeds, in their order (``sort_order`` 1, 2, 3).
+SEEDED_BRANDS: tuple[str, ...] = ("iFixandRepair", "Techy", "Talk&Fix")
+CLEARED_ACTION = "store.brand_cleared"
+ENTITY_STORE = "store"
+#: The entity of the Django admin's audit rows on the kinds of store (``StoreTypeAdmin``).
+ADMIN_ENTITY = "store_type"
+CANNOT_REVERSE = (
+    "Stores lost their brand to this migration (audit_log store.brand_cleared); the brands "
+    "cannot be restored, so this migration refuses to reverse."
+)
 
 OLD_TABLE = "store_types"
 NEW_TABLE = "brands"
@@ -49,6 +76,64 @@ def rename_trigger(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
 def unrename_trigger(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     # Runs before the table is renamed back: the trigger is still on ``brands``.
     _rename_trigger(schema_editor, NEW_TABLE, NEW_TABLE, OLD_TABLE)
+
+
+def seed_brands(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+    brand = apps.get_model("ledger", "Brand")
+    store = apps.get_model("ledger", "Store")
+    audit_log = apps.get_model("ledger", "AuditLog")
+    seeded = []
+    for index, name in enumerate(SEEDED_BRANDS, start=1):
+        row = brand.objects.filter(name__iexact=name).order_by("created_at", "id").first()
+        if row is None:
+            row = brand.objects.create(name=name, sort_order=index, active=True)
+        else:
+            brand.objects.filter(pk=row.pk).update(name=name, sort_order=index, active=True)
+        seeded.append(row.pk)
+    brand.objects.exclude(pk__in=seeded).update(active=False)
+    cleared = (
+        store.objects.filter(brand__active=False)
+        .select_related("brand")
+        .order_by("store_number", "external_label", "id")
+    )
+    for row in list(cleared):
+        audit_log.objects.create(
+            actor=None,
+            action=CLEARED_ACTION,
+            entity_type=ENTITY_STORE,
+            entity_id=str(row.pk),
+            before={"brand": row.brand.name, "needs_review": row.needs_review},
+            after={"brand": None, "needs_review": True},
+        )
+        store.objects.filter(pk=row.pk).update(brand=None, needs_review=True)
+
+
+def _made_inactive_in_admin(audit_log: Any, pk: object) -> bool:
+    """Whether the Django admin's last save of this kind of store left it inactive."""
+    last = (
+        audit_log.objects.filter(entity_type=ADMIN_ENTITY, entity_id=str(pk))
+        .order_by("-at", "-id")
+        .first()
+    )
+    return last is not None and isinstance(last.after, dict) and last.after.get("active") is False
+
+
+def unseed_brands(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+    brand = apps.get_model("ledger", "Brand")
+    audit_log = apps.get_model("ledger", "AuditLog")
+    if audit_log.objects.filter(action=CLEARED_ACTION, entity_type=ENTITY_STORE).exists():
+        raise RuntimeError(CANNOT_REVERSE)
+    for row in list(brand.objects.all()):
+        if row.name in SEEDED_BRANDS:
+            created_in_admin = audit_log.objects.filter(
+                entity_type=ADMIN_ENTITY,
+                entity_id=str(row.pk),
+                action=f"{ADMIN_ENTITY}.created_in_admin",
+            ).exists()
+            if not created_in_admin:
+                brand.objects.filter(pk=row.pk).update(active=False)
+        elif not _made_inactive_in_admin(audit_log, row.pk):
+            brand.objects.filter(pk=row.pk).update(active=True)
 
 
 class Migration(migrations.Migration):
@@ -90,6 +175,8 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.RunPython(rename_trigger, unrename_trigger, elidable=False),
-        # Reversed first: any check queued runs before the ALTER TABLE statements.
+        # Reversed after the data step: the rows it rewrote are checked before the ALTER
+        # TABLE statements.
         migrations.RunPython(migrations.RunPython.noop, run_pending_checks, elidable=False),
+        migrations.RunPython(seed_brands, unseed_brands, elidable=False),
     ]
