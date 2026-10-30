@@ -150,8 +150,8 @@ def test_admin_settings_brands(live_server: LiveServer, laptop: BrowserContext, 
     names = [field.input_value() for field in page.locator("#brands-table input[name=name]").all()]
     assert names[:3] == ["iFixandRepair", "Techy", "Talk&Fix"]
     shot(page, f"admin-settings-brands-{theme}-laptop")
-    page.fill("form[action$='/brands/add/'] input[name=name]", "Phone Hub")
-    page.locator("form[action$='/brands/add/'] button[type=submit]").click()
+    page.fill("#brand-add input[name=name]", "Phone Hub")
+    page.locator("#brand-add button[type=submit]").click()
     page.wait_for_load_state("networkidle")
     names = [field.input_value() for field in page.locator("#brands-table input[name=name]").all()]
     assert "Phone Hub" in names
