@@ -7,7 +7,7 @@
   <section class="card table-card settings-card" id="templates-card">
     {% responsive_table %}
     <table id="templates-table" aria-label="Message templates">
-      <thead><tr><th>Name</th><th>Code</th><th>Channel</th><th>Active</th></tr></thead>
+      <thead><tr><th>Name</th><th>Code</th><th>Channel</th><th>Status</th></tr></thead>
       <tbody>
         {% for template in template_rows %}
           <tr id="template-{{ template.code }}">

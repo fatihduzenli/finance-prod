@@ -397,6 +397,29 @@ def test_the_templates_list_and_an_edit_saved_and_audited() -> None:
     assert audit.after["body"] == "Hello {operator_name},\nPay {amount}."
 
 
+def test_the_templates_list_order_does_not_follow_the_database_collation() -> None:
+    """Active first, the operators' before the internal, then by case-folded name and code:
+    "F — …" and "F — … (no retry)" before "Final statement" on sqlite and PostgreSQL alike."""
+    active = [t.code for t in message_templates.rows() if t.active]
+    assert active == [
+        "reminder_autopay",
+        "reminder_due",
+        "overdue_day5",
+        "overdue_day10",
+        "returned_debit",
+        "returned_debit_no_retry",
+        "final_statement",
+        "internal_day30",
+    ]
+    inactive = [t for t in message_templates.rows() if not t.active]
+    assert inactive and [t.code for t in message_templates.rows()][len(active) :] == [
+        t.code for t in sorted(inactive, key=lambda t: (t.display_name.casefold(), t.code))
+    ]
+    client, _ = client_for(Role.ADMIN)
+    page = client.get("/admin-settings/templates/").content.decode()
+    assert "<th>Status</th>" in page and "<th>Active</th>" not in page
+
+
 @pytest.mark.parametrize(
     ("subject", "body", "refusal"),
     [
