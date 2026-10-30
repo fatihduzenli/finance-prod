@@ -8,7 +8,8 @@ the reminder three days ahead is keyed to the lease and the month, not to a char
 whose first debit of the month (its debit day, as the rent run places it,
 :func:`ledger.services.rent_run.debit_date`) is three days after ``today`` gets **A** when its
 rent collection schedule is active (the schedule's amount, debited from its bank account),
-else **B** (the rent in force on that day, due then). One message per lease, rule and month
+else **B** (the amount the rent run charges for that debit, prorated and split as
+:func:`ledger.services.rent_run.create_month` does, due then). One message per lease, rule and month
 (a :class:`~ledger.services.messaging.RentMonth`; the database keeps the one row): a lease
 debited twice a month gets one, for the month's first debit (plan §8, a checkpoint
 question). A month whose rent charge exists already and is paid, pending or waived (paid in
@@ -242,7 +243,9 @@ def _active_rent_schedules(lease_ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, De
 def rent_months_due(today: date) -> list[tuple[RentMonth, Rule]]:
     """The lease months whose A or B falls on ``today`` (the module docstring): the leases
     whose month's first debit is :data:`DAYS_BEFORE` days ahead, with A (autopay, the
-    schedule's amount) or B (the rent in force on the day). A month already settled is
+    schedule's amount) or B (what the rent run charges for the month's first debit,
+    :func:`ledger.services.rent_run.first_debit_amount`: prorated in the lease's first month,
+    half for a lease debited twice a month). A month already settled is
     listed: :func:`queue_due` counts it skipped."""
     debit = today + timedelta(days=DAYS_BEFORE)
     month = debit.replace(day=1)
@@ -277,9 +280,9 @@ def rent_months_due(today: date) -> list[tuple[RentMonth, Rule]]:
                 (RentMonth(lease, month, debit, schedules[lease.pk]), _rule(MessageRule.A))
             )
             continue
-        rent = leases.rent_on(lease, debit)
-        if rent is not None:
-            found.append((RentMonth(lease, month, debit, rent.amount), _rule(MessageRule.B)))
+        amount = rent_run.first_debit_amount(lease, month)
+        if amount is not None:
+            found.append((RentMonth(lease, month, debit, amount), _rule(MessageRule.B)))
     return found
 
 
