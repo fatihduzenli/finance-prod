@@ -359,7 +359,7 @@ def test_the_four_side_cards_read_the_lease() -> None:
     labels = re.findall(r'<h2 class="section-label"[^>]*>([^<]+)</h2>', side)
     assert labels == ["Lease", "Next", "Store cost", "Documents"]
     assert '<dd id="header-rent"><strong>$2,000.00</strong> / month</dd>' in side
-    assert '<dd id="header-since">Jan 1, 2025</dd>' in side
+    assert 'id="header-since"' not in side  # PLAN-014 B3: the Lease link carries the date
     assert '<dd id="header-debit-day">1st</dd>' in side
     assert '<dd id="header-deposit">$3,000.00 · not collected</dd>' in side
     assert re.search(

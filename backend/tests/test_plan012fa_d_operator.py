@@ -672,7 +672,9 @@ def test_the_page_renders_within_a_fixed_number_of_queries(selected: bool) -> No
     # rows (one query, nothing more while there is none): 53 and 64. PLAN-012g Batch A (A2) adds
     # one, the theme row: 54 and 65.
     assert large == small, (small, large)
-    assert small <= (65 if selected else 54), small
+    # PLAN-014 B3: +2 with a store selected (the sign fee, the insurance charges and their
+    # balances for the LEASE card): 67.
+    assert small <= (67 if selected else 54), small
 
 
 def test_the_page_writes_nothing() -> None:

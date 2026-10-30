@@ -1245,6 +1245,23 @@ LEDGER_CASES: list[ConstraintCase] = [
     ),
     # notes
     ConstraintCase("notes_body_not_blank", new_note, lambda: new_note(body="")),
+    # PLAN-014 B5: a pinned note carries when it was pinned; a deleted one its trio.
+    ConstraintCase(
+        "notes_pinned_at_matches",
+        lambda: new_note(pinned=True, pinned_at=datetime(2026, 10, 7, tzinfo=UTC)),
+        lambda: new_note(pinned=True),
+    ),
+    ConstraintCase(
+        "notes_deleted_all_or_none",
+        lambda: new_note(
+            deleted_at=datetime(2026, 10, 7, tzinfo=UTC),
+            deleted_by=make_user(),
+            delete_reason="Wrong store.",
+        ),
+        lambda: new_note(
+            deleted_at=datetime(2026, 10, 7, tzinfo=UTC), delete_reason="Wrong store."
+        ),
+    ),
     # invoices
     ConstraintCase(
         "invoices_number_format",

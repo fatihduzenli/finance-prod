@@ -22,6 +22,7 @@ from django.contrib.auth.models import User
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import Client
+from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role
@@ -45,7 +46,6 @@ from tests.receivables_helpers import (
     an_operator,
 )
 from tests.test_operator_views import client_for
-from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
 
@@ -187,10 +187,11 @@ def test_0058_reverses_when_no_store_was_cleared() -> None:
     leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
     try:
         old = _migrate(LEDGER_BEFORE)
-        assert (
-            old.get_model("ledger", "StoreType").objects.filter(name="Kiosk", active=True).exists()
-        )
+        types = old.get_model("ledger", "StoreType")
+        types.objects.get_or_create(name="Kiosk", defaults={"sort_order": 20, "active": True})
+        types.objects.filter(name="Kiosk").update(active=True)
         new = _migrate(("ledger", MIGRATION_0058))
+        assert new.get_model("ledger", "Brand").objects.get(name="Kiosk").active is False
         assert new.get_model("ledger", "Brand").objects.filter(name="Techy", active=True).exists()
         back = _migrate(LEDGER_BEFORE)
         types = back.get_model("ledger", "StoreType")
@@ -209,7 +210,9 @@ def test_a_cleared_store_is_an_attention_item_until_a_brand_is_chosen() -> None:
         entity_id=str(store.pk),
         before={"brand": "Cart"},
     )
-    items = [item for item in attention.attention(TODAY) if item.kind == attention.BRAND_NEEDED]
+    items = [
+        item for item in attention.attention(TODAY).items if item.kind == attention.BRAND_NEEDED
+    ]
     assert (
         len(items) == 1
         and "Brand needs choosing" in items[0].text
@@ -217,11 +220,16 @@ def test_a_cleared_store_is_an_attention_item_until_a_brand_is_chosen() -> None:
     )
     fresh = a_store("1504", number=1504)  # a new store without a brand is not flagged
     assert fresh.brand_id is None
-    assert sum(1 for item in attention.attention(TODAY) if item.kind == attention.BRAND_NEEDED) == 1
+    assert (
+        sum(1 for item in attention.attention(TODAY).items if item.kind == attention.BRAND_NEEDED)
+        == 1
+    )
     store.brand = Brand.objects.get(name="Techy")
     store.needs_review = False
     store.save()
-    assert not [item for item in attention.attention(TODAY) if item.kind == attention.BRAND_NEEDED]
+    assert not [
+        item for item in attention.attention(TODAY).items if item.kind == attention.BRAND_NEEDED
+    ]
 
 
 # --- B2: Admin › Settings ------------------------------------------------------------------
@@ -233,7 +241,7 @@ def test_settings_is_for_admins_and_lists_the_brands() -> None:
     admin, _ = client_for(Role.ADMIN)
     html = page(admin, "/admin-settings/")
     for name in BRANDS:
-        assert has_token(html, name) or name in html, name
+        assert name.replace("&", "&amp;") in html, name
     assert "Brands" in html
     nav = page(admin, "/")
     assert 'id="nav-settings"' in nav and ">Preferences<" in nav
@@ -243,25 +251,39 @@ def test_settings_is_for_admins_and_lists_the_brands() -> None:
 def test_brand_add_rename_toggle_and_order_are_audited_and_refuse_bad_names() -> None:
     admin, _ = client_for(Role.ADMIN)
     before = AuditLog.objects.filter(action__startswith="brand.").count()
-    assert admin.post("/admin-settings/brands/add/", {"name": "Phone Hub"}).status_code == 302
+    assert (
+        admin.post(reverse("ledger:settings:brand_add"), {"name": "Phone Hub"}).status_code == 302
+    )
     hub = Brand.objects.get(name="Phone Hub")
     assert hub.active and hub.sort_order > 3
-    response = admin.post("/admin-settings/brands/add/", {"name": "techy"})
-    assert response.status_code in (200, 400) and not Brand.objects.filter(name="techy").exists()
-    response = admin.post("/admin-settings/brands/add/", {"name": "   "})
-    assert response.status_code in (200, 400)
-    assert admin.post("/admin-settings/brands/add/", {"name": "x" * 61}).status_code in (200, 400)
+    # A refusal goes back to the page with its sentence as a message; nothing is created.
+    refused = (200, 302, 400)
+    response = admin.post(reverse("ledger:settings:brand_add"), {"name": "techy"})
+    assert response.status_code in refused and not Brand.objects.filter(name="techy").exists()
+    assert admin.post(reverse("ledger:settings:brand_add"), {"name": "   "}).status_code in refused
     assert (
-        admin.post(f"/admin-settings/brands/{hub.pk}/save/", {"name": "Phone Hub 2"}).status_code
+        admin.post(reverse("ledger:settings:brand_add"), {"name": "x" * 61}).status_code in refused
+    )
+    assert Brand.objects.count() == 9  # the three, the five old kinds, Phone Hub
+    assert (
+        admin.post(
+            reverse("ledger:settings:brand_save", kwargs={"pk": hub.pk}), {"name": "Phone Hub 2"}
+        ).status_code
         == 302
     )
     hub.refresh_from_db()
     assert hub.name == "Phone Hub 2"
-    assert admin.post(f"/admin-settings/brands/{hub.pk}/toggle/", {}).status_code == 302
+    assert (
+        admin.post(reverse("ledger:settings:brand_toggle", kwargs={"pk": hub.pk}), {}).status_code
+        == 302
+    )
     hub.refresh_from_db()
     assert hub.active is False
     assert (
-        admin.post(f"/admin-settings/brands/{hub.pk}/move/", {"direction": "up"}).status_code == 302
+        admin.post(
+            reverse("ledger:settings:brand_move", kwargs={"pk": hub.pk}), {"direction": "up"}
+        ).status_code
+        == 302
     )
     assert AuditLog.objects.filter(action__startswith="brand.").count() >= before + 4
     assert Brand.objects.filter(name="Phone Hub 2").exists()  # never deleted
@@ -270,8 +292,13 @@ def test_brand_add_rename_toggle_and_order_are_audited_and_refuse_bad_names() ->
 def test_a_billing_user_cannot_change_brands() -> None:
     billing, _ = client_for(Role.BILLING)
     techy = Brand.objects.get(name="Techy")
-    assert billing.post("/admin-settings/brands/add/", {"name": "Nope"}).status_code in (302, 403)
-    assert billing.post(f"/admin-settings/brands/{techy.pk}/toggle/", {}).status_code in (302, 403)
+    assert billing.post(reverse("ledger:settings:brand_add"), {"name": "Nope"}).status_code in (
+        302,
+        403,
+    )
+    assert billing.post(
+        reverse("ledger:settings:brand_toggle", kwargs={"pk": techy.pk}), {}
+    ).status_code in (302, 403)
     assert not Brand.objects.filter(name="Nope").exists()
     techy.refresh_from_db()
     assert techy.active
@@ -372,15 +399,16 @@ def test_the_insurance_row_states_for_the_current_policy_year(
         assert outcome.ok, outcome.message
     card = lease_card(store)
     assert "Insurance 2026–27" in card
-    row = section(card, "header-insurance-year", "</dd>")
-    assert expected in row and f"/{charge.pk}/" in row
+    row = section(card, "header-insurance-state", "</dd>")
+    assert expected in row
+    assert charge.pk  # an insurance charge has no page of its own: the row is not linked
 
 
 def test_the_insurance_row_not_billed_and_the_previous_year_notes() -> None:
     store, lease, _ = a_store_with_lease()
     card = lease_card(store)
-    row = section(card, "header-insurance-year", "</dd>")
-    assert "not billed" in row and 'id="insurance-bill"' in row
+    row = section(card, "header-insurance-state", "</dd>")
+    assert "not billed" in row  # no per-lease insurance creation route: no "Bill now" (QA-014)
     assert "Insurance 2025–26 never billed" in card
     an_insurance_charge(lease, 2025, date(2025, 7, 1), "300.00")
     card = lease_card(store)
@@ -497,14 +525,14 @@ def test_pinned_notes_fill_the_notes_card_newest_pin_first_up_to_five() -> None:
             Note.objects.filter(pk=note.pk).update(pinned_at=timezone.now() + timedelta(minutes=n))
             made.append(note)
     html = page(client, f"/stores/{store.pk}/")
-    card = section(html, "notes-card", "</div>\n")
-    assert card.count('class="note-pinned"') == 5 or card.count("Note number") == 5
+    card = section(html, "notes-card", "</section>")
+    assert card.count('class="pinned-note"') == 5
     assert card.index("Note number 5.") < card.index("Note number 1.")
     assert "Note number 0." not in card  # the sixth pin, the oldest, is beyond the cap
     assert "Note number 6." not in card  # never pinned
     notes.unpin(made[5], user)
     assert "Note number 5." not in section(
-        page(client, f"/stores/{store.pk}/"), "notes-card", "</div>\n"
+        page(client, f"/stores/{store.pk}/"), "notes-card", "</section>"
     )
 
 
@@ -513,12 +541,14 @@ def test_pinning_is_for_billing_and_a_viewer_is_refused() -> None:
     client, _ = a_user(Role.BILLING)
     client.post(f"/stores/{store.pk}/notes/", {"body": "Pin me."})
     note = Note.objects.get(entity_id=store.pk)
-    assert client.post(f"/notes/{note.pk}/pin/", {}).status_code == 302
+    assert client.post(f"/notes/{note.pk}/pin/", {"pinned": "1"}).status_code == 302
     note.refresh_from_db()
     assert note.pinned and note.pinned_at is not None
     viewer, _ = client_for(Role.VIEWER)
-    assert viewer.post(f"/notes/{note.pk}/pin/", {}).status_code in (302, 403)
-    assert client.post(f"/notes/{note.pk}/pin/", {}).status_code == 302  # toggles off
+    assert viewer.post(f"/notes/{note.pk}/pin/", {"pinned": "0"}).status_code in (302, 403)
+    note.refresh_from_db()
+    assert note.pinned
+    assert client.post(f"/notes/{note.pk}/pin/", {"pinned": "0"}).status_code == 302
     note.refresh_from_db()
     assert not note.pinned
 

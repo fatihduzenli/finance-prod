@@ -45,6 +45,7 @@ from ledger.models import (
     Lease,
     LeaseEnd,
     LeaseTransfer,
+    Note,
     OneOffCharge,
     Operator,
     Payment,
@@ -53,6 +54,7 @@ from ledger.models import (
     Store,
     StoreCost,
 )
+from ledger.services import notes as note_service
 from payments.models import WebhookEvent, WebhookOutcome
 from tests.auth_helpers import iter_routes
 from tests.receivables_helpers import (
@@ -100,6 +102,8 @@ class World:
     autopay: AutopayPlan
     cost: StoreCost
     entry: ContactEntry
+    #: A store note the admin wrote (PLAN-014 B5): its Edit and Delete dialogs open.
+    note: Note
     calendar: CalendarEntry
     event: WebhookEvent
     deposit: OneOffCharge
@@ -121,6 +125,7 @@ class World:
             "operators": self.operator.pk,
             "stores": self.store.pk,
             "contacts": self.entry.pk,
+            "notes": self.note.pk,
             "leases": self.lease.pk,
             "lease_ends": self.end.pk,
             "transfers": self.transfer.pk,
@@ -209,6 +214,7 @@ def world() -> World:
             admin_user,
         ),
         transfer=begin(moving_lease(), admin_user),
+        note=note_service.add(store, "Walk store note.", admin_user),
     )
 
 
@@ -353,6 +359,9 @@ FORM_PAGES = (
     # PLAN-012f-c D5: over the payment page (the world's payment is a bank debit, so billing
     # sees its refusal; tests/test_void_manual_payment.py opens it on a manual payment).
     "ledger:payments:void_manual",
+    # PLAN-014 B5: the Edit note and Delete note dialogs over the store page.
+    "ledger:notes:edit",
+    "ledger:notes:delete",
 )
 
 POST_ONLY = "a POST-only action (405 to a GET)"
@@ -428,6 +437,9 @@ for _name in (
     "ledger:documents:upload_store",
     "ledger:documents:upload_lease",
     "ledger:documents:delete",
+    # PLAN-014 B5: a store note is written and pinned by POST.
+    "ledger:notes:add",
+    "ledger:notes:pin",
     # PLAN-014 B2: Admin › Settings' Brands card.
     "ledger:settings:brand_add",
     "ledger:settings:brand_save",

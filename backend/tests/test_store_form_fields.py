@@ -60,20 +60,25 @@ def html(path: str, role: Role = Role.ADMIN) -> str:
 # --- D10: the store type ------------------------------------------------------------------
 
 
-def test_the_five_types_are_seeded_in_order_and_active() -> None:
-    assert list(Brand.objects.values_list("name", "active")) == [
-        ("Inline store", True),
-        ("Kiosk", True),
-        ("Cart", True),
-        ("Pop-up", True),
-        ("Warehouse", True),
+def test_the_three_brands_are_seeded_in_order_and_the_old_kinds_are_inactive() -> None:
+    # PLAN-014 B1 (ledger 0058): exactly iFixandRepair, Techy and Talk&Fix are offered.
+    assert list(Brand.objects.filter(active=True).values_list("name", flat=True)) == [
+        "iFixandRepair",
+        "Techy",
+        "Talk&Fix",
     ]
+    assert set(Brand.objects.filter(active=False).values_list("name", flat=True)) >= {
+        "Inline store",
+        "Kiosk",
+        "Cart",
+        "Pop-up",
+        "Warehouse",
+    }
 
 
-def test_the_type_select_lists_the_active_types_and_keeps_a_stores_own_inactive_one() -> None:
-    Brand.objects.filter(name="Cart").update(active=False)
+def test_the_brand_select_lists_the_active_brands_and_keeps_a_stores_own_inactive_one() -> None:
     labels = [label for _, label in choices(StoreForm(), "brand")]
-    assert labels == ["—", "Inline store", "Kiosk", "Pop-up", "Warehouse"]
+    assert labels == ["—", "iFixandRepair", "Techy", "Talk&Fix"]
     store = a_store("Cart store")
     store.brand = Brand.objects.get(name="Cart")
     store.save()
@@ -91,14 +96,15 @@ def test_an_inactive_or_unknown_type_is_refused_without_echo() -> None:
         assert value not in str(form.errors)
 
 
-def test_the_new_store_form_saves_the_type_and_audits_it() -> None:
+def test_the_new_store_form_saves_the_brand_and_audits_it() -> None:
     admin, _ = client_for(Role.ADMIN)
-    response = admin.post(NEW, form_data(brand=str(kiosk().pk)))
+    techy = Brand.objects.get(name="Techy")
+    response = admin.post(NEW, form_data(brand=str(techy.pk)))
     assert response.status_code == 302
     store = Store.objects.get()
-    assert store.brand == kiosk()
+    assert store.brand == techy
     created = AuditLog.objects.get(action="store.created")
-    assert created.after is not None and created.after["brand"] == str(kiosk().pk)
+    assert created.after is not None and created.after["brand"] == str(techy.pk)
 
 
 def test_the_pill_shows_on_the_four_surfaces_when_set() -> None:
