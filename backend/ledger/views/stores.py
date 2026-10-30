@@ -80,11 +80,11 @@ from ledger.services import (
     invoice_builder,
     lease_end,
     list_filters,
-    notes,
     payments_entry,
     rent_run,
     search,
     store_costs,
+    timeline,
     workspace,
 )
 from ledger.services import stores as service
@@ -258,28 +258,54 @@ def _detail_context(
         **workspace_cards.side_cards(request, store, today),
     }
     if tab in (workspace.TAB_CONTACTS, workspace.TAB_CHARGES):
-        # PLAN-012 D3: the entries about a lease of this store, and Add entry.
-        context.update(
-            {
-                "contact_rows": contact_log.log_rows(
-                    request,
-                    list(
-                        contacts.store_entries(
-                            store, include_deleted=contact_log.include_deleted(request)
-                        )[: contacts.PAGE_LIMIT + 1]
-                    ),
-                    store=store,
-                ),
-                "contact_limit": contacts.PAGE_LIMIT,
-                "contact_add_url": contact_log.store_add_url(request, store, today),
-            }
+        # PLAN-012 D3: Add entry.
+        context["contact_add_url"] = contact_log.store_add_url(request, store, today)
+    if tab == workspace.TAB_CHARGES:
+        # PLAN-012 D3: the latest entries about a lease of this store, under the Charges tab.
+        context["contact_rows"] = contact_log.log_rows(
+            request,
+            list(
+                contacts.store_entries(store, include_deleted=contact_log.include_deleted(request))[
+                    : contacts.PAGE_LIMIT + 1
+                ]
+            ),
+            store=store,
         )
     if tab == workspace.TAB_CONTACTS:
-        # PLAN-014 B5: the store's notes, and the form to write one (billing).
+        # PLAN-014 B5, B6: the form to write a note (billing), then one list of the store's
+        # notes and contact entries, narrowed by ?show=.
+        show = timeline.parse_show(request.GET.get("show"))
+        found = timeline.entries(
+            store,
+            show,
+            include_deleted=contact_log.include_deleted(request),
+            limit=contacts.PAGE_LIMIT,
+        )
         context.update(
             {
-                "note_rows": contact_log.note_rows(request, notes.for_store(store)),
                 "note_form": NoteForm() if context["billing"] else None,
+                "timeline_rows": contact_log.timeline_rows(
+                    request, found[: contacts.PAGE_LIMIT], store=store
+                ),
+                "timeline_more": len(found) > contacts.PAGE_LIMIT,
+                "timeline_show": show,
+                "timeline_filters": [
+                    (
+                        value,
+                        label,
+                        f"{reverse('ledger:stores:detail', kwargs={'pk': store.pk})}"
+                        f"?{urlencode({'tab': workspace.TAB_CONTACTS, 'show': value})}"
+                        f"#tab-{workspace.TAB_CONTACTS}",
+                    )
+                    for value, label in timeline.SHOWS
+                ],
+                "timeline_empty": (
+                    timeline.EMPTY_EMAILS
+                    if show == timeline.SHOW_EMAILS
+                    else timeline.EMPTY_NOTES
+                    if show == timeline.SHOW_NOTES
+                    else ""
+                ),
             }
         )
     if tab == workspace.TAB_DOCUMENTS:

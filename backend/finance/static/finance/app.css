@@ -348,6 +348,9 @@ td.line-number { white-space: nowrap; color: var(--muted); }
    neutral "N", the pin toggle .note-pin, aria-pressed) and the form above them; the NOTES card's
    pinned notes, each shown in full but clamped to four lines. */
 .note-form { margin: 0 0 var(--space-3); }
+/* PLAN-014 B6: the list's filter (a .segmented pill of links) and the tab's actions on one row. */
+.timeline-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-2); }
+.timeline-bar .actions { margin: 0; }
 .note-form textarea { width: 100%; box-sizing: border-box; }
 .note-form .form-actions { margin-top: var(--space-2); }
 .note-pin { display: inline-flex; align-items: center; gap: var(--space-1); }

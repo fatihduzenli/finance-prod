@@ -221,9 +221,10 @@ def _live(store: Store) -> QuerySet[Note]:
     ).select_related("author")
 
 
-def for_store(store: Store) -> list[Note]:
-    """The store's live notes, newest first (one query)."""
-    return list(_live(store).order_by("-created_at", "-id"))
+def for_store(store: Store, limit: int | None = None) -> list[Note]:
+    """The store's live notes, newest first (one query), at most ``limit``."""
+    found = _live(store).order_by("-created_at", "-id")
+    return list(found if limit is None else found[:limit])
 
 
 def pinned_for(store: Store, limit: int = PINNED_SHOWN) -> list[Note]:

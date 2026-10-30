@@ -1,17 +1,21 @@
-{% comment %}The Notes & follow-ups tab (PLAN-012 D3, docs/qa/PLAN-012d D3; PLAN-014 B4, B5): for billing, the note form (#note-form: "Write a note about this store…", at most 2,000 characters, Save); the store's notes (ledger/notes/_entry.html); then the entries about a lease of this store.{% endcomment %}
+{% comment %}The Notes & follow-ups tab (PLAN-012 D3, docs/qa/PLAN-012d D3; PLAN-014 B4 to B6): for billing, the note form (#note-form: "Write a note about this store…", at most 2,000 characters, Save); the filter (#timeline-filter, links: All · Notes · Calls & promises · E-mails, the current one aria-current); then one list, newest first (ledger.services.timeline.entries): each note through ledger/notes/_entry.html, each entry about a lease of this store through ledger/contacts/_log_entry.html. E-mails lists nothing until Batch D ("No e-mails yet.").{% endcomment %}
 <h2 id="contacts">Notes &amp; follow-ups</h2>
 {% if note_form %}<form method="post" action="{% url 'ledger:notes:add' pk=store.pk %}" class="note-form js-single-submit" id="note-form" autocomplete="off">
   {% csrf_token %}
   <div class="field{% if note_form.body.errors %} has-error{% endif %}"><label class="visually-hidden" for="{{ note_form.body.id_for_label }}">Note</label>{{ note_form.body }}{{ note_form.body.errors }}</div>
   <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" id="note-save">Save</button></div>
 </form>{% endif %}
-{% if note_rows %}<ul class="contact-log note-list" id="notes">
-  {% for row in note_rows %}{% include "ledger/notes/_entry.html" %}{% endfor %}
-</ul>{% endif %}
-<p class="actions">
-  {% if contact_add_url %}<a class="btn" id="add-store-contact" href="{{ contact_add_url }}">Add entry</a>{% endif %}
-  <a class="btn" id="all-store-contacts" href="{% url 'ledger:stores:contacts' pk=store.pk %}">All entries</a>
-</p>
-<p class="muted">Entries about a lease of this store. Dates are New York days.</p>
-{% include "ledger/contacts/_log.html" with rows=contact_rows|slice:contact_limit empty_next_url=contact_add_url %}
-{% if contact_rows|length > contact_limit %}<p>The {{ contact_limit }} latest are shown; <a href="{% url 'ledger:stores:contacts' pk=store.pk %}">see every entry</a>.</p>{% endif %}
+<div class="timeline-bar">
+  <nav class="segmented" id="timeline-filter" aria-label="Show">{% for value, label, url in timeline_filters %}<a href="{{ url }}" id="timeline-show-{{ value }}"{% if value == timeline_show %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
+  <p class="actions">
+    {% if contact_add_url %}<a class="btn" id="add-store-contact" href="{{ contact_add_url }}">Add entry</a>{% endif %}
+    <a class="btn" id="all-store-contacts" href="{% url 'ledger:stores:contacts' pk=store.pk %}">All entries</a>
+  </p>
+</div>
+<p class="muted">Notes about this store and entries about a lease of it. Dates are New York days.</p>
+<ul class="contact-log" id="contact-entries">
+  {% for item in timeline_rows %}{% with row=item.row %}{% if item.kind == "note" %}{% include "ledger/notes/_entry.html" %}{% else %}{% include "ledger/contacts/_log_entry.html" %}{% endif %}{% endwith %}{% empty %}
+  <li class="muted empty" id="timeline-empty">{% if timeline_empty %}{{ timeline_empty }}{% else %}No entries yet. Add one.{% if contact_add_url %} <a class="btn empty-next" href="{{ contact_add_url }}">Add entry</a>{% endif %}{% endif %}</li>
+  {% endfor %}
+</ul>
+{% if timeline_more %}<p>The latest are shown; <a href="{% url 'ledger:stores:contacts' pk=store.pk %}">see every entry</a>.</p>{% endif %}

@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
 from ledger.models import ContactEntry, ContactKind, ContactStatus, Note, Store
-from ledger.services import contacts, notes
+from ledger.services import contacts, notes, timeline
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,3 +117,40 @@ def note_rows(request: HttpRequest, found: list[Note]) -> list[NoteRow]:
         NoteRow(note=note, can_pin=billing, can_change=billing and notes.can_change(note, user))
         for note in found
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineRow:
+    """One row of the Notes & follow-ups list (PLAN-014 B6): ``kind`` as
+    :class:`ledger.services.timeline.TimelineEntry` names it and the row its template
+    reads (a :class:`NoteRow` for a note, a :class:`LogRow` for a contact entry)."""
+
+    kind: str
+    row: NoteRow | LogRow
+
+
+def timeline_rows(
+    request: HttpRequest, found: list[timeline.TimelineEntry], *, store: Store
+) -> list[TimelineRow]:
+    """The list's rows in their order, with what the request's user may do on each."""
+    notes_by_id = {
+        row.note.pk: row
+        for row in note_rows(
+            request, [entry.payload for entry in found if entry.kind == timeline.NOTE]
+        )
+    }
+    logs_by_id = {
+        row.entry.pk: row
+        for row in log_rows(
+            request,
+            [entry.payload for entry in found if entry.kind == timeline.CONTACT],
+            store=store,
+        )
+    }
+    rows: list[TimelineRow] = []
+    for entry in found:
+        if entry.kind == timeline.NOTE:
+            rows.append(TimelineRow(entry.kind, notes_by_id[entry.payload.pk]))
+        elif entry.kind == timeline.CONTACT:
+            rows.append(TimelineRow(entry.kind, logs_by_id[entry.payload.pk]))
+    return rows
