@@ -757,17 +757,21 @@ rules A to E (below), the final statement of a lease end and **Send a message no
 charge page (billing: an active template, the lease's billing e-mail, one row per send); F
 (returned debits) is Batch F's.
 
-**The reminder rules.** The daily job (09:00 New York) queues, for every open charge, the rule
-of that day only, counted from the due date: **A** three days before the debit of a rent charge
-on autopay (the lease's rent schedule is on; nothing else is sent for that charge unless a debit
-of it is returned or the schedule stops), **B** three days before any other charge is due, **C**
-five days after, **D** ten days after and again at 40, 50, 60 … days while it is owed, and **E**
-at 30 days, once, to the managers only. A day that has passed is never sent later: the first run,
-or the end of a pause, sends nothing for the days missed. An open promise to pay whose date has
-not passed pauses B to E for the charges of its lease (A still goes); the day after the promised
-date the promise is broken and the rules resume with the next rule day. Paid, waived and voided
-charges get nothing, each installment of a plan is reminded on its own due date, and no rule adds
-a fee. The job's line counts the messages queued per rule, the charges paused by a promise and
+**The reminder rules.** Rent is reminded by lease and month, before its charge exists (the
+charge is still made on its day): three days before the month's debit day the daily job (09:00
+New York) queues **A** for a lease on autopay (its rent schedule is on: the scheduled amount and
+bank account) and **B** for any other lease, once per lease and month (a lease debited twice a
+month gets one, for the first debit), and nothing when the lease ends before that day or the
+month's rent is already paid, pending or waived. For every open charge it then queues the rule
+of that day only, counted from the due date: **B** three days before an insurance or one-off
+charge is due, **C** five days after, **D** ten days after and again at 40, 50, 60 … days while
+it is owed, and **E** at 30 days, once, to the managers only (a rent charge on autopay gets none
+of these unless a debit of it is returned or the schedule stops). A day that has passed is
+never sent later: the first run, or the end of a pause, sends nothing for the days missed. An
+open promise to pay whose date has not passed pauses B to E for the charges and the rent months
+of its lease (A still goes); the day after the promised date the promise is broken and the rules
+resume with the next rule day. Paid, waived and voided charges get nothing, each installment of
+a plan is reminded on its own due date, and no rule adds a fee. The job's line counts the messages queued per rule, the charges paused by a promise and
 the ones not queued (already queued that day, or no lease to bill).
 
 **Admin › Settings › Mail.** *Send as* (the company mailbox the Workspace key impersonates),
