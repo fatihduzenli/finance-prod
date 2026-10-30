@@ -109,8 +109,10 @@ account (all TODO-VERIFY at the second checkpoint); an Invoices list page (none 
 
 ## 3. Decisions
 
-Numbering: ledger migrations 0058 (B), 0059 (C), 0060 (D), 0061 (F), 0062 (G if needed); payments
-0019 (D); accounts 0004 (A); portal 0001 (H); banking 0001 (I). ADRs 0015–0018. TODO-VERIFY 066+.
+Numbering (as built through C): ledger migrations 0058 (B), 0059 (C: billing per lease), 0060 (C:
+the transfer's incoming billing), 0061 (D), 0062 (F), 0063 (G if needed); payments 0019 (C: the
+lease job kinds and the attach kind), 0020 (D: `Job.run_after`); accounts 0004 (A); portal 0001 (H);
+banking 0001 (I). ADRs 0015–0018. TODO-VERIFY 066–073 added with C.
 
 ### Batch A — dashboard, lists and small UI fixes (Opus; Fable the carry-overs and tests)
 
