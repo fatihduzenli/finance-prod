@@ -1,5 +1,5 @@
 {% load components icons money dates %}
-{% comment %}The workspace's side cards (docs/qa/PLAN-012d D1; the approved design's right column, docs/qa/PLAN-012f-approved-design.md D8): ledger.services.workspace.Header and ledger.views.workspace_cards.side_cards. LEASE: the operator (on the operator page, "ows", the selected store), the lease, the rent, the debit days, autopay (with "Set up" while none), the deposit, the sign fee and this policy year's insurance (PLAN-014 B3: ledger.services.detail_cards.lease_collections; "Bill now" for billing while the sign fee is not billed), the open balance in red, or "$0.00 ✓" in green (and, on the operator page, that of all the operator's stores) and any credit; under the list, the yellow note about last year's insurance. NEXT: the next scheduled payment, the next rent debit when that is something else, the open promise and the next insurance renewal. STORE COST: the cost in effect, with Change (billing). DOCUMENTS: the newest documents, with Upload (billing). The ids are the header card's (PLAN-012d D1).{% endcomment %}
+{% comment %}The workspace's side cards (docs/qa/PLAN-012d D1; the approved design's right column, docs/qa/PLAN-012f-approved-design.md D8): ledger.services.workspace.Header and ledger.views.workspace_cards.side_cards. LEASE: the operator (on the operator page, "ows", the selected store), the lease, the rent, the debit days, autopay (with "Set up" while none), the deposit, the sign fee and this policy year's insurance (PLAN-014 B3: ledger.services.detail_cards.lease_collections; "Bill now" for billing while the sign fee is not billed), the open balance in red, or "$0.00 ✓" in green (and, on the operator page, that of all the operator's stores) and any credit; under the list, the yellow note about last year's insurance. NOTES (PLAN-014 B5, ledger/stores/_notes_card.html): the pinned notes, when there are any. NEXT: the next scheduled payment, the next rent debit when that is something else, the open promise and the next insurance renewal. STORE COST: the cost in effect, with Change (billing). DOCUMENTS: the newest documents, with Upload (billing). The ids are the header card's (PLAN-012d D1).{% endcomment %}
 <section id="workspace-header" class="workspace-header" aria-label="Store summary">
   <div class="card" id="lease-card">
     <h2 class="section-label">Lease</h2>
@@ -18,6 +18,7 @@
     </dl>
     {% if header.collections.insurance_note %}<p class="side-note warning" id="header-insurance-note">{{ header.collections.insurance_note }}</p>{% endif %}
   </div>
+  {% include "ledger/stores/_notes_card.html" %}
   <div class="card" id="next-card">
     <h2 class="section-label">Next</h2>
     <dl class="side-list side-list-dates">

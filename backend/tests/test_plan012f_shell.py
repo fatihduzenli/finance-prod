@@ -620,6 +620,7 @@ ICON_NAMES = (
     "arrow-right",
     "x",
     "banknote",  # PLAN-012f-a D4: the Payments card's empty state
+    "pin",  # PLAN-014 B5: a note's pin
     "trash",  # PLAN-012f-a D5: the builder's remove-line button
     "alert",  # PLAN-012f-b E-4: the warning flash message
     "dot",  # PLAN-012f-b E-4: the error flash message

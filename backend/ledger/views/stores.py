@@ -60,6 +60,7 @@ from ledger.forms import (
     ALLOCATION_PREFIX,
     CREDIT_PREFIX,
     AllocationPaymentForm,
+    NoteForm,
     StoreCostCloseForm,
     StoreCostCorrectForm,
     StoreCostForm,
@@ -79,6 +80,7 @@ from ledger.services import (
     invoice_builder,
     lease_end,
     list_filters,
+    notes,
     payments_entry,
     rent_run,
     search,
@@ -270,6 +272,14 @@ def _detail_context(
                 ),
                 "contact_limit": contacts.PAGE_LIMIT,
                 "contact_add_url": contact_log.store_add_url(request, store, today),
+            }
+        )
+    if tab == workspace.TAB_CONTACTS:
+        # PLAN-014 B5: the store's notes, and the form to write one (billing).
+        context.update(
+            {
+                "note_rows": contact_log.note_rows(request, notes.for_store(store)),
+                "note_form": NoteForm() if context["billing"] else None,
             }
         )
     if tab == workspace.TAB_DOCUMENTS:

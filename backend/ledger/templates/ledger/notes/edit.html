@@ -1,0 +1,12 @@
+{% extends "ledger/stores/detail.html" %}
+{% load components %}
+{% block title %}Edit note{% endblock %}
+{% comment %}Edit a store note (docs/qa/PLAN-014 B5), in the dialog over the store page's Notes & follow-ups tab (the pattern of payments/void_manual.html): the body, "Keep the note" and Save. Its author or an admin only.{% endcomment %}
+{% block dialog %}{% dialog id="note-edit-dialog" title="Edit note" size="sm" open=True return_url=note_back_url %}
+  <form method="post" class="js-single-submit" autocomplete="off" id="note-edit-form" action="{% url 'ledger:notes:edit' pk=edited_note.pk %}">
+    {% csrf_token %}
+    {% if edit_form.non_field_errors %}<p class="errorlist">{{ edit_form.non_field_errors|join:" " }}</p>{% endif %}
+    {% include "ledger/stores/_form_field.html" with field=edit_form.body %}
+    <div class="dialog-foot"><a class="btn" href="{{ note_back_url }}" id="note-edit-keep">Keep the note</a> <button class="btn btn-primary" type="submit" id="note-edit-submit">Save</button></div>
+  </form>
+{% enddialog %}{% endblock %}

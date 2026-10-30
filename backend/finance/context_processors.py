@@ -57,6 +57,7 @@ _NAMESPACE_SECTIONS: dict[str, str] = {
     "arrears": "arrears",
     "calendar": "calendar",
     "stores": "stores",
+    "notes": "stores",
     "operators": "operators",
     "leases": "leases",
     "run": "run",

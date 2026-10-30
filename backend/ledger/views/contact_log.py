@@ -16,8 +16,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
-from ledger.models import ContactEntry, ContactKind, ContactStatus, Store
-from ledger.services import contacts
+from ledger.models import ContactEntry, ContactKind, ContactStatus, Note, Store
+from ledger.services import contacts, notes
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,3 +98,22 @@ def store_add_url(request: HttpRequest, store: Store, today: date) -> str:
     if contacts.store_contact_lease(store, today) is None:
         return ""
     return reverse("ledger:stores:contacts_add", kwargs={"pk": store.pk})
+
+
+@dataclass(frozen=True, slots=True)
+class NoteRow:
+    """One store note as the tab shows it to the request's user (PLAN-014 B5): billing pins
+    it; its author or an admin edits and deletes it."""
+
+    note: Note
+    can_pin: bool
+    can_change: bool
+
+
+def note_rows(request: HttpRequest, found: list[Note]) -> list[NoteRow]:
+    billing = meets(role_of(request.user), Role.BILLING)
+    user = request.user if isinstance(request.user, User) else None
+    return [
+        NoteRow(note=note, can_pin=billing, can_change=billing and notes.can_change(note, user))
+        for note in found
+    ]

@@ -36,6 +36,7 @@ from ledger.views import (
     invoices,
     lease_ends,
     leases,
+    notes,
     one_off_charges,
     operators,
     payments,
@@ -412,6 +413,18 @@ calendar_patterns = (
     "calendar",
 )
 
+# A store's notes (PLAN-014 B5): add and pin (billing); edit and delete, the author or an
+# admin (their dialog over the store page on GET).
+note_patterns = (
+    [
+        path("stores/<str:pk>/notes/", notes.note_add, name="add"),
+        path("notes/<str:pk>/edit/", notes.note_edit, name="edit"),
+        path("notes/<str:pk>/pin/", notes.note_pin, name="pin"),
+        path("notes/<str:pk>/delete/", notes.note_delete, name="delete"),
+    ],
+    "notes",
+)
+
 # Admin › Settings (PLAN-014 B2): admin only.
 settings_patterns = (
     [
@@ -455,4 +468,5 @@ urlpatterns = [
     path("documents/", include(document_patterns)),
     path("audit/", include(audit_patterns)),
     path("admin-settings/", include(settings_patterns)),
+    path("", include(note_patterns)),
 ]

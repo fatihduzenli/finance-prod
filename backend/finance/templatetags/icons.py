@@ -82,6 +82,8 @@ ICONS: dict[str, str] = {
         '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/>'
         '<path d="M6 12h.01M18 12h.01"/>'
     ),
+    # PLAN-014 B5: a note's pin.
+    "pin": '<path d="M12 16v6"/><path d="M9 3h6l-1 6 3 3.5V16H7v-3.5L10 9z"/>',
     # PLAN-012f-a D5: the invoice builder's remove-line button.
     "trash": (
         '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>'

@@ -1,0 +1,6 @@
+{% load dates people %}{% comment %}The NOTES card (docs/qa/PLAN-014 B5), after the LEASE card: the store's pinned notes, the latest pinned first, at most five (ledger.services.notes.pinned_for), each in full (CSS shows four lines; nothing is cut from the text) with its author and day, and "All ›" to the Notes & follow-ups tab. Absent when nothing is pinned.{% endcomment %}{% if pinned_notes %}<section class="card" id="notes-card" aria-labelledby="notes-card-heading">
+    <div class="card-header"><h2 class="section-label" id="notes-card-heading">Notes</h2><a class="card-link" href="{{ notes_tab_url }}" id="notes-card-all">All ›</a></div>
+    <ul class="pinned-notes">
+      {% for note in pinned_notes %}<li class="pinned-note" id="pinned-note-{{ note.pk }}"><p class="pinned-note-body">{{ note.body }}</p><p class="pinned-note-meta">{{ note.author|staff|default:note.author_label|default:"—" }} · {{ note.created_at|day }}</p></li>{% endfor %}
+    </ul>
+  </section>{% endif %}

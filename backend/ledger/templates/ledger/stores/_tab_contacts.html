@@ -1,5 +1,13 @@
-{% comment %}The Notes & follow-ups tab (PLAN-012 D3, docs/qa/PLAN-012d D3).{% endcomment %}
+{% comment %}The Notes & follow-ups tab (PLAN-012 D3, docs/qa/PLAN-012d D3; PLAN-014 B4, B5): for billing, the note form (#note-form: "Write a note about this store…", at most 2,000 characters, Save); the store's notes (ledger/notes/_entry.html); then the entries about a lease of this store.{% endcomment %}
 <h2 id="contacts">Notes &amp; follow-ups</h2>
+{% if note_form %}<form method="post" action="{% url 'ledger:notes:add' pk=store.pk %}" class="note-form js-single-submit" id="note-form" autocomplete="off">
+  {% csrf_token %}
+  <div class="field{% if note_form.body.errors %} has-error{% endif %}"><label class="visually-hidden" for="{{ note_form.body.id_for_label }}">Note</label>{{ note_form.body }}{{ note_form.body.errors }}</div>
+  <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit" id="note-save">Save</button></div>
+</form>{% endif %}
+{% if note_rows %}<ul class="contact-log note-list" id="notes">
+  {% for row in note_rows %}{% include "ledger/notes/_entry.html" %}{% endfor %}
+</ul>{% endif %}
 <p class="actions">
   {% if contact_add_url %}<a class="btn" id="add-store-contact" href="{{ contact_add_url }}">Add entry</a>{% endif %}
   <a class="btn" id="all-store-contacts" href="{% url 'ledger:stores:contacts' pk=store.pk %}">All entries</a>

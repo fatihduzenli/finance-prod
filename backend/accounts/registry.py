@@ -247,6 +247,12 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:stores:plan_resume": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:stores:plan_stop": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:stores:plan_end": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # A store's notes (PLAN-014 B5): billing; editing and deleting is the author's or an
+    # admin's (ledger.services.notes.can_change). Edit and delete open their dialog on GET.
+    "ledger:notes:add": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:notes:edit": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:notes:pin": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:notes:delete": RouteRule(min_role=Role.BILLING, methods=POST),
     # Admin › Settings' Brands card (PLAN-014 B2).
     "ledger:settings:brand_add": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:settings:brand_save": RouteRule(min_role=Role.ADMIN, methods=POST),
