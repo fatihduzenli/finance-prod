@@ -246,8 +246,9 @@ def test_every_page_answers_under_two_seconds_on_volume(monkeypatch: pytest.Monk
     # not by the data. Reported to QA; rent_run is outside this batch.
     due_today = Lease.objects.filter(debit_day=TODAY.day).count()
     pages: dict[str, tuple[str, dict[str, str], int]] = {
-        # +1 since PLAN-012g A2: the theme row read on every page.
-        "dashboard": ("/", {}, 26 + 3 * due_today),
+        # +1 since PLAN-012g A2: the theme row read on every page; +1 since PLAN-014 B1: the
+        # attention card's brand_needed source (one query; a second only when a store was cleared).
+        "dashboard": ("/", {}, 27 + 3 * due_today),
         "grid (500 x 24)": ("/grid/", span, 21),
         # PLAN-012d D16: the words filter keeps the grid's query count.
         "grid filtered": ("/grid/", {**span, "q": "store 1"}, 21),
