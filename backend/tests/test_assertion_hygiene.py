@@ -65,7 +65,11 @@ ALLOWED: dict[str, set[int | str]] = {
     # The message shown to staff: a fixed string, no ids.
     "test_manual_payment_marking.py": {586, 587, 589},
     # An outbound request body as a dict: key membership, not a substring.
-    "test_operator_sync.py": {890, 1247},
+    # (listed by text: the file moves with the PLAN-014 re-pins).
+    "test_lease_sync.py": {
+        'assert "lastname" not in body',
+        'assert ("email" in body) is (expected_email is not None)',
+    },
     "test_plan012a_adversarial.py": {58},
     "test_stax_adapter.py": {289, 290, 368},
     # The money filter's output for one value (listed by text: the file moves with route pins).

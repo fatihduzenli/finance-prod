@@ -1,5 +1,11 @@
-"""The operator sync service (docs/qa/PLAN-006-operators.md §6 rows 1, 2, 3, 5 and 8;
-PLAN-006c §2 rows 1 to 6).
+"""The lease sync service (docs/qa/PLAN-014 C3; before it, the operator sync of
+docs/qa/PLAN-006-operators.md §6 rows 1, 2, 3, 5 and 8 and PLAN-006c §2 rows 1 to 6).
+
+Since PLAN-014 the processor customer is per lease: every row here bills a lease (an
+operator made through :mod:`ledger.services.operators`, a store and a lease, with the
+billing details written by :func:`payments.lease_sync.update_billing`) and syncs it with
+:func:`payments.lease_sync.sync_lease` / :func:`payments.lease_sync.link_lease`. The
+operator's own writes (the creation-key replay, the archive) are local and call nothing.
 
 Every provider here is a :class:`~payments.fake.FakeProvider` or a subclass defined in
 this file; nothing opens a socket.
@@ -8,13 +14,14 @@ this file; nothing opens a socket.
 from __future__ import annotations
 
 import importlib
+import itertools
 import json
 import logging
 import threading
 import time
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -28,8 +35,17 @@ from django.test import override_settings
 from django.utils import timezone
 
 from accounts.roles import Role
-from ledger.models import AuditLog, EnrolmentStatus, Operator, SyncFailure, SyncStatus
-from payments import operator_sync
+from ledger.models import (
+    AuditLog,
+    Lease,
+    LeaseBilling,
+    Operator,
+    Store,
+    SyncFailure,
+    SyncStatus,
+)
+from ledger.services import operators
+from payments import lease_sync
 from payments.errors import (
     CircuitOpen,
     ProviderError,
@@ -38,8 +54,8 @@ from payments.errors import (
     TransportError,
 )
 from payments.fake import FakeProvider
+from payments.lease_sync import Action
 from payments.models import ExternalRef
-from payments.operator_sync import Action
 from payments.provider import CustomerQuery, CustomerRecord, mask_identifier
 from payments.stax.adapter import StaxProvider
 from tests.auth_helpers import make_user
@@ -52,6 +68,9 @@ requires_postgresql = pytest.mark.skipif(
 )
 
 EMAIL = "ops@example.com"
+
+#: Store numbers for the stores made here (the reference sent to the provider).
+_STORE_NUMBERS = itertools.count(7001)
 
 
 class FuzzyFakeProvider(FakeProvider):
@@ -87,10 +106,10 @@ def call_names(provider: FakeProvider) -> list[str]:
 
 
 def fields(**overrides: Any) -> dict[str, Any]:
+    """The operator's fields, as the operator form posts them (PLAN-014 C1: the Full name
+    is the display name; no type, company or legal name)."""
     values: dict[str, Any] = {
         "display_name": "Northwind Stores",
-        "legal_name": "Northwind Stores LLC",
-        "company": "Northwind",
         "email": EMAIL,
         "phone": "+1 555 010 0001",
         "address_line1": "1 Demo Avenue",
@@ -103,12 +122,68 @@ def fields(**overrides: Any) -> dict[str, Any]:
     return {**values, **overrides}
 
 
-def customer_refs(operator: Operator) -> list[ExternalRef]:
+def billing_fields(**overrides: Any) -> dict[str, Any]:
+    """A lease's billing details, as the Edit billing details form posts them."""
+    values: dict[str, Any] = {
+        "company_name": "Northwind Stores LLC",
+        "email": EMAIL,
+        "phone": "+1 555 010 0001",
+        "address_line1": "1 Demo Avenue",
+        "address_line2": "",
+        "city": "Testville",
+        "state": "TX",
+        "postal_code": "75001",
+    }
+    return {**values, **overrides}
+
+
+def customer_refs(lease: Lease) -> list[ExternalRef]:
+    """The lease's own processor customer references (PLAN-014 C3: per lease)."""
     return list(
         ExternalRef.objects.filter(
-            entity_type="operator", entity_id=operator.pk, external_kind="customer"
+            entity_type="lease", entity_id=lease.pk, external_kind="customer"
         )
     )
+
+
+def billed_lease(
+    actor: User | None = None,
+    *,
+    operator: Operator | None = None,
+    name: str = "Northwind Stores",
+    **billing: Any,
+) -> Lease:
+    """A lease of ``operator`` (a new one named ``name`` when none is given, through
+    :func:`ledger.services.operators.create_operator`) on a store of its own, its billing
+    details :func:`billing_fields` with ``billing`` written by
+    :func:`payments.lease_sync.update_billing`: ``pending`` with a billing e-mail,
+    ``awaiting_link`` without one. Nothing calls the provider."""
+    if operator is None:
+        operator, created = operators.create_operator(
+            fields(display_name=name, email=None), creation_key=uuid.uuid4(), actor=actor
+        )
+        assert created
+    number = next(_STORE_NUMBERS)
+    store = Store.objects.create(
+        external_label=f"Store {number}",
+        store_number=number,
+        open_date=date(2024, 1, 1),
+        needs_open_date=False,
+        status="active",
+    )
+    lease = Lease.objects.create(
+        store=store,
+        operator=operator,
+        debit_day=5,
+        collection_status="active",
+        payment_channel="stax",
+    )
+    lease_sync.update_billing(lease.pk, billing_fields(**billing), actor=actor)
+    return Lease.objects.select_related("operator", "store", "billing").get(pk=lease.pk)
+
+
+def billing_row(lease: Lease) -> LeaseBilling:
+    return LeaseBilling.objects.get(lease=lease)
 
 
 @pytest.fixture
@@ -122,44 +197,45 @@ def fake() -> FakeProvider:
     return FakeProvider()
 
 
-def create(actor: User, **overrides: Any) -> Operator:
-    operator, created = operator_sync.create_operator(
-        fields(**overrides), creation_key=uuid.uuid4(), actor=actor
-    )
-    assert created
-    return operator
+def create(actor: User, **billing: Any) -> Lease:
+    return billed_lease(actor, **billing)
 
 
 # --- Row 1: one provider customer however often the create is sent ---------------------
 
 
 @pytest.mark.django_db
-def test_the_same_creation_key_twice_gives_one_operator_and_one_customer(
+def test_the_same_creation_key_twice_gives_one_operator_and_its_lease_one_customer(
     actor: User, fake: FakeProvider
 ) -> None:
     key = uuid.uuid4()
-    first, created_first = operator_sync.create_operator(fields(), creation_key=key, actor=actor)
-    operator_sync.sync_operator(first.pk, provider=fake, actor=actor)
-    second, created_second = operator_sync.create_operator(
+    first, created_first = operators.create_operator(fields(), creation_key=key, actor=actor)
+    second, created_second = operators.create_operator(
         fields(display_name="Replayed with other values"), creation_key=key, actor=actor
     )
-    operator_sync.sync_operator(second.pk, provider=fake, actor=actor)
 
     assert (created_first, created_second) == (True, False)
     assert second.pk == first.pk
     assert Operator.objects.count() == 1
     assert Operator.objects.get().display_name == "Northwind Stores"
+    # PLAN-014 C3: saving an operator never reaches the provider.
+    assert fake.calls == []
+    assert Operator.objects.get().sync_status == SyncStatus.NOT_APPLICABLE
+
+    lease = billed_lease(actor, operator=first)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
     assert call_names(fake).count("create_customer") == 1
-    assert len(customer_refs(first)) == 1
+    assert len(customer_refs(lease)) == 1
 
 
 @pytest.mark.django_db
-def test_a_linked_operator_is_never_synced_again(actor: User, fake: FakeProvider) -> None:
-    operator = create(actor)
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+def test_a_linked_lease_is_never_synced_again(actor: User, fake: FakeProvider) -> None:
+    lease = create(actor)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
     calls = len(fake.calls)
     for retry in (False, True):
-        outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=retry)
+        outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=retry)
         assert outcome.action is Action.NO_CALL
     assert len(fake.calls) == calls
 
@@ -174,17 +250,18 @@ class SlowFakeProvider(FakeProvider):
 
 @requires_postgresql
 @pytest.mark.django_db(transaction=True)
-def test_concurrent_creates_with_one_key_make_one_customer(actor: User) -> None:
+def test_concurrent_creates_with_one_key_make_one_operator_and_no_call(actor: User) -> None:
     provider = SlowFakeProvider()
     key = uuid.uuid4()
     barrier = threading.Barrier(2)
     errors: list[BaseException] = []
+    made: list[uuid.UUID] = []
 
     def submit() -> None:
         try:
             barrier.wait()
-            operator, _ = operator_sync.create_operator(fields(), creation_key=key, actor=actor)
-            operator_sync.sync_operator(operator.pk, provider=provider, actor=actor)
+            operator, _ = operators.create_operator(fields(), creation_key=key, actor=actor)
+            made.append(operator.pk)
         except BaseException as error:  # reported below, not swallowed
             errors.append(error)
         finally:
@@ -198,24 +275,22 @@ def test_concurrent_creates_with_one_key_make_one_customer(actor: User) -> None:
 
     assert errors == []
     assert Operator.objects.count() == 1
-    assert call_names(provider).count("create_customer") == 1
-    assert len(customer_refs(Operator.objects.get())) == 1
+    assert made == [Operator.objects.get().pk] * 2
+    assert provider.calls == []
 
 
 @requires_postgresql
 @pytest.mark.django_db(transaction=True)
-def test_concurrent_syncs_of_one_operator_call_the_provider_once(actor: User) -> None:
+def test_concurrent_syncs_of_one_lease_call_the_provider_once(actor: User) -> None:
     provider = SlowFakeProvider()
-    operator = create(actor)
+    lease = create(actor)
     barrier = threading.Barrier(3)
     outcomes: list[Action] = []
 
     def sync() -> None:
         try:
             barrier.wait()
-            outcomes.append(
-                operator_sync.sync_operator(operator.pk, provider=provider, actor=actor).action
-            )
+            outcomes.append(lease_sync.sync_lease(lease.pk, provider=provider, actor=actor).action)
         finally:
             connection.close()
 
@@ -227,6 +302,7 @@ def test_concurrent_syncs_of_one_operator_call_the_provider_once(actor: User) ->
 
     assert sorted(outcomes) == sorted([Action.CREATED, Action.NO_CALL, Action.NO_CALL])
     assert call_names(provider) == ["find_customers", "create_customer"]
+    assert len(customer_refs(lease)) == 1
 
 
 # --- Row 2: provider failures -----------------------------------------------------------
@@ -247,56 +323,53 @@ FAILURES: list[tuple[str, ProviderError, str]] = [
 def test_a_failure_keeps_the_local_record_and_stores_only_the_class_name(
     actor: User, fake: FakeProvider, method: str, error: ProviderError, name: str
 ) -> None:
-    operator = create(actor)
+    lease = create(actor)
     fake.fail_next(method, error)
 
-    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.action is Action.FAILED
-    assert (operator.sync_status, operator.sync_failure) == (SyncStatus.FAILED, name)
-    assert operator.sync_attempted_at is not None
-    assert customer_refs(operator) == []
+    assert (lease.sync_status, lease.sync_failure) == (SyncStatus.FAILED, name)
+    assert lease.sync_attempted_at is not None
+    assert customer_refs(lease) == []
+    assert billing_row(lease).email == EMAIL
     assert "CANARY" not in outcome.message
-    assert outcome.message == operator_sync.MESSAGES[name]
-    audit = AuditLog.objects.get(action="operator.sync_failed")
+    assert outcome.message == lease_sync.MESSAGES[name]
+    audit = AuditLog.objects.get(action="lease.sync_failed")
     assert "CANARY" not in str(audit.after)
 
 
 @pytest.mark.django_db
-def test_a_failed_operator_is_not_called_again_until_retry(actor: User, fake: FakeProvider) -> None:
-    operator = create(actor)
+def test_a_failed_lease_is_not_called_again_until_retry(actor: User, fake: FakeProvider) -> None:
+    lease = create(actor)
     fake.fail_next("find_customers", ProviderUnavailable(503))
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
     assert len(fake.calls) == 1
 
     # A plain sync (a page load, an edit) does nothing.
-    assert operator_sync.sync_operator(operator.pk, provider=fake, actor=actor).action is (
-        Action.NO_CALL
-    )
-    operator_sync.update_operator(operator.pk, fields(phone="+1 555 010 0002"), actor=actor)
-    assert operator_sync.sync_operator(operator.pk, provider=fake, actor=actor).action is (
-        Action.NO_CALL
-    )
+    assert lease_sync.sync_lease(lease.pk, provider=fake, actor=actor).action is (Action.NO_CALL)
+    lease_sync.update_billing(lease.pk, billing_fields(phone="+1 555 010 0002"), actor=actor)
+    assert lease_sync.sync_lease(lease.pk, provider=fake, actor=actor).action is (Action.NO_CALL)
     assert len(fake.calls) == 1
 
     # The retry, once the lock has passed: one lookup and one create, then linked.
-    Operator.objects.filter(pk=operator.pk).update(
-        sync_attempted_at=timezone.now() - timedelta(seconds=operator_sync.RETRY_LOCK_SECONDS)
+    Lease.objects.filter(pk=lease.pk).update(
+        sync_attempted_at=timezone.now() - timedelta(seconds=lease_sync.RETRY_LOCK_SECONDS)
     )
-    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=True)
     assert outcome.action is Action.CREATED
     assert call_names(fake) == ["find_customers", "find_customers", "create_customer"]
-    operator.refresh_from_db()
-    assert (operator.sync_status, operator.sync_failure) == (SyncStatus.LINKED, "")
+    lease.refresh_from_db()
+    assert (lease.sync_status, lease.sync_failure) == (SyncStatus.LINKED, "")
 
 
 def test_an_unknown_provider_error_subclass_maps_to_its_nearest_known_class() -> None:
     class Unforeseen(ProviderUnavailable):
         pass
 
-    assert operator_sync.failure_name(Unforeseen(502)) == "ProviderUnavailable"
-    assert operator_sync.failure_name(ProviderError("x")) == "ProviderError"
+    assert lease_sync.failure_name(Unforeseen(502)) == "ProviderUnavailable"
+    assert lease_sync.failure_name(ProviderError("x")) == "ProviderError"
 
 
 # --- Row 3: an existing provider customer with the same e-mail ---------------------------
@@ -313,16 +386,16 @@ def test_an_existing_customer_is_linked_and_none_is_created(
     provider = FuzzyFakeProvider()
     add_provider_customer(provider, "cus_existing_0001", provider_email)
     add_provider_customer(provider, "cus_other_0002", "someone-else@example.com")
-    operator = create(actor)
+    lease = create(actor)
 
-    outcome = operator_sync.sync_operator(operator.pk, provider=provider, actor=actor)
+    outcome = lease_sync.sync_lease(lease.pk, provider=provider, actor=actor)
 
     assert outcome.action is Action.LINKED_EXISTING
     assert "create_customer" not in call_names(provider)
-    [ref] = customer_refs(operator)
+    [ref] = customer_refs(lease)
     assert ref.external_id == "cus_existing_0001"
-    operator.refresh_from_db()
-    assert (operator.sync_status, operator.needs_review) == (SyncStatus.LINKED, False)
+    lease.refresh_from_db()
+    assert (lease.sync_status, lease.needs_review) == (SyncStatus.LINKED, False)
 
 
 @pytest.mark.django_db
@@ -331,18 +404,18 @@ def test_two_matches_link_the_oldest_and_flag_for_review(actor: User) -> None:
     add_provider_customer(provider, "cus_newer_00001", EMAIL, "2026-05-01 10:00:00")
     add_provider_customer(provider, "cus_oldest_0001", "OPS@example.com", "2024-01-01 09:00:00")
     add_provider_customer(provider, "cus_no_date_001", EMAIL)
-    operator = create(actor)
+    lease = create(actor)
 
-    outcome = operator_sync.sync_operator(operator.pk, provider=provider, actor=actor)
+    outcome = lease_sync.sync_lease(lease.pk, provider=provider, actor=actor)
 
     assert outcome.action is Action.LINKED_EXISTING
     assert outcome.needs_review is True
-    [ref] = customer_refs(operator)
+    [ref] = customer_refs(lease)
     assert ref.external_id == "cus_oldest_0001"
-    operator.refresh_from_db()
-    assert operator.needs_review is True
+    lease.refresh_from_db()
+    assert lease.needs_review is True
     assert "create_customer" not in call_names(provider)
-    audit = AuditLog.objects.get(action="operator.sync_linked")
+    audit = AuditLog.objects.get(action="lease.sync_linked")
     assert audit.after is not None and audit.after["matches"] == 3
 
 
@@ -351,50 +424,52 @@ def test_a_near_miss_email_is_not_a_match(actor: User) -> None:
     provider = FuzzyFakeProvider()
     add_provider_customer(provider, "cus_near_000001", "ops@example.com.")
     add_provider_customer(provider, "cus_near_000002", "xops@example.com")
-    operator = create(actor)
+    lease = create(actor)
 
-    outcome = operator_sync.sync_operator(operator.pk, provider=provider, actor=actor)
+    outcome = lease_sync.sync_lease(lease.pk, provider=provider, actor=actor)
 
     assert outcome.action is Action.CREATED
     assert call_names(provider).count("create_customer") == 1
 
 
 @pytest.mark.django_db
-def test_a_match_already_linked_to_another_operator_is_not_reused(actor: User) -> None:
+def test_a_match_already_linked_to_another_lease_is_not_reused(actor: User) -> None:
     provider = FuzzyFakeProvider()
     add_provider_customer(provider, "cus_taken_00001", EMAIL)
     other = create(actor, email="other@example.com")
     ExternalRef.objects.create(
-        entity_type="operator",
+        entity_type="lease",
         entity_id=other.pk,
-        provider=operator_sync.PROVIDER_KEY,
+        provider=lease_sync.PROVIDER_KEY,
         external_kind="customer",
         external_id="cus_taken_00001",
     )
-    operator = create(actor)
+    lease = create(actor)
 
-    outcome = operator_sync.sync_operator(operator.pk, provider=provider, actor=actor)
+    outcome = lease_sync.sync_lease(lease.pk, provider=provider, actor=actor)
 
     assert outcome.action is Action.FAILED
     assert outcome.failure == SyncFailure.ALREADY_LINKED_ELSEWHERE
-    operator.refresh_from_db()
-    assert operator.needs_review is True
+    lease.refresh_from_db()
+    assert lease.needs_review is True
     assert "create_customer" not in call_names(provider)
 
 
 @pytest.mark.django_db
-def test_the_create_carries_our_reference_and_the_d5_mapping(
+def test_the_create_carries_our_reference_and_the_c3_mapping(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = create(actor, legal_name="")
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    lease = billed_lease(actor, name="Ana Maria Lopez")
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
     [(name, (customer,))] = [call for call in fake.calls if call[0] == "create_customer"]
     assert name == "create_customer"
-    assert customer.first_name == "Northwind Stores"  # type: ignore[attr-defined]
-    assert customer.last_name == ""  # type: ignore[attr-defined]
-    assert customer.company_name == "Northwind Stores"  # type: ignore[attr-defined]
+    # The operator's full name split on the last space; the lease's company and e-mail;
+    # the store number as our reference.
+    assert customer.first_name == "Ana Maria"  # type: ignore[attr-defined]
+    assert customer.last_name == "Lopez"  # type: ignore[attr-defined]
+    assert customer.company_name == "Northwind Stores LLC"  # type: ignore[attr-defined]
     assert customer.operator_email == EMAIL  # type: ignore[attr-defined]
-    assert customer.reference == str(operator.pk)  # type: ignore[attr-defined]
+    assert customer.reference == str(lease.store.store_number)  # type: ignore[attr-defined]
 
 
 # --- Row 5: no e-mail, and the manual link ----------------------------------------------
@@ -402,20 +477,20 @@ def test_the_create_carries_our_reference_and_the_d5_mapping(
 
 @pytest.mark.django_db
 def test_no_email_saves_awaiting_link_and_calls_nothing(actor: User, fake: FakeProvider) -> None:
-    operator = create(actor, email=None)
-    assert operator.sync_status == SyncStatus.AWAITING_LINK
-    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    lease = create(actor, email=None)
+    assert lease.sync_status == SyncStatus.AWAITING_LINK
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
     assert outcome.action is Action.NO_CALL
     assert fake.calls == []
 
 
 @pytest.mark.django_db
-def test_link_stores_both_ids_after_one_read_and_enrols(actor: User, fake: FakeProvider) -> None:
+def test_link_stores_both_ids_after_one_read_and_connects(actor: User, fake: FakeProvider) -> None:
     add_provider_customer(fake, "cus_manual_0001", "")
-    operator = create(actor, email=None)
+    lease = create(actor, email=None)
 
-    outcome = operator_sync.link_operator(
-        operator.pk,
+    outcome = lease_sync.link_lease(
+        lease.pk,
         customer_external_id="cus_manual_0001",
         payment_method_external_id="pm_bank-0001",
         provider=fake,
@@ -425,19 +500,19 @@ def test_link_stores_both_ids_after_one_read_and_enrols(actor: User, fake: FakeP
     assert outcome.action is Action.LINK_SET
     assert outcome.message == "Connected to Stax. Autopay can be set up."
     assert fake.calls == [("get_customer", ("cus_manual_0001",))]
-    refs = operator_sync.current_refs(operator)
+    refs = lease_sync.current_refs(lease)
     assert refs == {"customer": "cus_manual_0001", "payment_method": "pm_bank-0001"}
-    operator.refresh_from_db()
-    assert operator.enrolment_status == EnrolmentStatus.ENROLLED
-    assert operator.sync_status == SyncStatus.LINKED
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
+    assert AuditLog.objects.filter(action="lease.link_set", entity_id=str(lease.pk)).count() == 1
 
 
 @pytest.mark.django_db
 def test_a_bad_customer_id_stores_nothing(actor: User, fake: FakeProvider) -> None:
-    operator = create(actor, email=None)
+    lease = create(actor, email=None)
 
-    outcome = operator_sync.link_operator(
-        operator.pk,
+    outcome = lease_sync.link_lease(
+        lease.pk,
         customer_external_id="cus_missing_001",
         payment_method_external_id="pm_bank-0001",
         provider=fake,
@@ -446,12 +521,11 @@ def test_a_bad_customer_id_stores_nothing(actor: User, fake: FakeProvider) -> No
 
     assert outcome.action is Action.LINK_REFUSED
     assert outcome.failure == "ProviderRejected"
-    assert outcome.message == operator_sync.LINK_REJECTED_MESSAGE
-    assert operator_sync.current_refs(operator) == {}
-    operator.refresh_from_db()
-    assert operator.enrolment_status == EnrolmentStatus.NOT_ENROLLED
-    assert operator.sync_status == SyncStatus.AWAITING_LINK
-    assert not AuditLog.objects.filter(action="operator.link_set").exists()
+    assert outcome.message == lease_sync.LINK_REJECTED_MESSAGE
+    assert lease_sync.current_refs(lease) == {}
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.AWAITING_LINK
+    assert not AuditLog.objects.filter(action="lease.link_set").exists()
 
 
 @pytest.mark.django_db
@@ -469,9 +543,9 @@ def test_a_bad_customer_id_stores_nothing(actor: User, fake: FakeProvider) -> No
 def test_link_refuses_a_malformed_identifier_without_a_call(
     actor: User, fake: FakeProvider, customer_id: str, method_id: str
 ) -> None:
-    operator = create(actor, email=None)
-    outcome = operator_sync.link_operator(
-        operator.pk,
+    lease = create(actor, email=None)
+    outcome = lease_sync.link_lease(
+        lease.pk,
         customer_external_id=customer_id,
         payment_method_external_id=method_id,
         provider=fake,
@@ -479,47 +553,47 @@ def test_link_refuses_a_malformed_identifier_without_a_call(
     )
     assert outcome.action is Action.LINK_REFUSED
     assert fake.calls == []
-    assert operator_sync.current_refs(operator) == {}
+    assert lease_sync.current_refs(lease) == {}
 
 
 @pytest.mark.django_db
 def test_link_to_a_different_customer_than_the_current_one_is_refused(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = create(actor)
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    lease = create(actor)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
     add_provider_customer(fake, "cus_someone_else", "")
     calls = len(fake.calls)
 
-    outcome = operator_sync.link_operator(
-        operator.pk,
+    outcome = lease_sync.link_lease(
+        lease.pk,
         customer_external_id="cus_someone_else",
         payment_method_external_id="pm_1",
         provider=fake,
         actor=actor,
     )
 
-    assert outcome.failure == operator_sync.ALREADY_LINKED
+    assert outcome.failure == lease_sync.ALREADY_LINKED
     assert len(fake.calls) == calls
 
 
 @pytest.mark.django_db
-def test_link_adds_a_payment_method_to_a_synced_operator_and_replaces_an_old_one(
+def test_link_adds_a_payment_method_to_a_synced_lease_and_replaces_an_old_one(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = create(actor)
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
-    customer = operator_sync.current_refs(operator)["customer"]
+    lease = create(actor)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
+    customer = lease_sync.current_refs(lease)["customer"]
     for method in ("pm_first", "pm_second"):
-        outcome = operator_sync.link_operator(
-            operator.pk,
+        outcome = lease_sync.link_lease(
+            lease.pk,
             customer_external_id=customer,
             payment_method_external_id=method,
             provider=fake,
             actor=actor,
         )
         assert outcome.action is Action.LINK_SET
-    assert operator_sync.current_refs(operator)["payment_method"] == "pm_second"
+    assert lease_sync.current_refs(lease)["payment_method"] == "pm_second"
     old = ExternalRef.objects.get(external_id="pm_first")
     assert old.superseded_at is not None
 
@@ -532,22 +606,22 @@ def test_every_action_writes_one_audit_row_with_actor_and_before_after(
     actor: User, fake: FakeProvider
 ) -> None:
     with_email = create(actor)
-    operator_sync.sync_operator(with_email.pk, provider=fake, actor=actor)
-    operator_sync.update_operator(with_email.pk, fields(city="Newtown"), actor=actor)
-    operator_sync.archive_operator(with_email.pk, actor=actor)
+    lease_sync.sync_lease(with_email.pk, provider=fake, actor=actor)
+    lease_sync.update_billing(with_email.pk, billing_fields(city="Newtown"), actor=actor)
+    operators.archive_operator(with_email.operator.pk, actor=actor)
 
     failing = create(actor, email="fails@example.com")
     fake.fail_next("find_customers", ProviderUnavailable(503))
-    operator_sync.sync_operator(failing.pk, provider=fake, actor=actor)
+    lease_sync.sync_lease(failing.pk, provider=fake, actor=actor)
 
     provider = FuzzyFakeProvider()
     add_provider_customer(provider, "cus_linked_0001", "linked@example.com")
     linked = create(actor, email="linked@example.com")
-    operator_sync.sync_operator(linked.pk, provider=provider, actor=actor)
+    lease_sync.sync_lease(linked.pk, provider=provider, actor=actor)
 
     add_provider_customer(fake, "cus_manual_0001", "")
     manual = create(actor, email=None)
-    operator_sync.link_operator(
+    lease_sync.link_lease(
         manual.pk,
         customer_external_id="cus_manual_0001",
         payment_method_external_id="pm_1",
@@ -558,30 +632,37 @@ def test_every_action_writes_one_audit_row_with_actor_and_before_after(
     rows = list(AuditLog.objects.order_by("id"))
     assert [row.action for row in rows] == [
         "operator.created",
-        "operator.sync_created",
-        "operator.updated",
+        "lease_billing.changed",
+        "lease.sync_created",
+        "lease_billing.changed",
         "operator.archived",
         "operator.created",
-        "operator.sync_failed",
+        "lease_billing.changed",
+        "lease.sync_failed",
         "operator.created",
-        "operator.sync_linked",
+        "lease_billing.changed",
+        "lease.sync_linked",
         "operator.created",
-        "operator.link_set",
+        "lease_billing.changed",
+        "lease.link_set",
     ]
     for row in rows:
         assert row.actor_id == actor.pk
-        assert row.entity_type == "operator"
+        expected = "operator" if row.action.startswith("operator.") else "lease"
+        assert row.entity_type == expected, row.action
         assert row.after is not None
     created = rows[0]
     assert created.before is None
     assert created.after is not None and created.after["display_name"] == "Northwind Stores"
-    updated = rows[2]
+    assert rows[2].entity_id == str(with_email.pk)
+    updated = rows[3]
     assert updated.before is not None and updated.after is not None
     assert (updated.before["city"], updated.after["city"]) == ("Testville", "Newtown")
-    archived = rows[3]
+    archived = rows[4]
+    assert archived.entity_id == str(with_email.operator.pk)
     assert archived.before is not None and archived.after is not None
     assert archived.before["archived_at"] is None and archived.after["archived_at"]
-    assert rows[5].after is not None and rows[5].after["sync_failure"] == "ProviderUnavailable"
+    assert rows[7].after is not None and rows[7].after["sync_failure"] == "ProviderUnavailable"
     # Identifiers in the audit log are masked.
     link = rows[-1]
     assert link.after is not None
@@ -591,30 +672,36 @@ def test_every_action_writes_one_audit_row_with_actor_and_before_after(
 
 @pytest.mark.django_db
 def test_an_edit_that_changes_nothing_writes_no_audit_row(actor: User) -> None:
-    operator = create(actor)
-    operator_sync.update_operator(operator.pk, fields(), actor=actor)
-    assert list(AuditLog.objects.values_list("action", flat=True)) == ["operator.created"]
+    lease = create(actor)
+    assert lease.operator is not None
+    operators.update_operator(lease.operator.pk, fields(email=None), actor=actor)
+    lease_sync.update_billing(lease.pk, billing_fields(), actor=actor)
+    assert list(AuditLog.objects.order_by("id").values_list("action", flat=True)) == [
+        "operator.created",
+        "lease_billing.changed",
+    ]
 
 
 @pytest.mark.django_db
-def test_archived_operator_cannot_be_updated_synced_or_linked(
+def test_archived_operator_cannot_be_updated_and_its_lease_not_synced_or_linked(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = create(actor)
-    operator_sync.archive_operator(operator.pk, actor=actor)
-    with pytest.raises(operator_sync.OperatorArchived):
-        operator_sync.update_operator(operator.pk, fields(city="X"), actor=actor)
-    assert operator_sync.sync_operator(
-        operator.pk, provider=fake, actor=actor, retry=True
-    ).action is (Action.NO_CALL)
-    outcome = operator_sync.link_operator(
-        operator.pk,
+    lease = create(actor)
+    assert lease.operator is not None
+    operators.archive_operator(lease.operator.pk, actor=actor)
+    with pytest.raises(operators.OperatorArchived):
+        operators.update_operator(lease.operator.pk, fields(city="X"), actor=actor)
+    assert lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=True).action is (
+        Action.NO_CALL
+    )
+    outcome = lease_sync.link_lease(
+        lease.pk,
         customer_external_id="cus_1",
         payment_method_external_id="pm_1",
         provider=fake,
         actor=actor,
     )
-    assert outcome.failure == operator_sync.ARCHIVED
+    assert outcome.failure == lease_sync.ARCHIVED
     assert fake.calls == []
 
 
@@ -632,16 +719,16 @@ def _no_real_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 # --- PLAN-006a §4 row 4: the retry lock ------------------------------------------------------
 
 
-def failed_operator(actor: User, fake: FakeProvider, seconds_ago: float) -> Operator:
-    """An operator whose last attempt failed ``seconds_ago`` seconds ago."""
-    operator = create(actor)
+def failed_lease(actor: User, fake: FakeProvider, seconds_ago: float) -> Lease:
+    """A lease whose last attempt failed ``seconds_ago`` seconds ago."""
+    lease = create(actor)
     fake.fail_next("find_customers", ProviderUnavailable(503))
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
-    Operator.objects.filter(pk=operator.pk).update(
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
+    Lease.objects.filter(pk=lease.pk).update(
         sync_attempted_at=timezone.now() - timedelta(seconds=seconds_ago)
     )
     fake.calls.clear()
-    return operator
+    return lease
 
 
 @pytest.mark.django_db
@@ -649,18 +736,18 @@ def failed_operator(actor: User, fake: FakeProvider, seconds_ago: float) -> Oper
 def test_a_retry_within_60_seconds_is_refused_with_no_call(
     actor: User, fake: FakeProvider, seconds_ago: int
 ) -> None:
-    operator = failed_operator(actor, fake, seconds_ago)
+    lease = failed_lease(actor, fake, seconds_ago)
     audit_rows = AuditLog.objects.count()
 
-    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=True)
 
     assert outcome.action is Action.RETRY_TOO_SOON
     assert outcome.status == SyncStatus.FAILED
     assert 1 <= outcome.retry_in <= 60 - seconds_ago
     assert outcome.message == f"Retry available in {outcome.retry_in} seconds."
     assert fake.calls == []
-    operator.refresh_from_db()
-    assert operator.sync_status == SyncStatus.FAILED
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.FAILED
     assert AuditLog.objects.count() == audit_rows
 
 
@@ -669,29 +756,29 @@ def test_a_retry_within_60_seconds_is_refused_with_no_call(
 def test_a_retry_at_or_after_60_seconds_is_allowed(
     actor: User, fake: FakeProvider, seconds_ago: int
 ) -> None:
-    operator = failed_operator(actor, fake, seconds_ago)
-    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+    lease = failed_lease(actor, fake, seconds_ago)
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=True)
     assert outcome.action is Action.CREATED
     assert call_names(fake) == ["find_customers", "create_customer"]
 
 
 def test_retry_wait_seconds_at_the_boundaries() -> None:
     now = timezone.now()
-    operator = Operator(display_name="x")
-    assert operator_sync.retry_wait_seconds(operator, now) == 0
+    lease = Lease()
+    assert lease_sync.retry_wait_seconds(lease, now) == 0
     for elapsed, expected in [(0, 60), (0.2, 60), (59, 1), (59.9, 1), (60, 0), (61, 0)]:
-        operator.sync_attempted_at = now - timedelta(seconds=elapsed)
-        assert operator_sync.retry_wait_seconds(operator, now) == expected, elapsed
+        lease.sync_attempted_at = now - timedelta(seconds=elapsed)
+        assert lease_sync.retry_wait_seconds(lease, now) == expected, elapsed
     # An attempt time in the future (clock skew) never locks longer than the lock.
-    operator.sync_attempted_at = now + timedelta(seconds=30)
-    assert operator_sync.retry_wait_seconds(operator, now) == operator_sync.RETRY_LOCK_SECONDS
+    lease.sync_attempted_at = now + timedelta(seconds=30)
+    assert lease_sync.retry_wait_seconds(lease, now) == lease_sync.RETRY_LOCK_SECONDS
 
 
 @pytest.mark.django_db
 def test_a_plain_sync_is_not_affected_by_the_retry_lock(actor: User, fake: FakeProvider) -> None:
-    operator = create(actor)
-    Operator.objects.filter(pk=operator.pk).update(sync_attempted_at=timezone.now())
-    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    lease = create(actor)
+    Lease.objects.filter(pk=lease.pk).update(sync_attempted_at=timezone.now())
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
     assert outcome.action is Action.CREATED
 
 
@@ -708,8 +795,8 @@ class SlowFailingProvider(FakeProvider):
 @pytest.mark.django_db(transaction=True)
 def test_two_concurrent_retries_make_one_call(actor: User) -> None:
     provider = SlowFailingProvider()
-    operator = create(actor)
-    Operator.objects.filter(pk=operator.pk).update(sync_status=SyncStatus.FAILED)
+    lease = create(actor)
+    Lease.objects.filter(pk=lease.pk).update(sync_status=SyncStatus.FAILED)
     barrier = threading.Barrier(2)
     outcomes: list[Action] = []
 
@@ -717,9 +804,7 @@ def test_two_concurrent_retries_make_one_call(actor: User) -> None:
         try:
             barrier.wait()
             outcomes.append(
-                operator_sync.sync_operator(
-                    operator.pk, provider=provider, actor=actor, retry=True
-                ).action
+                lease_sync.sync_lease(lease.pk, provider=provider, actor=actor, retry=True).action
             )
         finally:
             connection.close()
@@ -741,29 +826,29 @@ def test_two_concurrent_retries_make_one_call(actor: User) -> None:
 def test_rejected_field_names_are_stored_audited_and_cleared_on_success(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = create(actor)
+    lease = create(actor)
     fake.fail_next(
         "create_customer",
         ProviderRejected(422, "CANARY provider text", error_fields=("email", "lastname")),
     )
-    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.failure == "ProviderRejected"
-    assert operator.sync_failure_fields == "email,lastname"
-    audit = AuditLog.objects.get(action="operator.sync_failed")
+    assert lease.sync_failure_fields == "email,lastname"
+    audit = AuditLog.objects.get(action="lease.sync_failed")
     assert audit.after is not None
     assert audit.after["sync_failure_fields"] == "email,lastname"
     assert "CANARY" not in str(audit.after) and "CANARY" not in outcome.message
 
-    Operator.objects.filter(pk=operator.pk).update(
-        sync_attempted_at=timezone.now() - timedelta(seconds=operator_sync.RETRY_LOCK_SECONDS)
+    Lease.objects.filter(pk=lease.pk).update(
+        sync_attempted_at=timezone.now() - timedelta(seconds=lease_sync.RETRY_LOCK_SECONDS)
     )
-    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
-    operator.refresh_from_db()
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=True)
+    lease.refresh_from_db()
     assert outcome.action is Action.CREATED
-    assert (operator.sync_failure, operator.sync_failure_fields) == ("", "")
-    created = AuditLog.objects.get(action="operator.sync_created")
+    assert (lease.sync_failure, lease.sync_failure_fields) == ("", "")
+    created = AuditLog.objects.get(action="lease.sync_created")
     assert created.after is not None and created.after["sync_failure_fields"] == ""
 
 
@@ -771,14 +856,14 @@ def test_rejected_field_names_are_stored_audited_and_cleared_on_success(
 def test_a_failure_other_than_rejected_stores_no_field_names(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = create(actor)
+    lease = create(actor)
     fake.fail_next("create_customer", ProviderRejected(422, error_fields=("email",)))
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
-    Operator.objects.filter(pk=operator.pk).update(sync_attempted_at=None)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
+    Lease.objects.filter(pk=lease.pk).update(sync_attempted_at=None)
     fake.fail_next("find_customers", ProviderUnavailable(503))
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
-    operator.refresh_from_db()
-    assert (operator.sync_failure, operator.sync_failure_fields) == ("ProviderUnavailable", "")
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=True)
+    lease.refresh_from_db()
+    assert (lease.sync_failure, lease.sync_failure_fields) == ("ProviderUnavailable", "")
 
 
 @pytest.mark.django_db
@@ -786,40 +871,38 @@ def test_removing_the_email_or_linking_clears_the_field_names(
     actor: User, fake: FakeProvider
 ) -> None:
     for clear in ("remove_email", "link"):
-        operator = create(actor, email=f"{clear}@example.com")
+        lease = create(actor, email=f"{clear}@example.com")
         fake.fail_next("create_customer", ProviderRejected(422, error_fields=("email",)))
-        operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+        lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
         if clear == "remove_email":
-            operator_sync.update_operator(operator.pk, fields(email=None), actor=actor)
+            lease_sync.update_billing(lease.pk, billing_fields(email=None), actor=actor)
         else:
             add_provider_customer(fake, "cus_clear_0001", "")
-            operator_sync.link_operator(
-                operator.pk,
+            lease_sync.link_lease(
+                lease.pk,
                 customer_external_id="cus_clear_0001",
                 payment_method_external_id="pm_clear",
                 provider=fake,
                 actor=actor,
             )
-        operator.refresh_from_db()
-        assert operator.sync_failure_fields == "", clear
+        lease.refresh_from_db()
+        assert lease.sync_failure_fields == "", clear
 
 
 @pytest.mark.django_db
 def test_the_field_names_column_is_guarded_against_card_numbers(actor: User) -> None:
-    operator = create(actor)
-    operator.sync_failure_fields = "email,4111111111111111"
+    lease = create(actor)
+    lease.sync_failure_fields = "email,4111111111111111"
     with pytest.raises(ValidationError):
-        operator.save()
+        lease.save()
 
 
 @requires_postgresql
 @pytest.mark.django_db
 def test_the_database_trigger_guards_the_field_names_column(actor: User) -> None:
-    operator = create(actor)
+    lease = create(actor)
     with pytest.raises(IntegrityError), transaction.atomic():
-        Operator.objects.filter(pk=operator.pk).update(
-            sync_failure_fields="email,4111 1111 1111 1111"
-        )
+        Lease.objects.filter(pk=lease.pk).update(sync_failure_fields="email,4111 1111 1111 1111")
 
 
 @pytest.mark.django_db
@@ -842,19 +925,17 @@ def test_an_end_to_end_422_through_the_real_transport_stores_names_only(
             ]
         )
     )
-    operator = create(actor)
+    lease = create(actor)
     with override_settings(STAX_CALLER="worker"), caplog.at_level(logging.DEBUG):
-        outcome = operator_sync.sync_operator(
-            operator.pk, provider=StaxProvider(rig.transport), actor=actor
-        )
+        outcome = lease_sync.sync_lease(lease.pk, provider=StaxProvider(rig.transport), actor=actor)
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.failure == "ProviderRejected"
-    assert operator.sync_failure_fields == "email,lastname"
+    assert lease.sync_failure_fields == "email,lastname"
     assert "error_fields=email,lastname" in caplog.text
-    audit = AuditLog.objects.get(action="operator.sync_failed")
+    audit = AuditLog.objects.get(action="lease.sync_failed")
     stored = " ".join(
-        [str(audit.before), str(audit.after), operator.sync_failure_fields, outcome.message]
+        [str(audit.before), str(audit.after), lease.sync_failure_fields, outcome.message]
     )
     for forbidden in (marker, card, fake_stax_api_key):
         assert forbidden not in stored
@@ -880,11 +961,10 @@ def test_the_customer_sent_carries_digits_and_no_empty_fields(
     rig = make_rig(
         sequence([httpx.Response(200, json={"data": []}), httpx.Response(200, json={"id": "c1"})])
     )
-    operator = create(actor, phone=stored)
+    # A one-word full name: no last name, so none is sent.
+    lease = billed_lease(actor, name="Northwind", phone=stored)
     with override_settings(STAX_CALLER="worker"):
-        outcome = operator_sync.sync_operator(
-            operator.pk, provider=StaxProvider(rig.transport), actor=actor
-        )
+        outcome = lease_sync.sync_lease(lease.pk, provider=StaxProvider(rig.transport), actor=actor)
     assert outcome.action is Action.CREATED
     [body] = _sent_bodies(rig)
     assert "lastname" not in body
@@ -897,21 +977,22 @@ def test_the_customer_sent_carries_digits_and_no_empty_fields(
 def test_a_stored_bad_phone_refuses_the_sync_before_any_call(
     actor: User, fake: FakeProvider, retry: bool
 ) -> None:
-    operator = create(actor)
+    lease = create(actor)
     status = SyncStatus.FAILED if retry else SyncStatus.PENDING
-    Operator.objects.filter(pk=operator.pk).update(phone="555-0132", sync_status=status)
+    LeaseBilling.objects.filter(lease=lease).update(phone="555-0132")
+    Lease.objects.filter(pk=lease.pk).update(sync_status=status)
     audits = AuditLog.objects.count()
 
-    outcome = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=retry)
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=retry)
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert fake.calls == []
-    assert (outcome.action, outcome.failure) == (Action.FAILED, operator_sync.PHONE_INVALID)
+    assert (outcome.action, outcome.failure) == (Action.FAILED, lease_sync.PHONE_INVALID)
     assert outcome.message == "Fix the phone number first."
-    assert operator.sync_status == status
-    assert operator.sync_attempted_at is None
+    assert lease.sync_status == status
+    assert lease.sync_attempted_at is None
     assert AuditLog.objects.count() == audits
-    assert operator_sync.phone_is_valid(operator) is False
+    assert lease_sync.phone_is_valid(billing_row(lease)) is False
 
 
 @pytest.mark.django_db
@@ -948,27 +1029,23 @@ def test_migration_0006_normalises_good_phones_and_flags_bad_ones() -> None:
     assert operation.reversible
 
 
-# --- PLAN-006c: an edit of a linked operator updates the provider customer ------------------
+# --- PLAN-006c: an edit of a linked lease's billing updates the provider customer -----------
 
 
-def linked(actor: User, fake: FakeProvider, **overrides: Any) -> Operator:
-    """An operator created and linked through the service; the fake's call log cleared."""
-    operator = create(actor, **overrides)
-    assert operator_sync.sync_operator(operator.pk, provider=fake, actor=actor).action is (
-        Action.CREATED
-    )
-    operator.refresh_from_db()
-    assert operator.sync_status == SyncStatus.LINKED
+def linked(actor: User, fake: FakeProvider, **overrides: Any) -> Lease:
+    """A lease created and linked through the service; the fake's call log cleared."""
+    lease = billed_lease(actor, **overrides)
+    assert lease_sync.sync_lease(lease.pk, provider=fake, actor=actor).action is (Action.CREATED)
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
     fake.calls.clear()
-    return operator
+    return lease
 
 
-def edit(
-    actor: User, fake: FakeProvider, operator: Operator, **changes: Any
-) -> operator_sync.SyncOutcome:
-    """What the edit view does: save the fields, then sync the saved row."""
-    operator_sync.update_operator(operator.pk, fields(**changes), actor=actor)
-    return operator_sync.sync_operator(operator.pk, provider=fake, actor=actor)
+def edit(actor: User, fake: FakeProvider, lease: Lease, **changes: Any) -> lease_sync.SyncOutcome:
+    """What the billing view does: save the billing details, then sync the saved row."""
+    lease_sync.update_billing(lease.pk, billing_fields(**changes), actor=actor)
+    return lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
 
 
 def update_calls(fake: FakeProvider) -> list[tuple[str, Any]]:
@@ -984,27 +1061,28 @@ def audit_text(row: AuditLog) -> str:
 def test_006c_row1_a_phone_edit_updates_the_customer_with_the_digits(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = linked(actor, fake)
-    [ref] = customer_refs(operator)
+    lease = linked(actor, fake)
+    [ref] = customer_refs(lease)
 
-    outcome = edit(actor, fake, operator, phone="+1 (555) 010-0002")
+    outcome = edit(actor, fake, lease, phone="+1 (555) 010-0002")
 
-    operator.refresh_from_db()
+    lease = Lease.objects.select_related("operator", "store", "billing").get(pk=lease.pk)
     assert outcome.action is Action.UPDATED
     assert outcome.message == "Updated the customer in Stax."
     assert call_names(fake) == ["update_customer"]
     [(customer_id, sent)] = update_calls(fake)
     assert customer_id == ref.external_id
-    assert sent == operator_sync.customer_input(operator)
+    assert sent == lease_sync.customer_input(lease)
     assert sent.phone == "15550100002"
-    assert (sent.first_name, sent.company_name, sent.operator_email) == (
-        "Northwind Stores",
+    assert (sent.first_name, sent.last_name, sent.company_name, sent.operator_email) == (
+        "Northwind",
+        "Stores",
         "Northwind Stores LLC",
         EMAIL,
     )
-    assert (operator.sync_status, operator.sync_failure) == (SyncStatus.LINKED, "")
-    assert operator.sync_attempted_at is not None
-    audit = AuditLog.objects.get(action="operator.sync_updated")
+    assert (lease.sync_status, lease.sync_failure) == (SyncStatus.LINKED, "")
+    assert lease.sync_attempted_at is not None
+    audit = AuditLog.objects.get(action="lease.sync_updated")
     assert audit.actor_id == actor.pk
     assert audit.after is not None
     assert audit.after["fields"] == ["phone"]
@@ -1013,83 +1091,102 @@ def test_006c_row1_a_phone_edit_updates_the_customer_with_the_digits(
     assert audit.after["sync_status"] == SyncStatus.LINKED
     assert EMAIL not in audit_text(audit)
     assert not has_token(audit_text(audit), "0100002")
-    assert len(customer_refs(operator)) == 1
+    assert len(customer_refs(lease)) == 1
 
 
 @pytest.mark.django_db
-def test_006c_row1_a_name_edit_names_the_field_and_sends_the_d5_mapping(
+def test_006c_row1_a_company_edit_names_the_field_and_sends_the_c3_mapping(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = linked(actor, fake, legal_name="")
+    lease = linked(actor, fake)
 
-    assert edit(actor, fake, operator, display_name="Southwind", legal_name="").action is (
-        Action.UPDATED
-    )
+    assert edit(actor, fake, lease, company_name="Southwind LLC").action is (Action.UPDATED)
 
     [(_, sent)] = update_calls(fake)
-    assert (sent.first_name, sent.company_name) == ("Southwind", "Southwind")
-    audit = AuditLog.objects.get(action="operator.sync_updated")
-    assert audit.after is not None and audit.after["fields"] == ["display_name"]
+    assert (sent.first_name, sent.last_name, sent.company_name) == (
+        "Northwind",
+        "Stores",
+        "Southwind LLC",
+    )
+    audit = AuditLog.objects.get(action="lease.sync_updated")
+    assert audit.after is not None and audit.after["fields"] == ["company_name"]
+
+
+@pytest.mark.django_db
+def test_006c_an_operator_rename_is_local_and_makes_no_call(
+    actor: User, fake: FakeProvider
+) -> None:
+    """PLAN-014 C3: operator writes never reach the provider; the lease stays linked."""
+    lease = linked(actor, fake)
+    assert lease.operator is not None
+
+    operators.update_operator(
+        lease.operator.pk, fields(display_name="Southwind Person", email=None), actor=actor
+    )
+
+    assert lease_sync.sync_lease(lease.pk, provider=fake, actor=actor).action is Action.NO_CALL
+    assert fake.calls == []
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
+    assert not AuditLog.objects.filter(action="lease.sync_updated").exists()
 
 
 @pytest.mark.django_db
 def test_006c_row2_a_rejected_update_keeps_the_edit_and_the_retry_updates_once(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = linked(actor, fake)
+    lease = linked(actor, fake)
     fake.fail_next(
         "update_customer",
         ProviderRejected(422, "CANARY provider text", error_fields=("phone", "email")),
     )
 
-    outcome = edit(actor, fake, operator, phone="4155550132")
+    outcome = edit(actor, fake, lease, phone="4155550132")
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.action is Action.UPDATE_FAILED
     assert outcome.message == (
         "Saved here. Stax did not accept the update: Rejected. Retry when ready."
     )
-    assert operator.phone == "4155550132"
-    assert (operator.sync_status, operator.sync_failure, operator.sync_failure_fields) == (
+    assert billing_row(lease).phone == "4155550132"
+    assert (lease.sync_status, lease.sync_failure, lease.sync_failure_fields) == (
         SyncStatus.FAILED,
         "ProviderRejected",
         "phone,email",
     )
-    assert operator.sync_attempted_at is not None
-    failed = AuditLog.objects.get(action="operator.sync_failed")
+    assert lease.sync_attempted_at is not None
+    failed = AuditLog.objects.get(action="lease.sync_failed")
     assert failed.after is not None
     assert failed.after["fields"] == ["phone"]
     assert failed.after["sync_failure_fields"] == "phone,email"
     for forbidden in ("CANARY", EMAIL, "4155550132"):
         assert forbidden not in audit_text(failed)
         assert forbidden not in outcome.message
-    assert len(customer_refs(operator)) == 1
+    assert len(customer_refs(lease)) == 1
 
     # A plain sync and an early retry make no call.
-    assert operator_sync.sync_operator(operator.pk, provider=fake, actor=actor).action is (
-        Action.NO_CALL
-    )
-    early = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+    assert lease_sync.sync_lease(lease.pk, provider=fake, actor=actor).action is (Action.NO_CALL)
+    early = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=True)
     assert early.action is Action.RETRY_TOO_SOON
     assert call_names(fake) == ["update_customer"]
 
-    Operator.objects.filter(pk=operator.pk).update(
-        sync_attempted_at=timezone.now() - timedelta(seconds=operator_sync.RETRY_LOCK_SECONDS)
+    Lease.objects.filter(pk=lease.pk).update(
+        sync_attempted_at=timezone.now() - timedelta(seconds=lease_sync.RETRY_LOCK_SECONDS)
     )
-    retried = operator_sync.sync_operator(operator.pk, provider=fake, actor=actor, retry=True)
+    retried = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor, retry=True)
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert retried.action is Action.UPDATED
     assert call_names(fake) == ["update_customer", "update_customer"]
     assert update_calls(fake)[1][1].phone == "4155550132"
-    assert (operator.sync_status, operator.sync_failure, operator.sync_failure_fields) == (
+    assert (lease.sync_status, lease.sync_failure, lease.sync_failure_fields) == (
         SyncStatus.LINKED,
         "",
         "",
     )
-    updated = AuditLog.objects.get(action="operator.sync_updated")
+    updated = AuditLog.objects.get(action="lease.sync_updated")
     assert updated.after is not None and updated.after["fields"] == ["phone"]
-    assert len(customer_refs(operator)) == 1
+    assert len(customer_refs(lease)) == 1
 
 
 @pytest.mark.django_db
@@ -1105,40 +1202,40 @@ def test_006c_row2_a_rejected_update_keeps_the_edit_and_the_retry_updates_once(
 def test_006c_row2_other_failures_name_the_failure_in_words_and_no_fields(
     actor: User, fake: FakeProvider, error: ProviderError, name: str, words: str
 ) -> None:
-    operator = linked(actor, fake)
+    lease = linked(actor, fake)
     fake.fail_next("update_customer", error)
 
-    outcome = edit(actor, fake, operator, phone="4155550132")
+    outcome = edit(actor, fake, lease, phone="4155550132")
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.message == (
         f"Saved here. Stax did not accept the update: {words}. Retry when ready."
     )
     assert name not in outcome.message
-    assert (operator.phone, operator.sync_status, operator.sync_failure) == (
+    assert (billing_row(lease).phone, lease.sync_status, lease.sync_failure) == (
         "4155550132",
         SyncStatus.FAILED,
         name,
     )
-    assert operator.sync_failure_fields == ""
+    assert lease.sync_failure_fields == ""
 
 
 @pytest.mark.django_db
-def test_006c_row2_an_edit_of_a_failed_linked_operator_updates_again(
+def test_006c_row2_an_edit_of_a_failed_linked_lease_updates_again(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = linked(actor, fake)
+    lease = linked(actor, fake)
     fake.fail_next("update_customer", ProviderRejected(422, error_fields=("phone",)))
-    edit(actor, fake, operator, phone="4155550132")
+    edit(actor, fake, lease, phone="4155550132")
 
     # The fix of the rejected field is sent with the save, as an edit of a linked row is.
-    outcome = edit(actor, fake, operator, phone="4155550133")
+    outcome = edit(actor, fake, lease, phone="4155550133")
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.action is Action.UPDATED
     assert call_names(fake) == ["update_customer", "update_customer"]
-    assert operator.sync_status == SyncStatus.LINKED
-    audit = AuditLog.objects.get(action="operator.sync_updated")
+    assert lease.sync_status == SyncStatus.LINKED
+    audit = AuditLog.objects.get(action="lease.sync_updated")
     assert audit.after is not None and audit.after["fields"] == ["phone"]
 
 
@@ -1148,41 +1245,42 @@ def test_006c_row2_an_edit_of_a_failed_linked_operator_updates_again(
     [
         {"notes": "Pays early"},
         {"address_line1": "2 Demo Avenue", "city": "Elsewhere", "postal_code": "75002"},
-        {"company": "Northwind Holdings"},
+        {"address_line2": "Suite 4", "state": "OK"},
         {"phone": "15550100001"},  # the same digits as "+1 555 010 0001"
         {"email": " OPS@Example.com "},
     ],
-    ids=["notes", "address", "company", "same-phone-digits", "same-email"],
+    ids=["not-a-billing-field", "address", "address-line-2", "same-phone-digits", "same-email"],
 )
 def test_006c_row3_an_edit_outside_the_payload_makes_no_call(
     actor: User, fake: FakeProvider, changes: dict[str, Any]
 ) -> None:
-    operator = linked(actor, fake)
+    lease = linked(actor, fake)
 
-    outcome = edit(actor, fake, operator, **changes)
+    outcome = edit(actor, fake, lease, **changes)
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.action is Action.NO_CALL
     assert fake.calls == []
-    assert operator.sync_status == SyncStatus.LINKED
-    assert not AuditLog.objects.filter(action="operator.sync_updated").exists()
+    assert lease.sync_status == SyncStatus.LINKED
+    assert not AuditLog.objects.filter(action="lease.sync_updated").exists()
 
 
 @pytest.mark.django_db
 def test_006c_row3_a_non_payload_edit_keeps_a_failed_status(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = linked(actor, fake)
+    lease = linked(actor, fake)
     fake.fail_next("update_customer", ProviderUnavailable(503))
-    edit(actor, fake, operator, phone="4155550132")
+    edit(actor, fake, lease, phone="4155550132")
     fake.calls.clear()
 
-    outcome = edit(actor, fake, operator, phone="4155550132", notes="Called them")
+    outcome = edit(actor, fake, lease, phone="4155550132", city="Elsewhere")
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.action is Action.NO_CALL
     assert fake.calls == []
-    assert (operator.sync_status, operator.sync_failure) == (
+    assert billing_row(lease).city == "Elsewhere"
+    assert (lease.sync_status, lease.sync_failure) == (
         SyncStatus.FAILED,
         "ProviderUnavailable",
     )
@@ -1192,18 +1290,18 @@ def test_006c_row3_a_non_payload_edit_keeps_a_failed_status(
 def test_006c_row4_removing_the_email_updates_without_it_and_stays_linked(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = linked(actor, fake)
-    [ref] = customer_refs(operator)
+    lease = linked(actor, fake)
+    [ref] = customer_refs(lease)
 
-    outcome = edit(actor, fake, operator, email=None)
+    outcome = edit(actor, fake, lease, email=None)
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.action is Action.UPDATED
     [(customer_id, sent)] = update_calls(fake)
     assert (customer_id, sent.operator_email) == (ref.external_id, "")
-    assert operator.email is None
-    assert operator.sync_status == SyncStatus.LINKED
-    audit = AuditLog.objects.get(action="operator.sync_updated")
+    assert billing_row(lease).email == ""
+    assert lease.sync_status == SyncStatus.LINKED
+    audit = AuditLog.objects.get(action="lease.sync_updated")
     assert audit.after is not None
     assert (audit.after["fields"], audit.after["email"]) == (["email"], "")
     assert EMAIL not in audit_text(audit)
@@ -1226,37 +1324,35 @@ def test_006c_an_edit_reaches_the_real_adapter_as_a_put_with_the_mapped_body(
     expected_email: str | None,
 ) -> None:
     """Rules 1 and 4 through the real StaxProvider and a mock transport, not the fake."""
-    operator = linked(actor, fake)
-    [ref] = customer_refs(operator)
+    lease = linked(actor, fake)
+    [ref] = customer_refs(lease)
     rig = make_rig(lambda request: httpx.Response(200, json={"id": ref.external_id}))
 
-    operator_sync.update_operator(operator.pk, fields(**changes), actor=actor)
+    lease_sync.update_billing(lease.pk, billing_fields(**changes), actor=actor)
     with override_settings(STAX_CALLER="worker"):
-        outcome = operator_sync.sync_operator(
-            operator.pk, provider=StaxProvider(rig.transport), actor=actor
-        )
+        outcome = lease_sync.sync_lease(lease.pk, provider=StaxProvider(rig.transport), actor=actor)
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert outcome.action is Action.UPDATED
-    assert operator.sync_status == SyncStatus.LINKED
+    assert lease.sync_status == SyncStatus.LINKED
     [request] = rig.recorder.requests
     assert (request.method, request.url.path) == ("PUT", f"/customer/{ref.external_id}")
     [body] = _sent_bodies(rig)
     assert body["phone"] == expected_phone
     assert body.get("email") == expected_email
     assert ("email" in body) is (expected_email is not None)
-    assert body["firstname"] == "Northwind Stores"
+    assert (body["firstname"], body["lastname"]) == ("Northwind", "Stores")
     assert "" not in body.values()
 
 
 @pytest.mark.django_db
-def test_006c_row5_an_unlinked_operator_is_never_updated(actor: User, fake: FakeProvider) -> None:
+def test_006c_row5_an_unlinked_lease_is_never_updated(actor: User, fake: FakeProvider) -> None:
     awaiting = create(actor, email=None)
     assert edit(actor, fake, awaiting, email=None, phone="4155550132").action is (Action.NO_CALL)
 
     failed = create(actor, email="failed@example.com")
     fake.fail_next("find_customers", ProviderUnavailable(503))
-    operator_sync.sync_operator(failed.pk, provider=fake, actor=actor)
+    lease_sync.sync_lease(failed.pk, provider=fake, actor=actor)
     assert edit(actor, fake, failed, email="failed@example.com", phone="4155550132").action is (
         Action.NO_CALL
     )
@@ -1276,16 +1372,16 @@ def test_006c_row5_an_unlinked_operator_is_never_updated(actor: User, fake: Fake
 def test_006c_row6_two_edits_in_turn_send_two_updates_and_end_on_the_last(
     actor: User, fake: FakeProvider
 ) -> None:
-    operator = linked(actor, fake)
-    edit(actor, fake, operator, phone="4155550132")
-    edit(actor, fake, operator, phone="4155550133")
+    lease = linked(actor, fake)
+    edit(actor, fake, lease, phone="4155550132")
+    edit(actor, fake, lease, phone="4155550133")
 
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     assert [sent.phone for _, sent in update_calls(fake)] == ["4155550132", "4155550133"]
-    assert operator.sync_status == SyncStatus.LINKED
+    assert lease.sync_status == SyncStatus.LINKED
     assert [
         row.after["fields"] if row.after else None
-        for row in AuditLog.objects.filter(action="operator.sync_updated").order_by("id")
+        for row in AuditLog.objects.filter(action="lease.sync_updated").order_by("id")
     ] == [["phone"], ["phone"]]
 
 
@@ -1303,7 +1399,7 @@ def test_006c_row6_two_concurrent_edits_never_crash_and_stax_ends_on_the_saved_r
     actor: User,
 ) -> None:
     provider = SlowUpdateProvider()
-    operator = linked(actor, provider)
+    lease = linked(actor, provider)
     barrier = threading.Barrier(2)
     errors: list[BaseException] = []
     outcomes: list[Action] = []
@@ -1311,10 +1407,8 @@ def test_006c_row6_two_concurrent_edits_never_crash_and_stax_ends_on_the_saved_r
     def submit(phone: str) -> None:
         try:
             barrier.wait()
-            operator_sync.update_operator(operator.pk, fields(phone=phone), actor=actor)
-            outcomes.append(
-                operator_sync.sync_operator(operator.pk, provider=provider, actor=actor).action
-            )
+            lease_sync.update_billing(lease.pk, billing_fields(phone=phone), actor=actor)
+            outcomes.append(lease_sync.sync_lease(lease.pk, provider=provider, actor=actor).action)
         except BaseException as error:  # reported below, not swallowed
             errors.append(error)
         finally:
@@ -1329,7 +1423,7 @@ def test_006c_row6_two_concurrent_edits_never_crash_and_stax_ends_on_the_saved_r
         thread.join()
 
     assert errors == []
-    operator.refresh_from_db()
+    lease.refresh_from_db()
     sent = update_calls(provider)
     assert 1 <= len(sent) <= 2
     assert sorted(outcomes, key=str) in (
@@ -1337,6 +1431,6 @@ def test_006c_row6_two_concurrent_edits_never_crash_and_stax_ends_on_the_saved_r
         sorted([Action.UPDATED, Action.NO_CALL], key=str),
     )
     # The last update sent carries what is saved here.
-    assert sent[-1][1].phone == operator.phone
-    assert operator.sync_status == SyncStatus.LINKED
-    assert len(customer_refs(operator)) == 1
+    assert sent[-1][1].phone == billing_row(lease).phone
+    assert lease.sync_status == SyncStatus.LINKED
+    assert len(customer_refs(lease)) == 1

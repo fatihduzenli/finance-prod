@@ -601,17 +601,19 @@ def test_the_names_reach_the_bar_and_the_nav() -> None:
 
 def test_the_provider_name_is_substituted_in_the_job_banner() -> None:
     operator = an_operator("Banner Ops")
-    a_lease(a_store("0103 BANNER", 103, "GA"), operator)
+    # PLAN-014 C3: the processor customer is per lease; its sync job and banner are the
+    # lease's (the operator page no longer shows a provider request).
+    lease = a_lease(a_store("0103 BANNER", 103, "GA"), operator)
     Job.objects.create(
-        kind=JobKind.OPERATOR_SYNC,
-        entity_type="operator",
-        entity_id=str(operator.pk),
+        kind=JobKind.LEASE_SYNC,
+        entity_type="lease",
+        entity_id=str(lease.pk),
         status=JobStatus.QUEUED,
     )
     row = CompanySettings.current()
     row.provider_name = "PayCo"
     row.save()
-    html = body(client_for(Role.BILLING).get(f"/operators/{operator.pk}/"))
+    html = body(client_for(Role.BILLING).get(f"/leases/{lease.pk}/"))
     banner = html[
         html.index('<p id="job-status"') : html.index("</p>", html.index('id="job-status"'))
     ]

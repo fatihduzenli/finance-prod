@@ -27,6 +27,7 @@ from ledger.models import (
     InvoiceDraft,
     InvoiceDraftStatus,
     Lease,
+    LeaseBilling,
     LeaseEnd,
     LeaseEndReason,
     LeaseEndStatus,
@@ -36,6 +37,7 @@ from ledger.models import (
     OneOffCharge,
     OneOffChargeStatus,
     Operator,
+    OperatorKind,
     Payment,
     PaymentKind,
     PaymentMethod,
@@ -86,18 +88,26 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def incoming_operator(name: str = "Southwind Stores") -> Operator:
-    """An operator linked to a (fake) customer at the payment provider."""
-    operator = Operator.objects.create(
-        display_name=name, email=f"{uuid.uuid4().hex[:8]}@example.com"
+    """An operator with an e-mail address. Its provider customer is a lease's since
+    PLAN-014 C3: :func:`connect` gives one to the incoming lease once it exists."""
+    return Operator.objects.create(display_name=name, email=f"{uuid.uuid4().hex[:8]}@example.com")
+
+
+def connect(lease: Lease) -> Lease:
+    """Give ``lease`` billing details (its operator's e-mail) and a (fake) customer at the
+    payment provider, as staff do through Edit billing details (PLAN-014 C3)."""
+    assert lease.operator is not None
+    LeaseBilling.objects.update_or_create(
+        lease=lease, defaults={"email": lease.operator.email or ""}
     )
     ExternalRef.objects.create(
-        entity_type="operator",
-        entity_id=operator.pk,
+        entity_type="lease",
+        entity_id=lease.pk,
         provider="stax_pay",
         external_kind="customer",
         external_id=f"cus-{uuid.uuid4().hex[:8]}",
     )
-    return operator
+    return lease
 
 
 def begin(lease: Lease, user: User | None = None, *, ended_on: date = ENDED) -> LeaseTransfer:
@@ -475,7 +485,9 @@ def test_a_clean_transfer_ends_the_outgoing_lease_and_starts_the_incoming_one(
     assert lines == [("Security deposit", D("3000.00")), ("Sign fee", D("450.00"))]
     assert not OneOffCharge.objects.filter(lease=new).exists()
     assert set(Job.objects.values_list("kind", flat=True)) == {JobKind.LEASE_END_DOCUMENTS}
-    # Sent, the draft makes the charges and the provider job.
+    # Sent once the new lease has its provider customer (PLAN-014 C3: per lease), the
+    # draft makes the charges and the provider job.
+    connect(new)
     sent = invoice_builder.send(draft.pk, user, today=TODAY)
     assert sent.ok, sent.message
     made = OneOffCharge.objects.filter(lease=new).order_by("price")
@@ -636,19 +648,22 @@ def test_unknown_or_malformed_ids_are_404(admin: Any) -> None:
         assert client.get(f"/stores/{key}/transfer/").status_code == 404
 
 
-def test_an_operator_created_on_the_step_queues_its_sync_job(admin: Any, pinned: None) -> None:
+def test_an_operator_created_on_the_step_queues_no_provider_job(admin: Any, pinned: None) -> None:
     client, _ = admin
     lease = a_clean_lease()
     client.post(f"/stores/{lease.store_id}/transfer/")
     row = LeaseTransfer.objects.get()
+    jobs_before = set(Job.objects.values_list("pk", flat=True))
     response = client.post(
         f"/transfers/{row.pk}/operator/",
         {
             "action": "create",
             "creation_key": str(uuid.uuid4()),
-            # PLAN-012f-b D9: Type and the company's name; the display name is derived.
+            # PLAN-014 C1: the Full name is the display name; a posted Type and company
+            # are ignored, not an error.
+            "display_name": "Eastwind Stores",
             "kind": "company",
-            "company": "Eastwind Stores",
+            "company": "Eastwind Holdings LLC",
             "email": "eastwind@example.com",
             "phone": "",
         },
@@ -656,8 +671,11 @@ def test_an_operator_created_on_the_step_queues_its_sync_job(admin: Any, pinned:
     assert response["Location"] == f"/transfers/{row.pk}/end/"
     created = Operator.objects.get(display_name="Eastwind Stores")
     assert fresh(row).incoming_operator_id == created.pk
-    job = Job.objects.get(kind=JobKind.OPERATOR_SYNC)
-    assert job.entity_id == created.pk
+    assert (created.kind, created.company) == (OperatorKind.PERSON, "")
+    # PLAN-014 C3: creating an operator is local only; the processor customer is a lease's.
+    assert created.sync_status == "not_applicable"
+    assert set(Job.objects.values_list("pk", flat=True)) == jobs_before
+    assert not ExternalRef.objects.filter(entity_type="operator", entity_id=created.pk).exists()
 
 
 def test_an_admin_walks_the_transfer_from_the_store_page(admin: Any, pinned: None) -> None:

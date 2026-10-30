@@ -130,10 +130,9 @@ def add_methods(fake: FakeProvider) -> None:
 
 
 def read_methods(lease: Lease, fake: FakeProvider) -> Lease:
-    """What the worker's ``operator_methods_refresh`` job does: the snapshot the
+    """What the worker's ``lease_methods_refresh`` job does: the snapshot the
     enrolment page reads (PLAN-010 Batch A follow-up). The read is not counted."""
-    assert lease.operator is not None
-    assert service.refresh_payment_methods(lease.operator.pk).ok
+    assert service.refresh_payment_methods(lease.pk).ok
     fake.calls.clear()
     return lease
 
@@ -158,6 +157,7 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             "resolve_deposit",
             "end",
             "stop_autopay",
+            "billing",
             *POST_ROUTES,
         )
     }
@@ -183,6 +183,9 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     # PLAN-012e D5 amendment: stopping autopay needs admin.
     rule = registry.rule_for("ledger:leases:stop_autopay")
     assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
+    # PLAN-014 C3: Edit billing details (the details, the link, the retry) needs billing.
+    rule = registry.rule_for("ledger:leases:billing")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
 
 
 @pytest.mark.parametrize("role", [Role.VIEWER, Role.BILLING])

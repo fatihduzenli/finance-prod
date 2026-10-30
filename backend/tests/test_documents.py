@@ -68,8 +68,8 @@ from tests.document_files import (
     part,
 )
 from tests.test_lease_services import _race
+from tests.test_lease_sync import requires_postgresql
 from tests.test_ledger_models import new_lease, new_store, saved
-from tests.test_operator_sync import requires_postgresql
 from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db

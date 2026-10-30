@@ -1,9 +1,9 @@
 """Create an operator in a browser with a double click (docs/qa/PLAN-006-operators.md §5).
 
 The live server runs in this process, so replacing ``payments.get_provider`` gives the
-worker's jobs an in-memory provider: no request leaves the machine. PLAN-010 D3: the
-save queues the sync; the test runs the queued job as the worker would, and the page,
-which refreshes itself every five seconds while the job waits, then shows the link.
+worker's jobs an in-memory provider: no request leaves the machine. PLAN-014 C3: the
+processor customer is per lease, so the save makes one operator, queues no job and
+calls nothing (the lease's sync is pinned in ``tests/test_operator_views.py``).
 """
 
 from __future__ import annotations
@@ -17,14 +17,14 @@ from pytest_django.live_server_helper import LiveServer
 from accounts.roles import Role
 from ledger.models import Operator, SyncStatus
 from payments.fake import FakeProvider
-from payments.models import Job, JobKind, JobStatus
+from payments.models import Job
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.job_helpers import run_queued_jobs
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
 
 
-def test_double_click_on_save_creates_one_operator_and_one_customer(
+def test_double_click_on_save_creates_one_operator_and_no_provider_call(
     live_server: LiveServer, page: Page, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     provider = FakeProvider()
@@ -43,32 +43,21 @@ def test_double_click_on_save_creates_one_operator_and_one_customer(
     page.wait_for_url(f"{live_server.url}/")  # the dashboard (PLAN-011 D1)
 
     page.goto(f"{live_server.url}/operators/new/")
-    # PLAN-012f-b D9: Type Company shows the company's name; the display name is derived.
-    page.click("label[for='id_kind_0']")  # the segmented control: its label is the target
-    page.fill("#id_company", "Double Click Stores")
+    # PLAN-014 C1: an operator is a person; the form's first field is the Full name.
+    page.fill("#id_display_name", "Double Click Stores")
     page.fill("#id_email", "double.click@example.com")
     page.locator("#save-operator").dblclick()
 
     page.wait_for_url(re.compile(r".*/operators/[0-9a-f-]{36}/$"))
-    page.locator("#job-state").wait_for(state="visible")
-    assert page.locator("#job-state").inner_text() == "Waiting"
-    assert provider.calls == []
-
-    # The sync, then the methods read the sync queues for the enrolment page.
-    [sync_job, methods_job] = run_queued_jobs()
-    assert sync_job.kind == JobKind.OPERATOR_SYNC and sync_job.status == JobStatus.DONE
-    assert methods_job.kind == JobKind.OPERATOR_METHODS_REFRESH
-    assert methods_job.status == JobStatus.DONE
-    # The meta refresh reloads the page; no click is needed.
-    # The link status reads "Connected" (PLAN-012c §4.5 label).
-    page.wait_for_function(
-        "document.querySelector('#sync-status').innerText.startsWith('Connected')", timeout=15_000
-    )
-    assert page.locator("#job-state").inner_text().startswith("Done: ")
+    assert page.locator("#operator-title").inner_text().startswith("Double Click Stores")
     assert page.locator("#sandbox-banner").is_visible()
+
+    # PLAN-014 C3: the processor customer is per lease; saving an operator queues no sync
+    # and makes no provider call.
+    assert run_queued_jobs() == []
+    assert provider.calls == []
+    assert Job.objects.count() == 0
 
     operator = Operator.objects.get()
     assert operator.display_name == "Double Click Stores"
-    assert operator.sync_status == SyncStatus.LINKED
-    assert [name for name, _ in provider.calls].count("create_customer") == 1
-    assert Job.objects.count() == 2
+    assert operator.sync_status == SyncStatus.NOT_APPLICABLE

@@ -80,7 +80,7 @@ from tests.job_helpers import run_queued_jobs
 from tests.stax_helpers import FakeClock, Recorder
 from tests.test_jobs import provider_reaching_functions
 from tests.test_lease_services import make_operator
-from tests.test_operator_sync import requires_postgresql
+from tests.test_lease_sync import requires_postgresql
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 from tests.test_webhook_handlers import (

@@ -35,7 +35,7 @@ from payments.models import ExternalRef
 from payments.provider import TransactionRecord
 from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.test_lease_services import _race
-from tests.test_operator_sync import requires_postgresql
+from tests.test_lease_sync import requires_postgresql
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 from tests.test_webhook_handlers import (

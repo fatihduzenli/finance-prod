@@ -31,7 +31,7 @@ from payments.models import ExternalRef
 from payments.provider import CustomerRecord, PaymentMethodRecord
 from tests.job_helpers import run_queued_jobs
 from tests.receivables_helpers import a_lease, a_store
-from tests.test_lease_services import make_operator
+from tests.test_lease_services import bill_lease, make_operator
 from tests.test_operator_views import client_for
 
 pytestmark = pytest.mark.django_db
@@ -57,15 +57,26 @@ def today() -> date:
 
 
 def a_plan_lease(fake: FakeProvider | None = None, operator: Any = None) -> Lease:
-    """An active lease whose operator has a provider customer and a linked bank method."""
+    """An active lease with a provider customer and a linked bank method (PLAN-014 C3: the
+    account is the lease's; a further lease of ``operator`` shares the first's)."""
     tag = uuid.uuid4().hex[:8]
+    email = customer = ""
     if operator is None:
         email = f"{tag}@example.com"
         customer = f"cus-{tag}"
         operator = make_operator(email=email, customer=customer)
+    lease = bill_lease(
+        a_lease(
+            a_store(f"Store {tag}"),
+            operator,
+            channel=PaymentChannel.PROVIDER_ACH,
+            started=date(2026, 1, 1),
+        )
+    )
+    if customer:
         ExternalRef.objects.create(
-            entity_type="operator",
-            entity_id=operator.pk,
+            entity_type="lease",
+            entity_id=lease.pk,
             provider="stax_pay",
             external_kind="payment_method",
             external_id=f"pm-{tag}",
@@ -80,12 +91,7 @@ def a_plan_lease(fake: FakeProvider | None = None, operator: Any = None) -> Leas
                     external_id=f"pm-{tag}", raw_status="", fetched_at=timezone.now(), method="bank"
                 ),
             )
-    return a_lease(
-        a_store(f"Store {tag}"),
-        operator,
-        channel=PaymentChannel.PROVIDER_ACH,
-        started=date(2026, 1, 1),
-    )
+    return lease
 
 
 def a_plan(lease: Lease, **overrides: Any) -> AutopayPlan:

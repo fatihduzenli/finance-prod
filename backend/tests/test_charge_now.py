@@ -81,9 +81,10 @@ def enabled() -> Iterator[None]:
 
 
 def store_methods(operator: Operator, *, method: str = "bank", status: str = "") -> None:
-    """The operator's method list as the worker's refresh stores it (no provider call)."""
+    """The method list of the customer of the operator's lease (PLAN-014 C3: the account
+    is the lease's) as the worker's refresh stores it (no provider call)."""
     ref = ExternalRef.objects.get(
-        entity_type="operator", entity_id=operator.pk, external_kind="customer"
+        entity_type="lease", entity_id__in=operator.leases.values("pk"), external_kind="customer"
     )
     ProviderSnapshot.objects.create(
         external_ref=ref,

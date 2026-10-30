@@ -367,7 +367,8 @@ def test_c3_a_bank_on_file_with_the_flag_off_reads_the_flag_line_without_a_link(
     operator, lease = builder.banked(fake)
     with override_settings(STAX_CALLER="worker", STAX_PAY_INVOICE_ENABLED=False):
         html = builder.draft_html(a_draft(operator, lease, one_line()), Role.ADMIN)
-        tiles = invoice_builder.bank_tiles(operator)
+        # PLAN-014 C5: the tiles read the account of the lease the draft bills.
+        tiles = invoice_builder.bank_tiles(operator, lease)
     assert tiles == invoice_builder.BankTiles(
         bank_why="", bank_url="", charge_now_why=str(one_off_service.DEBIT_OFF), charge_now_more=""
     )

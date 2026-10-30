@@ -32,7 +32,7 @@ MARKUP = '<script>alert("x")</script>'
 BANNER = "SANDBOX — test system, no real money"
 
 #: Every stored choice value of ledger.models before Batch D (2026-10-17). Labels may change;
-#: values never.
+#: values never. Values are only ever added (PLAN-014 C2: ReviewReason own_customer).
 FROZEN_CHOICES: dict[str, list[str]] = {
     "AdjustmentReason": ["carry_forward", "credit", "cross_store_balance", "discount"],
     # PLAN-012f-a Batch E (ADR-0014): the repeating debit plan's three stored choices.
@@ -125,7 +125,7 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "RentChargeStatus": ["due", "paid", "partial", "pending", "unpaid", "waived"],
     "RentSource": ["sheet_current", "sheet_inferred", "staff"],
     "ResolutionKind": ["note", "rescheduled"],
-    "ReviewReason": ["closed", "dormant", "unknown", "wire"],
+    "ReviewReason": ["closed", "dormant", "own_customer", "unknown", "wire"],
     "ScheduleKind": ["insurance", "rent"],
     "ScheduleState": ["active", "ended", "failed", "none", "paused"],
     "StoreBalanceKind": ["deposit_or_access", "insurance_opening", "sign"],
@@ -154,8 +154,11 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: since slice C2 (ledger:charges:charge_now, PLAN-012f-b §10 D19); 274 since PLAN-012f-c
 #: Batch A (ledger:payments:void_manual); 275 since Batch C (ledger:plans:split_preview); 276
 #: since PLAN-012g Batch A (finance:theme); 277 since PLAN-014 Batch A
-#: (finance:payment_status_period).
-FROZEN_ROUTES = (277, "93d1419c7a5238f69b2c1986f16d2628f3b9d3b50bc496748ed5695725ae347f")
+#: (finance:payment_status_period); 281 since Batch B (ledger:settings:index and the four brand
+#: actions, ledger:notes:add|edit|pin|delete; the five admin:ledger_storetype_* routes gone); 280
+#: since Batch C (ledger:leases:billing; ledger:operators:link and retry_sync gone; checked by
+#: hand: those three changes on the 281 set give its digest).
+FROZEN_ROUTES = (280, "81026fe08c6673f91f9aba80ae05defafe180edec2b72d0c1dc10a91c78a2f31")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

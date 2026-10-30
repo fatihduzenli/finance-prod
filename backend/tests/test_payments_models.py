@@ -95,8 +95,8 @@ def new_sync_state(**fields: Any) -> provider.SyncState:
 
 def new_job(**fields: Any) -> provider.Job:
     values = {
-        "kind": provider.JobKind.OPERATOR_SYNC,
-        "entity_type": provider.JobEntity.OPERATOR,
+        "kind": provider.JobKind.LEASE_SYNC,
+        "entity_type": provider.JobEntity.LEASE,
         "entity_id": uuid.uuid4(),
     }
     return provider.Job(**{**values, **fields})

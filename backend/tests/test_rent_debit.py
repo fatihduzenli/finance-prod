@@ -1136,11 +1136,10 @@ def test_the_unpaid_balances_and_the_charges_tab_read_bank_debit(fake: FakeProvi
 
 def an_autopay_rent(fake: FakeProvider, due_on: date, *, paused: bool = False) -> RentCharge:
     """A ``due`` rent charge of a lease whose rent autopay is on (or paused) at the fake,
-    the operator's bank method stored."""
+    the lease's bank method stored."""
     lease = linked_lease(fake)
-    assert lease.operator is not None
     customer = ExternalRef.objects.get(
-        entity_type="operator", entity_id=lease.operator.pk, external_kind="customer"
+        entity_type="lease", entity_id=lease.pk, external_kind="customer"
     )
     # The stored method list (as the worker's refresh leaves it) names the linked method.
     ProviderSnapshot.objects.create(

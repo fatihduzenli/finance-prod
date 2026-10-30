@@ -38,7 +38,7 @@ from ledger.views.jobs import BUSY, REPLAY_REFUSED
 from ledger.views.leases import REFRESH_QUEUED
 from ledger.views.run import MATCH_QUEUED
 from payments import get_provider as real_get_provider
-from payments import jobs, operator_sync
+from payments import jobs
 from payments.errors import ProviderRejected
 from payments.fake import FakeProvider
 from payments.health import BREAKER_OPEN
@@ -59,9 +59,9 @@ from payments.webhooks import receiver
 from tests.job_helpers import run_queued_jobs
 from tests.test_lease_services import make_lease, method
 from tests.test_lease_services import make_operator as lease_operator
+from tests.test_lease_sync import add_provider_customer, billed_lease, requires_postgresql
 from tests.test_manual_payment_marking import invoiced
-from tests.test_operator_sync import add_provider_customer, fields, requires_postgresql
-from tests.test_operator_views import client_for, form_data
+from tests.test_operator_views import billing_data, billing_url, client_for, form_data
 from tests.test_refunds_voids import ach
 from tests.test_rent_run import (
     enrolled,
@@ -96,12 +96,11 @@ def refuse_provider(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return used
 
 
-def new_operator(**overrides: Any) -> Operator:
+def new_lease(**overrides: Any) -> Lease:
+    """A lease with its billing details saved and its sync not yet run (PLAN-014 C3: the
+    processor customer, its sync, retry and link jobs are the lease's)."""
     values = {"email": f"jobs-{uuid.uuid4().hex[:8]}@example.com", **overrides}
-    operator, _ = operator_sync.create_operator(
-        fields(**values), creation_key=uuid.uuid4(), actor=None
-    )
-    return operator
+    return billed_lease(**values)
 
 
 def detail(operator: Operator) -> str:
@@ -117,16 +116,16 @@ def only_job() -> Job:
 
 
 def test_enqueue_stores_a_queued_job_with_identifiers_and_amounts_as_text() -> None:
-    operator = new_operator()
+    lease = new_lease()
     key = uuid.uuid4()
     job = jobs.enqueue(
-        JobKind.OPERATOR_LINK,
-        operator,
+        JobKind.LEASE_LINK,
+        lease,
         {"amount": Decimal("12.50"), "key": key, "flag": True, "count": 2},
         None,
     )
     job.refresh_from_db()
-    assert (job.kind, job.entity_type, job.entity_id) == ("operator_link", "operator", operator.pk)
+    assert (job.kind, job.entity_type, job.entity_id) == ("operator_link", "lease", lease.pk)
     assert job.status == JobStatus.QUEUED
     assert (job.attempts, job.max_attempts) == (0, 1)
     assert job.params == {"amount": "12.50", "key": str(key), "flag": True, "count": 2}
@@ -136,19 +135,28 @@ def test_enqueue_stores_a_queued_job_with_identifiers_and_amounts_as_text() -> N
 @pytest.mark.parametrize("value", [object(), [1], Decimal("NaN"), b"bytes"], ids=repr)
 def test_enqueue_refuses_any_parameter_but_text_numbers_and_identifiers(value: object) -> None:
     with pytest.raises(TypeError):
-        jobs.enqueue(JobKind.OPERATOR_SYNC, new_operator(), {"value": value}, None)
+        jobs.enqueue(JobKind.LEASE_SYNC, new_lease(), {"value": value}, None)
     assert not Job.objects.exists()
 
 
 def test_enqueue_refuses_a_kind_for_another_entity_and_any_other_model() -> None:
-    operator = new_operator()
+    lease = new_lease()
+    assert lease.operator is not None
     with pytest.raises(ValueError, match="does not act"):
-        jobs.enqueue(JobKind.AUTOPAY_PAUSE, operator, None, None)
+        jobs.enqueue(JobKind.AUTOPAY_PAUSE, lease.operator, None, None)
+    # PLAN-014 C3: the sync, retry, link and methods read act on a lease, never an operator.
+    for kind in (
+        JobKind.LEASE_SYNC,
+        JobKind.LEASE_RETRY,
+        JobKind.LEASE_LINK,
+        JobKind.LEASE_METHODS_REFRESH,
+    ):
+        with pytest.raises(ValueError, match="does not act"):
+            jobs.enqueue(kind, lease.operator, None, None)
     with pytest.raises(ValueError):
-        jobs.enqueue("webhook_event", operator, None, None)
-    lease = make_lease()
+        jobs.enqueue("webhook_event", lease, None, None)
     with pytest.raises(ValueError, match="operators, leases"):
-        jobs.enqueue(JobKind.OPERATOR_SYNC, lease.store, None, None)
+        jobs.enqueue(JobKind.LEASE_SYNC, lease.store, None, None)
     assert not Job.objects.exists()
 
 
@@ -156,28 +164,28 @@ def test_a_card_number_in_the_parameters_is_refused() -> None:
     from django.core.exceptions import ValidationError
 
     with pytest.raises(ValidationError):
-        jobs.enqueue(JobKind.OPERATOR_LINK, new_operator(), {"customer_id": CARD}, None)
+        jobs.enqueue(JobKind.LEASE_LINK, new_lease(), {"customer_id": CARD}, None)
     assert not Job.objects.exists()
 
 
 def test_a_replay_key_returns_the_first_job() -> None:
-    operator = new_operator()
+    lease = new_lease()
     key = uuid.uuid4()
-    first = jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None, key)
-    second = jobs.enqueue(JobKind.OPERATOR_SYNC, operator, {"other": "x"}, None, key)
+    first = jobs.enqueue(JobKind.LEASE_SYNC, lease, None, None, key)
+    second = jobs.enqueue(JobKind.LEASE_SYNC, lease, {"other": "x"}, None, key)
     assert first.pk == second.pk
     assert Job.objects.count() == 1
     assert second.params == {}
 
 
 def test_a_replay_key_of_another_entity_or_kind_is_refused() -> None:
-    first, second = new_operator(), new_operator(email="other@example.com")
+    first, second = new_lease(), new_lease(email="other@example.com")
     key = uuid.uuid4()
-    jobs.enqueue(JobKind.OPERATOR_SYNC, first, None, None, key)
+    jobs.enqueue(JobKind.LEASE_SYNC, first, None, None, key)
     with pytest.raises(jobs.ReplayKeyUsed):
-        jobs.enqueue(JobKind.OPERATOR_SYNC, second, None, None, key)
+        jobs.enqueue(JobKind.LEASE_SYNC, second, None, None, key)
     with pytest.raises(jobs.ReplayKeyUsed):
-        jobs.enqueue(JobKind.OPERATOR_RETRY, first, None, None, key)
+        jobs.enqueue(JobKind.LEASE_RETRY, first, None, None, key)
     assert Job.objects.count() == 1
 
 
@@ -185,9 +193,9 @@ def test_a_replay_key_of_another_entity_or_kind_is_refused() -> None:
 
 
 def test_claim_takes_the_oldest_queued_job_and_marks_it_running() -> None:
-    operator = new_operator()
-    older = jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None)
-    newer = jobs.enqueue(JobKind.OPERATOR_RETRY, operator, None, None)
+    lease = new_lease()
+    older = jobs.enqueue(JobKind.LEASE_SYNC, lease, None, None)
+    newer = jobs.enqueue(JobKind.LEASE_RETRY, lease, None, None)
     Job.objects.filter(pk=older.pk).update(created_at=timezone.now() - timedelta(minutes=1))
     now = timezone.now()
 
@@ -201,7 +209,7 @@ def test_claim_takes_the_oldest_queued_job_and_marks_it_running() -> None:
 
 
 def test_a_job_whose_worker_died_is_queued_again_once_then_dead() -> None:
-    jobs.enqueue(JobKind.OPERATOR_SYNC, new_operator(), None, None)
+    jobs.enqueue(JobKind.LEASE_SYNC, new_lease(), None, None)
     start = timezone.now()
     first = jobs.claim_next(now=start)
     assert first is not None
@@ -221,31 +229,31 @@ def test_a_job_whose_worker_died_is_queued_again_once_then_dead() -> None:
 
 
 def test_run_records_done_with_the_service_sentence(fake: FakeProvider) -> None:
-    operator = new_operator()
-    jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None)
+    lease = new_lease()
+    jobs.enqueue(JobKind.LEASE_SYNC, lease, None, None)
     [job, refresh] = run_queued_jobs()
     assert job.status == JobStatus.DONE
     assert job.result == "Created the customer in Stax."
     # The successful sync queued the methods read the enrolment page shows.
-    assert (refresh.kind, refresh.status) == (JobKind.OPERATOR_METHODS_REFRESH, JobStatus.DONE)
+    assert (refresh.kind, refresh.status) == (JobKind.LEASE_METHODS_REFRESH, JobStatus.DONE)
     assert job.finished_at is not None and job.locked_until is None
     assert jobs.describe(job) == f"Done: {job.result}"
-    operator.refresh_from_db()
-    assert operator.sync_status == SyncStatus.LINKED
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
 
 
 def test_run_records_a_refusal_as_failed_in_words_with_the_class_in_the_audit_row(
     fake: FakeProvider,
 ) -> None:
-    operator = new_operator()
+    lease = new_lease()
     fake.fail_next("find_customers", ProviderRejected(422, "CANARY text", error_fields=("email",)))
-    jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None)
+    jobs.enqueue(JobKind.LEASE_SYNC, lease, None, None)
     [job] = run_queued_jobs()
     assert job.status == JobStatus.FAILED
     assert job.result.endswith(" (Rejected)")
     assert "ProviderRejected" not in job.result and "email" not in job.result
     assert "CANARY" not in job.result
-    [audit] = AuditLog.objects.filter(action="operator.sync_failed", entity_id=str(operator.pk))
+    [audit] = AuditLog.objects.filter(action="lease.sync_failed", entity_id=str(lease.pk))
     assert audit.after is not None
     assert (audit.after["sync_failure"], audit.after["sync_failure_fields"]) == (
         "ProviderRejected",
@@ -262,10 +270,10 @@ def test_an_exception_in_a_job_is_recorded_as_its_class_only(
 
     monkeypatch.setitem(
         __import__("payments.jobs.runners", fromlist=["RUNNERS"]).RUNNERS,
-        JobKind.OPERATOR_SYNC,
+        JobKind.LEASE_SYNC,
         broken,
     )
-    jobs.enqueue(JobKind.OPERATOR_SYNC, new_operator(), None, None)
+    jobs.enqueue(JobKind.LEASE_SYNC, new_lease(), None, None)
     with caplog.at_level(logging.WARNING):
         [job] = run_queued_jobs()
     assert (job.status, job.result) == (JobStatus.FAILED, "RuntimeError")
@@ -273,7 +281,7 @@ def test_an_exception_in_a_job_is_recorded_as_its_class_only(
 
 
 def test_an_outcome_holding_a_card_number_is_not_stored() -> None:
-    jobs.enqueue(JobKind.OPERATOR_SYNC, new_operator(), None, None)
+    jobs.enqueue(JobKind.LEASE_SYNC, new_lease(), None, None)
     job = jobs.claim_next()
     assert job is not None
     jobs.finish(job, JobStatus.DONE, f"text {CARD}")
@@ -282,12 +290,12 @@ def test_an_outcome_holding_a_card_number_is_not_stored() -> None:
 
 
 def test_latest_for_is_the_newest_job_of_that_entity_only() -> None:
-    first, second = new_operator(), new_operator(email="other@example.com")
+    first, second = new_lease(), new_lease(email="other@example.com")
     assert jobs.latest_for(first) is None
-    old = jobs.enqueue(JobKind.OPERATOR_SYNC, first, None, None)
+    old = jobs.enqueue(JobKind.LEASE_SYNC, first, None, None)
     Job.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(minutes=1))
-    new = jobs.enqueue(JobKind.OPERATOR_RETRY, first, None, None)
-    jobs.enqueue(JobKind.OPERATOR_SYNC, second, None, None)
+    new = jobs.enqueue(JobKind.LEASE_RETRY, first, None, None)
+    jobs.enqueue(JobKind.LEASE_SYNC, second, None, None)
     latest = jobs.latest_for(first)
     assert latest is not None and latest.pk == new.pk
 
@@ -295,7 +303,7 @@ def test_latest_for_is_the_newest_job_of_that_entity_only() -> None:
 @requires_postgresql
 @pytest.mark.django_db(transaction=True)
 def test_two_workers_claiming_at_once_take_one_job_once() -> None:
-    jobs.enqueue(JobKind.OPERATOR_SYNC, new_operator(), None, None)
+    jobs.enqueue(JobKind.LEASE_SYNC, new_lease(), None, None)
     barrier = threading.Barrier(2)
     taken: list[Job | None] = []
 
@@ -319,7 +327,7 @@ def test_two_workers_claiming_at_once_take_one_job_once() -> None:
 def test_the_database_refuses_a_card_number_in_params_written_around_the_model() -> None:
     from django.db import DataError, IntegrityError, InternalError
 
-    job = jobs.enqueue(JobKind.OPERATOR_SYNC, new_operator(), None, None)
+    job = jobs.enqueue(JobKind.LEASE_SYNC, new_lease(), None, None)
     with pytest.raises((DataError, IntegrityError, InternalError)):
         Job.objects.filter(pk=job.pk).update(params={"note": CARD})
 
@@ -334,7 +342,7 @@ def as_worker() -> Any:
 
 
 def test_the_worker_refuses_to_start_unless_it_is_the_caller() -> None:
-    jobs.enqueue(JobKind.OPERATOR_SYNC, new_operator(), None, None)
+    jobs.enqueue(JobKind.LEASE_SYNC, new_lease(), None, None)
     for caller in ("none", ""):
         with override_settings(STAX_CALLER=caller), pytest.raises(CommandError, match="worker"):
             call_command("worker", "--once")
@@ -358,16 +366,16 @@ def test_each_tick_takes_a_job_before_an_event(
         lambda event_type, object_id: WebhookOutcome.PROCESSED,
     )
     event = _stored_event()
-    jobs.enqueue(JobKind.OPERATOR_SYNC, new_operator(), None, None)
+    jobs.enqueue(JobKind.LEASE_SYNC, new_lease(), None, None)
 
     call_command("worker", "--once")
-    assert Job.objects.get(kind=JobKind.OPERATOR_SYNC).status == JobStatus.DONE
+    assert Job.objects.get(kind=JobKind.LEASE_SYNC).status == JobStatus.DONE
     event.refresh_from_db()
     assert event.processed_at is None
 
     # The sync queued a methods read; it is a job, so it too comes before the event.
     call_command("worker", "--once")
-    assert Job.objects.get(kind=JobKind.OPERATOR_METHODS_REFRESH).status == JobStatus.DONE
+    assert Job.objects.get(kind=JobKind.LEASE_METHODS_REFRESH).status == JobStatus.DONE
     event.refresh_from_db()
     assert event.processed_at is None
 
@@ -388,15 +396,16 @@ def test_the_worker_skips_dead_letters_and_failed_events() -> None:
 def test_the_worker_logs_one_line_per_item_with_the_masked_entity(
     fake: FakeProvider, caplog: pytest.LogCaptureFixture
 ) -> None:
-    operator = new_operator()
-    jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None)
+    lease = new_lease()
+    jobs.enqueue(JobKind.LEASE_SYNC, lease, None, None)
     with caplog.at_level(logging.INFO, logger="payments.management.commands.worker"):
         call_command("worker", "--once")
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Worker item")]
+    # The lease kind keeps the stored value of the operator kind it replaced (PLAN-014 C3).
     assert lines == [
-        f"Worker item: kind=operator_sync entity={mask_identifier(str(operator.pk))} outcome=done"
+        f"Worker item: kind=operator_sync entity={mask_identifier(str(lease.pk))} outcome=done"
     ]
-    assert str(operator.pk) not in caplog.text
+    assert str(lease.pk) not in caplog.text
 
 
 @pytest.mark.usefixtures("as_worker")
@@ -449,14 +458,14 @@ def test_the_worker_runs_jobs_with_the_real_adapter_only_as_the_caller(
 
     monkeypatch.setattr("httpx.Client.send", no_network)
     monkeypatch.setattr("payments._providers", {})
-    operator = new_operator()
-    jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None)
+    lease = new_lease()
+    jobs.enqueue(JobKind.LEASE_SYNC, lease, None, None)
     with override_settings(STAX_CALLER="none", STAX_PROVIDER="stax"):
         [job] = run_queued_jobs()
     assert job.status == JobStatus.FAILED
     assert job.result.endswith(" (Not allowed here)")
     assert "ProviderNotPermittedHere" not in job.result
-    [audit] = AuditLog.objects.filter(action="operator.sync_failed", entity_id=str(operator.pk))
+    [audit] = AuditLog.objects.filter(action="lease.sync_failed", entity_id=str(lease.pk))
     assert audit.after is not None
     assert audit.after["sync_failure"] == "ProviderNotPermittedHere"
 
@@ -470,7 +479,7 @@ RECEIVER = BACKEND / "payments" / "webhooks" / "receiver.py"
 #: Modules whose public functions a view could call to reach the provider indirectly.
 SERVICE_MODULES = (
     *sorted((BACKEND / "ledger" / "services").glob("*.py")),
-    BACKEND / "payments" / "operator_sync.py",
+    BACKEND / "payments" / "lease_sync.py",
     BACKEND / "payments" / "invoice_sync.py",
     BACKEND / "payments" / "offline_marking.py",
     *sorted((BACKEND / "payments" / "webhooks").rglob("*.py")),
@@ -582,7 +591,8 @@ def test_the_service_scan_finds_the_reads_the_pages_used_to_make() -> None:
         "enable_autopay",
         "mark_provider_invoice",
         "refund_payment",
-        "sync_operator",
+        "sync_lease",
+        "link_lease",
     } <= reaching
     assert "payment_method_choices" not in reaching
     assert not {"autopay_blockers", "debit_plan", "leases_due", "create_charges"} & reaching
@@ -638,42 +648,51 @@ Post = tuple[str, Client, str, dict[str, Any], str]
 
 
 def _operator_and_lease_posts(fake: FakeProvider) -> list[Post]:
+    """PLAN-014 C3: the sync, retry and link are queued from the lease's Edit billing
+    details; saving an operator queues nothing (pinned below)."""
     billing, _ = client_for(Role.BILLING)
     admin, _ = client_for(Role.ADMIN)
-    linked = new_operator(email="linked@example.com")
-    jobs.enqueue(JobKind.OPERATOR_SYNC, linked, None, None)
+    created = new_lease(email=None)
+    linked = new_lease(email="linked@example.com")
+    jobs.enqueue(JobKind.LEASE_SYNC, linked, None, None)
     run_queued_jobs()
-    failed = new_operator(email="failed@example.com")
-    Operator.objects.filter(pk=failed.pk).update(
+    failed = new_lease(email="failed@example.com")
+    Lease.objects.filter(pk=failed.pk).update(
         sync_status=SyncStatus.FAILED,
         sync_attempted_at=timezone.now() - timedelta(minutes=5),
     )
-    manual = new_operator(email=None, display_name="Manual")
+    manual = new_lease(email=None, name="Manual")
     lease = make_lease()
     # One lease each: a lease's second request waits while its first is queued (BUSY).
     paused = make_lease(operator=lease_operator(email="paused@example.com", customer="cus-p"))
     resumed = make_lease(operator=lease_operator(email="resumed@example.com", customer="cus-r"))
     return [
         (
-            JobKind.OPERATOR_SYNC,
+            JobKind.LEASE_SYNC,
             billing,
-            "/operators/new/",
-            form_data(email="created@example.com"),
-            "",
+            billing_url(created),
+            billing_data(email="created@example.com"),
+            str(created.pk),
         ),
         (
-            JobKind.OPERATOR_SYNC,
+            JobKind.LEASE_SYNC,
             billing,
-            f"{detail(linked)}edit/",
-            form_data(email="linked@example.com", phone="+1 415 555 0199"),
+            billing_url(linked),
+            billing_data(email="linked@example.com", phone="+1 415 555 0199"),
             str(linked.pk),
         ),
-        (JobKind.OPERATOR_RETRY, billing, f"{detail(failed)}retry-sync/", {}, str(failed.pk)),
         (
-            JobKind.OPERATOR_LINK,
+            JobKind.LEASE_RETRY,
             billing,
-            f"{detail(manual)}link/",
-            {"customer_id": "cus_manual_0001", "payment_method_id": "pm_bank-0001"},
+            billing_url(failed),
+            billing_data("retry"),
+            str(failed.pk),
+        ),
+        (
+            JobKind.LEASE_LINK,
+            billing,
+            billing_url(manual),
+            billing_data("link", customer_id="cus_manual_0001", payment_method_id="pm_bank-0001"),
             str(manual.pk),
         ),
         (
@@ -745,15 +764,15 @@ def _read_posts(fake: FakeProvider) -> list[Post]:
     admin, _ = client_for(Role.ADMIN)
     billing, _ = client_for(Role.BILLING)
     lease = make_lease()
-    assert lease.operator is not None
     event = _stored_event()
     return [
         (
-            JobKind.OPERATOR_METHODS_REFRESH,
+            JobKind.LEASE_METHODS_REFRESH,
             admin,
             f"/leases/{lease.pk}/enrol/",
             {"refresh_methods": "1"},
-            str(lease.operator.pk),
+            # PLAN-014 C3: queued on the lease that holds the customer (this one).
+            str(lease.pk),
         ),
         (JobKind.RUN_MATCH, billing, "/run/match/", {}, str(jobs.RENT_RUN.pk)),
         (JobKind.WEBHOOK_REPLAY, billing, f"/webhooks/{event.pk}/replay/", {}, str(event.pk)),
@@ -784,14 +803,30 @@ def test_every_enqueueing_view_queues_its_job_and_never_calls_the_provider(
     assert fake.calls == []
 
 
+def test_saving_an_operator_queues_nothing_and_never_calls_the_provider(
+    fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PLAN-014 C3: the operator has no processor customer; create and edit are local."""
+    billing, _ = client_for(Role.BILLING)
+    used = refuse_provider(monkeypatch)
+    created = billing.post("/operators/new/", form_data(email="created@example.com"))
+    assert created.status_code == 302
+    operator = Operator.objects.get()
+    edited = billing.post(f"{detail(operator)}edit/", form_data(phone="+1 415 555 0199"))
+    assert edited.status_code == 302
+    assert not Job.objects.exists()
+    assert used == []
+    assert fake.calls == []
+
+
 @pytest.mark.usefixtures("as_worker")
 def test_the_page_shows_queued_then_running_then_done_and_refreshes_only_meanwhile(
     fake: FakeProvider,
 ) -> None:
     billing, user = client_for(Role.BILLING)
-    response = billing.post("/operators/new/", form_data(), follow=True)
+    lease = new_lease(email=None)
+    response = billing.post(billing_url(lease), billing_data(), follow=True)
     page = response.content.decode()
-    operator = Operator.objects.get()
     assert '<meta http-equiv="refresh" content="5">' in page
     assert 'id="job-state">Waiting<' in page
     assert fake.calls == []
@@ -799,37 +834,39 @@ def test_the_page_shows_queued_then_running_then_done_and_refreshes_only_meanwhi
     assert job.requested_by == user
 
     assert jobs.claim_next() is not None
-    page = billing.get(detail(operator)).content.decode()
+    page = billing.get(f"/leases/{lease.pk}/").content.decode()
     assert 'id="job-state">In progress<' in page and 'http-equiv="refresh"' in page
 
     jobs.run(Job.objects.get())
-    page = billing.get(detail(operator)).content.decode()
+    page = billing.get(f"/leases/{lease.pk}/").content.decode()
     assert 'id="job-state">Done: Created the customer in Stax.<' in page
     assert 'http-equiv="refresh"' not in page
 
 
 def test_a_page_without_a_job_shows_no_state_and_does_not_refresh(fake: FakeProvider) -> None:
     billing, _ = client_for(Role.BILLING)
-    operator = new_operator(email=None)
-    page = billing.get(detail(operator)).content.decode()
-    assert 'id="job-status"' not in page and 'http-equiv="refresh"' not in page
+    lease = new_lease(email=None)
+    assert lease.operator is not None
+    for path in (detail(lease.operator), f"/leases/{lease.pk}/", billing_url(lease)):
+        page = billing.get(path).content.decode()
+        assert 'id="job-status"' not in page and 'http-equiv="refresh"' not in page, path
 
 
 def test_the_retry_button_waits_for_a_queued_job_and_a_second_post_queues_nothing(
     fake: FakeProvider,
 ) -> None:
     billing, _ = client_for(Role.BILLING)
-    operator = new_operator()
-    Operator.objects.filter(pk=operator.pk).update(
+    lease = new_lease()
+    Lease.objects.filter(pk=lease.pk).update(
         sync_status=SyncStatus.FAILED,
         sync_failure="ProviderUnavailable",
         sync_attempted_at=timezone.now() - timedelta(minutes=5),
     )
-    assert ">Try again</button>" in billing.get(detail(operator)).content.decode()
-    billing.post(f"{detail(operator)}retry-sync/")
-    page = billing.get(detail(operator)).content.decode()
+    assert ">Try again</button>" in billing.get(billing_url(lease)).content.decode()
+    billing.post(billing_url(lease), billing_data("retry"))
+    page = billing.get(billing_url(lease)).content.decode()
     assert ">Try again</button>" not in page
-    second = billing.post(f"{detail(operator)}retry-sync/", follow=True)
+    second = billing.post(billing_url(lease), billing_data("retry"), follow=True)
     assert str(BUSY) in second.content.decode()
     assert Job.objects.count() == 1
     assert fake.calls == []
@@ -878,20 +915,22 @@ def test_a_queued_pause_also_blocks_a_resume_of_the_same_lease(fake: FakeProvide
 
 def test_a_viewer_cannot_queue_anything(fake: FakeProvider) -> None:
     viewer, _ = client_for(Role.VIEWER)
-    operator = new_operator()
-    assert viewer.post(f"{detail(operator)}retry-sync/").status_code == 403
-    assert viewer.post(f"{detail(operator)}link/", {"customer_id": "c"}).status_code == 403
+    lease = new_lease()
+    assert viewer.post(billing_url(lease), billing_data("retry")).status_code == 403
+    link = billing_data("link", customer_id="c", payment_method_id="p")
+    assert viewer.post(billing_url(lease), link).status_code == 403
+    assert viewer.post(billing_url(lease), billing_data(phone="4155550199")).status_code == 403
     assert not Job.objects.exists()
 
 
 def test_the_page_never_shows_the_identifiers_a_link_job_carries(fake: FakeProvider) -> None:
     billing, _ = client_for(Role.BILLING)
-    operator = new_operator(email=None)
+    lease = new_lease(email=None)
     data = {"customer_id": "cus_secretish_0001", "payment_method_id": "pm_secretish_0002"}
-    billing.post(f"{detail(operator)}link/", data)
+    billing.post(billing_url(lease), billing_data("link", **data))
     assert only_job().params == data
     for _ in range(2):
-        page = billing.get(detail(operator)).content.decode()
+        page = billing.get(billing_url(lease)).content.decode()
         assert "cus_secretish_0001" not in page and "pm_secretish_0002" not in page
         run_queued_jobs()
 
@@ -955,14 +994,14 @@ def test_submit_refuses_a_replay_key_of_another_record_with_a_message() -> None:
 
     from ledger.views.jobs import submit
 
-    first, second = new_operator(), new_operator(email="other@example.com")
+    first, second = new_lease(), new_lease(email="other@example.com")
     key = uuid.uuid4()
-    jobs.enqueue(JobKind.OPERATOR_SYNC, first, None, None, key)
+    jobs.enqueue(JobKind.LEASE_SYNC, first, None, None, key)
     request = RequestFactory().post("/")
     request.user = AnonymousUser()
     request.session = SessionStore()
     request._messages = FallbackStorage(request)  # type: ignore[attr-defined]
-    assert submit(request, JobKind.OPERATOR_SYNC, second, replay_key=key) is None
+    assert submit(request, JobKind.LEASE_SYNC, second, replay_key=key) is None
     assert [str(message) for message in get_messages(request)] == [REPLAY_REFUSED]
     assert Job.objects.count() == 1
 
@@ -1042,7 +1081,7 @@ def test_the_enrolment_page_without_a_snapshot_offers_the_refresh_then_lists_the
     assert 'id="refresh-methods" disabled' in page and 'http-equiv="refresh"' in page
     job = only_job()
     assert (job.kind, job.requested_by, job.params) == (
-        JobKind.OPERATOR_METHODS_REFRESH,
+        JobKind.LEASE_METHODS_REFRESH,
         user,
         {},
     )
@@ -1066,7 +1105,7 @@ def test_a_second_refresh_while_one_waits_queues_nothing(fake: FakeProvider) -> 
     assert Job.objects.count() == 1
 
 
-def test_a_refresh_for_an_operator_without_a_customer_is_refused_before_queueing(
+def test_a_refresh_for_a_lease_without_a_customer_is_refused_before_queueing(
     fake: FakeProvider,
 ) -> None:
     admin, _ = client_for(Role.ADMIN)
@@ -1089,45 +1128,89 @@ def test_a_successful_link_or_sync_queues_a_methods_read_and_a_failed_one_does_n
     fake: FakeProvider,
 ) -> None:
     add_provider_customer(fake, "cus_link_0001", "link@example.com")
-    manual = new_operator(email=None, display_name="Manual")
+    manual = new_lease(email=None, name="Manual")
     jobs.enqueue(
-        JobKind.OPERATOR_LINK,
+        JobKind.LEASE_LINK,
         manual,
         {"customer_id": "cus_link_0001", "payment_method_id": "pm_bank-0001"},
         None,
     )
-    failing = new_operator(email="fails@example.com")
+    failing = new_lease(email="fails@example.com")
     fake.fail_next("find_customers", ProviderRejected(422, "x", error_fields=("email",)))
-    jobs.enqueue(JobKind.OPERATOR_SYNC, failing, None, None)
+    jobs.enqueue(JobKind.LEASE_SYNC, failing, None, None)
     ran = run_queued_jobs()
     assert [(job.kind, job.status) for job in ran] == [
-        (JobKind.OPERATOR_LINK, JobStatus.DONE),
-        (JobKind.OPERATOR_SYNC, JobStatus.FAILED),
-        (JobKind.OPERATOR_METHODS_REFRESH, JobStatus.DONE),
+        (JobKind.LEASE_LINK, JobStatus.DONE),
+        (JobKind.LEASE_SYNC, JobStatus.FAILED),
+        (JobKind.LEASE_METHODS_REFRESH, JobStatus.DONE),
     ]
     assert ran[2].entity_id == manual.pk
-    assert leases.payment_method_choices(make_lease(operator=manual)).fetched_at is not None
+    assert leases.payment_method_choices(manual).fetched_at is not None
 
 
-def test_the_automatic_read_is_not_the_operator_page_state(fake: FakeProvider) -> None:
+def test_the_automatic_read_is_not_the_lease_page_state(fake: FakeProvider) -> None:
     billing, _ = client_for(Role.BILLING)
-    operator = new_operator()
-    jobs.enqueue(JobKind.OPERATOR_SYNC, operator, None, None)
+    lease = new_lease()
+    jobs.enqueue(JobKind.LEASE_SYNC, lease, None, None)
     jobs.run(jobs.claim_next())  # type: ignore[arg-type]
-    assert Job.objects.filter(kind=JobKind.OPERATOR_METHODS_REFRESH, status="queued").exists()
-    page = billing.get(detail(operator)).content.decode()
+    assert Job.objects.filter(kind=JobKind.LEASE_METHODS_REFRESH, status="queued").exists()
+    page = billing.get(f"/leases/{lease.pk}/").content.decode()
     assert 'id="job-state">Done: Created the customer in Stax.<' in page
     assert 'http-equiv="refresh"' not in page
-    latest = jobs.latest_for(operator, [JobKind.OPERATOR_METHODS_REFRESH])
+    latest = jobs.latest_for(lease, [JobKind.LEASE_METHODS_REFRESH])
     assert latest is not None and latest.status == JobStatus.QUEUED
 
 
 def test_refresh_methods_returns_the_waiting_read() -> None:
-    operator = new_operator()
-    first = jobs.refresh_methods(operator, None)
-    assert jobs.refresh_methods(operator, None).pk == first.pk
+    lease = new_lease()
+    first = jobs.refresh_methods(lease, None)
+    assert jobs.refresh_methods(lease, None).pk == first.pk
     jobs.finish(first, JobStatus.DONE, "done")
-    assert jobs.refresh_methods(operator, None).pk != first.pk
+    assert jobs.refresh_methods(lease, None).pk != first.pk
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        JobKind.LEASE_SYNC,
+        JobKind.LEASE_RETRY,
+        JobKind.LEASE_LINK,
+        JobKind.LEASE_METHODS_REFRESH,
+    ],
+)
+def test_a_queued_job_of_a_retired_operator_kind_runs_as_a_logged_no_op(
+    fake: FakeProvider, caplog: pytest.LogCaptureFixture, kind: str
+) -> None:
+    """PLAN-014 C3: a row of the old operator kinds' stored values that names an operator
+    (queued before ledger migration 0059) finishes done with the fixed sentence, sends
+    nothing and writes nothing; a warning names its kind, never the operator."""
+    add_provider_customer(fake, "cus_old_0001", "")
+    lease = new_lease()
+    assert lease.operator is not None
+    job = Job.objects.create(
+        kind=kind,
+        entity_type="operator",
+        entity_id=lease.operator.pk,
+        params=(
+            {"customer_id": "cus_old_0001", "payment_method_id": "pm_old_0001"}
+            if kind == JobKind.LEASE_LINK
+            else {}
+        ),
+    )
+    audits = AuditLog.objects.count()
+    with caplog.at_level(logging.WARNING, logger="payments.jobs.runners"):
+        [ran] = run_queued_jobs()
+    assert ran.pk == job.pk
+    assert (ran.status, ran.result) == (JobStatus.DONE, runners.RETIRED_OPERATOR_JOB)
+    assert fake.calls == []
+    assert [r.getMessage() for r in caplog.records if r.name == "payments.jobs.runners"] == [
+        f"Job {kind} of a retired operator kind run as a no-op"
+    ]
+    assert str(lease.operator.pk) not in caplog.text
+    assert AuditLog.objects.count() == audits
+    assert not ExternalRef.objects.exists()
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.PENDING
 
 
 def test_match_is_queued_once_and_its_report_is_shown_masked_and_cut(
@@ -1260,12 +1343,12 @@ def test_the_worker_event_pass_still_skips_an_event_a_failed_replay_attempted(
 
 
 def test_enqueue_refuses_the_new_kinds_on_another_entity() -> None:
-    operator = new_operator()
+    lease = new_lease()
     event = _stored_event()
     for kind, entity in (
-        (JobKind.RUN_MATCH, operator),
+        (JobKind.RUN_MATCH, lease),
         (JobKind.WEBHOOK_REPLAY, jobs.RENT_RUN),
-        (JobKind.OPERATOR_METHODS_REFRESH, event),
+        (JobKind.LEASE_METHODS_REFRESH, event),
     ):
         with pytest.raises(ValueError, match="does not act on this entity"):
             jobs.enqueue(kind, entity, None, None)
@@ -1323,10 +1406,9 @@ def test_a_refused_methods_read_keeps_the_previous_snapshot(
     fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lease = make_lease()
-    assert lease.operator is not None
     fake.add_payment_method("cus-1", method())
-    assert leases.refresh_payment_methods(lease.operator.pk).ok
-    queued = jobs.enqueue(JobKind.OPERATOR_METHODS_REFRESH, lease.operator, None, None)
+    assert leases.refresh_payment_methods(lease.pk).ok
+    queued = jobs.enqueue(JobKind.LEASE_METHODS_REFRESH, lease, None, None)
     before = _state()
     with as_none_with_the_real_adapter(monkeypatch):
         [job] = run_queued_jobs()

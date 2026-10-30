@@ -46,7 +46,7 @@ from tests.test_lease_services import (
     make_operator,
     method,
 )
-from tests.test_operator_sync import requires_postgresql
+from tests.test_lease_sync import requires_postgresql
 
 pytestmark = pytest.mark.django_db
 
@@ -97,7 +97,7 @@ def lease(**overrides: Any) -> Lease:
 def enrolled(fake: FakeProvider, **overrides: Any) -> tuple[Lease, list[str]]:
     """A lease with active autopay; its provider schedule IDs in seq order."""
     row = lease(**overrides)
-    customer = lease_service.customer_ref(row.operator)
+    customer = lease_service.customer_ref(row)
     bank = f"pm-{customer}"
     fake.add_payment_method(customer, method(bank))
     outcome = lease_service.enable_autopay(row.pk, bank, actor=None, now=NOW)

@@ -411,7 +411,7 @@ def test_a_card_number_in_the_note_is_refused(fake: FakeProvider) -> None:
 
 def test_an_operator_without_a_provider_customer_is_refused(fake: FakeProvider) -> None:
     payment = a_return(fake)
-    ExternalRef.objects.filter(entity_type="operator", external_kind="customer").delete()
+    ExternalRef.objects.filter(entity_type="lease", external_kind="customer").delete()
     outcome = reschedule(payment)
     assert (outcome.ok, outcome.message) == (False, nsf.NO_PROVIDER_CUSTOMER)
     assert nothing_written()

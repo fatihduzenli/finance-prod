@@ -105,14 +105,18 @@ def an_operator(
     bank: str | None = BANK,
     email: str = "",
 ) -> Operator:
-    """An operator with a provider customer (known to the fake) and a linked bank method.
-    A test with two operators gives the second its own customer and method."""
+    """An operator with an active lease that holds a provider customer (known to the fake)
+    and a linked bank method (PLAN-014 C3: the account is the lease's; a charge without a
+    lease bills through the operator's first active lease). A later lease of the operator
+    made by ``make_lease`` shares this lease's account. A test with two operators gives
+    the second its own customer and method."""
     email = email or f"{uuid.uuid4().hex[:8]}-{EMAIL}"
     operator = make_operator(email=email, customer=customer)
+    lease = make_lease(operator=operator)
     if bank and customer:
         ExternalRef.objects.create(
-            entity_type="operator",
-            entity_id=operator.pk,
+            entity_type="lease",
+            entity_id=lease.pk,
             provider="stax_pay",
             external_kind="payment_method",
             external_id=bank,
@@ -792,6 +796,7 @@ def test_a_reference_naming_another_operators_invoice_is_not_linked_and_flags(
     charge = created(an_operator(fake), item(CollectionMethod.MANUAL))
     invoice = invoice_of(charge)
     stranger = make_operator(email="stranger@example.com", customer="cus-stranger")
+    make_lease(operator=stranger)
     fake.invoices["fake-stranger-1"] = InvoiceRecord(
         external_id="fake-stranger-1",
         raw_status="DRAFT",
@@ -1149,7 +1154,11 @@ def test_an_operator_level_charge_is_on_a_row_without_a_store_that_carries_no_co
     july = date(2026, 7, 10)
     created(operator, item(category=OneOffCategory.OTHER, due_date=july, amount="50.00"))
     selected = pnl.parse_query({"from": "2026-07", "to": "2026-07"})
-    [row] = [row for row in pnl.rows(selected) if row.operator_id == operator.pk]
+    # The operator's lease (PLAN-014 C3: it holds the account) may add its store's row;
+    # the charge is on the one row without a store, and on no other.
+    rows = [row for row in pnl.rows(selected) if row.operator_id == operator.pk]
+    [row] = [row for row in rows if row.store_id is None]
+    assert sum(other.fees_billed for other in rows) == D("50.00")
     assert (row.store_id, row.store, row.fees_billed) == (None, pnl.NO_STORE, D("50.00"))
     assert (row.landlord_rent, row.other_costs, row.margin_billed) == (
         D("0.00"),
@@ -1228,9 +1237,11 @@ def test_the_rename_migration_rewrites_rows_and_reverses() -> None:
         payment = new.get_model("ledger", "Payment").objects.get()
         assert (payment.kind, payment.one_off_charge_id) == ("one_off", charge.pk)
         logged = new.get_model("ledger", "AuditLog").objects.order_by("id")
+        # Ledger 0059 (PLAN-014 C8), later in the chain, audits the lease's billing row.
         assert [(entry.action, entry.entity_type) for entry in logged] == [
             ("one_off_charge.created", "one_off_charge"),
             ("payment.provider_already_paid", "payment"),
+            ("lease_billing.migrated", "lease"),
         ]
         assert logged[1].after == {"one_off_charge": str(charge.pk)}
         job = new.get_model("payments", "Job").objects.get()

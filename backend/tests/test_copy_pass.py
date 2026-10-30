@@ -264,7 +264,7 @@ def test_the_morning_e_mail_writes_the_promised_amount_with_its_separator() -> N
         (RentSource, RentSource.SHEET_CURRENT, "From the spreadsheet"),
         (RentSource, RentSource.SHEET_INFERRED, "From the spreadsheet (inferred)"),
         (RentSource, RentSource.STAFF, "Entered by staff"),
-        (JobKind, JobKind.OPERATOR_SYNC, "Updating the operator"),
+        (JobKind, JobKind.LEASE_SYNC, "Updating the operator"),
         (JobKind, JobKind.PAYMENT_MARK, "Marking the invoice paid"),
         (JobKind, JobKind.INVOICE_CREATE, "Creating the invoice"),
         (JobKind, JobKind.SCHEDULE_CREATE, "Setting up autopay"),
@@ -288,7 +288,7 @@ def test_the_models_show_the_labels_and_store_the_values() -> None:
     assert lease.get_payment_channel_display() == "Bank debit"
     schedule = CollectionSchedule(lease=lease, kind=ScheduleKind.RENT, seq=1)
     assert schedule.state == "none" and schedule.get_state_display() == "Not set up"
-    job = Job(kind=JobKind.OPERATOR_SYNC, status=JobStatus.QUEUED)
+    job = Job(kind=JobKind.LEASE_SYNC, status=JobStatus.QUEUED)
     assert (job.get_kind_display(), job.get_status_display()) == (
         "Updating the operator",
         "Waiting",
@@ -370,7 +370,8 @@ def test_outside_a_request_the_reader_can_be_given() -> None:
 # --- the approved list, template by template (§4.2 to §4.7) -----------------------------------
 
 #: (template, old text, new text) as the copy list states them; each pair is checked in the
-#: template that holds it.
+#: template that holds it. PLAN-014 C3: the link, retry and update wording of the operator
+#: page moved, with the provider connection, to the lease's Edit billing details dialog.
 PAIRS: list[tuple[str, str, str]] = [
     # §4.2 navigation and shell
     # PLAN-012f D11 (pending the owner): the sidebar item reads "Monthly rent", as the
@@ -395,7 +396,7 @@ PAIRS: list[tuple[str, str, str]] = [
     ("leases/enrol.html", "Autopay for", "Set up autopay"),
     ("leases/enrol.html", "Enable autopay", "Set up autopay"),
     ("leases/stop_autopay.html", "Stop autopay", "Turn off autopay"),
-    ("operators/link.html", "Link payment provider IDs", f"Connect to {P}"),
+    ("leases/_billing_dialog.html", "Link payment provider IDs", f"Connect to {P}"),
     ("run/today.html", "Rent run", "Daily charges, "),
     ("arrears/page.html", "{% block title %}Arrears", "{% block title %}Unpaid balances"),
     ("grid/page.html", "{% block title %}Grid", "{% block title %}Monthly rent overview"),
@@ -416,13 +417,13 @@ PAIRS: list[tuple[str, str, str]] = [
     # §4.4 buttons and action links
     ("payments/add_payment.html", ">Record payment<", ">Add payment<"),
     ("charges/link_invoice.html", ">Link invoice<", f">Attach {P} invoice<"),
-    ("operators/detail.html", "Link provider IDs", f"Connect to {P}"),
-    ("operators/link.html", ">Link</button>", f">Connect to {P}</button>"),
+    ("leases/_billing_dialog.html", "Link provider IDs", f"Connect to {P}"),
+    ("leases/_billing_dialog.html", ">Link</button>", f">Connect to {P}</button>"),
     ("leases/enrol.html", ">Enable autopay<", ">Set up autopay<"),
     ("leases/detail.html", "Stop autopay", "Turn off autopay"),
     ("run/today.html", "Match invoices", f"Update from {P}"),
     ("one_off_charges/detail.html", "Delete provider invoice", f"Cancel in {P}"),
-    ("operators/detail.html", "Retry sync", "Try again"),
+    ("leases/_billing_dialog.html", "Retry sync", "Try again"),
     ("charges/detail.html", "Retry marking the invoice paid", f"Mark paid in {P} again"),
     ("one_off_charges/detail.html", "Retry marking the invoice paid", f"Mark paid in {P} again"),
     ("stores/_tab_charges.html", "Export rent charges CSV", "Download rent charges"),
@@ -484,7 +485,7 @@ PAIRS: list[tuple[str, str, str]] = [
         "Nothing is sent to the payment provider.",
         f"Nothing is sent to {P}.",
     ),
-    ("operators/detail.html", "Provider customer updated", f"Updated from {P}"),
+    ("leases/_billing_dialog.html", "Provider customer updated", f"Updated from {P}"),
     ("operators/detail.html", "SMS phone", "Text-message phone"),
     ("operators/detail.html", "SMS consent given on", "Text-message consent given on"),
     (

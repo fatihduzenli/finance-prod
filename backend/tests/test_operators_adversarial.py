@@ -1,4 +1,9 @@
-"""Adversarial cases for PLAN-006, written by the QA owner (plan §6 rows 11 to 13)."""
+"""Adversarial cases for PLAN-006, written by the QA owner (plan §6 rows 11 to 13).
+
+PLAN-014 C3: the processor customer, its sync, the retry and the link are the lease's
+(``payments.lease_sync``, the LEASE card's Edit billing details); saving an operator is
+local and calls nothing. The cases below are pinned there.
+"""
 
 from __future__ import annotations
 
@@ -13,8 +18,9 @@ from django.db import connections
 from django.test import Client, override_settings
 
 from accounts.roles import Role
-from ledger.models import Operator, SyncStatus
-from payments import operator_sync
+from ledger.models import Lease, LeaseBilling, Operator, SyncStatus
+from ledger.services import operators
+from payments import lease_sync
 from payments.errors import ProviderError
 from payments.fake import FakeProvider
 from payments.models import ExternalRef
@@ -23,14 +29,15 @@ from payments.stax import mapping
 from tests.auth_helpers import make_user, verified_client
 from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.stax_helpers import make_rig
-from tests.test_operator_sync import (
+from tests.test_lease_sync import (
     add_provider_customer,
+    billed_lease,
     call_names,
     customer_refs,
     fields,
     requires_postgresql,
 )
-from tests.test_operator_views import form_data
+from tests.test_operator_views import billing_data, billing_url, form_data
 from tests.text_helpers import has_token
 
 pytestmark = pytest.mark.django_db
@@ -68,9 +75,9 @@ def _worker_runs_between_requests(request: pytest.FixtureRequest) -> None:
 def test_replaying_a_used_creation_key_with_other_values_changes_nothing(
     billing: Client, fake: FakeProvider
 ) -> None:
-    data = form_data(company="First Name")
+    data = form_data(display_name="First Name")
     billing.post("/operators/new/", data)
-    replay = {**data, "company": "Overwritten", "email": "other@example.com"}
+    replay = {**data, "display_name": "Overwritten", "email": "other@example.com"}
     response = billing.post("/operators/new/", replay)
 
     assert response.status_code in (200, 302)
@@ -78,15 +85,16 @@ def test_replaying_a_used_creation_key_with_other_values_changes_nothing(
     operator = Operator.objects.get()
     assert operator.display_name == "First Name"
     assert operator.email == fields()["email"]
-    assert call_names(fake).count("create_customer") == 1
+    # PLAN-014 C3: an operator has no processor customer; neither post called anything.
+    assert call_names(fake) == []
 
 
 def test_a_creation_key_from_another_user_cannot_overwrite_or_leak(fake: FakeProvider) -> None:
     first = _client(Role.BILLING)
     second = _client(Role.BILLING)
-    data = form_data(company="Owner One", email="one@example.com")
+    data = form_data(display_name="Owner One", email="one@example.com")
     first.post("/operators/new/", data)
-    stolen = {**data, "company": "Owner Two", "email": "two@example.com"}
+    stolen = {**data, "display_name": "Owner Two", "email": "two@example.com"}
     response = second.post("/operators/new/", stolen)
 
     assert Operator.objects.count() == 1
@@ -130,22 +138,29 @@ def test_paging_past_the_end_or_nonsense_still_renders(billing: Client, page: st
 def test_an_archived_operator_refuses_edit_retry_and_link_through_every_route(
     billing: Client, fake: FakeProvider
 ) -> None:
-    operator = Operator.objects.create(display_name="Gone", sync_status=SyncStatus.FAILED)
-    operator_sync.archive_operator(operator.pk, actor=None)
+    operator = Operator.objects.create(display_name="Gone")
+    lease = billed_lease(operator=operator)
+    Lease.objects.filter(pk=lease.pk).update(sync_status=SyncStatus.FAILED)
+    operators.archive_operator(operator.pk, actor=None)
     before = Operator.objects.get(pk=operator.pk)
 
     billing.post(f"/operators/{operator.pk}/edit/", form_data(display_name="Back"))
-    billing.post(f"/operators/{operator.pk}/retry-sync/")
+    billing.post(billing_url(lease), billing_data("retry"))
     billing.post(
-        f"/operators/{operator.pk}/link/",
-        {"customer_external_id": "cus_1", "payment_method_external_id": "pm_1"},
+        billing_url(lease), billing_data("link", customer_id="cus_1", payment_method_id="pm_1")
     )
+    billing.post(billing_url(lease), billing_data(company_name="Back Co"))
+    # The operator routes of the link and the retry are gone (PLAN-014 C3).
+    for suffix in ("retry-sync/", "link/"):
+        assert billing.post(f"/operators/{operator.pk}/{suffix}").status_code == 404
 
     after = Operator.objects.get(pk=operator.pk)
     assert after.display_name == before.display_name == "Gone"
-    assert after.sync_status == before.sync_status
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.FAILED
+    assert LeaseBilling.objects.get(lease=lease).company_name == "Northwind Stores LLC"
     assert call_names(fake) == []
-    assert customer_refs(after) == []
+    assert customer_refs(lease) == []
 
 
 def test_unknown_operator_ids_are_404_not_500(billing: Client) -> None:
@@ -180,11 +195,9 @@ def test_email_matching_is_exact_after_lower_case_and_strip(
     add_provider_customer(fake, "cus_existing", returned)
     # Simulate a fuzzy provider filter that returns every customer for any query.
     monkeypatch.setattr(fake, "find_customers", lambda query: list(fake.customers.values()))
-    operator, _ = operator_sync.create_operator(
-        fields(email=stored), creation_key=uuid.uuid4(), actor=None
-    )
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=None)
-    refs = customer_refs(operator)
+    lease = billed_lease(email=stored)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=None)
+    refs = customer_refs(lease)
     if should_match:
         assert [ref.external_id for ref in refs] == ["cus_existing"]
         assert "create_customer" not in call_names(fake)
@@ -226,10 +239,8 @@ def test_a_provider_customer_record_with_bank_fields_is_stored_trimmed(fake: Fak
     """End to end through the fake: the raw summary that reaches external refs is clean."""
     record = add_provider_customer(fake, "cus_dirty", "ops@example.com")
     object.__setattr__(record, "raw_summary", {"bank_account": "000123456789", "id": "cus_dirty"})
-    operator, _ = operator_sync.create_operator(
-        fields(email="ops@example.com"), creation_key=uuid.uuid4(), actor=None
-    )
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=None)
+    lease = billed_lease(email="ops@example.com")
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=None)
     from payments.models import ProviderSnapshot
 
     for snapshot in ProviderSnapshot.objects.all():
@@ -243,17 +254,15 @@ def test_a_provider_customer_record_with_bank_fields_is_stored_trimmed(fake: Fak
 @pytest.mark.django_db(transaction=True)
 def test_retry_and_link_at_the_same_moment_leave_one_customer_reference(fake: FakeProvider) -> None:
     add_provider_customer(fake, "cus_dash", "race@example.com")
-    operator, _ = operator_sync.create_operator(
-        fields(email="race@example.com"), creation_key=uuid.uuid4(), actor=None
-    )
-    Operator.objects.filter(pk=operator.pk).update(sync_status=SyncStatus.FAILED)
+    lease = billed_lease(email="race@example.com")
+    Lease.objects.filter(pk=lease.pk).update(sync_status=SyncStatus.FAILED)
     barrier = threading.Barrier(2)
     errors: list[BaseException] = []
 
     def retry() -> None:
         try:
             barrier.wait(timeout=10)
-            operator_sync.sync_operator(operator.pk, provider=fake, actor=None, retry=True)
+            lease_sync.sync_lease(lease.pk, provider=fake, actor=None, retry=True)
         except BaseException as error:
             errors.append(error)
         finally:
@@ -262,8 +271,8 @@ def test_retry_and_link_at_the_same_moment_leave_one_customer_reference(fake: Fa
     def link() -> None:
         try:
             barrier.wait(timeout=10)
-            operator_sync.link_operator(
-                operator.pk,
+            lease_sync.link_lease(
+                lease.pk,
                 customer_external_id="cus_dash",
                 payment_method_external_id="pm_dash",
                 provider=fake,
@@ -283,7 +292,7 @@ def test_retry_and_link_at_the_same_moment_leave_one_customer_reference(fake: Fa
         thread.join(timeout=60)
 
     current = ExternalRef.objects.filter(
-        entity_type="operator", entity_id=operator.pk, external_kind="customer", superseded_at=None
+        entity_type="lease", entity_id=lease.pk, external_kind="customer", superseded_at=None
     )
     assert current.count() == 1
     assert current.get().external_id == "cus_dash"
@@ -371,6 +380,16 @@ def test_hostile_phones_are_refused_without_a_call_and_without_the_card_message(
     assert "card or account numbers" not in body
     assert "4111111111111111" not in body
 
+    # The lease's billing form (PLAN-014 C3) holds the same rule before any call.
+    lease = billed_lease(email=None)
+    response = billing.post(billing_url(lease), billing_data(phone=phone), follow=True)
+    body = response.content.decode(errors="replace")
+    assert LeaseBilling.objects.get(lease=lease).email == ""
+    assert call_names(fake) == []
+    assert "Enter 10 to 15 digits" in body
+    assert "card or account numbers" not in body
+    assert "4111111111111111" not in body
+
 
 @pytest.mark.parametrize("phone", ["0000000000", "+1 (415) 555-0132", "415.555.0132", "9" * 15])
 def test_accepted_phones_reach_the_provider_as_digits_only(
@@ -379,30 +398,34 @@ def test_accepted_phones_reach_the_provider_as_digits_only(
     billing.post("/operators/new/", form_data(phone=phone, email="digits@example.com"))
     operator = Operator.objects.get()
     assert operator.phone.isdigit() and 10 <= len(operator.phone) <= 15
+    # PLAN-014 C3: what reaches the provider is the lease's billing phone.
+    assert call_names(fake) == []
+    lease = billed_lease(operator=operator, email=None)
+    billing.post(billing_url(lease), billing_data(phone=phone, email="digits@example.com"))
+    stored = LeaseBilling.objects.get(lease=lease).phone
+    assert stored.isdigit() and 10 <= len(stored) <= 15
     created = [args for name, args in fake.calls if name == "create_customer"]
     assert len(created) == 1
     sent = created[0][0]
     assert isinstance(sent, CustomerInput)
-    assert sent.phone == operator.phone
+    assert sent.phone == stored
 
 
-# --- PLAN-006c row 7: edits of a linked operator ------------------------------------------------
+# --- PLAN-006c row 7: edits of a linked lease's billing details ---------------------------------
 
 
-def _linked_operator(fake: FakeProvider, **fields: Any) -> Operator:
-    values = {"email": "linked@example.com", "phone": "4155550132", **fields}
-    operator, _ = operator_sync.create_operator(
-        fields_for_adversarial(**values), creation_key=uuid.uuid4(), actor=None
-    )
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=None)
+def _linked_lease(fake: FakeProvider, **billing: Any) -> Lease:
+    values = {"email": "linked@example.com", "phone": "4155550132", **billing}
+    lease = billed_lease(**values)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=None)
     fake.calls.clear()
-    operator.refresh_from_db()
-    assert operator.sync_status == SyncStatus.LINKED
-    return operator
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
+    return lease
 
 
-def fields_for_adversarial(**overrides: Any) -> dict[str, Any]:
-    return fields(**overrides)
+def _billing_row(lease: Lease) -> LeaseBilling:
+    return LeaseBilling.objects.get(lease=lease)
 
 
 def test_a_rejected_update_whose_body_names_the_token_leaves_no_trace_of_it(
@@ -412,55 +435,53 @@ def test_a_rejected_update_whose_body_names_the_token_leaves_no_trace_of_it(
 
     from payments.errors import ProviderRejected
 
-    operator = _linked_operator(fake)
+    lease = _linked_lease(fake)
     fake.fail_next("update_customer", ProviderRejected(422, "token FAKE-CI-KEY-XYZ123 leaked"))
     caplog.set_level(logging.INFO)
     billing = _client(Role.BILLING)
-    billing.post(f"/operators/{operator.pk}/edit/", form_data(**fields(phone="4155550199")))
-    operator.refresh_from_db()
-    assert operator.sync_status == SyncStatus.FAILED
-    assert operator.phone == "4155550199"  # the local change stands
-    page = billing.get(f"/operators/{operator.pk}/").content.decode()
-    for text in (page, caplog.text, operator.sync_failure, operator.sync_failure_fields):
+    billing.post(billing_url(lease), billing_data(email="linked@example.com", phone="4155550199"))
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.FAILED
+    assert _billing_row(lease).phone == "4155550199"  # the local change stands
+    page = billing.get(billing_url(lease)).content.decode()
+    for text in (page, caplog.text, lease.sync_failure, lease.sync_failure_fields):
         assert "FAKE-CI-KEY-XYZ123" not in text
         assert not has_token(text, "leaked")
     from ledger.models import AuditLog
 
-    for row in AuditLog.objects.filter(entity_type="operator"):
+    for row in AuditLog.objects.filter(entity_type="lease"):
         assert "leaked" not in str(row.after) and "FAKE-CI-KEY-XYZ123" not in str(row.after)
 
 
 def test_a_bad_phone_on_edit_is_refused_by_the_form_before_any_call(fake: FakeProvider) -> None:
-    operator = _linked_operator(fake)
+    lease = _linked_lease(fake)
     billing = _client(Role.BILLING)
-    billing.post(f"/operators/{operator.pk}/edit/", form_data(**fields(phone="555-0132")))
-    operator.refresh_from_db()
-    assert operator.phone == "4155550132"
+    billing.post(billing_url(lease), billing_data(email="linked@example.com", phone="555-0132"))
+    lease.refresh_from_db()
+    assert _billing_row(lease).phone == "4155550132"
     assert call_names(fake) == []
-    assert operator.sync_status == SyncStatus.LINKED
+    assert lease.sync_status == SyncStatus.LINKED
 
 
-def test_an_edit_of_an_archived_linked_operator_calls_nothing(fake: FakeProvider) -> None:
-    operator = _linked_operator(fake)
-    operator_sync.archive_operator(operator.pk, actor=None)
+def test_an_edit_of_an_archived_operators_linked_lease_calls_nothing(fake: FakeProvider) -> None:
+    lease = _linked_lease(fake)
+    assert lease.operator is not None
+    operators.archive_operator(lease.operator.pk, actor=None)
     fake.calls.clear()
     _client(Role.BILLING).post(
-        f"/operators/{operator.pk}/edit/", form_data(**fields(phone="4155550199"))
+        billing_url(lease), billing_data(email="linked@example.com", phone="4155550199")
     )
-    operator.refresh_from_db()
-    assert operator.phone == "4155550132"
+    assert _billing_row(lease).phone == "4155550132"
     assert call_names(fake) == []
 
 
 def test_update_audit_rows_never_carry_the_full_email(fake: FakeProvider) -> None:
     from ledger.models import AuditLog
 
-    operator = _linked_operator(fake, email="private.person@example.com")
-    _client(Role.BILLING).post(
-        f"/operators/{operator.pk}/edit/", form_data(**fields(email="other.person@example.com"))
-    )
+    lease = _linked_lease(fake, email="private.person@example.com")
+    _client(Role.BILLING).post(billing_url(lease), billing_data(email="other.person@example.com"))
     rows = AuditLog.objects.filter(
-        entity_type="operator", action__in=["operator.sync_updated", "operator.sync_failed"]
+        entity_type="lease", action__in=["lease.sync_updated", "lease.sync_failed"]
     )
     assert rows.exists()
     for row in rows:
@@ -473,13 +494,13 @@ def test_an_update_after_retries_exhausted_keeps_the_local_change_and_fails_once
 ) -> None:
     from payments.errors import ProviderUnavailable
 
-    operator = _linked_operator(fake)
+    lease = _linked_lease(fake)
     fake.fail_next("update_customer", ProviderUnavailable(503))
     _client(Role.BILLING).post(
-        f"/operators/{operator.pk}/edit/", form_data(**fields(phone="4155550177"))
+        billing_url(lease), billing_data(email="linked@example.com", phone="4155550177")
     )
-    operator.refresh_from_db()
-    assert operator.phone == "4155550177"
-    assert operator.sync_status == SyncStatus.FAILED
+    lease.refresh_from_db()
+    assert _billing_row(lease).phone == "4155550177"
+    assert lease.sync_status == SyncStatus.FAILED
     assert call_names(fake).count("update_customer") == 1
     assert "create_customer" not in call_names(fake)

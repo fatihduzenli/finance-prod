@@ -28,6 +28,7 @@ from ledger.models import (
     CollectionSchedule,
     CollectionStatus,
     Lease,
+    LeaseBilling,
     LeaseRentHistory,
     Operator,
     PaymentChannel,
@@ -52,7 +53,7 @@ from payments.provider import (
 from payments.stax.adapter import DEFAULT_PAYMENT_PAGE_URL, StaxProvider
 from tests.auth_helpers import make_user
 from tests.stax_helpers import make_rig, sequence
-from tests.test_operator_sync import requires_postgresql
+from tests.test_lease_sync import requires_postgresql
 
 pytestmark = pytest.mark.django_db
 
@@ -91,19 +92,65 @@ def method(
     )
 
 
+#: What :func:`make_operator` was given to bill with, by operator: (billing e-mail,
+#: provider customer). PLAN-014 C3 moved both to the lease; :func:`bill_lease` gives them
+#: to each lease made for the operator.
+_OPERATOR_BILLING: dict[uuid.UUID, tuple[str | None, str | None]] = {}
+
+
 def make_operator(
     email: str | None = "ops@example.com", customer: str | None = CUSTOMER
 ) -> Operator:
+    """An operator with ``email``. The billing e-mail and the provider ``customer`` are the
+    lease's since PLAN-014 C3: :func:`make_lease` (or :func:`bill_lease`) gives them to
+    each lease of the operator, as ledger migration 0059 copied them."""
     operator = Operator.objects.create(display_name="Northwind Stores", email=email)
-    if customer:
-        ExternalRef.objects.create(
-            entity_type="operator",
-            entity_id=operator.pk,
+    _OPERATOR_BILLING[operator.pk] = (email, customer)
+    return operator
+
+
+def bill_lease(lease: Lease) -> Lease:
+    """Give ``lease`` the billing :func:`make_operator` was given for its operator: a
+    billing row with that e-mail and the provider customer reference. The first lease of
+    the customer holds the reference; a later one shares its account (one hop), as
+    migration 0059 re-pointed an operator's references. Nothing for any other operator."""
+    if lease.operator_id is None or lease.operator_id not in _OPERATOR_BILLING:
+        return lease
+    email, customer = _OPERATOR_BILLING[lease.operator_id]
+    if not email and not customer:
+        return lease
+    holder = (
+        ExternalRef.objects.filter(
+            entity_type="lease",
+            provider="stax_pay",
+            external_kind="customer",
+            external_id=customer,
+            superseded_at__isnull=True,
+        )
+        .exclude(entity_id=lease.pk)
+        .first()
+        if customer
+        else None
+    )
+    billing, _ = LeaseBilling.objects.update_or_create(
+        lease=lease,
+        defaults={
+            "email": email or "",
+            "shares_account_of": (
+                Lease.objects.get(pk=holder.entity_id) if holder is not None else None
+            ),
+        },
+    )
+    if customer and holder is None:
+        ExternalRef.objects.get_or_create(
+            entity_type="lease",
+            entity_id=lease.pk,
             provider="stax_pay",
             external_kind="customer",
             external_id=customer,
         )
-    return operator
+    lease.billing = billing
+    return lease
 
 
 def lease_fields(**overrides: Any) -> dict[str, Any]:
@@ -135,7 +182,7 @@ def make_lease(rent: Decimal = RENT, **overrides: Any) -> Lease:
         today=started - timedelta(days=1) if started is not None else None,
     )
     assert created
-    return lease
+    return bill_lease(lease)
 
 
 def edit(lease: Lease, rent: Decimal, starts: date | None = None, **changes: Any) -> Lease:
@@ -975,7 +1022,7 @@ def test_a_refresh_reads_the_list_once_and_the_page_reads_only_the_snapshot(
     fake.add_payment_method(CUSTOMER, method("pm-card-1", kind="card"))
     lease = make_lease()
     assert lease.operator is not None
-    outcome = service.refresh_payment_methods(lease.operator.pk)
+    outcome = service.refresh_payment_methods(lease.pk)
     assert (outcome.ok, outcome.message) == (True, service.METHODS_READ.format(count=2))
     assert [name for name, _ in fake.calls] == ["list_payment_methods"]
 
@@ -999,9 +1046,9 @@ def test_a_second_refresh_replaces_the_list_and_keeps_the_customer_snapshot(
         external_ref=ref, payload={"id": CUSTOMER}, fetched_at=NOW
     )
     fake.add_payment_method(CUSTOMER, method())
-    service.refresh_payment_methods(lease.operator.pk)
+    service.refresh_payment_methods(lease.pk)
     fake.add_payment_method(CUSTOMER, method("pm-bank-2"))
-    service.refresh_payment_methods(lease.operator.pk)
+    service.refresh_payment_methods(lease.pk)
     [snapshot] = _method_snapshots()
     assert [item["external_id"] for item in snapshot.payload] == [BANK, "pm-bank-2"]
     assert ProviderSnapshot.objects.filter(pk=customer.pk).exists()
@@ -1017,11 +1064,11 @@ def test_a_failed_refresh_keeps_the_previous_list_and_names_fields_only(
     lease = make_lease()
     assert lease.operator is not None
     fake.add_payment_method(CUSTOMER, method())
-    service.refresh_payment_methods(lease.operator.pk)
+    service.refresh_payment_methods(lease.pk)
     fake.fail_next(
         "list_payment_methods", ProviderRejected(404, "CANARY", error_fields=("customer",))
     )
-    outcome = service.refresh_payment_methods(lease.operator.pk)
+    outcome = service.refresh_payment_methods(lease.pk)
     assert (outcome.ok, outcome.fields, outcome.failure) == (
         False,
         ("customer",),
@@ -1035,8 +1082,8 @@ def test_a_failed_refresh_keeps_the_previous_list_and_names_fields_only(
 def test_a_refresh_without_a_customer_calls_nothing_and_writes_nothing(
     fake: FakeProvider,
 ) -> None:
-    operator = make_operator(customer=None)
-    outcome = service.refresh_payment_methods(operator.pk)
+    lease = make_lease(operator=make_operator(customer=None))
+    outcome = service.refresh_payment_methods(lease.pk)
     assert (outcome.ok, outcome.message) == (False, service.NO_PROVIDER_CUSTOMER)
     assert service.refresh_payment_methods(uuid.uuid4()).ok is False
     assert fake.calls == [] and not ProviderSnapshot.objects.exists()
@@ -1048,13 +1095,13 @@ def test_a_method_holding_a_card_number_is_not_stored_and_the_old_list_stays(
     lease = make_lease()
     assert lease.operator is not None
     fake.add_payment_method(CUSTOMER, method())
-    service.refresh_payment_methods(lease.operator.pk)
+    service.refresh_payment_methods(lease.pk)
     dirty = PaymentMethodRecord(
         external_id="pm-dirty", raw_status="", fetched_at=NOW, nickname="4111111111111111"
     )
     fake.add_payment_method(CUSTOMER, dirty)
     with pytest.raises(ValidationError):
-        service.refresh_payment_methods(lease.operator.pk)
+        service.refresh_payment_methods(lease.pk)
     [snapshot] = _method_snapshots()
     assert [item["external_id"] for item in snapshot.payload] == [BANK]
     assert "4111111111111111" not in str(ProviderSnapshot.objects.values_list("payload"))
@@ -1334,14 +1381,13 @@ PLAN = uuid.UUID("00000000-0000-0000-0000-0000000000d1")
 
 def linked_lease(fake: FakeProvider, rent: Decimal = RENT, **overrides: Any) -> Lease:
     """A lease with rent autopay enabled on :data:`NOW` (the 15th's first debit is 15
-    October) and the operator's bank method linked, as the move needs it."""
+    October) and the lease's bank method linked, as the move needs it."""
     fake.add_payment_method(CUSTOMER, method())
     lease = make_lease(rent, **overrides)
     assert enable(lease).ok
-    assert lease.operator is not None
     ExternalRef.objects.create(
-        entity_type="operator",
-        entity_id=lease.operator.pk,
+        entity_type="lease",
+        entity_id=lease.pk,
         provider="stax_pay",
         external_kind="payment_method",
         external_id=BANK,

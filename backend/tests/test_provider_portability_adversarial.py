@@ -25,7 +25,7 @@ ALLOWED_INSIDE_PAYMENTS = {
     "payments/__init__.py",
     "payments/health.py",
     "payments/offline_marking.py",
-    "payments/operator_sync.py",
+    "payments/lease_sync.py",
     "payments/timezone_audit.py",
     "payments/reconciliation/__init__.py",
     "payments/management/commands/provider_environment_check.py",

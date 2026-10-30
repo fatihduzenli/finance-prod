@@ -42,7 +42,7 @@ from payments.models import ExternalRef, Job, JobKind, JobStatus
 from payments.provider import CustomerRecord, PaymentMethodRecord, ScheduleInput
 from tests.job_helpers import run_queued_jobs
 from tests.receivables_helpers import a_lease, a_store
-from tests.test_lease_services import make_operator
+from tests.test_lease_services import bill_lease, make_operator
 from tests.test_operator_views import client_for
 
 pytestmark = pytest.mark.django_db
@@ -73,16 +73,24 @@ def today() -> date:
 def a_plan_lease(
     fake: FakeProvider | None = None, *, customer: bool = True, bank: bool = True
 ) -> Lease:
-    """An active lease whose operator has its own provider customer and linked bank
-    method (each known to ``fake`` when given)."""
+    """An active lease with its own provider customer and linked bank method (each known
+    to ``fake`` when given; PLAN-014 C3: the account is the lease's)."""
     tag = uuid.uuid4().hex[:8]
     email = f"{tag}@example.com"
     customer_id = f"cus-{tag}" if customer else None
     operator = make_operator(email=email, customer=customer_id)
+    lease = bill_lease(
+        a_lease(
+            a_store(f"Store {tag}"),
+            operator,
+            channel=PaymentChannel.PROVIDER_ACH,
+            started=date(2026, 1, 1),
+        )
+    )
     if customer_id and bank:
         ExternalRef.objects.create(
-            entity_type="operator",
-            entity_id=operator.pk,
+            entity_type="lease",
+            entity_id=lease.pk,
             provider="stax_pay",
             external_kind="payment_method",
             external_id=f"pm-{tag}",
@@ -98,12 +106,7 @@ def a_plan_lease(
                     external_id=f"pm-{tag}", raw_status="", fetched_at=timezone.now(), method="bank"
                 ),
             )
-    return a_lease(
-        a_store(f"Store {tag}"),
-        operator,
-        channel=PaymentChannel.PROVIDER_ACH,
-        started=date(2026, 1, 1),
-    )
+    return lease
 
 
 def setup(lease: Lease | None, **overrides: Any) -> autopay_plans.Outcome:
