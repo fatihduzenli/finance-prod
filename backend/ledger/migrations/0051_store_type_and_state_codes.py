@@ -40,6 +40,9 @@ GUARDED_COLUMNS: dict[str, tuple[str, ...]] = {"store_types": ("name",)}
 #: The seeded types, in their order (``sort_order`` 10, 20, ...).
 SEEDED_TYPES: tuple[str, ...] = ("Inline store", "Kiosk", "Cart", "Pop-up", "Warehouse")
 UNMAPPED_ACTION = "store.state_unmapped"
+#: The historical model's name (ledger 0058 renamed it ``Brand``, PLAN-014 B1); a name, not a
+#: literal, so the type checker does not look it up among today's models.
+STORE_TYPE_MODEL = "StoreType"
 ADMIN_GROUP = "admin"
 #: (model_name, codename) of each permission granted to the admin group.
 ADMIN_PERMISSIONS = tuple(
@@ -98,7 +101,7 @@ def _permissions(apps: Apps) -> list[Any]:
 
 
 def seed_types(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    store_type = apps.get_model("ledger", "StoreType")
+    store_type = apps.get_model("ledger", STORE_TYPE_MODEL)
     for index, name in enumerate(SEEDED_TYPES, start=1):
         store_type.objects.get_or_create(name=name, defaults={"sort_order": index * 10})
     # Permissions are normally created after migrate finishes; create them now so they
@@ -118,7 +121,7 @@ def unseed_types(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     group = apps.get_model("auth", "Group").objects.filter(name=ADMIN_GROUP).first()
     if group is not None:
         group.permissions.remove(*_permissions(apps))
-    store_type = apps.get_model("ledger", "StoreType")
+    store_type = apps.get_model("ledger", STORE_TYPE_MODEL)
     store_type.objects.filter(name__in=SEEDED_TYPES, stores__isnull=True).delete()
 
 

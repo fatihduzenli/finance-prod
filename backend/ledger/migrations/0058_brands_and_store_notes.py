@@ -93,19 +93,19 @@ def seed_brands(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     brand.objects.exclude(pk__in=seeded).update(active=False)
     cleared = (
         store.objects.filter(brand__active=False)
-        .select_related("brand")
         .order_by("store_number", "external_label", "id")
+        .values_list("pk", "brand__name", "needs_review")
     )
-    for row in list(cleared):
+    for pk, brand_name, needs_review in list(cleared):
         audit_log.objects.create(
             actor=None,
             action=CLEARED_ACTION,
             entity_type=ENTITY_STORE,
-            entity_id=str(row.pk),
-            before={"brand": row.brand.name, "needs_review": row.needs_review},
+            entity_id=str(pk),
+            before={"brand": brand_name, "needs_review": needs_review},
             after={"brand": None, "needs_review": True},
         )
-        store.objects.filter(pk=row.pk).update(brand=None, needs_review=True)
+        store.objects.filter(pk=pk).update(brand=None, needs_review=True)
 
 
 def _made_inactive_in_admin(audit_log: Any, pk: object) -> bool:
