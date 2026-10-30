@@ -2516,7 +2516,7 @@ class DocumentDeleteForm(forms.Form):
         return note
 
 
-# --- Contact log and calendar (PLAN-011b D7, D8) -------------------------------------------
+# --- Notes & follow-ups and calendar (PLAN-011b D7, D8) -------------------------------------------
 
 #: The longest contact note accepted.
 CONTACT_BODY_MAX_LENGTH = 2000

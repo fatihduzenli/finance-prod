@@ -322,7 +322,7 @@ def operator_export(request: HttpRequest) -> StreamingHttpResponse:
     return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("operators"))
 
 
-#: The entries the RECENT CONTACT card lists (PLAN-012f-a D7); the Contact log card lists more.
+#: The entries the RECENT CONTACT card lists (PLAN-012f-a D7); the Notes & follow-ups card lists more.
 RECENT_CONTACTS = 2
 
 
@@ -331,7 +331,7 @@ RECENT_CONTACTS = 2
 def operator_detail(request: HttpRequest, pk: str) -> HttpResponse:
     """The operator page as the workspace (PLAN-012d D14): the operator-level items
     (contact details, SMS phone and consents, the payment-provider block, Collection
-    e-mails, the contact log, notes), then the selected store's header card and action
+    e-mails, the notes & follow-ups, notes), then the selected store's header card and action
     bar (``?store=``, one of the operator's stores) and the open tab (``?tab=``) across
     the operator's stores (:func:`ledger.services.workspace.operator_workspace`)."""
     return render(request, "ledger/operators/detail.html", _detail_context(request, _load(pk)))
@@ -434,7 +434,7 @@ def _detail_context(
         "can_link": billing and active,
         "can_archive": meets(role, Role.ADMIN) and active,
         # PLAN-011b D6, D7: the operator's own attention items as banners, and the
-        # latest contact log entries.
+        # latest notes & follow-ups entries.
         "attention": attention.attention(timezone.localdate(), operator=operator.pk),
         # PLAN-012c-b D2: Kept, Reschedule and Broken on a broken promise.
         "can_record_outcome": billing and active,

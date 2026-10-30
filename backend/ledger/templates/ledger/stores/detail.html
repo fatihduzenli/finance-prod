@@ -3,7 +3,7 @@
 {% load responsive %}
 {% load static %}
 {% block title %}Store {{ store.external_label }}{% endblock %}
-{% comment %}The store workspace (docs/qa/PLAN-012d D1 to D3; the approved design's layout, docs/qa/PLAN-012f-approved-design.md D8 and store-workspace-laptop.png / -phone.png). The header: the breadcrumb, the title with the status badge, one line (the address and the open date), the phone's line (the operator and the city), the action bar, the phone's summary strip (Open balance, Rent, Autopay) and the tabs, Charges with its count of open charges. The body: the open tab in the two-thirds column (the Charges tab with the contact log under it), then the store's details, its cost history and its leases; the side cards in the one-third column (ledger/stores/_header.html). On a phone the columns stack.{% endcomment %}
+{% comment %}The store workspace (docs/qa/PLAN-012d D1 to D3; the approved design's layout, docs/qa/PLAN-012f-approved-design.md D8 and store-workspace-laptop.png / -phone.png). The header: the breadcrumb, the title with the status badge, one line (the address and the open date), the phone's line (the operator and the city), the action bar, the phone's summary strip (Open balance, Rent, Autopay) and the tabs, Charges with its count of open charges. The body: the open tab in the two-thirds column (the Charges tab with the notes & follow-ups under it), then the store's details, its cost history and its leases; the side cards in the one-third column (ledger/stores/_header.html). On a phone the columns stack.{% endcomment %}
 {% block header %}<div class="page-header workspace-head">
   <div class="page-title-block">
     <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:stores:list' %}">Stores</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:stores:detail' pk=store.pk %}" aria-current="page">{{ store_crumb }}</a></nav>
@@ -41,7 +41,7 @@
 
   {% if space.tab == "charges" %}
   <section class="card" id="contact-card" aria-labelledby="contact-card-heading">
-    <div class="card-header"><h2 id="contact-card-heading">Contact log</h2><span class="card-link">{% if contact_add_url %}<a class="btn btn-sm" id="card-add-contact" href="{{ contact_add_url }}">{% icon "plus" 14 %}Add entry</a>{% endif %} <a class="btn btn-sm" href="?tab=contacts#tab-contacts" id="card-all-contacts">All entries</a></span></div>
+    <div class="card-header"><h2 id="contact-card-heading">Notes &amp; follow-ups</h2><span class="card-link">{% if contact_add_url %}<a class="btn btn-sm" id="card-add-contact" href="{{ contact_add_url }}">{% icon "plus" 14 %}Add entry</a>{% endif %} <a class="btn btn-sm" href="?tab=contacts#tab-contacts" id="card-all-contacts">All entries</a></span></div>
     {% include "ledger/contacts/_log.html" with rows=contact_rows|slice:":3" empty_next_url=contact_add_url %}
   </section>
   {% endif %}

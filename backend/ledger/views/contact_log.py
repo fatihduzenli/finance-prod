@@ -1,4 +1,4 @@
-"""The contact log as the operator page, the store page and the full lists show it
+"""The notes & follow-ups as the operator page, the store page and the full lists show it
 (docs/qa/PLAN-012 D2, D9): each entry with what the request's user may do on it.
 
 Kept apart from :mod:`ledger.views.contacts` so that the operator and store pages, which

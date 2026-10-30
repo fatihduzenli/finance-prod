@@ -1,5 +1,5 @@
-{% comment %}The Contact log tab (PLAN-012 D3, docs/qa/PLAN-012d D3).{% endcomment %}
-<h2 id="contacts">Contact log</h2>
+{% comment %}The Notes & follow-ups tab (PLAN-012 D3, docs/qa/PLAN-012d D3).{% endcomment %}
+<h2 id="contacts">Notes &amp; follow-ups</h2>
 <p class="actions">
   {% if contact_add_url %}<a class="btn" id="add-store-contact" href="{{ contact_add_url }}">Add entry</a>{% endif %}
   <a class="btn" id="all-store-contacts" href="{% url 'ledger:stores:contacts' pk=store.pk %}">All entries</a>

@@ -24,7 +24,7 @@ city or operator matches every word; it is kept by the paging and export links.
 The detail page is the store's workspace (docs/qa/PLAN-012d-store-workspace.md D1 to D3,
 :mod:`ledger.services.workspace`): a header card, the action bar for billing and admin,
 and tabs rendered one at a time (``?tab=``): Charges, Invoices (with the store's drafts),
-Payments, Schedules, Documents, Contact log (the entries about a lease of the store, with
+Payments, Schedules, Documents, Notes & follow-ups (the entries about a lease of the store, with
 **Add entry** for billing; PLAN-012 D3) and History (admin). ``stores:record_payment``
 (billing; one payment allocated over the open charges, PLAN-012d D6),
 ``stores:schedule_payment`` (billing) and ``stores:charge_now_pick`` (admin) are the bar's

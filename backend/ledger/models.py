@@ -2723,7 +2723,7 @@ class OutboundMessage(GuardedModel):
         ]
 
 
-# --- Contact log and calendar (PLAN-011b D7, D8) ------------------------------------
+# --- Notes & follow-ups and calendar (PLAN-011b D7, D8) ------------------------------------
 
 
 class ContactKind(models.TextChoices):

@@ -581,10 +581,10 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:stores:record_payment": lambda w: (_store(w), "Add payment"),
     "ledger:stores:end_lease": lambda w: (_store(w), "End lease"),
     "ledger:stores:transfer": lambda w: (_store(w), "Transfer"),
-    "ledger:stores:contacts": lambda w: ([f"Store {w.store.external_label}"], "Contact log"),
+    "ledger:stores:contacts": lambda w: ([f"Store {w.store.external_label}"], "Notes & follow-ups"),
     "ledger:operators:link": lambda w: (["Operators", "Walk Co"], "Connect to Stax"),
     "ledger:operators:statement": lambda w: (["Operators", "Walk Co"], "Statement"),
-    "ledger:operators:contacts": lambda w: (["Walk Co"], "Contact log"),
+    "ledger:operators:contacts": lambda w: (["Walk Co"], "Notes & follow-ups"),
     "ledger:operators:contacts_add": lambda w: (["Walk Co"], "Add entry: Walk Co"),
     "ledger:leases:create": lambda w: (["Leases"], "New lease"),
     "ledger:leases:detail": lambda w: (["Leases"], f"Lease {w.store.external_label}"),
@@ -668,8 +668,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:reports:deposits": lambda w: (["Reports"], "Bank account check"),
     # PLAN-012f-b E-1: the report family's header (DESIGN-SPEC §4 Profit and loss).
     "ledger:reports:pnl": lambda w: (["Reports"], "Profit and loss"),
-    "ledger:contacts:edit": lambda w: (["Contact log"], "Edit contact entry"),
-    "ledger:contacts:correct": lambda w: (["Contact log"], "Add a correction"),
+    "ledger:contacts:edit": lambda w: (["Notes & follow-ups"], "Edit contact entry"),
+    "ledger:contacts:correct": lambda w: (["Notes & follow-ups"], "Add a correction"),
     # PLAN-012f-b E-4: Delete contact entry is its dialog over the operator page, whose own
     # breadcrumb ends in a link (tests/test_states.py checks the page behind).
     "ledger:contacts:outcome": lambda w: (["Operators", "Walk Co"], "Kept"),

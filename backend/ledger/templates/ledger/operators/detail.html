@@ -59,7 +59,7 @@
     {% elif ows.tab == "payments" %}{% include "ledger/stores/_tab_payments.html" %}
     {% elif ows.tab == "schedules" %}{% include "ledger/stores/_tab_schedules.html" %}
     {% elif ows.tab == "documents" %}{% if store %}{% include "ledger/documents/_section.html" %}{% elif ows.stores %}<p class="muted" id="choose-store">Choose a store in the Store select to see its documents.</p>{% else %}<p class="muted">No store.</p>{% endif %}
-    {% elif ows.tab == "contacts" %}<p class="muted">The operator's contact log, with the store of each entry, is <a href="#contacts">below</a>.</p>
+    {% elif ows.tab == "contacts" %}<p class="muted">The operator's notes &amp; follow-ups, with the store of each entry, are <a href="#contacts">below</a>.</p>
     {% elif ows.tab == "history" %}{% if store %}{% include "ledger/stores/_tab_history.html" %}{% elif ows.stores %}<p class="muted" id="choose-store">Choose a store in the Store select to see its history.</p>{% else %}<p class="muted">No store.</p>{% endif %}{% endif %}
   </section>
 
@@ -125,7 +125,7 @@
 
   </section>
   <section class="card" id="operator-contacts-card">
-  <h2 id="contacts">Contact log</h2>
+  <h2 id="contacts">Notes &amp; follow-ups</h2>
   <p class="actions">
     {% if can_add_contact %}<a class="btn" id="add-contact" href="{% url 'ledger:operators:contacts_add' pk=operator.pk %}">Add entry</a>{% endif %}
     <a class="btn" id="all-contacts" href="{% url 'ledger:operators:contacts' pk=operator.pk %}">All entries</a>

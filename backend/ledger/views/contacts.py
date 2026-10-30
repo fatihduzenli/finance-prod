@@ -1,4 +1,4 @@
-"""The contact log (docs/qa/PLAN-011b D7; PLAN-012 D2 to D5, D9).
+"""The notes & follow-ups (docs/qa/PLAN-011b D7; PLAN-012 D2 to D5, D9).
 
 - ``ledger:operators:contacts`` and ``ledger:stores:contacts`` (any role): every entry of
   the operator, or about a lease of the store, newest first, paginated, filtered by a
@@ -7,7 +7,7 @@
 - ``ledger:operators:contacts_add`` and ``ledger:stores:contacts_add`` (billing; the
   registry refuses the POST below billing and the views refuse the form's GET too): add an
   entry. The store's form is the form of the operator of the store's lease in effect
-  today, with that lease chosen; it returns to the store page's Contact log tab, and
+  today, with that lease chosen; it returns to the store page's Notes & follow-ups tab, and
   opened from the store page (``?store=&lease=``, PLAN-012d D2) it hides the lease and
   shows the read-only line. When the operator has an open promise the form asks what
   happened to it (Still open, the default, Kept, Rescheduled or Broken), and warns when a
@@ -374,7 +374,7 @@ def store_contacts_add(request: HttpRequest, pk: str) -> HttpResponse:
         back_url=reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
         title=f"{lease.operator.display_name}, store {store.external_label}"
         f"{_lease_state(lease, today)}",
-        # PLAN-012d D8: back to the store page's Contact log tab.
+        # PLAN-012d D8: back to the store page's Notes & follow-ups tab.
         done_url=tab,
         context=context,
     )
@@ -421,7 +421,7 @@ def _entry_page(
     over_log: bool = False,
 ) -> HttpResponse:
     """An entry's form page; with ``over_log`` (Delete's confirmation, PLAN-012f-b E-4) the
-    operator page, whose contact log the entry is in, is the page behind the dialog."""
+    operator page, whose notes & follow-ups the entry is in, is the page behind the dialog."""
     if request.method == "POST":
         drop_payment_data(form)
     behind = _operator_page(request, entry.operator) if over_log else {}

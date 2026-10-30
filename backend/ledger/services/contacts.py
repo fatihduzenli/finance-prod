@@ -1,4 +1,4 @@
-"""The contact log of an operator (docs/qa/PLAN-011b D7; PLAN-012 D2 to D5).
+"""The notes & follow-ups of an operator (docs/qa/PLAN-011b D7; PLAN-012 D2 to D5).
 
 Billing records each call, e-mail, visit and promise to pay as a :class:`ContactEntry`,
 dated in New York days, optionally about one lease of the operator (the store follows from
