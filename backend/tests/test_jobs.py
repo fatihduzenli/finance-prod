@@ -150,6 +150,8 @@ def test_enqueue_refuses_a_kind_for_another_entity_and_any_other_model() -> None
         JobKind.LEASE_RETRY,
         JobKind.LEASE_LINK,
         JobKind.LEASE_METHODS_REFRESH,
+        # PLAN-014 C9: the switch to the lease's own account.
+        JobKind.LEASE_ACCOUNT_SWITCH,
     ):
         with pytest.raises(ValueError, match="does not act"):
             jobs.enqueue(kind, lease.operator, None, None)

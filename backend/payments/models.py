@@ -261,6 +261,9 @@ class JobKind(models.TextChoices):
     #: PLAN-014 C7: verify and link the bank method the hosted fields created under the
     #: lease's customer (``ledger.services.leases.attach_bank_method``).
     LEASE_METHOD_ATTACH = "lease_method_attach", "Connecting a bank account"
+    #: PLAN-014 C9: a lease that shares another lease's account moves to its own customer's
+    #: bank method (``ledger.services.leases.switch_to_own_account``).
+    LEASE_ACCOUNT_SWITCH = "lease_account_switch", "Switching to the lease's own account"
 
 
 class JobEntity(models.TextChoices):

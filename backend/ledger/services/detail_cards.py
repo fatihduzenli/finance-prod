@@ -436,6 +436,15 @@ class LeaseAccount:
         """Whether the bank line names a method (the LEASE card's "Replace", PLAN-014 C4)."""
         return self.bank != NO_BANK_ON_FILE
 
+    @property
+    def switchable(self) -> bool:
+        """Whether the LEASE card offers "Switch to own account" (PLAN-014 C9): the lease
+        shares another lease's account and holds a customer of its own (one query, only
+        for a sharer and only when read)."""
+        return self.shares is not None and bool(
+            lease_sync.current_refs(self.lease).get(lease_sync.KIND_CUSTOMER)
+        )
+
 
 def bank_text(last4: str) -> str:
     """ "Bank ····4821", or :data:`NO_BANK_ON_FILE` without four digits."""

@@ -66,6 +66,10 @@ Rules kept here:
   TODO-VERIFY (to record): the payment provider starts a schedule created with a
   ``DTSTART`` next month on that date, without catching up the occurrence skipped this
   month.
+- **Switch to own account** (PLAN-014 C9): a lease that shares another lease's account and
+  holds a customer of its own moves to that customer's default (else only) usable bank
+  method, and its active rent autopay moves with it through :func:`move_autopay` from now
+  (:func:`switch_to_own_account`, in the worker).
 
 Every change writes one ``audit_log`` row; provider identifiers in it are masked.
 Messages are fixed sentences; a provider rejection adds only the field names the
@@ -1098,6 +1102,235 @@ def queue_own_customers(*, dry_run: bool, limit: int | None = None) -> OwnCustom
             jobs.enqueue(JobKind.LEASE_SYNC, locked, {"own_customer": True}, None)
         queued += 1
     return OwnCustomers(leases=len(candidates), queued=queued)
+
+
+# --- Switch to own account (PLAN-014 C9) -------------------------------------------------
+
+#: Refusal reasons of :func:`switch_to_own_account` (stored in its audit row; never shown).
+SWITCH_NOT_SHARING = "NotSharing"
+SWITCH_NO_CUSTOMER = "NoOwnCustomer"
+SWITCH_ARCHIVED = "Archived"
+SWITCH_PAUSED = "AutopayPaused"
+#: The view's own refusal: a switch of the lease is queued or running.
+SWITCH_WAITING = "SwitchWaiting"
+SWITCH_NO_METHOD = "NoBankMethod"
+SWITCH_SEVERAL = "SeveralBankMethods"
+SWITCH_NOT_MOVED = "AutopayNotMoved"
+#: The sentence of each refusal; a provider failure has its own (:data:`SWITCH_FAILED`).
+SWITCH_MESSAGES: dict[str, str] = {
+    SWITCH_NOT_SHARING: "This lease already uses its own account. Nothing was changed.",
+    SWITCH_NO_CUSTOMER: provider_sentence(
+        "This lease has no {provider} customer of its own yet. Nothing was changed."
+    ),
+    SWITCH_ARCHIVED: "This operator is archived. Nothing was changed.",
+    SWITCH_PAUSED: (
+        "Autopay is paused on this lease. Resume or stop it before switching. Nothing was changed."
+    ),
+    SWITCH_WAITING: "A switch to the lease's own account is already waiting. Nothing was queued.",
+    SWITCH_NO_METHOD: provider_sentence(
+        "The lease's own {provider} customer has no usable bank account. Nothing was changed."
+    ),
+    SWITCH_SEVERAL: provider_sentence(
+        "The lease's own {provider} customer has several bank accounts and none is the "
+        "default. Make one the default in {provider} first. Nothing was changed."
+    ),
+    SWITCH_NOT_MOVED: "The autopay could not be moved. Nothing was changed.",
+}
+SWITCH_FAILED = provider_sentence(
+    "The request to {provider} failed. Nothing was changed; try again later."
+)
+SWITCH_QUEUED = "Switching to the lease's own account."
+SWITCH_DONE = (
+    "Switched to the lease's own account, bank ····{last4}. Autopay schedules moved: {moved}."
+)
+SWITCH_DONE_NO_DIGITS = "Switched to the lease's own account. Autopay schedules moved: {moved}."
+SWITCH_MOVE_FAILED = (
+    "Switched to the lease's own account, but the autopay was not fully moved. "
+    "Check the lease's autopay."
+)
+SWITCHED_ACTION = "lease.account_switched"
+SWITCH_REFUSED_ACTION = "lease.account_switch_refused"
+
+
+@dataclass(frozen=True, slots=True)
+class AccountSwitch:
+    """The outcome of :func:`switch_to_own_account`."""
+
+    ok: bool
+    message: str
+    #: A refusal reason of :data:`SWITCH_MESSAGES` or a provider error's class name.
+    reason: str = ""
+
+
+class _NotMoved(Exception):  # noqa: N818 (an outcome carried out of the savepoint)
+    def __init__(self, outcome: AutopayOutcome) -> None:
+        super().__init__(outcome.message)
+        self.outcome = outcome
+
+
+def switch_refusal(lease: Lease) -> str:
+    """Why the lease cannot switch to its own account now, or ``""`` (local data only;
+    the view's up-front check and the job's first one): it does not share another lease's
+    account, its operator is archived, it holds no customer of its own, or a rent or
+    insurance schedule of it is paused at the provider (resuming it later would debit the
+    shared account's method)."""
+    if lease_sync.billing_of(lease).shares_account_of_id is None:
+        return SWITCH_NOT_SHARING
+    if lease.operator is not None and lease.operator.archived_at is not None:
+        return SWITCH_ARCHIVED
+    if not lease_sync.current_refs(lease).get(lease_sync.KIND_CUSTOMER):
+        return SWITCH_NO_CUSTOMER
+    if any(row.state == ScheduleState.PAUSED for row, _ in stoppable_schedules(lease)):
+        return SWITCH_PAUSED
+    return ""
+
+
+def own_bank_method(
+    methods: Iterable[PaymentMethodRecord],
+) -> tuple[PaymentMethodRecord | None, str]:
+    """The usable bank method a switch links: the default one, else the only one; or the
+    refusal reason (none, or several without exactly one default)."""
+    usable = [method for method in methods if method.is_usable_bank]
+    defaults = [method for method in usable if method.is_default]
+    if len(defaults) == 1:
+        return defaults[0], ""
+    if not usable:
+        return None, SWITCH_NO_METHOD
+    if len(usable) == 1 and not defaults:
+        return usable[0], ""
+    return None, SWITCH_SEVERAL
+
+
+def switch_to_own_account(
+    lease_id: uuid.UUID, *, move_key: uuid.UUID, actor: User | None
+) -> AccountSwitch:
+    """Move a lease that shares another lease's account to the bank method of its own
+    processor customer (worker only; ``JobKind.LEASE_ACCOUNT_SWITCH``).
+
+    In one transaction under the lease's row lock: :func:`switch_refusal`; one provider call
+    reads the own customer's payment methods; :func:`own_bank_method` picks the method
+    (refused with no write when there is none or several without a default). Then, in a
+    savepoint: the lease's ``payment_method`` reference is written, the list kept as the own
+    customer's method snapshot, ``bank_last4`` cached and ``shares_account_of`` cleared,
+    and :func:`move_autopay` moves every active rent schedule onto the new customer and
+    method with ``move_key`` as its plan key and ``seq=0`` (no debit has seq 0, so every
+    debit starts from now; ``skipped`` is then never read). A move that fails before it
+    deleted any schedule at the provider rolls the savepoint back: the switch is refused
+    (:data:`SWITCH_NOT_MOVED` or the provider error's class) and nothing is written. A
+    move that fails after a delete keeps the switch (the deleted rows stay ended) and
+    reports it. Audited ``lease.account_switched`` (masked identifiers, the last four, the
+    move key, the debits moved) or ``lease.account_switch_refused`` (the reason name).
+
+    A replay of the same job (the lease already switched with ``move_key``) reads nothing
+    and runs the move again, which deletes nothing already deleted and creates what is
+    missing.
+    """
+    with transaction.atomic():
+        lease = _locked(lease_id)
+        billing = lease_sync.billing_of(lease)
+        if billing.shares_account_of_id is None and _switched(lease, move_key):
+            moved = move_autopay(
+                lease.pk, seq=0, skipped=timezone.localdate(), plan_id=move_key, actor=actor
+            )
+            return _switch_done(lease, moved, billing.bank_last4, move_key)
+        reason = switch_refusal(lease)
+        if reason:
+            return _switch_refused(actor, lease, reason)
+        customer = lease_sync.current_refs(lease)[lease_sync.KIND_CUSTOMER]
+        try:
+            methods = payments.get_provider().list_payment_methods(customer)
+        except ProviderError as error:
+            return _switch_refused(actor, lease, lease_sync.failure_name(error))
+        chosen, reason = own_bank_method(methods)
+        if chosen is None:
+            return _switch_refused(actor, lease, reason)
+        shared = billing.shares_account_of_id
+        try:
+            with transaction.atomic():
+                _link_own_method(lease, billing, customer, chosen, methods)
+                moved = move_autopay(
+                    lease.pk, seq=0, skipped=timezone.localdate(), plan_id=move_key, actor=actor
+                )
+                deleted = _move_rows(lease, DELETED_FOR_MOVE_ACTION, move_key)
+                if not moved.ok and not deleted:
+                    raise _NotMoved(moved)
+        except _NotMoved as stop:
+            return _switch_refused(actor, lease, stop.outcome.failure or SWITCH_NOT_MOVED)
+        digits = bank_last4(chosen)
+        _audit(
+            actor,
+            SWITCHED_ACTION,
+            lease,
+            {"shares_account_of": str(shared), "payment_method": ""},
+            {
+                "shares_account_of": None,
+                "customer": mask_identifier(customer),
+                "payment_method": mask_identifier(chosen.external_id),
+                "last4": digits,
+                "move_key": str(move_key),
+                "autopay": str(moved.action),
+                "moved": sorted(_move_rows(lease, MOVED_ACTION, move_key)),
+            },
+        )
+    return _switch_done(lease, moved, digits, move_key)
+
+
+def _switch_done(
+    lease: Lease, moved: AutopayOutcome, digits: str, move_key: uuid.UUID
+) -> AccountSwitch:
+    """The outcome of a switch written with ``move_key``: done with the debits moved, or
+    failed when its autopay move did not finish."""
+    if not moved.ok:
+        return AccountSwitch(False, SWITCH_MOVE_FAILED, moved.failure)
+    count = len(_move_rows(lease, MOVED_ACTION, move_key))
+    text = SWITCH_DONE if digits else SWITCH_DONE_NO_DIGITS
+    return AccountSwitch(True, text.format(last4=digits, moved=count))
+
+
+def _switched(lease: Lease, move_key: uuid.UUID) -> bool:
+    """Whether the lease was switched to its own account with this move key."""
+    return AuditLog.objects.filter(
+        action=SWITCHED_ACTION,
+        entity_type=ENTITY_LEASE,
+        entity_id=str(lease.pk),
+        after__move_key=str(move_key),
+    ).exists()
+
+
+def _link_own_method(
+    lease: Lease,
+    billing: LeaseBilling,
+    customer: str,
+    chosen: PaymentMethodRecord,
+    methods: list[PaymentMethodRecord],
+) -> None:
+    """Clear the share and link ``chosen`` as the lease's own bank method; the list is kept
+    as the own customer's snapshot and the last four cached (the caller's transaction)."""
+    billing.shares_account_of = None
+    billing.save(update_fields=["shares_account_of", "updated_at"])
+    ExternalRef.objects.filter(
+        entity_type=lease_sync.ENTITY_LEASE,
+        entity_id=lease.pk,
+        provider=PROVIDER_KEY,
+        external_kind=lease_sync.KIND_PAYMENT_METHOD,
+        superseded_at__isnull=True,
+    ).update(superseded_at=timezone.now())
+    ExternalRef.objects.create(
+        entity_type=lease_sync.ENTITY_LEASE,
+        entity_id=lease.pk,
+        provider=PROVIDER_KEY,
+        external_kind=lease_sync.KIND_PAYMENT_METHOD,
+        external_id=chosen.external_id,
+    )
+    customer_row = _customer_ref_row(lease)
+    if customer_row is not None and customer_row.external_id == customer:
+        _store_methods(customer_row, methods, lease)
+
+
+def _switch_refused(actor: User | None, lease: Lease, reason: str) -> AccountSwitch:
+    """Audit a refused switch (the reason name only) and report it."""
+    _audit(actor, SWITCH_REFUSED_ACTION, lease, None, {"reason": reason})
+    return AccountSwitch(False, SWITCH_MESSAGES.get(reason, SWITCH_FAILED), reason)
 
 
 # --- Lease writes ---------------------------------------------------------------------

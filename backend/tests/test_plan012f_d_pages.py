@@ -450,6 +450,8 @@ for _name in (
     "ledger:settings:brand_move",
     # PLAN-014 C7: the bank-entry page posts the new payment-method id here.
     "ledger:leases:bank_attach",
+    # PLAN-014 C9: the LEASE card's "Switch to own account" posts here.
+    "ledger:leases:switch_own",
 ):
     NOT_PAGES[_name] = POST_ONLY
 

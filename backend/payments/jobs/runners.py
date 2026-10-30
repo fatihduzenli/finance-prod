@@ -20,7 +20,9 @@ is run as a no-op, logged as a warning, and finishes ``done`` with
 
 The bank method attach of the hosted fields (``lease_method_attach``, PLAN-014 C7) verifies
 the posted payment-method id against the lease's own customer before linking it
-(:func:`ledger.services.leases.attach_bank_method`).
+(:func:`ledger.services.leases.attach_bank_method`). The switch to the lease's own account
+(``lease_account_switch``, PLAN-014 C9) runs :func:`ledger.services.leases.switch_to_own_account`
+with the move key in ``params``.
 """
 
 from __future__ import annotations
@@ -379,6 +381,17 @@ def lease_method_attach_job(job: Job) -> Result:
     return outcome.ok, outcome.message
 
 
+def lease_account_switch_job(job: Job) -> Result:
+    """PLAN-014 C9: move a sharing lease to its own customer's bank method; the move key the
+    view queued keeps a replay of this job on the same autopay move."""
+    outcome = leases.switch_to_own_account(
+        job.entity_id,
+        move_key=uuid.UUID(str(job.params.get("move_key", ""))),
+        actor=job.requested_by,
+    )
+    return outcome.ok, outcome.message
+
+
 def _line(text: str) -> str:
     """One stored report line: one line of text, cut to :data:`MATCH_LINE_LENGTH`."""
     flat = " ".join(text.split())
@@ -508,4 +521,5 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.LEASE_END_DOCUMENTS: lease_end_documents_job,
     JobKind.AUTOPAY_STOP: autopay_stop_job,
     JobKind.LEASE_METHOD_ATTACH: lease_method_attach_job,
+    JobKind.LEASE_ACCOUNT_SWITCH: lease_account_switch_job,
 }

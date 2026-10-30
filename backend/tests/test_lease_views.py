@@ -163,6 +163,7 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             "billing",
             "bank",
             "bank_attach",
+            "switch_own",
             *POST_ROUTES,
         )
     }
@@ -194,6 +195,9 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     # PLAN-014 C7: the bank-entry page reads; its attach needs billing.
     assert "ledger:leases:bank" in registry.READ_ONLY_ROUTE_NAMES
     rule = registry.rule_for("ledger:leases:bank_attach")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-014 C9: the LEASE card's "Switch to own account" needs billing.
+    rule = registry.rule_for("ledger:leases:switch_own")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
 
 
@@ -869,3 +873,107 @@ def test_the_lease_card_says_add_a_bank_account_without_one(
     lease = make_lease()
     page = _store_page(admin, lease)
     assert tag_with(page, 'id="lease-bank-entry"') and ">Add a bank account</a>" in page
+
+
+# --- PLAN-014 C9: Switch to own account --------------------------------------------------------
+
+
+def _sharer(fake: FakeProvider) -> tuple[Lease, Lease]:
+    from tests.test_lease_services import OWN, own_method, sharer_on_autopay
+
+    holder, sharer = sharer_on_autopay(fake)
+    fake.add_payment_method(OWN, own_method())
+    return holder, sharer
+
+
+def _switch_path(lease: Lease) -> str:
+    return f"/leases/{lease.pk}/bank/switch-own/"
+
+
+def _switch_jobs() -> list[Any]:
+    from payments.models import Job, JobKind
+
+    return list(Job.objects.filter(kind=JobKind.LEASE_ACCOUNT_SWITCH))
+
+
+def test_the_lease_card_offers_the_switch_to_a_sharer_with_its_own_customer(
+    fake: FakeProvider,
+) -> None:
+    holder, sharer = _sharer(fake)
+    billing, _ = client_for(Role.BILLING, "billing-switch")
+    page = _store_page(billing, sharer)
+    assert tag_with(page, 'id="switch-own-form"', f'action="{_switch_path(sharer)}"')
+    assert tag_with(page, 'id="switch-own-account"', 'type="submit"')
+    assert ">Switch to own account</button>" in page
+    # Not for the account's holder, a sharer without its own customer, or a viewer.
+    assert 'id="switch-own-account"' not in _store_page(billing, holder)
+    viewer, _ = client_for(Role.VIEWER, "viewer-switch")
+    assert 'id="switch-own-account"' not in _store_page(viewer, sharer)
+    ExternalRef.objects.filter(entity_id=sharer.pk, external_kind="customer").delete()
+    assert 'id="switch-own-account"' not in _store_page(billing, sharer)
+
+
+def test_the_switch_queues_one_job_that_moves_the_lease_to_its_own_account(
+    fake: FakeProvider,
+) -> None:
+    _, sharer = _sharer(fake)
+    billing, user = client_for(Role.BILLING, "billing-switch")
+    response = billing.post(_switch_path(sharer))
+    assert (response.status_code, response["Location"]) == (302, f"/leases/{sharer.pk}/")
+    [job] = _switch_jobs()
+    assert (job.entity_id, job.requested_by, job.status) == (sharer.pk, user, "done")
+    assert set(job.params) == {"move_key"} and uuid.UUID(job.params["move_key"])
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id is None
+    page = billing.get(f"/leases/{sharer.pk}/").content.decode()
+    assert html.escape(service.SWITCH_QUEUED) in page
+
+
+@pytest.mark.parametrize("why", ["not_sharing", "no_customer", "archived", "waiting"])
+def test_the_switch_is_refused_up_front_with_a_sentence_and_nothing_queued(
+    fake: FakeProvider, why: str
+) -> None:
+    from payments.models import Job, JobKind
+
+    holder, sharer = _sharer(fake)
+    target = sharer
+    expected = {
+        "not_sharing": service.SWITCH_NOT_SHARING,
+        "no_customer": service.SWITCH_NO_CUSTOMER,
+        "archived": service.SWITCH_ARCHIVED,
+        "waiting": service.SWITCH_WAITING,
+    }[why]
+    if why == "not_sharing":
+        target = holder
+    elif why == "no_customer":
+        ExternalRef.objects.filter(entity_id=sharer.pk, external_kind="customer").delete()
+    elif why == "archived":
+        Operator.objects.filter(leases=sharer).update(archived_at=timezone.now())
+    else:
+        # A switch the worker is running (a queued one would run after this request).
+        Job.objects.create(
+            kind=JobKind.LEASE_ACCOUNT_SWITCH,
+            entity_type="lease",
+            entity_id=sharer.pk,
+            params={"move_key": str(uuid.uuid4())},
+            status="running",
+        )
+    jobs_before = Job.objects.count()
+    billing, _ = client_for(Role.BILLING, "billing-switch")
+    response = billing.post(_switch_path(target), follow=True)
+    assert response.redirect_chain == [(f"/leases/{target.pk}/", 302)]
+    assert html.escape(service.SWITCH_MESSAGES[expected]) in response.content.decode()
+    assert Job.objects.count() == jobs_before
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id == holder.pk
+    assert not [name for name, _ in fake.calls if name == "list_payment_methods"]
+
+
+@pytest.mark.parametrize("role", [Role.VIEWER, None])
+def test_the_switch_below_billing_is_forbidden_and_queues_nothing(
+    fake: FakeProvider, role: Role | None
+) -> None:
+    _, sharer = _sharer(fake)
+    client, _ = client_for(role, f"switch-{role}")
+    assert client.post(_switch_path(sharer)).status_code == 403
+    assert client.get(_switch_path(sharer)).status_code in (403, 405)
+    assert _switch_jobs() == []
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id is not None
