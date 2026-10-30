@@ -14,9 +14,9 @@ message).
 - otherwise the Gmail sender (:class:`~mail.gmail.GmailApiSender`, one per process and
   sender, built on first use from the key, sending as the company settings'
   ``sender_email`` with its ``reply_to_email``), wrapped, on the sandbox environment
-  (:func:`finance.middleware.on_sandbox`, the sandbox banner's own test), in :class:`~mail.outbox.AllowlistSender`: a recipient off the company
-  settings' ``sandbox_allowlist`` is held (``sandbox``). A sandbox can never mail anyone
-  else.
+  (:func:`finance.middleware.on_sandbox`, the sandbox banner's own test), in
+  :class:`~mail.outbox.AllowlistSender`: a recipient off the company settings'
+  ``sandbox_allowlist`` is held (``sandbox``). A sandbox can never mail anyone else.
 
 Imports are made inside the functions so that loading this package touches neither
 google-auth, the settings nor the database.
