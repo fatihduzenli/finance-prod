@@ -205,15 +205,14 @@ class SyncState(GuardedModel):
 class JobKind(models.TextChoices):
     """What a job does; a closed list (docs/qa/PLAN-010 D1). Each maps to one service."""
 
-    #: PLAN-014 C3: the processor customer is per lease. The three kinds below (and
-    #: ``LEASE_METHODS_REFRESH``) keep the stored values and labels of the operator kinds
-    #: they replace, so the ``jobs_kind_valid`` CHECK and the column's choices are
-    #: unchanged (no payments migration in part 1; the labels change with Batch D's
-    #: payments 0019). A row of these values that names an operator was queued before
-    #: ledger migration 0059 and is run as a no-op (``payments.jobs.runners``).
-    LEASE_SYNC = "operator_sync", "Updating the operator"
-    LEASE_RETRY = "operator_retry", "Updating the operator again"
-    LEASE_LINK = "operator_link", "Connecting the operator"
+    #: PLAN-014 C3: the processor customer is per lease. Payments migration 0019 renamed
+    #: the stored values of the operator kinds these replace (``operator_sync``,
+    #: ``operator_retry``, ``operator_link``, ``operator_methods_refresh``) and rewrote the
+    #: rows. A row of these kinds that names an operator was queued before ledger
+    #: migration 0059 and is run as a no-op (``payments.jobs.runners``).
+    LEASE_SYNC = "lease_sync", "Updating the lease"
+    LEASE_RETRY = "lease_retry", "Updating the lease again"
+    LEASE_LINK = "lease_link", "Connecting the lease"
     AUTOPAY_ENABLE = "autopay_enable", "Setting up autopay"
     AUTOPAY_PAUSE = "autopay_pause", "Pausing autopay"
     AUTOPAY_RESUME = "autopay_resume", "Resuming autopay"
@@ -222,7 +221,7 @@ class JobKind(models.TextChoices):
     PAYMENT_REFUND = "payment_refund", "Refunding the payment"
     PAYMENT_VOID = "payment_void", "Voiding the payment"
     #: PLAN-010 Batch A follow-up: the reads the enrolment, run and event pages needed.
-    LEASE_METHODS_REFRESH = "operator_methods_refresh", "Updating bank methods"
+    LEASE_METHODS_REFRESH = "lease_methods_refresh", "Updating bank methods"
     RUN_MATCH = "run_match", "Updating invoices"
     WEBHOOK_REPLAY = "webhook_replay", "Processing a message again"
     #: PLAN-010 Batch B: "Run now" on the reconciliation page.
@@ -259,6 +258,9 @@ class JobKind(models.TextChoices):
     LEASE_END_DOCUMENTS = "lease_end_documents", "Making the final statement and its e-mail"
     #: PLAN-012e D5 amendment: delete the lease's rent and insurance schedules.
     AUTOPAY_STOP = "autopay_stop", "Turning off autopay"
+    #: PLAN-014 C7: verify and link the bank method the hosted fields created under the
+    #: lease's customer (``ledger.services.leases.attach_bank_method``).
+    LEASE_METHOD_ATTACH = "lease_method_attach", "Connecting a bank account"
 
 
 class JobEntity(models.TextChoices):

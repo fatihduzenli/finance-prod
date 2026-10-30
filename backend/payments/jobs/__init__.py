@@ -85,6 +85,7 @@ ENTITY_OF_KIND: dict[str, str] = {
     JobKind.DISPUTE_EVIDENCE_UPLOAD: JobEntity.DISPUTE_EVIDENCE,
     JobKind.LEASE_END_DOCUMENTS: JobEntity.LEASE_END,
     JobKind.AUTOPAY_STOP: JobEntity.LEASE,
+    JobKind.LEASE_METHOD_ATTACH: JobEntity.LEASE,
 }
 #: Further entities a kind acts on besides its :data:`ENTITY_OF_KIND` one: a morning
 #: e-mail is a calendar entry's or a promise to pay's (PLAN-011b D8).

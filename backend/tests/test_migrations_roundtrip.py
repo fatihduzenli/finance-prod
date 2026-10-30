@@ -163,6 +163,7 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0016_lease_end_jobs",
                 "[ ] 0017_autopay_stop_job",
                 "[ ] 0018_copy_labels",
+                "[ ] 0019_lease_job_kinds",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):
