@@ -113,6 +113,8 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # Edit billing details (PLAN-014 C3): billing. The details, the link of the provider
     # IDs and the retry post here; the view refuses the dialog's GET below billing too.
     "ledger:leases:billing": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The bank-entry page's attach (PLAN-014 C7): billing; only the payment-method id.
+    "ledger:leases:bank_attach": RouteRule(min_role=Role.BILLING, methods=POST),
     # Ending a lease (PLAN-010b Batch C): admin. The view refuses the form's GET below
     # admin too, and sends an admin to the end-of-lease wizard (PLAN-012e D4).
     "ledger:leases:end": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -341,6 +343,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         # Lease screens that only read (PLAN-007 §4.1).
         "ledger:leases:list",
         "ledger:leases:detail",
+        # The bank-entry page (PLAN-014 C7): GET only; the view requires billing.
+        "ledger:leases:bank",
         # The end-of-lease wizard's live items and its PDF (PLAN-012e D5, D7); the views
         # themselves require admin.
         "ledger:lease_ends:blockers",

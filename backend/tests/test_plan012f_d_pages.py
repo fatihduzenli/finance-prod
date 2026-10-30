@@ -278,6 +278,8 @@ PAGES: dict[str, Role] = {
     "ledger:stores:contacts": Role.VIEWER,
     "ledger:leases:list": Role.VIEWER,
     "ledger:leases:detail": Role.VIEWER,
+    # PLAN-014 C7: the bank-entry dialog over the lease page (GET only; billing).
+    "ledger:leases:bank": Role.BILLING,
     "ledger:lease_ends:blockers": Role.ADMIN,
     "ledger:transfers:blockers": Role.ADMIN,
     "ledger:run:today": Role.BILLING,
@@ -446,6 +448,8 @@ for _name in (
     "ledger:settings:brand_save",
     "ledger:settings:brand_toggle",
     "ledger:settings:brand_move",
+    # PLAN-014 C7: the bank-entry page posts the new payment-method id here.
+    "ledger:leases:bank_attach",
 ):
     NOT_PAGES[_name] = POST_ONLY
 
@@ -617,6 +621,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     ),
     "ledger:leases:stop_autopay": lambda w: BREADCRUMBS["ledger:leases:detail"](w),
     "ledger:leases:billing": lambda w: BREADCRUMBS["ledger:leases:detail"](w),
+    "ledger:leases:bank": lambda w: BREADCRUMBS["ledger:leases:detail"](w),
     "ledger:leases:resolve_deposit": lambda w: (
         ["Leases", f"Lease {deposit_store(w)}"],
         "Return deposit",

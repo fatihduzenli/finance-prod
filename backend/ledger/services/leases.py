@@ -745,21 +745,193 @@ def refresh_payment_methods(lease_id: uuid.UUID) -> MethodsRefresh:
         return MethodsRefresh(
             False, _failure_message(error), _fields(error), lease_sync.failure_name(error)
         )
-    fetched_at = max((method.fetched_at for method in methods), default=timezone.now())
     with transaction.atomic():
-        old = [snapshot.pk for snapshot in _method_snapshots(ref)]
-        ProviderSnapshot.objects.create(
-            external_ref=ref,
-            payload=[_method_payload(method) for method in methods],
-            fetched_at=fetched_at,
-        )
-        ProviderSnapshot.objects.filter(pk__in=old).delete()
-        owner = account_lease(lease)
-        if owner is not None:
-            linked = linked_payment_method(owner)
-            digits = bank_last4(next((m for m in methods if m.external_id == linked), None))
-            LeaseBilling.objects.update_or_create(lease=owner, defaults={"bank_last4": digits})
+        _store_methods(ref, methods, account_lease(lease))
     return MethodsRefresh(True, METHODS_READ.format(count=len(methods)))
+
+
+def _store_methods(
+    ref: ExternalRef, methods: list[PaymentMethodRecord], owner: Lease | None
+) -> None:
+    """Keep ``methods`` as the one method-list snapshot of the customer reference and
+    cache the linked method's last four on ``owner``'s billing row (the caller's
+    transaction)."""
+    fetched_at = max((method.fetched_at for method in methods), default=timezone.now())
+    old = [snapshot.pk for snapshot in _method_snapshots(ref)]
+    ProviderSnapshot.objects.create(
+        external_ref=ref,
+        payload=[_method_payload(method) for method in methods],
+        fetched_at=fetched_at,
+    )
+    ProviderSnapshot.objects.filter(pk__in=old).delete()
+    if owner is not None:
+        linked = linked_payment_method(owner)
+        digits = bank_last4(next((m for m in methods if m.external_id == linked), None))
+        LeaseBilling.objects.update_or_create(lease=owner, defaults={"bank_last4": digits})
+
+
+# --- Bank account entry (PLAN-014 C7) ---------------------------------------------------
+
+#: Refusal reasons of :func:`attach_bank_method` (stored in its audit row; never shown).
+ATTACH_INVALID_ID = "InvalidId"
+ATTACH_ARCHIVED = "Archived"
+ATTACH_SHARES_ACCOUNT = "SharesAccount"
+ATTACH_NO_CUSTOMER = "NoProviderCustomer"
+ATTACH_LINKED_ELSEWHERE = "AlreadyLinkedElsewhere"
+ATTACH_NOT_THIS_CUSTOMER = "NotThisCustomer"
+ATTACH_NOT_BANK = "NotBankMethod"
+#: The sentence of each refusal; a provider failure has its own (:data:`ATTACH_FAILED`).
+ATTACH_MESSAGES: dict[str, str] = {
+    ATTACH_INVALID_ID: "That is not a bank method ID. Nothing was saved.",
+    ATTACH_ARCHIVED: "This operator is archived.",
+    ATTACH_SHARES_ACCOUNT: (
+        "This lease uses another lease's account. Switch it to its own account first. "
+        "Nothing was saved."
+    ),
+    ATTACH_NO_CUSTOMER: provider_sentence(
+        "The lease is not connected to {provider} yet. Save its billing details with an "
+        "e-mail first. Nothing was saved."
+    ),
+    ATTACH_LINKED_ELSEWHERE: provider_sentence(
+        "That {provider} bank method is already connected to another lease. Nothing was saved."
+    ),
+    ATTACH_NOT_THIS_CUSTOMER: provider_sentence(
+        "That bank method does not belong to this lease's {provider} customer. Nothing was saved."
+    ),
+    ATTACH_NOT_BANK: "That payment method is not a usable bank account. Nothing was saved.",
+}
+ATTACH_FAILED = provider_sentence(
+    "{provider} could not confirm the bank account. Nothing was saved; try again later."
+)
+ATTACH_ALREADY = "This bank account is already connected to the lease. Nothing was changed."
+ATTACH_DONE = "Bank account ····{last4} connected."
+ATTACH_DONE_NO_DIGITS = "Bank account connected."
+
+
+@dataclass(frozen=True, slots=True)
+class BankAttach:
+    """The outcome of :func:`attach_bank_method`."""
+
+    ok: bool
+    message: str
+    #: A refusal reason of :data:`ATTACH_MESSAGES` or a provider error's class name.
+    reason: str = ""
+
+
+def attach_bank_method(
+    lease_id: uuid.UUID, payment_method_external_id: str, *, actor: User | None
+) -> BankAttach:
+    """Verify and link the bank method the hosted fields created under the lease's own
+    customer (worker only; ``JobKind.LEASE_METHOD_ATTACH``).
+
+    Under the lease's row lock: the identifier's syntax, the operator not archived, the
+    lease not sharing another's account, its own customer reference, and the method not
+    linked to any other entity. Then one provider call reads the customer's payment
+    methods (the per-customer list: a method of another customer is not in it, and the
+    adapter drops any object naming another customer); the id must be in it and be a usable
+    bank method. Only then is the lease's current ``payment_method`` reference superseded
+    and the new one written, the list kept as the customer's method snapshot and the last
+    four cached (``LeaseBilling.bank_last4``). Audited ``lease.bank_attached`` (masked
+    identifiers, the last four) or ``lease.bank_attach_refused`` (the reason name); a
+    method already linked to the lease changes nothing and makes no call.
+    """
+    with transaction.atomic():
+        lease = (
+            Lease.objects.select_for_update().select_related("operator", "store").get(pk=lease_id)
+        )
+        reason = _attach_refusal(lease, payment_method_external_id)
+        if reason:
+            return _attach_refused(actor, lease, reason, payment_method_external_id)
+        refs = lease_sync.current_refs(lease)
+        customer = refs[lease_sync.KIND_CUSTOMER]
+        previous = refs.get(lease_sync.KIND_PAYMENT_METHOD, "")
+        if previous == payment_method_external_id:
+            return BankAttach(True, ATTACH_ALREADY)
+        try:
+            methods = payments.get_provider().list_payment_methods(customer)
+        except ProviderError as error:
+            return _attach_refused(
+                actor, lease, lease_sync.failure_name(error), payment_method_external_id
+            )
+        chosen = next((m for m in methods if m.external_id == payment_method_external_id), None)
+        if chosen is None:
+            return _attach_refused(
+                actor, lease, ATTACH_NOT_THIS_CUSTOMER, payment_method_external_id
+            )
+        if not chosen.is_usable_bank:
+            return _attach_refused(actor, lease, ATTACH_NOT_BANK, payment_method_external_id)
+        now = timezone.now()
+        ExternalRef.objects.filter(
+            entity_type=lease_sync.ENTITY_LEASE,
+            entity_id=lease.pk,
+            provider=PROVIDER_KEY,
+            external_kind=lease_sync.KIND_PAYMENT_METHOD,
+            superseded_at__isnull=True,
+        ).update(superseded_at=now)
+        ExternalRef.objects.create(
+            entity_type=lease_sync.ENTITY_LEASE,
+            entity_id=lease.pk,
+            provider=PROVIDER_KEY,
+            external_kind=lease_sync.KIND_PAYMENT_METHOD,
+            external_id=payment_method_external_id,
+        )
+        customer_row = _customer_ref_row(lease)
+        if customer_row is not None:
+            _store_methods(customer_row, methods, lease)
+        digits = bank_last4(chosen)
+        _audit(
+            actor,
+            "lease.bank_attached",
+            lease,
+            {"payment_method": mask_identifier(previous) if previous else ""},
+            {
+                "customer": mask_identifier(customer),
+                "payment_method": mask_identifier(payment_method_external_id),
+                "last4": digits,
+            },
+        )
+    return BankAttach(True, ATTACH_DONE.format(last4=digits) if digits else ATTACH_DONE_NO_DIGITS)
+
+
+def _attach_refusal(lease: Lease, payment_method_external_id: str) -> str:
+    """Why :func:`attach_bank_method` refuses before any provider call, or ``""``."""
+    if not lease_sync.IDENTIFIER.match(payment_method_external_id or ""):
+        return ATTACH_INVALID_ID
+    if lease.operator is not None and lease.operator.archived_at is not None:
+        return ATTACH_ARCHIVED
+    if lease_sync.billing_of(lease).shares_account_of_id is not None:
+        return ATTACH_SHARES_ACCOUNT
+    if not lease_sync.current_refs(lease).get(lease_sync.KIND_CUSTOMER):
+        return ATTACH_NO_CUSTOMER
+    elsewhere = (
+        ExternalRef.objects.filter(
+            provider=PROVIDER_KEY,
+            external_kind=lease_sync.KIND_PAYMENT_METHOD,
+            external_id=payment_method_external_id,
+        )
+        .exclude(entity_type=lease_sync.ENTITY_LEASE, entity_id=lease.pk)
+        .exists()
+    )
+    return ATTACH_LINKED_ELSEWHERE if elsewhere else ""
+
+
+def _attach_refused(
+    actor: User | None, lease: Lease, reason: str, payment_method_external_id: str
+) -> BankAttach:
+    """Audit a refused attach (the reason name and the masked id only) and report it."""
+    masked = (
+        mask_identifier(payment_method_external_id)
+        if lease_sync.IDENTIFIER.match(payment_method_external_id or "")
+        else ""
+    )
+    _audit(
+        actor,
+        "lease.bank_attach_refused",
+        lease,
+        None,
+        {"reason": reason, "payment_method": masked},
+    )
+    return BankAttach(False, ATTACH_MESSAGES.get(reason, ATTACH_FAILED), reason)
 
 
 # --- Lease writes ---------------------------------------------------------------------

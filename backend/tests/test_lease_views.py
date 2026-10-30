@@ -158,6 +158,8 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             "end",
             "stop_autopay",
             "billing",
+            "bank",
+            "bank_attach",
             *POST_ROUTES,
         )
     }
@@ -185,6 +187,10 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
     # PLAN-014 C3: Edit billing details (the details, the link, the retry) needs billing.
     rule = registry.rule_for("ledger:leases:billing")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-014 C7: the bank-entry page reads; its attach needs billing.
+    assert "ledger:leases:bank" in registry.READ_ONLY_ROUTE_NAMES
+    rule = registry.rule_for("ledger:leases:bank_attach")
     assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
 
 

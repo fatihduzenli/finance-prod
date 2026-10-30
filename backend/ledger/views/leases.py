@@ -84,8 +84,9 @@ from ledger.views.operators import (
     export_name,
     role_required,
 )
-from ledger.wording import format_amount
+from ledger.wording import format_amount, provider_sentence
 from payments import jobs, lease_sync
+from payments.hosted_fields import HostedFieldsConfig, get_hosted_fields
 from payments.models import JobKind
 from payments.provider import mask_identifier
 
@@ -774,3 +775,101 @@ def _billing_dialog(
         "can_save": active,
         "return_url": reverse("ledger:leases:detail", kwargs={"pk": lease.pk}),
     }
+
+
+# --- Bank account entry (PLAN-014 C7) ---------------------------------------------------
+
+BANK_NOT_SET_UP = provider_sentence(
+    "Bank account entry is not set up on this environment yet. Staff can connect a bank "
+    "method entered in the {provider} dashboard from Edit billing details."
+)
+BANK_NO_CUSTOMER = provider_sentence(
+    "The lease is not connected to {provider} yet. Save its billing details with an e-mail "
+    "first; the bank account is entered after that."
+)
+BANK_SHARES = "This lease uses another lease's account. Switch it to its own account first."
+BANK_ONLY_THE_ID = "Only the bank method ID can be sent here. Nothing was saved."
+BANK_CHECKING = provider_sentence("Checking the bank account with {provider}.")
+
+
+def _bank_state(lease: Lease) -> tuple[HostedFieldsConfig | None, str]:
+    """The hosted fields' configuration for the lease's own customer, or ``None`` with the
+    sentence the bank-entry page shows instead (no provider call)."""
+    hosted = get_hosted_fields()
+    if not hosted.available():
+        return None, str(BANK_NOT_SET_UP)
+    if lease.operator is not None and lease.operator.archived_at is not None:
+        return None, lease_sync.MESSAGES[lease_sync.ARCHIVED]
+    if lease_sync.billing_of(lease).shares_account_of_id is not None:
+        return None, BANK_SHARES
+    customer = lease_sync.current_refs(lease).get(lease_sync.KIND_CUSTOMER, "")
+    if not customer:
+        return None, str(BANK_NO_CUSTOMER)
+    config = hosted.config_for(customer)
+    return config, "" if config is not None else str(BANK_NOT_SET_UP)
+
+
+def bank_csp(config: HostedFieldsConfig) -> str:
+    """The bank-entry page's Content-Security-Policy: scripts and frames from the page's own
+    origin and the processor's host only (no inline script runs on that page)."""
+    host = config.provider_host
+    return f"script-src 'self' {host}; frame-src 'self' {host}"
+
+
+@role_required
+@require_safe
+def lease_bank(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:bank`` (billing; PLAN-014 C7): the bank-entry dialog over the lease
+    page. With hosted fields set up and a lease that holds its own customer, it shows the
+    processor's bank-account fields (or the fake's one field, locally), which post only the
+    new ``payment_method_id`` to ``ledger:leases:bank_attach``; otherwise one sentence says
+    why not."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    config, message = _bank_state(lease)
+    replaces = bool(lease_sync.current_refs(lease).get(lease_sync.KIND_PAYMENT_METHOD))
+    context = _detail_context(request, lease)
+    context["bank_entry"] = {
+        "lease": lease,
+        "config": config,
+        "message": message,
+        "csp": bank_csp(config) if config is not None and config.script_url else "",
+        "replaces": replaces,
+        "title": "Replace the bank account" if replaces else "Add a bank account",
+        "return_url": reverse("ledger:leases:detail", kwargs={"pk": lease.pk}),
+    }
+    return render(request, "ledger/leases/bank_entry.html", context)
+
+
+@role_required
+@require_POST
+def lease_bank_attach(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:bank_attach`` (billing; PLAN-014 C7): accepts exactly one field,
+    ``payment_method_id``, and queues ``lease_method_attach``, which verifies the method
+    against the lease's own customer before linking it. Any other field, a second value, an
+    id that is not an identifier, a lease that shares another's account or an environment
+    without hosted fields is refused and nothing is queued. Returns to the lease page, which
+    shows the job until it finishes."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    names = set(request.POST) - {"csrfmiddlewaretoken"}
+    values = request.POST.getlist("payment_method_id")
+    if names != {"payment_method_id"} or len(values) != 1:
+        messages.error(request, BANK_ONLY_THE_ID)
+        return redirect("ledger:leases:bank", pk=lease.pk)
+    value = values[0].strip()
+    if not lease_sync.IDENTIFIER.match(value):
+        messages.error(request, service.ATTACH_MESSAGES[service.ATTACH_INVALID_ID])
+        return redirect("ledger:leases:bank", pk=lease.pk)
+    config, message = _bank_state(lease)
+    if config is None:
+        messages.error(request, message)
+        return redirect("ledger:leases:bank", pk=lease.pk)
+    if not busy(request, lease):
+        submit(request, JobKind.LEASE_METHOD_ATTACH, lease, {"payment_method_id": value})
+        messages.info(request, BANK_CHECKING)
+    return redirect("ledger:leases:detail", pk=lease.pk)

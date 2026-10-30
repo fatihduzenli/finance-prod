@@ -11,11 +11,16 @@ A successful lease sync or link (PLAN-014 C3: the processor customer is per leas
 a read of the lease's payment methods (:func:`payments.jobs.refresh_methods`) when the lease
 has a customer reference, so the enrolment page usually has a recent list.
 
-The lease kinds keep the stored values of the operator kinds they replaced
-(``operator_sync``, ``operator_retry``, ``operator_link``, ``operator_methods_refresh``). A
-row of those values that names an operator (``entity_type = "operator"``) was queued before
-ledger migration 0059 moved the customers to the leases: it is run as a no-op, logged as a
-warning, and finishes ``done`` with :data:`RETIRED_OPERATOR_JOB` (nothing is sent).
+The lease kinds replaced the operator kinds (``operator_sync``, ``operator_retry``,
+``operator_link``, ``operator_methods_refresh``; payments migration 0019 renamed the stored
+values and the rows). A row of these kinds that names an operator (``entity_type =
+"operator"``) was queued before ledger migration 0059 moved the customers to the leases: it
+is run as a no-op, logged as a warning, and finishes ``done`` with
+:data:`RETIRED_OPERATOR_JOB` (nothing is sent).
+
+The bank method attach of the hosted fields (``lease_method_attach``, PLAN-014 C7) verifies
+the posted payment-method id against the lease's own customer before linking it
+(:func:`ledger.services.leases.attach_bank_method`).
 """
 
 from __future__ import annotations
@@ -358,6 +363,14 @@ def lease_methods_refresh_job(job: Job) -> Result:
     return _methods(leases.refresh_payment_methods(job.entity_id))
 
 
+def lease_method_attach_job(job: Job) -> Result:
+    """PLAN-014 C7: verify and link the bank method the hosted fields created."""
+    outcome = leases.attach_bank_method(
+        job.entity_id, str(job.params.get("payment_method_id", "")), actor=job.requested_by
+    )
+    return outcome.ok, outcome.message
+
+
 def _line(text: str) -> str:
     """One stored report line: one line of text, cut to :data:`MATCH_LINE_LENGTH`."""
     flat = " ".join(text.split())
@@ -486,4 +499,5 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.DISPUTE_EVIDENCE_UPLOAD: dispute_evidence_upload_job,
     JobKind.LEASE_END_DOCUMENTS: lease_end_documents_job,
     JobKind.AUTOPAY_STOP: autopay_stop_job,
+    JobKind.LEASE_METHOD_ATTACH: lease_method_attach_job,
 }
