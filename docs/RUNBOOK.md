@@ -752,10 +752,10 @@ writes to Stax through the worker: it is a Publish Request of its own, after Bat
 **One engine.** Every e-mail to an operator or to the managers is a message: rendered when it is
 queued, stored with its subject and body, sent by the worker in the send window (9:00 to 18:00
 New York; a message queued outside it waits for the next 9:00) and listed on the store's
-**Notes & follow-ups** tab (filter *E-mails*) with its result. The reminder rules (A to F) are
-Batch E's and F's; today the engine carries the final statement of a lease end and **Send a
-message now** on a charge page (billing: an active template, the lease's billing e-mail, one
-row per send).
+**Notes & follow-ups** tab (filter *E-mails*) with its result. The engine carries the reminder
+rules A to E (below), the final statement of a lease end and **Send a message now** on a
+charge page (billing: an active template, the lease's billing e-mail, one row per send); F
+(returned debits) is Batch F's.
 
 **The reminder rules.** The daily job (09:00 New York) queues, for every open charge, the rule
 of that day only, counted from the due date: **A** three days before the debit of a rent charge
