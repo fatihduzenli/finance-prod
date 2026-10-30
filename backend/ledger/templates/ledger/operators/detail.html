@@ -79,7 +79,7 @@
   </section>
   <section class="card" id="operator-collections-card">
   <h2 id="collections">Collection e-mails</h2>
-  <p id="handled-personally">{% if operator.handled_personally %}<strong>Handled personally:</strong> the collection e-mails skip this operator.{% if operator.handled_personally_note %} <span style="white-space:pre-wrap;">{{ operator.handled_personally_note }}</span>{% endif %}{% else %}The collection e-mails go to this operator when a charge is overdue{% if not operator.email %} (none can be sent: no e-mail address){% endif %}.{% endif %}</p>
+  <p id="handled-personally">{% if operator.handled_personally %}<strong>Handled personally:</strong> the collection e-mails skip this operator.{% if operator.handled_personally_note %} <span style="white-space:pre-wrap;">{{ operator.handled_personally_note }}</span>{% endif %}{% else %}The collection e-mails go to the billing e-mail of the overdue charge's lease (a lease without one gets none).{% endif %}</p>
   {% if can_set_handled %}
     <form method="post" action="{% url 'ledger:operators:handled_personally' pk=operator.pk %}" class="js-single-submit" id="handled-personally-form">
       {% csrf_token %}

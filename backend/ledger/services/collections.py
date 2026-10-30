@@ -4,8 +4,10 @@
 (:func:`ledger.services.receivables.open_balances`) and keeps the overdue **rent** and
 **one-off** charges (insurance is not on the ladder; deposits are never open balances):
 a balance above zero, a status that is not waived, voided, paid or (for rent) pending (a
-payment on its way), billed to an operator that is not archived, has an e-mail address
-and is not marked *handled personally*. Days late are New York days: ``today`` minus the
+payment on its way), billed to an operator that is not archived and is not marked
+*handled personally*, through a lease whose billing details hold an e-mail address (PLAN-014
+C5: the charge's lease, else, for a one-off charge without one, its operator's first active
+lease; the message goes to that address). Days late are New York days: ``today`` minus the
 due date, ``today`` being the project's local date.
 
 **Which step.** For each such charge, the step sent is the active step with the largest
@@ -54,6 +56,7 @@ from ledger.models import (
     AuditLog,
     ChargeEntityType,
     CollectionStep,
+    Lease,
     MessageKind,
     MessageStatus,
     OneOffCharge,
@@ -63,10 +66,11 @@ from ledger.models import (
     RentCharge,
     RentChargeStatus,
 )
-from ledger.services import messages, receivables, statement_links
+from ledger.services import leases, messages, receivables, statement_links
 from ledger.validators import contains_bank_routing_pattern, contains_card_number, visible_text
 from ledger.wording import format_amount
 from mail.base import SUBJECT_MAX_LENGTH
+from payments import lease_sync
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +113,7 @@ HAND_NEEDS_CONFIRM = (
     "it is recorded as a manual send."
 )
 HAND_NOT_OVERDUE = "Only an overdue charge with a balance can be chased."
-HAND_NO_EMAIL = "The operator has no e-mail address."
+HAND_NO_EMAIL = "The lease billed has no billing e-mail address."
 HAND_OPTED_OUT = (
     "This operator is handled personally: no collection e-mail is sent. Change that on the "
     "operator's page first."
@@ -125,6 +129,8 @@ class DueStep:
     step: CollectionStep
     days_late: int
     operator: Operator
+    #: The lease whose billing e-mail the message goes to (PLAN-014 C5).
+    lease: Lease
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,12 +163,40 @@ def _reachable_operators(ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, Operator]:
     return {
         operator.pk: operator
         for operator in Operator.objects.filter(
-            pk__in=list(ids),
-            archived_at__isnull=True,
-            handled_personally=False,
-            email__isnull=False,
+            pk__in=list(ids), archived_at__isnull=True, handled_personally=False
         )
     }
+
+
+def _billing_leases(rows: list[receivables.OpenBalance]) -> dict[uuid.UUID, Lease]:
+    """Charge id -> the lease whose billing details bill it (PLAN-014 C5): its lease, else
+    its operator's first active lease. Two queries."""
+    by_id = {
+        lease.pk: lease
+        for lease in Lease.objects.filter(
+            pk__in={row.lease_id for row in rows if row.lease_id is not None}
+        ).select_related("billing")
+    }
+    first = leases.first_active_leases(
+        {row.operator_id for row in rows if row.lease_id is None and row.operator_id is not None}
+    )
+    found: dict[uuid.UUID, Lease] = {}
+    for row in rows:
+        lease = (
+            by_id.get(row.lease_id)
+            if row.lease_id is not None
+            else first.get(row.operator_id)
+            if row.operator_id is not None
+            else None
+        )
+        if lease is not None:
+            found[row.charge_id] = lease
+    return found
+
+
+def billing_email(lease: Lease | None) -> str:
+    """The billing e-mail of ``lease``, or ``""``."""
+    return lease_sync.billing_of(lease).email if lease is not None else ""
 
 
 def _logged_offsets(charge_ids: Iterable[uuid.UUID]) -> dict[tuple[str, uuid.UUID], int]:
@@ -197,11 +231,13 @@ def due_steps(today: date) -> list[DueStep]:
     if not rows:
         return []
     operators = _reachable_operators({row.operator_id for row in rows if row.operator_id})
+    billed = _billing_leases(rows)
     logged = _logged_offsets(row.charge_id for row in rows)
     found = []
     for row in rows:
         operator = operators.get(row.operator_id) if row.operator_id else None
-        if operator is None:
+        lease = billed.get(row.charge_id)
+        if operator is None or lease is None or not billing_email(lease):
             continue
         late = days_late(row.due_on, today)
         step = [candidate for candidate in steps if candidate.day_offset <= late][-1]
@@ -209,7 +245,7 @@ def due_steps(today: date) -> list[DueStep]:
         latest = logged.get((charge_type, row.charge_id))
         if latest is not None and latest >= step.day_offset:
             continue
-        found.append(DueStep(row, charge_type, step, late, operator))
+        found.append(DueStep(row, charge_type, step, late, operator, lease))
     return found
 
 
@@ -234,6 +270,7 @@ def _audit(
 
 def _queue(
     operator: Operator,
+    lease: Lease,
     charge_type: str,
     charge_id: uuid.UUID,
     step: CollectionStep,
@@ -249,6 +286,7 @@ def _queue(
                 operator,
                 step.template,
                 messages.MessageContext(charge_type, charge_id),
+                lease=lease,
                 actor=actor,
                 step=step,
                 manual=manual,
@@ -263,7 +301,7 @@ def queue_due(today: date) -> QueueReport:
     """Queue every due step of ``today`` (one row and one job each)."""
     queued = already = 0
     for due in due_steps(today):
-        message = _queue(due.operator, due.charge_type, due.charge.charge_id, due.step)
+        message = _queue(due.operator, due.lease, due.charge_type, due.charge.charge_id, due.step)
         if message is None:
             already += 1
         else:
@@ -353,7 +391,7 @@ def _skip_reason(message: OutboundMessage, figures: ChargeFigures | None) -> str
         return OPERATOR_ARCHIVED
     if operator.handled_personally:
         return OPERATOR_OPTED_OUT
-    if not operator.email:
+    if not billing_email(message.lease):
         return NO_ADDRESS
     return ""
 
@@ -387,7 +425,7 @@ def send(message_id: uuid.UUID, today: date | None = None) -> Outcome:
     with transaction.atomic():
         message = (
             OutboundMessage.objects.select_for_update(of=("self",))
-            .select_related("operator", "template", "step")
+            .select_related("operator", "lease", "template", "step")
             .filter(pk=message_id)
             .first()
         )
@@ -403,7 +441,7 @@ def send(message_id: uuid.UUID, today: date | None = None) -> Outcome:
             _finish(message, MessageStatus.SUPPRESSED, error=reason or CHARGE_CLOSED)
             return Outcome(True, SUPPRESSED_TEXT.format(cause=reason or CHARGE_CLOSED))
         operator = message.operator
-        address = str(operator.email)
+        address = billing_email(message.lease)
         values = merge_values(operator, figures, day)
         try:
             subject = one_line(merge.render(message.template.subject, values))
@@ -460,38 +498,43 @@ def send_step_by_hand(
     figures = charge_figures(charge_type, charge_id)
     if figures is None or not figures.open or figures.due_on >= day:
         return Outcome(False, HAND_NOT_OVERDUE)
-    operator = _billed_operator(charge_type, charge_id)
+    operator, lease = _billed(charge_type, charge_id)
     if operator is None:
         return Outcome(False, HAND_NOT_OVERDUE)
     if operator.archived_at is not None:
         return Outcome(False, HAND_ARCHIVED)
     if operator.handled_personally:
         return Outcome(False, HAND_OPTED_OUT)
-    if not operator.email:
+    if lease is None or not billing_email(lease):
         return Outcome(False, HAND_NO_EMAIL)
     logged = OutboundMessage.objects.filter(
         manual=False, charge_entity_type=charge_type, charge_entity_id=charge_id, step=step
     ).exists()
-    if not logged and _queue(operator, charge_type, charge_id, step, actor=actor) is not None:
+    if (
+        not logged
+        and _queue(operator, lease, charge_type, charge_id, step, actor=actor) is not None
+    ):
         return Outcome(True, HAND_QUEUED)
     if not confirm:
         return Outcome(False, HAND_NEEDS_CONFIRM, needs_confirm=True)
-    _queue(operator, charge_type, charge_id, step, actor=actor, manual=True)
+    _queue(operator, lease, charge_type, charge_id, step, actor=actor, manual=True)
     return Outcome(True, HAND_QUEUED)
 
 
-def _billed_operator(charge_type: str, charge_id: uuid.UUID) -> Operator | None:
+def _billed(charge_type: str, charge_id: uuid.UUID) -> tuple[Operator | None, Lease | None]:
+    """The operator a charge is billed to and the lease whose billing details bill it."""
     if charge_type == ChargeEntityType.RENT_CHARGE:
         rent = RentCharge.objects.select_related("lease__operator").filter(pk=charge_id).first()
-        return rent.lease.operator if rent is not None else None
+        return (rent.lease.operator, rent.lease) if rent is not None else (None, None)
     one_off = (
         OneOffCharge.objects.select_related("operator", "lease__operator")
         .filter(pk=charge_id)
         .first()
     )
     if one_off is None:
-        return None
-    return one_off.operator or (one_off.lease.operator if one_off.lease is not None else None)
+        return None, None
+    operator = one_off.operator or (one_off.lease.operator if one_off.lease is not None else None)
+    return operator, leases.billing_lease(one_off)
 
 
 # --- Pages --------------------------------------------------------------------------------

@@ -542,6 +542,29 @@ def first_active_lease(operator: Operator | None) -> Lease | None:
     )
 
 
+def first_active_leases(operator_ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, Lease]:
+    """:func:`first_active_lease` of each of these operators that has one, with its billing
+    row (one query)."""
+    found: dict[uuid.UUID, Lease] = {}
+    rows = (
+        Lease.objects.filter(
+            operator_id__in=list(operator_ids),
+            ended_on__isnull=True,
+            collection_status__in=[CollectionStatus.ACTIVE, CollectionStatus.PAUSED],
+        )
+        .select_related("store", "operator", "billing")
+        .order_by(
+            F("started_on").asc(nulls_last=True),
+            F("store__store_number").asc(nulls_last=True),
+            "id",
+        )
+    )
+    for lease in rows:
+        if lease.operator_id is not None:
+            found.setdefault(lease.operator_id, lease)
+    return found
+
+
 def billing_lease(charge: Any) -> Lease | None:
     """The lease whose billing details and account bill ``charge`` (PLAN-014 C5): a rent
     or insurance charge's lease; a one-off charge's lease, else its operator's first
