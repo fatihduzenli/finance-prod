@@ -142,8 +142,7 @@ MESSAGES: dict[str, str] = {
         "That {provider} record is already connected to another lease. Nothing was changed."
     ),
     ALREADY_LINKED: provider_sentence(
-        "This lease is already connected to a different {provider} customer. "
-        "Nothing was changed."
+        "This lease is already connected to a different {provider} customer. Nothing was changed."
     ),
     ARCHIVED: "This operator is archived.",
     SHARES_ACCOUNT: (
@@ -251,8 +250,8 @@ def update_billing(
     lease's account keeps its status: nothing is sent for it.
     """
     with transaction.atomic():
-        lease = Lease.objects.select_for_update().select_related("operator", "store").get(
-            pk=lease_id
+        lease = (
+            Lease.objects.select_for_update().select_related("operator", "store").get(pk=lease_id)
         )
         billing = billing_of(lease)
         before = billing_snapshot(billing)
@@ -311,9 +310,7 @@ def sync_lease(
     """
     with transaction.atomic():
         lease = (
-            Lease.objects.select_for_update()
-            .select_related("operator", "store")
-            .get(pk=lease_id)
+            Lease.objects.select_for_update().select_related("operator", "store").get(pk=lease_id)
         )
         billing = billing_of(lease)
         status = lease.sync_status
@@ -395,9 +392,7 @@ def sync_lease(
         return SyncOutcome(action, lease.sync_status, needs_review=needs_review)
 
 
-def _refused_before_call(
-    lease: Lease, billing: LeaseBilling, *, retry: bool
-) -> SyncOutcome | None:
+def _refused_before_call(lease: Lease, billing: LeaseBilling, *, retry: bool) -> SyncOutcome | None:
     """The retry lock and the phone rule, checked under the row lock; nothing is written."""
     wait = retry_wait_seconds(lease) if retry else 0
     if wait:
@@ -489,9 +484,7 @@ def link_lease(
             return SyncOutcome(Action.LINK_REFUSED, "", SyncFailure.VALIDATION_FAILED)
     with transaction.atomic():
         lease = (
-            Lease.objects.select_for_update()
-            .select_related("operator", "store")
-            .get(pk=lease_id)
+            Lease.objects.select_for_update().select_related("operator", "store").get(pk=lease_id)
         )
         if _archived(lease):
             return SyncOutcome(Action.LINK_REFUSED, lease.sync_status, ARCHIVED)
