@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from urllib.parse import urlencode
 
 from django.contrib.auth.models import User
 from django.http import HttpRequest
@@ -154,3 +155,14 @@ def timeline_rows(
         elif entry.kind == timeline.CONTACT:
             rows.append(TimelineRow(entry.kind, logs_by_id[entry.payload.pk]))
     return rows
+
+
+def timeline_filters(
+    url: str, query: dict[str, str], fragment: str = ""
+) -> list[tuple[str, str, str]]:
+    """The list's filter (All · Notes · Calls & promises · E-mails) as ``(value, label,
+    link)``: ``url`` with ``query`` and ``show=value``, then ``fragment``."""
+    return [
+        (value, label, f"{url}?{urlencode({**query, 'show': value})}{fragment}")
+        for value, label in timeline.SHOWS
+    ]

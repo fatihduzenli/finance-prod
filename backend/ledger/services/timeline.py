@@ -6,14 +6,16 @@ visits, e-mails logged by hand and promises with their outcomes and corrections)
 by day (a note's day in New York, an entry's ``happened_on``), then by when each was written.
 ``show`` narrows it (``?show=``, :func:`parse_show`): ``notes``, ``contacts`` (Calls &
 promises) or ``emails``, which lists nothing until the messaging engine (Batch D) keeps the
-e-mails sent; anything else is ``all``. Read only.
+e-mails sent; anything else is ``all``. :class:`Listing` is the whole list, without the
+tab's cap, as the store's All entries page pages it. Read only.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
+from typing import Any, overload
 
 from django.utils import timezone
 
@@ -92,3 +94,50 @@ def entries(
 
 def _more(limit: int | None) -> int | None:
     return None if limit is None else limit + 1
+
+
+def empty_text(show: str) -> str:
+    """What an empty list says for ``show``: "No e-mails yet." and "No notes yet."; ``""``
+    for the others (the page words its own "No entries yet")."""
+    return {SHOW_EMAILS: EMPTY_EMAILS, SHOW_NOTES: EMPTY_NOTES}.get(parse_show(show), "")
+
+
+class Listing:
+    """The store's whole list for ``show`` as a :class:`~django.core.paginator.Paginator`
+    pages it: :meth:`count` counts each source, and a page reads each source only as far as
+    the page's end (both are newest first, so the first rows of the union come from the
+    first rows of each)."""
+
+    def __init__(self, store: Store, show: str, *, include_deleted: bool) -> None:
+        self.store = store
+        self.show = parse_show(show)
+        self.include_deleted = include_deleted
+
+    def count(self) -> int:
+        kinds = _KINDS[self.show]
+        total = 0
+        if NOTE in kinds:
+            total += notes.count_for_store(self.store)
+        if CONTACT in kinds:
+            total += contacts.store_entries(
+                self.store, include_deleted=self.include_deleted
+            ).count()
+        return total
+
+    def __len__(self) -> int:
+        return self.count()
+
+    def __iter__(self) -> Iterator[TimelineEntry]:
+        return iter(entries(self.store, self.show, include_deleted=self.include_deleted))
+
+    @overload
+    def __getitem__(self, index: int) -> TimelineEntry: ...
+    @overload
+    def __getitem__(self, index: slice) -> list[TimelineEntry]: ...
+    def __getitem__(self, index: int | slice) -> TimelineEntry | list[TimelineEntry]:
+        if isinstance(index, int):
+            return list(self)[index]
+        found = entries(
+            self.store, self.show, include_deleted=self.include_deleted, limit=index.stop
+        )
+        return found[index]

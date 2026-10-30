@@ -227,6 +227,11 @@ def for_store(store: Store, limit: int | None = None) -> list[Note]:
     return list(found if limit is None else found[:limit])
 
 
+def count_for_store(store: Store) -> int:
+    """How many live notes the store has (one query)."""
+    return _live(store).count()
+
+
 def pinned_for(store: Store, limit: int = PINNED_SHOWN) -> list[Note]:
     """The store's pinned live notes, the latest pinned first, at most ``limit``."""
     return list(_live(store).filter(pinned=True).order_by("-pinned_at", "-id")[:limit])

@@ -1,0 +1,20 @@
+{% extends "finance/base.html" %}
+{% comment %}The store's All entries page (ledger:stores:contacts; docs/qa/PLAN-014 B6): the Notes & follow-ups tab's list without its cap, paginated: the filter (#timeline-filter, the current one aria-current), then ledger/stores/_timeline_list.html. No export.{% endcomment %}
+{% block title %}Notes &amp; follow-ups: {{ title }}{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{{ back_url }}">{{ back_label }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Notes &amp; follow-ups</span></nav><h1>Notes &amp; follow-ups: {{ title }}</h1></div>{% if contact_add_url %}<div class="page-actions"><a class="btn" id="add-contact" href="{{ contact_add_url }}">Add entry</a></div>{% endif %}</div>{% endblock %}
+{% block content %}
+  <div class="timeline-bar">
+    <nav class="segmented" id="timeline-filter" aria-label="Show">{% for value, label, url in timeline_filters %}<a href="{{ url }}" id="timeline-show-{{ value }}"{% if value == timeline_show %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
+  </div>
+  <section class="card" id="contact-log-card">
+  <p class="muted">Notes about this store and entries about a lease of it, newest first. Dates are New York days.</p>
+  {% include "ledger/stores/_timeline_list.html" %}
+  </section>
+  {% if page.paginator.num_pages > 1 %}
+    <div class="pager pagination" role="navigation" aria-label="Pages">
+      {% if page.has_previous %}<a class="btn" href="?show={{ timeline_show }}&amp;page={{ page.previous_page_number }}">Previous</a>{% endif %}
+      <span class="pager-count">Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}<a class="btn" href="?show={{ timeline_show }}&amp;page={{ page.next_page_number }}">Next</a>{% endif %}
+    </div>
+  {% endif %}
+{% endblock %}
