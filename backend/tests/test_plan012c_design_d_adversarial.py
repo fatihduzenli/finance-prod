@@ -40,8 +40,15 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "AutopayEndRule": ["count", "date", "never"],
     "AutopayPlanState": ["active", "finished", "paused", "stopped"],
     "CalendarEntryKind": ["note", "reminder"],
-    # PLAN-014 D4: a lease's insurance charge (the reminder rules of Batch E).
-    "ChargeEntityType": ["insurance_charge", "lease_end", "one_off_charge", "rent_charge"],
+    # PLAN-014 D4: a lease's insurance charge (the reminder rules of Batch E); E4: a lease's
+    # rent month (rules A and B before the month's charge).
+    "ChargeEntityType": [
+        "insurance_charge",
+        "lease_end",
+        "lease_month",
+        "one_off_charge",
+        "rent_charge",
+    ],
     "CollectionMethod": ["autopay_due", "charge_now", "email", "manual", "none"],
     "CollectionStatus": ["active", "ended", "paused", "prospective"],
     "CompanyTimeZone": [
