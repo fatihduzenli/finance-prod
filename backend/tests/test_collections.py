@@ -309,7 +309,8 @@ def test_the_same_rule_twice_keeps_one_row_and_the_next_occurrence_is_another(
     assert queue_rule(charge, MessageRule.D, "overdue_day10") is not None
     assert queue_rule(charge, MessageRule.D, "overdue_day10") is None
     assert queue_rule(charge, MessageRule.D, "overdue_day10", occurrence=2) is not None
-    assert [(row.rule, row.occurrence) for row in messages_of(charge)] == [("D", 1), ("D", 2)]
+    found = sorted((row.rule, row.occurrence) for row in messages_of(charge))
+    assert found == [("D", 1), ("D", 2)]
     assert Job.objects.filter(kind=JobKind.MESSAGE_SEND).count() == 2
 
 

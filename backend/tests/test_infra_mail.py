@@ -223,7 +223,7 @@ def test_env_example_names_the_mail_setting_with_an_empty_value(name: str) -> No
 def test_env_example_no_longer_names_a_retired_mail_setting(name: str) -> None:
     text = (REPO / ".env.example").read_text()
     assert not re.search(rf"^{name}=", text, re.MULTILINE)
-    assert "Admin › Settings › Mail" in text and "Outbox" in text
+    assert "Admin › Settings › Mail" in text and "held in the Outbox" in text
 
 
 def test_the_retired_mail_parameters_are_a_noted_follow_up() -> None:

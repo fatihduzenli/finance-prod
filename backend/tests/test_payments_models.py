@@ -473,11 +473,21 @@ def _migrate_payments(target: tuple[str, str]) -> None:
     executor.migrate([target])
 
 
+def _old_job(kind: str) -> Any:
+    """A job row written through the model as it stands at 0020: payments 0021 (PLAN-014 D7)
+    adds ``run_after``, which this test's schemas do not have."""
+    from django.db.migrations.executor import MigrationExecutor
+
+    state = MigrationExecutor(connection).loader.project_state(SWITCH_MIGRATION)
+    model = state.apps.get_model("payments", "Job")
+    return model.objects.create(kind=kind, entity_type="lease", entity_id=uuid.uuid4())
+
+
 def _switch_job_saves() -> bool:
     """Whether the ``jobs_kind_valid`` CHECK takes a row of the switch kind (rolled back)."""
     try:
         with transaction.atomic():
-            saved(new_job(kind=SWITCH_KIND))
+            _old_job(SWITCH_KIND)
             transaction.set_rollback(True)
     except IntegrityError:
         return False
@@ -498,11 +508,11 @@ def test_migration_0020_adds_the_switch_kind_and_reverses_only_without_switch_jo
         assert _switch_job_saves()
         _migrate_payments(BEFORE_SWITCH_KIND)
         assert not _switch_job_saves()
-        saved(new_job(kind=provider.JobKind.LEASE_METHOD_ATTACH))  # the 0019 kinds still go
+        _old_job(provider.JobKind.LEASE_METHOD_ATTACH)  # the 0019 kinds still go
         _migrate_payments(SWITCH_MIGRATION)
         assert _switch_job_saves()
         # A switch job cannot be lost by going back: the reverse refuses and changes nothing.
-        saved(new_job(kind=SWITCH_KIND))
+        _old_job(SWITCH_KIND)
         with pytest.raises(RuntimeError, match="refuses to reverse"):
             _migrate_payments(BEFORE_SWITCH_KIND)
         assert provider.Job.objects.filter(kind=SWITCH_KIND).count() == 1

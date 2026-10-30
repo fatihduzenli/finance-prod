@@ -569,6 +569,17 @@ def test_migration_0061_carries_the_ladder_rows_and_reverses_only_without_new_ru
     try:
         old = _migrate(BEFORE)
         step_model = old.get_model("ledger", "CollectionStep")
+        # The ladder's seed (0025), written again when a transactional test flushed it.
+        seed = importlib.import_module("ledger.migrations.0025_seed_collections_ladder")
+        for code, subject, body in seed.TEMPLATES:
+            template, _ = old.get_model("ledger", "MessageTemplate").objects.get_or_create(
+                code=code, defaults={"subject": subject, "body": body}
+            )
+            for day, step_code, position in seed.STEPS:
+                if step_code == code:
+                    step_model.objects.get_or_create(
+                        day_offset=day, defaults={"template": template, "position": position}
+                    )
         assert [row.day_offset for row in step_model.objects.order_by("day_offset")] == [3, 10, 20]
         operator_model = old.get_model("ledger", "Operator")
         message_model = old.get_model("ledger", "OutboundMessage")
