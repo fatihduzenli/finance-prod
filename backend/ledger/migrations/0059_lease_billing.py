@@ -31,7 +31,9 @@ Data (``copy_billing``), once, in this transaction; nothing here calls the payme
    ``entity_id`` = the lease; the external ids do not change, so the provider sees
    nothing; the method snapshots stay on the customer reference), and the operator's
    ``sync_status``, ``sync_failure``, ``sync_failure_fields``, ``sync_attempted_at`` and
-   ``creation_key`` are copied to that lease. Every **other** lease of the operator gets
+   ``creation_key`` are copied to that lease, and its ``bank_last4`` is the linked method's
+   last four as the customer's latest method-list snapshot lists them ("" otherwise). Every
+   **other** lease of the operator gets
    ``shares_account_of`` = the primary lease, so its billing keeps using the same customer
    and bank method; those not ended are also flagged ``needs_review`` with the reason
    ``own_customer`` (a reason already set is kept).
@@ -186,12 +188,30 @@ def _billing_values(operator: Any) -> dict[str, Any]:
     }
 
 
+def _cached_last4(snapshot_model: Any, customer: Any, method_id: str) -> str:
+    """The linked method's last four from the latest method-list snapshot of the customer
+    reference (a JSON array), or "" when it is not listed as four digits."""
+    for snapshot in snapshot_model.objects.filter(external_ref=customer).order_by(
+        "-fetched_at", "-id"
+    ):
+        if not isinstance(snapshot.payload, list):
+            continue
+        for item in snapshot.payload:
+            if isinstance(item, dict) and item.get("external_id") == method_id:
+                digits = item.get("last_four")
+                if isinstance(digits, str) and len(digits) == 4 and digits.isdigit():
+                    return digits
+        return ""
+    return ""
+
+
 def copy_billing(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     lease_model = apps.get_model("ledger", "Lease")
     billing_model = apps.get_model("ledger", "LeaseBilling")
     operator_model = apps.get_model("ledger", "Operator")
     audit_log = apps.get_model("ledger", "AuditLog")
     external_ref = apps.get_model("payments", "ExternalRef")
+    snapshot_model = apps.get_model("payments", "ProviderSnapshot")
 
     live_refs = external_ref.objects.filter(
         entity_type=ENTITY_OPERATOR,
@@ -234,10 +254,18 @@ def copy_billing(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
         before = {"needs_review": lease.needs_review, "review_reason": lease.review_reason}
         updates: dict[str, Any] = {}
         if moved and operator is not None:
+            refs = {ref.external_kind: ref for ref in live_refs.filter(entity_id=operator.pk)}
             live_refs.filter(entity_id=operator.pk).update(
                 entity_type=ENTITY_LEASE, entity_id=lease.pk
             )
             updates.update({name: getattr(operator, name) for name in SYNC_COLUMNS})
+            method = refs.get(KIND_PAYMENT_METHOD)
+            if method is not None and KIND_CUSTOMER in refs:
+                billing_model.objects.filter(lease=lease).update(
+                    bank_last4=_cached_last4(
+                        snapshot_model, refs[KIND_CUSTOMER], method.external_id
+                    )
+                )
         if shares:
             billing_model.objects.filter(lease=lease).update(shares_account_of=primary)
             if not _is_ended(lease):
