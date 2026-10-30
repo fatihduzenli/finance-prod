@@ -134,7 +134,7 @@
   <h2>Insurance due in the next {{ insurance_days }} days</h2>
   {% responsive_table %}
   <table id="insurance-due">
-    <thead><tr><th>Due</th><th>Store</th><th>Policy year</th><th>Premium</th><th>Charge</th></tr></thead>
+    <thead><tr><th>Due</th><th>Store</th><th>Policy year</th><th class="money">Premium</th><th>Charge</th></tr></thead>
     <tbody>
       {% for item in insurance_due %}
         <tr>

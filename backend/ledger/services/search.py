@@ -62,6 +62,13 @@ def words(query: str) -> list[str]:
     return found
 
 
+def number_prefix(word: str) -> str | None:
+    """The digits a word matches a store number by, as a prefix (``#24`` and ``24`` give
+    ``"24"``); ``None`` when the word is not a number."""
+    number = _NUMBER.fullmatch(word)
+    return number.group(1) if number is not None else None
+
+
 def _store_word(word: str, today: date) -> Q:
     operator_named = Exists(
         Lease.objects.filter(store=OuterRef("pk"), operator__display_name__icontains=word).filter(
@@ -69,9 +76,9 @@ def _store_word(word: str, today: date) -> Q:
         )
     )
     condition = Q(external_label__icontains=word) | Q(city__icontains=word) | Q(operator_named)
-    number = _NUMBER.fullmatch(word)
+    number = number_prefix(word)
     if number is not None:
-        condition |= Q(_search_number__startswith=number.group(1))
+        condition |= Q(_search_number__startswith=number)
     return condition
 
 

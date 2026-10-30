@@ -1,0 +1,18 @@
+{% comment %}The list pages' search and filters (PLAN-014 A5; finance/templatetags/filters.py renders it with "filters_ui",
+the tag's arguments, and "filters_ui.fields", the page's own filter fields). The row: the wide search field (when the page
+has a search), the "Filters" button (hidden until finance/filters.js runs: without the script the panel is simply
+open), the "Sort: … ▾" menu (the .menu disclosure) where the page sorts. The panel #filters-panel: the page's fields,
+Clear (the page keeping only its search and sort) and Apply. The chips row: one link per active filter, the same page
+without that parameter. #filters-backdrop is the phone's sheet backdrop.{% endcomment %}<form method="get" action="{{ filters_ui.action }}" id="filters" class="filters" role="search" data-results="#results">
+  <div class="filters-row">
+    {% if filters_ui.search_name %}<input type="search" name="{{ filters_ui.search_name }}" value="{{ filters_ui.search_value|default:'' }}"{% if filters_ui.search_maxlength %} maxlength="{{ filters_ui.search_maxlength }}"{% endif %} placeholder="{{ filters_ui.search_placeholder }}" aria-label="{{ filters_ui.search_label }}" class="filters-search"{% if filters_ui.search_id %} id="{{ filters_ui.search_id }}"{% endif %}>{% endif %}
+    <button type="button" class="btn filters-toggle" id="filters-toggle" aria-expanded="false" aria-controls="filters-panel" hidden>Filters{% if filters_ui.active.count %} · {{ filters_ui.active.count }}{% endif %}</button>
+    {% if filters_ui.sort_options %}<details class="menu filters-sort" id="filters-sort"><summary class="btn btn-menu">Sort: {{ filters_ui.sort_current }} ▾</summary><ul>{% for option in filters_ui.sort_options %}<li><a href="{{ option.url }}"{% if option.current %} aria-current="true"{% endif %}>{{ option.label }}</a></li>{% endfor %}</ul></details>{% endif %}
+  </div>
+  <div class="filters-panel" id="filters-panel" role="group" aria-label="Filters">
+    <div class="filters-fields">{{ filters_ui.fields }}</div>
+    <div class="filters-footer"><a class="btn" id="filters-clear" href="{{ filters_ui.active.clear_url }}">Clear</a><button class="btn btn-dark" type="submit" id="filters-apply">Apply</button></div>
+  </div>
+  <div class="filters-chips" id="filters-chips">{% for chip in filters_ui.active.chips %}<a class="chip" href="{{ chip.remove_url }}" aria-label="Remove {{ chip.label }}: {{ chip.value_label }}">{{ chip.label }}: {{ chip.value_label }} <span aria-hidden="true">×</span></a>{% endfor %}</div>
+</form>
+<div class="filters-backdrop" id="filters-backdrop" hidden></div>

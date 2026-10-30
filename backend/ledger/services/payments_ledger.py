@@ -9,7 +9,11 @@ query string and an unusable value is ignored, never an error:
 - ``operator`` and ``store``: IDs, matched through the payment's charge (rent,
   insurance or one-off) or, for the operator, its invoice;
 - ``status``: ``pending``, ``settled``, ``returned`` or ``voided`` (payments that are not
-  refunds), or ``refunded`` (the refund rows).
+  refunds), or ``refunded`` (the refund rows);
+- ``q`` (PLAN-014 A5), cleaned by :func:`ledger.services.search.clean_query`: every word
+  matches the store's number (as a prefix, as the stores list matches it) or name, the
+  operator's display name (both through the paths above), or the payment's reference
+  (case-insensitive "contains"). It is never a chip.
 
 The totals of the filtered set keep ``settled`` (collected), ``pending``, ``returned``
 and ``refunded`` apart: a pending payment is never counted as collected. Deposits are
@@ -46,8 +50,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from django.db.models import Exists, F, OuterRef, Q, QuerySet, Sum
-from django.db.models.functions import Coalesce
+from django.db.models import CharField, Exists, F, OuterRef, Q, QuerySet, Sum
+from django.db.models.functions import Cast, Coalesce
 
 from ledger.models import (
     ZERO,
@@ -65,7 +69,7 @@ from ledger.models import (
     RentChargeStatus,
     Store,
 )
-from ledger.services import installments
+from ledger.services import installments, search
 from ledger.services.csv_export import CsvWriter
 from payments.models import ExternalRef
 from payments.operator_sync import PROVIDER_KEY
@@ -120,6 +124,8 @@ class PaymentFilter:
     operator: uuid.UUID | None = None
     store: uuid.UUID | None = None
     status: str = ""
+    #: The search's words (``q``), cleaned.
+    query: str = ""
 
     def as_query(self) -> dict[str, str]:
         """The filter as query-string values, empty ones left out."""
@@ -131,6 +137,7 @@ class PaymentFilter:
             "operator": str(self.operator) if self.operator else "",
             "store": str(self.store) if self.store else "",
             "status": self.status,
+            "q": self.query,
         }
         return {name: value for name, value in values.items() if value}
 
@@ -184,28 +191,74 @@ def parse_filter(params: Mapping[str, str]) -> PaymentFilter:
         operator=_uuid(params.get("operator")),
         store=_uuid(params.get("store")),
         status=status if status in dict(STATUS_CHOICES) else "",
+        query=search.clean_query(params.get("q")),
     )
+
+
+#: The paths from a payment to its store and to its operator (the filters' own).
+_STORE_PATHS = (
+    "rent_charge__lease__store",
+    "insurance_charge__lease__store",
+    "one_off_charge__lease__store",
+)
+_OPERATOR_PATHS = (
+    "rent_charge__lease__operator",
+    "insurance_charge__lease__operator",
+    "one_off_charge__operator",
+    "one_off_charge__lease__operator",
+    "invoice__operator",
+)
+
+
+def _searched(rows: QuerySet[Payment], query: str) -> QuerySet[Payment]:
+    """``rows`` narrowed to the payments matching every word of ``query`` (see the module
+    docstring); ``rows`` unchanged when the query has no word. Bound parameters only."""
+    found = search.words(query)
+    if not found:
+        return rows
+    rows = rows.annotate(
+        **{
+            f"_search_number_{index}": Cast(f"{path}__store_number", CharField())
+            for index, path in enumerate(_STORE_PATHS)
+        }
+    )
+    for word in found:
+        condition = Q(reference__icontains=word)
+        for path in _STORE_PATHS:
+            condition |= Q(**{f"{path}__external_label__icontains": word})
+        for path in _OPERATOR_PATHS:
+            condition |= Q(**{f"{path}__display_name__icontains": word})
+        number = search.number_prefix(word)
+        if number is not None:
+            for index in range(len(_STORE_PATHS)):
+                condition |= Q(**{f"_search_number_{index}__startswith": number})
+        rows = rows.filter(condition)
+    return rows
 
 
 def ledger_payments(selected: PaymentFilter) -> QuerySet[Payment]:
     """The filtered payments, latest first, with what the rows need already joined."""
-    rows = Payment.objects.select_related(
-        "invoice__operator",
-        "rent_charge__lease__store",
-        "rent_charge__lease__operator",
-        "insurance_charge__lease__store",
-        "insurance_charge__lease__operator",
-        "one_off_charge__fee_type",
-        "one_off_charge__lease__store",
-        "one_off_charge__lease__operator",
-        "one_off_charge__operator",
-        "one_off_charge__plan__rent_charge",
-        "one_off_charge__plan__one_off_charge__fee_type",
-        "recorded_by",
-    ).annotate(
-        on=Coalesce("settled_on", "initiated_on"),
-        has_note=Exists(ChargeNote.objects.filter(rent_charge=OuterRef("rent_charge")))
-        | Exists(ChargeNote.objects.filter(insurance_charge=OuterRef("insurance_charge"))),
+    rows = (
+        _searched(Payment.objects.all(), selected.query)
+        .select_related(
+            "invoice__operator",
+            "rent_charge__lease__store",
+            "rent_charge__lease__operator",
+            "insurance_charge__lease__store",
+            "insurance_charge__lease__operator",
+            "one_off_charge__fee_type",
+            "one_off_charge__lease__store",
+            "one_off_charge__lease__operator",
+            "one_off_charge__operator",
+            "one_off_charge__plan__rent_charge",
+            "one_off_charge__plan__one_off_charge__fee_type",
+            "recorded_by",
+        )
+        .annotate(
+            on=Coalesce("settled_on", "initiated_on"),
+            has_note=Exists(ChargeNote.objects.filter(rent_charge=OuterRef("rent_charge")))
+            | Exists(ChargeNote.objects.filter(insurance_charge=OuterRef("insurance_charge"))),
+        )
     )
     column = "initiated_on" if selected.date_by == DATE_BY_INITIATED else "settled_on"
     if selected.date_from is not None:

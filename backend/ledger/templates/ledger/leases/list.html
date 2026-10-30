@@ -1,18 +1,18 @@
 {% extends "finance/base.html" %}
-{% load components money icons %}
+{% load components money icons filters static %}
 {% load responsive %}
 {% block title %}Leases{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><h1>Leases</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} lease{{ page.paginator.count|pluralize }}</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:leases:export' %}{% if query %}?{{ query }}{% endif %}">Download spreadsheet</a>{% if can_create %}<a class="btn btn-primary" href="{% url 'ledger:leases:create' %}">{% icon "plus" 16 %} New lease</a>{% endif %}</div></div>{% endblock %}
 {% block content %}
   {% comment %}The list family (docs/qa/PLAN-012f-a-design-follow-up.md D3).{% endcomment %}
-  <div class="card filter-card"><form method="get" action="{% url 'ledger:leases:list' %}" class="actions list-filters" role="search" id="lease-filters">
+  <div class="card filter-card">{% filters active=active_filters search_name="q" search_value=search_query search_maxlength=100 search_placeholder="Store number or name, or operator" search_label="Search leases" %}
     <span class="filter-field"><label for="operator">Operator</label>
     <select name="operator" id="operator">
       <option value="">Any</option>
       {% for item in operators %}<option value="{{ item.pk }}"{% if item.pk == operator %} selected{% endif %}>{{ item.display_name }}</option>{% endfor %}
     </select></span>
-    <button class="btn btn-dark" type="submit">Filter</button>
-  </form></div>
+  {% endfilters %}</div>
+  <div id="results">
   <div class="card table-card list-card">
   {% responsive_table %}
   <table id="leases">
@@ -37,4 +37,6 @@
   {% endresponsive_table %}
   {% include "ledger/_list_footer.html" with page=page pager_query=query %}
   </div>
+  </div>
 {% endblock %}
+{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script>{% endblock %}

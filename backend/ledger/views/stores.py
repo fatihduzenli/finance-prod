@@ -78,6 +78,7 @@ from ledger.services import (
     csv_export,
     invoice_builder,
     lease_end,
+    list_filters,
     payments_entry,
     rent_run,
     search,
@@ -138,7 +139,21 @@ def _list_context(request: HttpRequest) -> dict[str, Any]:
     listed = service.store_list(request.GET, timezone.localdate())
     filters = listed.filters
     page = Paginator(listed.rows, PAGE_SIZE).get_page(request.GET.get("page"))
+    # PLAN-014 A5: the Filters button's count, the chips and Clear; the Sort menu.
+    active_filters = list_filters.active(
+        request,
+        {
+            "state": ("State", dict(listed.states)),
+            "status": ("Status", dict(service.LIST_STATUSES)),
+            "balance": ("Balance", dict(service.LIST_BALANCES)),
+        },
+        accepted=filters.as_query(),
+    )
     return {
+        "active_filters": active_filters,
+        "sort_options": list_filters.sort_menu(
+            request, active_filters.params, service.LIST_SORTS, filters.sort
+        ),
         "page": page,
         "listed": listed,
         "filters": filters,

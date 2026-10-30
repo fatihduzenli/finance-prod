@@ -22,7 +22,6 @@ from django.test import Client
 from django.test.utils import CaptureQueriesContext
 
 from accounts.roles import Role
-from finance.templatetags.components import progress_widths
 from ledger.models import (
     FeeType,
     Lease,
@@ -138,9 +137,9 @@ def test_an_empty_dashboard_has_its_dashes_and_sentences() -> None:
     assert '<span class="kpi-note">—</span>' in html  # nothing billed this month
     assert '<span class="kpi-note">0 debits</span>' in html
     # PLAN-012f-b E-4: the empty cards are the empty state (finance/_empty_state.html).
-    assert empty_title(html, "collection-none") == "No rent billed for Oct 2026 yet."
-    assert 'class="progress' not in html
-    assert empty_title(html, "coming-up-none") == "Nothing scheduled."
+    # PLAN-014 A2: the Collection and Coming up cards are gone.
+    assert 'id="collection-none"' not in html and 'class="progress' not in html
+    assert 'id="coming-up-none"' not in html
     assert empty_title(html, "recent-payments-none") == "No settled payments yet."
     assert 'id="attention-none"' in html
 
@@ -161,7 +160,8 @@ def test_the_header_has_the_long_date_and_new_invoice_for_billing_only() -> None
     assert 'id="new-invoice"' not in viewer
 
 
-def test_the_collection_card_shows_the_share_and_four_segments() -> None:
+def test_the_month_s_collection_has_the_share() -> None:
+    # PLAN-014 A2: the card is gone; the share still feeds the "Collected this month" figure.
     seeded()
     collection = blocks.collection_progress(TODAY)
     assert (collection.billed, collection.collected, collection.percent) == (
@@ -169,25 +169,9 @@ def test_the_collection_card_shows_the_share_and_four_segments() -> None:
         D("1400.00"),
         46,
     )
-    assert collection.segments == [
-        ("paid", D("1000.00")),
-        ("pending", D("500.00")),
-        ("partial", D("800.00")),
-        ("unpaid", D("700.00")),
-    ]
-    widths = [width for _, _, width in progress_widths(collection.segments)]
-    assert sum(widths) <= 100
     html = page(client_for(Role.VIEWER)[0], "/")
-    card = section(html, 'id="collection-card"', "</section>")
-    assert '<h2 id="collection-heading">Oct 2026 collection</h2>' in card
-    assert 'id="collection-percent">46%</span>' in card
-    assert 'id="collection-billed">of $3,000.00</span>' in card
-    assert re.findall(r'class="progress-segment progress-([a-z]+)"', card) == [
-        "paid",
-        "pending",
-        "partial",
-        "unpaid",
-    ]
+    assert "46% of Oct 2026 rent" in kpi(html, "figure-paid")
+    assert 'id="collection-card"' not in html
 
 
 def test_more_collected_than_billed_is_capped_at_one_hundred() -> None:
@@ -231,41 +215,6 @@ def test_the_attention_rows_have_one_button_each_for_billing_and_none_for_a_view
     assert 'class="btn' not in table and "<form" not in table
     # The viewer follows the item's page from the line under the badge.
     assert re.search(r'<span class="cell-subline attention-details"><a href="/charges/', table)
-
-
-def test_the_coming_up_items_are_in_date_order_with_their_chips() -> None:
-    seeded()
-    insured = a_store("2399", 2399)
-    insured.open_date = date(2025, 10, 8)
-    insured.needs_open_date = False
-    insured.save(update_fields=["open_date", "needs_open_date"])
-    a_lease(insured, an_operator("Insured Co"), debit_day=12)
-    items = blocks.coming_up(blocks_leases(), TODAY, blocks.pending_debits())
-    assert [(item.on, item.title, item.note) for item in items] == [
-        (date(2026, 10, 8), "Insurance renewals", "1 store"),
-        (date(2026, 10, 9), "ACH settlement", "1 debit · $500.00"),
-        (date(2026, 10, 9), "Rent day", "1 store"),  # the waived charge's lease, on the 9th
-    ]
-    html = page(client_for(Role.VIEWER)[0], "/")
-    card = section(html, 'id="coming-up"', "</section>")
-    assert re.findall(r'<time class="date-chip" datetime="([0-9-]+)">', card) == [
-        "2026-10-08",
-        "2026-10-09",
-        "2026-10-09",
-    ]
-    assert '<span class="coming-title">ACH settlement</span>' in card
-
-
-def blocks_leases() -> list[Lease]:
-    from ledger.services import attention
-
-    return list(attention.dashboard_leases())
-
-
-def test_the_next_rent_day_moves_a_31st_to_a_short_month_s_last_day() -> None:
-    a_lease(debit_day=31)
-    item = blocks.next_rent_day(blocks_leases(), date(2026, 11, 2))
-    assert item is not None and item.on == date(2026, 11, 30)
 
 
 def test_the_five_recent_payments_say_today_and_yesterday() -> None:
@@ -317,11 +266,6 @@ def test_each_new_block_is_one_query() -> None:
         with CaptureQueriesContext(connection) as captured:
             build()
         assert len(captured.captured_queries) == 1
-    leases = blocks_leases()
-    debits = blocks.pending_debits()
-    with CaptureQueriesContext(connection) as captured:
-        blocks.coming_up(leases, TODAY, debits)
-    assert len(captured.captured_queries) == 0
 
 
 def test_business_days_skip_the_weekend() -> None:
@@ -489,7 +433,7 @@ def test_the_grid_has_its_header_filter_card_legend_and_totals() -> None:
         'name="to"',
         'id="status"',
         'id="channel"',
-        ">Show</button>",
+        ">Apply</button>",  # PLAN-014 A5: the shared filters form's Apply
     ):
         assert marker in card, marker
     legend = section(html, '<p class="legend muted">', "</p>")
@@ -509,9 +453,10 @@ def test_the_grid_has_its_header_filter_card_legend_and_totals() -> None:
 
 def test_every_grid_filter_label_wraps_with_its_control() -> None:
     """Fable's review of Batch C: a label and its control are one .filter-field, so a wrap
-    moves them together; Show stays beside the last pair."""
+    moves them together. PLAN-014 A5: the fields are the shared filters panel's; Apply is in
+    its footer, no longer beside the last pair."""
     html = page(client_for(Role.VIEWER)[0], "/grid/")
-    form = section(html, 'id="grid-filters"', "</form>")
+    form = section(html, 'id="filters-panel"', "</form>")
     fields = re.findall(
         r'<span class="filter-field">(.*?)</span>\s*(?=<span class="filter|</div>)', form, re.S
     )
@@ -520,7 +465,7 @@ def test_every_grid_filter_label_wraps_with_its_control() -> None:
     assert len(fields) == len(labels)
     for name, field in zip(labels, fields, strict=True):
         assert f'<label for="{name}"' in field and f'id="{name}"' in field, name
-    assert '<button class="btn" type="submit">Show</button>' in fields[-1]
+    assert '<button class="btn btn-dark" type="submit" id="filters-apply">Apply</button>' in form
     from tests.test_plan012f_components import rule
 
     pair = rule(".filter-field")

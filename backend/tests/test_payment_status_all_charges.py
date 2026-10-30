@@ -47,12 +47,18 @@ TODAY = date(2026, 10, 6)
 OCT = date(2026, 10, 1)
 SEP = date(2026, 9, 1)
 NOV = date(2026, 11, 1)
-THIS_MONTH = blocks.Range("this", "This month", OCT, OCT)
+#: PLAN-014 A3: the card reads its own period (a week or a month), no longer the Cashflow range.
+THIS_MONTH = blocks.period_for(blocks.PERIOD_MONTHLY, OCT, TODAY)
 LAST_WEEK = date(2026, 9, 29)
 NEXT_WEEK = date(2026, 10, 13)
 
 
-def card(selected: blocks.Range = THIS_MONTH) -> blocks.PaymentStatusCard:
+def span(start: date, end: date) -> blocks.Period:
+    """A period over several months, for the selection rule (the pill offers weeks and months)."""
+    return blocks.Period(blocks.PERIOD_MONTHLY, start, end, "", start, end)
+
+
+def card(selected: blocks.Period = THIS_MONTH) -> blocks.PaymentStatusCard:
     return blocks.payment_status(selected, TODAY)
 
 
@@ -94,7 +100,7 @@ def test_a_fee_due_before_today_unpaid_is_overdue_by_its_price() -> None:
 def test_a_fee_due_last_week_is_overdue_in_the_range_that_holds_its_due_date() -> None:
     a_fee("150.00", LAST_WEEK)
     assert boxes(card()) == EMPTY  # due in September: not in October's card
-    wider = card(blocks.Range("3m", "Last 3 months", date(2026, 8, 1), OCT))
+    wider = card(span(date(2026, 8, 1), date(2026, 10, 31)))
     assert boxes(wider)["overdue"] == (1, D("150.00"))
 
 
@@ -382,7 +388,7 @@ def test_the_range_holds_its_first_and_last_day_and_nothing_beyond() -> None:
     result = card()
     assert boxes(result)["overdue"] == (1, D("20.00"))
     assert boxes(result)["upcoming"] == (1, D("30.00"))
-    custom = card(blocks.Range("custom", "Sep 2026 to Nov 2026", SEP, NOV))
+    custom = card(span(SEP, date(2026, 11, 30)))
     assert boxes(custom)["overdue"] == (2, D("30.00"))
     assert boxes(custom)["upcoming"] == (2, D("70.00"))
 

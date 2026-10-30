@@ -1,5 +1,6 @@
 """Sign-in bookkeeping (no IP address is stored, personal data; user agent only) and the
-user's display preference (PLAN-012g A2: the theme, Light, Dark or System)."""
+user's display preference (PLAN-012g A2: the theme, Light, Dark or System; PLAN-014 A3: the
+Payment status card's period)."""
 
 from __future__ import annotations
 
@@ -35,14 +36,25 @@ class Theme(models.TextChoices):
     SYSTEM = "system", "System"
 
 
+class PaymentStatusPeriod(models.TextChoices):
+    """The dashboard Payment status card's period (PLAN-014 A3): the calendar week, Sunday to
+    Saturday, or the calendar month."""
+
+    WEEKLY = "weekly", "Weekly"
+    MONTHLY = "monthly", "Monthly"
+
+
 class UserPreference(models.Model):
     """One row per user who has chosen a display preference; no row reads as the defaults
-    (:func:`accounts.themes.theme_for`)."""
+    (:func:`accounts.themes.theme_for`, :func:`accounts.themes.payment_status_period_for`)."""
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="preference"
     )
     theme = models.CharField(max_length=6, choices=Theme.choices, default=Theme.SYSTEM)
+    payment_status_period = models.CharField(
+        max_length=7, choices=PaymentStatusPeriod.choices, default=PaymentStatusPeriod.WEEKLY
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:

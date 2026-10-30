@@ -360,6 +360,7 @@ NOT_PAGES: dict[str, str] = {
     "finance:service_worker": "the service worker (JavaScript)",
     "finance:feed_create": POST_ONLY,
     "finance:theme": POST_ONLY,  # the appearance choice (PLAN-012g A3)
+    "finance:payment_status_period": POST_ONLY,  # the Payment status card's period (PLAN-014 A3)
     "finance:feed_revoke": POST_ONLY,
     "ledger:calendar:feed": "the public calendar feed (iCalendar; its token is the credential)",
     "ledger:calendar:delete": POST_ONLY,

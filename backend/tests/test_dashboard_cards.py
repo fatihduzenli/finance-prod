@@ -273,9 +273,18 @@ def status_month() -> None:
     a_rent_charge(a_lease(), OCT, RentChargeStatus.WAIVED, "800.00", day=8)
 
 
+#: PLAN-014 A3: the card reads its own period, no longer the Cashflow range.
+OCTOBER = blocks.period_for(blocks.PERIOD_MONTHLY, OCT, TODAY)
+
+
+def span(start: date, end: date) -> blocks.Period:
+    """A period over several months, for the selection rule (the pill offers weeks and months)."""
+    return blocks.Period(blocks.PERIOD_MONTHLY, start, end, "", start, end)
+
+
 def test_payment_status_counts_a_seeded_month() -> None:
     status_month()
-    card = blocks.payment_status(blocks.Range("this", "This month", OCT, OCT), TODAY)
+    card = blocks.payment_status(OCTOBER, TODAY)
     assert (card.overdue.count, card.overdue.amount) == (1, D("1000.00"))
     assert (card.paid.count, card.paid.amount) == (1, D("1500.00"))
     assert (card.upcoming.count, card.upcoming.amount) == (1, D("1200.00"))
@@ -287,7 +296,7 @@ def test_payment_status_counts_a_seeded_month() -> None:
 def test_partly_paid_is_overdue_by_its_balance_when_past_due_else_pending() -> None:
     a_rent_charge(a_lease(), OCT, RentChargeStatus.PARTIAL, "1000.00", "400.00", day=2)
     a_rent_charge(a_lease(), OCT, RentChargeStatus.PARTIAL, "1000.00", "250.00", day=25)
-    card = blocks.payment_status(blocks.Range("this", "This month", OCT, OCT), TODAY)
+    card = blocks.payment_status(OCTOBER, TODAY)
     assert (card.overdue.count, card.overdue.amount) == (1, D("600.00"))
     assert card.upcoming.count == 0 and card.pending == 1
 
@@ -295,10 +304,10 @@ def test_partly_paid_is_overdue_by_its_balance_when_past_due_else_pending() -> N
 def test_a_charge_due_today_is_upcoming_and_outside_the_range_is_not_counted() -> None:
     a_rent_charge(a_lease(), OCT, RentChargeStatus.DUE, "700.00", day=6)
     a_rent_charge(a_lease(), SEP, RentChargeStatus.UNPAID, "999.00", day=5)
-    card = blocks.payment_status(blocks.Range("this", "This month", OCT, OCT), TODAY)
+    card = blocks.payment_status(OCTOBER, TODAY)
     assert (card.upcoming.count, card.upcoming.amount) == (1, D("700.00"))
     assert card.overdue.count == 0
-    wider = blocks.payment_status(blocks.Range("3m", "Last 3 months", AUG, OCT), TODAY)
+    wider = blocks.payment_status(span(AUG, date(2026, 10, 31)), TODAY)
     assert (wider.overdue.count, wider.overdue.amount) == (1, D("999.00"))
 
 
@@ -327,12 +336,12 @@ def test_a_charge_paid_through_any_path_counts_as_paid() -> None:
     # Paid by its installment plan: the debits are payments on the installment one-off
     # charges, none on the rent charge itself.
     a_rent_charge(a_lease(), OCT, RentChargeStatus.PAID, "1200.00", "1200.00", day=3)
-    card = blocks.payment_status(blocks.Range("this", "This month", OCT, OCT), TODAY)
+    card = blocks.payment_status(OCTOBER, TODAY)
     assert (card.paid.count, card.paid.amount) == (3, D("2000.00"))
     assert card.total == D("2000.00")
     # The range is by due date: a charge due in September is in no box of October.
     a_rent_charge(a_lease(), SEP, RentChargeStatus.PAID, "700.00", "700.00", day=1)
-    again = blocks.payment_status(blocks.Range("this", "This month", OCT, OCT), TODAY)
+    again = blocks.payment_status(OCTOBER, TODAY)
     assert again.paid.count == 3
 
 
@@ -538,8 +547,6 @@ def test_the_cards_are_in_the_owners_order(today: date) -> None:
         'id="mini-calendar"',
         'id="recent-payments"',
         'id="payment-status"',
-        'id="coming-up"',
-        'id="collection-card"',
         'id="today-run"',
         'id="failed-attempts"',
         'id="not-sent-card"',
@@ -547,7 +554,7 @@ def test_the_cards_are_in_the_owners_order(today: date) -> None:
     ]
     positions = [html.index(marker) for marker in order]
     assert positions == sorted(positions)
-    assert html.count('class="dashboard-row-thirds"') == 3  # PLAN-012g C1
+    assert html.count('class="dashboard-row-thirds"') == 2  # PLAN-014 A2 (was 3, PLAN-012g C1)
     assert 'src="/static/ledger/dashboard.js"' in html
 
 
@@ -577,12 +584,13 @@ def test_a_viewer_reads_every_card_and_nothing_is_written(today: date) -> None:
     assert '<option value="3m" selected>Last 3 months</option>' in form
 
 
-def test_an_unusable_range_says_so_once_and_computes_neither_card(today: date) -> None:
+def test_an_unusable_range_says_so_once_and_computes_no_cashflow(today: date) -> None:
     client, _ = client_for(Role.VIEWER)
     html = page(client, range="custom", **{"from": "2026-09", "to": "2026-05"})
     assert html.count(blocks.RANGE_MESSAGE) == 1
-    assert 'class="bars-chart"' not in html and 'class="donut"' not in html
-    assert 'id="payment-status-none"' in html
+    assert 'class="bars-chart"' not in html
+    # PLAN-014 A3: the Payment status card has its own period; the range does not feed it.
+    assert 'class="donut"' in html and 'id="payment-status-none"' not in html
     assert 'class="range-form is-custom"' in html
     assert '<option value="2026-09" selected>' in html  # the months asked for stay chosen
 

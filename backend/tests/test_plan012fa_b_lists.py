@@ -140,6 +140,12 @@ def test_the_pager_at_page_two_of_three(viewer: Client) -> None:
 # --- The table -----------------------------------------------------------------------------
 
 
+def balance(row: str) -> str:
+    match = re.search(r'<td class="store-balance"[^>]*>(.*?)</td>', row, re.S)
+    assert match is not None
+    return match.group(1)
+
+
 def test_each_balance_family_and_status_badge(viewer: Client) -> None:
     world()
     found = rows(page(viewer))
@@ -147,8 +153,10 @@ def test_each_balance_family_and_status_badge(viewer: Client) -> None:
     assert "badge-paid" in found["Paid"] and "Paid up" in found["Paid"]
     assert "badge-overdue" in found["Late"] and "$2,100.00 overdue" in found["Late"]
     assert "badge-partial" in found["Part"] and "$658.06 partly paid" in found["Part"]
-    assert "badge-neutral" in found["Ended"] and "Vacant 31 days" in found["Ended"]
-    assert "badge-neutral" in found["Empty"] and "> Vacant</span>" in found["Empty"]
+    # PLAN-014 A4: without a lease the Balance is "—" and the Status says how long it is vacant.
+    assert "badge" not in balance(found["Ended"]) and "—" in balance(found["Ended"])
+    assert "badge-neutral" in found["Ended"] and "Vacant · 31 days" in found["Ended"]
+    assert "badge-neutral" in found["Empty"] and "Vacant · never leased" in found["Empty"]
 
     def status(name: str) -> str:
         match = re.search(r'<td class="store-status"[^>]*>(.*?)</td>', found[name], re.S)
@@ -227,11 +235,14 @@ def test_an_unknown_value_is_the_default_and_never_echoed(
     html = page(viewer, **{name: value})
     assert order(html) == ["Owing", "Paid", "Late", "Part", "Ended", "Empty", "Shut"]
     assert "filtered from" not in html
-    start = html.index('id="store-filters"')
+    # PLAN-014 A5: the shared filters form; the Sort is its menu, no longer a select.
+    start = html.index('id="filters"')
     form = html[start : html.index("</form>", start)]
     assert f'value="{value}"' not in form and f">{value}<" not in html
     selected = re.findall(r'<option value="([^"]*)" selected>', form)
-    assert selected == ["", "", "number"]  # Status All, Balance Any, Sort Store number
+    assert selected == ["", ""]  # Status All, Balance Any
+    assert "Sort: Store number ▾" in form and 'name="sort"' not in form
+    assert 'class="chip"' not in form  # an unknown value filters nothing: no chip
 
 
 def test_the_chosen_filters_are_selected_and_kept_by_the_pager(viewer: Client) -> None:
@@ -240,10 +251,13 @@ def test_the_chosen_filters_are_selected_and_kept_by_the_pager(viewer: Client) -
         lease = a_lease(store, an_operator(f"Late Op {number}"))
         a_rent_charge(lease, date(2026, 9, 1), RentChargeStatus.UNPAID, "100.00", day=1)
     html = page(viewer, state="TX", status="active", balance="overdue", sort="balance")
-    start = html.index('id="store-filters"')
+    start = html.index('id="filters"')
     form = html[start : html.index("</form>", start)]
-    for value in ("TX", "active", "overdue", "balance"):
+    for value in ("TX", "active", "overdue"):
         assert f'<option value="{value}" selected>' in form
+    # PLAN-014 A5: the sort is the menu's current option, kept by Apply in a hidden field.
+    assert "Sort: Balance ▾" in form and '<input type="hidden" name="sort" value="balance">' in form
+    assert ">Filters · 3</button>" in form
     assert (
         'href="?state=TX&amp;status=active&amp;balance=overdue&amp;sort=balance&amp;page=2"' in html
     )
@@ -332,7 +346,10 @@ def test_the_family_structure_of_each_paged_list(path: str, table_id: str) -> No
     assert re.search(r'<div class="page-title"><h1>[^<]+</h1><span class="list-counts"', header)
     assert 'id="export-csv"' in header
     assert html.count('class="card filter-card"') == 1
-    assert 'class="btn btn-dark" type="submit"' in html
+    # PLAN-014 A5: the shared search and filters form, its Apply in the panel.
+    assert '<form method="get" action="' + path + '" id="filters"' in html
+    assert '<button class="btn btn-dark" type="submit" id="filters-apply">Apply</button>' in html
+    assert html.index('<div id="results">') < html.index(f'<table id="{table_id}"')
     cells = _first_cells(html, table_id)
     assert cells and all('class="cell-title"' in cell for cell in cells), path
     if path != "/operators/":  # an operator without a legal name has no subline

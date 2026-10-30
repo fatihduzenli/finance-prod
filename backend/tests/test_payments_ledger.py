@@ -218,23 +218,11 @@ def test_unusable_filter_values_are_ignored(book: dict[str, Any], params: dict[s
 def test_every_role_reads_the_ledger_and_the_totals(book: dict[str, Any], role: Role) -> None:
     client, _ = client_for(role)
     page = client.get(LIST).content.decode()
-    assert (
-        '<td id="total-settled" class="money" data-role="meta" data-label="Settled (collected)">'
-        "$1,900.00</td>" in page
-    )
-    assert (
-        '<td id="total-pending" class="money" data-role="meta" '
-        'data-label="Pending (not collected yet)">'
-        "$700.00</td>" in page
-    )
-    assert (
-        '<td id="total-returned" class="money" data-role="meta" data-label="Returned">$300.00</td>'
-        in page
-    )
-    assert (
-        '<td id="total-refunded" class="money" data-role="meta" data-label="Refunded">$200.00</td>'
-        in page
-    )
+    # PLAN-014 A6: the totals are five tiles, the figures keep their ids.
+    assert '<span class="tile-value" id="total-settled">$1,900.00</span>' in page
+    assert '<span class="tile-value" id="total-pending">$700.00</span>' in page
+    assert '<span class="tile-value" id="total-returned">$300.00</span>' in page
+    assert '<span class="tile-value" id="total-refunded">$200.00</span>' in page
     assert "txn-…5678" in page and TRANSACTION not in page
 
 
@@ -265,7 +253,7 @@ def test_the_ledger_pages_25_rows_and_keeps_the_filter() -> None:
         payment(charge, "1.00", method=PaymentMethod.WIRE, note="Wire.")
     client, _ = client_for(Role.VIEWER)
     first = client.get(LIST, {"method": "wire"}).content.decode()
-    assert first.count("<tr>") == 2 + 1 + 25  # totals (head and body), list head, 25 rows
+    assert first.count("<tr>") == 1 + 25  # list head, 25 rows (PLAN-014 A6: totals are tiles)
     assert '<span class="pager-count">1–25 of 26</span>' in first  # PLAN-012f-a D3 footer
     assert "?method=wire&amp;page=2" in first
 

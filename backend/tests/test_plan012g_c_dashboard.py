@@ -53,7 +53,8 @@ def card_classes(html: str, element_id: str) -> str:
 # --- Order and ranges -----------------------------------------------------------------------------
 
 
-def test_the_rows_are_the_spec_s_order_with_three_thirds_rows() -> None:
+def test_the_rows_are_the_spec_s_order_with_two_thirds_rows() -> None:
+    # PLAN-014 A2: the Coming up and Collection row is gone (10 ids, two thirds rows).
     html = page(client_for(Role.BILLING)[0])
     order = [
         'id="figures-card"',
@@ -62,8 +63,6 @@ def test_the_rows_are_the_spec_s_order_with_three_thirds_rows() -> None:
         'id="mini-calendar"',
         'id="recent-payments"',
         'id="payment-status"',
-        'id="coming-up"',
-        'id="collection-card"',
         'id="today-run"',
         'id="failed-attempts"',
         'id="not-sent-card"',
@@ -71,7 +70,8 @@ def test_the_rows_are_the_spec_s_order_with_three_thirds_rows() -> None:
     ]
     positions = [html.index(marker) for marker in order]
     assert positions == sorted(positions)
-    assert html.count('class="dashboard-row-thirds"') == 3
+    assert html.count('class="dashboard-row-thirds"') == 2
+    assert 'id="coming-up"' not in html and 'id="collection-card"' not in html
 
 
 def test_the_six_month_preset_exists_and_twelve_is_the_default() -> None:

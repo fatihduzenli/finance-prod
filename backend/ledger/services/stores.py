@@ -458,18 +458,24 @@ def _store_balances(today: date) -> dict[uuid.UUID, tuple[Decimal, bool, bool]]:
 
 
 def _vacant_label(last_ended: date | None, today: date) -> str:
-    if last_ended is None or last_ended >= today:
-        return "Vacant"
-    days = (today - last_ended).days
-    return f"Vacant {days} day{'s' if days != 1 else ''}"
+    """The Status of a store without a lease (PLAN-014 A4): "Vacant · 23 days" since its last
+    lease ended, or "Vacant · never leased" when it never had one (a lease not ended before
+    today is the store's current lease, so a vacant store's leases all ended)."""
+    if last_ended is None:
+        return "Vacant · never leased"
+    days = max((today - last_ended).days, 0)
+    return f"Vacant · {days} day{'s' if days != 1 else ''}"
 
 
-def _balance(
-    owed: tuple[Decimal, bool, bool] | None, has_lease: bool, last_ended: date | None, today: date
-) -> ListBalance:
+def _balance(owed: tuple[Decimal, bool, bool] | None, has_lease: bool) -> ListBalance:
     """The Balance badge: an open balance by its worst state (overdue, partly paid, unpaid);
-    nothing owed reads "Paid up" with a lease and "Vacant" (with its days) without one."""
+    nothing owed reads "Paid up" with a lease. Without a lease (PLAN-014 A4) the previous
+    lease's leftover reads "$1,200.00 unpaid" and nothing owed has no badge (the page's "—")."""
     amount, overdue, partial = owed or (Decimal("0.00"), False, False)
+    if not has_lease:
+        if amount > 0:
+            return ListBalance(amount, overdue, f"{format_amount(amount)} unpaid", "due")
+        return ListBalance(amount, False, "", "")
     if amount > 0:
         text = format_amount(amount)
         if overdue:
@@ -477,17 +483,18 @@ def _balance(
         if partial:
             return ListBalance(amount, False, f"{text} partly paid", "partial")
         return ListBalance(amount, False, f"{text} unpaid", "due")
-    if has_lease:
-        return ListBalance(amount, False, "Paid up", "paid")
-    return ListBalance(amount, False, _vacant_label(last_ended, today), "neutral")
+    return ListBalance(amount, False, "Paid up", "paid")
 
 
-def _status(store: Store, has_lease: bool) -> tuple[str, str, str]:
-    """(key, label, badge value) of the Status column."""
+def _status(
+    store: Store, has_lease: bool, last_ended: date | None, today: date
+) -> tuple[str, str, str]:
+    """(key, label, badge value) of the Status column; ``last_ended`` is the day the store's
+    last lease ended (the list's ``list_last_ended``), for a vacant store's label."""
     if store.status in CLOSED_STATUSES:
         return LIST_STATUS_CLOSED, store.get_status_display(), status_badge(store)
     if not has_lease:
-        return LIST_STATUS_VACANT, "Vacant", "neutral"
+        return LIST_STATUS_VACANT, _vacant_label(last_ended, today), "neutral"
     if store.status == StoreStatus.ACTIVE:
         return LIST_STATUS_ACTIVE, "Active", status_badge(store)
     return store.status, store.get_status_display(), "neutral"
@@ -495,7 +502,7 @@ def _status(store: Store, has_lease: bool) -> tuple[str, str, str]:
 
 def _row(store: Any, owed: tuple[Decimal, bool, bool] | None, today: date) -> ListRow:
     has_lease = store.list_lease is not None
-    key, label, value = _status(store, has_lease)
+    key, label, value = _status(store, has_lease, store.list_last_ended, today)
     channel = store.list_channel or ""
     return ListRow(
         store=store,
@@ -510,7 +517,7 @@ def _row(store: Any, owed: tuple[Decimal, bool, bool] | None, today: date) -> Li
         status_key=key,
         status_label=label,
         status_value=value,
-        balance=_balance(owed, has_lease, store.list_last_ended, today),
+        balance=_balance(owed, has_lease),
     )
 
 

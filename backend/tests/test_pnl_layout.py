@@ -65,7 +65,7 @@ def text_of(fragment: str) -> str:
 
 def test_the_header_has_the_breadcrumb_print_and_the_spreadsheet() -> None:
     page = page_of()
-    header = between(page, '<div class="page-header">', 'id="pnl-filters"')
+    header = between(page, '<div class="page-header">', 'class="card filter-card pnl-filters"')
     assert '<nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">' in header
     assert '<a href="/reports/">Reports</a>' in header
     assert (
@@ -80,10 +80,9 @@ def test_the_header_has_the_breadcrumb_print_and_the_spreadsheet() -> None:
     assert "btn-primary" not in header
 
 
-def test_the_filter_card_has_the_months_the_grouping_the_rows_box_and_a_navy_show() -> None:
-    form = between(
-        page_of(), '<form method="get" action="/reports/pnl/" id="pnl-filters"', "</form>"
-    )
+def test_the_filter_card_has_the_months_the_grouping_the_rows_box_and_a_navy_apply() -> None:
+    # PLAN-014 A5: the shared filters form; its navy Apply replaces Show.
+    form = between(page_of(), '<form method="get" action="/reports/pnl/" id="filters"', "</form>")
     for name in ("from", "to", "group"):
         assert f'<select name="{name}" id="{name}">' in form, name
     assert re.findall(r'<option value="([a-z]+)"', between(form, 'id="group"', "</select>")) == [
@@ -93,7 +92,7 @@ def test_the_filter_card_has_the_months_the_grouping_the_rows_box_and_a_navy_sho
     ]
     assert 'name="state"' not in form and ">State<" not in form
     assert 'type="checkbox" name="detail" value="1" id="detail"' in form
-    assert '<button class="btn btn-dark pnl-show" type="submit">Show</button>' in form
+    assert '<button class="btn btn-dark" type="submit" id="filters-apply">Apply</button>' in form
     # The old row of links is gone: the spreadsheet is in the header, the rows are the box.
     assert 'id="toggle-detail"' not in page_of()
 

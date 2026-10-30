@@ -1,24 +1,25 @@
 {% load charts money %}
-{% comment %}The Payment status card (PLAN-012f-b D5; PLAN-012g C4; DESIGN-SPEC §4a, §7.5): the range's charges, rent and
-fees (D20: installments, autopay-plan occurrences and re-debits count through their parent or source), as a
-donut with their count and the word "charges" in the middle ({% donut %}, finance/templatetags/charts.py),
-the range's label muted at the right of the title, and three boxes, Overdue, Paid and Upcoming, each with a
-3 px top border in its colour, its count and amount; "+ n pending · rent and fees" under them for the charges
-the donut leaves out (pending, and partly paid not yet due). On a phone the donut is at the left and the same
-boxes a list at the right, a dot in place of the border (app.css). The range is the Cashflow card's.{% endcomment %}
+{% comment %}The Payment status card (PLAN-012f-b D5; PLAN-012g C4; PLAN-014 A3; DESIGN-SPEC §4a, §7.5): the charges due in the
+card's own period, rent and fees (D20: installments, autopay-plan occurrences and re-debits count through their parent
+or source), as a donut with their count and the word "charges" in the middle ({% donut %},
+finance/templatetags/charts.py), and three boxes, Overdue, Paid and Upcoming, each with a 3 px top border in its
+colour, its count and amount; "+ n pending · rent and fees" under them for the charges the donut leaves out (pending,
+and partly paid not yet due). The title row: "Payment status" and, at the right, the Weekly | Monthly pill (the
+segmented control; each segment a small form posting to finance:payment_status_period, which saves the choice and
+sends the browser back to this page with ?ps=<kind>, so a GET never writes; aria-pressed on the current one). Under
+it ‹ the period's label › (?ps=<kind>&ps_at=<a day of the previous or next period>). Every link keeps the page's other
+query parameters (ledger.views.dashboard._period_links). On a phone the donut is at the left and the same boxes a
+list at the right, a dot in place of the border (app.css).{% endcomment %}
 <section class="card payment-status" id="payment-status" aria-labelledby="payment-status-heading">
-  <div class="card-header"><h2 id="payment-status-heading">Payment status</h2>{% if payment_status %}<span class="muted status-range" id="payment-status-range">{{ payment_status.range.label }}</span>{% endif %}</div>
-  {% if payment_status %}
-    <div class="status-layout">
-      {% donut payment_status.parts payment_status.total payment_status.count %}
-      <div class="status-detail">
-        <ul class="status-boxes">
-          {% for part in payment_status.parts %}<li class="status-box status-{{ part.key }}" id="status-{{ part.key }}"><span class="status-box-label">{{ part.label }}</span><span class="status-box-count">{{ part.count }}</span><span class="status-box-amount">{{ part.amount|money }}</span></li>{% endfor %}
-        </ul>
-        {% if payment_status.pending %}<p class="muted status-pending" id="payment-status-pending">+ {{ payment_status.pending }} pending · rent and fees</p>{% endif %}
-      </div>
+  <div class="card-header"><h2 id="payment-status-heading">Payment status</h2><div class="segmented period-switch" id="payment-status-switch" role="group" aria-label="Period">{% for kind, label, query, pressed in period_links.segments %}<form method="post" action="{% url 'finance:payment_status_period' %}">{% csrf_token %}<input type="hidden" name="next" value="{% url 'ledger:home' %}{{ query }}"><button type="submit" name="period" value="{{ kind }}" aria-pressed="{% if pressed %}true{% else %}false{% endif %}">{{ label }}</button></form>{% endfor %}</div></div>
+  <div class="status-period" id="payment-status-period"><a class="btn btn-sm mini-step" id="payment-status-previous" href="{{ period_links.previous }}" aria-label="Previous {% if period.kind == 'monthly' %}month{% else %}week{% endif %}">‹</a><span class="status-period-label" id="payment-status-label">{{ period.label }}</span><a class="btn btn-sm mini-step" id="payment-status-next" href="{{ period_links.next }}" aria-label="Next {% if period.kind == 'monthly' %}month{% else %}week{% endif %}">›</a></div>
+  <div class="status-layout">
+    {% donut payment_status.parts payment_status.total payment_status.count %}
+    <div class="status-detail">
+      <ul class="status-boxes">
+        {% for part in payment_status.parts %}<li class="status-box status-{{ part.key }}" id="status-{{ part.key }}"><span class="status-box-label">{{ part.label }}</span><span class="status-box-count">{{ part.count }}</span><span class="status-box-amount">{{ part.amount|money }}</span></li>{% endfor %}
+      </ul>
+      {% if payment_status.pending %}<p class="muted status-pending" id="payment-status-pending">+ {{ payment_status.pending }} pending · rent and fees</p>{% endif %}
     </div>
-  {% else %}
-    <p class="muted" id="payment-status-none">Choose a range above.</p>
-  {% endif %}
+  </div>
 </section>

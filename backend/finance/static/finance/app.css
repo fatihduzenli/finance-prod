@@ -499,12 +499,11 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
 /* --- Dashboard (PLAN-012f D7) -----------------------------------------------------------------
    The header's .page-title (the title, then the long date in .page-date). Row 1, .kpi-row: the
    four KPI cards. Row 2, .dashboard-cashflow: the Cashflow card, full width (PLAN-012f-b D3).
-   Rows 3 to 5 (PLAN-012g C1; DESIGN-SPEC §7.5), .dashboard-row-thirds (two thirds | one
-   third), the two cards of a row as tall as each other: the Needs attention card
+   Rows 3 and 4 (PLAN-012g C1, PLAN-014 A2; DESIGN-SPEC §7.5), .dashboard-row-thirds (two
+   thirds | one third), the two cards of a row as tall as each other: the Needs attention card
    (.attention-table: the store, the why badge with the rest of the item's text, the amount,
-   the row's button) beside the mini calendar; Recent payments beside Payment status; Coming up
-   (.coming-list: a date chip beside each item's title and its muted note) beside the month's
-   collection (.collection-total: the 28/700 percentage and "of $X"). Then the other cards. */
+   the row's button) beside the mini calendar; Recent payments beside Payment status. Then the
+   other cards. */
 .page-header .page-actions .nav-search { flex: 0 0 320px; }
 .page-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-4); }
 .page-date { color: var(--muted); font-size: var(--fs-base); }
@@ -517,13 +516,6 @@ td.balance-open { color: var(--unpaid-text); font-weight: 600; }
 .attention-table .attention-details { overflow-wrap: anywhere; }
 .attention-table .attention-details a { color: inherit; }
 td.attention-action { text-align: right; }
-.collection-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); margin: 0 0 var(--space-3); }
-.collection-percent { color: var(--text); font-size: var(--fs-kpi); font-weight: 700; line-height: 1.1; }
-.coming-list { list-style: none; margin: 0; padding: 0; }
-.coming-item { display: flex; align-items: center; gap: var(--space-3); padding: 5px 0; }
-.coming-text { display: flex; flex-direction: column; min-width: 0; }
-.coming-title { color: var(--text); font-size: var(--fs-base); font-weight: 500; }
-.coming-note { color: var(--muted); font-size: var(--fs-sm); }
 .kpi-note a { color: var(--link); }
 .recent-when { color: var(--muted); text-decoration: none; }
 .recent-when:hover { text-decoration: underline; }
@@ -561,13 +553,19 @@ td.attention-action { text-align: right; }
 .cashflow-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .chart-key { flex: 0 0 auto; }
 .cashflow-note { font-size: var(--fs-sm); }
-/* The Payment status card (D5; PLAN-012g C4, DESIGN-SPEC §7.5): the range's label muted at the
-   right of the title (.status-range); the {% donut %} ring with the charges' count over the word
+/* The Payment status card (D5; PLAN-012g C4, PLAN-014 A3, DESIGN-SPEC §7.5): the Weekly |
+   Monthly pill at the right of the title (.period-switch, the segmented control, one small form
+   per segment); under the title ‹ the period's label › (.status-period, the mini calendar's
+   .mini-step buttons); the {% donut %} ring with the charges' count over the word
    "charges" in its middle (.donut-total); the three boxes, each with a 3 px top border in its
    colour (--box-colour, the donut's), its word, its count bold and its amount; "+ n pending ·
    rent and fees" under them. On a phone the donut is at the left and the boxes a list at the
    right (see the phone block). */
-.status-range { margin-left: auto; font-size: var(--fs-sm); }
+.period-switch { margin-left: auto; }
+.period-switch form { display: contents; }
+.period-switch button { padding: 3px 10px; font-size: var(--fs-sm); }
+.status-period { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); }
+.status-period-label { color: var(--text-2); font-size: var(--fs-sm); font-weight: 500; }
 .status-overdue { --box-colour: var(--chart-overdue); }
 .status-paid { --box-colour: var(--chart-paid); }
 .status-upcoming { --box-colour: var(--chart-upcoming); }
@@ -1200,10 +1198,59 @@ a.pager-page:hover { background: var(--surface-2); }
 th.cell-chevron, td.cell-chevron { width: 1%; padding-left: 0; text-align: right; white-space: nowrap; }
 td.cell-chevron a { display: inline-flex; color: var(--muted); }
 td.cell-chevron a:hover { color: var(--text); }
+/* --- Search and filters (PLAN-014 A5; finance/_filters.html, finance/filters.js) ----------------
+   .filters-row: the wide search field (.filters-search, flex), the "Filters" button and, where
+   the page sorts, the "Sort: … ▾" menu. .filters-panel: the page's own fields (.filters-fields,
+   the old filter row's layout) over a footer with Clear and Apply at the right; once the script
+   runs (.is-enhanced) it is shown only while open (.is-open). On a phone the open panel is a
+   bottom sheet above the tab bar over the backdrop (--backdrop), the More sheet's frame.
+   .filters-chips: one pill per active filter ("State: New Jersey ×"), hidden when empty. */
+.filters { margin: 0; }
+.filters-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.filters-search { flex: 1 1 18rem; min-width: 12rem; max-width: none; }
+.filters-panel { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border-soft); }
+.filters.is-enhanced .filters-panel:not(.is-open) { display: none; }
+.filters-fields { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.filters-fields label { margin: 0; }
+.filters-footer { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+.filters-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.filters-chips:empty { display: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-sm); font-weight: 500; text-decoration: none; }
+.chip:hover { border-color: var(--input-border); color: var(--text); }
+.filters-backdrop { position: fixed; inset: 0; z-index: 34; background: var(--backdrop); }
+.filters-backdrop[hidden] { display: none; }
+@media (max-width: 768px) {
+  .filters.is-enhanced .filters-panel.is-open { position: fixed; left: 0; right: 0; bottom: var(--tab-bar-h); z-index: 35; max-height: 70vh; overflow-y: auto; box-sizing: border-box; margin: 0; padding: var(--space-4); background: var(--surface); border-top: 1px solid var(--border); border-radius: var(--radius-card) var(--radius-card) 0 0; }
+  .filters-fields { flex-direction: column; align-items: stretch; }
+  .filters .filters-row .btn, .filters .filters-row button { width: auto; }
+}
+/* --- Totals tiles (PLAN-014 A6; the Payments list's totals) ----------------------------------
+   .tile-row: five tiles across (two per row at 768 px and under), each a label over its figure,
+   the figure right-aligned in its tile; .tone-paid green, .tone-unpaid red, .is-zero muted.
+   .info: the round ⓘ beside the card's title; its .tooltip (role=tooltip) opens on hover, focus
+   and a tap (.is-open), on the popover's surface, edge and shadow (--popover-*). */
+.tile-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-3); }
+.tile { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-ctl); background: var(--surface); }
+.tile-label { color: var(--muted); font-size: var(--fs-sm); }
+.tile-value { color: var(--text); font-size: var(--fs-lg); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.tile.tone-paid .tile-value { color: var(--paid-text); }
+.tile.tone-unpaid .tile-value { color: var(--unpaid-text); }
+.tile.is-zero .tile-value { color: var(--muted); font-weight: 600; }
+.info-wrap { position: relative; display: inline-flex; }
+.info { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); font: inherit; font-size: var(--fs-md); cursor: pointer; }
+.info:hover, .info:focus-visible { color: var(--text); }
+.tooltip { display: none; position: absolute; top: calc(100% + var(--space-1)); left: 0; z-index: 20; width: min(22rem, 80vw); padding: var(--space-3); border: 1px solid var(--popover-border); border-radius: var(--radius-ctl); background: var(--surface-2); box-shadow: var(--popover-shadow); color: var(--text-2); font-size: var(--fs-sm); font-weight: 400; }
+.info-wrap:hover .tooltip, .info-wrap:focus-within .tooltip, .info-wrap.is-open .tooltip { display: block; }
+@media (max-width: 768px) {
+  .tile-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tooltip { left: auto; right: 0; }
+}
+/* PLAN-014 A4: a vacant store's "+ Add lease" link after its Status badge (admins). */
+.row-add { margin-left: var(--space-2); color: var(--link); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; }
 
 /* --- Report family (PLAN-012f-b E-1) ---------------------------------------------------------
-   DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png. The filter card's one row with
-   the navy Show at its right (.pnl-show); the four .kpi cards (.tone-paid: a green figure);
+   DESIGN-SPEC §4 Profit and loss, profit-and-loss-laptop.png. The filter card (the shared
+   search and filters form since PLAN-014 A5; .pnl-detail-check its rows box); the four .kpi cards (.tone-paid: a green figure);
    the table card: its header (the title, the muted count line, the held pills at the right,
    .pnl-held), the two-row header with its group heads centred (.grp-head) and a hairline at
    the left of each column group (.grp-start), the margins bold, a negative in the unpaid text
@@ -1212,7 +1259,6 @@ td.cell-chevron a:hover { color: var(--text); }
    scrolls sideways inside its card when the window is narrow; the phone draws the rows as
    the two-line cards of the cards tables. */
 .pnl-filters .pnl-detail-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
-.pnl-filters .pnl-show { margin-left: auto; }
 .kpi-value.tone-paid { color: var(--paid-text); }
 .kpi .unknown { color: var(--muted); font-weight: 600; }
 .pnl-held { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); margin-left: auto; }
@@ -1550,6 +1596,9 @@ p.detail-more-notes { padding-left: 0; }
   form input:not([type=checkbox]):not([type=radio]):not([type=hidden]), form select, form textarea { width: 100% !important; }
   form .btn, form button { width: 100%; }
   form button.link-action { width: auto; }
+  /* The Payment status card's Weekly | Monthly segments are form buttons too: they keep their
+     own width, side by side in the pill. */
+  .period-switch button { width: auto; }
   /* An open bar menu opens in the flow: nothing hangs past the screen's edge. */
   .menu ul { position: static; margin-top: var(--space-1); box-shadow: none; }
   /* A list's card gives way to its rows' cards. */
@@ -1633,7 +1682,6 @@ p.detail-more-notes { padding-left: 0; }
      a row's meta line, under the word Total. */
   .pnl-table .grp-start { border-left: 0; }
   .pnl-held { margin-left: 0; }
-  .pnl-filters .pnl-show { margin-left: 0; flex: 1 0 100%; }
   .table-cards > table.pnl-table.role-cards tr.totals { flex-wrap: wrap; justify-content: flex-start; column-gap: var(--space-3); }
   .table-cards > table.pnl-table.role-cards tr.totals > th { flex: 0 0 100%; }
   .table-cards > table.pnl-table.role-cards tr.totals > td.money { text-align: left; }

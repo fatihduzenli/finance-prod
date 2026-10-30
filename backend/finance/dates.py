@@ -9,7 +9,8 @@ screen only; Python that builds a sentence for a page calls them, and the templa
 
 - :func:`day_text` ``Nov 1, 2026``; :func:`day_short_text` ``Nov 1`` (only where the text
   around it names the year); :func:`day_long_text` ``Tuesday, Oct 20, 2026``;
-  :func:`month_text` ``Oct 2026``; :func:`moment_text` ``Nov 1, 2026 · 14:02``.
+  :func:`month_text` ``Oct 2026``; :func:`month_long_text` ``October 2026`` (a period's
+  name, PLAN-014 A3); :func:`moment_text` ``Nov 1, 2026 · 14:02``.
 - A ``datetime`` is read in New York (PLAN-011b D1: storage is UTC, every day the business
   names is a New York day); a naive ``datetime`` is taken to be UTC, as the pages already do.
   A ``date`` is used as it is.
@@ -33,12 +34,27 @@ __all__ = [
     "day_short_text",
     "day_text",
     "moment_text",
+    "month_long_text",
     "month_text",
 ]
 
 NEW_YORK = ZoneInfo(PROJECT_TIME_ZONE)
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_MONTHS_LONG = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
@@ -80,6 +96,12 @@ def month_text(value: date | datetime) -> str:
     """``Oct 2026``: the month of a day (a ``datetime``'s New York month)."""
     day = _day(value)
     return f"{_MONTHS[day.month - 1]} {day.year}"
+
+
+def month_long_text(value: date | datetime) -> str:
+    """``October 2026``: a month named in full, as a card's period reads it (PLAN-014 A3)."""
+    day = _day(value)
+    return f"{_MONTHS_LONG[day.month - 1]} {day.year}"
 
 
 def month_short_text(value: date | datetime) -> str:

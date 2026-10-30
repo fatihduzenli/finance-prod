@@ -8,18 +8,11 @@ none when it reads what the page already loaded:
   initiation day plus :data:`ACH_SETTLE_BUSINESS_DAYS` business days (the documented ACH
   window, docs/CLAUDE.md §10: settled or returned within about five business days; Saturdays
   and Sundays are skipped, bank holidays are not known here);
-- :func:`collection_progress` (one query): the month's rent charges, waived ones left out,
+- :func:`collection_progress` (one query; the "Collected this month" figure's share line): the
+  month's rent charges, waived ones left out,
   by status: what was billed (``amount_due``), what was collected on them (``amount_paid``,
   at most each charge's amount, so the share never passes 100 %), the share as a whole
-  per cent rounded down (``None`` when nothing is billed) and the progress bar's segments
-  (Paid, Pending, Partly paid, Unpaid: the amounts billed of the charges in each status);
-- :func:`coming_up` (no query: the leases the attention list already read, and
-  :func:`pending_debits`): up to three items in date order: the next rent debit day after
-  today with the number of stores debited that day (leases in collection, a known channel,
-  started by then and not ended; days 29 to 31 fall on a short month's last day, as the rent
-  run counts them), the ACH settlement of the pending debits, and the next insurance
-  renewals (the stores' open-date anniversaries from today, held by a lease that day and not
-  closed by then) with their count;
+  per cent rounded down (``None`` when nothing is billed);
 - :func:`recent_payments` (one query): the last :data:`RECENT_LIMIT` settled payments (not a
   refund, not a credit applied: no money came in), newest first, each with when it settled
   in words ("Today 14:02", "Yesterday", else the date; the time is the row's last change in
@@ -27,20 +20,21 @@ none when it reads what the page already loaded:
   title, "#1991 Istanbul", :func:`ledger.services.stores.title`), what it
   paid for, the method and the amount.
 
-The cards of the owner's staging review (docs/qa/PLAN-012f-b-staging-review.md D3 to D6)
-share one range of whole months (:func:`parse_range`: this month, the last 3, 6 or 12 months
-with the current one, or a custom From to To of at most :data:`MAX_RANGE_MONTHS` months; the
-last 12 by default, PLAN-012g C2):
+The cards of the owner's staging review (docs/qa/PLAN-012f-b-staging-review.md D3 to D6); the
+Cashflow card reads a range of whole months (:func:`parse_range`: this month, the last 3, 6 or
+12 months with the current one, or a custom From to To of at most :data:`MAX_RANGE_MONTHS`
+months; the last 12 by default, PLAN-012g C2):
 
 - :func:`cashflow` (the P&L's rows, :func:`ledger.services.pnl.rows`): per month the
   collected income, the known costs and the net, totalled over the range; a store whose
   costs are not entered is left out of the expenses and counted, never read as zero;
   :func:`cashflows` builds several ranges' cards from one read of the P&L's rows (the
   dashboard's laptop and phone defaults, PLAN-012g C2);
-- :func:`payment_status` (two queries): the rent charges and the one-off charges due in the
-  range as Overdue, Paid and Upcoming by the grid's status rule, the pending ones counted
-  apart (D20: an installment, an autopay-plan occurrence and a re-debit count through their
-  parent or source, never on their own);
+- :func:`payment_status` (two queries): the rent charges and the one-off charges due in its
+  own period (PLAN-014 A3, :func:`period_for`: a calendar week, Sunday to Saturday, or a
+  calendar month; not the Cashflow range) as Overdue, Paid and Upcoming by the grid's status
+  rule, the pending ones counted apart (D20: an installment, an autopay-plan occurrence and a
+  re-debit count through their parent or source, never on their own);
 - :func:`mini_calendar` (the Calendar page's three queries): a month's days and items.
 
 Money is ``Decimal``; dates are the project's ``TIME_ZONE`` days.
@@ -59,48 +53,27 @@ from django.db.models import Count, Exists, F, Max, OuterRef, Sum
 from django.db.models.functions import Least
 from django.utils import timezone
 
-from finance.dates import day_short_text, day_text, month_text
+from finance.dates import day_short_text, day_text, month_long_text, month_text
 from ledger.models import (
     ZERO,
-    CollectionStatus,
-    Lease,
     OneOffCategory,
     OneOffCharge,
     OneOffChargeStatus,
     Payment,
-    PaymentChannel,
     PaymentMethod,
     PaymentStatus,
     RentCharge,
     RentChargeStatus,
-    StoreStatus,
 )
-from ledger.services import calendar, grid, insurance, pnl, rent_run, stores
-from ledger.wording import format_amount
+from ledger.services import calendar, grid, pnl, stores
 
 #: Business days an ACH debit takes to settle (docs/CLAUDE.md §10, the provider's ACH page).
 ACH_SETTLE_BUSINESS_DAYS = 5
 #: Payments the Recent payments card lists.
 RECENT_LIMIT = 5
-#: Items the Coming up card lists.
-COMING_UP_LIMIT = 3
-#: How far ahead the next rent debit day is looked for (a month and a day).
-RENT_LOOKAHEAD_DAYS = 32
 
 TODAY_WORD = "Today"
 YESTERDAY_WORD = "Yesterday"
-ACH_SETTLEMENT = "ACH settlement"
-RENT_DAY = "Rent day"
-INSURANCE_RENEWALS = "Insurance renewals"
-
-#: The progress bar's families (finance.templatetags.components) of each rent status, in bar
-#: order: Paid, Pending, Partly paid, Unpaid (due and unpaid both).
-SEGMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("paid", (RentChargeStatus.PAID,)),
-    ("pending", (RentChargeStatus.PENDING,)),
-    ("partial", (RentChargeStatus.PARTIAL,)),
-    ("unpaid", (RentChargeStatus.DUE, RentChargeStatus.UNPAID)),
-)
 
 
 def _plural(count: int, word: str) -> str:
@@ -160,8 +133,6 @@ class Collection:
     collected: Decimal
     #: The whole per cent collected of billed, rounded down; ``None`` when nothing is billed.
     percent: int | None
-    #: ``(family, amount billed)`` per segment, in bar order (the progress tag's input).
-    segments: list[tuple[str, Decimal]]
 
 
 def collection_progress(month: date) -> Collection:
@@ -184,108 +155,12 @@ def collection_progress(month: date) -> Collection:
         if billed > 0
         else None
     )
-    segments = [
-        (family, sum((billed_by.get(status, ZERO) for status in statuses), ZERO))
-        for family, statuses in SEGMENTS
-    ]
     return Collection(
         month=month.replace(day=1),
         billed=billed,
         collected=collected,
         percent=min(percent, 100) if percent is not None else None,
-        segments=segments,
     )
-
-
-# --- Coming up -------------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class ComingItem:
-    on: date
-    title: str
-    note: str
-
-
-def _debits_on(lease: Lease, day: date) -> bool:
-    """Whether a debit day of ``lease`` falls on ``day`` (29 to 31: a short month's last)."""
-    for debit_day in (lease.debit_day, lease.second_debit_day):
-        if debit_day is not None and rent_run.falls_on(debit_day, day.year, day.month) == day.day:
-            return True
-    return False
-
-
-def _in_collection(lease: Lease, day: date) -> bool:
-    return (
-        lease.collection_status == CollectionStatus.ACTIVE
-        and lease.payment_channel != PaymentChannel.UNKNOWN
-        and (lease.started_on is None or lease.started_on <= day)
-        and (lease.ended_on is None or lease.ended_on >= day)
-    )
-
-
-def next_rent_day(leases: Iterable[Lease], today: date) -> ComingItem | None:
-    """The next day after ``today`` a lease in collection is debited, with its store count."""
-    debited = [
-        lease
-        for lease in leases
-        if lease.collection_status == CollectionStatus.ACTIVE
-        and (lease.debit_day is not None or lease.second_debit_day is not None)
-    ]
-    for offset in range(1, RENT_LOOKAHEAD_DAYS + 1):
-        day = today + timedelta(days=offset)
-        due = {
-            lease.store_id
-            for lease in debited
-            if _in_collection(lease, day) and _debits_on(lease, day)
-        }
-        if due:
-            return ComingItem(day, RENT_DAY, _plural(len(due), "store"))
-    return None
-
-
-def _anniversary_from(open_date: date, today: date) -> date:
-    due = insurance.anniversary(open_date, today.year)
-    return due if due >= today else insurance.anniversary(open_date, today.year + 1)
-
-
-def next_renewals(leases: Iterable[Lease], today: date) -> ComingItem | None:
-    """The next day stores renew their insurance (their open-date anniversary, from today),
-    held by a lease that day, the store active and not closed by then; with the count."""
-    days: dict[object, date] = {}
-    for lease in leases:
-        store = lease.store
-        if store.open_date is None or store.status != StoreStatus.ACTIVE:
-            continue
-        due = _anniversary_from(store.open_date, today)
-        if store.closed_at is not None and due >= store.closed_at:
-            continue
-        if insurance.holds_on(lease, due):
-            days[store.pk] = due
-    if not days:
-        return None
-    first = min(days.values())
-    count = sum(1 for due in days.values() if due == first)
-    return ComingItem(first, INSURANCE_RENEWALS, _plural(count, "store"))
-
-
-def coming_up(leases: Iterable[Lease], today: date, debits: PendingDebits) -> list[ComingItem]:
-    """Up to :data:`COMING_UP_LIMIT` items in date order (see the module docstring)."""
-    rows = list(leases)
-    found: list[ComingItem] = []
-    if debits.count and debits.settle_by is not None:
-        found.append(
-            ComingItem(
-                debits.settle_by,
-                ACH_SETTLEMENT,
-                f"{_plural(debits.count, 'debit')} · {format_amount(debits.amount)}",
-            )
-        )
-    for item in (next_rent_day(rows, today), next_renewals(rows, today)):
-        if item is not None:
-            found.append(item)
-    found.sort(key=lambda item: (item.on, item.title))
-    return found[:COMING_UP_LIMIT]
 
 
 # --- Recent payments -------------------------------------------------------------------------
@@ -389,7 +264,7 @@ RANGE_MESSAGE = "Choose a range of whole months, the earlier month first, at mos
 
 @dataclass(frozen=True, slots=True)
 class Range:
-    """The months the Cashflow and Payment status cards cover, both included."""
+    """The months the Cashflow card covers, both included."""
 
     key: str
     label: str
@@ -613,9 +488,77 @@ class StatusPart:
     amount: Decimal
 
 
+PERIOD_WEEKLY = "weekly"
+PERIOD_MONTHLY = "monthly"
+#: The pill's segments, in its order.
+PERIOD_CHOICES: tuple[tuple[str, str], ...] = (
+    (PERIOD_WEEKLY, "Weekly"),
+    (PERIOD_MONTHLY, "Monthly"),
+)
+#: How far from today ``?ps_at=`` may move the period, in years either way.
+PERIOD_MAX_YEARS = 5
+
+
+@dataclass(frozen=True, slots=True)
+class Period:
+    """The days the Payment status card covers, both included (PLAN-014 A3)."""
+
+    kind: str
+    start: date
+    end: date
+    #: "Oct 25 – 31", "Oct 25 – Nov 1" (a week across two months) or "October 2026".
+    label: str
+    #: A day of the previous and of the next period (``‹ ›``'s ``?ps_at=``).
+    prev_at: date
+    next_at: date
+
+
+def _years_from(day: date, years: int) -> date:
+    """``day`` moved by whole years (February 29 to February 28 in a common year)."""
+    try:
+        return day.replace(year=day.year + years)
+    except ValueError:
+        return day.replace(year=day.year + years, day=28)
+
+
+def _week_label(start: date, end: date) -> str:
+    if start.month == end.month:
+        return f"{day_short_text(start)} – {end.day}"
+    return f"{day_short_text(start)} – {day_short_text(end)}"
+
+
+def period_for(kind: str, at: date | None, today: date) -> Period:
+    """The week (Sunday to Saturday) or the month holding ``at``: an unknown ``kind`` is
+    weekly; ``at`` is today when ``None`` or more than :data:`PERIOD_MAX_YEARS` years from
+    today."""
+    day = at or today
+    if not _years_from(today, -PERIOD_MAX_YEARS) <= day <= _years_from(today, PERIOD_MAX_YEARS):
+        day = today
+    if kind == PERIOD_MONTHLY:
+        first = day.replace(day=1)
+        return Period(
+            kind=PERIOD_MONTHLY,
+            start=first,
+            end=pnl.month_end(first),
+            label=month_long_text(first),
+            prev_at=pnl.add_months(first, -1),
+            next_at=pnl.add_months(first, 1),
+        )
+    start = day - timedelta(days=(day.weekday() + 1) % 7)
+    end = start + timedelta(days=6)
+    return Period(
+        kind=PERIOD_WEEKLY,
+        start=start,
+        end=end,
+        label=_week_label(start, end),
+        prev_at=start - timedelta(days=7),
+        next_at=start + timedelta(days=7),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PaymentStatusCard:
-    range: Range
+    period: Period
     overdue: StatusPart
     paid: StatusPart
     upcoming: StatusPart
@@ -667,8 +610,8 @@ def _one_off_family(status: str, amount_paid: Decimal, has_pending: bool) -> str
     return grid.STATUS_UNPAID
 
 
-def payment_status(selected: Range, today: date) -> PaymentStatusCard:
-    """The charges due in the range (by due date, for every box), by the grid's status of
+def payment_status(period: Period, today: date) -> PaymentStatusCard:
+    """The charges due in the period (by due date, for every box), by the grid's status of
     each (two queries): the rent charges by :func:`ledger.services.grid.combined_status`,
     and the one-off charges (PLAN-012f-b §10 D20) but an installment, an autopay-plan
     occurrence and a re-debit (:data:`PAYMENT_STATUS_SKIPPED_CATEGORIES`), by
@@ -678,13 +621,13 @@ def payment_status(selected: Range, today: date) -> PaymentStatusCard:
     or due, due today or later, by balance. Pending charges and the partly paid ones not
     yet due are counted apart; waived (and voided) ones nowhere."""
     rent_rows = RentCharge.objects.filter(
-        due_on__gte=selected.from_month, due_on__lte=selected.end
+        due_on__gte=period.start, due_on__lte=period.end
     ).values_list("status", "due_on", "amount_due", "amount_paid")
     pending_payment = Payment.objects.filter(
         one_off_charge=OuterRef("pk"), status=PaymentStatus.PENDING, is_refund=False
     )
     one_off_rows = (
-        OneOffCharge.objects.filter(due_date__gte=selected.from_month, due_date__lte=selected.end)
+        OneOffCharge.objects.filter(due_date__gte=period.start, due_date__lte=period.end)
         .exclude(category__in=PAYMENT_STATUS_SKIPPED_CATEGORIES)
         .annotate(has_pending=Exists(pending_payment))
         .values_list("status", "due_date", "price", "amount_paid", "has_pending")
@@ -714,7 +657,7 @@ def payment_status(selected: Range, today: date) -> PaymentStatusCard:
         counts[part] += 1
         amounts[part] += max(due - paid, ZERO)
     return PaymentStatusCard(
-        range=selected,
+        period=period,
         overdue=StatusPart(
             STATUS_OVERDUE, "Overdue", counts[STATUS_OVERDUE], amounts[STATUS_OVERDUE]
         ),

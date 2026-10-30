@@ -297,7 +297,8 @@ def test_the_grid_opens_on_ten_past_months_this_month_and_the_next() -> None:
         assert options[24][:2] == ("2026-10", "Oct 2026")
         assert options[-1][:2] == ("2028-10", "Oct 2028")
         assert [value for value, _, selected in options if selected] == [chosen]
-    assert '<button class="btn" type="submit">Show</button>' in html
+    # PLAN-014 A5: the shared filters form's Apply submits the range and the filters.
+    assert '<button class="btn btn-dark" type="submit" id="filters-apply">Apply</button>' in html
     assert 'id="grid-messages"' not in html
 
 

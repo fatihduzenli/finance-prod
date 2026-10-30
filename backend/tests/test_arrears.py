@@ -200,7 +200,7 @@ def test_the_page_shows_rows_totals_and_sort_links(today: date) -> None:
     client, _ = client_for(Role.VIEWER)
     html = client.get("/arrears/").content.decode()
     assert '<th id="arrears-count">4</th>' in html
-    assert '<th id="arrears-owed">$6,965.00</th>' in html
+    assert '<th id="arrears-owed" class="money">$6,965.00</th>' in html
     assert "$4,545.00" in html and "3 or more months" in html
     assert 'href="?sort=owed&amp;dir=desc"' in html
     assert 'href="?sort=months&amp;dir=asc"' in html  # the current sort flips
