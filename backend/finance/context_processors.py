@@ -29,7 +29,7 @@ from django.http import HttpRequest
 from django.templatetags.static import static
 from django.urls import reverse
 
-from accounts.themes import DEFAULT_THEME, theme_for
+from accounts.themes import preference_for
 from finance import pwa
 from ledger.models import LOGO_CONTENT_TYPES, CompanySettings, Document
 
@@ -40,8 +40,6 @@ BRAND_LOGO = "finance/brand/monvera_logo_dark_transparent.svg"
 #: Where a request keeps its company settings row and its :class:`Company`.
 _ROW_ATTRIBUTE = "_company_settings"
 _COMPANY_ATTRIBUTE = "_company"
-#: Where a request keeps its user's theme.
-_THEME_ATTRIBUTE = "_theme"
 
 #: Sections named by a whole view name; checked before the namespaces.
 _VIEW_SECTIONS: dict[str, str] = {
@@ -172,10 +170,6 @@ def company(request: HttpRequest) -> dict[str, object]:
 
 def theme(request: HttpRequest) -> dict[str, str]:
     """``theme``: the user's stored choice, ``"system"`` when signed out or never chosen.
-    Read once per request (one query at most) and kept on the request."""
-    chosen: str | None = getattr(request, _THEME_ATTRIBUTE, None)
-    if chosen is None:
-        user = getattr(request, "user", None)
-        chosen = theme_for(user) if user is not None else DEFAULT_THEME
-        setattr(request, _THEME_ATTRIBUTE, chosen)
-    return {"theme": chosen}
+    Read once per request (one query at most, shared with the dashboard's period:
+    :func:`accounts.themes.preference_for`) and kept on the request."""
+    return {"theme": preference_for(request).theme}

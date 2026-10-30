@@ -9,12 +9,14 @@ from __future__ import annotations
 import re
 
 import pytest
+from django.db import connection
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from accounts.models import UserPreference
 from accounts.roles import Role
-from accounts.themes import THEMES, set_theme, theme_for
+from accounts.themes import THEMES, set_payment_status_period, set_theme, theme_for
 from tests.test_operator_views import client_for
 
 pytestmark = pytest.mark.django_db
@@ -170,3 +172,42 @@ def test_set_theme_refuses_a_value_outside_the_three() -> None:
     with pytest.raises(ValueError):
         set_theme(user, "sepia")
     assert not UserPreference.objects.filter(user=user).exists()
+
+
+# --- One read of the preference row per request (PLAN-014 A3 rework) ------------------------------
+
+
+def pressed_period(html: str) -> str:
+    pressed = re.findall(r'name="period" value="(\w+)" aria-pressed="true"', html)
+    assert len(pressed) == 1, pressed
+    return str(pressed[0])
+
+
+def preference_reads(client: Client, path: str) -> tuple[str, int]:
+    with CaptureQueriesContext(connection) as captured:
+        response = client.get(path)
+    assert response.status_code == 200, path
+    table = UserPreference._meta.db_table
+    reads = [q["sql"] for q in captured.captured_queries if table in q["sql"]]
+    return response.content.decode(), len(reads)
+
+
+@pytest.mark.parametrize("path", ["/", "/?ps=weekly", "/?ps=sepia", "/stores/"])
+def test_a_page_reads_the_preference_row_once_for_the_theme_and_the_period(path: str) -> None:
+    client, user = client_for(Role.ADMIN)
+    set_theme(user, "dark")
+    set_payment_status_period(user, "monthly")
+    html, reads = preference_reads(client, path)
+    assert reads == 1, path
+    assert html_tag(html) == '<html lang="en" data-theme="dark">'
+    if path != "/stores/":  # the stored period (or ?ps=), from the same read
+        expected = "weekly" if path == "/?ps=weekly" else "monthly"
+        assert pressed_period(html) == expected, path
+
+
+def test_without_a_row_the_dashboard_reads_once_and_follows_the_defaults() -> None:
+    client, _ = client_for(Role.VIEWER)
+    html, reads = preference_reads(client, "/")
+    assert reads == 1
+    assert html_tag(html) == '<html lang="en" data-theme="system">'
+    assert pressed_period(html) == "weekly"

@@ -28,7 +28,7 @@ from django.utils.safestring import SafeString
 from django.views.decorators.http import require_safe
 
 from accounts.roles import Role, meets, role_of
-from accounts.themes import PAYMENT_STATUS_PERIODS, payment_status_period_for
+from accounts.themes import PAYMENT_STATUS_PERIODS, preference_for
 from finance.dates import month_text
 from finance.templatetags.components import GLYPHS, badge_family
 from finance.us_states import US_STATES
@@ -156,11 +156,12 @@ _ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
 
 def _payment_status_period(request: HttpRequest, today: date) -> dashboard_blocks.Period:
     """The Payment status card's period (PLAN-014 A3): ``?ps=`` when it is ``weekly`` or
-    ``monthly``, else the user's stored choice (one query; a GET never writes it); ``?ps_at=``
+    ``monthly``, else the user's stored choice (the request's one read of the preference row,
+    shared with the shell's theme; a GET never writes it); ``?ps_at=``
     when it is a ``YYYY-MM-DD`` day, else today."""
     kind = request.GET.get("ps", "")
     if kind not in PAYMENT_STATUS_PERIODS:
-        kind = payment_status_period_for(request.user)
+        kind = preference_for(request).payment_status_period
     raw = request.GET.get("ps_at", "")
     at: date | None = None
     if _ISO_DAY.fullmatch(raw):
