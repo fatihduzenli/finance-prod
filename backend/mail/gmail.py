@@ -79,7 +79,9 @@ def _status_name(status: int) -> str:
 
 
 class GmailApiSender:
-    """Sends as ``sender`` (the delegated mailbox) with the service-account key ``info``.
+    """Sends as ``sender`` (the delegated mailbox: the company settings' sender address,
+    PLAN-014 D1) with the service-account key ``info``, with ``Reply-To: reply_to`` when it
+    is given.
 
     ``transport``, ``sleep`` and ``clock`` exist for tests (``httpx.MockTransport``, no
     real waits, a fixed time).
@@ -90,6 +92,7 @@ class GmailApiSender:
         info: Mapping[str, Any],
         sender: str,
         *,
+        reply_to: str = "",
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[int], None] = time.sleep,
         clock: Callable[[], int] = lambda: int(time.time()),
@@ -103,6 +106,7 @@ class GmailApiSender:
         if info.get("token_uri") != TOKEN_URI:
             raise _unavailable("setup", "TokenUriRefused")
         self.sender = sender
+        self.reply_to = reply_to
         self._signer = credentials.signer
         self._issuer = credentials.service_account_email
         self._sleep = sleep
@@ -189,7 +193,11 @@ class GmailApiSender:
     # --- Send -------------------------------------------------------------------------
 
     def send(self, message: Message) -> SentReceipt:
-        raw = base64.urlsafe_b64encode(mime_bytes(message, self.sender)).decode("ascii")
+        try:
+            data = mime_bytes(message, self.sender, self.reply_to)
+        except ValueError:
+            raise _unavailable("send", "ReplyToRefused") from None
+        raw = base64.urlsafe_b64encode(data).decode("ascii")
         token = self._access_token()
         try:
             response = self._post(

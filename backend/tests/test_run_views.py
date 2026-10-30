@@ -55,8 +55,8 @@ POST_ROUTES = (
     "ledger:charges:record_payment",
     "ledger:charges:retry_mark",
     "ledger:charges:link_invoice",
-    # PLAN-011b D4: sending a step of the collections ladder by hand.
-    "ledger:charges:send_step",
+    # PLAN-011b D4, PLAN-014 D6: "Send a message now" on the charge page.
+    "ledger:charges:send_message",
     # PLAN-012e D10: Split into installments.
     "ledger:charges:split",
     # PLAN-012b-b D13: repeat a failed release of a rent charge's Stax invoice or autopay move.

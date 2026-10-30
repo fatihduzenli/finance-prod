@@ -69,6 +69,7 @@ _NAMESPACE_SECTIONS: dict[str, str] = {
     "reconciliation": "reconciliation",
     "audit": "audit",
     "settings": "settings",
+    "outbox": "outbox",
     "admin": "django_admin",
 }
 #: The navigation group of a section (PLAN-012c D3, copy list §4.2).
@@ -86,6 +87,7 @@ _SECTION_GROUPS: dict[str, str] = {
     "webhooks": "admin",
     "reconciliation": "admin",
     "settings": "admin",
+    "outbox": "admin",
     "django_admin": "admin",
 }
 

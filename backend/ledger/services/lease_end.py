@@ -50,10 +50,11 @@ The wizard's state is one :class:`~ledger.models.LeaseEnd` row per lease
 
 The job (:func:`produce_documents`) renders the PDF, stores it under the store's
 documents through :func:`ledger.services.documents.upload` (kind ``final_statement``; the
-payment-data checks run on our own bytes) and queues the e-mail to the operator
-(:func:`ledger.services.messages.queue`); :func:`send_statement` delivers it with the PDF
-attached through :func:`mail.get_sender` (``suppressed`` when mail is off, the catch-all
-outside production).
+payment-data checks run on our own bytes) and queues the e-mail to the operator through the
+messaging engine (:func:`ledger.services.messaging.queue`, rule ``final_statement``, rendered
+then; PLAN-014 D3), which delivers it with the PDF attached (:func:`statement_attachment`)
+in the send window, or holds it in the Outbox when mail is not set up or, on the sandbox,
+the address is not on the allowlist.
 
 A lease end that is part of a transfer (PLAN-012e D6, :mod:`ledger.services.transfer`)
 has the reason ``transfer`` fixed, is confirmed by the transfer's confirm in the same
@@ -76,13 +77,12 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.urls import reverse
 from django.utils import timezone
 
 import mail
-from documents_storage import StorageUnavailable
 from finance.dates import day_text, month_text
 from ledger import merge
 from ledger.models import (
@@ -106,7 +106,7 @@ from ledger.models import (
     LeaseTransferStatus,
     LegacyStatus,
     MessageKind,
-    MessageStatus,
+    MessageRule,
     MessageTemplate,
     OneOffCategory,
     OneOffCharge,
@@ -130,7 +130,7 @@ from ledger.services import (
     documents,
     installments,
     leases,
-    messages,
+    messaging,
     one_off_charges,
     receivables,
     rent_run,
@@ -138,8 +138,7 @@ from ledger.services import (
 )
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_name
-from mail.base import SUBJECT_MAX_LENGTH
-from payments import jobs, lease_sync
+from payments import jobs
 from payments.models import ExternalRef, JobKind
 
 ENTITY = "lease_end"
@@ -1468,17 +1467,18 @@ def produce_documents(end_id: uuid.UUID, actor: User | None) -> tuple[bool, str]
         manual=False,
     ).exists()
     if not queued:
-        try:
-            with transaction.atomic():
-                message = messages.queue(
-                    MessageKind.FINAL_STATEMENT,
-                    operator,
-                    template,
-                    messages.MessageContext(ChargeEntityType.LEASE_END, end.pk),
-                    lease=end.lease,
-                    document=document,
-                    actor=actor,
-                )
+        figures = statements.from_json(end.statement_json)
+        with transaction.atomic():
+            message = messaging.queue(
+                MessageRule.FINAL_STATEMENT,
+                end.lease,
+                end,
+                template,
+                merge_values(figures),
+                document=document,
+                actor=actor,
+            )
+            if message is not None:  # else a concurrent run queued it first
                 _audit(
                     actor,
                     "lease_end.statement_queued",
@@ -1486,8 +1486,6 @@ def produce_documents(end_id: uuid.UUID, actor: User | None) -> tuple[bool, str]
                     None,
                     {"message": str(message.pk), "document": str(document.pk)},
                 )
-        except IntegrityError:
-            pass  # a concurrent run queued it first
     return True, DOCUMENTS_DONE
 
 
@@ -1502,124 +1500,37 @@ def merge_values(figures: statements.Final) -> dict[str, str]:
     }
 
 
-def _finish(message: OutboundMessage, status: str, *, error: str = "", receipt: Any = None) -> None:
-    message.status = status
-    message.error = error
-    if receipt is not None:
-        message.mail_message_id = receipt.provider_message_id
-        if status != MessageStatus.SUPPRESSED:
-            message.sent_at = receipt.sent_at
-    message.save()
-    action = {
-        MessageStatus.SENT: "lease_end.statement_sent",
-        MessageStatus.CATCH_ALL: "lease_end.statement_sent",
-        MessageStatus.SUPPRESSED: "lease_end.statement_suppressed",
-    }.get(MessageStatus(status), "lease_end.statement_failed")
-    _audit(
-        None,
-        action,
-        message.pk,
-        None,
-        {
-            "lease_end": str(message.charge_entity_id),
-            "document": str(message.document_id) if message.document_id else None,
-            "status": status,
-            "error": error,
-        },
-        entity_type=ENTITY_MESSAGE,
+class StatementMissing(Exception):  # noqa: N818 - reads as the outcome
+    """The final statement of a queued message is no longer there to attach."""
+
+
+def statement_ready(message: OutboundMessage) -> bool:
+    """Whether the lease end of a queued final statement is still confirmed with its PDF."""
+    end = LeaseEnd.objects.filter(pk=message.charge_entity_id).first()
+    return (
+        end is not None
+        and end.status == LeaseEndStatus.CONFIRMED
+        and message.document_id is not None
     )
 
 
-def send_statement(message_id: uuid.UUID) -> messages.Sent:
-    """Deliver one queued final statement e-mail with its PDF attached."""
-    from ledger.services.collections import NOT_QUEUED, html_part, one_line
+def statement_attachment(message: OutboundMessage) -> mail.Attachment:
+    """The PDF of a queued final statement, read as the user who confirmed the lease end.
+    :class:`StatementMissing` without its lease end or PDF, ``NoReader`` without that user;
+    the storage's own errors otherwise."""
+    end = LeaseEnd.objects.filter(pk=message.charge_entity_id).first()
+    if end is None or message.document is None:
+        raise StatementMissing
+    reader = message.sent_by
+    if reader is None:
+        raise NoReader
+    data = documents.read_all(message.document, reader)
+    figures = statements.from_json(end.statement_json)
+    return mail.Attachment(statements.pdf_filename(figures), message.document.content_type, data)
 
-    with transaction.atomic():
-        message = (
-            OutboundMessage.objects.select_for_update(of=("self",))
-            .select_related("operator", "lease", "template", "document", "sent_by")
-            .filter(pk=message_id)
-            .first()
-        )
-        if message is None:
-            return messages.Sent(False, GONE)
-        if message.status != MessageStatus.QUEUED:
-            return messages.Sent(
-                True, NOT_QUEUED.format(status=message.get_status_display().lower())
-            )
-        end = LeaseEnd.objects.filter(pk=message.charge_entity_id).first()
-        operator = message.operator
-        reason = ""
-        if end is None or end.status != LeaseEndStatus.CONFIRMED or message.document is None:
-            reason = "StatementMissing"
-        elif operator.archived_at is not None:
-            reason = "OperatorArchived"
-        elif not (message.lease is not None and lease_sync.billing_of(message.lease).email):
-            # PLAN-014 C5: the statement goes to the ended lease's billing e-mail.
-            reason = "NoAddress"
-        if reason or end is None or message.document is None:
-            _finish(message, MessageStatus.SUPPRESSED, error=reason or "StatementMissing")
-            return messages.Sent(True, f"Not sent ({reason or 'StatementMissing'}).")
-        figures = statements.from_json(end.statement_json)
-        values = merge_values(figures)
-        try:
-            subject = one_line(merge.render(message.template.subject, values))
-            body = merge.render(message.template.body, values)
-        except merge.TemplateRefused:
-            _finish(message, MessageStatus.FAILED, error="TemplateRefused")
-            return messages.Sent(False, "Failed: TemplateRefused.")
-        address = lease_sync.billing_of(message.lease).email if message.lease is not None else ""
-        message.to_address = address
-        message.subject = subject[:SUBJECT_MAX_LENGTH]
-        message.body_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
-        try:
-            message.check_payment_data()
-        except ValidationError:
-            message.subject = ""
-            _finish(message, MessageStatus.FAILED, error="PaymentDataRefused")
-            return messages.Sent(False, "Failed: PaymentDataRefused.")
-        try:
-            sender = mail.get_sender()
-        except mail.MailUnavailable as error:
-            _finish(message, MessageStatus.FAILED, error=error.cause)
-            return messages.Sent(False, f"Failed: {error.cause}.")
-        reader = message.sent_by
-        if reader is None:
-            _finish(message, MessageStatus.FAILED, error="NoReader")
-            return messages.Sent(False, "Failed: NoReader.")
-        try:
-            data = documents.read_all(message.document, reader)
-        except (StorageUnavailable, PermissionDenied) as error:
-            name = type(error).__name__
-            _finish(message, MessageStatus.FAILED, error=name)
-            return messages.Sent(False, f"Failed: {name}.")
-        try:
-            outgoing = mail.Message(
-                to=address,
-                subject=message.subject,
-                text=body,
-                html=html_part(body),
-                attachments=(
-                    mail.Attachment(
-                        statements.pdf_filename(figures), message.document.content_type, data
-                    ),
-                ),
-            )
-            receipt = sender.send(outgoing)
-        except mail.MailUnavailable as error:
-            _finish(message, MessageStatus.FAILED, error=error.cause)
-            return messages.Sent(False, f"Failed: {error.cause}.")
-        except ValueError:
-            _finish(message, MessageStatus.FAILED, error="MessageRefused")
-            return messages.Sent(False, "Failed: MessageRefused.")
-        status = MessageStatus(receipt.disposition)
-        _finish(message, status, receipt=receipt)
-        texts = {
-            MessageStatus.SENT: "Sent.",
-            MessageStatus.CATCH_ALL: "Sent to the test inbox.",
-            MessageStatus.SUPPRESSED: "Not sent: mail is off.",
-        }
-        return messages.Sent(True, texts[status])
+
+class NoReader(Exception):  # noqa: N818 - reads as the outcome
+    """No user is recorded to read the statement's PDF as."""
 
 
 def statement_log(end: LeaseEnd) -> list[OutboundMessage]:

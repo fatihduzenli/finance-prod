@@ -17,8 +17,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import Role, meets, role_of
-from ledger.models import ContactEntry, ContactKind, ContactStatus, Note, Store
-from ledger.services import contacts, notes, timeline
+from ledger.models import ContactEntry, ContactKind, ContactStatus, Note, OutboundMessage, Store
+from ledger.services import collections, contacts, messaging, notes, timeline
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,10 +124,21 @@ def note_rows(request: HttpRequest, found: list[Note]) -> list[NoteRow]:
 class TimelineRow:
     """One row of the Notes & follow-ups list (PLAN-014 B6): ``kind`` as
     :class:`ledger.services.timeline.TimelineEntry` names it and the row its template
-    reads (a :class:`NoteRow` for a note, a :class:`LogRow` for a contact entry)."""
+    reads (a :class:`NoteRow` for a note, a :class:`LogRow` for a contact entry, an
+    :class:`EmailRow` for a message)."""
 
     kind: str
-    row: NoteRow | LogRow
+    row: NoteRow | LogRow | EmailRow
+
+
+@dataclass(frozen=True, slots=True)
+class EmailRow:
+    """One message on the list (PLAN-014 D5): the template's name, the delivery result, the
+    address (masked below admin) and the stored text."""
+
+    message: OutboundMessage
+    status: str
+    to: str
 
 
 def timeline_rows(
@@ -148,12 +159,31 @@ def timeline_rows(
             store=store,
         )
     }
+    admin = meets(role_of(request.user), Role.ADMIN)
     rows: list[TimelineRow] = []
     for entry in found:
         if entry.kind == timeline.NOTE:
             rows.append(TimelineRow(entry.kind, notes_by_id[entry.payload.pk]))
         elif entry.kind == timeline.CONTACT:
             rows.append(TimelineRow(entry.kind, logs_by_id[entry.payload.pk]))
+        elif entry.kind == timeline.EMAIL:
+            message = entry.payload
+            rows.append(
+                TimelineRow(
+                    entry.kind,
+                    EmailRow(
+                        message=message,
+                        status=messaging.status_text(message),
+                        to=(
+                            message.to_address
+                            if admin
+                            else collections.mask_address(message.to_address)
+                        )
+                        if message.to_address
+                        else "",
+                    ),
+                )
+            )
     return rows
 
 

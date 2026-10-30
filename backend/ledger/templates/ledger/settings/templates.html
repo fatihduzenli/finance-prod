@@ -1,0 +1,26 @@
+{% extends "finance/base.html" %}
+{% load responsive %}
+{% block title %}Message templates{% endblock %}
+{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:settings:index' %}">Settings</a> <span aria-hidden="true">›</span> <span aria-current="page">Message templates</span></nav><h1>Message templates</h1></div></div>{% endblock %}
+{% block content %}
+  {% comment %}Admin › Settings › Message templates (docs/qa/PLAN-014 D4): every template, the active first; a row opens its edit page. An inactive template is kept for the messages that used it and offered nowhere; an internal one goes to the managers, never to an operator.{% endcomment %}
+  <section class="card table-card settings-card" id="templates-card">
+    {% responsive_table %}
+    <table id="templates-table" aria-label="Message templates">
+      <thead><tr><th>Name</th><th>Code</th><th>Channel</th><th>Active</th></tr></thead>
+      <tbody>
+        {% for template in template_rows %}
+          <tr id="template-{{ template.code }}">
+            <td><a href="{% url 'ledger:settings:template_edit' pk=template.pk %}">{{ template.display_name }}</a>{% if template.internal %} <span class="badge">Internal</span>{% endif %}</td>
+            <td><code>{{ template.code }}</code></td>
+            <td>{{ template.get_channel_display }}</td>
+            <td>{% if template.active %}Active{% else %}<span class="muted">Inactive</span>{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="muted empty">No templates yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endresponsive_table %}
+  </section>
+{% endblock %}

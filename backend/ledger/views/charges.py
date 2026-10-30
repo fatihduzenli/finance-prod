@@ -51,11 +51,11 @@ from ledger.models import (
     Store,
 )
 from ledger.services import (
-    collections,
     contacts,
     csv_export,
     installments,
     leases,
+    messaging,
     rent_run,
     workspace,
     workspace_cards,
@@ -230,12 +230,12 @@ def _detail_context(request: HttpRequest, charge: RentCharge) -> dict[str, Any]:
         "can_retry_release": billing and installments.retry_release(charge) is not None,
         "can_link_invoice": billing and not invoice_rows,
         "retry_wait_message": (lease_sync.retry_wait_message(retry_wait) if retry_wait else ""),
-        # PLAN-011b D4: the charge's collection e-mails and the hand send.
-        **collections.charge_context(
+        # PLAN-011b D4, PLAN-014 D6: the charge's messages and "Send a message now".
+        **messaging.charge_context(
             ChargeEntityType.RENT_CHARGE,
             charge.pk,
             billing=billing,
-            url=reverse("ledger:charges:send_step", kwargs={"pk": charge.pk}),
+            url=reverse("ledger:charges:send_message", kwargs={"pk": charge.pk}),
         ),
         # PLAN-012f-b D19: the open bank debit from Add payment, beside the payments.
         "open_debit": one_off_service.open_debit(charge),

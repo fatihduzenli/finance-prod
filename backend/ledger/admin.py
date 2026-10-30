@@ -15,10 +15,8 @@ group holds view, add and change on both (ledger migration 0013); the registry r
 any POST to them below admin. Every save writes an ``audit_log`` row with the fields
 before and after.
 
-The collections ladder's steps and e-mail templates (docs/qa/PLAN-011b D4, D10) are
-edited here the same way, by an admin only, add and change, never delete (a step no
-longer used is made inactive). A template whose subject or text uses anything but the
-whitelisted merge fields is refused on save (``MessageTemplate.clean``, :mod:`ledger.merge`).
+The message templates are not here (PLAN-014 D4): an admin edits them on Admin › Settings ›
+Message templates; the collections ladder's steps are gone (PLAN-014 D6).
 
 The brands (docs/qa/PLAN-014 B1, B2; the kinds of store of PLAN-012f-b D10 before) are not
 here: an admin edits them on Admin › Settings.
@@ -38,15 +36,12 @@ from django.contrib.auth.models import User
 from django.db import models
 from django.http import HttpRequest
 
-from ledger import merge
 from ledger.models import (
     AuditLog,
-    CollectionStep,
     CompanySettings,
     FeeType,
     InsurancePremium,
     Lease,
-    MessageTemplate,
     Operator,
     Store,
 )
@@ -192,36 +187,6 @@ class InsurancePremiumAdmin(AuditedAdmin):
     ordering = ("-policy_year",)
     audited_fields = ("policy_year", "amount", "cost")
     entity_type = "insurance_premium"
-
-
-@admin.register(MessageTemplate)
-class MessageTemplateAdmin(AuditedAdmin):
-    list_display = ("code", "subject", "updated_at")
-    ordering = ("code",)
-    fields = ("code", "subject", "body")
-    audited_fields = ("code", "subject", "body")
-    entity_type = "message_template"
-
-    def get_form(
-        self, request: HttpRequest, obj: Any = None, change: bool = False, **kwargs: Any
-    ) -> type[forms.ModelForm[Any]]:
-        form = super().get_form(request, obj, change, **kwargs)
-        # PLAN-012e D8: the final statement template has its own fields.
-        text = merge.fields_text(merge.fields_for(obj.code)) if obj is not None else ""
-        for name in ("subject", "body"):
-            if name in form.base_fields:
-                form.base_fields[name].help_text = f"Merge fields: {text or merge.FIELDS_TEXT}."
-        return form
-
-
-@admin.register(CollectionStep)
-class CollectionStepAdmin(AuditedAdmin):
-    list_display = ("day_offset", "template", "active", "position")
-    list_filter = ("active",)
-    ordering = ("day_offset", "position")
-    list_select_related = ("template",)
-    audited_fields = ("day_offset", "template_id", "active", "position")
-    entity_type = "collection_step"
 
 
 @admin.register(CompanySettings)

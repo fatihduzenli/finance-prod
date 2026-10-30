@@ -58,6 +58,9 @@ STEPS: tuple[tuple[int, str, int], ...] = (
     (20, "final_notice", 3),
 )
 MESSAGES_EXIST = "Outbound messages exist; the ladder's seed refuses to reverse."
+#: The steps' model, by name: ledger 0061 removed it (PLAN-014 D6), so it exists only in
+#: the historical apps.
+STEP_MODEL = "CollectionStep"
 ADMIN_GROUP = "admin"
 ADMIN_PERMISSIONS = tuple(
     (model, f"{action}_{model}")
@@ -79,7 +82,7 @@ def _permissions(apps: Apps) -> list[Any]:
 
 def seed(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     template_model = apps.get_model("ledger", "MessageTemplate")
-    step_model = apps.get_model("ledger", "CollectionStep")
+    step_model = apps.get_model("ledger", STEP_MODEL)
     templates = {}
     for code, subject, body in TEMPLATES:
         templates[code], _ = template_model.objects.get_or_create(
@@ -108,7 +111,7 @@ def unseed(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     group = apps.get_model("auth", "Group").objects.filter(name=ADMIN_GROUP).first()
     if group is not None:
         group.permissions.remove(*_permissions(apps))
-    apps.get_model("ledger", "CollectionStep").objects.all().delete()
+    apps.get_model("ledger", STEP_MODEL).objects.all().delete()
     apps.get_model("ledger", "MessageTemplate").objects.all().delete()
 
 

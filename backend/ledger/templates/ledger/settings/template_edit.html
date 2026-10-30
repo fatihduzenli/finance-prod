@@ -1,0 +1,29 @@
+{% extends "finance/base.html" %}
+{% block title %}{{ template.display_name }}{% endblock %}
+{% block header %}<div class="page-header detail-head"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:settings:index' %}">Settings</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:settings:templates' %}">Message templates</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ template.display_name }}</span></nav><h1>{{ template.display_name }}</h1><p class="store-line" id="detail-line"><code>{{ template.code }}</code> · {{ template.get_channel_display }} · {% if template.active %}Active{% else %}Inactive{% endif %}{% if template.internal %} · Internal: to the managers{% endif %}</p></div></div>{% endblock %}
+{% block content %}
+  {% comment %}One template (docs/qa/PLAN-014 D4): its subject and body, saved by "Save" (audited) or rendered by "Preview" with the chosen store's current lease and sample amounts (nothing saved, nothing queued). Both buttons post the same fields; a refusal shows the page again with the text as typed.{% endcomment %}
+  <section class="card" id="template-card">
+    <form method="post" action="{% url 'ledger:settings:template_edit' pk=template.pk %}" id="template-form">{% csrf_token %}
+      <div class="field"><label for="template-subject">Subject</label><input type="text" name="subject" id="template-subject" value="{{ subject }}" maxlength="{{ subject_max }}" required></div>
+      <div class="field"><label for="template-body">Message</label><textarea name="body" id="template-body" rows="12" maxlength="{{ body_max }}" required>{{ body }}</textarea><span class="help" id="template-placeholders">Placeholders you can use: {{ placeholders }}</span></div>
+      <div class="field"><label for="template-store">Preview with the store</label><select name="store" id="template-store">
+        <option value="">Choose a store</option>
+        {% for choice in stores %}<option value="{{ choice.store.pk }}"{% if choice.store.pk|stringformat:"s" == store_id %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}
+      </select></div>
+      <div class="actions"><button class="btn btn-primary" type="submit" id="template-save">Save</button><button class="btn" type="submit" formaction="{% url 'ledger:settings:template_preview' pk=template.pk %}" id="template-preview-button">Preview</button></div>
+    </form>
+  </section>
+  {% if preview %}
+    <section class="card" id="template-preview">
+      <div class="card-header"><h2>Preview</h2></div>
+      {% if preview.ok %}
+        <p class="help">The store's real names and links, with sample amounts and dates. Nothing was saved or sent.</p>
+        <p id="preview-subject"><strong>{{ preview.subject }}</strong></p>
+        <pre class="message-body" id="preview-body">{{ preview.body }}</pre>
+      {% else %}
+        <p class="muted" id="preview-refused">{{ preview.message }}</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

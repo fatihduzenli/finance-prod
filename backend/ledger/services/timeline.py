@@ -1,13 +1,15 @@
-"""The Notes & follow-ups tab's one list (docs/qa/PLAN-014 B6).
+"""The Notes & follow-ups tab's one list (docs/qa/PLAN-014 B6, D5).
 
-:func:`entries` is the union of a store's live notes (:func:`ledger.services.notes.for_store`)
-and the entries about a lease of it (:func:`ledger.services.contacts.store_entries`: calls,
-visits, e-mails logged by hand and promises with their outcomes and corrections), newest first:
-by day (a note's day in New York, an entry's ``happened_on``), then by when each was written.
-``show`` narrows it (``?show=``, :func:`parse_show`): ``notes``, ``contacts`` (Calls &
-promises) or ``emails``, which lists nothing until the messaging engine (Batch D) keeps the
-e-mails sent; anything else is ``all``. :class:`Listing` is the whole list, without the
-tab's cap, as the store's All entries page pages it. Read only.
+:func:`entries` is the union of a store's live notes (:func:`ledger.services.notes.for_store`),
+the entries about a lease of it (:func:`ledger.services.contacts.store_entries`: calls,
+visits, e-mails logged by hand and promises with their outcomes and corrections) and the
+messages about a lease of it (:func:`ledger.services.messaging.for_store`: sent, held,
+failed or suppressed, with their stored text), newest first: by day (a note's day in New
+York, an entry's ``happened_on``, a message's day queued in New York), then by when each
+was written. ``show`` narrows it (``?show=``, :func:`parse_show`): ``notes``, ``contacts``
+(Calls & promises) or ``emails`` (the messages); anything else is ``all``. :class:`Listing`
+is the whole list, without the tab's cap, as the store's All entries page pages it. Read
+only.
 """
 
 from __future__ import annotations
@@ -19,8 +21,8 @@ from typing import Any, overload
 
 from django.utils import timezone
 
-from ledger.models import ContactEntry, Note, Store
-from ledger.services import contacts, notes
+from ledger.models import ContactEntry, Note, OutboundMessage, Store
+from ledger.services import contacts, messaging, notes
 
 NOTE = "note"
 CONTACT = "contact"
@@ -50,8 +52,8 @@ EMPTY_NOTES = "No notes yet."
 @dataclass(frozen=True, slots=True)
 class TimelineEntry:
     """One row of the list: ``kind`` one of ``note``, ``contact``, ``email``; ``at`` when it
-    was written; ``payload`` the row itself (a :class:`~ledger.models.Note` or a
-    :class:`~ledger.models.ContactEntry`)."""
+    was written; ``payload`` the row itself (a :class:`~ledger.models.Note`, a
+    :class:`~ledger.models.ContactEntry` or an :class:`~ledger.models.OutboundMessage`)."""
 
     kind: str
     at: datetime
@@ -73,6 +75,10 @@ def _contact(entry: ContactEntry) -> TimelineEntry:
     return TimelineEntry(CONTACT, entry.created_at, entry, entry.happened_on)
 
 
+def _email(message: OutboundMessage) -> TimelineEntry:
+    return TimelineEntry(EMAIL, message.queued_at, message, timezone.localdate(message.queued_at))
+
+
 def entries(
     store: Store, show: str, *, include_deleted: bool = False, limit: int | None = None
 ) -> list[TimelineEntry]:
@@ -88,6 +94,11 @@ def entries(
         if limit is not None:
             rows = rows[: limit + 1]
         found += [_contact(entry) for entry in rows]
+    if EMAIL in kinds:
+        sent = messaging.for_store(store.pk)
+        if limit is not None:
+            sent = sent[: limit + 1]
+        found += [_email(message) for message in sent]
     found.sort(key=lambda entry: (entry.day, entry.at), reverse=True)
     return found if limit is None else found[: limit + 1]
 
@@ -122,6 +133,8 @@ class Listing:
             total += contacts.store_entries(
                 self.store, include_deleted=self.include_deleted
             ).count()
+        if EMAIL in kinds:
+            total += messaging.for_store(self.store.pk).count()
         return total
 
     def __len__(self) -> int:

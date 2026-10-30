@@ -59,11 +59,11 @@ from ledger.forms import OperatorCreateForm, OperatorForm
 from ledger.models import Note, NoteEntityType, Operator
 from ledger.services import (
     attention,
-    collections,
     contacts,
     csv_export,
     detail_cards,
     list_filters,
+    messaging,
     statement_links,
     workspace,
 )
@@ -381,8 +381,8 @@ def _detail_context(
         "can_add_contact": billing and active,
         # PLAN-011b D4: the collection e-mails sent to the operator, and the
         # "handled personally" switch (billing).
-        "collection_log": collections.operator_log(operator, collections.LOG_LIMIT),
-        "collection_log_limit": collections.LOG_LIMIT,
+        "collection_log": messaging.operator_log(operator, messaging.LOG_LIMIT),
+        "collection_log_limit": messaging.LOG_LIMIT,
         "can_set_handled": billing and active,
         # PLAN-011b D4: the signed statement links (billing revokes them).
         "can_revoke_links": billing,

@@ -1,10 +1,12 @@
-"""The mail interface, its message and its one error (docs/qa/PLAN-011b D3).
+"""The mail interface, its message and its one error (docs/qa/PLAN-011b D3, PLAN-014 D1).
 
 A :class:`Message` is checked when it is made: one recipient address, a subject and
 header values without line breaks (no header injection), header names of the ``X-``
 form only, and attachments (PLAN-012e D8) with a plain file name, a known content type
 and some bytes. :func:`mime_bytes` turns it into the RFC 5322 bytes a sender delivers:
-``multipart/mixed`` when there is an attachment.
+``multipart/mixed`` when there is an attachment, with a ``Reply-To`` when one is given.
+:func:`address_lines` reads a list of addresses kept one per line (the company settings'
+managers and sandbox allowlist, PLAN-014 D1).
 """
 
 from __future__ import annotations
@@ -16,13 +18,17 @@ from email.message import EmailMessage
 from email.policy import SMTP
 from typing import Protocol
 
-#: What became of a message: delivered to its recipient, delivered to the catch-all
-#: address instead, or not delivered because mail is off. The values are the
+#: What became of a message: delivered to its recipient, or held in the Outbox (mail not
+#: set up, or a recipient off the sandbox allowlist; PLAN-014 D2). The values are the
 #: ``outbound_messages.status`` values of the same meaning.
 SENT = "sent"
-CATCH_ALL = "catch_all"
-SUPPRESSED = "suppressed"
-DISPOSITIONS: tuple[str, ...] = (SENT, CATCH_ALL, SUPPRESSED)
+HELD = "held"
+DISPOSITIONS: tuple[str, ...] = (SENT, HELD)
+#: Why a message is held, as ``SentReceipt.reason`` and ``outbound_messages.held_reason``
+#: name it: mail is not set up in this environment, or the recipient is not on the sandbox
+#: allowlist.
+NOT_SET_UP = "not_set_up"
+SANDBOX = "sandbox"
 
 #: One plain address, ASCII, no display name: nothing a header could be split on.
 ADDRESS = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
@@ -55,6 +61,30 @@ class MailUnavailable(Exception):  # noqa: N818 - the name is the contract (PLAN
 
 def is_address(value: str) -> bool:
     return bool(ADDRESS.fullmatch(value))
+
+
+#: Most addresses one list may hold.
+ADDRESS_LINES_MAX = 50
+ADDRESS_LINE_REFUSED = "Write one plain e-mail address per line."
+ADDRESS_LINES_TOO_MANY = f"A list holds at most {ADDRESS_LINES_MAX} addresses."
+
+
+def address_lines(text: str) -> list[str]:
+    """The addresses of ``text``, one per line: blank lines ignored, each lower-cased, each
+    once, in order. ``ValueError`` (with a sentence that repeats no line) when a line holds
+    anything but one plain address, or there are more than :data:`ADDRESS_LINES_MAX`."""
+    found: list[str] = []
+    for line in text.splitlines():
+        address = line.strip().lower()
+        if not address:
+            continue
+        if not is_address(address):
+            raise ValueError(ADDRESS_LINE_REFUSED)
+        if address not in found:
+            found.append(address)
+    if len(found) > ADDRESS_LINES_MAX:
+        raise ValueError(ADDRESS_LINES_TOO_MANY)
+    return found
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,11 +130,13 @@ class Message:
 @dataclass(frozen=True, slots=True)
 class SentReceipt:
     """What a sender reports: the provider's message ID (empty when nothing was sent),
-    when, and the :data:`DISPOSITIONS` value."""
+    when, the :data:`DISPOSITIONS` value and, for a held message, why
+    (:data:`NOT_SET_UP` or :data:`SANDBOX`)."""
 
     provider_message_id: str
     sent_at: datetime
     disposition: str = SENT
+    reason: str = ""
 
 
 class MailSender(Protocol):
@@ -113,13 +145,18 @@ class MailSender(Protocol):
         ...
 
 
-def mime_bytes(message: Message, sender: str) -> bytes:
-    """The message as RFC 5322 bytes from ``sender``: the text part, and the HTML part as
-    an alternative when there is one; with attachments, ``multipart/mixed`` holding that
-    body and each file (PLAN-012e D8)."""
+def mime_bytes(message: Message, sender: str, reply_to: str = "") -> bytes:
+    """The message as RFC 5322 bytes from ``sender`` (with ``Reply-To`` when ``reply_to`` is
+    given, PLAN-014 D1): the text part, and the HTML part as an alternative when there is
+    one; with attachments, ``multipart/mixed`` holding that body and each file (PLAN-012e
+    D8)."""
+    if reply_to and not is_address(reply_to):
+        raise ValueError("The Reply-To must be one plain e-mail address.")
     mime = EmailMessage(policy=SMTP)
     mime["From"] = sender
     mime["To"] = message.to
+    if reply_to:
+        mime["Reply-To"] = reply_to
     mime["Subject"] = message.subject
     for name, value in message.headers:
         mime[name] = value

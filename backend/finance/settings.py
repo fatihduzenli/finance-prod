@@ -227,15 +227,14 @@ AZURE_CLIENT_ID = _config.azure_client_id
 REPORT_STATEMENT_TIMEOUT_MS = _config.report_statement_timeout_ms
 
 # --- Outbound mail (docs/qa/PLAN-011b-collections-nsf-attention-calendar.md D3, D4) ----
-#: Off unless "true": every send is then "suppressed" and nothing leaves the app.
+#: Off unless "true": every message is then held in the Outbox and nothing leaves the app
+#: (PLAN-014 D2). The mailbox sent as, the Reply-To, the managers' list and the sandbox
+#: allowlist are company settings (Admin › Settings › Mail), not environment variables.
 MAIL_ENABLED = _config.mail_enabled
-#: The company mailbox the service account sends as (domain-wide delegation).
-GMAIL_SENDER = _config.gmail_sender
 #: Server-side only: the service-account key, from a vault reference. Read by
-#: ``mail.get_sender`` alone; never rendered, logged or exported.
+#: ``mail.get_sender`` alone (Admin › Settings › Mail says only whether it is there); never
+#: rendered, logged or exported.
 GMAIL_SERVICE_ACCOUNT_JSON = _config.gmail_service_account_json
-#: When set, every message goes to this address instead (required outside production).
-MAIL_CATCH_ALL = _config.mail_catch_all
 #: The ``{company}`` merge field of the collection e-mails.
 COMPANY_NAME = _config.company_name
 

@@ -39,6 +39,7 @@ from ledger.views import (
     notes,
     one_off_charges,
     operators,
+    outbox,
     payments,
     reconciliation,
     reports,
@@ -217,7 +218,7 @@ charge_patterns = (
         path("<str:pk>/retry-mark/", charges.charge_retry_mark, name="retry_mark"),
         path("<str:pk>/retry-release/", charges.charge_retry_release, name="retry_release"),
         path("<str:pk>/link-invoice/", charges.charge_link_invoice, name="link_invoice"),
-        path("<str:pk>/send-step/", collections.rent_charge_send_step, name="send_step"),
+        path("<str:pk>/send-message/", collections.rent_charge_send_message, name="send_message"),
         path("<str:pk>/split/", installments.charge_split, name="split"),
     ],
     "charges",
@@ -255,7 +256,11 @@ one_off_charge_patterns = (
         ),
         path("<str:pk>/retry/", one_off_charges.charge_retry, name="retry"),
         path("<str:pk>/charge-now/", one_off_charges.charge_now, name="charge_now"),
-        path("<str:pk>/send-step/", collections.one_off_charge_send_step, name="send_step"),
+        path(
+            "<str:pk>/send-message/",
+            collections.one_off_charge_send_message,
+            name="send_message",
+        ),
         path("<str:pk>/split/", installments.one_off_split, name="split"),
     ],
     "one_off_charges",
@@ -435,8 +440,22 @@ settings_patterns = (
         path("brands/<str:pk>/save/", settings.brand_save, name="brand_save"),
         path("brands/<str:pk>/toggle/", settings.brand_toggle, name="brand_toggle"),
         path("brands/<str:pk>/move/", settings.brand_move, name="brand_move"),
+        # PLAN-014 D1, D4: the Mail card and the message templates.
+        path("mail/", settings.mail_save, name="mail_save"),
+        path("templates/", settings.templates_list, name="templates"),
+        path("templates/<str:pk>/", settings.template_edit, name="template_edit"),
+        path("templates/<str:pk>/preview/", settings.template_preview, name="template_preview"),
     ],
     "settings",
+)
+
+# Admin › Outbox (PLAN-014 D5): admin only.
+outbox_patterns = (
+    [
+        path("", outbox.outbox_page, name="page"),
+        path("<str:pk>/send-now/", outbox.send_now, name="send_now"),
+    ],
+    "outbox",
 )
 
 urlpatterns = [
@@ -469,6 +488,7 @@ urlpatterns = [
     path("reports/", include(report_patterns)),
     path("documents/", include(document_patterns)),
     path("audit/", include(audit_patterns)),
+    path("admin-settings/outbox/", include(outbox_patterns)),
     path("admin-settings/", include(settings_patterns)),
     path("", include(note_patterns)),
 ]

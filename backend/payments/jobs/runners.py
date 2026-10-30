@@ -41,7 +41,7 @@ from ledger.services import (
     installments,
     lease_end,
     leases,
-    messages,
+    messaging,
     one_off_charges,
     refunds,
     rent_run,
@@ -462,9 +462,9 @@ def reconcile_run_job(job: Job) -> Result:
 
 
 def message_send_job(job: Job) -> Result:
-    """PLAN-011b D4, PLAN-012e D8: one e-mail (a collection e-mail or a final
-    statement), rendered and sent."""
-    outcome = messages.send(job.entity_id)
+    """PLAN-011b D4, PLAN-012e D8, PLAN-014 D7: one message (about a charge, or a final
+    statement), its stored text sent."""
+    outcome = messaging.send(job.entity_id)
     return outcome.ok, outcome.message
 
 

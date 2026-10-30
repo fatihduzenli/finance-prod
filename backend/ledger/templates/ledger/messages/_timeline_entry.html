@@ -1,0 +1,8 @@
+{% load components dates people %}{% comment %}One message on the Notes & follow-ups list (docs/qa/PLAN-014 D5): the round "E", the template's name, the delivery result (the held reason when held), the address (masked below admin), when it was queued and by whom when sent by hand, and its stored subject and body in a details element. ``row``: a ledger.views.contact_log.EmailRow.{% endcomment %}{% with message=row.message %}<li class="contact-entry email" id="message-{{ message.pk }}">
+    {% avatar "E" "neutral" %}
+    <div class="contact-body">
+      <p class="contact-text"><strong>E-mail</strong> · {{ message.template.display_name }} · <span class="message-status">{{ row.status }}</span></p>
+      <p class="contact-meta">{% if row.to %}To {{ row.to }} · {% endif %}{{ message.queued_at|moment }}{% if message.manual %} · sent by {{ message.sent_by|staff|default:"—" }}{% endif %}</p>
+      {% if message.rendered_body %}<details class="message-text"><summary>{{ message.rendered_subject|default:"The message" }}</summary><pre class="message-body">{{ message.rendered_body }}</pre></details>{% endif %}
+    </div>
+  </li>{% endwith %}

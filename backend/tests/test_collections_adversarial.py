@@ -1,7 +1,8 @@
 """Adversarial cases for PLAN-011b (mail, ladder, NSF, calendar feed, time zone, statement
 links), by the QA owner (plan §7). Opus's files prove each feature; these cases try to make
 the system mail a real address, leak the key, charge a fee by itself, or hand a link to the
-wrong reader."""
+wrong reader. Re-pinned to the messaging engine (PLAN-014 D2): the catch-all is retired,
+the Outbox and the sandbox allowlist keep a sandbox from mailing a real address."""
 
 from __future__ import annotations
 
@@ -25,12 +26,12 @@ from ledger.services import statement_links
 from tests import test_collections as ladder
 from tests.test_calendar import feed_path, make_feed
 from tests.test_collections import (
-    CATCH_ALL,
     CEO,
+    at,
+    mail_set_up,
     operator,
+    queue_rule,
     rent_charge,
-    step,
-    tick,
 )
 from tests.test_mail import PRIVATE_KEY_MARKER, marker_info
 from tests.test_operator_views import client_for
@@ -57,10 +58,8 @@ def test_the_service_account_key_is_in_no_log_row_page_or_error(
     from mail import gmail
 
     info = marker_info()
-    settings.MAIL_ENABLED = True
-    settings.GMAIL_SENDER = "billing@example.com"
+    mail_set_up(settings)
     settings.GMAIL_SERVICE_ACCOUNT_JSON = json.dumps(info)
-    settings.MAIL_CATCH_ALL = CATCH_ALL
 
     def refuse(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"error": "boom " + PRIVATE_KEY_MARKER})
@@ -69,10 +68,9 @@ def test_the_service_account_key_is_in_no_log_row_page_or_error(
     monkeypatch.setattr(gmail, "RETRY_DELAY_SECONDS", 0, raising=False)
     caplog.set_level(logging.DEBUG)
     charge = rent_charge(owner=operator(email=CEO))
-    step(3)
     with override_settings(STAX_CALLER="worker"):
         try:
-            tick()
+            queue_rule(charge)
             from tests.job_helpers import run_queued_jobs
 
             run_queued_jobs()
@@ -82,7 +80,7 @@ def test_the_service_account_key_is_in_no_log_row_page_or_error(
     for row in AuditLog.objects.all():
         dump += str(row.before) + str(row.after)
     for message in OutboundMessage.objects.all():
-        dump += (message.error or "") + message.subject + str(message.status)
+        dump += (message.error or "") + message.rendered_subject + str(message.status)
     admin, _ = client_for(Role.ADMIN)
     dump += admin.get(f"/operators/{charge.lease.operator_id}/").content.decode()
     dump += admin.get("/audit/").content.decode()
@@ -90,61 +88,54 @@ def test_the_service_account_key_is_in_no_log_row_page_or_error(
     assert info["private_key"] not in dump
 
 
-# --- the ladder can never reach a real address outside production -----------------------
+# --- a sandbox can never reach a real address (PLAN-014 D2) -------------------------------
 
 
-def test_outside_production_every_envelope_goes_to_the_catch_all(clock: Any) -> None:
+def test_on_the_sandbox_nothing_reaches_an_address_off_the_allowlist(
+    clock: Any, settings: Any
+) -> None:
     from mail.memory import MemoryMailSender
 
     memory = MemoryMailSender()
-    with (
-        override_settings(
-            APP_ENV="staging",
-            MAIL_ENABLED=True,
-            MAIL_CATCH_ALL=CATCH_ALL,
-            GMAIL_SENDER="billing@example.com",
-            STAX_CALLER="worker",
-        ),
-        pytest.MonkeyPatch.context() as mp,
-    ):
+    mail_set_up(settings, sandbox=True, allowlist="")
+    clock(at(date(2026, 10, 8)))
+    with override_settings(STAX_CALLER="worker"), pytest.MonkeyPatch.context() as mp:
         import mail
 
         # Only the base sender is replaced: get_sender() itself must wrap it in the
-        # catch-all because MAIL_CATCH_ALL is set.
+        # allowlist because STAX_ENV is sandbox.
         mp.setattr(mail, "_base_sender", lambda: memory)
         for address in (CEO, "someone@realcompany.example", "x+tag@example.org"):
-            rent_charge(due_on=date(2026, 9, 1), owner=operator(email=address))
-        step(3)
-        tick()
+            queue_rule(rent_charge(due_on=date(2026, 9, 1), owner=operator(email=address)))
         from tests.job_helpers import run_queued_jobs
 
         run_queued_jobs()
-    assert memory.sent, "nothing was sent"
-    for message in memory.sent:
-        assert message.to == CATCH_ALL
-        assert "[to: " in message.subject
-    assert all(m.status in ("catch_all", "sent") for m in OutboundMessage.objects.all())
+    assert memory.sent == []
+    messages = list(OutboundMessage.objects.all())
+    assert len(messages) == 3
+    assert {(m.status, m.held_reason) for m in messages} == {("held", "sandbox")}
 
 
-def test_no_catch_all_outside_production_refuses_at_boot_and_at_send() -> None:
-    from finance.env_guard import EnvGuardError, validate
+def test_mail_on_boots_without_the_retired_variables_and_sends_nothing_without_a_sender(
+    settings: Any,
+) -> None:
+    from finance.env_guard import validate
+    from mail.outbox import OutboxSender
+    from tests.test_env_guard import DEPLOYED_ENV, _env
 
-    env = {
-        "APP_ENV": "staging",
-        "STAX_ENV": "sandbox",
-        "STAX_API_BASE_URL": "https://apiprod.fattlabs.com",
-        "APP_BASE_URL": "https://staging.example.com",
-        "DJANGO_SECRET_KEY": "placeholder-not-secret",
-        "STAX_API_KEY": "FAKE-CI-KEY-XYZ123",
-        "DATABASE_URL": "postgresql://postgres@localhost/x",
-        "MAIL_ENABLED": "true",
-        "GMAIL_SENDER": "billing@example.com",
-        "GMAIL_SERVICE_ACCOUNT_JSON": json.dumps(marker_info()),
-    }
-    with pytest.raises(EnvGuardError) as raised:
-        validate(env)
-    assert "MAIL_CATCH_ALL" in str(raised.value)
-    assert PRIVATE_KEY_MARKER not in str(raised.value)
+    env = _env(
+        DEPLOYED_ENV,
+        MAIL_ENABLED="true",
+        GMAIL_SERVICE_ACCOUNT_JSON=json.dumps(marker_info()),
+    )
+    config = validate(env)
+    assert config.mail_enabled is True
+    assert PRIVATE_KEY_MARKER not in repr(config)
+    import mail
+
+    settings.MAIL_ENABLED = True
+    settings.GMAIL_SERVICE_ACCOUNT_JSON = json.dumps(marker_info())
+    assert isinstance(mail.get_sender(), OutboxSender)  # no sender address in the settings
 
 
 # --- templates cannot reach into objects ------------------------------------------------

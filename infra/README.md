@@ -532,6 +532,22 @@ the line commented out, as the USPS pair: the owner stores the secret in the vau
 then uncomments it, and the redeploy is a Publish action (root `CLAUDE.md` section 6). The
 sandbox cannot tokenize a bank account (`docs/STATUS.md`), so staging stays without it.
 
+### Mail: the sender and the sandbox allowlist moved to Admin › Settings (PLAN-014 D1)
+
+Mail is sent through the Gmail API with the service-account key referenced from the vault
+as before (`gmail-service-account-key`, `GMAIL_SERVICE_ACCOUNT_JSON`, wired only while
+`mailEnabled`). The mailbox it sends as, the Reply-To, the managers' list and the **sandbox
+allowlist** are now company settings an admin edits in Admin › Settings › Mail; while the key
+is absent, `MAIL_ENABLED` is false or no "Send as" address is set, every message is held in
+the Outbox (Admin › Outbox) and nothing leaves the app. On the sandbox (`STAX_ENV=sandbox`)
+mail reaches only the allowlist's addresses. The app no longer reads `GMAIL_SENDER` or
+`MAIL_CATCH_ALL`.
+
+**Follow-up (Step 16):** the `main.bicep` parameters `gmailSender` and `mailCatchAll` and the
+two environment variables the web, worker and daily-job modules still set from them are
+unused; they stay until Step 16 removes them (their descriptions still name the old
+behaviour). Removing them is an infrastructure change and its apply a Publish action.
+
 ## 10. Step 10 (Celery) is already covered by this platform
 
 Nothing has to be re-planned for the worker and beat:

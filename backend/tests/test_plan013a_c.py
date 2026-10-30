@@ -173,12 +173,12 @@ def test_c1_the_cost_history_names_the_admin_who_closed_a_row() -> None:
 def test_c1_the_message_log_names_who_sent_by_hand_and_keeps_ladder(
     clock: Any,  # noqa: F811
 ) -> None:
+    # PLAN-014 D6: "Send a message now" replaced the ladder's step; each send is a manual row.
     clock(tc.at(date(2026, 10, 6)))
     charge = tc.rent_charge()
     client, user = named(Role.BILLING)
-    step10 = tc.step(10)
-    client.post(tc.send_url(charge), {"step": str(step10.pk)})
-    client.post(tc.send_url(charge), {"step": str(step10.pk), "confirm": "on"})
+    client.post(tc.send_url(charge), {"template": tc.template_id()})
+    client.post(tc.send_url(charge), {"template": tc.template_id()})
     page = body(client, f"/charges/{charge.pk}/")
     log = between(page, 'id="message-log"', "</table>")
     rows = log.split("<tr")[2:]  # past the header row

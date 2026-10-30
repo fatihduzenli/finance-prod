@@ -30,4 +30,21 @@
     {% endresponsive_table %}
     <form method="post" action="{% url 'ledger:settings:brand_add' %}" class="settings-inline settings-add" id="brand-add">{% csrf_token %}<label for="brand-add-name">New brand</label><input type="text" name="name" id="brand-add-name" maxlength="{{ name_max }}" required><button class="btn btn-primary btn-sm" type="submit">Add</button></form>
   </section>
+  {% comment %}PLAN-014 D1, D2: the Mail card. Whether mail is set up reads the key's presence, never its value. The two lists take one address per line; on the sandbox only the allowlist's addresses are ever mailed, every other message is held in the Outbox.{% endcomment %}
+  <section class="card settings-card" id="mail-card">
+    <div class="card-header"><h2 id="mail">Mail</h2></div>
+    <p id="mail-status">{{ mail_status }}</p>
+    <form method="post" action="{% url 'ledger:settings:mail_save' %}" id="mail-form">{% csrf_token %}
+      <div class="field"><label for="mail-sender">Send as</label><input type="email" name="sender_email" id="mail-sender" value="{{ mail.sender_email }}" maxlength="254" autocomplete="off"><span class="help">The company mailbox the messages are sent from.</span></div>
+      <div class="field"><label for="mail-reply-to">Reply-To</label><input type="email" name="reply_to_email" id="mail-reply-to" value="{{ mail.reply_to_email }}" maxlength="254" autocomplete="off"><span class="help">Where replies go; empty: to the Send as address.</span></div>
+      <div class="field"><label for="mail-managers">Managers</label><textarea name="manager_emails" id="mail-managers" rows="3">{{ mail.manager_emails }}</textarea><span class="help">One address per line: they receive the internal 30-days-overdue message.</span></div>
+      <div class="field"><label for="mail-allowlist">Sandbox allowlist</label><textarea name="sandbox_allowlist" id="mail-allowlist" rows="3">{{ mail.sandbox_allowlist }}</textarea><span class="help">One address per line. On the sandbox, mail goes only to these addresses; every other message is held in the Outbox.</span></div>
+      <p class="help" id="mail-pay-link">Until the operator portal exists, the {pay_link} placeholder is a signed link to the operator's statement.</p>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+  </section>
+  <section class="card settings-card" id="templates-card">
+    <div class="card-header"><h2 id="message-templates">Message templates</h2></div>
+    <p>The subject and text of every message, with the placeholders each may use. <a href="{% url 'ledger:settings:templates' %}" id="templates-link">Edit message templates</a> · <a href="{% url 'ledger:outbox:page' %}" id="outbox-link">Outbox</a></p>
+  </section>
 {% endblock %}

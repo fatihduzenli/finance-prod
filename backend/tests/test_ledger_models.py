@@ -362,20 +362,23 @@ def new_message_template(**fields: Any) -> ledger.MessageTemplate:
     return ledger.MessageTemplate(**{**values, **fields})
 
 
-def new_collection_step(**fields: Any) -> ledger.CollectionStep:
-    _default(fields, "template", lambda: saved(new_message_template()))
-    return ledger.CollectionStep(**{"day_offset": 100 + next(_numbers) % 200, **fields})
+def new_leased_message(**fields: Any) -> ledger.OutboundMessage:
+    """A message through a lease (the unique constraint names the lease; PLAN-014 D3)."""
+    _default(fields, "lease", lambda: saved(new_lease()))
+    return new_outbound_message(**fields)
 
 
 def new_outbound_message(**fields: Any) -> ledger.OutboundMessage:
+    """A message about a charge (PLAN-014 D3): rule B, the first occurrence."""
     _default(fields, "operator", lambda: saved(new_operator()))
-    _default(fields, "step", lambda: saved(new_collection_step()))
+    _default(fields, "template", lambda: saved(new_message_template()))
     values = {
-        "template": fields["step"].template,
+        "rule": "B",
         "charge_entity_type": "rent_charge",
         "charge_entity_id": uuid.uuid4(),
         "to_address": "ops@example.com",
-        "subject": "Notice",
+        "rendered_subject": "Notice",
+        "rendered_body": "Owed.",
     }
     return ledger.OutboundMessage(**{**values, **fields})
 
@@ -522,12 +525,12 @@ def _second_plan(*, cancelled_first: bool, rent: bool) -> ledger.InstallmentPlan
 
 
 def new_final_statement_message(**fields: Any) -> ledger.OutboundMessage:
-    """A final statement e-mail (PLAN-012e D8): no step, a lease end, a document."""
+    """A final statement e-mail (PLAN-012e D8): its rule, a lease end, a document."""
     _default(fields, "operator", lambda: saved(new_operator()))
     _default(fields, "template", lambda: saved(new_message_template()))
     values = {
         "kind": "final_statement",
-        "step": None,
+        "rule": "final_statement",
         "charge_entity_type": "lease_end",
         "charge_entity_id": uuid.uuid4(),
         "to_address": "ops@example.com",
@@ -600,7 +603,6 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.Dispute: new_dispute,
     ledger.DisputeEvidence: new_dispute_evidence,
     ledger.MessageTemplate: new_message_template,
-    ledger.CollectionStep: new_collection_step,
     ledger.OutboundMessage: new_outbound_message,
     ledger.ContactEntry: new_contact_entry,
     ledger.ContactCorrection: new_contact_correction,
@@ -1740,7 +1742,7 @@ LEDGER_CASES: list[ConstraintCase] = [
         unique_pair(new_calendar_feed, {}, {"user": lambda row: row.user}),
     ),
     _field_unique("calendar_feeds", "token_hash", new_calendar_feed, b"\x01" * 32, b"\x02" * 32),
-    # message_templates, collection_steps, outbound_messages (PLAN-011b D4)
+    # message_templates, outbound_messages (PLAN-011b D4, PLAN-014 D3)
     ConstraintCase(
         "message_templates_subject_not_blank",
         new_message_template,
@@ -1757,16 +1759,6 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_message_template(code="Test-Code"),
     ),
     _field_unique("message_templates", "code", new_message_template, "test_one", "test_two"),
-    ConstraintCase(
-        "collection_steps_day_offset_range",
-        lambda: new_collection_step(day_offset=365),
-        lambda: new_collection_step(day_offset=366),
-    ),
-    ConstraintCase(
-        "collection_steps_day_unique",
-        unique_pair(new_collection_step, {"day_offset": 300}, {"day_offset": 301}),
-        unique_pair(new_collection_step, {"day_offset": 300}, {"day_offset": 300}),
-    ),
     ConstraintCase(
         "outbound_messages_body_sha256_hex",
         lambda: new_outbound_message(body_sha256="0123456789abcdef" * 4),
@@ -1788,26 +1780,38 @@ LEDGER_CASES: list[ConstraintCase] = [
         lambda: new_outbound_message(manual=True, sent_by=None),
     ),
     ConstraintCase(
-        "outbound_messages_one_per_charge_step",
+        "outbound_messages_one_per_lease_charge_rule",
         unique_pair(
-            new_outbound_message,
+            new_leased_message,
             {},
             {
-                "step": lambda row: row.step,
+                "lease": lambda row: row.lease,
                 "charge_entity_id": lambda row: row.charge_entity_id,
-                "manual": True,
-                "sent_by": lambda row: make_user(),
+                "occurrence": 2,
             },
         ),
         unique_pair(
-            new_outbound_message,
+            new_leased_message,
             {},
-            {"step": lambda row: row.step, "charge_entity_id": lambda row: row.charge_entity_id},
+            {
+                "lease": lambda row: row.lease,
+                "charge_entity_id": lambda row: row.charge_entity_id,
+            },
         ),
     ),
-    # PLAN-012e D8: kinds of outbound messages.
     ConstraintCase(
-        "outbound_messages_step_iff_ladder",
+        "outbound_messages_occurrence_positive",
+        lambda: new_outbound_message(occurrence=1),
+        lambda: new_outbound_message(occurrence=0),
+    ),
+    ConstraintCase(
+        "outbound_messages_held_has_reason",
+        lambda: new_outbound_message(status="held", held_reason="sandbox"),
+        lambda: new_outbound_message(status="held", held_reason=""),
+    ),
+    # PLAN-012e D8, PLAN-014 D3: kinds of outbound messages and their rules.
+    ConstraintCase(
+        "outbound_messages_kind_matches_rule",
         new_final_statement_message,
         lambda: new_final_statement_message(kind="ladder"),
     ),
