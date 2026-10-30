@@ -606,6 +606,7 @@ def test_every_action_writes_one_audit_row_with_actor_and_before_after(
     actor: User, fake: FakeProvider
 ) -> None:
     with_email = create(actor)
+    assert with_email.operator is not None
     lease_sync.sync_lease(with_email.pk, provider=fake, actor=actor)
     lease_sync.update_billing(with_email.pk, billing_fields(city="Newtown"), actor=actor)
     operators.archive_operator(with_email.operator.pk, actor=actor)

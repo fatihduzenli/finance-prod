@@ -79,6 +79,18 @@ def new_lease(**fields: Any) -> ledger.Lease:
     return ledger.Lease(**{**values, **fields})
 
 
+def new_lease_billing(**fields: Any) -> ledger.LeaseBilling:
+    """A lease's billing details (PLAN-014 C2)."""
+    _default(fields, "lease", lambda: saved(new_lease()))
+    values = {"company_name": "Test Operator LLC", "email": "billing@example.com"}
+    return ledger.LeaseBilling(**{**values, **fields})
+
+
+def _self_shared_billing() -> ledger.LeaseBilling:
+    lease = saved(new_lease())
+    return new_lease_billing(lease=lease, shares_account_of=lease)
+
+
 def new_rent_history(**fields: Any) -> ledger.LeaseRentHistory:
     _default(fields, "lease", lambda: saved(new_lease()))
     values = {"amount": D("2450.00"), "effective_from": date(2026, 1, 1), "source": "staff"}
@@ -561,6 +573,7 @@ LEDGER_FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     ledger.Operator: new_operator,
     ledger.Store: new_store,
     ledger.Lease: new_lease,
+    ledger.LeaseBilling: new_lease_billing,
     ledger.LeaseRentHistory: new_rent_history,
     ledger.CollectionSchedule: new_schedule,
     ledger.RentCharge: new_rent_charge,
@@ -869,6 +882,24 @@ LEDGER_CASES: list[ConstraintCase] = [
         "leases_active_has_day_and_operator",
         lambda: new_lease(collection_status="prospective", operator=None, debit_day=None),
         lambda: new_lease(collection_status="active", operator=None),
+    ),
+    _field_unique("leases", "creation_key", new_lease, _UUID_1, _UUID_2),
+    # lease_billing (PLAN-014 C2)
+    ConstraintCase(
+        "lease_billing_last4_digits",
+        lambda: new_lease_billing(bank_last4="4821"),
+        lambda: new_lease_billing(bank_last4="48a1"),
+    ),
+    ConstraintCase(
+        "lease_billing_not_self_shared",
+        lambda: new_lease_billing(shares_account_of=saved(new_lease())),
+        _self_shared_billing,
+    ),
+    ConstraintCase(
+        "lease_billing.lease_id",
+        unique_pair(new_lease_billing, {}, {}),
+        unique_pair(new_lease_billing, {}, {"lease": _same_lease}),
+        column="lease_id",
     ),
     ConstraintCase(
         "leases_ended_after_started",

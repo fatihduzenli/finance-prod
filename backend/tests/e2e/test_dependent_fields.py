@@ -34,6 +34,7 @@ from ledger.services.invoice_builder import LineInput
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.receivables_helpers import a_lease, a_one_off_charge, a_store, an_operator
 from tests.test_charge_now import store_methods
+from tests.test_lease_services import bill_lease
 from tests.test_one_off_charges import an_operator as one_off_operator
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
@@ -163,7 +164,8 @@ def test_without_javascript_every_dependent_field_stays_visible(
 
 def _banked() -> Operator:
     """An operator with a usable bank account on file (PLAN-012f-b D15: Schedule for a
-    date is on offer only then)."""
+    date is on offer only then). PLAN-014 C3: the account is its first lease's; a further
+    lease shares it through ``bill_lease``."""
     operator = one_off_operator()
     store_methods(operator)
     return operator
@@ -175,7 +177,7 @@ def test_how_to_collect_shows_the_chosen_choices_fields_and_button(
     """PLAN-012e-2 D3: the builder's How to collect shows the debit date only for
     Schedule for a date, the received payment only for Record payment now, and the one
     button of the chosen choice, which names the live total."""
-    lease = a_lease(a_store("E2E-12E2-1"), _banked(), started=date(2026, 1, 1))
+    lease = bill_lease(a_lease(a_store("E2E-12E2-1"), _banked(), started=date(2026, 1, 1)))
     _sign_in(page, live_server, "e2e-12e2-collect")
     page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/")
     date_field, method = page.locator("#id_schedule_on"), page.locator("#id_method")
@@ -209,7 +211,7 @@ def test_how_to_collect_shows_the_chosen_choices_fields_and_button(
 def test_without_javascript_how_to_collect_shows_every_field_and_button(
     live_server: LiveServer, no_script: BrowserContext
 ) -> None:
-    lease = a_lease(a_store("E2E-12E2-2"), _banked(), started=date(2026, 1, 1))
+    lease = bill_lease(a_lease(a_store("E2E-12E2-2"), _banked(), started=date(2026, 1, 1)))
     page = no_script.new_page()
     _sign_in(page, live_server, "e2e-12e2-noscript")
     page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/?collect=schedule")
@@ -228,7 +230,7 @@ def test_set_up_autopay_shows_its_fields_by_the_choice_and_the_end_rule(
     live_server: LiveServer, page: Page
 ) -> None:
     # PLAN-012f-b D15: Set up autopay is on offer with a bank account on file.
-    lease = a_lease(a_store("E2E-12FA-E2-1"), _banked(), started=date(2026, 1, 1))
+    lease = bill_lease(a_lease(a_store("E2E-12FA-E2-1"), _banked(), started=date(2026, 1, 1)))
     _sign_in(page, live_server, "e2e-12fa-e2-autopay")
     page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/")
     cadence, first = page.locator("#id_autopay_cadence"), page.locator("#id_autopay_first_on")
@@ -268,7 +270,7 @@ def test_without_javascript_set_up_autopay_shows_every_field(
     live_server: LiveServer, no_script: BrowserContext
 ) -> None:
     # PLAN-012f-b D15: Set up autopay is on offer with a bank account on file.
-    lease = a_lease(a_store("E2E-12FA-E2-2"), _banked(), started=date(2026, 1, 1))
+    lease = bill_lease(a_lease(a_store("E2E-12FA-E2-2"), _banked(), started=date(2026, 1, 1)))
     page = no_script.new_page()
     _sign_in(page, live_server, "e2e-12fa-e2-noscript")
     page.goto(f"{live_server.url}/invoices/new/store/{lease.store_id}/?collect=autopay")

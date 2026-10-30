@@ -104,15 +104,17 @@ def an_operator(
     customer: str | None = CUSTOMER,
     bank: str | None = BANK,
     email: str = "",
+    account: dict[str, Any] | None = None,
 ) -> Operator:
     """An operator with an active lease that holds a provider customer (known to the fake)
     and a linked bank method (PLAN-014 C3: the account is the lease's; a charge without a
     lease bills through the operator's first active lease). A later lease of the operator
-    made by ``make_lease`` shares this lease's account. A test with two operators gives
-    the second its own customer and method."""
+    made by ``make_lease`` shares this lease's account; ``account`` holds fields of that
+    first lease (``make_lease``'s), for a test whose operator has one lease only. A test
+    with two operators gives the second its own customer and method."""
     email = email or f"{uuid.uuid4().hex[:8]}-{EMAIL}"
     operator = make_operator(email=email, customer=customer)
-    lease = make_lease(operator=operator)
+    lease = make_lease(operator=operator, **(account or {}))
     if bank and customer:
         ExternalRef.objects.create(
             entity_type="lease",
