@@ -1576,7 +1576,8 @@ class BankTiles:
     C3, as on Add payment). ``bank_why``: the one line of Schedule for a date, Set up autopay
     and Schedule settlement, no usable bank method on file
     (:data:`~ledger.services.one_off_charges.DEBIT_NO_ACCOUNT` naming the operator), or
-    ``""``; ``bank_url``: the "Operator page" link under it (``""`` without an operator);
+    ``""``; ``bank_url``: the "Edit billing details" link under it, to the billing lease's
+    dialog (``""`` without a lease, PLAN-014 C3);
     ``charge_now_why``: Charge now's line, ``bank_why`` first, then the pay-an-invoice flag
     off (it gates that call only; schedules work without it); ``charge_now_more``: Charge
     now's second line when no bank method is on file and the flag is off as well."""
@@ -1596,7 +1597,7 @@ def bank_tiles(operator: Operator | None, lease: Lease | None = None) -> BankTil
     if method is not None and method.is_usable_bank:
         off = "" if enabled else str(one_off_charges.DEBIT_OFF)
         return BankTiles(bank_why="", bank_url="", charge_now_why=off, charge_now_more="")
-    line, url = one_off_charges.no_account_line(operator)
+    line, url = one_off_charges.no_account_line(operator, account)
     more = "" if enabled else str(one_off_charges.DEBIT_ALSO_OFF)
     return BankTiles(bank_why=line, bank_url=url, charge_now_why=line, charge_now_more=more)
 

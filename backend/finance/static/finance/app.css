@@ -883,7 +883,7 @@ fieldset.card > legend + * { clear: both; }
 .collect-tile.is-unavailable .collect-option { cursor: not-allowed; }
 .collect-tile.is-unavailable .collect-name { color: var(--muted); }
 .collect-tile.is-unavailable .unavailable-reason { color: var(--text-2); }
-/* PLAN-012f-c §11 E2: the greyed card's "Operator page" link, the size of its notes. */
+/* PLAN-012f-c §11 E2: the greyed card's link (PLAN-014 C3: "Edit billing details"), the size of its notes. */
 .collect-link { align-self: flex-start; font-size: var(--fs-sm); }
 .bank-field .bank-select { pointer-events: none; background: var(--surface-2); color: var(--text); }
 .note-card textarea { width: 100%; }

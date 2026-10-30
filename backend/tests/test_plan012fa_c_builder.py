@@ -262,7 +262,7 @@ def test_one_tile_per_choice_each_with_its_radio_name_and_sentence() -> None:
         assert len(found) == 6, role
         # PLAN-013a C3: the operator has no bank account on file and bank debits are off,
         # so an admin's Charge now carries a second note, the "also off" line, under its
-        # reason (and the Operator page link); every other tile has its one note.
+        # reason (and the Edit billing details link); every other tile has its one note.
         also_off = invoice_builder.bank_tiles(lease.operator).charge_now_more
         assert also_off == str(one_off_charges.DEBIT_ALSO_OFF)
         for tile in found:

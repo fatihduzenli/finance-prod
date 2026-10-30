@@ -332,7 +332,7 @@ def _collect_form(
     D15): Charge now greyed below admin, with the pay-an-invoice flag off or no bank account
     on file; Schedule for a date and Set up autopay greyed with no bank account on file or
     where ``can_schedule`` is false (:func:`ledger.services.invoice_builder.bank_tiles`, with
-    the "Operator page" link and Charge now's second line, PLAN-013a C3)."""
+    the "Edit billing details" link and Charge now's second line, PLAN-013a C3)."""
     bank = invoice_builder.bank_tiles(operator, lease)
     greyed: dict[str, Any] = {
         "can_charge_now": meets(_role(request), Role.ADMIN),

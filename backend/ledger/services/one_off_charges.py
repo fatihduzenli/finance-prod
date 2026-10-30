@@ -1673,28 +1673,28 @@ def _bank_method(lease: Lease | None) -> BankMethod | None:
     )
 
 
-def no_account_line(operator: Operator | None) -> tuple[str, str]:
+def no_account_line(operator: Operator | None, lease: Lease | None) -> tuple[str, str]:
     """:data:`DEBIT_NO_ACCOUNT` naming ``operator`` (:data:`DEBIT_OPERATOR_FALLBACK` without
-    one) and the operator page's URL (``""`` without an operator): the first line of a card
-    or tile greyed for no bank method on file and the "Operator page" link under it."""
-    if operator is None:
-        return DEBIT_NO_ACCOUNT.format(operator=DEBIT_OPERATOR_FALLBACK), ""
-    return (
-        DEBIT_NO_ACCOUNT.format(operator=operator.display_name),
-        reverse("ledger:operators:detail", kwargs={"pk": operator.pk}),
-    )
+    one) and the URL of Edit billing details of the lease whose account bills (``lease``'s,
+    or the one it shares; ``""`` without a lease), where the bank is connected (PLAN-014
+    C3): the first line of a card or tile greyed for no bank method on file and the "Edit
+    billing details" link under it."""
+    name = operator.display_name if operator is not None else DEBIT_OPERATOR_FALLBACK
+    account = leases.account_lease(lease)
+    url = reverse("ledger:leases:billing", kwargs={"pk": account.pk}) if account else ""
+    return DEBIT_NO_ACCOUNT.format(operator=name), url
 
 
 def _setup_reasons(
-    enabled: bool, method: BankMethod | None, operator: Operator | None
+    enabled: bool, method: BankMethod | None, operator: Operator | None, lease: Lease | None
 ) -> tuple[str, str, str]:
     """The greyed card's two lines and link for the flag and the bank method (PLAN-012f-c
-    D7, §11 E2): no bank method, :data:`DEBIT_NO_ACCOUNT` naming the operator and the
-    operator page's URL (``""`` without an operator), with :data:`DEBIT_ALSO_OFF` under it
-    when the flag is off as well; the flag off alone, :data:`DEBIT_OFF`; neither,
-    ``("", "", "")``."""
+    D7, §11 E2): no bank method, :data:`DEBIT_NO_ACCOUNT` naming the operator and the URL
+    of the billing lease's Edit billing details (:func:`no_account_line`), with
+    :data:`DEBIT_ALSO_OFF` under it when the flag is off as well; the flag off alone,
+    :data:`DEBIT_OFF`; neither, ``("", "", "")``."""
     if method is None:
-        line, url = no_account_line(operator)
+        line, url = no_account_line(operator, lease)
         more = "" if enabled else str(DEBIT_ALSO_OFF)
         return line, more, url
     if not enabled:
@@ -1706,7 +1706,8 @@ def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
     """The bank-debit card of Add payment (D14). Local data only; no provider call."""
     enabled = charge_now_enabled()
     operator = _charge_operator(charge)
-    method = _bank_method(leases.billing_lease(charge))
+    billed = leases.billing_lease(charge)
+    method = _bank_method(billed)
     balance = open_balance(charge)
     reason_more = reason_url = ""
     if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
@@ -1716,7 +1717,7 @@ def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
     elif has_pending_payment(charge):
         reason = DEBIT_PENDING
     else:
-        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator)
+        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator, billed)
     return BankDebitOptions(
         enabled=enabled,
         method=method,
@@ -1812,7 +1813,7 @@ def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDeb
     elif rent_debit_live(charge):
         reason = RENT_DEBIT_PENDING
     else:
-        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator)
+        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator, charge.lease)
     return BankDebitOptions(
         enabled=enabled,
         method=method,

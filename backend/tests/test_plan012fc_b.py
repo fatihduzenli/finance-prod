@@ -37,7 +37,7 @@ from ledger.models import (
     PaymentStatus,
     RentChargeStatus,
 )
-from ledger.services import detail_cards, refunds, rent_run
+from ledger.services import detail_cards, leases, refunds, rent_run
 from ledger.services import one_off_charges as service
 from ledger.validators import contains_card_number, validate_no_payment_data
 from ledger.views.operators import HELD_FORM_KEY
@@ -99,6 +99,14 @@ def named_user(username: str, first: str = "", last: str = "", email: str = "") 
 # --- D7: the greyed card's reasons --------------------------------------------------------
 
 
+def billing_page(operator: Operator) -> str:
+    """Edit billing details of the lease that bills a charge without a lease: the
+    operator's first active lease (PLAN-014 C3)."""
+    lease = leases.first_active_lease(operator)
+    assert lease is not None
+    return reverse("ledger:leases:billing", kwargs={"pk": lease.pk})
+
+
 def test_no_bank_and_the_flag_off_give_the_owners_two_lines(fake: FakeProvider) -> None:
     name_provider()
     operator = an_operator(fake, bank=None)
@@ -108,7 +116,7 @@ def test_no_bank_and_the_flag_off_give_the_owners_two_lines(fake: FakeProvider) 
         options = service.bank_debit_options(charge)
     assert options.reason == "No bank account on file for Fatih Co."
     assert options.reason_more == "Bank debits are also off at PayCo."
-    assert options.reason_url == reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
+    assert options.reason_url == billing_page(operator)  # PLAN-014 C3: the billing lease's
     assert not options.allowed
 
 
@@ -158,8 +166,7 @@ def test_a_rent_charge_gets_the_two_lines_too() -> None:
     with override_settings(STAX_PAY_INVOICE_ENABLED=True):
         one = service.rent_debit_options(charge)
     assert (one.reason, one.reason_more) == ("No bank account on file for Rent Ops.", "")
-    assert lease.operator is not None
-    page = reverse("ledger:operators:detail", kwargs={"pk": lease.operator.pk})
+    page = reverse("ledger:leases:billing", kwargs={"pk": lease.pk})  # PLAN-014 C3
     assert both.reason_url == one.reason_url == page
 
 
@@ -185,7 +192,7 @@ def test_the_page_prints_the_second_line_muted_under_the_first(fake: FakeProvide
     )
     link = (
         f'<a class="collect-link" id="debit-reason-link" href="'
-        f'{reverse("ledger:operators:detail", kwargs={"pk": operator.pk})}">Operator page</a>'
+        f'{billing_page(operator)}">Edit billing details</a>'
     )
     second = (
         '<span class="collect-note" id="debit-reason-more">'

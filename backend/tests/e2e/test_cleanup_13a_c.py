@@ -1,8 +1,8 @@
 """PLAN-013a Batch C in a browser: the QA screenshots (``QA_SHOTS_DIR``) of the pages the
 cleanup changed — the stores list on a phone (C6, the meta line), a Zelle payment's page without
-the Refunds card (C2), the invoice builder's greyed bank tiles with the Operator page link (C3),
-and a cost history row showing the staff member's name (C1). Each page is also checked for the
-change it carries."""
+the Refunds card (C2), the invoice builder's greyed bank tiles with their link (C3; since
+PLAN-014 C3 Edit billing details), and a cost history row showing the staff member's name
+(C1). Each page is also checked for the change it carries."""
 
 from __future__ import annotations
 
@@ -109,11 +109,11 @@ def walk(page: Page, live_server: LiveServer, width: str) -> None:
     body = page.content()
     assert 'id="refunds-card"' not in body and 'id="tile-applied"' in body
     shot(page, f"payment-no-refunds-card-{width}")
-    # C3: the builder's greyed bank tiles with the Operator page link.
+    # C3: the builder's greyed bank tiles with the link (PLAN-014 C3: Edit billing details).
     page.goto(live_server.url + reverse("ledger:invoices:new_store", kwargs={"pk": store.pk}))
     body = page.content()
     assert "No bank account on file for Acme Stores." in body
-    assert ">Operator page<" in body
+    assert ">Edit billing details<" in body
     shot(page, f"builder-no-bank-tiles-{width}")
 
 

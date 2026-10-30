@@ -35,7 +35,7 @@ from ledger.models import (
     PaymentChannel,
     RentCharge,
 )
-from ledger.services import invoice_builder, store_costs
+from ledger.services import invoice_builder, leases, store_costs
 from ledger.services import one_off_charges as one_off_service
 from payments.fake import FakeProvider
 from tests import test_builder_save_prompt as builder
@@ -308,6 +308,14 @@ def no_bank_draft(fake: FakeProvider, name: str = "") -> tuple[Any, str]:
 BANK_TILES = ("charge_now", "schedule", "autopay", "settlement")
 
 
+def billing_page(operator: Any) -> str:
+    """Edit billing details of the lease that holds the operator's account (PLAN-014 C3:
+    the draft's lease shares the account of the operator's first lease, one hop)."""
+    holder = leases.account_lease(operator.leases.first())
+    assert holder is not None
+    return reverse("ledger:leases:billing", kwargs={"pk": holder.pk})
+
+
 def test_c3_bank_unavailable_reads_the_add_payment_sentence_with_the_operators_name(
     fake: FakeProvider, enabled: None, builder_now: None
 ) -> None:
@@ -316,17 +324,19 @@ def test_c3_bank_unavailable_reads_the_add_payment_sentence_with_the_operators_n
     tiles = invoice_builder.bank_tiles(operator)
     assert invoice_builder.bank_unavailable(operator) == line == tiles.bank_why
     assert invoice_builder.charge_now_unavailable(operator) == line
-    assert tiles.bank_url == reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
+    # PLAN-014 C3: the link is Edit billing details of the lease whose account bills (the
+    # operator's first active lease, without a lease of the draft).
+    assert tiles.bank_url == billing_page(operator)
     assert tiles.charge_now_more == ""
     nobody = invoice_builder.bank_tiles(None)
     assert nobody.bank_why == "No bank account on file for the operator." and nobody.bank_url == ""
 
 
-def test_c3_every_greyed_bank_tile_links_the_operator_page_under_its_line(
+def test_c3_every_greyed_bank_tile_links_edit_billing_details_under_its_line(
     fake: FakeProvider, enabled: None, builder_now: None
 ) -> None:
     operator, html = no_bank_draft(fake)
-    url = reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
+    url = billing_page(operator)
     plain = f"No bank account on file for {operator.display_name}."
     line = escape(plain)
     for value in BANK_TILES:
@@ -334,7 +344,8 @@ def test_c3_every_greyed_bank_tile_links_the_operator_page_under_its_line(
         assert builder.greyed(html, value) == plain
         assert (
             f'<span class="collect-note unavailable-reason" id="{value}-reason">{line}</span>'
-            f'<a class="collect-link" id="{value}-reason-link" href="{url}">Operator page</a>'
+            f'<a class="collect-link" id="{value}-reason-link" href="{url}">'
+            "Edit billing details</a>"
         ) in found, value
         assert f'id="{value}-reason-more"' not in found, value
     for value in ("draft", "record"):
