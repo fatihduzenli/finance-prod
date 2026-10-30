@@ -449,7 +449,7 @@ class Migration(migrations.Migration):
                 (
                     "lease",
                     models.OneToOneField(
-                        on_delete=django.db.models.deletion.PROTECT,
+                        on_delete=django.db.models.deletion.CASCADE,
                         related_name="billing",
                         to="ledger.lease",
                     ),

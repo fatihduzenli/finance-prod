@@ -19,6 +19,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import connection
+from django.db.models import ProtectedError
 from django.test import override_settings
 from django.utils import timezone
 
@@ -1962,3 +1963,28 @@ def test_a_sharer_without_autopay_switches_and_moves_nothing(fake: FakeProvider)
     )
     assert call_names(fake) == ["list_payment_methods"]
     assert own_refs(sharer, "payment_method") == [OWN_BANK]
+
+
+def test_deleting_a_lease_removes_its_billing_but_a_shared_account_lease_is_kept() -> None:
+    """QA-014 Batch C: the billing row is part of its lease (CASCADE), but a lease whose
+    account another lease shares must not vanish (PROTECT on ``shares_account_of``)."""
+    operator = make_operator()
+    holder = make_lease(operator=operator)
+    sharer = make_lease(operator=operator)
+    alone = make_lease(operator=make_operator(email="other@example.com", customer="cus-2"))
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id == holder.pk
+    alone_billing = LeaseBilling.objects.get(lease=alone).pk
+
+    alone.delete()
+    assert not LeaseBilling.objects.filter(pk=alone_billing).exists()
+    assert not Lease.objects.filter(pk=alone.pk).exists()
+
+    with pytest.raises(ProtectedError):
+        holder.delete()
+    assert Lease.objects.filter(pk=holder.pk).exists()
+    assert LeaseBilling.objects.filter(lease=holder).exists()
+
+    sharer.delete()
+    assert not LeaseBilling.objects.filter(lease_id=sharer.pk).exists()
+    holder.delete()
+    assert not LeaseBilling.objects.filter(lease_id=holder.pk).exists()
