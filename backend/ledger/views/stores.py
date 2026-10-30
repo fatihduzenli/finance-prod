@@ -289,23 +289,12 @@ def _detail_context(
                 ),
                 "timeline_more": len(found) > contacts.PAGE_LIMIT,
                 "timeline_show": show,
-                "timeline_filters": [
-                    (
-                        value,
-                        label,
-                        f"{reverse('ledger:stores:detail', kwargs={'pk': store.pk})}"
-                        f"?{urlencode({'tab': workspace.TAB_CONTACTS, 'show': value})}"
-                        f"#tab-{workspace.TAB_CONTACTS}",
-                    )
-                    for value, label in timeline.SHOWS
-                ],
-                "timeline_empty": (
-                    timeline.EMPTY_EMAILS
-                    if show == timeline.SHOW_EMAILS
-                    else timeline.EMPTY_NOTES
-                    if show == timeline.SHOW_NOTES
-                    else ""
+                "timeline_filters": contact_log.timeline_filters(
+                    reverse("ledger:stores:detail", kwargs={"pk": store.pk}),
+                    {"tab": workspace.TAB_CONTACTS},
+                    f"#tab-{workspace.TAB_CONTACTS}",
                 ),
+                "timeline_empty": timeline.empty_text(show),
             }
         )
     if tab == workspace.TAB_DOCUMENTS:
