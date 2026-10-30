@@ -178,7 +178,7 @@ def test_the_placeholder_set_is_exactly_the_fifteen() -> None:
     ("bad", "named"),
     [
         ("{unknown}", "{unknown}"),
-        ("{0}", "{0}"),
+        ("{0}", ""),  # not a plain word: refused without being named
         ("{operator_name.__class__}", ""),
         ("{amount[0]}", ""),
         ("{amount:>99999}", "{amount}"),
@@ -360,8 +360,8 @@ def test_the_send_window_schedules_the_next_nine_new_york(
 
 
 def test_the_window_is_an_hour_apart_in_utc_across_the_dst_change() -> None:
-    before = messaging.scheduled_for(at(20, 0, date(2026, 10, 31)).astimezone(UTC))
-    after = messaging.scheduled_for(at(20, 0, date(2026, 11, 1)).astimezone(UTC))
+    before = messaging.scheduled_for(at(20, 0, date(2026, 10, 30)).astimezone(UTC))
+    after = messaging.scheduled_for(at(20, 0, date(2026, 10, 31)).astimezone(UTC))
     assert before.astimezone(NEW_YORK).hour == 9 and after.astimezone(NEW_YORK).hour == 9
     assert before.hour == 13 and after.hour == 14  # 9:00 EDT is 13:00 UTC; 9:00 EST is 14:00
 
@@ -430,10 +430,13 @@ def test_a_message_appears_in_the_stores_timeline_with_its_result_and_a_masked_a
         messaging.send(message.pk, now=at(10))
     billing, _ = client_for(Role.BILLING)
     page = billing.get(f"/stores/{lease.store_id}/?tab=contacts&show=emails").content.decode()
-    assert "Payment due" in page
-    assert "not sent (mail not set up)" in page
     assert "No e-mails yet." not in page
-    assert "store1701@example.com" not in page  # masked below admin
+    start = page.index(f'id="message-{message.pk}"')
+    entry = page[start : page.index("</li>", start)]
+    assert "Payment due" in entry
+    assert "not sent (mail not set up)" in entry
+    assert "s***@example.com" in entry  # masked below admin (the LEASE card shows the full one)
+    assert "store1701@example.com" not in entry
 
 
 # --- D4: the preview queues nothing; a huge body is refused -----------------------------------
