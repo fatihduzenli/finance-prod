@@ -7,7 +7,7 @@
 - :class:`AllowlistSender`: on the sandbox, a recipient that is not on the company settings'
   allowlist is ``held`` with the reason ``sandbox`` and never reaches the inner sender; an
   allowlisted one is delivered by it. :func:`mail.get_sender` wraps the Gmail sender in it
-  whenever ``STAX_ENV`` is ``sandbox``, so no path (a reminder, a final statement, a morning
+  whenever the environment is the sandbox, so no path (a reminder, a final statement, a morning
   e-mail) can mail anyone else from a sandbox.
 """
 

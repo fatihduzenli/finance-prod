@@ -13,8 +13,8 @@ message).
   company settings): nothing is delivered and every message is held (``not_set_up``);
 - otherwise the Gmail sender (:class:`~mail.gmail.GmailApiSender`, one per process and
   sender, built on first use from the key, sending as the company settings'
-  ``sender_email`` with its ``reply_to_email``), wrapped, when ``STAX_ENV`` is
-  ``sandbox``, in :class:`~mail.outbox.AllowlistSender`: a recipient off the company
+  ``sender_email`` with its ``reply_to_email``), wrapped, on the sandbox environment
+  (:func:`finance.middleware.on_sandbox`, the sandbox banner's own test), in :class:`~mail.outbox.AllowlistSender`: a recipient off the company
   settings' ``sandbox_allowlist`` is held (``sandbox``). A sandbox can never mail anyone
   else.
 
@@ -57,9 +57,6 @@ __all__ = [
     "is_set_up",
     "mail_settings",
 ]
-
-#: The ``STAX_ENV`` of the sandbox environment, where only the allowlist is reached.
-SANDBOX_ENV = "sandbox"
 
 _lock = threading.Lock()
 _senders: dict[str, MailSender] = {}
@@ -111,9 +108,10 @@ def is_set_up(found: MailSettings | None = None) -> bool:
 
 
 def on_sandbox() -> bool:
-    from django.conf import settings
+    """Whether this is the sandbox environment, where only the allowlist is mailed."""
+    from finance.middleware import on_sandbox as sandbox
 
-    return bool(settings.STAX_ENV == SANDBOX_ENV)
+    return sandbox()
 
 
 def get_sender() -> MailSender:
