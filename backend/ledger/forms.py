@@ -47,6 +47,7 @@ from ledger.models import (
     FeeType,
     InstallmentCadence,
     Lease,
+    LeaseBilling,
     LeaseEndReason,
     OneOffCharge,
     Operator,
@@ -62,15 +63,17 @@ from ledger.services.leases import END_DATE_REQUIRED
 from ledger.services.one_off_charges import ChargeInput
 from ledger.validators import validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_sentence
-from payments.operator_sync import normalise_phone
+from payments.lease_sync import normalise_phone
 
 if TYPE_CHECKING:
     _OperatorFormBase = forms.ModelForm[Operator]
     _LeaseFormBase = forms.ModelForm[Lease]
+    _LeaseBillingFormBase = forms.ModelForm[LeaseBilling]
     _StoreFormBase = forms.ModelForm[Store]
 else:  # ModelForm is only generic in the type stubs.
     _OperatorFormBase = forms.ModelForm
     _LeaseFormBase = forms.ModelForm
+    _LeaseBillingFormBase = forms.ModelForm
     _StoreFormBase = forms.ModelForm
 
 #: The attribute of a dependent field (PLAN-012c D8): the field is shown while one of the
@@ -285,6 +288,44 @@ class LinkForm(forms.Form):
         max_length=IDENTIFIER_MAX_LENGTH,
         validators=[IDENTIFIER_VALIDATOR],
     )
+
+
+class LeaseBillingForm(_LeaseBillingFormBase):
+    """The lease's billing details (PLAN-014 C3, the LEASE card's "Edit billing details"):
+    the company billed, the e-mail receipts and messages go to, the phone and the address.
+    The e-mail is lower-cased and stripped; the phone must pass the payment provider's rule,
+    as on the operator form. Nothing else of the lease is posted here."""
+
+    email = forms.EmailField(required=False, max_length=254, label="E-mail")
+
+    class Meta:
+        model = LeaseBilling
+        fields = (
+            "company_name",
+            "email",
+            "phone",
+            "address_line1",
+            "address_line2",
+            "city",
+            "state",
+            "postal_code",
+        )
+        labels = {
+            "company_name": "Company name",
+            "address_line1": "Address line 1",
+            "address_line2": "Address line 2",
+            "postal_code": "ZIP code",
+        }
+
+    def clean_email(self) -> str:
+        return str(self.cleaned_data.get("email") or "").strip().lower()
+
+    def clean_phone(self) -> str:
+        """The provider's phone rule; the normalised digits are stored, empty stays empty."""
+        digits = normalise_phone(str(self.cleaned_data.get("phone") or ""))
+        if digits is None:
+            raise forms.ValidationError(PHONE_MESSAGE, code="phone")
+        return digits
 
 
 # --- Leases (PLAN-007 §4.1) -------------------------------------------------------------

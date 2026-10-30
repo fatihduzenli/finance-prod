@@ -23,8 +23,8 @@ from django.utils import timezone
 
 import payments
 from payments.errors import ProviderRejected
+from payments.lease_sync import PROVIDER_KEY
 from payments.models import ExternalRef
-from payments.operator_sync import PROVIDER_KEY
 from payments.provider import WebhookRecord, mask_identifier
 from payments.webhooks.events import EVENT_NAMES
 

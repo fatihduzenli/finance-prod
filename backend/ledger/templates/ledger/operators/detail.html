@@ -7,16 +7,15 @@
 {% block header %}<div class="page-header workspace-head operator-head">
   <div class="page-title-block">
     <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:operators:list' %}">Operators</a> <span aria-hidden="true">›</span> <a href="{% url 'ledger:operators:detail' pk=operator.pk %}" aria-current="page">{{ operator.display_name }}</a></nav>
-    <h1 class="store-title" id="operator-title">{{ operator.display_name }} {% if operator.archived_at %}<span class="badge">Archived {{ operator.archived_at|day }}</span>{% else %}{% status_badge "Active" "paid" %}{% endif %}{% if customer_masked %} <span class="provider-pill" id="provider-connected">Connected to {{ company.provider_name }}</span>{% endif %}</h1>
+    <h1 class="store-title" id="operator-title">{{ operator.display_name }} {% if operator.archived_at %}<span class="badge">Archived {{ operator.archived_at|day }}</span>{% else %}{% status_badge "Active" "paid" %}{% endif %}</h1>
     <span class="operator-avatar" id="operator-avatar" aria-hidden="true">{{ operator_initials }}</span>
     <p class="store-line operator-line" id="operator-line">{{ operator_line }}</p>
   </div>
   <div class="page-actions" id="operator-actions">
     <a class="btn" id="statement" href="{% url 'ledger:operators:statement' pk=operator.pk %}">Statement</a>
     {% if can_edit %}<a class="btn" id="edit-operator" href="{% url 'ledger:operators:edit' pk=operator.pk %}">Edit</a>{% endif %}
-    {% if can_link or can_archive %}
+    {% if can_archive %}
       <details class="menu" id="more-menu"><summary class="btn btn-menu">More ▾</summary><ul>
-        {% if can_link %}<li><a id="connect-provider" href="{% url 'ledger:operators:link' pk=operator.pk %}">Connect to {{ company.provider_name }}</a></li>{% endif %}
         {% if can_archive %}<li><form method="post" action="{% url 'ledger:operators:archive' pk=operator.pk %}" onsubmit="return window.confirm('Archive this operator? It is hidden from the list but never deleted.');">
           {% csrf_token %}<button class="menu-danger" type="submit" id="archive-operator">Archive</button>
         </form></li>{% endif %}
@@ -78,36 +77,6 @@
   </dl>
 
   </section>
-  <section class="card" id="operator-provider-card">
-  <h2>{{ company.provider_name }}</h2>
-  {% include "ledger/_job_status.html" %}
-  <dl>
-    <dt>Connection to {{ company.provider_name }}</dt><dd id="sync-status">{{ operator.get_sync_status_display }}{% if operator.needs_review %} {% status_badge "Needs review" %}{% endif %}</dd>
-    {% if failure_message %}
-      <dt>Last failure</dt>
-      <dd id="sync-failure"><strong>{{ failure_message }}</strong><br><span class="muted">{{ operator.get_sync_failure_display }}{% if operator.sync_attempted_at %} at {{ operator.sync_attempted_at|moment }}{% endif %}</span>{% if failure_fields %}<br><span id="sync-failure-fields">Fields {{ company.provider_name }} rejected: {{ failure_fields }}</span>{% endif %}</dd>
-    {% elif provider_updated_at %}
-      <dt>Last update</dt><dd id="provider-updated">Updated from {{ company.provider_name }} {{ provider_updated_at|moment }}</dd>
-    {% elif operator.sync_attempted_at %}
-      <dt>Last attempt</dt><dd>{{ operator.sync_attempted_at|moment }}</dd>
-    {% endif %}
-    {% comment %}PLAN-012c D8: the provider's identifiers and the enrolment only for an operator with a provider customer; the link status above says when there is none.{% endcomment %}
-    {% if customer_masked %}<dt>{{ company.provider_name }} customer ID</dt><dd id="provider-customer">{{ customer_masked }}</dd>
-    <dt>{{ company.provider_name }} bank method ID</dt><dd id="provider-method">{{ payment_method_masked|default:"—" }}</dd>
-    <dt>Enrolment</dt><dd id="provider-enrolment">{{ operator.get_enrolment_status_display }}</dd>{% endif %}
-  </dl>
-  {% if can_retry %}
-    <form method="post" action="{% url 'ledger:operators:retry_sync' pk=operator.pk %}" class="actions js-single-submit">
-      {% csrf_token %}<button class="btn btn-primary" type="submit">Try again</button>
-      <span class="muted">Makes one new call to {{ company.provider_name }}.</span>
-    </form>
-  {% elif fix_phone_message %}
-    <p id="fix-phone"><strong>{{ fix_phone_message }}</strong></p>
-  {% elif retry_wait_message %}
-    <p id="retry-wait" class="muted">{{ retry_wait_message }}</p>
-  {% endif %}
-
-  </section>
   <section class="card" id="operator-collections-card">
   <h2 id="collections">Collection e-mails</h2>
   <p id="handled-personally">{% if operator.handled_personally %}<strong>Handled personally:</strong> the collection e-mails skip this operator.{% if operator.handled_personally_note %} <span style="white-space:pre-wrap;">{{ operator.handled_personally_note }}</span>{% endif %}{% else %}The collection e-mails go to this operator when a charge is overdue{% if not operator.email %} (none can be sent: no e-mail address){% endif %}.{% endif %}</p>
@@ -158,8 +127,7 @@
     <section class="card" id="payment-card" aria-labelledby="payment-card-heading">
       <h2 class="section-label" id="payment-card-heading">Payment</h2>
       <dl class="side-list">
-        <dt>{{ company.provider_name }}</dt><dd id="side-customer">{% if customer_masked %}Customer · <a href="#operator-provider-card">open</a>{% else %}Not connected{% endif %}</dd>
-        <dt>Bank</dt><dd id="side-bank">{% if bank_method %}{{ bank_method.nickname|default:bank_method.bank_type|default:"Bank method" }}{% if bank_method.last_four %} ····{{ bank_method.last_four }}{% endif %}{% else %}—{% endif %}</dd>
+        {% for account in lease_accounts %}<dt>{{ account.lease.store.external_label }}</dt><dd class="side-lease-account" id="side-account-{{ account.lease.pk }}">{% if account.company %}{{ account.company }}<br>{% endif %}{{ account.bank }}{% if account.shares %} <span class="muted">(the account of {{ account.shares.store.external_label }})</span>{% endif %}</dd>{% empty %}<dt>Billing</dt><dd id="side-no-lease">No current lease</dd>{% endfor %}
         <dt>Returns</dt><dd id="side-returns"{% if returns_this_year %} class="side-strong tone-unpaid"{% endif %}>{{ returns_this_year }} this year</dd>
         <dt>Promise</dt><dd id="side-promise">{% if open_promise %}{{ open_promise.promised_amount|money }} by {{ open_promise.promised_date|day }} <span class="badge promise-status promise-open">Open</span>{% else %}—{% endif %}</dd>
       </dl>

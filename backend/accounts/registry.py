@@ -97,8 +97,6 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # Operators (docs/qa/PLAN-006-operators.md §4.1, D10). There is no delete route.
     "ledger:operators:create": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:edit": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:operators:retry_sync": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:operators:link": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:operators:archive": RouteRule(min_role=Role.ADMIN, methods=POST),
     # Stores (docs/qa/PLAN-007b-stores.md §1): admin only. There is no delete route.
     "ledger:stores:create": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -112,6 +110,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # Stop autopay (PLAN-012e D5 amendment): admin. The view refuses the confirmation
     # page's GET below admin too.
     "ledger:leases:stop_autopay": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Edit billing details (PLAN-014 C3): billing. The details, the link of the provider
+    # IDs and the retry post here; the view refuses the dialog's GET below billing too.
+    "ledger:leases:billing": RouteRule(min_role=Role.BILLING, methods=POST),
     # Ending a lease (PLAN-010b Batch C): admin. The view refuses the form's GET below
     # admin too, and sends an admin to the end-of-lease wizard (PLAN-012e D4).
     "ledger:leases:end": RouteRule(min_role=Role.ADMIN, methods=POST),

@@ -11,7 +11,7 @@
     <p><strong>Autopay cannot be set up yet:</strong></p>
     <ul id="enrolment-blockers">{% for text in blockers %}<li>{{ text }}</li>{% endfor %}</ul>
   {% else %}
-    {% if notes_info or lease.operator.email %}<ul id="enrolment-notes" class="muted">{% if lease.operator.email %}<li id="receipts-email">Receipts go to {{ lease.operator.email }}</li>{% endif %}{% for text in notes_info %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}
+    {% if notes_info or receipts_email %}<ul id="enrolment-notes" class="muted">{% if receipts_email %}<li id="receipts-email">Receipts go to {{ receipts_email }}</li>{% endif %}{% for text in notes_info %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}
     {% responsive_table %}
     <table id="debits">
       <thead><tr><th>Debit</th><th>Day</th><th class="money">Amount per debit</th><th>First debit</th></tr></thead>

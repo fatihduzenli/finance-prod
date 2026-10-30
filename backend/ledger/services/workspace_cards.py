@@ -10,8 +10,8 @@ of the operator, its title, the rent of the operator's current lease of it and h
 collected ("bank debit on the 1st" while autopay is on, else what autopay is), its open balance
 from the receivables rows the page already read and whether any of them is overdue; three
 queries whatever the number of stores. :func:`returns_this_year` is the PAYMENT card's Returns
-row (one query), :func:`bank_method` its Bank row (the linked method's stored record, no
-provider call), :func:`open_promise` its Promise row, and :func:`statement_link_opened` the
+row (one query; its line per lease is :func:`ledger.services.detail_cards.lease_accounts`,
+PLAN-014 C3), :func:`open_promise` its Promise row, and :func:`statement_link_opened` the
 statement link card's "Last opened" (one query on the audit rows the statement page writes).
 """
 
@@ -40,10 +40,9 @@ from ledger.models import (
     ScheduleState,
     Store,
 )
-from ledger.services import contacts, leases, receivables, statement_links
+from ledger.services import contacts, receivables, statement_links
 from ledger.services import stores as store_service
 from ledger.services.workspace import ordinal
-from payments.provider import PaymentMethodRecord
 
 ZERO = Decimal("0.00")
 #: The strip card's collection line while autopay is not on (the store card's words).
@@ -186,12 +185,6 @@ def returns_this_year(operator: Operator, today: date) -> int:
         .distinct()
         .count()
     )
-
-
-def bank_method(operator: Operator, linked: str) -> PaymentMethodRecord | None:
-    """The linked payment method's stored record (``linked``: its id, ``""`` when none is
-    linked), or ``None``; no provider call."""
-    return leases.linked_method_record(operator) if linked else None
 
 
 def open_promise(operator: Operator) -> ContactEntry | None:

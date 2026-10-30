@@ -1,16 +1,17 @@
-"""Operator screens: list, detail, create, edit, archive, retry, link (PLAN-006 §4.1).
+"""Operator screens: list, detail, create, edit, archive (PLAN-006 §4.1).
 
 Access: every view requires a signed-in, second-factor-verified user (middleware) with a
 role; a user without one gets 403. Unsafe methods are checked a second time by
-``accounts.registry`` before the view runs (viewer: none; billing: create, edit,
-retry, link; admin: archive as well).
+``accounts.registry`` before the view runs (viewer: none; billing: create, edit; admin:
+archive as well).
 
 Every operator in a URL is loaded from the database before anything else happens, and
-every change goes through :mod:`payments.operator_sync`, which writes the audit log.
-No view calls the payment provider: the sync, the retry and the link are queued as jobs
-(:mod:`ledger.views.jobs`, PLAN-010 D3) after the local write, and the detail page shows
-the latest one. Templates receive masked identifiers only (first four and last four
-characters) and no setting.
+every change goes through :mod:`ledger.services.operators`, which writes the audit log.
+No view here reaches the payment provider: since PLAN-014 C3 the processor customer, its
+bank method, the connection and the Link form belong to each lease (the LEASE card's
+"Edit billing details", :func:`ledger.views.leases.lease_billing`); the operator page's
+PAYMENT card lists each lease's company and bank line. Templates receive no identifier
+and no setting.
 
 Every POST ends in a redirect, whatever the outcome (PLAN-006a §3.4), so a refresh
 never resubmits. A form with errors is kept in the session under
@@ -54,26 +55,24 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from accounts.roles import Role, meets, role_of
 from accounts.views import forbidden
 from finance.templatetags.phones import phone_text
-from ledger.forms import LinkForm, OperatorCreateForm, OperatorForm
-from ledger.models import Note, NoteEntityType, Operator, SyncStatus
+from ledger.forms import OperatorCreateForm, OperatorForm
+from ledger.models import Note, NoteEntityType, Operator
 from ledger.services import (
     attention,
     collections,
     contacts,
     csv_export,
+    detail_cards,
     list_filters,
     statement_links,
     workspace,
 )
+from ledger.services import operators as operator_service
 from ledger.services import workspace_cards as operator_cards
 from ledger.services.csv_export import CsvWriter
+from ledger.services.operators import OperatorArchived
 from ledger.validators import validate_no_payment_data
 from ledger.views import contact_log, workspace_cards
-from ledger.views.jobs import busy, job_context, submit
-from payments import operator_sync
-from payments.models import JobKind
-from payments.operator_sync import OperatorArchived
-from payments.provider import mask_identifier
 
 PAGE_SIZE = 25
 #: Longer search input is cut to this length before it reaches a query.
@@ -82,6 +81,7 @@ SEARCH_MAX_LENGTH = 200
 # them belongs in a search term; ordinary spaces are kept.
 CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 EMAIL_TAKEN = "An operator with this e-mail address already exists."
+ARCHIVED_MESSAGE = "This operator is archived."
 ALREADY_SAVED = "This operator was already saved. Nothing was changed."
 #: Session key of a form with errors, held for the one GET after the redirect.
 HELD_FORM_KEY = "operator_form_errors"
@@ -132,16 +132,6 @@ def _actor(request: HttpRequest) -> User:
 
 def _role(request: HttpRequest) -> Role | None:
     return role_of(request.user)
-
-
-def _after_save(
-    request: HttpRequest, operator: Operator, replay_key: uuid.UUID | None = None
-) -> None:
-    """Queue the sync of a row that needs it; tell staff when it waits for a manual link."""
-    if operator.sync_status == SyncStatus.PENDING:
-        submit(request, JobKind.OPERATOR_SYNC, operator, replay_key=replay_key)
-    elif operator.sync_status == SyncStatus.AWAITING_LINK:
-        messages.warning(request, operator_sync.AWAITING_LINK_MESSAGE)
 
 
 def _by_creation_key(raw: str | None) -> Operator | None:
@@ -210,7 +200,7 @@ def _held[F: forms.BaseForm](
 
 
 def _refused_archived(request: HttpRequest, operator: Operator) -> HttpResponse:
-    messages.error(request, operator_sync.MESSAGES[operator_sync.ARCHIVED])
+    messages.error(request, ARCHIVED_MESSAGE)
     return redirect("ledger:operators:detail", pk=operator.pk)
 
 
@@ -345,9 +335,6 @@ def _detail_context(
     dialog (PLAN-012f-b Batch B). ``forced_tab`` opens that tab across the operator's stores
     whatever the query says, without its filter (PLAN-012f-b D15: the "Invoice saved"
     dialog over the Invoices tab)."""
-    refs = operator_sync.current_refs(operator)
-    customer = refs.get(operator_sync.KIND_CUSTOMER, "")
-    method = refs.get(operator_sync.KIND_PAYMENT_METHOD, "")
     role = _role(request)
     today = timezone.localdate()
     tab = workspace.chosen_tab(forced_tab or request.GET.get("tab"), role)
@@ -371,10 +358,6 @@ def _detail_context(
         tab_context.update(documents.section_context(request, selected))
     active = operator.archived_at is None
     billing = meets(role, Role.BILLING)
-    failed = operator.sync_status == SyncStatus.FAILED
-    phone_ok = operator_sync.phone_is_valid(operator)
-    retry_in = operator_sync.retry_wait_seconds(operator) if failed and phone_ok else 0
-    jobs = job_context(operator)
     contact_rows = contact_log.log_rows(
         request,
         list(
@@ -386,7 +369,6 @@ def _detail_context(
     store_count = len(space.stores)
     store_cards = operator_cards.store_cards(operator, space.stores, space.open_rows, today)
     return {
-        **jobs,
         **space.data,
         **tab_context,
         "operator": operator,
@@ -397,42 +379,10 @@ def _detail_context(
         "billing": billing,
         # The tab and filter links keep the selected store (D14).
         "keep_store": urlencode({"store": str(selected.pk)}) + "&" if selected else "",
-        "customer_masked": mask_identifier(customer) if customer else "",
-        "payment_method_masked": mask_identifier(method) if method else "",
-        "failure_message": (
-            operator_sync.MESSAGES.get(operator.sync_failure, operator_sync.DEFAULT_MESSAGE)
-            if failed
-            else ""
-        ),
-        "failure_fields": (
-            ", ".join(operator.sync_failure_fields.split(","))
-            if failed and operator.sync_failure_fields
-            else ""
-        ),
         "notes": Note.objects.filter(
             entity_type=NoteEntityType.OPERATOR, entity_id=operator.pk
         ).order_by("-created_at"),
-        "provider_updated_at": (
-            operator_sync.provider_updated_at(operator)
-            if operator.sync_status == SyncStatus.LINKED
-            else None
-        ),
         "can_edit": billing and active,
-        "can_retry": billing
-        and active
-        and failed
-        and phone_ok
-        and not retry_in
-        and not jobs["job_refresh"],
-        "fix_phone_message": (
-            operator_sync.MESSAGES[operator_sync.PHONE_INVALID]
-            if billing and active and failed and not phone_ok
-            else ""
-        ),
-        "retry_wait_message": (
-            operator_sync.retry_wait_message(retry_in) if billing and active and retry_in else ""
-        ),
-        "can_link": billing and active,
         "can_archive": meets(role, Role.ADMIN) and active,
         # PLAN-011b D6, D7: the operator's own attention items as banners, and the
         # latest notes & follow-ups entries.
@@ -468,7 +418,8 @@ def _detail_context(
         "charges_scope": next(
             (card.title for card in store_cards if card.store == selected), "all stores"
         ),
-        "bank_method": operator_cards.bank_method(operator, method),
+        # PLAN-014 C3: the PAYMENT card's line per lease (store, company, bank).
+        "lease_accounts": detail_cards.lease_accounts(operator),
         "returns_this_year": operator_cards.returns_this_year(operator, today),
         "open_promise": operator_cards.open_promise(operator),
         "recent_contacts": [row for row in contact_rows if row.entry.deleted_at is None][
@@ -509,7 +460,7 @@ def operator_create(request: HttpRequest) -> HttpResponse:
         form = OperatorCreateForm(request.POST)
         if form.is_valid():
             try:
-                operator, created = operator_sync.create_operator(
+                operator, created = operator_service.create_operator(
                     form.cleaned_data,
                     creation_key=form.cleaned_data["creation_key"],
                     actor=_actor(request),
@@ -521,7 +472,6 @@ def operator_create(request: HttpRequest) -> HttpResponse:
                     messages.info(request, ALREADY_SAVED)
                     return redirect("ledger:operators:detail", pk=operator.pk)
                 messages.success(request, f"Operator {operator.display_name} added.")
-                _after_save(request, operator, form.cleaned_data["creation_key"])
                 return redirect("ledger:operators:detail", pk=operator.pk)
         _hold(request, "create", form)
         return redirect("ledger:operators:create")
@@ -543,7 +493,7 @@ def operator_edit(request: HttpRequest, pk: str) -> HttpResponse:
         form = OperatorForm(request.POST, instance=operator)
         if form.is_valid():
             try:
-                updated = operator_sync.update_operator(
+                operator_service.update_operator(
                     operator.pk, form.cleaned_data, actor=_actor(request)
                 )
             except OperatorArchived:
@@ -552,7 +502,6 @@ def operator_edit(request: HttpRequest, pk: str) -> HttpResponse:
                 form.add_error("email", EMAIL_TAKEN)
             else:
                 messages.success(request, "Operator saved.")
-                _after_save(request, updated)
                 return redirect("ledger:operators:detail", pk=operator.pk)
         _hold(request, f"edit:{operator.pk}", form)
         return redirect("ledger:operators:edit", pk=operator.pk)
@@ -574,52 +523,6 @@ def operator_edit(request: HttpRequest, pk: str) -> HttpResponse:
 def operator_archive(request: HttpRequest, pk: str) -> HttpResponse:
     operator = _load(pk)
     if operator.archived_at is None:
-        operator_sync.archive_operator(operator.pk, actor=_actor(request))
+        operator_service.archive_operator(operator.pk, actor=_actor(request))
         messages.success(request, "Operator archived.")
     return redirect("ledger:operators:list")
-
-
-@role_required
-@require_POST
-def operator_retry_sync(request: HttpRequest, pk: str) -> HttpResponse:
-    operator = _load(pk)
-    if operator.archived_at is not None:
-        return _refused_archived(request, operator)
-    if not busy(request, operator):
-        submit(request, JobKind.OPERATOR_RETRY, operator)
-    return redirect("ledger:operators:detail", pk=operator.pk)
-
-
-@role_required
-@require_http_methods(["GET", "HEAD", "POST"])
-def operator_link(request: HttpRequest, pk: str) -> HttpResponse:
-    operator = _load(pk)
-    if operator.archived_at is not None:
-        return _refused_archived(request, operator)
-    if request.method == "POST":
-        form = LinkForm(request.POST)
-        if form.is_valid():
-            submit(
-                request,
-                JobKind.OPERATOR_LINK,
-                operator,
-                {
-                    "customer_id": form.cleaned_data["customer_id"],
-                    "payment_method_id": form.cleaned_data["payment_method_id"],
-                },
-            )
-            return redirect("ledger:operators:detail", pk=operator.pk)
-        _hold(request, f"link:{operator.pk}", form)
-        return redirect("ledger:operators:link", pk=operator.pk)
-    form = _held(request, f"link:{operator.pk}", LinkForm) or LinkForm()
-    refs = operator_sync.current_refs(operator)
-    customer = refs.get(operator_sync.KIND_CUSTOMER, "")
-    return render(
-        request,
-        "ledger/operators/link.html",
-        {
-            "form": form,
-            "operator": operator,
-            "customer_masked": mask_identifier(customer) if customer else "",
-        },
-    )

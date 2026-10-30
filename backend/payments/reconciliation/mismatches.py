@@ -19,8 +19,8 @@ from django.utils import timezone
 
 from ledger.models import AuditLog
 from ledger.validators import visible_text
+from payments.lease_sync import PROVIDER_KEY
 from payments.models import ReconciliationMismatch, ReconciliationRun
-from payments.operator_sync import PROVIDER_KEY
 
 ENTITY_MISMATCH = "reconciliation_mismatch"
 #: ``entity_type`` of a mismatch about a provider transaction we hold no row for.

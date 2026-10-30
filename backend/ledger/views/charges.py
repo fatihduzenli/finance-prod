@@ -80,7 +80,7 @@ from ledger.views.operators import (
 )
 from ledger.views.run import _billing_only
 from ledger.wording import format_amount
-from payments import operator_sync
+from payments import lease_sync
 from payments.models import JobKind
 
 NOTHING_TO_RETRY = "Nothing to retry on this charge."
@@ -228,7 +228,7 @@ def _detail_context(request: HttpRequest, charge: RentCharge) -> dict[str, Any]:
         # PLAN-012b-b D13: a failed release of the split charge's invoice or autopay.
         "can_retry_release": billing and installments.retry_release(charge) is not None,
         "can_link_invoice": billing and not invoice_rows,
-        "retry_wait_message": (operator_sync.retry_wait_message(retry_wait) if retry_wait else ""),
+        "retry_wait_message": (lease_sync.retry_wait_message(retry_wait) if retry_wait else ""),
         # PLAN-011b D4: the charge's collection e-mails and the hand send.
         **collections.charge_context(
             ChargeEntityType.RENT_CHARGE,

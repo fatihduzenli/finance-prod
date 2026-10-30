@@ -126,5 +126,6 @@
   {% endif %}
   </aside>
   </div>
+  {% if billing_dialog %}{% include "ledger/leases/_billing_dialog.html" with dialog=billing_dialog %}{% endif %}
 {% endblock %}
 {% block scripts %}{% include "ledger/operators/single_submit.html" %}{% include "ledger/_menu_script.html" %}{% if documents_feature_on and documents_can_upload %}<script src="{% static 'ledger/document_drop.js' %}" defer></script>{% endif %}{% endblock %}

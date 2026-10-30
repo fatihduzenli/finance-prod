@@ -115,7 +115,7 @@ from ledger.models import (
 )
 from ledger.services import installments, leases, numbering, one_off_charges, rent_run
 from ledger.wording import provider_sentence
-from payments import invoice_sync, operator_sync
+from payments import invoice_sync, lease_sync
 from payments.errors import ProviderError, ProviderRejected
 from payments.models import ExternalRef, JobEntity, WebhookOutcome
 from payments.provider import (
@@ -138,7 +138,7 @@ from payments.webhooks.handlers import transaction as transaction_handler
 
 Result = tuple[bool, str]
 
-PROVIDER_KEY = operator_sync.PROVIDER_KEY
+PROVIDER_KEY = lease_sync.PROVIDER_KEY
 ENTITY_INVOICE = "invoice"
 KIND_INVOICE = "invoice"
 ENTITY_CHARGE = one_off_charges.ENTITY_ONE_OFF_CHARGE
@@ -285,7 +285,7 @@ def _attempted(charge: OneOffCharge, action: str) -> bool:
 def _failure(error: ProviderError) -> str:
     """The failure in words, as the pages show it (copy list §4.1: codes are never shown);
     the class and the rejected key names stay in the audit row."""
-    return SyncFailure(operator_sync.failure_name(error)).label
+    return SyncFailure(lease_sync.failure_name(error)).label
 
 
 def _fetch(call: Callable[[str], Any], external_id: str) -> Any:
@@ -330,8 +330,8 @@ def _failed(
         ENTITY_RENT_CHARGE if isinstance(charge, RentCharge) else ENTITY_CHARGE,
         charge.pk,
         {
-            "failure": operator_sync.failure_name(error),
-            "fields": operator_sync.failure_fields(error),
+            "failure": lease_sync.failure_name(error),
+            "fields": lease_sync.failure_fields(error),
         },
     )
     return False, f"{text}: {failure}.{RETRY_HINT}"
@@ -562,8 +562,8 @@ def create_provider_invoice(charge_id: uuid.UUID, actor: User | None) -> Result:
             # create succeeds and its mark runs.
             one_off_charges.flag_not_marked(
                 charge.pk,
-                failure=operator_sync.failure_name(error),
-                fields=operator_sync.failure_fields(error),
+                failure=lease_sync.failure_name(error),
+                fields=lease_sync.failure_fields(error),
                 actor=actor,
             )
             return failed
@@ -1394,8 +1394,8 @@ def pay(charge_id: uuid.UUID, actor: User | None, *, confirmed: bool) -> Result:
             charge,
             actor,
             {
-                "failure": operator_sync.failure_name(error),
-                "fields": operator_sync.failure_fields(error),
+                "failure": lease_sync.failure_name(error),
+                "fields": lease_sync.failure_fields(error),
             },
             f"{CHARGE_FAILED}: {_failure(error)}.{CHARGE_STAYS_OPEN}",
         )
@@ -1417,8 +1417,8 @@ def pay(charge_id: uuid.UUID, actor: User | None, *, confirmed: bool) -> Result:
             charge,
             actor,
             {
-                "failure": operator_sync.failure_name(error),
-                "fields": operator_sync.failure_fields(error),
+                "failure": lease_sync.failure_name(error),
+                "fields": lease_sync.failure_fields(error),
                 "provider_invoice": mask_identifier(ref),
             },
             f"{CHARGE_FAILED}: {_failure(error)}.{CHARGE_STAYS_OPEN}",

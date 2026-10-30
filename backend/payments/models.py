@@ -205,9 +205,15 @@ class SyncState(GuardedModel):
 class JobKind(models.TextChoices):
     """What a job does; a closed list (docs/qa/PLAN-010 D1). Each maps to one service."""
 
-    OPERATOR_SYNC = "operator_sync", "Updating the operator"
-    OPERATOR_RETRY = "operator_retry", "Updating the operator again"
-    OPERATOR_LINK = "operator_link", "Connecting the operator"
+    #: PLAN-014 C3: the processor customer is per lease. The three kinds below (and
+    #: ``LEASE_METHODS_REFRESH``) keep the stored values and labels of the operator kinds
+    #: they replace, so the ``jobs_kind_valid`` CHECK and the column's choices are
+    #: unchanged (no payments migration in part 1; the labels change with Batch D's
+    #: payments 0019). A row of these values that names an operator was queued before
+    #: ledger migration 0059 and is run as a no-op (``payments.jobs.runners``).
+    LEASE_SYNC = "operator_sync", "Updating the operator"
+    LEASE_RETRY = "operator_retry", "Updating the operator again"
+    LEASE_LINK = "operator_link", "Connecting the operator"
     AUTOPAY_ENABLE = "autopay_enable", "Setting up autopay"
     AUTOPAY_PAUSE = "autopay_pause", "Pausing autopay"
     AUTOPAY_RESUME = "autopay_resume", "Resuming autopay"
@@ -216,7 +222,7 @@ class JobKind(models.TextChoices):
     PAYMENT_REFUND = "payment_refund", "Refunding the payment"
     PAYMENT_VOID = "payment_void", "Voiding the payment"
     #: PLAN-010 Batch A follow-up: the reads the enrolment, run and event pages needed.
-    OPERATOR_METHODS_REFRESH = "operator_methods_refresh", "Updating bank methods"
+    LEASE_METHODS_REFRESH = "operator_methods_refresh", "Updating bank methods"
     RUN_MATCH = "run_match", "Updating invoices"
     WEBHOOK_REPLAY = "webhook_replay", "Processing a message again"
     #: PLAN-010 Batch B: "Run now" on the reconciliation page.

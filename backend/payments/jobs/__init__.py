@@ -16,11 +16,12 @@ it finished; the manual retry creates a new job.
 ``result`` holds the service's fixed sentence, or an error's class and field names.
 
 Besides the staff actions, three reads run here so that no page reaches the provider:
-the operator's payment-method list for the enrolment page (``operator_methods_refresh``,
-queued by the page's button and after every successful link or sync, see
-:func:`refresh_methods`), "Match invoices" on the rent run (``run_match``, entity
-:data:`RENT_RUN`) and the webhook event replay (``webhook_replay``). The automatic
-methods refresh is not the page state of its operator (:data:`BACKGROUND_KINDS`).
+the payment-method list of a lease's customer for the enrolment page
+(``LEASE_METHODS_REFRESH``, PLAN-014 C3; queued on the lease that holds the customer by the
+page's button and after every successful link or sync, see :func:`refresh_methods`),
+"Match invoices" on the rent run (``run_match``, entity :data:`RENT_RUN`) and the webhook
+event replay (``webhook_replay``). The automatic methods refresh is not the page state of
+its lease (:data:`BACKGROUND_KINDS`).
 "Run now" on the reconciliation page queues ``reconcile_run`` (entity
 :data:`RECONCILIATION`), which the worker runs through
 :func:`payments.reconciliation.run_reconciliation`. The scheduled Container Apps job
@@ -56,9 +57,9 @@ RESULT_NOT_STORED = "ResultNotStored"
 
 #: The entity each kind acts on; :func:`enqueue` refuses any other.
 ENTITY_OF_KIND: dict[str, str] = {
-    JobKind.OPERATOR_SYNC: JobEntity.OPERATOR,
-    JobKind.OPERATOR_RETRY: JobEntity.OPERATOR,
-    JobKind.OPERATOR_LINK: JobEntity.OPERATOR,
+    JobKind.LEASE_SYNC: JobEntity.LEASE,
+    JobKind.LEASE_RETRY: JobEntity.LEASE,
+    JobKind.LEASE_LINK: JobEntity.LEASE,
     JobKind.AUTOPAY_ENABLE: JobEntity.LEASE,
     JobKind.AUTOPAY_PAUSE: JobEntity.LEASE,
     JobKind.AUTOPAY_RESUME: JobEntity.LEASE,
@@ -66,7 +67,7 @@ ENTITY_OF_KIND: dict[str, str] = {
     JobKind.PAYMENT_RETRY_MARK: JobEntity.RENT_CHARGE,
     JobKind.PAYMENT_REFUND: JobEntity.PAYMENT,
     JobKind.PAYMENT_VOID: JobEntity.PAYMENT,
-    JobKind.OPERATOR_METHODS_REFRESH: JobEntity.OPERATOR,
+    JobKind.LEASE_METHODS_REFRESH: JobEntity.LEASE,
     JobKind.RUN_MATCH: JobEntity.RENT_RUN,
     JobKind.WEBHOOK_REPLAY: JobEntity.WEBHOOK_EVENT,
     JobKind.RECONCILE_RUN: JobEntity.RECONCILIATION,
@@ -135,7 +136,7 @@ TRIGGER = "trigger"
 
 #: Kinds queued by the worker itself, not by a staff action on the entity's page: they
 #: are left out of :func:`latest_for` unless asked for by kind.
-BACKGROUND_KINDS: frozenset[str] = frozenset({JobKind.OPERATOR_METHODS_REFRESH})
+BACKGROUND_KINDS: frozenset[str] = frozenset({JobKind.LEASE_METHODS_REFRESH})
 
 Entity = models.Model | Target
 
@@ -334,12 +335,13 @@ def latest_for(entity: Entity, kinds: Iterable[str] | None = None) -> Job | None
     return found.order_by("-created_at", "-id").first()
 
 
-def refresh_methods(operator: models.Model, requested_by: User | AnonymousUser | None) -> Job:
-    """Queue a read of the operator's payment methods, unless one is already waiting."""
-    waiting = latest_for(operator, [JobKind.OPERATOR_METHODS_REFRESH])
+def refresh_methods(lease: models.Model, requested_by: User | AnonymousUser | None) -> Job:
+    """Queue a read of the payment methods of the lease's customer, unless one is already
+    waiting."""
+    waiting = latest_for(lease, [JobKind.LEASE_METHODS_REFRESH])
     if waiting is not None and is_active(waiting):
         return waiting
-    return enqueue(JobKind.OPERATOR_METHODS_REFRESH, operator, None, requested_by)
+    return enqueue(JobKind.LEASE_METHODS_REFRESH, lease, None, requested_by)
 
 
 def is_active(job: Job | None) -> bool:
