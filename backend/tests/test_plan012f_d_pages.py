@@ -454,7 +454,14 @@ def is_export(name: str) -> bool:
 
 
 #: The pages only the author of the record (or an admin) may open; opened as its author.
-AUTHOR_PAGES = ("ledger:calendar:edit", "ledger:contacts:edit")
+#: Pages only their author (or an admin) may open: the world's author wrote them all
+#: (PLAN-014 B5 adds the note's Edit and Delete dialogs).
+AUTHOR_PAGES = (
+    "ledger:calendar:edit",
+    "ledger:contacts:edit",
+    "ledger:notes:edit",
+    "ledger:notes:delete",
+)
 
 
 def client_of(world: World, name: str, clients: dict[Role, Client]) -> Client:
