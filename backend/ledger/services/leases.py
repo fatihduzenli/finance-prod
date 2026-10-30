@@ -109,12 +109,13 @@ from ledger.models import (
     ScheduleKind,
     ScheduleState,
     Store,
+    SyncStatus,
 )
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_name, provider_sentence
-from payments import lease_sync
+from payments import jobs, lease_sync
 from payments.errors import ProviderError, ProviderRejected
-from payments.models import ExternalRef, ProviderSnapshot
+from payments.models import ExternalRef, JobKind, ProviderSnapshot
 from payments.provider import (
     Amounts,
     LineItem,
@@ -934,6 +935,113 @@ def _attach_refused(
     return BankAttach(False, ATTACH_MESSAGES.get(reason, ATTACH_FAILED), reason)
 
 
+# --- The bank account of a new lease (PLAN-014 C4) ---------------------------------------
+
+#: The bank-account choices of the New lease and Transfer billing details: no account yet
+#: (the lease gets its own processor customer and no method), the hosted fields after the
+#: save (C7), or ``same:<lease id>``, the account of another lease of the same operator.
+ACCOUNT_LATER = "later"
+ACCOUNT_ENTER = "enter"
+ACCOUNT_SAME = "same:"
+ACCOUNT_INVALID = "Choose how the bank account is set up."
+ACCOUNT_NOT_SHAREABLE = (
+    "That lease's bank account cannot be used for this lease: it belongs to another "
+    "operator, has no usable bank method or uses another lease's account. Choose again."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SharedAccount:
+    """A lease whose account a new lease of the same operator may use, with the last four
+    of its bank method ("Use the same account as #1991 (····4821)")."""
+
+    lease: Lease
+    last4: str
+
+    @property
+    def value(self) -> str:
+        return f"{ACCOUNT_SAME}{self.lease.pk}"
+
+
+def shareable_accounts(operator_ids: Iterable[uuid.UUID]) -> list[SharedAccount]:
+    """The leases of these operators, not ended, that hold their own processor customer
+    and a usable linked bank method and do not use another lease's account, by store
+    number (local data only: the latest method snapshot)."""
+    leases = Lease.objects.filter(operator_id__in=list(operator_ids), ended_on__isnull=True)
+    own = ExternalRef.objects.filter(
+        entity_type=lease_sync.ENTITY_LEASE,
+        provider=PROVIDER_KEY,
+        superseded_at__isnull=True,
+        entity_id__in=leases.values("pk"),
+    )
+    with_customer = own.filter(external_kind=lease_sync.KIND_CUSTOMER).values("entity_id")
+    with_method = own.filter(external_kind=lease_sync.KIND_PAYMENT_METHOD).values("entity_id")
+    candidates = (
+        leases.filter(pk__in=with_customer)
+        .filter(pk__in=with_method)
+        .exclude(collection_status=CollectionStatus.ENDED)
+        .exclude(billing__shares_account_of__isnull=False)
+        .select_related("store", "operator")
+        .order_by(F("store__store_number").asc(nulls_last=True), "store__external_label", "id")
+    )
+    found = []
+    for lease in candidates:
+        method = linked_method_record(lease)
+        if method is not None and method.is_usable_bank:
+            found.append(SharedAccount(lease, bank_last4(method)))
+    return found
+
+
+def shared_account(operator: Operator | None, account: str) -> Lease | None:
+    """The lease whose account ``account`` names (``same:<lease id>``), checked again
+    under its row lock: of ``operator``, not ended, its own customer and a usable bank
+    method, not itself sharing; ``None`` for :data:`ACCOUNT_LATER` and
+    :data:`ACCOUNT_ENTER`. Raises :class:`LeaseRefused` otherwise."""
+    if account in (ACCOUNT_LATER, ACCOUNT_ENTER):
+        return None
+    if not account.startswith(ACCOUNT_SAME):
+        raise LeaseRefused("account", ACCOUNT_INVALID)
+    try:
+        key = uuid.UUID(account.removeprefix(ACCOUNT_SAME))
+    except ValueError:
+        raise LeaseRefused("account", ACCOUNT_INVALID) from None
+    other = Lease.objects.select_for_update().filter(pk=key).first()
+    if (
+        other is None
+        or operator is None
+        or other.operator_id != operator.pk
+        or other.pk not in {found.lease.pk for found in shareable_accounts([operator.pk])}
+    ):
+        raise LeaseRefused("account", ACCOUNT_NOT_SHAREABLE)
+    return other
+
+
+def start_billing(
+    lease: Lease, billing: Mapping[str, Any], account: str, *, actor: User | None
+) -> LeaseBilling:
+    """Write a new lease's billing details and its bank-account choice (the caller's
+    transaction; PLAN-014 C4). ``same:<lease id>`` shares that lease's account
+    (:func:`shared_account`, refused with :class:`LeaseRefused`); otherwise the lease is
+    its own customer: with a billing e-mail it is marked ``pending`` and one
+    ``lease_sync`` is queued (the part-1 rule), without one it waits for a manual link.
+    Nothing is copied from the operator. Audited ``lease_billing.changed``."""
+    shares = shared_account(lease.operator, account)
+    row = LeaseBilling(lease=lease, shares_account_of=shares)
+    for name in lease_sync.BILLING_FIELDS:
+        setattr(row, name, billing.get(name) or "")
+    row.save()
+    lease.billing = row
+    queue = False
+    if shares is None and lease.operator is not None:
+        queue = bool(row.email)
+        lease.sync_status = SyncStatus.PENDING if queue else SyncStatus.AWAITING_LINK
+        lease.save(update_fields=["sync_status", "updated_at"])
+    _audit(actor, "lease_billing.changed", lease, None, lease_sync.billing_snapshot(row))
+    if queue:
+        jobs.enqueue(JobKind.LEASE_SYNC, lease, None, actor)
+    return row
+
+
 # --- Lease writes ---------------------------------------------------------------------
 
 
@@ -944,11 +1052,16 @@ def create_lease(
     creation_key: uuid.UUID,
     actor: User | None,
     today: date | None = None,
+    billing: Mapping[str, Any] | None = None,
+    account: str = ACCOUNT_LATER,
 ) -> tuple[Lease, bool]:
     """Save a new lease and its first rent row, or return the lease this key made.
 
     The key is recorded in the ``lease.created`` audit row; the store row is locked
-    while it is looked up, so two submissions of one form make one lease.
+    while it is looked up, so two submissions of one form make one lease. With
+    ``billing`` (PLAN-014 C4), the lease's billing details and bank-account choice are
+    written in the same transaction (:func:`start_billing`); a refused choice raises
+    :class:`LeaseRefused` and nothing is saved.
     """
     values = _editable(fields)
     store: Store = values["store"]
@@ -973,6 +1086,8 @@ def create_lease(
             {**_snapshot(lease), "creation_key": str(creation_key)},
         )
         _catch_up(lease, actor, today)
+        if billing is not None:
+            start_billing(lease, billing, account, actor=actor)
     return lease, True
 
 
