@@ -117,6 +117,16 @@ fees, automatic discount rules, proration for mid-month openings or closings. Se
 > is removed. Zelle and wire are the only other channels and are recorded manually.
 > Store-by-store rollout with no single cutover day: confirmed.
 
+> **Owner update, 2026-10-29 (ADR-0015, built by PLAN-014 Batch C).** In Stax every customer is a
+> **store**: billing details (company name, e-mail, phone, address, the bank account) belong to each
+> **lease**, and each lease is its own Stax customer; the operator is the person who runs the
+> stores, kept so that all of one person's stores and their total debt are seen together. "One Stax
+> customer per operator" below is history. Enrolment is per lease: staff still link a customer and
+> payment-method ID from the Stax dashboard, and (ADR-0017, PLAN-014 C7/H) the operator may enter
+> the bank account in the processor's hosted fields on the app's bank-entry page or the portal — the
+> app receives a payment-method token and the last four only, never an account number. A lease may
+> use another lease's account ("Use the same account as #1991"): it shares that lease's customer.
+
 The founding prompt assumed customers pay each invoice on Stax's hosted page. The audit shows the
 business today **debits operators' bank accounts by ACH** on a fixed day, without operator action.
 Both can be done without bank data touching the app, but they are different products for the

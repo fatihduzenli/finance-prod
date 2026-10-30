@@ -65,10 +65,15 @@ that could reasonably hold one.
 internal tool into a compliance liability.
 
 **How to apply.**
-- Bank methods are entered only in the Stax dashboard, by staff. This app links
-  the resulting Stax customer ID and payment-method ID and nothing else. Do not
-  embed Stax.js, do not build a "pay now" form, do not tokenize cards here. If a future prompt asks for an
-  in-app payment form, stop and escalate; it conflicts with this rule.
+- Bank methods are entered in the Stax dashboard by staff, or by the operator in the
+  processor's **hosted fields** (Stax.js inside the processor's own iframe) on this app's
+  bank-entry pages only — the lease's bank-entry page and, from PLAN-014 Batch H, the
+  operator portal (owner, 2026-10-29; ADR-0015, ADR-0017). This app receives a payment-method
+  ID, verifies it with the processor and links it to the lease's customer; it never renders a
+  field for an account or routing number, never receives one, and keeps the token and the last
+  four only. Stax.js runs on those pages and nowhere else (`test_stax_isolation` lists them).
+  Do not build a "pay now" form for cards, do not tokenize cards here. If a prompt asks for a
+  card form, stop and escalate; it conflicts with this rule.
 - Free-text fields (notes, memos, descriptions) get a server-side validator that
   rejects strings matching a 13–19 digit run that passes the Luhn check, and
   9-digit ABA routing patterns adjacent to a longer digit run. Reject with a
