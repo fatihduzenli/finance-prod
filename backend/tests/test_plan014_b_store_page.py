@@ -277,7 +277,7 @@ def test_brand_add_rename_toggle_and_order_are_audited_and_refuse_bad_names() ->
         admin.post(reverse("ledger:settings:brand_toggle", kwargs={"pk": hub.pk}), {}).status_code
         == 302
     )
-    hub.refresh_from_db()
+    hub = Brand.objects.get(pk=hub.pk)
     assert hub.active is False
     assert (
         admin.post(
@@ -480,14 +480,16 @@ def test_only_the_author_or_an_admin_edits_and_the_note_says_edited() -> None:
     note.refresh_from_db()
     assert note.body == "First version." and note.edited_at is None
     assert author.post(f"/notes/{note.pk}/edit/", {"body": "Second version."}).status_code == 302
-    note.refresh_from_db()
+    note = Note.objects.get(pk=note.pk)
     assert note.body == "Second version." and note.edited_at is not None
     assert "edited" in section(note_tab(author, store), f"note-{note.pk}", "</li>")
     assert admin.post(f"/notes/{note.pk}/edit/", {"body": "Admin version."}).status_code == 302
     note.refresh_from_db()
     assert note.body == "Admin version."
     audit = AuditLog.objects.filter(action="note.edited", entity_id=str(note.pk)).order_by("at")
-    assert audit.count() == 2 and audit.first().before.get("body") == "First version."  # type: ignore[union-attr]
+    first = audit.first()
+    assert audit.count() == 2 and first is not None
+    assert first.before.get("body") == "First version."
     assert note_tab(other, store).count(
         'href="/notes/'
     ) == 0 or f"/notes/{note.pk}/edit/" not in note_tab(other, store)
@@ -503,7 +505,7 @@ def test_deleting_needs_a_reason_keeps_the_trail_and_hides_the_note() -> None:
     note.refresh_from_db()
     assert note.deleted_at is None
     assert author.post(f"/notes/{note.pk}/delete/", {"reason": "Wrong store."}).status_code == 302
-    note.refresh_from_db()
+    note = Note.objects.get(pk=note.pk)
     assert note.deleted_at is not None and note.delete_reason == "Wrong store."
     assert Note.objects.filter(pk=note.pk).exists()  # soft
     assert f'id="note-{note.pk}"' not in note_tab(author, store)
