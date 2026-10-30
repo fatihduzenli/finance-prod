@@ -168,12 +168,12 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: (finance:payment_status_period); 281 since Batch B (ledger:settings:index and the four brand
 #: actions, ledger:notes:add|edit|pin|delete; the five admin:ledger_storetype_* routes gone); 280
 #: since Batch C part 1 (ledger:leases:billing; ledger:operators:link and retry_sync gone;
-#: computed with _route_names after the merge of Batch B on 2026-10-30); 283 at the end of
-#: Batch C (its lease bank routes; this digest was not re-pinned there); 279 since Batch D
-#: (ledger:settings:
-#: mail_save, templates, template_edit, template_preview, ledger:outbox:page and send_now;
-#: send_step became send_message on both charge pages; the admin:ledger_messagetemplate_* and
-#: admin:ledger_collectionstep_* routes gone with their registrations).
+#: computed with _route_names after the merge of Batch B on 2026-10-30); 283 since PLAN-014
+#: Batch C (ledger:leases:billing, bank, bank_attach, switch_own; the operator's link and
+#: retry_sync gone); 279 since Batch D (ledger:settings:mail_save, templates, template_edit,
+#: template_preview, ledger:outbox:page and send_now added; send_step became send_message on
+#: both charge pages; the admin:ledger_messagetemplate_* and admin:ledger_collectionstep_*
+#: routes gone with their registrations).
 FROZEN_ROUTES = (279, "f0eeee9617810172a5ca21478db3a20db77e695c9783056ed140b5727b4207ee")
 
 

@@ -73,6 +73,7 @@ def test_the_tables_exist_and_start_empty() -> None:
 def test_columns_are_as_listed() -> None:
     columns = {str(field.column) for field in OutboundMessage._meta.concrete_fields}
     assert columns == {
+        "lease_id",  # PLAN-014 C5: the lease whose billing e-mail the message goes to
         "id",
         "operator_id",
         "template_id",

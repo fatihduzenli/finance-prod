@@ -246,8 +246,9 @@ def test_every_page_answers_under_two_seconds_on_volume(monkeypatch: pytest.Monk
     # not by the data. Reported to QA; rent_run is outside this batch.
     due_today = Lease.objects.filter(debit_day=TODAY.day).count()
     pages: dict[str, tuple[str, dict[str, str], int]] = {
-        # +1 since PLAN-012g A2: the theme row read on every page.
-        "dashboard": ("/", {}, 26 + 3 * due_today),
+        # +1 since PLAN-012g A2: the theme row read on every page; +1 since PLAN-014 B1: the
+        # attention card's brand_needed source (one query; a second only when a store was cleared).
+        "dashboard": ("/", {}, 27 + 3 * due_today),
         "grid (500 x 24)": ("/grid/", span, 21),
         # PLAN-012d D16: the words filter keeps the grid's query count.
         "grid filtered": ("/grid/", {**span, "q": "store 1"}, 21),
@@ -256,7 +257,8 @@ def test_every_page_answers_under_two_seconds_on_volume(monkeypatch: pytest.Monk
         "revenue": ("/reports/revenue/", span, 31),
         "payments by method": ("/reports/payments-by-method/", span, 21),
         "deposits": ("/reports/deposits/", span, 21),
-        "statement": (f"/operators/{operator.pk}/statement/", span, 21),
+        # +1 since PLAN-014 C6: each store section's billing company.
+        "statement": (f"/operators/{operator.pk}/statement/", span, 22),
     }
     client, _ = client_for(Role.VIEWER)
     client.get("/reports/")  # warm the session and the template loaders
@@ -289,7 +291,11 @@ def test_the_company_settings_add_one_query_to_a_page(monkeypatch: pytest.Monkey
         "grid (500 x 24)": ("/grid/", span, 18 + 1 + 1),
         "revenue": ("/reports/revenue/", span, 29 + 1 + 1),
         "arrears": ("/arrears/", {}, 18 + 1 + 1),
-        "statement": (f"/operators/{operator.pk}/statement/", span, 19 + 1 + 1),
+        "statement": (
+            f"/operators/{operator.pk}/statement/",
+            span,
+            20 + 1 + 1,
+        ),  # +1 PLAN-014 C6: each store's billing company
     }
     client, _ = client_for(Role.VIEWER)
     client.get("/reports/")  # warm the session and the template loaders

@@ -377,13 +377,20 @@ def seed_before_the_rename() -> None:
     )
 
 
+#: Audit rows later migrations write on their own forward run, not part of the rename's
+#: rewrite: ledger 0059 (PLAN-014 C) logs one row per lease and per operator it leaves alone.
+LATER_MIGRATION_ACTIONS = ("lease_billing.migrated", "operator.refs_kept")
+
+
 def _audit_rows(database_url: str) -> list[tuple[object, ...]]:
     import psycopg
 
     with psycopg.connect(database_url) as scratch:
         return list(
             scratch.execute(
-                "SELECT actor_id, action, entity_type, before, after FROM audit_log ORDER BY id"
+                "SELECT actor_id, action, entity_type, before, after FROM audit_log "
+                "WHERE action <> ALL(%s) ORDER BY id",
+                [list(LATER_MIGRATION_ACTIONS)],
             )
         )
 

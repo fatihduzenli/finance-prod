@@ -257,7 +257,9 @@ def update_billing(
     """
     with transaction.atomic():
         lease = (
-            Lease.objects.select_for_update().select_related("operator", "store").get(pk=lease_id)
+            Lease.objects.select_for_update(of=("self",))
+            .select_related("operator", "store")
+            .get(pk=lease_id)
         )
         if _archived(lease):
             raise OperatorArchived
@@ -347,7 +349,9 @@ def sync_lease(
     """
     with transaction.atomic():
         lease = (
-            Lease.objects.select_for_update().select_related("operator", "store").get(pk=lease_id)
+            Lease.objects.select_for_update(of=("self",))
+            .select_related("operator", "store")
+            .get(pk=lease_id)
         )
         billing = billing_of(lease)
         status = lease.sync_status
@@ -526,7 +530,9 @@ def link_lease(
             return SyncOutcome(Action.LINK_REFUSED, "", SyncFailure.VALIDATION_FAILED)
     with transaction.atomic():
         lease = (
-            Lease.objects.select_for_update().select_related("operator", "store").get(pk=lease_id)
+            Lease.objects.select_for_update(of=("self",))
+            .select_related("operator", "store")
+            .get(pk=lease_id)
         )
         if _archived(lease):
             return SyncOutcome(Action.LINK_REFUSED, lease.sync_status, ARCHIVED)

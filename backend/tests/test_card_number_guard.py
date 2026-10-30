@@ -625,7 +625,12 @@ def _accepted_samples(model: type[models.Model], field: models.Field[Any, Any]) 
         ]
     # PLAN-012 D2: a delete reason is not blank, and only on a deleted entry (CHECK);
     # PLAN-012e D14: a debt-override reason is not blank (CHECK).
-    if column in {"contact_entries.delete_reason", "lease_transfers.debt_override_reason"}:
+    # PLAN-014 B5: a store note's delete reason, the same way.
+    if column in {
+        "contact_entries.delete_reason",
+        "notes.delete_reason",
+        "lease_transfers.debt_override_reason",
+    }:
         return [text for text in samples if re.search(r"\S", text)]
     # PLAN-012c D2: the company's names are not blank, and a logo override is a stored
     # document's path (CHECKs); the guard reads each UUID as one letter, so a path passes.
@@ -645,7 +650,7 @@ def _existing_row(model: type[models.Model], field: models.Field[Any, Any]) -> m
     exists on a deleted entry (PLAN-012 D2); a transfer's debt-override reason only with
     the override's amount and moment (PLAN-012e D14)."""
     column = f"{model._meta.db_table}.{field.column}"
-    if column == "contact_entries.delete_reason":
+    if column in {"contact_entries.delete_reason", "notes.delete_reason"}:
         return saved(
             FACTORIES[model](
                 deleted_at=timezone.now(), deleted_by=make_user(), delete_reason="Wrong shop."
