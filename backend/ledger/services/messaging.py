@@ -7,7 +7,9 @@ builds them; :mod:`ledger.merge` renders, never Django templates) and stores one
 queued it (``A`` to ``F``, ``final_statement``, ``manual``) and its occurrence, then its
 ``message_send`` job, in the caller's transaction. The database keeps one row per (lease,
 charge, rule, occurrence) unless the row is a send by hand: a second queue of the same
-returns ``None`` and writes nothing. A template of the ``sms`` channel is refused
+returns ``None`` and writes nothing. A message without a lease is refused (``ValueError``)
+before anything is rendered: the unique rule cannot dedupe a NULL lease on PostgreSQL, and
+the row would have no billing e-mail to go to. A template of the ``sms`` channel is refused
 (:class:`ChannelUnavailable`, "SMS is not set up."): no SMS provider exists (D8).
 
 **Send window (D7).** A message queued between 9:00 and 18:00 New York time goes at once;
@@ -25,7 +27,9 @@ Then the channel (:func:`channel_for`, e-mail only) sends it: mail not set up ho
 (``not_set_up``); on the sandbox a recipient off the allowlist holds it (``sandbox``) and
 nothing is handed to the mail sender; otherwise it is ``sent``, or ``failed`` with the
 error's class name. Each outcome is audited (``message.sent``, ``message.held``,
-``message.failed``, ``message.suppressed``).
+``message.failed``, ``message.suppressed``) with the number of addresses the send was
+for (``recipients``; 0 when it stopped before any): an internal message goes to every
+manager, while its row names the first.
 
 **By hand.** :func:`send_by_hand` (billing, the charge page's "Send a message now") queues a
 ``manual`` row of an active, not internal template for an open charge, through the same
@@ -144,6 +148,9 @@ SEND_NOW_NOT_ALLOWED = (
     "stays held."
 )
 SEND_NOW_NO_ADDRESS = "The message has no address to send to: it stays held."
+NO_LEASE = "A message belongs to a lease."
+#: Who an internal message goes to, as the Outbox and the store's timeline show it.
+MANAGERS_TO = "the managers ({count})"
 
 #: The send window, New York time (D7): from 9:00, until 18:00.
 WINDOW_OPENS = time(9, 0)
@@ -405,6 +412,11 @@ def manager_addresses() -> list[str]:
         return []
 
 
+def managers_to() -> str:
+    """ "the managers (2)": an internal message's recipients, the list as it stands now."""
+    return MANAGERS_TO.format(count=len(manager_addresses()))
+
+
 def _recipients(message: OutboundMessage) -> list[str]:
     """Where the message goes now: the managers' list for an internal message; else the
     billing e-mail of its lease, read again (it may have changed, or gone, since the queue);
@@ -434,7 +446,10 @@ def queue(
     module docstring); ``None`` when the row exists already (the unique constraint).
     :class:`ChannelUnavailable` for an SMS template; :class:`~ledger.merge.TemplateRefused`
     when the values are not one code's placeholders. A rendered text holding payment data is
-    stored as ``failed`` (``PaymentDataRefused``) without its text, and gets no job."""
+    stored as ``failed`` (``PaymentDataRefused``) without its text, and gets no job.
+    ``ValueError`` and nothing written when ``lease`` is ``None``."""
+    if lease is None:
+        raise ValueError(NO_LEASE)
     channel_for(template.channel)
     operator = operator_of(lease, charge)
     if operator is None:
@@ -447,7 +462,7 @@ def queue(
     if template.internal:
         managers = manager_addresses()
         address = managers[0] if managers else ""
-    elif lease is not None:
+    else:
         address = lease_sync.billing_of(lease).email
     message = OutboundMessage(
         operator=operator,
@@ -474,6 +489,9 @@ def queue(
         message.rendered_subject = message.rendered_body = message.body_sha256 = ""
         message.status = MessageStatus.FAILED
         message.error = PAYMENT_DATA_REFUSED
+    audited: dict[str, object] = {"status": message.status, "error": message.error}
+    if message.status == MessageStatus.FAILED:  # as a send's failure reads
+        audited["recipients"] = 0
     try:
         with transaction.atomic():
             message.save()
@@ -485,7 +503,7 @@ def queue(
                 "message.queued" if message.status == MessageStatus.QUEUED else "message.failed",
                 message,
                 actor,
-                {"status": message.status, "error": message.error},
+                audited,
             )
     except IntegrityError:
         return None
@@ -526,8 +544,9 @@ def _suppress_reason(message: OutboundMessage) -> str:
     return ""
 
 
-def _finish(message: OutboundMessage, disposition: Disposition) -> str:
-    """Record ``disposition`` on the row, audit it, and return the job's sentence."""
+def _finish(message: OutboundMessage, disposition: Disposition, recipients: int = 0) -> str:
+    """Record ``disposition`` on the row, audit it with the number of addresses
+    the send was for (``recipients``), and return the job's sentence."""
     message.status = disposition.status
     message.held_reason = disposition.reason if disposition.status == MessageStatus.HELD else ""
     message.error = disposition.error
@@ -549,6 +568,7 @@ def _finish(message: OutboundMessage, disposition: Disposition) -> str:
             "status": message.status,
             "held_reason": message.held_reason,
             "error": message.error,
+            "recipients": recipients,
         },
     )
     if disposition.status == MessageStatus.SENT:
@@ -613,7 +633,7 @@ def send(message_id: uuid.UUID, now: datetime | None = None) -> Outcome:
             return Outcome(True, _finish(message, Disposition(MessageStatus.HELD, held)))
         message.to_address = recipients[0]
         disposition = _deliver(message, recipients)
-        text = _finish(message, disposition)
+        text = _finish(message, disposition, len(recipients))
         return Outcome(disposition.status != MessageStatus.FAILED, text)
 
 

@@ -134,11 +134,13 @@ class TimelineRow:
 @dataclass(frozen=True, slots=True)
 class EmailRow:
     """One message on the list (PLAN-014 D5): the template's name, the delivery result, the
-    address (masked below admin) and the stored text."""
+    address (masked below admin; "the managers (n)" for an internal message) and, for
+    billing and above, the stored text: it carries the signed statement link, a bearer URL."""
 
     message: OutboundMessage
     status: str
     to: str
+    show_text: bool
 
 
 def timeline_rows(
@@ -159,7 +161,10 @@ def timeline_rows(
             store=store,
         )
     }
-    admin = meets(role_of(request.user), Role.ADMIN)
+    role = role_of(request.user)
+    admin = meets(role, Role.ADMIN)
+    billing = meets(role, Role.BILLING)
+    managers = ""
     rows: list[TimelineRow] = []
     for entry in found:
         if entry.kind == timeline.NOTE:
@@ -168,19 +173,21 @@ def timeline_rows(
             rows.append(TimelineRow(entry.kind, logs_by_id[entry.payload.pk]))
         elif entry.kind == timeline.EMAIL:
             message = entry.payload
+            if message.template.internal:
+                managers = managers or messaging.managers_to()
+                to = managers
+            elif not message.to_address:
+                to = ""
+            else:
+                to = message.to_address if admin else collections.mask_address(message.to_address)
             rows.append(
                 TimelineRow(
                     entry.kind,
                     EmailRow(
                         message=message,
                         status=messaging.status_text(message),
-                        to=(
-                            message.to_address
-                            if admin
-                            else collections.mask_address(message.to_address)
-                        )
-                        if message.to_address
-                        else "",
+                        to=to,
+                        show_text=billing,
                     ),
                 )
             )

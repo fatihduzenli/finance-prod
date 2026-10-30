@@ -22,7 +22,7 @@
   <table id="outbox">
     <thead><tr><th>When</th><th>Store</th><th>Operator</th><th>Template</th><th>Rule</th><th>Status</th><th>To</th><th>Scheduled for</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
     <tbody>
-      {% for message, status in rows %}
+      {% for message, status, to in rows %}
         <tr id="message-{{ message.pk }}">
           <td>{{ message.queued_at|moment }}</td>
           <td>{% if message.lease %}<a href="{% url 'ledger:stores:detail' pk=message.lease.store_id %}">{% if message.lease.store.store_number is not None %}#{{ message.lease.store.store_number }} {% endif %}{{ message.lease.store.external_label }}</a>{% else %}—{% endif %}</td>
@@ -30,7 +30,7 @@
           <td><details class="message-text"><summary>{{ message.template.display_name }}</summary><p><strong>{{ message.rendered_subject|default:"—" }}</strong></p><pre class="message-body">{{ message.rendered_body }}</pre></details></td>
           <td>{{ message.get_rule_display }}</td>
           <td>{{ status }}</td>
-          <td>{{ message.to_address|default:"—" }}</td>
+          <td>{{ to|default:"—" }}</td>
           <td>{% if message.scheduled_for %}{{ message.scheduled_for|moment }}{% else %}—{% endif %}</td>
           <td>{% if message.status == "held" %}<form method="post" action="{% url 'ledger:outbox:send_now' pk=message.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-sm" type="submit">Send now</button></form>{% endif %}</td>
         </tr>

@@ -245,6 +245,41 @@ def test_the_internal_message_goes_to_the_managers_and_never_to_the_operator(
     assert sent.status == MessageStatus.SENT
     assert [message.to for message in memory.sent] == ["boss@example.com", "lead@example.com"]
     assert CEO not in [message.to for message in memory.sent]
+    # The audit counts every manager mailed; the held one reached nobody.
+    audits = {
+        row.entity_id: row.after
+        for row in AuditLog.objects.filter(action__in=("message.sent", "message.held"))
+    }
+    assert audits[str(sent.pk)]["recipients"] == 2
+    assert audits[str(held.pk)]["recipients"] == 0
+    # The pages name the managers, not the first address the row keeps.
+    admin, _ = client_for(Role.ADMIN)
+    outbox = admin.get("/admin-settings/outbox/").content.decode()
+    row = outbox[outbox.index(f'id="message-{sent.pk}"') :]
+    row = row[: row.index("</tr>")]
+    assert "the managers (2)" in row and "boss@example.com" not in row
+    store = charge.lease.store
+    for role in (Role.ADMIN, Role.VIEWER):
+        viewer, _ = client_for(role)
+        page = viewer.get(f"/stores/{store.pk}/?tab=contacts&show=emails").content.decode()
+        item = page[page.index(f'id="message-{sent.pk}"') :]
+        item = item[: item.index("</li>")]
+        assert "To the managers (2)" in item and "boss@example.com" not in item, role
+
+
+def test_a_message_without_a_lease_is_refused_before_anything_is_rendered(clock: Any) -> None:
+    charge = rent_charge()
+    clock(at(date(2026, 10, 8)))
+    template = MessageTemplate.objects.get(code="overdue_day5")
+    context = messaging.context_for(charge.lease, charge, MessageRule.C, today=DUE)
+    for _ in range(2):
+        with pytest.raises(ValueError, match="A message belongs to a lease."):
+            messaging.queue(MessageRule.C, None, charge, template, context)
+    # Even a context that could not render is refused for the lease first.
+    with pytest.raises(ValueError, match="A message belongs to a lease."):
+        messaging.queue(MessageRule.C, None, charge, template, {})
+    assert OutboundMessage.objects.count() == Job.objects.count() == 0
+    assert not AuditLog.objects.filter(entity_type=messaging.ENTITY).exists()
 
 
 def test_a_rendered_text_with_payment_data_is_stored_failed_without_its_text(
@@ -261,6 +296,8 @@ def test_a_rendered_text_with_payment_data_is_stored_failed_without_its_text(
     assert (message.status, message.error) == (MessageStatus.FAILED, "PaymentDataRefused")
     assert message.rendered_body == message.rendered_subject == ""
     assert not Job.objects.filter(kind=JobKind.MESSAGE_SEND).exists()
+    audit = AuditLog.objects.get(action="message.failed", entity_id=str(message.pk))
+    assert audit.after["recipients"] == 0
 
 
 # --- D1: the Mail card -----------------------------------------------------------------------
@@ -517,8 +554,16 @@ def test_every_message_of_a_lease_is_on_its_store_timeline(clock: Any, settings:
     item = item[: item.index("</li>")]
     assert "C — Payment overdue" in item and "not sent (mail not set up)" in item
     assert "t***@example.com" in item and "timeline.person@example.com" not in item
-    assert "<details" in item and "We have not yet received" in item
+    # Below billing, no stored text: it carries the signed statement link, a bearer URL.
+    assert "<details" not in item and "We have not yet received" not in item
+    assert "http" not in item
     assert "No e-mails yet." not in page
+    billing, _ = client_for(Role.BILLING)
+    page = billing.get(f"/stores/{store.pk}/?tab=contacts&show=emails").content.decode()
+    item = page[page.index(f'id="message-{entry.payload.pk}"') :]
+    item = item[: item.index("</li>")]
+    assert "<details" in item and "We have not yet received" in item and "http" in item
+    assert "t***@example.com" in item and "timeline.person@example.com" not in item
     admin, _ = client_for(Role.ADMIN)
     page = admin.get(f"/stores/{store.pk}/?tab=contacts&show=emails").content.decode()
     item = page[page.index(f'id="message-{entry.payload.pk}"') :]

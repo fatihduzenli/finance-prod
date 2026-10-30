@@ -2,8 +2,9 @@
 
 - ``ledger:outbox:page`` (admin, read-only in the registry; the view refuses below admin):
   every message, newest first, 50 a page, with its time, store, operator, template, rule,
-  status (and held reason), address and the time the send window lets it go; filters by
-  status and by a range of days queued (the list pages' filters component). Each row opens
+  status (and held reason), address ("the managers (n)" for an internal message, which goes
+  to every manager) and the time the send window lets it go; filters by status and by a
+  range of days queued (the list pages' filters component). Each row opens
   its stored subject and body. The address is shown in full: the page is admin's only.
 - ``ledger:outbox:send_now`` (admin, POST): "Send now" on a held message
   (:func:`ledger.services.messaging.send_now`); the outcome is a message on the page.
@@ -59,6 +60,7 @@ def outbox_page(request: HttpRequest) -> HttpResponse:
     since, until = _day(request.GET.get("from")), _day(request.GET.get("to"))
     found = messaging.outbox(status=status, since=since, until=until)
     page = Paginator(found, PAGE_SIZE).get_page(request.GET.get("page"))
+    managers = messaging.managers_to()
     accepted = {
         "status": status,
         "from": since.isoformat() if since is not None else "",
@@ -79,7 +81,14 @@ def outbox_page(request: HttpRequest) -> HttpResponse:
             ),
             "page": page,
             "query": urlencode({name: value for name, value in accepted.items() if value}),
-            "rows": [(message, messaging.status_text(message)) for message in page],
+            "rows": [
+                (
+                    message,
+                    messaging.status_text(message),
+                    managers if message.template.internal else message.to_address,
+                )
+                for message in page
+            ],
             "status_choices": MessageStatus.choices,
             "selected": {"status": status, "from": since, "to": until},
             "mail_set_up": mail.is_set_up(),
