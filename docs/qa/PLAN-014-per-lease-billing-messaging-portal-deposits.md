@@ -947,6 +947,12 @@ sqlite), makemigrations check on both databases, the secret scan, the provider-n
 
 ## 8. Departures and questions carried to the checkpoints
 
+- **The per-charge unique rule reads rows without a month only (E4, built):** a lease month's rows
+  all name the lease as their entity, so October's and November's A would otherwise collide;
+  `outbound_messages_one_per_lease_charge_rule` now carries `period_month IS NULL` and the lease
+  months have `outbound_messages_one_per_lease_month`. B is not sent when no rent is in force on
+  the debit date (the rent run makes no charge either); the month's settlement is read from its
+  first debit's charge (seq 1).
 - **Twice-monthly debits and rule A (E4):** a lease debited on two days of the month gets one
   A, three days before the first debit (the owner's key is lease + month + rule). Whether the
   second debit deserves its own A is a checkpoint 2 question.
