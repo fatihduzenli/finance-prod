@@ -589,7 +589,8 @@ def test_the_calendar_entry_page_has_the_family_frame() -> None:
 #: open-debit guard).
 BUDGETS = {  # +1 on every page since PLAN-012g A2: the theme row
     "one_off": 38,
-    "rent": 31,
+    # PLAN-014 E4: +1, the month's lease-month A or B read for the rent charge's message log.
+    "rent": 32,
     "payment": 18,
     # PLAN-014 C6: +1, the lease's billing row for "Bill to".
     "invoice": 28,
