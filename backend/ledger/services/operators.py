@@ -2,8 +2,11 @@
 
 An operator is a person: since PLAN-014 the processor customer, the bank method and the
 billing details belong to each lease (``ledger.LeaseBilling``, :mod:`payments.lease_sync`).
-Saving, editing or archiving an operator never reaches the payment provider; its own
-``sync_*`` columns of PLAN-006 D7 are kept for history and no longer written.
+Saving, editing or archiving an operator never calls the payment provider; its own
+``sync_*`` columns of PLAN-006 D7 are kept for history and no longer written. A rename is
+the one edit the provider must hear of (each lease's customer carries the operator's full
+name): it marks every lease with its own customer reference ``pending`` and queues its
+``lease_sync`` job, which the worker runs (Fable's PLAN-014 C part 1 finding).
 
 A repeated create form finds the operator its ``creation_key`` already made (D6). Every
 change writes one ``audit_log`` row with the operator's fields before and after.
@@ -21,6 +24,8 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from ledger.models import AuditLog, Operator, OperatorKind
+from payments import jobs, lease_sync
+from payments.models import JobKind
 
 ENTITY_OPERATOR = "operator"
 
@@ -42,6 +47,10 @@ OPERATOR_FIELDS: tuple[str, ...] = (
     "sms_consent_at",
     "email_consent_at",
 )
+
+
+#: The jobs that send a lease's customer details to the provider.
+SYNC_KINDS = (JobKind.LEASE_SYNC, JobKind.LEASE_RETRY)
 
 
 class OperatorArchived(Exception):  # noqa: N818 (reads as a state, like the provider errors)
@@ -75,7 +84,10 @@ def create_operator(
 def update_operator(
     operator_id: uuid.UUID, fields: Mapping[str, Any], *, actor: User | None
 ) -> Operator:
-    """Apply staff edits under a row lock; audited when something changed."""
+    """Apply staff edits under a row lock; audited when something changed. A change of the
+    display name marks each lease with its own customer reference ``pending`` and queues
+    one ``lease_sync`` job for it (none while a sync or retry of it waits: that job reads
+    the new name), in the same transaction."""
     with transaction.atomic():
         operator = Operator.objects.select_for_update().get(pk=operator_id)
         if operator.archived_at is not None:
@@ -87,6 +99,11 @@ def update_operator(
         after = snapshot(operator)
         if after != before:
             _audit(actor, "operator.updated", operator, before, after)
+        if after["display_name"] != before["display_name"]:
+            for lease in lease_sync.mark_renamed(operator.pk):
+                waiting = jobs.latest_for(lease, SYNC_KINDS)
+                if not jobs.is_active(waiting):
+                    jobs.enqueue(JobKind.LEASE_SYNC, lease, None, actor)
     return operator
 
 

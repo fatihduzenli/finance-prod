@@ -649,13 +649,17 @@ Post = tuple[str, Client, str, dict[str, Any], str]
 
 def _operator_and_lease_posts(fake: FakeProvider) -> list[Post]:
     """PLAN-014 C3: the sync, retry and link are queued from the lease's Edit billing
-    details; saving an operator queues nothing (pinned below)."""
+    details; saving an operator queues nothing (pinned below) unless it renames an
+    operator whose lease has its own customer (Fable's C part 1 finding)."""
     billing, _ = client_for(Role.BILLING)
     admin, _ = client_for(Role.ADMIN)
     created = new_lease(email=None)
     linked = new_lease(email="linked@example.com")
     jobs.enqueue(JobKind.LEASE_SYNC, linked, None, None)
+    renamed = new_lease(email="renamed@example.com", name="Before Rename")
+    jobs.enqueue(JobKind.LEASE_SYNC, renamed, None, None)
     run_queued_jobs()
+    assert renamed.operator is not None
     failed = new_lease(email="failed@example.com")
     Lease.objects.filter(pk=failed.pk).update(
         sync_status=SyncStatus.FAILED,
@@ -680,6 +684,13 @@ def _operator_and_lease_posts(fake: FakeProvider) -> list[Post]:
             billing_url(linked),
             billing_data(email="linked@example.com", phone="+1 415 555 0199"),
             str(linked.pk),
+        ),
+        (
+            JobKind.LEASE_SYNC,
+            billing,
+            f"{detail(renamed.operator)}edit/",
+            form_data(display_name="After Rename", email=""),
+            str(renamed.pk),
         ),
         (
             JobKind.LEASE_RETRY,

@@ -41,6 +41,7 @@ from ledger.models import Operator, OperatorKind, SyncStatus
 from ledger.services import operators, search
 from payments import lease_sync
 from payments.fake import FakeProvider
+from payments.models import Job, JobKind
 from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.receivables_helpers import a_lease, a_store, an_operator
 from tests.test_form_modals import _field_error, dialog_of, page
@@ -324,8 +325,10 @@ def test_a_rename_is_local_and_the_leases_customer_input_follows_the_full_name(
     assert fake.calls == []
 
 
-def test_a_rename_of_an_operator_with_a_linked_lease_queues_no_sync(fake: FakeProvider) -> None:
-    """PLAN-014 C3: operator writes are local; the lease's customer is not marked pending."""
+def test_a_rename_of_an_operator_with_a_linked_lease_queues_its_sync(fake: FakeProvider) -> None:
+    """Fable's PLAN-014 C part 1 finding: the lease's customer carries the full name, so a
+    rename marks the linked lease ``pending`` and queues its ``lease_sync``; it calls
+    nothing itself."""
     operator, _ = operators.create_operator(
         {"display_name": "Ada Lovelace", "email": "a@example.com"},
         creation_key=uuid.uuid4(),
@@ -339,7 +342,9 @@ def test_a_rename_of_an_operator_with_a_linked_lease_queues_no_sync(fake: FakePr
     updated = operators.update_operator(operator.pk, {"display_name": "Ada Byron"}, actor=None)
     lease.refresh_from_db()
     assert (updated.display_name, updated.sync_status) == ("Ada Byron", SyncStatus.NOT_APPLICABLE)
-    assert lease.sync_status == SyncStatus.LINKED
+    assert lease.sync_status == SyncStatus.PENDING
+    [job] = Job.objects.filter(kind=JobKind.LEASE_SYNC)
+    assert (job.entity_type, job.entity_id) == ("lease", lease.pk)
     assert len(fake.calls) == calls
 
 

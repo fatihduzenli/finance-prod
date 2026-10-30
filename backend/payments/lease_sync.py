@@ -287,6 +287,26 @@ def update_billing(
     return lease, billing
 
 
+def mark_renamed(operator_id: uuid.UUID) -> list[Lease]:
+    """Mark ``pending`` every lease of the operator that holds its own current customer
+    reference, after the operator's display name changed: :func:`customer_input` sends
+    that name (first and last), so each lease's ``lease_sync`` job updates its customer.
+    A lease that shares another's account holds no reference: nothing is sent for it.
+    Returns the leases marked, locked; the caller's transaction holds the lock."""
+    own = ExternalRef.objects.filter(
+        entity_type=ENTITY_LEASE,
+        provider=PROVIDER_KEY,
+        external_kind=KIND_CUSTOMER,
+        superseded_at__isnull=True,
+        entity_id__in=Lease.objects.filter(operator_id=operator_id).values("pk"),
+    ).values("entity_id")
+    marked = list(Lease.objects.select_for_update().filter(pk__in=own).order_by("pk"))
+    for lease in marked:
+        lease.sync_status = SyncStatus.PENDING
+        lease.save(update_fields=["sync_status", "updated_at"])
+    return marked
+
+
 # --- Provider calls -----------------------------------------------------------------
 
 

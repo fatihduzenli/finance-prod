@@ -55,7 +55,7 @@ from payments.errors import (
 )
 from payments.fake import FakeProvider
 from payments.lease_sync import Action
-from payments.models import ExternalRef
+from payments.models import ExternalRef, Job, JobKind
 from payments.provider import CustomerQuery, CustomerRecord, mask_identifier
 from payments.stax.adapter import StaxProvider
 from tests.auth_helpers import make_user
@@ -1114,22 +1114,67 @@ def test_006c_row1_a_company_edit_names_the_field_and_sends_the_c3_mapping(
 
 
 @pytest.mark.django_db
-def test_006c_an_operator_rename_is_local_and_makes_no_call(
+def test_006c_an_operator_rename_queues_one_sync_per_lease_with_its_own_customer(
     actor: User, fake: FakeProvider
 ) -> None:
-    """PLAN-014 C3: operator writes never reach the provider; the lease stays linked."""
+    """Fable's PLAN-014 C part 1 finding: each lease's customer carries the operator's full
+    name, so a rename marks every lease with its own customer reference ``pending`` and
+    queues one ``lease_sync`` for it; the job sends the new name. A lease that shares that
+    account, a lease without a customer yet and an operator without a linked lease queue
+    nothing; the rename itself calls nothing."""
     lease = linked(actor, fake)
-    assert lease.operator is not None
+    operator = lease.operator
+    assert operator is not None
+    [ref] = customer_refs(lease)
+    unlinked = billed_lease(actor, operator=operator)
+    sharer = billed_lease(actor, operator=operator, email=None)
+    LeaseBilling.objects.filter(lease=sharer).update(shares_account_of=lease)
+    statuses = {row.pk: row.sync_status for row in (unlinked, sharer)}
+    lonely = billed_lease(actor, name="Lonely Stores")
+    assert lonely.operator is not None
 
     operators.update_operator(
-        lease.operator.pk, fields(display_name="Southwind Person", email=None), actor=actor
+        operator.pk, fields(display_name="Southwind Person", email=None), actor=actor
+    )
+    # A second rename while the job waits queues no second one: the job reads the row.
+    operators.update_operator(
+        operator.pk, fields(display_name="Southwind Persons", email=None), actor=actor
+    )
+    operators.update_operator(
+        lonely.operator.pk, fields(display_name="Lonely Person", email=None), actor=actor
     )
 
-    assert lease_sync.sync_lease(lease.pk, provider=fake, actor=actor).action is Action.NO_CALL
     assert fake.calls == []
+    [job] = Job.objects.filter(kind=JobKind.LEASE_SYNC)
+    assert (job.entity_type, job.entity_id, job.requested_by_id) == ("lease", lease.pk, actor.pk)
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.PENDING
+    for row in (unlinked, sharer):
+        row.refresh_from_db()
+        assert row.sync_status == statuses[row.pk]
+    assert AuditLog.objects.filter(action="operator.updated").count() == 3
+
+    outcome = lease_sync.sync_lease(lease.pk, provider=fake, actor=actor)
+    assert outcome.action is Action.UPDATED
+    [(customer_id, sent)] = update_calls(fake)
+    assert customer_id == ref.external_id
+    assert (sent.first_name, sent.last_name) == ("Southwind", "Persons")
     lease.refresh_from_db()
     assert lease.sync_status == SyncStatus.LINKED
-    assert not AuditLog.objects.filter(action="lease.sync_updated").exists()
+
+
+@pytest.mark.django_db
+def test_006c_an_operator_edit_that_keeps_the_name_queues_nothing(
+    actor: User, fake: FakeProvider
+) -> None:
+    lease = linked(actor, fake)
+    assert lease.operator is not None
+    operators.update_operator(
+        lease.operator.pk, fields(phone="+1 555 010 0009", email=None), actor=actor
+    )
+    assert fake.calls == [] and not Job.objects.exists()
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
 
 
 @pytest.mark.django_db
