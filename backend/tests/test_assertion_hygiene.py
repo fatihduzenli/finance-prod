@@ -52,7 +52,7 @@ ALLOWED: dict[str, set[int | str]] = {
     "test_card_number_guard.py": {143},
     # A CSV export: no ids in its columns.
     "test_contact_log.py": {1570},
-    "test_store_form_fields.py": {191},
+    "test_store_form_fields.py": {'assert ",TX," in body and "Texas" not in body'},
     # Text extracted from an uploaded document, not a page; a content-type lookup (a fixed string).
     "test_documents.py": {
         337,

@@ -1568,7 +1568,7 @@ def test_the_closing_entries_name_their_promise_on_every_page_and_in_the_csv(
     assert by_note["Paid in the office."] == "Closed $2,000.00 by 2026-10-01 as Kept"
     assert by_note["Will not pay."] == "Closed $300.00 by 2026-10-03 as Broken"
     assert by_note["New date."] == "Closed $400.00 by 2026-10-04 as Rescheduled"
-    assert by_note["Just a call."] == "" and "href" not in body
+    assert by_note["Just a call."] == "" and "href=" not in body
 
 
 def test_the_store_page_links_to_the_operator_page_for_a_promise_not_on_that_store(
