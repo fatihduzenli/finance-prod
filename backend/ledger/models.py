@@ -249,9 +249,9 @@ CONSENT_FIELDS: tuple[str, ...] = ("sms_consent_at", "email_consent_at")
 class Operator(GuardedModel):
     """The business that runs a store and pays its rent ("customer" in older prompts)."""
 
-    #: The stored, shown name. :meth:`save` derives it from the kind's name fields when
-    #: they are filled (PLAN-012f-b D9); a row without them (one made before the kind
-    #: existed) keeps the name it has.
+    #: The stored, shown name: the operator's Full name (PLAN-014 C1). :meth:`save` derives
+    #: it from the kind's name fields (PLAN-012f-b D9) only while it is empty; the forms
+    #: no longer write those fields, which stay as history.
     display_name = guarded_char(NAME_MAX_LENGTH)
     legal_name = guarded_char(NAME_MAX_LENGTH, blank=True)
     #: Existing operators are people until staff say otherwise (nothing guessed).
@@ -354,8 +354,9 @@ class Operator(GuardedModel):
         return " ".join(f"{self.first_name} {self.last_name}".split())
 
     def derive_display_name(self) -> None:
-        """Set ``display_name`` from the kind's name fields when they are filled."""
-        if name := self.kind_name():
+        """Set an empty ``display_name`` from the kind's name fields when they are filled
+        (PLAN-014 C1: a Full name staff typed is never replaced)."""
+        if not " ".join((self.display_name or "").split()) and (name := self.kind_name()):
             self.display_name = name
 
     def save(self, *args: Any, **kwargs: Any) -> None:

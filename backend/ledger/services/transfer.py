@@ -272,18 +272,14 @@ def in_progress(store: Store) -> LeaseTransfer | None:
 
 
 def search_operators(query: str, transfer: LeaseTransfer) -> list[Operator]:
-    """Operators that are not archived whose display, legal or company name holds
-    ``query`` (ignoring case), by name; the outgoing operator is left out."""
+    """Operators that are not archived whose full name (the display name, PLAN-014 C1)
+    holds ``query`` (ignoring case), by name; the outgoing operator is left out."""
     text = (query or "").strip()
     if not text:
         return []
     rows = (
         Operator.objects.filter(archived_at__isnull=True)
-        .filter(
-            Q(display_name__icontains=text)
-            | Q(legal_name__icontains=text)
-            | Q(company__icontains=text)
-        )
+        .filter(display_name__icontains=text)
         .order_by("display_name", "id")
     )
     outgoing = transfer.outgoing_lease.operator_id

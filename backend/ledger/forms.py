@@ -51,7 +51,6 @@ from ledger.models import (
     LeaseEndReason,
     OneOffCharge,
     Operator,
-    OperatorKind,
     PaymentChannel,
     PaymentMethod,
     RefundMethod,
@@ -142,55 +141,23 @@ def _quiet_formfield(db_field: models.Field[Any, Any], **kwargs: Any) -> forms.F
 CONSENT_SHOWN_WHEN = {"sms_consent_at": "id_sms_phone|id_phone", "email_consent_at": "id_email"}
 
 
-#: The Type radios' ids (PLAN-012f-b D9): a name field is shown while its kind's radio is
-#: chosen (``ledger/shown_when.js``); Django numbers a radio group's inputs in order.
-KIND_RADIO_IDS = {kind: f"id_kind_{index}" for index, kind in enumerate(OperatorKind.values)}
-#: The name fields each kind asks for, with the refusal when one is empty.
-KIND_NAME_FIELDS: dict[str, dict[str, str]] = {
-    OperatorKind.COMPANY: {"company": "Enter the company name."},
-    OperatorKind.PERSON: {
-        "first_name": "Enter the first name.",
-        "last_name": "Enter the last name.",
-    },
-}
-#: The fields shown with each kind (the other kind's are hidden).
-KIND_SHOWN_FIELDS: dict[str, tuple[str, ...]] = {
-    OperatorKind.COMPANY: ("company", "contact_person"),
-    OperatorKind.PERSON: ("first_name", "last_name"),
-}
-
-
 class OperatorForm(_OperatorFormBase):
-    """Create and edit. The e-mail is lower-cased and stripped; empty means none.
+    """Create and edit (PLAN-014 C1: an operator is a person). The fields are the Full name
+    (required; stored as the display name), the e-mail, the phone, the address, the notes
+    and the SMS phone and consents. The e-mail is lower-cased and stripped; empty means
+    none. The phone must pass the payment provider's rule, as before.
 
-    The phone must pass the payment provider's rule, on create and on every edit, so an
-    operator with a bad phone cannot be saved (or re-synced) until it is fixed.
-
-    PLAN-012f-b D9: Type (Company / Person) comes first and picks the name fields: a
-    company needs its name (the contact person is optional), a person a first and a last
-    name. The display name is not a field: ``Operator.save`` derives it, so a posted
-    ``display_name`` is ignored.
+    The type, company name, contact person, first and last name and legal name left the
+    form (the columns stay, unwritten); a post that still sends them is not refused: the
+    model form ignores fields it does not have.
     """
 
-    kind = _QuietChoiceField(
-        choices=OperatorKind.choices,
-        initial=OperatorKind.PERSON.value,
-        label="Type",
-        # B2-2: drawn as the segmented control (app.css .radio-segmented).
-        widget=forms.RadioSelect(attrs={"class": "radio-segmented"}),
-        error_messages={"required": "Choose company or person."},
-    )
     email = forms.EmailField(required=False, max_length=254)
 
     class Meta:
         model = Operator
         fields = (
-            "kind",
-            "company",
-            "contact_person",
-            "first_name",
-            "last_name",
-            "legal_name",
+            "display_name",
             "email",
             "phone",
             "address_line1",
@@ -204,34 +171,31 @@ class OperatorForm(_OperatorFormBase):
             "email_consent_at",
         )
         labels = {
-            "company": "Company name",
-            "contact_person": "Contact person",
-            "first_name": "First name",
-            "last_name": "Last name",
+            "display_name": "Full name",
             "sms_phone": "Text-message phone (international, +1…)",
             "sms_consent_at": "Text-message consent given on",
             "email_consent_at": "E-mail consent given on",
         }
+        error_messages = {"display_name": {"required": "Enter the full name."}}
         # PLAN-012c D8: a consent is shown only with a phone (SMS) or an e-mail on the form.
         widgets = {
-            **{
-                name: forms.DateTimeInput(
-                    attrs={
-                        "type": "datetime-local",
-                        "step": "1",
-                        SHOWN_WHEN: CONSENT_SHOWN_WHEN[name],
-                    },
-                    format=CONSENT_INPUT_FORMAT,
-                )
-                for name in CONSENT_FIELDS
-            },
-            # PLAN-012f-b D9: each name field is shown with its kind's radio.
-            **{
-                name: forms.TextInput(attrs={SHOWN_WHEN: KIND_RADIO_IDS[kind]})
-                for kind, names in KIND_SHOWN_FIELDS.items()
-                for name in names
-            },
+            name: forms.DateTimeInput(
+                attrs={
+                    "type": "datetime-local",
+                    "step": "1",
+                    SHOWN_WHEN: CONSENT_SHOWN_WHEN[name],
+                },
+                format=CONSENT_INPUT_FORMAT,
+            )
+            for name in CONSENT_FIELDS
         }
+
+    def clean_display_name(self) -> str:
+        """The full name with its spaces collapsed; empty is refused."""
+        value = " ".join(str(self.cleaned_data.get("display_name") or "").split())
+        if not value:
+            raise forms.ValidationError("Enter the full name.", code="required")
+        return value
 
     def clean_email(self) -> str | None:
         value = self.cleaned_data.get("email") or ""
@@ -243,23 +207,6 @@ class OperatorForm(_OperatorFormBase):
         if digits is None:
             raise forms.ValidationError(PHONE_MESSAGE, code="phone")
         return digits
-
-    def clean(self) -> dict[str, Any]:
-        data = super().clean() or {}
-        for name, refusal in KIND_NAME_FIELDS.get(data.get("kind") or "", {}).items():
-            value = " ".join(str(data.get(name) or "").split())
-            if value:
-                data[name] = value
-            elif name not in self.errors:
-                self.add_error(name, forms.ValidationError(refusal, code="required"))
-        # B2-3: the other kind's name fields are cleared, so a post without the script (where
-        # every field shows) never keeps stale names. A company keeps its contact person.
-        for kind, names in KIND_SHOWN_FIELDS.items():
-            if data.get("kind") and kind != data.get("kind"):
-                for name in names:
-                    if name in data:
-                        data[name] = ""
-        return data
 
 
 class OperatorCreateForm(OperatorForm):

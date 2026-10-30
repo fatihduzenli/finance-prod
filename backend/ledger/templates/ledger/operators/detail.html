@@ -65,8 +65,7 @@
   <section class="card" id="operator-contact-card">
   <h2>Details</h2>
   <dl>
-    <dt>Legal name</dt><dd>{{ operator.legal_name|default:"—" }}</dd>
-    <dt>Company</dt><dd>{{ operator.company|default:"—" }}</dd>
+    <dt>Full name</dt><dd id="full-name">{{ operator.display_name }}</dd>
     <dt>E-mail</dt><dd>{{ operator.email|default:"—" }}</dd>
     <dt>Phone</dt><dd>{{ operator.phone|phone|default:"—" }}</dd>
     <dt>Text-message phone</dt><dd id="sms-phone">{{ operator.sms_phone|phone|default:"—" }}</dd>

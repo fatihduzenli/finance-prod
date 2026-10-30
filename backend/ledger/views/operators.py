@@ -220,12 +220,7 @@ def _listed(request: HttpRequest) -> tuple[QuerySet[Operator], str, bool]:
     if not include_archived:
         operators = operators.filter(archived_at__isnull=True)
     if query:
-        operators = operators.filter(
-            Q(display_name__icontains=query)
-            | Q(legal_name__icontains=query)
-            | Q(company__icontains=query)
-            | Q(email__icontains=query)
-        )
+        operators = operators.filter(Q(display_name__icontains=query) | Q(email__icontains=query))
     return operators.order_by(Lower("display_name"), "id"), query, include_archived
 
 
@@ -269,8 +264,6 @@ def _list_context(request: HttpRequest) -> dict[str, Any]:
 
 EXPORT_HEADER = (
     "Operator",
-    "Legal name",
-    "Company",
     "Email",
     "Phone",
     "SMS phone",
@@ -278,8 +271,6 @@ EXPORT_HEADER = (
     "E-mail consent given on",
     "City",
     "State",
-    "Provider link",
-    "Enrolment",
     "Needs review",
     "Archived on",
 )
@@ -293,8 +284,6 @@ def operator_export(request: HttpRequest) -> StreamingHttpResponse:
     records = (
         [
             operator.display_name,
-            operator.legal_name,
-            operator.company,
             operator.email or "",
             operator.phone,
             operator.sms_phone,
@@ -302,8 +291,6 @@ def operator_export(request: HttpRequest) -> StreamingHttpResponse:
             operator.email_consent_at,
             operator.city,
             operator.state,
-            operator.get_sync_status_display(),
-            operator.get_enrolment_status_display(),
             operator.needs_review,
             operator.archived_at,
         ]
@@ -432,7 +419,7 @@ def _detail_context(
 # --- Write --------------------------------------------------------------------------
 
 #: The New / Edit operator dialog's fields that take both columns (PLAN-012f-b Batch B).
-WIDE_FIELDS: tuple[str, ...] = ("address_line1", "address_line2", "notes")
+WIDE_FIELDS: tuple[str, ...] = ("display_name", "address_line1", "address_line2", "notes")
 
 
 def _form_dialog(

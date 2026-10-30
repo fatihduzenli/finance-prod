@@ -20,22 +20,15 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from ledger.models import AuditLog, Operator
+from ledger.models import AuditLog, Operator, OperatorKind
 
 ENTITY_OPERATOR = "operator"
 
-#: The operator fields staff edit, in form order.
+#: The operator fields staff edit, in form order (PLAN-014 C1: the Full name is the display
+#: name; the kind, company, contact person, first and last name and legal name are no
+#: longer written).
 OPERATOR_FIELDS: tuple[str, ...] = (
-    # PLAN-012f-b D9: the form sends the kind and its name fields, never the display
-    # name, which ``Operator.save`` derives from them; a caller that sets the display
-    # name directly still can.
-    "kind",
-    "company",
-    "contact_person",
-    "first_name",
-    "last_name",
     "display_name",
-    "legal_name",
     "email",
     "phone",
     "address_line1",
@@ -66,7 +59,7 @@ def create_operator(
     existing = Operator.objects.filter(creation_key=creation_key).first()
     if existing is not None:
         return existing, False
-    operator = Operator(creation_key=creation_key, **_editable(fields))
+    operator = Operator(creation_key=creation_key, kind=OperatorKind.PERSON, **_editable(fields))
     try:
         with transaction.atomic():
             operator.save()
