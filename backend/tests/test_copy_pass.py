@@ -264,7 +264,11 @@ def test_the_morning_e_mail_writes_the_promised_amount_with_its_separator() -> N
         (RentSource, RentSource.SHEET_CURRENT, "From the spreadsheet"),
         (RentSource, RentSource.SHEET_INFERRED, "From the spreadsheet (inferred)"),
         (RentSource, RentSource.STAFF, "Entered by staff"),
-        (JobKind, JobKind.LEASE_SYNC, "Updating the operator"),
+        (JobKind, JobKind.LEASE_SYNC, "Updating the lease"),
+        (JobKind, JobKind.LEASE_RETRY, "Updating the lease again"),
+        (JobKind, JobKind.LEASE_LINK, "Connecting the lease"),
+        (JobKind, JobKind.LEASE_METHODS_REFRESH, "Updating bank methods"),
+        (JobKind, JobKind.LEASE_METHOD_ATTACH, "Connecting a bank account"),
         (JobKind, JobKind.PAYMENT_MARK, "Marking the invoice paid"),
         (JobKind, JobKind.INVOICE_CREATE, "Creating the invoice"),
         (JobKind, JobKind.SCHEDULE_CREATE, "Setting up autopay"),
@@ -290,7 +294,7 @@ def test_the_models_show_the_labels_and_store_the_values() -> None:
     assert schedule.state == "none" and schedule.get_state_display() == "Not set up"
     job = Job(kind=JobKind.LEASE_SYNC, status=JobStatus.QUEUED)
     assert (job.get_kind_display(), job.get_status_display()) == (
-        "Updating the operator",
+        "Updating the lease",
         "Waiting",
     )
     event = WebhookEvent(outcome="ignored: no handler")

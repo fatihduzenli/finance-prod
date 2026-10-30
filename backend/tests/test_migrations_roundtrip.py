@@ -79,6 +79,7 @@ GUARD_MODULES = (
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",
+    "payments.migrations.0019_lease_job_kinds",
 )
 
 
