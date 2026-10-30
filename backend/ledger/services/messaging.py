@@ -62,7 +62,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.urls import reverse
 from django.utils import timezone
 
@@ -924,9 +924,20 @@ def operator_log(operator: Operator, limit: int) -> list[LogRow]:
 
 
 def charge_log(charge_type: str, charge_id: uuid.UUID) -> list[LogRow]:
-    """The charge's messages, newest first."""
+    """The charge's messages, newest first. A rent charge's log also lists its month's A
+    and B (E4: stored by the lease and the month, ``lease_month``), named "Rent October
+    2026"."""
+    about = Q(charge_entity_type=charge_type, charge_entity_id=charge_id)
+    if charge_type == ChargeEntityType.RENT_CHARGE:
+        rent = RentCharge.objects.filter(pk=charge_id).values("lease_id", "period_month").first()
+        if rent is not None:
+            about |= Q(
+                charge_entity_type=ChargeEntityType.LEASE_MONTH,
+                charge_entity_id=rent["lease_id"],
+                period_month=rent["period_month"],
+            )
     return _rows(
-        OutboundMessage.objects.filter(charge_entity_type=charge_type, charge_entity_id=charge_id)
+        OutboundMessage.objects.filter(about)
         .select_related("template", "sent_by")
         .order_by("-queued_at", "-id")
     )

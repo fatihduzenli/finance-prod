@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
+from django.urls import reverse
 
 from accounts.roles import Role
 from ledger.models import (
@@ -830,6 +831,41 @@ def test_rent_months_due_lists_the_month_and_its_rule(clock: Any) -> None:
     assert (month.month, month.debit_date, month.amount, month.seq) == (OCT, DUE, D("900.00"), 1)
 
 
+def test_b_for_a_lease_debited_twice_a_month_names_the_first_debits_half(clock: Any) -> None:
+    lease = a_monthly_lease(second_debit_day=18)
+    [(month, rule)] = reminders.rent_months_due(A_DAY)
+    assert (rule.code, month.amount) == ("B", D("1225.00"))
+    run_on(clock, A_DAY)
+    message = OutboundMessage.objects.get(lease=lease)
+    assert "A payment of $1,225.00 for Rent October 2026" in message.rendered_body
+    charge, made = rent_run.create_month(lease, OCT, None)
+    assert made and (charge.seq, charge.amount_due) == (1, month.amount)
+
+
+def test_b_in_the_leases_first_month_names_the_prorated_amount_the_charge_then_has(
+    clock: Any,
+) -> None:
+    lease = a_monthly_lease(debit_day=3, started_on=date(2026, 10, 12))
+    [(month, rule)] = reminders.rent_months_due(date(2026, 10, 9))
+    assert rule.code == "B"
+    assert D("0") < month.amount < RENT
+    assert rent_run.first_debit_amount(lease, OCT) == month.amount
+    run_on(clock, date(2026, 10, 9))
+    message = OutboundMessage.objects.get(lease=lease)
+    assert f"A payment of ${month.amount:,.2f} for Rent October 2026" in message.rendered_body
+    charge, made = rent_run.create_month(lease, OCT, None)
+    assert made and charge.amount_due == month.amount
+
+
+def test_first_debit_amount_is_none_without_a_debit_day_or_a_rent_in_force() -> None:
+    owner = operator()
+    no_rent = saved(new_lease(operator=owner, debit_day=3))
+    assert rent_run.first_debit_amount(no_rent, OCT) is None
+    with_rent = a_monthly_lease()
+    with_rent.debit_day = None  # not saved: an active lease keeps its debit day
+    assert rent_run.first_debit_amount(with_rent, OCT) is None
+
+
 # --- E4: checked again at the send ----------------------------------------------------------
 
 
@@ -973,6 +1009,29 @@ def test_the_outbox_and_the_store_timeline_list_the_month(clock: Any) -> None:
     store = client.get(f"/stores/{lease.store_id}/?tab=contacts&show=emails")
     assert store.status_code == 200
     assert f'id="message-{message.pk}"' in store.content.decode()
+
+
+def test_the_rent_charge_page_lists_its_months_b_and_not_another_months(clock: Any) -> None:
+    lease = a_monthly_lease()
+    run_on(clock, A_DAY)
+    message = OutboundMessage.objects.get(lease=lease, charge_entity_type="lease_month")
+    october, _ = rent_run.create_month(lease, OCT, None)
+    september, _ = rent_run.create_month(lease, date(2026, 9, 1), None)
+    [row] = messaging.charge_log("rent_charge", october.pk)
+    assert (row.charge_type, row.charge_name, row.rule, row.status) == (
+        "lease_month",
+        "Rent October 2026",
+        message.get_rule_display(),
+        message.status,
+    )
+    assert messaging.charge_log("rent_charge", september.pk) == []
+    client, _ = client_for(Role.BILLING)
+    page = client.get(reverse("ledger:charges:detail", kwargs={"pk": october.pk}))
+    assert page.status_code == 200
+    assert "· Rent October 2026" in page.content.decode()
+    other = client.get(reverse("ledger:charges:detail", kwargs={"pk": september.pk}))
+    assert other.status_code == 200
+    assert "Rent October 2026" not in other.content.decode()
 
 
 # --- E4: ledger migration 0062 ----------------------------------------------------------------

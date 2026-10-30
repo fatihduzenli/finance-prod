@@ -684,6 +684,22 @@ def debit_date(lease: Lease, period: date, debit_day: int) -> date:
     return on
 
 
+def first_debit_amount(lease: Lease, period: date) -> Decimal | None:
+    """What :func:`create_month` charges ``lease`` for ``period``'s first debit (seq 1) when
+    no amount is given: the rent in effect on its :func:`debit_date`, prorated by
+    :func:`first_month` and split by :func:`debit_amounts` for a lease debited twice a
+    month. ``None`` when the lease has no debit day or no rent is in effect on that date
+    (PLAN-014 E4: what rule B announces). Local data only."""
+    days = [day for day in (lease.debit_day, lease.second_debit_day) if day is not None]
+    if not days:
+        return None
+    rent = rent_on(lease, debit_date(lease, period, days[0]))
+    if rent is None:
+        return None
+    month = first_month(lease, period, rent.amount)
+    return debit_amounts(month.amount, twice_monthly=len(days) == 2)[0]
+
+
 def create_month(
     lease: Lease,
     period: date,
