@@ -431,6 +431,11 @@ class LeaseAccount:
     bank: str
     shares: Lease | None
 
+    @property
+    def has_bank(self) -> bool:
+        """Whether the bank line names a method (the LEASE card's "Replace", PLAN-014 C4)."""
+        return self.bank != NO_BANK_ON_FILE
+
 
 def bank_text(last4: str) -> str:
     """ "Bank ····4821", or :data:`NO_BANK_ON_FILE` without four digits."""

@@ -25,6 +25,7 @@ from ledger.models import (
     CollectionSchedule,
     CollectionStatus,
     Lease,
+    LeaseBilling,
     LeaseRentHistory,
     Operator,
     PaymentChannel,
@@ -826,3 +827,45 @@ def test_new_lease_refuses_the_account_of_another_operators_lease(
     assert (response.status_code, response["Location"]) == (302, NEW)
     assert list(Lease.objects.all()) == [holder]
     assert html.escape(service.ACCOUNT_NOT_SHAREABLE) in admin.get(NEW).content.decode()
+
+
+def _store_page(client: Client, lease: Lease) -> str:
+    response = client.get(f"/stores/{lease.store_id}/")
+    assert response.status_code == 200
+    return response.content.decode()
+
+
+@override_settings(STAX_PROVIDER="fake")
+def test_the_lease_card_offers_the_bank_entry_and_names_a_shared_account(
+    admin: Client, fake: FakeProvider
+) -> None:
+    holder = _holder(fake)
+    LeaseBilling.objects.filter(lease=holder).update(bank_last4="6789")
+    page = _store_page(admin, holder)
+    assert tag_with(page, 'id="lease-bank-entry"', f'href="/leases/{holder.pk}/bank/"')
+    assert ">Replace</a>" in page
+    sharer = make_lease(
+        operator=holder.operator,
+        store=Store.objects.create(external_label="Store 0404", status=StoreStatus.ACTIVE),
+    )
+    LeaseBilling.objects.filter(lease=sharer).update(shares_account_of=holder)
+    page = _store_page(admin, sharer)
+    assert f"Shared with #{holder.store.external_label}" in page
+    assert 'id="lease-bank-entry"' not in page
+
+
+def test_the_lease_card_offers_no_bank_entry_without_hosted_fields(
+    admin: Client, fake: FakeProvider
+) -> None:
+    lease = make_lease()
+    page = _store_page(admin, lease)
+    assert 'id="edit-billing"' in page and 'id="lease-bank-entry"' not in page
+
+
+@override_settings(STAX_PROVIDER="fake")
+def test_the_lease_card_says_add_a_bank_account_without_one(
+    admin: Client, fake: FakeProvider
+) -> None:
+    lease = make_lease()
+    page = _store_page(admin, lease)
+    assert tag_with(page, 'id="lease-bank-entry"') and ">Add a bank account</a>" in page

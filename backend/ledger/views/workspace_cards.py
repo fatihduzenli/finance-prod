@@ -25,6 +25,7 @@ from ledger.models import Operator, Store
 from ledger.services import documents as document_service
 from ledger.services import notes, store_costs, workspace
 from ledger.services import stores as store_service
+from payments.hosted_fields import get_hosted_fields
 
 #: The newest documents the DOCUMENTS card lists; the Documents tab lists every one.
 DOCUMENTS_SHOWN = 5
@@ -67,6 +68,8 @@ def side_cards(request: HttpRequest, store: Store, today: date) -> dict[str, Any
         "can_set_cost": meets(role_of(request.user), Role.BILLING),
         # PLAN-014 B3: the LEASE card's "Bill now" (the invoice builder is billing's).
         "can_bill": meets(role_of(request.user), Role.BILLING),
+        # PLAN-014 C4: the LEASE card's "Add a bank account" / "Replace" (no query).
+        "bank_entry_available": get_hosted_fields().available(),
         # PLAN-014 B5: the NOTES card (one query), "All ›" to the Notes & follow-ups tab.
         "pinned_notes": notes.pinned_for(store),
         "notes_tab_url": workspace.tab_url(store.pk, workspace.TAB_CONTACTS),
