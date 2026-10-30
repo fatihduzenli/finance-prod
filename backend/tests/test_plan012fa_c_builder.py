@@ -380,7 +380,8 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
         # dialog's foot (tests/test_form_modals.py).
         (
             reverse("ledger:leases:create"),
-            ["Lease", "Debits", "Setup checklist", "Documents"],
+            # PLAN-014 C4: the Billing details card after Debits.
+            ["Lease", "Debits", "Billing details", "Setup checklist", "Documents"],
             "save-lease",
         ),
         (reverse("ledger:leases:edit", kwargs={"pk": lease.pk}), ["Lease", "Debits"], "save-lease"),

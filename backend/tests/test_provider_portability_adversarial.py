@@ -23,6 +23,8 @@ BACKEND = Path(__file__).resolve().parents[1]
 #: The modules inside ``payments/`` that may import the adapter package (docs/PROVIDER.md §1).
 ALLOWED_INSIDE_PAYMENTS = {
     "payments/__init__.py",
+    # PLAN-014 C7: the hosted-fields factory picks the Stax or the fake page, as get_provider does.
+    "payments/hosted_fields.py",
     "payments/health.py",
     "payments/offline_marking.py",
     "payments/lease_sync.py",
