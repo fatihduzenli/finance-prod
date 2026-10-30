@@ -2432,11 +2432,12 @@ class TransferOperatorForm(forms.Form):
     )
 
 
-class TransferIncomingForm(forms.Form):
+class TransferIncomingForm(BillingStepMixin, forms.Form):
     """The incoming lease's terms, its deposit and its setup checklist (one price per
     checklist item that is not a deposit: empty with the catalogue's default price as the
-    placeholder; a price means charged, PLAN-012d D9). The service checks every rule
-    again."""
+    placeholder; a price means charged, PLAN-012d D9), and its Billing details (PLAN-014
+    C4, :class:`BillingStepMixin`: the incoming operator is known, so every ``same:``
+    choice is one of its leases). The service checks every rule again."""
 
     started_on = forms.DateField(
         label="Start date",
@@ -2495,6 +2496,8 @@ class TransferIncomingForm(forms.Form):
         *args: Any,
         fee_types: Iterable[FeeType] = (),
         deposit_offered: bool = True,
+        accounts: Sequence[SharedAccount] = (),
+        enter_refusal: str = "",
         **kwargs: Any,
     ) -> None:
         """``deposit_offered``: the catalogue offers a security deposit. Without one the
@@ -2505,12 +2508,14 @@ class TransferIncomingForm(forms.Form):
         self.deposit_offered = deposit_offered
         for fee_type in self.fee_types:
             self.fields[f"{_setup_name(fee_type)}_price"] = _setup_price_field(fee_type)
+        self.add_billing_step(accounts, enter_refusal=enter_refusal)
 
     def lease_fields(self) -> list[forms.BoundField]:
         return [
             field
             for field in self.visible_fields()
             if not field.name.startswith(SETUP)
+            and field.name not in BILLING_STEP_FIELDS
             and (field.name != "deposit_amount" or self.deposit_offered or field.errors)
         ]
 

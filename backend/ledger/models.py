@@ -3188,7 +3188,9 @@ class LeaseTransfer(GuardedModel):
     The transfer wizard's state while a draft (one per store): the incoming operator and
     the incoming lease's terms (``incoming_*``), the deposit amount and the ticked setup
     items (``setup_lines``: ``[{"fee_type": <id>, "price": "<amount>"}]``, catalogue
-    order). Confirmed, it names the incoming lease and the draft it made. A lease-end
+    order) and the incoming lease's billing details (``incoming_billing``,
+    ``incoming_account``; PLAN-014 C4). Confirmed, it names the incoming lease and the draft
+    it made. A lease-end
     balance left on the outgoing operator needs an admin's written reason
     (``debt_override_*``, D14). Written only by :mod:`ledger.services.transfer`.
     """
@@ -3218,6 +3220,11 @@ class LeaseTransfer(GuardedModel):
     incoming_prorate_first_month = models.BooleanField(default=True)
     deposit_amount = MoneyField(null=True, blank=True)
     setup_lines = guarded_json(default=list, blank=True)
+    #: PLAN-014 C4: the incoming lease's billing details as typed (the ``LeaseBillingForm``
+    #: fields) and its bank-account choice (``later``, ``enter`` or ``same:<lease id>``),
+    #: written to the incoming lease's ``LeaseBilling`` on confirm.
+    incoming_billing = guarded_json(default=dict, blank=True)
+    incoming_account = guarded_char(64, blank=True, default="later")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )

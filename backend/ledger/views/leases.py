@@ -355,7 +355,7 @@ def _create_context(request: HttpRequest) -> store_context.StoreContext | None:
     return store_context.from_request(request, store=get_object_or_404(Store, pk=key))
 
 
-def _enter_refusal() -> str:
+def enter_refusal() -> str:
     """Why "Enter a bank account" cannot be chosen here, or ``""`` (PLAN-014 C4)."""
     return "" if get_hosted_fields().available() else str(BANK_NOT_SET_UP)
 
@@ -367,7 +367,7 @@ def _create_form(data: Any, context: store_context.StoreContext | None) -> Lease
         data,
         initial=initial,
         accounts=service.shareable_accounts(operators),
-        enter_refusal=_enter_refusal(),
+        enter_refusal=enter_refusal(),
     )
     if context is not None:
         _lock_known(form, ("store",))

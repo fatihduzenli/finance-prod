@@ -20,7 +20,8 @@ with its lease end (:func:`cancel`). Its steps:
    not a blocker. The wizard never calls the payment provider.
 4. **Incoming lease** (:func:`set_incoming`): the start date (the day after the end date
    or later), the rent, the debit day(s), the channel, *Prorate first month*, the
-   deposit amount and the setup items ticked from the catalogue.
+   deposit amount and the setup items ticked from the catalogue; PLAN-014 C4: the
+   incoming lease's billing details and bank-account choice (kept on the transfer).
 5. **Confirm** (:func:`confirm`, one explicit "are you sure" for both effects): in one
    transaction under the store's and the transfer's row locks, the blockers and the
    dates are read again, the outgoing lease ends with every effect of its statement
@@ -28,8 +29,11 @@ with its lease end (:func:`cancel`). Its steps:
    the ``lease_end_documents`` job), the incoming lease is created
    (:func:`ledger.services.leases.create_lease`, status active), and **one** builder
    draft on the incoming operator and lease holds the deposit and the ticked setup items
-   (:func:`ledger.services.invoice_builder.create_draft`): nothing reaches the payment
-   provider, and no charge exists, until staff send the draft.
+   (:func:`ledger.services.invoice_builder.create_draft`): no charge exists until staff
+   send the draft. The incoming lease's billing row is written from the transfer
+   (:func:`ledger.services.leases.start_billing`: with an e-mail and its own account, its
+   ``lease_sync`` job is queued, which the worker runs after the commit); the ended lease's
+   billing details and processor references are not touched.
 
 **A lease-end balance blocks by default** (D14, the owner's decision 3 of 2026-10-14).
 When the statement would leave the outgoing operator owing money after the deposit
@@ -51,7 +55,7 @@ A refusal is one sentence and writes nothing. Every step writes one ``audit_log`
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -95,6 +99,7 @@ from ledger.services import (
 )
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 from ledger.wording import format_amount
+from payments import lease_sync
 
 ENTITY = "lease_transfer"
 #: Most operators the search lists.
@@ -245,6 +250,8 @@ def _state(transfer: LeaseTransfer) -> dict[str, Any]:
             str(transfer.deposit_amount) if transfer.deposit_amount is not None else None
         ),
         "setup_lines": list(transfer.setup_lines or []),
+        "incoming_billing": dict(transfer.incoming_billing or {}),
+        "incoming_account": transfer.incoming_account,
     }
 
 
@@ -563,9 +570,16 @@ def set_incoming(
     deposit_amount: Decimal | None,
     setup: Sequence[SetupInput],
     actor: User | None,
+    billing: Mapping[str, Any] | None = None,
+    account: str = leases.ACCOUNT_LATER,
 ) -> Outcome:
     """Step 4: the incoming lease's terms, its deposit and its setup items. The start is
-    the day after the outgoing lease's end date or later."""
+    the day after the outgoing lease's end date or later.
+
+    PLAN-014 C4: and its billing details (``billing``, the ``LeaseBillingForm`` fields as
+    typed; kept on the transfer, written to the incoming lease on confirm) and bank-account
+    choice (``account``; ``same:<lease id>`` must name a lease of the incoming operator
+    whose account can be shared, :func:`ledger.services.leases.shared_account`)."""
     try:
         with transaction.atomic():
             row = _locked_draft(transfer.pk)
@@ -595,6 +609,10 @@ def set_incoming(
             if deposit_amount and deposit_type() is None:
                 raise _Abort(NO_DEPOSIT_TYPE, "deposit_amount")
             lines = _clean_setup(setup)
+            try:
+                leases.shared_account(row.incoming_operator, account)
+            except leases.LeaseRefused as refusal:
+                raise _Abort(str(refusal), "account") from None
             before = _state(row)
             row.incoming_started_on = started_on
             row.incoming_rent = rent
@@ -604,6 +622,8 @@ def set_incoming(
             row.incoming_prorate_first_month = prorate_first_month is True
             row.deposit_amount = deposit_amount
             row.setup_lines = lines
+            row.incoming_billing = _billing_values(billing)
+            row.incoming_account = account
             row.save(
                 update_fields=[
                     "incoming_started_on",
@@ -614,15 +634,26 @@ def set_incoming(
                     "incoming_prorate_first_month",
                     "deposit_amount",
                     "setup_lines",
+                    "incoming_billing",
+                    "incoming_account",
                     "updated_at",
                 ]
             )
             _audit(actor, "lease_transfer.incoming_set", row.pk, before, _state(row))
     except _Abort as abort:
         return _refused(abort.message, abort.field)
+    except ValidationError:
+        # The save's payment-data guard (the form checked the same fields first).
+        return _refused(PAYMENT_DATA_MESSAGE)
     except LeaseTransfer.DoesNotExist:
         return _refused(GONE)
     return Outcome(True, INCOMING_SAVED, transfer=row)
+
+
+def _billing_values(billing: Mapping[str, Any] | None) -> dict[str, str]:
+    """The billing details kept on the transfer: the known fields, as text."""
+    given = billing or {}
+    return {name: str(given.get(name) or "") for name in lease_sync.BILLING_FIELDS}
 
 
 def cancel(transfer: LeaseTransfer, actor: User | None) -> Outcome:
@@ -731,6 +762,8 @@ def _incoming_lease(row: LeaseTransfer, rent: Decimal, actor: User | None, day: 
         creation_key=row.pk,
         actor=actor,
         today=day,
+        billing=dict(row.incoming_billing or {}),
+        account=row.incoming_account or leases.ACCOUNT_LATER,
     )
     if not created:
         raise _Abort(CHANGED_MEANWHILE)
@@ -824,6 +857,9 @@ def confirm(
         return _refused(abort.message, abort.field)
     except lease_end.Refused as refusal:
         return _refused(refusal.message, refusal.field)
+    except leases.LeaseRefused as refusal:
+        # PLAN-014 C4: the incoming lease's account choice no longer holds.
+        return _refused(str(refusal), refusal.field)
     except (LeaseTransfer.DoesNotExist, Store.DoesNotExist):
         return _refused(GONE)
     except IntegrityError:
