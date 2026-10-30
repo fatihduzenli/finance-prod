@@ -91,9 +91,7 @@ def test_columns_are_as_listed() -> None:
         # PLAN-012e D8: the message's kind and a final statement's attachment.
         "kind",
         "document_id",
-        # PLAN-014 C5: the lease billed; D3: the engine's columns (``subject`` became
-        # ``rendered_subject``).
-        "lease_id",
+        # PLAN-014 D3: the engine's columns (``subject`` became ``rendered_subject``).
         "channel",
         "rule",
         "occurrence",
