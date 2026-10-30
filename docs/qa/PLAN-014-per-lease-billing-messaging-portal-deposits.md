@@ -421,6 +421,11 @@ banking 0001 (I). ADRs 0015–0018. TODO-VERIFY 066–073 added with C.
 - **D8 Channel abstraction.** `messaging.Channel` Protocol (`send(rendered) -> Disposition`)
   with `EmailChannel` (the mail sender) only; `OutboundMessage.channel` selects it; `sms` is
   refused at queue time with a clear sentence. No SMS provider.
+- **D10 CI (Opus, `ci.yml`).** The deploy's worker step retries a transient `az containerapp
+  update` error (Batch B's merge: Azure answered "the containerapp does not exist" once, the step
+  swallowed it and the verify failed ten minutes later): up to three attempts, 30 s apart, before
+  falling through to the verify; the same for the reconcile and daily job updates. Fable's CI
+  edits are delegated to Opus by the root rules.
 - **D9 ADR-0016 (Fable).** Context, decision (D1–D8, E, F), alternatives (a third-party mail
   API — rejected, ADR-0010 stands; per-recipient opt-out — out of scope, consent fields exist),
   consequences (the body is stored; the ladder's `CollectionStep` is gone; the NSF fee and the
