@@ -1,21 +1,36 @@
 """The reminder and overdue rules A to E (docs/qa/PLAN-014-per-lease-billing-messaging-portal-
-deposits.md E1 to E3), queued once a day by ``collections_tick``.
+deposits.md E1 to E4), queued once a day by ``collections_tick``.
+
+**Rent before its charge: A and B by lease and month** (E4, the owner's decision of
+2026-10-30). A month's rent charge is made on its debit day and no page shows rent early, so
+the reminder three days ahead is keyed to the lease and the month, not to a charge
+(:func:`rent_months_due`): every active lease, not ended and not ending before the debit,
+whose first debit of the month (its debit day, as the rent run places it,
+:func:`ledger.services.rent_run.debit_date`) is three days after ``today`` gets **A** when its
+rent collection schedule is active (the schedule's amount, debited from its bank account),
+else **B** (the rent in force on that day, due then). One message per lease, rule and month
+(a :class:`~ledger.services.messaging.RentMonth`; the database keeps the one row): a lease
+debited twice a month gets one, for the month's first debit (plan §8, a checkpoint
+question). A month whose rent charge exists already and is paid, pending or waived (paid in
+advance through the invoice builder, or collected) gets nothing, counted skipped; a lease
+with no rent in force on the day gets no charge from the rent run and no message.
 
 **Which charges.** The open balances (:func:`ledger.services.receivables.open_balances`):
 rent, insurance and one-off charges with something owed, an installment plan's rows each on
-its own due date (its parent is not open while the plan is live), deposits never. They hold
-the rent charges of the coming days too, so a rent charge already made for a debit three
-days ahead is read for A. A charge whose status closes it to messages (rent ``pending``,
-``paid`` or ``waived``; one-off ``paid``, ``waived`` or ``voided``,
-:data:`ledger.services.messaging.CLOSED_RENT` and ``CLOSED_ONE_OFF``) gets nothing.
+its own due date (its parent is not open while the plan is live), deposits never. A charge
+whose status closes it to messages (rent ``pending``, ``paid`` or ``waived``; one-off
+``paid``, ``waived`` or ``voided``, :data:`ledger.services.messaging.CLOSED_RENT` and
+``CLOSED_ONE_OFF``) gets nothing.
 
 **Which rule** (:func:`rule_for`), counted in New York days from the charge's due date:
 
-- **A** — a rent charge on autopay (its lease has an active rent collection schedule, and no
-  payment of the charge was returned) three days before its debit date. Nothing else is sent
-  for such a charge: its debit collects it. Once a debit of it is returned, or the schedule
-  is no longer active, the charge takes the rules below like any other.
-- **B** — any other open charge, three days before its due date.
+- **A**, and **B** for rent — never from a charge: they come from the lease and the month
+  (above), before the charge exists.
+- A rent charge on autopay (its lease has an active rent collection schedule, and no payment
+  of the charge was returned) gets nothing more: its debit collects it. Once a debit of it is
+  returned, or the schedule is no longer active, the charge takes the rules below like any
+  other.
+- **B** — any other open charge (insurance, one-off), three days before its due date.
 - **C** — five days after it.
 - **D** — ten days after it; then again (occurrence 2, 3, …) at 40, 50, 60 … days while
   something is owed. The 20-day gap between 10 and 40 is the owner's rule.
@@ -28,19 +43,23 @@ run, or a run after a pause, does not flood an operator with the rules it missed
 **Pause** (E2). An open promise to pay whose date is today or later
 (:func:`ledger.services.contacts.promises_pending`) on the lease that bills the charge, or
 on no store of the same operator, pauses B to E (:data:`PAUSED_BY_PROMISE`) for every charge
-of that lease; A still goes, since the debit will happen anyway. A promise past its date is
-broken and pauses nothing: the rules resume from the next rule day, without catching up the
-days paused.
+of that lease and for its month's B; A still goes, since the debit will happen anyway. A
+promise past its date is broken and pauses nothing: the rules resume from the next rule day,
+without catching up the days paused.
 
-**Queue** (:func:`queue_due`). The lease that bills a charge is
+**Queue** (:func:`queue_due`). The lease months first, then the open balances. The lease
+that bills a charge is
 :func:`ledger.services.leases.billing_lease` (a one-off charge without a lease bills its
 operator's first active lease; a charge with none is skipped). Each message is queued
 through :func:`ledger.services.messaging.queue` with the rule's seeded template, under the
 lease's row lock (``of=("self",)``: never a lock over a nullable join, which PostgreSQL
-refuses). The database keeps one message per (lease, charge, rule, occurrence), so a second
-run the same day queues nothing more and counts it skipped. Whether the message then goes
-is the engine's: an operator handled personally or a lease without a billing e-mail is held,
-an archived operator or a charge closed before the send is suppressed.
+refuses). The database keeps one message per (lease, charge, rule, occurrence), and per
+(lease, rule, month) for a lease month, so a second run the same day queues nothing more and
+counts it skipped. Whether the message then goes is the engine's: an operator handled
+personally or a lease without a billing e-mail is held, an archived operator or a charge
+closed before the send is suppressed, as is a lease month whose lease ended, whose A lost
+its schedule, or whose rent charge closed since (``LeaseEnded``, ``ScheduleStopped``,
+``MonthSettled``).
 
 **No fee** (E3). Nothing here creates a charge or a fee, and no rule's text speaks of one.
 """
@@ -51,26 +70,30 @@ import logging
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 
 from ledger import merge
 from ledger.models import (
     CollectionSchedule,
+    CollectionStatus,
     InsuranceCharge,
     Lease,
     MessageRule,
     MessageTemplate,
     OneOffCharge,
     Payment,
+    PaymentChannel,
     PaymentStatus,
     RentCharge,
     ScheduleKind,
     ScheduleState,
 )
-from ledger.services import contacts, leases, messaging, receivables
+from ledger.services import contacts, leases, messaging, receivables, rent_run
+from ledger.services.messaging import RentMonth
 
 logger = logging.getLogger(__name__)
 
@@ -177,16 +200,19 @@ def rule_for(
 ) -> Rule | None:
     """The rule due for the open charge ``row`` on ``today`` (the module docstring), or
     ``None``. ``autopay`` says whether it is a rent charge collected by autopay
-    (:func:`on_autopay`); read here (one query) when not given. A promise's pause is not
-    applied here: :func:`queue_due` counts it."""
+    (:func:`on_autopay`); read here (one query) when not given. A and B for rent are never a
+    charge's (:func:`rent_months_due`). A promise's pause is not applied here:
+    :func:`queue_due` counts it."""
     if _closed(row):
         return None
     lead = (row.due_on - today).days
     if row.kind == receivables.KIND_RENT:
+        if lead == DAYS_BEFORE:
+            return None
         if autopay is None:
             autopay = row.charge_id in on_autopay([row])
         if autopay:
-            return _rule(MessageRule.A) if lead == DAYS_BEFORE else None
+            return None
     late = -lead
     if lead == DAYS_BEFORE:
         return _rule(MessageRule.B)
@@ -196,6 +222,65 @@ def rule_for(
         return _rule(MessageRule.E)
     occurrence = _d_occurrence(late)
     return _rule(MessageRule.D, occurrence) if occurrence is not None else None
+
+
+def _active_rent_schedules(lease_ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, Decimal]:
+    """Lease -> the amount of its first active rent schedule (one query)."""
+    found: dict[uuid.UUID, Decimal] = {}
+    rows = (
+        CollectionSchedule.objects.filter(
+            lease_id__in=list(lease_ids), kind=ScheduleKind.RENT, state=ScheduleState.ACTIVE
+        )
+        .order_by("lease_id", "seq")
+        .values_list("lease_id", "amount")
+    )
+    for lease_id, amount in rows:
+        found.setdefault(lease_id, amount)
+    return found
+
+
+def rent_months_due(today: date) -> list[tuple[RentMonth, Rule]]:
+    """The lease months whose A or B falls on ``today`` (the module docstring): the leases
+    whose month's first debit is :data:`DAYS_BEFORE` days ahead, with A (autopay, the
+    schedule's amount) or B (the rent in force on the day). A month already settled is
+    listed: :func:`queue_due` counts it skipped."""
+    debit = today + timedelta(days=DAYS_BEFORE)
+    month = debit.replace(day=1)
+    days = [
+        day for day in range(1, 32) if rent_run.falls_on(day, debit.year, debit.month) == debit.day
+    ]
+    candidates = list(
+        Lease.objects.select_related("store", "operator", "billing")
+        .filter(
+            collection_status=CollectionStatus.ACTIVE,
+            operator__isnull=False,
+            debit_day__isnull=False,
+        )
+        .exclude(payment_channel=PaymentChannel.UNKNOWN)
+        .filter(Q(started_on__isnull=True) | Q(started_on__lte=debit))
+        .filter(Q(ended_on__isnull=True) | Q(ended_on__gte=debit))
+        # A lease starting in the month after its debit day is first due on its start.
+        .filter(Q(debit_day__in=days) | Q(started_on=debit))
+        .order_by("store__external_label", "id")
+    )
+    due = [
+        lease
+        for lease in candidates
+        if lease.debit_day is not None
+        and rent_run.debit_date(lease, month, lease.debit_day) == debit
+    ]
+    schedules = _active_rent_schedules(lease.pk for lease in due)
+    found: list[tuple[RentMonth, Rule]] = []
+    for lease in due:
+        if lease.pk in schedules:
+            found.append(
+                (RentMonth(lease, month, debit, schedules[lease.pk]), _rule(MessageRule.A))
+            )
+            continue
+        rent = leases.rent_on(lease, debit)
+        if rent is not None:
+            found.append((RentMonth(lease, month, debit, rent.amount), _rule(MessageRule.B)))
+    return found
 
 
 def _charges(
@@ -233,8 +318,10 @@ def _paused(
 
 
 def queue_due(today: date) -> Summary:
-    """Queue the message of the rule due today for every open charge (the module
-    docstring): one row and its ``message_send`` job each."""
+    """Queue the message of the rule due today for every lease month
+    (:func:`rent_months_due`), then for every open charge (the module docstring): one row
+    and its ``message_send`` job each."""
+    months = rent_months_due(today)
     rows = receivables.open_balances(today)
     autopay = on_autopay(rows)
     due = [
@@ -243,15 +330,28 @@ def queue_due(today: date) -> Summary:
         if (rule := rule_for(row, today, autopay=row.charge_id in autopay)) is not None
     ]
     queued = dict.fromkeys(RULES, 0)
-    if not due:
+    if not due and not months:
         return Summary(queued, 0, 0)
-    charges = _charges(row for row, _ in due)
     templates = {
         row.code: row
         for row in MessageTemplate.objects.filter(code__in=TEMPLATES.values(), active=True)
     }
     pending = contacts.promises_pending(today)
     paused = skipped = 0
+    for rent_month, rule in months:
+        owner = rent_month.lease.operator
+        template = templates.get(rule.template)
+        if owner is None or template is None:
+            skipped += 1
+            continue
+        if rule.code in PAUSED_BY_PROMISE and _paused(rent_month.lease, owner.pk, pending):
+            paused += 1
+            continue
+        if _queue_month(rent_month, rule, template, today):
+            queued[rule.code] += 1
+        else:
+            skipped += 1
+    charges = _charges(row for row, _ in due)
     for row, rule in due:
         charge = charges.get((row.kind, row.charge_id))
         lease = leases.billing_lease(charge) if charge is not None else None
@@ -289,7 +389,6 @@ def _queue(
             today=today,
             # What the open balances owe (a re-debit may carry part of the charge).
             amount=row.balance,
-            debit_date=row.due_on if rule.code == MessageRule.A else None,
         )
         try:
             message = messaging.queue(
@@ -300,6 +399,29 @@ def _queue(
                 "Reminder %s not queued for charge %s: %s",
                 rule.code,
                 row.charge_id,
+                type(error).__name__,
+            )
+            return False
+    return message is not None
+
+
+def _queue_month(rent_month: RentMonth, rule: Rule, template: MessageTemplate, today: date) -> bool:
+    """Queue a lease month's A or B under the lease's row lock; ``False`` when the month's
+    rent charge is settled already, the row exists already, or the template cannot be
+    rendered or sent (logged, by class name)."""
+    lease = rent_month.lease
+    with transaction.atomic():
+        Lease.objects.select_for_update(of=("self",)).filter(pk=lease.pk).first()
+        if messaging.month_settled(lease.pk, rent_month.month):
+            return False
+        context = messaging.context_for(lease, rent_month, rule.code, today=today)
+        try:
+            message = messaging.queue(rule.code, lease, rent_month, template, context)
+        except (messaging.ChannelUnavailable, merge.TemplateRefused) as error:
+            logger.warning(
+                "Reminder %s not queued for lease %s: %s",
+                rule.code,
+                lease.pk,
                 type(error).__name__,
             )
             return False

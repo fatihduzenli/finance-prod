@@ -48,6 +48,7 @@ from tests.test_ledger_models import (
     new_one_off_charge,
     new_payment,
     new_promise,
+    new_rent_history,
     new_schedule,
     saved,
 )
@@ -94,24 +95,49 @@ def autopay(charge: RentCharge, **fields: Any) -> RentCharge:
     return charge
 
 
+def monthly(charge: RentCharge) -> RentCharge:
+    """Give the charge's lease its due day as debit day and a rent in force: A and B for
+    rent come from the lease and the month (E4), three days before the month's debit."""
+    Lease.objects.filter(pk=charge.lease_id).update(debit_day=charge.due_on.day)
+    saved(new_rent_history(lease=charge.lease, amount=charge.amount_due))
+    charge.lease.refresh_from_db()
+    return charge
+
+
+def month_rules(lease: Lease) -> list[tuple[str, date | None]]:
+    """(rule, month) of every message about a month of ``lease`` (E4), in queue order."""
+    return list(
+        OutboundMessage.objects.filter(lease=lease, charge_entity_type="lease_month")
+        .order_by("queued_at", "id")
+        .values_list("rule", "period_month")
+    )
+
+
+OCT, NOV, DEC = date(2026, 10, 1), date(2026, 11, 1), date(2026, 12, 1)
+
+
 # --- E1: the calendar of each rule ----------------------------------------------------------
 
 
 def test_b_c_d_and_e_fire_on_their_days_only(clock: Any) -> None:
-    charge = rent_charge()
+    # Re-pinned for E4: rent's B is the month's (three days before each month's debit, by
+    # the lease), not the charge's; C, D and E stay the charge's.
+    charge = monthly(rent_charge())
     found = calendar(clock, -10, 75)
     assert by_day(found) == {
         -3: {"B": 1},
         5: {"C": 1},
         10: {"D": 1},
+        28: {"B": 1},
         30: {"E": 1},
         40: {"D": 1},
         50: {"D": 1},
+        58: {"B": 1},
         60: {"D": 1},
         70: {"D": 1},
     }
+    assert month_rules(charge.lease) == [("B", OCT), ("B", NOV), ("B", DEC)]
     assert rules_of(charge) == [
-        ("B", 1),
         ("C", 1),
         ("D", 1),
         ("E", 1),
@@ -128,10 +154,13 @@ def test_b_c_d_and_e_fire_on_their_days_only(clock: Any) -> None:
 def test_a_fires_three_days_before_the_debit_of_a_rent_charge_on_autopay_and_nothing_else(
     clock: Any,
 ) -> None:
-    charge = autopay(rent_charge())
+    # Re-pinned for E4: A is the lease's and the month's (each month), never the charge's.
+    charge = autopay(monthly(rent_charge()))
     found = calendar(clock, -10, 45)
-    assert by_day(found) == {-3: {"A": 1}}
-    [message] = OutboundMessage.objects.filter(charge_entity_id=str(charge.pk))
+    assert by_day(found) == {-3: {"A": 1}, 28: {"A": 1}}
+    assert rules_of(charge) == []
+    assert month_rules(charge.lease) == [("A", OCT), ("A", NOV)]
+    message = OutboundMessage.objects.get(lease=charge.lease, period_month=OCT)
     assert message.template.code == "reminder_autopay"
     assert "will be debited on Oct 3, 2026" in message.rendered_subject
     assert "$2,450.00" in message.rendered_body
@@ -139,23 +168,28 @@ def test_a_fires_three_days_before_the_debit_of_a_rent_charge_on_autopay_and_not
 
 @pytest.mark.parametrize("state", ["paused", "failed", "ended", "none"])
 def test_a_schedule_that_is_not_active_is_not_autopay(clock: Any, state: str) -> None:
-    charge = autopay(rent_charge(), state=state)
+    # Re-pinned for E4: the B is the month's; the charge keeps C.
+    charge = autopay(monthly(rent_charge()), state=state)
     assert by_day(calendar(clock, -3, 5)) == {-3: {"B": 1}, 5: {"C": 1}}
-    assert rules_of(charge) == [("B", 1), ("C", 1)]
+    assert month_rules(charge.lease) == [("B", OCT)]
+    assert rules_of(charge) == [("C", 1)]
 
 
 def test_an_insurance_schedule_does_not_make_rent_autopay(clock: Any) -> None:
-    charge = autopay(rent_charge(), kind="insurance")
+    # Re-pinned for E4: the B is the month's.
+    charge = autopay(monthly(rent_charge()), kind="insurance")
     assert by_day(calendar(clock, -3, -3)) == {-3: {"B": 1}}
-    assert rules_of(charge) == [("B", 1)]
+    assert month_rules(charge.lease) == [("B", OCT)]
 
 
 def test_a_returned_debit_puts_an_autopay_charge_back_on_the_overdue_rules(clock: Any) -> None:
-    charge = autopay(rent_charge())
+    # Re-pinned for E4: the A is the month's; the returned charge takes C and D.
+    charge = autopay(monthly(rent_charge()))
     assert by_day(calendar(clock, -3, 1)) == {-3: {"A": 1}}
     saved(new_payment(rent_charge=charge, status="returned", amount=D("2450.00")))
     assert by_day(calendar(clock, 2, 10)) == {5: {"C": 1}, 10: {"D": 1}}
-    assert rules_of(charge) == [("A", 1), ("C", 1), ("D", 1)]
+    assert month_rules(charge.lease) == [("A", OCT)]
+    assert rules_of(charge) == [("C", 1), ("D", 1)]
 
 
 def test_one_off_and_insurance_charges_take_b_to_e(clock: Any) -> None:
@@ -313,7 +347,8 @@ def test_an_open_promise_pauses_b_to_e_for_every_charge_of_the_lease(clock: Any)
 
 
 def test_an_open_promise_does_not_pause_a(clock: Any) -> None:
-    charge = autopay(rent_charge())
+    # Re-pinned for E4: the A is the month's.
+    charge = autopay(monthly(rent_charge()))
     promise(charge.lease, day(10))
     clock(at(day(-3)))
     summary = reminders.queue_due(day(-3))
@@ -565,7 +600,9 @@ def test_rule_for_reads_autopay_itself_when_not_told(clock: Any) -> None:
 
     charge = autopay(rent_charge())
     [row] = [r for r in receivables.open_balances(DUE) if r.charge_id == charge.pk]
-    assert reminders.rule_for(row, day(-3)) == reminders.Rule("A", "reminder_autopay", 1)
+    # Re-pinned for E4: A and B for rent are never a charge's (rent_months_due).
+    assert reminders.rule_for(row, day(-3)) is None
+    assert reminders.rule_for(row, day(-3), autopay=False) is None
     assert reminders.rule_for(row, day(5)) is None
     assert reminders.rule_for(row, day(5), autopay=False) == reminders.Rule("C", "overdue_day5", 1)
     assert reminders.rule_for(row, day(40), autopay=False) == reminders.Rule(

@@ -56,10 +56,16 @@ TODAY = date(2026, 10, 20)  # a Tuesday
 
 
 def billed_lease(
-    number: int, email: str | None = "store@example.com", started: date | None = None
+    number: int,
+    email: str | None = "store@example.com",
+    started: date | None = None,
+    debit_day: int = 5,
 ) -> Lease:
     lease = a_lease(
-        a_store(str(number), number=number), an_operator(f"Operator {number}"), started=started
+        a_store(str(number), number=number),
+        an_operator(f"Operator {number}"),
+        started=started,
+        debit_day=debit_day,
     )
     LeaseBilling.objects.update_or_create(
         lease=lease, defaults={"email": email or "", "company_name": f"Store {number} LLC"}
@@ -100,8 +106,10 @@ def managers(text: str) -> None:
 
 def test_one_run_fires_exactly_todays_rule_for_each_charge() -> None:
     managers("boss@example.com")
+    # Re-pinned for E4 (Opus): rent's B is the lease month's, three days before the lease's
+    # debit day (the 5th here), never a charge's.
     expected: dict[int, list[tuple[str, int]]] = {
-        -3: [("B", 1)],
+        -3: [],
         0: [],
         5: [("C", 1)],
         9: [],
@@ -122,8 +130,8 @@ def test_one_run_fires_exactly_todays_rule_for_each_charge() -> None:
     summary = reminders.queue_due(TODAY)
     for offset, rules in expected.items():
         assert rules_of(leases[offset]) == rules, offset
-    assert dict(summary.queued_by_rule) == {"A": 0, "B": 1, "C": 1, "D": 4, "E": 1}
-    assert Job.objects.filter(kind=JobKind.MESSAGE_SEND).count() == 7
+    assert dict(summary.queued_by_rule) == {"A": 0, "B": 0, "C": 1, "D": 4, "E": 1}
+    assert Job.objects.filter(kind=JobKind.MESSAGE_SEND).count() == 6
 
 
 def test_a_second_run_the_same_day_writes_nothing_and_counts_it() -> None:
@@ -151,7 +159,9 @@ def test_a_missed_day_is_not_caught_up_later() -> None:
 
 
 def test_rent_on_autopay_gets_a_three_days_before_the_debit_and_nothing_at_five_days_late() -> None:
-    lease = billed_lease(1201)
+    # Re-pinned for E4 (Opus): the lease is debited on the 23rd, and the A is the lease
+    # month's (the lease and October), not the charge's.
+    lease = billed_lease(1201, debit_day=23)
     autopay(lease)
     coming = rent_due(lease, TODAY + timedelta(days=3))
     late = rent_due(lease, TODAY - timedelta(days=5), seq=2)  # the month's second debit
@@ -159,7 +169,8 @@ def test_rent_on_autopay_gets_a_three_days_before_the_debit_and_nothing_at_five_
     assert rules_of(lease) == [("A", 1)]
     assert summary.queued == 1 and summary.queued_by_rule["A"] == 1
     message = OutboundMessage.objects.get(lease=lease)
-    assert message.charge_entity_id == coming.pk
+    assert (message.charge_entity_type, message.charge_entity_id) == ("lease_month", lease.pk)
+    assert message.period_month == coming.period_month
     assert "will be debited" in message.rendered_subject
     assert late.pk != coming.pk
 
@@ -174,7 +185,8 @@ def test_rent_whose_schedule_stopped_gets_the_overdue_rules_again(state: str) ->
 
 
 def test_a_rent_charge_without_autopay_gets_b_not_a() -> None:
-    lease = billed_lease(1203)
+    # Re-pinned for E4 (Opus): the lease is due on the 23rd; the B is the lease month's.
+    lease = billed_lease(1203, debit_day=23)
     rent_due(lease, TODAY + timedelta(days=3))
     reminders.queue_due(TODAY)
     assert rules_of(lease) == [("B", 1)]
@@ -258,7 +270,7 @@ def test_an_open_promise_pauses_b_to_e_and_not_a() -> None:
     rent_due(paused, TODAY - timedelta(days=5))
     rent_due(paused, TODAY - timedelta(days=30))
     promise(paused, TODAY + timedelta(days=4))
-    on_autopay = billed_lease(1502)
+    on_autopay = billed_lease(1502, debit_day=23)  # re-pinned for E4 (Opus): A by the month
     autopay(on_autopay)
     rent_due(on_autopay, TODAY + timedelta(days=3))
     promise(on_autopay, TODAY + timedelta(days=4))
