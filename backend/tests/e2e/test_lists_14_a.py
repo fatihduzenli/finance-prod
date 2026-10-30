@@ -7,6 +7,7 @@ QA shots (``QA_SHOTS_DIR``) come from here, in both themes."""
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
@@ -106,8 +107,7 @@ def test_the_stores_list_searches_as_you_type_and_filters_from_the_panel(
     shot(page, f"stores-filters-panel-{theme}-laptop")
     page.select_option("#filters-panel select[name=state]", "NJ")
     page.locator("#filters-panel button[type=submit]").click()
-    page.wait_for_load_state("networkidle")
-    assert "state=NJ" in page.url
+    page.wait_for_url(re.compile(r"state=NJ"))
     expect(rows).to_have_count(3)
     assert "Filters · 1" in toggle.inner_text()
     chip = page.locator("#filters .chip", has_text="State: New Jersey")
@@ -119,8 +119,7 @@ def test_the_stores_list_searches_as_you_type_and_filters_from_the_panel(
     page.keyboard.press("Escape")
     expect(panel).to_be_hidden()
     chip.click()
-    page.wait_for_load_state("networkidle")
-    assert "state=" not in page.url
+    page.wait_for_url(lambda url: "state=" not in url)
     expect(rows).to_have_count(6)
     assert "Filters · " not in toggle.inner_text()
 
@@ -150,8 +149,7 @@ def test_the_phone_panel_is_a_bottom_sheet_with_clear_and_apply(
     href = clear.get_attribute("href") or ""
     assert "state=" not in href and "status=" not in href
     clear.tap()
-    page.wait_for_load_state("networkidle")
-    assert "state=" not in page.url
+    page.wait_for_url(lambda url: "state=" not in url)
     assert "Filters · " not in page.locator("#filters .filters-toggle").inner_text()
 
 
@@ -166,8 +164,7 @@ def test_the_payment_status_pill_saves_the_choice_and_steps(
     monthly = card.locator("button[aria-pressed]", has_text="Monthly")
     assert weekly.get_attribute("aria-pressed") == "true"
     monthly.click()
-    page.wait_for_load_state("networkidle")
-    assert "ps=monthly" in page.url
+    page.wait_for_url(re.compile(r"ps=monthly"))
     assert (
         card.locator("button[aria-pressed]", has_text="Monthly").get_attribute("aria-pressed")
         == "true"
@@ -181,8 +178,7 @@ def test_the_payment_status_pill_saves_the_choice_and_steps(
         == "true"
     )
     card.locator("#payment-status-next").click()
-    page.wait_for_load_state("networkidle")
-    assert "ps_at=" in page.url
+    page.wait_for_url(re.compile(r"ps_at="))
     assert card.locator("#payment-status-label").inner_text() != label
 
 
