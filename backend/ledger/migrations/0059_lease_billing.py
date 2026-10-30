@@ -214,13 +214,13 @@ def copy_billing(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
         if active:
             primary_of[operator_id] = min(active, key=_primary_key)
             continue
-        operator = operator_model.objects.get(pk=operator_id)
+        kept = operator_model.objects.get(pk=operator_id)
         audit_log.objects.create(
             actor=None,
             action=REFS_KEPT_ACTION,
             entity_type=ENTITY_OPERATOR,
             entity_id=str(operator_id),
-            before={"needs_review": operator.needs_review},
+            before={"needs_review": kept.needs_review},
             after={"needs_review": True, "reason": REFS_KEPT_REASON},
         )
         operator_model.objects.filter(pk=operator_id).update(needs_review=True)
@@ -229,12 +229,12 @@ def copy_billing(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
         operator = lease.operator
         billing_model.objects.create(lease=lease, **_billing_values(operator))
         primary = primary_of.get(lease.operator_id)
-        moved = primary is not None and primary.pk == lease.pk
+        moved = operator is not None and primary is not None and primary.pk == lease.pk
         shares = primary is not None and not moved
         before = {"needs_review": lease.needs_review, "review_reason": lease.review_reason}
         updates: dict[str, Any] = {}
-        if moved:
-            live_refs.filter(entity_id=lease.operator_id).update(
+        if moved and operator is not None:
+            live_refs.filter(entity_id=operator.pk).update(
                 entity_type=ENTITY_LEASE, entity_id=lease.pk
             )
             updates.update({name: getattr(operator, name) for name in SYNC_COLUMNS})
@@ -256,7 +256,7 @@ def copy_billing(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
                 "operator": str(lease.operator_id) if lease.operator_id else None,
                 "refs_moved": moved,
                 "shares": shares,
-                "shares_account_of": str(primary.pk) if shares else None,
+                "shares_account_of": str(primary.pk) if shares and primary is not None else None,
                 "needs_review": updates.get("needs_review", lease.needs_review),
                 "review_reason": updates.get("review_reason", lease.review_reason),
             },
