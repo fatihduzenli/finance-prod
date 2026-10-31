@@ -87,3 +87,18 @@ def test_the_workflow_runs_the_four_shards_and_deploys_after_all() -> None:
     assert "migrations-complete" in deploy.split("steps:")[0]
     on_block = workflow.split("\non:")[1].split("\npermissions:")[0]
     assert "pull_request:" in on_block and re.search(r"push:\s*\n\s*branches:\s*\[main\]", on_block)
+
+
+def test_the_two_unit_halves_split_on_the_same_glob_with_headroom() -> None:
+    """2026-10-31 (PR #30): the portal's tests took half B past its 20-minute step limit; the
+    split moved to test_a…–test_o… and both steps got 25 minutes. Half A's file glob must be
+    exactly what half B ignores, so every unit test runs in one half and only one."""
+    workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+    half_a = workflow.split("name: Unit tests, half A")[1].split("- name:")[0]
+    half_b = workflow.split("name: Unit tests, half B")[1].split("- name:")[0]
+    included = re.search(r"backend/tests/(test_\[[a-z]-[a-z]\]\*\.py)", half_a)
+    ignored = re.search(r'--ignore-glob="backend/tests/(test_\[[a-z]-[a-z]\]\*\.py)"', half_b)
+    assert included is not None and ignored is not None
+    assert included.group(1) == ignored.group(1)
+    for half in (half_a, half_b):
+        assert "timeout-minutes: 25" in half
