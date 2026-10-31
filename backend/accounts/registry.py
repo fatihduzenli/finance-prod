@@ -82,6 +82,7 @@ PORTAL_ROUTE_NAMES: frozenset[str] = PORTAL_PUBLIC_ROUTE_NAMES | frozenset(
         "portal:payments",
         "portal:statement",
         "portal:pay",
+        "portal:pay_status",
         "portal:bank",
         "portal:account",
         "portal:password",

@@ -14,6 +14,7 @@ company's name only. Nothing here reads the staff user.
   <title>{% block title %}{% endblock %} · {{ company.name }}</title>
   <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'portal/portal.css' %}">
+  {% if refresh %}<meta http-equiv="refresh" content="5">{% endif %}
 </head>
 <body class="portal">
 <header class="portal-bar" id="portal-bar">
@@ -37,5 +38,6 @@ company's name only. Nothing here reads the staff user.
 <main class="portal-main" id="portal-main">
 {% block content %}{% endblock %}
 </main>
+{% block scripts %}{% endblock %}
 </body>
 </html>

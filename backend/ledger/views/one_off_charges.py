@@ -31,7 +31,6 @@ queue when posted from there.
 
 from __future__ import annotations
 
-import copy
 import uuid
 from typing import Any
 from urllib.parse import urlencode
@@ -346,18 +345,6 @@ def _charge_now_context(
     }
 
 
-def _as_debit(charge: OneOffCharge) -> OneOffCharge:
-    """The charge as today's bank debit reads it (PLAN-012f-b D14): an e-mail or manual
-    charge is switched to Charge now by :func:`ledger.services.one_off_charges.debit`
-    before Charge now's rules apply, so the confirmation page reads the same rules. An
-    unsaved copy; nothing is written."""
-    if charge.collection not in (CollectionMethod.EMAIL, CollectionMethod.MANUAL):
-        return charge
-    preview = copy.copy(charge)
-    preview.collection = CollectionMethod.CHARGE_NOW
-    return preview
-
-
 def _note_key(charge: OneOffCharge, key: uuid.UUID) -> str:
     """The session entry holding Add payment's note for today's debit (C2-2) until the
     confirmation's POST passes it to :func:`ledger.services.one_off_charges.debit`."""
@@ -413,7 +400,7 @@ def charge_now(request: HttpRequest, pk: str) -> HttpResponse:
     form = _held(request, target, ChargeNowForm) or ChargeNowForm(
         initial={"key": _page_key(request)}
     )
-    details = service.charge_now_request(_as_debit(charge), _actor(request))
+    details = service.charge_now_request(service.as_debit_today(charge), _actor(request))
     wait = details.wait_seconds
     return render(
         request,

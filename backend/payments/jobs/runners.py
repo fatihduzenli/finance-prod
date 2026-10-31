@@ -22,7 +22,8 @@ The bank method attach of the hosted fields (``lease_method_attach``, PLAN-014 C
 the posted payment-method id against the lease's own customer before linking it
 (:func:`ledger.services.leases.attach_bank_method`). The switch to the lease's own account
 (``lease_account_switch``, PLAN-014 C9) runs :func:`ledger.services.leases.switch_to_own_account`
-with the move key in ``params``.
+with the move key in ``params``. A portal user's own payment (``portal_pay``, PLAN-014 H4) runs
+the pay-an-invoice attempt of one charge and reports it to :mod:`portal.payments`.
 """
 
 from __future__ import annotations
@@ -374,11 +375,40 @@ def lease_methods_refresh_job(job: Job) -> Result:
 
 
 def lease_method_attach_job(job: Job) -> Result:
-    """PLAN-014 C7: verify and link the bank method the hosted fields created."""
+    """PLAN-014 C7: verify and link the bank method the hosted fields created. A portal
+    user's request (H5, ``params.portal_user``) is audited on the portal side once linked."""
     outcome = leases.attach_bank_method(
         job.entity_id, str(job.params.get("payment_method_id", "")), actor=job.requested_by
     )
+    if job.params.get("portal_user"):
+        from portal import payments as portal_payments  # the portal app imports this package
+
+        portal_payments.record_bank_outcome(job, outcome.ok)
     return outcome.ok, outcome.message
+
+
+def portal_pay_job(job: Job) -> Result:
+    """PLAN-014 H4: a portal user's own payment of one charge (Rule 2's second caller,
+    ADR-0017). A rent charge's bank debit gets its provider invoice first; then the single
+    pay-an-invoice attempt (:func:`payments.one_off_invoices.pay`: the local rules again, the
+    invoice re-fetched, ``pay_invoice`` once with the charge's stored ``charge_now_key``; the
+    large-debit box is the operator's confirmation of the amount). Nothing retries by itself.
+    The outcome is written on the portal payment's charge, also when the attempt raises."""
+    from portal import payments as portal_payments  # the portal app imports this package
+
+    line = job.params.get(portal_payments.CHARGE_PARAM)
+    ok = False
+    try:
+        charge = OneOffCharge.objects.get(pk=job.entity_id)
+        ok, text = True, ""
+        if rent_run.provider_invoice(charge) is None:
+            ok, text = one_off_invoices.create_provider_invoice(job.entity_id, None)
+        if ok:
+            ok, text = one_off_invoices.pay(job.entity_id, None, confirmed=True)
+    finally:
+        if line:
+            portal_payments.record_charge_outcome(uuid.UUID(str(line)), ok)
+    return ok, text
 
 
 def lease_account_switch_job(job: Job) -> Result:
@@ -522,4 +552,5 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.AUTOPAY_STOP: autopay_stop_job,
     JobKind.LEASE_METHOD_ATTACH: lease_method_attach_job,
     JobKind.LEASE_ACCOUNT_SWITCH: lease_account_switch_job,
+    JobKind.PORTAL_PAY: portal_pay_job,
 }

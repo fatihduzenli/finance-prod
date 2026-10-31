@@ -206,11 +206,11 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: both charge pages; the admin:ledger_messagetemplate_* and admin:ledger_collectionstep_*
 #: routes gone with their registrations); 280 since PLAN-014 Batch F
 #: (ledger:one_off_charges:stop_retry); 298 since PLAN-014 H slice 1 (the portal's 14 routes and
-#: ledger:operators:portal_invite, portal_disable, portal_enable, portal_reset); 310 since
+#: ledger:operators:portal_invite, portal_disable, portal_enable, portal_reset); 300 since PLAN-014
+#: H slice 2 (portal:not_found, the slice-1 rework's catch-all, and portal:pay_status); 311 since
 #: PLAN-014 I slice 1 (banking:page, confirm, choose, split, ignore, undo, fetch_now, link_token,
-#: link_exchange, disconnect and ledger:settings:bank_save; and portal:not_found of the H
-#: rework, which the pin of 298 did not count yet).
-FROZEN_ROUTES = (310, "45ec8826c62fea820c26723ca42318cbe7f7047843e3bcaaa184f4ead876cf00")
+#: link_exchange, disconnect and ledger:settings:bank_save).
+FROZEN_ROUTES = (311, "PLACEHOLDER")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

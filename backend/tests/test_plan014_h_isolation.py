@@ -125,7 +125,10 @@ def test_a_page_without_parameters_answers_200_for_a_and_never_names_b(
     if response.status_code == 200:
         body = response.content.decode()
         whole_tokens_absent(body)
-        assert "101" in body or name in ("portal:account", "portal:statement")
+        if name not in ("portal:account", "portal:statement"):
+            assert (
+                re.search(r"(?<![\w,.])101(?![\w,.])", body) is not None
+            )  # A's store, whole token
 
 
 def test_b_sees_b_and_not_a(world: World) -> None:

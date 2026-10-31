@@ -13,14 +13,18 @@ with ``Referrer-Policy: no-referrer``.
 Signed in (``portal.middleware.PortalAuthMiddleware``): ``portal:home``, ``portal:store``,
 ``portal:invoices``, ``portal:payments`` (a store's id in the URL, answered only when the
 store is the operator's: any other id is the portal's 404), ``portal:statement``,
-``portal:account`` (GET; POST stores the theme), ``portal:password`` (POST), and the slice-2
-pages ``portal:pay`` and ``portal:bank``, which say for now that the action is not available.
+``portal:account`` (GET; POST stores the theme), ``portal:password`` (POST), and, through
+:mod:`portal.payments` (PLAN-014 H4, H5), ``portal:pay`` (GET, POST), ``portal:pay_status``
+(GET) and ``portal:bank`` (GET, POST; its own Content-Security-Policy: scripts and frames from
+this site and the processor's host only).
 Every POST is CSRF-protected; every page carries ``X-Robots-Tag: noindex``.
 """
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
+from urllib.parse import urlencode
 
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import redirect, render
@@ -28,13 +32,13 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
+from ledger.models import Store
 from ledger.views.calendar import client_address
 from portal import auth, invitations, services, tokens
+from portal import payments as portal_payments
 from portal.middleware import safe_next
 from portal.models import PortalToken, PortalUser, TokenKind
 
-PAY_UNAVAILABLE = "Online payment is not available yet."
-BANK_UNAVAILABLE = "Bank account changes are not available yet."
 LINK_GONE = "This link has expired or was used already. Ask us for a new one."
 RESET_SENT = (
     "If this e-mail has a portal account, a link to choose a new password is on its way. "
@@ -224,23 +228,130 @@ def statement(request: HttpRequest) -> HttpResponse:
     return _page(request, "portal/statement.html", report=report)
 
 
-def _unavailable(request: HttpRequest, pk: str, tab: str, sentence: str) -> HttpResponse:
-    found = services.store_of(_user(request), pk)
+def _bank_url(store: Store, **query: str) -> str:
+    url = reverse("portal:bank", kwargs={"pk": store.pk})
+    return f"{url}?{urlencode(query)}" if query else url
+
+
+@GET_POST
+def pay(request: HttpRequest, pk: str) -> HttpResponse:
+    """``portal:pay`` (PLAN-014 H4): the confirmation of one open charge (``?charge=``) or of
+    the store's whole open balance, the amount and the bank's last four; its POST requests
+    the payment (:func:`portal.payments.request_payment`) and goes to ``portal:pay_status``.
+    The flag off: one sentence, nothing created. No bank method on file: the Bank account
+    page first. A charge that is not one of the store's open charges is the portal's 404."""
+    user = _user(request)
+    found = services.store_of(user, pk)
     if found is None:
         return not_found(request)
-    return _page(request, "portal/unavailable.html", store=found, tab=tab, sentence=sentence)
+    today = timezone.localdate()
+    problem = ""
+    if request.method == "POST":
+        charge_raw = request.POST.get("charge", "")
+        outcome = portal_payments.request_payment(
+            user,
+            found,
+            charge_raw,
+            request.POST.get("amount"),
+            request.POST.get("creation_key"),
+            today,
+        )
+        if outcome is None:
+            return not_found(request)
+        if outcome.to_bank:
+            return HttpResponseRedirect(_bank_url(found, pay="1"))
+        if outcome.payment is not None and not outcome.refusal:
+            url = reverse("portal:pay_status", kwargs={"pk": found.pk})
+            return HttpResponseRedirect(f"{url}?{urlencode({'payment': outcome.payment.pk})}")
+        problem = outcome.refusal
+    else:
+        charge_raw = request.GET.get("charge", "")
+    page = portal_payments.pay_page(user, found, charge_raw, today)
+    if page is None:
+        return not_found(request)
+    if page.enabled and not page.has_bank and request.method != "POST":
+        return HttpResponseRedirect(_bank_url(found, pay="1"))
+    return _page(
+        request,
+        "portal/pay.html",
+        status=400 if problem else 200,
+        store=found,
+        tab="pay",
+        page=page,
+        problem=problem,
+        unavailable=portal_payments.PAY_UNAVAILABLE,
+        creation_key=uuid.uuid4(),
+    )
 
 
 @require_safe
-def pay(request: HttpRequest, pk: str) -> HttpResponse:
-    """``portal:pay``: online payment comes with PLAN-014 H4."""
-    return _unavailable(request, pk, "pay", PAY_UNAVAILABLE)
+def pay_status(request: HttpRequest, pk: str) -> HttpResponse:
+    """``portal:pay_status`` (PLAN-014 H4): the outcome of the user's payment on the store
+    (``?payment=``, else the latest), refreshed every 5 seconds while a debit is being
+    sent, as Charge now's page; another id is the portal's 404."""
+    user = _user(request)
+    found = services.store_of(user, pk)
+    if found is None:
+        return not_found(request)
+    state = portal_payments.payment_state(user, found, request.GET.get("payment"))
+    if state is None:
+        return not_found(request)
+    return _page(
+        request,
+        "portal/pay_status.html",
+        store=found,
+        tab="pay",
+        state=state,
+        refresh=state.waiting,
+    )
 
 
-@require_safe
+def _bank_response(
+    request: HttpRequest, store: Store, page: portal_payments.BankPage, *, problem: str = ""
+) -> HttpResponse:
+    response = _page(
+        request,
+        "portal/bank.html",
+        status=400 if problem else 200,
+        store=store,
+        tab="bank",
+        bank=page,
+        problem=problem,
+        shared_text=portal_payments.shared_replace_text(page),
+        needs_bank=request.GET.get("pay") == "1",
+        needs_bank_text=portal_payments.PAY_NEEDS_BANK,
+        refresh=page.waiting,
+    )
+    host = page.config.provider_host if page.config is not None else ""
+    # Scripts and frames from this site and the processor's host only; never framed.
+    scripts = f"'self' {host}" if host else "'self'"
+    frames = host or "'none'"
+    response["Content-Security-Policy"] = (
+        f"script-src {scripts}; frame-src {frames}; frame-ancestors 'none'"
+    )
+    return response
+
+
+@GET_POST
 def bank(request: HttpRequest, pk: str) -> HttpResponse:
-    """``portal:bank``: bank account changes come with PLAN-014 H5."""
-    return _unavailable(request, pk, "bank", BANK_UNAVAILABLE)
+    """``portal:bank`` (PLAN-014 H5): the bank on file (the lease's, or the shared account's
+    with "Shared with #1991"), the processor's hosted fields to add or replace it (the fake's
+    one field locally; one sentence where bank entry is not set up), and that automatic
+    debits are set up by staff. The POST takes only ``payment_method_id`` and queues the
+    attach (:func:`portal.payments.request_bank`), then shows how it goes."""
+    user = _user(request)
+    found = services.store_of(user, pk)
+    if found is None:
+        return not_found(request)
+    if request.method == "POST":
+        problem = portal_payments.request_bank(user, found, request.POST)
+        if not problem:
+            return HttpResponseRedirect(_bank_url(found, sent="1"))
+        return _bank_response(
+            request, found, portal_payments.bank_page(user, found), problem=problem
+        )
+    page = portal_payments.bank_page(user, found, after_send=request.GET.get("sent") == "1")
+    return _bank_response(request, found, page)
 
 
 @GET_POST

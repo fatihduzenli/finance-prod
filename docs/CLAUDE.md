@@ -15,7 +15,9 @@ Last verified against the Stax docs: **2026-09-10**. See §10 for what was check
 
 - Replaces a Google Sheets workflow for a small US business: customers, invoices,
   payments, notes, and internal follow-up status.
-- Staff-only internal tool. Customers never log in here.
+- Staff sign in at `/`; operators sign in at `/portal/` with a separate principal (their own
+  e-mail and password, invitation by staff, no staff navigation or roles; PLAN-014 Batch H,
+  ADR-0017). Nobody else logs in.
 - Operators are debited by ACH through **Stax**, from a bank method that staff
   enter in the **Stax dashboard** (owner, 2026-09-29). Operators never enter bank
   details anywhere in this app, and this app never renders a payment form.
@@ -129,10 +131,12 @@ disagreeing ledgers.
   due. **A schedule's amount is never edited for an adjustment:** each adjustment
   is its own one-off invoice linked to a `charge_adjustments` row
   (TODO-VERIFY-019).
-- "Pay an invoice" (`POST /invoice/{id}/pay`) is used for **one action only**: an
-  admin's "Charge now" on a one-off charge (ADR-0009, owner decision 2026-10-05),
-  behind `STAX_PAY_INVOICE_ENABLED`, with a confirmation page, the large-debit
-  confirmation, a stored idempotency ID and **one request with no automatic retry**.
+- "Pay an invoice" (`POST /invoice/{id}/pay`) is used for **two actions only**: an
+  admin's "Charge now" on a one-off charge (ADR-0009, owner decision 2026-10-05) and a
+  portal user's own payment of their charge (PLAN-014 H4, ADR-0017; the operator's
+  confirmation of the amount is the large-debit confirmation), both behind
+  `STAX_PAY_INVOICE_ENABLED`, with a confirmation page, a stored idempotency ID and **one
+  request with no automatic retry**.
   No job, webhook handler or schedule may call it. The app never creates a payment
   method (Rule 1).
 - One-off charges (arrears, adjustments, damage, other, setup fees) are created in the

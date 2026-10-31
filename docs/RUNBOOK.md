@@ -871,8 +871,37 @@ whether automatic debit is on (read only), the bank on file as its last four, th
 (number, date, amount, Open/Paid/Void; never a draft), the payments (settled, pending, returned,
 with the method and the last four); their statement (every store, the last twelve months; the
 browser's Print saves it as a PDF); and their account (the e-mail, the password, Light/Dark/
-System). Pay and Bank account say "not available yet" until PLAN-014 H4 and H5. A store, charge
-or page of another operator answers "Not found".
+System). A store, charge, payment or page of another operator answers "Not found".
+
+**Paying by bank debit** (PLAN-014 H4). On a store, **Pay** next to an open charge, or **Pay the
+whole balance**, shows the amount and the bank's last four; **Pay** sends one bank debit per
+charge from that account, the same single attempt as an admin's **Charge now** (the worker
+calls the processor; nothing retries by itself). The amount is always what the charge or the
+store owes; any other amount is refused and nothing is written. A charge that cannot be paid
+online says why on the page (a debit already on its way, collected by the lease's automatic
+debit or by installments, above the processor's per-debit limit, insurance, billed to another
+bank account): staff collect it as before. The outcome page refreshes until the bank has the
+debit, then reads "Submitted — bank debits take a few days to settle"; the payment appears as
+pending on the Payments tab and settles, or comes back as a return, like any bank debit. A
+charge whose attempt failed reads Failed; the operator may try again a minute later. Online
+payment is on only where pay-an-invoice is (`STAX_PAY_INVOICE_ENABLED`; off on the sandbox
+and staging, where the page says "Online payment is not available yet"). Without a bank
+account on file, Pay opens the Bank account page first. Reminder e-mails' `{pay_link}` opens
+the store's Pay page when the operator has an active portal account, else the signed statement
+link as before. In the activity log: `portal_payment.requested`, `paid`, `failed`, `refused`
+(a charge changed between the page and the click; nothing was debited).
+
+**The bank account** (PLAN-014 H5). **Bank account** on a store shows the bank on file and the
+processor's own fields to add or replace it, as staff's bank-entry page: the account goes
+straight to the processor, the app receives only a reference, and the worker checks it belongs
+to the lease's processor customer before linking it. The old method is superseded, not deleted
+at the processor (TODO-VERIFY-069). A lease that uses another store's account shows "Shared
+with #1991"; replacing it changes the account of every lease sharing it, and the page says so
+before saving. Automatic debits cannot be changed here ("Automatic debits are set up by our
+staff"): enrolment, pause and resume stay on the staff lease page. Where hosted bank entry is
+not set up (no web payments token: staging) the page says so, and staff connect a method from
+the processor's dashboard as before. In the activity log: `portal_bank.attached` or `replaced`
+(on the portal account), with the lease's own `lease.bank_attached`.
 
 ## 23. Bank deposits (PLAN-014 I)
 

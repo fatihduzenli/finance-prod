@@ -1,0 +1,25 @@
+{% extends "portal/base.html" %}{% load money %}
+{% comment %}A payment's outcome (PLAN-014 H4; portal.views.pay_status): while a debit is being sent the page reloads every 5 seconds (base.html, refresh); then "Submitted" with the settling sentence, or which charges failed.{% endcomment %}
+{% block title %}Payment{% endblock %}
+{% block content %}
+{% include "portal/_store_title.html" %}
+{% include "portal/_store_tabs.html" %}
+<section class="portal-card">
+  <h2>Payment</h2>
+  {% if state.sentence %}<p id="pay-state" class="{% if state.status == 'paid' %}portal-ok{% elif state.status == 'failed' %}portal-error{% endif %}" role="status">{{ state.sentence }}</p>{% endif %}
+  {% if state.waiting %}<p class="portal-muted" id="pay-refreshes">This page refreshes every 5 seconds.</p>{% endif %}
+  {% if state.charges %}
+  <div class="portal-scroll">
+  <table id="pay-outcome">
+    <thead><tr><th>Charge</th><th class="portal-money">Amount</th><th>State</th></tr></thead>
+    <tbody>
+      {% for item in state.charges %}
+      <tr class="pay-outcome-charge"><td>{{ item.description }}</td><td class="portal-money">{{ item.amount|money }}</td><td>{% if item.status == "paid" %}Submitted{% elif item.status == "failed" %}Failed{% else %}Sending{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+  <p><a href="{% url 'portal:payments' pk=store.pk %}" id="to-payments">See the payments</a></p>
+</section>
+{% endblock %}
