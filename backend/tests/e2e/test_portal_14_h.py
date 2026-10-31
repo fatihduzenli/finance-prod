@@ -108,7 +108,7 @@ def test_the_portal_on_the_phone(
     assert re.search(r"\b1701\b", body) and re.search(
         r"\b1702\b", body
     )  # both stores, whole numbers
-    assert "ended" in body.lower()
+    assert re.search(r"\bended\b", body, re.IGNORECASE)  # the ended lease's badge
     assert "$3,000.00" in body
     shot(page, f"portal-home-{theme}-phone")
     page.get_by_role("link", name=re.compile("1701")).first.click()
