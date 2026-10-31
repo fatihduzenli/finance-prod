@@ -10,7 +10,10 @@ sweep, it closes the open promises to pay that a settled payment keeps
 overdue messages of the day's rules A to E (:func:`ledger.services.reminders.queue_due`,
 PLAN-014 E1: one ``message_send`` job each), queues the processor schedule of each automatic
 re-debit due today or on the next business day (:func:`ledger.services.nsf.create_due_redebits`,
-PLAN-014 F3: one ``schedule_create`` job each), and queues the day's morning e-mails
+PLAN-014 F3: one ``schedule_create`` job each), fetches the day's bank deposits
+(:func:`banking.services.fetch`, PLAN-014 I2: only when the module is on, a bank source exists
+and an account is connected; it refreshes the new deposits' suggestions and confirms the exact
+ones when that setting is on), and queues the day's morning e-mails
 (:func:`ledger.services.calendar.queue_morning_emails`, one ``calendar_email`` job each),
 which the worker sends. It also queues the day's read
 of the dispute list (:func:`ledger.services.disputes.queue_daily`, one ``disputes_sync``
@@ -19,10 +22,11 @@ seven days (:func:`ledger.services.lease_end.sweep_drafts`, PLAN-012b-b D9). Aft
 rent run it makes the autopay plans' due occurrences
 (:func:`ledger.services.autopay_plans.run_due`, PLAN-012f-a D13: one one-off charge each,
 whose ``schedule_create`` job the worker runs). The reminder rules replace the retired
-collections ladder (PLAN-014 D6). It calls no external service, so it runs whatever
-process role it is given. "Today" is the project's local date. Running it
-twice the same day creates and queues nothing more (it writes a second
-``rent_run.ticked`` row, with nothing created). It prints counts only.
+collections ladder (PLAN-014 D6). It calls no external service but the bank's (Plaid, read
+only, when the Bank deposits module is ready), so it runs whatever process role it is given.
+"Today" is the project's local date. Running it twice the same day creates and queues nothing
+more (it writes a second ``rent_run.ticked`` row, with nothing created; a second bank fetch
+adds no deposit already read). It prints counts only.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ from typing import Any
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from banking import services as bank_deposits
 from ledger.services import (
     autopay_plans,
     calendar,
@@ -63,6 +68,8 @@ class Command(BaseCommand):
         reminded = reminders.queue_due(today)
         # PLAN-014 F3: the eve of each automatic re-debit, after the reminders.
         redebits = nsf.create_due_redebits(today)
+        # PLAN-014 I2: the bank's deposits, after the re-debits; a sentence when not ready.
+        deposits = bank_deposits.fetch(today)
         morning = calendar.queue_morning_emails(today)
         dispute_read = disputes.queue_daily(today)
         swept = lease_end.sweep_drafts()
@@ -76,6 +83,7 @@ class Command(BaseCommand):
             f"Reminders paused by a promise: {reminded.paused}. "
             f"Reminders not queued (already queued, or no lease to bill): {reminded.skipped}. "
             f"Automatic re-debits scheduled: {redebits}. "
+            f"Bank deposits: {deposits.message} "
             f"Morning e-mails queued: {morning.entries}. "
             f"Promise reminders queued: {morning.promises}. Promises kept by a payment: {kept}. "
             f"Dispute list read queued: {'yes' if dispute_read else 'no'}. "

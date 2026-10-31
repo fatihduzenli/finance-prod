@@ -3596,6 +3596,11 @@ class CompanySettings(PaymentDataGuardedModel):
     )
     manager_emails = free_text(default="")
     sandbox_allowlist = free_text(default="")
+    #: PLAN-014 I2: the Bank deposits module (``banking``) is off until an admin turns it on
+    #: in Admin › Settings › Bank deposits; a deposit whose suggestion is exact is confirmed
+    #: without a staff click only when the second is on as well.
+    bank_deposits_enabled = models.BooleanField(default=False)
+    bank_auto_confirm_exact = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

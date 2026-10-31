@@ -13,6 +13,10 @@ GET as well). The cards:
 - **Message templates** (:mod:`ledger.services.message_templates`, D4): the list, a page per
   template to edit its subject and body with the placeholders it may use, and a Preview
   with a store's real values and sample amounts (nothing queued).
+- **Bank deposits** (:mod:`banking.services`, I2): whether the Plaid keys are in this
+  environment (names only), the two switches (``ledger:settings:bank_save``), the connected
+  account (institution and mask) with Disconnect, or Connect a bank account (Plaid Link; the
+  routes are ``banking:link_token``, ``banking:link_exchange`` and ``banking:disconnect``).
 
 Each action answers with a redirect to the page and its outcome as a message (a refusal
 never repeats what was posted), except the template's save refused and the preview, which
@@ -30,6 +34,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
+from banking import services as banking
 from ledger.models import TEMPLATE_SUBJECT_MAX_LENGTH, CompanySettings, MessageTemplate
 from ledger.services import brands, mail_settings, message_templates
 from ledger.services.message_templates import BODY_MAX_LENGTH
@@ -48,7 +53,7 @@ def _pk_or_404(pk: str) -> uuid.UUID:
 
 def _answer(
     request: HttpRequest,
-    outcome: brands.Outcome | mail_settings.Outcome | message_templates.Outcome,
+    outcome: brands.Outcome | mail_settings.Outcome | message_templates.Outcome | banking.Outcome,
     to: str = INDEX,
 ) -> HttpResponse:
     if outcome.ok:
@@ -75,6 +80,7 @@ def settings_index(request: HttpRequest) -> HttpResponse:
             "name_max": brands.NAME_MAX,
             "mail_status": mail_settings.status(),
             "mail": {name: getattr(company, name) for name in mail_settings.FIELDS},
+            "bank": banking.card(),
         },
     )
 
@@ -135,6 +141,20 @@ def mail_save(request: HttpRequest) -> HttpResponse:
         return refused
     outcome = mail_settings.save(request.POST, _actor(request))
     return _answer(request, outcome, f"{reverse(INDEX)}#mail")
+
+
+# --- Bank deposits (I2) ----------------------------------------------------------------------
+
+
+@role_required
+@require_POST
+def bank_save(request: HttpRequest) -> HttpResponse:
+    """``ledger:settings:bank_save`` (admin, POST): the Bank deposits card's two switches."""
+    refused = _admin_only(request)
+    if refused is not None:
+        return refused
+    outcome = banking.save_settings(request.POST, _actor(request))
+    return _answer(request, outcome, f"{reverse(INDEX)}#bank-deposits")
 
 
 # --- Message templates (D4) -----------------------------------------------------------------

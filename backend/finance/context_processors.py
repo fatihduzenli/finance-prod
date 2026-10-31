@@ -70,6 +70,7 @@ _NAMESPACE_SECTIONS: dict[str, str] = {
     "audit": "audit",
     "settings": "settings",
     "outbox": "outbox",
+    "banking": "bank_deposits",
     "admin": "django_admin",
 }
 #: The navigation group of a section (PLAN-012c D3, copy list §4.2).
@@ -88,6 +89,7 @@ _SECTION_GROUPS: dict[str, str] = {
     "reconciliation": "admin",
     "settings": "admin",
     "outbox": "admin",
+    "bank_deposits": "admin",
     "django_admin": "admin",
 }
 
