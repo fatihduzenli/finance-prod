@@ -359,10 +359,13 @@ def test_the_family_structure_of_each_paged_list(path: str, table_id: str) -> No
     assert re.search(r'<td class="cell-chevron" data-role="meta"[^>]*><a href="/', html)
 
 
-def test_the_operators_list_reads_the_legal_name_and_the_stores(viewer: Client) -> None:
+def test_the_operators_list_reads_the_name_the_stores_and_the_email(viewer: Client) -> None:
+    # PLAN-014 C1: the columns are Operator, Stores and E-mail; the legal name is no longer a
+    # subline and the provider connection and enrolment columns left.
     operator = an_operator("Count Co")
     operator.legal_name = "Count Company LLC"
-    operator.save(update_fields=["legal_name"])
+    operator.email = "count@example.com"
+    operator.save(update_fields=["legal_name", "email"])
     a_lease(a_numbered_store("One", 8101), operator)
     a_lease(a_numbered_store("Two", 8102), operator)
     ended = a_lease(a_numbered_store("Three", 8103), operator)
@@ -370,8 +373,12 @@ def test_the_operators_list_reads_the_legal_name_and_the_stores(viewer: Client) 
         ended_on=date(2026, 1, 31), collection_status=CollectionStatus.ENDED
     )
     html = viewer.get("/operators/").content.decode()
-    assert '<span class="cell-subline">Count Company LLC</span>' in html
+    assert "Count Company LLC" not in html and 'class="cell-subline"' not in html
+    head = re.search(r"<thead>(.*?)</thead>", html[html.index('id="operators"') :], re.S)
+    assert head is not None
+    assert re.findall(r"<th[^>]*>([^<]*)<", head[1]) == ["Operator", "Stores", "E-mail", ""]
     assert re.search(r'<td class="operator-stores"[^>]*>2</td>', html)
+    assert re.search(r"<td[^>]*>count@example.com</td>", html)
     assert '<span class="list-counts" id="list-counts">1 operator</span>' in html
 
 

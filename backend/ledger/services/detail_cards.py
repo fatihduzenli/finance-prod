@@ -19,7 +19,9 @@ muted line that exist. :func:`lease_open_balance` is the lease page's Open balan
 
 :func:`collection_state` says how much of a charge is collected (PLAN-014 B3) and
 :func:`lease_collections` gives the store workspace's LEASE card its Sign fee and Insurance rows
-and the note about last year's insurance.
+and the note about last year's insurance. :func:`lease_account` gives the LEASE card its billing
+lines and :func:`lease_accounts` the operator page's PAYMENT card one line per lease (PLAN-014
+C3).
 """
 
 from __future__ import annotations
@@ -32,13 +34,14 @@ from decimal import Decimal
 from urllib.parse import urlencode
 
 from django.contrib.auth.models import User
-from django.db.models import Count, OuterRef, Q, Subquery
+from django.db.models import Count, F, OuterRef, Q, Subquery
 from django.urls import reverse
 
 from finance.dates import day_text
 from ledger.models import (
     ZERO,
     AuditLog,
+    CollectionStatus,
     DepositResolution,
     InsuranceCharge,
     Invoice,
@@ -47,10 +50,12 @@ from ledger.models import (
     OneOffCategory,
     OneOffCharge,
     OneOffChargeStatus,
+    Operator,
     RentCharge,
 )
 from ledger.services import audit, installments, insurance, one_off_charges, receivables, rent_run
 from ledger.wording import format_amount
+from payments import lease_sync
 
 #: The newest rows the Activity card shows; older ones are on the store page's History tab.
 ACTIVITY_SIZE = 20
@@ -405,3 +410,70 @@ def lease_collections(lease: Lease, today: date) -> LeaseCollections:
             else ""
         ),
     )
+
+
+# --- Billing details per lease (PLAN-014 C3) ------------------------------------------
+
+#: The LEASE and PAYMENT cards' bank line when the lease's account has no linked method.
+NO_BANK_ON_FILE = "no bank account on file"
+
+
+@dataclass(frozen=True, slots=True)
+class LeaseAccount:
+    """A lease's billing line for the LEASE card and the operator page's PAYMENT card: the
+    company billed, the billing e-mail, the bank line ("Bank ····4821" or
+    :data:`NO_BANK_ON_FILE`, from the cached last four of the account's lease) and the
+    lease whose account it shares, if any."""
+
+    lease: Lease
+    company: str
+    email: str
+    bank: str
+    shares: Lease | None
+
+    @property
+    def has_bank(self) -> bool:
+        """Whether the bank line names a method (the LEASE card's "Replace", PLAN-014 C4)."""
+        return self.bank != NO_BANK_ON_FILE
+
+    @property
+    def switchable(self) -> bool:
+        """Whether the LEASE card offers "Switch to own account" (PLAN-014 C9): the lease
+        shares another lease's account and holds a customer of its own (one query, only
+        for a sharer and only when read)."""
+        return self.shares is not None and bool(
+            lease_sync.current_refs(self.lease).get(lease_sync.KIND_CUSTOMER)
+        )
+
+
+def bank_text(last4: str) -> str:
+    """ "Bank ····4821", or :data:`NO_BANK_ON_FILE` without four digits."""
+    return f"Bank ····{last4}" if last4 else NO_BANK_ON_FILE
+
+
+def lease_account(lease: Lease) -> LeaseAccount:
+    """The LEASE card's billing lines of ``lease`` (at most two queries; none with the
+    billing rows selected)."""
+    billing = lease_sync.billing_of(lease)
+    shares = billing.shares_account_of
+    owner = lease_sync.billing_of(shares) if shares is not None else billing
+    return LeaseAccount(
+        lease=lease,
+        company=billing.company_name,
+        email=billing.email,
+        bank=bank_text(owner.bank_last4),
+        shares=shares,
+    )
+
+
+def lease_accounts(operator: Operator) -> list[LeaseAccount]:
+    """The PAYMENT card's line per lease of the operator not ended, by store (one query)."""
+    rows = (
+        Lease.objects.filter(operator=operator, ended_on__isnull=True)
+        .exclude(collection_status=CollectionStatus.ENDED)
+        .select_related(
+            "store", "billing", "billing__shares_account_of", "billing__shares_account_of__billing"
+        )
+        .order_by(F("store__store_number").asc(nulls_last=True), "store__external_label", "id")
+    )
+    return [lease_account(lease) for lease in rows]

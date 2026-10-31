@@ -35,6 +35,7 @@ from ledger.models import (
     InvoiceLineKind,
     InvoiceStatus,
     Lease,
+    LeaseBilling,
     LeaseRentHistory,
     LegacyStatus,
     Note,
@@ -237,16 +238,6 @@ class _Seeder:
                     ),
                 )
             )
-            if enrolled:
-                _ensure(
-                    ExternalRef,
-                    f"external-ref-operator-{index}",
-                    entity_type="operator",
-                    entity_id=self.operators[-1].pk,
-                    provider=DEMO_PROVIDER,
-                    external_kind="customer",
-                    external_id=f"demo-customer-{index:04d}",
-                )
 
     def _stores_and_leases(self) -> None:
         for index in range(STORE_COUNT):
@@ -265,6 +256,45 @@ class _Seeder:
             )
             self.stores.append(store)
             self.leases.append(self._lease(index, store))
+        self._billing()
+
+    def _billing(self) -> None:
+        """PLAN-014 C2: each lease's billing details, copied from its operator, and the
+        processor customer of each enrolled operator on its first lease (the label of the
+        operator's reference before PLAN-014, so a second run finds the row); a later lease
+        of that operator shares the first one's account, as ledger migration 0059 leaves
+        it."""
+        first: dict[int, Lease] = {}
+        for index, lease in enumerate(self.leases):
+            operator_index = LEASE_OPERATOR[index]
+            operator = None if operator_index is None else self.operators[operator_index]
+            shares = first.get(operator_index) if operator_index is not None else None
+            _ensure(
+                LeaseBilling,
+                f"lease-billing-{index}",
+                lease=lease,
+                company_name=operator.company if operator is not None else "",
+                email=(operator.email or "") if operator is not None else "",
+                phone=operator.phone if operator is not None else "",
+                address_line1=operator.address_line1 if operator is not None else "",
+                city=operator.city if operator is not None else "",
+                state=operator.state if operator is not None else "",
+                postal_code=operator.postal_code if operator is not None else "",
+                shares_account_of=shares,
+            )
+            if operator_index is None or shares is not None:
+                continue
+            first[operator_index] = lease
+            if operator_index in ENROLLED_OPERATORS:
+                _ensure(
+                    ExternalRef,
+                    f"external-ref-operator-{operator_index}",
+                    entity_type="lease",
+                    entity_id=lease.pk,
+                    provider=DEMO_PROVIDER,
+                    external_kind="customer",
+                    external_id=f"demo-customer-{operator_index:04d}",
+                )
 
     def _lease(self, index: int, store: Store) -> Lease:
         operator_index = LEASE_OPERATOR[index]

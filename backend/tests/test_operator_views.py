@@ -1,4 +1,6 @@
-"""The operator screens (docs/qa/PLAN-006-operators.md §6 rows 1, 2, 4, 5, 6 and 7).
+"""The operator screens (docs/qa/PLAN-006-operators.md §6 rows 1, 2, 4, 5, 6 and 7) and,
+since PLAN-014 C3, the lease's Edit billing details (``ledger:leases:billing``), where the
+processor customer, its sync, the retry and the manual link now live.
 
 ``payments.get_provider`` is replaced by a :class:`~payments.fake.FakeProvider` for
 every test here, so the views run exactly as deployed but no request leaves.
@@ -30,20 +32,25 @@ from ledger.models import (
     CONSENT_IN_FUTURE_MESSAGE,
     SMS_PHONE_MESSAGE,
     AuditLog,
-    EnrolmentStatus,
+    Lease,
+    LeaseBilling,
     Operator,
     SyncFailure,
     SyncStatus,
 )
+from ledger.services import operators as operator_service
 from ledger.views.operators import HELD_FORM_KEY
-from payments import operator_sync
+from payments import lease_sync
 from payments.errors import CircuitOpen, ProviderRejected, ProviderUnavailable
 from payments.fake import FakeProvider
+from payments.models import Job
 from payments.provider import CustomerQuery, CustomerRecord
 from tests.auth_helpers import iter_routes, make_user, verified_client
 from tests.job_helpers import worker_between_requests  # noqa: F401
-from tests.test_operator_sync import (
+from tests.test_lease_sync import (
     add_provider_customer,
+    billed_lease,
+    billing_fields,
     call_names,
     customer_refs,
     fields,
@@ -77,50 +84,92 @@ def billing() -> Client:
 
 
 def form_data(**overrides: Any) -> dict[str, Any]:
-    """The operator form's post: a company named as ``fields()``'s display name (PLAN-012f-b
-    D9: the form has Type and the kind's name fields, never ``display_name``)."""
+    """The operator form's post (PLAN-014 C1: the Full name is ``display_name``; the type,
+    company and name fields left the form)."""
     data = {name: ("" if value is None else value) for name, value in fields().items()}
-    data["kind"] = "company"
-    data["company"] = data.pop("display_name")
     data["creation_key"] = str(uuid.uuid4())
     return {**data, **overrides}
+
+
+def billing_data(form: str = "details", **overrides: Any) -> dict[str, Any]:
+    """A post of the Edit billing details dialog: ``details`` (the billing fields),
+    ``link`` (give ``customer_id`` and ``payment_method_id``) or ``retry``."""
+    if form != "details":
+        return {"form": form, **overrides}
+    data = {name: ("" if value is None else value) for name, value in billing_fields().items()}
+    return {"form": form, **data, **overrides}
 
 
 def detail(operator: Operator) -> str:
     return f"/operators/{operator.pk}/"
 
 
-def backdate_attempt(operator: Operator, seconds: int = operator_sync.RETRY_LOCK_SECONDS) -> None:
-    """Move the last sync attempt into the past, as if the retry lock had passed."""
-    Operator.objects.filter(pk=operator.pk).update(
+def billing_url(lease: Lease) -> str:
+    return f"/leases/{lease.pk}/billing/"
+
+
+def backdate_attempt(lease: Lease, seconds: int = lease_sync.RETRY_LOCK_SECONDS) -> None:
+    """Move the lease's last sync attempt into the past, as if the retry lock had passed."""
+    Lease.objects.filter(pk=lease.pk).update(
         sync_attempted_at=timezone.now() - timedelta(seconds=seconds)
     )
 
 
 def new_operator(**overrides: Any) -> Operator:
-    operator, _ = operator_sync.create_operator(
+    operator, _ = operator_service.create_operator(
         fields(**overrides), creation_key=uuid.uuid4(), actor=None
     )
     return operator
 
 
+def lease_of(operator: Operator, **billing: Any) -> Lease:
+    """A lease of ``operator`` whose billing details are saved but not yet sent (no call)."""
+    return billed_lease(operator=operator, **billing)
+
+
+def billing_of(lease: Lease) -> LeaseBilling:
+    return LeaseBilling.objects.get(lease=lease)
+
+
+def awaiting_lease(**operator_fields: Any) -> Lease:
+    """A lease without a billing e-mail (awaiting a manual link), its operator new."""
+    return lease_of(new_operator(**{"email": None, **operator_fields}), email=None)
+
+
 # --- Row 1: double submission ---------------------------------------------------------------
 
 
-def test_two_posts_with_one_creation_key_make_one_operator_and_one_customer(
+def test_two_posts_with_one_creation_key_make_one_operator_and_no_provider_call(
     billing: Client, fake: FakeProvider
 ) -> None:
     data = form_data()
     first = billing.post(NEW, data)
-    second = billing.post(NEW, {**data, "company": "Different on replay"})
+    second = billing.post(NEW, {**data, "display_name": "Different on replay"})
 
     operator = Operator.objects.get()
     assert first.status_code == second.status_code == 302
     assert first["Location"] == second["Location"] == detail(operator)
     assert operator.display_name == "Northwind Stores"
+    # PLAN-014 C3: an operator has no processor customer; saving it queues nothing.
+    assert fake.calls == []
+    assert Job.objects.count() == 0
+    assert operator.sync_status == SyncStatus.NOT_APPLICABLE
+
+
+def test_two_billing_saves_of_one_lease_make_one_customer(
+    billing: Client, fake: FakeProvider
+) -> None:
+    lease = awaiting_lease()
+    data = billing_data()
+    first = billing.post(billing_url(lease), data)
+    second = billing.post(billing_url(lease), data)
+
+    assert first.status_code == second.status_code == 302
+    assert first["Location"] == second["Location"] == billing_url(lease)
     assert call_names(fake).count("create_customer") == 1
-    assert len(customer_refs(operator)) == 1
-    assert operator.sync_status == SyncStatus.LINKED
+    assert len(customer_refs(lease)) == 1
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
 
 
 @requires_postgresql
@@ -153,8 +202,7 @@ def test_two_concurrent_posts_with_one_creation_key(monkeypatch: pytest.MonkeyPa
 
     assert statuses == [302, 302]
     assert Operator.objects.count() == 1
-    assert call_names(provider).count("create_customer") == 1
-    assert len(customer_refs(Operator.objects.get())) == 1
+    assert provider.calls == []
 
 
 def test_the_create_form_carries_a_fresh_creation_key_and_csrf(billing: Client) -> None:
@@ -163,9 +211,10 @@ def test_the_create_form_carries_a_fresh_creation_key_and_csrf(billing: Client) 
         page = billing.get(NEW).content.decode()
         assert 'name="csrfmiddlewaretoken"' in page
         assert 'type="email"' in page
-        assert (
-            'id="id_company"' in page and 'id="id_kind_1"' in page and has_token(page, "required")
-        )
+        assert 'id="id_display_name"' in page and has_token(page, "required")
+        assert "Full name" in page
+        # PLAN-014 C1: no Type radios and no company field.
+        assert 'id="id_company"' not in page and 'id="id_kind_1"' not in page
         start = page.index('name="creation_key" value="') + len('name="creation_key" value="')
         keys.add(uuid.UUID(page[start : start + 36]))
     assert len(keys) == 2
@@ -175,15 +224,18 @@ def test_forms_enforce_csrf(fake: FakeProvider) -> None:
     user, device = make_user("csrf-billing", Role.BILLING)
     assert device is not None
     client = verified_client(user, device, Client(enforce_csrf_checks=True))
-    operator = new_operator(email=None)
-    for path in (
-        NEW,
-        f"{detail(operator)}edit/",
-        f"{detail(operator)}link/",
-        f"{detail(operator)}retry-sync/",
+    lease = awaiting_lease()
+    assert lease.operator is not None
+    for path, data in (
+        (NEW, form_data()),
+        (f"{detail(lease.operator)}edit/", form_data()),
+        (billing_url(lease), billing_data()),
+        (billing_url(lease), billing_data("link", customer_id="cus_1", payment_method_id="pm_1")),
+        (billing_url(lease), billing_data("retry")),
     ):
-        assert client.post(path, form_data()).status_code == 403, path
+        assert client.post(path, data).status_code == 403, (path, data.get("form"))
     assert Operator.objects.count() == 1
+    assert billing_of(lease).email == ""
     assert fake.calls == []
 
 
@@ -199,14 +251,15 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
     billing: Client, fake: FakeProvider, error: Exception
 ) -> None:
     assert isinstance(error, ProviderUnavailable | ProviderRejected | CircuitOpen)
+    lease = awaiting_lease()
     fake.fail_next("find_customers", error)
-    response = billing.post(NEW, form_data(), follow=True)
+    response = billing.post(billing_url(lease), billing_data(), follow=True)
 
-    operator = Operator.objects.get()
+    lease.refresh_from_db()
     name = type(error).__name__
-    assert (operator.sync_status, operator.sync_failure) == (SyncStatus.FAILED, name)
+    assert (lease.sync_status, lease.sync_failure) == (SyncStatus.FAILED, name)
     page = response.content.decode()
-    assert operator_sync.MESSAGES[name].replace("'", "&#x27;") in page
+    assert lease_sync.MESSAGES[name].replace("'", "&#x27;") in page
     assert f"({SyncFailure(name).label})" in page and not has_token(page, name)
     # PLAN-006a §3.3: the retry button waits a minute after the attempt.
     assert ">Try again</button>" not in page
@@ -215,24 +268,24 @@ def test_a_failure_is_shown_with_a_retry_button_and_retry_calls_once(
     assert len(fake.calls) == 1
 
     # Viewing and editing do not call again.
-    billing.get(detail(operator))
-    billing.post(f"{detail(operator)}edit/", form_data(phone="+1 555 010 0009"))
+    billing.get(billing_url(lease))
+    billing.post(billing_url(lease), billing_data(phone="+1 555 010 0009"))
     assert len(fake.calls) == 1
 
-    backdate_attempt(operator)
-    assert ">Try again</button>" in billing.get(detail(operator)).content.decode()
+    backdate_attempt(lease)
+    assert ">Try again</button>" in billing.get(billing_url(lease)).content.decode()
 
-    retried = billing.post(f"{detail(operator)}retry-sync/", follow=True)
+    retried = billing.post(billing_url(lease), billing_data("retry"), follow=True)
     assert retried.status_code == 200
-    # A successful sync queues a read of the operator's payment methods (PLAN-010 follow-up).
+    # A successful sync queues a read of the lease's payment methods (PLAN-010 follow-up).
     assert call_names(fake) == [
         "find_customers",
         "find_customers",
         "create_customer",
         "list_payment_methods",
     ]
-    operator.refresh_from_db()
-    assert operator.sync_status == SyncStatus.LINKED
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
     assert ">Try again</button>" not in retried.content.decode()
 
 
@@ -281,27 +334,36 @@ def test_a_card_number_in_a_text_field_is_refused(billing: Client, fake: FakePro
 
 
 def test_no_email_saves_awaiting_link_with_no_call(billing: Client, fake: FakeProvider) -> None:
-    response = billing.post(NEW, form_data(email=""), follow=True)
+    created = billing.post(NEW, form_data(email=""), follow=True)
     operator = Operator.objects.get()
     assert operator.email is None
-    assert operator.sync_status == SyncStatus.AWAITING_LINK
+    # PLAN-014 C3: the operator has no processor customer to connect.
+    assert operator.sync_status == SyncStatus.NOT_APPLICABLE
+    assert "connect the Stax customer by hand" not in created.content.decode()
+
+    lease = lease_of(operator)
+    response = billing.post(billing_url(lease), billing_data(email=""), follow=True)
+    lease.refresh_from_db()
+    assert billing_of(lease).email == ""
+    assert lease.sync_status == SyncStatus.AWAITING_LINK
     assert fake.calls == []
     assert "connect the Stax customer by hand" in response.content.decode()
 
 
 def test_the_link_form_stores_both_ids_after_one_read(billing: Client, fake: FakeProvider) -> None:
     add_provider_customer(fake, "cus_manual_0001", "")
-    operator = new_operator(email=None)
+    lease = awaiting_lease()
 
     response = billing.post(
-        f"{detail(operator)}link/",
-        {
-            "customer_id": "cus_manual_0001",
-            "payment_method_id": "pm_bank-0001",
+        billing_url(lease),
+        billing_data(
+            "link",
+            customer_id="cus_manual_0001",
+            payment_method_id="pm_bank-0001",
             # Not a field of the form: ignored, never stored.
-            "routing_number": "021000021",
-            "account_number": "000123456789",
-        },
+            routing_number="021000021",
+            account_number="000123456789",
+        ),
         follow=True,
     )
 
@@ -310,12 +372,12 @@ def test_the_link_form_stores_both_ids_after_one_read(billing: Client, fake: Fak
         ("get_customer", ("cus_manual_0001",)),
         ("list_payment_methods", ("cus_manual_0001",)),
     ]
-    assert operator_sync.current_refs(operator) == {
+    assert lease_sync.current_refs(lease) == {
         "customer": "cus_manual_0001",
         "payment_method": "pm_bank-0001",
     }
-    operator.refresh_from_db()
-    assert operator.enrolment_status == EnrolmentStatus.ENROLLED
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
     page = response.content.decode()
     assert "cus_…0001" in page and "pm_b…0001" in page
     assert "cus_manual_0001" not in page and "pm_bank-0001" not in page
@@ -325,17 +387,17 @@ def test_the_link_form_stores_both_ids_after_one_read(billing: Client, fake: Fak
 def test_a_bad_customer_id_shows_a_clear_message_and_stores_nothing(
     billing: Client, fake: FakeProvider
 ) -> None:
-    operator = new_operator(email=None)
+    lease = awaiting_lease()
     response = billing.post(
-        f"{detail(operator)}link/",
-        {"customer_id": "cus_missing", "payment_method_id": "pm_1"},
+        billing_url(lease),
+        billing_data("link", customer_id="cus_missing", payment_method_id="pm_1"),
         follow=True,
     )
-    # PLAN-010 D3: the link is a job; its outcome is shown on the detail page.
-    assert response.redirect_chain == [(detail(operator), 302)]
-    assert str(operator_sync.LINK_REJECTED_MESSAGE) in response.content.decode()
+    # PLAN-010 D3: the link is a job; its outcome is shown on the billing page.
+    assert response.redirect_chain == [(billing_url(lease), 302)]
+    assert str(lease_sync.LINK_REJECTED_MESSAGE) in response.content.decode()
     assert call_names(fake) == ["get_customer"]
-    assert operator_sync.current_refs(operator) == {}
+    assert lease_sync.current_refs(lease) == {}
 
 
 @pytest.mark.parametrize(
@@ -344,59 +406,70 @@ def test_a_bad_customer_id_shows_a_clear_message_and_stores_nothing(
 def test_the_link_form_refuses_anything_but_an_identifier(
     billing: Client, fake: FakeProvider, value: str
 ) -> None:
-    operator = new_operator(email=None)
+    lease = awaiting_lease()
     response = billing.post(
-        f"{detail(operator)}link/", {"customer_id": value, "payment_method_id": "pm_1"}, follow=True
+        billing_url(lease),
+        billing_data("link", customer_id=value, payment_method_id="pm_1"),
+        follow=True,
     )
-    assert response.redirect_chain == [(f"{detail(operator)}link/", 302)]
+    assert response.redirect_chain == [(billing_url(lease), 302)]
     assert 'class="errorlist' in response.content.decode()
     assert fake.calls == []
-    assert operator_sync.current_refs(operator) == {}
+    assert lease_sync.current_refs(lease) == {}
 
 
 # --- Row 6: roles -------------------------------------------------------------------------------
 
 
-def _paths(operator: Operator) -> dict[str, str]:
-    base = detail(operator)
+def _paths(lease: Lease) -> dict[str, str]:
+    assert lease.operator is not None
+    base = detail(lease.operator)
     return {
         "list": LIST,
         "create": NEW,
         "detail": base,
         "edit": f"{base}edit/",
         "archive": f"{base}archive/",
-        "retry_sync": f"{base}retry-sync/",
-        "link": f"{base}link/",
+        "billing": billing_url(lease),
     }
 
 
-GET_ROUTES = ("list", "create", "detail", "edit", "link")
-POST_ROUTES = ("create", "edit", "archive", "retry_sync", "link")
+GET_ROUTES = ("list", "create", "detail", "edit")
+POST_ROUTES = ("create", "edit", "archive", "billing")
 
 
 def test_viewer_reads_everything_and_writes_nothing(fake: FakeProvider) -> None:
     client, _ = client_for(Role.VIEWER)
-    operator = new_operator(email=None)
-    paths = _paths(operator)
+    lease = awaiting_lease()
+    paths = _paths(lease)
     for name in GET_ROUTES:
         assert client.get(paths[name]).status_code == 200, name
+    # The Edit billing details dialog is billing's (PLAN-014 C3): refused even to read.
+    assert client.get(paths["billing"]).status_code == 403
     for name in POST_ROUTES:
-        response = client.post(paths[name], form_data())
+        data = billing_data() if name == "billing" else form_data()
+        response = client.post(paths[name], data)
         assert response.status_code == 403, name
         assert "Your role does not allow this action." in response.content.decode()
     assert Operator.objects.count() == 1
-    operator.refresh_from_db()
-    assert operator.archived_at is None
+    assert lease.operator is not None
+    lease.operator.refresh_from_db()
+    assert lease.operator.archived_at is None
+    assert billing_of(lease).email == ""
     assert fake.calls == []
 
 
 def test_viewer_sees_no_write_controls(fake: FakeProvider) -> None:
     client, _ = client_for(Role.VIEWER)
-    operator = new_operator(email=None)
+    lease = awaiting_lease()
+    assert lease.operator is not None
     assert "New operator" not in client.get(LIST).content.decode()
-    page = client.get(detail(operator)).content.decode()
+    page = client.get(detail(lease.operator)).content.decode()
     for control in ("Edit</a>", ">Connect to Stax</a>", ">Archive<", ">Try again</button>"):
         assert control not in page
+    lease_page = client.get(f"/leases/{lease.pk}/").content.decode()
+    assert 'id="edit-billing"' not in lease_page
+    assert ">Try again</button>" not in lease_page
 
 
 def test_billing_cannot_archive_and_admin_can(fake: FakeProvider) -> None:
@@ -413,23 +486,30 @@ def test_billing_cannot_archive_and_admin_can(fake: FakeProvider) -> None:
     assert operator.archived_at is not None
 
 
-def test_billing_can_create_edit_retry_and_link(fake: FakeProvider) -> None:
+def test_billing_can_create_edit_and_on_the_lease_save_retry_and_link(
+    fake: FakeProvider,
+) -> None:
     client, _ = client_for(Role.BILLING)
     assert client.post(NEW, form_data(email="")).status_code == 302
     operator = Operator.objects.get()
-    paths = _paths(operator)
+    lease = lease_of(operator, email=None)
+    paths = _paths(lease)
     assert client.post(paths["edit"], form_data(email="", city="Elsewhere")).status_code == 302
-    assert client.post(paths["retry_sync"]).status_code == 302
+    assert client.get(paths["billing"]).status_code == 200
+    assert client.post(paths["billing"], billing_data(email="")).status_code == 302
+    assert client.post(paths["billing"], billing_data("retry")).status_code == 302
     add_provider_customer(fake, "cus_1", "")
-    response = client.post(paths["link"], {"customer_id": "cus_1", "payment_method_id": "pm_1"})
+    response = client.post(
+        paths["billing"], billing_data("link", customer_id="cus_1", payment_method_id="pm_1")
+    )
     assert response.status_code == 302
+    assert lease_sync.current_refs(lease) == {"customer": "cus_1", "payment_method": "pm_1"}
 
 
 def test_anonymous_gets_401_everywhere() -> None:
     client = Client()
-    operator = new_operator(email=None)
-    paths = _paths(operator)
-    for name in GET_ROUTES:
+    paths = _paths(awaiting_lease())
+    for name in (*GET_ROUTES, "billing"):
         assert client.get(paths[name]).status_code == 401, name
     for name in POST_ROUTES:
         assert client.post(paths[name]).status_code == 401, name
@@ -437,9 +517,26 @@ def test_anonymous_gets_401_everywhere() -> None:
 
 def test_a_user_without_a_role_is_refused_even_to_read(fake: FakeProvider) -> None:
     client, _ = client_for(None)
+    paths = _paths(awaiting_lease())
+    for name in ("list", "detail", "create", "edit", "billing"):
+        assert client.get(paths[name]).status_code == 403, name
+
+
+def test_the_operator_link_and_retry_routes_are_gone(billing: Client, fake: FakeProvider) -> None:
+    """PLAN-014 C3: the link and the retry moved to the lease (``ledger:leases:billing``)."""
     operator = new_operator(email=None)
-    for name in ("list", "detail", "create", "edit", "link"):
-        assert client.get(_paths(operator)[name]).status_code == 403, name
+    for name in ("ledger:operators:link", "ledger:operators:retry_sync"):
+        with pytest.raises(NoReverseMatch):
+            reverse(name, kwargs={"pk": operator.pk})
+        assert registry.rule_for(name) is None
+    for suffix in ("link/", "retry-sync/"):
+        assert billing.get(f"{detail(operator)}{suffix}").status_code == 404, suffix
+        response = billing.post(
+            f"{detail(operator)}{suffix}", {"customer_id": "cus_1", "payment_method_id": "pm_1"}
+        )
+        assert response.status_code == 404, suffix
+    assert fake.calls == []
+    assert Job.objects.count() == 0
 
 
 def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
@@ -451,8 +548,6 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:detail",
         "ledger:operators:edit",
         "ledger:operators:archive",
-        "ledger:operators:retry_sync",
-        "ledger:operators:link",
         # PLAN-010d D2: creating a one-off charge from the operator page.
         "ledger:operators:new_charge",
         # PLAN-011 D4, D5: the list's CSV export and the customer statement.
@@ -478,19 +573,19 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:contacts_export",
     } <= registry.READ_ONLY_ROUTE_NAMES
     expected = {
-        "contacts_add": Role.BILLING,
-        "create": Role.BILLING,
-        "edit": Role.BILLING,
-        "retry_sync": Role.BILLING,
-        "link": Role.BILLING,
-        "new_charge": Role.BILLING,
-        "handled_personally": Role.BILLING,
-        "statement_links_revoke": Role.BILLING,
-        "archive": Role.ADMIN,
+        "ledger:operators:contacts_add": Role.BILLING,
+        "ledger:operators:create": Role.BILLING,
+        "ledger:operators:edit": Role.BILLING,
+        "ledger:operators:new_charge": Role.BILLING,
+        "ledger:operators:handled_personally": Role.BILLING,
+        "ledger:operators:statement_links_revoke": Role.BILLING,
+        "ledger:operators:archive": Role.ADMIN,
+        # PLAN-014 C3: the details, the link and the retry post to the lease's billing.
+        "ledger:leases:billing": Role.BILLING,
     }
-    for short, role in expected.items():
-        rule = registry.rule_for(f"ledger:operators:{short}")
-        assert rule is not None and rule.min_role is role and rule.methods == {"POST"}
+    for name, role in expected.items():
+        rule = registry.rule_for(name)
+        assert rule is not None and rule.min_role is role and rule.methods == {"POST"}, name
 
 
 def test_an_unknown_or_malformed_operator_id_is_404(billing: Client) -> None:
@@ -517,18 +612,58 @@ def test_archive_hides_the_operator_unless_asked(fake: FakeProvider) -> None:
     assert kept.archived_at is None
 
 
-def test_an_archived_operator_cannot_be_edited_retried_or_linked(fake: FakeProvider) -> None:
-    operator = new_operator(email=None)
-    operator_sync.archive_operator(operator.pk, actor=None)
+def test_an_archived_operator_cannot_be_edited_and_its_lease_not_billed_retried_or_linked(
+    fake: FakeProvider,
+) -> None:
+    lease = awaiting_lease()
+    assert lease.operator is not None
+    operator_service.archive_operator(lease.operator.pk, actor=None)
     client, _ = client_for(Role.BILLING)
-    paths = _paths(operator)
-    for name in ("edit", "retry_sync", "link"):
-        response = client.post(paths[name], form_data(city="Changed"))
-        assert response.status_code == 302, name
-        assert response["Location"] == detail(operator)
-    operator.refresh_from_db()
-    assert operator.city == "Testville"
+    paths = _paths(lease)
+    response = client.post(paths["edit"], form_data(city="Changed"))
+    assert response.status_code == 302
+    assert response["Location"] == detail(lease.operator)
+    for data in (
+        billing_data(city="Changed"),
+        billing_data("retry"),
+        billing_data("link", customer_id="cus_1", payment_method_id="pm_1"),
+    ):
+        response = client.post(paths["billing"], data, follow=True)
+        assert response.redirect_chain == [(billing_url(lease), 302)], data["form"]
+        assert "This operator is archived." in response.content.decode(), data["form"]
+    lease.operator.refresh_from_db()
+    assert lease.operator.city == "Testville"
+    assert billing_of(lease).city == "Testville"
     assert fake.calls == []
+    assert Job.objects.count() == 0
+
+
+def test_a_billing_save_racing_an_archive_is_refused_by_the_service_with_the_message(
+    fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fable's C part 1 finding: the service refuses an archived operator's lease itself,
+    so an archive between the view's check and the save writes nothing either."""
+    from ledger.views import leases as lease_views
+
+    lease = awaiting_lease()
+    assert lease.operator is not None
+    operator_service.archive_operator(lease.operator.pk, actor=None)
+    real_load = lease_views._load
+
+    def loaded_before_the_archive(pk: str) -> Any:
+        row = real_load(pk)
+        assert row.operator is not None
+        row.operator.archived_at = None
+        return row
+
+    monkeypatch.setattr(lease_views, "_load", loaded_before_the_archive)
+    client, _ = client_for(Role.BILLING)
+    response = client.post(billing_url(lease), billing_data(city="Changed"), follow=True)
+    assert response.redirect_chain == [(billing_url(lease), 302)]
+    assert "This operator is archived." in response.content.decode()
+    assert "Billing details saved." not in response.content.decode()
+    assert billing_of(lease).city == "Testville"
+    assert fake.calls == [] and Job.objects.count() == 0
 
 
 def test_no_delete_route_exists() -> None:
@@ -614,7 +749,7 @@ def test_control_characters_in_the_search_are_removed_not_a_500(billing: Client)
         assert "\x00" not in page and "\x1b" not in page, term
 
 
-def test_the_detail_page_shows_balance_leases_and_masked_ids(
+def test_the_detail_page_shows_balance_leases_and_the_billing_page_the_masked_ids(
     billing: Client, fake: FakeProvider
 ) -> None:
     from tests.test_ledger_models import new_lease, new_rent_charge, saved
@@ -622,17 +757,22 @@ def test_the_detail_page_shows_balance_leases_and_masked_ids(
     operator = new_operator()
     lease = saved(new_lease(operator=operator))
     saved(new_rent_charge(lease=lease))
-    operator_sync.sync_operator(operator.pk, provider=fake, actor=None)
-    customer = operator_sync.current_refs(operator)["customer"]
+    lease_sync.update_billing(lease.pk, billing_fields(), actor=None)
+    lease_sync.sync_lease(lease.pk, provider=fake, actor=None)
+    customer = lease_sync.current_refs(lease)["customer"]
 
     page = billing.get(detail(operator)).content.decode()
     assert "$2,450.00" in page
     assert "Store 900 Testville" in page
+    # PLAN-014 C3: the PAYMENT card has the lease's line; the identifiers are the lease's.
+    assert f'id="side-account-{lease.pk}"' in page
+    assert customer not in page and f"{customer[:4]}…{customer[-4:]}" not in page
     # PLAN-012d D14: the invoices are on the Invoices tab.
     invoices = billing.get(detail(operator) + "?tab=invoices").content.decode()
     assert "No unpaid invoice." in invoices and "No draft." in invoices
-    assert customer not in page
-    assert f"{customer[:4]}…{customer[-4:]}" in page
+    dialog = billing.get(billing_url(lease)).content.decode()
+    assert customer not in dialog
+    assert f"{customer[:4]}…{customer[-4:]}" in dialog
 
 
 # --- PLAN-006a §4 row 5: every POST redirects; errors shown once ------------------------------
@@ -649,20 +789,25 @@ def test_every_post_route_redirects_on_success(fake: FakeProvider) -> None:
     operator = Operator.objects.get()
     assert (created.status_code, created["Location"]) == (302, detail(operator))
 
-    paths = _paths(operator)
+    lease = lease_of(operator)
+    paths = _paths(lease)
     edited = client.post(paths["edit"], form_data(phone="+1 555 010 0003"))
     assert (edited.status_code, edited["Location"]) == (302, detail(operator))
 
-    Operator.objects.filter(pk=operator.pk).update(sync_status=SyncStatus.FAILED)
-    retried = client.post(paths["retry_sync"])
-    assert (retried.status_code, retried["Location"]) == (302, detail(operator))
+    saved_billing = client.post(paths["billing"], billing_data(phone="+1 555 010 0003"))
+    assert (saved_billing.status_code, saved_billing["Location"]) == (302, billing_url(lease))
 
-    manual = new_operator(email=None, display_name="Manual")
+    Lease.objects.filter(pk=lease.pk).update(sync_status=SyncStatus.FAILED)
+    retried = client.post(paths["billing"], billing_data("retry"))
+    assert (retried.status_code, retried["Location"]) == (302, billing_url(lease))
+
+    manual = awaiting_lease(display_name="Manual")
     add_provider_customer(fake, "cus_prg_0001", "")
     linked = client.post(
-        _paths(manual)["link"], {"customer_id": "cus_prg_0001", "payment_method_id": "pm_prg"}
+        billing_url(manual),
+        billing_data("link", customer_id="cus_prg_0001", payment_method_id="pm_prg"),
     )
-    assert (linked.status_code, linked["Location"]) == (302, detail(manual))
+    assert (linked.status_code, linked["Location"]) == (302, billing_url(manual))
 
     archived = client.post(paths["archive"])
     assert (archived.status_code, archived["Location"]) == (302, LIST)
@@ -671,71 +816,88 @@ def test_every_post_route_redirects_on_success(fake: FakeProvider) -> None:
 
 def test_every_post_route_redirects_on_failure(fake: FakeProvider) -> None:
     client, _ = client_for(Role.ADMIN)
-    operator = new_operator()
-    paths = _paths(operator)
+    lease = lease_of(new_operator())
+    paths = _paths(lease)
 
-    invalid_create = client.post(NEW, form_data(company="  ", email="bad"))
+    invalid_create = client.post(NEW, form_data(display_name="  ", email="bad"))
     assert (invalid_create.status_code, invalid_create["Location"]) == (302, NEW)
 
-    invalid_edit = client.post(paths["edit"], form_data(company=""))
+    invalid_edit = client.post(paths["edit"], form_data(display_name=""))
     assert (invalid_edit.status_code, invalid_edit["Location"]) == (302, paths["edit"])
 
-    invalid_link = client.post(paths["link"], {"customer_id": "bad id", "payment_method_id": ""})
-    assert (invalid_link.status_code, invalid_link["Location"]) == (302, paths["link"])
+    invalid_details = client.post(paths["billing"], billing_data(email="bad"))
+    assert (invalid_details.status_code, invalid_details["Location"]) == (302, paths["billing"])
 
-    # PLAN-010 D3: a valid link form is queued; the refusal shows on the detail page.
-    refused_link = client.post(paths["link"], {"customer_id": "cus_none", "payment_method_id": "p"})
-    assert (refused_link.status_code, refused_link["Location"]) == (302, detail(operator))
+    invalid_link = client.post(
+        paths["billing"], billing_data("link", customer_id="bad id", payment_method_id="")
+    )
+    assert (invalid_link.status_code, invalid_link["Location"]) == (302, paths["billing"])
+
+    # PLAN-010 D3: a valid link form is queued; the refusal shows on the billing page.
+    refused_link = client.post(
+        paths["billing"], billing_data("link", customer_id="cus_none", payment_method_id="p")
+    )
+    assert (refused_link.status_code, refused_link["Location"]) == (302, paths["billing"])
 
     # A retry inside the lock is refused with a message, still a redirect.
-    Operator.objects.filter(pk=operator.pk).update(
+    Lease.objects.filter(pk=lease.pk).update(
         sync_status=SyncStatus.FAILED, sync_attempted_at=timezone.now()
     )
-    too_soon = client.post(paths["retry_sync"], follow=True)
-    assert too_soon.redirect_chain == [(detail(operator), 302)]
+    too_soon = client.post(paths["billing"], billing_data("retry"), follow=True)
+    assert too_soon.redirect_chain == [(paths["billing"], 302)]
     assert "Retry available in " in too_soon.content.decode()
     assert fake.calls == [("get_customer", ("cus_none",))]
 
-    # Archiving twice, and anything on an archived operator, redirects too.
+    # Archiving twice, and anything on an archived operator or its lease, redirects too.
     assert client.post(paths["archive"]).status_code == 302
-    for name in ("archive", "edit", "retry_sync", "link"):
-        response = client.post(paths[name], form_data())
+    for name, data in (
+        ("archive", form_data()),
+        ("edit", form_data()),
+        ("billing", billing_data()),
+        ("billing", billing_data("retry")),
+        ("billing", billing_data("link", customer_id="cus_1", payment_method_id="pm_1")),
+    ):
+        response = client.post(paths[name], data)
         assert response.status_code == 302, name
 
 
-@pytest.mark.parametrize("route", ["create", "edit", "link"])
+@pytest.mark.parametrize("route", ["create", "edit", "billing", "link"])
 def test_errors_are_shown_on_the_next_get_only(
     billing: Client, fake: FakeProvider, route: str
 ) -> None:
-    operator = new_operator(email=None)
-    path = _paths(operator)[route]
-    invalid: dict[str, Any] = (
-        {"customer_id": "bad id", "payment_method_id": "pm_1"}
-        if route == "link"
-        else form_data(company="", legal_name="Kept Legal Name")
-    )
+    lease = awaiting_lease()
+    path = _paths(lease)["billing" if route == "link" else route]
+    invalid: dict[str, Any] = {
+        "create": form_data(display_name="", city="Kept City"),
+        "edit": form_data(display_name="", city="Kept City"),
+        "billing": billing_data(phone="555-0132", city="Kept City"),
+        "link": billing_data("link", customer_id="bad id", payment_method_id="pm_1"),
+    }[route]
 
     posted = billing.post(path, invalid)
     assert posted.status_code == 302 and posted["Location"] == path
 
     first = billing.get(path).content.decode()
     assert 'class="errorlist' in first
-    if route != "link":
-        assert "Enter the company name." in first
-        assert 'value="Kept Legal Name"' in first
+    if route in ("create", "edit"):
+        assert "Enter the full name." in first
+        assert 'value="Kept City"' in first
+    elif route == "billing":
+        assert PHONE_MESSAGE in first
+        assert 'value="Kept City"' in first
     else:
         assert 'value="bad id"' in first
 
     second = billing.get(path).content.decode()
     assert 'class="errorlist' not in second
-    assert "Kept Legal Name" not in second
+    assert "Kept City" not in second and 'value="bad id"' not in second
     assert _held_count() == 0
 
 
 def test_the_create_form_keeps_its_creation_key_across_the_redirect(
     billing: Client, fake: FakeProvider
 ) -> None:
-    data = form_data(company="")
+    data = form_data(display_name="")
     billing.post(NEW, data)
     page = billing.get(NEW).content.decode()
     assert f'value="{data["creation_key"]}"' in page
@@ -744,11 +906,23 @@ def test_the_create_form_keeps_its_creation_key_across_the_redirect(
 def test_a_held_form_is_not_shown_on_another_form(billing: Client, fake: FakeProvider) -> None:
     first = new_operator(email=None)
     second = new_operator(email=None, display_name="Second")
-    billing.post(_paths(first)["edit"], form_data(company=""))
-    other = billing.get(_paths(second)["edit"]).content.decode()
+    billing.post(f"{detail(first)}edit/", form_data(display_name=""))
+    other = billing.get(f"{detail(second)}edit/").content.decode()
     assert 'class="errorlist' not in other
     # Consumed by that GET: the first form's page no longer shows it either.
-    assert 'class="errorlist' not in billing.get(_paths(first)["edit"]).content.decode()
+    assert 'class="errorlist' not in billing.get(f"{detail(first)}edit/").content.decode()
+
+
+def test_a_held_billing_form_is_not_shown_on_another_lease(
+    billing: Client, fake: FakeProvider
+) -> None:
+    first, second = awaiting_lease(), awaiting_lease()
+    billing.post(billing_url(first), billing_data(phone="555-0132"))
+    assert 'class="errorlist' not in billing.get(billing_url(second)).content.decode()
+    # The billing page takes only its own held form; the first lease still shows it once.
+    assert 'class="errorlist' in billing.get(billing_url(first)).content.decode()
+    assert 'class="errorlist' not in billing.get(billing_url(first)).content.decode()
+    assert _held_count() == 0
 
 
 def test_a_card_number_is_never_held_in_the_session(billing: Client, fake: FakeProvider) -> None:
@@ -770,92 +944,109 @@ def test_refreshing_after_a_post_issues_only_a_get(billing: Client, fake: FakePr
     # A refresh repeats the last request of the chain: a GET of the detail page.
     billing.get(final_url)
     assert Operator.objects.count() == 1
+    assert fake.calls == []
+
+    lease = awaiting_lease()
+    response = billing.post(billing_url(lease), billing_data(), follow=True)
+    assert response.request["REQUEST_METHOD"] == "GET"
+    billing.get(response.redirect_chain[-1][0])
     assert call_names(fake).count("create_customer") == 1
 
 
-# --- PLAN-006a §4 rows 4 and 6: the lock and the rejected fields on the detail page -----------
+# --- PLAN-006a §4 rows 4 and 6: the lock and the rejected fields on the billing page -----------
 
 
-def test_the_detail_page_shows_the_rejected_field_names(
+def test_the_billing_page_shows_the_rejected_field_names(
     billing: Client, fake: FakeProvider
 ) -> None:
+    lease = awaiting_lease()
     fake.fail_next("create_customer", ProviderRejected(422, error_fields=("email", "lastname")))
-    response = billing.post(NEW, form_data(), follow=True)
+    response = billing.post(billing_url(lease), billing_data(), follow=True)
     page = response.content.decode()
     assert "Fields Stax rejected: email, lastname" in page
 
-    operator = Operator.objects.get()
-    backdate_attempt(operator)
-    billing.post(f"{detail(operator)}retry-sync/")
-    page = billing.get(detail(operator)).content.decode()
+    backdate_attempt(lease)
+    billing.post(billing_url(lease), billing_data("retry"))
+    page = billing.get(billing_url(lease)).content.decode()
     assert "Fields Stax rejected" not in page
 
 
-def test_the_detail_page_hides_the_retry_button_while_locked(
+def test_the_billing_page_hides_the_retry_button_while_locked(
     billing: Client, fake: FakeProvider
 ) -> None:
-    operator = new_operator()
-    Operator.objects.filter(pk=operator.pk).update(sync_status=SyncStatus.FAILED)
+    lease = lease_of(new_operator())
+    Lease.objects.filter(pk=lease.pk).update(sync_status=SyncStatus.FAILED)
     for seconds, button in [(1, False), (59, False), (60, True), (600, True)]:
-        backdate_attempt(operator, seconds)
-        page = billing.get(detail(operator)).content.decode()
+        backdate_attempt(lease, seconds)
+        page = billing.get(billing_url(lease)).content.decode()
         assert (">Try again</button>" in page) is button, seconds
         assert ("Retry available in " in page) is (not button), seconds
 
 
 def test_a_viewer_sees_neither_the_button_nor_the_wait(fake: FakeProvider) -> None:
     client, _ = client_for(Role.VIEWER)
-    operator = new_operator()
-    Operator.objects.filter(pk=operator.pk).update(
+    lease = lease_of(new_operator())
+    Lease.objects.filter(pk=lease.pk).update(
         sync_status=SyncStatus.FAILED, sync_attempted_at=timezone.now()
     )
-    page = client.get(detail(operator)).content.decode()
-    assert ">Try again</button>" not in page and "Retry available" not in page
+    assert client.get(billing_url(lease)).status_code == 403
+    assert lease.operator is not None
+    for path in (detail(lease.operator), f"/leases/{lease.pk}/"):
+        page = client.get(path).content.decode()
+        assert ">Try again</button>" not in page and "Retry available" not in page, path
 
 
 def test_two_quick_retry_posts_make_one_provider_call(billing: Client, fake: FakeProvider) -> None:
-    operator = new_operator()
-    Operator.objects.filter(pk=operator.pk).update(sync_status=SyncStatus.FAILED)
+    lease = lease_of(new_operator())
+    Lease.objects.filter(pk=lease.pk).update(sync_status=SyncStatus.FAILED)
     fake.fail_next("find_customers", ProviderUnavailable(503))
-    first = billing.post(f"{detail(operator)}retry-sync/")
-    second = billing.post(f"{detail(operator)}retry-sync/", follow=True)
+    first = billing.post(billing_url(lease), billing_data("retry"))
+    second = billing.post(billing_url(lease), billing_data("retry"), follow=True)
     assert first.status_code == 302
-    assert second.redirect_chain == [(detail(operator), 302)]
+    assert second.redirect_chain == [(billing_url(lease), 302)]
     assert call_names(fake) == ["find_customers"]
     assert "Retry available in " in second.content.decode()
 
 
-# --- PLAN-006b §3 rows 1 and 4: the phone rule in the form, the edit and the retry ------------
+# --- PLAN-006b §3 rows 1 and 4: the phone rule in the forms, the edit and the retry -----------
 
 PHONE_MESSAGE = "Enter 10 to 15 digits, for example 4155550132."
 
+PHONES = [
+    ("4155550132", "4155550132"),
+    ("+1 (415) 555-0132", "14155550132"),
+    ("415.555.0132", "4155550132"),
+    ("123456789012345", "123456789012345"),
+    ("", ""),
+]
+PHONE_IDS = ["digits", "formatted", "dotted", "fifteen", "empty"]
+BAD_PHONES = ["555-0132", "12345678901234567", "+44 20 7946 0958 ext 12", "call the office"]
+BAD_PHONE_IDS = ["seven", "seventeen", "extension", "letters"]
 
-@pytest.mark.parametrize(
-    ("phone", "stored"),
-    [
-        ("4155550132", "4155550132"),
-        ("+1 (415) 555-0132", "14155550132"),
-        ("415.555.0132", "4155550132"),
-        ("123456789012345", "123456789012345"),
-        ("", ""),
-    ],
-    ids=["digits", "formatted", "dotted", "fifteen", "empty"],
-)
+
+@pytest.mark.parametrize(("phone", "stored"), PHONES, ids=PHONE_IDS)
 def test_the_create_form_accepts_and_stores_the_normalised_phone(
     billing: Client, fake: FakeProvider, phone: str, stored: str
 ) -> None:
     billing.post(NEW, form_data(phone=phone))
     operator = Operator.objects.get()
     assert operator.phone == stored
+    # PLAN-014 C3: the operator's phone is not sent anywhere.
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize(("phone", "stored"), PHONES, ids=PHONE_IDS)
+def test_the_billing_form_stores_the_normalised_phone_and_sends_it(
+    billing: Client, fake: FakeProvider, phone: str, stored: str
+) -> None:
+    lease = awaiting_lease()
+    billing.post(billing_url(lease), billing_data(phone=phone))
+    assert billing_of(lease).phone == stored
     [(_, (customer,))] = [call for call in fake.calls if call[0] == "create_customer"]
     assert customer.phone == stored  # type: ignore[attr-defined]
 
 
-@pytest.mark.parametrize(
-    "phone",
-    ["555-0132", "12345678901234567", "+44 20 7946 0958 ext 12", "call the office"],
-    ids=["seven", "seventeen", "extension", "letters"],
-)
+@pytest.mark.parametrize("phone", BAD_PHONES, ids=BAD_PHONE_IDS)
 def test_the_create_form_refuses_a_bad_phone_with_the_fixed_text_and_no_call(
     billing: Client, fake: FakeProvider, phone: str
 ) -> None:
@@ -867,56 +1058,67 @@ def test_the_create_form_refuses_a_bad_phone_with_the_fixed_text_and_no_call(
     assert fake.calls == []
 
 
+@pytest.mark.parametrize("phone", BAD_PHONES, ids=BAD_PHONE_IDS)
+def test_the_billing_form_refuses_a_bad_phone_with_the_fixed_text_and_no_call(
+    billing: Client, fake: FakeProvider, phone: str
+) -> None:
+    lease = awaiting_lease()
+    response = billing.post(billing_url(lease), billing_data(phone=phone), follow=True)
+    assert PHONE_MESSAGE in response.content.decode()
+    assert response.redirect_chain[-1][0] == billing_url(lease)
+    assert billing_of(lease).email == ""
+    assert fake.calls == []
+    assert Job.objects.count() == 0
+
+
 def test_a_bad_stored_phone_blocks_edit_and_retry_until_it_is_fixed(
     billing: Client, fake: FakeProvider
 ) -> None:
-    operator = new_operator()
-    Operator.objects.filter(pk=operator.pk).update(
-        phone="555-0132", sync_status=SyncStatus.FAILED, sync_failure="ProviderRejected"
+    lease = lease_of(new_operator())
+    LeaseBilling.objects.filter(lease=lease).update(phone="555-0132")
+    Lease.objects.filter(pk=lease.pk).update(
+        sync_status=SyncStatus.FAILED, sync_failure="ProviderRejected"
     )
-    backdate_attempt(operator)
-    edit = f"{detail(operator)}edit/"
-    retry = f"{detail(operator)}retry-sync/"
+    backdate_attempt(lease)
+    path = billing_url(lease)
 
-    # The detail page offers the fix sentence, not the retry button.
-    page = billing.get(detail(operator)).content.decode()
+    # The billing page offers the fix sentence, not the retry button.
+    page = billing.get(path).content.decode()
     assert "Fix the phone number first." in page
     assert ">Try again</button>" not in page
     assert "Retry available in" not in page
 
-    # An edit that keeps the bad phone is refused; a direct retry POST makes no call.
-    response = billing.post(edit, form_data(phone="555-0132", city="Elsewhere"), follow=True)
+    # A save that keeps the bad phone is refused; a direct retry POST makes no call.
+    response = billing.post(path, billing_data(phone="555-0132", city="Elsewhere"), follow=True)
     assert PHONE_MESSAGE in response.content.decode()
-    response = billing.post(retry, follow=True)
+    response = billing.post(path, billing_data("retry"), follow=True)
     assert "Fix the phone number first." in response.content.decode()
-    operator.refresh_from_db()
-    assert (operator.phone, operator.city) == ("555-0132", "Testville")
-    assert operator.sync_status == SyncStatus.FAILED
+    row = billing_of(lease)
+    assert (row.phone, row.city) == ("555-0132", "Testville")
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.FAILED
     assert fake.calls == []
 
     # Fixed: saved as digits, the retry button returns, and the retry links the customer.
-    billing.post(edit, form_data(phone="(415) 555-0132"))
-    operator.refresh_from_db()
-    assert operator.phone == "4155550132"
-    page = billing.get(detail(operator)).content.decode()
+    billing.post(path, billing_data(phone="(415) 555-0132"))
+    assert billing_of(lease).phone == "4155550132"
+    page = billing.get(path).content.decode()
     # The last request's outcome still names the phone (PLAN-010 D3); the prompt is gone.
-    assert 'id="fix-phone"' not in page
+    assert 'id="billing-fix-phone"' not in page
     assert ">Try again</button>" in page
-    billing.post(retry)
-    operator.refresh_from_db()
-    assert operator.sync_status == SyncStatus.LINKED
+    billing.post(path, billing_data("retry"))
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
     [(_, (customer,))] = [call for call in fake.calls if call[0] == "create_customer"]
     assert customer.phone == "4155550132"  # type: ignore[attr-defined]
 
 
-def test_the_edit_of_a_linked_operator_with_a_bad_phone_is_refused(
+def test_the_edit_of_an_operator_or_a_linked_lease_with_a_bad_phone_is_refused(
     billing: Client, fake: FakeProvider
 ) -> None:
     billing.post(NEW, form_data())
     operator = Operator.objects.get()
-    assert operator.sync_status == SyncStatus.LINKED
     Operator.objects.filter(pk=operator.pk).update(phone="555-0132")
-    calls = len(fake.calls)
 
     response = billing.post(
         f"{detail(operator)}edit/", form_data(phone="555-0132", city="Elsewhere"), follow=True
@@ -925,102 +1127,118 @@ def test_the_edit_of_a_linked_operator_with_a_bad_phone_is_refused(
     assert PHONE_MESSAGE in response.content.decode()
     operator.refresh_from_db()
     assert operator.city == "Testville"
-    assert len(fake.calls) == calls
+
+    lease = linked_through_the_form(billing, fake, operator)
+    LeaseBilling.objects.filter(lease=lease).update(phone="555-0132")
+    response = billing.post(
+        billing_url(lease), billing_data(phone="555-0132", city="Elsewhere"), follow=True
+    )
+    assert PHONE_MESSAGE in response.content.decode()
+    assert billing_of(lease).city == "Testville"
+    assert fake.calls == []
 
 
-# --- PLAN-006c: the edit of a linked operator updates the provider customer ------------------
+# --- PLAN-006c: an edit of a linked lease's billing updates the provider customer -----------
 
 
-def linked_through_the_form(billing: Client, fake: FakeProvider) -> Operator:
-    billing.post(NEW, form_data())
-    operator = Operator.objects.get()
-    assert operator.sync_status == SyncStatus.LINKED
+def linked_through_the_form(
+    billing: Client, fake: FakeProvider, operator: Operator | None = None
+) -> Lease:
+    """A lease linked by saving its billing details (the queued sync creates the
+    customer); the fake's call log cleared."""
+    lease = lease_of(operator or new_operator(email=None), email=None)
+    billing.post(billing_url(lease), billing_data())
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
     fake.calls.clear()
-    return operator
+    return lease
 
 
 def test_006c_a_phone_edit_updates_the_customer_and_the_page_says_when(
     billing: Client, fake: FakeProvider
 ) -> None:
-    operator = linked_through_the_form(billing, fake)
-    page = billing.get(detail(operator)).content.decode()
+    lease = linked_through_the_form(billing, fake)
+    page = billing.get(billing_url(lease)).content.decode()
     assert "Updated from Stax" not in page
 
-    response = billing.post(
-        f"{detail(operator)}edit/", form_data(phone="(415) 555-0132"), follow=True
-    )
+    response = billing.post(billing_url(lease), billing_data(phone="(415) 555-0132"), follow=True)
 
     page = response.content.decode()
-    assert response.redirect_chain[-1][0] == detail(operator)
+    assert response.redirect_chain[-1][0] == billing_url(lease)
     assert call_names(fake) == ["update_customer", "list_payment_methods"]
     [(_, (_, sent)), _] = fake.calls
     assert sent.phone == "4155550132"  # type: ignore[attr-defined]
     assert "Updated the customer in Stax." in page
-    assert 'id="provider-updated"' in page and "Updated from Stax " in page
-    operator.refresh_from_db()
-    assert operator.sync_status == SyncStatus.LINKED
+    assert 'id="billing-provider-updated"' in page and "Updated from Stax " in page
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
 
 
 def test_006c_a_rejected_update_shows_the_failure_and_the_retry_updates(
     billing: Client, fake: FakeProvider
 ) -> None:
-    operator = linked_through_the_form(billing, fake)
+    lease = linked_through_the_form(billing, fake)
     fake.fail_next(
         "update_customer", ProviderRejected(422, "CANARY-provider-text", error_fields=("phone",))
     )
 
-    response = billing.post(
-        f"{detail(operator)}edit/", form_data(phone="(415) 555-0132"), follow=True
-    )
+    response = billing.post(billing_url(lease), billing_data(phone="(415) 555-0132"), follow=True)
 
     page = response.content.decode()
     assert "Saved here. Stax did not accept the update: Rejected. Retry when ready." in page
     assert "ProviderRejected" not in page
-    assert 'id="sync-failure"' in page and "Fields Stax rejected: phone" in page
+    assert 'id="billing-sync-failure"' in page and "Fields Stax rejected: phone" in page
     assert "Retry available in " in page and ">Try again</button>" not in page
     assert "Updated from Stax" not in page
     assert not has_token(page, "CANARY")
-    operator.refresh_from_db()
-    assert (operator.phone, operator.sync_status) == ("4155550132", SyncStatus.FAILED)
+    lease.refresh_from_db()
+    assert (billing_of(lease).phone, lease.sync_status) == ("4155550132", SyncStatus.FAILED)
 
-    backdate_attempt(operator)
-    assert ">Try again</button>" in billing.get(detail(operator)).content.decode()
-    retried = billing.post(f"{detail(operator)}retry-sync/", follow=True)
+    backdate_attempt(lease)
+    assert ">Try again</button>" in billing.get(billing_url(lease)).content.decode()
+    retried = billing.post(billing_url(lease), billing_data("retry"), follow=True)
 
     page = retried.content.decode()
     assert call_names(fake) == ["update_customer", "update_customer", "list_payment_methods"]
     assert "Updated the customer in Stax." in page
     assert "Updated from Stax " in page and ">Try again</button>" not in page
-    operator.refresh_from_db()
-    assert operator.sync_status == SyncStatus.LINKED
+    lease.refresh_from_db()
+    assert lease.sync_status == SyncStatus.LINKED
 
 
-def test_006c_a_notes_edit_makes_no_call_and_keeps_the_status(
+def test_006c_a_notes_or_address_edit_makes_no_call_and_keeps_the_status(
     billing: Client, fake: FakeProvider
 ) -> None:
-    operator = linked_through_the_form(billing, fake)
+    lease = linked_through_the_form(billing, fake)
+    assert lease.operator is not None
 
-    response = billing.post(f"{detail(operator)}edit/", form_data(notes="Pays early"), follow=True)
+    response = billing.post(
+        f"{detail(lease.operator)}edit/", form_data(email="", notes="Pays early"), follow=True
+    )
+    assert "Updated the customer" not in response.content.decode()
+    response = billing.post(billing_url(lease), billing_data(city="Elsewhere"), follow=True)
+    assert "Updated the customer" not in response.content.decode()
 
     assert fake.calls == []
-    assert "Updated the customer" not in response.content.decode()
-    operator.refresh_from_db()
-    assert (operator.notes, operator.sync_status) == ("Pays early", SyncStatus.LINKED)
+    lease.operator.refresh_from_db()
+    lease.refresh_from_db()
+    assert (lease.operator.notes, billing_of(lease).city) == ("Pays early", "Elsewhere")
+    assert lease.sync_status == SyncStatus.LINKED
 
 
-def test_006c_removing_the_email_of_a_linked_operator_updates_and_stays_linked(
+def test_006c_removing_the_email_of_a_linked_lease_updates_and_stays_linked(
     billing: Client, fake: FakeProvider
 ) -> None:
-    operator = linked_through_the_form(billing, fake)
+    lease = linked_through_the_form(billing, fake)
 
-    response = billing.post(f"{detail(operator)}edit/", form_data(email=""), follow=True)
+    response = billing.post(billing_url(lease), billing_data(email=""), follow=True)
 
     assert call_names(fake) == ["update_customer", "list_payment_methods"]
     [(_, (_, sent)), _] = fake.calls
     assert sent.operator_email == ""  # type: ignore[attr-defined]
     assert "Updated the customer in Stax." in response.content.decode()
-    operator.refresh_from_db()
-    assert (operator.email, operator.sync_status) == (None, SyncStatus.LINKED)
+    lease.refresh_from_db()
+    assert (billing_of(lease).email, lease.sync_status) == ("", SyncStatus.LINKED)
 
 
 # --- PLAN-012a D3: SMS phone and consent times ---------------------------------------------
@@ -1045,7 +1263,8 @@ def test_the_form_shows_the_sms_phone_and_consent_fields(billing: Client) -> Non
 def test_billing_saves_an_sms_phone_and_two_consent_times_without_a_provider_call(
     billing: Client, fake: FakeProvider
 ) -> None:
-    operator = linked_through_the_form(billing, fake)
+    billing.post(NEW, form_data())
+    operator = Operator.objects.get()
     sms_at = (timezone.now() - timedelta(days=2)).replace(microsecond=0)
     email_at = timezone.now().replace(microsecond=0)
 
@@ -1060,14 +1279,14 @@ def test_billing_saves_an_sms_phone_and_two_consent_times_without_a_provider_cal
     )
 
     assert response.redirect_chain[-1][0] == detail(operator)
-    assert fake.calls == []  # not part of the provider payload
+    assert fake.calls == []  # not part of any provider payload
     operator.refresh_from_db()
     assert (operator.sms_phone, operator.sms_consent_at, operator.email_consent_at) == (
         "+14045551234",
         sms_at,
         email_at,
     )
-    assert operator.sync_status == SyncStatus.LINKED
+    assert operator.sync_status == SyncStatus.NOT_APPLICABLE
     page = response.content.decode()
     # Shown as "(404) 555-1234" (PLAN-012f-c D9); stored as typed (above).
     assert '<dd id="sms-phone">(404) 555-1234</dd>' in page

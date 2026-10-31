@@ -18,6 +18,7 @@ from ledger.models import AuditLog, InstallmentPlan, OneOffCharge, RentCharge, R
 from payments.fake import FakeProvider
 from payments.models import Job
 from tests.receivables_helpers import a_lease, a_one_off_charge, a_rent_charge, a_store, an_operator
+from tests.test_lease_services import bill_lease
 from tests.test_one_off_charges import an_operator as a_linked_operator
 from tests.test_operator_views import client_for
 from tests.text_helpers import has_token
@@ -147,7 +148,8 @@ def test_a_good_preview_sums_to_the_balance_marks_the_cent_and_writes_nothing(
     provider = FakeProvider()
     monkeypatch.setattr("payments.get_provider", lambda: provider)
     operator = a_linked_operator(provider)
-    lease = a_lease(a_store(), operator)
+    # PLAN-014 C3: a further lease of the operator shares its first lease's account.
+    lease = bill_lease(a_lease(a_store(), operator))
     charge = a_one_off_charge(
         operator, "1000.00", date(2026, 9, 20), lease=lease, collection="email"
     )

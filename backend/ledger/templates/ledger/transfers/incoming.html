@@ -28,7 +28,8 @@
     {% endresponsive_table %}
     <p class="table-total" id="setup-total">Setup charges: <span class="js-total-out" data-total-for="setup-rows">{{ form.setup_total|money }}</span></p>
     {% endif %}
+    {% include "ledger/leases/_billing_step.html" with in_wizard=True %}
   </form>
 {% endblock %}
 {% block step_primary %}<button class="btn btn-primary" type="submit" form="transfer-incoming">Save and continue →</button>{% endblock %}
-{% block step_scripts %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/table_total.js' %}" defer></script>{% endblock %}
+{% block step_scripts %}<script src="{% static 'ledger/shown_when.js' %}" defer></script><script src="{% static 'ledger/table_total.js' %}" defer></script><script src="{% static 'ledger/leases_billing.js' %}" defer></script>{% endblock %}

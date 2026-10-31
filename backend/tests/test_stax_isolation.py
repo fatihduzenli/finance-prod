@@ -41,6 +41,14 @@ ALLOWED: dict[str, str] = {
     # two hold its first value (the seed, and the fallback when the row is missing).
     "ledger/company_defaults.py": "the company settings row's seed values (PLAN-012c D2)",
     "ledger/migrations/0045_company_settings.py": "seeds the company settings row (PLAN-012c D2)",
+    # PLAN-014 C7: the bank-entry page is the one page that runs the processor's own script
+    # (its hosted bank-account fields); the template and its script name Stax.js.
+    "ledger/templates/ledger/leases/bank_entry.html": (
+        "the bank-entry page loads Stax.js, the processor's hosted fields (PLAN-014 C7)"
+    ),
+    "ledger/static/ledger/bank_entry.js": (
+        "runs Stax.js's hosted bank-account fields on the bank-entry page (PLAN-014 C7)"
+    ),
 }
 #: In these files the only permitted mention is the quoted payment_channel value.
 CHANNEL_VALUE_ONLY = {"ledger/models.py", "ledger/migrations/0001_initial.py"}

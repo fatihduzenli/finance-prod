@@ -15,8 +15,8 @@ from typing import Any
 from django.utils import timezone
 
 import payments
+from payments.lease_sync import PROVIDER_KEY
 from payments.models import Deposit, WebhookOutcome
-from payments.operator_sync import PROVIDER_KEY
 from payments.provider import DateRange, DepositRecord, mask_identifier
 from payments.webhooks.events import ignored
 from payments.webhooks.handlers.common import (

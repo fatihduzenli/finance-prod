@@ -145,7 +145,7 @@ from ledger.services.leases import (
 )
 from ledger.validators import validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_sentence
-from payments import invoice_sync, offline_marking, operator_sync
+from payments import invoice_sync, lease_sync, offline_marking
 from payments.errors import ProviderError
 from payments.health import provider_health
 from payments.models import ExternalRef
@@ -1081,7 +1081,7 @@ def match_schedule_invoices(*, actor: User | None) -> MatchReport:
                 None,
                 {
                     "schedule": mask_identifier(ref),
-                    "failure": operator_sync.failure_name(error),
+                    "failure": lease_sync.failure_name(error),
                 },
             )
             return report
@@ -1691,7 +1691,7 @@ def charge_retry_wait(
 def retry_wait_after(event: AuditLog, now: datetime | None = None) -> int:
     """Whole seconds until a retry after the failure ``event`` is allowed (0: now)."""
     elapsed = ((now or timezone.now()) - event.at).total_seconds()
-    lock = operator_sync.RETRY_LOCK_SECONDS
+    lock = lease_sync.RETRY_LOCK_SECONDS
     if elapsed >= lock:
         return 0
     return min(lock, max(1, math.ceil(lock - elapsed)))
@@ -1832,7 +1832,7 @@ def _mark(
             wait = retry_wait_after(last)
             if wait:
                 return MarkResult(
-                    MarkAction.RETRY_TOO_SOON, operator_sync.retry_wait_message(wait), wait
+                    MarkAction.RETRY_TOO_SOON, lease_sync.retry_wait_message(wait), wait
                 )
             payment_id = uuid.UUID(str(last.after["payment"]))
             previous_stage = str(last.after.get("stage", ""))
@@ -1883,8 +1883,8 @@ def _mark(
                 stage = STAGE_REREAD
                 record = provider.get_invoice(ref)
         except ProviderError as error:
-            failure = operator_sync.failure_name(error)
-            fields = operator_sync.failure_fields(error)
+            failure = lease_sync.failure_name(error)
+            fields = lease_sync.failure_fields(error)
             template = (
                 offline_marking.REREAD_FAILED
                 if stage == STAGE_REREAD

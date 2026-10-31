@@ -85,7 +85,7 @@ from payments.webhooks.handlers.common import (
     fetch,
     json_summary,
 )
-from payments.webhooks.handlers.invoice import customer_operator, sync_invoice, usable_total
+from payments.webhooks.handlers.invoice import customer_lease, sync_invoice, usable_total
 
 SETTLED_EVENT = "update_transaction_settled"
 METHOD_CARD = "card"
@@ -135,8 +135,8 @@ def apply(record: TransactionRecord, *, settle: bool, parent_lookup: bool = True
     if invoice_id:
         _, invoice = sync_invoice(invoice_id)
     if invoice is not None and record.customer_external_id:
-        operator = customer_operator(record.customer_external_id)
-        if operator is None or operator.pk != invoice.operator_id:
+        lease = customer_lease(record.customer_external_id)
+        if lease is None or lease.operator_id != invoice.operator_id:
             return OTHER_OPERATOR
     payment = local_payment(record.external_id)
     if payment is None and parent is not None:

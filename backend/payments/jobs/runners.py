@@ -7,20 +7,34 @@ sentence (with the failure in words; copy list §4.1: codes are never shown, so 
 class and the rejected key names stay in the failure's audit row, on the operator row or
 on the event row). Nothing from a provider response reaches ``text``.
 
-A successful operator sync or link queues a read of the operator's payment methods
-(:func:`payments.jobs.refresh_methods`) when the operator has a customer reference, so
-the enrolment page usually has a recent list.
+A successful lease sync or link (PLAN-014 C3: the processor customer is per lease) queues
+a read of the lease's payment methods (:func:`payments.jobs.refresh_methods`) when the lease
+has a customer reference, so the enrolment page usually has a recent list.
+
+The lease kinds replaced the operator kinds (``operator_sync``, ``operator_retry``,
+``operator_link``, ``operator_methods_refresh``; payments migration 0019 renamed the stored
+values and the rows). A row of these kinds that names an operator (``entity_type =
+"operator"``) was queued before ledger migration 0059 moved the customers to the leases: it
+is run as a no-op, logged as a warning, and finishes ``done`` with
+:data:`RETIRED_OPERATOR_JOB` (nothing is sent).
+
+The bank method attach of the hosted fields (``lease_method_attach``, PLAN-014 C7) verifies
+the posted payment-method id against the lease's own customer before linking it
+(:func:`ledger.services.leases.attach_bank_method`). The switch to the lease's own account
+(``lease_account_switch``, PLAN-014 C9) runs :func:`ledger.services.leases.switch_to_own_account`
+with the move key in ``params``.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 
 import payments
-from ledger.models import OneOffCharge, Operator, SyncFailure
+from ledger.models import Lease, OneOffCharge, SyncFailure
 from ledger.services import (
     calendar,
     disputes,
@@ -35,7 +49,8 @@ from ledger.services import (
 from ledger.services.leases import AutopayOutcome, MethodsRefresh
 from ledger.services.rent_run import MarkAction, MarkResult, MatchAction, MatchReport
 from ledger.wording import provider_sentence, with_provider
-from payments import jobs, one_off_invoices, operator_sync, reconciliation
+from payments import jobs, lease_sync, one_off_invoices, reconciliation
+from payments.lease_sync import Action, SyncOutcome
 from payments.models import (
     Job,
     JobEntity,
@@ -46,13 +61,16 @@ from payments.models import (
     WebhookEvent,
     WebhookOutcome,
 )
-from payments.operator_sync import Action, SyncOutcome
 from payments.webhooks import processor
 
 Result = tuple[bool, str]
 
+logger = logging.getLogger(__name__)
+
 #: The sentence of a sync that had nothing to send.
-NO_CALL = "Nothing to send: the operator needs no sync now."
+NO_CALL = "Nothing to send: the lease needs no sync now."
+#: The sentence of a job of a retired operator kind (queued before ledger migration 0059).
+RETIRED_OPERATOR_JOB = "Nothing was sent: the processor customer now belongs to the lease."
 #: The sentence of a marking that had nothing to do.
 NO_INVOICE = provider_sentence("The charge has no {provider} invoice to mark.")
 #: The name space of the replay key of a mark queued by a successful create (PLAN-012e-2).
@@ -86,16 +104,26 @@ def _sync(job: Job, outcome: SyncOutcome) -> Result:
         _refresh_methods_after(job)
         return ok, text
     # A failed create, link or update keeps the class and the rejected key names on the
-    # operator row and in its ``operator.sync_failed`` / update audit row.
+    # lease row and in its ``lease.sync_failed`` / update audit row.
     return ok, _in_words(text, outcome.failure)
 
 
 def _refresh_methods_after(job: Job) -> None:
-    operator = Operator.objects.filter(pk=job.entity_id).first()
-    if operator is not None and operator_sync.current_refs(operator).get(
-        operator_sync.KIND_CUSTOMER
-    ):
-        jobs.refresh_methods(operator, job.requested_by)
+    if job.params.get("own_customer") is True:
+        # A sharing lease's new own customer has no method yet, and the methods the lease
+        # bills with are the shared account's (PLAN-014 C9): nothing to read.
+        return
+    lease = Lease.objects.filter(pk=job.entity_id).first()
+    if lease is not None and lease_sync.current_refs(lease).get(lease_sync.KIND_CUSTOMER):
+        jobs.refresh_methods(lease, job.requested_by)
+
+
+def _retired_operator_job(job: Job) -> Result | None:
+    """The no-op of a job of a retired operator kind (see the module docstring)."""
+    if job.entity_type != JobEntity.OPERATOR:
+        return None
+    logger.warning("Job %s of a retired operator kind run as a no-op", job.kind)
+    return True, RETIRED_OPERATOR_JOB
 
 
 def _autopay(outcome: AutopayOutcome) -> Result:
@@ -110,28 +138,41 @@ def _refund(outcome: refunds.Outcome) -> Result:
     return outcome.ok, outcome.message
 
 
-def operator_sync_job(job: Job) -> Result:
+def lease_sync_job(job: Job) -> Result:
+    retired = _retired_operator_job(job)
+    if retired is not None:
+        return retired
     return _sync(
         job,
-        operator_sync.sync_operator(
-            job.entity_id, provider=payments.get_provider(), actor=job.requested_by
+        lease_sync.sync_lease(
+            job.entity_id,
+            provider=payments.get_provider(),
+            actor=job.requested_by,
+            # PLAN-014 C9: create_lease_customers asks for a sharing lease's own customer.
+            own_customer=job.params.get("own_customer") is True,
         ),
     )
 
 
-def operator_retry_job(job: Job) -> Result:
+def lease_retry_job(job: Job) -> Result:
+    retired = _retired_operator_job(job)
+    if retired is not None:
+        return retired
     return _sync(
         job,
-        operator_sync.sync_operator(
+        lease_sync.sync_lease(
             job.entity_id, provider=payments.get_provider(), actor=job.requested_by, retry=True
         ),
     )
 
 
-def operator_link_job(job: Job) -> Result:
+def lease_link_job(job: Job) -> Result:
+    retired = _retired_operator_job(job)
+    if retired is not None:
+        return retired
     return _sync(
         job,
-        operator_sync.link_operator(
+        lease_sync.link_lease(
             job.entity_id,
             customer_external_id=str(job.params["customer_id"]),
             payment_method_external_id=str(job.params["payment_method_id"]),
@@ -325,8 +366,30 @@ def _methods(outcome: MethodsRefresh) -> Result:
     return outcome.ok, _in_words(text, outcome.failure)
 
 
-def operator_methods_refresh_job(job: Job) -> Result:
+def lease_methods_refresh_job(job: Job) -> Result:
+    retired = _retired_operator_job(job)
+    if retired is not None:
+        return retired
     return _methods(leases.refresh_payment_methods(job.entity_id))
+
+
+def lease_method_attach_job(job: Job) -> Result:
+    """PLAN-014 C7: verify and link the bank method the hosted fields created."""
+    outcome = leases.attach_bank_method(
+        job.entity_id, str(job.params.get("payment_method_id", "")), actor=job.requested_by
+    )
+    return outcome.ok, outcome.message
+
+
+def lease_account_switch_job(job: Job) -> Result:
+    """PLAN-014 C9: move a sharing lease to its own customer's bank method; the move key the
+    view queued keeps a replay of this job on the same autopay move."""
+    outcome = leases.switch_to_own_account(
+        job.entity_id,
+        move_key=uuid.UUID(str(job.params.get("move_key", ""))),
+        actor=job.requested_by,
+    )
+    return outcome.ok, outcome.message
 
 
 def _line(text: str) -> str:
@@ -429,9 +492,9 @@ def lease_end_documents_job(job: Job) -> Result:
 
 
 RUNNERS: dict[str, Callable[[Job], Result]] = {
-    JobKind.OPERATOR_SYNC: operator_sync_job,
-    JobKind.OPERATOR_RETRY: operator_retry_job,
-    JobKind.OPERATOR_LINK: operator_link_job,
+    JobKind.LEASE_SYNC: lease_sync_job,
+    JobKind.LEASE_RETRY: lease_retry_job,
+    JobKind.LEASE_LINK: lease_link_job,
     JobKind.AUTOPAY_ENABLE: autopay_enable_job,
     JobKind.AUTOPAY_PAUSE: autopay_pause_job,
     JobKind.AUTOPAY_RESUME: autopay_resume_job,
@@ -439,7 +502,7 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.PAYMENT_RETRY_MARK: payment_retry_mark_job,
     JobKind.PAYMENT_REFUND: payment_refund_job,
     JobKind.PAYMENT_VOID: payment_void_job,
-    JobKind.OPERATOR_METHODS_REFRESH: operator_methods_refresh_job,
+    JobKind.LEASE_METHODS_REFRESH: lease_methods_refresh_job,
     JobKind.RUN_MATCH: run_match_job,
     JobKind.WEBHOOK_REPLAY: webhook_replay_job,
     JobKind.RECONCILE_RUN: reconcile_run_job,
@@ -457,4 +520,6 @@ RUNNERS: dict[str, Callable[[Job], Result]] = {
     JobKind.DISPUTE_EVIDENCE_UPLOAD: dispute_evidence_upload_job,
     JobKind.LEASE_END_DOCUMENTS: lease_end_documents_job,
     JobKind.AUTOPAY_STOP: autopay_stop_job,
+    JobKind.LEASE_METHOD_ATTACH: lease_method_attach_job,
+    JobKind.LEASE_ACCOUNT_SWITCH: lease_account_switch_job,
 }

@@ -158,15 +158,11 @@ HEADERS: frozenset[str] = frozenset(
         "Paid (USD)",
         "Balance (USD)",
         # Operators
-        "Legal name",
-        "Company",
         "Email",
         "Phone",
         "SMS phone",
         "SMS consent given on",
         "E-mail consent given on",
-        "Provider link",
-        "Enrolment",
         "Needs review",
         "Archived on",
         # Stores

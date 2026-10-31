@@ -40,6 +40,10 @@ fake = builder_tests.fake
 worker = builder_tests.worker
 
 
+#: The move-in lease of the never-billed-twice cases: starts on the 13th, paid by wire.
+MOVE_IN = {"payment_channel": "wire", "started_on": date(2026, 10, 13), "debit_day": 1}
+
+
 def _rent_line(lease: Lease, month: date = OCTOBER, amount: str | None = None) -> LineInput:
     return LineInput(
         "Rent",
@@ -124,11 +128,10 @@ def test_two_rent_lines_for_one_month_are_refused_however_they_are_posted(
 def test_the_invoices_rent_charge_is_never_billed_or_paid_twice_by_the_run(
     fake: FakeProvider, worker: None
 ) -> None:
-    operator = an_operator(fake)  # no other lease: the run sees this one only
-    # The lease starts on the 13th; the first rent is invoiced before the start.
-    lease = make_lease(
-        operator=operator, payment_channel="wire", started_on=date(2026, 10, 13), debit_day=1
-    )
+    # The lease starts on the 13th; the first rent is invoiced before the start. It is the
+    # operator's only lease (PLAN-014 C3: it holds the provider account): the run sees it only.
+    operator = an_operator(fake, account=MOVE_IN)
+    lease = Lease.objects.get(operator=operator)
     made = _draft(operator, lease, [_rent_line(lease)])
     assert made.ok and made.draft is not None, made.message
     [draft_line] = InvoiceDraftLine.objects.filter(draft=made.draft)
@@ -176,10 +179,10 @@ def test_the_invoices_rent_charge_is_never_billed_or_paid_twice_by_the_run(
 def test_a_move_in_invoice_counts_each_kind_once(fake: FakeProvider, worker: None) -> None:
     from tests.test_setup_charges import fee
 
-    operator = an_operator(fake)  # no other lease: the run sees this one only
-    lease = make_lease(
-        operator=operator, payment_channel="wire", started_on=date(2026, 10, 13), debit_day=1
-    )
+    # The operator's only lease (PLAN-014 C3: it holds the provider account): the run sees
+    # this one only.
+    operator = an_operator(fake, account=MOVE_IN)
+    lease = Lease.objects.get(operator=operator)
     deposit_type = fee("deposit", name="Security deposit", refundable=True)
     sign_fee = fee("sign_fee")
     made = _draft(

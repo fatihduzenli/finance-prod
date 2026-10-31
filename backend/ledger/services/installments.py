@@ -134,6 +134,7 @@ from ledger.models import (
     InstallmentPlanStatus,
     Invoice,
     InvoiceStatus,
+    Lease,
     OneOffCategory,
     OneOffCharge,
     OneOffChargeStatus,
@@ -777,18 +778,20 @@ def split_refusal(parent: Parent, today: date | None = None) -> str:
         return PENDING
     if jobs.is_active(jobs.latest_for(parent)):
         return REQUEST_WAITING
-    return _collection_refusal(collection_of(parent), operator)
+    return _collection_refusal(collection_of(parent), leases.billing_lease(parent))
 
 
-def _collection_refusal(collection: str, operator: Operator) -> str:
+def _collection_refusal(collection: str, lease: Lease | None) -> str:
+    """Why the installments cannot be collected so: the provider collects through the
+    account of the lease that bills the parent (PLAN-014 C5)."""
     if collection == InstallmentCollection.MANUAL:
         return ""
-    if not leases.customer_ref(operator):
+    if lease is None:
+        return leases.NO_LEASE_BILLING
+    if not leases.customer_ref(lease):
         label = InstallmentCollection(collection).label
         return NO_CUSTOMER.format(collection=str(label).lower())
-    if collection == InstallmentCollection.AUTOPAY_DUE and not leases.linked_payment_method(
-        operator
-    ):
+    if collection == InstallmentCollection.AUTOPAY_DUE and not leases.linked_payment_method(lease):
         return NO_BANK_METHOD
     return ""
 
@@ -1018,7 +1021,7 @@ def create_plan(
             reason = split_refusal(locked, day)
             operator = operator_of(locked)
             if not reason and collection is not None and operator is not None:
-                reason = _collection_refusal(collection, operator)
+                reason = _collection_refusal(collection, leases.billing_lease(locked))
             if reason:
                 return Outcome(False, reason)
             refused = lines_refusal(lines, balance_of(locked), count, day)

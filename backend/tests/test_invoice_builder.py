@@ -40,6 +40,7 @@ from ledger.models import (
     InvoiceLineKind,
     InvoiceStatus,
     Lease,
+    LeaseBilling,
     OneOffCategory,
     OneOffCharge,
     OneOffChargeStatus,
@@ -1040,9 +1041,14 @@ def test_the_preview_and_the_print_view_render_for_a_viewer(fake: FakeProvider) 
     preview = viewer.get(f"/invoices/drafts/{draft.pk}/preview/")
     printed = viewer.get(f"/invoices/drafts/{draft.pk}/print/")
     assert (preview.status_code, printed.status_code) == (200, 200)
+    # PLAN-014 C6: "Billed to" is the operator's full name and the lease's billing e-mail.
+    billing_email = LeaseBilling.objects.get(lease=lease).email
+    assert billing_email
     for text in (preview.content.decode(), printed.content.decode()):
         assert draft.number in text and settings.COMPANY_NAME in text
         assert operator.display_name in text and lease.store.external_label in text
+        assert f'<span id="bill-to-name">{operator.display_name}</span>' in text
+        assert f'<span id="bill-to-email">{billing_email}</span>' in text
         assert has_token(text, "Poster") and "$99.99" in text and MEMO in text
         assert day_text(TODAY + timedelta(days=15)) in text
     page = printed.content.decode()
@@ -2023,12 +2029,14 @@ def test_the_run_and_the_catch_up_skip_a_month_billed_by_invoice(
     for that month."""
     operator, lease, lines = move_in(fake)
     sent(a_draft(operator, lease, lines))
-    before = RentCharge.objects.count()
+    # PLAN-014 C3: the operator's account lease (another store, from January) has its own
+    # charges caught up by the run; only this lease's are counted.
+    before = RentCharge.objects.filter(lease=lease).count()
     report = rent_run.create_charges(date(2026, 10, 14), actor=None)
-    assert not report.caught_up and not report.created
-    assert RentCharge.objects.count() == before == 1
+    assert [row for row in (*report.caught_up, *report.created) if row.lease_id == lease.pk] == []
+    assert RentCharge.objects.filter(lease=lease).count() == before == 1
     report = rent_run.create_charges(date(2026, 11, 1), actor=None)
-    assert [charge.period_month for charge in report.created] == [NOVEMBER]
+    assert [row.period_month for row in report.created if row.lease_id == lease.pk] == [NOVEMBER]
     assert the_rent(lease, NOVEMBER).billed_by_invoice_id is None
 
 

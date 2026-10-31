@@ -1,4 +1,4 @@
-{% comment %}The invoice as the operator reads it (PLAN-012 D7): the preview and the print view.{% endcomment %}
+{% comment %}The invoice as the operator reads it (PLAN-012 D7): the preview and the print view. "Billed to" (PLAN-014 C6) is ledger.services.invoice_builder.bill_to: the lease's company when it has one, the operator's full name under it, then the lease's billing address and e-mail.{% endcomment %}
 {% load components responsive money dates %}
 <section class="invoice-document" id="invoice-document">
   <header class="invoice-header">
@@ -12,10 +12,9 @@
   <div class="invoice-parties">
     <div id="invoice-operator">
       <h2>Billed to</h2>
-      <p>{{ preview.operator.display_name }}{% if preview.operator.legal_name %}<br>{{ preview.operator.legal_name }}{% endif %}{% if preview.operator.company %}<br>{{ preview.operator.company }}{% endif %}
-        {% if preview.operator.address_line1 %}<br>{{ preview.operator.address_line1 }}{% endif %}{% if preview.operator.address_line2 %}<br>{{ preview.operator.address_line2 }}{% endif %}
-        {% if preview.operator.city or preview.operator.state or preview.operator.postal_code %}<br>{{ preview.operator.city }}{% if preview.operator.city and preview.operator.state %}, {% endif %}{{ preview.operator.state }} {{ preview.operator.postal_code }}{% endif %}
-        {% if preview.operator.email %}<br>{{ preview.operator.email }}{% endif %}</p>
+      {% with bill=preview.bill_to %}<p>{% if bill.company %}<strong id="bill-to-company">{{ bill.company }}</strong><br>{% endif %}<span id="bill-to-name">{{ bill.name }}</span>
+        {% for line in bill.address_lines %}<br>{{ line }}{% endfor %}
+        {% if bill.email %}<br><span id="bill-to-email">{{ bill.email }}</span>{% endif %}</p>{% endwith %}
     </div>
     <div id="invoice-store">
       <h2>Store</h2>

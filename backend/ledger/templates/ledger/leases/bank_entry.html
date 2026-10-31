@@ -1,0 +1,33 @@
+{% extends "ledger/leases/detail.html" %}
+{% comment %}The bank-entry dialog (docs/qa/PLAN-014 C7; ledger.views.leases.lease_bank) over the lease page, the one template outside payments/ that names the processor's script: Stax.js (payments.stax.hosted, TODO-VERIFY-066) shows the account holder, routing and account fields in the processor's own frames and creates the bank method under the lease's customer; the page posts only the new payment_method_id to ledger:leases:bank_attach (Rule 1: this app renders no field for an account or routing number and never receives one). With Stax.js the page carries a Content-Security-Policy meta (scripts and frames from 'self' and the processor's host only; no inline script runs here). The fake hosted fields (STAX_PROVIDER=fake, local only) show one plain field, payment_method_id. Without hosted fields, or for a lease without its own customer, one sentence says why and no script is loaded.{% endcomment %}
+{% load static components %}
+{% block title %}Bank account: lease {{ lease.store.external_label }}{% endblock %}
+{% block head %}{% if bank_entry.csp %}<meta http-equiv="Content-Security-Policy" content="{{ bank_entry.csp }}">{% endif %}{% endblock %}
+{% block dialog %}{% dialog id="bank-entry-dialog" title=bank_entry.title size="sm" open=True return_url=bank_entry.return_url %}
+{% with config=bank_entry.config %}
+{% if not config %}
+  <p id="bank-entry-unavailable">{{ bank_entry.message }}</p>
+  <div class="dialog-foot"><a class="btn" id="bank-entry-back" href="{{ bank_entry.return_url }}">Back to the lease</a></div>
+{% elif config.script_url %}
+  <form method="post" action="{% url 'ledger:leases:bank_attach' pk=bank_entry.lease.pk %}" id="bank-entry-form" class="dialog-form" autocomplete="off">
+    {% csrf_token %}<input type="hidden" name="payment_method_id" id="bank-entry-method" value="">
+    <p class="muted">The bank account is entered in {{ company.provider_name }}'s own fields below and goes straight to {{ company.provider_name }}. This app receives only a reference to it.{% if bank_entry.replaces %} The new account replaces the one connected now.{% endif %}</p>
+    <div id="bank-entry-fields" data-token="{{ config.web_payments_token }}" data-customer="{{ config.customer_external_id }}">
+      <div id="bank-holder-field"></div>
+      <div id="bank-routing-field"></div>
+      <div id="bank-account-field"></div>
+    </div>
+    <p id="bank-entry-error" class="errorlist" role="alert" hidden>{{ company.provider_name }} could not take the bank account. Check it and try again.</p>
+    <div class="dialog-foot"><a class="btn" id="bank-entry-cancel" href="{{ bank_entry.return_url }}">Cancel</a><button class="btn btn-primary" type="submit" id="bank-entry-save" disabled>Save bank account</button></div>
+  </form>
+{% else %}
+  <form method="post" action="{% url 'ledger:leases:bank_attach' pk=bank_entry.lease.pk %}" id="bank-entry-form" class="dialog-form js-single-submit" autocomplete="off">
+    {% csrf_token %}
+    <p class="muted">Local test fields: enter the ID of a bank method the in-memory {{ company.provider_name }} holds for this lease's customer.</p>
+    <p><label for="bank-entry-method">Bank method ID</label><br><input type="text" name="payment_method_id" id="bank-entry-method" maxlength="255" required></p>
+    <div class="dialog-foot"><a class="btn" id="bank-entry-cancel" href="{{ bank_entry.return_url }}">Cancel</a><button class="btn btn-primary" type="submit" id="bank-entry-save">Save bank account</button></div>
+  </form>
+{% endif %}
+{% endwith %}
+{% enddialog %}{% endblock %}
+{% block scripts %}{% if bank_entry.config.script_url %}<script src="{{ bank_entry.config.script_url }}"></script><script src="{% static 'ledger/bank_entry.js' %}" defer></script>{% else %}{{ block.super }}{% endif %}{% endblock %}

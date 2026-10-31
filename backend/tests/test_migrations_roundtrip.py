@@ -75,9 +75,13 @@ GUARD_MODULES = (
     "ledger.migrations.0056_rent_charge_bank_debit",
     "ledger.migrations.0057_payment_void_fields",
     "ledger.migrations.0058_brands_and_store_notes",
+    "ledger.migrations.0059_lease_billing",
+    "ledger.migrations.0060_transfer_incoming_billing",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",
+    "payments.migrations.0019_lease_job_kinds",
+    "payments.migrations.0020_lease_account_switch",
 )
 
 
@@ -162,6 +166,8 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0016_lease_end_jobs",
                 "[ ] 0017_autopay_stop_job",
                 "[ ] 0018_copy_labels",
+                "[ ] 0019_lease_job_kinds",
+                "[ ] 0020_lease_account_switch",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):
@@ -368,13 +374,20 @@ def seed_before_the_rename() -> None:
     )
 
 
+#: Audit rows later migrations write on their own forward run, not part of the rename's
+#: rewrite: ledger 0059 (PLAN-014 C) logs one row per lease and per operator it leaves alone.
+LATER_MIGRATION_ACTIONS = ("lease_billing.migrated", "operator.refs_kept")
+
+
 def _audit_rows(database_url: str) -> list[tuple[object, ...]]:
     import psycopg
 
     with psycopg.connect(database_url) as scratch:
         return list(
             scratch.execute(
-                "SELECT actor_id, action, entity_type, before, after FROM audit_log ORDER BY id"
+                "SELECT actor_id, action, entity_type, before, after FROM audit_log "
+                "WHERE action <> ALL(%s) ORDER BY id",
+                [list(LATER_MIGRATION_ACTIONS)],
             )
         )
 

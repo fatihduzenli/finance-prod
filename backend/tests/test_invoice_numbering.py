@@ -12,7 +12,7 @@ from ledger.models import Invoice, Operator
 from ledger.services import numbering
 from payments.models import SyncState
 from tests.test_lease_services import _race
-from tests.test_operator_sync import requires_postgresql
+from tests.test_lease_sync import requires_postgresql
 
 pytestmark = pytest.mark.django_db
 

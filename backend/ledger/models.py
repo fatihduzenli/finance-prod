@@ -249,9 +249,9 @@ CONSENT_FIELDS: tuple[str, ...] = ("sms_consent_at", "email_consent_at")
 class Operator(GuardedModel):
     """The business that runs a store and pays its rent ("customer" in older prompts)."""
 
-    #: The stored, shown name. :meth:`save` derives it from the kind's name fields when
-    #: they are filled (PLAN-012f-b D9); a row without them (one made before the kind
-    #: existed) keeps the name it has.
+    #: The stored, shown name: the operator's Full name (PLAN-014 C1). :meth:`save` derives
+    #: it from the kind's name fields (PLAN-012f-b D9) only while it is empty; the forms
+    #: no longer write those fields, which stay as history.
     display_name = guarded_char(NAME_MAX_LENGTH)
     legal_name = guarded_char(NAME_MAX_LENGTH, blank=True)
     #: Existing operators are people until staff say otherwise (nothing guessed).
@@ -354,8 +354,9 @@ class Operator(GuardedModel):
         return " ".join(f"{self.first_name} {self.last_name}".split())
 
     def derive_display_name(self) -> None:
-        """Set ``display_name`` from the kind's name fields when they are filled."""
-        if name := self.kind_name():
+        """Set an empty ``display_name`` from the kind's name fields when they are filled
+        (PLAN-014 C1: a Full name staff typed is never replaced)."""
+        if not " ".join((self.display_name or "").split()) and (name := self.kind_name()):
             self.display_name = name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -434,6 +435,9 @@ class ReviewReason(models.TextChoices):
     DORMANT = "dormant", "Dormant"
     CLOSED = "closed", "Closed"
     UNKNOWN = "unknown", "Unknown"
+    #: PLAN-014 C8: the lease bills through another lease's processor customer since
+    #: ledger migration 0059 (``LeaseBilling.shares_account_of``) and needs its own.
+    OWN_CUSTOMER = "own_customer", "Own processor customer needed"
 
 
 class PaymentChannel(models.TextChoices):
@@ -461,6 +465,15 @@ class Lease(GuardedModel):
     #: PLAN-012e D2: the first rent charge of a lease that starts after the 1st is for
     #: the days used. Leases billed before the switch existed are never rewritten.
     prorate_first_month = models.BooleanField(default=True)
+    #: PLAN-014 C2: where the lease stands with the payment provider, whose customer is
+    #: now per lease (``payments.lease_sync``); the operator's columns of PLAN-006 D7 are
+    #: kept for history and no longer written.
+    sync_status = _choice(SyncStatus, default=SyncStatus.NOT_APPLICABLE)
+    sync_failure = _choice(SyncFailure, blank=True, default="")
+    #: Comma-separated key names of a ``ProviderRejected`` body, never values.
+    sync_failure_fields = free_text(default="")
+    sync_attempted_at = models.DateTimeField(null=True, blank=True)
+    creation_key = models.UUIDField(unique=True, null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -492,10 +505,65 @@ class Lease(GuardedModel):
             _valid_choice("leases", "collection_status", CollectionStatus),
             _valid_choice("leases", "review_reason", ReviewReason, blank=True),
             _valid_choice("leases", "payment_channel", PaymentChannel),
+            _valid_choice("leases", "sync_status", SyncStatus),
+            _valid_choice("leases", "sync_failure", SyncFailure, blank=True),
         ]
 
     def __str__(self) -> str:
         return f"Lease {self.pk}"
+
+
+class LeaseBilling(GuardedModel):
+    """The billing details of one lease (PLAN-014 C2): the company billed, the e-mail
+    receipts and messages go to, the phone and the address. Copied once from the operator
+    by ledger migration 0059, independent of it from then on.
+
+    The processor customer and its bank method are ``payments.ExternalRef`` rows of the
+    lease (``entity_type="lease"``); ``bank_last4`` is a cached copy of the linked
+    method's last four for lists and cards (Rule 1: never more). A lease that
+    ``shares_account_of`` another bills through that lease's customer and method and
+    holds no reference of its own (one hop; ``ledger.services.leases.customer_ref``).
+    """
+
+    lease = models.OneToOneField(Lease, on_delete=models.CASCADE, related_name="billing")
+    company_name = guarded_char(120, blank=True, default="")
+    email = models.EmailField(blank=True, default="", validators=[validate_no_payment_data])
+    phone = guarded_char(50, blank=True, default="")
+    address_line1 = guarded_char(NAME_MAX_LENGTH, blank=True, default="")
+    address_line2 = guarded_char(NAME_MAX_LENGTH, blank=True, default="")
+    city = guarded_char(100, blank=True, default="")
+    state = guarded_char(50, blank=True, default="")
+    postal_code = guarded_char(20, blank=True, default="")
+    bank_last4 = models.CharField(max_length=4, blank=True, default="")
+    shares_account_of = models.ForeignKey(
+        Lease,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="account_sharers",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "lease_billing"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(bank_last4="") | Q(bank_last4__regex=r"^[0-9]{4}$"),
+                name="lease_billing_last4_digits",
+            ),
+            models.CheckConstraint(
+                condition=Q(shares_account_of__isnull=True) | ~Q(shares_account_of=F("lease")),
+                name="lease_billing_not_self_shared",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Billing of lease {self.lease_id}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.email = (self.email or "").strip().lower()
+        super().save(*args, **kwargs)
 
 
 class RentSource(models.TextChoices):
@@ -2665,6 +2733,11 @@ class OutboundMessage(GuardedModel):
     operator = models.ForeignKey(
         Operator, on_delete=models.PROTECT, related_name="outbound_messages"
     )
+    #: PLAN-014 C5: the lease whose billing e-mail ``to_address`` is; null for a message
+    #: queued before it, or for a charge with no lease to bill from.
+    lease = models.ForeignKey(
+        Lease, on_delete=models.PROTECT, null=True, blank=True, related_name="outbound_messages"
+    )
     template = models.ForeignKey(MessageTemplate, on_delete=models.PROTECT, related_name="+")
     kind = _choice(MessageKind, default=MessageKind.LADDER)
     step = models.ForeignKey(
@@ -3115,7 +3188,9 @@ class LeaseTransfer(GuardedModel):
     The transfer wizard's state while a draft (one per store): the incoming operator and
     the incoming lease's terms (``incoming_*``), the deposit amount and the ticked setup
     items (``setup_lines``: ``[{"fee_type": <id>, "price": "<amount>"}]``, catalogue
-    order). Confirmed, it names the incoming lease and the draft it made. A lease-end
+    order) and the incoming lease's billing details (``incoming_billing``,
+    ``incoming_account``; PLAN-014 C4). Confirmed, it names the incoming lease and the draft
+    it made. A lease-end
     balance left on the outgoing operator needs an admin's written reason
     (``debt_override_*``, D14). Written only by :mod:`ledger.services.transfer`.
     """
@@ -3145,6 +3220,11 @@ class LeaseTransfer(GuardedModel):
     incoming_prorate_first_month = models.BooleanField(default=True)
     deposit_amount = MoneyField(null=True, blank=True)
     setup_lines = guarded_json(default=list, blank=True)
+    #: PLAN-014 C4: the incoming lease's billing details as typed (the ``LeaseBillingForm``
+    #: fields) and its bank-account choice (``later``, ``enter`` or ``same:<lease id>``),
+    #: written to the incoming lease's ``LeaseBilling`` on confirm.
+    incoming_billing = guarded_json(default=dict, blank=True)
+    incoming_account = guarded_char(64, blank=True, default="later")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )

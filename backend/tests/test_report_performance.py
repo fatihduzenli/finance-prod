@@ -257,7 +257,8 @@ def test_every_page_answers_under_two_seconds_on_volume(monkeypatch: pytest.Monk
         "revenue": ("/reports/revenue/", span, 31),
         "payments by method": ("/reports/payments-by-method/", span, 21),
         "deposits": ("/reports/deposits/", span, 21),
-        "statement": (f"/operators/{operator.pk}/statement/", span, 21),
+        # +1 since PLAN-014 C6: each store section's billing company.
+        "statement": (f"/operators/{operator.pk}/statement/", span, 22),
     }
     client, _ = client_for(Role.VIEWER)
     client.get("/reports/")  # warm the session and the template loaders
@@ -290,7 +291,11 @@ def test_the_company_settings_add_one_query_to_a_page(monkeypatch: pytest.Monkey
         "grid (500 x 24)": ("/grid/", span, 18 + 1 + 1),
         "revenue": ("/reports/revenue/", span, 29 + 1 + 1),
         "arrears": ("/arrears/", {}, 18 + 1 + 1),
-        "statement": (f"/operators/{operator.pk}/statement/", span, 19 + 1 + 1),
+        "statement": (
+            f"/operators/{operator.pk}/statement/",
+            span,
+            20 + 1 + 1,
+        ),  # +1 PLAN-014 C6: each store's billing company
     }
     client, _ = client_for(Role.VIEWER)
     client.get("/reports/")  # warm the session and the template loaders

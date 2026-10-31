@@ -76,7 +76,7 @@ from ledger.models import (
 from ledger.services import installments, one_off_charges, rent_run
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_sentence
-from payments import invoice_sync, operator_sync
+from payments import invoice_sync, lease_sync
 from payments.errors import ProviderError, ProviderUnavailable
 from payments.provider import TRANSACTION_REFUND, TransactionRecord, mask_identifier
 from payments.webhooks.handlers import transaction as transaction_handler
@@ -345,7 +345,7 @@ def refund_payment(
                 record = fetch(provider.get_transaction, refund_id)
             except ProviderError as error:
                 # The provider's answer names the refund: the row keeps its ID.
-                refetch_failure = operator_sync.failure_name(error)
+                refetch_failure = lease_sync.failure_name(error)
                 record = answer
         if record is not None and not _is_refund_of(record, reference):
             record = None
@@ -426,7 +426,7 @@ def void_payment(
         try:
             record = provider.get_transaction(reference)
         except ProviderError as error:
-            refetch_failure = operator_sync.failure_name(error)
+            refetch_failure = lease_sync.failure_name(error)
         transaction_handler.record_void(payment, record)
         # PLAN-012f-c D2: both voids read alike under the payment page's DETAILS.
         voided_at = timezone.now()
@@ -641,7 +641,7 @@ def _refresh_invoice(payment: Payment) -> tuple[dict[str, Any], str]:
     try:
         record = payments.get_provider().get_invoice(reference)
     except ProviderError as error:
-        return {}, operator_sync.failure_name(error)
+        return {}, lease_sync.failure_name(error)
     return invoice_sync.record_provider_state(payment.invoice_id, record), ""
 
 
@@ -655,8 +655,8 @@ def _failed(
     verb: str,
     noun: str,
 ) -> Outcome:
-    failure = operator_sync.failure_name(error)
-    fields = operator_sync.failure_fields(error)
+    failure = lease_sync.failure_name(error)
+    fields = lease_sync.failure_fields(error)
     _audit(
         actor,
         action,

@@ -444,25 +444,31 @@ def test_a_consent_posted_without_a_phone_or_email_is_saved_as_before(admin: Any
     assert row.sms_consent_at is not None and row.email_consent_at is None
 
 
-def test_the_provider_fields_show_only_for_an_operator_with_a_provider_customer() -> None:
-    viewer, _ = client_for(Role.VIEWER)
-    without = Operator.objects.create(display_name="Unlinked Co")
-    linked = Operator.objects.create(display_name="Linked Co", email="linked@example.com")
+def test_the_provider_fields_show_only_for_a_lease_with_a_provider_customer() -> None:
+    # PLAN-014 C3: the processor customer is the lease's; its fields are in the lease's Edit
+    # billing details dialog (billing), no longer on the operator page.
+    billing, _ = client_for(Role.BILLING)
+    without = a_lease(a_store("D8-P1"), an_operator("Unlinked Co"))
+    linked = a_lease(a_store("D8-P2"), an_operator("Linked Co"))
     ExternalRef.objects.create(
-        entity_type="operator",
+        entity_type="lease",
         entity_id=linked.pk,
         provider="stax_pay",
         external_kind="customer",
         external_id="cus-d8-linked",
     )
-    html = page(viewer, f"/operators/{without.pk}/")
-    assert 'id="sync-status"' in html
-    for marker in ('id="provider-customer"', 'id="provider-method"', 'id="provider-enrolment"'):
+    html = page(billing, f"/leases/{without.pk}/billing/")
+    assert 'id="billing-sync-status"' in html
+    for marker in ('id="billing-customer"', 'id="billing-method"'):
         assert marker not in html, marker
-    html = page(viewer, f"/operators/{linked.pk}/")
-    for marker in ('id="provider-customer"', 'id="provider-method"', 'id="provider-enrolment"'):
+    html = page(billing, f"/leases/{linked.pk}/billing/")
+    for marker in ('id="billing-customer"', 'id="billing-method"'):
         assert marker in html, marker
     assert "cus-d8-linked" not in html  # masked, as before
+    assert linked.operator is not None
+    html = page(billing, f"/operators/{linked.operator.pk}/")
+    for marker in ('id="sync-status"', 'id="provider-customer"', 'id="provider-method"'):
+        assert marker not in html, marker
 
 
 # --- The store page: lease actions on a vacant store (already) ------------------------------

@@ -1223,11 +1223,9 @@ def test_billing_links_edits_and_adds_through_the_pages() -> None:
     # PLAN-012e-2 D4: Add setup charge opens the invoice builder with the item on line 1;
     # sent by e-mail, the line is the setup charge.
     access = fee("access_fee")
-    operator_id = lease_of(charge).operator_id
-    assert operator_id is not None
     ExternalRef.objects.create(
-        entity_type="operator",
-        entity_id=operator_id,
+        entity_type="lease",
+        entity_id=lease_of(charge).pk,
         provider="stax_pay",
         external_kind="customer",
         external_id="cus-setup-builder",

@@ -35,6 +35,7 @@ from ledger.models import (
     InsuranceCharge,
     Invoice,
     Lease,
+    LeaseBilling,
     Operator,
     Payment,
     PaymentKind,
@@ -506,7 +507,7 @@ def test_a_transaction_without_an_invoice_is_recorded_unmatched(fake: FakeProvid
 
 def test_a_transaction_of_another_customer_is_not_linked(fake: FakeProvider) -> None:
     make_world(fake)
-    make_operator(email="other@example.com", customer=OTHER_CUSTOMER)
+    make_lease(operator=make_operator(email="other@example.com", customer=OTHER_CUSTOMER))
     provider_txn(fake, customer_external_id=OTHER_CUSTOMER)
     assert deliver("create_transaction", id=TXN) == ignored("customer mismatch")
     assert not Payment.objects.exists()
@@ -654,6 +655,7 @@ def test_an_invoice_total_that_differs_flags_the_charge(fake: FakeProvider) -> N
 
 def test_an_unknown_invoice_of_a_known_customer_is_created_unlinked(fake: FakeProvider) -> None:
     operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    make_lease(operator=operator)  # PLAN-014 C3: the customer is the lease's (no charge yet)
     provider_invoice(
         fake,
         "inv-new",
@@ -709,7 +711,7 @@ def test_a_schedule_invoice_naming_another_operators_customer_is_not_linked(
 ) -> None:
     row, refs = enrolled(fake)
     rent_run.create_charges(date(2026, 10, 15), actor=None)
-    make_operator(email="other@example.com", customer=OTHER_CUSTOMER)
+    make_lease(operator=make_operator(email="other@example.com", customer=OTHER_CUSTOMER))
     record = schedule_invoice(fake, refs[0])
     fake.invoices[record.external_id] = replace(record, customer_external_id=OTHER_CUSTOMER)
     assert deliver("create_invoice", id=record.external_id) == ignored("not matched")
@@ -931,7 +933,7 @@ def test_an_unpaid_or_partial_charge_is_a_candidate(fake: FakeProvider, status: 
 
 
 def test_zero_candidates_leaves_it_unlinked_with_the_count(fake: FakeProvider) -> None:
-    make_operator(email="ops@example.com", customer=CUSTOMER)
+    make_lease(operator=make_operator(email="ops@example.com", customer=CUSTOMER))  # no charge
     dashboard_invoice(fake)
     assert deliver("create_invoice", id=DASHBOARD) == "processed: unlinked (0 candidates)"
     assert Invoice.objects.get().rent_charge_id is None
@@ -987,7 +989,7 @@ def test_a_charge_with_an_invoice_or_no_balance_is_not_a_candidate(fake: FakePro
 
 
 def test_another_operators_charge_is_not_a_candidate(fake: FakeProvider) -> None:
-    make_operator(email="ops@example.com", customer=CUSTOMER)
+    make_lease(operator=make_operator(email="ops@example.com", customer=CUSTOMER))  # no charge
     other = make_operator(email="other@example.com", customer=OTHER_CUSTOMER)
     open_charge(other)
     dashboard_invoice(fake)
@@ -1009,6 +1011,7 @@ def test_an_invoice_naming_a_schedule_is_never_auto_linked(fake: FakeProvider) -
 
 def test_update_invoice_links_an_unlinked_invoice_once_a_charge_fits(fake: FakeProvider) -> None:
     operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    make_lease(operator=operator)  # holds the customer; no charge yet
     dashboard_invoice(fake)
     assert deliver("create_invoice", id=DASHBOARD) == "processed: unlinked (0 candidates)"
     charge = open_charge(operator)
@@ -1055,9 +1058,11 @@ def _dashboard_invoice_ids() -> list[uuid.UUID]:
 
 
 def _customer(lease: Lease) -> str:
-    assert lease.operator_id is not None
     return ExternalRef.objects.get(
-        entity_type="operator", entity_id=lease.operator_id, external_kind="customer"
+        entity_type="lease",
+        entity_id=lease.pk,
+        external_kind="customer",
+        superseded_at__isnull=True,
     ).external_id
 
 
@@ -1077,6 +1082,8 @@ def customer_record(email: str, **summary: Any) -> CustomerRecord:
 
 def test_a_customer_event_never_overwrites_the_operator(fake: FakeProvider) -> None:
     operator = make_operator(email="ops@example.com", customer=CUSTOMER)
+    lease = make_lease(operator=operator)
+    LeaseBilling.objects.filter(lease=lease).update(company_name="Northwind Stores LLC")
     fake.customers[CUSTOMER] = customer_record("OPS@example.com ", company="Someone Else LLC")
     assert deliver("update_customer", id=CUSTOMER) == "processed"
     after = Operator.objects.get()
@@ -1086,18 +1093,24 @@ def test_a_customer_event_never_overwrites_the_operator(fake: FakeProvider) -> N
         operator.company,
     )
     assert not after.needs_review
+    # PLAN-014 C3: the customer is the lease's; its billing details are never overwritten.
+    billing = LeaseBilling.objects.get(lease=lease)
+    assert (billing.company_name, billing.email) == ("Northwind Stores LLC", "ops@example.com")
+    assert not Lease.objects.get(pk=lease.pk).needs_review
     snapshot = ProviderSnapshot.objects.get()
     assert snapshot.payload["company"] == "Someone Else LLC"
 
 
-def test_a_different_email_flags_the_operator_with_the_message(fake: FakeProvider) -> None:
-    make_operator(email="ops@example.com", customer=CUSTOMER)
+def test_a_different_email_flags_the_lease_with_the_message(fake: FakeProvider) -> None:
+    lease = make_lease(operator=make_operator(email="ops@example.com", customer=CUSTOMER))
     fake.customers[CUSTOMER] = customer_record("billing@example.com")
     deliver("update_customer", id=CUSTOMER)
-    operator = Operator.objects.get()
-    assert operator.email == "ops@example.com"
-    assert operator.needs_review
-    audit = AuditLog.objects.get(action="operator.provider_email_differs")
+    # PLAN-014 C3: the lease is flagged, its billing e-mail kept; the operator is untouched.
+    assert LeaseBilling.objects.get(lease=lease).email == "ops@example.com"
+    assert Lease.objects.get(pk=lease.pk).needs_review
+    assert not Operator.objects.get().needs_review
+    audit = AuditLog.objects.get(action="lease.provider_email_differs")
+    assert (audit.entity_type, audit.entity_id) == ("lease", str(lease.pk))
     assert audit.after is not None
     assert audit.after["message"] == (
         "Email differs from the provider; receipts go to the provider's address"
@@ -1105,7 +1118,7 @@ def test_a_different_email_flags_the_operator_with_the_message(fake: FakeProvide
 
 
 def test_a_customer_snapshot_is_added_only_when_it_changes(fake: FakeProvider) -> None:
-    make_operator(email="ops@example.com", customer=CUSTOMER)
+    make_lease(operator=make_operator(email="ops@example.com", customer=CUSTOMER))
     fake.customers[CUSTOMER] = customer_record("ops@example.com")
     deliver("update_customer", id=CUSTOMER)
     deliver("update_customer", id=CUSTOMER)

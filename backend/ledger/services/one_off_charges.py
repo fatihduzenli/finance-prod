@@ -774,10 +774,15 @@ def one_off_refusal(
             return Outcome(False, DUE_IN_PAST, "due_date")
         if lease is not None and _lease_ended(lease, day):
             return Outcome(False, LEASE_ENDED, "collection")
-    if item.collection != CollectionMethod.MANUAL and not leases.customer_ref(operator):
+    # PLAN-014 C5: the provider collects through the lease's account; a charge without a
+    # lease uses its operator's first active lease's, and none is refused here.
+    account = lease if lease is not None else leases.first_active_lease(operator)
+    if item.collection != CollectionMethod.MANUAL and account is None:
+        return Outcome(False, leases.NO_LEASE_BILLING, "collection")
+    if item.collection != CollectionMethod.MANUAL and not leases.customer_ref(account):
         return Outcome(False, NO_PROVIDER_CUSTOMER, "collection")
     if item.collection in DEBIT_COLLECTIONS:
-        if not leases.linked_payment_method(operator):
+        if not leases.linked_payment_method(account):
             return Outcome(False, NO_BANK_METHOD, "collection")
         limit = leases.provider_limit_refusal([item.price])
         if limit:
@@ -827,16 +832,24 @@ def create_lease_with_checklist(
     creation_key: uuid.UUID,
     items: Sequence[ChargeInput],
     actor: User | None,
+    billing: Mapping[str, Any] | None = None,
+    account: str = leases.ACCOUNT_LATER,
 ) -> tuple[Lease, bool, list[OneOffCharge]]:
     """Save a new lease and the ticked setup charges in one transaction (D5).
 
     A resubmitted form (same ``creation_key``) returns the lease the first one made and
     creates nothing. A refused row raises :class:`SetupRefused` and nothing is saved,
-    the lease included.
+    the lease included; so does a refused bank-account choice
+    (:class:`~ledger.services.leases.LeaseRefused`, PLAN-014 C4).
     """
     with transaction.atomic():
         lease, created = leases.create_lease(
-            fields, rent=rent, creation_key=creation_key, actor=actor
+            fields,
+            rent=rent,
+            creation_key=creation_key,
+            actor=actor,
+            billing=billing,
+            account=account,
         )
         if not created:
             return lease, False, []
@@ -950,7 +963,9 @@ def _create_one_off(
     with_invoice: bool = True,
 ) -> Outcome:
     collection = CollectionMethod(item.collection)
-    has_customer = bool(leases.customer_ref(operator))
+    has_customer = bool(
+        leases.customer_ref(lease if lease is not None else leases.first_active_lease(operator))
+    )
     with transaction.atomic():
         locked = Operator.objects.select_for_update().get(pk=operator.pk)
         if locked.archived_at is not None:
@@ -1482,10 +1497,10 @@ def charge_now_refusal(charge: OneOffCharge) -> str:
         return CHARGE_NOW_NOT_LINKED
     if linked[0].total != billed:
         return CHARGE_NOW_TOTAL_DIFFERS
-    operator = _charge_operator(charge)
-    if not leases.linked_payment_method(operator):
+    account = leases.billing_lease(charge)
+    if not leases.linked_payment_method(account):
         return CHARGE_NOW_NO_METHOD
-    method = leases.linked_method_record(operator)
+    method = leases.linked_method_record(account)
     if method is None or not method.is_usable_bank:
         return CHARGE_NOW_METHOD_NOT_STORED
     return leases.provider_limit_refusal([billed])
@@ -1500,7 +1515,7 @@ def charge_now_request(charge: OneOffCharge, actor: User | None) -> ChargeNowDet
         else charge_now_refusal(charge)
     )
     linked = rent_run.provider_invoice(charge)
-    method = leases.linked_method_record(operator)
+    method = leases.linked_method_record(leases.billing_lease(charge))
     amount = billed_total(charge)
     return ChargeNowDetails(
         refusal=refusal,
@@ -1654,10 +1669,11 @@ def open_balance(charge: OneOffCharge) -> Decimal:
     return max(billed_total(charge) - paid_in(charge), ZERO).quantize(CENT)
 
 
-def _bank_method(operator: Operator | None) -> BankMethod | None:
-    if not leases.customer_ref(operator):
+def _bank_method(lease: Lease | None) -> BankMethod | None:
+    """The usable bank method of the lease's account (PLAN-014 C5), or ``None``."""
+    if not leases.customer_ref(lease):
         return None
-    record = leases.linked_method_record(operator)
+    record = leases.linked_method_record(lease)
     if record is None or not record.is_usable_bank:
         return None
     return BankMethod(
@@ -1665,28 +1681,28 @@ def _bank_method(operator: Operator | None) -> BankMethod | None:
     )
 
 
-def no_account_line(operator: Operator | None) -> tuple[str, str]:
+def no_account_line(operator: Operator | None, lease: Lease | None) -> tuple[str, str]:
     """:data:`DEBIT_NO_ACCOUNT` naming ``operator`` (:data:`DEBIT_OPERATOR_FALLBACK` without
-    one) and the operator page's URL (``""`` without an operator): the first line of a card
-    or tile greyed for no bank method on file and the "Operator page" link under it."""
-    if operator is None:
-        return DEBIT_NO_ACCOUNT.format(operator=DEBIT_OPERATOR_FALLBACK), ""
-    return (
-        DEBIT_NO_ACCOUNT.format(operator=operator.display_name),
-        reverse("ledger:operators:detail", kwargs={"pk": operator.pk}),
-    )
+    one) and the URL of Edit billing details of the lease whose account bills (``lease``'s,
+    or the one it shares; ``""`` without a lease), where the bank is connected (PLAN-014
+    C3): the first line of a card or tile greyed for no bank method on file and the "Edit
+    billing details" link under it."""
+    name = operator.display_name if operator is not None else DEBIT_OPERATOR_FALLBACK
+    account = leases.account_lease(lease)
+    url = reverse("ledger:leases:billing", kwargs={"pk": account.pk}) if account else ""
+    return DEBIT_NO_ACCOUNT.format(operator=name), url
 
 
 def _setup_reasons(
-    enabled: bool, method: BankMethod | None, operator: Operator | None
+    enabled: bool, method: BankMethod | None, operator: Operator | None, lease: Lease | None
 ) -> tuple[str, str, str]:
     """The greyed card's two lines and link for the flag and the bank method (PLAN-012f-c
-    D7, §11 E2): no bank method, :data:`DEBIT_NO_ACCOUNT` naming the operator and the
-    operator page's URL (``""`` without an operator), with :data:`DEBIT_ALSO_OFF` under it
-    when the flag is off as well; the flag off alone, :data:`DEBIT_OFF`; neither,
-    ``("", "", "")``."""
+    D7, §11 E2): no bank method, :data:`DEBIT_NO_ACCOUNT` naming the operator and the URL
+    of the billing lease's Edit billing details (:func:`no_account_line`), with
+    :data:`DEBIT_ALSO_OFF` under it when the flag is off as well; the flag off alone,
+    :data:`DEBIT_OFF`; neither, ``("", "", "")``."""
     if method is None:
-        line, url = no_account_line(operator)
+        line, url = no_account_line(operator, lease)
         more = "" if enabled else str(DEBIT_ALSO_OFF)
         return line, more, url
     if not enabled:
@@ -1698,7 +1714,8 @@ def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
     """The bank-debit card of Add payment (D14). Local data only; no provider call."""
     enabled = charge_now_enabled()
     operator = _charge_operator(charge)
-    method = _bank_method(operator)
+    billed = leases.billing_lease(charge)
+    method = _bank_method(billed)
     balance = open_balance(charge)
     reason_more = reason_url = ""
     if charge.status in (OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED):
@@ -1708,7 +1725,7 @@ def bank_debit_options(charge: OneOffCharge) -> BankDebitOptions:
     elif has_pending_payment(charge):
         reason = DEBIT_PENDING
     else:
-        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator)
+        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator, billed)
     return BankDebitOptions(
         enabled=enabled,
         method=method,
@@ -1786,7 +1803,7 @@ def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDeb
     day = today or timezone.localdate()
     enabled = charge_now_enabled()
     operator = charge.lease.operator
-    method = _bank_method(operator)
+    method = _bank_method(charge.lease)
     balance = max(Decimal(charge.balance), ZERO).quantize(CENT)
     reason_more = reason_url = ""
     if charge.status == RentChargeStatus.WAIVED:
@@ -1804,7 +1821,7 @@ def rent_debit_options(charge: RentCharge, today: date | None = None) -> BankDeb
     elif rent_debit_live(charge):
         reason = RENT_DEBIT_PENDING
     else:
-        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator)
+        reason, reason_more, reason_url = _setup_reasons(enabled, method, operator, charge.lease)
     return BankDebitOptions(
         enabled=enabled,
         method=method,

@@ -20,6 +20,7 @@ from ledger.models import InstallmentPlan, OneOffCharge
 from payments.fake import FakeProvider
 from tests.auth_helpers import TEST_PASSWORD, current_code, make_user
 from tests.receivables_helpers import a_lease, a_one_off_charge, a_store
+from tests.test_lease_services import bill_lease
 from tests.test_one_off_charges import an_operator
 
 pytestmark = [pytest.mark.e2e, pytest.mark.django_db(transaction=True)]
@@ -77,7 +78,8 @@ def a_charge(fake: FakeProvider) -> OneOffCharge:
     """A $1,000 one-off charge collected by e-mail, of an operator connected to the
     processor (the fake), so its installments are invoices there."""
     operator = an_operator(fake)
-    lease = a_lease(a_store(), operator)
+    # PLAN-014 C3: a further lease of the operator shares its first lease's account.
+    lease = bill_lease(a_lease(a_store(), operator))
     return a_one_off_charge(operator, "1000.00", date(2026, 9, 20), lease=lease, collection="email")
 
 

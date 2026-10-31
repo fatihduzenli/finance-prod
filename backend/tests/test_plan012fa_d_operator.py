@@ -1,13 +1,14 @@
 """The operator workspace on the reference's frame (docs/qa/PLAN-012f-a-design-follow-up.md D7;
 DESIGN-SPEC §4 "Operator workspace", operator-workspace-laptop.png).
 
-The header (the avatar's initials, the name with Active or Archived and "Connected to Stax" only
-with a provider customer, the muted line and its omissions), the actions by role, the Store
+The header (the avatar's initials, the name with Active or Archived and no "Connected to Stax"
+pill since PLAN-014 C3, the muted line and its omissions), the actions by role, the Store
 select (All stores by default, submit on change with a no-script Show), the strip of store cards
 (rent and collection line, the balance in red or green, "· overdue"), the Charges card's title
-per selection, the right column's cards (CONTACT, PAYMENT with the returns of this calendar year
-in local time, RECENT CONTACT, the statement link) with their empty states, escaping, and the
-page's query budget. Facts only: nothing here is stored by the page.
+per selection, the right column's cards (CONTACT, PAYMENT with one billing line per lease since
+PLAN-014 C3 and the returns of this calendar year in local time, RECENT CONTACT, the statement
+link) with their empty states, escaping, and the page's query budget. Facts only: nothing here
+is stored by the page.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from ledger.models import (
     ContactEntry,
     ContactKind,
     Lease,
+    LeaseBilling,
     Operator,
     Payment,
     PaymentChannel,
@@ -102,19 +104,19 @@ def three_stores() -> tuple[Operator, list[Lease]]:
     return operator, leases
 
 
-def link_method(operator: Operator, *, nickname: str = "Chase", last_four: str = "4421") -> None:
-    """A linked bank method and the method list the worker's refresh stores (no provider call)."""
-    with_customer(operator)
+def link_method(lease: Lease, *, nickname: str = "Chase", last_four: str = "4421") -> None:
+    """A linked bank method of the lease (PLAN-014 C3: the refs are per lease) and what the
+    worker's refresh stores: the method list and the billing row's cached last four (no
+    provider call)."""
+    with_customer(lease)
     ExternalRef.objects.create(
-        entity_type="operator",
-        entity_id=operator.pk,
+        entity_type="lease",
+        entity_id=lease.pk,
         provider="stax_pay",
         external_kind="payment_method",
         external_id="pm-linked-1",
     )
-    ref = ExternalRef.objects.get(
-        entity_type="operator", entity_id=operator.pk, external_kind="customer"
-    )
+    ref = ExternalRef.objects.get(entity_type="lease", entity_id=lease.pk, external_kind="customer")
     ProviderSnapshot.objects.create(
         external_ref=ref,
         payload=[
@@ -130,6 +132,7 @@ def link_method(operator: Operator, *, nickname: str = "Chase", last_four: str =
         ],
         fetched_at=NOW,
     )
+    LeaseBilling.objects.update_or_create(lease=lease, defaults={"bank_last4": last_four})
 
 
 def an_entry(operator: Operator, kind: str, day: date, body: str, **fields: object) -> ContactEntry:
@@ -182,13 +185,15 @@ def test_the_muted_line_leaves_out_what_is_missing_and_counts_one_store() -> Non
     assert ">no SMS consent · 0 stores</p>" in by_id(html, "operator-line", "p")
 
 
-def test_connected_to_the_provider_only_with_a_customer_and_archived_replaces_active() -> None:
-    operator, _ = three_stores()
+def test_no_connected_pill_even_with_a_lease_customer_and_archived_replaces_active() -> None:
+    # PLAN-014 C3: the processor customer is the lease's; the operator's header has no
+    # "Connected to Stax" pill with or without one.
+    operator, leases = three_stores()
     viewer = client_for(Role.VIEWER)[0]
     assert "Connected to Stax" not in header(page(viewer, operator_page(operator)))
-    with_customer(operator)
+    with_customer(leases[0])
     top = header(page(viewer, operator_page(operator)))
-    assert '<span class="provider-pill" id="provider-connected">Connected to Stax</span>' in top
+    assert "Connected to Stax" not in top and 'id="provider-connected"' not in top
     Operator.objects.filter(pk=operator.pk).update(archived_at=NOW)
     title = by_id(header(page(viewer, operator_page(operator))), "operator-title", "h1")
     assert "Archived Oct 15, 2026" in title and "Active" not in title
@@ -210,22 +215,24 @@ def test_a_name_with_markup_is_escaped_in_the_title_the_line_and_the_cards() -> 
 
 
 @pytest.mark.parametrize(
-    ("role", "links", "connect", "archive"),
+    ("role", "links", "archive"),
     [
-        (Role.VIEWER, ["Statement"], False, False),
-        (Role.BILLING, ["Statement", "Edit"], True, False),
-        (Role.ADMIN, ["Statement", "Edit"], True, True),
+        (Role.VIEWER, ["Statement"], False),
+        (Role.BILLING, ["Statement", "Edit"], False),
+        (Role.ADMIN, ["Statement", "Edit"], True),
     ],
 )
 def test_the_actions_are_statement_edit_and_more_by_role(
-    role: Role, links: list[str], connect: bool, archive: bool
+    role: Role, links: list[str], archive: bool
 ) -> None:
+    # PLAN-014 C3: Connect to Stax left More ▾ for every role (the lease's Edit billing
+    # details links the provider IDs), so More ▾ is the admin's Archive alone.
     operator, _ = three_stores()
     html = page(client_for(role)[0], operator_page(operator))
     top = actions(html)
     assert re.findall(r'<a class="btn[^"]*"[^>]*>([^<]+)</a>', top) == links
-    assert ('id="more-menu"' in top) == (connect or archive)
-    assert ('id="connect-provider"' in top) == connect
+    assert ('id="more-menu"' in top) == archive
+    assert 'id="connect-provider"' not in top and "Connect to Stax" not in top
     assert ('id="archive-operator"' in top) == archive
     # DESIGN-SPEC §4: no invoice or payment action and no primary in the operator's header.
     assert "btn-primary" not in header(html)
@@ -390,18 +397,30 @@ def test_the_contact_card_has_phone_email_and_the_sms_consent_badge() -> None:
 # --- PAYMENT ---------------------------------------------------------------------------------
 
 
+def lease_line(lease: Lease) -> str:
+    return f'<dd class="side-lease-account" id="side-account-{lease.pk}">'
+
+
 def test_the_payment_card_empty() -> None:
-    operator, _ = three_stores()
+    # PLAN-014 C3: one line per lease (the store, then the company and the bank line); no
+    # provider row and no operator-wide Bank row.
+    operator, leases = three_stores()
     card = by_id(page(client_for(Role.VIEWER)[0], operator_page(operator)), "payment-card")
-    assert "<dt>Stax</dt>" in card and 'id="side-customer">Not connected<' in card
-    assert 'id="side-bank">—<' in card
+    assert "<dt>Stax</dt>" not in card and 'id="side-customer"' not in card
+    assert 'id="side-bank"' not in card
+    for lease, label in zip(leases, ("1991", "1999", "2475"), strict=True):
+        assert f"<dt>{label}</dt>{lease_line(lease)}no bank account on file</dd>" in card
     assert 'id="side-returns">0 this year<' in card
     assert 'id="side-promise">—<' in card
+    nobody = an_operator("Nobody")
+    card = by_id(page(client_for(Role.VIEWER)[0], operator_page(nobody)), "payment-card")
+    assert '<dt>Billing</dt><dd id="side-no-lease">No current lease</dd>' in card
 
 
 def test_the_payment_card_with_customer_bank_returns_and_promise() -> None:
     operator, (first, second, _) = three_stores()
-    link_method(operator)
+    link_method(first)
+    LeaseBilling.objects.filter(lease=first).update(company_name="Düzenli Stores LLC")
     returned = a_rent_charge(first, OCTOBER, due="2000.00")
     a_payment(returned, "2000.00", None, status=PaymentStatus.RETURNED)
     returned.payments.update(returned_at=datetime(2026, 10, 3, 14, 0, tzinfo=UTC))
@@ -415,22 +434,39 @@ def test_the_payment_card_with_customer_bank_returns_and_promise() -> None:
         promised_amount=D("3000.00"),
     )
     card = by_id(page(client_for(Role.VIEWER)[0], operator_page(operator)), "payment-card")
-    assert 'Customer · <a href="#operator-provider-card">open</a>' in card
-    assert 'id="side-bank">Chase ····4421<' in card
+    assert 'id="side-customer"' not in card and "#operator-provider-card" not in card
+    assert f"{lease_line(first)}Düzenli Stores LLC<br>Bank ····4421</dd>" in card
+    assert f"{lease_line(second)}no bank account on file</dd>" in card
     assert 'class="side-strong tone-unpaid">1 this year<' in card
     assert "$3,000.00 by Nov 1, 2026" in card and "promise-open" in card
     # No provider identifier reaches the card.
     assert "pm-linked-1" not in card and "cus-" not in card
 
 
-def test_the_bank_row_without_a_nickname_reads_the_type_and_a_missing_record_is_a_dash() -> None:
-    operator, _ = three_stores()
-    link_method(operator, nickname="")
-    card = by_id(page(client_for(Role.VIEWER)[0], operator_page(operator)), "payment-card")
-    assert 'id="side-bank">checking ····4421<' in card
+def test_the_bank_line_is_the_cached_last_four_and_a_sharer_names_the_account_it_uses() -> None:
+    # PLAN-014 C3: the bank line reads the billing row's cached last four ("Bank ····4421",
+    # whatever the nickname), not the stored method list; a lease that shares another's
+    # account reads that lease's bank line and names it; without the cache it is "no bank
+    # account on file".
+    operator, (first, second, third) = three_stores()
+    link_method(first, nickname="")
+    LeaseBilling.objects.create(lease=second, shares_account_of=first)
+    viewer = client_for(Role.VIEWER)[0]
+    card = by_id(page(viewer, operator_page(operator)), "payment-card")
+    assert f"{lease_line(first)}Bank ····4421</dd>" in card
+    assert (
+        f'{lease_line(second)}Bank ····4421 <span class="muted">(the account of 1991)</span></dd>'
+        in card
+    )
+    assert f"{lease_line(third)}no bank account on file</dd>" in card
+    assert "checking" not in card
     ProviderSnapshot.objects.all().delete()  # the stored list no longer has the method
-    card = by_id(page(client_for(Role.VIEWER)[0], operator_page(operator)), "payment-card")
-    assert 'id="side-bank">—<' in card
+    card = by_id(page(viewer, operator_page(operator)), "payment-card")
+    assert f"{lease_line(first)}Bank ····4421</dd>" in card  # the cache, not the list
+    LeaseBilling.objects.filter(lease=first).update(bank_last4="")
+    card = by_id(page(viewer, operator_page(operator)), "payment-card")
+    assert f"{lease_line(first)}no bank account on file</dd>" in card
+    assert f"{lease_line(second)}no bank account on file " in card
 
 
 def test_returns_count_this_calendar_year_in_local_time_this_operator_only() -> None:
@@ -632,7 +668,7 @@ def test_the_page_renders_within_a_fixed_number_of_queries(selected: bool) -> No
         a_lease(a_store(f"70{n}"), operator, started=STARTED, channel=PaymentChannel.WIRE)
         for n in range(3)
     ]
-    link_method(operator)
+    link_method(leases[0])
     client = client_for(Role.ADMIN)[0]
     query = {"store": str(leases[0].store_id)} if selected else {}
 
@@ -678,8 +714,8 @@ def test_the_page_renders_within_a_fixed_number_of_queries(selected: bool) -> No
 
 
 def test_the_page_writes_nothing() -> None:
-    operator, _ = three_stores()
-    link_method(operator)
+    operator, leases = three_stores()
+    link_method(leases[0])
     client = client_for(Role.ADMIN)[0]
     with CaptureQueriesContext(connection) as queries:
         page(client, operator_page(operator))

@@ -22,12 +22,14 @@ Rules kept here:
   create failed is first looked for in the provider's list, in case the failed request
   took effect, and adopted when exactly one unlinked schedule matches.
 - **Methods from the snapshot** (PLAN-010 Batch A follow-up): the enrolment page reads
-  the operator's payment methods from the latest ``provider_snapshots`` row of its
-  customer reference, written by :func:`refresh_payment_methods` in the worker; the
-  page never calls the provider. :func:`enable_autopay` still reads the list from the
-  provider before it creates anything.
+  the payment methods of the lease's customer (PLAN-014 C3: the lease's own, or that of
+  the lease whose account it shares, :func:`account_lease`) from the latest
+  ``provider_snapshots`` row of that customer reference, written by
+  :func:`refresh_payment_methods` in the worker; the page never calls the provider.
+  :func:`enable_autopay` still reads the list from the provider before it creates
+  anything.
 - **Bank only.** The chosen payment method must be in the provider's list for the
-  operator's customer, be a ``bank`` method and not be deleted; a card is refused even
+  lease's customer, be a ``bank`` method and not be deleted; a card is refused even
   when its ID is posted directly (D2).
 - **Large debits** (PLAN-007c §1), compared per debit: above ``PROVIDER_MAX_TXN_AMOUNT``
   (when set) enrolment is refused whatever is confirmed; else above
@@ -49,7 +51,7 @@ Rules kept here:
   :func:`move_autopay`: every active rent schedule of the lease is deleted at the
   provider as :func:`stop_autopay` deletes it (a 404 counts as already gone; the row is
   ``ended``, audited ``lease.autopay_deleted_for_move`` with the plan), then created
-  again through the enrolment's create (:func:`_create_one`, the operator's linked bank
+  again through the enrolment's create (:func:`_create_one`, the lease's linked bank
   method) as a new row: the split charge's debit (its seq) from the debit after that
   charge's debit instant (:func:`debit_instant` of its due date), so its first debit is
   next month's; any other debit from now, so its next debit is kept. Audited once per
@@ -64,6 +66,10 @@ Rules kept here:
   TODO-VERIFY (to record): the payment provider starts a schedule created with a
   ``DTSTART`` next month on that date, without catching up the occurrence skipped this
   month.
+- **Switch to own account** (PLAN-014 C9): a lease that shares another lease's account and
+  holds a customer of its own moves to that customer's default (else only) usable bank
+  method, and its active rent autopay moves with it through :func:`move_autopay` from now
+  (:func:`switch_to_own_account`, in the worker).
 
 Every change writes one ``audit_log`` row; provider identifiers in it are masked.
 Messages are fixed sentences; a provider rejection adds only the field names the
@@ -87,6 +93,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 import payments
@@ -98,6 +105,7 @@ from ledger.models import (
     CollectionStatus,
     InstallmentPlan,
     Lease,
+    LeaseBilling,
     LeaseRentHistory,
     Operator,
     PaymentChannel,
@@ -105,12 +113,13 @@ from ledger.models import (
     ScheduleKind,
     ScheduleState,
     Store,
+    SyncStatus,
 )
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_name, provider_sentence
-from payments import operator_sync
+from payments import jobs, lease_sync
 from payments.errors import ProviderError, ProviderRejected
-from payments.models import ExternalRef, ProviderSnapshot
+from payments.models import ExternalRef, JobKind, ProviderSnapshot
 from payments.provider import (
     Amounts,
     LineItem,
@@ -130,7 +139,7 @@ MOVED_ACTION = "collection_schedule.moved_for_installments"
 DELETED_FOR_MOVE_ACTION = "lease.autopay_deleted_for_move"
 ENTITY_SCHEDULE = "collection_schedule"
 KIND_SCHEDULE = "schedule"
-PROVIDER_KEY = operator_sync.PROVIDER_KEY
+PROVIDER_KEY = lease_sync.PROVIDER_KEY
 
 CENT = Decimal("0.01")
 #: D3: every debit is scheduled at this UTC time of day.
@@ -163,6 +172,8 @@ NO_DEBIT_DAY = "The lease has no debit day."
 DAY_NOT_SCHEDULABLE = "Autopay cannot use the 29th, 30th or 31st. Choose a day from 1 to 28."
 NO_RENT = "The lease has no rent."
 NO_PROVIDER_CUSTOMER = provider_sentence("The operator is not connected to {provider}.")
+#: PLAN-014 C5: a one-off charge without a lease whose operator has no active lease.
+NO_LEASE_BILLING = "This charge has no lease to bill from."
 NO_BANK_METHOD = "No bank method linked."
 METHODS_NOT_READ = "The operator's payment methods have not been read yet."
 METHODS_READ = "Payment methods read: {count}."
@@ -488,17 +499,92 @@ def schedule_ref(schedule: CollectionSchedule) -> str:
     return ref.external_id if ref is not None else ""
 
 
-def customer_ref(operator: Operator | None) -> str:
-    if operator is None:
-        return ""
-    return operator_sync.current_refs(operator).get(operator_sync.KIND_CUSTOMER, "")
+def account_lease(lease: Lease | None) -> Lease | None:
+    """The lease whose processor customer bills ``lease`` (PLAN-014 C3): the lease it
+    shares the account of, else itself; one hop, never further."""
+    if lease is None:
+        return None
+    billing = lease_sync.billing_of(lease)
+    if billing.shares_account_of_id is not None:
+        return billing.shares_account_of
+    return lease
 
 
-def linked_payment_method(operator: Operator | None) -> str:
-    """The payment-method ID staff linked to the operator, or ``""`` (unmasked)."""
-    if operator is None:
+def customer_ref(lease: Lease | None) -> str:
+    """The provider customer ID that bills the lease, or ``""`` (unmasked)."""
+    owner = account_lease(lease)
+    if owner is None:
         return ""
-    return operator_sync.current_refs(operator).get(operator_sync.KIND_PAYMENT_METHOD, "")
+    return lease_sync.current_refs(owner).get(lease_sync.KIND_CUSTOMER, "")
+
+
+def linked_payment_method(lease: Lease | None) -> str:
+    """The payment-method ID staff linked to the lease's account, or ``""`` (unmasked)."""
+    owner = account_lease(lease)
+    if owner is None:
+        return ""
+    return lease_sync.current_refs(owner).get(lease_sync.KIND_PAYMENT_METHOD, "")
+
+
+def first_active_lease(operator: Operator | None) -> Lease | None:
+    """The operator's first active lease (collection active or paused, not ended): the
+    earliest start (none last), then the lowest store number (PLAN-014 C5)."""
+    if operator is None:
+        return None
+    return (
+        Lease.objects.filter(
+            operator=operator,
+            ended_on__isnull=True,
+            collection_status__in=[CollectionStatus.ACTIVE, CollectionStatus.PAUSED],
+        )
+        .select_related("store", "operator")
+        .order_by(
+            F("started_on").asc(nulls_last=True),
+            F("store__store_number").asc(nulls_last=True),
+            "id",
+        )
+        .first()
+    )
+
+
+def first_active_leases(operator_ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, Lease]:
+    """:func:`first_active_lease` of each of these operators that has one, with its billing
+    row (one query)."""
+    found: dict[uuid.UUID, Lease] = {}
+    rows = (
+        Lease.objects.filter(
+            operator_id__in=list(operator_ids),
+            ended_on__isnull=True,
+            collection_status__in=[CollectionStatus.ACTIVE, CollectionStatus.PAUSED],
+        )
+        .select_related("store", "operator", "billing")
+        .order_by(
+            F("started_on").asc(nulls_last=True),
+            F("store__store_number").asc(nulls_last=True),
+            "id",
+        )
+    )
+    for lease in rows:
+        if lease.operator_id is not None:
+            found.setdefault(lease.operator_id, lease)
+    return found
+
+
+def billing_lease(charge: Any) -> Lease | None:
+    """The lease whose billing details and account bill ``charge`` (PLAN-014 C5): a rent
+    or insurance charge's lease; a one-off charge's lease, else its operator's first
+    active lease; ``None`` when there is none (callers refuse with
+    :data:`NO_LEASE_BILLING`)."""
+    lease: Lease | None = getattr(charge, "lease", None)
+    if lease is not None:
+        return lease
+    return first_active_lease(getattr(charge, "operator", None))
+
+
+def billing_for(charge: Any) -> LeaseBilling | None:
+    """The billing details of :func:`billing_lease`, or ``None``."""
+    lease = billing_lease(charge)
+    return lease_sync.billing_of(lease) if lease is not None else None
 
 
 def lease_for_creation_key(raw: object) -> Lease | None:
@@ -532,7 +618,7 @@ def autopay_blockers(lease: Lease) -> list[str]:
         blockers.append(DAY_NOT_SCHEDULABLE)
     if open_rent(lease) is None:
         blockers.append(NO_RENT)
-    if operator is not None and not customer_ref(operator):
+    if operator is not None and not customer_ref(lease):
         blockers.append(NO_PROVIDER_CUSTOMER)
     return blockers
 
@@ -543,9 +629,9 @@ def enrolment_notes(lease: Lease) -> list[str]:
     notes: list[str] = []
     if operator is None:
         return notes
-    if not linked_payment_method(operator):
+    if not linked_payment_method(lease):
         notes.append(NO_BANK_METHOD)
-    if not operator.email:
+    if not lease_sync.billing_of(lease).email:
         notes.append(NO_EMAIL)
     return notes
 
@@ -562,14 +648,16 @@ METHOD_SNAPSHOT_FIELDS: tuple[str, ...] = (
 )
 
 
-def _customer_ref_row(operator: Operator | None) -> ExternalRef | None:
-    if operator is None:
+def _customer_ref_row(lease: Lease | None) -> ExternalRef | None:
+    """The customer reference that bills the lease (through a shared account)."""
+    owner = account_lease(lease)
+    if owner is None:
         return None
     return ExternalRef.objects.filter(
-        entity_type=operator_sync.ENTITY_OPERATOR,
-        entity_id=operator.pk,
+        entity_type=lease_sync.ENTITY_LEASE,
+        entity_id=owner.pk,
         provider=PROVIDER_KEY,
-        external_kind=operator_sync.KIND_CUSTOMER,
+        external_kind=lease_sync.KIND_CUSTOMER,
         superseded_at__isnull=True,
     ).first()
 
@@ -602,15 +690,11 @@ def _method_from_payload(item: object, fetched_at: datetime) -> PaymentMethodRec
     return PaymentMethodRecord(fetched_at=fetched_at, **values)
 
 
-def payment_method_choices(lease: Lease) -> MethodChoices:
-    """The operator's methods from the latest snapshot (no provider call), or why there
-    are none. ``fetched_at`` is ``None`` when the methods were never read."""
-    return operator_method_choices(lease.operator)
-
-
-def operator_method_choices(operator: Operator | None) -> MethodChoices:
-    """:func:`payment_method_choices` for an operator (no provider call)."""
-    ref = _customer_ref_row(operator)
+def payment_method_choices(lease: Lease | None) -> MethodChoices:
+    """The methods of the customer that bills the lease, from the latest snapshot (no
+    provider call), or why there are none. ``fetched_at`` is ``None`` when the methods
+    were never read."""
+    ref = _customer_ref_row(lease)
     if ref is None:
         return MethodChoices(error=NO_PROVIDER_CUSTOMER)
     snapshots = _method_snapshots(ref)
@@ -624,49 +708,631 @@ def operator_method_choices(operator: Operator | None) -> MethodChoices:
     )
 
 
-def linked_method_record(operator: Operator | None) -> PaymentMethodRecord | None:
-    """The operator's linked payment method as the latest stored snapshot shows it, or
-    ``None`` when nothing is linked or the snapshot does not list it (no provider call)."""
-    linked = linked_payment_method(operator)
+def linked_method_record(lease: Lease | None) -> PaymentMethodRecord | None:
+    """The lease's linked payment method (through a shared account) as the latest stored
+    snapshot shows it, or ``None`` when nothing is linked or the snapshot does not list it
+    (no provider call)."""
+    linked = linked_payment_method(lease)
     if not linked:
         return None
     return next(
         (
             method
-            for method in operator_method_choices(operator).methods
+            for method in payment_method_choices(lease).methods
             if method.external_id == linked
         ),
         None,
     )
 
 
-def refresh_payment_methods(operator_id: uuid.UUID) -> MethodsRefresh:
-    """Read the operator's payment methods from the provider (one list call) and keep
-    them as the one method-list snapshot of its customer reference (worker only).
+def bank_last4(method: PaymentMethodRecord | None) -> str:
+    """The four digits ``LeaseBilling.bank_last4`` caches, or ``""``."""
+    digits = method.last_four if method is not None else ""
+    return digits if len(digits) == 4 and digits.isdigit() else ""
+
+
+def refresh_payment_methods(lease_id: uuid.UUID) -> MethodsRefresh:
+    """Read the payment methods of the customer that bills the lease from the provider
+    (one list call) and keep them as the one method-list snapshot of that customer
+    reference (worker only); the linked method's last four are cached on the account
+    lease's billing row (``bank_last4``).
 
     Nothing is written before the call; a failure keeps the previous snapshot. The new
     snapshot replaces the previous ones in one transaction.
     """
-    operator = Operator.objects.filter(pk=operator_id).first()
-    ref = _customer_ref_row(operator)
+    lease = Lease.objects.select_related("operator", "store").filter(pk=lease_id).first()
+    ref = _customer_ref_row(lease)
     if ref is None:
         return MethodsRefresh(False, NO_PROVIDER_CUSTOMER)
     try:
         methods = payments.get_provider().list_payment_methods(ref.external_id)
     except ProviderError as error:
         return MethodsRefresh(
-            False, _failure_message(error), _fields(error), operator_sync.failure_name(error)
+            False, _failure_message(error), _fields(error), lease_sync.failure_name(error)
         )
-    fetched_at = max((method.fetched_at for method in methods), default=timezone.now())
     with transaction.atomic():
-        old = [snapshot.pk for snapshot in _method_snapshots(ref)]
-        ProviderSnapshot.objects.create(
-            external_ref=ref,
-            payload=[_method_payload(method) for method in methods],
-            fetched_at=fetched_at,
-        )
-        ProviderSnapshot.objects.filter(pk__in=old).delete()
+        _store_methods(ref, methods, account_lease(lease))
     return MethodsRefresh(True, METHODS_READ.format(count=len(methods)))
+
+
+def _store_methods(
+    ref: ExternalRef, methods: list[PaymentMethodRecord], owner: Lease | None
+) -> None:
+    """Keep ``methods`` as the one method-list snapshot of the customer reference and
+    cache the linked method's last four on ``owner``'s billing row (the caller's
+    transaction)."""
+    fetched_at = max((method.fetched_at for method in methods), default=timezone.now())
+    old = [snapshot.pk for snapshot in _method_snapshots(ref)]
+    ProviderSnapshot.objects.create(
+        external_ref=ref,
+        payload=[_method_payload(method) for method in methods],
+        fetched_at=fetched_at,
+    )
+    ProviderSnapshot.objects.filter(pk__in=old).delete()
+    if owner is not None:
+        linked = linked_payment_method(owner)
+        digits = bank_last4(next((m for m in methods if m.external_id == linked), None))
+        LeaseBilling.objects.update_or_create(lease=owner, defaults={"bank_last4": digits})
+
+
+# --- Bank account entry (PLAN-014 C7) ---------------------------------------------------
+
+#: Refusal reasons of :func:`attach_bank_method` (stored in its audit row; never shown).
+ATTACH_INVALID_ID = "InvalidId"
+ATTACH_ARCHIVED = "Archived"
+ATTACH_SHARES_ACCOUNT = "SharesAccount"
+ATTACH_NO_CUSTOMER = "NoProviderCustomer"
+ATTACH_LINKED_ELSEWHERE = "AlreadyLinkedElsewhere"
+ATTACH_NOT_THIS_CUSTOMER = "NotThisCustomer"
+ATTACH_NOT_BANK = "NotBankMethod"
+#: The sentence of each refusal; a provider failure has its own (:data:`ATTACH_FAILED`).
+ATTACH_MESSAGES: dict[str, str] = {
+    ATTACH_INVALID_ID: "That is not a bank method ID. Nothing was saved.",
+    ATTACH_ARCHIVED: "This operator is archived.",
+    ATTACH_SHARES_ACCOUNT: (
+        "This lease uses another lease's account. Switch it to its own account first. "
+        "Nothing was saved."
+    ),
+    ATTACH_NO_CUSTOMER: provider_sentence(
+        "The lease is not connected to {provider} yet. Save its billing details with an "
+        "e-mail first. Nothing was saved."
+    ),
+    ATTACH_LINKED_ELSEWHERE: provider_sentence(
+        "That {provider} bank method is already connected to another lease. Nothing was saved."
+    ),
+    ATTACH_NOT_THIS_CUSTOMER: provider_sentence(
+        "That bank method does not belong to this lease's {provider} customer. Nothing was saved."
+    ),
+    ATTACH_NOT_BANK: "That payment method is not a usable bank account. Nothing was saved.",
+}
+ATTACH_FAILED = provider_sentence(
+    "{provider} could not confirm the bank account. Nothing was saved; try again later."
+)
+ATTACH_ALREADY = "This bank account is already connected to the lease. Nothing was changed."
+ATTACH_DONE = "Bank account ····{last4} connected."
+ATTACH_DONE_NO_DIGITS = "Bank account connected."
+
+
+@dataclass(frozen=True, slots=True)
+class BankAttach:
+    """The outcome of :func:`attach_bank_method`."""
+
+    ok: bool
+    message: str
+    #: A refusal reason of :data:`ATTACH_MESSAGES` or a provider error's class name.
+    reason: str = ""
+
+
+def attach_bank_method(
+    lease_id: uuid.UUID, payment_method_external_id: str, *, actor: User | None
+) -> BankAttach:
+    """Verify and link the bank method the hosted fields created under the lease's own
+    customer (worker only; ``JobKind.LEASE_METHOD_ATTACH``).
+
+    Under the lease's row lock: the identifier's syntax, the operator not archived, the
+    lease not sharing another's account, its own customer reference, and the method not
+    linked to any other entity. Then one provider call reads the customer's payment
+    methods (the per-customer list: a method of another customer is not in it, and the
+    adapter drops any object naming another customer); the id must be in it and be a usable
+    bank method. Only then is the lease's current ``payment_method`` reference superseded
+    and the new one written, the list kept as the customer's method snapshot and the last
+    four cached (``LeaseBilling.bank_last4``). Audited ``lease.bank_attached`` (masked
+    identifiers, the last four) or ``lease.bank_attach_refused`` (the reason name); a
+    method already linked to the lease changes nothing and makes no call.
+    """
+    with transaction.atomic():
+        lease = (
+            Lease.objects.select_for_update(of=("self",))
+            .select_related("operator", "store")
+            .get(pk=lease_id)
+        )
+        reason = _attach_refusal(lease, payment_method_external_id)
+        if reason:
+            return _attach_refused(actor, lease, reason, payment_method_external_id)
+        refs = lease_sync.current_refs(lease)
+        customer = refs[lease_sync.KIND_CUSTOMER]
+        previous = refs.get(lease_sync.KIND_PAYMENT_METHOD, "")
+        if previous == payment_method_external_id:
+            return BankAttach(True, ATTACH_ALREADY)
+        try:
+            methods = payments.get_provider().list_payment_methods(customer)
+        except ProviderError as error:
+            return _attach_refused(
+                actor, lease, lease_sync.failure_name(error), payment_method_external_id
+            )
+        chosen = next((m for m in methods if m.external_id == payment_method_external_id), None)
+        if chosen is None:
+            return _attach_refused(
+                actor, lease, ATTACH_NOT_THIS_CUSTOMER, payment_method_external_id
+            )
+        if not chosen.is_usable_bank:
+            return _attach_refused(actor, lease, ATTACH_NOT_BANK, payment_method_external_id)
+        now = timezone.now()
+        ExternalRef.objects.filter(
+            entity_type=lease_sync.ENTITY_LEASE,
+            entity_id=lease.pk,
+            provider=PROVIDER_KEY,
+            external_kind=lease_sync.KIND_PAYMENT_METHOD,
+            superseded_at__isnull=True,
+        ).update(superseded_at=now)
+        ExternalRef.objects.create(
+            entity_type=lease_sync.ENTITY_LEASE,
+            entity_id=lease.pk,
+            provider=PROVIDER_KEY,
+            external_kind=lease_sync.KIND_PAYMENT_METHOD,
+            external_id=payment_method_external_id,
+        )
+        customer_row = _customer_ref_row(lease)
+        if customer_row is not None:
+            _store_methods(customer_row, methods, lease)
+        digits = bank_last4(chosen)
+        _audit(
+            actor,
+            "lease.bank_attached",
+            lease,
+            {"payment_method": mask_identifier(previous) if previous else ""},
+            {
+                "customer": mask_identifier(customer),
+                "payment_method": mask_identifier(payment_method_external_id),
+                "last4": digits,
+            },
+        )
+    return BankAttach(True, ATTACH_DONE.format(last4=digits) if digits else ATTACH_DONE_NO_DIGITS)
+
+
+def _attach_refusal(lease: Lease, payment_method_external_id: str) -> str:
+    """Why :func:`attach_bank_method` refuses before any provider call, or ``""``."""
+    if not lease_sync.IDENTIFIER.match(payment_method_external_id or ""):
+        return ATTACH_INVALID_ID
+    if lease.operator is not None and lease.operator.archived_at is not None:
+        return ATTACH_ARCHIVED
+    if lease_sync.billing_of(lease).shares_account_of_id is not None:
+        return ATTACH_SHARES_ACCOUNT
+    if not lease_sync.current_refs(lease).get(lease_sync.KIND_CUSTOMER):
+        return ATTACH_NO_CUSTOMER
+    elsewhere = (
+        ExternalRef.objects.filter(
+            provider=PROVIDER_KEY,
+            external_kind=lease_sync.KIND_PAYMENT_METHOD,
+            external_id=payment_method_external_id,
+        )
+        .exclude(entity_type=lease_sync.ENTITY_LEASE, entity_id=lease.pk)
+        .exists()
+    )
+    return ATTACH_LINKED_ELSEWHERE if elsewhere else ""
+
+
+def _attach_refused(
+    actor: User | None, lease: Lease, reason: str, payment_method_external_id: str
+) -> BankAttach:
+    """Audit a refused attach (the reason name and the masked id only) and report it."""
+    masked = (
+        mask_identifier(payment_method_external_id)
+        if lease_sync.IDENTIFIER.match(payment_method_external_id or "")
+        else ""
+    )
+    _audit(
+        actor,
+        "lease.bank_attach_refused",
+        lease,
+        None,
+        {"reason": reason, "payment_method": masked},
+    )
+    return BankAttach(False, ATTACH_MESSAGES.get(reason, ATTACH_FAILED), reason)
+
+
+# --- The bank account of a new lease (PLAN-014 C4) ---------------------------------------
+
+#: The bank-account choices of the New lease and Transfer billing details: no account yet
+#: (the lease gets its own processor customer and no method), the hosted fields after the
+#: save (C7), or ``same:<lease id>``, the account of another lease of the same operator.
+ACCOUNT_LATER = "later"
+ACCOUNT_ENTER = "enter"
+ACCOUNT_SAME = "same:"
+ACCOUNT_INVALID = "Choose how the bank account is set up."
+ACCOUNT_NOT_SHAREABLE = (
+    "That lease's bank account cannot be used for this lease: it belongs to another "
+    "operator, has no usable bank method or uses another lease's account. Choose again."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SharedAccount:
+    """A lease whose account a new lease of the same operator may use, with the last four
+    of its bank method ("Use the same account as #1991 (····4821)")."""
+
+    lease: Lease
+    last4: str
+
+    @property
+    def value(self) -> str:
+        return f"{ACCOUNT_SAME}{self.lease.pk}"
+
+
+def shareable_accounts(operator_ids: Iterable[uuid.UUID]) -> list[SharedAccount]:
+    """The leases of these operators, not ended, that hold their own processor customer
+    and a usable linked bank method and do not use another lease's account, by store
+    number (local data only: the latest method snapshot)."""
+    leases = Lease.objects.filter(operator_id__in=list(operator_ids), ended_on__isnull=True)
+    own = ExternalRef.objects.filter(
+        entity_type=lease_sync.ENTITY_LEASE,
+        provider=PROVIDER_KEY,
+        superseded_at__isnull=True,
+        entity_id__in=leases.values("pk"),
+    )
+    with_customer = own.filter(external_kind=lease_sync.KIND_CUSTOMER).values("entity_id")
+    with_method = own.filter(external_kind=lease_sync.KIND_PAYMENT_METHOD).values("entity_id")
+    candidates = (
+        leases.filter(pk__in=with_customer)
+        .filter(pk__in=with_method)
+        .exclude(collection_status=CollectionStatus.ENDED)
+        .exclude(billing__shares_account_of__isnull=False)
+        .select_related("store", "operator")
+        .order_by(F("store__store_number").asc(nulls_last=True), "store__external_label", "id")
+    )
+    found = []
+    for lease in candidates:
+        method = linked_method_record(lease)
+        if method is not None and method.is_usable_bank:
+            found.append(SharedAccount(lease, bank_last4(method)))
+    return found
+
+
+def shared_account(operator: Operator | None, account: str) -> Lease | None:
+    """The lease whose account ``account`` names (``same:<lease id>``), checked again
+    under its row lock: of ``operator``, not ended, its own customer and a usable bank
+    method, not itself sharing; ``None`` for :data:`ACCOUNT_LATER` and
+    :data:`ACCOUNT_ENTER`. Raises :class:`LeaseRefused` otherwise."""
+    if account in (ACCOUNT_LATER, ACCOUNT_ENTER):
+        return None
+    if not account.startswith(ACCOUNT_SAME):
+        raise LeaseRefused("account", ACCOUNT_INVALID)
+    try:
+        key = uuid.UUID(account.removeprefix(ACCOUNT_SAME))
+    except ValueError:
+        raise LeaseRefused("account", ACCOUNT_INVALID) from None
+    other = Lease.objects.select_for_update().filter(pk=key).first()
+    if (
+        other is None
+        or operator is None
+        or other.operator_id != operator.pk
+        or other.pk not in {found.lease.pk for found in shareable_accounts([operator.pk])}
+    ):
+        raise LeaseRefused("account", ACCOUNT_NOT_SHAREABLE)
+    return other
+
+
+def start_billing(
+    lease: Lease, billing: Mapping[str, Any], account: str, *, actor: User | None
+) -> LeaseBilling:
+    """Write a new lease's billing details and its bank-account choice (the caller's
+    transaction; PLAN-014 C4). ``same:<lease id>`` shares that lease's account
+    (:func:`shared_account`, refused with :class:`LeaseRefused`); otherwise the lease is
+    its own customer: with a billing e-mail it is marked ``pending`` and one
+    ``lease_sync`` is queued (the part-1 rule), without one it waits for a manual link.
+    Nothing is copied from the operator. Audited ``lease_billing.changed``."""
+    shares = shared_account(lease.operator, account)
+    row = LeaseBilling(lease=lease, shares_account_of=shares)
+    for name in lease_sync.BILLING_FIELDS:
+        setattr(row, name, billing.get(name) or "")
+    row.save()
+    lease.billing = row
+    queue = False
+    if shares is None and lease.operator is not None:
+        queue = bool(row.email)
+        lease.sync_status = SyncStatus.PENDING if queue else SyncStatus.AWAITING_LINK
+        lease.save(update_fields=["sync_status", "updated_at"])
+    _audit(actor, "lease_billing.changed", lease, None, lease_sync.billing_snapshot(row))
+    if queue:
+        jobs.enqueue(JobKind.LEASE_SYNC, lease, None, actor)
+    return row
+
+
+# --- The per-lease customers of the sharing leases (PLAN-014 C9) ------------------------
+
+#: The jobs that already send a lease's customer (one of them waiting: nothing more queued).
+SYNC_KINDS = (JobKind.LEASE_SYNC, JobKind.LEASE_RETRY)
+
+
+@dataclass(frozen=True, slots=True)
+class OwnCustomers:
+    """What :func:`queue_own_customers` found and queued."""
+
+    leases: int
+    queued: int
+
+
+def own_customer_candidates() -> list[Lease]:
+    """The leases that share another lease's account and hold no customer of their own,
+    not ended, of an operator not archived, by store number."""
+    own = ExternalRef.objects.filter(
+        entity_type=lease_sync.ENTITY_LEASE,
+        provider=PROVIDER_KEY,
+        external_kind=lease_sync.KIND_CUSTOMER,
+        superseded_at__isnull=True,
+    ).values("entity_id")
+    return list(
+        Lease.objects.filter(
+            billing__shares_account_of__isnull=False,
+            ended_on__isnull=True,
+            operator__isnull=False,
+            operator__archived_at__isnull=True,
+        )
+        .exclude(collection_status=CollectionStatus.ENDED)
+        .exclude(pk__in=own)
+        .select_related("store", "billing")
+        .order_by(F("store__store_number").asc(nulls_last=True), "store__external_label", "id")
+    )
+
+
+def queue_own_customers(*, dry_run: bool, limit: int | None = None) -> OwnCustomers:
+    """Queue one ``lease_sync`` with ``own_customer`` for each candidate (at most
+    ``limit``) that has a billing e-mail and no sync waiting, marking it ``pending``;
+    ``shares_account_of`` and every bank method are left as they are. The dry run queues
+    and writes nothing. Running it again while the jobs wait queues nothing more."""
+    candidates = own_customer_candidates()
+    queued = 0
+    for lease in candidates:
+        if dry_run or (limit is not None and queued >= limit):
+            break
+        if not lease.billing.email or jobs.is_active(jobs.latest_for(lease, SYNC_KINDS)):
+            continue
+        with transaction.atomic():
+            locked = Lease.objects.select_for_update().get(pk=lease.pk)
+            locked.sync_status = SyncStatus.PENDING
+            locked.save(update_fields=["sync_status", "updated_at"])
+            jobs.enqueue(JobKind.LEASE_SYNC, locked, {"own_customer": True}, None)
+        queued += 1
+    return OwnCustomers(leases=len(candidates), queued=queued)
+
+
+# --- Switch to own account (PLAN-014 C9) -------------------------------------------------
+
+#: Refusal reasons of :func:`switch_to_own_account` (stored in its audit row; never shown).
+SWITCH_NOT_SHARING = "NotSharing"
+SWITCH_NO_CUSTOMER = "NoOwnCustomer"
+SWITCH_ARCHIVED = "Archived"
+SWITCH_PAUSED = "AutopayPaused"
+#: The view's own refusal: a switch of the lease is queued or running.
+SWITCH_WAITING = "SwitchWaiting"
+SWITCH_NO_METHOD = "NoBankMethod"
+SWITCH_SEVERAL = "SeveralBankMethods"
+SWITCH_NOT_MOVED = "AutopayNotMoved"
+#: The sentence of each refusal; a provider failure has its own (:data:`SWITCH_FAILED`).
+SWITCH_MESSAGES: dict[str, str] = {
+    SWITCH_NOT_SHARING: "This lease already uses its own account. Nothing was changed.",
+    SWITCH_NO_CUSTOMER: provider_sentence(
+        "This lease has no {provider} customer of its own yet. Nothing was changed."
+    ),
+    SWITCH_ARCHIVED: "This operator is archived. Nothing was changed.",
+    SWITCH_PAUSED: (
+        "Autopay is paused on this lease. Resume or stop it before switching. Nothing was changed."
+    ),
+    SWITCH_WAITING: "A switch to the lease's own account is already waiting. Nothing was queued.",
+    SWITCH_NO_METHOD: provider_sentence(
+        "The lease's own {provider} customer has no usable bank account. Nothing was changed."
+    ),
+    SWITCH_SEVERAL: provider_sentence(
+        "The lease's own {provider} customer has several bank accounts and none is the "
+        "default. Make one the default in {provider} first. Nothing was changed."
+    ),
+    SWITCH_NOT_MOVED: "The autopay could not be moved. Nothing was changed.",
+}
+SWITCH_FAILED = provider_sentence(
+    "The request to {provider} failed. Nothing was changed; try again later."
+)
+SWITCH_QUEUED = "Switching to the lease's own account."
+SWITCH_DONE = (
+    "Switched to the lease's own account, bank ····{last4}. Autopay schedules moved: {moved}."
+)
+SWITCH_DONE_NO_DIGITS = "Switched to the lease's own account. Autopay schedules moved: {moved}."
+SWITCH_MOVE_FAILED = (
+    "Switched to the lease's own account, but the autopay was not fully moved. "
+    "Check the lease's autopay."
+)
+SWITCHED_ACTION = "lease.account_switched"
+SWITCH_REFUSED_ACTION = "lease.account_switch_refused"
+
+
+@dataclass(frozen=True, slots=True)
+class AccountSwitch:
+    """The outcome of :func:`switch_to_own_account`."""
+
+    ok: bool
+    message: str
+    #: A refusal reason of :data:`SWITCH_MESSAGES` or a provider error's class name.
+    reason: str = ""
+
+
+class _NotMoved(Exception):  # noqa: N818 (an outcome carried out of the savepoint)
+    def __init__(self, outcome: AutopayOutcome) -> None:
+        super().__init__(outcome.message)
+        self.outcome = outcome
+
+
+def switch_refusal(lease: Lease) -> str:
+    """Why the lease cannot switch to its own account now, or ``""`` (local data only;
+    the view's up-front check and the job's first one): it does not share another lease's
+    account, its operator is archived, it holds no customer of its own, or a rent or
+    insurance schedule of it is paused at the provider (resuming it later would debit the
+    shared account's method)."""
+    if lease_sync.billing_of(lease).shares_account_of_id is None:
+        return SWITCH_NOT_SHARING
+    if lease.operator is not None and lease.operator.archived_at is not None:
+        return SWITCH_ARCHIVED
+    if not lease_sync.current_refs(lease).get(lease_sync.KIND_CUSTOMER):
+        return SWITCH_NO_CUSTOMER
+    if any(row.state == ScheduleState.PAUSED for row, _ in stoppable_schedules(lease)):
+        return SWITCH_PAUSED
+    return ""
+
+
+def own_bank_method(
+    methods: Iterable[PaymentMethodRecord],
+) -> tuple[PaymentMethodRecord | None, str]:
+    """The usable bank method a switch links: the default one, else the only one; or the
+    refusal reason (none, or several without exactly one default)."""
+    usable = [method for method in methods if method.is_usable_bank]
+    defaults = [method for method in usable if method.is_default]
+    if len(defaults) == 1:
+        return defaults[0], ""
+    if not usable:
+        return None, SWITCH_NO_METHOD
+    if len(usable) == 1 and not defaults:
+        return usable[0], ""
+    return None, SWITCH_SEVERAL
+
+
+def switch_to_own_account(
+    lease_id: uuid.UUID, *, move_key: uuid.UUID, actor: User | None
+) -> AccountSwitch:
+    """Move a lease that shares another lease's account to the bank method of its own
+    processor customer (worker only; ``JobKind.LEASE_ACCOUNT_SWITCH``).
+
+    In one transaction under the lease's row lock: :func:`switch_refusal`; one provider call
+    reads the own customer's payment methods; :func:`own_bank_method` picks the method
+    (refused with no write when there is none or several without a default). Then, in a
+    savepoint: the lease's ``payment_method`` reference is written, the list kept as the own
+    customer's method snapshot, ``bank_last4`` cached and ``shares_account_of`` cleared,
+    and :func:`move_autopay` moves every active rent schedule onto the new customer and
+    method with ``move_key`` as its plan key and ``seq=0`` (no debit has seq 0, so every
+    debit starts from now; ``skipped`` is then never read). A move that fails before it
+    deleted any schedule at the provider rolls the savepoint back: the switch is refused
+    (:data:`SWITCH_NOT_MOVED` or the provider error's class) and nothing is written. A
+    move that fails after a delete keeps the switch (the deleted rows stay ended) and
+    reports it. Audited ``lease.account_switched`` (masked identifiers, the last four, the
+    move key, the debits moved) or ``lease.account_switch_refused`` (the reason name).
+
+    A replay of the same job (the lease already switched with ``move_key``) reads nothing
+    and runs the move again, which deletes nothing already deleted and creates what is
+    missing.
+    """
+    with transaction.atomic():
+        lease = _locked(lease_id)
+        billing = lease_sync.billing_of(lease)
+        if billing.shares_account_of_id is None and _switched(lease, move_key):
+            moved = move_autopay(
+                lease.pk, seq=0, skipped=timezone.localdate(), plan_id=move_key, actor=actor
+            )
+            return _switch_done(lease, moved, billing.bank_last4, move_key)
+        reason = switch_refusal(lease)
+        if reason:
+            return _switch_refused(actor, lease, reason)
+        customer = lease_sync.current_refs(lease)[lease_sync.KIND_CUSTOMER]
+        try:
+            methods = payments.get_provider().list_payment_methods(customer)
+        except ProviderError as error:
+            return _switch_refused(actor, lease, lease_sync.failure_name(error))
+        chosen, reason = own_bank_method(methods)
+        if chosen is None:
+            return _switch_refused(actor, lease, reason)
+        shared = billing.shares_account_of_id
+        try:
+            with transaction.atomic():
+                _link_own_method(lease, billing, customer, chosen, methods)
+                moved = move_autopay(
+                    lease.pk, seq=0, skipped=timezone.localdate(), plan_id=move_key, actor=actor
+                )
+                deleted = _move_rows(lease, DELETED_FOR_MOVE_ACTION, move_key)
+                if not moved.ok and not deleted:
+                    raise _NotMoved(moved)
+        except _NotMoved as stop:
+            return _switch_refused(actor, lease, stop.outcome.failure or SWITCH_NOT_MOVED)
+        digits = bank_last4(chosen)
+        _audit(
+            actor,
+            SWITCHED_ACTION,
+            lease,
+            {"shares_account_of": str(shared), "payment_method": ""},
+            {
+                "shares_account_of": None,
+                "customer": mask_identifier(customer),
+                "payment_method": mask_identifier(chosen.external_id),
+                "last4": digits,
+                "move_key": str(move_key),
+                "autopay": str(moved.action),
+                "moved": sorted(_move_rows(lease, MOVED_ACTION, move_key)),
+            },
+        )
+    return _switch_done(lease, moved, digits, move_key)
+
+
+def _switch_done(
+    lease: Lease, moved: AutopayOutcome, digits: str, move_key: uuid.UUID
+) -> AccountSwitch:
+    """The outcome of a switch written with ``move_key``: done with the debits moved, or
+    failed when its autopay move did not finish."""
+    if not moved.ok:
+        return AccountSwitch(False, SWITCH_MOVE_FAILED, moved.failure)
+    count = len(_move_rows(lease, MOVED_ACTION, move_key))
+    text = SWITCH_DONE if digits else SWITCH_DONE_NO_DIGITS
+    return AccountSwitch(True, text.format(last4=digits, moved=count))
+
+
+def _switched(lease: Lease, move_key: uuid.UUID) -> bool:
+    """Whether the lease was switched to its own account with this move key."""
+    return AuditLog.objects.filter(
+        action=SWITCHED_ACTION,
+        entity_type=ENTITY_LEASE,
+        entity_id=str(lease.pk),
+        after__move_key=str(move_key),
+    ).exists()
+
+
+def _link_own_method(
+    lease: Lease,
+    billing: LeaseBilling,
+    customer: str,
+    chosen: PaymentMethodRecord,
+    methods: list[PaymentMethodRecord],
+) -> None:
+    """Clear the share and link ``chosen`` as the lease's own bank method; the list is kept
+    as the own customer's snapshot and the last four cached (the caller's transaction)."""
+    billing.shares_account_of = None
+    billing.save(update_fields=["shares_account_of", "updated_at"])
+    ExternalRef.objects.filter(
+        entity_type=lease_sync.ENTITY_LEASE,
+        entity_id=lease.pk,
+        provider=PROVIDER_KEY,
+        external_kind=lease_sync.KIND_PAYMENT_METHOD,
+        superseded_at__isnull=True,
+    ).update(superseded_at=timezone.now())
+    ExternalRef.objects.create(
+        entity_type=lease_sync.ENTITY_LEASE,
+        entity_id=lease.pk,
+        provider=PROVIDER_KEY,
+        external_kind=lease_sync.KIND_PAYMENT_METHOD,
+        external_id=chosen.external_id,
+    )
+    customer_row = _customer_ref_row(lease)
+    if customer_row is not None and customer_row.external_id == customer:
+        _store_methods(customer_row, methods, lease)
+
+
+def _switch_refused(actor: User | None, lease: Lease, reason: str) -> AccountSwitch:
+    """Audit a refused switch (the reason name only) and report it."""
+    _audit(actor, SWITCH_REFUSED_ACTION, lease, None, {"reason": reason})
+    return AccountSwitch(False, SWITCH_MESSAGES.get(reason, SWITCH_FAILED), reason)
 
 
 # --- Lease writes ---------------------------------------------------------------------
@@ -679,11 +1345,16 @@ def create_lease(
     creation_key: uuid.UUID,
     actor: User | None,
     today: date | None = None,
+    billing: Mapping[str, Any] | None = None,
+    account: str = ACCOUNT_LATER,
 ) -> tuple[Lease, bool]:
     """Save a new lease and its first rent row, or return the lease this key made.
 
     The key is recorded in the ``lease.created`` audit row; the store row is locked
-    while it is looked up, so two submissions of one form make one lease.
+    while it is looked up, so two submissions of one form make one lease. With
+    ``billing`` (PLAN-014 C4), the lease's billing details and bank-account choice are
+    written in the same transaction (:func:`start_billing`); a refused choice raises
+    :class:`LeaseRefused` and nothing is saved.
     """
     values = _editable(fields)
     store: Store = values["store"]
@@ -708,6 +1379,8 @@ def create_lease(
             {**_snapshot(lease), "creation_key": str(creation_key)},
         )
         _catch_up(lease, actor, today)
+        if billing is not None:
+            start_billing(lease, billing, account, actor=actor)
     return lease, True
 
 
@@ -849,14 +1522,14 @@ def enable_autopay(
     call); the per-debit amounts of the debits to create (PLAN-007c: above the confirmed
     provider limit is refused; above the warning threshold is refused unless
     ``confirmed`` is ``True``; both with no provider call); the method list for the
-    operator's customer (the chosen ID must be a bank method in it); a delete of every
+    lease's customer (the chosen ID must be a bank method in it); a delete of every
     stale (flagged, paused) schedule, a 404 counting as already gone, where any other
     failure ends nothing and creates nothing; then one create per missing debit. A
     create failure stops at that debit, marks its row ``failed`` and changes nothing on
     the lease; schedules already created stay linked.
     A confirmed large debit is audited after the method check, before any provider write.
     """
-    if not operator_sync.IDENTIFIER.match(payment_method_external_id or ""):
+    if not lease_sync.IDENTIFIER.match(payment_method_external_id or ""):
         return AutopayOutcome(AutopayAction.REFUSED, CHOOSE_METHOD)
     moment = now or timezone.now()
     with transaction.atomic():
@@ -897,7 +1570,7 @@ def enable_autopay(
             return AutopayOutcome(AutopayAction.REFUSED, large_debit_confirmation(amounts))
 
         provider = payments.get_provider()
-        customer = customer_ref(operator)
+        customer = customer_ref(lease)
         try:
             methods = provider.list_payment_methods(customer)
         except ProviderError as error:
@@ -960,7 +1633,6 @@ def enable_autopay(
             outcome = _create_one(
                 provider,
                 lease,
-                operator,
                 live[debit.seq][0] if debit.seq in live else None,
                 debit,
                 customer=customer,
@@ -1137,7 +1809,7 @@ def move_autopay(
     """PLAN-012b-b D13: move the lease's active rent autopay past the debit due on
     ``skipped`` (debit ``seq``), split by plan ``plan_id``; see the module docstring.
 
-    Order: lease row lock; the operator's customer and linked bank method (refused, with
+    Order: lease row lock; the lease's customer and linked bank method (refused, with
     no provider call, without them); the rent in effect on each new first debit; then
     each active schedule not yet deleted for this plan, deleted (a 404 counts as gone),
     ended and audited :data:`DELETED_FOR_MOVE_ACTION`, one at a time; then each debit
@@ -1154,10 +1826,10 @@ def move_autopay(
         operator = lease.operator
         if operator is None:
             return AutopayOutcome(AutopayAction.REFUSED, NO_OPERATOR)
-        customer = customer_ref(operator)
+        customer = customer_ref(lease)
         if not customer:
             return AutopayOutcome(AutopayAction.REFUSED, NO_PROVIDER_CUSTOMER)
-        payment_method = linked_payment_method(operator)
+        payment_method = linked_payment_method(lease)
         if not payment_method:
             return AutopayOutcome(AutopayAction.REFUSED, NO_BANK_METHOD)
         deleted = _move_rows(lease, DELETED_FOR_MOVE_ACTION, plan_id)
@@ -1225,7 +1897,6 @@ def move_autopay(
             outcome = _create_one(
                 provider,
                 lease,
-                operator,
                 current,
                 debit,
                 customer=customer,
@@ -1296,7 +1967,6 @@ def autopay_move(lease: Lease, now: datetime | None = None) -> AutopayMove | Non
 def _create_one(
     provider: PaymentProvider,
     lease: Lease,
-    operator: Operator,
     row: CollectionSchedule | None,
     debit: PlannedDebit,
     *,
@@ -1339,7 +2009,7 @@ def _create_one(
         payment_method_external_id=payment_method,
         amounts=Amounts(debit.amount, debit.amount, Decimal("0.00"), (line,)),
         rule=rule,
-        email_notification=bool(operator.email),
+        email_notification=bool(lease_sync.billing_of(account_lease(lease) or lease).email),
     )
     try:
         record = provider.create_scheduled_invoice(schedule)
@@ -1442,7 +2112,7 @@ def _failed(
     context: dict[str, Any],
 ) -> AutopayOutcome:
     """Audit a provider failure (class name and field names only) and report it (D12)."""
-    failure = operator_sync.failure_name(error)
+    failure = lease_sync.failure_name(error)
     fields = _fields(error)
     _audit(actor, action, lease, None, {**context, "failure": failure, "fields": list(fields)})
     return AutopayOutcome(AutopayAction.FAILED, _failure_message(error), fields, failure)

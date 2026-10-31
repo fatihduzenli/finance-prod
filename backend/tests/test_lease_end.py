@@ -37,6 +37,7 @@ from ledger.models import (
     Invoice,
     InvoiceStatus,
     Lease,
+    LeaseBilling,
     LeaseEnd,
     LeaseEndStatus,
     MessageKind,
@@ -1189,11 +1190,16 @@ def test_outside_production_the_statement_goes_to_the_catch_all_with_the_pdf(
     assert AuditLog.objects.filter(action="lease_end.statement_sent").exists()
 
 
-def test_an_operator_without_an_address_is_not_mailed(admin: Any, memory: MemoryMailSender) -> None:
+def test_a_lease_without_a_billing_address_is_not_mailed(
+    admin: Any, memory: MemoryMailSender
+) -> None:
     _, user = admin
     end = a_confirmed_end(user)
+    # PLAN-014 C5: the statement goes to the ended lease's billing e-mail, not the
+    # operator's (which is kept here).
     operator = fresh(end).lease.operator
-    type(operator).objects.filter(pk=operator.pk).update(email=None)
+    assert operator is not None and operator.email
+    LeaseBilling.objects.filter(lease_id=end.lease_id).update(email="")
     run_queued_jobs()
     assert memory.sent == []
     message = OutboundMessage.objects.get()

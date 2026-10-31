@@ -12,7 +12,7 @@
   {% if query %}
     <ul id="operator-results">
       {% for row in results %}
-        <li>{{ row.display_name }}{% if row.company and row.company != row.display_name %} ({{ row.company }}){% endif %}
+        <li>{{ row.display_name }}
           <form method="post" class="js-single-submit inline-form">
             {% csrf_token %}
             <input type="hidden" name="action" value="pick">
@@ -26,7 +26,6 @@
     </ul>
   {% endif %}
   <h2 class="section-label">New operator</h2>
-  <p class="muted">With an e-mail address, saving also connects or creates the operator's customer in {{ company.provider_name }}, as on the operator form.</p>
   <form method="post" id="operator-create" class="js-single-submit" autocomplete="off">
     {% csrf_token %}
     <input type="hidden" name="action" value="create">

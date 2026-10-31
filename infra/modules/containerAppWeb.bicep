@@ -101,6 +101,9 @@ param uspsClientIdSecretName string = ''
 @description('Vault secret name for that client\'s secret, e.g. usps-client-secret. Wired only together with uspsClientIdSecretName.')
 param uspsClientSecretSecretName string = ''
 
+@description('Vault secret name for the Stax web payments token of the hosted bank-account fields (PLAN-014 C7), e.g. stax-web-payments-token. Leave empty to run without bank entry; STAX_WEB_PAYMENTS_TOKEN is then not set at all.')
+param staxWebPaymentsTokenSecretName string = ''
+
 @description('Custom hostname to bind, e.g. staging.monvera.io. Empty means the app is reachable on its default ingress host name only.')
 param customDomainName string = ''
 
@@ -132,6 +135,10 @@ var wireSentry = !empty(sentryDsnSecretName)
 // PLAN-012f-c D14: the USPS pair is wired only when both names are set (the env guard
 // refuses one alone). The web app is the only caller (the store form's "Check address").
 var wireUsps = !empty(uspsClientIdSecretName) && !empty(uspsClientSecretSecretName)
+
+// PLAN-014 C7: the web payments token is wired only when its name is set. The web app is
+// the only reader (the bank-entry page).
+var wireWebPayments = !empty(staxWebPaymentsTokenSecretName)
 
 // Pass 1 binds the hostname without a certificate, which is what lets the
 // environment issue one. Pass 2 supplies the certificate ID and switches the
@@ -193,6 +200,14 @@ var uspsSecrets = [
   {
     name: 'usps-client-secret'
     keyVaultUrl: '${keyVaultUri}secrets/${uspsClientSecretSecretName}'
+    identity: identityResourceId
+  }
+]
+
+var webPaymentsSecrets = [
+  {
+    name: 'stax-web-payments-token'
+    keyVaultUrl: '${keyVaultUri}secrets/${staxWebPaymentsTokenSecretName}'
     identity: identityResourceId
   }
 ]
@@ -296,6 +311,13 @@ var uspsEnv = [
   }
 ]
 
+var webPaymentsEnv = [
+  {
+    name: 'STAX_WEB_PAYMENTS_TOKEN'
+    secretRef: 'stax-web-payments-token'
+  }
+]
+
 // PLAN-011b D3, D9: the Gmail service-account key, by vault reference, only while mail
 // is on (the env guard requires it then, and nothing reads it otherwise).
 var mailSecrets = [
@@ -347,7 +369,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
           identity: identityResourceId
         }
       ]
-      secrets: concat(baseSecrets, wireSentry ? sentrySecrets : [], mailEnabled ? mailSecrets : [], wireUsps ? uspsSecrets : [])
+      secrets: concat(baseSecrets, wireSentry ? sentrySecrets : [], mailEnabled ? mailSecrets : [], wireUsps ? uspsSecrets : [], wireWebPayments ? webPaymentsSecrets : [])
     }
     template: {
       containers: [
@@ -358,7 +380,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json(cpuCores)
             memory: memory
           }
-          env: concat(baseEnv, wireSentry ? sentryEnv : [], mailEnabled ? mailSecretEnv : [], wireUsps ? uspsEnv : [])
+          env: concat(baseEnv, wireSentry ? sentryEnv : [], mailEnabled ? mailSecretEnv : [], wireUsps ? uspsEnv : [], wireWebPayments ? webPaymentsEnv : [])
           probes: [
             {
               type: 'Readiness'

@@ -68,6 +68,7 @@ from ledger.services import (
     contacts,
     csv_export,
     invoice_builder,
+    leases,
     rent_run,
     workspace,
 )
@@ -91,7 +92,7 @@ from ledger.views.operators import (
     role_required,
     uuid_param,
 )
-from payments import operator_sync
+from payments import lease_sync
 from payments.jobs import is_active, latest_for
 from payments.models import JobKind
 from payments.provider import mask_identifier
@@ -264,7 +265,7 @@ def _detail_context(request: HttpRequest, charge: OneOffCharge) -> dict[str, Any
         and not jobs["job_refresh"]
         and service.retry_kind(charge) is not None,
         "can_retry_mark": retry_wait == 0 and not jobs["job_refresh"],
-        "retry_wait_message": (operator_sync.retry_wait_message(retry_wait) if retry_wait else ""),
+        "retry_wait_message": (lease_sync.retry_wait_message(retry_wait) if retry_wait else ""),
         **_charge_now_context(charge, admin, closed, jobs["job_refresh"]),
         # PLAN-012e D9, D10: an installment's plan, or the parent's plan and Split.
         "installment_plan": charge.plan,
@@ -506,6 +507,7 @@ def charge_payment(request: HttpRequest, pk: str) -> HttpResponse:
         charge_url=detail_url,
         store=charge.lease.store if charge.lease is not None else None,
         operator=operator,
+        billing_lease=leases.billing_lease(charge),
         status=charge.status,
         status_label=str(charge.get_status_display()),
         amount=charge.price,

@@ -62,8 +62,6 @@ operator_patterns = (
         path("<str:pk>/", operators.operator_detail, name="detail"),
         path("<str:pk>/edit/", operators.operator_edit, name="edit"),
         path("<str:pk>/archive/", operators.operator_archive, name="archive"),
-        path("<str:pk>/retry-sync/", operators.operator_retry_sync, name="retry_sync"),
-        path("<str:pk>/link/", operators.operator_link, name="link"),
         # Replaced by the invoice builder (PLAN-012 D6): answers 410 Gone.
         path("<str:pk>/charges/new/", one_off_charges.create_form_gone, name="new_charge"),
         path("<str:pk>/statement/", reports.statement_page, name="statement"),
@@ -179,6 +177,10 @@ lease_patterns = (
         path("<str:pk>/pause/", leases.lease_pause, name="pause"),
         path("<str:pk>/resume/", leases.lease_resume, name="resume"),
         path("<str:pk>/stop-autopay/", leases.lease_stop_autopay, name="stop_autopay"),
+        path("<str:pk>/billing/", leases.lease_billing, name="billing"),
+        path("<str:pk>/bank/", leases.lease_bank, name="bank"),
+        path("<str:pk>/bank/attach/", leases.lease_bank_attach, name="bank_attach"),
+        path("<str:pk>/bank/switch-own/", leases.lease_switch_own, name="switch_own"),
         path(
             "<str:pk>/setup-charges/new/",
             one_off_charges.lease_add_setup_charge,

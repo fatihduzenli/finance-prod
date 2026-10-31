@@ -19,6 +19,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import connection
+from django.db.models import ProtectedError
 from django.test import override_settings
 from django.utils import timezone
 
@@ -28,6 +29,7 @@ from ledger.models import (
     CollectionSchedule,
     CollectionStatus,
     Lease,
+    LeaseBilling,
     LeaseRentHistory,
     Operator,
     PaymentChannel,
@@ -52,7 +54,7 @@ from payments.provider import (
 from payments.stax.adapter import DEFAULT_PAYMENT_PAGE_URL, StaxProvider
 from tests.auth_helpers import make_user
 from tests.stax_helpers import make_rig, sequence
-from tests.test_operator_sync import requires_postgresql
+from tests.test_lease_sync import requires_postgresql
 
 pytestmark = pytest.mark.django_db
 
@@ -91,19 +93,65 @@ def method(
     )
 
 
+#: What :func:`make_operator` was given to bill with, by operator: (billing e-mail,
+#: provider customer). PLAN-014 C3 moved both to the lease; :func:`bill_lease` gives them
+#: to each lease made for the operator.
+_OPERATOR_BILLING: dict[uuid.UUID, tuple[str | None, str | None]] = {}
+
+
 def make_operator(
     email: str | None = "ops@example.com", customer: str | None = CUSTOMER
 ) -> Operator:
+    """An operator with ``email``. The billing e-mail and the provider ``customer`` are the
+    lease's since PLAN-014 C3: :func:`make_lease` (or :func:`bill_lease`) gives them to
+    each lease of the operator, as ledger migration 0059 copied them."""
     operator = Operator.objects.create(display_name="Northwind Stores", email=email)
-    if customer:
-        ExternalRef.objects.create(
-            entity_type="operator",
-            entity_id=operator.pk,
+    _OPERATOR_BILLING[operator.pk] = (email, customer)
+    return operator
+
+
+def bill_lease(lease: Lease) -> Lease:
+    """Give ``lease`` the billing :func:`make_operator` was given for its operator: a
+    billing row with that e-mail and the provider customer reference. The first lease of
+    the customer holds the reference; a later one shares its account (one hop), as
+    migration 0059 re-pointed an operator's references. Nothing for any other operator."""
+    if lease.operator_id is None or lease.operator_id not in _OPERATOR_BILLING:
+        return lease
+    email, customer = _OPERATOR_BILLING[lease.operator_id]
+    if not email and not customer:
+        return lease
+    holder = (
+        ExternalRef.objects.filter(
+            entity_type="lease",
+            provider="stax_pay",
+            external_kind="customer",
+            external_id=customer,
+            superseded_at__isnull=True,
+        )
+        .exclude(entity_id=lease.pk)
+        .first()
+        if customer
+        else None
+    )
+    billing, _ = LeaseBilling.objects.update_or_create(
+        lease=lease,
+        defaults={
+            "email": email or "",
+            "shares_account_of": (
+                Lease.objects.get(pk=holder.entity_id) if holder is not None else None
+            ),
+        },
+    )
+    if customer and holder is None:
+        ExternalRef.objects.get_or_create(
+            entity_type="lease",
+            entity_id=lease.pk,
             provider="stax_pay",
             external_kind="customer",
             external_id=customer,
         )
-    return operator
+    lease.billing = billing
+    return lease
 
 
 def lease_fields(**overrides: Any) -> dict[str, Any]:
@@ -135,7 +183,7 @@ def make_lease(rent: Decimal = RENT, **overrides: Any) -> Lease:
         today=started - timedelta(days=1) if started is not None else None,
     )
     assert created
-    return lease
+    return bill_lease(lease)
 
 
 def edit(lease: Lease, rent: Decimal, starts: date | None = None, **changes: Any) -> Lease:
@@ -975,7 +1023,7 @@ def test_a_refresh_reads_the_list_once_and_the_page_reads_only_the_snapshot(
     fake.add_payment_method(CUSTOMER, method("pm-card-1", kind="card"))
     lease = make_lease()
     assert lease.operator is not None
-    outcome = service.refresh_payment_methods(lease.operator.pk)
+    outcome = service.refresh_payment_methods(lease.pk)
     assert (outcome.ok, outcome.message) == (True, service.METHODS_READ.format(count=2))
     assert [name for name, _ in fake.calls] == ["list_payment_methods"]
 
@@ -999,9 +1047,9 @@ def test_a_second_refresh_replaces_the_list_and_keeps_the_customer_snapshot(
         external_ref=ref, payload={"id": CUSTOMER}, fetched_at=NOW
     )
     fake.add_payment_method(CUSTOMER, method())
-    service.refresh_payment_methods(lease.operator.pk)
+    service.refresh_payment_methods(lease.pk)
     fake.add_payment_method(CUSTOMER, method("pm-bank-2"))
-    service.refresh_payment_methods(lease.operator.pk)
+    service.refresh_payment_methods(lease.pk)
     [snapshot] = _method_snapshots()
     assert [item["external_id"] for item in snapshot.payload] == [BANK, "pm-bank-2"]
     assert ProviderSnapshot.objects.filter(pk=customer.pk).exists()
@@ -1017,11 +1065,11 @@ def test_a_failed_refresh_keeps_the_previous_list_and_names_fields_only(
     lease = make_lease()
     assert lease.operator is not None
     fake.add_payment_method(CUSTOMER, method())
-    service.refresh_payment_methods(lease.operator.pk)
+    service.refresh_payment_methods(lease.pk)
     fake.fail_next(
         "list_payment_methods", ProviderRejected(404, "CANARY", error_fields=("customer",))
     )
-    outcome = service.refresh_payment_methods(lease.operator.pk)
+    outcome = service.refresh_payment_methods(lease.pk)
     assert (outcome.ok, outcome.fields, outcome.failure) == (
         False,
         ("customer",),
@@ -1035,8 +1083,8 @@ def test_a_failed_refresh_keeps_the_previous_list_and_names_fields_only(
 def test_a_refresh_without_a_customer_calls_nothing_and_writes_nothing(
     fake: FakeProvider,
 ) -> None:
-    operator = make_operator(customer=None)
-    outcome = service.refresh_payment_methods(operator.pk)
+    lease = make_lease(operator=make_operator(customer=None))
+    outcome = service.refresh_payment_methods(lease.pk)
     assert (outcome.ok, outcome.message) == (False, service.NO_PROVIDER_CUSTOMER)
     assert service.refresh_payment_methods(uuid.uuid4()).ok is False
     assert fake.calls == [] and not ProviderSnapshot.objects.exists()
@@ -1048,13 +1096,13 @@ def test_a_method_holding_a_card_number_is_not_stored_and_the_old_list_stays(
     lease = make_lease()
     assert lease.operator is not None
     fake.add_payment_method(CUSTOMER, method())
-    service.refresh_payment_methods(lease.operator.pk)
+    service.refresh_payment_methods(lease.pk)
     dirty = PaymentMethodRecord(
         external_id="pm-dirty", raw_status="", fetched_at=NOW, nickname="4111111111111111"
     )
     fake.add_payment_method(CUSTOMER, dirty)
     with pytest.raises(ValidationError):
-        service.refresh_payment_methods(lease.operator.pk)
+        service.refresh_payment_methods(lease.pk)
     [snapshot] = _method_snapshots()
     assert [item["external_id"] for item in snapshot.payload] == [BANK]
     assert "4111111111111111" not in str(ProviderSnapshot.objects.values_list("payload"))
@@ -1334,14 +1382,13 @@ PLAN = uuid.UUID("00000000-0000-0000-0000-0000000000d1")
 
 def linked_lease(fake: FakeProvider, rent: Decimal = RENT, **overrides: Any) -> Lease:
     """A lease with rent autopay enabled on :data:`NOW` (the 15th's first debit is 15
-    October) and the operator's bank method linked, as the move needs it."""
+    October) and the lease's bank method linked, as the move needs it."""
     fake.add_payment_method(CUSTOMER, method())
     lease = make_lease(rent, **overrides)
     assert enable(lease).ok
-    assert lease.operator is not None
     ExternalRef.objects.create(
-        entity_type="operator",
-        entity_id=lease.operator.pk,
+        entity_type="lease",
+        entity_id=lease.pk,
         provider="stax_pay",
         external_kind="payment_method",
         external_id=BANK,
@@ -1454,3 +1501,490 @@ def test_the_debit_instant_is_noon_utc_of_the_day() -> None:
     assert service.next_debit_at(15, service.debit_instant(date(2026, 10, 15))) == datetime(
         2026, 11, 15, 12, tzinfo=UTC
     )
+
+
+# --- PLAN-014 C4: a new lease's billing details and bank-account choice -------------------------
+
+BILLING_IN = {
+    "company_name": "Northwind Two LLC",
+    "email": "two@example.com",
+    "phone": "4155550132",
+    "address_line1": "1 Main St",
+    "address_line2": "",
+    "city": "Austin",
+    "state": "TX",
+    "postal_code": "78701",
+}
+
+
+def account_holder(fake: FakeProvider, *, kind: str = "bank", raw_status: str = "") -> Lease:
+    """A lease of a new operator holding its own customer, a linked method and the method
+    list read (the latest snapshot lists the method)."""
+    fake.add_payment_method(CUSTOMER, method(kind=kind, raw_status=raw_status))
+    lease = make_lease()
+    ExternalRef.objects.create(
+        entity_type="lease",
+        entity_id=lease.pk,
+        provider="stax_pay",
+        external_kind="payment_method",
+        external_id=BANK,
+    )
+    assert service.refresh_payment_methods(lease.pk).ok
+    return lease
+
+
+def operator_of(lease: Lease) -> list[uuid.UUID]:
+    assert lease.operator_id is not None
+    return [lease.operator_id]
+
+
+def new_lease(operator: Operator | None, billing: dict[str, Any] | None, account: str) -> Lease:
+    lease, created = service.create_lease(
+        lease_fields(
+            operator=operator,
+            store=Store.objects.create(external_label="Store 0303", status=StoreStatus.ACTIVE),
+        ),
+        rent=RENT,
+        creation_key=uuid.uuid4(),
+        actor=None,
+        today=date(2025, 12, 31),
+        billing=billing,
+        account=account,
+    )
+    assert created
+    return lease
+
+
+def test_a_new_lease_without_billing_details_keeps_no_billing_row() -> None:
+    lease = new_lease(make_operator(customer=None), None, service.ACCOUNT_LATER)
+    assert not LeaseBilling.objects.filter(lease=lease).exists()
+    assert lease.sync_status == "not_applicable"
+
+
+def test_later_with_an_email_saves_the_details_as_typed_and_queues_one_sync() -> None:
+    from payments.models import Job, JobKind
+
+    lease = new_lease(make_operator(customer=None), BILLING_IN, service.ACCOUNT_LATER)
+    billing = LeaseBilling.objects.get(lease=lease)
+    assert {name: getattr(billing, name) for name in BILLING_IN} == BILLING_IN
+    assert billing.shares_account_of is None and billing.bank_last4 == ""
+    lease.refresh_from_db()
+    assert lease.sync_status == "pending"
+    [job] = Job.objects.filter(entity_id=lease.pk)
+    assert job.kind == JobKind.LEASE_SYNC
+    [audit] = AuditLog.objects.filter(action="lease_billing.changed", entity_id=str(lease.pk))
+    assert audit.before is None and audit.after["email"] == "two@example.com"
+    assert ExternalRef.objects.filter(entity_id=lease.pk).count() == 0
+
+
+def test_later_without_an_email_waits_for_a_link_and_queues_nothing() -> None:
+    from payments.models import Job
+
+    lease = new_lease(make_operator(customer=None), {"company_name": ""}, service.ACCOUNT_LATER)
+    lease.refresh_from_db()
+    assert lease.sync_status == "awaiting_link"
+    assert LeaseBilling.objects.get(lease=lease).email == ""
+    assert not Job.objects.filter(entity_id=lease.pk).exists()
+
+
+def test_enter_is_later_for_the_service_the_page_continues_to_the_bank_entry() -> None:
+    from payments.models import Job
+
+    lease = new_lease(make_operator(customer=None), BILLING_IN, service.ACCOUNT_ENTER)
+    assert Job.objects.filter(entity_id=lease.pk).count() == 1
+
+
+def test_the_same_account_shares_a_usable_lease_of_the_operator(fake: FakeProvider) -> None:
+    from payments.models import Job
+
+    holder = account_holder(fake)
+    [found] = service.shareable_accounts(operator_of(holder))
+    assert (found.lease, found.last4, found.value) == (holder, "6789", f"same:{holder.pk}")
+    lease = new_lease(holder.operator, BILLING_IN, found.value)
+    billing = LeaseBilling.objects.get(lease=lease)
+    assert billing.shares_account_of == holder and billing.email == BILLING_IN["email"]
+    lease.refresh_from_db()
+    assert lease.sync_status == "not_applicable"
+    assert not Job.objects.filter(entity_id=lease.pk).exists()
+    assert service.customer_ref(lease) == CUSTOMER
+    assert service.linked_payment_method(lease) == BANK
+    assert service.shareable_accounts(operator_of(holder)) == [found]  # a sharer is not listed
+
+
+@pytest.mark.parametrize("why", ["card", "deleted", "other_operator", "sharer", "no_method"])
+def test_a_same_account_that_cannot_be_shared_is_refused_and_nothing_is_saved(
+    fake: FakeProvider, why: str
+) -> None:
+    holder = account_holder(
+        fake,
+        kind="card" if why == "card" else "bank",
+        raw_status=PAYMENT_METHOD_DELETED if why == "deleted" else "",
+    )
+    operator = holder.operator
+    target = holder
+    if why == "other_operator":
+        operator = make_operator(email="other@example.com", customer=None)
+    elif why == "sharer":
+        target = new_lease(holder.operator, BILLING_IN, f"same:{holder.pk}")
+    elif why == "no_method":
+        ExternalRef.objects.filter(external_kind="payment_method").update(superseded_at=NOW)
+    leases_before = Lease.objects.count()
+    if why in ("card", "deleted", "no_method"):
+        assert service.shareable_accounts(operator_of(holder)) == []
+    with pytest.raises(LeaseRefused) as refused:
+        new_lease(operator, BILLING_IN, f"same:{target.pk}")
+    assert (refused.value.field, str(refused.value)) == ("account", service.ACCOUNT_NOT_SHAREABLE)
+    assert Lease.objects.count() == leases_before
+    assert LeaseBilling.objects.filter(email=BILLING_IN["email"]).count() == (
+        1 if why == "sharer" else 0
+    )
+
+
+@pytest.mark.parametrize("account", ["", "same:", "same:not-a-uuid", "sometime", "SAME:x"])
+def test_an_unknown_account_choice_is_refused(account: str) -> None:
+    with pytest.raises(LeaseRefused) as refused:
+        new_lease(make_operator(customer=None), BILLING_IN, account)
+    assert str(refused.value) == service.ACCOUNT_INVALID
+    assert not Lease.objects.filter(store__external_label="Store 0303").exists()
+
+
+def test_a_same_account_of_an_unknown_lease_is_refused() -> None:
+    with pytest.raises(LeaseRefused) as refused:
+        new_lease(make_operator(customer=None), BILLING_IN, f"same:{uuid.uuid4()}")
+    assert str(refused.value) == service.ACCOUNT_NOT_SHAREABLE
+
+
+# --- PLAN-014 C9: Switch to own account --------------------------------------------------------
+
+OWN = "cus-own-2"
+OWN_BANK = "pm-own-bank-2"
+MOVE_KEY = uuid.UUID("00000000-0000-0000-0000-00000000c009")
+
+
+def own_method(
+    external_id: str = OWN_BANK,
+    *,
+    last_four: str = "4321",
+    is_default: bool = False,
+    kind: str = "bank",
+    raw_status: str = "",
+) -> PaymentMethodRecord:
+    return PaymentMethodRecord(
+        external_id=external_id,
+        raw_status=raw_status,
+        fetched_at=NOW,
+        method=kind,
+        last_four=last_four,
+        bank_type="checking",
+        nickname="Own",
+        is_default=is_default,
+    )
+
+
+def sharer_on_autopay(fake: FakeProvider) -> tuple[Lease, Lease]:
+    """The account holder (:func:`account_holder`) and a second lease of its operator
+    sharing its account, with rent autopay enabled on :data:`NOW` through the shared
+    account and a customer of its own (``OWN``, no method yet), as the command
+    ``create_lease_customers`` leaves it. The fake's call log is cleared."""
+    holder = account_holder(fake)
+    sharer = new_lease(holder.operator, BILLING_IN, f"same:{holder.pk}")
+    assert enable(sharer).ok
+    ExternalRef.objects.create(
+        entity_type="lease",
+        entity_id=sharer.pk,
+        provider="stax_pay",
+        external_kind="customer",
+        external_id=OWN,
+    )
+    fake.calls.clear()
+    return holder, Lease.objects.get(pk=sharer.pk)
+
+
+def switch(lease: Lease, key: uuid.UUID = MOVE_KEY) -> service.AccountSwitch:
+    return service.switch_to_own_account(lease.pk, move_key=key, actor=None)
+
+
+def call_names(fake: FakeProvider) -> list[str]:
+    return [name for name, _ in fake.calls]
+
+
+def own_refs(lease: Lease, kind: str) -> list[str]:
+    return list(
+        ExternalRef.objects.filter(
+            entity_type="lease", entity_id=lease.pk, external_kind=kind, superseded_at__isnull=True
+        ).values_list("external_id", flat=True)
+    )
+
+
+def assert_not_switched(holder: Lease, sharer: Lease, old: CollectionSchedule) -> None:
+    """Nothing of a switch was written: still sharing, no method of its own, the old
+    schedule active, no snapshot of the own customer, no switch audit."""
+    billing = LeaseBilling.objects.get(lease=sharer)
+    assert (billing.shares_account_of_id, billing.bank_last4) == (holder.pk, "")
+    assert own_refs(sharer, "payment_method") == []
+    old.refresh_from_db()
+    assert old.state == ScheduleState.ACTIVE and service.schedule_ref(old)
+    assert not ProviderSnapshot.objects.filter(external_ref__external_id=OWN).exists()
+    assert "lease.account_switched" not in actions(sharer)
+
+
+def test_the_switch_job_moves_the_sharer_to_its_own_method_and_its_autopay_with_it(
+    fake: FakeProvider, actor: User
+) -> None:
+    from payments import jobs
+    from payments.models import JobKind, JobStatus
+    from tests.job_helpers import run_queued_jobs
+
+    holder, sharer = sharer_on_autopay(fake)
+    [old] = service.live_schedules(sharer)
+    old_ref = service.schedule_ref(old)
+    fake.add_payment_method(OWN, own_method())
+    jobs.enqueue(JobKind.LEASE_ACCOUNT_SWITCH, sharer, {"move_key": MOVE_KEY}, actor)
+    before = timezone.now()
+    [job] = run_queued_jobs()
+    after = timezone.now()
+    assert job.status == JobStatus.DONE, job.result
+    assert job.result == (
+        "Switched to the lease's own account, bank ····4321. Autopay schedules moved: 1."
+    )
+    # One list call for the own customer, then the move: the delete, the create.
+    assert fake.calls[0] == ("list_payment_methods", (OWN,))
+    assert call_names(fake) == [
+        "list_payment_methods",
+        "delete_scheduled_invoice",
+        "create_scheduled_invoice",
+    ]
+    billing = LeaseBilling.objects.get(lease=sharer)
+    assert (billing.shares_account_of_id, billing.bank_last4) == (None, "4321")
+    assert own_refs(sharer, "payment_method") == [OWN_BANK]
+    assert (service.customer_ref(sharer), service.linked_payment_method(sharer)) == (
+        OWN,
+        OWN_BANK,
+    )
+    # The list is the own customer's method snapshot.
+    assert [m.external_id for m in service.payment_method_choices(sharer).methods] == [OWN_BANK]
+    # The old schedule was deleted and ended; the new one bills the own account from now.
+    old.refresh_from_db()
+    assert old.state == ScheduleState.ENDED
+    assert [args for name, args in fake.calls if name == "delete_scheduled_invoice"] == [(old_ref,)]
+    [created] = creates(fake)
+    assert (created.customer_external_id, created.payment_method_external_id) == (OWN, OWN_BANK)
+    assert created.amounts.total == RENT
+    [new] = service.live_schedules(sharer)
+    assert new.state == ScheduleState.ACTIVE and service.schedule_ref(new) != old_ref
+    # Every debit starts from now (the move's seq 0 is no debit): the next 15th's noon.
+    assert created.rule in {service.schedule_rule(15, moment) for moment in (before, after)}
+    # Not an installment move: the lease page shows no "Autopay resumes".
+    assert service.autopay_move(sharer) is None
+    [audit] = AuditLog.objects.filter(action="lease.account_switched", entity_id=str(sharer.pk))
+    assert audit.actor == actor
+    assert audit.before == {"shares_account_of": str(holder.pk), "payment_method": ""}
+    assert audit.after == {
+        "shares_account_of": None,
+        "customer": mask_identifier(OWN),
+        "payment_method": mask_identifier(OWN_BANK),
+        "last4": "4321",
+        "move_key": str(MOVE_KEY),
+        "autopay": "moved",
+        "moved": [1],
+    }
+    assert OWN not in json.dumps(audit.after) and OWN_BANK not in json.dumps(audit.after)
+    # The holder keeps its own customer, method and last four.
+    assert (service.customer_ref(holder), service.linked_payment_method(holder)) == (CUSTOMER, BANK)
+    assert LeaseBilling.objects.get(lease=holder).bank_last4 == "6789"
+
+
+@pytest.mark.parametrize(
+    "methods",
+    [
+        "default_of_two",
+        "only_bank_beside_a_card",
+        "only_bank_beside_a_deleted_default",
+    ],
+)
+def test_the_switch_links_the_default_bank_method_else_the_only_one(
+    fake: FakeProvider, methods: str
+) -> None:
+    _, sharer = sharer_on_autopay(fake)
+    if methods == "default_of_two":
+        fake.add_payment_method(OWN, own_method("pm-own-other", last_four="1111"))
+        fake.add_payment_method(OWN, own_method(is_default=True))
+    elif methods == "only_bank_beside_a_card":
+        fake.add_payment_method(OWN, own_method("pm-own-card", kind="card", is_default=True))
+        fake.add_payment_method(OWN, own_method())
+    else:
+        fake.add_payment_method(
+            OWN,
+            own_method("pm-own-gone", raw_status=PAYMENT_METHOD_DELETED, is_default=True),
+        )
+        fake.add_payment_method(OWN, own_method())
+    assert switch(sharer).ok
+    assert own_refs(sharer, "payment_method") == [OWN_BANK]
+    assert LeaseBilling.objects.get(lease=sharer).bank_last4 == "4321"
+
+
+@pytest.mark.parametrize(
+    ("methods", "reason", "sentence"),
+    [
+        ("none", "NoBankMethod", "has no usable bank account"),
+        ("card_only", "NoBankMethod", "has no usable bank account"),
+        ("deleted_only", "NoBankMethod", "has no usable bank account"),
+        ("two_without_default", "SeveralBankMethods", "none is the default"),
+        ("two_defaults", "SeveralBankMethods", "none is the default"),
+    ],
+)
+def test_no_usable_method_or_an_ambiguous_one_refuses_and_writes_nothing(
+    fake: FakeProvider, methods: str, reason: str, sentence: str
+) -> None:
+    holder, sharer = sharer_on_autopay(fake)
+    [old] = service.live_schedules(sharer)
+    if methods == "card_only":
+        fake.add_payment_method(OWN, own_method(kind="card", is_default=True))
+    elif methods == "deleted_only":
+        fake.add_payment_method(OWN, own_method(raw_status=PAYMENT_METHOD_DELETED))
+    elif methods.startswith("two_"):
+        default = methods == "two_defaults"
+        fake.add_payment_method(OWN, own_method(is_default=default))
+        fake.add_payment_method(OWN, own_method("pm-own-other", is_default=default))
+    outcome = switch(sharer)
+    assert (outcome.ok, outcome.reason) == (False, reason)
+    assert sentence in outcome.message and outcome.message.endswith("Nothing was changed.")
+    assert call_names(fake) == ["list_payment_methods"]
+    assert_not_switched(holder, sharer, old)
+    [audit] = AuditLog.objects.filter(
+        action="lease.account_switch_refused", entity_id=str(sharer.pk)
+    )
+    assert audit.after == {"reason": reason}
+
+
+@pytest.mark.parametrize("why", ["not_sharing", "no_customer", "archived", "paused"])
+def test_local_refusals_make_no_provider_call(fake: FakeProvider, why: str) -> None:
+    holder, sharer = sharer_on_autopay(fake)
+    fake.add_payment_method(OWN, own_method())
+    target = sharer
+    expected = {
+        "not_sharing": service.SWITCH_NOT_SHARING,
+        "no_customer": service.SWITCH_NO_CUSTOMER,
+        "archived": service.SWITCH_ARCHIVED,
+        "paused": service.SWITCH_PAUSED,
+    }[why]
+    if why == "not_sharing":
+        target = holder
+    elif why == "no_customer":
+        ExternalRef.objects.filter(entity_id=sharer.pk, external_kind="customer").delete()
+    elif why == "archived":
+        Operator.objects.filter(leases=sharer).update(archived_at=NOW)
+    else:
+        assert service.pause_autopay(sharer.pk, actor=None).ok
+        fake.calls.clear()
+    assert service.switch_refusal(Lease.objects.get(pk=target.pk)) == expected
+    outcome = switch(target)
+    assert (outcome.ok, outcome.reason) == (False, expected)
+    assert outcome.message == service.SWITCH_MESSAGES[expected]
+    assert fake.calls == []
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id == holder.pk
+
+
+def test_a_failed_method_list_refuses_and_writes_nothing(fake: FakeProvider) -> None:
+    holder, sharer = sharer_on_autopay(fake)
+    [old] = service.live_schedules(sharer)
+    fake.fail_next("list_payment_methods", ProviderUnavailable(503, "unavailable"))
+    outcome = switch(sharer)
+    assert (outcome.ok, outcome.reason, outcome.message) == (
+        False,
+        "ProviderUnavailable",
+        service.SWITCH_FAILED,
+    )
+    assert_not_switched(holder, sharer, old)
+
+
+def test_a_move_failing_before_any_delete_rolls_the_switch_back(fake: FakeProvider) -> None:
+    holder, sharer = sharer_on_autopay(fake)
+    [old] = service.live_schedules(sharer)
+    fake.add_payment_method(OWN, own_method())
+    fake.fail_next("delete_scheduled_invoice", ProviderUnavailable(503, "unavailable"))
+    outcome = switch(sharer)
+    assert (outcome.ok, outcome.reason) == (False, "ProviderUnavailable")
+    assert_not_switched(holder, sharer, old)
+    # The move's own failure row went with the savepoint; the refusal names the class.
+    assert "lease.autopay_move_failed" not in actions(sharer)
+    [audit] = AuditLog.objects.filter(
+        action="lease.account_switch_refused", entity_id=str(sharer.pk)
+    )
+    assert audit.after == {"reason": "ProviderUnavailable"}
+    # Pressed again (a new job, a new key): it switches.
+    assert switch(sharer, uuid.uuid4()).ok
+
+
+def test_a_replay_of_the_job_reads_no_methods_and_finishes_the_move(fake: FakeProvider) -> None:
+    _, sharer = sharer_on_autopay(fake)
+    [old] = service.live_schedules(sharer)
+    fake.add_payment_method(OWN, own_method())
+    # The create after the delete fails: the switch stays, the autopay is not moved yet.
+    fake.fail_next("create_scheduled_invoice", ProviderUnavailable(503, "unavailable"))
+    first = switch(sharer)
+    assert (first.ok, first.message, first.reason) == (
+        False,
+        service.SWITCH_MOVE_FAILED,
+        "ProviderUnavailable",
+    )
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id is None
+    old.refresh_from_db()
+    assert old.state == ScheduleState.ENDED
+    [audit] = AuditLog.objects.filter(action="lease.account_switched", entity_id=str(sharer.pk))
+    assert (audit.after["autopay"], audit.after["moved"]) == ("failed", [])
+    fake.calls.clear()
+    # The same job again (the same key): no method list read; the failed debit is first
+    # looked for at the provider (the move's adopt step), then created.
+    again = switch(sharer)
+    assert again.ok and again.message.endswith("Autopay schedules moved: 1.")
+    assert call_names(fake) == ["list_scheduled_invoices", "create_scheduled_invoice"]
+    [created] = creates(fake)
+    assert created.payment_method_external_id == OWN_BANK
+    fake.calls.clear()
+    # And once more: nothing is called or written.
+    audits = AuditLog.objects.count()
+    assert switch(sharer).ok
+    assert fake.calls == [] and AuditLog.objects.count() == audits
+    assert len(AuditLog.objects.filter(action="lease.account_switched")) == 1
+    # A new key on a switched lease is a lease that no longer shares.
+    assert switch(sharer, uuid.uuid4()).reason == service.SWITCH_NOT_SHARING
+
+
+def test_a_sharer_without_autopay_switches_and_moves_nothing(fake: FakeProvider) -> None:
+    _, sharer = sharer_on_autopay(fake)
+    assert service.stop_autopay(sharer.pk, actor=None).ok
+    fake.calls.clear()
+    fake.add_payment_method(OWN, own_method(last_four=""))
+    outcome = switch(sharer)
+    assert (outcome.ok, outcome.message) == (
+        True,
+        "Switched to the lease's own account. Autopay schedules moved: 0.",
+    )
+    assert call_names(fake) == ["list_payment_methods"]
+    assert own_refs(sharer, "payment_method") == [OWN_BANK]
+
+
+def test_deleting_a_lease_removes_its_billing_but_a_shared_account_lease_is_kept() -> None:
+    """QA-014 Batch C: the billing row is part of its lease (CASCADE), but a lease whose
+    account another lease shares must not vanish (PROTECT on ``shares_account_of``)."""
+    operator = make_operator()
+    holder = make_lease(operator=operator)
+    sharer = make_lease(operator=operator)
+    alone = make_lease(operator=make_operator(email="other@example.com", customer="cus-2"))
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id == holder.pk
+    alone_billing = LeaseBilling.objects.get(lease=alone).pk
+
+    alone.delete()
+    assert not LeaseBilling.objects.filter(pk=alone_billing).exists()
+    assert not Lease.objects.filter(pk=alone.pk).exists()
+
+    with pytest.raises(ProtectedError):
+        holder.delete()
+    assert Lease.objects.filter(pk=holder.pk).exists()
+    assert LeaseBilling.objects.filter(lease=holder).exists()
+
+    sharer.delete()
+    assert not LeaseBilling.objects.filter(lease_id=sharer.pk).exists()
+    holder.delete()
+    assert not LeaseBilling.objects.filter(lease_id=holder.pk).exists()

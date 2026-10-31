@@ -250,21 +250,23 @@ def test_a_blank_state_lands_in_needs_review_and_a_closed_store_does_not() -> No
     assert MARKUP not in body and "State needs choosing" in body
 
 
-# --- Slice B-2: the operator type ------------------------------------------------------------
+# --- Slice B-2: the operator type (PLAN-014 C1: an operator is a person, named by its Full name)
 
 
-def test_a_forged_display_name_is_ignored_and_the_name_is_derived() -> None:
+def test_a_forged_kind_and_its_name_fields_are_ignored_and_the_full_name_is_kept() -> None:
+    # PLAN-014 C1: the Full name is the display name; a post that still sends the type and
+    # the kind's name fields is not refused, and none of them is written.
     from ledger.models import Operator
     from tests.test_operator_views import form_data as operator_data
 
     billing, _ = client_for(Role.BILLING)
     url = reverse("ledger:operators:create")
     data = operator_data(
-        kind="person",
-        company="",
-        first_name="Ada",
-        last_name="Lovelace",
-        display_name=MARKUP,
+        display_name="Ada Lovelace",
+        kind="company",
+        company=MARKUP,
+        first_name="Forged",
+        last_name="Name",
         email="ada@example.com",
     )
     response = billing.post(url, data)
@@ -272,27 +274,38 @@ def test_a_forged_display_name_is_ignored_and_the_name_is_derived() -> None:
     operator = Operator.objects.get(email="ada@example.com")
     assert operator.display_name == "Ada Lovelace"
     assert operator.kind == "person"
+    assert (operator.company, operator.first_name, operator.last_name) == ("", "", "")
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [("kind", MARKUP), ("kind", "robot"), ("kind", "4111111111111111"), ("kind", "")],
 )
-def test_a_hostile_kind_is_refused_without_echo_and_writes_nothing(field: str, value: str) -> None:
+def test_a_hostile_kind_is_ignored_without_echo_and_the_operator_is_a_person(
+    field: str, value: str
+) -> None:
+    # PLAN-014 C1: the type is not a form field, so a hostile one is neither refused nor
+    # stored: the operator is created as a person and nothing posted comes back.
     from ledger.models import Operator
     from tests.test_operator_views import form_data as operator_data
 
     billing, _ = client_for(Role.BILLING)
     url = reverse("ledger:operators:create")
     before = Operator.objects.count()
-    response = billing.post(url, operator_data(email="kind@example.com", **{field: value}))
+    response = billing.post(
+        url, operator_data(display_name="Kind Ops", email="kind@example.com", **{field: value})
+    )
     assert response.status_code == 302
-    body = billing.get(url).content.decode()
+    operator = Operator.objects.get(email="kind@example.com")
+    assert response["Location"] == f"/operators/{operator.pk}/"
+    assert operator.kind == "person" and operator.display_name == "Kind Ops"
+    assert Operator.objects.count() == before + 1
+    body = billing.get(response["Location"]).content.decode()
     assert "4111111111111111" not in body and MARKUP not in body
-    assert Operator.objects.count() == before
 
 
-def test_a_person_without_a_last_name_and_a_company_without_a_name_are_refused() -> None:
+def test_a_blank_full_name_is_refused_whatever_kind_fields_are_posted() -> None:
+    # PLAN-014 C1: the Full name is required; the kind's name fields no longer stand in.
     from ledger.models import Operator
     from tests.test_operator_views import form_data as operator_data
 
@@ -300,12 +313,12 @@ def test_a_person_without_a_last_name_and_a_company_without_a_name_are_refused()
     url = reverse("ledger:operators:create")
     before = Operator.objects.count()
     for data in (
-        operator_data(kind="person", company="", first_name="Ada", last_name="   "),
-        operator_data(kind="company", company="   "),
+        operator_data(display_name="   ", kind="person", first_name="Ada", last_name="Lovelace"),
+        operator_data(display_name="", kind="company", company="Named Co"),
     ):
         assert billing.post(url, data).status_code == 302
         body = billing.get(url).content.decode()
-        assert "Enter the" in body
+        assert "Enter the full name." in body
     assert Operator.objects.count() == before
 
 
@@ -326,13 +339,16 @@ def test_an_existing_operator_opens_as_a_person_with_its_name_kept() -> None:
 def test_the_search_finds_a_person_by_last_name_without_echoing_markup() -> None:
     from ledger.models import Operator
 
-    Operator.objects.create(
-        display_name="x",
+    # PLAN-014 C1: save derives the display name from the kind's name fields only while it is
+    # empty (a typed Full name is never replaced), so this row is made without one.
+    operator = Operator.objects.create(
+        display_name="",
         kind="person",
         first_name="Grace",
         last_name=f"Hopper {MARKUP}",
         email="g@example.com",
     )
+    assert operator.display_name == f"Grace Hopper {MARKUP}"
     billing, _ = client_for(Role.BILLING)
     response = billing.get(reverse("ledger:search") + "?q=Hopper", follow=True)
     body = response.content.decode()

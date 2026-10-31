@@ -4,7 +4,8 @@ checkpoint decisions of 2026-10-27.
 - E1: the Needs review item of a voided payment whose processor invoice stays marked paid
   reads "Unmark invoice {number} in {provider} by hand; this payment was voided".
 - E2: the greyed bank-debit card of Add payment, no bank method on file, reads "No bank
-  account on file for {operator}." with an "Operator page" link after it, and "Bank debits
+  account on file for {operator}." with a link after it (PLAN-014 C3: "Edit billing
+  details" of the lease whose account bills the charge), and "Bank debits
   are also off at {provider}." under it when the flag is off as well; the dashboard
   instruction is in the Payments help topic.
 - E3: the page of a payment recorded outside the processor shows Amount and Applied to and
@@ -27,6 +28,8 @@ from django.utils.html import escape
 from accounts.roles import Role
 from ledger.models import (
     CompanySettings,
+    Lease,
+    LeaseBilling,
     Operator,
     Payment,
     PaymentKind,
@@ -35,7 +38,7 @@ from ledger.models import (
     RentCharge,
     RentChargeStatus,
 )
-from ledger.services import attention, installments, refunds, rent_run
+from ledger.services import attention, installments, leases, refunds, rent_run
 from ledger.services import one_off_charges as service
 from ledger.views.payments import _applied_tile
 from payments.fake import FakeProvider
@@ -77,14 +80,18 @@ def admin_get(path: str) -> str:
     return body_of(client_for(Role.ADMIN)[0], path)
 
 
-def operator_page(operator: Operator) -> str:
-    return reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
+def billing_page(billed: Operator | Lease) -> str:
+    """Edit billing details of the lease that bills (PLAN-014 C3): ``billed`` itself, or
+    the operator's first active lease (a charge without a lease bills through it)."""
+    lease = billed if isinstance(billed, Lease) else leases.first_active_lease(billed)
+    assert lease is not None
+    return reverse("ledger:leases:billing", kwargs={"pk": lease.pk})
 
 
-def link_to(operator: Operator) -> str:
+def link_to(billed: Operator | Lease) -> str:
     return (
-        f'<a class="collect-link" id="debit-reason-link" href="{operator_page(operator)}">'
-        "Operator page</a>"
+        f'<a class="collect-link" id="debit-reason-link" href="{billing_page(billed)}">'
+        "Edit billing details</a>"
     )
 
 
@@ -168,7 +175,7 @@ def test_no_bank_with_the_flag_on_reads_the_sentence_and_links_the_operator(
     options = service.bank_debit_options(charge)
     assert options.reason == "No bank account on file for Fatih Co."
     assert options.reason_more == ""
-    assert options.reason_url == operator_page(operator)
+    assert options.reason_url == billing_page(operator)
     card = tiles(admin_get(page_of(charge)))["debit"]
     first = (
         '<span class="collect-note unavailable-reason" id="debit-reason">'
@@ -191,7 +198,7 @@ def test_no_bank_with_the_flag_off_adds_the_second_line_after_the_link(
     assert (options.reason, options.reason_more, options.reason_url) == (
         "No bank account on file for Fatih Co.",
         "Bank debits are also off at PayCo.",
-        operator_page(operator),
+        billing_page(operator),
     )
     second = (
         '<span class="collect-note" id="debit-reason-more">'
@@ -209,7 +216,7 @@ def test_a_bank_on_file_has_no_link(fake: FakeProvider, flag: bool) -> None:
         card = tiles(admin_get(page_of(charge)))["debit"]
     assert options.reason_url == ""
     assert options.reason == ("" if flag else "Bank debits are off at PayCo.")
-    assert "debit-reason-link" not in card and "Operator page" not in card
+    assert "debit-reason-link" not in card and "Edit billing details" not in card
 
 
 def test_an_earlier_reason_has_no_link(fake: FakeProvider) -> None:
@@ -238,23 +245,36 @@ def test_a_rent_charge_reads_the_same_sentence_and_link(flag: bool) -> None:
         card = tiles(admin_get(rent_page(charge.pk)))["debit"]
     assert options.reason == "No bank account on file for Rent Ops."
     assert options.reason_more == ("" if flag else "Bank debits are also off at PayCo.")
-    assert options.reason_url == operator_page(operator)
-    assert link_to(operator) in card
+    assert options.reason_url == billing_page(charge.lease)
+    assert link_to(charge.lease) in card
     assert ("debit-reason-more" in card) is not flag
 
 
 def test_without_an_operator_the_sentence_says_the_operator_and_has_no_link() -> None:
     name_provider()
-    assert service._setup_reasons(True, None, None) == (
+    assert service._setup_reasons(True, None, None, None) == (
         "No bank account on file for the operator.",
         "",
         "",
     )
-    assert service._setup_reasons(False, None, None) == (
+    assert service._setup_reasons(False, None, None, None) == (
         "No bank account on file for the operator.",
         "Bank debits are also off at PayCo.",
         "",
     )
+
+
+def test_the_link_is_edit_billing_details_of_the_lease_that_holds_the_account() -> None:
+    """PLAN-014 C3 (Fable's C part 1 finding): the bank is connected on the lease whose
+    account bills; a lease that shares another's links that one; no lease, no link."""
+    operator = a_plain_operator("Share Ops")
+    holder = a_lease(a_store("Holder 1"), operator)
+    sharer = a_lease(a_store("Sharer 2"), operator)
+    LeaseBilling.objects.create(lease=sharer, shares_account_of=holder)
+    sentence = "No bank account on file for Share Ops."
+    assert service.no_account_line(operator, holder) == (sentence, billing_page(holder))
+    assert service.no_account_line(operator, sharer) == (sentence, billing_page(holder))
+    assert service.no_account_line(operator, None) == (sentence, "")
 
 
 def test_a_hostile_operator_name_is_escaped_beside_the_link(fake: FakeProvider) -> None:
