@@ -367,3 +367,34 @@ def test_a_lease_less_charge_is_never_a_candidate_even_for_the_operators_alias()
     assert found.confidence == Confidence.NONE and found.candidates == ()
     assert store_less.lease_id is None
     assert a_store is not None and a_lease is not None  # the helpers stay imported for the world
+
+
+# --- The memo line with online payment off (finding I-2) -------------------------------------
+
+
+def test_the_pay_page_carries_the_memo_line_even_when_online_payment_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from django.test import override_settings
+
+    from ledger.models import InvoiceStatus
+    from payments.fake import FakeProvider
+    from tests.receivables_helpers import an_invoice
+    from tests.test_portal_payments import World
+
+    fake = FakeProvider(pay_invoice_enabled=False)
+    monkeypatch.setattr("payments.get_provider", lambda: fake)
+    with override_settings(STAX_CALLER="worker", STAX_PAY_INVOICE_ENABLED=False):
+        world = World(fake)
+        an_invoice(
+            world.operator,
+            9201,
+            "1500.00",
+            rent_charge=world.rent,
+            internal_status=InvoiceStatus.SENT,
+        )
+        page = world.client.get(world.pay_url(world.rent.pk)).content.decode()
+        assert 'id="pay-unavailable"' in page and 'id="pay-form"' not in page
+        assert "Paying by wire or Zelle? Put INV-2026-9201 in the memo." in page
+        whole = world.client.get(world.pay_url()).content.decode()
+        assert "Put INV-2026-9201 in the memo." in whole and 'id="pay-form"' not in whole
