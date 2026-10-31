@@ -105,7 +105,10 @@ def test_the_portal_on_the_phone(
     page.close()
     page = portal_sign_in(phone, live_server)
     body = page.locator("main, body").first.inner_text()
-    assert "1701" in body and "1702" in body and "ended" in body.lower()
+    assert re.search(r"\b1701\b", body) and re.search(
+        r"\b1702\b", body
+    )  # both stores, whole numbers
+    assert "ended" in body.lower()
     assert "$3,000.00" in body
     shot(page, f"portal-home-{theme}-phone")
     page.get_by_role("link", name=re.compile("1701")).first.click()
@@ -135,7 +138,7 @@ def test_the_portal_on_the_laptop_and_the_account_page(
     assert "ayse@example.com" in page.locator("main, body").first.inner_text()
     shot(page, f"portal-account-{theme}-laptop")
     page.goto(f"{live_server.url}/portal/statement/")
-    assert "1701" in page.locator("main, body").first.inner_text()
+    assert re.search(r"\b1701\b", page.locator("main, body").first.inner_text())
     shot(page, f"portal-statement-{theme}-laptop")
     page.get_by_role("button", name=re.compile("Sign out")).first.click()
     page.wait_for_url(re.compile(r"/portal/login/"))
