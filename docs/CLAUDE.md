@@ -398,6 +398,10 @@ any Stax call, and no code may be tested against Stax.
 | `DATABASE_URL`, `REDIS_URL`, `DJANGO_SECRET_KEY` | Standard Django/Celery. SQLite is allowed only when `APP_ENV=local`. |
 | `USPS_CLIENT_ID` | Optional, paired with `USPS_CLIENT_SECRET`: the USPS Addresses API OAuth client ID for the store form's "Check address" (PLAN-012f-b D13). Both empty turns the check off; one alone aborts the boot. Vault secret `usps-client-id`. |
 | `USPS_CLIENT_SECRET` | Optional, paired with `USPS_CLIENT_ID`: that client's secret. Read by `finance/usps.py` alone; redacted from logs and Sentry. Vault secret `usps-client-secret`. (`USPS_API_BASE_URL` is `https://apis.usps.com`, overridable only when `APP_ENV=local`.) |
+| `PLAID_ENV` | Optional (PLAN-014 I1, ADR-0018): `sandbox` (default when empty), `development` or `production`; `production` is refused when `APP_ENV=local`. Not a secret. |
+| `PLAID_CLIENT_ID` | Optional, with `PLAID_SECRET` and `PLAID_TOKEN_KEY` all set or all empty (one or two alone abort the boot): Plaid's client ID for the Bank deposits connector. Vault secret `plaid-client-id`. |
+| `PLAID_SECRET` | Plaid's secret for that environment. Read by `banking/plaid/client.py` alone; never logged. Vault secret `plaid-secret`. |
+| `PLAID_TOKEN_KEY` | The Fernet key (32 bytes, URL-safe base64) that encrypts the linked bank's access token at rest (`banking/crypto.py`). Vault secret `plaid-token-key`. All three empty: the Bank deposits card says the keys are missing and nothing connects to a bank. Nothing in `infra/` sets these names yet (Step 16). |
 | `AZURE_KEY_VAULT_URL` | Vault to read the secrets above from at runtime, via managed identity. Locally unset; values come from `.env`. |
 
 **DNS (owner, 2026-09-27):** the public Azure DNS zone **`monvera.io`** lives in resource group
