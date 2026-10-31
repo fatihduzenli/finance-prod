@@ -621,7 +621,8 @@ def _accepted_samples(model: type[models.Model], field: models.Field[Any, Any]) 
     column = f"{model._meta.db_table}.{field.column}"
     if column == "invoices.invoice_number":
         return [text for text in samples if re.fullmatch(r"INV-[0-9]{4}-[0-9]{4,}", text)]
-    if column == "operators.email":
+    # PLAN-014 H1: a portal account's e-mail is lower-cased by its CHECK, as the operator's.
+    if column in ("operators.email", "portal_users.email"):
         return [text.lower() for text in samples if text == text.strip()]
     # PLAN-011b D4: a template code and an error class name have a CHECK of their own.
     if column == "message_templates.code":
