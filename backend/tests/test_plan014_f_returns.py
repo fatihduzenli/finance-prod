@@ -25,7 +25,7 @@ from ledger.models import (
     OutboundMessage,
     RetryState,
 )
-from ledger.services import business_days
+from ledger.services import business_days, nsf
 from payments.models import Job, JobKind
 from tests.test_operator_views import client_for
 from tests.test_returns_nsf import (
@@ -203,3 +203,53 @@ def test_the_fees_own_page_names_the_return_and_offers_no_retry_line(fake: Any) 
     assert "Your bank reports this debit was not authorized" in page
     assert 'id="stop-retry"' not in page
     assert OutboundMessage.objects.filter(rule=MessageRule.F).count() == 1
+
+
+# --- The rework: a missed eve, and the CSV's Retry column ----------------------------------------
+
+
+def test_a_missed_eve_is_re_dated_once_and_scheduled_on_the_new_eve(fake: Any) -> None:
+    a_world(fake)
+    payment = returned(fake, "R01")  # retry Thu Nov 12
+    redebit = redebit_of(payment)
+    assert redebit.retry_date == RETRY
+    late = date(2026, 11, 13)  # the job runs the day after the retry date was missed
+    nsf.create_due_redebits(late)
+    redebit.refresh_from_db()
+    assert redebit.retry_date == date(2026, 11, 16) and redebit.due_date == date(2026, 11, 16)
+    assert redebit.retry_state in (RetryState.AUTO_PENDING, RetryState.SCHEDULED)
+    assert AuditLog.objects.filter(action="redebit.rescheduled").count() == 1
+    nsf.create_due_redebits(late)  # the same day again: no second re-dating
+    redebit.refresh_from_db()
+    assert redebit.retry_date == date(2026, 11, 16)
+    assert AuditLog.objects.filter(action="redebit.rescheduled").count() == 1
+    assert Job.objects.filter(kind=JobKind.SCHEDULE_CREATE).count() == 1  # Nov 13 is the eve
+
+
+def test_a_stopped_re_debit_is_not_re_dated(fake: Any) -> None:
+    a_world(fake)
+    payment = returned(fake, "R01")
+    redebit = redebit_of(payment)
+    user = client_for(Role.BILLING)[1]
+    assert nsf.stop_retry(redebit.pk, user).ok
+    nsf.create_due_redebits(date(2026, 11, 20))
+    redebit.refresh_from_db()
+    assert redebit.retry_date == RETRY and redebit.retry_state == RetryState.STOPPED
+    assert not AuditLog.objects.filter(action="redebit.rescheduled").exists()
+    assert not Job.objects.filter(kind=JobKind.SCHEDULE_CREATE).exists()
+
+
+def test_the_returns_csv_has_the_pages_retry_text(fake: Any) -> None:
+    a_world(fake)
+    payment = returned(fake, "R01")
+    billing, _ = client_for(Role.BILLING)
+    page = billing.get("/returns/").content.decode()
+    cell_start = page.index(f'id="retry-{payment.pk}"')
+    cell = page[cell_start : page.index("</td>", cell_start)]
+    assert "Automatic re-debit on Nov 12" in cell
+    export = billing.get("/returns/export.csv")
+    csv = b"".join(export.streaming_content).decode()
+    header = csv.splitlines()[0]
+    assert "Retry" in header
+    assert "Automatic re-debit on Nov 12" in csv
+    assert OneOffCharge.objects.filter(source_payment=payment).count() == 2
