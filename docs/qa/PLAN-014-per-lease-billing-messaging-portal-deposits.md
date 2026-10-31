@@ -496,7 +496,7 @@ banking 0001 (I). ADRs 0015–0018. TODO-VERIFY 066–073 added with C.
   `RETRYABLE = {"R01", "R09"}`.
 - **F2 At the return.** The transaction webhook's return transition (`_refresh_charge`) now
   calls `nsf.on_return(payment, today)` inside the same transaction: (a) the **$100.00 NSF
-  fee** as its own one-off charge (`nsf_fee_first` fee type, activated by migration 0061;
+  fee** as its own one-off charge (`nsf_fee_first` fee type, activated by migration 0063;
   companion of the return, `source_payment`; one per returned payment by a unique partial index
   on `(source_payment, category=nsf_fee)`), `operator.nsf_return_count += 1`; (b) for R01/R09
   an **automatic re-debit**: a `REDEBIT` one-off charge for the original amount only, state
@@ -735,7 +735,7 @@ banking 0001 (I). ADRs 0015–0018. TODO-VERIFY 066–073 added with C.
   `nsf.create_due_redebits(today)`, `nsf.stop_retry(charge, actor, reason)`;
   `business_days.add(date, n)`, `is_business_day(date)`; `OneOffCharge.retry_date`,
   `retry_state ∈ {auto_pending, scheduled, stopped, done}`; `ledger:one_off_charges:stop_retry`
-  POST BILLING; attention kind `REDEBIT_PENDING`; migration 0061 activates `nsf_fee_first`.
+  POST BILLING; attention kind `REDEBIT_PENDING`; migration 0063 activates `nsf_fee_first`.
 - **G:** `receivables.AgingFilter(state, operator, brand, kind, include_deposits)`,
   `receivables.aging(today, selected) -> AgingReport(rows: list[AgingStoreRow], totals,
   as_of)`, buckets `("current","1_30","31_60","61_90","over_90")`; `?state=&operator=&brand=
