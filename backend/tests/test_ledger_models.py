@@ -368,6 +368,18 @@ def new_leased_message(**fields: Any) -> ledger.OutboundMessage:
     return new_outbound_message(**fields)
 
 
+def new_lease_month_message(**fields: Any) -> ledger.OutboundMessage:
+    """A rule A message about a lease's October rent, before its charge (PLAN-014 E4)."""
+    _default(fields, "lease", lambda: saved(new_lease()))
+    values = {
+        "rule": "A",
+        "charge_entity_type": "lease_month",
+        "charge_entity_id": fields["lease"].pk,
+        "period_month": date(2026, 10, 1),
+    }
+    return new_outbound_message(**{**values, **fields})
+
+
 def new_outbound_message(**fields: Any) -> ledger.OutboundMessage:
     """A message about a charge (PLAN-014 D3): rule B, the first occurrence."""
     _default(fields, "operator", lambda: saved(new_operator()))
@@ -1809,6 +1821,16 @@ LEDGER_CASES: list[ConstraintCase] = [
                 "charge_entity_id": lambda row: row.charge_entity_id,
             },
         ),
+    ),
+    # PLAN-014 E4: one message per lease, rule and month.
+    ConstraintCase(
+        "outbound_messages_one_per_lease_month",
+        unique_pair(
+            new_lease_month_message,
+            {},
+            {"lease": lambda row: row.lease, "period_month": date(2026, 11, 1)},
+        ),
+        unique_pair(new_lease_month_message, {}, {"lease": lambda row: row.lease}),
     ),
     ConstraintCase(
         "outbound_messages_occurrence_positive",

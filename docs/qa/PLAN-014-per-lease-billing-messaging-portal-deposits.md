@@ -110,7 +110,7 @@ account (all TODO-VERIFY at the second checkpoint); an Invoices list page (none 
 ## 3. Decisions
 
 Numbering (as built through C): ledger migrations 0058 (B), 0059 (C: billing per lease), 0060 (C:
-the transfer's incoming billing), 0061 (D), 0062 (F), 0063 (G if needed); payments 0019 (C: the
+the transfer's incoming billing), 0061 (D), 0062 (E: the rent-month messages, amendment of 2026-10-30), 0063 (F), 0064 (G if needed); payments 0019 (C: the
 lease job kinds and the attach kind), 0020 (D: `Job.run_after`); accounts 0004 (A); portal 0001 (H);
 banking 0001 (I). ADRs 0015–0018. TODO-VERIFY 066–073 added with C.
 
@@ -460,6 +460,31 @@ banking 0001 (I). ADRs 0015–0018. TODO-VERIFY 066–073 added with C.
   its date, `contacts.broken_promises`) resumes the rules from the next due day. Plans apply per
   installment because each installment is its own one-off row in `open_balances`.
 - **E3 No late fee.** Nothing creates a fee here; E's wording says nothing about fees.
+- **E4 Rules A and B for rent are keyed to the lease and the month, not to a charge (owner's
+  decision of 2026-10-30, replacing E1's reading of A and B for rent).** The rent run keeps
+  creating a month's rent charge on its debit day and no page shows rent early. Three days before
+  the month's scheduled debit, a lease on autopay gets template **A** once per lease per month;
+  a lease not on autopay gets template **B** three days before its rent due date, once per lease
+  per month. The message row carries `charge_entity_type="lease_month"`, `charge_entity_id` =
+  the lease, and a new nullable `period_month` (ledger migration **0062**: the column, the
+  constraint `outbound_messages_one_per_lease_month` — unique on (lease, rule, period_month)
+  where `period_month` is not null — and `kind_matches_rule` widened so that `lease_month`
+  requires `period_month` and a rule of `A` or `B`; the reverse refuses while a `lease_month`
+  row exists). Values: `{amount}` is the scheduled debit amount (the lease's rent in force on the
+  debit date — the active rent schedule's amount for A), `{debit_date}` / `{due_date}` the
+  scheduled date (the lease's debit day in that month; a lease debited twice a month gets one
+  message, for the month's first debit — a question for checkpoint 2, §8), `{bank_last4}` the
+  lease's billing last four, `{charge_name}` "Rent <Month YYYY>", `{pay_link}` the statement
+  link as for every rule. Skipped (counted) when: the lease has ended or ends before the
+  debit date; for A, the rent schedule is not active; a rent charge for that month already
+  exists and is paid, pending or waived (paid in advance through the invoice builder, or
+  already collected). At send time the same checks run again and suppress (`LeaseEnded`,
+  `ScheduleStopped`, `MonthSettled`). The Outbox row and the store timeline link to the store
+  and the lease (no charge link); the charge logs of the lease page list the month's A or B
+  under "Rent <Month YYYY>". **C, D and E keep working on the rent charge once it exists on
+  its due date.** Idempotent by the new constraint: the job run twice the same day writes one
+  row. `reminders.queue_due` gains the rent-month pass (A and B from the leases and the
+  calendar, before the open-balance pass, which no longer emits A, nor B for rent).
 
 ### Batch F — returned bank debits (Opus; Fable the tests)
 
@@ -471,7 +496,7 @@ banking 0001 (I). ADRs 0015–0018. TODO-VERIFY 066–073 added with C.
   `RETRYABLE = {"R01", "R09"}`.
 - **F2 At the return.** The transaction webhook's return transition (`_refresh_charge`) now
   calls `nsf.on_return(payment, today)` inside the same transaction: (a) the **$100.00 NSF
-  fee** as its own one-off charge (`nsf_fee_first` fee type, activated by migration 0061;
+  fee** as its own one-off charge (`nsf_fee_first` fee type, activated by migration 0063;
   companion of the return, `source_payment`; one per returned payment by a unique partial index
   on `(source_payment, category=nsf_fee)`), `operator.nsf_return_count += 1`; (b) for R01/R09
   an **automatic re-debit**: a `REDEBIT` one-off charge for the original amount only, state
@@ -702,12 +727,15 @@ banking 0001 (I). ADRs 0015–0018. TODO-VERIFY 066–073 added with C.
   send_now`; template codes `reminder_autopay, reminder_due, overdue_day5, overdue_day10,
   internal_day30, returned_debit, returned_debit_no_retry` (+ `portal_invite`, `portal_reset` in H).
 - **E:** `reminders.queue_due(today) -> Summary(queued_by_rule, paused, skipped)`;
-  `reminders.rule_for(row, today) -> Rule | None`; `reminders.PAUSED_BY_PROMISE`.
+  `reminders.rule_for(row, today) -> Rule | None`; `reminders.PAUSED_BY_PROMISE`. E4: `reminders.RentMonth(lease, month, debit_date, amount, seq)`,
+  `reminders.rent_months_due(today) -> list[tuple[RentMonth, Rule]]`; `messaging.queue` accepts a
+  `RentMonth` (entity type `lease_month`, `period_month` set); `OutboundMessage.period_month`;
+  `ChargeEntityType.LEASE_MONTH`; suppress causes `LeaseEnded`, `ScheduleStopped`, `MonthSettled`.
 - **F:** `return_codes.plain_words(code)`, `RETRYABLE`; `nsf.on_return(payment, today)`,
   `nsf.create_due_redebits(today)`, `nsf.stop_retry(charge, actor, reason)`;
   `business_days.add(date, n)`, `is_business_day(date)`; `OneOffCharge.retry_date`,
   `retry_state ∈ {auto_pending, scheduled, stopped, done}`; `ledger:one_off_charges:stop_retry`
-  POST BILLING; attention kind `REDEBIT_PENDING`; migration 0061 activates `nsf_fee_first`.
+  POST BILLING; attention kind `REDEBIT_PENDING`; migration 0063 activates `nsf_fee_first`.
 - **G:** `receivables.AgingFilter(state, operator, brand, kind, include_deposits)`,
   `receivables.aging(today, selected) -> AgingReport(rows: list[AgingStoreRow], totals,
   as_of)`, buckets `("current","1_30","31_60","61_90","over_90")`; `?state=&operator=&brand=
@@ -785,6 +813,12 @@ sqlite), makemigrations check on both databases, the secret scan, the provider-n
   refused; `CollectionStep` gone (migration 0060 forward/backward with the old templates
   deactivated and the six seeded byte-for-byte equal to §9); the old "Send a step now" tests
   replaced by "Send a message now"; the handled-personally hold.
+- **E (E4):** one A per lease per month even when the job runs twice; no A when autopay is paused
+  or the lease ends before the debit date; no A for a month already paid in advance through the
+  invoice builder; B for rent without autopay at due −3 keyed to the month, once; the rent charge
+  created on its day then takes C, D and E; the A row links to the lease, not a charge; migration
+  0062 both ways and its refusal over a lease_month row; the widened CHECK; a twice-monthly lease
+  gets one message.
 - **E:** a calendar of days around one charge for each rule (A at −3 only with an active rent
   schedule; B at −3 without; C at +5; D at +10, +40, +50 and not at +20/+30/+45; E at +30 once to
   the manager list; nothing on other days); idempotent re-run the same day; paid/waived/voided
@@ -913,6 +947,15 @@ sqlite), makemigrations check on both databases, the secret scan, the provider-n
 
 ## 8. Departures and questions carried to the checkpoints
 
+- **The per-charge unique rule reads rows without a month only (E4, built):** a lease month's rows
+  all name the lease as their entity, so October's and November's A would otherwise collide;
+  `outbound_messages_one_per_lease_charge_rule` now carries `period_month IS NULL` and the lease
+  months have `outbound_messages_one_per_lease_month`. B is not sent when no rent is in force on
+  the debit date (the rent run makes no charge either); the month's settlement is read from its
+  first debit's charge (seq 1).
+- **Twice-monthly debits and rule A (E4):** a lease debited on two days of the month gets one
+  A, three days before the first debit (the owner's key is lease + month + rule). Whether the
+  second debit deserves its own A is a checkpoint 2 question.
 - **No Invoices list page exists**; the filters component goes on the pages that exist. An
   Invoices list is not built unless the owner asks (checkpoint 1).
 - **"Sort" menus** appear only where a page sorts today (the arrears page); others gain none.

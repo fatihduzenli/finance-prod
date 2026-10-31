@@ -2737,14 +2737,22 @@ class ChargeEntityType(models.TextChoices):
     LEASE_END = "lease_end", "Lease end"
     #: PLAN-014 D4: a lease's yearly insurance charge (the reminder rules of Batch E).
     INSURANCE_CHARGE = "insurance_charge", "Insurance charge"
+    #: PLAN-014 E4: a lease's rent of one month, before its charge exists (rules A and B
+    #: three days ahead of the debit; the owner's decision of 2026-10-30). The entity is the
+    #: lease; the month is the message's ``period_month``.
+    LEASE_MONTH = "lease_month", "Rent month"
 
 
-#: The charge types a message about a charge (not a lease end) names.
+#: The charge types a message about a charge (not a lease end) names; a lease month is the
+#: rent of a month whose charge is not made yet (PLAN-014 E4).
 CHARGE_TYPES_OF_CHARGES: tuple[str, ...] = (
     ChargeEntityType.RENT_CHARGE,
     ChargeEntityType.ONE_OFF_CHARGE,
     ChargeEntityType.INSURANCE_CHARGE,
+    ChargeEntityType.LEASE_MONTH,
 )
+#: The rules a message about a lease month carries (PLAN-014 E4).
+LEASE_MONTH_RULES: tuple[str, ...] = (MessageRule.A, MessageRule.B)
 
 
 class MessageKind(models.TextChoices):
@@ -2769,6 +2777,11 @@ class OutboundMessage(GuardedModel):
     hash), so the Outbox and the store's timeline show what was or would have been sent.
     ``scheduled_for`` is the send window's time (PLAN-014 D7); ``held_reason`` says why a
     ``held`` message waits in the Outbox; ``error`` is a class name.
+
+    A message about a lease month (PLAN-014 E4: rule A or B for rent, sent before the
+    month's charge exists) names the lease as its entity and the month in
+    ``period_month``; one row per (lease, rule, month). Every other message has no
+    ``period_month`` (CHECK).
     """
 
     operator = models.ForeignKey(
@@ -2786,6 +2799,8 @@ class OutboundMessage(GuardedModel):
     occurrence = models.PositiveSmallIntegerField(default=1)
     charge_entity_type = _choice(ChargeEntityType)
     charge_entity_id = models.UUIDField()
+    #: PLAN-014 E4: the month (its 1st) of a message about a lease month; null otherwise.
+    period_month = models.DateField(null=True, blank=True)
     #: The attachment of a final statement (PLAN-012e D8); null otherwise.
     document = models.ForeignKey(
         Document, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
@@ -2831,7 +2846,8 @@ class OutboundMessage(GuardedModel):
             _valid_choice("outbound_messages", "rule", MessageRule),
             _valid_choice("outbound_messages", "held_reason", HeldReason, blank=True),
             # A message about a charge names a charge; a final statement names a lease end,
-            # and its rule says so. (Each rule reads only valid kinds.)
+            # and its rule says so; a lease month carries its month and rule A or B, and no
+            # other message carries a month. (Each rule reads only valid kinds.)
             models.CheckConstraint(
                 condition=(
                     ~Q(kind=MessageKind.LADDER)
@@ -2845,6 +2861,17 @@ class OutboundMessage(GuardedModel):
                     | Q(
                         charge_entity_type=ChargeEntityType.LEASE_END,
                         rule=MessageRule.FINAL_STATEMENT,
+                    )
+                )
+                & (
+                    Q(
+                        charge_entity_type=ChargeEntityType.LEASE_MONTH,
+                        period_month__isnull=False,
+                        rule__in=LEASE_MONTH_RULES,
+                    )
+                    | (
+                        ~Q(charge_entity_type=ChargeEntityType.LEASE_MONTH)
+                        & Q(period_month__isnull=True)
                     )
                 ),
                 name="outbound_messages_kind_matches_rule",
@@ -2878,10 +2905,17 @@ class OutboundMessage(GuardedModel):
                 condition=Q(manual=False) | Q(sent_by__isnull=False),
                 name="outbound_messages_manual_has_sender",
             ),
+            # A lease month's rows share their entity (the lease) from month to month: they
+            # are kept one per (lease, rule, month) by the next constraint instead.
             models.UniqueConstraint(
                 fields=["lease", "charge_entity_type", "charge_entity_id", "rule", "occurrence"],
-                condition=Q(manual=False),
+                condition=Q(manual=False, period_month__isnull=True),
                 name="outbound_messages_one_per_lease_charge_rule",
+            ),
+            models.UniqueConstraint(
+                fields=["lease", "rule", "period_month"],
+                condition=Q(period_month__isnull=False),
+                name="outbound_messages_one_per_lease_month",
             ),
             models.UniqueConstraint(
                 fields=["charge_entity_type", "charge_entity_id"],

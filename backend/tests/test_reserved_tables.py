@@ -100,6 +100,8 @@ def test_columns_are_as_listed() -> None:
         "rendered_body",
         "held_reason",
         "scheduled_for",
+        # PLAN-014 E4: the month of a message about a lease month.
+        "period_month",
     }
 
 

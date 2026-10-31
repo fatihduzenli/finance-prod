@@ -12,6 +12,13 @@ before anything is rendered: the unique rule cannot dedupe a NULL lease on Postg
 the row would have no billing e-mail to go to. A template of the ``sms`` channel is refused
 (:class:`ChannelUnavailable`, "SMS is not set up."): no SMS provider exists (D8).
 
+**A lease month (E4).** Rules A and B for rent go three days before the month's debit, before
+its rent charge exists (the owner's decision of 2026-10-30: rent charges are still made on
+their day). Such a message is about a :class:`RentMonth`: its row names the lease as its
+entity (``charge_entity_type`` ``lease_month``) and the month in ``period_month``, one row per
+(lease, rule, month). Its values are the month's: "Rent October 2026", the scheduled debit
+date and amount.
+
 **Send window (D7).** A message queued between 9:00 and 18:00 New York time goes at once;
 one queued outside it waits for the next 9:00 New York (:func:`scheduled_for`; the zone
 decides daylight saving): its ``scheduled_for`` and its job's ``run_after`` are that
@@ -20,9 +27,11 @@ instant, so the worker leaves it until then.
 **Send.** :func:`send` (the ``message_send`` job) delivers the stored text: a message for an
 operator (rules ``A`` to ``D``, ``F``, ``manual``) whose charge has closed since is
 ``suppressed`` (``ChargeClosed``), as is one to an archived operator or a final statement
-whose lease end is gone; an operator handled personally holds its messages
-(``handled_personally``; never the internal E, which goes to the managers); a message
-without an address is held (``no_address``, or ``no_manager_list`` for an internal one).
+whose lease end is gone; a message about a lease month is checked again instead of a charge
+(:func:`month_closed_reason`: ``LeaseEnded``, ``ScheduleStopped`` for A, ``MonthSettled``);
+an operator handled personally holds its messages (``handled_personally``; never the
+internal E, which goes to the managers); a message without an address is held
+(``no_address``, or ``no_manager_list`` for an internal one).
 Then the channel (:func:`channel_for`, e-mail only) sends it: mail not set up holds it
 (``not_set_up``); on the sandbox a recipient off the allowlist holds it (``sandbox``) and
 nothing is handed to the mail sender; otherwise it is ``sent``, or ``failed`` with the
@@ -53,7 +62,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.urls import reverse
 from django.utils import timezone
 
@@ -63,6 +72,8 @@ from ledger import merge
 from ledger.models import (
     AuditLog,
     ChargeEntityType,
+    CollectionSchedule,
+    CollectionStatus,
     CompanySettings,
     Document,
     HeldReason,
@@ -80,8 +91,10 @@ from ledger.models import (
     OutboundMessage,
     RentCharge,
     RentChargeStatus,
+    ScheduleKind,
+    ScheduleState,
 )
-from ledger.services import insurance, leases, statement_links
+from ledger.services import insurance, leases, rent_run, statement_links
 from ledger.services.collections import mask_address
 from ledger.wording import format_amount
 from mail.base import SUBJECT_MAX_LENGTH
@@ -119,6 +132,11 @@ OPERATOR_ARCHIVED = "OperatorArchived"
 STATEMENT_MISSING = "StatementMissing"
 PAYMENT_DATA_REFUSED = "PaymentDataRefused"
 MESSAGE_REFUSED = "MessageRefused"
+#: A message about a lease month (E4) not sent: the lease ended before the month's debit,
+#: the rent schedule of an A is no longer on, or the month's rent charge is closed.
+LEASE_ENDED = "LeaseEnded"
+SCHEDULE_STOPPED = "ScheduleStopped"
+MONTH_SETTLED = "MonthSettled"
 
 SMS_UNAVAILABLE = "SMS is not set up."
 GONE = "The message no longer exists."
@@ -281,7 +299,28 @@ def scheduled_for(now: datetime) -> datetime:
 Charge = RentCharge | OneOffCharge | InsuranceCharge
 
 
-def charge_type_of(charge: Charge | LeaseEnd) -> str:
+@dataclass(frozen=True, slots=True)
+class RentMonth:
+    """The rent of one lease for one month, before its charge exists (E4): what rules A and
+    B announce three days ahead. ``month`` is the month's 1st; ``debit_date`` the day the
+    month's first debit is scheduled (or its rent due, without autopay); ``amount`` what is
+    scheduled; ``seq`` the debit the message is for (always the first: one message per
+    lease and month)."""
+
+    lease: Lease
+    month: date
+    debit_date: date
+    amount: Decimal
+    seq: int = 1
+
+
+#: What a rule's message is about.
+Subject = Charge | RentMonth
+
+
+def charge_type_of(charge: Subject | LeaseEnd) -> str:
+    if isinstance(charge, RentMonth):
+        return ChargeEntityType.LEASE_MONTH
     if isinstance(charge, RentCharge):
         return ChargeEntityType.RENT_CHARGE
     if isinstance(charge, OneOffCharge):
@@ -298,9 +337,17 @@ def policy_label(year: int) -> str:
     return f"Insurance {year}–{(year + 1) % 100:02d}"
 
 
-def charge_name(charge: Charge) -> str:
+def rent_month_name(month: date) -> str:
+    """ "Rent October 2026": what a message about a lease month calls it (E4)."""
+    return f"Rent {month_long_text(month)}"
+
+
+def charge_name(charge: Subject) -> str:
     """What the message calls the charge: "Rent October 2026" (and its second debit),
-    "Insurance 2026–27", or a one-off charge's description."""
+    "Insurance 2026–27", or a one-off charge's description; a lease month reads as its
+    month's rent."""
+    if isinstance(charge, RentMonth):
+        return rent_month_name(charge.month)
     if isinstance(charge, RentCharge):
         text = f"Rent {month_long_text(charge.period_month)}"
         return text + (f" (debit {charge.seq})" if charge.seq > 1 else "")
@@ -309,17 +356,21 @@ def charge_name(charge: Charge) -> str:
     return charge.label
 
 
-def due_of(charge: Charge) -> date:
+def due_of(charge: Subject) -> date:
+    if isinstance(charge, RentMonth):
+        return charge.debit_date
     return charge.due_date if isinstance(charge, OneOffCharge) else charge.due_on
 
 
-def balance_of(charge: Charge) -> Decimal:
+def balance_of(charge: Subject) -> Decimal:
+    if isinstance(charge, RentMonth):
+        return charge.amount
     if isinstance(charge, InsuranceCharge):
         return insurance.balance(charge)
     return Decimal(str(charge.balance))
 
 
-def operator_of(lease: Lease | None, charge: Charge | LeaseEnd) -> Operator | None:
+def operator_of(lease: Lease | None, charge: Subject | LeaseEnd) -> Operator | None:
     """The operator a message about ``charge`` goes to (or is about)."""
     if isinstance(charge, OneOffCharge) and charge.operator is not None:
         return charge.operator
@@ -337,7 +388,7 @@ def store_link(lease: Lease) -> str:
 
 def context_for(
     lease: Lease,
-    charge: Charge,
+    charge: Subject,
     rule: str,
     *,
     today: date,
@@ -353,7 +404,8 @@ def context_for(
     unless given; ``days_late`` counted from the due date (never below zero);
     ``retry_date`` and ``return_reason`` empty unless given (rule F). ``{pay_link}`` is a
     new signed statement link until the portal exists (Batch H). ``rule`` is accepted for
-    the rules that will shape a value of their own."""
+    the rules that will shape a value of their own. For a :class:`RentMonth` the amount is
+    the scheduled one and both dates the scheduled debit (E4)."""
     row = company or CompanySettings.read()
     operator = operator_of(lease, charge)
     store = lease.store
@@ -432,7 +484,7 @@ def _recipients(message: OutboundMessage) -> list[str]:
 def queue(
     rule: str,
     lease: Lease | None,
-    charge: Charge | LeaseEnd,
+    charge: Subject | LeaseEnd,
     template: MessageTemplate,
     context: Mapping[str, str],
     *,
@@ -447,7 +499,8 @@ def queue(
     :class:`ChannelUnavailable` for an SMS template; :class:`~ledger.merge.TemplateRefused`
     when the values are not one code's placeholders. A rendered text holding payment data is
     stored as ``failed`` (``PaymentDataRefused``) without its text, and gets no job.
-    ``ValueError`` and nothing written when ``lease`` is ``None``."""
+    ``ValueError`` and nothing written when ``lease`` is ``None``. A :class:`RentMonth` is
+    stored by its lease and month (``lease_month``, ``period_month``; E4)."""
     if lease is None:
         raise ValueError(NO_LEASE)
     channel_for(template.channel)
@@ -473,7 +526,8 @@ def queue(
         rule=rule,
         occurrence=occurrence,
         charge_entity_type=charge_type_of(charge),
-        charge_entity_id=charge.pk,
+        charge_entity_id=charge.lease.pk if isinstance(charge, RentMonth) else charge.pk,
+        period_month=charge.month if isinstance(charge, RentMonth) else None,
         document=document,
         to_address=address,
         rendered_subject=subject,
@@ -529,10 +583,55 @@ def _charge_open(charge_type: str, charge_id: uuid.UUID) -> bool:
     return False
 
 
+def rent_schedule_active(lease_id: uuid.UUID) -> bool:
+    """Whether the lease's rent is on autopay: a rent collection schedule of it is active."""
+    return CollectionSchedule.objects.filter(
+        lease_id=lease_id, kind=ScheduleKind.RENT, state=ScheduleState.ACTIVE
+    ).exists()
+
+
+def month_settled(lease_id: uuid.UUID, month: date) -> bool:
+    """Whether the month's (first) rent charge exists already and is closed to messages:
+    paid (in advance through the invoice builder, or collected), pending or waived."""
+    return RentCharge.objects.filter(
+        lease_id=lease_id, period_month=month, seq=1, status__in=CLOSED_RENT
+    ).exists()
+
+
+def lease_ended_by(lease: Lease, day: date) -> bool:
+    """Whether the lease is ended, or ends before ``day``: it gets no rent of that day."""
+    if lease.collection_status == CollectionStatus.ENDED:
+        return True
+    return lease.ended_on is not None and lease.ended_on < day
+
+
+def month_closed_reason(message: OutboundMessage) -> str:
+    """Why a message about a lease month (E4) is no longer to be sent, checked again at the
+    send as at the queue: ``LeaseEnded`` (the lease ended, or ends before the month's debit
+    as its debit day now falls), ``ScheduleStopped`` (an A whose rent schedule is no longer
+    on: the debit it announces will not happen), ``MonthSettled`` (the month's rent charge
+    exists and is paid, pending or waived); ``""`` when it still goes."""
+    lease = message.lease
+    month = message.period_month
+    if lease is None or month is None or lease.debit_day is None:
+        return LEASE_ENDED
+    if lease_ended_by(lease, rent_run.debit_date(lease, month, lease.debit_day)):
+        return LEASE_ENDED
+    if message.rule == MessageRule.A and not rent_schedule_active(lease.pk):
+        return SCHEDULE_STOPPED
+    if month_settled(lease.pk, month):
+        return MONTH_SETTLED
+    return ""
+
+
 def _suppress_reason(message: OutboundMessage) -> str:
     from ledger.services import lease_end
 
-    if message.rule == MessageRule.FINAL_STATEMENT:
+    if message.charge_entity_type == ChargeEntityType.LEASE_MONTH:
+        reason = month_closed_reason(message)
+        if reason:
+            return reason
+    elif message.rule == MessageRule.FINAL_STATEMENT:
         if not lease_end.statement_ready(message):
             return STATEMENT_MISSING
     elif message.rule in OPERATOR_FACING_RULES and not _charge_open(
@@ -773,6 +872,9 @@ class LogRow:
     charge_id: uuid.UUID
     #: Who sent it by hand, or ``None`` for a rule; shown through ``|staff``.
     sent_by: User | None
+    #: "Rent October 2026" for a message about a lease month (E4: ``charge_id`` is then the
+    #: lease); empty otherwise.
+    charge_name: str = ""
 
 
 def status_text(message: OutboundMessage) -> str:
@@ -800,6 +902,9 @@ def _rows(found: Iterable[OutboundMessage]) -> list[LogRow]:
             charge_type=message.charge_entity_type,
             charge_id=message.charge_entity_id,
             sent_by=message.sent_by,
+            charge_name=(
+                rent_month_name(message.period_month) if message.period_month is not None else ""
+            ),
         )
         for message in found
     ]
@@ -819,9 +924,20 @@ def operator_log(operator: Operator, limit: int) -> list[LogRow]:
 
 
 def charge_log(charge_type: str, charge_id: uuid.UUID) -> list[LogRow]:
-    """The charge's messages, newest first."""
+    """The charge's messages, newest first. A rent charge's log also lists its month's A
+    and B (E4: stored by the lease and the month, ``lease_month``), named "Rent October
+    2026"."""
+    about = Q(charge_entity_type=charge_type, charge_entity_id=charge_id)
+    if charge_type == ChargeEntityType.RENT_CHARGE:
+        rent = RentCharge.objects.filter(pk=charge_id).values("lease_id", "period_month").first()
+        if rent is not None:
+            about |= Q(
+                charge_entity_type=ChargeEntityType.LEASE_MONTH,
+                charge_entity_id=rent["lease_id"],
+                period_month=rent["period_month"],
+            )
     return _rows(
-        OutboundMessage.objects.filter(charge_entity_type=charge_type, charge_entity_id=charge_id)
+        OutboundMessage.objects.filter(about)
         .select_related("template", "sent_by")
         .order_by("-queued_at", "-id")
     )

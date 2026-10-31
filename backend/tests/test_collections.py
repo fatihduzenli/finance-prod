@@ -1,8 +1,8 @@
 """Messages about charges and the daily tick (docs/qa/PLAN-011b D4, D8, §7; re-pinned to the
 messaging engine of PLAN-014 D2 to D7).
 
-The collections ladder is retired (PLAN-014 D6): the tick no longer queues messages (the
-reminder rules are Batch E's), so these tests queue through
+The collections ladder is retired (PLAN-014 D6): the tick queues the reminder rules of
+Batch E instead (tested in ``test_reminders.py``); these tests queue through
 :func:`ledger.services.messaging.queue` (a rule's message, rendered then and stored) or
 "Send a message now" (a manual row). The worker (``run_queued_jobs``) sends the stored text
 through ``mail.get_sender()``, here a :class:`~mail.memory.MemoryMailSender` with mail set
@@ -255,14 +255,21 @@ def test_a_queued_message_is_rendered_stored_and_sent_by_the_worker(
     ]
 
 
-def test_the_tick_queues_no_message_now_that_the_ladder_is_retired(
+def test_the_tick_queues_the_reminder_rule_of_the_day_not_the_ladder(
     clock: Any, memory: MemoryMailSender
 ) -> None:
+    # Re-pinned by PLAN-014 E1: the tick queues the day's rule (D at ten days late), never a
+    # step of the retired ladder; the rules themselves are tested in test_reminders.py.
     charge = rent_charge()
     clock(at(DUE + timedelta(days=10)))
     output = tick()
     assert "Collection e-mails queued" not in output
-    assert messages_of(charge) == [] and run_queued_jobs() == []
+    assert "Reminders queued: A 0, B 0, C 0, D 1, E 0." in output
+    [message] = messages_of(charge)
+    assert (message.rule, message.occurrence) == (MessageRule.D, 1)
+    clock(at(DUE + timedelta(days=11)))
+    tick()
+    assert len(messages_of(charge)) == 1
 
 
 def test_the_tick_creates_the_missing_rent_charges_once(clock: Any) -> None:
