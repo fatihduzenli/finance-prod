@@ -404,16 +404,34 @@ catch-all address. Since Batch D every message goes through the messaging engine
 ladder's steps are gone, its three templates stay inactive for their history, the staging
 safeguard is the sandbox allowlist and the Outbox, and the reminder rules are Batch E's.
 
-**Returns and NSF.** A returned ACH debit sits in the returns queue and on the dashboard
-("Returned debit not rescheduled: store, amount, returned date") until staff resolve it. After
-calling the operator, choose **Reschedule**, enter the agreed date and a note: the app creates a
-re-debit charge for the original amount and an NSF fee charge (100.00 on the operator's first
-return, 50.00 afterwards; an admin can waive the fee with a note), one Stax invoice or schedule
-with the two lines, and the attention item disappears. The re-debit date shows on the calendar.
-When the re-debit settles, the original month reads paid again. The fee is never created by the
-webhook, so a bank-side error can be resolved with a plain note and no fee.
+**Returns and NSF** (since PLAN-014 Batch F; ADR-0016). When Stax reports a returned ACH debit,
+the app at once, in the webhook's own transaction: adds the **NSF fee** of 100.00 as its own
+charge (once per returned payment; due that day, collected by hand: bill it, debit it or, as an
+admin, waive it with a note on the fee's own page), and queues template **F** to the lease's
+billing e-mail with the reason in plain words (R01 "Insufficient funds", R10 "Your bank reports
+this debit was not authorized", any other code a general sentence), inside the 9:00–18:00 New
+York send window. For **R01 and R09** it also makes an **automatic re-debit** of the original
+amount only, on the third business day after the notice (weekends and Federal Reserve holidays
+skipped); the Stax schedule is created by the daily tick only on the eve, so until then nothing
+is at Stax. Staff stop it with **Stop automatic retry** (on the re-debit's page or the returns
+queue), and logging a call, e-mail, visit or promise for that lease within two business days of
+the notice stops it too; after that it proceeds. A stop on the eve, once the schedule exists,
+queues the schedule's cancel and voids the re-debit when Stax confirms. A re-debit's own return
+is handled the same way; an original debit is re-debited at most twice within 180 days (Nacha),
+then the lease goes to Needs review ("Re-debit limit reached (Nacha)") and no third is made.
+**Every other code** (or an account with no linked bank method) gets no retry: the lease goes to
+Needs review ("Returned debit (code): new payment method needed") and the operator gets F's
+no-retry variant, which asks them to contact us within two business days. The returns queue
+shows each return's state ("Automatic re-debit on Nov 3", "Stopped", "No retry: R10"); the
+dashboard lists upcoming automatic re-debits (low) and every return without a pending retry
+("Returned debit not rescheduled: ..."). For a stopped retry or a code that is not retried,
+**Debit again** sets a date staff agreed with the operator; it adds no second fee (an older
+return without a fee still gets one, 100.00 on the operator's first return and 50.00 after).
+A successful re-debit closes its return by itself; a staff void of a payment never messages the
+operator.
 
-**Attention list** (dashboard): overdue charges, returned debits not rescheduled, promises to pay
+**Attention list** (dashboard): overdue charges, returned debits not rescheduled, automatic
+re-debits coming up, promises to pay
 past their date, insurance due in 30 days or a missing premium, leases ending in 60 days, landlord
 leases ending in 90 days, stores without an open date, operators without an e-mail, stores vacant
 over 30 days, schedules flagged after a rent change, dead-letter webhooks, reconciliation
