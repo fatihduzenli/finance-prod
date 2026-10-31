@@ -210,7 +210,7 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: H slice 2 (portal:not_found, the slice-1 rework's catch-all, and portal:pay_status); 311 since
 #: PLAN-014 I slice 1 (banking:page, confirm, choose, split, ignore, undo, fetch_now, link_token,
 #: link_exchange, disconnect and ledger:settings:bank_save).
-FROZEN_ROUTES = (311, "PLACEHOLDER")
+FROZEN_ROUTES = (311, "cc73c368ee2124f0cd5cccad577eaa65e2f32082dbd1bf1173fd6f52bb3acdf2")
 
 
 # --- what is stored or addressed never changes ------------------------------------------
