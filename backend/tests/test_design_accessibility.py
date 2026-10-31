@@ -46,6 +46,8 @@ BACKEND = Path(__file__).resolve().parents[1]
 STATIC = BACKEND / "finance" / "static" / "finance"
 TOKENS_CSS = STATIC / "tokens.css"
 APP_CSS = STATIC / "app.css"
+#: The operator portal's sheet (PLAN-014 H3), on the same tokens.
+PORTAL_CSS = BACKEND / "portal" / "static" / "portal" / "portal.css"
 TEMPLATE_ROOTS = (
     BACKEND / "ledger" / "templates",
     BACKEND / "finance" / "templates",
@@ -258,6 +260,46 @@ def test_every_text_colour_on_a_background_in_app_css_is_a_documented_pair() -> 
     undocumented = [
         f"{selector}: {fg} on {bg}"
         for selector, fg, bg in checked
+        if (root_name(fg, defined), root_name(bg, defined)) not in documented
+    ]
+    assert undocumented == [], "pairings missing a 'pair:' line in tokens.css:\n" + "\n".join(
+        undocumented
+    )
+
+
+#: The badge family's text tokens: each is defined for text on its own ``-bg`` only.
+STATUS_TEXT = re.compile(
+    r"color\s*:\s*var\(\s*(--(paid|unpaid|overdue|pending|partial|waived|neutral)-text)\s*\)"
+)
+
+
+def test_the_portal_sheet_pairs_every_status_text_token_with_its_background() -> None:
+    """PLAN-014 H (Fable, gate H's shot ``portal-store-light-phone.png``): a portal rule that
+    paints text with a badge-family token (``--overdue-text`` is white in light mode) must set
+    that family's background in the same rule, else the text sits on the card's surface and
+    disappears; and every portal rule that sets both a text colour and a background is a
+    documented pair, as app.css's rules are."""
+    tokens = TOKENS_CSS.read_text()
+    css = PORTAL_CSS.read_text()
+    defined = definitions(tokens, css)
+    documented = {
+        (root_name(pair.foreground, defined), root_name(pair.background.split("[")[0], defined))
+        for pair in documented_pairs(tokens)
+    }
+    unpaired = []
+    for selector, declarations in RULE.findall(without_comments(css)):
+        for match in STATUS_TEXT.finditer(declarations):
+            family = match.group(2)
+            if not re.search(
+                rf"background(?:-color)?\s*:\s*var\(\s*--{family}-bg\s*\)", declarations
+            ):
+                unpaired.append(
+                    f"{' '.join(selector.split())}: {match.group(1)} without --{family}-bg"
+                )
+    assert unpaired == [], "badge text tokens used off their background:\n" + "\n".join(unpaired)
+    undocumented = [
+        f"{selector}: {fg} on {bg}"
+        for selector, fg, bg in rules_with_text_on_background(css)
         if (root_name(fg, defined), root_name(bg, defined)) not in documented
     ]
     assert undocumented == [], "pairings missing a 'pair:' line in tokens.css:\n" + "\n".join(
