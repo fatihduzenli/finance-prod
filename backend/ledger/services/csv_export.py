@@ -189,6 +189,8 @@ HEADERS: frozenset[str] = frozenset(
         # Returns
         "Return reason",
         "Returned at",
+        # PLAN-014 F4: the returns queue's automatic re-debit state.
+        "Retry",
         # Webhooks
         "Received at",
         "Event type",
