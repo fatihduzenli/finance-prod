@@ -13,9 +13,10 @@ debit in flight, not collected by the lease's autopay or by a plan, within the p
 limit) and billed to the bank account the page shows. With the pay-an-invoice flag off
 (:func:`payments.pay_invoice_enabled`; off on the sandbox and staging) the page says
 :data:`PAY_UNAVAILABLE` and nothing is created; without a usable bank method on file the user
-is sent to the Bank account page first. Under the amount, the memo line names each sent
-invoice of the charges paid ("Paying by wire or Zelle? Put INV-2026-0012 in the memo.",
-PLAN-014 I5), so a payer who wires instead is matched by the Bank deposits module.
+is sent to the Bank account page first. Under the amount (with the flag off, under its
+sentence), the memo line names each sent invoice of the charges paid ("Paying by wire or
+Zelle? Put INV-2026-0012 in the memo.", PLAN-014 I5), so a payer who wires instead is matched
+by the Bank deposits module.
 
 A request writes, in one transaction, a :class:`portal.models.PortalPayment` (the page's
 one-time ``creation_key``: a replay answers the first request and queues nothing), one
@@ -350,7 +351,7 @@ def pay_page(user: PortalUser, store: Store, charge_raw: object, today: date) ->
         last4=last4,
         shared_with=_shared_with(lease),
         refusal=refusal,
-        memo_lines=_memo_lines(user, rows) if enabled and rows else (),
+        memo_lines=_memo_lines(user, rows) if rows else (),
     )
 
 

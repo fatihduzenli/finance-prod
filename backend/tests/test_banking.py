@@ -1465,3 +1465,25 @@ def test_the_portals_pay_page_names_the_invoice_of_each_charge_paid(provider: An
         whole = world.client.get(world.pay_url()).content.decode()
         assert rent_line in whole and one_off_line in whole
         assert whole.count("in the memo.") == 2
+
+
+def test_with_the_pay_flag_off_the_pay_page_still_carries_the_memo_line(provider: Any) -> None:
+    from django.test import override_settings
+
+    from ledger.models import InvoiceStatus
+    from portal import payments as portal_payments
+    from tests.receivables_helpers import an_invoice as invoice_of
+    from tests.test_portal_payments import World
+
+    with override_settings(STAX_CALLER="worker", STAX_PAY_INVOICE_ENABLED=True):
+        world = World(provider)
+    invoice_of(
+        world.operator, 9201, "1500.00", rent_charge=world.rent, internal_status=InvoiceStatus.SENT
+    )
+    rent_line = "Paying by wire or Zelle? Put INV-2026-9201 in the memo."
+    with override_settings(STAX_CALLER="worker", STAX_PAY_INVOICE_ENABLED=False):
+        page = world.client.get(world.pay_url(world.rent.pk)).content.decode()
+    assert portal_payments.PAY_UNAVAILABLE in page
+    assert f'<p class="portal-muted pay-memo">{rent_line}</p>' in page
+    assert page.index('id="pay-unavailable"') < page.index(rent_line)
+    assert 'id="pay-form"' not in page and 'id="pay-amount"' not in page
