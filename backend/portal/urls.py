@@ -1,9 +1,10 @@
 """The portal's routes, mounted at ``/portal/`` (PLAN-014 H1). Every one is listed in
-``accounts.registry.PORTAL_ROUTE_NAMES``; the public ones in ``PORTAL_PUBLIC_ROUTE_NAMES``."""
+``accounts.registry.PORTAL_ROUTE_NAMES``; the public ones in ``PORTAL_PUBLIC_ROUTE_NAMES``. The
+last, ``portal:not_found``, answers any other path under ``/portal/`` with the portal's 404."""
 
 from __future__ import annotations
 
-from django.urls import path
+from django.urls import path, re_path
 
 from portal import views
 
@@ -24,4 +25,6 @@ urlpatterns = [
     path("statement/", views.statement, name="statement"),
     path("account/", views.account, name="account"),
     path("account/password/", views.password, name="password"),
+    # Last: any other path under /portal/ is the portal's 404, never the staff 401.
+    re_path(r"^.*$", views.not_found, name="not_found"),
 ]

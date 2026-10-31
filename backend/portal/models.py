@@ -5,7 +5,8 @@
   e-mail when the invitation was made; ``password`` is a Django hasher's value
   (``make_password``/``check_password``), empty until the invitation is accepted. The states:
   invited (``is_active`` false, ``activated_at`` empty), active, disabled (``is_active`` false,
-  ``disabled_at`` set).
+  ``disabled_at`` set). An account signs in only while its operator is not archived
+  (:attr:`PortalUser.can_sign_in`).
 - :class:`PortalToken`: a one-time link's SHA-256 (never the token), its kind (invitation, 7
   days; reset, 1 hour), its expiry and its use.
 - :class:`PortalLoginAttempt`: one row per sign-in attempt, by the keyed hash of the e-mail
@@ -73,7 +74,14 @@ class PortalUser(GuardedModel):
 
     @property
     def can_sign_in(self) -> bool:
-        return self.is_active and self.activated_at is not None and self.disabled_at is None
+        """Accepted, not disabled, and its operator not archived (load ``operator`` with
+        the user to spare a query)."""
+        return (
+            self.is_active
+            and self.activated_at is not None
+            and self.disabled_at is None
+            and self.operator.archived_at is None
+        )
 
 
 class TokenKind(models.TextChoices):

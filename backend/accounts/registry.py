@@ -71,6 +71,7 @@ PORTAL_PUBLIC_ROUTE_NAMES: frozenset[str] = frozenset(
         "portal:reset_request",
         "portal:reset_confirm",
         "portal:logout",
+        "portal:not_found",
     }
 )
 PORTAL_ROUTE_NAMES: frozenset[str] = PORTAL_PUBLIC_ROUTE_NAMES | frozenset(

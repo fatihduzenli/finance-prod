@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib
 import re
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -22,7 +23,12 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import (
+    check_password,
+    identify_hasher,
+    is_password_usable,
+    make_password,
+)
 from django.contrib.sessions.backends.db import SessionStore
 from django.db import connection, models
 from django.db.migrations.executor import MigrationExecutor
@@ -30,7 +36,8 @@ from django.test import Client
 from django.utils import timezone
 
 import mail
-from accounts import registry
+from accounts import registry, signals
+from accounts.models import UserSession
 from accounts.roles import Role
 from ledger import merge
 from ledger.models import (
@@ -480,6 +487,80 @@ def test_a_wrong_password_an_unknown_email_and_a_disabled_account_read_the_same(
     assert not PortalLoginAttempt.objects.filter(email_hash__icontains="@").exists()
 
 
+def test_an_unknown_email_is_checked_against_a_usable_hash(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Finding 2: an unusable hash is refused without hashing, so an unknown e-mail would
+    # answer faster than a wrong password.
+    assert is_password_usable(auth._THROWAWAY)
+    identify_hasher(auth._THROWAWAY)
+    checked: list[str] = []
+
+    def spy(password: str, encoded: str) -> bool:
+        checked.append(encoded)
+        return check_password(password, encoded)
+
+    monkeypatch.setattr(auth, "check_password", spy)
+    invited = saved(PortalUser(operator=world.b, email="beta.owner@example.com"))
+    for email in ("nobody@example.com", invited.email):
+        _, response = sign_in(email, PASSWORD, ip="198.51.100.25")
+        assert auth.WRONG in text(response)
+    assert checked == [auth._THROWAWAY, auth._THROWAWAY]
+
+
+def test_an_archived_operators_account_cannot_sign_in_and_its_session_ends(world: World) -> None:
+    user = active_user(world.a)
+    signed_in = portal_client(user)
+    assert signed_in.get("/portal/").status_code == 200
+    _, reset_raw = tokens.issue(user, TokenKind.RESET)
+    invited = saved(PortalUser(operator=world.b, email="beta.owner@example.com"))
+    _, invite_raw = tokens.issue(invited, TokenKind.INVITE)
+    Operator.objects.filter(pk__in=[world.a.pk, world.b.pk]).update(archived_at=START)
+    # The live session is emptied at its next request, and stays ended.
+    ended = signed_in.get("/portal/")
+    assert ended.status_code == 302 and ended["Location"].startswith("/portal/login/")
+    assert signed_in.cookies[COOKIE_NAME].value == ""
+    assert signed_in.get("/portal/").status_code == 302
+    # The right password answers the same sentence as a wrong one.
+    _, refused = sign_in(user.email, ip="198.51.100.130")
+    _, wrong = sign_in(user.email, "not-the-password", ip="198.51.100.131")
+    assert refused.status_code == 400 and auth.WRONG in text(refused)
+    blank = re.compile(r'value="[^"]*"')
+    assert blank.sub("", text(refused)) == blank.sub("", text(wrong))
+    assert not PortalLoginAttempt.objects.filter(ok=True, at__gt=START).exists()
+    # Both links are refused.
+    assert Client().get(f"/portal/reset/{reset_raw}/").status_code == 404
+    assert Client().get(f"/portal/invite/{invite_raw}/").status_code == 404
+    accepted = Client().post(
+        f"/portal/invite/{invite_raw}/", {"password": NEW_PASSWORD, "confirm": NEW_PASSWORD}
+    )
+    assert accepted.status_code == 404
+    assert PortalUser.objects.get(pk=invited.pk).activated_at is None
+
+
+def test_the_card_of_an_archived_operator_offers_only_disable_and_enable(world: World) -> None:
+    active_user(world.a)
+    Operator.objects.filter(pk=world.a.pk).update(archived_at=START)
+    staff = billing_client()
+    page = text(staff.get(f"/operators/{world.a.pk}/"))
+    assert 'id="portal-state">Operator archived<' in page
+    for absent in ("portal-invite-form", "portal-reset-form", "portal-enable-form"):
+        assert f'id="{absent}"' not in page, absent
+    assert 'id="portal-disable-form"' in page
+    reset = staff.post(f"/operators/{world.a.pk}/portal/reset/", follow=True)
+    assert invitations.ARCHIVED in text(reset)
+    assert not OutboundMessage.objects.filter(kind=MessageKind.PORTAL).exists()
+    assert staff.post(f"/operators/{world.a.pk}/portal/disable/").status_code == 302
+    page = text(staff.get(f"/operators/{world.a.pk}/"))
+    assert 'id="portal-state">Operator archived<' in page
+    assert 'id="portal-enable-form"' in page and 'id="portal-disable-form"' not in page
+    # An archived operator without an account offers nothing.
+    Operator.objects.filter(pk=world.b.pk).update(archived_at=START)
+    bare = text(staff.get(f"/operators/{world.b.pk}/"))
+    assert 'id="portal-state">Operator archived<' in bare
+    assert 'id="portal-invite-form"' not in bare and 'id="portal-enable-form"' not in bare
+
+
 def test_five_failures_lock_the_email_for_fifteen_minutes(world: World, clock: Clock) -> None:
     user = active_user(world.a)
     for number in range(4):
@@ -711,7 +792,39 @@ def test_a_staff_session_opens_no_portal_page(world: World) -> None:
         assert response["Location"].startswith("/portal/login/"), name
 
 
-def test_every_portal_route_needs_the_portal_sign_in_but_the_public_five() -> None:
+def test_a_portal_request_leaves_the_staff_session_idle_timer_alone(world: World) -> None:
+    staff = client_for(Role.BILLING)[0]
+    session = staff.session
+    stamp = int(time.time()) - 60
+    session[signals.LAST_SEEN_SESSION_KEY] = stamp
+    session.save()
+    key = session.session_key
+    UserSession.objects.filter(session_key=key).update(last_seen_at=START - timedelta(minutes=1))
+    before = UserSession.objects.get(session_key=key).last_seen_at
+    for path in ("/portal/login/", "/portal/", "/portal/nothing-here/"):
+        staff.get(path)
+    assert staff.session[signals.LAST_SEEN_SESSION_KEY] == stamp
+    assert UserSession.objects.get(session_key=key).last_seen_at == before
+    # A staff page still refreshes it.
+    assert staff.get("/operators/").status_code == 200
+    assert staff.session[signals.LAST_SEEN_SESSION_KEY] > stamp
+    assert UserSession.objects.get(session_key=key).last_seen_at == START
+
+
+def test_an_unknown_portal_path_is_the_portals_404_never_the_staff_401(world: World) -> None:
+    signed_in = portal_client(active_user(world.a))
+    for client in (Client(), signed_in, client_for(Role.ADMIN)[0]):
+        for path in ("/portal/nothing-here/", "/portal/stores/", "/portal/a/b/c"):
+            response = client.get(path)
+            assert response.status_code == 404, (path, response.status_code)
+            assert 'id="not-found"' in text(response), path
+            assert response["X-Robots-Tag"] == "noindex, nofollow"
+    # Signed in, the page is the portal's own, with the operator's stores.
+    page = text(signed_in.get("/portal/nothing-here/"))
+    assert 'id="store-switcher"' in page and "#101 Alphaville" in page
+
+
+def test_every_portal_route_needs_the_portal_sign_in_but_the_public_ones() -> None:
     routes = [
         (name, sample_path(raw)) for name, raw, _ in iter_routes() if registry.is_portal_route(name)
     ]

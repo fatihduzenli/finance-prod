@@ -95,14 +95,15 @@ def test_public_set_is_exactly_login_healthz_webhook_receiver_and_static() -> No
 
 
 def test_the_portal_sets_are_pinned_and_apart_from_the_staff_ones() -> None:
-    # PLAN-014 H1: the portal's routes, its public five, and the portal namespace holds
-    # exactly them; none is a staff public, read-only or ruled route.
+    # PLAN-014 H1: the portal's routes, its public six (the catch-all 404 is one), and the
+    # portal namespace holds exactly them; none is a staff public, read-only or ruled route.
     assert registry.PORTAL_PUBLIC_ROUTE_NAMES == {
         "portal:login",
         "portal:invite",
         "portal:reset_request",
         "portal:reset_confirm",
         "portal:logout",
+        "portal:not_found",
     }
     assert registry.PORTAL_ROUTE_NAMES == registry.PORTAL_PUBLIC_ROUTE_NAMES | {
         "portal:home",

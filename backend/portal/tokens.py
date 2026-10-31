@@ -10,9 +10,9 @@ kind is voided: its ``used_at`` is set), :func:`drop` voids it. The messaging en
 
 :func:`find` answers the live token a raw value names, or ``None`` for any other value: too
 long, unknown, of the other kind, used, voided, expired, or of an account that may not use it
-(an invitation of an account already activated or disabled; a reset of an account that cannot
-sign in). The stored hash is compared with :func:`hmac.compare_digest`. Nothing here logs a
-token.
+(an invitation of an account already activated or disabled, or whose operator is archived; a
+reset of an account that cannot sign in). The stored hash is compared with
+:func:`hmac.compare_digest`. Nothing here logs a token.
 """
 
 from __future__ import annotations
@@ -73,7 +73,11 @@ def void_all(user: PortalUser, kind: str, now: datetime | None = None) -> None:
 
 def _usable_by(user: PortalUser, kind: str) -> bool:
     if kind == TokenKind.INVITE:
-        return user.activated_at is None and user.disabled_at is None
+        return (
+            user.activated_at is None
+            and user.disabled_at is None
+            and user.operator.archived_at is None
+        )
     return user.can_sign_in
 
 
