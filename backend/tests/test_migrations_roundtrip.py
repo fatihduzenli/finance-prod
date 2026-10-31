@@ -1844,9 +1844,10 @@ def test_the_company_settings_migration_over_existing_rows_on_sqlite(
             scratch.execute(
                 "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
                 "logo, processor_name, updated_at, sender_email, reply_to_email, "
-                "manager_emails, sandbox_allowlist) VALUES "
+                "manager_emails, sandbox_allowlist, bank_deposits_enabled, "
+                "bank_auto_confirm_exact) VALUES "
                 "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', '2026-10-16', "
-                "'', '', '', '')"
+                "'', '', '', '', 0, 0)"
             )
 
 
@@ -1862,8 +1863,9 @@ def test_the_company_settings_migration_over_existing_rows_on_postgresql(
         scratch.execute(
             "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
             "logo, processor_name, updated_at, sender_email, reply_to_email, manager_emails, "
-            "sandbox_allowlist) VALUES "
-            "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', now(), '', '', '', '')"
+            "sandbox_allowlist, bank_deposits_enabled, bank_auto_confirm_exact) VALUES "
+            "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', now(), '', '', '', '', "
+            "false, false)"
         )
     with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
         scratch.execute("UPDATE company_settings SET logo = 'https://example.com/logo.svg'")

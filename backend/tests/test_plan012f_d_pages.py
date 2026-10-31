@@ -476,6 +476,8 @@ for _name in (
     "ledger:settings:mail_save",
     "ledger:settings:template_preview",
     "ledger:outbox:send_now",
+    # PLAN-014 I2: the Bank deposits card's switches.
+    "ledger:settings:bank_save",
 ):
     NOT_PAGES[_name] = POST_ONLY
 
