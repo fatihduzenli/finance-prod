@@ -39,7 +39,7 @@
       <div class="field"><label for="mail-reply-to">Reply-To</label><input type="email" name="reply_to_email" id="mail-reply-to" value="{{ mail.reply_to_email }}" maxlength="254" autocomplete="off"><span class="help">Where replies go; empty: to the Send as address.</span></div>
       <div class="field"><label for="mail-managers">Managers</label><textarea name="manager_emails" id="mail-managers" rows="3">{{ mail.manager_emails }}</textarea><span class="help">One address per line: they receive the internal 30-days-overdue message.</span></div>
       <div class="field"><label for="mail-allowlist">Sandbox allowlist</label><textarea name="sandbox_allowlist" id="mail-allowlist" rows="3">{{ mail.sandbox_allowlist }}</textarea><span class="help">One address per line. On the sandbox, mail goes only to these addresses; every other message is held in the Outbox.</span></div>
-      <p class="help" id="mail-pay-link">Until the operator portal exists, the {pay_link} placeholder is a signed link to the operator's statement.</p>
+      <p class="help" id="mail-pay-link">The {pay_link} placeholder is the operator portal's Pay page when the operator has a portal account; otherwise a signed link to the operator's statement.</p>
       <button class="btn btn-primary" type="submit">Save</button>
     </form>
   </section>

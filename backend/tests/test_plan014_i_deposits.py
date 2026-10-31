@@ -398,3 +398,12 @@ def test_the_pay_page_carries_the_memo_line_even_when_online_payment_is_off(
         assert "Paying by wire or Zelle? Put INV-2026-9201 in the memo." in page
         whole = world.client.get(world.pay_url()).content.decode()
         assert "Put INV-2026-9201 in the memo." in whole and 'id="pay-form"' not in whole
+
+
+def test_the_mail_cards_pay_link_line_names_the_portal_now() -> None:
+    """Gate I's Settings shots: the Mail card still said "Until the operator portal exists";
+    since Batch H, {pay_link} is the portal's Pay page for an operator with a portal account."""
+    admin, _ = client_for(Role.ADMIN)
+    page = admin.get("/admin-settings/").content.decode()
+    assert "Until the operator portal exists" not in page
+    assert "Pay page when the operator has a portal account" in page
