@@ -409,6 +409,9 @@ def test_the_templates_list_order_does_not_follow_the_database_collation() -> No
         "returned_debit",
         "returned_debit_no_retry",
         "final_statement",
+        # PLAN-014 H2: "H — Portal invitation" and "H — Portal password reset".
+        "portal_invite",
+        "portal_reset",
         "internal_day30",
     ]
     inactive = [t for t in message_templates.rows() if not t.active]

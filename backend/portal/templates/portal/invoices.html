@@ -1,0 +1,21 @@
+{% extends "portal/base.html" %}{% load money dates %}
+{% block title %}Invoices{% endblock %}
+{% block content %}
+{% include "portal/_store_title.html" %}
+{% include "portal/_store_tabs.html" with tab="invoices" %}
+<section class="portal-card">
+  <h2>Invoices</h2>
+  <div class="portal-scroll">
+  <table id="invoices">
+    <thead><tr><th>Number</th><th>Date</th><th class="portal-money">Amount</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="invoice-row"><td>{{ row.number }}</td><td>{{ row.issued|day }}</td><td class="portal-money">{{ row.total|money }}</td><td>{{ row.status }}</td></tr>
+      {% empty %}
+      <tr><td colspan="4" class="portal-muted" id="no-invoices">No invoice yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

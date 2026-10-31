@@ -185,7 +185,10 @@ def template_id(code: str = "overdue_day5") -> str:
 def test_the_seven_templates_are_seeded_and_the_ladder_is_retired() -> None:
     active = {
         row.code: (row.name, row.internal)
-        for row in MessageTemplate.objects.filter(active=True).exclude(code="final_statement")
+        # PLAN-014 H2's two portal templates are pinned in tests/test_portal.py.
+        for row in MessageTemplate.objects.filter(active=True).exclude(
+            code__in=("final_statement", "portal_invite", "portal_reset")
+        )
     }
     assert active == {
         "reminder_autopay": ("A — Rent will be debited", False),

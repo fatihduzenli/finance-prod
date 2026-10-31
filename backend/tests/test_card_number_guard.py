@@ -43,6 +43,7 @@ from tests.test_ledger_models import (
     saved,
 )
 from tests.test_payments_models import PAYMENTS_FACTORIES
+from tests.test_portal import PORTAL_FACTORIES
 
 TEST_CARD = "4111 1111 1111 1111"
 
@@ -315,13 +316,16 @@ GUARD_VALIDATORS = (validate_no_payment_data, validate_json_has_no_payment_data)
 FACTORIES: dict[type[models.Model], Callable[..., models.Model]] = {
     **LEDGER_FACTORIES,
     **PAYMENTS_FACTORIES,
+    **PORTAL_FACTORIES,
 }
+#: The apps whose tables hold business text: the operator portal's since PLAN-014 H1.
+GUARDED_APPS = ("ledger", "payments", "portal")
 
 
 def guarded_fields() -> list[tuple[type[models.Model], models.Field[Any, Any]]]:
     return [
         (model, field)
-        for label in ("ledger", "payments")
+        for label in GUARDED_APPS
         for model in apps.get_app_config(label).get_models()
         for field in model._meta.concrete_fields
         if any(validator in GUARD_VALIDATORS for validator in field.validators)
@@ -382,6 +386,7 @@ GUARD_MODULES = (
     "ledger.migrations.0061_messaging_engine",
     "ledger.migrations.0062_rent_month_messages",
     "ledger.migrations.0063_returned_debits",
+    "ledger.migrations.0064_portal_messages",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0003_webhook_event_processing",
     "payments.migrations.0005_jobs",
@@ -390,6 +395,7 @@ GUARD_MODULES = (
     "payments.migrations.0019_lease_job_kinds",
     "payments.migrations.0020_lease_account_switch",
     "payments.migrations.0021_job_run_after",
+    "portal.migrations.0001_initial",
 )
 
 
@@ -424,12 +430,17 @@ IDENTIFIER_COLUMNS = {
     # to its shape by a CHECK.
     "outbound_messages.body_sha256",
     "outbound_messages.mail_message_id",
+    # PLAN-014 H1: a password hasher's value, a one-time link's SHA-256 and the keyed hash of
+    # an e-mail (both held to 64 hexadecimal characters by a CHECK).
+    "portal_users.password",
+    "portal_tokens.token_hash",
+    "portal_login_attempts.email_hash",
 }
 
 
 def test_guard_covers_every_open_text_column_except_the_named_identifiers() -> None:
     open_text = set()
-    for label in ("ledger", "payments"):
+    for label in GUARDED_APPS:
         for model in apps.get_app_config(label).get_models():
             for field in model._meta.concrete_fields:
                 is_text = isinstance(field, models.CharField | models.TextField)
@@ -477,11 +488,13 @@ def test_guard_covers_every_open_text_column_except_the_named_identifiers() -> N
 IDENTIFIER_VALUES = {
     "documents.sha256": "4111111111111111" + "abcdef" * 8,
     "outbound_messages.body_sha256": "4111111111111111" + "abcdef" * 8,
+    "portal_tokens.token_hash": "4111111111111111" + "abcdef" * 8,
+    "portal_login_attempts.email_hash": "4111111111111111" + "abcdef" * 8,
 }
 
 IDENTIFIER_FIELDS = [
     (model, field)
-    for label in ("ledger", "payments")
+    for label in GUARDED_APPS
     for model in apps.get_app_config(label).get_models()
     for field in model._meta.concrete_fields
     if f"{model._meta.db_table}.{field.column}" in IDENTIFIER_COLUMNS
@@ -834,12 +847,12 @@ def test_the_trigger_refuses_a_card_number_split_by_bidi_marks() -> None:
 
 # --- The two guard lists stay complete ----------------------------------------------------------
 
-FIRST_LISTED_WITHOUT_EXCEPTION = {"ledger": "0041", "payments": "0018"}
+FIRST_LISTED_WITHOUT_EXCEPTION = {"ledger": "0041", "payments": "0018", "portal": "0001"}
 
 
 def every_migration() -> list[str]:
     found = []
-    for app in ("ledger", "payments"):
+    for app in GUARDED_APPS:
         folder = Path(__file__).resolve().parents[1] / app / "migrations"
         found += [f"{app}.migrations.{path.stem}" for path in sorted(folder.glob("0*.py"))]
     return found

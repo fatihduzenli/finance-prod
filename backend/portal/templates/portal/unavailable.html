@@ -1,0 +1,9 @@
+{% extends "portal/base.html" %}
+{% block title %}{% if tab == "pay" %}Pay{% else %}Bank account{% endif %}{% endblock %}
+{% block content %}
+{% include "portal/_store_title.html" %}
+{% include "portal/_store_tabs.html" %}
+<section class="portal-card">
+  <p id="unavailable">{{ sentence }}</p>
+</section>
+{% endblock %}

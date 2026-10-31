@@ -22,6 +22,8 @@ def _is_classified(name: str) -> bool:
         name in registry.PUBLIC_ROUTE_NAMES
         or name in registry.READ_ONLY_ROUTE_NAMES
         or registry.rule_for(name) is not None
+        # PLAN-014 H1: the operator portal's routes, decided by the portal's own middleware.
+        or name in registry.PORTAL_ROUTE_NAMES
     )
 
 
@@ -60,6 +62,7 @@ def test_registry_has_no_stale_entries() -> None:
             | registry.PUBLIC_ROUTE_NAMES
             | registry.MFA_SETUP_ROUTE_NAMES
             | registry.MFA_EXEMPT_ROUTE_NAMES
+            | registry.PORTAL_ROUTE_NAMES
         )
         if name not in names
     ]
@@ -91,6 +94,35 @@ def test_public_set_is_exactly_login_healthz_webhook_receiver_and_static() -> No
     assert registry.PUBLIC_PATH_PREFIXES == (f"/{settings.STATIC_URL.lstrip('/')}",)
 
 
+def test_the_portal_sets_are_pinned_and_apart_from_the_staff_ones() -> None:
+    # PLAN-014 H1: the portal's routes, its public five, and the portal namespace holds
+    # exactly them; none is a staff public, read-only or ruled route.
+    assert registry.PORTAL_PUBLIC_ROUTE_NAMES == {
+        "portal:login",
+        "portal:invite",
+        "portal:reset_request",
+        "portal:reset_confirm",
+        "portal:logout",
+    }
+    assert registry.PORTAL_ROUTE_NAMES == registry.PORTAL_PUBLIC_ROUTE_NAMES | {
+        "portal:home",
+        "portal:store",
+        "portal:invoices",
+        "portal:payments",
+        "portal:statement",
+        "portal:pay",
+        "portal:bank",
+        "portal:account",
+        "portal:password",
+    }
+    names = {name for name, _, _ in iter_routes() if name}
+    assert {name for name in names if name.startswith("portal:")} == registry.PORTAL_ROUTE_NAMES
+    for name in registry.PORTAL_ROUTE_NAMES:
+        assert name not in registry.PUBLIC_ROUTE_NAMES, name
+        assert name not in registry.READ_ONLY_ROUTE_NAMES, name
+        assert registry.rule_for(name) is None, name
+
+
 def test_unregistered_name_has_no_rule() -> None:
     assert registry.rule_for(None) is None
     assert registry.rule_for("payments:refund") is None
@@ -100,10 +132,11 @@ def test_unregistered_name_has_no_rule() -> None:
 
 
 def _non_public_routes() -> list[tuple[str, str]]:
+    # PLAN-014 H1: the portal's routes answer the portal's sign-in instead (tests/test_portal.py).
     return [
         (name or raw, sample_path(raw))
         for name, raw, _ in iter_routes()
-        if name not in registry.PUBLIC_ROUTE_NAMES
+        if name not in registry.PUBLIC_ROUTE_NAMES and not registry.is_portal_route(name)
     ]
 
 

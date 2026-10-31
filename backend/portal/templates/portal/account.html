@@ -1,0 +1,24 @@
+{% extends "portal/base.html" %}
+{% block title %}Account{% endblock %}
+{% block content %}
+<h1>Account</h1>
+{% if changed %}<p class="portal-ok" id="password-changed" role="status">{{ changed_text }}</p>{% endif %}
+<section class="portal-card">
+  <dl class="portal-facts"><dt>E-mail</dt><dd id="account-email">{{ portal_user.email }}</dd></dl>
+  <p class="portal-muted">To change the e-mail, write to us.</p>
+</section>
+<section class="portal-card">
+  <h2>Change your password</h2>
+  <form method="post" action="{% url 'portal:password' %}" id="password-form">{% csrf_token %}
+    <label for="current-password">Current password</label>
+    <input id="current-password" type="password" name="current" autocomplete="current-password" required>
+    {% include "portal/_password_fields.html" %}
+    <button type="submit" class="portal-button">Change password</button>
+  </form>
+</section>
+<section class="portal-card">
+  <h2>Theme</h2>
+  <p class="portal-muted">Light, Dark, or System (as your device).</p>
+  <form method="post" action="{% url 'portal:account' %}" class="portal-theme" id="account-theme">{% csrf_token %}<button type="submit" name="theme" value="light" aria-pressed="{% if portal_theme == 'light' %}true{% else %}false{% endif %}">Light</button><button type="submit" name="theme" value="dark" aria-pressed="{% if portal_theme == 'dark' %}true{% else %}false{% endif %}">Dark</button><button type="submit" name="theme" value="system" aria-pressed="{% if portal_theme == 'light' or portal_theme == 'dark' %}false{% else %}true{% endif %}">System</button></form>
+</section>
+{% endblock %}

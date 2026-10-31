@@ -1,5 +1,6 @@
-"""URL map: the staff screens, Django admin, /healthz for the platform probe, and the
-public webhook receiver under /api/webhooks/ (docs/qa/PLAN-008-webhooks.md D2).
+"""URL map: the staff screens, Django admin, /healthz for the platform probe, the
+public webhook receiver under /api/webhooks/ (docs/qa/PLAN-008-webhooks.md D2), and the
+operator portal under /portal/ (PLAN-014 H1).
 
 Every route must be classified in accounts.registry; backend/tests/test_route_registry.py
 fails when one is not.
@@ -78,6 +79,8 @@ urlpatterns = [
     # POST only; Django's LogoutView answers GET with 405.
     path("account/logout/", LogoutView.as_view(), name="logout"),
     path("account/", include("accounts.urls")),
+    # The operator portal (PLAN-014 H1): its own sign-in, session and pages.
+    path("portal/", include("portal.urls")),
     # Staff screens: /operators/ (docs/qa/PLAN-006-operators.md §4.1).
     path("", include("ledger.urls")),
 ]

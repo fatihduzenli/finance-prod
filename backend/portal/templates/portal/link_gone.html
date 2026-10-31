@@ -1,0 +1,9 @@
+{% extends "portal/base.html" %}
+{% block title %}Link not valid{% endblock %}
+{% block content %}
+<section class="portal-card portal-narrow">
+  <h1>Link not valid</h1>
+  <p id="link-gone">{{ sentence }}</p>
+  <p><a href="{% url 'portal:login' %}">Sign in</a> · <a href="{% url 'portal:reset_request' %}">Forgot your password?</a></p>
+</section>
+{% endblock %}

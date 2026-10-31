@@ -143,6 +143,21 @@
     </section>
     <section class="card" id="portal-card" aria-labelledby="portal-card-heading">
       <h2 class="section-label" id="portal-card-heading">Portal</h2>
+      <dl class="side-list">
+        <dt>Account</dt><dd id="portal-state">{{ portal.state }}{% if portal.user %}<br><span class="muted">{{ portal.user.email }}</span>{% endif %}</dd>
+        {% if portal.user and portal.user.invited_at %}<dt>Invited</dt><dd id="portal-invited">{{ portal.user.invited_at|moment }}</dd>{% endif %}
+        <dt>Last sign-in</dt><dd id="portal-last-sign-in">{% if portal.user.last_login_at %}{{ portal.user.last_login_at|moment }}{% else %}Never{% endif %}</dd>
+      </dl>
+      {% if billing %}
+        {% if portal.can_invite or portal.can_resend %}
+          {% if operator.email %}
+          <form method="post" action="{% url 'ledger:operators:portal_invite' pk=operator.pk %}" class="js-single-submit card-note" id="portal-invite-form">{% csrf_token %}<button class="link-action" type="submit">{% if portal.can_resend %}Resend invitation{% else %}Invite to the portal{% endif %}</button></form>
+          {% else %}<p class="muted card-note" id="portal-needs-email">Add the operator's e-mail to invite them to the portal.</p>{% endif %}
+        {% endif %}
+        {% if portal.can_reset %}<form method="post" action="{% url 'ledger:operators:portal_reset' pk=operator.pk %}" class="js-single-submit card-note" id="portal-reset-form">{% csrf_token %}<button class="link-action" type="submit">Reset password</button></form>{% endif %}
+        {% if portal.can_disable %}<form method="post" action="{% url 'ledger:operators:portal_disable' pk=operator.pk %}" class="js-single-submit card-note" id="portal-disable-form">{% csrf_token %}<button class="link-action" type="submit">Disable</button></form>{% endif %}
+        {% if portal.can_enable %}<form method="post" action="{% url 'ledger:operators:portal_enable' pk=operator.pk %}" class="js-single-submit card-note" id="portal-enable-form">{% csrf_token %}<button class="link-action" type="submit">Enable</button></form>{% endif %}
+      {% endif %}
       <p id="statement-links" class="muted">Statement link: each collection e-mail carries a link to this operator's statement that opens without an account for {{ statement_link_days }} days.{% if operator.statement_links_revoked_at %} Links sent before {{ operator.statement_links_revoked_at|moment }} were revoked.{% endif %}</p>
       <dl class="side-list"><dt>Last opened</dt><dd id="statement-link-opened">{% if statement_link_opened %}{{ statement_link_opened|moment }}{% else %}Never{% endif %}</dd></dl>
       {% if can_revoke_links %}

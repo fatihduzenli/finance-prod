@@ -1,0 +1,16 @@
+{% extends "portal/base.html" %}{% load money %}
+{% block title %}Your stores{% endblock %}
+{% block content %}
+<h1>Your stores</h1>
+<ul class="portal-stores" id="portal-stores">
+  {% for row in rows %}
+  <li class="portal-card portal-store" id="store-{{ row.store.pk }}">
+    <a class="portal-store-name" href="{% url 'portal:store' pk=row.store.pk %}">{% if row.store.store_number is not None %}#{{ row.store.store_number }} {% endif %}{{ row.store.external_label }}</a>
+    {% if row.ended %}<span class="portal-badge" id="ended-{{ row.store.pk }}">ended</span>{% endif %}
+    <p class="portal-balance">Open balance <strong id="balance-{{ row.store.pk }}">{{ row.balance|money }}</strong></p>
+  </li>
+  {% empty %}
+  <li class="portal-card" id="no-stores">No store is billed to you here.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

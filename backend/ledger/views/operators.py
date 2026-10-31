@@ -73,6 +73,7 @@ from ledger.services.csv_export import CsvWriter
 from ledger.services.operators import OperatorArchived
 from ledger.validators import validate_no_payment_data
 from ledger.views import contact_log, workspace_cards
+from portal import invitations
 
 PAGE_SIZE = 25
 #: Longer search input is cut to this length before it reaches a query.
@@ -413,6 +414,8 @@ def _detail_context(
             :RECENT_CONTACTS
         ],
         "statement_link_opened": operator_cards.statement_link_opened(operator),
+        # PLAN-014 H2: the operator's portal account and the card's actions (billing).
+        "portal": invitations.card(operator),
     }
 
 

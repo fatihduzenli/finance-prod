@@ -1,0 +1,41 @@
+{% load static %}{% comment %}
+The operator portal's shell (PLAN-014 H3): light by default, phone first, its own. The 12g
+tokens (finance/tokens.css: data-theme light, dark or system) and portal/portal.css; no staff
+navigation, no manifest, no service worker. The top bar: the company's name, the store switcher
+(a <details> list of the operator's stores, no script), the Light · Dark · System control (a
+POST to portal:account) and Sign out (a POST to portal:logout). Signed out, the bar holds the
+company's name only. Nothing here reads the staff user.
+{% endcomment %}<!doctype html>
+<html lang="en" data-theme="{{ portal_theme|default:'system' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}{% endblock %} · {{ company.name }}</title>
+  <link rel="stylesheet" href="{% static 'finance/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'portal/portal.css' %}">
+</head>
+<body class="portal">
+<header class="portal-bar" id="portal-bar">
+  <a class="portal-company" id="portal-company" href="{% if portal_user %}{% url 'portal:home' %}{% else %}{% url 'portal:login' %}{% endif %}">{{ company.name }}</a>
+  {% if portal_user %}
+  <nav class="portal-nav" aria-label="Portal">
+    <details class="portal-switcher" id="store-switcher">
+      <summary>{% if store %}{% if store.store_number is not None %}#{{ store.store_number }} {% endif %}{{ store.external_label }}{% else %}Your stores{% endif %}</summary>
+      <ul>
+        <li><a href="{% url 'portal:home' %}">All stores</a></li>
+        {% for choice in portal_stores %}<li><a href="{% url 'portal:store' pk=choice.pk %}"{% if store and choice.pk == store.pk %} aria-current="page"{% endif %}>{% if choice.store_number is not None %}#{{ choice.store_number }} {% endif %}{{ choice.external_label }}</a></li>{% endfor %}
+      </ul>
+    </details>
+    <a href="{% url 'portal:statement' %}">Statement</a>
+    <a href="{% url 'portal:account' %}">Account</a>
+    <form method="post" action="{% url 'portal:account' %}" class="portal-theme" id="portal-theme">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit" name="theme" value="light" aria-pressed="{% if portal_theme == 'light' %}true{% else %}false{% endif %}">Light</button><button type="submit" name="theme" value="dark" aria-pressed="{% if portal_theme == 'dark' %}true{% else %}false{% endif %}">Dark</button><button type="submit" name="theme" value="system" aria-pressed="{% if portal_theme == 'light' or portal_theme == 'dark' %}false{% else %}true{% endif %}">System</button></form>
+    <form method="post" action="{% url 'portal:logout' %}" id="portal-logout">{% csrf_token %}<button type="submit" class="portal-link-button">Sign out</button></form>
+  </nav>
+  {% endif %}
+</header>
+<main class="portal-main" id="portal-main">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
