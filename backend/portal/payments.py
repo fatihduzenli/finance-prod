@@ -170,11 +170,9 @@ class PayCharge:
 
     @property
     def kind(self) -> str:
-        return (
-            PortalChargeKind.RENT
-            if self.row.kind == receivables.KIND_RENT
-            else (PortalChargeKind.ONE_OFF)
-        )
+        if self.row.kind == receivables.KIND_RENT:
+            return PortalChargeKind.RENT
+        return PortalChargeKind.ONE_OFF
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,7 +185,8 @@ class PayPage:
     amount: Decimal
     #: The pay-an-invoice flag (off: :data:`PAY_UNAVAILABLE`).
     enabled: bool
-    #: The last four of the usable bank method on file (``""``: none, the Bank page first).
+    #: A usable bank method is on file (none: the Bank page first), and its last four.
+    has_bank: bool
     last4: str
     #: ``#1991`` when the lease debits the account of another store's lease.
     shared_with: str
@@ -196,7 +195,7 @@ class PayPage:
 
     @property
     def payable(self) -> bool:
-        return self.enabled and bool(self.last4) and not self.refusal
+        return self.enabled and self.has_bank and not self.refusal
 
 
 def _charge_of(row: receivables.OpenBalance) -> RentCharge | OneOffCharge | None:
@@ -238,11 +237,12 @@ def _pay_charge(row: receivables.OpenBalance, account: Lease | None, today: date
     return PayCharge(row, charge, _refusal_text(code, row) if code else "")
 
 
-def _usable_last4(lease: Lease | None) -> str:
+def _usable_bank(lease: Lease | None) -> tuple[bool, str]:
+    """Whether a usable bank method is on file for the lease's account, and its last four."""
     method = leases.linked_method_record(lease)
     if method is None or not method.is_usable_bank:
-        return ""
-    return method.last_four or "····"
+        return False, ""
+    return True, method.last_four
 
 
 def _shared_with(lease: Lease | None) -> str:
@@ -272,9 +272,9 @@ def pay_page(user: PortalUser, store: Store, charge_raw: object, today: date) ->
             return None
     lease = services.lease_of(user, store)
     enabled = debits.charge_now_enabled()
-    last4 = _usable_last4(lease) if enabled else ""
+    has_bank, last4 = _usable_bank(lease) if enabled else (False, "")
     account = leases.account_lease(lease)
-    charges = [_pay_charge(row, account, today) for row in rows] if enabled and last4 else []
+    charges = [_pay_charge(row, account, today) for row in rows] if has_bank else []
     refusal = ""
     if not rows:
         refusal = NOTHING_OWED
@@ -289,6 +289,7 @@ def pay_page(user: PortalUser, store: Store, charge_raw: object, today: date) ->
         whole=whole,
         amount=receivables.total(rows),
         enabled=enabled,
+        has_bank=has_bank,
         last4=last4,
         shared_with=_shared_with(lease),
         refusal=refusal,
@@ -378,7 +379,7 @@ def request_payment(
         return None
     if not page.enabled:
         return Requested(refusal=PAY_UNAVAILABLE)
-    if not page.last4:
+    if not page.has_bank:
         return Requested(to_bank=True)
     if _exact_amount(amount_raw) != page.amount:
         return Requested(refusal=TAMPERED)

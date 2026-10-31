@@ -273,7 +273,7 @@ def pay(request: HttpRequest, pk: str) -> HttpResponse:
     page = portal_payments.pay_page(user, found, charge_raw, today)
     if page is None:
         return not_found(request)
-    if page.enabled and not page.last4 and request.method != "POST":
+    if page.enabled and not page.has_bank and request.method != "POST":
         return HttpResponseRedirect(_bank_url(found, pay="1"))
     return _page(
         request,
