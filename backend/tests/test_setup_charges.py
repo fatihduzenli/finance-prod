@@ -1058,6 +1058,8 @@ WRITE_ROUTES = {
     "ledger:one_off_charges:send_message": Role.BILLING,
     # PLAN-012e D10: Split into installments, billing.
     "ledger:one_off_charges:split": Role.BILLING,
+    # PLAN-014 F3: Stop automatic retry, billing.
+    "ledger:one_off_charges:stop_retry": Role.BILLING,
 }
 
 #: PLAN-012e-2 D4: Add setup charge moved into the invoice builder; its route is a read-only
@@ -1069,6 +1071,7 @@ POST_ONLY_ROUTES = {
     "ledger:one_off_charges:retry",
     "ledger:one_off_charges:delete_invoice",
     "ledger:one_off_charges:send_message",
+    "ledger:one_off_charges:stop_retry",
 }
 
 
@@ -1090,6 +1093,7 @@ def routes(charge: OneOffCharge) -> dict[str, str]:
         "ledger:one_off_charges:delete_invoice": f"{base}delete-invoice/",
         "ledger:one_off_charges:send_message": f"{base}send-message/",
         "ledger:one_off_charges:split": f"{base}split/",
+        "ledger:one_off_charges:stop_retry": f"{base}stop-retry/",
     }
 
 

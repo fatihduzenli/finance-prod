@@ -426,6 +426,17 @@ def test_a_return_without_a_code_reads_the_general_sentence_and_is_not_retried(
     assert fee.note == f"Returned debit (no code): {return_codes.FALLBACK}."
 
 
+def test_a_code_of_another_shape_is_never_copied_into_stored_text(fake: FakeProvider) -> None:
+    world = a_world(fake)
+    payment = returned(fake, "R01 call 555")
+    [fee] = fees_of(payment)
+    assert fee.note == f"Returned debit (unlisted code): {return_codes.FALLBACK}."
+    flagged = AuditLog.objects.get(action=nsf.FLAGGED_ACTION, entity_id=str(world.lease.pk))
+    assert flagged.after is not None
+    assert flagged.after["reason"] == "Returned debit (unlisted code): new payment method needed"
+    assert nsf.queue_states([payment])[payment.pk].text == "No retry: unlisted code"
+
+
 def test_an_r01_without_a_linked_bank_method_is_not_retried(fake: FakeProvider) -> None:
     world = a_world(fake, bank=False)
     payment = returned(fake, "R01")
@@ -879,7 +890,12 @@ def test_migration_0063_activates_the_fee_and_reverses_only_without_its_rows() -
     try:
         old = _migrate(BEFORE)
         assert "retry_state" not in _columns()
-        assert not old.get_model("ledger", "FeeType").objects.get(code=NSF_FEE_FIRST).active
+        # A flush by an earlier transactional test removes the seeded rows: seed it as 0027.
+        old.get_model("ledger", "FeeType").objects.get_or_create(
+            code=NSF_FEE_FIRST,
+            defaults={"name": "NSF fee, first return", "default_price": D("100.00")},
+        )
+        old.get_model("ledger", "FeeType").objects.filter(code=NSF_FEE_FIRST).update(active=False)
         new = _migrate(AFTER)
         assert "retry_state" in _columns() and "retry_date" in _columns()
         assert new.get_model("ledger", "FeeType").objects.get(code=NSF_FEE_FIRST).active

@@ -438,6 +438,8 @@ for _name in (
     "ledger:one_off_charges:retry_mark",
     "ledger:one_off_charges:delete_invoice",
     "ledger:one_off_charges:retry",
+    # PLAN-014 F3: Stop automatic retry, a POST from the charge page and the returns queue.
+    "ledger:one_off_charges:stop_retry",
     "ledger:one_off_charges:send_message",
     "ledger:invoices:edit",
     "ledger:invoices:send",

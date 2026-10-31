@@ -79,6 +79,7 @@ A staff void of a payment never reaches :func:`on_return` and queues no message.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -512,6 +513,9 @@ NO_RETRY_ACCOUNT = "account"
 REVIEW_RETURNED = "Returned debit ({code}): new payment method needed"
 REVIEW_LIMIT = "Re-debit limit reached (Nacha)"
 NO_CODE = "no code"
+#: A code that is not an ACH return code's shape is never copied into a charge's text.
+OTHER_CODE = "unlisted code"
+_CODE_SHAPE = re.compile(r"R[0-9]{2}")
 FEE_NOTE = "Returned debit ({code}): {reason}."
 REDEBIT_NOTE = "Automatic re-debit of the returned debit ({code}) on {date}."
 STOPPED_BY_STAFF = "Stopped by staff"
@@ -533,6 +537,14 @@ STATE_DONE = "Re-debited"
 STATE_NO_RETRY = "No retry: {code}"
 STATE_LIMIT = "No retry: re-debit limit reached"
 STATE_ACCOUNT = "No retry: no bank account to debit"
+
+
+def shown(code: str) -> str:
+    """The return code as charges, notes and the queue name it: ``R10``; "no code"; or
+    "unlisted code" for text of another shape (never copied into stored text)."""
+    if not code:
+        return NO_CODE
+    return code if _CODE_SHAPE.fullmatch(code) else OTHER_CODE
 
 
 @dataclass(frozen=True, slots=True)
@@ -804,7 +816,7 @@ def on_return(payment: Payment, today: date, now: datetime | None = None) -> Ret
         lease = charge_lease(payment)
         account = lease if lease is not None else leases.first_active_lease(operator)
         code = (payment.return_code or "").strip().upper()
-        shown_code = code or NO_CODE
+        shown_code = shown(code)
         words = payments.return_reason_words(code)
         what = source_description(payment)
         amount = Decimal(payment.amount)
@@ -1118,7 +1130,7 @@ def queue_states(found: Iterable[Payment]) -> dict[uuid.UUID, QueueState]:
         key = uuid.UUID(entity_id)
         retry = (after or {}).get("retry")
         if retry == NO_RETRY_CODE:
-            texts[key] = STATE_NO_RETRY.format(code=codes.get(key) or NO_CODE)
+            texts[key] = STATE_NO_RETRY.format(code=shown((codes.get(key) or "").upper()))
         elif retry == NO_RETRY_LIMIT:
             texts[key] = STATE_LIMIT
         elif retry == NO_RETRY_ACCOUNT:

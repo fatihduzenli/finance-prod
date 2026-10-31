@@ -733,6 +733,31 @@ def _second_fee(*, same_redebit: bool) -> ledger.OneOffCharge:
     return new_one_off_charge(category="nsf_fee", description="NSF fee", companion_of=other)
 
 
+def _second_return_fee(*, same_payment: bool) -> ledger.OneOffCharge:
+    """PLAN-014 F2: save the NSF fee made at one return; return an unsaved fee of the same or
+    another returned payment."""
+    payment = saved(new_payment(status="returned"))
+    insert(new_one_off_charge(category="nsf_fee", description="NSF fee", source_payment=payment))
+    other = payment if same_payment else saved(new_payment(status="returned"))
+    return new_one_off_charge(category="nsf_fee", description="NSF fee", source_payment=other)
+
+
+def _redebit_after_a_stop() -> ledger.OneOffCharge:
+    """PLAN-014 F4: a voided (stopped) re-debit of a payment; an unsaved live one of it."""
+    payment = saved(new_payment(status="returned"))
+    insert(
+        new_one_off_charge(
+            category="redebit",
+            description="Re-debit",
+            source_payment=payment,
+            status="voided",
+            voided_at=datetime(2026, 11, 9, tzinfo=UTC),
+            void_note="Stopped by staff",
+        )
+    )
+    return new_one_off_charge(category="redebit", description="Re-debit", source_payment=payment)
+
+
 def choice_cases(
     factories: dict[type[models.Model], Callable[..., models.Model]],
 ) -> list[ConstraintCase]:
@@ -741,14 +766,28 @@ def choice_cases(
     # A bogus value that must travel with a companion so that only the choice CHECK can fail:
     # PostgreSQL reports the first violated constraint by name, and a queued row with a held
     # reason violates outbound_messages_held_has_reason before ..._held_reason_valid.
+    # A callable companion value is made when the row is (PLAN-014 F2: a retry state travels
+    # with a re-debit of a returned payment and its date, one_off_charges_retry_iff_redebit).
     companions: dict[tuple[str, str], dict[str, Any]] = {
         ("outbound_messages", "held_reason"): {"status": "held"},
+        ("one_off_charges", "retry_state"): {
+            "category": "redebit",
+            "description": "Re-debit",
+            "source_payment": lambda: saved(new_payment(status="returned")),
+            "retry_date": date(2026, 11, 12),
+            # The table's factory makes a setup charge: no fee type, and an operator billed.
+            "fee_type": None,
+            "collection": "autopay_due",
+            "operator": lambda: saved(new_operator()),
+        },
     }
 
     def with_bogus(
         factory: Callable[..., models.Model], name: str, extra: dict[str, Any]
     ) -> Callable[[], models.Model]:
-        return lambda: factory(**{name: "bogus", **extra})
+        return lambda: factory(
+            **{name: "bogus", **{k: v() if callable(v) else v for k, v in extra.items()}}
+        )
 
     return [
         ConstraintCase(
@@ -2011,6 +2050,54 @@ LEDGER_CASES: list[ConstraintCase] = [
         "one_off_charges_one_redebit_per_payment",
         lambda: _second_redebit(same_payment=False),
         lambda: _second_redebit(same_payment=True),
+    ),
+    # PLAN-014 F2, F4 (0063): a fee made at the return names its payment, once; a stopped
+    # (voided) re-debit leaves room for Debit again; a retry state needs a re-debit's date.
+    ConstraintCase(
+        "one_off_charges_companion_iff_nsf_fee",
+        lambda: new_one_off_charge(
+            category="nsf_fee",
+            description="NSF fee",
+            source_payment=saved(new_payment(status="returned")),
+        ),
+        lambda: new_one_off_charge(
+            description="Broken shelf", companion_of=saved(new_one_off_charge())
+        ),
+    ),
+    ConstraintCase(
+        "one_off_charges_one_fee_per_returned_payment",
+        lambda: _second_return_fee(same_payment=False),
+        lambda: _second_return_fee(same_payment=True),
+    ),
+    ConstraintCase(
+        "one_off_charges_one_redebit_per_payment",
+        _redebit_after_a_stop,
+        lambda: _second_redebit(same_payment=True),
+    ),
+    ConstraintCase(
+        "one_off_charges_retry_iff_redebit",
+        lambda: new_one_off_charge(
+            category="redebit",
+            description="Re-debit",
+            source_payment=saved(new_payment(status="returned")),
+            retry_state="auto_pending",
+            retry_date=date(2026, 11, 12),
+        ),
+        lambda: new_one_off_charge(retry_state="auto_pending", retry_date=date(2026, 11, 12)),
+    ),
+    ConstraintCase(
+        "one_off_charges_retry_iff_redebit",
+        lambda: new_one_off_charge(
+            category="redebit",
+            description="Re-debit",
+            source_payment=saved(new_payment(status="returned")),
+        ),
+        lambda: new_one_off_charge(
+            category="redebit",
+            description="Re-debit",
+            source_payment=saved(new_payment(status="returned")),
+            retry_state="scheduled",
+        ),
     ),
     ConstraintCase(
         "one_off_charges_one_fee_per_redebit",
