@@ -267,14 +267,14 @@ def test_status_garbage_falls_back_and_return_status_garbage_returns_to_the_plai
 
 
 def test_an_institution_name_holding_a_card_number_is_withheld_at_link(settings: Any) -> None:
-    from banking.sources import FakeSource
+    from banking.sources import FakeSource, get_source
 
     settings.PLAID_CLIENT_ID = ""
     settings.PLAID_SECRET = ""
     settings.PLAID_TOKEN_KEY = ""
     enable()
     admin, admin_user = client_for(Role.ADMIN)
-    assert isinstance(services.get_source(), FakeSource)
+    assert isinstance(get_source(), FakeSource)
     response = admin.post(
         reverse("banking:link_exchange"),
         {
