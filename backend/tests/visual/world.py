@@ -32,6 +32,7 @@ from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from accounts.roles import Role
 from accounts.themes import set_theme
+from banking.models import BankTransaction, Kind, Source
 from ledger.models import (
     Brand,
     CalendarEntry,
@@ -311,6 +312,33 @@ def _build() -> World:
     )
     assert message is not None
     messaging.send(message.pk)
+
+    # PLAN-014 I4: two bank deposits for the Bank deposits page — a wire equal to the Maple
+    # Avenue lease's oldest unpaid rent (the weak suggestion row, with Confirm) and a Zelle
+    # payment that matches nothing (the "none" row); the module stays off, so the page also
+    # shows the readiness sentence. The external ids are fixed so a shot is the same every run.
+    BankTransaction.objects.get_or_create(
+        external_id="visual-wire-0001",
+        defaults={
+            "source": Source.FAKE,
+            "posted_on": TODAY - timedelta(days=1),
+            "amount": unpaid.balance,
+            "description": "WIRE IN NORTHWIND STORES LLC",
+            "counterparty": "Northwind Stores LLC",
+            "kind": Kind.WIRE,
+        },
+    )
+    BankTransaction.objects.get_or_create(
+        external_id="visual-zelle-0002",
+        defaults={
+            "source": Source.FAKE,
+            "posted_on": TODAY - timedelta(days=2),
+            "amount": Decimal("123.45"),
+            "description": "ZELLE FROM PAT EXAMPLE",
+            "counterparty": "Pat Example",
+            "kind": Kind.ZELLE,
+        },
+    )
 
     # Last, so that the rows above keep their ids whoever else signs in.
     _, admin_device = make_user(ADMIN_USERNAME, Role.ADMIN)
