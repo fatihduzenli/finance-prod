@@ -81,6 +81,7 @@ GUARD_MODULES = (
     "ledger.migrations.0062_rent_month_messages",
     "ledger.migrations.0063_returned_debits",
     "ledger.migrations.0064_portal_messages",
+    "ledger.migrations.0065_bank_deposit_settings",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",
@@ -88,6 +89,7 @@ GUARD_MODULES = (
     "payments.migrations.0020_lease_account_switch",
     "payments.migrations.0021_job_run_after",
     "portal.migrations.0001_initial",
+    "banking.migrations.0001_initial",
 )
 
 
@@ -177,8 +179,9 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0021_job_run_after",
             ]
         if step == len(ROUND_TRIP) - 1:
-            # PLAN-014 H1: the portal's migrations come back with the ledger's.
-            for label in ("ledger", "payments", "portal"):
+            # PLAN-014 H1, I1: the portal's and the bank deposits' migrations come back with the
+            # ledger's.
+            for label in ("ledger", "payments", "portal", "banking"):
                 applied = _applied(repo_root, database_url, label)
                 assert applied and all(line.startswith("[X]") for line in applied), applied
 
