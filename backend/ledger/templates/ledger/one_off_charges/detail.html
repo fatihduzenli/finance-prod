@@ -12,6 +12,14 @@
 </ul></details>{% endif %}</div>{% endif %}</div>{% endblock %}
 {% block content %}
   {% if review_message %}<p id="charge-review"><strong>{{ review_message }}</strong></p>{% endif %}
+  {% if retry_line %}
+    <p id="charge-retry">{{ retry_line }}</p>
+    {% if can_stop_retry %}
+      <form method="post" action="{% url 'ledger:one_off_charges:stop_retry' pk=charge.pk %}" class="actions js-single-submit">
+        {% csrf_token %}<button class="btn" type="submit" id="stop-retry">Stop automatic retry</button>
+      </form>
+    {% endif %}
+  {% endif %}
   {% if charge_now_shown and not can_charge_now %}
     {% if charge_now_refusal %}
       <p id="charge-now-refusal" class="muted">{{ charge_now_refusal }}</p>

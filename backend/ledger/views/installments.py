@@ -67,8 +67,8 @@ CONFIRM_FIELD = "confirmed"
 SPLIT_LINE = "Equal installments of what is still owed; the last carries the rounding cent."
 #: The Summary's line on a returned installment (the Autopay help's Debit again sentence).
 NSF_LINE = (
-    "A returned installment is debited again only when staff reschedule it, with the NSF fee "
-    "added (one amount on an operator's first return, another afterwards)."
+    "A returned installment gets the NSF fee at once; for insufficient or uncollected funds it "
+    "is debited again automatically on the third business day unless staff stop it."
 )
 #: The preview route's ``?parent=``: ``rent:<pk>`` or ``one_off:<pk>`` (D13).
 PARENT_RENT = "rent"

@@ -5,7 +5,10 @@ here) and a note. Resolving with a note records who and why; it changes no charg
 calls no provider. **Reschedule** (``returns:reschedule``, billing; the fee waiver admin,
 403 otherwise) takes the agreed re-debit date and runs
 :func:`ledger.services.nsf.reschedule`: the re-debit and NSF fee charges and one provider
-job for the worker. No view calls the provider.
+job for the worker. No view calls the provider. Each row shows its automatic re-debit's state
+(PLAN-014 F4: "Automatic re-debit on Nov 3" with **Stop automatic retry**, "Stopped", "No
+retry: R10"); Debit again is offered only without a pending re-debit, and without the fee
+waiver when the fee was made at the return.
 
 The queue exports as CSV (``returns:export``, PLAN-011 D5), any role.
 """
@@ -13,6 +16,8 @@ The queue exports as CSV (``returns:export``, PLAN-011 D5), any role.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
+from itertools import islice
 
 from django.contrib import messages
 from django.core.paginator import Paginator
@@ -49,12 +54,14 @@ def _fee_label(code: str) -> str:
 @require_safe
 def return_list(request: HttpRequest) -> HttpResponse:
     page = Paginator(returns.open_returns(), PAGE_SIZE).get_page(request.GET.get("page"))
+    found = list(page)
+    states = nsf.queue_states(found)
     return render(
         request,
         "ledger/returns/list.html",
         {
             "page": page,
-            "rows": [returns.row(payment) for payment in page],
+            "rows": [(returns.row(payment), states[payment.pk]) for payment in found],
             "can_resolve": meets(_role(request), Role.BILLING),
             "can_waive": meets(_role(request), Role.ADMIN),
             "today": timezone.localdate(),
@@ -72,33 +79,38 @@ EXPORT_HEADER = (
     "Return code",
     "Return reason",
     "Returned at",
+    "Retry",
     "Payment ID",
 )
+EXPORT_CHUNK = 2_000
 
 
 @role_required
 @require_safe
 def return_export(request: HttpRequest) -> StreamingHttpResponse:
-    """``ledger:returns:export`` (PLAN-011 D5): the unresolved returns, as the queue."""
-    records = (
-        [
-            item.operator.display_name if item.operator is not None else "",
-            item.store.external_label if item.store is not None else "",
-            item.payment.kind,
-            item.amount,
-            item.code,
-            item.reason,
-            item.returned_at,
-            item.payment.pk,
-        ]
-        for item in (
-            returns.row(payment)
-            for payment in returns.open_returns()[: csv_export.CSV_MAX_ROWS + 1].iterator(
-                chunk_size=2_000
-            )
-        )
-    )
-    return csv_response(CsvWriter(EXPORT_HEADER).lines(records), export_name("returns"))
+    """``ledger:returns:export`` (PLAN-011 D5): the unresolved returns, as the queue; the
+    Retry column is the page's Retry text (PLAN-014 F4)."""
+    return csv_response(CsvWriter(EXPORT_HEADER).lines(_export_records()), export_name("returns"))
+
+
+def _export_records() -> Iterator[list[object]]:
+    """The export's rows, the retry states read per chunk of :data:`EXPORT_CHUNK` returns."""
+    found = returns.open_returns()[: csv_export.CSV_MAX_ROWS + 1].iterator(chunk_size=EXPORT_CHUNK)
+    for chunk in iter(lambda: list(islice(found, EXPORT_CHUNK)), []):
+        states = nsf.queue_states(chunk)
+        for payment in chunk:
+            item = returns.row(payment)
+            yield [
+                item.operator.display_name if item.operator is not None else "",
+                item.store.external_label if item.store is not None else "",
+                item.payment.kind,
+                item.amount,
+                item.code,
+                item.reason,
+                item.returned_at,
+                states[payment.pk].text,
+                item.payment.pk,
+            ]
 
 
 @role_required

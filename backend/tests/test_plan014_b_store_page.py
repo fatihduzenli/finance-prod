@@ -569,7 +569,8 @@ def test_a_note_with_payment_data_or_a_bad_length_is_refused(body: str) -> None:
     assert response.status_code in (200, 400)
     assert not Note.objects.filter(entity_id=store.pk).exists()
     if "4111" in body:
-        assert "4111" not in response.content.decode()
+        # The typed number, never echoed (a bare "4111" would match a random UUID).
+        assert "4111 1111 1111 1111" not in response.content.decode()
 
 
 def test_a_note_of_2000_characters_is_accepted() -> None:

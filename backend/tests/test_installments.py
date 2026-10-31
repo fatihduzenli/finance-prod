@@ -788,6 +788,11 @@ def test_a_returned_installment_raises_the_fee_by_the_rule_and_the_attention_ite
     ).exists()
     # The NSF rule applies to the returned installment payment as to any other.
     [returned] = Payment.objects.filter(status=PaymentStatus.RETURNED)
+    # Re-pinned by PLAN-014 F2/F4: the R01 return made the $100.00 fee and an automatic
+    # re-debit at once; staff stop that retry before they debit again on a date of their own.
+    pending = nsf.live_redebit(returned)
+    assert pending is not None and pending.retry_state == "auto_pending"
+    assert nsf.stop_retry(pending, a_user(Role.BILLING)).ok
     outcome = nsf.reschedule(
         returned.pk,
         redebit_date=date(2026, 10, 27),

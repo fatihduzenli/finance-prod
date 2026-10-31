@@ -53,7 +53,9 @@ MAY = date(2026, 5, 1)
 JAN = date(2026, 1, 1)
 #: The dashboard GET's queries with the default range (73 measured at A-2/A-3, 76 at A5) plus
 #: a margin; PLAN-012f-b §10 D20 moved the pin 80 → 81.
-MAX_DASHBOARD_QUERIES = 81  # 76 measured on sqlite (A5: 75 before, plus the fees query of D20)
+#: PLAN-014 F5 moved it 81 → 83: the pending re-debits and the returns they cover (two fixed
+#: queries of the attention list; 83 measured on PostgreSQL).
+MAX_DASHBOARD_QUERIES = 83
 
 
 @pytest.fixture

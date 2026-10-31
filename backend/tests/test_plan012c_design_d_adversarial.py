@@ -32,7 +32,8 @@ MARKUP = '<script>alert("x")</script>'
 BANNER = "SANDBOX — test system, no real money"
 
 #: Every stored choice value of ledger.models before Batch D (2026-10-17). Labels may change;
-#: values never. Values are only ever added (PLAN-014 C2: ReviewReason own_customer).
+#: values never. Values are only ever added (PLAN-014 C2: ReviewReason own_customer; PLAN-014
+#: F2: ReviewReason returned_debit and redebit_limit, and the new RetryState).
 FROZEN_CHOICES: dict[str, list[str]] = {
     "AdjustmentReason": ["carry_forward", "credit", "cross_store_balance", "discount"],
     # PLAN-012f-a Batch E (ADR-0014): the repeating debit plan's three stored choices.
@@ -143,7 +144,16 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "RentChargeStatus": ["due", "paid", "partial", "pending", "unpaid", "waived"],
     "RentSource": ["sheet_current", "sheet_inferred", "staff"],
     "ResolutionKind": ["note", "rescheduled"],
-    "ReviewReason": ["closed", "dormant", "own_customer", "unknown", "wire"],
+    "RetryState": ["auto_pending", "done", "scheduled", "stopped"],
+    "ReviewReason": [
+        "closed",
+        "dormant",
+        "own_customer",
+        "redebit_limit",
+        "returned_debit",
+        "unknown",
+        "wire",
+    ],
     "ScheduleKind": ["insurance", "rent"],
     "ScheduleState": ["active", "ended", "failed", "none", "paused"],
     "StoreBalanceKind": ["deposit_or_access", "insurance_opening", "sign"],
@@ -180,8 +190,9 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: retry_sync gone); 279 since Batch D (ledger:settings:mail_save, templates, template_edit,
 #: template_preview, ledger:outbox:page and send_now added; send_step became send_message on
 #: both charge pages; the admin:ledger_messagetemplate_* and admin:ledger_collectionstep_*
-#: routes gone with their registrations).
-FROZEN_ROUTES = (279, "f0eeee9617810172a5ca21478db3a20db77e695c9783056ed140b5727b4207ee")
+#: routes gone with their registrations); 280 since PLAN-014 Batch F
+#: (ledger:one_off_charges:stop_retry).
+FROZEN_ROUTES = (280, "6055009cfa1eac2f18ec2b25ba1333170d0ccfa88c368156c088475b2ba7fb79")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

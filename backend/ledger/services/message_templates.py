@@ -34,7 +34,7 @@ from ledger.models import (
     MessageTemplate,
     Store,
 )
-from ledger.services import messaging, statement_links
+from ledger.services import business_days, messaging, statement_links
 from ledger.validators import validate_no_payment_data
 from payments import lease_sync
 
@@ -184,14 +184,9 @@ def current_lease(store_id: uuid.UUID) -> Lease | None:
 
 
 def business_days_after(day: date, count: int) -> date:
-    """``count`` weekdays after ``day`` (the preview's sample retry date; holidays are Batch
-    F's)."""
-    found = day
-    while count > 0:
-        found += timedelta(days=1)
-        if found.weekday() < 5:
-            count -= 1
-    return found
+    """``count`` business days after ``day`` (the preview's sample retry date; Federal
+    Reserve holidays skipped, :func:`ledger.services.business_days.add`)."""
+    return business_days.add(day, count)
 
 
 def sample_context(template: MessageTemplate, lease: Lease, today: date) -> dict[str, str]:

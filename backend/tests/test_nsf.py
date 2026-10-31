@@ -164,7 +164,8 @@ def created_calls(fake: FakeProvider, name: str) -> list[object]:
 
 
 def charges_of(payment: Payment) -> tuple[OneOffCharge, OneOffCharge]:
-    redebit = OneOffCharge.objects.get(source_payment=payment)
+    # PLAN-014 F2: a fee made at the return names the payment too.
+    redebit = OneOffCharge.objects.get(source_payment=payment, category=OneOffCategory.REDEBIT)
     fee = OneOffCharge.objects.get(companion_of=redebit)
     return redebit, fee
 
@@ -176,11 +177,13 @@ def nothing_written() -> bool:
 # --- The fee types -----------------------------------------------------------------------
 
 
-def test_the_nsf_fee_types_are_seeded_inactive_and_never_on_the_checklist() -> None:
+def test_the_nsf_fee_types_are_seeded_and_never_on_the_checklist() -> None:
+    # Re-pinned by PLAN-014 F2: ledger migration 0063 makes ``nsf_fee_first`` active (the
+    # fee made at the return is charged at its price); ``nsf_fee_later`` stays inactive.
     first = FeeType.objects.get(code=NSF_FEE_FIRST)
     later = FeeType.objects.get(code=NSF_FEE_LATER)
     assert (first.default_price, later.default_price) == (D("100.00"), D("50.00"))
-    assert not first.active and not later.active
+    assert first.active and not later.active
     assert not first.refundable and not later.refundable
     FeeType.objects.filter(code__in=[NSF_FEE_FIRST, NSF_FEE_LATER]).update(active=True)
     codes = {fee_type.code for fee_type in one_off_service.checklist_types()}
@@ -466,10 +469,14 @@ def test_a_returned_one_off_charge_is_rescheduled_like_rent(fake: FakeProvider) 
     assert receivables.total(rows) == D("400.00")
 
 
-# --- The webhook never makes a fee -------------------------------------------------------
+# --- The webhook makes the fee (PLAN-014 F2) -----------------------------------------------
 
 
-def test_the_return_webhook_creates_no_fee_and_no_re_debit(fake: FakeProvider) -> None:
+def test_the_return_webhook_makes_the_fee_and_no_staff_reschedule(fake: FakeProvider) -> None:
+    # Re-pinned by PLAN-014 F2 (ADR-0016 supersedes ADR-0010's "NSF only by staff"): the
+    # return itself makes the $100.00 fee and counts it; the return stays open in the queue
+    # and nothing is rescheduled by staff. The world's operator has no linked bank method,
+    # so the R01 gets no automatic re-debit (tests/test_returns_nsf.py covers the retry).
     world = make_world(fake)
     provider_txn(fake)
     deliver("create_transaction", id="txn-0001")
@@ -477,11 +484,10 @@ def test_the_return_webhook_creates_no_fee_and_no_re_debit(fake: FakeProvider) -
     assert deliver("update_transaction_settled", id="txn-0001") == "processed"
     payment = payment_for()
     assert payment.status == PaymentStatus.RETURNED and payment.resolved_at is None
-    assert not OneOffCharge.objects.filter(
-        category__in=[OneOffCategory.REDEBIT, OneOffCategory.NSF_FEE]
-    ).exists()
+    fee = OneOffCharge.objects.get(category=OneOffCategory.NSF_FEE)
+    assert (fee.source_payment_id, fee.price) == (payment.pk, D("100.00"))
     world.operator.refresh_from_db()
-    assert world.operator.nsf_return_count == 0
+    assert world.operator.nsf_return_count == 1
     assert not AuditLog.objects.filter(action=nsf.ACTION).exists()
 
 
@@ -503,7 +509,8 @@ def _paid_on_the_redebit_invoice(
 def _settle_on_the_redebit_invoice(fake: FakeProvider, payment: Payment, amount: str) -> str:
     """Deliver a settled ACH payment of ``amount`` on the invoice of the re-debit of the
     rescheduled ``payment`` (the worker already created it); its transaction ID."""
-    redebit, _ = charges_of(payment)
+    # PLAN-014 F2: a return with a fee made at the return has no companion fee.
+    redebit = OneOffCharge.objects.get(source_payment=payment, category=OneOffCategory.REDEBIT)
     invoice = Invoice.objects.get(one_off_charge=redebit)
     ref = ExternalRef.objects.get(
         entity_type="invoice", entity_id=invoice.pk, external_kind="invoice"
@@ -945,8 +952,9 @@ def test_the_month_turns_green_on_the_grid_and_the_run_page_and_red_again_on_a_r
         ).count()
         == 2
     )
-    # Owed once again: the re-debit and its fee, the rent carried by the re-debit.
-    assert _open_total(payment) == D("1600.00")
+    # Owed once again: the re-debit and its fee, the rent carried by the re-debit; and
+    # (re-pinned by PLAN-014 F2) the $100.00 fee the second return made at once.
+    assert _open_total(payment) == D("1700.00")
 
 
 @pytest.mark.parametrize(
@@ -1097,8 +1105,13 @@ def test_a_re_debit_of_a_returned_re_debit_payment_pays_the_month_and_the_first_
     assert second_return.status == PaymentStatus.RETURNED
     assert reschedule(second_return).ok
     run_queued_jobs()
-    assert _open_total(payment) == D("1650.00")  # 1600 again and the later fee of 50
-    _settle_on_the_redebit_invoice(fake, second_return, "1650.00")
+    # Re-pinned by PLAN-014 F2: the second return made its own $100.00 fee at once, so
+    # Debit again adds none: 1600 again on the invoice and the fee of 100 on its own page.
+    assert _open_total(payment) == D("1700.00")
+    _settle_on_the_redebit_invoice(fake, second_return, "1600.00")
+    return_fee = nsf.return_fee(second_return)
+    assert return_fee is not None
+    assert one_off_service.waive(return_fee.pk, note="First time.", actor=None).ok
     charge = _source_rent(payment)
     assert (charge.amount_paid, charge.status) == (D("1500.00"), RentChargeStatus.PAID)
     first, first_fee = charges_of(payment)

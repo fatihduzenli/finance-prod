@@ -47,6 +47,22 @@ def pay_invoice_enabled() -> bool:
     return bool(settings.STAX_PAY_INVOICE_ENABLED)
 
 
+def return_reason_words(code: str | None) -> str:
+    """An ACH return code in plain words, for the operator (PLAN-014 F1); a code the
+    processor's table does not list, or none, reads a general sentence."""
+    from payments.stax import return_codes
+
+    return return_codes.plain_words(code)
+
+
+def retryable_return(code: str | None) -> bool:
+    """Whether a debit returned with ``code`` is re-debited automatically (PLAN-014 F1:
+    insufficient or uncollected funds only)."""
+    from payments.stax import return_codes
+
+    return return_codes.is_retryable(code)
+
+
 def _build(kind: str) -> PaymentProvider:
     if kind == FAKE:
         from payments.fake import FakeProvider

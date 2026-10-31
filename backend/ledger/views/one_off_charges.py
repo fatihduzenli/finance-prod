@@ -24,7 +24,9 @@ job keyed by the form's one-time key, the marking retry as a
 ends in a redirect; a form with errors is held in the session for the next GET.
 
 ``one_off_charges:export`` (PLAN-011 D5) is one-off charges as CSV, of one lease or
-operator, any role.
+operator, any role. ``one_off_charges:stop_retry`` (PLAN-014 F3, billing, POST) stops an
+automatic re-debit (:func:`ledger.services.nsf.stop_retry`); it comes back to the returns
+queue when posted from there.
 """
 
 from __future__ import annotations
@@ -69,6 +71,7 @@ from ledger.services import (
     invoice_builder,
     leases,
     messaging,
+    nsf,
     rent_run,
     workspace,
 )
@@ -237,6 +240,9 @@ def _detail_context(request: HttpRequest, charge: OneOffCharge) -> dict[str, Any
         "schedule_masked": mask_identifier(schedule) if schedule else "",
         "payments": payments,
         "review_message": service.review_message(charge),
+        # PLAN-014 F3: an automatic re-debit's line and its stop.
+        "retry_line": nsf.retry_line(charge),
+        "can_stop_retry": billing and nsf.can_stop(charge),
         # Any line of a builder invoice takes a payment of its own (PLAN-012c-a D2).
         "can_record": billing
         and not closed
@@ -592,6 +598,24 @@ def charge_retry(request: HttpRequest, pk: str) -> HttpResponse:
         else:
             # A failed release is repeated with its flag (PLAN-012b-a D3).
             submit(request, kind, charge, service.retry_params(charge))
+    return redirect("ledger:one_off_charges:detail", pk=charge.pk)
+
+
+@role_required
+@require_POST
+def charge_stop_retry(request: HttpRequest, pk: str) -> HttpResponse:
+    """Stop the charge's automatic re-debit (PLAN-014 F3); billing."""
+    refused = _refuse_below(request, Role.BILLING)
+    if refused is not None:
+        return refused
+    charge = _load(pk)
+    outcome = nsf.stop_retry(charge.pk, _actor(request))
+    if outcome.ok:
+        messages.success(request, outcome.message)
+    else:
+        messages.error(request, outcome.message)
+    if request.POST.get("back") == "returns" and charge.source_payment_id is not None:
+        return redirect(f"{reverse('ledger:returns:list')}#return-{charge.source_payment_id}")
     return redirect("ledger:one_off_charges:detail", pk=charge.pk)
 
 

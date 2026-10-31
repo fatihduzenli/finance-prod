@@ -224,5 +224,6 @@ def test_the_dashboard_query_count_stays_within_its_budget(
     a_world()
     billing, _ = client_for(Role.BILLING)
     billing.get("/")  # warm the session row
-    with django_assert_max_num_queries(81):  # D20 (A5): the fees query joined; 76 measured
+    # D20 (A5): the fees query joined; PLAN-014 F5: +2, the pending re-debits (83 on PostgreSQL).
+    with django_assert_max_num_queries(83):
         assert billing.get("/?range=12m").status_code == 200

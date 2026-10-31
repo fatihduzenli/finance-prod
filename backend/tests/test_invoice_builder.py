@@ -1362,9 +1362,12 @@ def test_a_rescheduled_return_on_a_two_line_invoice_is_owed_once(
     txn = pay(fake, invoice, "150.00")
     assert receivables.open_balances(TODAY, operator=operator_id) == []
     ach_return(fake, txn)
+    # Re-pinned by PLAN-014 F2: a code that is not retried (R02), so that staff reschedule;
+    # the return itself adds the $100.00 NSF fee as its own charge.
+    fake.transactions[txn] = dataclasses.replace(fake.transactions[txn], return_code="R02")
     deliver("update_transaction_settled", id=txn)
     before = receivables.open_balances(TODAY, operator=operator_id)
-    assert sorted(row.balance for row in before) == [D("50.00"), D("100.00")]
+    assert sorted(row.balance for row in before) == [D("50.00"), D("100.00"), D("100.00")]
     returned = Payment.objects.get(status=PaymentStatus.RETURNED)
     outcome = nsf.reschedule(
         returned.pk,
@@ -1377,12 +1380,14 @@ def test_a_rescheduled_return_on_a_two_line_invoice_is_owed_once(
     assert outcome.ok, outcome.message
     after = receivables.open_balances(TODAY, operator=operator_id)
     redebit = OneOffCharge.objects.get(category=OneOffCategory.REDEBIT)
-    fee = OneOffCharge.objects.get(companion_of=redebit)
+    # The fee made at the return is the only fee: Debit again adds none.
+    fee = nsf.return_fee(returned)
+    assert fee is not None and not OneOffCharge.objects.filter(companion_of=redebit).exists()
     assert {row.charge_id: row.balance for row in after} == {
         redebit.pk: D("150.00"),
         fee.pk: Decimal(fee.price),
     }
-    assert receivables.total(after) - Decimal(fee.price) == receivables.total(before)
+    assert receivables.total(after) == receivables.total(before)
 
 
 # --- PLAN-012a D1, D2: line kind, fees and surcharge -------------------------------------
