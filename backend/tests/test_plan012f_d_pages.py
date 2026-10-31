@@ -714,7 +714,7 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
         ["Messages from Stax"],
         w.event.event_type_words,
     ),
-    "ledger:reports:aging": lambda w: (["Reports"], "Unpaid by age"),
+    "ledger:reports:aging": lambda w: (["Reports"], "Aging"),  # PLAN-014 G3
     "ledger:reports:revenue": lambda w: (["Reports"], "Revenue by month"),
     "ledger:reports:payments_by_method": lambda w: (["Reports"], "Payments by method"),
     "ledger:reports:deposits": lambda w: (["Reports"], "Bank account check"),

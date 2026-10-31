@@ -1,33 +1,62 @@
 {% extends "finance/base.html" %}
-{% load money responsive dates %}
-{% block title %}Unpaid by age{% endblock %}
-{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Unpaid by age</span></nav><h1>Unpaid by age</h1></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}">Download spreadsheet</a></div></div>{% endblock %}
+{% load money responsive dates filters static %}
+{% comment %}The Aging report (docs/qa/PLAN-014 G1, G3): ledger.views.reports.aging_report. The filters (A5's component), then one row per store (a one-off charge without a lease under "No store" with its operator): the store's name opens its Charges tab of open charges, each bucket's amount the same tab with that bucket highlighted. As of today only: no range, so that the total without a filter is the dashboard's Unpaid balances figure.{% endcomment %}
+{% block title %}Aging{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title-block"><nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb"><a href="{% url 'ledger:reports:index' %}">Reports</a> <span aria-hidden="true">›</span> <span aria-current="page">Aging</span></nav><h1>Aging</h1>{% if report %}<span class="list-counts" id="aging-as-of">As of {{ report.as_of|day }}</span>{% endif %}</div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:reports:aging_export' %}{% if export_query %}?{{ export_query }}{% endif %}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
+  <div class="card filter-card">{% filters active=active_filters %}
+      <span class="filter-field"><label for="state">State</label>
+      <select name="state" id="state">
+        <option value="">All</option>
+        {% for code, name in states %}<option value="{{ code }}"{% if code == selected.state %} selected{% endif %}>{{ name }}</option>{% endfor %}
+      </select></span>
+      <span class="filter-field"><label for="operator">Operator</label>
+      <select name="operator" id="operator">
+        <option value="">All</option>
+        {% for operator in operators %}<option value="{{ operator.pk }}"{% if operator.pk == selected.operator %} selected{% endif %}>{{ operator.display_name }}</option>{% endfor %}
+      </select></span>
+      <span class="filter-field"><label for="brand">Brand</label>
+      <select name="brand" id="brand">
+        <option value="">All</option>
+        <option value="none"{% if selected.brand == "none" %} selected{% endif %}>No brand</option>
+        {% for brand in brands %}{% with value=brand.pk|stringformat:"s" %}<option value="{{ value }}"{% if value == selected.brand %} selected{% endif %}>{{ brand.name }}</option>{% endwith %}{% endfor %}
+      </select></span>
+      <span class="filter-field"><label for="kind">Charges</label>
+      <select name="kind" id="kind">
+        <option value="all">All</option>
+        {% for value, label in kinds %}<option value="{{ value }}"{% if value == selected.kind %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select></span>
+      <span class="filter-field"><label><input type="checkbox" name="deposits" value="1" id="deposits"{% if selected.include_deposits %} checked{% endif %}> Include deposits</label></span>
+  {% endfilters %}</div>
+  <div id="results">
+  {% if selected.messages %}
+    <ul class="messages" id="aging-messages">{% for text in selected.messages %}<li class="warning" role="status">{{ text }}</li>{% endfor %}</ul>
+  {% endif %}
   {% if too_slow %}
     <p class="warning" id="aging-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted">Open balances on {{ today|day }} by operator and days past due: rent, insurance and one-off charges not waived or voided, deposits left out. These are the same charges as the dashboard's total outstanding. Current is not yet due or due today. Aging is by due date; revenue is by settled month. Amounts in US dollars.</p>
   <div class="card table-card">
   {% responsive_table "scroll" %}
   <table id="aging">
     <thead>
-      <tr><th>Operator</th>{% for bucket, label in buckets %}<th class="money">{{ label|money }}</th>{% endfor %}<th class="money">Total</th><th>Open charges</th></tr>
+      <tr><th>Store</th><th>Operator</th>{% for bucket, label in buckets %}<th class="money" data-bucket="{{ bucket }}">{{ label }}</th>{% endfor %}<th class="money">Total</th><th>Open charges</th></tr>
     </thead>
     <tbody>
-      {% for row in report.rows %}
+      {% for line in lines %}
         <tr class="aging-row">
-          <td>{% if row.operator_id %}<a href="{% url 'ledger:operators:statement' pk=row.operator_id %}">{{ row.operator_name }}</a>{% else %}No operator{% endif %}</td>
-          {% for amount in row.amounts %}<td class="money">{{ amount|money }}</td>{% endfor %}
-          <td class="money row-total">{{ row.total|money }}</td>
-          <td>{{ row.count }}</td>
+          <td class="aging-store">{% if line.url %}<a href="{{ line.url }}">{{ line.title }}</a>{% else %}{{ line.title }}{% endif %}</td>
+          <td class="aging-operator">{{ line.row.operator_names|join:", " }}</td>
+          {% for bucket, amount, url in line.cells %}<td class="money" data-bucket="{{ bucket }}">{% if url and amount %}<a href="{{ url }}">{{ amount|money }}</a>{% else %}{{ amount|money }}{% endif %}</td>{% endfor %}
+          <td class="money row-total">{{ line.row.total|money }}</td>
+          <td>{{ line.row.count }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="8" class="muted empty">Nothing is owed.</td></tr>
+        <tr><td colspan="9" class="muted empty">Nothing is owed.</td></tr>
       {% endfor %}
     </tbody>
     <tfoot>
       <tr class="totals" id="aging-total">
-        <th scope="row">Total</th>
+        <th scope="row" colspan="2">Total</th>
         {% for amount in report.totals.amounts %}<th class="money bucket-total">{{ amount|money }}</th>{% endfor %}
         <th class="money" id="aging-grand-total">{{ report.totals.total|money }}</th>
         <th id="aging-count">{{ report.totals.count }}</th>
@@ -36,5 +65,8 @@
   </table>
   {% endresponsive_table %}
   </div>
+  <p class="muted" id="aging-deposits-note">{% if report.deposits_included %}The total includes {{ report.totals.deposits|money }} of deposits still owed, which the dashboard's Unpaid balances leaves out.{% else %}Deposits still owed are left out, as on the dashboard's Unpaid balances; choose Include deposits to add them.{% endif %} Days past due are by due date; revenue is by settled month. Current is due today or later.</p>
   {% endif %}
+  </div>
 {% endblock %}
+{% block scripts %}<script src="{% static 'finance/filters.js' %}"></script>{% endblock %}

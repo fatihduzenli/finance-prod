@@ -405,8 +405,11 @@ PAIRS: list[tuple[str, str, str]] = [
     ("run/today.html", "Rent run", "Daily charges, "),
     ("arrears/page.html", "{% block title %}Arrears", "{% block title %}Unpaid balances"),
     ("grid/page.html", "{% block title %}Grid", "{% block title %}Monthly rent overview"),
-    ("reports/aging.html", "A/R aging", "Unpaid by age"),
-    ("reports/index.html", "A/R aging", "Unpaid by age"),
+    # PLAN-014 G3: "Unpaid by age" became "Aging".
+    ("reports/aging.html", "A/R aging", "<h1>Aging</h1>"),
+    ("reports/aging.html", "Unpaid by age", "<h1>Aging</h1>"),
+    ("reports/index.html", "A/R aging", 'id="report-aging">Aging</a>'),
+    ("reports/index.html", "Unpaid by age", 'id="report-aging">Aging</a>'),
     ("reports/deposits.html", "Deposits versus transactions", "Bank account check"),
     ("reports/index.html", "Deposits versus transactions", "Bank account check"),
     ("reconciliation/page.html", "<h1>Reconciliation</h1>", "<h1>Nightly check</h1>"),
@@ -580,7 +583,7 @@ def test_the_workspace_names_its_tabs_and_actions_as_the_list_says() -> None:
             ["<h1>Nightly check</h1>", "No nightly check has run yet."],
             ["Reconciliation<", "Run now<"],
         ),
-        ("ledger:reports:aging", ["<h1>Unpaid by age</h1>"], ["A/R aging"]),
+        ("ledger:reports:aging", ["<h1>Aging</h1>"], ["A/R aging", "Unpaid by age"]),  # G3
         ("ledger:reports:deposits", ["<h1>Bank account check</h1>"], ["Deposits versus"]),
         ("ledger:disputes:page", ["Update from Stax", "Not updated yet."], ["Refresh<"]),
     ],

@@ -253,12 +253,14 @@ def build_mixed() -> dict[str, Any]:
     return {"north": north, "south": south}
 
 
-def test_the_aging_rows_by_operator_skip_waived_voided_paid_and_deposits(today: date) -> None:
+def test_the_aging_rows_by_store_skip_waived_voided_paid_and_deposits(today: date) -> None:
+    # Re-pinned for PLAN-014 G1: the rows are by store (each store here has one operator).
     build_mixed()
     report = receivables.aging(TODAY)
-    by_name = {row.operator_name or "none": row for row in report.rows}
-    assert list(by_name) == ["North", "South", "none"]
-    north = by_name["North"]
+    by_name = {row.store_label: row for row in report.rows}
+    assert list(by_name) == ["100", "200", "300"]
+    assert [row.operator_names for row in report.rows] == [["North"], ["South"], ["No operator"]]
+    north = by_name["100"]
     assert north.buckets == {
         receivables.AGING_CURRENT: D("1000.00"),
         receivables.AGING_1_30: D("1000.00"),
@@ -266,8 +268,8 @@ def test_the_aging_rows_by_operator_skip_waived_voided_paid_and_deposits(today: 
         receivables.AGING_61_90: D("750.00"),
         receivables.AGING_OVER_90: D("1000.00"),
     }
-    assert by_name["South"].total == D("580.00")
-    assert by_name["none"].total == D("10.00")
+    assert by_name["200"].total == D("580.00")
+    assert by_name["300"].total == D("10.00")
     assert report.totals.total == D("4840.00")
     assert report.totals.total == receivables.dashboard(TODAY).outstanding
 
@@ -290,7 +292,9 @@ def test_the_aging_page_and_csv(today: date) -> None:
     assert 'id="aging-grand-total">$4,840.00<' in page
     assert "by due date" in page and "revenue is by settled month" in page
     records = dicts_of(client.get("/reports/aging/export.csv"))
-    assert [record["Operator"] for record in records] == ["North", "South", "No operator", "Total"]
+    # Re-pinned for PLAN-014 G1: a line per store, its operator in a column.
+    assert [record["Store"] for record in records] == ["100", "200", "300", "Total"]
+    assert [record["Operator"] for record in records] == ["North", "South", "No operator", ""]
     assert records[-1]["Total (USD)"] == "4840.00"
     assert records[0]["Over 90 days (USD)"] == "1000.00"
     assert records[-1]["Open charges"] == "8"
@@ -764,7 +768,7 @@ def test_a_settlement_at_2359_new_york_on_the_last_day() -> None:
 def test_the_revenue_page_says_settled_month_and_due_date(today: date) -> None:
     page = viewer().get("/reports/revenue/").content.decode()
     assert 'id="revenue-basis"' in page
-    assert "by settled month" in page and "Unpaid by age is by due date" in page
+    assert "by settled month" in page and "Aging is by due date" in page  # G3
 
 
 # --- Payments by method -----------------------------------------------------------------
@@ -1152,7 +1156,8 @@ def test_the_report_query_counts_do_not_grow_with_the_data(today: date) -> None:
     # PLAN-012 D6: two more for the revenue (the P&L's multi-line invoices and lines),
     # and one for the statement (its payments on multi-line invoices, split by line).
     # PLAN-012e D12: one more for the revenue (installment payments, under their parent).
-    assert small == {"aging": 4, "revenue": 17, "by_method": 1, "deposits": 3, "statement": 6}
+    # PLAN-014 G1: one more for the aging (the stores' number and brand).
+    assert small == {"aging": 5, "revenue": 17, "by_method": 1, "deposits": 3, "statement": 6}
 
 
 def test_a_pending_charge_is_owed_and_current_until_due(today: date) -> None:

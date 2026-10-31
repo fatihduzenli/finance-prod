@@ -5,7 +5,7 @@
   <p class="muted">Every report reads stored exact amounts in US dollars and downloads as a spreadsheet with the rows it shows.</p>
   <section class="card" id="reports-card">
   <ul id="reports">
-    <li><a href="{% url 'ledger:reports:aging' %}" id="report-aging">Unpaid by age</a>: open balances by operator and days past due, as of today. Its total is the dashboard's total outstanding.</li>
+    <li><a href="{% url 'ledger:reports:aging' %}" id="report-aging">Aging</a>: open balances by store and days past due, as of today. Without a filter, its total is the dashboard's Unpaid balances figure.</li>
     <li><a href="{% url 'ledger:reports:revenue' %}" id="report-revenue">Revenue by month</a>: billed and collected, rent, insurance and other fees; collected by settled month.</li>
     <li><a href="{% url 'ledger:reports:payments_by_method' %}" id="report-payments-by-method">Payments by method</a>: settled payments per month by ACH, Zelle, wire, check and other.</li>
     <li><a href="{% url 'ledger:reports:deposits' %}" id="report-deposits">Bank account check</a>: bank deposits against settled ACH payments, with unmatched items.</li>

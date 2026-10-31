@@ -57,13 +57,11 @@ from django.utils import timezone
 
 from finance.dates import day_text
 from ledger.models import (
-    LIVE_PLAN_STATUSES,
     ZERO,
     AuditLog,
     Lease,
     OneOffCategory,
     OneOffCharge,
-    OneOffChargeStatus,
     Payment,
     RentCharge,
     Store,
@@ -191,9 +189,8 @@ def _deposits(lease: Lease) -> list[OpenCharge]:
     """The lease's deposits still owed (receivables leaves them out: money held, not
     revenue; they are still collected)."""
     rows = (
-        OneOffCharge.objects.filter(lease=lease, fee_type__refundable=True, balance__gt=0)
-        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
-        .exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
+        receivables.owed_deposits()
+        .filter(lease=lease)
         .values_list("pk", "fee_type__name", "due_date", "balance")
     )
     return [

@@ -1,5 +1,5 @@
 """Revenue by month, payments by method, deposits versus transactions and the customer
-statement (docs/qa/PLAN-011-dashboard-reports-mobile.md D4). The A/R aging lives with the
+statement (docs/qa/PLAN-011-dashboard-reports-mobile.md D4). The Aging report lives with the
 open balances it sums (:func:`ledger.services.receivables.aging`).
 
 Read only: nothing here writes or calls the payment provider.

@@ -1,4 +1,4 @@
-"""The reports menu, the profit and loss report, the A/R aging, revenue by month,
+"""The reports menu, the profit and loss report, the Aging report, revenue by month,
 payments by method, deposits versus transactions and the customer statement, each with
 its CSV export (docs/qa/PLAN-010b D11, D12; PLAN-011 D4, D5, D10).
 
@@ -11,8 +11,13 @@ unusable range is replaced and the page says so. Each export applies its page's 
 The From and To months are plain selects (``ledger/_month_select.html``, the months of
 :func:`ledger.services.grid.picker_months`, as on the grid), never HTML month inputs,
 which Safari does not render (PLAN-012d, the owner's rule).
-The aging has no range: it is the open balances as of today, so that its grand total
-is the dashboard's total outstanding.
+The Aging report (PLAN-014 G1) has no range: it is the open balances by store as of
+today, so that its grand total without a filter is the dashboard's Unpaid balances. Its
+filters (``?state=&operator=&brand=&kind=&deposits=1``, read by
+:func:`ledger.services.receivables.parse_aging_filter`) go through the list pages' Filters
+component; a store's name opens its
+Charges tab of open charges (``?tab=charges&status=open``), a bucket's amount the same tab
+with ``&bucket=<key>``, which highlights the charges of that bucket.
 
 **Statement timeout** (PLAN-010c D11): on PostgreSQL every query of the page and of the
 export runs inside one transaction with ``SET LOCAL statement_timeout`` set to
@@ -28,6 +33,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
@@ -41,10 +47,12 @@ from django.http import (
     HttpResponseBase,
 )
 from django.shortcuts import get_object_or_404, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_safe
 
-from ledger.models import Operator
+from finance.us_states import US_STATES
+from ledger.models import Brand, Operator
 from ledger.services import (
     credits,
     detail_cards,
@@ -54,6 +62,7 @@ from ledger.services import (
     receivables,
     reports,
     stores,
+    workspace,
 )
 from ledger.views.operators import csv_response, role_required
 
@@ -231,18 +240,96 @@ def report_index(request: HttpRequest) -> HttpResponse:
     return render(request, "ledger/reports/index.html")
 
 
-# --- A/R aging --------------------------------------------------------------------------
+# --- Aging (PLAN-014 G1) ----------------------------------------------------------------
 
 
-def _aging_page(request: HttpRequest, report: receivables.AgingReport | None) -> HttpResponse:
+@dataclass(frozen=True, slots=True)
+class AgingLine:
+    """A row of the Aging table: its title ("#1991 Istanbul", or "No store"), the store's
+    Charges tab of open charges, and each bucket's amount with its drill-down link."""
+
+    row: receivables.AgingStoreRow
+    title: str
+    url: str
+    cells: list[tuple[str, Decimal, str]]
+
+
+def _aging_lines(report: receivables.AgingReport) -> list[AgingLine]:
+    lines = []
+    for row in report.rows:
+        if row.store_id is None:
+            lines.append(
+                AgingLine(
+                    row,
+                    row.store_label,
+                    "",
+                    [(key, row.buckets[key], "") for key, _ in receivables.AGING_BUCKETS],
+                )
+            )
+            continue
+        page = reverse("ledger:stores:detail", kwargs={"pk": row.store_id})
+        query = {"tab": workspace.TAB_CHARGES, "status": workspace.FILTER_OPEN}
+        lines.append(
+            AgingLine(
+                row,
+                stores.title_of(row.store_number, row.store_label),
+                f"{page}?{urlencode(query)}#tab-charges",
+                [
+                    (
+                        key,
+                        row.buckets[key],
+                        f"{page}?{urlencode({**query, 'bucket': key})}#tab-charges",
+                    )
+                    for key, _ in receivables.AGING_BUCKETS
+                ],
+            )
+        )
+    return lines
+
+
+def _aging_page(
+    request: HttpRequest,
+    selected: receivables.AgingFilter,
+    report: receivables.AgingReport | None,
+) -> HttpResponse:
+    operators = receivables.arrears_operators()
+    brands = list(Brand.objects.order_by("sort_order", "name"))
+    brand_choices = {
+        receivables.AGING_NO_BRAND: "No brand",
+        **{str(brand.pk): brand.name for brand in brands},
+    }
+    # PLAN-014 A5: the Filters button's count, the chips (accepted values only) and Clear.
+    active_filters = list_filters.active(
+        request,
+        {
+            "state": ("State", dict(US_STATES)),
+            "operator": (
+                "Operator",
+                {str(operator.pk): operator.display_name for operator in operators},
+            ),
+            "brand": ("Brand", brand_choices),
+            "kind": ("Charges", dict(receivables.AGING_KINDS)),
+            "deposits": ("Deposits", {receivables.AGING_DEPOSITS_ON: "Included"}),
+        },
+        accepted=selected.as_query(),
+        keep=(),
+    )
     return render(
         request,
         "ledger/reports/aging.html",
         {
+            "selected": selected,
+            "active_filters": active_filters,
             "report": report,
+            "lines": _aging_lines(report) if report is not None else [],
             "too_slow": TOO_SLOW if report is None else "",
             "buckets": receivables.AGING_BUCKETS,
             "today": timezone.localdate(),
+            "export_query": urlencode(selected.as_query()),
+            "operators": operators,
+            "brands": brands,
+            "states": US_STATES,
+            "kinds": receivables.AGING_KINDS,
         },
     )
 
@@ -250,22 +337,26 @@ def _aging_page(request: HttpRequest, report: receivables.AgingReport | None) ->
 @role_required
 @require_safe
 def aging_report(request: HttpRequest) -> HttpResponse:
+    """``ledger:reports:aging``: the open balances by store as of today, filtered."""
+    selected = receivables.parse_aging_filter(request.GET)
     today = timezone.localdate()
     try:
-        report = bounded(lambda: receivables.aging(today))
+        report = bounded(lambda: receivables.aging(today, selected))
     except ReportTooSlow:
         report = None
-    return _aging_page(request, report)
+    return _aging_page(request, selected, report)
 
 
 @role_required
 @require_safe
 def aging_export(request: HttpRequest) -> HttpResponseBase:
+    """``ledger:reports:aging_export``: the page's rows and totals, with its filters."""
+    selected = receivables.parse_aging_filter(request.GET)
     today = timezone.localdate()
     try:
-        report = bounded(lambda: receivables.aging(today))
+        report = bounded(lambda: receivables.aging(today, selected))
     except ReportTooSlow:
-        return _aging_page(request, None)
+        return _aging_page(request, selected, None)
     return csv_response(receivables.aging_csv_lines(report), f"aging-{today:%Y-%m-%d}.csv")
 
 

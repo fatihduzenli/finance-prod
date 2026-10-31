@@ -8,7 +8,7 @@
   {% if too_slow %}
     <p class="warning" id="report-too-slow" role="status">{{ too_slow }}</p>
   {% else %}
-  <p class="muted" id="revenue-basis">Revenue is by settled month: collected amounts count in the month their payment settled, less refunds settled that month. Unpaid by age is by due date. Billed: rent by rent month (waived charges left out), insurance and other fees by due date (waived and voided charges left out). Deposits held are not revenue and are not here. The part of a deposit withheld at the end of a lease counts as other fees collected in the month it was withheld. Amounts in US dollars.</p>
+  <p class="muted" id="revenue-basis">Revenue is by settled month: collected amounts count in the month their payment settled, less refunds settled that month. Aging is by due date. Billed: rent by rent month (waived charges left out), insurance and other fees by due date (waived and voided charges left out). Deposits held are not revenue and are not here. The part of a deposit withheld at the end of a lease counts as other fees collected in the month it was withheld. Amounts in US dollars.</p>
   <div class="card table-card">
   {% responsive_table "scroll" %}
   <table id="revenue">
