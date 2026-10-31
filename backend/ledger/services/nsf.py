@@ -34,8 +34,10 @@ transaction, once per returned ACH debit; a refund's return does nothing):
 **The retry's schedule** (:func:`create_due_redebits`, the daily tick): every ``auto_pending``
 re-debit due today or on the next business day gets its processor schedule, through the
 existing ``schedule_create`` job, and becomes ``scheduled``; nothing reaches the processor
-before that eve. A re-debit whose payment settles (:func:`on_settled`) is ``done`` and its
-returned payment resolved (``rescheduled`` on its date).
+before that eve. One whose eve was missed (its day is already past) is re-dated to
+the next business day, audited ``redebit.rescheduled``, and scheduled in the same run. A
+re-debit whose payment settles (:func:`on_settled`) is ``done`` and its returned payment
+resolved (``rescheduled`` on its date).
 
 **Stop automatic retry** (:func:`stop_retry`, billing on the charge or the returns queue; and
 :func:`stop_on_contact`, a staff contact entry or promise logged for the lease within two
@@ -487,6 +489,7 @@ def reschedule(
 RETURN_ACTION = "payment.return_processed"
 STOPPED_ACTION = "redebit.stopped"
 SCHEDULED_ACTION = "redebit.scheduled"
+RESCHEDULED_ACTION = "redebit.rescheduled"
 DONE_ACTION = "redebit.done"
 FLAGGED_ACTION = "lease.flagged_for_review"
 #: The automatic re-debit's day: this many business days after the notice.
@@ -942,12 +945,56 @@ def on_settled(payment: Payment, now: datetime | None = None) -> None:
 # --- The retry's schedule (F3) --------------------------------------------------------------
 
 
+def _redate_missed(today: date, eve: date) -> None:
+    """Re-date every ``auto_pending`` re-debit whose day is already past (its eve was
+    missed: no tick that day, or the return came after it) to ``eve``, the next business
+    day; audited ``redebit.rescheduled`` with both dates. Its stop window is already past."""
+    missed = list(
+        OneOffCharge.objects.filter(
+            category=OneOffCategory.REDEBIT,
+            retry_state=RetryState.AUTO_PENDING,
+            retry_date__lt=today,
+        )
+        .exclude(status=OneOffChargeStatus.VOIDED)
+        .order_by("retry_date", "created_at", "id")
+        .values_list("pk", flat=True)
+    )
+    for pk in missed:
+        with transaction.atomic():
+            charge = OneOffCharge.objects.select_for_update(of=("self",)).get(pk=pk)
+            if (
+                charge.retry_state != RetryState.AUTO_PENDING
+                or charge.status == OneOffChargeStatus.VOIDED
+                or charge.retry_date is None
+                or charge.retry_date >= today
+            ):
+                continue
+            before = {
+                "retry_date": charge.retry_date.isoformat(),
+                "due_date": charge.due_date.isoformat(),
+            }
+            charge.retry_date = eve
+            charge.due_date = eve
+            charge.save(update_fields=["retry_date", "due_date", "updated_at"])
+            AuditLog.objects.create(
+                actor=None,
+                action=RESCHEDULED_ACTION,
+                entity_type=one_off_charges.ENTITY_ONE_OFF_CHARGE,
+                entity_id=str(charge.pk),
+                before=before,
+                after={"retry_date": eve.isoformat(), "due_date": eve.isoformat()},
+            )
+
+
 def create_due_redebits(today: date) -> int:
     """Queue the processor schedule of every ``auto_pending`` re-debit due today or on the
     next business day (the eve), through the ``schedule_create`` job; each becomes
-    ``scheduled``, audited ``redebit.scheduled``. How many were queued; a second run the
-    same day queues nothing."""
+    ``scheduled``, audited ``redebit.scheduled``. A re-debit whose day is already past (its
+    eve was missed) is first re-dated to the next business day (:func:`_redate_missed`), so
+    it is scheduled in the same run. How many were queued; a second run the same day queues
+    nothing."""
     eve = business_days.add(today, 1)
+    _redate_missed(today, eve)
     candidates = list(
         OneOffCharge.objects.filter(
             category=OneOffCategory.REDEBIT,

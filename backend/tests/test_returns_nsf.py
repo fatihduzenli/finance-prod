@@ -52,6 +52,7 @@ from payments.models import ExternalRef, Job, JobKind
 from payments.provider import ScheduleInput
 from payments.stax import return_codes
 from tests.job_helpers import run_queued_jobs
+from tests.test_list_exports import records
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
 from tests.test_webhook_handlers import (
@@ -557,6 +558,65 @@ def test_the_daily_tick_schedules_the_eve(fake: FakeProvider, clock: Clock) -> N
     assert redebit_of(payment).retry_state == RetryState.SCHEDULED
 
 
+#: Friday Nov 13: the retry (Thursday Nov 12) is past, its eve (Tuesday Nov 10) missed.
+LATE = date(2026, 11, 13)
+#: The next business day after it: Monday Nov 16.
+REDATED = date(2026, 11, 16)
+
+
+def test_a_missed_eve_is_re_dated_once_to_the_next_business_day_and_scheduled(
+    fake: FakeProvider,
+) -> None:
+    world = a_world(fake)
+    payment = returned(fake, "R01")
+    redebit = redebit_of(payment)
+    assert (redebit.retry_date, redebit.due_date) == (RETRY, RETRY)
+    assert nsf.create_due_redebits(LATE) == 1
+    redebit.refresh_from_db()
+    assert (redebit.retry_date, redebit.due_date) == (REDATED, REDATED)
+    assert redebit.retry_state == RetryState.SCHEDULED
+    [audit] = AuditLog.objects.filter(action=nsf.RESCHEDULED_ACTION, entity_id=str(redebit.pk))
+    assert audit.actor is None
+    assert audit.before == {"retry_date": "2026-11-12", "due_date": "2026-11-12"}
+    assert audit.after == {"retry_date": "2026-11-16", "due_date": "2026-11-16"}
+    [scheduled] = AuditLog.objects.filter(action=nsf.SCHEDULED_ACTION, entity_id=str(redebit.pk))
+    assert scheduled.after["retry_date"] == "2026-11-16"
+    [job] = Job.objects.filter(kind=JobKind.SCHEDULE_CREATE)
+    assert job.entity_id == redebit.pk
+    # Once: the next runs neither re-date nor schedule it again.
+    assert nsf.create_due_redebits(LATE) == 0
+    assert nsf.create_due_redebits(REDATED) == 0
+    assert AuditLog.objects.filter(action=nsf.RESCHEDULED_ACTION).count() == 1
+    assert Job.objects.filter(kind=JobKind.SCHEDULE_CREATE).count() == 1
+    [item] = [
+        entry
+        for entry in attention.attention(LATE, limit=None).items
+        if entry.kind == attention.REDEBIT_PENDING
+    ]
+    store = world.lease.store.external_label
+    assert item.text == f"Automatic re-debit: {store}, $1,500.00 on Nov 16, 2026"
+
+
+def test_a_missed_eve_on_a_weekend_tick_is_re_dated_to_monday(fake: FakeProvider) -> None:
+    a_world(fake)
+    redebit = redebit_of(returned(fake, "R01"))
+    assert nsf.create_due_redebits(date(2026, 11, 14)) == 1
+    redebit.refresh_from_db()
+    assert (redebit.retry_date, redebit.due_date) == (REDATED, REDATED)
+
+
+def test_a_stopped_retry_past_its_day_is_not_re_dated(fake: FakeProvider) -> None:
+    a_world(fake)
+    redebit = redebit_of(returned(fake, "R01"))
+    assert nsf.stop_retry(redebit, a_user(Role.BILLING)).ok
+    assert nsf.create_due_redebits(LATE) == 0
+    redebit.refresh_from_db()
+    assert (redebit.retry_date, redebit.due_date) == (RETRY, RETRY)
+    assert redebit.retry_state == RetryState.STOPPED
+    assert not AuditLog.objects.filter(action=nsf.RESCHEDULED_ACTION).exists()
+    assert not Job.objects.filter(kind=JobKind.SCHEDULE_CREATE).exists()
+
+
 class _Sink:
     def write(self, text: str) -> None:
         self.text = text
@@ -846,6 +906,45 @@ def test_the_returns_page_names_a_code_without_retry(fake: FakeProvider) -> None
     payment = returned(fake, "R10")
     page = client_for(Role.VIEWER)[0].get(reverse("ledger:returns:list")).content.decode()
     assert re.search(rf'id="retry-{payment.pk}"[^>]*>No retry: R10 ', page)
+
+
+def _page_retry(page: str, payment: Payment) -> str:
+    found = re.search(rf'id="retry-{payment.pk}"[^>]*>([^<]*)', page)
+    assert found is not None
+    return found.group(1).strip()
+
+
+def _export_retry(client: Any, payment: Payment) -> str:
+    [row] = [
+        row
+        for row in records(client, "/returns/export.csv")
+        if row["Payment ID"] == str(payment.pk)
+    ]
+    return row["Retry"]
+
+
+def test_the_returns_export_has_the_page_s_retry_text_pending_then_stopped(
+    fake: FakeProvider,
+) -> None:
+    a_world(fake)
+    payment = returned(fake, "R01")
+    client, _ = client_for(Role.BILLING)
+    page = client.get(reverse("ledger:returns:list")).content.decode()
+    assert _page_retry(page, payment) == "Automatic re-debit on Nov 12"
+    assert _export_retry(client, payment) == "Automatic re-debit on Nov 12"
+    assert nsf.stop_retry(redebit_of(payment), a_user(Role.BILLING)).ok
+    page = client.get(reverse("ledger:returns:list")).content.decode()
+    assert _page_retry(page, payment) == "Stopped"
+    assert _export_retry(client, payment) == "Stopped"
+
+
+def test_the_returns_export_has_the_page_s_retry_text_without_retry(fake: FakeProvider) -> None:
+    a_world(fake)
+    payment = returned(fake, "R10")
+    client, _ = client_for(Role.VIEWER)
+    page = client.get(reverse("ledger:returns:list")).content.decode()
+    assert _page_retry(page, payment) == "No retry: R10"
+    assert _export_retry(client, payment) == "No retry: R10"
 
 
 # --- D7's window applies to F ----------------------------------------------------------------
