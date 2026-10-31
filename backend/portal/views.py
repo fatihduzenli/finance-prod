@@ -4,7 +4,8 @@ flow); no view reads a model itself.
 
 Public (``accounts.registry.PORTAL_PUBLIC_ROUTE_NAMES``): ``portal:login`` (GET, POST),
 ``portal:logout`` (POST), ``portal:invite`` and ``portal:reset_confirm`` (the one-time links,
-GET and POST), ``portal:reset_request`` (GET, POST: the same sentence whatever the e-mail).
+GET and POST), ``portal:reset_request`` (GET, POST: the same sentence whatever the e-mail),
+``portal:not_found`` (any other path under ``/portal/``: the portal's 404).
 A link page answers a refused token (unknown, used, expired, of an account that may not use
 it) with the same 404 sentence, never logged with its path (the token is in it), and is sent
 with ``Referrer-Policy: no-referrer``.
@@ -68,7 +69,9 @@ def _page(
     return response
 
 
-def _not_found(request: HttpRequest) -> HttpResponse:
+def not_found(request: HttpRequest) -> HttpResponse:
+    """``portal:not_found``: the portal's 404, for a foreign store and any unknown path under
+    ``/portal/``."""
     return _page(request, "portal/not_found.html", status=404)
 
 
@@ -188,7 +191,7 @@ def store(request: HttpRequest, pk: str) -> HttpResponse:
     user = _user(request)
     found = services.store_of(user, pk)
     if found is None:
-        return _not_found(request)
+        return not_found(request)
     page = services.store_page(user, found, timezone.localdate())
     return _page(request, "portal/store.html", page=page, store=found, today=timezone.localdate())
 
@@ -199,7 +202,7 @@ def invoices(request: HttpRequest, pk: str) -> HttpResponse:
     user = _user(request)
     found = services.store_of(user, pk)
     if found is None:
-        return _not_found(request)
+        return not_found(request)
     return _page(request, "portal/invoices.html", store=found, rows=services.invoices(user, found))
 
 
@@ -209,7 +212,7 @@ def payments(request: HttpRequest, pk: str) -> HttpResponse:
     user = _user(request)
     found = services.store_of(user, pk)
     if found is None:
-        return _not_found(request)
+        return not_found(request)
     return _page(request, "portal/payments.html", store=found, rows=services.payments(user, found))
 
 
@@ -224,7 +227,7 @@ def statement(request: HttpRequest) -> HttpResponse:
 def _unavailable(request: HttpRequest, pk: str, tab: str, sentence: str) -> HttpResponse:
     found = services.store_of(_user(request), pk)
     if found is None:
-        return _not_found(request)
+        return not_found(request)
     return _page(request, "portal/unavailable.html", store=found, tab=tab, sentence=sentence)
 
 

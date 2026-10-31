@@ -2,9 +2,10 @@
 
 **Password.** Django's hashers (``check_password``/``make_password``) on
 :attr:`portal.models.PortalUser.password`; an e-mail without an account is checked against a
-throwaway hash so it takes the same time. Only an account that can sign in (accepted, not
-disabled) passes. A wrong password, an unknown e-mail, an account not yet accepted and a
-disabled one all answer :data:`WRONG` (no account enumeration).
+throwaway hash (a usable one, of a random password, made at import) so it takes the same time.
+Only an account that can sign in (accepted, not disabled, its operator not archived) passes. A
+wrong password, an unknown e-mail, an account not yet accepted, a disabled one and one whose
+operator is archived all answer :data:`WRONG` (no account enumeration).
 
 **Lockout.** Every attempt is a :class:`portal.models.PortalLoginAttempt` (the keyed hash of
 the e-mail, the client address, the time, the outcome). :data:`MAX_FAILURES` failures within
@@ -21,13 +22,14 @@ and starts a new one (a new key: rotated at sign-in) holding the user's id, the 
 the last request's time and a keyed hash of the stored password (a password change or reset
 ends every other session at its next request). :func:`current_user` reads it back: no user
 after :data:`IDLE_TIMEOUT` without a request or :data:`ABSOLUTE_TIMEOUT` after sign-in, for an
-account that can no longer sign in (disabled), or once the password changed; the session is
-then emptied.
+account that can no longer sign in (disabled, or its operator archived), or once the password
+changed; the session is then emptied.
 """
 
 from __future__ import annotations
 
 import math
+import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -60,8 +62,9 @@ LOGIN_AT_KEY = "portal_login_at"
 LAST_SEEN_KEY = "portal_last_seen_at"
 AUTH_HASH_KEY = "portal_auth_hash"
 
-#: Checked when the e-mail has no account, so that answer takes as long as a wrong password.
-_UNUSABLE = make_password(None)
+#: Checked when the e-mail has no account (or the account no password), so that answer takes
+#: as long as a wrong password: a usable hash, as an unusable one is refused without hashing.
+_THROWAWAY = make_password(secrets.token_urlsafe(32))
 
 
 def normalize_email(raw: object) -> str:
@@ -148,7 +151,7 @@ def authenticate(
     if len(password) > PASSWORD_MAX_LENGTH:
         password = ""
     if user is None or not user.password:
-        check_password(password, _UNUSABLE)
+        check_password(password, _THROWAWAY)
         ok = False
     else:
         ok = check_password(password, user.password) and user.can_sign_in

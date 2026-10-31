@@ -10,6 +10,8 @@ operator's row lock and audited on the entity ``portal_user``:
   queues the ``portal_invite`` message to that e-mail through the messaging engine
   (:func:`ledger.services.messaging.queue_portal`: the Outbox lists it). Audited
   ``portal_user.invited`` (``resend`` true the second time on).
+- An archived operator's account cannot sign in (its sessions end at their next request, its
+  links stop working); the card reads "Operator archived" and offers only Disable or Enable.
 - :func:`disable` and :func:`enable`: a disabled account cannot sign in, its sessions end at
   their next request and its links stop working; enabling makes it active again when it was
   accepted (else the invitation is still to be accepted). Audited ``portal_user.disabled``,
@@ -65,6 +67,8 @@ RESET_SENT = "portal_user.reset_sent"
 RESET_COOLDOWN = timedelta(minutes=5)
 
 NO_OPERATOR = "The operator no longer exists."
+#: The PORTAL card's account line for an archived operator.
+OPERATOR_ARCHIVED = "Operator archived"
 ARCHIVED = "The operator is archived."
 NO_EMAIL = "Add the operator's e-mail first: the invitation goes there."
 TAKEN = "Another operator's portal account uses this e-mail."
@@ -111,16 +115,20 @@ class Card:
 
 
 def card(operator: Operator) -> Card:
-    """The PORTAL card's account line and the actions it offers (one query)."""
+    """The PORTAL card's account line and the actions it offers (one query). An archived
+    operator's account cannot sign in: the card says so and offers only Disable or Enable."""
     user = PortalUser.objects.filter(operator=operator).first()
-    live = operator.archived_at is None
+    if operator.archived_at is not None:
+        disabled = user is not None and user.disabled_at is not None
+        can_disable = user is not None and not disabled
+        return Card(user, OPERATOR_ARCHIVED, False, False, can_disable, disabled, False)
     if user is None:
-        return Card(None, "Not invited", live, False, False, False, False)
+        return Card(None, "Not invited", True, False, False, False, False)
     if user.disabled_at is not None:
-        return Card(user, "Disabled", False, False, False, live, False)
+        return Card(user, "Disabled", False, False, False, True, False)
     if user.activated_at is None:
-        return Card(user, "Invited, not accepted yet", False, live, live, False, False)
-    return Card(user, "Active", False, False, live, False, live)
+        return Card(user, "Invited, not accepted yet", False, True, True, False, False)
+    return Card(user, "Active", False, False, True, False, True)
 
 
 def _template(code: str) -> MessageTemplate | None:
@@ -268,6 +276,8 @@ def send_reset(operator_id: uuid.UUID, actor: User, now: datetime | None = None)
         user = _locked_user(operator) if operator is not None else None
         if user is None:
             return Outcome(False, NO_ACCOUNT)
+        if operator is not None and operator.archived_at is not None:
+            return Outcome(False, ARCHIVED)
         if not user.can_sign_in:
             return Outcome(False, IS_DISABLED if user.disabled_at is not None else NOT_ACTIVE)
         template = _template(merge.PORTAL_RESET_CODE)

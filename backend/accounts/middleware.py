@@ -11,7 +11,8 @@ OTPMiddleware:
 
 The operator portal's routes (the ``portal:`` namespace, PLAN-014 H1) are exempt from 2 to
 4: ``portal.middleware`` signs its own principal in and out, and a staff session opens none
-of them.
+of them. 1 ignores every path under ``/portal/``: browsing the portal neither reads nor
+refreshes a staff session's idle timer.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ from accounts.registry import (
     view_name,
 )
 from accounts.roles import role_of
+from portal.middleware import PORTAL_PREFIX
 
 GetResponse = Callable[[HttpRequest], HttpResponseBase]
 
@@ -81,10 +83,13 @@ class SessionPolicyMiddleware(_Middleware):
 
     Expiry flushes the session (logout), so the request continues as anonymous and the
     next middleware answers 401. A signed-in session without a recorded sign-in time is
-    treated as expired: it cannot prove it is within the ceiling.
+    treated as expired: it cannot prove it is within the ceiling. A portal path is left
+    alone (PLAN-014 H1): it is not staff activity.
     """
 
     def __call__(self, request: HttpRequest) -> HttpResponseBase:
+        if request.path_info.startswith(PORTAL_PREFIX):
+            return self.get_response(request)
         if request.user.is_authenticated:
             self._enforce(request)
         return self.get_response(request)
