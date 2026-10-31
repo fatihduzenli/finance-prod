@@ -345,7 +345,10 @@ def test_the_charges_card_has_its_columns_and_the_open_balance_row() -> None:
         "Balance",
     ]
     assert '<tr class="totals"><th scope="row" colspan="5">Open balance</th>' in card
-    assert '<span id="charges-balance">$5,000.00</span>' in card
+    # Re-pinned for PLAN-014 G2: the $3,000 deposit is listed but not in the open balance,
+    # which is the header's (and the Aging report's row of the store).
+    assert '<span id="charges-balance">$2,000.00</span>' in card
+    assert 'id="charges-uncounted"' in card
     assert '<span class="charge-kind">Setup</span>' in card  # the one-off's kind
     assert 'id="create-missing-charges"' in card
     # The contact log card follows on the Charges tab.

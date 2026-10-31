@@ -605,6 +605,8 @@ class ChargeRow:
     resolution: str = ""
     badges: list[str] = field(default_factory=list)
     invoices: list[InvoiceLink] = field(default_factory=list)
+    #: An open charge in the Aging bucket the tab was opened with (``?bucket=``, PLAN-014 G1).
+    in_bucket: bool = False
 
 
 def _on_live_plan(column: str) -> Exists:
@@ -882,7 +884,13 @@ def _as_receivables(
 
 
 def charges_tab(
-    owner: Owner, chosen: str, role: Role | None, balances: StoreBalances | None = None
+    owner: Owner,
+    chosen: str,
+    role: Role | None,
+    balances: StoreBalances | None = None,
+    *,
+    bucket: str = "",
+    today: date | None = None,
 ) -> dict[str, Any]:
     """The Charges tab (D3): the rent, one-off and insurance charges of the store's
     leases (of the operator's, with the store named, on the operator page: D14) in one
@@ -893,11 +901,18 @@ def charges_tab(
     amount subtracted, finding 12d-2), as the insurance row does, so the open charges
     total the header's balance; ``balances`` is the header's, read here when not given.
     Seven queries whatever the number of charges, besides ``balances``; an eighth when a
-    rent row is carried (whether a bank debit carries it, PLAN-012f-b D19)."""
+    rent row is carried (whether a bank debit carries it, PLAN-012f-b D19).
+
+    The total counts the charges the open balance counts: a deposit (money held) and a
+    charge owed through its installments show their balance but are not in it, so the
+    open total is the header's balance and the Aging report's row of the store (PLAN-014
+    G2). ``bucket`` (one of :data:`ledger.services.receivables.AGING_BUCKETS`, from the
+    Aging report's drill-down) marks the counted charges whose days past due on ``today``
+    fall in that bucket, with their count and total."""
     billing = meets(role, Role.BILLING)
     back = _back(owner, TAB_PAYMENTS)
+    today = today or timezone.localdate()
     if balances is None:
-        today = timezone.localdate()
         balances = (
             _balances_of(*_open_rows(today, owner.pk))
             if isinstance(owner, Operator)
@@ -950,11 +965,24 @@ def charges_tab(
     for row in rows:
         row.invoices = links.get((row.kind, row.charge_id), [])
     rows.sort(key=lambda row: (row.due, row.kind, str(row.charge_id)), reverse=True)
+    counted = [row for row in rows if (row.kind, row.charge_id) in balances.owed]
+    if bucket in receivables.AGING_BUCKET_LABELS:
+        for row in counted:
+            row.in_bucket = receivables.aging_bucket((today - row.due).days) == bucket
+    else:
+        bucket = ""
+    in_bucket = [row for row in counted if row.in_bucket]
     return {
         "charge_rows": rows,
         "charge_filter": chosen,
         "charge_filters": CHARGE_FILTERS,
-        "charge_total": sum((row.balance for row in rows), ZERO),
+        "charge_total": sum((row.balance for row in counted), ZERO),
+        "charge_bucket": receivables.AGING_BUCKET_LABELS.get(bucket, ""),
+        "bucket_count": len(in_bucket),
+        "bucket_total": sum((row.balance for row in in_bucket), ZERO),
+        # Open charges listed but not in the open balance: a deposit, or a charge owed
+        # through its installments.
+        "charges_uncounted": chosen == FILTER_OPEN and len(counted) < len(rows),
         "several_leases": len({row.lease.pk for row in rows if row.lease is not None}) > 1,
         "by_store": isinstance(owner, Operator),
         "export_query": urlencode(_owner_query(owner)),
@@ -1292,11 +1320,19 @@ def _tab_data(
     balances: StoreBalances,
     today: date,
     now: datetime,
+    bucket: str = "",
 ) -> dict[str, Any]:
     """The open tab's data over the records of ``owner`` (a store, or an operator); empty
     for the tabs built elsewhere (Documents, Notes & follow-ups, History)."""
     if tab == TAB_CHARGES:
-        return charges_tab(owner, _chosen_filter(chosen, CHARGE_FILTERS), role, balances)
+        return charges_tab(
+            owner,
+            _chosen_filter(chosen, CHARGE_FILTERS),
+            role,
+            balances,
+            bucket=bucket,
+            today=today,
+        )
     if tab == TAB_INVOICES:
         return invoices_tab(owner, _chosen_filter(chosen, INVOICE_FILTERS), role)
     if tab == TAB_PAYMENTS:
@@ -1314,9 +1350,11 @@ def store_workspace(
     tab: str = TAB_CHARGES,
     chosen: str = "",
     now: datetime | None = None,
+    bucket: str = "",
 ) -> Workspace:
     """The header, the action bar and the open tab of ``store`` for ``role`` (D1); ``tab``
-    is a name :func:`chosen_tab` returned, ``chosen`` the tab's filter (``?filter=``)."""
+    is a name :func:`chosen_tab` returned, ``chosen`` the tab's filter (``?filter=``),
+    ``bucket`` the Charges tab's Aging bucket (``?bucket=``, PLAN-014 G1)."""
     moment = now or timezone.now()
     balances = store_balances(store, store.leases.all(), today)
     header = _header(
@@ -1335,7 +1373,7 @@ def store_workspace(
         data=(
             history_tab(store, today)
             if tab == TAB_HISTORY and meets(role, Role.ADMIN)
-            else _tab_data(store, tab, chosen, role, balances, today, moment)
+            else _tab_data(store, tab, chosen, role, balances, today, moment, bucket)
         ),
         create_charges_url=_create_charges_url(store, header, role),
     )

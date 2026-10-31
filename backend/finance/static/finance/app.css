@@ -524,6 +524,9 @@ p.empty, div.empty { padding: var(--space-4); border: 1px dashed var(--input-bor
 td.balance-open { color: var(--unpaid-text); font-weight: 600; }
 .store-tab .table-cards > table th, .store-tab .table-cards > table td { padding-left: 8px; padding-right: 8px; }
 #store-charges td.charge-due { white-space: nowrap; }
+/* PLAN-014 G1: the Aging report's drill-down (?bucket=) tints the charges of that bucket. */
+#store-charges tr.in-bucket > td { background: var(--month-current); }
+.bucket-note { margin: 0 0 var(--space-3); font-size: var(--fs-sm); }
 .action-bar { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-4) 0; }
 .action-bar form { margin: 0; }
 

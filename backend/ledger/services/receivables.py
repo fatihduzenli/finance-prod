@@ -37,9 +37,13 @@ by the invoice's later lines in line order. A re-debit is listed as a one-off ch
 (``Re-debit: Re-debit of Rent 2026-09``); its fee as ``NSF fee: ...``.
 
 Every other figure here sums those rows: the dashboard's total outstanding and overdue
-(:func:`dashboard`), the arrears list (:func:`arrears`) and the A/R aging (:func:`aging`,
-PLAN-011 D4: by operator and days past due, 0 or less, 1 to 30, 31 to 60, 61 to 90, over
-90), whose grand total is therefore the dashboard's total outstanding. The customer
+(:func:`dashboard`), the arrears list (:func:`arrears`) and the Aging report (:func:`aging`,
+PLAN-014 G1: by store and days past due, 0 or less, 1 to 30, 31 to 60, 61 to 90, over 90;
+a one-off charge without a lease under "No store" with its operator), whose grand total
+without a filter is therefore the dashboard's total outstanding. Its filters: the store's
+state, an operator, a brand (or none), the charge kind, and Include deposits, which adds
+the deposits still owed (:func:`owed_deposits`, not in the dashboard's figure). The
+state, operator and brand filters choose rows, never a row's amounts. The customer
 statement reads the same rows for one operator (``open_balances(today, operator=...)``:
 the charges billed to it, a one-off charge's own operator before its lease's). A charge
 is **overdue** when its due date is before ``today`` (the date in the project's
@@ -78,6 +82,7 @@ from django.db.models import Exists, F, Max, OuterRef, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce
 
 from finance.dates import month_text
+from finance.us_states import state_name
 from ledger.models import (
     BANK_DEBIT_LABEL,
     LIVE_PLAN_STATUSES,
@@ -810,15 +815,16 @@ def arrears_operators() -> list[Operator]:
     return list(Operator.objects.order_by("display_name", "id"))
 
 
-# --- A/R aging (D4) ------------------------------------------------------------------
+# --- Aging by store (PLAN-014 G1) -------------------------------------------------------
 
 AGING_CURRENT = "current"
-AGING_1_30 = "1-30"
-AGING_31_60 = "31-60"
-AGING_61_90 = "61-90"
-AGING_OVER_90 = "90+"
+AGING_1_30 = "1_30"
+AGING_31_60 = "31_60"
+AGING_61_90 = "61_90"
+AGING_OVER_90 = "over_90"
 #: The buckets in order, with their label: days past due 0 or less (not yet due, or due
-#: today), 1 to 30, 31 to 60, 61 to 90, and 91 or more.
+#: today), 1 to 30, 31 to 60, 61 to 90, and 91 or more. The keys are also the store Charges
+#: tab's ``?bucket=`` values.
 AGING_BUCKETS: tuple[tuple[str, str], ...] = (
     (AGING_CURRENT, "Current"),
     (AGING_1_30, "1 to 30 days"),
@@ -826,6 +832,23 @@ AGING_BUCKETS: tuple[tuple[str, str], ...] = (
     (AGING_61_90, "61 to 90 days"),
     (AGING_OVER_90, "Over 90 days"),
 )
+AGING_BUCKET_LABELS: dict[str, str] = dict(AGING_BUCKETS)
+#: The Kind filter's choices (none chosen, or ``kind=all``: every kind).
+AGING_KINDS: tuple[tuple[str, str], ...] = (
+    (KIND_RENT, "Rent"),
+    (KIND_INSURANCE, "Insurance"),
+    (KIND_ONE_OFF, "One-off"),
+)
+AGING_KIND_ALL = "all"
+#: The Brand filter's value for the stores without a brand.
+AGING_NO_BRAND = "none"
+#: The Include deposits box's value.
+AGING_DEPOSITS_ON = "1"
+NO_STORE = "No store"
+BAD_STATE = "Unknown state; showing every state."
+BAD_BRAND = "Unknown brand; showing every brand."
+BAD_KIND = "Unknown charge kind; showing every kind."
+AGING_TOTAL = "Total"
 
 
 def days_past_due(item: OpenBalance, today: date) -> int:
@@ -845,77 +868,273 @@ def aging_bucket(days: int) -> str:
     return AGING_OVER_90
 
 
+@dataclass(frozen=True, slots=True)
+class AgingFilter:
+    """The Aging report's filters (G1): the store's state (a two-letter code), an operator,
+    a brand (a brand's id as text, or :data:`AGING_NO_BRAND`), a charge kind (one of
+    :data:`AGING_KINDS`, ``""`` for every kind) and whether deposits still owed are added."""
+
+    state: str = ""
+    operator: uuid.UUID | None = None
+    brand: str = ""
+    kind: str = ""
+    include_deposits: bool = False
+    #: Why a value was not used, one sentence each.
+    messages: tuple[str, ...] = ()
+
+    def as_query(self) -> dict[str, str]:
+        values = {
+            "state": self.state,
+            "operator": str(self.operator) if self.operator else "",
+            "brand": self.brand,
+            "kind": self.kind,
+            "deposits": AGING_DEPOSITS_ON if self.include_deposits else "",
+        }
+        return {name: value for name, value in values.items() if value}
+
+
+def parse_aging_filter(params: Mapping[str, str]) -> AgingFilter:
+    """The filter from ``?state=&operator=&brand=&kind=&deposits=1``; never raises. An
+    unusable value is dropped with a sentence (the page answers 200 with it)."""
+    messages: list[str] = []
+    state = (params.get("state", "") or "").strip().upper()
+    if state and not state_name(state):
+        messages.append(BAD_STATE)
+        state = ""
+    operator: uuid.UUID | None = None
+    raw_operator = (params.get("operator", "") or "").strip()
+    if raw_operator:
+        try:
+            operator = uuid.UUID(raw_operator)
+        except ValueError:
+            messages.append(BAD_OPERATOR)
+    brand = (params.get("brand", "") or "").strip()
+    if brand and brand != AGING_NO_BRAND:
+        try:
+            brand = str(uuid.UUID(brand))
+        except ValueError:
+            messages.append(BAD_BRAND)
+            brand = ""
+    kind = (params.get("kind", "") or "").strip()
+    if kind == AGING_KIND_ALL:
+        kind = ""
+    elif kind and kind not in dict(AGING_KINDS):
+        messages.append(BAD_KIND)
+        kind = ""
+    deposits = (params.get("deposits", "") or "").strip() == AGING_DEPOSITS_ON
+    return AgingFilter(state, operator, brand, kind, deposits, tuple(messages))
+
+
 def _empty_buckets() -> dict[str, Decimal]:
     return {bucket: ZERO for bucket, _ in AGING_BUCKETS}
 
 
 @dataclass(slots=True)
-class AgingRow:
-    operator_id: uuid.UUID | None
-    operator_name: str
+class AgingStoreRow:
+    """One store's open balances by bucket (or, for one-off charges without a lease, one
+    operator's under :data:`NO_STORE`), or the report's totals."""
+
+    store_id: uuid.UUID | None
+    store_label: str
+    store_state: str = ""
+    store_number: int | None = None
+    brand_id: uuid.UUID | None = None
+    brand_name: str = ""
+    #: The operators billed by the row's charges: id → full name (``None``: no operator).
+    operators: dict[uuid.UUID | None, str] = field(default_factory=dict)
     buckets: dict[str, Decimal] = field(default_factory=_empty_buckets)
     total: Decimal = ZERO
     count: int = 0
+    #: The part of :attr:`total` that is deposits still owed (only with Include deposits).
+    deposits: Decimal = ZERO
 
     @property
     def amounts(self) -> list[Decimal]:
         """The bucket amounts in :data:`AGING_BUCKETS` order."""
         return [self.buckets[bucket] for bucket, _ in AGING_BUCKETS]
 
+    @property
+    def operator_names(self) -> list[str]:
+        return sorted((name or NO_OPERATOR for name in self.operators.values()), key=str.casefold)
+
+    def add(self, amount: Decimal, bucket: str, *, deposit: bool = False) -> None:
+        self.buckets[bucket] += amount
+        self.total += amount
+        self.count += 1
+        if deposit:
+            self.deposits += amount
+
+    def add_row(self, other: AgingStoreRow) -> None:
+        for bucket, amount in other.buckets.items():
+            self.buckets[bucket] += amount
+        self.total += other.total
+        self.count += other.count
+        self.deposits += other.deposits
+
 
 @dataclass(frozen=True, slots=True)
 class AgingReport:
-    today: date
-    rows: list[AgingRow]
-    totals: AgingRow
+    #: The only date of the report: the open balances on this day.
+    as_of: date
+    rows: list[AgingStoreRow]
+    totals: AgingStoreRow
+    #: Whether deposits still owed were added (Include deposits, for every kind or one-off).
+    deposits_included: bool = False
 
 
-def aging(today: date) -> AgingReport:
-    """Open balances by operator and days past due on ``today``: exactly the rows of
-    :func:`open_balances`, so the grand total is the dashboard's total outstanding."""
-    by_operator: dict[uuid.UUID | None, AgingRow] = {}
-    totals = AgingRow(None, "")
-    for item in open_balances(today):
-        row = by_operator.get(item.operator_id)
-        if row is None:
-            row = by_operator[item.operator_id] = AgingRow(item.operator_id, item.operator_name)
-        bucket = aging_bucket(days_past_due(item, today))
-        for target in (row, totals):
-            target.buckets[bucket] += item.balance
-            target.total += item.balance
-            target.count += 1
-    rows = sorted(
-        by_operator.values(),
-        key=lambda row: (
-            row.operator_id is None,
-            row.operator_name.casefold(),
-            str(row.operator_id),
-        ),
+def owed_deposits() -> QuerySet[OneOffCharge]:
+    """The deposits still owed: one-off charges of a refundable fee type with a balance,
+    neither waived nor voided, not on a live installment plan. :func:`open_balances`
+    leaves them out (money held, not revenue); they are still collected
+    (:func:`ledger.services.payments_entry.open_charges`, the Aging's Include deposits)."""
+    return (
+        OneOffCharge.objects.filter(fee_type__refundable=True, balance__gt=0)
+        .exclude(status__in=[OneOffChargeStatus.WAIVED, OneOffChargeStatus.VOIDED])
+        .exclude(installment_plans__status__in=LIVE_PLAN_STATUSES)
     )
-    return AgingReport(today=today, rows=rows, totals=totals)
+
+
+def _deposit_balances() -> list[OpenBalance]:
+    """:func:`owed_deposits` as receivables rows, in one query."""
+    rows = (
+        owed_deposits()
+        .values(
+            "pk",
+            "due_date",
+            "balance",
+            "status",
+            "lease",
+            fee_name=F("fee_type__name"),
+            billed=Coalesce("operator", "lease__operator"),
+            billed_name=Coalesce("operator__display_name", "lease__operator__display_name"),
+            store=F("lease__store"),
+            store_label=F("lease__store__external_label"),
+            store_state=F("lease__store__state"),
+            channel=F("lease__payment_channel"),
+        )
+        .order_by()
+    )
+    return [
+        OpenBalance(
+            kind=KIND_ONE_OFF,
+            charge_id=row["pk"],
+            operator_id=row["billed"],
+            operator_name=row["billed_name"] or "",
+            store_id=row["store"],
+            store_label=row["store_label"] or "",
+            store_state=row["store_state"] or "",
+            channel=row["channel"] or "",
+            due_on=row["due_date"],
+            balance=_money(row["balance"]),
+            status=row["status"],
+            description=f"Deposit: {row['fee_name']}",
+            lease_id=row["lease"],
+        )
+        for row in rows
+    ]
+
+
+def _aging_rows(
+    items: Iterable[OpenBalance], deposits: Iterable[OpenBalance], today: date
+) -> list[AgingStoreRow]:
+    """The rows by store, one more query for the stores' number and brand."""
+    grouped: dict[tuple[str, uuid.UUID | None], AgingStoreRow] = {}
+    for deposit, charges in ((False, items), (True, deposits)):
+        for item in charges:
+            # A one-off charge without a lease groups under "No store" with its operator.
+            key = ("store", item.store_id) if item.store_id else ("operator", item.operator_id)
+            row = grouped.get(key)
+            if row is None:
+                row = grouped[key] = (
+                    AgingStoreRow(item.store_id, item.store_label, item.store_state)
+                    if item.store_id
+                    else AgingStoreRow(None, NO_STORE)
+                )
+            row.operators.setdefault(item.operator_id, item.operator_name)
+            row.add(item.balance, aging_bucket(days_past_due(item, today)), deposit=deposit)
+    store_ids = [row.store_id for row in grouped.values() if row.store_id is not None]
+    if store_ids:
+        found = {
+            pk: (number, brand, brand_name)
+            for pk, number, brand, brand_name in Store.objects.filter(pk__in=store_ids)
+            .values_list("pk", "store_number", "brand", "brand__name")
+            .order_by()
+        }
+        for row in grouped.values():
+            if row.store_id in found:
+                row.store_number, row.brand_id, brand_name = found[row.store_id]
+                row.brand_name = brand_name or ""
+    return sorted(grouped.values(), key=_aging_order)
+
+
+def _aging_order(row: AgingStoreRow) -> tuple[object, ...]:
+    """Stores by name, then the "No store" rows by operator."""
+    if row.store_id is not None:
+        return (False, row.store_label.casefold(), str(row.store_id))
+    return (True, " ".join(row.operator_names).casefold(), str(next(iter(row.operators))))
+
+
+def _aging_kept(row: AgingStoreRow, selected: AgingFilter) -> bool:
+    """Whether ``row`` passes the state, operator and brand filters (a :data:`NO_STORE` row
+    has no state and no brand)."""
+    if selected.state and (row.store_id is None or row.store_state.upper() != selected.state):
+        return False
+    if selected.operator is not None and selected.operator not in row.operators:
+        return False
+    if selected.brand == AGING_NO_BRAND:
+        return row.store_id is not None and row.brand_id is None
+    if selected.brand:
+        return row.store_id is not None and str(row.brand_id) == selected.brand
+    return True
+
+
+def aging(today: date, selected: AgingFilter | None = None) -> AgingReport:
+    """The open balances on ``today`` by store and days past due (G1): exactly the rows of
+    :func:`open_balances` (of the chosen kind), so that without a filter the grand total is
+    the dashboard's Unpaid figure; with Include deposits (every kind, or one-off) the
+    deposits still owed are added. The state, operator and brand filters choose which rows
+    appear, never a row's amounts. Five queries (seven when a re-debit carries a one-off
+    charge), one more with deposits, whatever the number of stores."""
+    chosen = selected or AgingFilter()
+    items = [item for item in open_balances(today) if not chosen.kind or item.kind == chosen.kind]
+    with_deposits = chosen.include_deposits and chosen.kind in ("", KIND_ONE_OFF)
+    deposits = _deposit_balances() if with_deposits else []
+    rows = [row for row in _aging_rows(items, deposits, today) if _aging_kept(row, chosen)]
+    totals = AgingStoreRow(None, AGING_TOTAL)
+    for row in rows:
+        totals.add_row(row)
+    return AgingReport(as_of=today, rows=rows, totals=totals, deposits_included=with_deposits)
 
 
 AGING_CSV_HEADER = (
+    "Store",
+    "Store number",
+    "State",
+    "Brand",
     "Operator",
-    "Current (USD)",
-    "1 to 30 days (USD)",
-    "31 to 60 days (USD)",
-    "61 to 90 days (USD)",
-    "Over 90 days (USD)",
+    *(f"{label} (USD)" for _, label in AGING_BUCKETS),
     "Total (USD)",
     "Open charges",
 )
-AGING_TOTAL = "Total"
 
 
 def aging_csv_lines(report: AgingReport) -> Iterator[str]:
-    """One line per operator, then the totals; no query."""
+    """One line per row of the page, then the totals; no query."""
     records: list[list[object]] = [
-        [row.operator_name or NO_OPERATOR, *row.amounts, row.total, row.count]
+        [
+            row.store_label,
+            row.store_number,
+            row.store_state,
+            row.brand_name,
+            "; ".join(row.operator_names),
+            *row.amounts,
+            row.total,
+            row.count,
+        ]
         for row in report.rows
     ]
     totals = report.totals
-    records.append([AGING_TOTAL, *totals.amounts, totals.total, totals.count])
+    records.append([AGING_TOTAL, "", "", "", "", *totals.amounts, totals.total, totals.count])
     return CsvWriter(AGING_CSV_HEADER).lines(records)
 
 

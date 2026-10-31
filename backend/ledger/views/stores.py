@@ -229,8 +229,17 @@ def _detail_context(
     admin = meets(role, Role.ADMIN)
     default = workspace.TAB_DOCUMENTS if request.GET.get("preview") else workspace.TAB_CHARGES
     tab = workspace.chosen_tab(forced_tab or request.GET.get("tab"), role, default=default)
-    chosen = "" if forced_tab else request.GET.get("filter", "")
-    space = workspace.store_workspace(store, today, role, tab=tab, chosen=chosen)
+    # PLAN-014 G1: the Aging report's drill-down opens the tab with ?status=open (the
+    # Charges filter's other name) and ?bucket=.
+    chosen = "" if forced_tab else request.GET.get("filter") or request.GET.get("status", "")
+    space = workspace.store_workspace(
+        store,
+        today,
+        role,
+        tab=tab,
+        chosen=chosen,
+        bucket="" if forced_tab else request.GET.get("bucket", ""),
+    )
     in_progress = lease_end.store_in_progress(store)
     context: dict[str, Any] = {
         "store": store,

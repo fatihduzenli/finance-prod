@@ -371,8 +371,13 @@ status. Export CSV gives the sheet's column order so the parallel run can be dif
 **Arrears (`/arrears/`)**: one line per operator across stores, months behind (1, 2, 3+), total
 owed including insurance and one-off charges, last payment, channels, stores; CSV.
 
-**Reports (`/reports/`)**: A/R aging (a snapshot as of today; its grand total always equals the
-dashboard's outstanding), revenue by month (billed and collected by the month the money settled;
+**Reports (`/reports/`)**: **Aging** (PLAN-014 G1: open balances by store in five buckets,
+Current, 1 to 30, 31 to 60, 61 to 90 and over 90 days past due, as of today with no range; a
+one-off charge without a lease shows under "No store" with its operator; without a filter its
+grand total equals the dashboard's Unpaid balances; filters by state, operator, brand or no
+brand, charge kind, and Include deposits, which adds the deposits still owed and says so under
+the total; a store's name opens its Charges tab of open charges and a bucket's amount the same
+tab with that bucket's charges highlighted; CSV with the same filters), revenue by month (billed and collected by the month the money settled;
 deposits excluded), payments by method (ACH, Zelle, wire, other; no cards exist here), deposits
 versus transactions (unmatched items highlighted, from the nightly reconciliation), the P&L, and
 a printable **customer statement** per operator across all stores (open charges and payment
