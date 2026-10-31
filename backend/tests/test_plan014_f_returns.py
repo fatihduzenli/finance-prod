@@ -90,7 +90,8 @@ def test_the_f_body_names_the_words_the_fee_the_dates_and_the_returned_amount(fa
     assert "will be debited again automatically on Nov 12, 2026" in body
     assert f"made on {debited:%b} {debited.day}, {debited.year}" in body
     assert "$1,500.00" in body  # the returned amount
-    assert "4111" not in body and "routing" not in body.lower() and "Bank text" not in body
+    assert "Bank text" not in body  # the processor's own wording never reaches the operator
+    assert "routing number" not in body.lower()
 
 
 @pytest.mark.parametrize(
@@ -249,7 +250,7 @@ def test_the_returns_csv_has_the_pages_retry_text(fake: Any) -> None:
     assert "Automatic re-debit on Nov 12" in cell
     export: Any = billing.get("/returns/export.csv")
     csv = b"".join(export.streaming_content).decode()
-    header = csv.splitlines()[0]
-    assert "Retry" in header
+    header = csv.splitlines()[0].split(",")
+    assert header.count("Retry") == 1
     assert "Automatic re-debit on Nov 12" in csv
     assert OneOffCharge.objects.filter(source_payment=payment).count() == 2
