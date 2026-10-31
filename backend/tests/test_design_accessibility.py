@@ -773,3 +773,16 @@ def test_every_grid_cell_names_its_status_in_words(seeded: visual_world.World) -
         link = re.search(r'aria-label="([^"]+)"', inner)
         if link is not None:
             assert GRID_WORDS[status] in html.unescape(link.group(1)), (status, inner)
+
+
+def test_a_portal_link_styled_as_a_button_keeps_the_buttons_text_colour() -> None:
+    """PLAN-014 H (gate H run 2's store shots): ``.portal a`` paints links with ``--link``, which
+    outranks ``.portal-button`` on the one button that is an anchor ("Pay the whole balance"):
+    teal text on the teal fill. An anchor button must take the button's own text token."""
+    css = without_comments(PORTAL_CSS.read_text())
+    rules = {
+        " ".join(selector.split()): declarations for selector, declarations in RULE.findall(css)
+    }
+    anchor = rules.get(".portal a.portal-button", "")
+    assert re.search(r"color\s*:\s*var\(\s*--btn-primary-text\s*\)", anchor), anchor
+    assert "text-decoration: none" in anchor
