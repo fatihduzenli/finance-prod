@@ -23,6 +23,8 @@ body.portal { margin: 0; font-family: var(--font); font-size: var(--fs-base); co
 .portal-card form label { display: block; margin: var(--space-3) 0 var(--space-1); font-weight: 600; }
 .portal-card form input { box-sizing: border-box; width: 100%; padding: var(--space-2) var(--space-3); font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--input-border); border-radius: var(--radius-ctl); }
 .portal-button { margin-top: var(--space-4); padding: var(--space-2) var(--space-4); font: inherit; font-weight: 600; color: var(--btn-primary-text); background: var(--btn-primary-bg); border: 1px solid var(--btn-primary-border); border-radius: var(--radius-ctl); cursor: pointer; }
+/* A link styled as the button (Pay the whole balance) keeps the button's text, not the link colour. */
+.portal a.portal-button { display: inline-block; color: var(--btn-primary-text); text-decoration: none; }
 .portal-error { color: var(--error-text); background: var(--unpaid-bg); border-radius: var(--radius-ctl); padding: var(--space-2) var(--space-3); }
 ul.portal-error { padding-left: var(--space-6); }
 .portal-ok { color: var(--flash-success-text); background: var(--flash-success-bg); border-radius: var(--radius-ctl); padding: var(--space-2) var(--space-3); }
