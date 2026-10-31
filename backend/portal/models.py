@@ -210,9 +210,9 @@ class PortalPaymentCharge(GuardedModel):
     status = models.CharField(
         max_length=9, choices=PortalPaymentStatus.choices, default=PortalPaymentStatus.REQUESTED
     )
-    job = models.ForeignKey(
-        "payments.Job", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
-    )
+    #: Its ``portal_pay`` job: a reference without a foreign key, as ``jobs.entity_id``, so
+    #: the job table keeps no reverse relation.
+    job_id = models.UUIDField(null=True, blank=True)
 
     class Meta:
         db_table = "portal_payment_charges"

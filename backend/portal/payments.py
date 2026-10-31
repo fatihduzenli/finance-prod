@@ -439,14 +439,15 @@ def _start(
         debit=outcome.charge,
         amount=charge.row.balance,
     )
-    line.job = jobs.enqueue(
+    job = jobs.enqueue(
         JobKind.PORTAL_PAY,
         outcome.charge,
         {CHARGE_PARAM: line.pk},
         None,
         replay_key=uuid.uuid5(key, f"job:{line.pk}"),
     )
-    line.save(update_fields=["job"])
+    line.job_id = job.pk
+    line.save(update_fields=["job_id"])
     return line
 
 
@@ -506,9 +507,10 @@ class PaymentState:
 def _charge_status(line: PortalPaymentCharge) -> str:
     """A charge's state as the page reads it: a job that finished without reporting (it
     stopped twice and gave up) reads as failed."""
-    if line.status != PortalPaymentStatus.REQUESTED or line.job is None:
+    job = Job.objects.filter(pk=line.job_id).first() if line.job_id is not None else None
+    if line.status != PortalPaymentStatus.REQUESTED or job is None:
         return str(line.status)
-    if jobs.is_active(line.job):
+    if jobs.is_active(job):
         return PortalPaymentStatus.REQUESTED
     return PortalPaymentStatus.FAILED
 
@@ -534,7 +536,7 @@ def payment_state(user: PortalUser, store: Store, payment_raw: object) -> Paymen
         payment = found.order_by("-created_at").first()
     if payment is None:
         return PaymentState(None, "", NO_PAYMENT_YET, [])
-    lines = list(payment.charges.select_related("job").order_by("kind", "charge_id"))
+    lines = list(payment.charges.order_by("kind", "charge_id"))
     charges = [ChargeState(_description(line), line.amount, _charge_status(line)) for line in lines]
     states = {charge.status for charge in charges}
     if payment.status == PortalPaymentStatus.REFUSED:

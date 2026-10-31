@@ -2,7 +2,7 @@
 H4): ``portal_payments`` (the user, the lease, the amount confirmed, the Pay page's one-time
 ``creation_key``, unique, and the state: requested, paid, failed or refused; CHECKs on the state
 and on a positive amount) and ``portal_payment_charges`` (one row per charge paid: its kind and
-id, the one-off charge the debit runs on, the amount, the ``portal_pay`` job and the row's own
+id, the one-off charge the debit runs on, the amount, the ``portal_pay`` job's id and the row's own
 state; one row per charge of a payment). No free-text column, so no card-number trigger.
 
 The reverse refuses while a portal payment exists (they are the record of what an operator
@@ -115,22 +115,13 @@ class Migration(migrations.Migration):
                         max_length=9,
                     ),
                 ),
+                ("job_id", models.UUIDField(blank=True, null=True)),
                 (
                     "debit",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="+",
                         to="ledger.oneoffcharge",
-                    ),
-                ),
-                (
-                    "job",
-                    models.ForeignKey(
-                        blank=True,
-                        null=True,
-                        on_delete=django.db.models.deletion.PROTECT,
-                        related_name="+",
-                        to="payments.job",
                     ),
                 ),
                 (
