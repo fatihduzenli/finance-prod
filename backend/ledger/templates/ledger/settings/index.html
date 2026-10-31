@@ -49,8 +49,8 @@
     <p id="bank-keys">{{ bank.keys }}</p>
     {% if bank.fake %}<p class="help" id="bank-fake">Here the fake bank source is used: deposits come from a fixture and nothing reaches Plaid.</p>{% endif %}
     <form method="post" action="{% url 'ledger:settings:bank_save' %}" id="bank-form">{% csrf_token %}
-      <p><label><input type="checkbox" name="bank_deposits_enabled" value="1" id="bank-enabled"{% if bank.enabled %} checked{% endif %}> Bank deposits on</label><br><span class="help">Deposits are fetched from the connected bank account every day and listed under Admin › Bank deposits.</span></p>
-      <p><label><input type="checkbox" name="bank_auto_confirm_exact" value="1" id="bank-auto-confirm"{% if bank.auto_confirm %} checked{% endif %}> Confirm exact matches automatically</label><br><span class="help">Only a deposit naming an open invoice for exactly its balance.</span></p>
+      <p><label><input type="checkbox" name="bank_deposits_enabled" value="1" id="bank-enabled"{% if bank.enabled %} checked{% endif %}> Bank deposits on</label></p>
+      <p><label><input type="checkbox" name="bank_auto_confirm_exact" value="1" id="bank-auto-confirm"{% if bank.auto_confirm %} checked{% endif %}> Confirm exact matches automatically (the deposit names an open invoice and pays exactly its balance)</label></p>
       <button class="btn btn-primary" type="submit">Save</button>
     </form>
     {% if bank.connection %}
