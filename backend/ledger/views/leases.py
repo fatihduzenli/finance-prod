@@ -41,6 +41,8 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from accounts.roles import Role, meets
 from accounts.views import forbidden
+from banking import services as banking
+from banking.models import ALIAS_MAX_LENGTH
 from finance.dates import day_text
 from ledger.forms import EnrolForm, LeaseBillingForm, LeaseCreateForm, LeaseForm, LinkForm
 from ledger.models import (
@@ -796,8 +798,54 @@ def _billing_dialog(
         else "",
         "can_link": active and billing.shares_account_of_id is None,
         "can_save": active,
+        # PLAN-014 I4: the sender names the Bank deposits match reads.
+        "aliases": banking.aliases_of(lease),
+        "alias_max_length": ALIAS_MAX_LENGTH,
         "return_url": reverse("ledger:leases:detail", kwargs={"pk": lease.pk}),
     }
+
+
+# --- Sender names (PLAN-014 I4) ----------------------------------------------------------
+
+
+@role_required
+@require_POST
+def lease_alias_add(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:alias_add`` (billing; PLAN-014 I4): remembers the posted ``text`` as a
+    sender name of the lease (:func:`banking.services.add_alias`: normalised, the payment-data
+    validator, once per lease). Refused for an archived operator. Returns to the dialog."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    if lease.operator is not None and lease.operator.archived_at is not None:
+        messages.error(request, lease_sync.MESSAGES[lease_sync.ARCHIVED])
+        return redirect("ledger:leases:billing", pk=lease.pk)
+    outcome = banking.add_alias(lease, request.POST.get("text", ""), actor=_actor(request))
+    (messages.success if outcome.ok else messages.error)(request, outcome.message)
+    return redirect("ledger:leases:billing", pk=lease.pk)
+
+
+@role_required
+@require_POST
+def lease_alias_remove(request: HttpRequest, pk: str, alias: str) -> HttpResponse:
+    """``ledger:leases:alias_remove`` (billing; PLAN-014 I4): forgets one sender name of the
+    lease (:func:`banking.services.remove_alias`); another lease's or an unknown one answers
+    with one sentence and changes nothing. Refused for an archived operator."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    try:
+        alias_id = uuid.UUID(alias)
+    except ValueError:
+        raise Http404 from None
+    if lease.operator is not None and lease.operator.archived_at is not None:
+        messages.error(request, lease_sync.MESSAGES[lease_sync.ARCHIVED])
+        return redirect("ledger:leases:billing", pk=lease.pk)
+    outcome = banking.remove_alias(lease, alias_id, actor=_actor(request))
+    (messages.success if outcome.ok else messages.error)(request, outcome.message)
+    return redirect("ledger:leases:billing", pk=lease.pk)
 
 
 # --- Bank account entry (PLAN-014 C7) ---------------------------------------------------

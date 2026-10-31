@@ -1,4 +1,4 @@
-{% comment %}The invoice as the operator reads it (PLAN-012 D7): the preview and the print view. "Billed to" (PLAN-014 C6) is ledger.services.invoice_builder.bill_to: the lease's company when it has one, the operator's full name under it, then the lease's billing address and e-mail.{% endcomment %}
+{% comment %}The invoice as the operator reads it (PLAN-012 D7): the preview and the print view. "Billed to" (PLAN-014 C6) is ledger.services.invoice_builder.bill_to: the lease's company when it has one, the operator's full name under it, then the lease's billing address and e-mail. The memo line (PLAN-014 I5, preview.pay_memo) names the invoice number once it is sent; a draft shows none.{% endcomment %}
 {% load components responsive money dates %}
 <section class="invoice-document" id="invoice-document">
   <header class="invoice-header">
@@ -34,4 +34,5 @@
   {% endresponsive_table %}
   {% if preview.memo %}<p class="invoice-memo" id="invoice-memo" style="white-space:pre-wrap;">{{ preview.memo }}</p>{% endif %}
   <p class="muted">Payable by ACH bank transfer.</p>
+  {% if preview.pay_memo %}<p id="invoice-pay-memo">{{ preview.pay_memo }}</p>{% endif %}
 </section>

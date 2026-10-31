@@ -936,7 +936,9 @@ since the last fetch; **Fetch now** on the Bank deposits page (billing) does the
 second fetch never adds a deposit already read. When nothing can be fetched the page says why in
 one sentence (the module is off, the keys are missing, or no account is connected). A failed
 fetch keeps only the error's name ("The bank could not be read (PlaidItemLoginRequiredError)"):
-for that one, disconnect and connect the account again.
+for that one, disconnect and connect the account again. The daily job's log line reads "Bank
+deposits fetched: 3 (new 2)." after a fetch, "Bank deposits: off." with why when nothing could
+be fetched, and "Bank deposits: not fetched." with the error's name after a failed one.
 
 **Suggestions.** Each new deposit shows a suggestion over what is owed today, with its confidence:
 **Exact** (the description names an invoice number, `INV-2026-0001`, whose open charge has
@@ -965,3 +967,18 @@ or other (words required).
 new again. Undo is refused while the deposit kept a credit on a lease, or when one of its payments
 cannot be voided by hand (an insurance payment): void those on their own pages. Every action is in
 the activity log (`bank_transaction.confirmed`, `auto_confirmed`, `ignored`, `undone`).
+
+**Sender names** (billing). The lease page's **Edit billing details** dialog lists, under the
+payment provider's section, the names the bank shows for that lease's deposits (the aliases a
+strong match reads), each with **Remove**, and an **Add a sender name** field. A name is one
+line, compared in capitals with its spaces collapsed ("Fatih  trading llc" and "FATIH TRADING
+LLC" are the same name), at least three characters; a name the lease already has, or one holding
+a card or account number, is refused with a sentence and nothing is saved. A name remembered at
+Confirm appears here too. Adding and removing are in the activity log (`sender_alias.added`,
+`sender_alias.removed`); an archived operator's lease cannot be changed.
+
+**The memo line.** A sent invoice (its preview and print view) and the operator portal's
+**Invoices** page (under each open invoice) and **Pay** page (under the amount, one line per
+invoice of the charges being paid) read "Paying by wire or Zelle? Put INV-2026-0012 in the
+memo." with the invoice's real number, so that the deposit's description names it and the
+suggestion is exact. A draft (no number yet) and a void invoice show no memo line.

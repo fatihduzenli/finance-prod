@@ -645,12 +645,13 @@ def test_the_daily_job_syncs_only_when_enabled(monkeypatch: pytest.MonkeyPatch) 
     a_connection()
     out = StringIO()
     call_command("collections_tick", stdout=out)
-    assert services.OFF in out.getvalue()
+    # Slice 2 re-pin: the tick's own line ("Bank deposits: off." with why), not the page's.
+    assert f"Bank deposits: off. {services.OFF} " in out.getvalue()
     assert not BankTransaction.objects.exists()
     enable()
     out = StringIO()
     call_command("collections_tick", stdout=out)
-    assert "Bank deposits: Fetched from the bank: 2 new deposit(s)." in out.getvalue()
+    assert "Automatic re-debits scheduled: 0. Bank deposits fetched: 2 (new 2). " in out.getvalue()
     assert BankTransaction.objects.count() == 2
 
 
@@ -1342,3 +1343,125 @@ def test_the_free_text_columns_refuse_a_card_number(
 
     with pytest.raises(ValidationError):
         make("ref 4111 1111 1111 1111")
+
+
+# --- Slice 2: the daily job's line (I2) -----------------------------------------------------
+
+
+def test_the_daily_jobs_line_after_a_second_fetch_counts_nothing_new(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from io import StringIO
+
+    monkeypatch.setattr(services, "get_source", lambda: sources.FakeSource(ROWS))
+    a_connection()
+    enable()
+    call_command("collections_tick", stdout=StringIO())
+    out = StringIO()
+    call_command("collections_tick", stdout=out)
+    assert "Bank deposits fetched: 2 (new 0). " in out.getvalue()
+    assert BankTransaction.objects.count() == 2
+
+
+def test_the_daily_jobs_line_without_a_connection_says_off_and_why(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from io import StringIO
+
+    monkeypatch.setattr(services, "get_source", lambda: sources.FakeSource(ROWS))
+    enable()
+    out = StringIO()
+    call_command("collections_tick", stdout=out)
+    assert f"Bank deposits: off. {services.NO_CONNECTION} " in out.getvalue()
+
+
+def test_the_tick_line_of_a_failed_fetch_and_of_auto_confirmed_deposits() -> None:
+    failed = services.FetchReport(False, "The bank could not be read (X).", failed=True)
+    assert services.tick_line(failed) == (
+        "Bank deposits: not fetched. The bank could not be read (X)."
+    )
+    fetched = services.FetchReport(True, "", sources.SyncResult(added=1, already=3), 1)
+    assert services.tick_line(fetched) == (
+        "Bank deposits fetched: 4 (new 1). Bank deposits confirmed automatically: 1."
+    )
+
+
+# --- Slice 2: the memo line (I5) ------------------------------------------------------------
+
+
+@pytest.fixture
+def provider(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from payments.fake import FakeProvider
+
+    fake = FakeProvider(pay_invoice_enabled=True)
+    monkeypatch.setattr("payments.get_provider", lambda: fake)
+    return fake
+
+
+def test_the_memo_line_is_on_a_sent_invoice_and_not_on_a_draft_or_a_void_one(
+    provider: Any,
+) -> None:
+    from ledger.models import Invoice, InvoiceStatus
+    from ledger.wording import memo_line
+    from tests.test_invoice_builder import a_draft, a_world, line, sent
+
+    operator, lease = a_world(provider)
+    draft = a_draft(operator, lease, [line("Poster", "33.33")])
+    viewer, _ = client_for(Role.VIEWER)
+    for kind in ("preview", "print"):
+        page = viewer.get(f"/invoices/drafts/{draft.pk}/{kind}/").content.decode()
+        assert 'id="invoice-pay-memo"' not in page and "in the memo." not in page, kind
+    sent(draft)
+    invoice = Invoice.objects.get()
+    expected = f"Paying by wire or Zelle? Put {invoice.invoice_number} in the memo."
+    assert memo_line(str(invoice.invoice_number)) == expected
+    for kind in ("preview", "print"):
+        page = viewer.get(f"/invoices/drafts/{draft.pk}/{kind}/").content.decode()
+        assert f'<p id="invoice-pay-memo">{expected}</p>' in page, kind
+    Invoice.objects.filter(pk=invoice.pk).update(internal_status=InvoiceStatus.VOID)
+    page = viewer.get(f"/invoices/drafts/{draft.pk}/print/").content.decode()
+    assert "in the memo." not in page
+
+
+def test_the_portals_invoices_page_names_each_open_invoice_in_the_memo_line() -> None:
+    from ledger.models import Invoice, InvoiceStatus
+    from tests.test_portal import World, active_user, portal_client
+
+    world = World()
+    client = portal_client(active_user(world.a))
+    page = client.get(f"/portal/stores/{world.store_a.pk}/invoices/").content.decode()
+    assert "Paying by wire or Zelle? Put INV-2026-0001 in the memo." in page
+    assert "INV-2026-0002" not in page  # a draft: neither its row nor a memo line
+    assert "INV-2026-0003" not in page  # another operator's
+    assert page.count("in the memo.") == 1
+    Invoice.objects.filter(pk=world.invoice_a.pk).update(internal_status=InvoiceStatus.VOID)
+    page = client.get(f"/portal/stores/{world.store_a.pk}/invoices/").content.decode()
+    assert "INV-2026-0001" in page and "in the memo." not in page
+
+
+def test_the_portals_pay_page_names_the_invoice_of_each_charge_paid(provider: Any) -> None:
+    from django.test import override_settings
+
+    from ledger.models import Invoice, InvoiceStatus
+    from tests.receivables_helpers import an_invoice as invoice_of
+    from tests.test_portal_payments import World
+
+    with override_settings(STAX_CALLER="worker", STAX_PAY_INVOICE_ENABLED=True):
+        world = World(provider)
+        invoice_of(
+            world.operator,
+            9101,
+            "1500.00",
+            rent_charge=world.rent,
+            internal_status=InvoiceStatus.SENT,
+        )
+        one_off_number = Invoice.objects.get(one_off_charge=world.one_off).invoice_number
+        rent_line = "Paying by wire or Zelle? Put INV-2026-9101 in the memo."
+        one_off_line = f"Paying by wire or Zelle? Put {one_off_number} in the memo."
+        page = world.client.get(world.pay_url(world.rent.pk)).content.decode()
+        assert f'<p class="portal-muted pay-memo">{rent_line}</p>' in page
+        assert one_off_number not in page
+        assert page.index('id="pay-amount"') < page.index(rent_line)
+        whole = world.client.get(world.pay_url()).content.decode()
+        assert rent_line in whole and one_off_line in whole
+        assert whole.count("in the memo.") == 2

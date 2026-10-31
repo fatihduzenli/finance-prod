@@ -23,6 +23,7 @@ dependencies = [
     "pypdf==6.19.0",
     "google-auth==2.60.0",
     "reportlab==5.0.1",
+    "cryptography==50.0.2",
 ]
 
 [dependency-groups]

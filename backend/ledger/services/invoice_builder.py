@@ -32,7 +32,8 @@ saving (:data:`LINE_SAVE_NOT_OFFERED`).
 - :func:`preview` is what the preview and print pages show: the lines, the total, the
   operator's and store's details, our draft number (``DRAFT-`` and eight characters)
   until it is sent and the invoice number after, the due date (the draft's, else today
-  plus :data:`DUE_DAYS` days, New York).
+  plus :data:`DUE_DAYS` days, New York), and once sent (not void) the memo line
+  (:func:`ledger.wording.memo_line`, PLAN-014 I5).
 - :func:`send` (billing; collection ``email``) and :func:`charge_now` (admin; collection
   ``charge_now``, the confirmation of PLAN-010d D4) convert the draft **in one
   transaction**, under the draft's row lock (a second send finds it sent and changes
@@ -240,7 +241,7 @@ from ledger.services.one_off_charges import (
 )
 from ledger.services.rent_run import CENT
 from ledger.validators import validate_no_payment_data, visible_text
-from ledger.wording import format_amount, provider_sentence
+from ledger.wording import format_amount, memo_line, provider_sentence
 from payments import jobs, lease_sync
 from payments.models import Job, JobKind
 
@@ -655,6 +656,9 @@ class Preview:
     #: PLAN-014 C6: the lease's billing details (else the operator's first active
     #: lease's) under the operator's full name.
     bill_to: BillTo
+    #: PLAN-014 I5: "Paying by wire or Zelle? Put INV-… in the memo." once sent (never on
+    #: a draft or a void invoice), else ``""``.
+    pay_memo: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -742,6 +746,11 @@ def preview(draft: InvoiceDraft, today: date | None = None) -> Preview:
         memo=draft.memo,
         invoice=invoice,
         bill_to=bill_to(billing_account(draft.operator, lease), draft.operator),
+        pay_memo=(
+            memo_line(invoice.invoice_number)
+            if invoice is not None and invoice.internal_status != InvoiceStatus.VOID
+            else ""
+        ),
     )
 
 
