@@ -395,7 +395,9 @@ GUARD_MODULES = (
     "payments.migrations.0019_lease_job_kinds",
     "payments.migrations.0020_lease_account_switch",
     "payments.migrations.0021_job_run_after",
+    "payments.migrations.0022_portal_pay_job",
     "portal.migrations.0001_initial",
+    "portal.migrations.0002_portal_payments",
 )
 
 

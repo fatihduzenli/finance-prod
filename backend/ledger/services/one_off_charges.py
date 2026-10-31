@@ -155,6 +155,7 @@ Money is ``Decimal`` throughout.
 
 from __future__ import annotations
 
+import copy
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -1865,6 +1866,18 @@ def _debit_for_key(charge: OneOffCharge, key: uuid.UUID | None) -> bool:
     ).exists()
 
 
+def as_debit_today(charge: OneOffCharge) -> OneOffCharge:
+    """The charge as today's bank debit reads it (PLAN-012f-b D14): an e-mail or manual
+    charge is switched to Charge now by :func:`debit` (and by :func:`start_portal_debit`)
+    before Charge now's rules apply, so the confirmation page and the portal read the same
+    rules. An unsaved copy; nothing is written."""
+    if charge.collection not in (CollectionMethod.EMAIL, CollectionMethod.MANUAL):
+        return charge
+    preview = copy.copy(charge)
+    preview.collection = CollectionMethod.CHARGE_NOW
+    return preview
+
+
 def debit(
     charge: OneOffCharge,
     amount: Decimal,
@@ -2034,6 +2047,92 @@ def rent_debit_request(charge: RentCharge, actor: User | None) -> ChargeNowDetai
     )
 
 
+def _new_rent_debit(
+    locked: RentCharge,
+    operator: Operator,
+    amount: Decimal,
+    on: date,
+    day: date,
+    *,
+    actor: User | None,
+    key: uuid.UUID | None,
+    note: str,
+) -> tuple[OneOffCharge, Invoice | None] | None:
+    """The rent charge's bank debit (:func:`rent_debit`, D19): the ``redebit`` charge sourced
+    by ``locked`` (its row lock held), ``amount`` as its price, due on ``on``, ``key`` as its
+    ``charge_now_key``; for today (``on == day``) ``charge_now`` with its local one-line
+    invoice, else ``email``. Audited ``created`` on the charge and
+    ``rent_charge.debit_started`` on the rent charge. ``None`` (nothing written) when another
+    debit of the rent charge, or of this key, committed first."""
+    now = on == day
+    redebit = OneOffCharge(
+        operator=operator,
+        lease=locked.lease,
+        category=OneOffCategory.REDEBIT,
+        collection=CollectionMethod.CHARGE_NOW if now else CollectionMethod.EMAIL,
+        description=rent_debit_description(locked),
+        price=amount,
+        due_date=on,
+        note=note,
+        status=OneOffChargeStatus.OWED,
+        source_rent_charge=locked,
+        charge_now_key=key or uuid.uuid4(),
+    )
+    try:
+        with transaction.atomic():
+            redebit.save()
+    except IntegrityError:
+        return None
+    invoice = None
+    if now:
+        invoice = Invoice.objects.create(
+            invoice_number=numbering.next_invoice_number(day.year),
+            operator=operator,
+            one_off_charge=redebit,
+            issue_date=day,
+            due_date=day,
+            memo=redebit.description,
+            subtotal=amount,
+            tax=ZERO,
+            fees=ZERO,
+            surcharge=ZERO,
+            total=amount,
+            internal_status=InvoiceStatus.DRAFT,
+            allow_card=False,
+            allow_ach=True,
+            legacy=False,
+        )
+    number = invoice.invoice_number if invoice is not None else None
+    _audit(
+        actor,
+        CREATED_ACTION,
+        redebit,
+        None,
+        {
+            **charge_state(redebit),
+            "note": note,
+            "source_rent_charge": str(locked.pk),
+            "invoice_number": number,
+            "creation_key": str(key) if key is not None else None,
+        },
+    )
+    AuditLog.objects.create(
+        actor=actor,
+        action=RENT_DEBIT_ACTION,
+        entity_type=rent_run.ENTITY_CHARGE,
+        entity_id=str(locked.pk),
+        before=None,
+        after={
+            "amount": str(amount),
+            "on": on.isoformat(),
+            "charge": str(redebit.pk),
+            "debit_key": str(key) if key is not None else None,
+            "note": note,
+        },
+    )
+    return redebit, invoice
+
+
 def rent_debit(
     charge: RentCharge,
     on: date | None,
@@ -2099,72 +2198,12 @@ def rent_debit(
         now = on == day
         if not now and _lease_ended(locked.lease, day):
             return Outcome(False, LEASE_ENDED, "on")
-        redebit = OneOffCharge(
-            operator=operator,
-            lease=locked.lease,
-            category=OneOffCategory.REDEBIT,
-            collection=CollectionMethod.CHARGE_NOW if now else CollectionMethod.EMAIL,
-            description=rent_debit_description(locked),
-            price=amount,
-            due_date=on,
-            note=note,
-            status=OneOffChargeStatus.OWED,
-            source_rent_charge=locked,
-            charge_now_key=key or uuid.uuid4(),
-        )
-        try:
-            with transaction.atomic():
-                redebit.save()
-        except IntegrityError:
+        made = _new_rent_debit(locked, operator, amount, on, day, actor=actor, key=key, note=note)
+        if made is None:
             # Another debit of this rent charge (or of this key) committed first.
             return Outcome(False, RENT_DEBIT_PENDING)
-        invoice = None
-        if now:
-            invoice = Invoice.objects.create(
-                invoice_number=numbering.next_invoice_number(day.year),
-                operator=operator,
-                one_off_charge=redebit,
-                issue_date=day,
-                due_date=day,
-                memo=redebit.description,
-                subtotal=amount,
-                tax=ZERO,
-                fees=ZERO,
-                surcharge=ZERO,
-                total=amount,
-                internal_status=InvoiceStatus.DRAFT,
-                allow_card=False,
-                allow_ach=True,
-                legacy=False,
-            )
+        redebit, invoice = made
         number = invoice.invoice_number if invoice is not None else None
-        _audit(
-            actor,
-            CREATED_ACTION,
-            redebit,
-            None,
-            {
-                **charge_state(redebit),
-                "note": note,
-                "source_rent_charge": str(locked.pk),
-                "invoice_number": number,
-                "creation_key": str(key) if key is not None else None,
-            },
-        )
-        AuditLog.objects.create(
-            actor=actor,
-            action=RENT_DEBIT_ACTION,
-            entity_type=rent_run.ENTITY_CHARGE,
-            entity_id=str(locked.pk),
-            before=None,
-            after={
-                "amount": str(amount),
-                "on": on.isoformat(),
-                "charge": str(redebit.pk),
-                "debit_key": str(key) if key is not None else None,
-                "note": note,
-            },
-        )
         if now:
             _audit(
                 actor,
@@ -2188,6 +2227,154 @@ def rent_debit(
         if not outcome.ok:
             transaction.set_rollback(True)
     return outcome
+
+
+# --- A portal user's own payment (PLAN-014 H4) ----------------------------------------
+#
+# Rule 2 (ADR-0017): pay-an-invoice has two callers, an admin's Charge now and a portal user's
+# own payment, each one attempt per request. ``portal.payments`` reads these two functions and
+# queues the ``portal_pay`` job itself; the worker then runs ``payments.one_off_invoices.pay``.
+
+#: Why a portal user's own payment may not debit a charge now (:func:`portal_debit_refusal`).
+PORTAL_PENDING = "pending"
+PORTAL_WAIT = "wait"
+PORTAL_AUTOPAY = "autopay"
+PORTAL_PLAN = "plan"
+PORTAL_LIMIT = "limit"
+PORTAL_NOT_HERE = "not_here"
+#: The key of the portal payment's id in the audit rows of its debits (no staff actor).
+PORTAL_PAYMENT_KEY = "portal_payment"
+
+
+def _portal_rent_refusal(charge: RentCharge, amount: Decimal, today: date) -> str:
+    options = rent_debit_options(charge, today=today)
+    if options.reason == RENT_DEBIT_PENDING:
+        return PORTAL_PENDING
+    if options.reason == DEBIT_ON_PLAN:
+        return PORTAL_PLAN
+    if options.reason == DEBIT_BY_AUTOPAY.format(date=day_text(charge.due_on)):
+        return PORTAL_AUTOPAY
+    operator = charge.lease.operator
+    if options.reason or operator is None or operator.archived_at is not None:
+        return PORTAL_NOT_HERE
+    if options.balance != amount:
+        return PORTAL_NOT_HERE
+    return PORTAL_LIMIT if leases.provider_limit_refusal([amount]) else ""
+
+
+def _portal_one_off_refusal(charge: OneOffCharge, amount: Decimal) -> str:
+    options = bank_debit_options(charge)
+    if options.reason == DEBIT_PENDING:
+        return PORTAL_PENDING
+    if options.reason or not _debit_eligible(charge) or is_later_line(charge):
+        return PORTAL_NOT_HERE
+    if jobs.is_active(jobs.latest_for(charge)):
+        return PORTAL_PENDING
+    if charge_now_wait(charge):
+        return PORTAL_WAIT
+    billed = billed_total(charge)
+    if billed != amount or options.balance != amount:
+        return PORTAL_NOT_HERE
+    refusal = charge_now_refusal(as_debit_today(charge))
+    if refusal == CHARGE_NOW_HAS_PAYMENT:
+        return PORTAL_PENDING
+    if refusal and refusal == leases.provider_limit_refusal([billed]):
+        return PORTAL_LIMIT
+    return PORTAL_NOT_HERE if refusal else ""
+
+
+def portal_debit_refusal(charge: OneOffCharge | RentCharge, amount: Decimal, today: date) -> str:
+    """Why a portal user's own payment may not debit ``amount`` for ``charge`` today, as one
+    of the ``PORTAL_*`` codes, or ``""``. ``amount`` must be the whole open balance the
+    staff debit reads (:func:`rent_debit_options` for a rent charge; :func:`open_balance` and
+    the invoice's total for a one-off charge). The rules are those of Add payment's bank
+    debit today and of Charge now (the flag, the bank method on file, a debit in flight, a
+    live plan, the lease's autopay, the processor's limit), without the staff role and the
+    large-debit box: the operator confirms the amount on the page. Local data only."""
+    if isinstance(charge, RentCharge):
+        return _portal_rent_refusal(charge, amount, today)
+    return _portal_one_off_refusal(charge, amount)
+
+
+def start_portal_debit(
+    charge: OneOffCharge | RentCharge,
+    amount: Decimal,
+    *,
+    key: uuid.UUID,
+    portal_payment: uuid.UUID,
+    today: date,
+) -> Outcome:
+    """Prepare a portal user's own debit of ``charge`` (PLAN-014 H4) and answer the one-off
+    charge the ``portal_pay`` job debits (``Outcome.charge``), or the refusal code of
+    :func:`portal_debit_refusal` with nothing written (``Outcome.message``).
+
+    Under the charge's row lock the refusal is read again. A **one-off charge** e-mailed or
+    manual becomes ``charge_now`` (as Add payment's debit today, audited ``debit_requested``)
+    and keeps its ``charge_now_key`` (``key`` when it has none; it never changes after): the
+    stored idempotency key of the single attempt. A **rent charge** gets its bank debit with
+    its local one-line invoice (:func:`_new_rent_debit`, ``key`` as its key), whose provider
+    invoice the job creates before the attempt. Audited ``charge_now_requested`` on the
+    charge debited, with no staff actor and the portal payment's id. Nothing is queued here
+    and no payment state is written (Rule 2)."""
+    with transaction.atomic():
+        if isinstance(charge, RentCharge):
+            rent = (
+                RentCharge.objects.select_for_update(of=("self",))
+                .select_related("lease__operator", "lease__store")
+                .get(pk=charge.pk)
+            )
+            code = _portal_rent_refusal(rent, amount, today)
+            operator = rent.lease.operator
+            if code or operator is None:
+                return Outcome(False, code or PORTAL_NOT_HERE)
+            made = _new_rent_debit(
+                rent, operator, amount, today, today, actor=None, key=key, note=""
+            )
+            if made is None:
+                return Outcome(False, PORTAL_PENDING)
+            debit, invoice = made
+        else:
+            debit = (
+                OneOffCharge.objects.select_for_update(of=("self",))
+                .select_related("operator", "lease")
+                .get(pk=charge.pk)
+            )
+            code = _portal_one_off_refusal(debit, amount)
+            if code:
+                return Outcome(False, code)
+            before = debit.collection
+            debit.collection = CollectionMethod.CHARGE_NOW
+            if debit.charge_now_key is None:
+                debit.charge_now_key = key
+            debit.save(update_fields=["collection", "charge_now_key", "updated_at"])
+            _audit(
+                None,
+                DEBIT_NOW_ACTION,
+                debit,
+                {"collection": before},
+                {
+                    "collection": CollectionMethod.CHARGE_NOW.value,
+                    "amount": str(amount),
+                    "debit_key": str(key),
+                    "note": "",
+                    PORTAL_PAYMENT_KEY: str(portal_payment),
+                },
+            )
+            linked = rent_run.provider_invoice(debit)
+            invoice = linked[0] if linked is not None else None
+        _audit(
+            None,
+            CHARGE_NOW_REQUESTED_ACTION,
+            debit,
+            None,
+            {
+                "amount": str(amount),
+                "invoice_number": invoice.invoice_number if invoice is not None else None,
+                "large_debit_confirmed": leases.is_large_debit(amount),
+                PORTAL_PAYMENT_KEY: str(portal_payment),
+            },
+        )
+    return Outcome(True, "", charge=debit)
 
 
 #: The provider requests of a one-off charge that the page's single retry repeats (D3).

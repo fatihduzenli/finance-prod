@@ -1,0 +1,46 @@
+{% extends "portal/base.html" %}{% load static %}
+{% comment %}Bank account (PLAN-014 H5; portal.views.bank): the bank on file (its last four; a shared account names the store whose account it is), and the processor's hosted fields to add or replace it. The processor's script shows the account fields in its own frames, sends the account to the processor and gives this page only the new payment method's reference, the form's one field (payment_method_id; Rule 1: no account or routing number reaches this app). The script is ledger/bank_entry.js, the staff bank-entry page's, on the same element ids. Locally (the fake provider) one plain field takes a reference the fake knows. Without hosted fields one sentence says bank entry is not set up. Automatic debits are staff's: nothing here changes them.{% endcomment %}
+{% block title %}Bank account{% endblock %}
+{% block content %}
+{% include "portal/_store_title.html" %}
+{% include "portal/_store_tabs.html" %}
+{% if needs_bank %}<p class="portal-error" id="bank-needed" role="status">{{ needs_bank_text }}</p>{% endif %}
+{% if bank.change_text %}<p id="bank-change" class="{% if bank.change == 'done' %}portal-ok{% elif bank.change == 'failed' %}portal-error{% endif %}" role="status">{{ bank.change_text }}{% if bank.waiting %} This page refreshes every 5 seconds.{% endif %}</p>{% endif %}
+<section class="portal-card">
+  <dl class="portal-facts">
+    <dt>Bank on file</dt><dd id="bank-on-file">{% if bank.last4 %}····{{ bank.last4 }}{% else %}none{% endif %}{% if bank.shared_with %} <span class="portal-muted" id="bank-shared">Shared with {{ bank.shared_with }}</span>{% endif %}</dd>
+  </dl>
+  <p class="portal-muted" id="autopay-note">{{ bank.autopay_note }}</p>
+</section>
+<section class="portal-card">
+  <h2>{% if bank.replaces %}Replace the bank account{% else %}Add a bank account{% endif %}</h2>
+  {% if problem %}<p class="portal-error" id="bank-problem" role="alert">{{ problem }}</p>{% endif %}
+  {% with config=bank.config %}
+  {% if not config %}
+  <p id="bank-unavailable">{{ bank.message }}</p>
+  {% else %}
+  {% if bank.replaces %}<p id="bank-replaces">The new account replaces ····{{ bank.last4 }}.{% if shared_text %} <span id="bank-shared-replace">{{ shared_text }}</span>{% endif %}</p>{% endif %}
+  {% if config.script_url %}
+  <form method="post" action="{% url 'portal:bank' pk=store.pk %}" id="bank-entry-form" autocomplete="off">{% csrf_token %}<input type="hidden" name="payment_method_id" id="bank-entry-method" value="">
+    <p class="portal-muted">The bank account is entered in {{ company.provider_name }}'s own fields below and goes straight to {{ company.provider_name }}. We receive only a reference to it.</p>
+    <div id="bank-entry-fields" data-token="{{ config.web_payments_token }}" data-customer="{{ config.customer_external_id }}">
+      <div id="bank-holder-field"></div>
+      <div id="bank-routing-field"></div>
+      <div id="bank-account-field"></div>
+    </div>
+    <p id="bank-entry-error" class="portal-error" role="alert" hidden>{{ company.provider_name }} could not take the bank account. Check it and try again.</p>
+    <button type="submit" class="portal-button" id="bank-entry-save" disabled>Save bank account</button>
+  </form>
+  {% else %}
+  <form method="post" action="{% url 'portal:bank' pk=store.pk %}" id="bank-entry-form" autocomplete="off">{% csrf_token %}
+    <p class="portal-muted">Local test fields: the reference of a bank method the in-memory {{ company.provider_name }} holds for this account.</p>
+    <label for="bank-entry-method">Bank method reference</label>
+    <input type="text" name="payment_method_id" id="bank-entry-method" maxlength="255" required>
+    <button type="submit" class="portal-button" id="bank-entry-save">Save bank account</button>
+  </form>
+  {% endif %}
+  {% endif %}
+  {% endwith %}
+</section>
+{% endblock %}
+{% block scripts %}{% if bank.config.script_url %}<script src="{{ bank.config.script_url }}"></script><script src="{% static 'ledger/bank_entry.js' %}" defer></script>{% endif %}{% endblock %}

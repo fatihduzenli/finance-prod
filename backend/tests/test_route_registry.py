@@ -112,6 +112,7 @@ def test_the_portal_sets_are_pinned_and_apart_from_the_staff_ones() -> None:
         "portal:payments",
         "portal:statement",
         "portal:pay",
+        "portal:pay_status",  # PLAN-014 H4
         "portal:bank",
         "portal:account",
         "portal:password",

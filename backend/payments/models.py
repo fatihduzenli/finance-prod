@@ -264,6 +264,9 @@ class JobKind(models.TextChoices):
     #: PLAN-014 C9: a lease that shares another lease's account moves to its own customer's
     #: bank method (``ledger.services.leases.switch_to_own_account``).
     LEASE_ACCOUNT_SWITCH = "lease_account_switch", "Switching to the lease's own account"
+    #: PLAN-014 H4: a portal user's own payment of one charge, the single pay-an-invoice
+    #: attempt (``payments.jobs.runners.portal_pay_job``).
+    PORTAL_PAY = "portal_pay", "Paying from the portal"
 
 
 class JobEntity(models.TextChoices):

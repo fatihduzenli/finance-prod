@@ -939,11 +939,13 @@ def test_the_statement_is_scoped_to_the_portal_users_operator(world: World) -> N
 
 
 def test_pay_and_bank_say_they_are_not_available_yet(world: World) -> None:
+    """Re-pinned by PLAN-014 H4/H5: the flag off says online payment is not available yet;
+    without hosted fields the Bank account page says bank entry is not set up."""
     client = portal_client(active_user(world.a))
     pay = text(client.get(f"/portal/stores/{world.store_a.pk}/pay/"))
     assert "Online payment is not available yet." in pay
     bank = text(client.get(f"/portal/stores/{world.store_a.pk}/bank/"))
-    assert "Bank account changes are not available yet." in bank
+    assert "Adding a bank account online is not set up yet." in bank
 
 
 def test_the_account_page_changes_the_theme_and_the_password(world: World) -> None:

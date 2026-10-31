@@ -21,6 +21,7 @@ urlpatterns = [
     path("stores/<str:pk>/invoices/", views.invoices, name="invoices"),
     path("stores/<str:pk>/payments/", views.payments, name="payments"),
     path("stores/<str:pk>/pay/", views.pay, name="pay"),
+    path("stores/<str:pk>/pay/status/", views.pay_status, name="pay_status"),
     path("stores/<str:pk>/bank/", views.bank, name="bank"),
     path("statement/", views.statement, name="statement"),
     path("account/", views.account, name="account"),
