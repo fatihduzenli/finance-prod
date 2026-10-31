@@ -1,11 +1,7 @@
 {% extends "finance/base.html" %}
 {% load static responsive dates %}
 {% block title %}Settings{% endblock %}
-{% comment %}Plaid Link's script from Plaid's documented CDN URL (https://plaid.com/docs/link/web/: https://cdn.plaid.com/link/v2/stable/link-initialize.js), only while Connect is offered with the real source.{% endcomment %}
-{% block scripts %}{% if bank.can_connect and not bank.fake %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script><script src="{% static 'banking/link.js' %}" defer></script>{% endif %}{% endblock %}
 {% block header %}<div class="page-header"><h1>Settings</h1></div>{% endblock %}
-{% comment %}Plaid Link's script from Plaid's documented CDN URL (https://plaid.com/docs/link/web/: https://cdn.plaid.com/link/v2/stable/link-initialize.js), only while Connect is offered with the real source.{% endcomment %}
-{% block scripts %}{% if bank.can_connect and not bank.fake %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script><script src="{% static 'banking/link.js' %}" defer></script>{% endif %}{% endblock %}
 {% block content %}
   {% comment %}Admin › Settings (docs/qa/PLAN-014 B2): one card per section. Brands: each row renames in place (the name and Save), makes the brand active or inactive and moves it up or down, each a small POST of its own; Add takes a name. Nothing deletes a brand; the Stores column says how many stores carry each one (an inactive brand stays on its stores, the store form stops offering it).{% endcomment %}
   <section class="card table-card settings-card" id="brands-card">

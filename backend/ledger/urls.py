@@ -449,7 +449,7 @@ settings_patterns = (
         path("brands/<str:pk>/move/", settings.brand_move, name="brand_move"),
         # PLAN-014 D1, D4: the Mail card and the message templates.
         path("mail/", settings.mail_save, name="mail_save"),
-        path("bank-deposits/", settings.bank_save, name="bank_save"),
+        path("bank-deposit-settings/", settings.bank_save, name="bank_save"),
         path("templates/", settings.templates_list, name="templates"),
         path("templates/<str:pk>/", settings.template_edit, name="template_edit"),
         path("templates/<str:pk>/preview/", settings.template_preview, name="template_preview"),
