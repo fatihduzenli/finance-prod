@@ -202,6 +202,7 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:one_off_charges:payment": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:retry_mark": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:retry": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:stop_retry": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:link": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:one_off_charges:cancel": RouteRule(min_role=Role.BILLING, methods=POST),

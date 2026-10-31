@@ -255,6 +255,7 @@ one_off_charge_patterns = (
             name="delete_invoice",
         ),
         path("<str:pk>/retry/", one_off_charges.charge_retry, name="retry"),
+        path("<str:pk>/stop-retry/", one_off_charges.charge_stop_retry, name="stop_retry"),
         path("<str:pk>/charge-now/", one_off_charges.charge_now, name="charge_now"),
         path(
             "<str:pk>/send-message/",

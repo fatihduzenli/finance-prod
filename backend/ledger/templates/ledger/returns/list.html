@@ -3,30 +3,37 @@
 {% block title %}Returned payments{% endblock %}
 {% block header %}<div class="page-header"><div class="page-title"><h1>Returned payments</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} not resolved</span></div><div class="page-actions"><a class="btn" id="export-csv" href="{% url 'ledger:returns:export' %}">Download spreadsheet</a></div></div>{% endblock %}
 {% block content %}
-  <p class="muted">ACH debits {{ company.provider_name }} reported returned, not yet resolved. The charge was reopened when the return arrived. Nothing debits again unless staff reschedule it: <strong>Debit again</strong> adds the NSF fee ({{ nsf_first }} on an operator's first return, {{ nsf_later }} afterwards). Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
+  <p class="muted">ACH debits {{ company.provider_name }} reported returned, not yet resolved. The charge was reopened when the return arrived. The NSF fee ({{ nsf_first }}) is added when the return arrives. A debit returned for insufficient or uncollected funds (R01, R09) is debited again automatically on the third business day, unless staff stop it before then (or log a call, e-mail, visit or promise for the lease within two business days); every other code gets no retry and the lease is marked Needs review. <strong>Debit again</strong> sets a re-debit date staff agreed; on a return that has no fee yet it adds the NSF fee ({{ nsf_first }} on an operator's first return, {{ nsf_later }} afterwards). Learn more: <a href="{% url 'finance:help_topic' slug='autopay-and-daily-charges' %}">Autopay and the daily charges</a></p>
   <div class="card table-card list-card">
   {% responsive_table %}
   <table id="returns">
     <thead>
-      <tr><th>Operator</th><th class="money">Amount</th><th>Code</th><th>Reason</th><th>Returned at</th>{% if can_resolve %}<th>Resolve or reschedule</th>{% endif %}</tr>
+      <tr><th>Operator</th><th class="money">Amount</th><th>Code</th><th>Reason</th><th>Returned at</th><th>Retry</th>{% if can_resolve %}<th>Resolve or reschedule</th>{% endif %}</tr>
     </thead>
     <tbody>
-      {% for item in rows %}
+      {% for item, state in rows %}
         <tr id="return-{{ item.payment.pk }}">
           <td>{% if item.operator %}{% url 'ledger:operators:detail' pk=item.operator.pk as operator_url %}{% include "ledger/_cell_title.html" with title=item.operator.display_name link=operator_url subline=item.store.external_label|default:"No store" %}{% else %}{% include "ledger/_cell_title.html" with title="Unknown operator" subline=item.store.external_label|default:"No store" %}{% endif %}</td>
           <td class="money">{{ item.amount|money }}{% if item.payment.rent_charge_id %} <a href="{% url 'ledger:charges:detail' pk=item.payment.rent_charge_id %}">charge</a>{% elif item.payment.one_off_charge_id %} <a href="{% url 'ledger:one_off_charges:detail' pk=item.payment.one_off_charge_id %}">one-off charge</a>{% endif %}</td>
           <td>{{ item.code|default:"—" }}</td>
           <td>{{ item.reason|default:"—" }}</td>
           <td>{{ item.returned_at|moment|default:"—" }}</td>
+          <td id="retry-{{ item.payment.pk }}">{{ state.text|default:"—" }}{% if state.fee %} <a href="{% url 'ledger:one_off_charges:detail' pk=state.fee %}">NSF fee</a>{% endif %}</td>
           {% if can_resolve %}
             <td>
+              {% if state.pending %}
+              <form method="post" action="{% url 'ledger:one_off_charges:stop_retry' pk=state.pending %}" class="js-single-submit" id="stop-retry-{{ item.payment.pk }}">
+                {% csrf_token %}<input type="hidden" name="back" value="returns">
+                <button class="btn" type="submit">Stop automatic retry</button>
+              </form>
+              {% endif %}
               {% comment %}PLAN-012c D8: Reschedule only on a returned ACH debit; Resolve with a note on every return.{% endcomment %}
-              {% if item.debit %}
+              {% if item.debit and not state.pending %}
               <form method="post" action="{% url 'ledger:returns:reschedule' pk=item.payment.pk %}" class="js-single-submit reschedule-form" id="reschedule-{{ item.payment.pk }}">
                 {% csrf_token %}
                 <label for="redebit-date-{{ item.payment.pk }}">Re-debit date (New York) *</label>
                 <input type="date" name="redebit_date" id="redebit-date-{{ item.payment.pk }}" min="{{ today|date:'Y-m-d' }}" required>
-                {% if can_waive %}<label class="inline"><input type="checkbox" name="waive_fee" id="waive-fee-{{ item.payment.pk }}"> Waive the NSF fee (a note is required)</label>{% endif %}
+                {% if can_waive and not state.fee %}<label class="inline"><input type="checkbox" name="waive_fee" id="waive-fee-{{ item.payment.pk }}"> Waive the NSF fee (a note is required)</label>{% endif %}
                 <label class="inline"><input type="checkbox" name="confirm" id="confirm-{{ item.payment.pk }}"> I confirm a debit above the large-debit threshold</label>
                 <label for="reschedule-note-{{ item.payment.pk }}">Note</label>
                 <textarea name="note" id="reschedule-note-{{ item.payment.pk }}" rows="2" maxlength="2000"></textarea>
@@ -43,7 +50,7 @@
           {% endif %}
         </tr>
       {% empty %}
-        <tr><td colspan="{% if can_resolve %}6{% else %}5{% endif %}" class="muted empty">No unresolved returns.</td></tr>
+        <tr><td colspan="{% if can_resolve %}7{% else %}6{% endif %}" class="muted empty">No unresolved returns.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -438,6 +438,11 @@ class ReviewReason(models.TextChoices):
     #: PLAN-014 C8: the lease bills through another lease's processor customer since
     #: ledger migration 0059 (``LeaseBilling.shares_account_of``) and needs its own.
     OWN_CUSTOMER = "own_customer", "Own processor customer needed"
+    #: PLAN-014 F2: a debit returned with a code that is not retried (or that could not be
+    #: retried) needs a new payment method; the code is in the audit row.
+    RETURNED_DEBIT = "returned_debit", "Returned debit: new payment method needed"
+    #: PLAN-014 F2: the original debit was re-debited twice within 180 days (Nacha).
+    REDEBIT_LIMIT = "redebit_limit", "Re-debit limit reached (Nacha)"
 
 
 class PaymentChannel(models.TextChoices):
@@ -1040,13 +1045,26 @@ class OneOffCategory(models.TextChoices):
     #: or a rent charge's bank debit from Add payment (PLAN-012f-b D19),
     #: ``source_rent_charge`` naming it.
     REDEBIT = "redebit", "Re-debit"
-    #: The fee for a returned debit, made with its re-debit (``companion_of``).
+    #: The fee for a returned debit: made at the return (``source_payment``, PLAN-014 F2),
+    #: or with a re-debit staff scheduled (``companion_of``) for a return that has none.
     NSF_FEE = "nsf_fee", "Returned payment (NSF) fee"
     #: One installment of a plan (PLAN-012e D9); ``plan`` and ``installment_no`` name it.
     INSTALLMENT = "installment", "Installment"
     #: One occurrence of an autopay plan (PLAN-012f-a D11); ``autopay_plan`` and
     #: ``period_no`` name it.
     AUTOPAY_PLAN = "autopay_plan", "Autopay plan"
+
+
+class RetryState(models.TextChoices):
+    """Where the automatic re-debit of a returned debit stands (PLAN-014 F2, F3); empty on
+    every other charge. ``auto_pending`` until the eve of its date, ``scheduled`` once its
+    processor schedule is queued, ``stopped`` by staff (or a staff contact) within the two
+    business days, ``done`` once its payment settled or was returned."""
+
+    AUTO_PENDING = "auto_pending", "Automatic re-debit pending"
+    SCHEDULED = "scheduled", "Automatic re-debit scheduled"
+    STOPPED = "stopped", "Stopped"
+    DONE = "done", "Done"
 
 
 #: What staff call a ``redebit`` charge sourced by a rent charge (PLAN-012f-b §10 D19)
@@ -1150,9 +1168,11 @@ class OneOffCharge(GuardedModel):
     void_note = free_text()
     #: The idempotency identifier of the single "Charge now" attempt (D4), set once.
     charge_now_key = models.UUIDField(null=True, blank=True, unique=True, editable=False)
-    #: PLAN-011b D5: the returned payment a ``redebit`` charge collects again (one
+    #: PLAN-011b D5: the returned payment a ``redebit`` charge collects again (one live
     #: re-debit per return), and the ``redebit`` charge an ``nsf_fee`` charge goes with
     #: (one fee per re-debit). A payment on their shared invoice pays the re-debit first.
+    #: PLAN-014 F2: an ``nsf_fee`` charge made at the return names its returned payment
+    #: instead of a re-debit (one such fee per returned payment).
     source_payment = models.ForeignKey(
         "Payment", on_delete=models.PROTECT, null=True, blank=True, related_name="redebits"
     )
@@ -1189,6 +1209,10 @@ class OneOffCharge(GuardedModel):
         related_name="occurrences",
     )
     period_no = models.IntegerField(null=True, blank=True)
+    #: PLAN-014 F2: an automatic re-debit's date (the third business day after the return's
+    #: notice) and its state; both empty on every other charge.
+    retry_date = models.DateField(null=True, blank=True)
+    retry_state = _choice(RetryState, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1251,17 +1275,43 @@ class OneOffCharge(GuardedModel):
                 )
                 | (
                     ~Q(category="redebit")
-                    & Q(source_payment__isnull=True, source_rent_charge__isnull=True)
+                    & Q(source_rent_charge__isnull=True)
+                    & (Q(source_payment__isnull=True) | Q(category="nsf_fee"))
                 ),
                 name="one_off_charges_redebit_one_source",
             ),
+            # PLAN-014 F2: a fee made at the return names its returned payment instead.
             models.CheckConstraint(
-                condition=Q(category="nsf_fee", companion_of__isnull=False)
+                condition=(
+                    Q(category="nsf_fee")
+                    & (Q(companion_of__isnull=False) | Q(source_payment__isnull=False))
+                )
                 | (~Q(category="nsf_fee") & Q(companion_of__isnull=True)),
                 name="one_off_charges_companion_iff_nsf_fee",
             ),
+            # One live re-debit per returned payment: a stopped automatic re-debit is
+            # voided, and staff may then debit again (PLAN-014 F4).
             models.UniqueConstraint(
-                fields=["source_payment"], name="one_off_charges_one_redebit_per_payment"
+                fields=["source_payment"],
+                condition=Q(category="redebit") & ~Q(status="voided"),
+                name="one_off_charges_one_redebit_per_payment",
+            ),
+            models.UniqueConstraint(
+                fields=["source_payment"],
+                condition=Q(category="nsf_fee"),
+                name="one_off_charges_one_fee_per_returned_payment",
+            ),
+            models.CheckConstraint(
+                condition=Q(retry_state="", retry_date__isnull=True)
+                | (
+                    ~Q(retry_state="")
+                    & Q(
+                        category="redebit",
+                        source_payment__isnull=False,
+                        retry_date__isnull=False,
+                    )
+                ),
+                name="one_off_charges_retry_iff_redebit",
             ),
             models.UniqueConstraint(
                 fields=["companion_of"], name="one_off_charges_one_fee_per_redebit"
@@ -1302,6 +1352,7 @@ class OneOffCharge(GuardedModel):
             _valid_choice("one_off_charges", "status", OneOffChargeStatus),
             _valid_choice("one_off_charges", "category", OneOffCategory),
             _valid_choice("one_off_charges", "collection", CollectionMethod),
+            _valid_choice("one_off_charges", "retry_state", RetryState, blank=True),
         ]
 
     def __str__(self) -> str:

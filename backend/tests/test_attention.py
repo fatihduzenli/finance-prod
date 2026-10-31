@@ -221,6 +221,33 @@ def returned_payment(lease: Lease, amount: str = "3500.00") -> Payment:
     )
 
 
+def pending_redebit(lease: Lease) -> OneOffCharge:
+    """PLAN-014 F5: a returned debit whose automatic re-debit is still to be tried."""
+    assert lease.operator is not None
+    payment = Payment.objects.create(
+        rent_charge=a_rent_charge(lease, date(2026, 5, 1), RentChargeStatus.UNPAID),
+        kind=PaymentKind.RENT,
+        method=PaymentMethod.ACH,
+        amount=D("1200.00"),
+        status=PaymentStatus.RETURNED,
+        initiated_on=date(2026, 10, 1),
+        returned_at=datetime(2026, 10, 6, 14, 0, tzinfo=UTC),
+        return_code="R01",
+    )
+    return a_one_off_charge(
+        lease.operator,
+        "1200.00",
+        date(2026, 10, 9),
+        lease=lease,
+        category="redebit",
+        collection="autopay_due",
+        description="Re-debit of Rent 2026-10",
+        source_payment=payment,
+        retry_date=date(2026, 10, 9),
+        retry_state="auto_pending",
+    )
+
+
 # --- Each kind -----------------------------------------------------------------------------
 
 
@@ -496,6 +523,8 @@ def build(n: int) -> None:
         Lease.objects.filter(pk=lease.pk).update(ended_on=TODAY + timedelta(days=20))
         a_rent_charge(lease, date(2026, 8, 1), RentChargeStatus.UNPAID)
         returned_payment(lease)
+        # PLAN-014 F5: the new kind (redebit_pending) in every world of the query budget.
+        pending_redebit(lease)
         returned_installment(lease)
         split_paid(lease)
         rent_split_paid(lease, date(2026, 11, 1))

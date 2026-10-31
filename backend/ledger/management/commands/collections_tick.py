@@ -8,7 +8,9 @@ row (:func:`ledger.services.rent_run.record_run`, PLAN-012d D11). Then, as a saf
 sweep, it closes the open promises to pay that a settled payment keeps
 (:func:`ledger.services.contacts.close_kept`, PLAN-012 D4), queues the reminder and
 overdue messages of the day's rules A to E (:func:`ledger.services.reminders.queue_due`,
-PLAN-014 E1: one ``message_send`` job each), and queues the day's morning e-mails
+PLAN-014 E1: one ``message_send`` job each), queues the processor schedule of each automatic
+re-debit due today or on the next business day (:func:`ledger.services.nsf.create_due_redebits`,
+PLAN-014 F3: one ``schedule_create`` job each), and queues the day's morning e-mails
 (:func:`ledger.services.calendar.queue_morning_emails`, one ``calendar_email`` job each),
 which the worker sends. It also queues the day's read
 of the dispute list (:func:`ledger.services.disputes.queue_daily`, one ``disputes_sync``
@@ -36,6 +38,7 @@ from ledger.services import (
     contacts,
     disputes,
     lease_end,
+    nsf,
     reminders,
     rent_run,
 )
@@ -58,6 +61,8 @@ class Command(BaseCommand):
         # Before the queueing, so that a promise a payment kept gets no reminder.
         kept = contacts.close_kept()
         reminded = reminders.queue_due(today)
+        # PLAN-014 F3: the eve of each automatic re-debit, after the reminders.
+        redebits = nsf.create_due_redebits(today)
         morning = calendar.queue_morning_emails(today)
         dispute_read = disputes.queue_daily(today)
         swept = lease_end.sweep_drafts()
@@ -70,6 +75,7 @@ class Command(BaseCommand):
             f"Reminders queued: {by_rule}. "
             f"Reminders paused by a promise: {reminded.paused}. "
             f"Reminders not queued (already queued, or no lease to bill): {reminded.skipped}. "
+            f"Automatic re-debits scheduled: {redebits}. "
             f"Morning e-mails queued: {morning.entries}. "
             f"Promise reminders queued: {morning.promises}. Promises kept by a payment: {kept}. "
             f"Dispute list read queued: {'yes' if dispute_read else 'no'}. "

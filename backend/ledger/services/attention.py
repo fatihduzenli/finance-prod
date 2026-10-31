@@ -7,11 +7,13 @@ page that deals with it and ``since``, the day it began:
 - ``overdue``: an open charge due before today (:func:`ledger.services.receivables.open_balances`),
   most days late first; ``high`` from :data:`OVERDUE_HIGH_DAYS` days late;
 - ``returned_debit``: a returned ACH debit not rescheduled, with the text
-  ``"Returned debit not rescheduled: <store>, <amount>, returned <date>"``. Rescheduling
-  arrives in a later batch (PLAN-011b D5) and resolves the return; until then every
-  return the returns queue still holds (``status = returned``, ``resolved_at`` null) is
-  listed: ``payments.resolution_kind`` does not exist yet, so no return counts as
-  rescheduled;
+  ``"Returned debit not rescheduled: <store>, <amount>, returned <date>"``: every return
+  the returns queue still holds (``status = returned``, ``resolved_at`` null) but those
+  whose automatic re-debit is still to be tried (PLAN-014 F5);
+- ``redebit_pending`` (PLAN-014 F5, ``low``): one item per automatic re-debit still to be
+  tried (``auto_pending`` or ``scheduled``, not voided), ``"Automatic re-debit: <store>,
+  <amount> on <date>"``, since the return, linking to the re-debit's charge (where staff
+  stop it);
 - ``invoice_marked_paid_void`` (PLAN-012f-c D3): one ``high`` item per payment recorded
   outside the processor that billing voided after a marking job had marked its charge's
   provider invoice paid (the ``payment.voided_manual`` audit row carries
@@ -117,6 +119,8 @@ from ledger.models import (
     Lease,
     LeaseEnd,
     LeaseEndStatus,
+    OneOffCategory,
+    OneOffCharge,
     OneOffChargeStatus,
     Operator,
     Payment,
@@ -133,6 +137,7 @@ from ledger.services import (
     contacts,
     installments,
     insurance,
+    nsf,
     receivables,
     refunds,
     returns,
@@ -151,6 +156,7 @@ _SEVERITY_RANK = {HIGH: 0, MEDIUM: 1, LOW: 2}
 
 OVERDUE = "overdue"
 RETURNED_DEBIT = "returned_debit"
+REDEBIT_PENDING = "redebit_pending"
 INVOICE_MARKED_PAID_VOID = "invoice_marked_paid_void"
 INSTALLMENT_RETURNED = "installment_returned"
 SPLIT_CHARGE_PAID = "split_charge_paid"
@@ -182,6 +188,7 @@ KINDS: tuple[str, ...] = (
     INSURANCE_PREMIUM_MISSING,
     INSURANCE_DUE,
     INSTALLMENT_PLAN_PAUSED,
+    REDEBIT_PENDING,
     LEASE_ENDING,
     LANDLORD_LEASE_ENDING,
     SCHEDULE_REVIEW,
@@ -197,6 +204,7 @@ KINDS: tuple[str, ...] = (
 KIND_LABELS: dict[str, str] = {
     OVERDUE: "overdue charges",
     RETURNED_DEBIT: "returned debits",
+    REDEBIT_PENDING: "automatic re-debits coming up",
     INVOICE_MARKED_PAID_VOID: provider_sentence(
         "invoices marked paid in {provider} for a voided payment"
     ),
@@ -227,6 +235,7 @@ KIND_LABELS: dict[str, str] = {
 WHY_BADGES: dict[str, str] = {
     OVERDUE: "overdue",
     RETURNED_DEBIT: "returned",
+    REDEBIT_PENDING: "pending",
     INVOICE_MARKED_PAID_VOID: "attention",
     INSTALLMENT_RETURNED: "returned",
     SPLIT_CHARGE_PAID: "partial",
@@ -259,6 +268,7 @@ PLAN_PAUSED_DAYS = 30
 #: Most items of one kind the dashboard lists.
 KIND_LIMIT = 25
 RETURNED_TEXT = "Returned debit not rescheduled: {store}, {amount}, returned {date}"
+REDEBIT_PENDING_TEXT = "Automatic re-debit: {store}, {amount} on {date}"
 INSTALLMENT_RETURNED_TEXT = "Installment returned: {store}, {parent}, plan {paid} of {count} paid"
 SPLIT_CHARGE_PAID_TEXT = (
     "Payment on a split charge: {store}, {parent}, {amount} paid before its invoice was "
@@ -373,7 +383,10 @@ def _overdue(today: date, balances: list[receivables.OpenBalance]) -> list[Item]
 
 def _returned(today: date, operator: uuid.UUID | None) -> list[Item]:
     found = []
+    pending = nsf.pending_return_ids()
     for payment in returns.open_returns():
+        if payment.pk in pending:
+            continue
         row = returns.row(payment)
         operator_id = row.operator.pk if row.operator is not None else None
         if operator is not None and operator_id != operator:
@@ -395,6 +408,44 @@ def _returned(today: date, operator: uuid.UUID | None) -> list[Item]:
                 store_id=row.store.pk if row.store is not None else None,
                 operator_name=row.operator.display_name if row.operator is not None else "",
                 amount=row.amount,
+            )
+        )
+    return found
+
+
+def _redebits_pending(operator: uuid.UUID | None) -> list[Item]:
+    """PLAN-014 F5: the automatic re-debits still to be tried, soonest first."""
+    rows = (
+        OneOffCharge.objects.filter(
+            category=OneOffCategory.REDEBIT,
+            retry_state__in=nsf.PENDING_STATES,
+        )
+        .exclude(status=OneOffChargeStatus.VOIDED)
+        .select_related("lease__store", "operator", "source_payment")
+        .order_by("retry_date", "created_at", "id")
+    )
+    if operator is not None:
+        rows = rows.filter(operator=operator)
+    found = []
+    for charge in rows:
+        store = charge.lease.store if charge.lease is not None else None
+        returned_at = charge.source_payment.returned_at if charge.source_payment else None
+        found.append(
+            Item(
+                kind=REDEBIT_PENDING,
+                severity=LOW,
+                text=REDEBIT_PENDING_TEXT.format(
+                    store=store.external_label if store is not None else "No store",
+                    amount=format_amount(charge.price),
+                    date=_day(charge.retry_date),
+                ),
+                url=reverse("ledger:one_off_charges:detail", kwargs={"pk": charge.pk}),
+                since=timezone.localdate(returned_at) if returned_at is not None else None,
+                operator_id=charge.operator_id,
+                store=store.external_label if store is not None else "",
+                store_id=store.pk if store is not None else None,
+                operator_name=charge.operator.display_name if charge.operator else "",
+                amount=charge.price,
             )
         )
     return found
@@ -1132,6 +1183,7 @@ def attention(
     sources: list[Callable[[], list[Item]]] = [
         lambda: _overdue(today, balances),
         lambda: _returned(today, operator),
+        lambda: _redebits_pending(operator),
         lambda: _marked_paid_voids(operator),
         lambda: _installments_returned(operator),
         lambda: _split_charges_paid(operator),

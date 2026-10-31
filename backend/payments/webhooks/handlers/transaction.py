@@ -31,7 +31,11 @@ when that payment is returned, refunded or voided
 (:func:`ledger.services.one_off_charges.refresh_sources`), each audited.
 
 A payment that settles keeps the operator's open promises to pay it meets
-(:func:`ledger.services.contacts.close_kept_by_payment`, PLAN-012 D4).
+(:func:`ledger.services.contacts.close_kept_by_payment`, PLAN-012 D4). A returned debit
+gets, in the return's transaction, its NSF fee, its automatic re-debit (R01, R09) or the
+lease's Needs review flag, and template F (:func:`ledger.services.nsf.on_return`, PLAN-014
+F2); a settled automatic re-debit resolves the return it collected again
+(:func:`ledger.services.nsf.on_settled`). A void never messages the operator.
 
 ``returned`` and ``voided`` are final. Every write is keyed on provider IDs and every
 recomputation is pure, so a repeated or replayed event changes nothing.
@@ -368,8 +372,15 @@ def _transition(payment: Payment, record: TransactionRecord, *, settle: bool) ->
         {**_state(payment), "provider_transaction": mask_identifier(record.external_id)},
     )
     _refresh_charge(payment, returned=target == PaymentStatus.RETURNED)
+    # Imported here: nsf reaches the messaging engine, whose imports reach this module.
+    from ledger.services import nsf
+
+    if target == PaymentStatus.RETURNED:
+        # PLAN-014 F2: the NSF fee, the automatic re-debit or Needs review, and template F.
+        nsf.on_return(payment, timezone.localdate())
     if target == PaymentStatus.SETTLED:
         contacts.close_kept_by_payment(payment)
+        nsf.on_settled(payment)
     return WebhookOutcome.PROCESSED
 
 

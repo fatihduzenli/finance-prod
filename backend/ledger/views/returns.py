@@ -5,7 +5,10 @@ here) and a note. Resolving with a note records who and why; it changes no charg
 calls no provider. **Reschedule** (``returns:reschedule``, billing; the fee waiver admin,
 403 otherwise) takes the agreed re-debit date and runs
 :func:`ledger.services.nsf.reschedule`: the re-debit and NSF fee charges and one provider
-job for the worker. No view calls the provider.
+job for the worker. No view calls the provider. Each row shows its automatic re-debit's state
+(PLAN-014 F4: "Automatic re-debit on Nov 3" with **Stop automatic retry**, "Stopped", "No
+retry: R10"); Debit again is offered only without a pending re-debit, and without the fee
+waiver when the fee was made at the return.
 
 The queue exports as CSV (``returns:export``, PLAN-011 D5), any role.
 """
@@ -49,12 +52,14 @@ def _fee_label(code: str) -> str:
 @require_safe
 def return_list(request: HttpRequest) -> HttpResponse:
     page = Paginator(returns.open_returns(), PAGE_SIZE).get_page(request.GET.get("page"))
+    found = list(page)
+    states = nsf.queue_states(found)
     return render(
         request,
         "ledger/returns/list.html",
         {
             "page": page,
-            "rows": [returns.row(payment) for payment in page],
+            "rows": [(returns.row(payment), states[payment.pk]) for payment in found],
             "can_resolve": meets(_role(request), Role.BILLING),
             "can_waive": meets(_role(request), Role.ADMIN),
             "today": timezone.localdate(),

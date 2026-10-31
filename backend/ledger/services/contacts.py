@@ -30,6 +30,12 @@ promise of the operator on the same lease (no lease is a bucket of its own) as
 records no other outcome, else the next newer promise closed here (``closed_by`` is one to
 one), else null.
 
+**A contact stops an automatic re-debit** (PLAN-014 F3): an entry added by staff for a lease
+(any kind: call, e-mail, visit or promise) within two business days of a returned debit's
+notice stops that lease's pending automatic re-debit
+(:func:`ledger.services.nsf.stop_on_contact`, audited ``redebit.stopped`` with "Staff contact
+logged"), in the entry's transaction.
+
 **A payment keeps a promise** when all of these hold: the payment is ``settled`` and not a
 refund; its charge or invoice is billed to the promise's operator; when the promise names
 a lease, the payment's charge is on that lease (a promise without a lease takes any of the
@@ -126,6 +132,8 @@ LEASE_REQUIRED = "This operator has more than one store: choose the store this i
 LEASE_UNKNOWN = "That store is not one of this operator's leases."
 ARCHIVED = "This operator is archived; no contact can be added."
 ADDED = "Contact entry added."
+#: PLAN-014 F3: what the entry stopped, after the message.
+RETRY_STOPPED = " The automatic re-debit was stopped."
 NOT_AUTHOR = "Only the author may edit this entry."
 WINDOW_CLOSED = "This entry can no longer be edited; add a correction instead."
 DELETED = "This entry was deleted; it cannot be changed."
@@ -467,9 +475,14 @@ def add_entry(operator_id: uuid.UUID, data: ContactInput, *, actor: User | None)
         if previous is not None and closing:
             record_outcome(previous, closing, entry, actor=actor)
         superseded = _close_superseded(entry, actor=actor)
+        # Imported here: nsf imports one_off_charges, which imports this module.
+        from ledger.services import nsf
+
+        stopped = nsf.stop_on_contact(entry, actor)
+    extra = RETRY_STOPPED if stopped else ""
     if superseded:
-        return AddOutcome(True, _superseded_message(superseded), entry=entry)
-    return AddOutcome(True, ADDED, entry=entry)
+        return AddOutcome(True, _superseded_message(superseded) + extra, entry=entry)
+    return AddOutcome(True, ADDED + extra, entry=entry)
 
 
 def _promise_words(promise: ContactEntry) -> str:
