@@ -417,6 +417,11 @@ for _name in (
     "ledger:operators:archive",
     "ledger:operators:handled_personally",
     "ledger:operators:statement_links_revoke",
+    # PLAN-014 H2: the PORTAL card's actions.
+    "ledger:operators:portal_invite",
+    "ledger:operators:portal_disable",
+    "ledger:operators:portal_enable",
+    "ledger:operators:portal_reset",
     "ledger:stores:close_cost",
     "ledger:stores:create_charges",
     "ledger:stores:check_address",

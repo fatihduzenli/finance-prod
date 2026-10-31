@@ -562,6 +562,11 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         # signed statement link sent to it.
         "ledger:operators:handled_personally",
         "ledger:operators:statement_links_revoke",
+        # PLAN-014 H2: the PORTAL card's invitation, disable, enable and reset.
+        "ledger:operators:portal_invite",
+        "ledger:operators:portal_disable",
+        "ledger:operators:portal_enable",
+        "ledger:operators:portal_reset",
     }
     assert {
         "ledger:operators:list",
@@ -579,6 +584,10 @@ def test_every_operator_route_is_classified_with_the_planned_roles() -> None:
         "ledger:operators:new_charge": Role.BILLING,
         "ledger:operators:handled_personally": Role.BILLING,
         "ledger:operators:statement_links_revoke": Role.BILLING,
+        "ledger:operators:portal_invite": Role.BILLING,
+        "ledger:operators:portal_disable": Role.BILLING,
+        "ledger:operators:portal_enable": Role.BILLING,
+        "ledger:operators:portal_reset": Role.BILLING,
         "ledger:operators:archive": Role.ADMIN,
         # PLAN-014 C3: the details, the link and the retry post to the lease's billing.
         "ledger:leases:billing": Role.BILLING,

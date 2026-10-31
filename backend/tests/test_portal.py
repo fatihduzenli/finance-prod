@@ -67,6 +67,7 @@ from tests.receivables_helpers import (
 from tests.test_collections import mail_set_up
 from tests.test_ledger_models import new_operator, saved
 from tests.test_operator_views import client_for
+from tests.text_helpers import assert_absent, assert_present
 
 pytestmark = pytest.mark.django_db
 
@@ -409,7 +410,7 @@ def test_the_card_disables_enables_and_resets_with_audits(
     signed_in = portal_client(user)
     staff, actor = client_for(Role.BILLING)
     page = text(staff.get(f"/operators/{world.a.pk}/"))
-    assert "Active" in page and 'id="portal-reset-form"' in page
+    assert 'id="portal-state">Active<' in page and 'id="portal-reset-form"' in page
     assert 'id="portal-disable-form"' in page and 'id="portal-last-sign-in"' in page
     assert staff.post(f"/operators/{world.a.pk}/portal/disable/").status_code == 302
     user.refresh_from_db()
@@ -753,7 +754,8 @@ def test_home_lists_the_operators_stores_only_with_the_ended_one_marked(world: W
     page = text(client.get("/portal/"))
     assert _store_numbers(page) <= {"101", "102"}
     assert "#101 Alphaville" in page and "#102 Oldtown" in page
-    assert "Betaburg" not in page and "#202" not in page and "7,777.00" not in page
+    for absent in ("Betaburg", "202", "7,777.00"):
+        assert_absent(page, absent)
     assert f'id="ended-{world.store_a_old.pk}"' in page
     assert f'id="ended-{world.store_a.pk}"' not in page
     assert f'id="balance-{world.store_a.pk}">$1,850.00<' in page
@@ -761,7 +763,8 @@ def test_home_lists_the_operators_stores_only_with_the_ended_one_marked(world: W
     # The store switcher lists the same stores, and no staff navigation is on the page.
     switcher = page.split('id="store-switcher"', 1)[1].split("</details>", 1)[0]
     assert "#101 Alphaville" in switcher and "#102 Oldtown" in switcher and "#202" not in switcher
-    assert "manifest" not in page and 'id="sidebar"' not in page and "/operators/" not in page
+    assert_absent(page, "manifest")
+    assert 'id="sidebar"' not in page and "/operators/" not in page
 
 
 def test_the_store_page_shows_charges_autopay_and_the_bank(world: World) -> None:
@@ -781,7 +784,8 @@ def test_the_store_page_shows_charges_autopay_and_the_bank(world: World) -> None
     assert 'id="store-autopay">on<' in text(client.get(f"/portal/stores/{world.store_a.pk}/"))
     old = text(client.get(f"/portal/stores/{world.store_a_old.pk}/"))
     assert 'id="store-ended"' in old and 'id="store-bank">none<' in old
-    assert "#202" not in page and "9999" not in page and "7,777.00" not in page
+    for absent in ("202", "9999", "7,777.00"):
+        assert_absent(page, absent)
 
 
 def test_invoices_and_payments_are_the_operators_on_that_store(world: World) -> None:
@@ -792,7 +796,8 @@ def test_invoices_and_payments_are_the_operators_on_that_store(world: World) -> 
     assert "INV-2026-0003" not in invoices
     payments = text(client.get(f"/portal/stores/{world.store_a.pk}/payments/"))
     assert "Rent Aug 2026" in payments and "Bank debit (ACH) ····4821" in payments
-    assert "Settled" in payments and "6,666.00" not in payments
+    assert_present(payments, "Settled")
+    assert_absent(payments, "6,666.00")
     a_payment(world.rent_a, "100.00", None, PaymentStatus.RETURNED, date(2026, 9, 5))
     a_payment(world.rent_a, "50.00", None, PaymentStatus.VOIDED, date(2026, 9, 6))
     again = text(client.get(f"/portal/stores/{world.store_a.pk}/payments/"))
@@ -806,7 +811,9 @@ def test_a_foreign_or_unreadable_id_is_the_portals_404(world: World) -> None:
             response = client.get(f"/portal/stores/{key}/{suffix}")
             assert response.status_code == 404, (suffix, key)
             html = text(response)
-            assert 'id="not-found"' in html and "Betaburg" not in html and "#202" not in html
+            assert 'id="not-found"' in html
+            assert_absent(html, "Betaburg")
+            assert_absent(html, "202")
 
 
 def test_the_statement_is_scoped_to_the_portal_users_operator(world: World) -> None:
@@ -814,7 +821,8 @@ def test_the_statement_is_scoped_to_the_portal_users_operator(world: World) -> N
     page = text(client.get("/portal/statement/"))
     assert "Statement: Alpha Owner" in page
     assert 'id="open-total">$2,250.00<' in page
-    assert "Betaburg" not in page and "7,777.00" not in page and "6,666.00" not in page
+    for absent in ("Betaburg", "7,777.00", "6,666.00"):
+        assert_absent(page, absent)
 
 
 def test_pay_and_bank_say_they_are_not_available_yet(world: World) -> None:
