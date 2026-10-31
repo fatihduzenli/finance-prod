@@ -1,4 +1,4 @@
-{% comment %}Edit billing details (docs/qa/PLAN-014 C3): the LEASE card's dialog over the lease page (ledger.views.leases.lease_billing; "dialog" is billing_dialog). The billing details (company, e-mail, phone, address) post form=details; the lease's connection to the payment provider (masked identifiers only, the last failure in words, "Try again" posting form=retry); the Link form for the customer and bank-method IDs staff copied from the provider's dashboard posts form=link, and is not offered for a lease that uses another lease's account. No bank detail is ever entered here.{% endcomment %}{% load components dates %}{% dialog id="billing-form" title="Edit billing details" size="lg" open=True return_url=dialog.return_url %}
+{% comment %}Edit billing details (docs/qa/PLAN-014 C3): the LEASE card's dialog over the lease page (ledger.views.leases.lease_billing; "dialog" is billing_dialog). The billing details (company, e-mail, phone, address) post form=details; the lease's connection to the payment provider (masked identifiers only, the last failure in words, "Try again" posting form=retry); the Link form for the customer and bank-method IDs staff copied from the provider's dashboard posts form=link, and is not offered for a lease that uses another lease's account. No bank detail is ever entered here. Sender names (PLAN-014 I4): the names the Bank deposits match reads for this lease, each with Remove (alias_remove), and an Add field (alias_add).{% endcomment %}{% load components dates %}{% dialog id="billing-form" title="Edit billing details" size="lg" open=True return_url=dialog.return_url %}
 <form method="post" action="{% url 'ledger:leases:billing' pk=dialog.lease.pk %}" id="billing-save-form" class="js-single-submit dialog-form" autocomplete="off">
   {% csrf_token %}<input type="hidden" name="form" value="details">
   <p class="muted">Invoices, receipts and messages for this lease use these details. Saving sends them to {{ company.provider_name }} when the lease has its own customer there.</p>
@@ -31,5 +31,14 @@
     <p class="actions"><button class="btn" type="submit" id="billing-link">Connect to {{ company.provider_name }}</button></p>
   </form>
   {% endif %}
+</section>
+<section id="billing-aliases">
+  <h3>Sender names</h3>
+  <p class="muted">Bank deposits from these names are suggested for this lease.</p>
+  <ul id="alias-list">
+    {% for alias in dialog.aliases %}<li class="alias-row actions"><span class="alias-text">{{ alias.text }}</span>{% if dialog.can_save %}<form method="post" action="{% url 'ledger:leases:alias_remove' pk=dialog.lease.pk alias=alias.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-sm" type="submit" aria-label="Remove {{ alias.text }}">Remove</button></form>{% endif %}</li>
+    {% empty %}<li class="muted" id="no-aliases">None yet.</li>{% endfor %}
+  </ul>
+  {% if dialog.can_save %}<form method="post" action="{% url 'ledger:leases:alias_add' pk=dialog.lease.pk %}" id="alias-add-form" class="actions js-single-submit" autocomplete="off">{% csrf_token %}<label for="alias-text">Add a sender name</label> <input type="text" name="text" id="alias-text" maxlength="{{ dialog.alias_max_length }}" required> <button class="btn" type="submit" id="alias-add">Add</button></form>{% endif %}
 </section>
 {% enddialog %}

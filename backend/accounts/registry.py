@@ -150,6 +150,9 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     # Edit billing details (PLAN-014 C3): billing. The details, the link of the provider
     # IDs and the retry post here; the view refuses the dialog's GET below billing too.
     "ledger:leases:billing": RouteRule(min_role=Role.BILLING, methods=POST),
+    # The dialog's sender names (PLAN-014 I4): billing; the views and the service check again.
+    "ledger:leases:alias_add": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:leases:alias_remove": RouteRule(min_role=Role.BILLING, methods=POST),
     # The bank-entry page's attach (PLAN-014 C7): billing; only the payment-method id.
     "ledger:leases:bank_attach": RouteRule(min_role=Role.BILLING, methods=POST),
     # The LEASE card's "Switch to own account" (PLAN-014 C9): billing; the view checks again.

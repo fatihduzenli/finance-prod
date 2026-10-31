@@ -185,6 +185,12 @@ lease_patterns = (
         path("<str:pk>/resume/", leases.lease_resume, name="resume"),
         path("<str:pk>/stop-autopay/", leases.lease_stop_autopay, name="stop_autopay"),
         path("<str:pk>/billing/", leases.lease_billing, name="billing"),
+        path("<str:pk>/aliases/add/", leases.lease_alias_add, name="alias_add"),
+        path(
+            "<str:pk>/aliases/<str:alias>/remove/",
+            leases.lease_alias_remove,
+            name="alias_remove",
+        ),
         path("<str:pk>/bank/", leases.lease_bank, name="bank"),
         path("<str:pk>/bank/attach/", leases.lease_bank_attach, name="bank_attach"),
         path("<str:pk>/bank/switch-own/", leases.lease_switch_own, name="switch_own"),

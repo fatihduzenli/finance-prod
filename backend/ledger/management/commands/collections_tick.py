@@ -26,7 +26,9 @@ collections ladder (PLAN-014 D6). It calls no external service but the bank's (P
 only, when the Bank deposits module is ready), so it runs whatever process role it is given.
 "Today" is the project's local date. Running it twice the same day creates and queues nothing
 more (it writes a second ``rent_run.ticked`` row, with nothing created; a second bank fetch
-adds no deposit already read). It prints counts only.
+adds no deposit already read). It prints counts only; the bank's part is
+:func:`banking.services.tick_line` ("Bank deposits fetched: 3 (new 2)." or "Bank deposits: off."
+with why).
 """
 
 from __future__ import annotations
@@ -83,7 +85,7 @@ class Command(BaseCommand):
             f"Reminders paused by a promise: {reminded.paused}. "
             f"Reminders not queued (already queued, or no lease to bill): {reminded.skipped}. "
             f"Automatic re-debits scheduled: {redebits}. "
-            f"Bank deposits: {deposits.message} "
+            f"{bank_deposits.tick_line(deposits)} "
             f"Morning e-mails queued: {morning.entries}. "
             f"Promise reminders queued: {morning.promises}. Promises kept by a payment: {kept}. "
             f"Dispute list read queued: {'yes' if dispute_read else 'no'}. "

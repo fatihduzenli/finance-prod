@@ -37,6 +37,11 @@ unique ``allocation_group``):
   with nothing changed, when the deposit kept a credit on a lease or paid a charge whose
   payment cannot be voided by hand (an insurance charge). Audited ``bank_transaction.undone``.
 
+**Sender names** (billing; the lease's billing details dialog): :func:`add_alias` remembers a
+name the bank shows for the lease's deposits (one line, compared upper-cased with its
+whitespace collapsed; at least three characters; no card or account number; once per lease),
+:func:`remove_alias` forgets one. Audited ``sender_alias.added`` and ``sender_alias.removed``.
+
 Every refusal is one sentence and writes nothing. Money is ``Decimal`` throughout; nothing here
 calls the payment processor.
 """
@@ -73,6 +78,7 @@ from banking.models import (
 )
 from banking.sources import (
     FAKE_TOKEN_MARKER,
+    MONEY_MAX,
     BankTransactionSource,
     LinkRefusedError,
     SyncResult,
@@ -103,6 +109,9 @@ CONFIRMED_ACTION = "bank_transaction.confirmed"
 AUTO_CONFIRMED_ACTION = "bank_transaction.auto_confirmed"
 IGNORED_ACTION = "bank_transaction.ignored"
 UNDONE_ACTION = "bank_transaction.undone"
+ENTITY_ALIAS = "sender_alias"
+ALIAS_ADDED_ACTION = "sender_alias.added"
+ALIAS_REMOVED_ACTION = "sender_alias.removed"
 LINKED_ACTION = "bank_connection.linked"
 DISCONNECTED_ACTION = "bank_connection.disconnected"
 SETTINGS_FIELDS: tuple[str, ...] = ("bank_deposits_enabled", "bank_auto_confirm_exact")
@@ -151,6 +160,15 @@ CONFIRMED = "Deposit of {amount} recorded for {store}."
 SPLIT_DONE = "Deposit of {amount} recorded over {count} charge(s)."
 ALIAS_SAVED = " {text} is remembered for {store}."
 ALIAS_REFUSED = " The sender was not remembered (it holds a number shaped like an account number)."
+ALIAS_TOO_SHORT = (
+    f"Enter a sender name of at least {ALIAS_MIN_LENGTH} characters. Nothing was saved."
+)
+ALIAS_TOO_LONG = f"Keep the sender name under {ALIAS_MAX_LENGTH} characters. Nothing was saved."
+ALIAS_PAYMENT_DATA = "A sender name may not contain card or account numbers. Nothing was saved."
+ALIAS_DUPLICATE = "{text} is already a sender name of this lease. Nothing was saved."
+ALIAS_ADDED = "{text} is remembered for {store}."
+ALIAS_REMOVED = "{text} is no longer a sender name of {store}."
+ALIAS_GONE = "That sender name was already removed. Nothing was changed."
 REASON_REQUIRED = "Choose why the deposit is ignored. Nothing was changed."
 NOTE_REQUIRED = "Say why the deposit is ignored. Nothing was changed."
 NOTE_TOO_LONG = f"Keep the reason under {IGNORE_NOTE_MAX_LENGTH} characters. Nothing was changed."
@@ -164,6 +182,11 @@ UNDO_REFUSED = "{description}: {message} Nothing was changed."
 FETCHED = "Fetched from the bank: {added} new deposit(s)."
 FETCH_FAILED = "The bank could not be read ({error}). Nothing new was fetched."
 AUTO = " {count} confirmed automatically (exact matches)."
+#: The daily job's line (``collections_tick``).
+TICK_FETCHED = "Bank deposits fetched: {fetched} (new {added})."
+TICK_AUTO = " Bank deposits confirmed automatically: {count}."
+TICK_OFF = "Bank deposits: off. {message}"
+TICK_FAILED = "Bank deposits: not fetched. {message}"
 LINK_OFF = "Turn bank deposits on before connecting a bank account. Nothing was connected."
 LINK_NO_KEYS = "The Plaid keys are missing in this environment. Nothing was connected."
 LINK_EXISTS = "A bank account is already connected: disconnect it first. Nothing was connected."
@@ -406,6 +429,8 @@ class FetchReport:
     message: str
     result: SyncResult | None = None
     auto_confirmed: int = 0
+    #: The module was ready and the bank could not be read.
+    failed: bool = False
 
 
 def fetch(today: date, actor: User | None = None) -> FetchReport:
@@ -429,13 +454,28 @@ def fetch(today: date, actor: User | None = None) -> FetchReport:
         name = type(error).__name__
         BankConnection.objects.filter(pk=connection.pk).update(last_error=name)
         logger.warning("Bank sync failed: %s", name)
-        return FetchReport(False, FETCH_FAILED.format(error=name))
+        return FetchReport(False, FETCH_FAILED.format(error=name), failed=True)
     refresh_suggestions(today)
     auto = auto_confirm(today) if company.bank_auto_confirm_exact else 0
     message = FETCHED.format(added=result.added)
     if auto:
         message += AUTO.format(count=auto)
     return FetchReport(True, message, result, auto)
+
+
+def tick_line(report: FetchReport) -> str:
+    """The daily job's part of its one line: :data:`TICK_FETCHED` (the credits the bank gave,
+    and how many of them are new) after a sync, :data:`TICK_FAILED` with the sentence after a
+    failed one, else :data:`TICK_OFF` with why nothing was fetched."""
+    if report.ok and report.result is not None:
+        result = report.result
+        line = TICK_FETCHED.format(fetched=result.added + result.already, added=result.added)
+        if report.auto_confirmed:
+            line += TICK_AUTO.format(count=report.auto_confirmed)
+        return line
+    if report.failed:
+        return TICK_FAILED.format(message=report.message)
+    return TICK_OFF.format(message=report.message)
 
 
 def refresh_suggestions(today: date) -> None:
@@ -621,6 +661,66 @@ def alias_offer(
     return "" if (lease_id, normalise(text)) in known else text[:ALIAS_MAX_LENGTH]
 
 
+# --- Sender names on the lease's billing details (I4) ---------------------------------------
+
+
+def aliases_of(lease: Lease) -> list[SenderAlias]:
+    """The lease's sender names, as the billing details dialog lists them."""
+    return list(SenderAlias.objects.filter(lease=lease).order_by("normalised"))
+
+
+def add_alias(lease: Lease, raw: object, *, actor: User | None) -> Outcome:
+    """Remember ``raw`` as a sender name of ``lease`` (billing): one line, its whitespace
+    collapsed, compared as :func:`banking.models.normalise`; refused with nothing written when
+    it is too short, too long, holds payment data or is already one of the lease's. Audited
+    ``sender_alias.added``."""
+    if not _billing(actor):
+        return Outcome(False, NOT_ALLOWED)
+    text = " ".join(visible_text(raw if isinstance(raw, str) else "").split())
+    normalised = normalise(text)
+    if len(normalised) < ALIAS_MIN_LENGTH:
+        return Outcome(False, ALIAS_TOO_SHORT, "text")
+    if len(text) > ALIAS_MAX_LENGTH:
+        return Outcome(False, ALIAS_TOO_LONG, "text")
+    try:
+        validate_no_payment_data(text)
+    except ValidationError:
+        return Outcome(False, ALIAS_PAYMENT_DATA, "text")
+    duplicate = Outcome(False, ALIAS_DUPLICATE.format(text=text), "text")
+    if SenderAlias.objects.filter(lease=lease, normalised=normalised).exists():
+        return duplicate
+    try:
+        with transaction.atomic():
+            alias = SenderAlias.objects.create(
+                lease=lease, text=text, normalised=normalised, created_by=actor
+            )
+            _audit(
+                actor,
+                ALIAS_ADDED_ACTION,
+                ENTITY_ALIAS,
+                alias.pk,
+                None,
+                {"lease": str(lease.pk), "text": text, "normalised": normalised},
+            )
+    except IntegrityError:  # added by someone else meanwhile
+        return duplicate
+    return Outcome(True, ALIAS_ADDED.format(text=text, store=store_title(lease)))
+
+
+def remove_alias(lease: Lease, alias_id: uuid.UUID, *, actor: User | None) -> Outcome:
+    """Forget one sender name of ``lease`` (billing). Audited ``sender_alias.removed``."""
+    if not _billing(actor):
+        return Outcome(False, NOT_ALLOWED)
+    with transaction.atomic():
+        alias = SenderAlias.objects.select_for_update().filter(pk=alias_id, lease=lease).first()
+        if alias is None:
+            return Outcome(False, ALIAS_GONE)
+        before = {"lease": str(lease.pk), "text": alias.text, "normalised": alias.normalised}
+        alias.delete()
+        _audit(actor, ALIAS_REMOVED_ACTION, ENTITY_ALIAS, alias_id, before, None)
+    return Outcome(True, ALIAS_REMOVED.format(text=before["text"], store=store_title(lease)))
+
+
 def confirm(
     pk: uuid.UUID,
     choice: Choice,
@@ -720,9 +820,19 @@ def parse_amount(raw: object) -> Decimal | None:
         amount = Decimal(text)
     except InvalidOperation:
         raise ValueError(SPLIT_AMOUNT) from None
-    if not amount.is_finite() or amount <= 0 or amount != amount.quantize(Decimal("0.01")):
+    if not _is_cents(amount):
         raise ValueError(SPLIT_AMOUNT)
     return amount
+
+
+def _is_cents(amount: Decimal) -> bool:
+    """Whether ``amount`` is finite, above zero, at most :data:`MONEY_MAX` and in whole cents
+    (checked in that order, so that ``1e400`` never reaches the quantize)."""
+    return (
+        amount.is_finite()
+        and ZERO < amount <= MONEY_MAX
+        and amount == amount.quantize(Decimal("0.01"))
+    )
 
 
 def split(
@@ -759,9 +869,7 @@ def _split(
 ) -> list[payments_entry.EntryOutcome]:
     if not lines:
         raise _Refused(SPLIT_EMPTY)
-    if any(
-        line.amount <= 0 or line.amount != line.amount.quantize(Decimal("0.01")) for line in lines
-    ):
+    if not all(_is_cents(line.amount) for line in lines):
         raise _Refused(SPLIT_AMOUNT)
     amount = Decimal(txn.amount)
     allocated = sum((line.amount for line in lines), ZERO)
