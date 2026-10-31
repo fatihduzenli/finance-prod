@@ -49,6 +49,7 @@ from ledger.models import (
 from ledger.services import attention, business_days, contacts, nsf, refunds
 from payments.fake import FakeProvider
 from payments.models import ExternalRef, Job, JobKind
+from payments.provider import ScheduleInput
 from payments.stax import return_codes
 from tests.job_helpers import run_queued_jobs
 from tests.test_operator_views import client_for
@@ -531,6 +532,7 @@ def test_the_schedule_is_made_only_on_the_eve_and_once(fake: FakeProvider, worke
     assert AuditLog.objects.filter(action=nsf.SCHEDULED_ACTION, entity_id=str(redebit.pk)).exists()
     run_queued_jobs()
     [schedule] = [args[0] for name, args in fake.calls if name == "create_scheduled_invoice"]
+    assert isinstance(schedule, ScheduleInput)
     # The original amount only: the fee is its own charge.
     assert schedule.amounts.total == D("1500.00")
 
