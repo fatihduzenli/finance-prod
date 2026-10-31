@@ -27,7 +27,7 @@ from typing import Any
 import pytest
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import override_settings
+from django.test import Client, override_settings
 from django.utils import timezone
 
 from accounts.roles import Role
@@ -621,6 +621,19 @@ def test_an_ended_lease_cannot_change_its_bank(world: World, fake: FakeProvider)
         Lease.objects.filter(pk=world.lease.pk).update(ended_on=date(2026, 9, 30))
         page = text(world.client.get(bank_url(world.store)))
     assert portal_payments.BANK_ENDED in page
+
+
+@pytest.mark.parametrize("path", ["pay/", "bank/"])
+def test_the_pay_and_bank_posts_are_csrf_protected(world: World, path: str) -> None:
+    strict = Client(enforce_csrf_checks=True)
+    strict.cookies = world.client.cookies
+    before = written()
+    response = strict.post(
+        f"/portal/stores/{world.store.pk}/{path}",
+        {"charge": str(world.one_off.pk), "amount": "100.00", "creation_key": str(uuid.uuid4())},
+    )
+    assert response.status_code == 403
+    assert written() == before
 
 
 # --- {pay_link} ---------------------------------------------------------------------------------

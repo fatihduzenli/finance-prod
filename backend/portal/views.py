@@ -228,10 +228,6 @@ def statement(request: HttpRequest) -> HttpResponse:
     return _page(request, "portal/statement.html", report=report)
 
 
-def _store_or_none(request: HttpRequest, pk: str) -> Store | None:
-    return services.store_of(_user(request), pk)
-
-
 def _bank_url(store: Store, **query: str) -> str:
     url = reverse("portal:bank", kwargs={"pk": store.pk})
     return f"{url}?{urlencode(query)}" if query else url
@@ -293,10 +289,11 @@ def pay_status(request: HttpRequest, pk: str) -> HttpResponse:
     """``portal:pay_status`` (PLAN-014 H4): the outcome of the user's payment on the store
     (``?payment=``, else the latest), refreshed every 5 seconds while a debit is being
     sent, as Charge now's page; another id is the portal's 404."""
-    found = _store_or_none(request, pk)
+    user = _user(request)
+    found = services.store_of(user, pk)
     if found is None:
         return not_found(request)
-    state = portal_payments.payment_state(_user(request), found, request.GET.get("payment"))
+    state = portal_payments.payment_state(user, found, request.GET.get("payment"))
     if state is None:
         return not_found(request)
     return _page(
