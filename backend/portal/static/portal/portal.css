@@ -42,5 +42,5 @@ ul.portal-error { padding-left: var(--space-6); }
 .portal th, .portal td { border-bottom: 1px solid var(--border-soft); padding: var(--space-2); text-align: left; vertical-align: top; }
 .portal th { color: var(--muted); font-weight: 600; }
 .portal-money { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.portal tr.overdue td { color: var(--overdue-text); }
+.portal tr.overdue td { color: var(--error-text); }
 @media print { .portal-bar, .portal-tabs { display: none; } .portal-card { border: 0; padding: 0; } }
