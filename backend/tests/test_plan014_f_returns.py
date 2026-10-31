@@ -31,9 +31,7 @@ from tests.test_operator_views import client_for
 from tests.test_returns_nsf import (
     NOTICE,
     RETRY,
-    TXN,
     a_world,
-    deliver,
     f_messages,
     fees_of,
     redebit_of,
@@ -41,6 +39,7 @@ from tests.test_returns_nsf import (
 )
 from tests.test_returns_nsf import clock as clock  # noqa: PLC0414 (the fixture, re-exported)
 from tests.test_returns_nsf import fake as fake  # noqa: PLC0414 (the fixture, re-exported)
+from tests.test_webhook_handlers import TXN, deliver
 
 pytestmark = pytest.mark.django_db
 
@@ -83,14 +82,13 @@ def test_the_f_body_names_the_words_the_fee_the_dates_and_the_returned_amount(fa
     payment = returned(fake, "R01")
     message = f_messages()[0]
     body = message.rendered_body
+    assert payment.initiated_on is not None
+    debited = payment.initiated_on
     assert message.template.code == "returned_debit" and message.rule == MessageRule.F
     assert "Reason: Insufficient funds" in body
     assert "A returned-payment (NSF) fee of $100.00 has been added" in body
     assert "will be debited again automatically on Nov 12, 2026" in body
-    assert (
-        f"made on {payment.initiated_on:%b} {payment.initiated_on.day}, {payment.initiated_on.year}"
-        in body
-    )
+    assert f"made on {debited:%b} {debited.day}, {debited.year}" in body
     assert "$1,500.00" in body  # the returned amount
     assert "4111" not in body and "routing" not in body.lower() and "Bank text" not in body
 
@@ -128,7 +126,10 @@ def test_each_code_through_the_webhook_gets_its_words_and_only_r01_and_r09_a_ret
         (date(2026, 12, 23), date(2026, 12, 29)),  # Wed → Tue: Christmas Fri 25 and the weekend
         (date(2027, 1, 14), date(2027, 1, 20)),  # Thu → Wed: the weekend and MLK Day Mon 18
         (date(2027, 7, 1), date(2027, 7, 7)),  # Thu → Wed: the weekend and July 4 kept on Mon 5
-        (date(2026, 7, 2), date(2026, 7, 7)),  # Thu → Tue: July 4 2026 is a Saturday, not moved (Fri 3 counts)
+        (
+            date(2026, 7, 2),
+            date(2026, 7, 7),
+        ),  # Thu → Tue: Sat July 4 2026 not observed, Fri 3 counts
     ],
 )
 def test_the_third_business_day_over_holidays(notice: date, third: date) -> None:
