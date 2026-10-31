@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -364,6 +364,43 @@ def test_a_failed_attempt_is_reported_and_audited(world: World, fake: FakeProvid
     page = _status(world, payment)
     assert "The payment could not be made" in page and ">Failed<" in page
     assert portal_actions() == [portal_payments.REQUESTED_ACTION, portal_payments.FAILED_ACTION]
+
+
+def test_after_a_failed_attempt_the_operator_tries_again_a_minute_later_with_the_same_key(
+    world: World, fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake.fail_next("pay_invoice", ProviderRejected(422, error_fields=("payment_method_id",)))
+    post_pay(world, world.one_off.pk, "100.00")
+    run_queued_jobs()
+    again = post_pay(world, world.one_off.pk, "100.00")
+    assert again.status_code == 400 and portal_payments.CHARGE_WAIT in text(again)
+    later = timezone.now() + timedelta(seconds=61)
+    monkeypatch.setattr("django.utils.timezone.now", lambda: later)
+    assert post_pay(world, world.one_off.pk, "100.00").status_code == 302
+    run_queued_jobs()
+    requests = [args[1] for name, args in fake.calls if name == "pay_invoice"]
+    keys = {request.idempotency_id for request in requests}  # type: ignore[attr-defined]
+    assert keys == {str(OneOffCharge.objects.get(pk=world.one_off.pk).charge_now_key)}
+    assert [p.status for p in PortalPayment.objects.order_by("created_at")] == [
+        PortalPaymentStatus.FAILED,
+        PortalPaymentStatus.PAID,
+    ]
+
+
+def test_after_a_failed_rent_debit_its_bank_debit_is_paid_again(
+    world: World, fake: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake.fail_next("pay_invoice", ProviderRejected(422, error_fields=("payment_method_id",)))
+    post_pay(world, world.rent.pk, "1500.00")
+    run_queued_jobs()
+    debit = PortalPaymentCharge.objects.get().debit
+    later = timezone.now() + timedelta(seconds=61)
+    monkeypatch.setattr("django.utils.timezone.now", lambda: later)
+    page = text(world.client.get(f"/portal/stores/{world.store.pk}/"))
+    assert f"?charge={debit.pk}" in page  # the open bank debit is the charge to pay now
+    assert post_pay(world, debit.pk, "1500.00").status_code == 302
+    run_queued_jobs()
+    assert PortalPayment.objects.order_by("created_at").last().status == PortalPaymentStatus.PAID  # type: ignore[union-attr]
 
 
 def test_the_whole_balance_is_paid_only_once_every_charge_is(
