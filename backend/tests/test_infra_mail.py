@@ -22,6 +22,11 @@ DAILY = INFRA / "modules/containerAppJobDaily.bicep"
 MAIN = INFRA / "main.bicep"
 
 MAIL_PLAIN = ("MAIL_ENABLED", "GMAIL_SENDER", "MAIL_CATCH_ALL", "COMPANY_NAME")
+#: PLAN-014 D1: GMAIL_SENDER and MAIL_CATCH_ALL are retired from the app (the sender and the
+#: sandbox allowlist are company settings); the Bicep parameters stay until Step 16
+#: (infra/README.md), so the templates still pass them and nothing reads them.
+RETIRED_MAIL = ("GMAIL_SENDER", "MAIL_CATCH_ALL")
+ENV_EXAMPLE_MAIL = tuple(name for name in MAIL_PLAIN if name not in RETIRED_MAIL)
 MAIL_SECRET_ENV = "GMAIL_SERVICE_ACCOUNT_JSON"
 MAIL_SECRET_REF = "gmail-service-account-json"
 VAULT_SECRET_NAME = "gmail-service-account-key"
@@ -205,13 +210,25 @@ def test_main_wires_the_daily_job_like_the_reconcile_job() -> None:
 # --- .env.example -------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", [*MAIL_PLAIN, MAIL_SECRET_ENV])
+@pytest.mark.parametrize("name", [*ENV_EXAMPLE_MAIL, MAIL_SECRET_ENV])
 def test_env_example_names_the_mail_setting_with_an_empty_value(name: str) -> None:
     lines = (REPO / ".env.example").read_text().splitlines()
     assert f"{name}=" in lines
     index = lines.index(f"{name}=")
     assert lines[index - 1].startswith("# "), name
     assert sum(1 for line in lines if line.startswith(f"{name}=")) == 1
+
+
+@pytest.mark.parametrize("name", RETIRED_MAIL)
+def test_env_example_no_longer_names_a_retired_mail_setting(name: str) -> None:
+    text = (REPO / ".env.example").read_text()
+    assert not re.search(rf"^{name}=", text, re.MULTILINE)
+    assert "Admin › Settings › Mail" in text and "held in the Outbox" in text
+
+
+def test_the_retired_mail_parameters_are_a_noted_follow_up() -> None:
+    readme = (INFRA / "README.md").read_text()
+    assert "gmailSender" in readme and "mailCatchAll" in readme and "Step 16" in readme
 
 
 def test_env_example_names_the_vault_secret_and_the_time_zone() -> None:

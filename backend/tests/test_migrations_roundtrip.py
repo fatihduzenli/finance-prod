@@ -77,11 +77,13 @@ GUARD_MODULES = (
     "ledger.migrations.0058_brands_and_store_notes",
     "ledger.migrations.0059_lease_billing",
     "ledger.migrations.0060_transfer_incoming_billing",
+    "ledger.migrations.0061_messaging_engine",
     "payments.migrations.0002_postgresql_guards",
     "payments.migrations.0005_jobs",
     "payments.migrations.0018_copy_labels",
     "payments.migrations.0019_lease_job_kinds",
     "payments.migrations.0020_lease_account_switch",
+    "payments.migrations.0021_job_run_after",
 )
 
 
@@ -168,6 +170,7 @@ def _round_trip(repo_root: Path, database_url: str) -> None:
                 "[ ] 0018_copy_labels",
                 "[ ] 0019_lease_job_kinds",
                 "[ ] 0020_lease_account_switch",
+                "[ ] 0021_job_run_after",
             ]
         if step == len(ROUND_TRIP) - 1:
             for label in ("ledger", "payments"):
@@ -1832,8 +1835,10 @@ def test_the_company_settings_migration_over_existing_rows_on_sqlite(
         with pytest.raises(sqlite3.IntegrityError, match="company_settings_singleton"):
             scratch.execute(
                 "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
-                "logo, processor_name, updated_at) VALUES "
-                "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', '2026-10-16')"
+                "logo, processor_name, updated_at, sender_email, reply_to_email, "
+                "manager_emails, sandbox_allowlist) VALUES "
+                "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', '2026-10-16', "
+                "'', '', '', '')"
             )
 
 
@@ -1848,13 +1853,24 @@ def test_the_company_settings_migration_over_existing_rows_on_postgresql(
     with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
         scratch.execute(
             "INSERT INTO company_settings (id, name, short_name, support_email, time_zone, "
-            "logo, processor_name, updated_at) VALUES "
-            "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', now())"
+            "logo, processor_name, updated_at, sender_email, reply_to_email, manager_emails, "
+            "sandbox_allowlist) VALUES "
+            "(2, 'Other', 'Other', '', 'America/New_York', '', 'Other', now(), '', '', '', '')"
         )
     with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
         scratch.execute("UPDATE company_settings SET logo = 'https://example.com/logo.svg'")
     # The free-text columns are guarded by the trigger.
-    for column in ("name", "short_name", "support_email", "processor_name"):
+    for column in (
+        "name",
+        "short_name",
+        "support_email",
+        "processor_name",
+        # PLAN-014 D1: the Mail card's columns (ledger 0061).
+        "sender_email",
+        "reply_to_email",
+        "manager_emails",
+        "sandbox_allowlist",
+    ):
         with psycopg.connect(url) as scratch, pytest.raises(psycopg.errors.CheckViolation):
             scratch.execute(
                 f"UPDATE company_settings SET {column} = '4111 1111 1111 1111'"  # noqa: S608

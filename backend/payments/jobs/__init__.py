@@ -42,6 +42,7 @@ from decimal import Decimal
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, models, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from payments.models import Job, JobEntity, JobKind, JobStatus, ReconciliationTrigger
@@ -190,8 +191,11 @@ def enqueue(
     params: Mapping[str, object] | None,
     requested_by: User | AnonymousUser | None,
     replay_key: uuid.UUID | None = None,
+    *,
+    run_after: datetime | None = None,
 ) -> Job:
     """Queue one job for ``entity``; with ``replay_key``, return the job it already made.
+    With ``run_after``, the worker leaves it alone until that time (PLAN-014 D7).
 
     Raises :class:`ReplayKeyUsed` when the key belongs to a job of another kind or
     entity, and ``ValueError`` when ``kind`` does not act on this entity.
@@ -213,6 +217,7 @@ def enqueue(
         params=_clean_params(params),
         requested_by=requested_by if isinstance(requested_by, User) else None,
         replay_key=replay_key,
+        run_after=run_after,
     )
     try:
         with transaction.atomic():
@@ -265,7 +270,8 @@ def requeue_lost(*, now: datetime | None = None) -> int:
 
 
 def claim_next(*, now: datetime | None = None) -> Job | None:
-    """Take the oldest queued job and mark it ``running``; ``None`` when there is none.
+    """Take the oldest queued job and mark it ``running``; ``None`` when there is none. A
+    job whose ``run_after`` is still ahead of ``now`` is left for later (PLAN-014 D7).
 
     PostgreSQL: ``SELECT ... FOR UPDATE SKIP LOCKED``, so two workers never take one job.
     sqlite (local only) has no row locks; the conditional update below still lets only
@@ -277,6 +283,7 @@ def claim_next(*, now: datetime | None = None) -> Job | None:
         job = (
             Job.objects.select_for_update(skip_locked=_skip_locked())
             .filter(status=JobStatus.QUEUED)
+            .filter(Q(run_after__isnull=True) | Q(run_after__lte=moment))
             .order_by("created_at", "id")
             .first()
         )

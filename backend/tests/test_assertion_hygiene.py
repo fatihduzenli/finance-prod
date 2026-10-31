@@ -50,6 +50,10 @@ ALLOWED: dict[str, set[int | str]] = {
     "test_banner_adversarial.py": {85},
     # A fixed validation message.
     "test_card_number_guard.py": {143},
+    # The Mail card after a refused save: the posted lines must appear nowhere on the page.
+    "test_plan014_d_messaging.py": {
+        'assert "nope" not in page and "not-an-address" not in page and "b@example.com" not in page'
+    },
     # A CSV export: no ids in its columns.
     "test_contact_log.py": {1570},
     "test_store_form_fields.py": {'assert ",TX," in body and "Texas" not in body'},
@@ -89,6 +93,7 @@ ALLOWED: dict[str, set[int | str]] = {
     # The service worker's JavaScript.
     "test_pwa.py": {123},
     # A PostgreSQL trigger's message.
+    # (listed by text: the file moved with the PLAN-014 D3 re-pins).
     "test_reserved_tables.py": {'assert "outbound" not in text, text'},
     # form.errors, a dict.
     "test_settlement.py": {672},

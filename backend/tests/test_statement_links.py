@@ -35,7 +35,7 @@ from ledger.models import (
     PaymentStatus,
     RentChargeStatus,
 )
-from ledger.services import collections, statement_links
+from ledger.services import statement_links
 from ledger.views import statement_links as views
 from payments.models import ExternalRef
 from tests.receivables_helpers import a_lease, a_rent_charge, a_store, an_operator
@@ -269,7 +269,8 @@ def test_the_page_is_rate_limited_per_address(operator: Operator) -> None:
 
 
 def test_the_merge_field_renders_a_signed_link(operator: Operator) -> None:
-    link = collections.statement_link(operator)
+    # PLAN-014 D4: {pay_link} is this link until the portal exists.
+    link = statement_links.link(operator)
     match = re.fullmatch(r"http://localhost:8000/statement/([^/]+)/", link)
     assert match is not None
     assert statement_links.operator_for(match.group(1)) == operator

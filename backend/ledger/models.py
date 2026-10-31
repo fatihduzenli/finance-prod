@@ -2606,25 +2606,41 @@ class DisputeEvidence(GuardedModel):
         return self.name
 
 
-# --- Collections ladder and outbound e-mail (PLAN-011b D4) ---------------------------
+# --- Outbound messages (PLAN-011b D4; the messaging engine of PLAN-014 D) -------------------
 
 
 #: Longest template subject (PLAN-011b D4).
 TEMPLATE_SUBJECT_MAX_LENGTH = 200
-#: The latest day a ladder step may fall on.
-STEP_MAX_DAY_OFFSET = 365
+#: Longest template name, as the Message templates list shows it (PLAN-014 D4).
+TEMPLATE_NAME_MAX_LENGTH = 80
+
+
+class MessageChannel(models.TextChoices):
+    """How a message travels (PLAN-014 D8): e-mail only; ``sms`` is kept for a future
+    provider and refused at queue time."""
+
+    EMAIL = "email", "E-mail"
+    SMS = "sms", "SMS"
 
 
 class MessageTemplate(GuardedModel):
-    """An e-mail's subject and text (PLAN-011b D4, PLAN-012e D8), edited in the Django admin.
+    """A message's subject and text (PLAN-011b D4, PLAN-012e D8, PLAN-014 D4), edited on
+    Admin › Settings › Message templates.
 
-    The subject and the body may use the merge fields of :mod:`ledger.merge` for the
-    template's code only (:func:`ledger.merge.fields_for`); any
-    other field, attribute or index access, conversion or format specification is
-    refused on save (:meth:`clean` and :meth:`save`) and never rendered.
+    The subject and the body may use the placeholders of :mod:`ledger.merge` for the
+    template's code only (:func:`ledger.merge.fields_for`); any other placeholder,
+    attribute or index access, conversion or format specification is refused on save
+    (:meth:`clean` and :meth:`save`) and never rendered. ``internal`` marks a message to the
+    company's managers (rule E), never to an operator; an inactive template is kept for the
+    history of the messages that used it and is offered nowhere.
     """
 
     code = models.SlugField(max_length=64, unique=True, validators=[validate_no_payment_data])
+    #: What the list and the selects show; the code when blank.
+    name = guarded_char(TEMPLATE_NAME_MAX_LENGTH, blank=True, default="")
+    channel = _choice(MessageChannel, default=MessageChannel.EMAIL)
+    active = models.BooleanField(default=True)
+    internal = models.BooleanField(default=False)
     subject = guarded_char(TEMPLATE_SUBJECT_MAX_LENGTH)
     body = free_text(blank=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -2639,10 +2655,15 @@ class MessageTemplate(GuardedModel):
             models.CheckConstraint(
                 condition=Q(code__regex=r"^[a-z0-9_]+$"), name="message_templates_code_shape"
             ),
+            _valid_choice("message_templates", "channel", MessageChannel),
         ]
 
     def __str__(self) -> str:
-        return self.code
+        return self.display_name
+
+    @property
+    def display_name(self) -> str:
+        return str(self.name or self.code)
 
     def merge_field_errors(self) -> dict[str, list[str]]:
         fields = merge.fields_for(self.code or "")
@@ -2664,70 +2685,90 @@ class MessageTemplate(GuardedModel):
         super().save(*args, **kwargs)
 
 
-class CollectionStep(GuardedModel):
-    """One rung of the collections ladder (PLAN-011b D4): ``day_offset`` days after a
-    charge's due date (New York days), its template is sent, once per charge. Edited in
-    the Django admin; a step no longer used is made inactive, never deleted."""
-
-    day_offset = models.PositiveSmallIntegerField()
-    template = models.ForeignKey(MessageTemplate, on_delete=models.PROTECT, related_name="steps")
-    active = models.BooleanField(default=True)
-    position = models.SmallIntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "collection_steps"
-        ordering = ("day_offset", "position")
-        constraints = [
-            models.CheckConstraint(
-                condition=Q(day_offset__gte=1, day_offset__lte=STEP_MAX_DAY_OFFSET),
-                name="collection_steps_day_offset_range",
-            ),
-            models.UniqueConstraint(fields=["day_offset"], name="collection_steps_day_unique"),
-        ]
-
-    def __str__(self) -> str:
-        return f"Day {self.day_offset}"
-
-
 class MessageStatus(models.TextChoices):
-    """What became of an outbound message (PLAN-011b D4); a closed list."""
+    """What became of an outbound message (PLAN-011b D4, PLAN-014 D2); a closed list.
+    ``catch_all`` is history: the catch-all sender is retired (PLAN-014 D2)."""
 
     QUEUED = "queued", "Waiting"
     SENT = "sent", "Sent"
     FAILED = "failed", "Failed"
     SUPPRESSED = "suppressed", "Suppressed"
     CATCH_ALL = "catch_all", "Sent to the test inbox"
+    HELD = "held", "Held"
+
+
+class HeldReason(models.TextChoices):
+    """Why a message is held in the Outbox instead of sent (PLAN-014 D2, D6); the labels are
+    what the Outbox and the timeline say."""
+
+    NOT_SET_UP = "not_set_up", "not sent (mail not set up)"
+    SANDBOX = "sandbox", "held on sandbox"
+    NO_ADDRESS = "no_address", "no billing e-mail"
+    NO_MANAGER_LIST = "no_manager_list", "no manager list"
+    HANDLED_PERSONALLY = "handled_personally", "operator handled personally"
+
+
+class MessageRule(models.TextChoices):
+    """Why a message was queued (PLAN-014 D3): a reminder rule ``A`` to ``F`` (Batches E and
+    F), a final statement, a send by hand, or ``ladder``, a message of the retired
+    collections ladder (its old step's day in ``occurrence``)."""
+
+    A = "A", "A — rent will be debited"
+    B = "B", "B — payment due"
+    C = "C", "C — payment overdue"
+    D = "D", "D — notice: overdue"
+    E = "E", "E — 30 days overdue (internal)"
+    F = "F", "F — payment returned"
+    FINAL_STATEMENT = "final_statement", "Final statement"
+    MANUAL = "manual", "Sent by hand"
+    LADDER = "ladder", "Old collections ladder"
+
+
+#: Longest rule code (PLAN-014 D3).
+RULE_MAX_LENGTH = 32
 
 
 class ChargeEntityType(models.TextChoices):
-    """What an outbound message is about: a charge of the collections ladder, or a lease
-    end whose final statement it carries (PLAN-012e D8)."""
+    """What an outbound message is about: a charge, or a lease end whose final statement it
+    carries (PLAN-012e D8)."""
 
     RENT_CHARGE = "rent_charge", "Rent charge"
     ONE_OFF_CHARGE = "one_off_charge", "One-off charge"
     LEASE_END = "lease_end", "Lease end"
+    #: PLAN-014 D4: a lease's yearly insurance charge (the reminder rules of Batch E).
+    INSURANCE_CHARGE = "insurance_charge", "Insurance charge"
+
+
+#: The charge types a message about a charge (not a lease end) names.
+CHARGE_TYPES_OF_CHARGES: tuple[str, ...] = (
+    ChargeEntityType.RENT_CHARGE,
+    ChargeEntityType.ONE_OFF_CHARGE,
+    ChargeEntityType.INSURANCE_CHARGE,
+)
 
 
 class MessageKind(models.TextChoices):
-    """Why an outbound message is sent (PLAN-012e D8); a closed list."""
+    """What an outbound message carries (PLAN-012e D8); a closed list. ``ladder`` (the
+    value is history) is every message about a charge; ``final_statement`` carries the PDF
+    of a lease end."""
 
-    LADDER = "ladder", "Collections ladder"
+    LADDER = "ladder", "Charge message"
     FINAL_STATEMENT = "final_statement", "Final statement"
 
 
 class OutboundMessage(GuardedModel):
-    """One e-mail to an operator (PLAN-011b D4, PLAN-012e D8): a collection e-mail about
-    one charge (``kind`` ``ladder``, with its ``step``), or the final statement of a lease
-    end (``kind`` ``final_statement``, no step, the PDF in ``document``).
+    """One message (PLAN-011b D4, PLAN-012e D8, PLAN-014 D3): about one charge (``kind``
+    ``ladder``) or the final statement of a lease end (``kind`` ``final_statement``, the
+    PDF in ``document``).
 
     The subject is named generically (``charge_entity_type``, ``charge_entity_id``), as
-    audit rows name their entity. One ladder row per (charge, step): a hand send of a
-    step already logged is a second row marked ``manual``, made only on an explicit
-    confirmation; one final statement row per lease end. ``subject`` and ``body_sha256``
-    are written when the message is rendered for sending; the body itself is never
-    stored. ``error`` is a class name.
+    audit rows name their entity. ``rule`` says why it was queued and ``occurrence`` counts
+    a rule's repeats: one row per (lease, charge, rule, occurrence) unless ``manual`` (a
+    send by hand, made by a named user). The subject and body are rendered when the message
+    is queued and stored (``rendered_subject``, ``rendered_body``; ``body_sha256`` is their
+    hash), so the Outbox and the store's timeline show what was or would have been sent.
+    ``scheduled_for`` is the send window's time (PLAN-014 D7); ``held_reason`` says why a
+    ``held`` message waits in the Outbox; ``error`` is a class name.
     """
 
     operator = models.ForeignKey(
@@ -2740,9 +2781,9 @@ class OutboundMessage(GuardedModel):
     )
     template = models.ForeignKey(MessageTemplate, on_delete=models.PROTECT, related_name="+")
     kind = _choice(MessageKind, default=MessageKind.LADDER)
-    step = models.ForeignKey(
-        CollectionStep, on_delete=models.PROTECT, null=True, blank=True, related_name="messages"
-    )
+    channel = _choice(MessageChannel, default=MessageChannel.EMAIL)
+    rule = models.CharField(max_length=RULE_MAX_LENGTH, choices=MessageRule.choices)
+    occurrence = models.PositiveSmallIntegerField(default=1)
     charge_entity_type = _choice(ChargeEntityType)
     charge_entity_id = models.UUIDField()
     #: The attachment of a final statement (PLAN-012e D8); null otherwise.
@@ -2750,19 +2791,23 @@ class OutboundMessage(GuardedModel):
         Document, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     to_address = models.EmailField(validators=[validate_no_payment_data])
-    subject = free_text()
-    #: The SHA-256 of the text body sent, in lower-case hexadecimal; an identifier.
+    rendered_subject = free_text()
+    rendered_body = free_text()
+    #: The SHA-256 of the text body, in lower-case hexadecimal; an identifier.
     body_sha256 = models.CharField(max_length=64, blank=True, default="")
     status = _choice(MessageStatus, default=MessageStatus.QUEUED)
+    held_reason = _choice(HeldReason, blank=True, default="")
     #: The mail service's message ID (Gmail's); an identifier.
     mail_message_id = models.CharField(max_length=128, blank=True, default="")
     #: The class name of the failure, never a message (CHECK); guarded like free text.
     error = guarded_char(100, blank=True, default="")
     manual = models.BooleanField(default=False)
     queued_at = models.DateTimeField(auto_now_add=True)
+    #: When the send window lets it go (PLAN-014 D7); null for a message queued before it.
+    scheduled_for = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     #: Who sent it by hand, or who confirmed the lease end of a final statement; null
-    #: for the ladder.
+    #: for a rule.
     sent_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
@@ -2775,33 +2820,47 @@ class OutboundMessage(GuardedModel):
                 fields=["charge_entity_type", "charge_entity_id"],
                 name="outbound_messages_charge_idx",
             ),
+            models.Index(fields=["lease", "queued_at"], name="outbound_messages_lease_idx"),
+            models.Index(fields=["queued_at"], name="outbound_messages_queued_idx"),
         ]
         constraints = [
             _valid_choice("outbound_messages", "status", MessageStatus),
             _valid_choice("outbound_messages", "charge_entity_type", ChargeEntityType),
             _valid_choice("outbound_messages", "kind", MessageKind),
-            # A ladder message names its step and a charge; a final statement names a
-            # lease end and no step. (Each rule reads only valid kinds.)
+            _valid_choice("outbound_messages", "channel", MessageChannel),
+            _valid_choice("outbound_messages", "rule", MessageRule),
+            _valid_choice("outbound_messages", "held_reason", HeldReason, blank=True),
+            # A message about a charge names a charge; a final statement names a lease end,
+            # and its rule says so. (Each rule reads only valid kinds.)
             models.CheckConstraint(
                 condition=(
                     ~Q(kind=MessageKind.LADDER)
-                    | Q(
-                        step__isnull=False,
-                        charge_entity_type__in=[
-                            ChargeEntityType.RENT_CHARGE,
-                            ChargeEntityType.ONE_OFF_CHARGE,
-                        ],
+                    | (
+                        Q(charge_entity_type__in=CHARGE_TYPES_OF_CHARGES)
+                        & ~Q(rule=MessageRule.FINAL_STATEMENT)
                     )
                 )
                 & (
                     ~Q(kind=MessageKind.FINAL_STATEMENT)
-                    | Q(step__isnull=True, charge_entity_type=ChargeEntityType.LEASE_END)
+                    | Q(
+                        charge_entity_type=ChargeEntityType.LEASE_END,
+                        rule=MessageRule.FINAL_STATEMENT,
+                    )
                 ),
-                name="outbound_messages_step_iff_ladder",
+                name="outbound_messages_kind_matches_rule",
             ),
             models.CheckConstraint(
                 condition=Q(kind=MessageKind.FINAL_STATEMENT) | Q(document__isnull=True),
                 name="outbound_messages_document_only_final_statement",
+            ),
+            models.CheckConstraint(
+                condition=Q(occurrence__gte=1), name="outbound_messages_occurrence_positive"
+            ),
+            # A held message says why; any other has no reason.
+            models.CheckConstraint(
+                condition=(Q(status=MessageStatus.HELD) & ~Q(held_reason=""))
+                | (~Q(status=MessageStatus.HELD) & Q(held_reason="")),
+                name="outbound_messages_held_has_reason",
             ),
             models.CheckConstraint(
                 condition=Q(body_sha256__regex=r"^([0-9a-f]{64})?$"),
@@ -2820,9 +2879,9 @@ class OutboundMessage(GuardedModel):
                 name="outbound_messages_manual_has_sender",
             ),
             models.UniqueConstraint(
-                fields=["charge_entity_type", "charge_entity_id", "step"],
+                fields=["lease", "charge_entity_type", "charge_entity_id", "rule", "occurrence"],
                 condition=Q(manual=False),
-                name="outbound_messages_one_per_charge_step",
+                name="outbound_messages_one_per_lease_charge_rule",
             ),
             models.UniqueConstraint(
                 fields=["charge_entity_type", "charge_entity_id"],
@@ -2830,6 +2889,9 @@ class OutboundMessage(GuardedModel):
                 name="outbound_messages_one_final_statement",
             ),
         ]
+
+    def __str__(self) -> str:
+        return f"{self.rule} {self.status}"
 
 
 # --- Notes & follow-ups and calendar (PLAN-011b D7, D8) ------------------------------------
@@ -3413,6 +3475,16 @@ class CompanySettings(PaymentDataGuardedModel):
         max_length=200, blank=True, validators=[validate_no_payment_data, validate_logo_path]
     )
     processor_name = guarded_char(COMPANY_NAME_MAX_LENGTH)
+    #: PLAN-014 D1, D2: the mailbox the messages are sent as (the Gmail key impersonates
+    #: it), the Reply-To when set, the managers who receive the internal messages and, on
+    #: the sandbox, the only addresses mail may reach; each list one address per line.
+    #: Edited on Admin › Settings › Mail.
+    sender_email = models.EmailField(blank=True, default="", validators=[validate_no_payment_data])
+    reply_to_email = models.EmailField(
+        blank=True, default="", validators=[validate_no_payment_data]
+    )
+    manager_emails = free_text(default="")
+    sandbox_allowlist = free_text(default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

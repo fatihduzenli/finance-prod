@@ -729,9 +729,12 @@ def test_csv_headers_and_column_keys_are_unchanged() -> None:
 
 
 def test_the_collection_log_names_the_test_inbox() -> None:
-    from ledger.services import collections
+    # PLAN-014 D2: the catch-all is retired; its old rows keep the status's words, and a
+    # message held in the Outbox says why.
+    from ledger.services import messaging
 
-    assert collections.SENT_TEXT[MessageStatus.CATCH_ALL] == "Sent to the test inbox."
+    assert MessageStatus.CATCH_ALL.label == "Sent to the test inbox"
+    assert messaging.HELD_TEXT.format(reason="held on sandbox") == "Held: held on sandbox."
 
 
 # --- carry-over (a): the transfer's incoming step has the twice-a-month tick ---------------

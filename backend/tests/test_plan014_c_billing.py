@@ -488,15 +488,21 @@ def test_bill_to_prints_the_leases_company_over_the_persons_name() -> None:
 
 
 def test_a_collection_message_goes_to_the_leases_billing_email() -> None:
-    from ledger.models import OutboundMessage
-    from ledger.services import collections
+    # Through the messaging engine of Batch D (the ladder's queue_due is gone): the address is
+    # the billing lease's, never the operator's.
+    from ledger.models import MessageTemplate, OutboundMessage
+    from ledger.services import leases, messaging
 
     lease = connected_lease()
     assert lease.operator is not None
     lease.operator.email = "person@example.com"
     lease.operator.save()
-    a_rent_charge(lease, date(2026, 9, 1), due="1000.00", day=1)
-    collections.queue_due(TODAY)
+    charge = a_rent_charge(lease, date(2026, 9, 1), due="1000.00", day=1)
+    billed = leases.billing_lease(charge)
+    assert billed == lease
+    template = MessageTemplate.objects.get(code="reminder_due")
+    context = messaging.context_for(lease, charge, "B", today=TODAY)
+    messaging.queue("B", lease, charge, template, context)
     message = OutboundMessage.objects.order_by("queued_at").last()
     assert (
         message is not None

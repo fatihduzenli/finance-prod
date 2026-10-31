@@ -1,26 +1,13 @@
-"""Senders that reach no network (docs/qa/PLAN-011b D3): :class:`MemoryMailSender` for
-tests and local use, :class:`NullSender` when mail is off, and :class:`CatchAllSender`,
-which rewrites every message to the catch-all address before its inner sender sees it.
+"""The sender that reaches no network (docs/qa/PLAN-011b D3): :class:`MemoryMailSender`, for
+tests and local use. (Mail off is the Outbox, :mod:`mail.outbox`, PLAN-014 D2.)
 """
 
 from __future__ import annotations
 
 import threading
-from dataclasses import replace
 from datetime import UTC, datetime
 
-from mail.base import (
-    CATCH_ALL,
-    SUBJECT_MAX_LENGTH,
-    SUPPRESSED,
-    MailSender,
-    MailUnavailable,
-    Message,
-    SentReceipt,
-)
-
-#: The header that names the recipient a catch-all message was meant for.
-ORIGINAL_TO = "X-Original-To"
+from mail.base import MailUnavailable, Message, SentReceipt
 
 
 class MemoryMailSender:
@@ -39,34 +26,3 @@ class MemoryMailSender:
             self.sent.append(message)
             number = len(self.sent)
         return SentReceipt(provider_message_id=f"memory{number}", sent_at=datetime.now(UTC))
-
-
-class NullSender:
-    """Mail is off (``MAIL_ENABLED`` false): nothing is delivered, every send is
-    ``suppressed``."""
-
-    def send(self, message: Message) -> SentReceipt:
-        return SentReceipt(
-            provider_message_id="", sent_at=datetime.now(UTC), disposition=SUPPRESSED
-        )
-
-
-class CatchAllSender:
-    """Delivers every message to ``address`` instead of its recipient: the subject starts
-    with ``[to: <recipient>] `` and an ``X-Original-To`` header names the recipient; the
-    attachments go with it. The receipt says ``catch_all``."""
-
-    def __init__(self, inner: MailSender, address: str) -> None:
-        self.inner = inner
-        self.address = address
-
-    def send(self, message: Message) -> SentReceipt:
-        rewritten = Message(
-            to=self.address,
-            subject=f"[to: {message.to}] {message.subject}"[:SUBJECT_MAX_LENGTH],
-            text=message.text,
-            html=message.html,
-            headers=(*message.headers, (ORIGINAL_TO, message.to)),
-            attachments=message.attachments,
-        )
-        return replace(self.inner.send(rewritten), disposition=CATCH_ALL)

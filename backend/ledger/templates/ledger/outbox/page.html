@@ -1,0 +1,46 @@
+{% extends "finance/base.html" %}
+{% load filters dates responsive %}
+{% block title %}Outbox{% endblock %}
+{% block header %}<div class="page-header"><div class="page-title"><h1>Outbox</h1><span class="list-counts" id="list-counts">{{ page.paginator.count }} message{{ page.paginator.count|pluralize }}</span></div></div>{% endblock %}
+{% block content %}
+  {% comment %}Admin › Outbox (docs/qa/PLAN-014 D5): every message, newest first, 50 a page; filters by status and by the days queued. A row opens its stored subject and body. "Send now" sends a held message again once mail is set up (and, on the sandbox, its address is on the allowlist); the service refuses otherwise with a sentence.{% endcomment %}
+  <div class="card filter-card">{% filters active=active_filters %}
+      <span class="filter-field"><label for="status">Status</label>
+      <select name="status" id="status">
+        <option value="">Any</option>
+        {% for value, label in status_choices %}<option value="{{ value }}"{% if value == selected.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select></span>
+      <span class="filter-field"><label for="from">From</label>
+      <input type="date" name="from" id="from" value="{{ selected.from|date:'Y-m-d' }}"></span>
+      <span class="filter-field"><label for="to">To</label>
+      <input type="date" name="to" id="to" value="{{ selected.to|date:'Y-m-d' }}"></span>
+  {% endfilters %}</div>
+  <div id="results">
+  {% if not mail_set_up %}<p class="side-note warning" id="outbox-not-set-up">Mail is not set up in this environment: every message is held here.</p>{% endif %}
+  <div class="card table-card list-card">
+  {% responsive_table %}
+  <table id="outbox">
+    <thead><tr><th>When</th><th>Store</th><th>Operator</th><th>Template</th><th>Rule</th><th>Status</th><th>To</th><th>Scheduled for</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+      {% for message, status, to in rows %}
+        <tr id="message-{{ message.pk }}">
+          <td>{{ message.queued_at|moment }}</td>
+          <td>{% if message.lease %}<a href="{% url 'ledger:stores:detail' pk=message.lease.store_id %}">{% if message.lease.store.store_number is not None %}#{{ message.lease.store.store_number }} {% endif %}{{ message.lease.store.external_label }}</a>{% else %}—{% endif %}</td>
+          <td>{{ message.operator.display_name }}</td>
+          <td><details class="message-text"><summary>{{ message.template.display_name }}</summary><p><strong>{{ message.rendered_subject|default:"—" }}</strong></p><pre class="message-body">{{ message.rendered_body }}</pre></details></td>
+          <td>{{ message.get_rule_display }}</td>
+          <td>{{ status }}</td>
+          <td>{{ to|default:"—" }}</td>
+          <td>{% if message.scheduled_for %}{{ message.scheduled_for|moment }}{% else %}—{% endif %}</td>
+          <td>{% if message.status == "held" %}<form method="post" action="{% url 'ledger:outbox:send_now' pk=message.pk %}" class="js-single-submit">{% csrf_token %}<button class="btn btn-sm" type="submit">Send now</button></form>{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="9" class="muted empty">No messages yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endresponsive_table %}
+  {% include "ledger/_list_footer.html" with page=page pager_query=query %}
+  </div>
+  </div>
+{% endblock %}

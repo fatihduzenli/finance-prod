@@ -64,11 +64,11 @@ from ledger.models import (
     Operator,
 )
 from ledger.services import (
-    collections,
     contacts,
     csv_export,
     invoice_builder,
     leases,
+    messaging,
     rent_run,
     workspace,
 )
@@ -308,12 +308,12 @@ def _detail_context(request: HttpRequest, charge: OneOffCharge) -> dict[str, Any
             store=store,
             record=(service.ENTITY_ONE_OFF_CHARGE, charge.pk),
         ),
-        # PLAN-011b D4: the charge's collection e-mails and the hand send.
-        **collections.charge_context(
+        # PLAN-011b D4, PLAN-014 D6: the charge's messages and "Send a message now".
+        **messaging.charge_context(
             ChargeEntityType.ONE_OFF_CHARGE,
             charge.pk,
             billing=billing,
-            url=reverse("ledger:one_off_charges:send_step", kwargs={"pk": charge.pk}),
+            url=reverse("ledger:one_off_charges:send_message", kwargs={"pk": charge.pk}),
         ),
     }
 

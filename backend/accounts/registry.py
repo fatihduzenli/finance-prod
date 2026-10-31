@@ -263,6 +263,13 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:settings:brand_save": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:settings:brand_toggle": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:settings:brand_move": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Admin › Settings' Mail card and message templates (PLAN-014 D1, D4): the edit page's
+    # GET is refused below admin by its view.
+    "ledger:settings:mail_save": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:settings:template_edit": RouteRule(min_role=Role.ADMIN, methods=POST),
+    "ledger:settings:template_preview": RouteRule(min_role=Role.ADMIN, methods=POST),
+    # Admin › Outbox (PLAN-014 D5): "Send now" on a held message.
+    "ledger:outbox:send_now": RouteRule(min_role=Role.ADMIN, methods=POST),
     "ledger:contacts:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:correct": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:contacts:delete": RouteRule(min_role=Role.ADMIN, methods=POST),
@@ -275,13 +282,14 @@ ROUTE_ROLES: dict[str, RouteRule] = {
     "ledger:calendar:add": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:calendar:edit": RouteRule(min_role=Role.BILLING, methods=POST),
     "ledger:calendar:delete": RouteRule(min_role=Role.BILLING, methods=POST),
-    # The collections ladder (PLAN-011b D4, D10): marking an operator as handled
-    # personally and sending a step by hand need billing.
+    # Collections (PLAN-011b D4, D10): marking an operator as handled personally needs
+    # billing.
     "ledger:operators:handled_personally": RouteRule(min_role=Role.BILLING, methods=POST),
     # PLAN-011b D4: revoke every signed statement link of an operator (billing).
     "ledger:operators:statement_links_revoke": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:charges:send_step": RouteRule(min_role=Role.BILLING, methods=POST),
-    "ledger:one_off_charges:send_step": RouteRule(min_role=Role.BILLING, methods=POST),
+    # PLAN-014 D6: "Send a message now" on a charge's page.
+    "ledger:charges:send_message": RouteRule(min_role=Role.BILLING, methods=POST),
+    "ledger:one_off_charges:send_message": RouteRule(min_role=Role.BILLING, methods=POST),
     # One's own calendar feed (PLAN-011b D8, D10): any role, for their own feed only.
     "finance:feed_create": RouteRule(min_role=Role.VIEWER, methods=POST),
     "finance:feed_revoke": RouteRule(min_role=Role.VIEWER, methods=POST),
@@ -310,9 +318,6 @@ ADMIN_MODEL_PREFIX_RULES: dict[str, RouteRule] = {
     # The fee catalogue and the insurance premiums, edited in the admin (PLAN-010b D12).
     "admin:ledger_feetype_": RouteRule(min_role=Role.ADMIN, methods=POST),
     "admin:ledger_insurancepremium_": RouteRule(min_role=Role.ADMIN, methods=POST),
-    # The collections ladder's steps and e-mail templates (PLAN-011b D4, D10).
-    "admin:ledger_collectionstep_": RouteRule(min_role=Role.ADMIN, methods=POST),
-    "admin:ledger_messagetemplate_": RouteRule(min_role=Role.ADMIN, methods=POST),
     # The company settings row, changed in the admin (PLAN-012c D2).
     "admin:ledger_companysettings_": RouteRule(min_role=Role.ADMIN, methods=POST),
 }
@@ -342,6 +347,8 @@ READ_ONLY_ROUTE_NAMES: frozenset[str] = frozenset(
         "ledger:stores:detail",
         # Admin › Settings (PLAN-014 B2); the view refuses below admin.
         "ledger:settings:index",
+        "ledger:settings:templates",
+        "ledger:outbox:page",
         # Lease screens that only read (PLAN-007 §4.1).
         "ledger:leases:list",
         "ledger:leases:detail",

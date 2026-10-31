@@ -40,7 +40,8 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "AutopayEndRule": ["count", "date", "never"],
     "AutopayPlanState": ["active", "finished", "paused", "stopped"],
     "CalendarEntryKind": ["note", "reminder"],
-    "ChargeEntityType": ["lease_end", "one_off_charge", "rent_charge"],
+    # PLAN-014 D4: a lease's insurance charge (the reminder rules of Batch E).
+    "ChargeEntityType": ["insurance_charge", "lease_end", "one_off_charge", "rent_charge"],
     "CollectionMethod": ["autopay_due", "charge_now", "email", "manual", "none"],
     "CollectionStatus": ["active", "ended", "paused", "prospective"],
     "CompanyTimeZone": [
@@ -91,7 +92,17 @@ FROZEN_CHOICES: dict[str, list[str]] = {
     "LeaseTransferStatus": ["confirmed", "draft"],
     "LegacyStatus": ["paid", "unpaid"],
     "MessageKind": ["final_statement", "ladder"],
-    "MessageStatus": ["catch_all", "failed", "queued", "sent", "suppressed"],
+    # PLAN-014 D2: held in the Outbox; D3: the message's channel, rule and held reason.
+    "MessageStatus": ["catch_all", "failed", "held", "queued", "sent", "suppressed"],
+    "MessageChannel": ["email", "sms"],
+    "MessageRule": ["A", "B", "C", "D", "E", "F", "final_statement", "ladder", "manual"],
+    "HeldReason": [
+        "handled_personally",
+        "no_address",
+        "no_manager_list",
+        "not_set_up",
+        "sandbox",
+    ],
     # "check" added by PLAN-012e-3, "cash" by PLAN-012f-b Batch C.
     "MoneyMethod": ["ach", "cash", "check", "other", "wire", "zelle"],
     "NoteEntityType": ["lease", "operator", "store"],
@@ -157,10 +168,13 @@ FROZEN_CHOICES: dict[str, list[str]] = {
 #: (finance:payment_status_period); 281 since Batch B (ledger:settings:index and the four brand
 #: actions, ledger:notes:add|edit|pin|delete; the five admin:ledger_storetype_* routes gone); 280
 #: since Batch C part 1 (ledger:leases:billing; ledger:operators:link and retry_sync gone;
-#: computed with _route_names after the merge of Batch B on 2026-10-30).
-#: 283 since PLAN-014 Batch C (ledger:leases:billing, bank, bank_attach, switch_own; the
-#: operator's link and retry_sync gone).
-FROZEN_ROUTES = (283, "992b72f6e8fdaabd7b57ee5724967ae4ab1b1b972afc619c6b0c1708a0208771")
+#: computed with _route_names after the merge of Batch B on 2026-10-30); 283 since PLAN-014
+#: Batch C (ledger:leases:billing, bank, bank_attach, switch_own; the operator's link and
+#: retry_sync gone); 279 since Batch D (ledger:settings:mail_save, templates, template_edit,
+#: template_preview, ledger:outbox:page and send_now added; send_step became send_message on
+#: both charge pages; the admin:ledger_messagetemplate_* and admin:ledger_collectionstep_*
+#: routes gone with their registrations).
+FROZEN_ROUTES = (279, "f0eeee9617810172a5ca21478db3a20db77e695c9783056ed140b5727b4207ee")
 
 
 # --- what is stored or addressed never changes ------------------------------------------

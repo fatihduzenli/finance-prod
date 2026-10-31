@@ -42,6 +42,7 @@ MARKER = "MARKER-D14-REASON"
 storage = lease_end_tests.storage
 pinned = lease_end_tests.pinned
 memory = lease_end_tests.memory
+window_open = lease_end_tests.window_open
 
 
 def _admin() -> tuple[Any, User]:

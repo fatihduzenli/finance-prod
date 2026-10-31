@@ -1,32 +1,45 @@
-"""Merge fields of the e-mail templates (docs/qa/PLAN-011b D4, PLAN-012e D8).
+"""Placeholders of the message templates (docs/qa/PLAN-011b D4, PLAN-012e D8, PLAN-014 D4).
 
-A template's subject and body may name exactly the fields of its code's list, each as
-``{name}``: :data:`LADDER_FIELDS` for the collection e-mails, :data:`FINAL_STATEMENT_FIELDS`
-for the template ``final_statement`` (:func:`fields_for`); :data:`MERGE_FIELDS` is every
-field of either list. ``{{`` and ``}}`` write a literal brace. Nothing else is accepted: no
-attribute or index access (``{operator.__dict__}``, ``{operator[0]}``), no conversion
-(``{operator!r}``), no format specification (``{amount:>99999}``), no positional or
-unknown field (``{}``, ``{0}``, ``{__class__}``). :func:`problems` lists what a text
-breaks, for the admin's validation on save; :func:`render` refuses the same texts with
-:class:`TemplateRefused` and substitutes values from a mapping of plain strings only.
-Rendering is :class:`string.Formatter` with every lookup, conversion and specification
-overridden to accept nothing beyond a whitelisted name: Django templates are never used.
+A template's subject and body may name exactly the placeholders of its code's list, each as
+``{name}``: :data:`FIELDS` (the closed set of PLAN-014 D4) for every message about a charge,
+:data:`FINAL_STATEMENT_FIELDS` for the template ``final_statement`` (:func:`fields_for`);
+:data:`MERGE_FIELDS` is every placeholder of either list. ``{{`` and ``}}`` write a literal
+brace. Nothing else is accepted: no attribute or index access (``{operator_name.__dict__}``,
+``{amount[0]}``), no conversion (``{amount!r}``), no format specification
+(``{amount:>99999}``), no positional or unknown placeholder (``{}``, ``{0}``,
+``{__class__}``). :func:`problems` lists what a text breaks, for the refusal on save (an
+unknown placeholder is named, nothing else of the text is repeated); :func:`render` refuses
+the same texts with :class:`TemplateRefused` and substitutes values from a mapping of plain
+strings only. Rendering is :class:`string.Formatter` with every lookup, conversion and
+specification overridden to accept nothing beyond a whitelisted name: Django templates are
+never used.
 """
 
 from __future__ import annotations
 
+import re
 import string
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-LADDER_FIELDS: tuple[str, ...] = (
-    "operator",
-    "store",
+#: The placeholders of a message about a charge (PLAN-014 D4), in the order the edit page
+#: lists them.
+FIELDS: tuple[str, ...] = (
+    "operator_name",
+    "store_number",
+    "store_name",
     "amount",
+    "charge_name",
     "due_date",
+    "debit_date",
+    "retry_date",
     "days_late",
-    "statement_link",
-    "company",
+    "bank_last4",
+    "return_reason",
+    "pay_link",
+    "store_link",
+    "support_email",
+    "company_name",
 )
 #: The template code of the final statement e-mail (PLAN-012e D8) and its fields.
 FINAL_STATEMENT_CODE = "final_statement"
@@ -39,13 +52,19 @@ FINAL_STATEMENT_FIELDS: tuple[str, ...] = (
     "end_date",
 )
 MERGE_FIELDS: tuple[str, ...] = (
-    *LADDER_FIELDS,
-    *(name for name in FINAL_STATEMENT_FIELDS if name not in LADDER_FIELDS),
+    *FIELDS,
+    *(name for name in FINAL_STATEMENT_FIELDS if name not in FIELDS),
 )
 _ALLOWED = frozenset(MERGE_FIELDS)
 #: The exact sets of values :func:`render` accepts.
-_VALUE_SETS = (frozenset(LADDER_FIELDS), frozenset(FINAL_STATEMENT_FIELDS), _ALLOWED)
+_VALUE_SETS = (frozenset(FIELDS), frozenset(FINAL_STATEMENT_FIELDS), _ALLOWED)
 UNREADABLE = "Braces must pair: write {{ and }} for a literal brace."
+UNKNOWN = "{{{name}}} is not a placeholder this template can use."
+UNKNOWN_UNNAMED = "A placeholder in this text is not one this template can use."
+NO_FORMAT = "Write {{{name}}} as it is: a placeholder takes no format or conversion."
+#: How an unknown placeholder may be named back: a plain word of a reasonable length; any
+#: other text in braces is refused without being repeated.
+_NAMEABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}")
 
 
 def fields_text(fields: tuple[str, ...] = MERGE_FIELDS) -> str:
@@ -53,17 +72,16 @@ def fields_text(fields: tuple[str, ...] = MERGE_FIELDS) -> str:
 
 
 def not_allowed(fields: tuple[str, ...] = MERGE_FIELDS) -> str:
-    return "Only these merge fields are allowed, written exactly: " + fields_text(fields) + "."
+    return "Only these placeholders are allowed, written exactly: " + fields_text(fields) + "."
 
 
 def fields_for(code: str) -> tuple[str, ...]:
-    """The merge fields a template with this code may use."""
-    return FINAL_STATEMENT_FIELDS if code == FINAL_STATEMENT_CODE else LADDER_FIELDS
+    """The placeholders a template with this code may use."""
+    return FINAL_STATEMENT_FIELDS if code == FINAL_STATEMENT_CODE else FIELDS
 
 
-#: The collection e-mails' fields and refusal, as the admin shows them.
-FIELDS_TEXT = fields_text(LADDER_FIELDS)
-NOT_ALLOWED = not_allowed(LADDER_FIELDS)
+#: The refusal :func:`render` raises.
+NOT_ALLOWED = not_allowed(MERGE_FIELDS)
 
 
 class TemplateRefused(ValueError):  # noqa: N818 - reads as the outcome
@@ -72,7 +90,9 @@ class TemplateRefused(ValueError):  # noqa: N818 - reads as the outcome
 
 def problems(text: str, fields: tuple[str, ...] = MERGE_FIELDS) -> list[str]:
     """What ``text`` breaks, as messages for staff; empty when it is acceptable. Only
-    ``fields`` may be named (every merge field when not given)."""
+    ``fields`` may be named (every placeholder when not given). An unknown placeholder is
+    named when it is a plain word (:data:`UNKNOWN`), never otherwise; no other part of the
+    text is repeated."""
     allowed = frozenset(fields) & _ALLOWED
     try:
         parsed = list(string.Formatter().parse(text))
@@ -81,8 +101,12 @@ def problems(text: str, fields: tuple[str, ...] = MERGE_FIELDS) -> list[str]:
     for _, name, spec, conversion in parsed:
         if name is None:
             continue
-        if name not in allowed or spec or conversion is not None:
-            return [not_allowed(fields)]
+        if name not in allowed:
+            if _NAMEABLE.fullmatch(name):
+                return [UNKNOWN.format(name=name)]
+            return [UNKNOWN_UNNAMED]
+        if spec or conversion is not None:
+            return [NO_FORMAT.format(name=name)]
     return []
 
 

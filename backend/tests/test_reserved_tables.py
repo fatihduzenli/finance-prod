@@ -22,7 +22,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 
 from ledger.models import (
-    CollectionStep,
+    CompanySettings,
     Document,
     MessageTemplate,
     Operator,
@@ -35,6 +35,9 @@ CARD = "4111 1111 1111 1111"
 TABLES = ("documents", "outbound_messages")
 OLD_GUARDS = importlib.import_module("ledger.migrations.0004_reserved_tables").GUARDED_COLUMNS
 GUARDS = importlib.import_module("ledger.migrations.0024_collections_ladder").GUARDED_COLUMNS
+#: PLAN-014 D3: ledger 0061 replaced the outbound_messages and message_templates entries.
+ENGINE_GUARDS = importlib.import_module("ledger.migrations.0061_messaging_engine").GUARDED_COLUMNS
+LIVE_GUARDS = {**GUARDS, **ENGINE_GUARDS}
 
 requires_postgresql = pytest.mark.skipif(
     connection.vendor != "postgresql",
@@ -49,14 +52,14 @@ def operator() -> Operator:
 
 
 def message(**fields: Any) -> OutboundMessage:
-    step = CollectionStep.objects.select_related("template").get(day_offset=3)
     values = {
-        "template": step.template,
-        "step": step,
+        "template": MessageTemplate.objects.get(code="reminder_due"),
+        "rule": "B",
         "charge_entity_type": "rent_charge",
         "charge_entity_id": "00000000-0000-0000-0000-000000000001",
         "to_address": "ops@example.com",
-        "subject": "Reminder",
+        "rendered_subject": "Reminder",
+        "rendered_body": "Owed.",
     }
     return OutboundMessage(operator=operator(), **{**values, **fields})
 
@@ -75,11 +78,9 @@ def test_columns_are_as_listed() -> None:
         "id",
         "operator_id",
         "template_id",
-        "step_id",
         "charge_entity_type",
         "charge_entity_id",
         "to_address",
-        "subject",
         "body_sha256",
         "status",
         "mail_message_id",
@@ -91,6 +92,14 @@ def test_columns_are_as_listed() -> None:
         # PLAN-012e D8: the message's kind and a final statement's attachment.
         "kind",
         "document_id",
+        # PLAN-014 D3: the engine's columns (``subject`` became ``rendered_subject``).
+        "channel",
+        "rule",
+        "occurrence",
+        "rendered_subject",
+        "rendered_body",
+        "held_reason",
+        "scheduled_for",
     }
 
 
@@ -104,12 +113,23 @@ def test_the_guard_lists() -> None:
     assert GUARDS["outbound_messages"] == ("to_address", "subject", "error")
     assert GUARDS["message_templates"] == ("code", "subject", "body")
     assert GUARDS["operators"][-1] == "handled_personally_note"
+    assert ENGINE_GUARDS["outbound_messages"] == (
+        "to_address",
+        "rendered_subject",
+        "rendered_body",
+        "error",
+    )
+    assert ENGINE_GUARDS["message_templates"] == ("code", "subject", "body", "name")
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("subject", f"card {CARD}"), ("to_address", "4111111111111111@example.com")],
+    [
+        ("rendered_subject", f"card {CARD}"),
+        ("rendered_body", f"card {CARD}"),
+        ("to_address", "4111111111111111@example.com"),
+    ],
 )
 def test_save_refuses_a_card_number(field: str, value: Any) -> None:
     row = message(**{field: value})
@@ -127,7 +147,11 @@ def test_save_refuses_a_card_number(field: str, value: Any) -> None:
         ("error", "Bad error with spaces"),
         ("mail_message_id", "id with spaces"),
         ("status", "delivered"),
-        ("charge_entity_type", "insurance_charge"),
+        ("charge_entity_type", "invoice"),
+        ("rule", "Z"),
+        ("channel", "fax"),
+        ("held_reason", "later"),
+        ("occurrence", 0),
     ],
 )
 def test_identifier_and_choice_columns_are_held_to_their_shape(field: str, value: str) -> None:
@@ -152,13 +176,15 @@ def test_a_valid_row_saves() -> None:
 @pytest.mark.django_db
 @pytest.mark.parametrize(
     ("table", "column"),
-    [(table, column) for table, columns in GUARDS.items() for column in columns],
+    [(table, column) for table, columns in LIVE_GUARDS.items() for column in columns],
 )
 def test_the_database_trigger_refuses_a_card_number(table: str, column: str) -> None:
     rows = {
         "outbound_messages": lambda: message(),
         "message_templates": lambda: MessageTemplate(code="t_guard", subject="S", body="B"),
         "operators": operator,
+        # PLAN-014 D1: ledger 0061 rebuilt the company settings' guard with the four mail columns.
+        "company_settings": CompanySettings.current,
     }
     row = rows[table]()
     row.save()

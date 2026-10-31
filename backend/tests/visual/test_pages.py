@@ -97,6 +97,9 @@ PAGES: dict[str, Callable[[Site], str]] = {
     "login": lambda site: "/account/login/",
     # PLAN-014 B2: Admin › Settings (the Brands card), admins only.
     "settings": lambda site: "/admin-settings/",
+    # PLAN-014 D4, D5: the message templates and the Outbox (one held message), admins only.
+    "message-templates": lambda site: "/admin-settings/templates/",
+    "outbox": lambda site: "/admin-settings/outbox/",
 }
 
 
@@ -122,7 +125,15 @@ def settled_payment_of(site: Site) -> Payment:
 
 
 #: The lease-end wizard and the New store and New lease forms are for admins only.
-AS_ADMIN = {"lease-end-statement", "new-store", "new-lease", "void-payment", "settings"}
+AS_ADMIN = {
+    "lease-end-statement",
+    "new-store",
+    "new-lease",
+    "void-payment",
+    "settings",
+    "message-templates",
+    "outbox",
+}
 #: Seen signed out, in a context of its own (the sign-in page, PLAN-012f-a D9).
 SIGNED_OUT = {"login"}
 #: Pages that answer something other than 200 by design (PLAN-012f-b Batch E: the not-found page).

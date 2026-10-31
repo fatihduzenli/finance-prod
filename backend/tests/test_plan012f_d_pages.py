@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import html as html_lib
 import re
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -45,6 +46,7 @@ from ledger.models import (
     Lease,
     LeaseEnd,
     LeaseTransfer,
+    MessageTemplate,
     Note,
     OneOffCharge,
     Operator,
@@ -110,6 +112,9 @@ class World:
     end: LeaseEnd
     transfer: LeaseTransfer
 
+    def template_pk(self) -> Any:
+        return MessageTemplate.objects.get(code="reminder_due").pk
+
     def pk_for(self, name: str) -> Any:
         """The record a route of ``name`` opens with its ``pk``."""
         special = {
@@ -118,6 +123,10 @@ class World:
             "ledger:leases:resolve_deposit": self.deposit.lease_id,
             "ledger:returns:resolve": self.payment.pk,
             "ledger:returns:reschedule": self.payment.pk,
+            # PLAN-014 D4, D5: a message template's pages; "Send now" is POST-only.
+            "ledger:settings:template_edit": self.template_pk(),
+            "ledger:settings:template_preview": self.template_pk(),
+            "ledger:outbox:send_now": uuid.UUID(int=1),
         }
         if name in special:
             return special[name]
@@ -306,6 +315,10 @@ PAGES: dict[str, Role] = {
     "ledger:audit:page": Role.ADMIN,
     # PLAN-014 B2: Admin › Settings.
     "ledger:settings:index": Role.ADMIN,
+    # PLAN-014 D4, D5: the message templates and the Outbox (the views keep them to admin).
+    "ledger:settings:templates": Role.ADMIN,
+    "ledger:settings:template_edit": Role.ADMIN,
+    "ledger:outbox:page": Role.ADMIN,
 }
 #: The routes whose GET renders a form, opened by the role the registry gives their POST.
 FORM_PAGES = (
@@ -421,11 +434,11 @@ for _name in (
     "ledger:run:match",
     "ledger:charges:retry_mark",
     "ledger:charges:retry_release",
-    "ledger:charges:send_step",
+    "ledger:charges:send_message",
     "ledger:one_off_charges:retry_mark",
     "ledger:one_off_charges:delete_invoice",
     "ledger:one_off_charges:retry",
-    "ledger:one_off_charges:send_step",
+    "ledger:one_off_charges:send_message",
     "ledger:invoices:edit",
     "ledger:invoices:send",
     "ledger:invoices:delete_draft",
@@ -452,6 +465,10 @@ for _name in (
     "ledger:leases:bank_attach",
     # PLAN-014 C9: the LEASE card's "Switch to own account" posts here.
     "ledger:leases:switch_own",
+    # PLAN-014 D1, D4, D5: the Mail card's save, a template's Preview and "Send now".
+    "ledger:settings:mail_save",
+    "ledger:settings:template_preview",
+    "ledger:outbox:send_now",
 ):
     NOT_PAGES[_name] = POST_ONLY
 
@@ -609,6 +626,12 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:stores:transfer": lambda w: (_store(w), "Transfer"),
     "ledger:stores:contacts": lambda w: ([f"Store {w.store.external_label}"], "Notes & follow-ups"),
     "ledger:operators:statement": lambda w: (["Operators", "Walk Co"], "Statement"),
+    # PLAN-014 D4: Admin › Settings › Message templates and one template.
+    "ledger:settings:templates": lambda w: (["Settings"], "Message templates"),
+    "ledger:settings:template_edit": lambda w: (
+        ["Settings", "Message templates"],
+        "B — Payment due",
+    ),
     "ledger:operators:contacts": lambda w: (["Walk Co"], "Notes & follow-ups"),
     "ledger:operators:contacts_add": lambda w: (["Walk Co"], "Add entry: Walk Co"),
     "ledger:leases:create": lambda w: (["Leases"], "New lease"),
@@ -716,6 +739,7 @@ NO_PARENT = (
     "ledger:reconciliation:page",
     "ledger:audit:page",
     "ledger:settings:index",
+    "ledger:outbox:page",
     "ledger:search",
     "finance:settings",
     "finance:help",

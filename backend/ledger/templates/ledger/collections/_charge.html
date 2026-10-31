@@ -1,13 +1,12 @@
 <h2 id="collections">Collection e-mails</h2>
 {% include "ledger/collections/_log.html" with log=collection_log show_charge=False %}
-{% if can_send_step %}
-  <form method="post" action="{{ send_step_url }}" class="actions js-single-submit" id="send-step">
+{% if can_send_message %}
+  <form method="post" action="{{ send_message_url }}" class="actions js-single-submit" id="send-message">
     {% csrf_token %}
-    <label for="send-step-select">Send a step now</label>
-    <select name="step" id="send-step-select">
-      {% for step in collection_steps %}<option value="{{ step.pk }}">Day {{ step.day_offset }}: {{ step.template.code }}</option>{% endfor %}
+    <label for="send-message-select">Send a message now</label>
+    <select name="template" id="send-message-select">
+      {% for template in message_templates %}<option value="{{ template.pk }}">{{ template.display_name }}</option>{% endfor %}
     </select>
-    <label class="inline"><input type="checkbox" name="confirm" id="send-step-confirm"> Send again if this step was already sent</label>
-    <button class="btn" type="submit">Send by e-mail</button>
+    <button class="btn" type="submit">Send</button>
   </form>
 {% endif %}

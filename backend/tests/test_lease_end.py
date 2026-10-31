@@ -27,6 +27,7 @@ from ledger.models import (
     AuditLog,
     CollectionSchedule,
     CollectionStatus,
+    CompanySettings,
     DeductionKind,
     DepositResolution,
     Document,
@@ -61,6 +62,7 @@ from ledger.services import (
     installments,
     lease_end,
     leases,
+    messaging,
     pnl,
     rent_run,
     statements,
@@ -91,7 +93,6 @@ RENT = D("2000.00")
 #: 19 of 31 days of $2,000.00, rounded once (D1).
 PRORATED = D("1225.81")
 TEXT = "1–19 Oct, 19 of 31 days of $2,000.00 = $1,225.81"
-CATCH_ALL = "catchall@example.com"
 #: ABA-valid routing number and an account number, synthetic (as the guard tests).
 ROUTING_AND_ACCOUNT = "123456780 987654321012"
 
@@ -116,11 +117,22 @@ def admin() -> tuple[Client, User]:
     return client_for(Role.ADMIN)
 
 
+@pytest.fixture(autouse=True)
+def window_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PLAN-014 D7: the send window is tested in test_messaging_engine.py; here every
+    message goes when it is queued, whatever the hour the suite runs at."""
+    monkeypatch.setattr(messaging, "scheduled_for", lambda now: now)
+
+
 @pytest.fixture
 def memory(monkeypatch: pytest.MonkeyPatch, settings: Any) -> MemoryMailSender:
+    """Mail set up off the sandbox (PLAN-014 D1): on, a key, a sender address."""
     settings.MAIL_ENABLED = True
-    settings.MAIL_CATCH_ALL = CATCH_ALL
-    settings.APP_ENV = "staging"
+    settings.GMAIL_SERVICE_ACCOUNT_JSON = "{}"
+    settings.STAX_ENV = "live"
+    CompanySettings.objects.filter(pk=CompanySettings.current().pk).update(
+        sender_email="billing@example.com"
+    )
     sender = MemoryMailSender()
     monkeypatch.setattr(mail, "_base_sender", lambda: sender)
     return sender
@@ -1096,11 +1108,9 @@ def test_the_pdf_is_stored_under_the_store_and_its_text_passes_the_guard(
         "Prepared on October 20, 2026",
     ):
         assert expected in text, expected
-    assert actions()[-3:] == [
-        "lease_end.statement_stored",
-        "lease_end.statement_queued",
-        "lease_end.statement_suppressed",
-    ]
+    assert actions()[-2:] == ["lease_end.statement_stored", "lease_end.statement_queued"]
+    # PLAN-014 D2: mail is not set up here, so the e-mail is held in the Outbox.
+    assert actions("message.") == ["message.queued", "message.held"]
 
 
 def test_the_same_figures_render_the_same_bytes_and_a_retry_adopts_the_stored_document(
@@ -1151,31 +1161,33 @@ def test_the_pdf_is_downloaded_from_the_lease_end_page(admin: Any, pinned: None)
 # --- D8: the e-mail ---------------------------------------------------------------------------
 
 
-def test_with_mail_off_the_statement_e_mail_is_suppressed(admin: Any) -> None:
+def test_with_mail_not_set_up_the_statement_e_mail_is_held(admin: Any) -> None:
     _, user = admin
     end = a_confirmed_end(user)
     run_queued_jobs()  # the documents job, then the e-mail it queued
     message = OutboundMessage.objects.get()
-    assert (message.kind, message.step, message.document) == (
+    assert (message.kind, message.rule, message.document) == (
         MessageKind.FINAL_STATEMENT,
-        None,
+        "final_statement",
         fresh(end).document,
     )
     assert (message.charge_entity_type, message.charge_entity_id) == ("lease_end", end.pk)
-    assert message.status == MessageStatus.SUPPRESSED
-    assert "lease_end.statement_suppressed" in actions("lease_end.statement")
+    assert (message.status, message.held_reason) == (MessageStatus.HELD, "not_set_up")
+    # PLAN-014 D3: rendered when queued and stored, for the Outbox and the timeline.
+    assert "Refund due to you: $1,624.19" in message.rendered_body
+    assert message.rendered_subject.startswith("Final statement for")
 
 
-def test_outside_production_the_statement_goes_to_the_catch_all_with_the_pdf(
+def test_the_statement_goes_to_the_lease_billing_address_with_the_pdf(
     admin: Any, memory: MemoryMailSender
 ) -> None:
     _, user = admin
     end = a_confirmed_end(user)
     run_queued_jobs()
     [sent] = memory.sent
-    operator = fresh(end).lease.operator
-    assert sent.to == CATCH_ALL and sent.subject.startswith(f"[to: {operator.email}] ")
-    assert "Final statement for" in sent.subject
+    billing = LeaseBilling.objects.get(lease_id=end.lease_id)
+    assert billing.email and sent.to == billing.email
+    assert sent.subject.startswith("Final statement for")
     assert "Refund due to you: $1,624.19" in sent.text
     [attachment] = sent.attachments
     assert (attachment.filename, attachment.content_type) == (
@@ -1186,8 +1198,8 @@ def test_outside_production_the_statement_goes_to_the_catch_all_with_the_pdf(
     raw = mime_bytes(sent, "billing@example.com")
     assert b"multipart/mixed" in raw and b'filename="final-statement-20261019.pdf"' in raw
     message = OutboundMessage.objects.get()
-    assert message.status == MessageStatus.CATCH_ALL and message.body_sha256
-    assert AuditLog.objects.filter(action="lease_end.statement_sent").exists()
+    assert message.status == MessageStatus.SENT and message.body_sha256
+    assert AuditLog.objects.filter(action="message.sent", entity_id=str(message.pk)).exists()
 
 
 def test_a_lease_without_a_billing_address_is_not_mailed(
@@ -1203,7 +1215,7 @@ def test_a_lease_without_a_billing_address_is_not_mailed(
     run_queued_jobs()
     assert memory.sent == []
     message = OutboundMessage.objects.get()
-    assert (message.status, message.error) == (MessageStatus.SUPPRESSED, "NoAddress")
+    assert (message.status, message.held_reason) == (MessageStatus.HELD, "no_address")
 
 
 def test_the_operator_page_log_names_the_final_statement(admin: Any) -> None:

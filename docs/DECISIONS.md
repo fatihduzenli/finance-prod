@@ -942,3 +942,81 @@ billing columns on `Lease`; no way for the app to create a payment method (Rule 
 - The operator statement spans leases and prints the full name with each store's company; the
   signed statement link stays per operator.
 - Messages (Batch D) address the lease's billing e-mail; a lease without one is held.
+
+
+---
+
+## ADR-0016 — The messaging engine, the reminder rules and automatic re-debits of R01/R09 returns
+
+**Date:** 2026-10-30
+**Status:** Accepted (owner, 2026-10-29: Step 14 Batches D, E and F as written in the prompt; built by
+PLAN-014)
+**Deciders:** Project owner; plan and record by Fable; built by Opus
+
+### Context
+
+ADR-0010 chose mail through a delegated Google Workspace service account (scope `gmail.send`), a
+collections ladder of admin-editable steps (day 3, 10, 20) with whitelisted merge fields, and "NSF
+only by staff": a returned debit was re-debited only when staff pressed Debit again, which also
+added the fee. What the code had: `OutboundMessage` as a log keyed by step (the body kept as a
+hash only), `CatchAllSender` for every non-production environment, no send window, no allowlist,
+no automatic re-debit, no SMS. The owner asked for one engine for every operator message (e-mail
+now, SMS later), Outbox mode until the Workspace key exists, a sandbox allowlist, templates with a
+closed placeholder set, rules A–E as a daily job, template F at once on a returned debit, the
+NSF fee as its own charge, and an automatic re-debit of R01/R09 returns within Nacha's limits.
+
+### Decision
+
+1. **One engine** (`ledger/services/messaging.py`): every operator-facing or internal message is
+   an `OutboundMessage` with a lease, a rule, an occurrence, its rendered subject and body, a
+   status (`queued`, `sent`, `held`, `failed`, `suppressed`), a held reason and a scheduled time;
+   one row per lease per charge per rule per occurrence (a unique constraint), so a re-run never
+   duplicates. A channel abstraction carries e-mail now and SMS later; `sms` is refused until a
+   provider exists.
+2. **Outbox mode and the allowlist.** With no key, `MAIL_ENABLED` false or no sender address, a
+   message is rendered, stored and `held` ("not sent (mail not set up)"); on the sandbox
+   environment only addresses on the company's allowlist leave the system, every other message is
+   `held` ("held on sandbox"). The catch-all of ADR-0010 is retired. A held message can be sent
+   later from Admin › Outbox (`/admin-settings/outbox/`, admin only; "Send now" is refused while mail is not set up or, on the sandbox, while the address is off the allowlist).
+3. **The sender is a company setting.** `CompanySettings` holds the sender address, the reply-to,
+   the manager list (rule E) and the sandbox allowlist; the Gmail key stays in Key Vault
+   (`gmail-service-account-key`). `GMAIL_SENDER` and `MAIL_CATCH_ALL` are no longer settings.
+4. **Templates are data with a closed vocabulary.** Admins edit the templates in Admin › Settings;
+   the placeholders are exactly the fifteen of the plan; an unknown one is refused on save; the
+   body is rendered by the whitelisted formatter, never a Django template; the six templates of
+   the owner's prompt are seeded byte for byte, plus F's no-retry variant (plan §8); the three
+   ladder templates stay inactive for their messages' history; the ladder's `CollectionStep` is gone.
+5. **The send window** is 9:00–18:00 America/New_York: a message queued outside it is scheduled
+   for the next 9:00 through `Job.run_after`, which the worker honours.
+6. **The rules** (Batch E): rent with an active autopay gets A three days before the debit and
+   nothing else while debits succeed; every other open charge gets B three days before due, C on
+   day 5, D on day 10 and every ten days from day 40, E once to the managers on day 30; a rule
+   fires only on its day (no catch-up); an open promise pauses B–E until its date; paid, waived
+   and voided charges get nothing; installments are charges of their own. No late fee.
+7. **Returned debits** (Batch F): template F at once with the return code in plain words; the
+   $100.00 NSF fee as its own charge, once per returned payment; for R01 and R09 only, an
+   automatic re-debit of the original amount on the third business day (Federal Reserve
+   holidays excluded), at most two per original within 180 days, the processor schedule created
+   only on the eve so a stop is local; staff "Stop automatic retry" or a logged staff contact
+   within two business days stops it; every other code gets no retry, puts the lease in Needs
+   review and sends F's no-retry variant; a staff void never messages the operator. This
+   supersedes ADR-0010's "NSF only by staff" for the fee and for R01/R09 retries; staff keep
+   Debit again for the rest.
+
+### Alternatives rejected
+
+- A third-party mail API (ADR-0010's rejection stands).
+- Keeping the hash-only log: the Outbox and the timeline must show what was or would be sent.
+- Catch-up of missed rules at the first run or after a pause: a flood on day one; the owner's
+  text names days, not backlogs.
+- Creating the retry's processor schedule at the return: a stop would then need a provider
+  delete; the eve-of-retry creation keeps the stop local.
+
+### Consequences
+
+- The body of every message is stored; the recipient is masked below admin; the payment-data
+  validator covers the stored text.
+- `docs/CLAUDE.md`'s mail notes and `docs/SCOPE.md` §3's collection notes point here; the
+  RUNBOOK gains the Outbox and the allowlist.
+- Live mail waits for the owner's Workspace delegation (TODO-VERIFY-070); the re-presentment
+  limit and the holiday table are TODO-VERIFY-072 and 073.

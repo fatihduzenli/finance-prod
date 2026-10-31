@@ -327,11 +327,15 @@ class Job(GuardedModel):
     locked_until = models.DateTimeField(null=True, blank=True)
     #: The form's one-time key: a second submission finds the first job.
     replay_key = models.UUIDField(null=True, blank=True, unique=True)
+    #: PLAN-014 D7: not claimed before this time (a message's send window); null runs at
+    #: once.
+    run_after = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "jobs"
         indexes = [
             models.Index(fields=["status", "created_at"], name="jobs_status_created_idx"),
+            models.Index(fields=["status", "run_after"], name="jobs_status_run_after_idx"),
             models.Index(fields=["entity_type", "entity_id", "created_at"], name="jobs_entity_idx"),
         ]
         constraints = [

@@ -30,7 +30,6 @@ from ledger.services.lease_end import DeductionInput
 from tests import test_lease_end as lease_end_tests
 from tests.job_helpers import run_queued_jobs
 from tests.test_lease_end import (
-    CATCH_ALL,
     ENDED,
     TODAY,
     a_store_lease,
@@ -55,6 +54,7 @@ PAIR = "Routing 123456780 Account 987654321012"
 storage = lease_end_tests.storage
 pinned = lease_end_tests.pinned
 memory = lease_end_tests.memory
+window_open = lease_end_tests.window_open
 
 
 def _admin() -> tuple[Any, User]:
@@ -199,28 +199,36 @@ def test_the_stored_pdf_holds_no_long_digit_run_and_passes_the_guard(
     assert "ZL-2026-10" in text
 
 
-# --- mail never leaves for a real address outside production ----------------------------------
+# --- mail never leaves for a real address from a sandbox (PLAN-014 D2) ------------------------
 
 
-def test_the_statement_mail_goes_to_the_catch_all_with_the_attachment(
-    pinned: None, memory: Any
+def test_on_the_sandbox_the_statement_to_a_real_address_is_held_until_allowlisted(
+    pinned: None, memory: Any, settings: Any
 ) -> None:
-    from ledger.models import Operator
+    from ledger.models import CompanySettings, LeaseBilling, OutboundMessage
+    from ledger.services import messaging
 
+    settings.STAX_ENV = "sandbox"
     lease = a_store_lease()
-    assert lease.operator_id is not None
-    Operator.objects.filter(pk=lease.operator_id).update(email="real.person@realcompany.example")
+    LeaseBilling.objects.filter(lease=lease).update(email="real.person@realcompany.example")
     deposit(lease, "100.00")
     end = draft(lease)
     assert settle(fresh(end)).ok
-    assert confirm(fresh(end), _admin()[1]).ok
+    admin = _admin()[1]
+    assert confirm(fresh(end), admin).ok
     run_queued_jobs()
     run_queued_jobs()
-    assert memory.sent, "nothing was sent"
-    for message in memory.sent:
-        assert message.to == CATCH_ALL
-        assert "real.person@realcompany.example" not in message.to
-        assert message.attachments and message.attachments[0].content_type == "application/pdf"
+    assert memory.sent == []
+    message = OutboundMessage.objects.get()
+    assert (message.status, message.held_reason) == ("held", "sandbox")
+    # Still held while the address is off the allowlist; sent with the PDF once it is on.
+    assert not messaging.send_now(message.pk, admin).ok
+    CompanySettings.objects.update(sandbox_allowlist="real.person@realcompany.example")
+    assert messaging.send_now(message.pk, admin).ok
+    run_queued_jobs()
+    [sent] = memory.sent
+    assert sent.to == "real.person@realcompany.example"
+    assert sent.attachments and sent.attachments[0].content_type == "application/pdf"
 
 
 # --- below admin, nothing ----------------------------------------------------------------------

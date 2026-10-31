@@ -29,6 +29,12 @@ _BODY_TAG_RE = re.compile(rb"<body\b[^>]*>", re.IGNORECASE)
 _TITLE_TAG_RE = re.compile(rb"<title\b[^>]*>", re.IGNORECASE)
 
 
+def on_sandbox() -> bool:
+    """Whether this environment is the sandbox, read now: the banner's test, and the mail
+    allowlist's (PLAN-014 D2: on the sandbox mail reaches only the allowlisted addresses)."""
+    return bool(settings.STAX_ENV == SANDBOX_STAX_ENV)
+
+
 @cache
 def _banner_bytes() -> bytes:
     """The banner markup, rendered once.
@@ -48,7 +54,7 @@ class SandboxBannerMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponseBase:
         response = self.get_response(request)
 
-        if settings.STAX_ENV != SANDBOX_STAX_ENV:
+        if not on_sandbox():
             return response
         if isinstance(response, StreamingHttpResponse) or not isinstance(response, HttpResponse):
             # Streaming and file responses have no in-memory body to rewrite.

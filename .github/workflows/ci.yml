@@ -432,7 +432,9 @@ jobs:
 
       # Each update tolerates an error (owner request of 2026-10-02, PLAN-010 D13): the
       # command can report a transient failure for a revision that does go live. The
-      # verification step below decides from the revisions themselves.
+      # verification step below decides from the revisions themselves. The worker, reconcile
+      # and daily updates try up to three times, 30 s apart, before falling through to the
+      # verification (PLAN-014 D10: Azure once answered that the worker app did not exist).
       - name: Roll the web container app onto the new image
         env:
           ACR_NAME: ${{ vars.ACR_NAME }}
@@ -490,11 +492,20 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          az containerapp update \
-            --name "$WORKER_APP_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG" \
-            || echo "update returned an error; verifying the revision instead"
+          for attempt in 1 2 3; do
+            if az containerapp update \
+              --name "$WORKER_APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG"; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "update attempt $attempt returned an error; trying again in 30 s"
+              sleep 30
+            else
+              echo "update returned an error; verifying the revision instead"
+            fi
+          done
 
       # The scheduled reconciliation job (PLAN-010 D5, D13) runs the same image; the next
       # firing after this update uses it. Same tolerance as the other two updates.
@@ -506,11 +517,20 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          az containerapp job update \
-            --name "$RECONCILE_JOB_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG" \
-            || echo "update returned an error; verifying the revision instead"
+          for attempt in 1 2 3; do
+            if az containerapp job update \
+              --name "$RECONCILE_JOB_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG"; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "update attempt $attempt returned an error; trying again in 30 s"
+              sleep 30
+            else
+              echo "update returned an error; verifying the revision instead"
+            fi
+          done
 
       # The daily collections job (PLAN-011b D8, D9) runs the same image too, rolled after
       # the reconcile job with the same tolerance; its next firing uses the new image.
@@ -522,11 +542,20 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          az containerapp job update \
-            --name "$DAILY_JOB_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG" \
-            || echo "update returned an error; verifying the revision instead"
+          for attempt in 1 2 3; do
+            if az containerapp job update \
+              --name "$DAILY_JOB_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --image "$ACR_NAME.azurecr.io/finance-web:$IMAGE_TAG"; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "update attempt $attempt returned an error; trying again in 30 s"
+              sleep 30
+            else
+              echo "update returned an error; verifying the revision instead"
+            fi
+          done
 
       # Read-only az queries. Passes only when, for both apps, an active revision runs
       # the image tagged with this commit and reports Healthy and Running (a running

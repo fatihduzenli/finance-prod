@@ -81,13 +81,12 @@ _CLIENT_ID = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
 
-#: PLAN-011b D3: outbound mail. ``MAIL_ENABLED`` is off unless "true"; when it is on, the
-#: mailbox and the service-account key are required, and outside production so is the
-#: catch-all address that receives every message. The key is checked to be a JSON object
+#: PLAN-011b D3, PLAN-014 D1: outbound mail. ``MAIL_ENABLED`` is off unless "true"; when it
+#: is on, the service-account key is required (the mailbox it sends as is the company
+#: settings' sender address, and on the sandbox only the allowlist of the company settings is
+#: reached: neither is an environment variable). The key is checked to be a JSON object
 #: holding these keys; only missing key names are ever reported, never a value.
 SERVICE_ACCOUNT_KEYS: tuple[str, ...] = ("client_email", "private_key", "token_uri")
-#: One plain address, ASCII, no display name (the same shape ``mail.base`` accepts).
-_ADDRESS = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
 #: PLAN-011b D4: the ``{company}`` merge field. Plain text, one line.
 DEFAULT_COMPANY_NAME = "Global Retail Groups"
 COMPANY_NAME_MAX_LENGTH = 200
@@ -154,9 +153,7 @@ class Config:
     report_statement_timeout_ms: int = REPORT_STATEMENT_TIMEOUT_MS[0]
     #: PLAN-011b D3. The key is a credential: kept out of ``repr``.
     mail_enabled: bool = False
-    gmail_sender: str = ""
     gmail_service_account_json: str = field(default="", repr=False)
-    mail_catch_all: str = ""
     #: PLAN-011b D4.
     company_name: str = DEFAULT_COMPANY_NAME
     #: PLAN-012f-b D13: the USPS Addresses API's OAuth client. Both empty: the address
@@ -220,31 +217,16 @@ def _service_account_problem(raw: str) -> str | None:
     return None
 
 
-def _mail_problems(
-    env: Mapping[str, str], app_env: str
-) -> tuple[list[str], bool, str, str, str, str]:
-    """PLAN-011b D3, D4: the mail settings' problems, then the values."""
+def _mail_problems(env: Mapping[str, str]) -> tuple[list[str], bool, str, str]:
+    """PLAN-011b D3, D4, PLAN-014 D1: the mail settings' problems, then the values."""
     problems: list[str] = []
     mail_enabled = env.get("MAIL_ENABLED", "") or "false"
     if mail_enabled not in BOOLEAN_FLAGS:
         problems.append(f"MAIL_ENABLED is not one of: {', '.join(BOOLEAN_FLAGS)}")
     enabled = mail_enabled == "true"
-    gmail_sender = env.get("GMAIL_SENDER", "")
-    mail_catch_all = env.get("MAIL_CATCH_ALL", "")
     key = env.get("GMAIL_SERVICE_ACCOUNT_JSON", "")
-    for name, value in (("GMAIL_SENDER", gmail_sender), ("MAIL_CATCH_ALL", mail_catch_all)):
-        if value and not _ADDRESS.fullmatch(value):
-            problems.append(f"{name} must be one plain e-mail address")
-    if enabled:
-        if not gmail_sender:
-            problems.append("GMAIL_SENDER is required when MAIL_ENABLED is true")
-        if not key:
-            problems.append("GMAIL_SERVICE_ACCOUNT_JSON is required when MAIL_ENABLED is true")
-        if app_env != "production" and not mail_catch_all:
-            problems.append(
-                "MAIL_CATCH_ALL is required when MAIL_ENABLED is true and APP_ENV is not "
-                "'production'"
-            )
+    if enabled and not key:
+        problems.append("GMAIL_SERVICE_ACCOUNT_JSON is required when MAIL_ENABLED is true")
     if key:
         problem = _service_account_problem(key)
         if problem is not None:
@@ -254,7 +236,7 @@ def _mail_problems(
         problems.append(
             f"COMPANY_NAME must be one line of at most {COMPANY_NAME_MAX_LENGTH} characters"
         )
-    return problems, enabled, gmail_sender, key, mail_catch_all, company_name
+    return problems, enabled, key, company_name
 
 
 def _usps_problems(env: Mapping[str, str], is_local: bool) -> tuple[list[str], str, str, str]:
@@ -436,9 +418,7 @@ def validate(env: Mapping[str, str]) -> Config:
     elif documents_storage_account_url and not azure_client_id:
         problems.append("AZURE_CLIENT_ID is required when DOCUMENTS_STORAGE_ACCOUNT_URL is set")
 
-    mail_problems, mail_enabled, gmail_sender, gmail_key, mail_catch_all, company_name = (
-        _mail_problems(env, app_env)
-    )
+    mail_problems, mail_enabled, gmail_key, company_name = _mail_problems(env)
     problems.extend(mail_problems)
 
     usps_problems, usps_client_id, usps_client_secret, usps_api_base_url = _usps_problems(
@@ -497,9 +477,7 @@ def validate(env: Mapping[str, str]) -> Config:
         azure_client_id=azure_client_id,
         report_statement_timeout_ms=report_statement_timeout_ms,
         mail_enabled=mail_enabled,
-        gmail_sender=gmail_sender,
         gmail_service_account_json=gmail_key,
-        mail_catch_all=mail_catch_all,
         company_name=company_name,
         usps_client_id=usps_client_id,
         usps_client_secret=usps_client_secret,

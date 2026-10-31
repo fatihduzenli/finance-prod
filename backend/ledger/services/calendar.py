@@ -38,7 +38,8 @@ token.
 ``calendar_email`` job per stored entry of the day with ``email_morning`` (to its author)
 and per open promise to pay due that day (to the promise's author), at most one per item
 and day (a fixed replay key). The worker runs :func:`send_morning_email`, which sends
-through :func:`mail.get_sender`, so the catch-all applies as for every message.
+through :func:`mail.get_sender`: held (not sent) while mail is not set up, and on the
+sandbox to an address off the company settings' allowlist (PLAN-014 D2), as every message.
 """
 
 from __future__ import annotations
@@ -758,8 +759,7 @@ MORNING_NOT_DUE = "Nothing sent: the item no longer asks for a morning e-mail th
 MORNING_NO_ADDRESS = "Not sent: the author has no e-mail address."
 MORNING_SENT = {
     mail.SENT: "Sent.",
-    mail.CATCH_ALL: "Sent to the test inbox.",
-    mail.SUPPRESSED: "Not sent: mail is off.",
+    mail.HELD: "Not sent: mail is not set up here, or the address is not on the allowlist.",
 }
 MORNING_FAILED = "Failed: {cause}."
 

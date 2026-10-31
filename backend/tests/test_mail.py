@@ -1,13 +1,14 @@
 """Outbound mail (docs/qa/PLAN-011b-collections-nsf-attention-calendar.md D3, §7).
 
-- :class:`mail.Message` refuses header injection; the catch-all rewrites the envelope;
-  mail off suppresses; :func:`mail.get_sender` picks the sender from the settings and
-  refuses to send without a catch-all outside production.
+- :class:`mail.Message` refuses header injection; the Outbox holds everything while mail is
+  not set up, and on the sandbox the allowlist holds every other address (PLAN-014 D2);
+  :func:`mail.get_sender` picks the sender from the settings and the company settings'
+  sender, Reply-To and allowlist (PLAN-014 D1); the address-list parser.
 - The Gmail sender against ``httpx.MockTransport``: the signed assertion and the token
   exchange, the send, the token cache, and the 401, 403, 4xx, 5xx and timeout paths with
   the one retry after 5 seconds.
-- The environment guard: mail on needs the mailbox, the key and (outside production) the
-  catch-all; a malformed key is refused by key names only, never a value.
+- The environment guard: mail on needs the key (the mailbox and the catch-all are retired,
+  PLAN-014 D1); a malformed key is refused by key names only, never a value.
 - Fences: nothing outside ``backend/mail/`` imports ``google.*``; the key and the token
   never reach a log record or an exception message (the ladder's own fence on rows, audit
   and pages is in ``test_collections.py``).
@@ -37,14 +38,16 @@ from django.test import override_settings
 import mail
 from finance.env_guard import EnvGuardError, validate
 from finance.log_redaction import service_account_secrets
+from ledger.models import CompanySettings
 from mail import gmail
 from mail.base import mime_bytes
-from mail.memory import CatchAllSender, MemoryMailSender, NullSender
+from mail.memory import MemoryMailSender
+from mail.outbox import AllowlistSender, OutboxSender
 from tests.test_env_guard import DEPLOYED_ENV, LOCAL_ENV, _env
 
 BACKEND = Path(__file__).resolve().parents[1]
 SENDER = "billing@example.com"
-CATCH_ALL = "catchall@example.com"
+REPLY_TO = "help@example.com"
 TOKEN = "FAKE-ACCESS-TOKEN-MARKER-do-not-use-0001"
 #: The private_key of a fake service-account key: not a key at all, a marker to grep for.
 PRIVATE_KEY_MARKER = "PRIVATE-KEY-MARKER-do-not-use-Q7Z"
@@ -196,15 +199,30 @@ def test_the_mime_message_has_the_text_and_the_html_alternative() -> None:
     assert html is not None and "<p>Hello</p>" in html.get_content()
 
 
-def test_the_catch_all_rewrites_the_envelope_and_names_the_recipient() -> None:
+def test_the_mime_message_carries_the_reply_to_when_given() -> None:
+    # PLAN-014 D1: the company settings' Reply-To.
+    parsed = message_from_bytes(mime_bytes(a_message(), SENDER, REPLY_TO), policy=policy.default)
+    assert (parsed["From"], parsed["Reply-To"]) == (SENDER, REPLY_TO)
+    plain = message_from_bytes(mime_bytes(a_message(), SENDER), policy=policy.default)
+    assert plain["Reply-To"] is None
+
+
+@pytest.mark.parametrize("reply_to", ["a@example.com, b@example.com", "x@example.com\r\nBcc: y"])
+def test_a_reply_to_that_is_not_one_address_is_refused(reply_to: str) -> None:
+    with pytest.raises(ValueError):
+        mime_bytes(a_message(), SENDER, reply_to)
+
+
+def test_the_allowlist_holds_every_other_address_and_hands_it_nothing() -> None:
+    # PLAN-014 D2: on the sandbox only the allowlist is mailed.
     memory = MemoryMailSender()
-    receipt = CatchAllSender(memory, CATCH_ALL).send(a_message())
-    assert receipt.disposition == mail.CATCH_ALL
-    [delivered] = memory.sent
-    assert delivered.to == CATCH_ALL
-    assert delivered.subject == "[to: ceo@example.com] Friendly reminder"
-    assert ("X-Original-To", "ceo@example.com") in delivered.headers
-    assert delivered.text == a_message().text
+    sender = AllowlistSender(memory, ["Owner@Example.com"])
+    held = sender.send(a_message())
+    assert (held.disposition, held.reason, held.provider_message_id) == (mail.HELD, "sandbox", "")
+    assert memory.sent == []
+    sent = sender.send(a_message(to="owner@example.com"))
+    assert sent.disposition == mail.SENT
+    assert [message.to for message in memory.sent] == ["owner@example.com"]
 
 
 # --- Attachments (PLAN-012e D8) -----------------------------------------------------------
@@ -263,11 +281,11 @@ def test_without_an_attachment_the_mime_message_is_unchanged() -> None:
     assert parsed.get_content_type() == "multipart/alternative"
 
 
-def test_the_catch_all_keeps_the_attachment() -> None:
+def test_the_allowlist_keeps_the_attachment() -> None:
     memory = MemoryMailSender()
-    CatchAllSender(memory, CATCH_ALL).send(a_message(attachments=(a_pdf(),)))
+    AllowlistSender(memory, ["ceo@example.com"]).send(a_message(attachments=(a_pdf(),)))
     [delivered] = memory.sent
-    assert delivered.to == CATCH_ALL and delivered.attachments == (a_pdf(),)
+    assert delivered.attachments == (a_pdf(),)
 
 
 def test_the_gmail_sender_posts_the_attachment(rsa_key: rsa.RSAPrivateKey) -> None:
@@ -280,10 +298,57 @@ def test_the_gmail_sender_posts_the_attachment(rsa_key: rsa.RSAPrivateKey) -> No
     assert attached.get_content() == PDF
 
 
-def test_the_null_sender_suppresses_and_reaches_nothing() -> None:
-    receipt = NullSender().send(a_message())
-    assert receipt.disposition == mail.SUPPRESSED
+def test_the_outbox_sender_holds_and_reaches_nothing() -> None:
+    receipt = OutboxSender().send(a_message())
+    assert (receipt.disposition, receipt.reason) == (mail.HELD, "not_set_up")
     assert receipt.provider_message_id == ""
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("", []),
+        ("\n\n  \n", []),
+        ("A@Example.com\n\n b@example.com \r\na@example.com", ["a@example.com", "b@example.com"]),
+    ],
+)
+def test_an_address_list_is_one_address_per_line(text: str, expected: list[str]) -> None:
+    # PLAN-014 D1: blank lines ignored, lower-cased, each once, in order.
+    assert mail.address_lines(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a@example.com b@example.com",
+        "a@example.com, b@example.com",
+        "a@example.com;b@example.com",
+        "Someone <a@example.com>",
+        "not an address",
+        "\n".join(f"user{number}@example.com" for number in range(51)),
+    ],
+)
+def test_an_address_list_refuses_a_line_that_is_not_one_address(text: str) -> None:
+    with pytest.raises(ValueError) as raised:
+        mail.address_lines(text)
+    assert "example.com" not in str(raised.value)
+
+
+def test_the_gmail_sender_sends_as_its_mailbox_with_the_reply_to(
+    rsa_key: rsa.RSAPrivateKey,
+) -> None:
+    recorder = Recorder()
+    sender = gmail.GmailApiSender(
+        key_info(rsa_key),
+        SENDER,
+        reply_to=REPLY_TO,
+        transport=httpx.MockTransport(recorder),
+        sleep=lambda _: None,
+        clock=Clock(),
+    )
+    sender.send(a_message())
+    sent = sent_mime(recorder.requests[-1])
+    assert (sent["From"], sent["Reply-To"]) == (SENDER, REPLY_TO)
 
 
 def test_mail_unavailable_carries_a_class_name_only() -> None:
@@ -301,45 +366,77 @@ def memory_base(monkeypatch: pytest.MonkeyPatch) -> MemoryMailSender:
     return memory
 
 
-@override_settings(MAIL_ENABLED=False, MAIL_CATCH_ALL="")
-def test_mail_off_is_the_null_sender(memory_base: MemoryMailSender) -> None:
-    assert isinstance(mail.get_sender(), NullSender)
+def company(**fields: str) -> None:
+    CompanySettings.objects.filter(pk=CompanySettings.current().pk).update(**fields)
 
 
-@override_settings(MAIL_ENABLED=True, MAIL_CATCH_ALL=CATCH_ALL, APP_ENV="staging")
-def test_a_catch_all_wraps_the_base_sender(memory_base: MemoryMailSender) -> None:
-    receipt = mail.get_sender().send(a_message())
-    assert receipt.disposition == mail.CATCH_ALL
-    assert [message.to for message in memory_base.sent] == [CATCH_ALL]
+SET_UP = {"MAIL_ENABLED": True, "GMAIL_SERVICE_ACCOUNT_JSON": "{}"}
 
 
-@pytest.mark.parametrize("app_env", ["local", "staging"])
-def test_outside_production_no_catch_all_means_no_mail(
-    app_env: str, memory_base: MemoryMailSender
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("overrides", "sender_email"),
+    [
+        ({"MAIL_ENABLED": False}, SENDER),
+        ({"GMAIL_SERVICE_ACCOUNT_JSON": ""}, SENDER),
+        ({}, ""),
+    ],
+    ids=["mail-off", "no-key", "no-sender"],
+)
+def test_mail_not_set_up_is_the_outbox(
+    overrides: dict[str, Any], sender_email: str, memory_base: MemoryMailSender
 ) -> None:
-    with override_settings(MAIL_ENABLED=True, MAIL_CATCH_ALL="", APP_ENV=app_env):
-        with pytest.raises(mail.MailUnavailable) as raised:
-            mail.get_sender()
-    assert raised.value.cause == "CatchAllRequired"
+    company(sender_email=sender_email, sandbox_allowlist="ceo@example.com")
+    with override_settings(**{**SET_UP, **overrides}):
+        assert mail.is_set_up() is False
+        sender = mail.get_sender()
+        assert isinstance(sender, OutboxSender)
+        assert sender.send(a_message()).reason == "not_set_up"
     assert memory_base.sent == []
 
 
-@override_settings(MAIL_ENABLED=True, MAIL_CATCH_ALL="", APP_ENV="production")
-def test_production_without_a_catch_all_mails_the_recipient(
-    memory_base: MemoryMailSender,
-) -> None:
+@pytest.mark.django_db
+@override_settings(**SET_UP, STAX_ENV="sandbox")
+def test_on_the_sandbox_only_the_allowlist_is_mailed(memory_base: MemoryMailSender) -> None:
+    company(sender_email=SENDER, sandbox_allowlist="owner@example.com")
+    held = mail.get_sender().send(a_message())
+    assert (held.disposition, held.reason) == (mail.HELD, "sandbox")
+    sent = mail.get_sender().send(a_message(to="owner@example.com"))
+    assert sent.disposition == mail.SENT
+    assert [message.to for message in memory_base.sent] == ["owner@example.com"]
+
+
+@pytest.mark.django_db
+@override_settings(**SET_UP, STAX_ENV="sandbox")
+def test_an_empty_allowlist_holds_everything_on_the_sandbox(memory_base: MemoryMailSender) -> None:
+    company(sender_email=SENDER, sandbox_allowlist="")
+    assert mail.get_sender().send(a_message()).disposition == mail.HELD
+    assert memory_base.sent == []
+
+
+@pytest.mark.django_db
+@override_settings(**SET_UP, STAX_ENV="live")
+def test_off_the_sandbox_the_recipient_is_mailed(memory_base: MemoryMailSender) -> None:
+    company(sender_email=SENDER, sandbox_allowlist="")
     receipt = mail.get_sender().send(a_message())
     assert receipt.disposition == mail.SENT
     assert [message.to for message in memory_base.sent] == ["ceo@example.com"]
 
 
+@pytest.mark.django_db
 def test_the_real_base_sender_is_built_once_from_the_settings(rsa_key: rsa.RSAPrivateKey) -> None:
     raw = json.dumps(key_info(rsa_key))
-    with override_settings(GMAIL_SENDER=SENDER, GMAIL_SERVICE_ACCOUNT_JSON=raw):
+    company(sender_email=SENDER, reply_to_email=REPLY_TO)
+    with override_settings(GMAIL_SERVICE_ACCOUNT_JSON=raw):
         first = mail._base_sender()
         assert isinstance(first, gmail.GmailApiSender)
+        assert (first.sender, first.reply_to) == (SENDER, REPLY_TO)
         assert mail._base_sender() is first
-    with override_settings(GMAIL_SENDER=SENDER, GMAIL_SERVICE_ACCOUNT_JSON="not json"):
+        company(sender_email="other@example.com")
+        second = mail._base_sender()
+        assert isinstance(second, gmail.GmailApiSender)
+        assert second is not first and second.sender == "other@example.com"
+    with override_settings(GMAIL_SERVICE_ACCOUNT_JSON="not json"):
         with pytest.raises(mail.MailUnavailable) as raised:
             mail._base_sender()
     assert raised.value.cause == "KeyInvalid"
@@ -606,16 +703,14 @@ def key_json(**overrides: Any) -> str:
 
 MAIL_ON = {
     "MAIL_ENABLED": "true",
-    "GMAIL_SENDER": SENDER,
     "GMAIL_SERVICE_ACCOUNT_JSON": key_json(),
-    "MAIL_CATCH_ALL": CATCH_ALL,
 }
 
 
 def test_mail_is_off_by_default_and_needs_nothing() -> None:
     config = validate(DEPLOYED_ENV)
     assert config.mail_enabled is False
-    assert (config.gmail_sender, config.mail_catch_all) == ("", "")
+    assert config.gmail_service_account_json == ""
     assert config.company_name == "Global Retail Groups"
 
 
@@ -626,28 +721,32 @@ def test_mail_on_with_everything_is_valid_and_keeps_the_key_out_of_repr() -> Non
     assert PRIVATE_KEY_MARKER not in repr(config)
 
 
-@pytest.mark.parametrize("app_env", ["staging", "local"])
-def test_the_guard_refuses_to_boot_without_a_catch_all_outside_production(app_env: str) -> None:
-    base = DEPLOYED_ENV if app_env == "staging" else LOCAL_ENV
-    with pytest.raises(EnvGuardError) as raised:
-        validate(_env(base, **{**MAIL_ON, "MAIL_CATCH_ALL": None}))
-    assert "MAIL_CATCH_ALL is required" in str(raised.value)
+@pytest.mark.parametrize("app_env", ["staging", "local", "production"])
+def test_mail_on_needs_no_mailbox_and_no_catch_all(app_env: str) -> None:
+    # PLAN-014 D1: GMAIL_SENDER and MAIL_CATCH_ALL are retired; a deployment that still
+    # passes them boots, and they are read nowhere.
+    base = LOCAL_ENV if app_env == "local" else DEPLOYED_ENV
+    config = validate(_env(base, APP_ENV=app_env, **MAIL_ON))
+    assert config.mail_enabled is True
+    leftover = _env(
+        base,
+        APP_ENV=app_env,
+        **MAIL_ON,
+        GMAIL_SENDER="not an address",
+        MAIL_CATCH_ALL="a@example.com,b@example.com",
+    )
+    assert validate(leftover).mail_enabled is True
+    assert not hasattr(config, "gmail_sender") and not hasattr(config, "mail_catch_all")
 
 
-def test_production_may_run_without_a_catch_all() -> None:
-    env = _env(DEPLOYED_ENV, APP_ENV="production", **{**MAIL_ON, "MAIL_CATCH_ALL": None})
-    assert validate(env).mail_catch_all == ""
-
-
-def test_mail_off_needs_no_catch_all_anywhere() -> None:
+def test_mail_off_needs_nothing_anywhere() -> None:
     assert validate(_env(DEPLOYED_ENV, MAIL_ENABLED="false")).mail_enabled is False
 
 
-@pytest.mark.parametrize("name", ["GMAIL_SENDER", "GMAIL_SERVICE_ACCOUNT_JSON"])
-def test_mail_on_needs_the_mailbox_and_the_key(name: str) -> None:
+def test_mail_on_needs_the_key() -> None:
     with pytest.raises(EnvGuardError) as raised:
-        validate(_env(DEPLOYED_ENV, **{**MAIL_ON, name: None}))
-    assert f"{name} is required when MAIL_ENABLED is true" in str(raised.value)
+        validate(_env(DEPLOYED_ENV, **{**MAIL_ON, "GMAIL_SERVICE_ACCOUNT_JSON": None}))
+    assert "GMAIL_SERVICE_ACCOUNT_JSON is required when MAIL_ENABLED is true" in str(raised.value)
 
 
 @pytest.mark.parametrize(
@@ -676,8 +775,6 @@ def test_a_malformed_key_is_refused_without_a_value(raw: str, expected: str) -> 
     ("name", "value"),
     [
         ("MAIL_ENABLED", "yes"),
-        ("GMAIL_SENDER", "Billing <billing@example.com>"),
-        ("MAIL_CATCH_ALL", "a@example.com,b@example.com"),
         ("COMPANY_NAME", "Line one\nBcc: x@example.com"),
         ("COMPANY_NAME", "x" * 201),
     ],

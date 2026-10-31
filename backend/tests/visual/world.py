@@ -17,6 +17,7 @@ id (``DRAFT-`` and eight characters), so a random id would move the pixels betwe
 
 from __future__ import annotations
 
+import importlib
 import itertools
 import uuid
 from collections.abc import Iterator
@@ -39,14 +40,24 @@ from ledger.models import (
     InstallmentCadence,
     InvoiceDraft,
     Lease,
+    LeaseBilling,
     LeaseEnd,
+    MessageTemplate,
     OneOffCategory,
     Operator,
     PaymentStatus,
+    RentCharge,
     RentChargeStatus,
     Store,
 )
-from ledger.services import contacts, installments, invoice_builder, lease_end, store_costs
+from ledger.services import (
+    contacts,
+    installments,
+    invoice_builder,
+    lease_end,
+    messaging,
+    store_costs,
+)
 from ledger.services.invoice_builder import LineInput
 from ledger.services.lease_end import DeductionInput
 from tests.auth_helpers import make_user
@@ -273,6 +284,33 @@ def _build() -> World:
         today=TODAY,
     )
     assert deducted.ok, deducted.message
+
+    # PLAN-014 D: the seven templates of ledger 0061 (flushed by the suite's transaction tests,
+    # as the brands are), the Maple Avenue lease's billing e-mail, and one message of rule B for
+    # its oldest unpaid rent, held in the Outbox ("not sent (mail not set up)": the suite runs
+    # without a key) for the Outbox page and the store timeline.
+    seed = importlib.import_module("ledger.migrations.0061_messaging_engine")
+    for code, name, internal, subject, body in seed.TEMPLATES:
+        MessageTemplate.objects.get_or_create(
+            code=code,
+            defaults={"name": name, "internal": internal, "subject": subject, "body": body},
+        )
+    LeaseBilling.objects.update_or_create(
+        lease=lease,
+        defaults={"company_name": "Northwind Stores LLC", "email": "maple@example.com"},
+    )
+    unpaid = (
+        RentCharge.objects.filter(lease=lease, status=RentChargeStatus.UNPAID)
+        .order_by("due_on")
+        .first()
+    )
+    assert unpaid is not None
+    reminder = MessageTemplate.objects.get(code="reminder_due")
+    message = messaging.queue(
+        "B", lease, unpaid, reminder, messaging.context_for(lease, unpaid, "B", today=TODAY)
+    )
+    assert message is not None
+    messaging.send(message.pk)
 
     # Last, so that the rows above keep their ids whoever else signs in.
     _, admin_device = make_user(ADMIN_USERNAME, Role.ADMIN)
