@@ -12,9 +12,10 @@ The From and To months are plain selects (``ledger/_month_select.html``, the mon
 :func:`ledger.services.grid.picker_months`, as on the grid), never HTML month inputs,
 which Safari does not render (PLAN-012d, the owner's rule).
 The Aging report (PLAN-014 G1) has no range: it is the open balances by store as of
-today, so that its grand total without a filter is the dashboard's Unpaid figure. Its
-filters (``?state=&operator=&brand=&kind=&deposits=1``, :func:`ledger.services.receivables.
-parse_aging_filter`) go through the list pages' Filters component; a store's name opens its
+today, so that its grand total without a filter is the dashboard's Unpaid balances. Its
+filters (``?state=&operator=&brand=&kind=&deposits=1``, read by
+:func:`ledger.services.receivables.parse_aging_filter`) go through the list pages' Filters
+component; a store's name opens its
 Charges tab of open charges (``?tab=charges&status=open``), a bucket's amount the same tab
 with ``&bucket=<key>``, which highlights the charges of that bucket.
 

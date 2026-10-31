@@ -282,7 +282,7 @@ def test_include_deposits_adds_the_deposits_still_owed_and_says_so() -> None:
     note = re.search(r'<p class="muted" id="aging-deposits-note">([^<]*)</p>', on)
     assert note is not None
     assert "includes $2,000.00 of deposits still owed" in note.group(1)
-    assert "Unpaid balances figure leaves deposits out" in note.group(1)
+    assert "which the dashboard's Unpaid balances leaves out" in note.group(1)
     off = page(AGING)
     assert 'id="aging-grand-total">$4,015.00<' in off
     assert "Deposits still owed are left out" in off
@@ -443,7 +443,7 @@ def test_the_page_is_titled_aging_and_the_header_has_no_money_filter_bug() -> No
         "Total",
         "Open charges",
     ]
-    assert f"As of {TODAY:%b} {TODAY.day}, {TODAY.year}" in html
+    assert f'id="aging-as-of">As of {TODAY:%b} {TODAY.day}, {TODAY.year}</span>' in html
     menu = page("/reports/")
     assert 'id="report-aging">Aging</a>' in menu
 
