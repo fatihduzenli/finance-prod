@@ -39,6 +39,7 @@
    pair: --waived-text on --waived-bg
    pair: --neutral-text on --neutral-bg
    pair: --error-text on --unpaid-bg
+   pair: --error-text on --surface
    pair: --navy on --neutral-bg
    pair: --surface on --btn-primary-bg
    pair: --surface on --unpaid-text
@@ -92,6 +93,7 @@
    pair[dark]: --waived-text on --waived-bg
    pair[dark]: --neutral-text on --neutral-bg
    pair[dark]: --error-text on --unpaid-bg
+   pair[dark]: --error-text on --surface
    pair[dark]: --sandbox-text on --sandbox-bg
    pair[dark]: --btn-primary-text on --btn-primary-bg
    pair[dark]: --text-on-accent on --btn-primary-bg

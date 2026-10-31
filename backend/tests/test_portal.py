@@ -39,6 +39,7 @@ import mail
 from accounts import registry, signals
 from accounts.models import UserSession
 from accounts.roles import Role
+from finance.dates import day_text
 from ledger import merge
 from ledger.models import (
     AuditLog,
@@ -936,6 +937,29 @@ def test_the_statement_is_scoped_to_the_portal_users_operator(world: World) -> N
     assert 'id="open-total">$2,250.00<' in page
     for absent in ("Betaburg", "7,777.00", "6,666.00"):
         assert_absent(page, absent)
+
+
+def _overdue_rows(html: str) -> list[str]:
+    return re.findall(r'<tr class="open-charge overdue">(.*?)</tr>', html, re.DOTALL)
+
+
+def test_an_overdue_row_is_marked_and_shows_its_charge_date_and_balance(world: World) -> None:
+    """PLAN-014 H finding H-5: an overdue open charge keeps the ``overdue`` class that
+    portal.css colours with a token paired with --surface, and its row shows the description,
+    the due date and the balance, on the store page and in the statement's open charges."""
+    client = portal_client(active_user(world.a))
+    store = _overdue_rows(text(client.get(f"/portal/stores/{world.store_a.pk}/")))
+    assert len(store) == 1, store
+    for shown in ("Rent Sep 2026", day_text(world.rent_a.due_on), "$1,850.00"):
+        assert shown in store[0], (shown, store[0])
+    statement = _overdue_rows(text(client.get("/portal/statement/")))
+    assert len(statement) == 2, statement
+    for charge, description, balance in (
+        (world.rent_a, "Rent Sep 2026", "$1,850.00"),
+        (world.rent_a_old, "Rent Mar 2026", "$400.00"),
+    ):
+        row = next(row for row in statement if description in row)
+        assert day_text(charge.due_on) in row and balance in row, (description, row)
 
 
 def test_pay_and_bank_say_they_are_not_available_yet(world: World) -> None:
