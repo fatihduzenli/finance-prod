@@ -27,6 +27,7 @@ from ledger.models import (
     InvoiceDraft,
     InvoiceDraftStatus,
     Lease,
+    LeaseBilling,
     LeaseEnd,
     LeaseEndReason,
     LeaseEndStatus,
@@ -36,6 +37,7 @@ from ledger.models import (
     OneOffCharge,
     OneOffChargeStatus,
     Operator,
+    OperatorKind,
     Payment,
     PaymentKind,
     PaymentMethod,
@@ -86,18 +88,26 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def incoming_operator(name: str = "Southwind Stores") -> Operator:
-    """An operator linked to a (fake) customer at the payment provider."""
-    operator = Operator.objects.create(
-        display_name=name, email=f"{uuid.uuid4().hex[:8]}@example.com"
+    """An operator with an e-mail address. Its provider customer is a lease's since
+    PLAN-014 C3: :func:`connect` gives one to the incoming lease once it exists."""
+    return Operator.objects.create(display_name=name, email=f"{uuid.uuid4().hex[:8]}@example.com")
+
+
+def connect(lease: Lease) -> Lease:
+    """Give ``lease`` billing details (its operator's e-mail) and a (fake) customer at the
+    payment provider, as staff do through Edit billing details (PLAN-014 C3)."""
+    assert lease.operator is not None
+    LeaseBilling.objects.update_or_create(
+        lease=lease, defaults={"email": lease.operator.email or ""}
     )
     ExternalRef.objects.create(
-        entity_type="operator",
-        entity_id=operator.pk,
+        entity_type="lease",
+        entity_id=lease.pk,
         provider="stax_pay",
         external_kind="customer",
         external_id=f"cus-{uuid.uuid4().hex[:8]}",
     )
-    return operator
+    return lease
 
 
 def begin(lease: Lease, user: User | None = None, *, ended_on: date = ENDED) -> LeaseTransfer:
@@ -475,7 +485,9 @@ def test_a_clean_transfer_ends_the_outgoing_lease_and_starts_the_incoming_one(
     assert lines == [("Security deposit", D("3000.00")), ("Sign fee", D("450.00"))]
     assert not OneOffCharge.objects.filter(lease=new).exists()
     assert set(Job.objects.values_list("kind", flat=True)) == {JobKind.LEASE_END_DOCUMENTS}
-    # Sent, the draft makes the charges and the provider job.
+    # Sent once the new lease has its provider customer (PLAN-014 C3: per lease), the
+    # draft makes the charges and the provider job.
+    connect(new)
     sent = invoice_builder.send(draft.pk, user, today=TODAY)
     assert sent.ok, sent.message
     made = OneOffCharge.objects.filter(lease=new).order_by("price")
@@ -636,19 +648,22 @@ def test_unknown_or_malformed_ids_are_404(admin: Any) -> None:
         assert client.get(f"/stores/{key}/transfer/").status_code == 404
 
 
-def test_an_operator_created_on_the_step_queues_its_sync_job(admin: Any, pinned: None) -> None:
+def test_an_operator_created_on_the_step_queues_no_provider_job(admin: Any, pinned: None) -> None:
     client, _ = admin
     lease = a_clean_lease()
     client.post(f"/stores/{lease.store_id}/transfer/")
     row = LeaseTransfer.objects.get()
+    jobs_before = set(Job.objects.values_list("pk", flat=True))
     response = client.post(
         f"/transfers/{row.pk}/operator/",
         {
             "action": "create",
             "creation_key": str(uuid.uuid4()),
-            # PLAN-012f-b D9: Type and the company's name; the display name is derived.
+            # PLAN-014 C1: the Full name is the display name; a posted Type and company
+            # are ignored, not an error.
+            "display_name": "Eastwind Stores",
             "kind": "company",
-            "company": "Eastwind Stores",
+            "company": "Eastwind Holdings LLC",
             "email": "eastwind@example.com",
             "phone": "",
         },
@@ -656,8 +671,11 @@ def test_an_operator_created_on_the_step_queues_its_sync_job(admin: Any, pinned:
     assert response["Location"] == f"/transfers/{row.pk}/end/"
     created = Operator.objects.get(display_name="Eastwind Stores")
     assert fresh(row).incoming_operator_id == created.pk
-    job = Job.objects.get(kind=JobKind.OPERATOR_SYNC)
-    assert job.entity_id == created.pk
+    assert (created.kind, created.company) == (OperatorKind.PERSON, "")
+    # PLAN-014 C3: creating an operator is local only; the processor customer is a lease's.
+    assert created.sync_status == "not_applicable"
+    assert set(Job.objects.values_list("pk", flat=True)) == jobs_before
+    assert not ExternalRef.objects.filter(entity_type="operator", entity_id=created.pk).exists()
 
 
 def test_an_admin_walks_the_transfer_from_the_store_page(admin: Any, pinned: None) -> None:
@@ -1043,3 +1061,145 @@ def test_the_reason_stays_out_of_the_statement(admin: Any) -> None:
     end = fresh(row.lease_end)
     assert REASON not in str(end.statement_json)
     assert REASON not in str(lease_end.merge_values(statements.final(end, today=TODAY)))
+
+
+# --- PLAN-014 C4: the incoming lease's billing details ----------------------------------------
+
+INCOMING_BILLING = {
+    "company_name": "Southwind LLC",
+    "email": "south@example.com",
+    "phone": "4155550199",
+    "address_line1": "9 Elm St",
+    "address_line2": "",
+    "city": "Dallas",
+    "state": "TX",
+    "postal_code": "75201",
+}
+
+
+def refs_of(lease: Lease) -> list[tuple[str, str, Any]]:
+    return list(
+        ExternalRef.objects.filter(entity_type="lease", entity_id=lease.pk)
+        .order_by("external_kind")
+        .values_list("external_kind", "external_id", "superseded_at")
+    )
+
+
+def billed(user: User, **fields: Any) -> LeaseTransfer:
+    """:func:`ready` with the outgoing lease connected and the incoming billing set."""
+    row = begin(connect(a_clean_lease()), user)
+    end = fresh(row).lease_end
+    assert lease_end.save_statement(end, [], actor=user, today=TODAY).ok
+    assert settle(end, RefundMethod.ZELLE, actor=user).ok
+    outcome = incoming(row, user, billing=INCOMING_BILLING, **fields)
+    assert outcome.ok, outcome.message
+    return LeaseTransfer.objects.get(pk=row.pk)
+
+
+def test_the_incoming_billing_is_kept_then_written_to_the_new_lease_only(admin: Any) -> None:
+    _, user = admin
+    row = billed(user)
+    assert (row.incoming_billing, row.incoming_account) == (INCOMING_BILLING, "later")
+    [audit] = AuditLog.objects.filter(action="lease_transfer.incoming_set", entity_id=str(row.pk))
+    assert audit.after["incoming_billing"]["email"] == "south@example.com"
+    outgoing = row.outgoing_lease
+    billing_before = LeaseBilling.objects.filter(lease=outgoing).values().get()
+    refs_before = refs_of(outgoing)
+    assert confirm(row, user).ok
+    new = fresh(row).incoming_lease
+    assert new is not None
+    billing = LeaseBilling.objects.get(lease=new)
+    assert {name: getattr(billing, name) for name in INCOMING_BILLING} == INCOMING_BILLING
+    assert billing.shares_account_of is None
+    assert fresh(new).sync_status == "pending"
+    assert Job.objects.filter(kind=JobKind.LEASE_SYNC, entity_id=new.pk).count() == 1
+    # The ended lease keeps its billing details and its processor references.
+    assert LeaseBilling.objects.filter(lease=outgoing).values().get() == billing_before
+    assert refs_of(outgoing) == refs_before and refs_before
+
+
+def test_the_incoming_lease_can_share_an_account_of_the_incoming_operator(
+    admin: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from payments.fake import FakeProvider
+    from tests.test_lease_services import account_holder
+
+    _, user = admin
+    provider = FakeProvider()
+    monkeypatch.setattr("payments.get_provider", lambda: provider)
+    holder = account_holder(provider)
+    row = begin(connect(a_clean_lease()), user)
+    assert transfer.set_operator(fresh(row), holder.operator, actor=user).ok
+    end = fresh(row).lease_end
+    assert lease_end.save_statement(end, [], actor=user, today=TODAY).ok
+    assert settle(end, RefundMethod.ZELLE, actor=user).ok
+    assert incoming(row, user, billing=INCOMING_BILLING, account=f"same:{holder.pk}").ok
+    assert confirm(row, user).ok
+    new = fresh(row).incoming_lease
+    assert new is not None
+    assert LeaseBilling.objects.get(lease=new).shares_account_of == holder
+    assert not Job.objects.filter(kind=JobKind.LEASE_SYNC, entity_id=new.pk).exists()
+
+
+def test_an_account_of_another_operator_is_refused_on_the_step_and_again_on_confirm(
+    admin: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ledger.services import leases
+    from payments.fake import FakeProvider
+    from tests.test_lease_services import account_holder
+
+    _, user = admin
+    provider = FakeProvider()
+    monkeypatch.setattr("payments.get_provider", lambda: provider)
+    holder = account_holder(provider)
+    row = billed(user)
+    refused = incoming(row, user, billing=INCOMING_BILLING, account=f"same:{holder.pk}")
+    assert (refused.ok, refused.field) == (False, "account")
+    assert refused.message == leases.ACCOUNT_NOT_SHAREABLE
+    assert fresh(row).incoming_account == "later"
+    # A choice that stopped holding since the step (here written past the service) is
+    # refused on confirm, and nothing is written.
+    LeaseTransfer.objects.filter(pk=row.pk).update(incoming_account=f"same:{holder.pk}")
+    before = snapshot()
+    outcome = confirm(row, user)
+    assert (outcome.ok, outcome.message) == (False, leases.ACCOUNT_NOT_SHAREABLE)
+    assert snapshot() == before and fresh(row).status == LeaseTransferStatus.DRAFT
+
+
+def test_a_card_number_in_the_incoming_billing_is_refused_and_not_kept(admin: Any) -> None:
+    _, user = admin
+    row = begin(a_clean_lease(), user)
+    outcome = incoming(row, user, billing={**INCOMING_BILLING, "address_line2": CARD})
+    assert not outcome.ok
+    assert CARD not in outcome.message and fresh(row).incoming_billing == {}
+
+
+def test_the_incoming_page_shows_the_billing_details_and_the_copy_data(
+    admin: Any, pinned: None
+) -> None:
+    client, user = admin
+    row = billed(user)
+    operator = row.incoming_operator
+    assert operator is not None
+    page = client.get(f"/transfers/{row.pk}/incoming/").content.decode()
+    assert 'id="billing-card"' in page and "leases_billing.js" in page
+    assert has_token(page, 'id="copy-from-operator"')
+    assert f'data-email="{operator.email}"' in page
+    assert 'value="south@example.com"' in page  # as kept on the transfer
+    assert 'value="later" id="id_account_0" checked' in page
+    response = client.post(
+        f"/transfers/{row.pk}/incoming/",
+        {
+            "started_on": STARTS.isoformat(),
+            "rent": "2500.00",
+            "debit_day": "1",
+            "payment_channel": "wire",
+            "prorate_first_month": "on",
+            "deposit_amount": "3000.00",
+            "email": "Other@Example.com",
+            "account": "later",
+        },
+    )
+    assert response["Location"] == f"/transfers/{row.pk}/confirm/"
+    kept = fresh(row).incoming_billing
+    assert kept["email"] == "other@example.com" and kept["company_name"] == ""

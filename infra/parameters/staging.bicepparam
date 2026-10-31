@@ -47,6 +47,11 @@ param sentryDsnSecretName = 'sentry-dsn'
 // param uspsClientIdSecretName = 'usps-client-id'
 // param uspsClientSecretSecretName = 'usps-client-secret'
 
+// The bank-entry page's hosted fields (PLAN-014 C7): the web app reads
+// STAX_WEB_PAYMENTS_TOKEN from the vault secret stax-web-payments-token. Uncomment after
+// the secret exists in finance-sandbox-kv; until then bank entry is not set up.
+// param staxWebPaymentsTokenSecretName = 'stax-web-payments-token'
+
 // appBaseUrl is derived: it becomes https://<customHostname> when a custom
 // hostname is set, and the default ingress host name otherwise. Override it
 // only if the app is fronted by something else, such as a CDN or WAF.

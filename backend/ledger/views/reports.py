@@ -45,7 +45,16 @@ from django.utils import timezone
 from django.views.decorators.http import require_safe
 
 from ledger.models import Operator
-from ledger.services import credits, grid, list_filters, pnl, receivables, reports, stores
+from ledger.services import (
+    credits,
+    detail_cards,
+    grid,
+    list_filters,
+    pnl,
+    receivables,
+    reports,
+    stores,
+)
 from ledger.views.operators import csv_response, role_required
 
 logger = logging.getLogger(__name__)
@@ -394,7 +403,14 @@ def _statement(operator: Operator) -> Callable[[reports.ReportRange], reports.St
 def statement_page(request: HttpRequest, pk: str) -> HttpResponse:
     """``ledger:operators:statement``: printable, every store of the operator."""
     operator = _operator(pk)
-    return _ranged(request, STATEMENT, _statement(operator), operator=operator)
+    return _ranged(
+        request,
+        STATEMENT,
+        _statement(operator),
+        operator=operator,
+        # PLAN-014 C6: the company each store's lease bills.
+        bill_to=detail_cards.lease_accounts(operator),
+    )
 
 
 @role_required

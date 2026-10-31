@@ -14,8 +14,8 @@ from typing import Any
 
 from ledger.models import AuditLog
 from payments.errors import ProviderRejected
+from payments.lease_sync import PROVIDER_KEY
 from payments.models import ExternalRef
-from payments.operator_sync import PROVIDER_KEY
 from payments.provider import Summary
 from payments.webhooks.events import ignored
 

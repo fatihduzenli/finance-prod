@@ -29,9 +29,9 @@ from ledger.services import stores as service
 from payments.fake import FakeProvider
 from tests.auth_helpers import iter_routes, make_user, verified_client
 from tests.test_lease_services import _race, make_lease, make_operator
+from tests.test_lease_sync import requires_postgresql
 from tests.test_lease_views import NEW as LEASE_NEW
 from tests.test_lease_views import form_data as lease_form_data
-from tests.test_operator_sync import requires_postgresql
 from tests.test_operator_views import client_for
 from tests.text_helpers import has_token
 

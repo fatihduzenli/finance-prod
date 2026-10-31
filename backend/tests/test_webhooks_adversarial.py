@@ -19,7 +19,7 @@ from ledger.models import Invoice, Payment
 from payments.models import ExternalRef, WebhookEvent
 from payments.webhooks import processor, receiver
 from tests.auth_helpers import make_user, verified_client
-from tests.test_operator_sync import requires_postgresql
+from tests.test_lease_sync import requires_postgresql
 from tests.test_webhook_handlers import (
     CUSTOMER,
     INVOICE,

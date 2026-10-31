@@ -8,8 +8,9 @@ which runs when the form validates the model instance.
 
 from __future__ import annotations
 
+import copy
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -47,10 +48,10 @@ from ledger.models import (
     FeeType,
     InstallmentCadence,
     Lease,
+    LeaseBilling,
     LeaseEndReason,
     OneOffCharge,
     Operator,
-    OperatorKind,
     PaymentChannel,
     PaymentMethod,
     RefundMethod,
@@ -58,20 +59,30 @@ from ledger.models import (
 )
 from ledger.services import autopay_plans, installments, invoice_builder, one_off_charges, rent_run
 from ledger.services.deposits import NOTE_REQUIRED as DEPOSIT_NOTE_REQUIRED
-from ledger.services.leases import END_DATE_REQUIRED
+from ledger.services.leases import (
+    ACCOUNT_ENTER,
+    ACCOUNT_LATER,
+    END_DATE_REQUIRED,
+    SharedAccount,
+)
 from ledger.services.one_off_charges import ChargeInput
 from ledger.validators import validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_sentence
-from payments.operator_sync import normalise_phone
+from payments.lease_sync import normalise_phone
 
 if TYPE_CHECKING:
     _OperatorFormBase = forms.ModelForm[Operator]
     _LeaseFormBase = forms.ModelForm[Lease]
+    _LeaseBillingFormBase = forms.ModelForm[LeaseBilling]
     _StoreFormBase = forms.ModelForm[Store]
+    _BillingStepBase = forms.BaseForm
 else:  # ModelForm is only generic in the type stubs.
     _OperatorFormBase = forms.ModelForm
     _LeaseFormBase = forms.ModelForm
+    _LeaseBillingFormBase = forms.ModelForm
     _StoreFormBase = forms.ModelForm
+    #: A mixin, not a form: the form classes of this module are each tested as a form.
+    _BillingStepBase = object
 
 #: The attribute of a dependent field (PLAN-012c D8): the field is shown while one of the
 #: ``|``-separated conditions holds, each ``<control id>`` (a ticked box or a filled input)
@@ -139,55 +150,23 @@ def _quiet_formfield(db_field: models.Field[Any, Any], **kwargs: Any) -> forms.F
 CONSENT_SHOWN_WHEN = {"sms_consent_at": "id_sms_phone|id_phone", "email_consent_at": "id_email"}
 
 
-#: The Type radios' ids (PLAN-012f-b D9): a name field is shown while its kind's radio is
-#: chosen (``ledger/shown_when.js``); Django numbers a radio group's inputs in order.
-KIND_RADIO_IDS = {kind: f"id_kind_{index}" for index, kind in enumerate(OperatorKind.values)}
-#: The name fields each kind asks for, with the refusal when one is empty.
-KIND_NAME_FIELDS: dict[str, dict[str, str]] = {
-    OperatorKind.COMPANY: {"company": "Enter the company name."},
-    OperatorKind.PERSON: {
-        "first_name": "Enter the first name.",
-        "last_name": "Enter the last name.",
-    },
-}
-#: The fields shown with each kind (the other kind's are hidden).
-KIND_SHOWN_FIELDS: dict[str, tuple[str, ...]] = {
-    OperatorKind.COMPANY: ("company", "contact_person"),
-    OperatorKind.PERSON: ("first_name", "last_name"),
-}
-
-
 class OperatorForm(_OperatorFormBase):
-    """Create and edit. The e-mail is lower-cased and stripped; empty means none.
+    """Create and edit (PLAN-014 C1: an operator is a person). The fields are the Full name
+    (required; stored as the display name), the e-mail, the phone, the address, the notes
+    and the SMS phone and consents. The e-mail is lower-cased and stripped; empty means
+    none. The phone must pass the payment provider's rule, as before.
 
-    The phone must pass the payment provider's rule, on create and on every edit, so an
-    operator with a bad phone cannot be saved (or re-synced) until it is fixed.
-
-    PLAN-012f-b D9: Type (Company / Person) comes first and picks the name fields: a
-    company needs its name (the contact person is optional), a person a first and a last
-    name. The display name is not a field: ``Operator.save`` derives it, so a posted
-    ``display_name`` is ignored.
+    The type, company name, contact person, first and last name and legal name left the
+    form (the columns stay, unwritten); a post that still sends them is not refused: the
+    model form ignores fields it does not have.
     """
 
-    kind = _QuietChoiceField(
-        choices=OperatorKind.choices,
-        initial=OperatorKind.PERSON.value,
-        label="Type",
-        # B2-2: drawn as the segmented control (app.css .radio-segmented).
-        widget=forms.RadioSelect(attrs={"class": "radio-segmented"}),
-        error_messages={"required": "Choose company or person."},
-    )
     email = forms.EmailField(required=False, max_length=254)
 
     class Meta:
         model = Operator
         fields = (
-            "kind",
-            "company",
-            "contact_person",
-            "first_name",
-            "last_name",
-            "legal_name",
+            "display_name",
             "email",
             "phone",
             "address_line1",
@@ -201,34 +180,31 @@ class OperatorForm(_OperatorFormBase):
             "email_consent_at",
         )
         labels = {
-            "company": "Company name",
-            "contact_person": "Contact person",
-            "first_name": "First name",
-            "last_name": "Last name",
+            "display_name": "Full name",
             "sms_phone": "Text-message phone (international, +1…)",
             "sms_consent_at": "Text-message consent given on",
             "email_consent_at": "E-mail consent given on",
         }
+        error_messages = {"display_name": {"required": "Enter the full name."}}
         # PLAN-012c D8: a consent is shown only with a phone (SMS) or an e-mail on the form.
         widgets = {
-            **{
-                name: forms.DateTimeInput(
-                    attrs={
-                        "type": "datetime-local",
-                        "step": "1",
-                        SHOWN_WHEN: CONSENT_SHOWN_WHEN[name],
-                    },
-                    format=CONSENT_INPUT_FORMAT,
-                )
-                for name in CONSENT_FIELDS
-            },
-            # PLAN-012f-b D9: each name field is shown with its kind's radio.
-            **{
-                name: forms.TextInput(attrs={SHOWN_WHEN: KIND_RADIO_IDS[kind]})
-                for kind, names in KIND_SHOWN_FIELDS.items()
-                for name in names
-            },
+            name: forms.DateTimeInput(
+                attrs={
+                    "type": "datetime-local",
+                    "step": "1",
+                    SHOWN_WHEN: CONSENT_SHOWN_WHEN[name],
+                },
+                format=CONSENT_INPUT_FORMAT,
+            )
+            for name in CONSENT_FIELDS
         }
+
+    def clean_display_name(self) -> str:
+        """The full name with its spaces collapsed; empty is refused."""
+        value = " ".join(str(self.cleaned_data.get("display_name") or "").split())
+        if not value:
+            raise forms.ValidationError("Enter the full name.", code="required")
+        return value
 
     def clean_email(self) -> str | None:
         value = self.cleaned_data.get("email") or ""
@@ -240,23 +216,6 @@ class OperatorForm(_OperatorFormBase):
         if digits is None:
             raise forms.ValidationError(PHONE_MESSAGE, code="phone")
         return digits
-
-    def clean(self) -> dict[str, Any]:
-        data = super().clean() or {}
-        for name, refusal in KIND_NAME_FIELDS.get(data.get("kind") or "", {}).items():
-            value = " ".join(str(data.get(name) or "").split())
-            if value:
-                data[name] = value
-            elif name not in self.errors:
-                self.add_error(name, forms.ValidationError(refusal, code="required"))
-        # B2-3: the other kind's name fields are cleared, so a post without the script (where
-        # every field shows) never keeps stale names. A company keeps its contact person.
-        for kind, names in KIND_SHOWN_FIELDS.items():
-            if data.get("kind") and kind != data.get("kind"):
-                for name in names:
-                    if name in data:
-                        data[name] = ""
-        return data
 
 
 class OperatorCreateForm(OperatorForm):
@@ -285,6 +244,185 @@ class LinkForm(forms.Form):
         max_length=IDENTIFIER_MAX_LENGTH,
         validators=[IDENTIFIER_VALIDATOR],
     )
+
+
+class LeaseBillingForm(_LeaseBillingFormBase):
+    """The lease's billing details (PLAN-014 C3, the LEASE card's "Edit billing details"):
+    the company billed, the e-mail receipts and messages go to, the phone and the address.
+    The e-mail is lower-cased and stripped; the phone must pass the payment provider's rule,
+    as on the operator form. Nothing else of the lease is posted here."""
+
+    email = forms.EmailField(required=False, max_length=254, label="E-mail")
+
+    class Meta:
+        model = LeaseBilling
+        fields = (
+            "company_name",
+            "email",
+            "phone",
+            "address_line1",
+            "address_line2",
+            "city",
+            "state",
+            "postal_code",
+        )
+        labels = {
+            "company_name": "Company name",
+            "address_line1": "Address line 1",
+            "address_line2": "Address line 2",
+            "postal_code": "ZIP code",
+        }
+
+    def clean_email(self) -> str:
+        return str(self.cleaned_data.get("email") or "").strip().lower()
+
+    def clean_phone(self) -> str:
+        """The provider's phone rule; the normalised digits are stored, empty stays empty."""
+        digits = normalise_phone(str(self.cleaned_data.get("phone") or ""))
+        if digits is None:
+            raise forms.ValidationError(PHONE_MESSAGE, code="phone")
+        return digits
+
+
+# --- The billing details of a new lease (PLAN-014 C4) -----------------------------------
+
+#: The billing details fields of the New lease page and the transfer's incoming lease, as
+#: on Edit billing details (``LeaseBillingForm``), and the bank-account choice.
+BILLING_STEP_FIELDS: tuple[str, ...] = (*LeaseBillingForm.Meta.fields, "account")
+#: The operator's contact details the "Copy from operator" button fills in the browser:
+#: the ``data-*`` attribute of each billing field (``data-email`` fills ``email``).
+COPIED_FIELDS: tuple[str, ...] = (
+    "email",
+    "phone",
+    "address_line1",
+    "address_line2",
+    "city",
+    "state",
+    "postal_code",
+)
+ACCOUNT_LATER_LABEL = "Later"
+ACCOUNT_ENTER_LABEL = "Enter a bank account"
+ACCOUNT_SAME_LABEL = "Use the same account as #{store}{last4}"
+
+
+def copied_attrs(operator: Operator | None) -> dict[str, str]:
+    """The ``data-*`` attributes "Copy from operator" reads: the operator's e-mail, phone
+    and address (nothing is copied by the server)."""
+    if operator is None:
+        return {}
+    return {
+        f"data-{name.replace('_', '-')}": str(getattr(operator, name) or "")
+        for name in COPIED_FIELDS
+    }
+
+
+class OperatorContactSelect(forms.Select):
+    """The New lease page's operator select: each option carries the operator's contact
+    details as ``data-*`` attributes for "Copy from operator" (PLAN-014 C4)."""
+
+    def create_option(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        option = super().create_option(*args, **kwargs)
+        instance = getattr(option["value"], "instance", None)
+        if isinstance(instance, Operator):
+            option["attrs"].update(copied_attrs(instance))
+        return option
+
+
+class BillingStepMixin(_BillingStepBase):
+    """The Billing details of a new lease (PLAN-014 C4): the ``LeaseBillingForm`` fields,
+    starting empty, and **Bank account**: ``later`` (the default), ``enter`` (the hosted
+    fields after the save; refused while they are not set up) or ``same:<lease id>`` (the
+    account of a lease of :func:`~ledger.services.leases.shareable_accounts`, which the
+    service checks again under the row lock)."""
+
+    shared_accounts: list[SharedAccount]
+    enter_refusal: str
+    same_shown_when: str
+
+    def add_billing_step(
+        self,
+        accounts: Sequence[SharedAccount],
+        *,
+        enter_refusal: str,
+        shown_when: str = "",
+    ) -> None:
+        """Add the fields; ``shown_when`` (the operator select's id) hides the billing
+        fields until an operator is chosen and each ``same:`` option until its lease's
+        operator is the one chosen."""
+        for name in LeaseBillingForm.Meta.fields:
+            field = copy.deepcopy(LeaseBillingForm.base_fields[name])
+            if shown_when:
+                field.widget.attrs[SHOWN_WHEN] = shown_when
+            self.fields[name] = field
+        self.shared_accounts = list(accounts)
+        self.enter_refusal = enter_refusal
+        self.same_shown_when = shown_when
+        self.fields["account"] = _QuietChoiceField(
+            label="Bank account",
+            required=False,
+            initial=ACCOUNT_LATER,
+            choices=[
+                (ACCOUNT_LATER, ACCOUNT_LATER_LABEL),
+                (ACCOUNT_ENTER, ACCOUNT_ENTER_LABEL),
+                *((found.value, found.value) for found in self.shared_accounts),
+            ],
+            widget=forms.RadioSelect,
+        )
+
+    def clean_email(self) -> str:
+        return str(self.cleaned_data.get("email") or "").strip().lower()
+
+    def clean_phone(self) -> str:
+        """The provider's phone rule, as on Edit billing details."""
+        digits = normalise_phone(str(self.cleaned_data.get("phone") or ""))
+        if digits is None:
+            raise forms.ValidationError(PHONE_MESSAGE, code="phone")
+        return digits
+
+    def clean_account(self) -> str:
+        value = str(self.cleaned_data.get("account") or "") or ACCOUNT_LATER
+        if value == ACCOUNT_ENTER and self.enter_refusal:
+            raise forms.ValidationError(self.enter_refusal, code="enter")
+        return value
+
+    def billing_values(self) -> dict[str, str]:
+        """The billing details as typed (a valid form)."""
+        return {
+            name: str(self.cleaned_data.get(name) or "") for name in LeaseBillingForm.Meta.fields
+        }
+
+    def billing_fields(self) -> list[forms.BoundField]:
+        return [self[name] for name in LeaseBillingForm.Meta.fields]
+
+    def account_options(self) -> list[dict[str, Any]]:
+        """The Bank account radios, rendered one by one (a ``same:`` radio carries its
+        own ``data-shown-when``)."""
+        chosen = str(self["account"].value() or ACCOUNT_LATER)
+        options: list[dict[str, Any]] = [
+            {"value": ACCOUNT_LATER, "label": ACCOUNT_LATER_LABEL},
+            {"value": ACCOUNT_ENTER, "label": ACCOUNT_ENTER_LABEL, "reason": self.enter_refusal},
+        ]
+        for found in self.shared_accounts:
+            options.append(
+                {
+                    "value": found.value,
+                    "label": ACCOUNT_SAME_LABEL.format(
+                        store=found.lease.store.external_label,
+                        last4=f" (····{found.last4})" if found.last4 else "",
+                    ),
+                    "shown_when": (
+                        f"{self.same_shown_when}={found.lease.operator_id}"
+                        if self.same_shown_when
+                        else ""
+                    ),
+                }
+            )
+        for index, option in enumerate(options):
+            option["id"] = f"id_account_{index}"
+            option["checked"] = option["value"] == chosen and not option.get("reason")
+            option.setdefault("reason", "")
+            option.setdefault("shown_when", "")
+        return options
 
 
 # --- Leases (PLAN-007 §4.1) -------------------------------------------------------------
@@ -375,8 +513,13 @@ class LeaseForm(_LeaseFormBase):
         return _twice_monthly(self["second_debit_day"])
 
     def lease_fields(self) -> list[forms.BoundField]:
-        """The visible fields of the lease itself (the create form adds a checklist)."""
-        return [field for field in self.visible_fields() if not field.name.startswith(SETUP)]
+        """The visible fields of the lease itself (the create form adds a checklist and
+        the billing details)."""
+        return [
+            field
+            for field in self.visible_fields()
+            if not field.name.startswith(SETUP) and field.name not in BILLING_STEP_FIELDS
+        ]
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
@@ -396,18 +539,33 @@ class LeaseForm(_LeaseFormBase):
         return data
 
 
-class LeaseCreateForm(LeaseForm):
+class LeaseCreateForm(BillingStepMixin, LeaseForm):
     """Adds the one-time key rendered with the form, so a resubmission saves nothing,
     and the setup checklist (PLAN-010b D5; PLAN-012d D9): per fee type of
     :func:`~ledger.services.one_off_charges.checklist_types` a cost, a price, a vendor
     and a due date. A row is charged when its price has a value: the price input starts
     empty with the catalogue's default price as its placeholder, never as a value (no
-    tick box; a posted tick is ignored). An empty due date is the lease's start date."""
+    tick box; a posted tick is ignored). An empty due date is the lease's start date.
+
+    PLAN-014 C4: the Billing details (:class:`BillingStepMixin`), shown once an operator
+    is chosen; the operator select's options carry the contact details "Copy from
+    operator" fills in the browser."""
 
     creation_key = forms.UUIDField(widget=forms.HiddenInput)
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        accounts: Sequence[SharedAccount] = (),
+        enter_refusal: str = "",
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
+        operator = self.fields["operator"]
+        operator.widget = OperatorContactSelect(attrs=operator.widget.attrs)
+        if isinstance(operator, forms.ChoiceField):
+            operator.widget.choices = operator.choices
+        self.add_billing_step(accounts, enter_refusal=enter_refusal, shown_when="id_operator")
         self.fee_types = one_off_charges.checklist_types()
         for fee_type in self.fee_types:
             name = _setup_name(fee_type)
@@ -2274,11 +2432,12 @@ class TransferOperatorForm(forms.Form):
     )
 
 
-class TransferIncomingForm(forms.Form):
+class TransferIncomingForm(BillingStepMixin, forms.Form):
     """The incoming lease's terms, its deposit and its setup checklist (one price per
     checklist item that is not a deposit: empty with the catalogue's default price as the
-    placeholder; a price means charged, PLAN-012d D9). The service checks every rule
-    again."""
+    placeholder; a price means charged, PLAN-012d D9), and its Billing details (PLAN-014
+    C4, :class:`BillingStepMixin`: the incoming operator is known, so every ``same:``
+    choice is one of its leases). The service checks every rule again."""
 
     started_on = forms.DateField(
         label="Start date",
@@ -2337,6 +2496,8 @@ class TransferIncomingForm(forms.Form):
         *args: Any,
         fee_types: Iterable[FeeType] = (),
         deposit_offered: bool = True,
+        accounts: Sequence[SharedAccount] = (),
+        enter_refusal: str = "",
         **kwargs: Any,
     ) -> None:
         """``deposit_offered``: the catalogue offers a security deposit. Without one the
@@ -2347,12 +2508,14 @@ class TransferIncomingForm(forms.Form):
         self.deposit_offered = deposit_offered
         for fee_type in self.fee_types:
             self.fields[f"{_setup_name(fee_type)}_price"] = _setup_price_field(fee_type)
+        self.add_billing_step(accounts, enter_refusal=enter_refusal)
 
     def lease_fields(self) -> list[forms.BoundField]:
         return [
             field
             for field in self.visible_fields()
             if not field.name.startswith(SETUP)
+            and field.name not in BILLING_STEP_FIELDS
             and (field.name != "deposit_amount" or self.deposit_offered or field.errors)
         ]
 

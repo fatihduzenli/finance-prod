@@ -97,6 +97,11 @@ _ONE_LINE = re.compile(r"[^\x00-\x1f\x7f]+")
 #: only when APP_ENV is local, so tests and a local run can point at a fake.
 DEFAULT_USPS_API_BASE_URL = "https://apis.usps.com"
 
+#: PLAN-014 C7: the processor's web payments token for its hosted bank-account fields.
+#: Optional (empty: bank entry is not set up). It is written into the bank-entry page, so
+#: only these characters are accepted; it is a secret everywhere else.
+_WEB_PAYMENTS_TOKEN = re.compile(r"[A-Za-z0-9._-]{1,255}")
+
 _SQLITE_SCHEME_PREFIX = "sqlite"
 _WEB_URL_SCHEMES: tuple[str, ...] = ("http", "https")
 
@@ -160,6 +165,8 @@ class Config:
     usps_client_id: str = field(default="", repr=False)
     usps_client_secret: str = field(default="", repr=False)
     usps_api_base_url: str = DEFAULT_USPS_API_BASE_URL
+    #: PLAN-014 C7: empty means the hosted bank-account fields are not set up.
+    stax_web_payments_token: str = field(default="", repr=False)
 
 
 def _positive_amount(value: str) -> Decimal | None:
@@ -439,6 +446,18 @@ def validate(env: Mapping[str, str]) -> Config:
     )
     problems.extend(usps_problems)
 
+    # PLAN-014 C7: the hosted fields' token, optional; never with the in-memory provider
+    # (the browser would create methods at the processor the fake knows nothing of).
+    stax_web_payments_token = env.get("STAX_WEB_PAYMENTS_TOKEN", "")
+    if stax_web_payments_token:
+        if not _WEB_PAYMENTS_TOKEN.fullmatch(stax_web_payments_token):
+            problems.append(
+                "STAX_WEB_PAYMENTS_TOKEN must be letters, digits, '.', '_' or '-' "
+                "(at most 255) when it is set"
+            )
+        if stax_provider == "fake":
+            problems.append("STAX_WEB_PAYMENTS_TOKEN must be empty when STAX_PROVIDER is 'fake'")
+
     if (
         problems
         or large_debit_warning_amount is None
@@ -485,4 +504,5 @@ def validate(env: Mapping[str, str]) -> Config:
         usps_client_id=usps_client_id,
         usps_client_secret=usps_client_secret,
         usps_api_base_url=usps_api_base_url,
+        stax_web_payments_token=stax_web_payments_token,
     )

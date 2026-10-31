@@ -30,13 +30,14 @@ from ledger.forms import ADD_PAYMENT_REFERENCE_HELP, REFERENCE_HELP, AddPaymentF
 from ledger.models import (
     AuditLog,
     CompanySettings,
+    LeaseBilling,
     Operator,
     Payment,
     PaymentMethod,
     PaymentStatus,
     RentChargeStatus,
 )
-from ledger.services import detail_cards, refunds, rent_run
+from ledger.services import detail_cards, leases, refunds, rent_run
 from ledger.services import one_off_charges as service
 from ledger.validators import contains_card_number, validate_no_payment_data
 from ledger.views.operators import HELD_FORM_KEY
@@ -46,6 +47,7 @@ from tests.receivables_helpers import a_lease, a_rent_charge, a_store
 from tests.receivables_helpers import an_operator as a_plain_operator
 from tests.test_add_payment_page import element, page_of, tiles
 from tests.test_bank_debit import an_operator_with_bank, enabled, fake, invoiced, today
+from tests.test_lease_services import bill_lease
 from tests.test_manual_payment_marking import invoiced as invoiced_rent
 from tests.test_manual_payment_marking import pay
 from tests.test_one_off_charges import an_operator
@@ -97,6 +99,14 @@ def named_user(username: str, first: str = "", last: str = "", email: str = "") 
 # --- D7: the greyed card's reasons --------------------------------------------------------
 
 
+def billing_page(operator: Operator) -> str:
+    """Edit billing details of the lease that bills a charge without a lease: the
+    operator's first active lease (PLAN-014 C3)."""
+    lease = leases.first_active_lease(operator)
+    assert lease is not None
+    return reverse("ledger:leases:billing", kwargs={"pk": lease.pk})
+
+
 def test_no_bank_and_the_flag_off_give_the_owners_two_lines(fake: FakeProvider) -> None:
     name_provider()
     operator = an_operator(fake, bank=None)
@@ -106,7 +116,7 @@ def test_no_bank_and_the_flag_off_give_the_owners_two_lines(fake: FakeProvider) 
         options = service.bank_debit_options(charge)
     assert options.reason == "No bank account on file for Fatih Co."
     assert options.reason_more == "Bank debits are also off at PayCo."
-    assert options.reason_url == reverse("ledger:operators:detail", kwargs={"pk": operator.pk})
+    assert options.reason_url == billing_page(operator)  # PLAN-014 C3: the billing lease's
     assert not options.allowed
 
 
@@ -156,13 +166,13 @@ def test_a_rent_charge_gets_the_two_lines_too() -> None:
     with override_settings(STAX_PAY_INVOICE_ENABLED=True):
         one = service.rent_debit_options(charge)
     assert (one.reason, one.reason_more) == ("No bank account on file for Rent Ops.", "")
-    assert lease.operator is not None
-    page = reverse("ledger:operators:detail", kwargs={"pk": lease.operator.pk})
+    page = reverse("ledger:leases:billing", kwargs={"pk": lease.pk})  # PLAN-014 C3
     assert both.reason_url == one.reason_url == page
 
 
 def test_a_rent_charge_with_a_bank_and_the_flag_off_keeps_one_line(fake: FakeProvider) -> None:
-    lease = a_lease(a_store(), an_operator_with_bank(fake))
+    # PLAN-014 C3: a further lease of the operator shares its first lease's account.
+    lease = bill_lease(a_lease(a_store(), an_operator_with_bank(fake)))
     charge = a_rent_charge(lease, date(2026, 10, 1), RentChargeStatus.UNPAID, "2000.00")
     with override_settings(STAX_PAY_INVOICE_ENABLED=False):
         options = service.rent_debit_options(charge)
@@ -182,7 +192,7 @@ def test_the_page_prints_the_second_line_muted_under_the_first(fake: FakeProvide
     )
     link = (
         f'<a class="collect-link" id="debit-reason-link" href="'
-        f'{reverse("ledger:operators:detail", kwargs={"pk": operator.pk})}">Operator page</a>'
+        f'{billing_page(operator)}">Edit billing details</a>'
     )
     second = (
         '<span class="collect-note" id="debit-reason-more">'
@@ -354,7 +364,8 @@ def test_the_phone_filter(stored: str | None, shown: str) -> None:
 def test_the_phone_filter_output_is_escaped_on_a_page() -> None:
     html = render_to_string(
         "ledger/payments/_add_payment_summary.html",
-        {"operator": Operator(display_name="X", phone="<b>1</b>")},
+        # PLAN-014 C5: the card prints the billing phone of the lease that bills the charge.
+        {"operator": Operator(display_name="X"), "billing_phone": "<b>1</b>"},
     )
     assert "&lt;b&gt;1&lt;/b&gt;" in html and "<b>1</b>" not in html
 
@@ -385,10 +396,14 @@ def test_the_operator_page_shows_a_dash_for_no_phone() -> None:
 
 
 def test_the_add_payment_operator_card_formats_the_phone(fake: FakeProvider) -> None:
+    # PLAN-014 C5: the phone is the billing phone of the lease that bills the charge (here
+    # the operator's first active lease, the charge having none), not the operator's.
     operator = an_operator(fake)
-    Operator.objects.filter(pk=operator.pk).update(phone="+1 212 555 0100")
+    Operator.objects.filter(pk=operator.pk).update(phone="+1 404 555 0199")
+    LeaseBilling.objects.filter(lease__operator=operator).update(phone="+1 212 555 0100")
     body = admin_get(page_of(invoiced(fake, operator=Operator.objects.get(pk=operator.pk))))
     assert '<span id="operator-phone">(212) 555-0100</span>' in body
+    assert '<span id="operator-phone">(404) 555-0199</span>' not in body
 
 
 # --- D11: staff names ---------------------------------------------------------------------------

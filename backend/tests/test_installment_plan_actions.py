@@ -51,6 +51,7 @@ from payments.provider import InvoiceRecord
 from tests.job_helpers import run_queued_jobs
 from tests.receivables_helpers import a_lease, a_store
 from tests.test_installments import a_one_off, a_user, calls, pay, plan_for, rows_of
+from tests.test_lease_services import bill_lease
 from tests.test_one_off_charges import an_operator
 from tests.test_operator_views import client_for
 from tests.test_rent_run import health  # noqa: F401 (autouse fixture)
@@ -95,7 +96,9 @@ def worker() -> Iterator[None]:
 
 
 def a_store_lease(fake: FakeProvider) -> Lease:
-    return a_lease(a_store("Store 4410"), an_operator(fake), started=date(2026, 1, 1))
+    """A further lease of an operator with a provider account (PLAN-014 C3: it shares the
+    account of the operator's first lease, as ledger migration 0059 left them)."""
+    return bill_lease(a_lease(a_store("Store 4410"), an_operator(fake), started=date(2026, 1, 1)))
 
 
 def op(lease: Lease) -> Operator:

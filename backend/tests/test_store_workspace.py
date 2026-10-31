@@ -93,15 +93,16 @@ def a_world(label: str = "2477", name: str = "Acme Ops") -> Lease:
     return a_lease(a_store(label), an_operator(name), started=STARTED, channel=PaymentChannel.WIRE)
 
 
-def with_customer(operator: Operator) -> Operator:
+def with_customer(lease: Lease) -> Lease:
+    """The lease's own customer at the processor (PLAN-014 C3: the refs are per lease)."""
     ExternalRef.objects.create(
-        entity_type="operator",
-        entity_id=operator.pk,
+        entity_type="lease",
+        entity_id=lease.pk,
         provider="stax_pay",
         external_kind="customer",
         external_id=f"cus-{uuid.uuid4().hex[:12]}",
     )
-    return operator
+    return lease
 
 
 def store_page(store_id: object, **query: str) -> str:
@@ -367,10 +368,10 @@ def test_charge_now_opens_the_builder_with_charge_now_chosen_for_admins(
     lease = a_world()
     # PLAN-012f-b D15: Charge now is on offer with a bank account on file.
     assert lease.operator is not None
-    with_customer(lease.operator)
+    with_customer(lease)
     ExternalRef.objects.create(
-        entity_type="operator",
-        entity_id=lease.operator.pk,
+        entity_type="lease",
+        entity_id=lease.pk,
         provider="stax_pay",
         external_kind="payment_method",
         external_id=BANK,
@@ -686,7 +687,7 @@ def test_delete_of_a_never_sent_draft_needs_no_note_and_returns_to_the_tab() -> 
 def test_delete_refuses_a_sent_or_cancelled_draft_and_a_transfers_draft() -> None:
     lease = a_world()
     assert lease.operator is not None
-    with_customer(lease.operator)
+    with_customer(lease)
     billing, user = client_for(Role.BILLING)
     sent = a_draft(lease)
     assert invoice_builder.send(sent.pk, user).ok
@@ -706,7 +707,7 @@ def test_delete_refuses_a_sent_or_cancelled_draft_and_a_transfers_draft() -> Non
 def test_send_from_the_invoices_tab_returns_to_the_tab() -> None:
     lease = a_world()
     assert lease.operator is not None
-    with_customer(lease.operator)
+    with_customer(lease)
     draft = a_draft(lease)
     billing, _ = client_for(Role.BILLING)
     url = reverse("ledger:invoices:send", kwargs={"pk": draft.pk}) + f"?store={lease.store_id}"
@@ -1002,7 +1003,7 @@ def test_a_form_opened_elsewhere_returns_to_a_local_next_only() -> None:
     # e-mail (the draft's, opened from the operator page) returns to a local next only.
     lease = a_world()
     assert lease.operator is not None
-    with_customer(lease.operator)
+    with_customer(lease)
     billing, billing_user = client_for(Role.BILLING)
     back = f"/operators/{lease.operator_id}/"
     for target, expected in ((back, back), ("https://evil.example/", None)):

@@ -25,8 +25,8 @@ from django.utils import timezone
 
 from ledger.models import Invoice, Payment, PaymentMethod, PaymentStatus
 from payments import invoice_sync
+from payments.lease_sync import PROVIDER_KEY
 from payments.models import ExternalRef, MismatchKind, ReconciliationRun
-from payments.operator_sync import PROVIDER_KEY
 from payments.provider import (
     DateRange,
     PaymentProvider,

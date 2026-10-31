@@ -139,7 +139,7 @@ from ledger.services import (
 from ledger.validators import PAYMENT_DATA_MESSAGE, validate_no_payment_data, visible_text
 from ledger.wording import format_amount, provider_name
 from mail.base import SUBJECT_MAX_LENGTH
-from payments import jobs
+from payments import jobs, lease_sync
 from payments.models import ExternalRef, JobKind
 
 ENTITY = "lease_end"
@@ -1475,6 +1475,7 @@ def produce_documents(end_id: uuid.UUID, actor: User | None) -> tuple[bool, str]
                     operator,
                     template,
                     messages.MessageContext(ChargeEntityType.LEASE_END, end.pk),
+                    lease=end.lease,
                     document=document,
                     actor=actor,
                 )
@@ -1536,7 +1537,7 @@ def send_statement(message_id: uuid.UUID) -> messages.Sent:
     with transaction.atomic():
         message = (
             OutboundMessage.objects.select_for_update(of=("self",))
-            .select_related("operator", "template", "document", "sent_by")
+            .select_related("operator", "lease", "template", "document", "sent_by")
             .filter(pk=message_id)
             .first()
         )
@@ -1553,7 +1554,8 @@ def send_statement(message_id: uuid.UUID) -> messages.Sent:
             reason = "StatementMissing"
         elif operator.archived_at is not None:
             reason = "OperatorArchived"
-        elif not operator.email:
+        elif not (message.lease is not None and lease_sync.billing_of(message.lease).email):
+            # PLAN-014 C5: the statement goes to the ended lease's billing e-mail.
             reason = "NoAddress"
         if reason or end is None or message.document is None:
             _finish(message, MessageStatus.SUPPRESSED, error=reason or "StatementMissing")
@@ -1566,7 +1568,7 @@ def send_statement(message_id: uuid.UUID) -> messages.Sent:
         except merge.TemplateRefused:
             _finish(message, MessageStatus.FAILED, error="TemplateRefused")
             return messages.Sent(False, "Failed: TemplateRefused.")
-        address = str(operator.email)
+        address = lease_sync.billing_of(message.lease).email if message.lease is not None else ""
         message.to_address = address
         message.subject = subject[:SUBJECT_MAX_LENGTH]
         message.body_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()

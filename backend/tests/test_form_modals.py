@@ -5,8 +5,8 @@ The create and edit URLs stay the only URLs (D8: POST-redirect-GET, no fetch): a
 the page behind (the Stores or Operators list, the store or operator page) with the form
 dialog open (``open`` and ``data-open``, the return URL); a saved form lands on that page
 with the green flash; a refused one comes back to the GET with its errors under the fields,
-inside the dialog. A new record lands on its own page (Fable's B-1 finding: the sync state
-and the setup are there); Cancel and × return to the list. The roles are today's: admin for
+inside the dialog. A new record lands on its own page (Fable's B-1 finding: its setup is
+there); Cancel and × return to the list. The roles are today's: admin for
 stores, billing for operators.
 """
 
@@ -138,9 +138,14 @@ def test_new_operator_renders_the_operators_list_with_the_dialog_open() -> None:
     assert '<h2 id="operator-form-title">New operator</h2>' in dialog
     assert f'action="{NEW_OPERATOR}"' in dialog
     assert 'class="dialog-form-grid" id="operator-fields"' in dialog
-    # PLAN-012f-b D9: Type and the kind's name fields; the display name is derived.
-    assert 'name="creation_key"' in dialog and 'name="kind"' in dialog
-    assert 'name="display_name"' not in dialog
+    # PLAN-014 C1: Full name (the display name) first; Type and the kind's name fields left
+    # the form, and so did the note that saving connects the provider's customer.
+    assert 'name="creation_key"' in dialog and 'name="display_name"' in dialog
+    assert '<label for="id_display_name">Full name' in dialog
+    assert dialog.index('name="display_name"') < dialog.index('name="email"')
+    for gone in ('name="kind"', 'name="company"', 'name="first_name"', 'name="legal_name"'):
+        assert gone not in dialog, gone
+    assert "connects or creates" not in dialog
     # The consents follow the phone and the e-mail (ledger/shown_when.js, loaded once).
     assert 'data-shown-when="id_sms_phone|id_phone"' in dialog
     assert body.count("ledger/shown_when.js") == 1
@@ -157,7 +162,8 @@ def test_edit_operator_renders_the_operator_page_with_the_dialog_open() -> None:
     tag, dialog = dialog_of(body, "operator-form")
     assert_open(tag, detail)
     assert '<h2 id="operator-form-title">Edit operator Walk Co</h2>' in dialog
-    assert f'action="{detail}edit/"' in dialog and 'name="display_name"' not in dialog
+    assert f'action="{detail}edit/"' in dialog and 'name="display_name"' in dialog
+    assert 'value="Walk Co"' in dialog and 'name="kind"' not in dialog
     assert 'name="creation_key"' not in dialog
     assert_foot(dialog, "operator", detail)
     assert duplicate_ids(body) == []
@@ -243,9 +249,11 @@ def test_an_edited_store_lands_on_its_page_with_the_flash() -> None:
 
 
 def test_a_new_operator_lands_on_its_page_with_the_flash() -> None:
-    # Fable's B-1 finding: the operator's page, where the sync's state shows.
+    # Fable's B-1 finding: the operator's page (PLAN-014 C1: named by the Full name posted).
     billing, _ = client_for(Role.BILLING)
-    response = billing.post(NEW_OPERATOR, operator_data(company="Rome Stores", email=""))
+    response = billing.post(
+        NEW_OPERATOR, operator_data(display_name="Rome Stores", company="", email="")
+    )
     operator = Operator.objects.get()
     assert (response.status_code, response["Location"]) == (302, f"/operators/{operator.pk}/")
     body = page(billing, response["Location"])
@@ -320,12 +328,13 @@ def test_a_refused_operator_reopens_the_dialog_with_the_error_under_the_field(ro
     billing, _ = client_for(Role.BILLING)
     operator = new_operator(email=None, display_name="Walk Co")
     path = NEW_OPERATOR if route == "create" else f"/operators/{operator.pk}/edit/"
-    response = billing.post(path, operator_data(company="", legal_name="Kept Legal"))
+    # PLAN-014 C1: the Full name is the required field.
+    response = billing.post(path, operator_data(display_name="", city="Kept City"))
     assert (response.status_code, response["Location"]) == (302, path)
     body = page(billing, path)
     _, dialog = dialog_of(body, "operator-form")
-    assert "Enter the company name." in _field_error(dialog, "id_company")
-    assert 'value="Kept Legal"' in dialog
+    assert "Enter the full name." in _field_error(dialog, "id_display_name")
+    assert 'value="Kept City"' in dialog
     assert Operator.objects.count() == 1
 
 

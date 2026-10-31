@@ -26,6 +26,7 @@ from payments.fake import FakeProvider
 from tests.job_helpers import run_queued_jobs
 from tests.receivables_helpers import a_lease, a_store
 from tests.test_autopay_plans import a_plan_lease, fake, worker  # noqa: F401
+from tests.test_lease_services import bill_lease
 from tests.test_one_off_charges import an_operator as an_operator_with_bank
 from tests.test_operator_views import client_for
 
@@ -40,19 +41,22 @@ _CUSTOMERS = iter(range(1, 1000))
 
 
 def _lease_with_bank(name: str = "Plan Co") -> Lease:
-    """An active lease whose operator has a provider customer and a linked bank method, as
-    the plan requires (the one-off tests' operator helper; each operator its own ids)."""
+    """An active lease with a provider customer and a linked bank method, as the plan
+    requires (the one-off tests' operator helper; each operator its own ids). PLAN-014 C3:
+    the account is the operator's first lease's; this further lease shares it."""
     n = next(_CUSTOMERS)
     operator = an_operator_with_bank(
         email=f"{name.lower().replace(' ', '-')}-{n}@example.com",
         customer=f"cus-e-{n}",
         bank=f"pm-e-{n}",
     )
-    return a_lease(
-        a_store(f"Store {name}"),
-        operator,
-        channel=PaymentChannel.PROVIDER_ACH,
-        started=date(2026, 1, 1),
+    return bill_lease(
+        a_lease(
+            a_store(f"Store {name}"),
+            operator,
+            channel=PaymentChannel.PROVIDER_ACH,
+            started=date(2026, 1, 1),
+        )
     )
 
 

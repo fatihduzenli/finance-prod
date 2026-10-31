@@ -42,11 +42,12 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from accounts.roles import Role, meets
 from accounts.views import forbidden
 from finance.dates import day_text
-from ledger.forms import EnrolForm, LeaseCreateForm, LeaseForm
+from ledger.forms import EnrolForm, LeaseBillingForm, LeaseCreateForm, LeaseForm, LinkForm
 from ledger.models import (
     ChargeNote,
     DocumentKind,
     Lease,
+    LeaseBilling,
     LeaseRentHistory,
     Note,
     NoteEntityType,
@@ -54,6 +55,7 @@ from ledger.models import (
     PaymentChannel,
     ScheduleState,
     Store,
+    SyncStatus,
 )
 from ledger.services import (
     csv_export,
@@ -72,6 +74,7 @@ from ledger.views import documents, store_context
 from ledger.views.detail_cards import activity_context
 from ledger.views.jobs import busy, job_context, submit
 from ledger.views.operators import (
+    HELD_FORM_KEY,
     PAGE_SIZE,
     _actor,
     _held,
@@ -81,15 +84,16 @@ from ledger.views.operators import (
     export_name,
     role_required,
 )
-from ledger.wording import format_amount
-from payments import jobs
+from ledger.wording import format_amount, provider_sentence
+from payments import jobs, lease_sync
+from payments.hosted_fields import HostedFieldsConfig, get_hosted_fields
 from payments.models import JobKind
 from payments.provider import mask_identifier
 
 ALREADY_SAVED = "This lease was already saved. Nothing was changed."
-REFRESH_QUEUED = "Reading the operator's payment methods."
+REFRESH_QUEUED = "Reading the payment methods."
 #: The job kinds the enrolment page shows.
-REFRESH_KINDS = (JobKind.OPERATOR_METHODS_REFRESH,)
+REFRESH_KINDS = (JobKind.LEASE_METHODS_REFRESH,)
 
 
 def _load(pk: str) -> Lease:
@@ -351,9 +355,20 @@ def _create_context(request: HttpRequest) -> store_context.StoreContext | None:
     return store_context.from_request(request, store=get_object_or_404(Store, pk=key))
 
 
+def enter_refusal() -> str:
+    """Why "Enter a bank account" cannot be chosen here, or ``""`` (PLAN-014 C4)."""
+    return "" if get_hosted_fields().available() else str(BANK_NOT_SET_UP)
+
+
 def _create_form(data: Any, context: store_context.StoreContext | None) -> LeaseCreateForm:
     initial = {} if context is None else {"store": context.store.pk}
-    form = LeaseCreateForm(data, initial=initial)
+    operators = Operator.objects.filter(archived_at__isnull=True).values_list("pk", flat=True)
+    form = LeaseCreateForm(
+        data,
+        initial=initial,
+        accounts=service.shareable_accounts(operators),
+        enter_refusal=enter_refusal(),
+    )
     if context is not None:
         _lock_known(form, ("store",))
     return form
@@ -375,6 +390,10 @@ def lease_create(request: HttpRequest) -> HttpResponse:
             return redirect(_saved_url(request, existing, context))
         form = _create_form(request.POST, context)
         if form.is_valid():
+            # PLAN-014 C4: the billing details belong to a lease with an operator; without
+            # one they are not saved (the page hides them until an operator is chosen).
+            has_operator = form.cleaned_data.get("operator") is not None
+            account = form.cleaned_data["account"] if has_operator else service.ACCOUNT_LATER
             try:
                 lease, created, charges = one_off_charges.create_lease_with_checklist(
                     form.cleaned_data,
@@ -382,15 +401,23 @@ def lease_create(request: HttpRequest) -> HttpResponse:
                     creation_key=form.cleaned_data["creation_key"],
                     items=form.setup_items(),
                     actor=_actor(request),
+                    billing=form.billing_values() if has_operator else None,
+                    account=account,
                 )
             except SetupRefused as refusal:
                 form.add_error(None, _checklist_refusal(refusal))
+            except LeaseRefused as refusal:
+                form.add_error(
+                    refusal.field if refusal.field in form.fields else None, str(refusal)
+                )
             else:
                 if created:
                     messages.success(request, _saved_message(len(charges)))
                     documents.upload_after_create(request, lease, "lease")
                 else:
                     messages.info(request, ALREADY_SAVED)
+                if created and account == service.ACCOUNT_ENTER:
+                    return redirect("ledger:leases:bank", pk=lease.pk)
                 return redirect(_saved_url(request, lease, context))
         _hold(request, "lease-create", form)
         return redirect(request.get_full_path())
@@ -539,7 +566,7 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
         request,
         "ledger/leases/enrol.html",
         {
-            **(job_context(lease.operator, REFRESH_KINDS) if lease.operator else {}),
+            **job_context(service.account_lease(lease) or lease, REFRESH_KINDS),
             "lease": lease,
             "form": form,
             "blockers": blockers,
@@ -550,7 +577,9 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
             "limit_refusal": service.provider_limit_refusal(amounts),
             "confirmation": service.large_debit_confirmation(amounts),
             "choices": choices,
-            "linked_method": service.linked_payment_method(lease.operator),
+            "linked_method": service.linked_payment_method(lease),
+            # PLAN-014 C5: receipts go to the billing e-mail of the lease's account.
+            "receipts_email": lease_sync.billing_of(service.account_lease(lease) or lease).email,
             "no_bank_message": service.NO_BANK_METHOD,
             "methods_not_read": service.METHODS_NOT_READ,
         },
@@ -558,15 +587,16 @@ def lease_enrol(request: HttpRequest, pk: str) -> HttpResponse:
 
 
 def _refresh_methods(request: HttpRequest, lease: Lease) -> None:
-    """Queue a read of the operator's payment methods; refused, with a message, when
-    the operator has no customer reference or a read is already waiting."""
-    operator = lease.operator
-    if operator is None or not service.customer_ref(operator):
+    """Queue a read of the payment methods of the lease's customer, on the lease that
+    holds it (PLAN-014 C3); refused, with a message, when there is no customer reference
+    or a read is already waiting."""
+    owner = service.account_lease(lease)
+    if owner is None or not service.customer_ref(lease):
         messages.error(request, service.NO_PROVIDER_CUSTOMER)
         return
-    if busy(request, operator, REFRESH_KINDS):
+    if busy(request, owner, REFRESH_KINDS):
         return
-    jobs.refresh_methods(operator, request.user)
+    jobs.refresh_methods(owner, request.user)
     messages.info(request, REFRESH_QUEUED)
 
 
@@ -616,3 +646,281 @@ def lease_stop_autopay(request: HttpRequest, pk: str) -> HttpResponse:
             "nothing_to_stop": service.NOTHING_TO_STOP,
         },
     )
+
+
+# --- Billing details (PLAN-014 C3) ----------------------------------------------------
+
+#: The three forms of the Edit billing details dialog, named by the posted ``form``.
+BILLING_DETAILS, BILLING_LINK, BILLING_RETRY = "details", "link", "retry"
+BILLING_SAVED = "Billing details saved."
+
+
+def _billing_only(request: HttpRequest) -> HttpResponse | None:
+    if not meets(_role(request), Role.BILLING):
+        return forbidden(request)
+    return None
+
+
+def _held_target(request: HttpRequest) -> str:
+    """The target of the form held in the session, without consuming it."""
+    held = request.session.get(HELD_FORM_KEY)
+    return str(held.get("target", "")) if isinstance(held, dict) else ""
+
+
+@role_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def lease_billing(request: HttpRequest, pk: str) -> HttpResponse:
+    """Edit billing details (billing): the LEASE card's dialog over the lease page, with
+    the billing details (company, e-mail, phone, address), the lease's connection to the
+    payment provider with "Try again" after a failure, and the Link form for the customer
+    and bank-method IDs staff copied from the provider's dashboard. Each POST names its
+    form (``form``); nothing here calls the provider: a save that needs the provider
+    queues ``lease_sync``, the link ``lease_link``, the retry ``lease_retry``."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    details_target, link_target = f"billing:{lease.pk}", f"billing-link:{lease.pk}"
+    archived = lease.operator is not None and lease.operator.archived_at is not None
+    if request.method == "POST":
+        if archived:
+            messages.error(request, lease_sync.MESSAGES[lease_sync.ARCHIVED])
+            return redirect("ledger:leases:billing", pk=lease.pk)
+        which = request.POST.get("form")
+        if which == BILLING_RETRY:
+            if not busy(request, lease):
+                submit(request, JobKind.LEASE_RETRY, lease)
+            return redirect("ledger:leases:billing", pk=lease.pk)
+        if which == BILLING_LINK:
+            link = LinkForm(request.POST)
+            if link.is_valid():
+                if not busy(request, lease):
+                    submit(
+                        request,
+                        JobKind.LEASE_LINK,
+                        lease,
+                        {
+                            "customer_id": link.cleaned_data["customer_id"],
+                            "payment_method_id": link.cleaned_data["payment_method_id"],
+                        },
+                    )
+                return redirect("ledger:leases:billing", pk=lease.pk)
+            _hold(request, link_target, link)
+            return redirect("ledger:leases:billing", pk=lease.pk)
+        form = LeaseBillingForm(request.POST, instance=lease_sync.billing_of(lease))
+        if form.is_valid():
+            try:
+                updated, _ = lease_sync.update_billing(
+                    lease.pk, form.cleaned_data, actor=_actor(request)
+                )
+            except lease_sync.OperatorArchived:  # archived since the check above
+                messages.error(request, lease_sync.MESSAGES[lease_sync.ARCHIVED])
+                return redirect("ledger:leases:billing", pk=lease.pk)
+            messages.success(request, BILLING_SAVED)
+            if updated.sync_status == SyncStatus.PENDING and not busy(request, updated):
+                submit(request, JobKind.LEASE_SYNC, updated)
+            elif updated.sync_status == SyncStatus.AWAITING_LINK:
+                messages.warning(request, lease_sync.AWAITING_LINK_MESSAGE)
+            return redirect("ledger:leases:billing", pk=lease.pk)
+        _hold(request, details_target, form)
+        return redirect("ledger:leases:billing", pk=lease.pk)
+    billing = lease_sync.billing_of(lease)
+    held = _held_target(request)
+    form = (
+        _held(
+            request,
+            details_target,
+            lambda data: LeaseBillingForm(data, instance=billing),
+        )
+        if held == details_target
+        else None
+    ) or LeaseBillingForm(instance=billing)
+    link = (_held(request, link_target, LinkForm) if held == link_target else None) or LinkForm()
+    context = _detail_context(request, lease)
+    context["billing_dialog"] = _billing_dialog(lease, billing, form, link, archived=archived)
+    return render(request, "ledger/leases/detail.html", context)
+
+
+def _billing_dialog(
+    lease: Lease,
+    billing: LeaseBilling,
+    form: LeaseBillingForm,
+    link: LinkForm,
+    *,
+    archived: bool,
+) -> dict[str, Any]:
+    """The Edit billing details dialog's context (ledger/leases/_billing_dialog.html):
+    masked identifiers only, fixed sentences only."""
+    refs = lease_sync.current_refs(lease)
+    customer = refs.get(lease_sync.KIND_CUSTOMER, "")
+    method = refs.get(lease_sync.KIND_PAYMENT_METHOD, "")
+    failed = lease.sync_status == SyncStatus.FAILED
+    phone_ok = lease_sync.phone_is_valid(billing)
+    retry_in = lease_sync.retry_wait_seconds(lease) if failed and phone_ok else 0
+    jobs_now = job_context(lease)
+    active = not archived
+    return {
+        "form": form,
+        "link": link,
+        "lease": lease,
+        "shares": billing.shares_account_of,
+        "customer_masked": mask_identifier(customer) if customer else "",
+        "payment_method_masked": mask_identifier(method) if method else "",
+        "failure_message": (
+            lease_sync.MESSAGES.get(lease.sync_failure, lease_sync.DEFAULT_MESSAGE)
+            if failed
+            else ""
+        ),
+        "failure_fields": (
+            ", ".join(lease.sync_failure_fields.split(","))
+            if failed and lease.sync_failure_fields
+            else ""
+        ),
+        "provider_updated_at": (
+            lease_sync.provider_updated_at(lease)
+            if lease.sync_status == SyncStatus.LINKED
+            else None
+        ),
+        "can_retry": active
+        and failed
+        and phone_ok
+        and not retry_in
+        and not jobs_now["job_refresh"],
+        "fix_phone_message": (
+            lease_sync.MESSAGES[lease_sync.PHONE_INVALID]
+            if active and failed and not phone_ok
+            else ""
+        ),
+        "retry_wait_message": lease_sync.retry_wait_message(retry_in)
+        if active and retry_in
+        else "",
+        "can_link": active and billing.shares_account_of_id is None,
+        "can_save": active,
+        "return_url": reverse("ledger:leases:detail", kwargs={"pk": lease.pk}),
+    }
+
+
+# --- Bank account entry (PLAN-014 C7) ---------------------------------------------------
+
+BANK_NOT_SET_UP = provider_sentence(
+    "Bank account entry is not set up on this environment yet. Staff can connect a bank "
+    "method entered in the {provider} dashboard from Edit billing details."
+)
+BANK_NO_CUSTOMER = provider_sentence(
+    "The lease is not connected to {provider} yet. Save its billing details with an e-mail "
+    "first; the bank account is entered after that."
+)
+BANK_SHARES = "This lease uses another lease's account. Switch it to its own account first."
+BANK_ONLY_THE_ID = "Only the bank method ID can be sent here. Nothing was saved."
+BANK_CHECKING = provider_sentence("Checking the bank account with {provider}.")
+
+
+def _bank_state(lease: Lease) -> tuple[HostedFieldsConfig | None, str]:
+    """The hosted fields' configuration for the lease's own customer, or ``None`` with the
+    sentence the bank-entry page shows instead (no provider call)."""
+    hosted = get_hosted_fields()
+    if not hosted.available():
+        return None, str(BANK_NOT_SET_UP)
+    if lease.operator is not None and lease.operator.archived_at is not None:
+        return None, lease_sync.MESSAGES[lease_sync.ARCHIVED]
+    if lease_sync.billing_of(lease).shares_account_of_id is not None:
+        return None, BANK_SHARES
+    customer = lease_sync.current_refs(lease).get(lease_sync.KIND_CUSTOMER, "")
+    if not customer:
+        return None, str(BANK_NO_CUSTOMER)
+    config = hosted.config_for(customer)
+    return config, "" if config is not None else str(BANK_NOT_SET_UP)
+
+
+def bank_csp(config: HostedFieldsConfig) -> str:
+    """The bank-entry page's Content-Security-Policy: scripts and frames from the page's own
+    origin and the processor's host only (no inline script runs on that page)."""
+    host = config.provider_host
+    return f"script-src 'self' {host}; frame-src 'self' {host}"
+
+
+@role_required
+@require_safe
+def lease_bank(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:bank`` (billing; PLAN-014 C7): the bank-entry dialog over the lease
+    page. With hosted fields set up and a lease that holds its own customer, it shows the
+    processor's bank-account fields (or the fake's one field, locally), which post only the
+    new ``payment_method_id`` to ``ledger:leases:bank_attach``; otherwise one sentence says
+    why not."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    config, message = _bank_state(lease)
+    replaces = bool(lease_sync.current_refs(lease).get(lease_sync.KIND_PAYMENT_METHOD))
+    context = _detail_context(request, lease)
+    context["bank_entry"] = {
+        "lease": lease,
+        "config": config,
+        "message": message,
+        "csp": bank_csp(config) if config is not None and config.script_url else "",
+        "replaces": replaces,
+        "title": "Replace the bank account" if replaces else "Add a bank account",
+        "return_url": reverse("ledger:leases:detail", kwargs={"pk": lease.pk}),
+    }
+    return render(request, "ledger/leases/bank_entry.html", context)
+
+
+@role_required
+@require_POST
+def lease_bank_attach(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:bank_attach`` (billing; PLAN-014 C7): accepts exactly one field,
+    ``payment_method_id``, and queues ``lease_method_attach``, which verifies the method
+    against the lease's own customer before linking it. Any other field, a second value, an
+    id that is not an identifier, a lease that shares another's account or an environment
+    without hosted fields is refused and nothing is queued. Returns to the lease page, which
+    shows the job until it finishes."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    names = set(request.POST) - {"csrfmiddlewaretoken"}
+    values = request.POST.getlist("payment_method_id")
+    if names != {"payment_method_id"} or len(values) != 1:
+        messages.error(request, BANK_ONLY_THE_ID)
+        return redirect("ledger:leases:bank", pk=lease.pk)
+    value = values[0].strip()
+    if not lease_sync.IDENTIFIER.match(value):
+        messages.error(request, service.ATTACH_MESSAGES[service.ATTACH_INVALID_ID])
+        return redirect("ledger:leases:bank", pk=lease.pk)
+    config, message = _bank_state(lease)
+    if config is None:
+        messages.error(request, message)
+        return redirect("ledger:leases:bank", pk=lease.pk)
+    if not busy(request, lease):
+        submit(request, JobKind.LEASE_METHOD_ATTACH, lease, {"payment_method_id": value})
+        messages.info(request, BANK_CHECKING)
+    return redirect("ledger:leases:detail", pk=lease.pk)
+
+
+# --- Switch to own account (PLAN-014 C9) ------------------------------------------------
+
+SWITCH_KINDS = (JobKind.LEASE_ACCOUNT_SWITCH,)
+
+
+@role_required
+@require_POST
+def lease_switch_own(request: HttpRequest, pk: str) -> HttpResponse:
+    """``ledger:leases:switch_own`` (billing; PLAN-014 C9): the LEASE card's "Switch to own
+    account". Refused with one sentence and nothing queued when the lease does not share
+    another lease's account, holds no customer of its own, its operator is archived, its
+    autopay is paused (:func:`ledger.services.leases.switch_refusal`) or a switch of it is
+    already waiting; otherwise it queues ``lease_account_switch`` with a fresh move key.
+    Returns to the lease page, which shows the job until it finishes."""
+    refused = _billing_only(request)
+    if refused is not None:
+        return refused
+    lease = _load(pk)
+    reason = service.switch_refusal(lease)
+    if not reason and jobs.is_active(jobs.latest_for(lease, SWITCH_KINDS)):
+        reason = service.SWITCH_WAITING
+    if reason:
+        messages.error(request, service.SWITCH_MESSAGES[reason])
+    elif submit(request, JobKind.LEASE_ACCOUNT_SWITCH, lease, {"move_key": uuid.uuid4()}):
+        messages.info(request, service.SWITCH_QUEUED)
+    return redirect("ledger:leases:detail", pk=lease.pk)

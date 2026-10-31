@@ -278,6 +278,8 @@ PAGES: dict[str, Role] = {
     "ledger:stores:contacts": Role.VIEWER,
     "ledger:leases:list": Role.VIEWER,
     "ledger:leases:detail": Role.VIEWER,
+    # PLAN-014 C7: the bank-entry dialog over the lease page (GET only; billing).
+    "ledger:leases:bank": Role.BILLING,
     "ledger:lease_ends:blockers": Role.ADMIN,
     "ledger:transfers:blockers": Role.ADMIN,
     "ledger:run:today": Role.BILLING,
@@ -311,7 +313,6 @@ FORM_PAGES = (
     "ledger:calendar:edit",
     "ledger:operators:create",
     "ledger:operators:edit",
-    "ledger:operators:link",
     "ledger:operators:contacts_add",
     "ledger:stores:create",
     "ledger:stores:edit",
@@ -329,6 +330,9 @@ FORM_PAGES = (
     "ledger:leases:edit",
     "ledger:leases:enrol",
     "ledger:leases:stop_autopay",
+    # PLAN-014 C3: Edit billing details, the lease page with its dialog open (it replaced the
+    # operator's Connect to Stax page and its Try again).
+    "ledger:leases:billing",
     "ledger:leases:resolve_deposit",
     "ledger:lease_ends:terms",
     "ledger:lease_ends:statement",
@@ -398,7 +402,6 @@ NOT_PAGES: dict[str, str] = {
 }
 for _name in (
     "ledger:operators:archive",
-    "ledger:operators:retry_sync",
     "ledger:operators:handled_personally",
     "ledger:operators:statement_links_revoke",
     "ledger:stores:close_cost",
@@ -445,6 +448,10 @@ for _name in (
     "ledger:settings:brand_save",
     "ledger:settings:brand_toggle",
     "ledger:settings:brand_move",
+    # PLAN-014 C7: the bank-entry page posts the new payment-method id here.
+    "ledger:leases:bank_attach",
+    # PLAN-014 C9: the LEASE card's "Switch to own account" posts here.
+    "ledger:leases:switch_own",
 ):
     NOT_PAGES[_name] = POST_ONLY
 
@@ -601,7 +608,6 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
     "ledger:stores:end_lease": lambda w: (_store(w), "End lease"),
     "ledger:stores:transfer": lambda w: (_store(w), "Transfer"),
     "ledger:stores:contacts": lambda w: ([f"Store {w.store.external_label}"], "Notes & follow-ups"),
-    "ledger:operators:link": lambda w: (["Operators", "Walk Co"], "Connect to Stax"),
     "ledger:operators:statement": lambda w: (["Operators", "Walk Co"], "Statement"),
     "ledger:operators:contacts": lambda w: (["Walk Co"], "Notes & follow-ups"),
     "ledger:operators:contacts_add": lambda w: (["Walk Co"], "Add entry: Walk Co"),
@@ -616,6 +622,8 @@ BREADCRUMBS: dict[str, Callable[[World], tuple[list[str], str]]] = {
         "Set up autopay",
     ),
     "ledger:leases:stop_autopay": lambda w: BREADCRUMBS["ledger:leases:detail"](w),
+    "ledger:leases:billing": lambda w: BREADCRUMBS["ledger:leases:detail"](w),
+    "ledger:leases:bank": lambda w: BREADCRUMBS["ledger:leases:detail"](w),
     "ledger:leases:resolve_deposit": lambda w: (
         ["Leases", f"Lease {deposit_store(w)}"],
         "Return deposit",

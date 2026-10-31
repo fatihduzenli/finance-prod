@@ -39,6 +39,8 @@ from ledger.models import (
     CalendarEntry,
     CollectionStep,
     ContactEntry,
+    Lease,
+    LeaseBilling,
     MessageStatus,
     MessageTemplate,
     OneOffCharge,
@@ -105,8 +107,17 @@ def operator(email: str | None = None, **fields: Any) -> Operator:
     return saved(new_operator(email=address or None, **fields))
 
 
+def billed(lease: Lease, email: str | None) -> Lease:
+    """Give ``lease`` a billing row with ``email`` (PLAN-014 C5: the ladder writes to the
+    billing e-mail of the lease that bills the charge)."""
+    LeaseBilling.objects.update_or_create(lease=lease, defaults={"email": email or ""})
+    return lease
+
+
 def rent_charge(due_on: date = DUE, *, owner: Operator | None = None, **fields: Any) -> RentCharge:
-    lease = saved(new_lease(operator=owner or operator()))
+    """An overdue rent charge of a lease billed to its operator's e-mail address."""
+    owner = owner or operator()
+    lease = billed(saved(new_lease(operator=owner)), owner.email)
     values = {
         "due_on": due_on,
         "period_month": due_on.replace(day=1),
@@ -293,7 +304,9 @@ def test_queue_due_twice_at_once_keeps_one_row(clock: Any, memory: MemoryMailSen
     assert len(due) == 1
     first = collections.queue_due(today)
     # A second tick that read the due steps before the first one wrote its row.
-    again = collections._queue(due[0].operator, due[0].charge_type, charge.pk, due[0].step)
+    again = collections._queue(
+        due[0].operator, due[0].lease, due[0].charge_type, charge.pk, due[0].step
+    )
     assert (first.queued, again) == (1, None)
     assert len(messages_of(charge)) == 1
 
@@ -364,17 +377,22 @@ def test_an_operator_handled_personally_is_never_chased(
     assert messages_of(charge) == []
 
 
-def test_an_operator_without_an_email_is_chased_once_one_is_added(
+def test_a_lease_without_a_billing_email_is_chased_once_one_is_added(
     clock: Any, memory: MemoryMailSender
 ) -> None:
     owner = operator("")
     assert owner.email is None
     charge = rent_charge(owner=owner)
+    assert LeaseBilling.objects.get(lease=charge.lease).email == ""
     clock(at(date(2026, 10, 6)))
     tick()
     assert messages_of(charge) == []
-    owner.email = "added@example.com"
+    # PLAN-014 C5: the operator's own e-mail is not the billing address.
+    owner.email = "operator@example.com"
     owner.save()
+    tick()
+    assert messages_of(charge) == []
+    billed(charge.lease, "added@example.com")
     tick()
     run_queued_jobs()
     assert [message.status for message in messages_of(charge)] == [MessageStatus.CATCH_ALL]
@@ -421,6 +439,9 @@ def test_an_overdue_one_off_charge_is_chased_and_a_void_waived_or_paid_one_is_no
     clock: Any, memory: MemoryMailSender
 ) -> None:
     owner = operator()
+    # PLAN-014 C5: a one-off charge without a lease is billed through the operator's first
+    # active lease (its billing e-mail).
+    lease = billed(saved(new_lease(operator=owner)), owner.email)
     chased = saved(new_one_off_charge(operator=owner, due_date=DUE))
     paid = saved(
         new_one_off_charge(
@@ -445,7 +466,6 @@ def test_an_overdue_one_off_charge_is_chased_and_a_void_waived_or_paid_one_is_no
             void_note="Cancelled.",
         )
     )
-    lease = saved(new_lease(operator=owner))
     deposit = saved(
         new_setup_charge(
             lease=lease,
@@ -677,7 +697,9 @@ def test_a_hand_send_is_refused_for_a_charge_not_overdue_or_an_opted_out_operato
 def test_a_one_off_charge_is_sent_by_hand(clock: Any, memory: MemoryMailSender) -> None:
     clock(at(date(2026, 10, 6)))
     client, _ = client_for(Role.BILLING)
-    charge = saved(new_one_off_charge(operator=operator(), due_date=DUE))
+    owner = operator()
+    billed(saved(new_lease(operator=owner)), owner.email)  # its first active lease bills it
+    charge = saved(new_one_off_charge(operator=owner, due_date=DUE))
     response = client.post(f"/one-off-charges/{charge.pk}/send-step/", {"step": str(step(3).pk)})
     assert response.status_code == 302
     assert [row.charge_entity_type for row in messages_of(charge)] == ["one_off_charge"]

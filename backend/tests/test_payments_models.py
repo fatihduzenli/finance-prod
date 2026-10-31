@@ -95,8 +95,8 @@ def new_sync_state(**fields: Any) -> provider.SyncState:
 
 def new_job(**fields: Any) -> provider.Job:
     values = {
-        "kind": provider.JobKind.OPERATOR_SYNC,
-        "entity_type": provider.JobEntity.OPERATOR,
+        "kind": provider.JobKind.LEASE_SYNC,
+        "entity_type": provider.JobEntity.LEASE,
         "entity_id": uuid.uuid4(),
     }
     return provider.Job(**{**values, **fields})
@@ -456,3 +456,62 @@ def test_demo_provider_statuses_change_only_what_differs() -> None:
     assert write_demo_provider_statuses({invoice.pk: "VIEWED"}) == 0
     invoice.refresh_from_db()
     assert invoice.provider_status == "VIEWED"
+
+
+# --- PLAN-014 C9: payments migration 0020 (the switch to a lease's own account) -----------
+
+SWITCH_KIND = "lease_account_switch"
+BEFORE_SWITCH_KIND = ("payments", "0019_lease_job_kinds")
+SWITCH_MIGRATION = ("payments", "0020_lease_account_switch")
+
+
+def _migrate_payments(target: tuple[str, str]) -> None:
+    from django.db.migrations.executor import MigrationExecutor
+
+    executor = MigrationExecutor(connection)
+    executor.loader.build_graph()
+    executor.migrate([target])
+
+
+def _switch_job_saves() -> bool:
+    """Whether the ``jobs_kind_valid`` CHECK takes a row of the switch kind (rolled back)."""
+    try:
+        with transaction.atomic():
+            saved(new_job(kind=SWITCH_KIND))
+            transaction.set_rollback(True)
+    except IntegrityError:
+        return False
+    return True
+
+
+@pytest.mark.django_db(transaction=True)
+def test_migration_0020_adds_the_switch_kind_and_reverses_only_without_switch_jobs() -> None:
+    import importlib
+
+    from django.db.migrations.executor import MigrationExecutor
+
+    migration = importlib.import_module("payments.migrations.0020_lease_account_switch")
+    assert migration.KINDS[-1] == SWITCH_KIND
+    assert set(migration.KINDS) == set(provider.JobKind.values)
+    leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
+    try:
+        assert _switch_job_saves()
+        _migrate_payments(BEFORE_SWITCH_KIND)
+        assert not _switch_job_saves()
+        saved(new_job(kind=provider.JobKind.LEASE_METHOD_ATTACH))  # the 0019 kinds still go
+        _migrate_payments(SWITCH_MIGRATION)
+        assert _switch_job_saves()
+        # A switch job cannot be lost by going back: the reverse refuses and changes nothing.
+        saved(new_job(kind=SWITCH_KIND))
+        with pytest.raises(RuntimeError, match="refuses to reverse"):
+            _migrate_payments(BEFORE_SWITCH_KIND)
+        assert provider.Job.objects.filter(kind=SWITCH_KIND).count() == 1
+        provider.Job.objects.filter(kind=SWITCH_KIND).delete()
+        _migrate_payments(BEFORE_SWITCH_KIND)
+        assert not _switch_job_saves()
+    finally:
+        provider.Job.objects.all().delete()
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(leaves)
+    assert _switch_job_saves()

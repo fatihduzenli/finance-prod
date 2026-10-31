@@ -127,24 +127,25 @@ def ref(entity_type: str, entity_id: uuid.UUID, kind: str, value: str = "") -> s
     return external
 
 
-def linked(operator: Operator, *, bank: bool = True) -> Operator:
-    """The operator with a provider customer and, with ``bank``, a linked bank method."""
-    ref("operator", operator.pk, "customer")
+def linked(lease: Lease, *, bank: bool = True) -> Lease:
+    """The lease with a provider customer and, with ``bank``, a linked bank method
+    (PLAN-014 C3: the account is the lease's)."""
+    ref("lease", lease.pk, "customer")
     if bank:
-        ref("operator", operator.pk, "payment_method")
-    return operator
+        ref("lease", lease.pk, "payment_method")
+    return lease
 
 
-def banked(operator: Operator) -> Operator:
-    """The operator with a provider customer and a usable bank account on file: the linked
+def banked(lease: Lease) -> Lease:
+    """The lease with a provider customer and a usable bank account on file: the linked
     method is the one the worker's refresh stored (PLAN-012f-b D-1 offers Schedule only then)."""
-    ref("operator", operator.pk, "customer")
-    store_methods(operator)
+    ref("lease", lease.pk, "customer")
+    store_methods(operator_of(lease))
     from payments.models import ProviderSnapshot
 
-    snapshot = ProviderSnapshot.objects.get(external_ref__entity_id=operator.pk)
-    ref("operator", operator.pk, "payment_method", snapshot.payload[0]["external_id"])
-    return operator
+    snapshot = ProviderSnapshot.objects.get(external_ref__entity_id=lease.pk)
+    ref("lease", lease.pk, "payment_method", snapshot.payload[0]["external_id"])
+    return lease
 
 
 def an_invoice(
@@ -694,7 +695,7 @@ def schedule_form(lease: Lease, item: str = "Sign repair", **extra: str) -> dict
 
 def test_schedule_a_payment_creates_an_autopay_charge_and_queues_its_schedule() -> None:
     lease = a_world()
-    banked(operator_of(lease))
+    banked(lease)
     client = billing()
     opened = client.get(schedule_url(lease))
     assert (opened.status_code, opened["Location"]) == (302, builder_url(lease))
@@ -729,7 +730,7 @@ def test_schedule_a_payment_creates_an_autopay_charge_and_queues_its_schedule() 
 
 def test_a_catalogue_item_keeps_its_fee_type() -> None:
     lease = a_world()
-    banked(operator_of(lease))
+    banked(lease)
     fee = FeeType.objects.create(code=f"sign-{uuid.uuid4().hex[:6]}", name="Sign", active=True)
     assert billing().post(builder_url(lease), schedule_form(lease, "  sign "))
     charge = OneOffCharge.objects.get()
@@ -749,7 +750,7 @@ def test_schedule_a_payment_is_refused_without_a_customer_or_a_bank_method(
 ) -> None:
     lease = a_world()
     if customer:
-        linked(operator_of(lease), bank=bank)
+        linked(lease, bank=bank)
     client = billing()
     response = client.post(builder_url(lease), schedule_form(lease))
     # PLAN-012f-b D-1: without a bank account on file the Schedule tile is greyed and a
@@ -764,7 +765,7 @@ def test_schedule_a_payment_is_refused_without_a_customer_or_a_bank_method(
 def test_schedule_a_payment_refuses_today_and_needs_the_large_debit_tick(settings: Any) -> None:
     settings.LARGE_DEBIT_WARNING_AMOUNT = D("1000.00")
     lease = a_world()
-    banked(operator_of(lease))
+    banked(lease)
     client = billing()
     for day in ("2026-10-14", TODAY.isoformat()):
         past = client.post(builder_url(lease), schedule_form(lease, schedule_on=day))

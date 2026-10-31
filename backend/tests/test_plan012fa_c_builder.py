@@ -19,6 +19,7 @@ import re
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 from django.template import Context, Template
@@ -27,8 +28,8 @@ from django.urls import reverse
 from accounts.roles import Role
 from finance.templatetags.builder import line_total
 from ledger.forms import InvoiceLineForm, InvoiceLineFormSet
-from ledger.models import InvoiceDraft, Lease, Operator, PaymentChannel
-from ledger.services import invoice_builder, one_off_charges
+from ledger.models import InvoiceDraft, Lease, LeaseBilling, Operator, PaymentChannel
+from ledger.services import invoice_builder, leases, one_off_charges
 from ledger.services.invoice_builder import LineInput
 from ledger.views.invoices import _lines_total
 from payments.fake import FakeProvider
@@ -73,10 +74,21 @@ def a_draft(lease: Lease) -> InvoiceDraft:
 
 
 def banked_operator() -> Operator:
-    """An operator with a provider customer and a usable bank account on file."""
+    """An operator with a provider customer and a usable bank account on file (on its
+    first active lease, PLAN-014 C3)."""
     operator = one_off_operator()
     store_methods(operator)
     return operator
+
+
+def sharing_lease(store_label: str, operator: Operator, **fields: Any) -> Lease:
+    """A further lease of ``operator`` that shares its first active lease's account (one
+    hop), as ledger migration 0059 re-pointed an operator's other leases."""
+    account = leases.first_active_lease(operator)
+    assert account is not None
+    lease = a_lease(a_store(store_label), operator, **fields)
+    LeaseBilling.objects.create(lease=lease, shares_account_of=account)
+    return lease
 
 
 def get(role: Role, path: str) -> str:
@@ -250,7 +262,7 @@ def test_one_tile_per_choice_each_with_its_radio_name_and_sentence() -> None:
         assert len(found) == 6, role
         # PLAN-013a C3: the operator has no bank account on file and bank debits are off,
         # so an admin's Charge now carries a second note, the "also off" line, under its
-        # reason (and the Operator page link); every other tile has its one note.
+        # reason (and the Edit billing details link); every other tile has its one note.
         also_off = invoice_builder.bank_tiles(lease.operator).charge_now_more
         assert also_off == str(one_off_charges.DEBIT_ALSO_OFF)
         for tile in found:
@@ -294,7 +306,7 @@ def test_the_chosen_tile_is_marked_and_holds_its_fields() -> None:
 def test_the_schedule_tile_holds_the_debit_date_when_schedule_is_offered() -> None:
     # PLAN-012f-b D15: Schedule for a date is offered with a bank account on file.
     operator = banked_operator()
-    lease = a_lease(a_store("1992"), operator, started=date(2026, 1, 1))
+    lease = sharing_lease("1992", operator, started=date(2026, 1, 1))
     body = get(Role.BILLING, new_store_path(lease))
     schedule = [tile for tile in tiles(body) if 'id="tile-schedule"' in tile]
     assert len(schedule) == 1  # an active lease: Schedule for a date is offered
@@ -368,7 +380,8 @@ def test_each_form_page_has_its_cards_and_its_primary_in_the_summary() -> None:
         # dialog's foot (tests/test_form_modals.py).
         (
             reverse("ledger:leases:create"),
-            ["Lease", "Debits", "Setup checklist", "Documents"],
+            # PLAN-014 C4: the Billing details card after Debits.
+            ["Lease", "Debits", "Billing details", "Setup checklist", "Documents"],
             "save-lease",
         ),
         (reverse("ledger:leases:edit", kwargs={"pk": lease.pk}), ["Lease", "Debits"], "save-lease"),

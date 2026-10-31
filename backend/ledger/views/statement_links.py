@@ -25,7 +25,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from finance.ratelimit import SlidingWindowLimiter
-from ledger.services import statement_links
+from ledger.services import detail_cards, statement_links
 from ledger.views.calendar import client_address
 from ledger.views.operators import _actor, _load, role_required
 from ledger.views.run import _billing_only
@@ -71,6 +71,8 @@ def statement_link_page(request: HttpRequest, token: str) -> HttpResponse:
         {
             "operator": operator,
             "report": report,
+            # PLAN-014 C6: the company each store's lease bills.
+            "bill_to": detail_cards.lease_accounts(operator),
             "company": settings.COMPANY_NAME,
             "months": statement_links.HISTORY_MONTHS,
         },

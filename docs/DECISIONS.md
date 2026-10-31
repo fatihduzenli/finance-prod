@@ -858,3 +858,87 @@ New table `autopay_plans`, two columns on `one_off_charges`, one category value,
 source of truth for the cadence and the end rule, Stax for each debit's state; pausing deletes the
 pending debit's schedule (the only Stax write besides creation); a period number is internal and
 can exceed the count after a pause, so the charge's description carries the made ordinal.
+
+---
+
+## ADR-0015 — An operator is a person; billing details, with the processor customer, belong to each lease
+
+**Date:** 2026-10-30
+**Status:** Accepted (owner, 2026-10-29: "in Stax every customer is a store. We keep operators
+separate only to see all stores of one owner together and to follow their total debt"; built by
+PLAN-014 Batch C)
+**Deciders:** Project owner; plan and record by Fable; built by Opus
+
+### Context
+
+PLAN-006 made the **operator** the processor's customer: one Stax customer per operator, its
+bank method linked to the operator, invoices and schedules for every store of the operator
+raised against that one customer, receipts to the operator's e-mail (`docs/SCOPE.md` §4 "One
+Stax customer per operator"; ADR-0004 item 2 for the staff-entered method). The owner's
+business runs the other way round: in Stax every **store** is a customer with its own billing
+identity — company name, e-mail, phone, address and bank account — and an owner with several
+stores may pay each from a different account or the same one. The operator record exists to
+see one person's stores and their total debt together.
+
+What the code had: `Operator` with a kind (company or person), company, contact person, legal
+name, first and last name, e-mail (unique), phone, address and the processor sync columns;
+`ExternalRef(entity_type="operator")` rows for the customer and the bank method, the method's
+last four in a snapshot on the customer ref; every billing path resolving through
+`leases.customer_ref(operator)` and `linked_payment_method(operator)` (31 call sites); no
+billing columns on `Lease`; no way for the app to create a payment method (Rule 1).
+
+### Decision
+
+1. **An operator is a person.** The form holds Full name (required, stored in `display_name`),
+   Address, Phone and Email. Type, Company name, Contact person and Legal name leave the form
+   and every page; their columns stay (history) and are no longer written. The operator's
+   e-mail stays unique: it is the person's own address and, from Batch H, the portal login.
+2. **Billing details belong to each lease.** `LeaseBilling` (one row per lease): company name
+   (optional), e-mail, phone, address, the cached bank last four, and `shares_account_of`.
+   Invoices, statements ("Bill to": the lease's company with the operator's full name under
+   it), autopay, the Add payment bank-debit card and every message use the lease's details.
+3. **Each lease is one processor customer.** The customer and payment-method references are
+   `ExternalRef(entity_type="lease")`; the sync state lives on the lease; `customer_input`
+   sends the lease's company, the operator's name, the lease's e-mail and phone and the store
+   number as the reference. Webhooks map a customer to a lease.
+4. **"Use the same account as #1991" shares the processor customer.** A bank method belongs to
+   one processor customer and cannot be copied, so a lease that uses another lease's account
+   points at it (`shares_account_of`, one hop, no cycle) and bills through that lease's customer
+   and method. A lease moves to its own customer when its own customer holds a usable bank
+   method and staff press "Switch to own account" (future schedules move through the existing
+   `move_autopay`).
+5. **The migration copies once and never calls the processor.** Ledger 0059 creates a
+   `LeaseBilling` per lease from the operator's details, re-points each operator's live
+   customer and method references to its **primary lease** (the active lease with the earliest
+   start, then the lowest store number; the external ids do not change, so the processor sees
+   nothing), and makes every other lease of that operator share the primary's account, flagged
+   "Own processor customer needed". An operator with references but no active lease keeps them,
+   flagged. One audit row per lease. Backward: reverses when one lease held the references,
+   refuses otherwise.
+6. **Per-lease customers are created by a command, on the owner's yes.** `create_lease_customers
+   [--dry-run]` creates one processor customer per sharing lease through the lease sync job; it
+   never creates a bank method (the app cannot; a method arrives from the Stax dashboard or,
+   from Batch H, the operator's own entry through the processor's hosted fields). Its run on
+   staging against the sandbox is a Section 6 Publish Request; the live run is TODO-VERIFY-067.
+7. **Bank entry through the processor's hosted fields** is part of this model (C7) and is
+   decided in ADR-0017 together with the portal: the processor's iframe runs in the browser,
+   the app receives a payment-method id and verifies it with the existing read before linking.
+
+### Alternatives rejected
+
+- **One customer per operator with per-store labels on invoices.** The processor's receipts,
+  schedules and payment methods cannot be split per store; the owner's practice is per store.
+- **Copying the bank token to a new customer per lease.** Not possible: a method belongs to one
+  customer; re-entry is the only way, hence the shared account as the bridge.
+- **Moving every lease to its own customer in the migration.** It would strip working autopay
+  schedules of their bank method; the staged switch keeps collections running.
+
+### Consequences
+
+- `docs/SCOPE.md` §4 ("One Stax customer per operator", caveat 1) and `docs/CLAUDE.md` Rule 1's
+  second bullet are rewritten; `docs/qa/PLAN-006-operators.md` stays as history.
+- After 0059 on staging, multi-lease operators share until the command and the switch; the
+  checkpoint reports the dry run's counts.
+- The operator statement spans leases and prints the full name with each store's company; the
+  signed statement link stays per operator.
+- Messages (Batch D) address the lease's billing e-mail; a lease without one is held.

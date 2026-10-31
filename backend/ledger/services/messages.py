@@ -24,12 +24,13 @@ from django.contrib.auth.models import User
 from ledger.models import (
     CollectionStep,
     Document,
+    Lease,
     MessageKind,
     MessageTemplate,
     Operator,
     OutboundMessage,
 )
-from payments import jobs
+from payments import jobs, lease_sync
 from payments.models import JobKind
 
 
@@ -53,6 +54,7 @@ def queue(
     template: MessageTemplate,
     context: MessageContext,
     *,
+    lease: Lease | None,
     document: Document | None = None,
     actor: User | None = None,
     step: CollectionStep | None = None,
@@ -61,7 +63,8 @@ def queue(
     """One queued message and its job. The database refuses a second ladder row of a
     (charge, step), a second final statement of a lease end, a ladder row without a step
     and a document on anything but a final statement (``IntegrityError``); the caller
-    holds the transaction."""
+    holds the transaction. The address is the billing e-mail of ``lease``, the lease that
+    bills the charge (PLAN-014 C5); none without one."""
     message = OutboundMessage.objects.create(
         operator=operator,
         template=template,
@@ -69,8 +72,9 @@ def queue(
         step=step,
         charge_entity_type=context.entity_type,
         charge_entity_id=context.entity_id,
+        lease=lease,
         document=document,
-        to_address=operator.email or "",
+        to_address=lease_sync.billing_of(lease).email if lease is not None else "",
         manual=manual,
         sent_by=actor,
     )

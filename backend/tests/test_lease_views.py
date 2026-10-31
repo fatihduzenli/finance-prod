@@ -6,6 +6,8 @@ views run as deployed and no request leaves.
 
 from __future__ import annotations
 
+import html
+import re
 import uuid
 from datetime import date
 from decimal import Decimal
@@ -23,6 +25,7 @@ from ledger.models import (
     CollectionSchedule,
     CollectionStatus,
     Lease,
+    LeaseBilling,
     LeaseRentHistory,
     Operator,
     PaymentChannel,
@@ -130,10 +133,9 @@ def add_methods(fake: FakeProvider) -> None:
 
 
 def read_methods(lease: Lease, fake: FakeProvider) -> Lease:
-    """What the worker's ``operator_methods_refresh`` job does: the snapshot the
+    """What the worker's ``lease_methods_refresh`` job does: the snapshot the
     enrolment page reads (PLAN-010 Batch A follow-up). The read is not counted."""
-    assert lease.operator is not None
-    assert service.refresh_payment_methods(lease.operator.pk).ok
+    assert service.refresh_payment_methods(lease.pk).ok
     fake.calls.clear()
     return lease
 
@@ -158,6 +160,10 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
             "resolve_deposit",
             "end",
             "stop_autopay",
+            "billing",
+            "bank",
+            "bank_attach",
+            "switch_own",
             *POST_ROUTES,
         )
     }
@@ -183,6 +189,16 @@ def test_every_lease_route_is_classified_with_the_planned_roles() -> None:
     # PLAN-012e D5 amendment: stopping autopay needs admin.
     rule = registry.rule_for("ledger:leases:stop_autopay")
     assert rule is not None and rule.min_role is Role.ADMIN and rule.methods == {"POST"}
+    # PLAN-014 C3: Edit billing details (the details, the link, the retry) needs billing.
+    rule = registry.rule_for("ledger:leases:billing")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-014 C7: the bank-entry page reads; its attach needs billing.
+    assert "ledger:leases:bank" in registry.READ_ONLY_ROUTE_NAMES
+    rule = registry.rule_for("ledger:leases:bank_attach")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
+    # PLAN-014 C9: the LEASE card's "Switch to own account" needs billing.
+    rule = registry.rule_for("ledger:leases:switch_own")
+    assert rule is not None and rule.min_role is Role.BILLING and rule.methods == {"POST"}
 
 
 @pytest.mark.parametrize("role", [Role.VIEWER, Role.BILLING])
@@ -703,3 +719,261 @@ def test_an_operator_is_not_offered_once_archived(admin: Client) -> None:
     assert "Gone Operator" not in admin.get(NEW).content.decode()
     lease = make_lease(operator=archived, collection_status=CollectionStatus.PROSPECTIVE)
     assert "Gone Operator" in admin.get(paths(lease)["edit"]).content.decode()
+
+
+# --- PLAN-014 C4: the Billing details of New lease ------------------------------------------------
+
+
+def tag_with(page: str, *parts: str) -> bool:
+    """Whether one HTML tag of the page holds every one of ``parts``."""
+    return any(all(part in tag for part in parts) for tag in re.findall(r"<[^>]+>", page))
+
+
+def test_new_lease_shows_empty_billing_details_and_the_copy_data_of_each_operator(
+    admin: Client,
+) -> None:
+    from ledger.views.leases import BANK_NOT_SET_UP
+
+    operator = make_operator(email="copy@example.com", customer=None)
+    operator.phone, operator.city = "4155550132", "Austin"
+    operator.save()
+    page = admin.get(NEW).content.decode()
+    assert 'id="billing-card"' in page and "<h2>Billing details</h2>" in page
+    assert tag_with(page, 'id="copy-from-operator"', 'data-from="id_operator"')
+    assert tag_with(page, f'value="{operator.pk}"', 'data-email="copy@example.com"')
+    assert 'data-phone="4155550132"' in page and 'data-city="Austin"' in page
+    # Nothing is copied by the server: the billing fields start empty.
+    assert tag_with(page, 'name="email"', 'id="id_email"', 'data-shown-when="id_operator"')
+    assert 'value="copy@example.com"' not in page
+    assert tag_with(page, 'name="account"', 'value="later"', "checked")
+    assert tag_with(page, 'value="enter"', "disabled")
+    assert str(BANK_NOT_SET_UP) in page
+    assert "leases_billing.js" in page
+
+
+def test_new_lease_saves_billing_details_as_posted_empty_stays_empty(
+    admin: Client, fake: FakeProvider
+) -> None:
+    data = form_data()
+    assert admin.post(NEW, data).status_code == 302
+    lease = Lease.objects.get()
+    billing = lease.billing
+    # The operator's e-mail is views@example.com; nothing was copied.
+    assert (billing.email, billing.phone, billing.company_name) == ("", "", "")
+    lease.refresh_from_db()
+    assert lease.sync_status == "awaiting_link"
+    assert fake.calls == []
+
+
+def test_new_lease_later_with_an_email_creates_the_customer_and_no_method(
+    admin: Client, fake: FakeProvider
+) -> None:
+    data = form_data(email="Billing@Example.com", company_name="Two LLC", account="later")
+    response = admin.post(NEW, data)
+    lease = Lease.objects.get()
+    assert response["Location"] == f"/leases/{lease.pk}/"
+    assert (lease.billing.email, lease.billing.company_name) == ("billing@example.com", "Two LLC")
+    refs = dict(
+        ExternalRef.objects.filter(entity_id=lease.pk).values_list("external_kind", "external_id")
+    )
+    assert set(refs) == {"customer"}
+    lease.refresh_from_db()
+    assert lease.sync_status == "linked"
+
+
+def test_new_lease_refuses_enter_while_hosted_fields_are_not_set_up(admin: Client) -> None:
+    from ledger.views.leases import BANK_NOT_SET_UP
+
+    response = admin.post(NEW, form_data(account="enter", email="a@example.com"))
+    assert (response.status_code, response["Location"]) == (302, NEW)
+    assert Lease.objects.count() == 0
+    assert str(BANK_NOT_SET_UP) in admin.get(NEW).content.decode()
+
+
+@override_settings(STAX_PROVIDER="fake")
+def test_new_lease_with_enter_continues_to_the_bank_entry_page(
+    admin: Client, fake: FakeProvider
+) -> None:
+    response = admin.post(NEW, form_data(account="enter", email="a@example.com"))
+    lease = Lease.objects.get()
+    assert response["Location"] == f"/leases/{lease.pk}/bank/"
+
+
+def _holder(fake: FakeProvider) -> Lease:
+    from tests.test_lease_services import account_holder
+
+    return account_holder(fake)
+
+
+def test_new_lease_offers_and_saves_the_same_account_of_the_operators_lease(
+    admin: Client, fake: FakeProvider
+) -> None:
+    holder = _holder(fake)
+    page = admin.get(NEW).content.decode()
+    assert tag_with(
+        page,
+        f'value="same:{holder.pk}"',
+        f'data-shown-when="id_operator={holder.operator_id}"',
+    )
+    assert f"Use the same account as #{holder.store.external_label} (····6789)" in page
+    data = form_data(operator=str(holder.operator_id), account=f"same:{holder.pk}")
+    assert admin.post(NEW, data).status_code == 302
+    lease = Lease.objects.exclude(pk=holder.pk).get()
+    assert lease.billing.shares_account_of == holder
+    assert service.customer_ref(lease) == CUSTOMER
+
+
+def test_new_lease_refuses_the_account_of_another_operators_lease(
+    admin: Client, fake: FakeProvider
+) -> None:
+    holder = _holder(fake)
+    response = admin.post(NEW, form_data(account=f"same:{holder.pk}"))
+    assert (response.status_code, response["Location"]) == (302, NEW)
+    assert list(Lease.objects.all()) == [holder]
+    assert html.escape(service.ACCOUNT_NOT_SHAREABLE) in admin.get(NEW).content.decode()
+
+
+def _store_page(client: Client, lease: Lease) -> str:
+    response = client.get(f"/stores/{lease.store_id}/")
+    assert response.status_code == 200
+    return response.content.decode()
+
+
+@override_settings(STAX_PROVIDER="fake")
+def test_the_lease_card_offers_the_bank_entry_and_names_a_shared_account(
+    admin: Client, fake: FakeProvider
+) -> None:
+    holder = _holder(fake)
+    LeaseBilling.objects.filter(lease=holder).update(bank_last4="6789")
+    page = _store_page(admin, holder)
+    assert tag_with(page, 'id="lease-bank-entry"', f'href="/leases/{holder.pk}/bank/"')
+    assert ">Replace</a>" in page
+    sharer = make_lease(
+        operator=holder.operator,
+        store=Store.objects.create(external_label="Store 0404", status=StoreStatus.ACTIVE),
+    )
+    LeaseBilling.objects.filter(lease=sharer).update(shares_account_of=holder)
+    page = _store_page(admin, sharer)
+    assert f"Shared with #{holder.store.external_label}" in page
+    assert 'id="lease-bank-entry"' not in page
+
+
+def test_the_lease_card_offers_no_bank_entry_without_hosted_fields(
+    admin: Client, fake: FakeProvider
+) -> None:
+    lease = make_lease()
+    page = _store_page(admin, lease)
+    assert 'id="edit-billing"' in page and 'id="lease-bank-entry"' not in page
+
+
+@override_settings(STAX_PROVIDER="fake")
+def test_the_lease_card_says_add_a_bank_account_without_one(
+    admin: Client, fake: FakeProvider
+) -> None:
+    lease = make_lease()
+    page = _store_page(admin, lease)
+    assert tag_with(page, 'id="lease-bank-entry"') and ">Add a bank account</a>" in page
+
+
+# --- PLAN-014 C9: Switch to own account --------------------------------------------------------
+
+
+def _sharer(fake: FakeProvider) -> tuple[Lease, Lease]:
+    from tests.test_lease_services import OWN, own_method, sharer_on_autopay
+
+    holder, sharer = sharer_on_autopay(fake)
+    fake.add_payment_method(OWN, own_method())
+    return holder, sharer
+
+
+def _switch_path(lease: Lease) -> str:
+    return f"/leases/{lease.pk}/bank/switch-own/"
+
+
+def _switch_jobs() -> list[Any]:
+    from payments.models import Job, JobKind
+
+    return list(Job.objects.filter(kind=JobKind.LEASE_ACCOUNT_SWITCH))
+
+
+def test_the_lease_card_offers_the_switch_to_a_sharer_with_its_own_customer(
+    fake: FakeProvider,
+) -> None:
+    holder, sharer = _sharer(fake)
+    billing, _ = client_for(Role.BILLING, "billing-switch")
+    page = _store_page(billing, sharer)
+    assert tag_with(page, 'id="switch-own-form"', f'action="{_switch_path(sharer)}"')
+    assert tag_with(page, 'id="switch-own-account"', 'type="submit"')
+    assert ">Switch to own account</button>" in page
+    # Not for the account's holder, a sharer without its own customer, or a viewer.
+    assert 'id="switch-own-account"' not in _store_page(billing, holder)
+    viewer, _ = client_for(Role.VIEWER, "viewer-switch")
+    assert 'id="switch-own-account"' not in _store_page(viewer, sharer)
+    ExternalRef.objects.filter(entity_id=sharer.pk, external_kind="customer").delete()
+    assert 'id="switch-own-account"' not in _store_page(billing, sharer)
+
+
+def test_the_switch_queues_one_job_that_moves_the_lease_to_its_own_account(
+    fake: FakeProvider,
+) -> None:
+    _, sharer = _sharer(fake)
+    billing, user = client_for(Role.BILLING, "billing-switch")
+    response = billing.post(_switch_path(sharer))
+    assert (response.status_code, response["Location"]) == (302, f"/leases/{sharer.pk}/")
+    [job] = _switch_jobs()
+    assert (job.entity_id, job.requested_by, job.status) == (sharer.pk, user, "done")
+    assert set(job.params) == {"move_key"} and uuid.UUID(job.params["move_key"])
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id is None
+    page = billing.get(f"/leases/{sharer.pk}/").content.decode()
+    assert html.escape(service.SWITCH_QUEUED) in page
+
+
+@pytest.mark.parametrize("why", ["not_sharing", "no_customer", "archived", "waiting"])
+def test_the_switch_is_refused_up_front_with_a_sentence_and_nothing_queued(
+    fake: FakeProvider, why: str
+) -> None:
+    from payments.models import Job, JobKind
+
+    holder, sharer = _sharer(fake)
+    target = sharer
+    expected = {
+        "not_sharing": service.SWITCH_NOT_SHARING,
+        "no_customer": service.SWITCH_NO_CUSTOMER,
+        "archived": service.SWITCH_ARCHIVED,
+        "waiting": service.SWITCH_WAITING,
+    }[why]
+    if why == "not_sharing":
+        target = holder
+    elif why == "no_customer":
+        ExternalRef.objects.filter(entity_id=sharer.pk, external_kind="customer").delete()
+    elif why == "archived":
+        Operator.objects.filter(leases=sharer).update(archived_at=timezone.now())
+    else:
+        # A switch the worker is running (a queued one would run after this request).
+        Job.objects.create(
+            kind=JobKind.LEASE_ACCOUNT_SWITCH,
+            entity_type="lease",
+            entity_id=sharer.pk,
+            params={"move_key": str(uuid.uuid4())},
+            status="running",
+        )
+    jobs_before = Job.objects.count()
+    billing, _ = client_for(Role.BILLING, "billing-switch")
+    response = billing.post(_switch_path(target), follow=True)
+    assert response.redirect_chain == [(f"/leases/{target.pk}/", 302)]
+    assert html.escape(service.SWITCH_MESSAGES[expected]) in response.content.decode()
+    assert Job.objects.count() == jobs_before
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id == holder.pk
+    assert not [name for name, _ in fake.calls if name == "list_payment_methods"]
+
+
+@pytest.mark.parametrize("role", [Role.VIEWER, None])
+def test_the_switch_below_billing_is_forbidden_and_queues_nothing(
+    fake: FakeProvider, role: Role | None
+) -> None:
+    _, sharer = _sharer(fake)
+    client, _ = client_for(role, f"switch-{role}")
+    assert client.post(_switch_path(sharer)).status_code == 403
+    assert client.get(_switch_path(sharer)).status_code in (403, 405)
+    assert _switch_jobs() == []
+    assert LeaseBilling.objects.get(lease=sharer).shares_account_of_id is not None

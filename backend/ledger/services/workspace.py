@@ -243,6 +243,8 @@ class Header:
     next_insurance: date | None = None
     #: The Sign fee and Insurance rows under Deposit (PLAN-014 B3), with a lease.
     collections: detail_cards.LeaseCollections | None = None
+    #: The billing lines (PLAN-014 C3: company, e-mail, bank), with a lease.
+    account: detail_cards.LeaseAccount | None = None
 
 
 def _autopay_state(schedules: list[CollectionSchedule]) -> str:
@@ -463,6 +465,7 @@ def _header(
         next_rent=_next_rent(schedules, moved, now) or _next_debit_day(lease, today),
         next_insurance=_next_insurance(lease, today),
         collections=detail_cards.lease_collections(lease, today),
+        account=detail_cards.lease_account(lease),
     )
 
 

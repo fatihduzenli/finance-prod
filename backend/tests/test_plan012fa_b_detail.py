@@ -591,8 +591,10 @@ BUDGETS = {  # +1 on every page since PLAN-012g A2: the theme row
     "one_off": 38,
     "rent": 31,
     "payment": 18,
-    "invoice": 27,
-    "lease": 31,
+    # PLAN-014 C6: +1, the lease's billing row for "Bill to".
+    "invoice": 28,
+    # PLAN-014 C3: +1, the lease's billing row for the LEASE card's Billing and Bank rows.
+    "lease": 32,
     "calendar": 12,
 }
 

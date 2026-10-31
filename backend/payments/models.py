@@ -205,9 +205,14 @@ class SyncState(GuardedModel):
 class JobKind(models.TextChoices):
     """What a job does; a closed list (docs/qa/PLAN-010 D1). Each maps to one service."""
 
-    OPERATOR_SYNC = "operator_sync", "Updating the operator"
-    OPERATOR_RETRY = "operator_retry", "Updating the operator again"
-    OPERATOR_LINK = "operator_link", "Connecting the operator"
+    #: PLAN-014 C3: the processor customer is per lease. Payments migration 0019 renamed
+    #: the stored values of the operator kinds these replace (``operator_sync``,
+    #: ``operator_retry``, ``operator_link``, ``operator_methods_refresh``) and rewrote the
+    #: rows. A row of these kinds that names an operator was queued before ledger
+    #: migration 0059 and is run as a no-op (``payments.jobs.runners``).
+    LEASE_SYNC = "lease_sync", "Updating the lease"
+    LEASE_RETRY = "lease_retry", "Updating the lease again"
+    LEASE_LINK = "lease_link", "Connecting the lease"
     AUTOPAY_ENABLE = "autopay_enable", "Setting up autopay"
     AUTOPAY_PAUSE = "autopay_pause", "Pausing autopay"
     AUTOPAY_RESUME = "autopay_resume", "Resuming autopay"
@@ -216,7 +221,7 @@ class JobKind(models.TextChoices):
     PAYMENT_REFUND = "payment_refund", "Refunding the payment"
     PAYMENT_VOID = "payment_void", "Voiding the payment"
     #: PLAN-010 Batch A follow-up: the reads the enrolment, run and event pages needed.
-    OPERATOR_METHODS_REFRESH = "operator_methods_refresh", "Updating bank methods"
+    LEASE_METHODS_REFRESH = "lease_methods_refresh", "Updating bank methods"
     RUN_MATCH = "run_match", "Updating invoices"
     WEBHOOK_REPLAY = "webhook_replay", "Processing a message again"
     #: PLAN-010 Batch B: "Run now" on the reconciliation page.
@@ -253,6 +258,12 @@ class JobKind(models.TextChoices):
     LEASE_END_DOCUMENTS = "lease_end_documents", "Making the final statement and its e-mail"
     #: PLAN-012e D5 amendment: delete the lease's rent and insurance schedules.
     AUTOPAY_STOP = "autopay_stop", "Turning off autopay"
+    #: PLAN-014 C7: verify and link the bank method the hosted fields created under the
+    #: lease's customer (``ledger.services.leases.attach_bank_method``).
+    LEASE_METHOD_ATTACH = "lease_method_attach", "Connecting a bank account"
+    #: PLAN-014 C9: a lease that shares another lease's account moves to its own customer's
+    #: bank method (``ledger.services.leases.switch_to_own_account``).
+    LEASE_ACCOUNT_SWITCH = "lease_account_switch", "Switching to the lease's own account"
 
 
 class JobEntity(models.TextChoices):

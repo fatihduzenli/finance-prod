@@ -13,6 +13,7 @@ from django.test import Client
 from django.views.generic.base import RedirectView
 
 from accounts import registry
+from accounts.roles import Role
 from tests.auth_helpers import iter_routes, sample_path
 
 
@@ -136,3 +137,18 @@ def test_public_routes_answer_without_a_session(client: Client) -> None:
 def test_healthz_refuses_unsafe_methods(client: Client) -> None:
     # Public for GET only: a POST has no rule, so it is refused even though it is public.
     assert client.post("/healthz").status_code == 403
+
+
+def test_edit_billing_details_is_a_billing_post_and_the_operator_connect_routes_are_gone() -> None:
+    # PLAN-014 C3: the details, the link of the provider IDs and the retry post to the
+    # lease's Edit billing details; the operator's Connect to Stax and Try again routes left
+    # the URL map and the registry.
+    assert registry.rule_for("ledger:leases:billing") == registry.RouteRule(
+        min_role=Role.BILLING, methods=registry.POST
+    )
+    names = {name for name, _, _ in iter_routes() if name}
+    assert "ledger:leases:billing" in names
+    for gone in ("ledger:operators:link", "ledger:operators:retry_sync"):
+        assert gone not in names, gone
+        assert gone not in registry.ROUTE_ROLES, gone
+        assert registry.rule_for(gone) is None, gone

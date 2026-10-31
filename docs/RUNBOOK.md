@@ -727,3 +727,28 @@ used wherever a sentence names it. **The shell:** the navy top bar with the logo
 name, the search box and the user menu; the sandbox banner above it on the test system; on a
 laptop a left navigation (Dashboard, Stores, Operators, Monthly rent overview, Reports, Admin),
 on a phone the Menu button. The phone app's icon and splash come from the brand files.
+
+
+## 20. Own processor customers for the sharing leases (PLAN-014 C9)
+
+**When.** After ledger migration 0059 every further lease of an operator that had a Stax
+customer shares the first lease's account ("Shared with #1991" on the LEASE card, Needs review
+"Own processor customer needed"). Each store is to become its own Stax customer. Run the
+command once the billing details of those leases are checked (each needs a billing e-mail).
+
+**What it does.** `python backend/manage.py create_lease_customers --dry-run` counts the leases
+that share another lease's account and hold no customer of their own (not ended, operator not
+archived) and queues nothing. Without `--dry-run` it marks each one that has a billing e-mail
+pending and queues one `lease_sync` job for it (`--limit N`: at most N); a lease whose sync
+already waits is not queued again, so a second run while the jobs wait queues nothing. It
+prints `leases: <found>, queued: <queued>` and nothing else. The worker then creates one Stax
+customer per lease: it looks the e-mail up first and links a match only when no other lease
+holds it, so the shared account's customer is never adopted; otherwise it creates a new one.
+The lease keeps sharing (`shares_account_of` is not changed) and no bank method is created,
+moved or read: the new customer has none until staff enter one in the Stax dashboard (or the
+operator, in the portal of H). A failed create shows on the lease as before; running the
+command again queues it again.
+
+**Section 6.** The dry run reads only. The real run on staging (the sandbox) or production
+writes to Stax through the worker: it is a Publish Request of its own, after Batch C is merged
+(the live run is TODO-VERIFY-067). Record the dry run's counts in the request.

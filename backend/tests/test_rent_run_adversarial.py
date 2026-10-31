@@ -21,7 +21,7 @@ from payments.provider import ScheduleInput, ScheduleUpdate
 from tests.auth_helpers import make_user, verified_client
 from tests.job_helpers import worker_between_requests  # noqa: F401
 from tests.test_lease_services import CUSTOMER, _race, edit, make_lease, make_operator, method
-from tests.test_operator_sync import requires_postgresql
+from tests.test_lease_sync import requires_postgresql
 from tests.test_rent_run import DAY, NOW, PERIOD, RENT, charge_of, enrolled, invoice, lease
 
 pytestmark = pytest.mark.django_db
@@ -66,7 +66,7 @@ def test_two_concurrent_enable_clicks_make_exactly_one_schedule_per_debit(
     fake: FakeProvider,
 ) -> None:
     row = make_lease(debit_day=5, second_debit_day=20)
-    customer = lease_service.customer_ref(row.operator)
+    customer = lease_service.customer_ref(row)
     fake.add_payment_method(customer, method("pm-race"))
 
     outcomes = _race(

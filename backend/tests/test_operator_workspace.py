@@ -351,7 +351,7 @@ def test_the_operator_level_items_follow_the_open_tab_and_the_old_lists_are_gone
         'id="sms-phone"',
         'id="sms-consent"',
         'id="email-consent"',
-        'id="sync-status"',
+        'id="full-name"',
         'id="collections"',
         'id="handled-personally"',
         'id="contacts"',
@@ -362,6 +362,10 @@ def test_the_operator_level_items_follow_the_open_tab_and_the_old_lists_are_gone
     assert side_at < html.index('id="portal-card"') < html.index('id="action-bar"')
     assert html.index('id="action-bar"') < html.index('id="workspace-header"')
     for gone in ('id="invoice-drafts-table"', 'id="one-off-charges"', 'id="outstanding"'):
+        assert gone not in html, gone
+    # PLAN-014 C3: the provider card left the operator page; the connection is the lease's
+    # (the LEASE card's Edit billing details).
+    for gone in ('id="operator-provider-card"', 'id="sync-status"'):
         assert gone not in html, gone
     # PLAN-012f-a D7: New invoice left the operator header (DESIGN-SPEC §4); the selected
     # store's bar keeps its Create invoice under its own id.
@@ -399,9 +403,10 @@ def operator_bar(html: str) -> str:
     return found.group(0)
 
 
-def test_the_operator_bar_is_statement_edit_and_more_with_connect_and_archive() -> None:
-    # PLAN-012f-a D7 (DESIGN-SPEC §4): Statement, Edit, More ▾ (Connect to Stax, Archive); no
-    # invoice or payment action and no primary in the operator's header.
+def test_the_operator_bar_is_statement_edit_and_more_with_archive() -> None:
+    # PLAN-012f-a D7 (DESIGN-SPEC §4): Statement, Edit, More ▾ (Archive); no invoice or
+    # payment action and no primary in the operator's header. PLAN-014 C3: Connect to Stax
+    # left the menu (the lease's Edit billing details links its provider IDs).
     operator, first, _ = two_stores()
     html = page(client_for(Role.ADMIN)[0], operator_page(operator, store=str(first.store_id)))
     top = operator_bar(html)
@@ -411,9 +416,8 @@ def test_the_operator_bar_is_statement_edit_and_more_with_connect_and_archive() 
     assert reverse("ledger:invoices:new_operator", kwargs={"pk": operator.pk}) not in top
     menu = top[top.index('<details class="menu" id="more-menu">') : top.index("</details>")]
     assert '<summary class="btn btn-menu">More ▾</summary>' in menu  # PLAN-012f D6
-    link = reverse("ledger:operators:link", kwargs={"pk": operator.pk})
-    assert f'<li><a id="connect-provider" href="{link}">Connect to Stax</a></li>' in menu
-    assert menu.index("Connect to Stax") < menu.index("Archive")
+    assert 'id="connect-provider"' not in html and "Connect to Stax" not in menu
+    assert f"/operators/{operator.pk}/link/" not in html
     archive = reverse("ledger:operators:archive", kwargs={"pk": operator.pk})
     assert f'<form method="post" action="{archive}"' in menu and "csrfmiddlewaretoken" in menu
     assert (
@@ -427,13 +431,21 @@ def test_the_operator_bar_is_statement_edit_and_more_with_connect_and_archive() 
     assert 'document.querySelectorAll("details.menu")' in html
 
 
-def test_billing_has_connect_only_a_viewer_no_menu_and_an_archived_operator_neither() -> None:
-    operator, _, _ = two_stores()
-    billing = operator_bar(page(client_for(Role.BILLING)[0], operator_page(operator)))
+def test_billing_has_no_menu_a_viewer_neither_and_an_archived_operator_neither() -> None:
+    # PLAN-014 C3: Connect to Stax left billing's menu, so billing has no More ▾ at all; the
+    # selected store's LEASE card has Edit billing details for billing.
+    operator, first, _ = two_stores()
+    billing_html = page(client_for(Role.BILLING)[0], operator_page(operator))
+    billing = operator_bar(billing_html)
     assert re.findall(r'<a class="btn[^"]*"[^>]*>([^<]+)</a>', billing) == ["Statement", "Edit"]
-    assert 'id="connect-provider"' in billing and "Archive" not in billing
+    assert 'id="more-menu"' not in billing and "Archive" not in billing
+    assert 'id="connect-provider"' not in billing_html
+    picked = operator_page(operator, store=str(first.store_id))
+    edit_billing = reverse("ledger:leases:billing", kwargs={"pk": first.pk})
+    assert f'id="edit-billing" href="{edit_billing}"' in page(client_for(Role.BILLING)[0], picked)
     viewer = operator_bar(page(client_for(Role.VIEWER)[0], operator_page(operator)))
     assert 'id="more-menu"' not in viewer and "Edit" not in viewer and "Statement" in viewer
+    assert 'id="edit-billing"' not in page(client_for(Role.VIEWER)[0], picked)
     Operator.objects.filter(pk=operator.pk).update(archived_at=NOW)
     admin = operator_bar(page(client_for(Role.ADMIN)[0], operator_page(operator)))
     assert 'id="more-menu"' not in admin and 'id="new-invoice"' not in admin

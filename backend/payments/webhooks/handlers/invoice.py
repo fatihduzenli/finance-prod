@@ -1,7 +1,9 @@
 """Invoice events (PLAN-008 D4; docs/DATA_OWNERSHIP.md §3).
 
 The invoice is re-fetched. A local invoice is found by its ``external_refs`` row; if
-there is none, one is made for the operator whose customer the invoice names: linked
+there is none, one is made for the operator of the lease whose customer the invoice names
+(PLAN-014 C3: a customer belongs to a lease; one still on an operator is a mismatch,
+:data:`CUSTOMER_ON_OPERATOR`): linked
 to its rent charge by the rent run's matching when it names an active rent schedule
 of that operator (an invoice the matching cannot place yet is left for the rent run),
 and unlinked otherwise. The provider's status, sent, viewed and paid times and amount
@@ -34,12 +36,12 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 
 import payments
-from ledger.models import ZERO, Invoice, Operator
+from ledger.models import ZERO, Invoice, Lease
 from ledger.services import numbering, rent_run
 from ledger.services.rent_run import MatchAction
 from payments import invoice_sync, one_off_invoices
+from payments.lease_sync import ENTITY_LEASE, ENTITY_OPERATOR, KIND_CUSTOMER
 from payments.models import WebhookOutcome
-from payments.operator_sync import ENTITY_OPERATOR, KIND_CUSTOMER
 from payments.provider import InvoiceRecord, mask_identifier
 from payments.webhooks import events
 from payments.webhooks.events import ignored
@@ -58,6 +60,8 @@ from payments.webhooks.handlers.common import (
 )
 
 UNKNOWN_CUSTOMER = ignored("unknown customer")
+#: A customer reference still held by an operator (none after ledger migration 0059).
+CUSTOMER_ON_OPERATOR = ignored("customer mismatch: held by an operator")
 NOT_MATCHED = ignored("not matched")
 NO_DATE = ignored("no invoice date")
 NO_TOTAL = ignored("no usable total")
@@ -125,12 +129,18 @@ def local_invoice(external_id: str) -> Invoice | None:
     )
 
 
-def customer_operator(customer_external_id: str) -> Operator | None:
-    """The operator whose current customer reference is this ID."""
+def customer_lease(customer_external_id: str) -> Lease | None:
+    """The lease whose current customer reference is this ID (with its operator)."""
     ref = entity_for(KIND_CUSTOMER, customer_external_id)
-    if ref is None or ref.entity_type != ENTITY_OPERATOR:
+    if ref is None or ref.entity_type != ENTITY_LEASE:
         return None
-    return Operator.objects.filter(pk=ref.entity_id).first()
+    return Lease.objects.select_related("operator", "store").filter(pk=ref.entity_id).first()
+
+
+def customer_on_operator(customer_external_id: str) -> bool:
+    """Whether this customer ID is still a current reference of an operator."""
+    ref = entity_for(KIND_CUSTOMER, customer_external_id)
+    return ref is not None and ref.entity_type == ENTITY_OPERATOR
 
 
 def usable_total(total: Decimal | None) -> bool:
@@ -142,8 +152,11 @@ def usable_total(total: Decimal | None) -> bool:
 
 
 def _create(record: InvoiceRecord) -> tuple[str, Invoice | None]:
-    operator = customer_operator(record.customer_external_id)
+    lease = customer_lease(record.customer_external_id)
+    operator = lease.operator if lease is not None else None
     if operator is None:
+        if customer_on_operator(record.customer_external_id):
+            return CUSTOMER_ON_OPERATOR, None
         return UNKNOWN_CUSTOMER, None
     placed = one_off_invoices.link_from_provider(record, operator)
     if placed is not None:

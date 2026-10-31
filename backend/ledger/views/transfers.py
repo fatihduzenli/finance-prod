@@ -15,8 +15,8 @@ allows it to remain with a written reason (``ledger:transfers:override_debt``, P
 only), which the confirm and confirmed pages then show as "Allowed by".
 
 Every change goes through :mod:`ledger.services.transfer`, which audits it; an operator
-created on the operator step goes through :func:`payments.operator_sync.create_operator`
-and queues its sync job as the operator form does. No view calls the payment provider.
+created on the operator step goes through :func:`ledger.services.operators.create_operator`
+as the operator form does (local only, PLAN-014 C3). No view calls the payment provider.
 Every POST ends in a redirect; a form with errors is held in the session for the next
 GET.
 """
@@ -43,22 +43,23 @@ from ledger.forms import (
     TransferDebtOverrideForm,
     TransferIncomingForm,
     TransferOperatorForm,
+    copied_attrs,
 )
 from ledger.models import LeaseEnd, LeaseTransfer, LeaseTransferStatus, Operator, Store
 from ledger.services import lease_end, leases, statements
+from ledger.services import operators as operator_service
 from ledger.services import transfer as service
+from ledger.views import leases as lease_views
 from ledger.views import wizard_frame
 from ledger.views.operators import (
     EMAIL_TAKEN,
     _actor,
-    _after_save,
     _held,
     _hold,
     _role,
     role_required,
 )
 from ledger.wording import format_amount, provider_sentence
-from payments import operator_sync
 
 #: (key, label, route) of each step; ``lease_ends`` routes take the lease end's id.
 STEPS: tuple[tuple[str, str, str], ...] = (
@@ -270,13 +271,12 @@ def operator(request: HttpRequest, pk: str) -> HttpResponse:
 
 
 def _create_operator(request: HttpRequest, transfer: LeaseTransfer, target: str) -> HttpResponse:
-    """The operator form on the step: saved as on the operator page (its sync job queues
-    the same way), then chosen."""
+    """The operator form on the step: saved as on the operator page, then chosen."""
     form = _operator_create_form(request.POST)
     if form.is_valid():
         key = form.cleaned_data["creation_key"]
         try:
-            created_operator, created = operator_sync.create_operator(
+            created_operator, created = operator_service.create_operator(
                 form.cleaned_data, creation_key=key, actor=_actor(request)
             )
         except IntegrityError:
@@ -284,7 +284,6 @@ def _create_operator(request: HttpRequest, transfer: LeaseTransfer, target: str)
         else:
             if created:
                 messages.success(request, "Operator saved.")
-                _after_save(request, created_operator, key)
             outcome = service.set_operator(transfer, created_operator, actor=_actor(request))
             if outcome.ok:
                 messages.success(request, outcome.message)
@@ -335,8 +334,16 @@ def _incoming_form(
 ) -> TransferIncomingForm:
     fee_types = service.setup_types()
     offered = service.deposit_type() is not None
+    # PLAN-014 C4: the incoming lease's Billing details, over the incoming operator's leases.
+    operator = transfer.incoming_operator
+    billing_step: dict[str, Any] = {
+        "accounts": leases.shareable_accounts([operator.pk] if operator is not None else []),
+        "enter_refusal": lease_views.enter_refusal(),
+    }
     if data is not None:
-        return TransferIncomingForm(data, fee_types=fee_types, deposit_offered=offered)
+        return TransferIncomingForm(
+            data, fee_types=fee_types, deposit_offered=offered, **billing_step
+        )
     initial: dict[str, Any]
     if service.incoming_set(transfer):
         initial = {
@@ -352,6 +359,8 @@ def _incoming_form(
             # The items already chosen keep their price (PLAN-012d D9: a price means
             # charged).
             initial[f"setup_{line.fee_type.code}_price"] = line.price
+        initial.update(transfer.incoming_billing or {})
+        initial["account"] = transfer.incoming_account
     else:
         outgoing = transfer.outgoing_lease
         end = transfer.lease_end
@@ -368,7 +377,9 @@ def _incoming_form(
             "prorate_first_month": True,
             "deposit_amount": service.default_deposit(transfer),
         }
-    return TransferIncomingForm(initial=initial, fee_types=fee_types, deposit_offered=offered)
+    return TransferIncomingForm(
+        initial=initial, fee_types=fee_types, deposit_offered=offered, **billing_step
+    )
 
 
 @role_required
@@ -403,6 +414,8 @@ def incoming(request: HttpRequest, pk: str) -> HttpResponse:
                 deposit_amount=data["deposit_amount"],
                 setup=[service.SetupInput(fee, price) for fee, price in form.setup_items()],
                 actor=_actor(request),
+                billing=form.billing_values(),
+                account=data["account"],
             )
             if outcome.ok:
                 messages.success(request, outcome.message)
@@ -417,7 +430,9 @@ def incoming(request: HttpRequest, pk: str) -> HttpResponse:
     return render(
         request,
         "ledger/transfers/incoming.html",
-        _context(transfer, "incoming", form=form),
+        _context(
+            transfer, "incoming", form=form, copy_attrs=copied_attrs(transfer.incoming_operator)
+        ),
     )
 
 
@@ -457,6 +472,14 @@ def confirm(request: HttpRequest, pk: str) -> HttpResponse:
             outcome = service.confirm(transfer, _actor(request), confirmed=True)
             if outcome.ok:
                 messages.success(request, outcome.message)
+                confirmed = outcome.transfer
+                # PLAN-014 C4: "Enter a bank account" continues to the new lease's bank entry.
+                if (
+                    confirmed is not None
+                    and confirmed.incoming_lease_id is not None
+                    and confirmed.incoming_account == leases.ACCOUNT_ENTER
+                ):
+                    return redirect("ledger:leases:bank", pk=confirmed.incoming_lease_id)
                 return redirect("ledger:transfers:confirm", pk=transfer.pk)
             if outcome.field == "statement" and transfer.lease_end is not None:
                 return wizard_frame.statement_first(request, transfer.lease_end)

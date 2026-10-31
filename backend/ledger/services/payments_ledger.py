@@ -71,8 +71,8 @@ from ledger.models import (
 )
 from ledger.services import installments, search
 from ledger.services.csv_export import CsvWriter
+from payments.lease_sync import PROVIDER_KEY
 from payments.models import ExternalRef
-from payments.operator_sync import PROVIDER_KEY
 from payments.provider import mask_identifier
 from payments.webhooks.handlers.common import ENTITY_PAYMENT, KIND_TRANSACTION
 

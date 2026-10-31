@@ -518,6 +518,20 @@ revision from starting. To turn the check on:
 3. Redeploy the infrastructure. That apply is a Publish action (root `CLAUDE.md` section
    6) and runs only on the owner's explicit authorisation.
 
+### The bank-entry page's web payments token (PLAN-014 C7)
+
+The bank-entry page shows the processor's hosted bank-account fields (Stax.js, loaded in
+the browser from Stax's CDN; TODO-VERIFY-066) with the merchant's **web payments token**.
+The `main.bicep` parameter `staxWebPaymentsTokenSecretName` (default empty, passed to the
+web module only) names the Key Vault secret, **`stax-web-payments-token`**. While it is
+empty nothing is referenced, `STAX_WEB_PAYMENTS_TOKEN` is not set and the page says bank
+entry is not set up (staff keep linking a method entered in the Stax dashboard). When it
+is set, the web app references the secret as `stax-web-payments-token` and sets the
+variable by `secretRef`; the worker and the jobs get none of it. The parameter files ship
+the line commented out, as the USPS pair: the owner stores the secret in the vault first,
+then uncomments it, and the redeploy is a Publish action (root `CLAUDE.md` section 6). The
+sandbox cannot tokenize a bank account (`docs/STATUS.md`), so staging stays without it.
+
 ## 10. Step 10 (Celery) is already covered by this platform
 
 Nothing has to be re-planned for the worker and beat:
