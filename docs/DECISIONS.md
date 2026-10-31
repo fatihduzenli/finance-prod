@@ -1020,3 +1020,80 @@ NSF fee as its own charge, and an automatic re-debit of R01/R09 returns within N
   RUNBOOK gains the Outbox and the allowlist.
 - Live mail waits for the owner's Workspace delegation (TODO-VERIFY-070); the re-presentment
   limit and the holiday table are TODO-VERIFY-072 and 073.
+
+---
+
+## ADR-0017 — An operator portal at `/portal/` with its own principal; bank accounts through the processor's hosted fields
+
+**Date:** 2026-10-31
+**Status:** Accepted (owner, 2026-10-29: Step 14 Batch H as written in the prompt; built by
+PLAN-014 H; the hosted-fields premise is TODO-VERIFY-066 until the processor confirms it; the
+web-payments token reaches operators' browsers on the bank page by that design)
+**Deciders:** Project owner; plan and record by Fable; built by Opus
+
+### Context
+
+ADR-0004 item 2 and Rule 1 of `docs/CLAUDE.md` said that customers never sign in to this app and
+that no bank or card detail is ever entered here: bank methods were entered by staff in the
+processor's dashboard and linked by id. The owner's statement of 2026-09-29 kept it so for the
+first steps. On 2026-10-29 the owner asked for an operator portal: each operator signs in, sees
+all their stores, their charges, invoices, payments and statement, pays by bank debit and adds or
+replaces a bank account — without the staff app's navigation, roles or MFA, and without a
+second identity system entangled with the staff one. The processor's hosted fields (PLAN-014 C7)
+keep the account and routing numbers inside the processor's own iframe: the page never receives
+them, so Rule 1's substance holds while its old wording ("do not embed Stax.js") does not.
+
+### Decision
+
+1. **A separate principal.** `portal.PortalUser` (an operator's e-mail and a password through
+   Django's hashers; not `AbstractBaseUser`, not the staff `AUTH_USER_MODEL`), invited by staff
+   from the operator page, with invitation and reset tokens stored hashed (7 days and 1 hour),
+   a per-e-mail and per-IP lockout (5 failures in 15 minutes, the same sentence for unknown
+   e-mails), and its own session cookie `portal_sessionid` scoped to `/portal/` (HttpOnly, Secure
+   outside local, SameSite Strict; 30 minutes idle, 12 hours absolute, rotated at login). The
+   staff middleware chain exempts the `portal:` namespace; the portal's own middleware requires
+   a signed-in portal user for every portal route but the five public ones. The registry pins
+   the staff public set (five names), the portal set and the portal public set.
+2. **Isolation by construction.** Every portal query goes through `portal/services.py`, whose
+   functions take the portal user and filter by its operator; a foreign id is a 404, never a
+   403. A generated test matrix (Fable's) opens every parametrised portal route of operator A
+   with operator B's ids.
+3. **What the operator sees and does.** All their stores (ended leases marked), each store's
+   open charges, invoices, payments and the statement PDF; theme and password; **Pay** by bank
+   debit for a charge or a store's balance (a `PortalPayment` and a worker-only `PORTAL_PAY`
+   job through the existing pay-an-invoice path, one attempt, the processor limit, behind the
+   pay-invoice flag; Rule 2 gains "a portal user's own payment" as the second allowed caller);
+   **Bank account** add or replace through C7's hosted fields on the lease's processor customer
+   (the superseded method is not deleted at the processor: TODO-VERIFY-069). Autopay is read
+   only ("set up by our staff"). A lease sharing another's account sees that store's last four.
+4. **Messages.** The invitation and the reset go through the messaging engine (ADR-0016) on
+   seeded templates with one extra placeholder each, to the operator's e-mail; the one-time link
+   is issued when the e-mail leaves and never stored (a stored link in the Outbox would have let
+   staff take over an account); `{pay_link}` in
+   the reminder templates resolves to the portal's pay page once the operator has a portal user.
+5. **Staging.** The sandbox cannot tokenize a bank account and ACH is off there: the pay page
+   says "Online payment is not available yet" and the bank page "not set up"; the browser tests
+   run on the fake provider (TODO-VERIFY-068 live ACH from the portal; TODO-VERIFY-066 the
+   hosted fields' iframe).
+
+### Alternatives rejected
+
+- The processor's hosted invoice page (a link per invoice): the owner wants the operator
+  inside our portal with all their stores, statements and bank account in one place.
+- A staff-only bank entry (the previous rule): kept as the fallback path (the Link form) but no
+  longer the only one.
+- Reusing the staff `User` with a role "operator": one identity system for two audiences would
+  entangle MFA, lockout, sessions and the role registry; a foreign-key principal keeps the staff
+  chain untouched.
+
+### Consequences
+
+- `docs/CLAUDE.md` Rule 1 reads: no account or routing number is ever typed into, posted to or
+  stored by this app; the processor's hosted fields alone collect them. "Customers never log in
+  here" becomes "Staff sign in at `/`; operators sign in at `/portal/` with a separate principal."
+  Rule 2 names the portal payment as the second allowed caller of pay-an-invoice. `docs/SCOPE.md`
+  §2 and §4 name the portal.
+- A second login surface: its lockout, tokens and sessions are tested in isolation; the staff
+  public set is pinned so the portal can never widen it.
+- The Nacha authorisation text on the bank-entry page is the processor's (TODO-VERIFY-006
+  stays open).
