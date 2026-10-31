@@ -113,6 +113,7 @@ from ledger.wording import format_amount
 from mail.base import SUBJECT_MAX_LENGTH
 from payments import jobs, lease_sync
 from payments.models import JobKind
+from portal import links as portal_links
 
 logger = logging.getLogger(__name__)
 
@@ -422,6 +423,15 @@ def operator_of(lease: Lease | None, charge: Subject | LeaseEnd) -> Operator | N
     return owner.operator if owner is not None else None
 
 
+def pay_link(operator: Operator | None, store_id: uuid.UUID) -> str:
+    """``{pay_link}`` (PLAN-014 H4): the portal's Pay page of the store when the operator has
+    a portal account that can sign in, else a new signed statement link; ``""`` without an
+    operator."""
+    if operator is None:
+        return ""
+    return portal_links.pay_link(operator, store_id) or statement_links.link(operator)
+
+
 def store_link(lease: Lease) -> str:
     """The absolute URL of the staff page of the lease's store."""
     path = reverse("ledger:stores:detail", kwargs={"pk": lease.store_id})
@@ -444,8 +454,9 @@ def context_for(
     """The 15 placeholder values of a message about ``charge`` billed through ``lease``
     (D4). ``amount`` is the charge's balance unless given; ``debit_date`` its due date
     unless given; ``days_late`` counted from the due date (never below zero);
-    ``retry_date`` and ``return_reason`` empty unless given (rule F). ``{pay_link}`` is a
-    new signed statement link until the portal exists (Batch H). ``rule`` is accepted for
+    ``retry_date`` and ``return_reason`` empty unless given (rule F). ``{pay_link}`` is the
+    portal's Pay page of the store when the operator has a portal account that can sign in,
+    else a new signed statement link (:func:`pay_link`, PLAN-014 H4). ``rule`` is accepted for
     the rules that will shape a value of their own. For a :class:`RentMonth` the amount is
     the scheduled one and both dates the scheduled debit (E4)."""
     row = company or CompanySettings.read()
@@ -466,7 +477,7 @@ def context_for(
         "days_late": str(late),
         "bank_last4": last4 or NO_VALUE,
         "return_reason": return_reason,
-        "pay_link": statement_links.link(operator) if operator is not None else "",
+        "pay_link": pay_link(operator, store.pk),
         "store_link": store_link(lease),
         "support_email": str(row.support_email or ""),
         "company_name": str(row.name),

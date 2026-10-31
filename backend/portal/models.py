@@ -11,6 +11,12 @@
   days; reset, 1 hour), its expiry and its use.
 - :class:`PortalLoginAttempt`: one row per sign-in attempt, by the keyed hash of the e-mail
   and the client address, for the lockout (:mod:`portal.auth`).
+- :class:`PortalPayment` (PLAN-014 H4): a portal user's own bank debit of one charge or of a
+  store's whole open balance: the lease, the amount confirmed, the page's one-time
+  ``creation_key`` (a replay finds the first request), and its state (requested, paid,
+  failed, refused). One :class:`PortalPaymentCharge` per charge paid: the charge (a rent or
+  a one-off charge), the one-off charge the debit runs on (the charge itself, or the rent
+  charge's bank debit), its amount, its ``portal_pay`` job and its own state. No free text.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from django.db.models import Q
 from django.db.models.functions import Lower
 
 from accounts.models import Theme
-from ledger.models import GuardedModel, Operator
+from ledger.models import GuardedModel, Lease, MoneyField, OneOffCharge, Operator
 from ledger.validators import validate_no_payment_data
 
 #: The SHA-256 of a token or an e-mail, in lower-case hexadecimal.
@@ -138,3 +144,94 @@ class PortalLoginAttempt(models.Model):
 
     def __str__(self) -> str:
         return f"Portal sign-in attempt {self.pk}"
+
+
+class PortalPaymentStatus(models.TextChoices):
+    REQUESTED = "requested", "Requested"
+    #: Every charge's debit was accepted (it settles in a few days, as any bank debit).
+    PAID = "paid", "Submitted"
+    FAILED = "failed", "Failed"
+    #: Refused when it was requested (a charge changed since the page); nothing was debited.
+    REFUSED = "refused", "Refused"
+
+
+#: A charge's own states: a refusal is the whole payment's, never one charge's.
+CHARGE_STATUSES = (
+    PortalPaymentStatus.REQUESTED.value,
+    PortalPaymentStatus.PAID.value,
+    PortalPaymentStatus.FAILED.value,
+)
+
+
+class PortalPayment(GuardedModel):
+    user = models.ForeignKey(PortalUser, on_delete=models.PROTECT, related_name="payments")
+    lease = models.ForeignKey(Lease, on_delete=models.PROTECT, related_name="+")
+    amount = MoneyField()
+    #: The Pay page's one-time key: a second submission finds the first request.
+    creation_key = models.UUIDField(unique=True)
+    status = models.CharField(
+        max_length=9, choices=PortalPaymentStatus.choices, default=PortalPaymentStatus.REQUESTED
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "portal_payments"
+        indexes = [
+            models.Index(fields=["user", "created_at"], name="portal_payments_user_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(status__in=PortalPaymentStatus.values),
+                name="portal_payments_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(amount__gt=0), name="portal_payments_amount_positive"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Portal payment {self.pk}"
+
+
+class PortalChargeKind(models.TextChoices):
+    RENT = "rent", "Rent"
+    ONE_OFF = "one_off", "One-off"
+
+
+class PortalPaymentCharge(GuardedModel):
+    payment = models.ForeignKey(PortalPayment, on_delete=models.PROTECT, related_name="charges")
+    kind = models.CharField(max_length=7, choices=PortalChargeKind.choices)
+    #: The rent charge or the one-off charge paid (as ``receivables.OpenBalance.charge_id``).
+    charge_id = models.UUIDField()
+    #: The one-off charge the debit runs on: the charge itself, or the rent charge's bank debit.
+    debit = models.ForeignKey(OneOffCharge, on_delete=models.PROTECT, related_name="+")
+    amount = MoneyField()
+    status = models.CharField(
+        max_length=9, choices=PortalPaymentStatus.choices, default=PortalPaymentStatus.REQUESTED
+    )
+    job = models.ForeignKey(
+        "payments.Job", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        db_table = "portal_payment_charges"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["payment", "kind", "charge_id"], name="portal_payment_charges_unique"
+            ),
+            models.CheckConstraint(
+                condition=Q(kind__in=PortalChargeKind.values),
+                name="portal_payment_charges_kind_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(status__in=CHARGE_STATUSES),
+                name="portal_payment_charges_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(amount__gt=0), name="portal_payment_charges_amount_positive"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Portal payment charge {self.pk}"

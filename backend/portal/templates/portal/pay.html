@@ -1,0 +1,42 @@
+{% extends "portal/base.html" %}{% load money dates %}
+{% comment %}Pay (PLAN-014 H4; portal.views.pay): the confirmation of one open charge or of the store's whole open balance: the charges, the amount and the bank's last four. The form posts the amount shown and the page's one-time key; the server takes the amount from its own records and refuses any other. With the pay-an-invoice flag off one sentence says online payment is not available yet and no form is shown.{% endcomment %}
+{% block title %}Pay{% endblock %}
+{% block content %}
+{% include "portal/_store_title.html" %}
+{% include "portal/_store_tabs.html" %}
+<section class="portal-card">
+  {% if not page.enabled %}
+  <p id="pay-unavailable">{{ unavailable }}</p>
+  {% else %}
+  <h2>{% if page.whole %}Pay the whole balance{% else %}Pay this charge{% endif %}</h2>
+  {% if problem %}<p class="portal-error" id="pay-problem" role="alert">{{ problem }}</p>{% endif %}
+  <div class="portal-scroll">
+  <table id="pay-charges">
+    <thead><tr><th>Charge</th><th>Due date</th><th class="portal-money">Amount</th></tr></thead>
+    <tbody>
+      {% for item in page.charges %}
+      <tr class="pay-charge"><td>{{ item.row.description }}{% if item.refusal %}<br><span class="portal-muted pay-charge-refusal">{{ item.refusal }}</span>{% endif %}</td><td>{{ item.row.due_on|day }}</td><td class="portal-money">{{ item.row.balance|money }}</td></tr>
+      {% empty %}
+      <tr><td colspan="3" class="portal-muted">Nothing is owed.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <dl class="portal-facts">
+    <dt>Amount</dt><dd id="pay-amount">{{ page.amount|money }}</dd>
+    <dt>From the bank account</dt><dd id="pay-bank">····{{ page.last4 }}{% if page.shared_with %} <span class="portal-muted" id="pay-shared">Shared with {{ page.shared_with }}</span>{% endif %}</dd>
+  </dl>
+  {% if page.refusal %}
+  <p id="pay-refusal">{{ page.refusal }}</p>
+  {% elif page.payable %}
+  <form method="post" action="{% url 'portal:pay' pk=store.pk %}" id="pay-form">{% csrf_token %}
+    <input type="hidden" name="charge" value="{% if not page.whole %}{{ page.charges.0.row.charge_id }}{% endif %}">
+    <input type="hidden" name="amount" value="{{ page.amount }}">
+    <input type="hidden" name="creation_key" value="{{ creation_key }}">
+    <p class="portal-muted">One bank debit per charge, from the account above. It settles in a few days.</p>
+    <button type="submit" class="portal-button" id="pay-submit">Pay {{ page.amount|money }}</button>
+  </form>
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

@@ -77,7 +77,7 @@ def _leases(user: PortalUser) -> QuerySet[Lease]:
     return Lease.objects.filter(operator_id=user.operator_id)
 
 
-def _is_current(lease: Lease) -> bool:
+def is_current(lease: Lease) -> bool:
     return lease.ended_on is None and lease.collection_status != CollectionStatus.ENDED
 
 
@@ -114,7 +114,7 @@ def home(user: PortalUser, today: date) -> list[StoreRow]:
     """Every store of the operator with its open balance (see the module docstring)."""
     current: dict[uuid.UUID, bool] = defaultdict(bool)
     for lease in _leases(user).only("store_id", "ended_on", "collection_status"):
-        current[lease.store_id] |= _is_current(lease)
+        current[lease.store_id] |= is_current(lease)
     balances: dict[uuid.UUID, Decimal] = defaultdict(lambda: ZERO)
     for row in _open_rows(user, today):
         if row.store_id is not None:
@@ -135,7 +135,7 @@ class StorePage:
     bank_last4: str
 
 
-def _lease_of(user: PortalUser, store: Store) -> Lease | None:
+def lease_of(user: PortalUser, store: Store) -> Lease | None:
     """The operator's current lease of the store, else its latest."""
     leases = list(
         _leases(user)
@@ -143,7 +143,7 @@ def _lease_of(user: PortalUser, store: Store) -> Lease | None:
         .select_related("billing", "billing__shares_account_of__billing")
         .order_by(F("started_on").desc(nulls_last=True), "-created_at")
     )
-    return next((lease for lease in leases if _is_current(lease)), leases[0] if leases else None)
+    return next((lease for lease in leases if is_current(lease)), leases[0] if leases else None)
 
 
 def bank_last4(lease: Lease | None) -> str:
@@ -157,9 +157,9 @@ def bank_last4(lease: Lease | None) -> str:
 
 
 def store_page(user: PortalUser, store: Store, today: date) -> StorePage:
-    lease = _lease_of(user, store)
+    lease = lease_of(user, store)
     rows = [row for row in _open_rows(user, today) if row.store_id == store.pk]
-    current = lease is not None and _is_current(lease)
+    current = lease is not None and is_current(lease)
     return StorePage(
         store=store,
         ended=not current,
@@ -228,7 +228,7 @@ def payments(user: PortalUser, store: Store) -> list[PaymentRow]:
         .filter(billed=user.operator_id, store_of=store.pk, status__in=SHOWN_PAYMENT_STATUSES)
         .order_by(F("on").desc(nulls_last=True), "-created_at")
     )
-    last4 = bank_last4(_lease_of(user, store))
+    last4 = bank_last4(lease_of(user, store))
     return [
         PaymentRow(
             on=getattr(payment, "on", None),
