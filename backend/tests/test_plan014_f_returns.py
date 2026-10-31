@@ -247,7 +247,7 @@ def test_the_returns_csv_has_the_pages_retry_text(fake: Any) -> None:
     cell_start = page.index(f'id="retry-{payment.pk}"')
     cell = page[cell_start : page.index("</td>", cell_start)]
     assert "Automatic re-debit on Nov 12" in cell
-    export = billing.get("/returns/export.csv")
+    export: Any = billing.get("/returns/export.csv")
     csv = b"".join(export.streaming_content).decode()
     header = csv.splitlines()[0]
     assert "Retry" in header
